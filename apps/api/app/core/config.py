@@ -144,4 +144,4 @@ def get_settings() -> Settings:
     Usa lru_cache para garantir que o .env é lido apenas uma vez por processo.
     Em testes, limpar o cache com `get_settings.cache_clear()` ao sobrescrever vars.
     """
-    return Settings()  # type: ignore[call-arg]
+    return Settings()

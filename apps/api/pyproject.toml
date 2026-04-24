@@ -112,6 +112,9 @@ ignore = [
 "tests/**/*.py" = ["ANN", "S"]
 "alembic/env.py" = ["ANN"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
