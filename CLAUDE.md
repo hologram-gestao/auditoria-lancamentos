@@ -1,6 +1,6 @@
 # CLAUDE.md — Sistema de Auditoria de Lançamentos (Hologram)
 
-> **Para futuras conversas com Claude:** este arquivo é o *primer* obrigatório. Leia-o antes de qualquer ação. Ele é atualizado continuamente conforme decisões são tomadas.
+> **Para futuras conversas com Claude:** este arquivo é o _primer_ obrigatório. Leia-o antes de qualquer ação. Ele é atualizado continuamente conforme decisões são tomadas.
 >
 > **Status do projeto:** 📐 Em fase de planejamento — nenhum código escrito ainda. Toda estrutura de pastas e arquivos citada aqui **ainda precisa ser criada** conforme as sessões do plano.
 
@@ -11,11 +11,13 @@
 **O que é:** SaaS interno da Hologram Gestão para auditoria de lançamentos bancários contra o ERP Omie.
 
 **Fluxo núcleo:**
+
 1. Analista faz upload de extrato/fatura → 2. IA (Claude) extrai movimentações → 3. Humano valida amostra → 4. Sistema busca lançamentos Omie e faz matching determinístico → 5. Humano revisa → 6. Relatório Excel gerado.
 
 **Não é multi-tenant de BPOs** — é uso interno da Hologram. Multi-cliente = múltiplos clientes finais da Hologram.
 
 **Fontes da verdade:**
+
 - **Funcional:** `Docs/documentation/` (arquivos 0 a 18, numerados sequencialmente).
 - **Backlog:** `Docs/List _ Auditora de Lançamentos - Backlog _ Hologram (Lista) - TAREFAS.pdf`.
 - **Plano de implementação:** [Docs/PLANO_IMPLEMENTACAO.md](Docs/PLANO_IMPLEMENTACAO.md) — sessões S0–S18.
@@ -39,7 +41,7 @@
 - **httpx** (async HTTP client)
 - **ARQ** (async-first Redis queue) para background jobs — integração nativa com código async
 - **cryptography** para AES-256-GCM
-- **python-jose** para JWT, **passlib[bcrypt]** (cost ≥ 12)
+- **python-jose** para JWT, **bcrypt** direto (cost ≥ 12) — passlib não é usado (incompatível com bcrypt 5.x)
 - **openpyxl** para Excel
 - **structlog** para logs estruturados
 - **pytest + pytest-asyncio + respx + testcontainers**
@@ -163,27 +165,27 @@
 
 ## 7. Mapa de Sessões (referência rápida)
 
-| Sessão | Foco | Tarefas do backlog |
-|---|---|---|
-| **S0** | Setup monorepo + Docker + CI | — |
-| **S1** | Core: crypto, JWT, logging, errors | — |
-| **S2** | DB: models, migrations, seeds | — |
-| **S3** | Autenticação | BACK 1.1, 1.2 · FRONT 1.3 |
-| **S4** | Gestão de usuários | BACK 2.1 · FRONT 2.2 |
-| **S5** | Cliente Omie base | — (fundação) |
-| **S6** | CRUD de clientes BPO | BACK 3.1–3.5 · FRONT 3.7, 3.8 |
-| **S7** | Detalhe cliente + cache L1 | BACK 4.1, 4.2 · FRONT 4.3 |
-| **S8** | Formulário + validações | FRONT 5.1, 6.1 · BACK 6.2 |
-| **S9** | Parsing Claude | BACK 7.1 · FRONT 7.2 |
-| **S10** | Processamento async (Celery) | BACK 8.1–8.6 · FRONT 8.7 |
-| **S11** | Revisão — backend + cache L2 | BACK 9.1–9.10 |
-| **S12** | Revisão — estrutura + aba 1 | FRONT 9.11–9.14 |
-| **S13** | Revisão — abas 2, 3, 4 | FRONT 9.15–9.17 |
-| **S14** | Exportação Excel | BACK 10.1 |
-| **S15** | Tipos de anomalia | BACK 11.1 · FRONT 11.2 |
-| **S16** | Hardening de segurança | — (transversal) |
-| **S17** | Observabilidade | — (transversal) |
-| **S18** | E2E + deploy + docs | — (finalização) |
+| Sessão  | Foco                               | Tarefas do backlog            |
+| ------- | ---------------------------------- | ----------------------------- |
+| **S0**  | Setup monorepo + Docker + CI       | —                             |
+| **S1**  | Core: crypto, JWT, logging, errors | —                             |
+| **S2**  | DB: models, migrations, seeds      | —                             |
+| **S3**  | Autenticação                       | BACK 1.1, 1.2 · FRONT 1.3     |
+| **S4**  | Gestão de usuários                 | BACK 2.1 · FRONT 2.2          |
+| **S5**  | Cliente Omie base                  | — (fundação)                  |
+| **S6**  | CRUD de clientes BPO               | BACK 3.1–3.5 · FRONT 3.7, 3.8 |
+| **S7**  | Detalhe cliente + cache L1         | BACK 4.1, 4.2 · FRONT 4.3     |
+| **S8**  | Formulário + validações            | FRONT 5.1, 6.1 · BACK 6.2     |
+| **S9**  | Parsing Claude                     | BACK 7.1 · FRONT 7.2          |
+| **S10** | Processamento async (Celery)       | BACK 8.1–8.6 · FRONT 8.7      |
+| **S11** | Revisão — backend + cache L2       | BACK 9.1–9.10                 |
+| **S12** | Revisão — estrutura + aba 1        | FRONT 9.11–9.14               |
+| **S13** | Revisão — abas 2, 3, 4             | FRONT 9.15–9.17               |
+| **S14** | Exportação Excel                   | BACK 10.1                     |
+| **S15** | Tipos de anomalia                  | BACK 11.1 · FRONT 11.2        |
+| **S16** | Hardening de segurança             | — (transversal)               |
+| **S17** | Observabilidade                    | — (transversal)               |
+| **S18** | E2E + deploy + docs                | — (finalização)               |
 
 ---
 
@@ -223,13 +225,13 @@ Quando o usuário não tiver decidido, **pergunte** antes de presumir:
 
 **Ainda em aberto (aguardando stakeholder):**
 
-- [ ] Credenciais Omie sandbox disponíveis? *S5+*
-- [ ] Chave Anthropic com budget. *S9*
-- [ ] Paginação de `ListarExtrato` (doc Omie incompleta — validar com Galhardo). *S5*
-- [ ] `ListarContasPagar.filtrar_por_status` aceita múltiplos valores? *S5*
-- [ ] Endpoint Omie que expõe saldo em data específica (fallback de `balance_start`). *S10*
-- [ ] Ambiente de staging (AWS ECS, Render, Railway, outro). *S18*
-- [ ] Política de senhas (rotação, complexidade). *S4*
+- [ ] Credenciais Omie sandbox disponíveis? _S5+_
+- [ ] Chave Anthropic com budget. _S9_
+- [ ] Paginação de `ListarExtrato` (doc Omie incompleta — validar com Galhardo). _S5_
+- [ ] `ListarContasPagar.filtrar_por_status` aceita múltiplos valores? _S5_
+- [ ] Endpoint Omie que expõe saldo em data específica (fallback de `balance_start`). _S10_
+- [ ] Ambiente de staging (AWS ECS, Render, Railway, outro). _S18_
+- [ ] Política de senhas (rotação, complexidade). _S4_
 
 ---
 
@@ -248,20 +250,23 @@ Quando o usuário não tiver decidido, **pergunte** antes de presumir:
 ## 11. Atualização deste Arquivo
 
 **Quando atualizar:**
+
 - Decisão arquitetural tomada (confirmar framework, job runner, etc.).
 - Mudança em regra de negócio crítica.
 - Novo padrão adotado que vale para o projeto inteiro.
 - Descoberta que contradiz a documentação original (registrar delta).
 
 **Quando NÃO atualizar:**
+
 - Detalhes de implementação de uma feature específica (isso vai em PR + comentários no código).
 - Status de progresso — use o backlog, não o CLAUDE.md.
 - Lições aprendidas pontuais (vão em runbooks em `Docs/runbook.md` quando S18 chegar).
 
 **Como atualizar:**
+
 - Edit direto, sem seções `# Removed` ou comentários "// antes era X". Trate este arquivo como lei atual, não como histórico.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
 
-*Versão 1.0 — 24/04/2026. Alinhado à documentação em `Docs/documentation/` e ao plano em `Docs/PLANO_IMPLEMENTACAO.md`.*
+_Versão 1.0 — 24/04/2026. Alinhado à documentação em `Docs/documentation/` e ao plano em `Docs/PLANO_IMPLEMENTACAO.md`._

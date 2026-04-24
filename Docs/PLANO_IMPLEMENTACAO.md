@@ -6,6 +6,7 @@
 > **Escopo:** SaaS interno da Hologram Gestão para automatizar a conciliação bancária de clientes BPO cruzando extratos/faturas com o ERP Omie, usando IA (Claude) para extração e lógica determinística para matching.
 >
 > **Como usar este documento:**
+>
 > 1. Leia as seções **§1 a §10** uma única vez — são os fundamentos arquiteturais e estão congelados.
 > 2. As **sessões de implementação (§11)** são o guia de trabalho. Cada sessão corresponde a uma ou mais conversas com o Claude e cobre um conjunto coeso de tarefas do backlog.
 > 3. Antes de cada sessão, verifique o checklist de **pré-requisitos** e garanta que as sessões anteriores estão concluídas.
@@ -53,17 +54,20 @@
 ## 1. Visão Geral do Sistema
 
 ### 1.1 O que é
+
 Sistema **interno** da Hologram Gestão que substitui a conciliação manual linha-a-linha por um fluxo automatizado: o analista faz upload de um extrato bancário ou fatura de cartão, a IA (Claude) extrai as movimentações em formato estruturado, o sistema cruza contra os lançamentos do Omie (ERP do cliente), e gera um relatório Excel auditável com divergências e anomalias.
 
 ### 1.2 Personas
-| Persona | Escopo |
-|---|---|
-| **Admin** | Vê todos os clientes. Gerencia usuários, reatribui clientes entre gerentes, administra catálogo de anomalias. |
-| **Gerente (Manager)** | Vê apenas clientes da sua carteira. Cria clientes (auto-atribuídos). Realiza conciliações e gera relatórios. |
+
+| Persona               | Escopo                                                                                                        |
+| --------------------- | ------------------------------------------------------------------------------------------------------------- |
+| **Admin**             | Vê todos os clientes. Gerencia usuários, reatribui clientes entre gerentes, administra catálogo de anomalias. |
+| **Gerente (Manager)** | Vê apenas clientes da sua carteira. Cria clientes (auto-atribuídos). Realiza conciliações e gera relatórios.  |
 
 > Sistema **não é multi-tenant em termos de BPOs** — é de uso exclusivo da Hologram. Multi-cliente aqui significa "múltiplos clientes finais da Hologram", não múltiplas empresas de BPO.
 
 ### 1.3 Princípios de Design (invioláveis)
+
 1. **IA só extrai, nunca decide match.** O cruzamento é 100 % determinístico e auditável.
 2. **Human-in-the-loop em dois gates:** (a) validação da amostra do parsing antes de salvar, (b) revisão das linhas antes da exportação.
 3. **Idempotência por** `(bankAccount, month, fileHash)` — mesmo arquivo não é reprocessado.
@@ -81,57 +85,58 @@ Sistema **interno** da Hologram Gestão que substitui a conciliação manual lin
 
 ### 2.1 Backend
 
-| Item | Escolha | Motivo |
-|---|---|---|
-| **Linguagem** | Python 3.12+ | Conforme documentação. Ecossistema maduro para dados e IA. |
-| **Framework web** | **FastAPI 0.110+** | Async nativo (crítico para Omie/Claude), Pydantic v2 para DTOs, OpenAPI automática, type hints obrigatórios. |
-| **ORM** | **SQLAlchemy 2.0** (modo async) | Padrão de mercado, suporte async sólido, integração nativa com Alembic. |
-| **Migrations** | **Alembic** | Versionamento de schema reproducível. |
-| **Driver Postgres** | **psycopg3** (async) | Driver oficial moderno, compatível com SQLAlchemy async. |
-| **Validação/Schemas** | **Pydantic v2** | Obrigatório com FastAPI; usado em DTOs, settings e Claude tool schemas. |
-| **HTTP client** | **httpx** (async) | Para chamadas ao Omie e Claude — reuso de connection pool. |
-| **Background jobs** | **ARQ + Redis** | Async-first nativo, integra diretamente com código `async def` do FastAPI/httpx/SQLAlchemy, sem workaround de `asyncio.run()` em task síncrona. Mesma infra Redis do cache L2. |
-| **JWT** | **python-jose[cryptography]** | RFC-compliant, hash assíncrono suportado. |
-| **Hash de senha** | **passlib[bcrypt]** (cost ≥ 12) | bcrypt é o padrão especificado na documentação. |
-| **Criptografia AES-256-GCM** | **cryptography** (pyca) | Lib oficial, auditada, FIPS-friendly. |
-| **Parsing PDF (pré-IA)** | **pypdf** + fallback **pdfplumber** | Extrair texto para reduzir tokens enviados à Claude. |
-| **Parsing CSV/XLSX** | **pandas** ou **openpyxl** direto | Dependendo da complexidade — avaliar em S9. |
-| **Geração Excel** | **openpyxl** | Formatação fina de cores, estilos, larguras. |
-| **Rate limit** | **slowapi** | Integra com FastAPI + Redis backend. |
-| **Testes** | **pytest + pytest-asyncio + httpx AsyncClient + respx + testcontainers** | Unit, integração com DB real e mocks de HTTP externos. |
-| **Lint/Format** | **ruff + black + mypy (strict)** | Ruff substitui flake8/isort; black define formatação; mypy obrigatório. |
-| **Config** | **pydantic-settings** | `.env` tipado e validado no startup. |
-| **Logger** | **structlog** | Logs estruturados em JSON, com redação obrigatória de segredos. |
+| Item                         | Escolha                                                                  | Motivo                                                                                                                                                                         |
+| ---------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Linguagem**                | Python 3.12+                                                             | Conforme documentação. Ecossistema maduro para dados e IA.                                                                                                                     |
+| **Framework web**            | **FastAPI 0.110+**                                                       | Async nativo (crítico para Omie/Claude), Pydantic v2 para DTOs, OpenAPI automática, type hints obrigatórios.                                                                   |
+| **ORM**                      | **SQLAlchemy 2.0** (modo async)                                          | Padrão de mercado, suporte async sólido, integração nativa com Alembic.                                                                                                        |
+| **Migrations**               | **Alembic**                                                              | Versionamento de schema reproducível.                                                                                                                                          |
+| **Driver Postgres**          | **psycopg3** (async)                                                     | Driver oficial moderno, compatível com SQLAlchemy async.                                                                                                                       |
+| **Validação/Schemas**        | **Pydantic v2**                                                          | Obrigatório com FastAPI; usado em DTOs, settings e Claude tool schemas.                                                                                                        |
+| **HTTP client**              | **httpx** (async)                                                        | Para chamadas ao Omie e Claude — reuso de connection pool.                                                                                                                     |
+| **Background jobs**          | **ARQ + Redis**                                                          | Async-first nativo, integra diretamente com código `async def` do FastAPI/httpx/SQLAlchemy, sem workaround de `asyncio.run()` em task síncrona. Mesma infra Redis do cache L2. |
+| **JWT**                      | **python-jose[cryptography]**                                            | RFC-compliant, hash assíncrono suportado.                                                                                                                                      |
+| **Hash de senha**            | **bcrypt** direto (cost ≥ 12)                                            | bcrypt é o padrão; uso direto porque passlib 1.7.x é incompatível com bcrypt 5.x (trava no import).                                                                            |
+| **Criptografia AES-256-GCM** | **cryptography** (pyca)                                                  | Lib oficial, auditada, FIPS-friendly.                                                                                                                                          |
+| **Parsing PDF (pré-IA)**     | **pypdf** + fallback **pdfplumber**                                      | Extrair texto para reduzir tokens enviados à Claude.                                                                                                                           |
+| **Parsing CSV/XLSX**         | **pandas** ou **openpyxl** direto                                        | Dependendo da complexidade — avaliar em S9.                                                                                                                                    |
+| **Geração Excel**            | **openpyxl**                                                             | Formatação fina de cores, estilos, larguras.                                                                                                                                   |
+| **Rate limit**               | **slowapi**                                                              | Integra com FastAPI + Redis backend.                                                                                                                                           |
+| **Testes**                   | **pytest + pytest-asyncio + httpx AsyncClient + respx + testcontainers** | Unit, integração com DB real e mocks de HTTP externos.                                                                                                                         |
+| **Lint/Format**              | **ruff + black + mypy (strict)**                                         | Ruff substitui flake8/isort; black define formatação; mypy obrigatório.                                                                                                        |
+| **Config**                   | **pydantic-settings**                                                    | `.env` tipado e validado no startup.                                                                                                                                           |
+| **Logger**                   | **structlog**                                                            | Logs estruturados em JSON, com redação obrigatória de segredos.                                                                                                                |
 
 ### 2.2 Frontend
 
-| Item | Escolha | Motivo |
-|---|---|---|
-| **Framework** | **Next.js 14 (App Router)** + **TypeScript (strict)** | Conforme documentação. App Router para server components onde fizer sentido. |
-| **Estilo** | **TailwindCSS** + **shadcn/ui** | Componentes acessíveis, design system consistente e customizável. |
-| **Estado remoto** | **TanStack Query v5** | Cache de requests, invalidação granular, polling nativo. |
-| **Estado local** | **Zustand** | Estado leve e global quando necessário (ex: filtros da tela de revisão). |
-| **Formulários** | **react-hook-form + zod** | Validação tipada, schemas compartilhados com backend via gerador TS. |
-| **Tabelas** | **@tanstack/react-table + @tanstack/react-virtual** | Virtualização para listas grandes (tela de revisão com 2 k+ linhas). |
-| **Datas** | **date-fns + date-fns-tz** | Lightweight, tree-shakeable, sem moment. |
-| **Notifications** | **sonner** (ou **shadcn/ui toast**) | Toasts acessíveis. |
-| **Cryptography (browser)** | **Web Crypto API** nativo | Para SHA-256 do arquivo antes de upload. |
-| **Testes** | **vitest + react-testing-library + playwright** | Unit, componente, E2E. |
-| **Lint/Format** | **eslint (next config) + prettier** | Padrão. |
+| Item                       | Escolha                                               | Motivo                                                                       |
+| -------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------- |
+| **Framework**              | **Next.js 14 (App Router)** + **TypeScript (strict)** | Conforme documentação. App Router para server components onde fizer sentido. |
+| **Estilo**                 | **TailwindCSS** + **shadcn/ui**                       | Componentes acessíveis, design system consistente e customizável.            |
+| **Estado remoto**          | **TanStack Query v5**                                 | Cache de requests, invalidação granular, polling nativo.                     |
+| **Estado local**           | **Zustand**                                           | Estado leve e global quando necessário (ex: filtros da tela de revisão).     |
+| **Formulários**            | **react-hook-form + zod**                             | Validação tipada, schemas compartilhados com backend via gerador TS.         |
+| **Tabelas**                | **@tanstack/react-table + @tanstack/react-virtual**   | Virtualização para listas grandes (tela de revisão com 2 k+ linhas).         |
+| **Datas**                  | **date-fns + date-fns-tz**                            | Lightweight, tree-shakeable, sem moment.                                     |
+| **Notifications**          | **sonner** (ou **shadcn/ui toast**)                   | Toasts acessíveis.                                                           |
+| **Cryptography (browser)** | **Web Crypto API** nativo                             | Para SHA-256 do arquivo antes de upload.                                     |
+| **Testes**                 | **vitest + react-testing-library + playwright**       | Unit, componente, E2E.                                                       |
+| **Lint/Format**            | **eslint (next config) + prettier**                   | Padrão.                                                                      |
 
 ### 2.3 Infraestrutura
 
-| Item | Escolha | Motivo |
-|---|---|---|
-| **Banco** | **PostgreSQL 16** | Conforme documentação. |
-| **Cache + broker** | **Redis 7** | Cache L2 (lançamentos Omie) + broker Celery. Mesma instância serve aos dois. |
-| **Reverse proxy** | **Nginx** ou **Traefik** | TLS termination, headers de segurança, rate limit de borda. |
-| **Container** | **Docker + Docker Compose** (dev) / **Docker Swarm** ou **AWS ECS** (prod) | Isolamento e reprodutibilidade. Swarm/ECS mantém simplicidade — K8s é overengineering aqui. |
-| **CI/CD** | **GitHub Actions** | Lint, type-check, testes, build, deploy. |
-| **Observabilidade** | **Sentry** (erros) + **structlog + Loki/Grafana** (logs) | Stack moderna e barata. |
-| **Segredos** | **Variáveis de ambiente** em primeiro momento; **AWS Secrets Manager** ou **HashiCorp Vault** em prod | `OMIE_ENCRYPTION_KEY`, `JWT_SECRET`, `ANTHROPIC_API_KEY` nunca em repositório. |
+| Item                | Escolha                                                                                               | Motivo                                                                                      |
+| ------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| **Banco**           | **PostgreSQL 16**                                                                                     | Conforme documentação.                                                                      |
+| **Cache + broker**  | **Redis 7**                                                                                           | Cache L2 (lançamentos Omie) + broker Celery. Mesma instância serve aos dois.                |
+| **Reverse proxy**   | **Nginx** ou **Traefik**                                                                              | TLS termination, headers de segurança, rate limit de borda.                                 |
+| **Container**       | **Docker + Docker Compose** (dev) / **Docker Swarm** ou **AWS ECS** (prod)                            | Isolamento e reprodutibilidade. Swarm/ECS mantém simplicidade — K8s é overengineering aqui. |
+| **CI/CD**           | **GitHub Actions**                                                                                    | Lint, type-check, testes, build, deploy.                                                    |
+| **Observabilidade** | **Sentry** (erros) + **structlog + Loki/Grafana** (logs)                                              | Stack moderna e barata.                                                                     |
+| **Segredos**        | **Variáveis de ambiente** em primeiro momento; **AWS Secrets Manager** ou **HashiCorp Vault** em prod | `OMIE_ENCRYPTION_KEY`, `JWT_SECRET`, `ANTHROPIC_API_KEY` nunca em repositório.              |
 
 > **Decisões formalizadas em 24/04/2026:**
+>
 > - Framework Python: **FastAPI** (documentação deixou aberto entre FastAPI e Flask; escolhido FastAPI por async nativo + Pydantic integrado + OpenAPI automática).
 > - Job runner: **ARQ** (async-first, integra com código `async def` sem wrappers).
 > - Package manager Python: **uv**.
@@ -182,12 +187,12 @@ Sistema **interno** da Hologram Gestão que substitui a conciliação manual lin
 
 ### 3.2 Fronteira de segurança cliente × servidor
 
-| Roda no **browser** | Roda no **servidor** | **Nunca** no browser |
-|---|---|---|
-| SHA-256 do arquivo (Web Crypto) | Criptografia/descriptografia AES-256-GCM | Credenciais Omie (mesmo descriptografadas) |
-| Validação de extensão/tamanho (UX) | Todas as chamadas ao Omie | `OMIE_ENCRYPTION_KEY` |
-| Exibição e interação | Todas as chamadas à Claude API | `ANTHROPIC_API_KEY` |
-| Polling de status | Validações de autorização | Hash da senha de qualquer usuário |
+| Roda no **browser**                | Roda no **servidor**                     | **Nunca** no browser                       |
+| ---------------------------------- | ---------------------------------------- | ------------------------------------------ |
+| SHA-256 do arquivo (Web Crypto)    | Criptografia/descriptografia AES-256-GCM | Credenciais Omie (mesmo descriptografadas) |
+| Validação de extensão/tamanho (UX) | Todas as chamadas ao Omie                | `OMIE_ENCRYPTION_KEY`                      |
+| Exibição e interação               | Todas as chamadas à Claude API           | `ANTHROPIC_API_KEY`                        |
+| Polling de status                  | Validações de autorização                | Hash da senha de qualquer usuário          |
 
 ---
 
@@ -211,12 +216,12 @@ reconciliation_anomalies      — anomalias detectadas por sessão
 
 ### 4.2 Campos criptografados (AES-256-GCM)
 
-| Tabela | Campo(s) |
-|---|---|
-| `clients` | `omie_app_key_encrypted`, `omie_app_secret_encrypted` (+ `encryption_iv`, `encryption_tag`) |
-| `reconciliation_file_entries` | `description_encrypted`, `user_note_encrypted` |
-| `reconciliation_omie_entries` | `user_note_encrypted` |
-| `reconciliation_anomalies` | `context_encrypted`, `resolution_note_encrypted` |
+| Tabela                        | Campo(s)                                                                                    |
+| ----------------------------- | ------------------------------------------------------------------------------------------- |
+| `clients`                     | `omie_app_key_encrypted`, `omie_app_secret_encrypted` (+ `encryption_iv`, `encryption_tag`) |
+| `reconciliation_file_entries` | `description_encrypted`, `user_note_encrypted`                                              |
+| `reconciliation_omie_entries` | `user_note_encrypted`                                                                       |
+| `reconciliation_anomalies`    | `context_encrypted`, `resolution_note_encrypted`                                            |
 
 > **Regra:** cada operação de criptografia gera **IV novo** (12 bytes). IV e tag GCM são armazenados em colunas separadas (formato hex ou base64 — padronizar em S1).
 
@@ -267,14 +272,14 @@ reconciliation_anomalies      — anomalias detectadas por sessão
 
 ### 5.2 Modelo de ameaças (STRIDE resumido)
 
-| Ameaça | Mitigação |
-|---|---|
-| Spoofing (falsificar usuário) | JWT assinado + middleware verifica `active` |
-| Tampering (alterar dado criptografado) | AES-GCM detecta via tag; descriptografia falha |
-| Repudiation (negar ação) | Audit log em toda mutation crítica |
-| Information disclosure | Criptografia em repouso + TLS em trânsito + redação de logs |
-| Denial of Service | Rate limit + timeout rígido Omie (15 s) / Claude (60 s) + max file 20 MB |
-| Elevation of Privilege | RBAC verificado em **toda** rota; `client_assignments` em toda leitura de cliente |
+| Ameaça                                 | Mitigação                                                                         |
+| -------------------------------------- | --------------------------------------------------------------------------------- |
+| Spoofing (falsificar usuário)          | JWT assinado + middleware verifica `active`                                       |
+| Tampering (alterar dado criptografado) | AES-GCM detecta via tag; descriptografia falha                                    |
+| Repudiation (negar ação)               | Audit log em toda mutation crítica                                                |
+| Information disclosure                 | Criptografia em repouso + TLS em trânsito + redação de logs                       |
+| Denial of Service                      | Rate limit + timeout rígido Omie (15 s) / Claude (60 s) + max file 20 MB          |
+| Elevation of Privilege                 | RBAC verificado em **toda** rota; `client_assignments` em toda leitura de cliente |
 
 ---
 
@@ -282,14 +287,14 @@ reconciliation_anomalies      — anomalias detectadas por sessão
 
 ### 6.1 Estimativa de carga (hipótese de trabalho — validar com stakeholder)
 
-| Métrica | Valor esperado |
-|---|---|
-| Analistas ativos simultâneos | 5 – 30 |
-| Clientes BPO cadastrados | 100 – 1 000 |
-| Conciliações por mês | 500 – 5 000 |
-| Pico: concorrência de jobs de processamento | 10 – 30 |
-| Tamanho típico de arquivo | 100 – 2 000 linhas / 1 – 10 MB |
-| Latência média Omie | 300 – 800 ms/chamada |
+| Métrica                                     | Valor esperado                 |
+| ------------------------------------------- | ------------------------------ |
+| Analistas ativos simultâneos                | 5 – 30                         |
+| Clientes BPO cadastrados                    | 100 – 1 000                    |
+| Conciliações por mês                        | 500 – 5 000                    |
+| Pico: concorrência de jobs de processamento | 10 – 30                        |
+| Tamanho típico de arquivo                   | 100 – 2 000 linhas / 1 – 10 MB |
+| Latência média Omie                         | 300 – 800 ms/chamada           |
 
 ### 6.2 Gargalos conhecidos
 
@@ -309,6 +314,7 @@ reconciliation_anomalies      — anomalias detectadas por sessão
 ### 6.4 Veredicto
 
 **Sim, precisa ser escalável, mas com moderação.** A arquitetura recomendada atende 10 × a carga prevista sem reestruturação. Os pontos críticos para **não tornar escalabilidade difícil depois** são:
+
 - Código async puro (não bloquear event loop).
 - Cache com interface abstrata.
 - Jobs via broker desde o MVP (não `FastAPI.BackgroundTasks`, que morrem com o processo).
@@ -487,10 +493,13 @@ auditoria-lancamentos/
 ### 9.1 Padrão de resposta (alinhado à §18 da documentação)
 
 **Sucesso:**
+
 ```json
 { "data": { ... } }
 ```
+
 ou, em listas paginadas:
+
 ```json
 {
   "data": [ ... ],
@@ -504,6 +513,7 @@ ou, em listas paginadas:
 ```
 
 **Erro:**
+
 ```json
 {
   "error": {
@@ -516,19 +526,19 @@ ou, em listas paginadas:
 
 ### 9.2 Códigos canônicos
 
-| Código | HTTP | Situação |
-|---|---|---|
-| `VALIDATION_ERROR` | 400 | Dados inválidos (Pydantic) |
-| `UNAUTHORIZED` | 401 | Token ausente/inválido |
-| `TOKEN_EXPIRED` | 401 | Access expirou; frontend deve tentar refresh |
-| `FORBIDDEN` | 403 | Role insuficiente ou não atribuído ao cliente |
-| `NOT_FOUND` | 404 | Recurso inexistente |
-| `DUPLICATE_FILE` | 409 | Idempotência violada |
-| `RATE_LIMITED` | 429 | Limite de requests excedido |
-| `OMIE_AUTH_ERROR` | 502 | Credenciais Omie recusadas |
-| `OMIE_TIMEOUT` | 504 | Omie não respondeu em 15 s |
-| `PARSE_ERROR` | 422 | Claude API não extraiu movimentações |
-| `INTERNAL_ERROR` | 500 | Erro inesperado (log + Sentry) |
+| Código             | HTTP | Situação                                      |
+| ------------------ | ---- | --------------------------------------------- |
+| `VALIDATION_ERROR` | 400  | Dados inválidos (Pydantic)                    |
+| `UNAUTHORIZED`     | 401  | Token ausente/inválido                        |
+| `TOKEN_EXPIRED`    | 401  | Access expirou; frontend deve tentar refresh  |
+| `FORBIDDEN`        | 403  | Role insuficiente ou não atribuído ao cliente |
+| `NOT_FOUND`        | 404  | Recurso inexistente                           |
+| `DUPLICATE_FILE`   | 409  | Idempotência violada                          |
+| `RATE_LIMITED`     | 429  | Limite de requests excedido                   |
+| `OMIE_AUTH_ERROR`  | 502  | Credenciais Omie recusadas                    |
+| `OMIE_TIMEOUT`     | 504  | Omie não respondeu em 15 s                    |
+| `PARSE_ERROR`      | 422  | Claude API não extraiu movimentações          |
+| `INTERNAL_ERROR`   | 500  | Erro inesperado (log + Sentry)                |
 
 ### 9.3 Versionamento de API
 
@@ -551,19 +561,19 @@ ou, em listas paginadas:
 
 > Referência cruzada com documentação seções 6, 13, 14.
 
-| Regra | Detalhe |
-|---|---|
-| **Tolerância de valor** | `|a − b| ≤ 0.01 BRL` (absorve arredondamento de centavos). |
-| **Tolerância de data** | Parametrizável por conciliação; padrão 3 dias; opções 1/2/3/5/7. |
-| **Período expandido Omie** | Busca `[period_start − tolerância, period_end + tolerância]` para capturar lançamentos de borda. |
-| **Desempate de matches** | Menor `|days_diff|`; se empate, menor `|amount_diff|`; se ainda empate, primeiro Omie por `date asc`. |
-| **Dupla alocação** | Um `OmieEntry` só pode matchar 1 `Movement`. Manter set de IDs consumidos. |
-| **Idempotência** | `UNIQUE(client_id, omie_conta_id, reference_month, file_hash)`. |
-| **Saldo anterior** | Vem do próprio arquivo parseado pela Claude (`opening_balance`). Fallback: buscar do Omie no 1º dia do mês. |
-| **Anomalias estruturais** | Criadas automaticamente com `detected_by = 'ai'` para `missing_in_omie` (cada `sem_omie`) e `missing_in_file` (cada Omie Atrasado sem match). |
-| **Normalização Omie** | `cNatureza='D'` → `valor = nValorLanc × -1`; `cNatureza='C'` → manter. |
-| **Status Omie considerado** | Somente `Conciliado`, `Atrasado` ou `Previsto` entram no matching. Cancelados são ignorados. |
-| **Validação de saldos** | Se `|balance_end_file − sum(movements) − balance_start| > 0.01` → flag "saldo do arquivo não bate com as movimentações" (validação pós-IA). |
+| Regra                       | Detalhe                                                                                                                                       |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------------- | ----------- | ------------------------------------------------- |
+| **Tolerância de valor**     | `                                                                                                                                             | a − b                                             | ≤ 0.01 BRL` (absorve arredondamento de centavos).                                   |
+| **Tolerância de data**      | Parametrizável por conciliação; padrão 3 dias; opções 1/2/3/5/7.                                                                              |
+| **Período expandido Omie**  | Busca `[period_start − tolerância, period_end + tolerância]` para capturar lançamentos de borda.                                              |
+| **Desempate de matches**    | Menor `                                                                                                                                       | days_diff                                         | `; se empate, menor `                                                               | amount_diff | `; se ainda empate, primeiro Omie por `date asc`. |
+| **Dupla alocação**          | Um `OmieEntry` só pode matchar 1 `Movement`. Manter set de IDs consumidos.                                                                    |
+| **Idempotência**            | `UNIQUE(client_id, omie_conta_id, reference_month, file_hash)`.                                                                               |
+| **Saldo anterior**          | Vem do próprio arquivo parseado pela Claude (`opening_balance`). Fallback: buscar do Omie no 1º dia do mês.                                   |
+| **Anomalias estruturais**   | Criadas automaticamente com `detected_by = 'ai'` para `missing_in_omie` (cada `sem_omie`) e `missing_in_file` (cada Omie Atrasado sem match). |
+| **Normalização Omie**       | `cNatureza='D'` → `valor = nValorLanc × -1`; `cNatureza='C'` → manter.                                                                        |
+| **Status Omie considerado** | Somente `Conciliado`, `Atrasado` ou `Previsto` entram no matching. Cancelados são ignorados.                                                  |
+| **Validação de saldos**     | Se `                                                                                                                                          | balance_end_file − sum(movements) − balance_start | > 0.01` → flag "saldo do arquivo não bate com as movimentações" (validação pós-IA). |
 
 ---
 
@@ -572,6 +582,7 @@ ou, em listas paginadas:
 > Cada sessão é autocontida e cobre um conjunto coeso de tarefas. **Uma sessão = uma ou mais conversas de trabalho com o Claude.**
 >
 > **Convenção:**
+>
 > - ▸ **Tarefas do backlog:** IDs como `[BACK 1.1]` / `[FRONT 1.3]` vêm do PDF `Docs/List _ ... TAREFAS.pdf`.
 > - ▸ **Doc:** referências a arquivos em `Docs/documentation/`.
 > - ▸ **DoD (Definition of Done)** é o checklist obrigatório antes de marcar a sessão como concluída.
@@ -595,6 +606,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 **Duração estimada:** 1 sessão longa (4 – 6 h).
 
 **Entregáveis:**
+
 1. Estrutura de pastas exatamente como §7.
 2. `docker-compose.yml` com serviços `postgres`, `redis`, `api`, `worker`, `web` (todos buildáveis mas ainda triviais).
 3. `pyproject.toml` do backend com deps mínimas (FastAPI, SQLAlchemy, Alembic, Pydantic, pytest, ruff, black, mypy).
@@ -611,6 +623,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 8. `README.md` raiz com instruções de setup em 3 comandos.
 
 **Decisões formalizadas (24/04/2026):**
+
 - [x] Framework Python: **FastAPI**
 - [x] Job runner: **ARQ**
 - [x] Package manager Python: **uv**
@@ -618,6 +631,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 - [x] Estrutura: **monorepo simples**
 
 **DoD:**
+
 - [ ] `docker compose up` sobe todos os serviços sem erro.
 - [ ] `curl http://localhost:8000/health` retorna `200 OK`.
 - [ ] `curl http://localhost:3000/` serve página Next padrão.
@@ -651,6 +665,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 8. **`app/utils/magic_bytes.py`** — detecção de tipo real do arquivo (PDF, XLSX, XLS, CSV).
 
 **DoD:**
+
 - [ ] 100 % dos módulos com type hints e passando mypy strict.
 - [ ] Testes unitários cobrindo crypto (round-trip, tampering, IV único).
 - [ ] Logs locais mostram JSON estruturado sem segredos.
@@ -672,7 +687,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
    - `user.py`, `client.py`, `client_assignment.py`, `omie_account_cache.py`
    - `reconciliation_session.py`, `reconciliation_file_entry.py`, `reconciliation_omie_entry.py`
    - `anomaly_type.py`, `reconciliation_anomaly.py`
-   Cada modelo com tipos exatos conforme doc seção 0 (UUID, TIMESTAMPTZ, DECIMAL(14,2), etc.).
+     Cada modelo com tipos exatos conforme doc seção 0 (UUID, TIMESTAMPTZ, DECIMAL(14,2), etc.).
 2. **Alembic** configurado (`alembic.ini`, `env.py` com URL do Settings).
 3. **Migration inicial** criando todas as tabelas + todos os índices de uma vez.
 4. **Seeds** em `scripts/seed-dev.py`:
@@ -682,6 +697,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 6. **Fixtures de teste** (`tests/conftest.py`) usando `testcontainers` para subir Postgres real.
 
 **DoD:**
+
 - [ ] `alembic upgrade head` em banco limpo cria todas as tabelas.
 - [ ] `scripts/seed-dev.py` popula sem erro.
 - [ ] Testes de integração já rodam (esqueleto).
@@ -694,6 +710,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 **Objetivo:** login funcional com JWT, middleware de proteção e tela de login pronta.
 
 **Tarefas do backlog cobertas:**
+
 - `[BACK 1.1]` Endpoint de Login
 - `[BACK 1.2]` Middleware de Autenticação e Renovação
 - `[FRONT 1.3]` Tela de Login
@@ -719,6 +736,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
    - Proteção de rotas `app/(app)/layout.tsx` — verifica cookie de auth em middleware Next.
 
 **DoD:**
+
 - [ ] Login com credenciais válidas seta cookies e redireciona para `/clientes`.
 - [ ] Login inválido mostra erro genérico, não exposição de detalhes.
 - [ ] Rate limit testado (6ª tentativa retorna 429).
@@ -734,6 +752,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 **Objetivo:** CRUD completo de usuários, acessível apenas ao Admin.
 
 **Tarefas do backlog cobertas:**
+
 - `[BACK 2.1]` CRUD de Usuários (6 subtarefas)
 - `[FRONT 2.2]` Tela de Gestão de Usuários (5 subtarefas)
 
@@ -759,6 +778,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
    - Link no menu lateral visível apenas para admin.
 
 **DoD:**
+
 - [ ] Manager recebe 403 ao tentar acessar rota ou endpoint.
 - [ ] Criação com email duplicado retorna erro inline.
 - [ ] Admin desativando a si mesmo é bloqueado (front + back).
@@ -791,7 +811,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
    - `listar_extrato(n_cod_cc, data_inicial, data_final) -> list[LancamentoExtrato]`
    - `listar_contas_pagar(pagina, registros, data_de, data_ate, conta_corrente, status) -> PaginatedResult`
    - `listar_contas_receber(...)`
-   Com paginação automática (método auxiliar `paginate()`).
+     Com paginação automática (método auxiliar `paginate()`).
 
 3. **DTOs em `integrations/omie/schemas.py`** (Pydantic):
    - `ContaCorrente`, `LancamentoExtrato`, `TituloAPagar`, `TituloAReceber`.
@@ -800,6 +820,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 4. **Testes com `respx`** simulando respostas Omie (sucesso, faultstring, timeout, 5xx) — snapshots de payloads reais (quando conseguir credenciais sandbox).
 
 **DoD:**
+
 - [ ] `listar_contas_correntes` retorna DTOs tipados para payload real de sandbox.
 - [ ] Erro `faultstring` vira exceção custom.
 - [ ] Timeout de 15 s enforçado.
@@ -815,6 +836,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 **Objetivo:** CRUD de clientes com criptografia das credenciais e RBAC por `client_assignments`.
 
 **Tarefas do backlog cobertas:**
+
 - `[BACK 3.1]` Listar Clientes
 - `[BACK 3.2]` Criar Cliente
 - `[BACK 3.3]` Testar Conexão Omie
@@ -849,6 +871,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
    - RBAC verificado em **cada** endpoint via dependency `require_client_access(client_id)`.
 
 **DoD:**
+
 - [ ] Cliente é criado com credenciais criptografadas (verificar no banco — nenhum plaintext).
 - [ ] Manager não vê cliente de outro manager (teste com 2 contas).
 - [ ] Editar cliente sem preencher credenciais mantém as antigas.
@@ -862,6 +885,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 **Objetivo:** tela de detalhe com histórico de conciliações e contas bancárias vindas do cache L1 (24 h) com "Sincronizar" manual.
 
 **Tarefas do backlog cobertas:**
+
 - `[BACK 4.1]` Endpoint Detalhe do Cliente e contas
 - `[BACK 4.2]` Endpoint Histórico de Conciliações
 - `[FRONT 4.3]` Tela Detalhe do Cliente
@@ -888,6 +912,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
    - Seção histórico: filtros (conta, mês), lista de cards, paginação.
 
 **DoD:**
+
 - [ ] Segunda chamada do detalhe dentro de 24 h **não** chama Omie (verificar em logs).
 - [ ] Botão "Sincronizar" força chamada Omie e atualiza `synced_at`.
 - [ ] Filtros de histórico funcionam.
@@ -900,6 +925,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 **Objetivo:** formulário + validações client-side + checagem de duplicata no servidor (apenas pelo hash, sem upload do arquivo).
 
 **Tarefas do backlog cobertas:**
+
 - `[FRONT 5.1]` Formulário Nova Conciliação
 - `[FRONT 6.1]` Validações no Browser
 - `[BACK 6.2]` Endpoint Verificação de Duplicata
@@ -929,6 +955,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
    - Response: `{ duplicate: boolean, existing_session_id?: string }`.
 
 **DoD:**
+
 - [ ] Hash SHA-256 no browser bate com o calculado server-side em S9 (testar com arquivo conhecido).
 - [ ] Arquivo de 19.9 MB passa; 20.1 MB bloqueado com mensagem.
 - [ ] Duplicata detectada bloqueia upload e oferece link para sessão existente.
@@ -941,6 +968,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 **Objetivo:** envio do arquivo à Claude API com tool use estruturado, timeout agressivo, validação pós-IA, tela de preview.
 
 **Tarefas do backlog cobertas:**
+
 - `[BACK 7.1]` Endpoint Parsing via Claude
 - `[FRONT 7.2]` Tela Validação do Parsing
 
@@ -955,6 +983,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
    - Modelos disponíveis e recomendações explicitados em `CLAUDE.md`.
 
 2. **`integrations/anthropic/tools.py`** — definição do tool use:
+
    ```python
    EXTRACT_MOVEMENTS_TOOL = {
        "name": "extract_movements",
@@ -986,6 +1015,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
        }
    }
    ```
+
    **`tool_choice = {"type": "tool", "name": "extract_movements"}`** para forçar o schema.
 
 3. **`integrations/anthropic/prompts.py`** — prompt de sistema estável (para cache), instruindo extração exaustiva, preservação de descrição, normalização de datas ISO 8601, sinal no valor.
@@ -1017,6 +1047,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
    - Confirmar: navega para `/conciliacao/{session_id}/processando` (mas a criação da sessão acontece em S10).
 
 **DoD:**
+
 - [ ] Arquivo PDF real de 50 linhas é extraído em < 30 s.
 - [ ] Timeout de 60 s enforçado.
 - [ ] Arquivo corrompido retorna PARSE_ERROR com mensagem clara.
@@ -1031,6 +1062,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 **Objetivo:** sessão criada, job Celery processa, frontend faz polling, resultado classificado.
 
 **Tarefas do backlog cobertas:**
+
 - `[BACK 8.1]` Criar Sessão e Iniciar Job (8 subtarefas)
 - `[BACK 8.2]` Background: Buscar Lançamentos Omie (Extrato)
 - `[BACK 8.3]` Background: Buscar Lançamentos Omie (Pagar + Receber)
@@ -1056,6 +1088,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
    - Retorna `{ session_id, status: 'processing' }`.
 
 3. **Task `process_reconciliation_task(session_id)`:**
+
    ```python
    @celery_app.task(bind=True, max_retries=3, autoretry_for=(OmieTimeoutError,), retry_backoff=True)
    async def process_reconciliation_task(self, session_id: str):
@@ -1067,6 +1100,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
        # 6. Etapa 5: criar anomalias estruturais
        # 7. Etapa 6: recalcular saldos + status='reviewing'
    ```
+
    - **Etapa 4 (matcher — função pura):**
      - Indexar `omie_entries` por `amount` (dict de lista).
      - Para cada `file_entry`: buscar candidates com `|a1-a2|≤0.01` e `|d1-d2|≤tol`, excluir já consumidos.
@@ -1093,6 +1127,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
    - Se `status='error'` → mostra mensagem + botão "Voltar ao formulário".
 
 **DoD:**
+
 - [ ] Conciliação completa de arquivo de 100 linhas + 80 lançamentos Omie em < 90 s.
 - [ ] Matcher testado unitariamente com: valores iguais em datas diferentes, valores iguais consecutivos, centavos, edge case de tolerância no limite.
 - [ ] Double-allocation evitada (Omie consumido não matcha de novo).
@@ -1106,6 +1141,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 **Objetivo:** todos os endpoints que a tela de revisão consome, com cache abstrato de lançamentos Omie.
 
 **Tarefas do backlog cobertas:**
+
 - `[BACK 9.1]` Listar Movimentações
 - `[BACK 9.2]` Dados Omie de Lançamentos (batch)
 - `[BACK 9.3]` Atualizar Ação em Linha
@@ -1124,6 +1160,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 **Entregáveis:**
 
 1. **Cache L2 abstrato em `app/cache/`:**
+
    ```python
    class AsyncCache(Protocol):
        async def get(self, key: str) -> bytes | None: ...
@@ -1131,6 +1168,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
        async def delete(self, key: str) -> None: ...
        async def mget(self, keys: list[str]) -> dict[str, bytes]: ...
    ```
+
    - `InMemoryCache` com dict + expiresAt + limpeza periódica.
    - `RedisCache` (comentada, pronta para trocar via env `CACHE_BACKEND=memory|redis`).
    - **Chave:** `omie_lancamento:{client_id}:{omie_lancamento_id}`, TTL 2 h.
@@ -1148,9 +1186,10 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
    - `PATCH /reconciliations/:id/anomalies/:anomalyId/resolve` (resolve com nota obrigatória ≥ 10 chars)
    - `GET /api/v1/anomaly-types?active=true` (para o modal de registrar)
 
-3. **Autorização em **todos**: `require_client_access(client_id)` via dependency que busca a session → client_id e verifica.
+3. **Autorização em **todos\*\*: `require_client_access(client_id)` via dependency que busca a session → client_id e verifica.
 
 **DoD:**
+
 - [ ] Cache L2 hit/miss logado e métrica gerada.
 - [ ] Troca de match invalida cache da chave antiga.
 - [ ] Lista de file-entries com 500 linhas retorna em < 500 ms.
@@ -1164,6 +1203,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 **Objetivo:** esqueleto da tela de revisão com 4 abas e a primeira aba (Movimentações) totalmente funcional, incluindo modais.
 
 **Tarefas do backlog cobertas:**
+
 - `[FRONT 9.11]` Estrutura da Tela (5 sub)
 - `[FRONT 9.12]` Aba 1 — Movimentações
 - `[FRONT 9.13]` Modal Trocar Lançamento
@@ -1197,6 +1237,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
    - Submit chama POST, fecha modal, atualiza contador no header.
 
 **DoD:**
+
 - [ ] Rolagem virtual fluida com 2 000 linhas.
 - [ ] Filtros aplicados alteram contadores visíveis.
 - [ ] Modal "Trocar" atualiza linha com novo fornecedor/categoria sem recarregar.
@@ -1209,6 +1250,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 **Objetivo:** abas 2, 3 e 4.
 
 **Tarefas do backlog cobertas:**
+
 - `[FRONT 9.15]` Aba 2 — Divergências Omie
 - `[FRONT 9.16]` Aba 3 — Anomalias
 - `[FRONT 9.17]` Aba 4 — Resumo
@@ -1236,6 +1278,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
    - Dados vindos diretamente da session (sem chamar Omie novamente).
 
 **DoD:**
+
 - [ ] Status de saldo (verde/amarelo/vermelho) calculado corretamente.
 - [ ] Anomalia pendente sem nota não pode ser resolvida.
 - [ ] Contador no header atualiza ao resolver.
@@ -1247,6 +1290,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 **Objetivo:** botão Exportar gera Excel de 5 abas e serve como download direto.
 
 **Tarefas do backlog cobertas:**
+
 - `[BACK 10.1]` Endpoint Gerar Relatório (20 subtarefas — cada aba + formatação)
 
 **Pré-requisitos:** S13.
@@ -1274,6 +1318,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
    - Toast de erro se falhar.
 
 **DoD:**
+
 - [ ] Excel abre corretamente no Excel/LibreOffice/Google Sheets.
 - [ ] Cores por situação/status conforme doc.
 - [ ] Nome do arquivo sem caracteres inválidos.
@@ -1287,6 +1332,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 **Objetivo:** tela de admin para ativar/desativar tipos (Fase 1 apenas).
 
 **Tarefas do backlog cobertas:**
+
 - `[BACK 11.1]` CRUD de Tipos de Anomalia
 - `[FRONT 11.2]` Tela de Gestão
 
@@ -1308,6 +1354,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
    - Toggle ativo/inativo com modal de confirmação.
 
 **DoD:**
+
 - [ ] Tipo desativado não aparece no modal "Registrar anomalia" (S12).
 - [ ] Anomalias existentes do tipo desativado continuam visíveis.
 
@@ -1336,6 +1383,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 9. **Pentest checklist** manual (OWASP ASVS L1).
 
 **DoD:**
+
 - [ ] CI falha em PR com dep crítica vulnerável.
 - [ ] Headers verificados em `curl -I`.
 - [ ] Rate limit dispara 429 em teste de carga local.
@@ -1364,6 +1412,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 5. **Dashboard Grafana básico** (template JSON).
 
 **DoD:**
+
 - [ ] Erro simulado aparece no Sentry.
 - [ ] Log de uma conciliação completa é correlacionável do submit → worker → resultado via `correlation_id`.
 
@@ -1393,6 +1442,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
    - CLAUDE.md atualizado.
 
 **DoD:**
+
 - [ ] E2E roda em CI em < 5 min.
 - [ ] Deploy em staging completo sem intervenção manual.
 - [ ] `docs/runbook.md` cobre pelo menos 5 cenários de incidente.
@@ -1401,18 +1451,18 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 
 ## 12. Riscos e Mitigações
 
-| Risco | Impacto | Mitigação |
-|---|---|---|
-| **Omie API instável/fora** | Alto | Retry com backoff, timeout rígido 15 s, status='error' com mensagem, runbook de "Omie fora". |
-| **IA (Claude) erra no parsing** | Alto | Gate humano obrigatório (preview 5 linhas). Validação pós-IA (saldo bate). Prompt com exemplos canônicos. |
-| **Arquivo malformado/gigante** | Médio | Extensão + magic bytes + tamanho max 20 MB server-side. Timeout 60 s hard. |
-| **Custo Claude explode** | Médio | Prompt caching (90 % de desconto), Sonnet por padrão, pré-processamento PDF→texto, budget alert na Anthropic Console. |
-| **Vazamento de credencial Omie** | Crítico | AES-256-GCM, chave só em env, nunca em log, rotação via script, Sentry filtra chaves sensíveis. |
-| **Double-allocation no matcher** | Crítico (dados incorretos) | Set de IDs consumidos, testes unitários exaustivos, assertion final (`len(used) == sum(conciliated)`). |
-| **Manager acessa cliente de outro** | Crítico (confidencialidade) | RBAC verificado em toda rota, testes negativos obrigatórios em S6. |
-| **Cache L2 cresce sem limites** | Médio | TTL 2 h + limpeza periódica em in-memory; quando migrar para Redis, usar `maxmemory-policy allkeys-lru`. |
-| **JWT comprometido** | Alto | Expiração curta (1 h), `active` verificado a cada request, rotação de `JWT_SECRET` suportada via `kid` no header. |
-| **Prompt injection via descrição do arquivo** | Médio | Descrições sanitizadas antes de enviar ao Claude no worker de detecção de anomalias (Fase 2). No parsing inicial, o arquivo é input do usuário esperado; delimitadores claros no prompt. |
+| Risco                                         | Impacto                     | Mitigação                                                                                                                                                                                |
+| --------------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Omie API instável/fora**                    | Alto                        | Retry com backoff, timeout rígido 15 s, status='error' com mensagem, runbook de "Omie fora".                                                                                             |
+| **IA (Claude) erra no parsing**               | Alto                        | Gate humano obrigatório (preview 5 linhas). Validação pós-IA (saldo bate). Prompt com exemplos canônicos.                                                                                |
+| **Arquivo malformado/gigante**                | Médio                       | Extensão + magic bytes + tamanho max 20 MB server-side. Timeout 60 s hard.                                                                                                               |
+| **Custo Claude explode**                      | Médio                       | Prompt caching (90 % de desconto), Sonnet por padrão, pré-processamento PDF→texto, budget alert na Anthropic Console.                                                                    |
+| **Vazamento de credencial Omie**              | Crítico                     | AES-256-GCM, chave só em env, nunca em log, rotação via script, Sentry filtra chaves sensíveis.                                                                                          |
+| **Double-allocation no matcher**              | Crítico (dados incorretos)  | Set de IDs consumidos, testes unitários exaustivos, assertion final (`len(used) == sum(conciliated)`).                                                                                   |
+| **Manager acessa cliente de outro**           | Crítico (confidencialidade) | RBAC verificado em toda rota, testes negativos obrigatórios em S6.                                                                                                                       |
+| **Cache L2 cresce sem limites**               | Médio                       | TTL 2 h + limpeza periódica em in-memory; quando migrar para Redis, usar `maxmemory-policy allkeys-lru`.                                                                                 |
+| **JWT comprometido**                          | Alto                        | Expiração curta (1 h), `active` verificado a cada request, rotação de `JWT_SECRET` suportada via `kid` no header.                                                                        |
+| **Prompt injection via descrição do arquivo** | Médio                       | Descrições sanitizadas antes de enviar ao Claude no worker de detecção de anomalias (Fase 2). No parsing inicial, o arquivo é input do usuário esperado; delimitadores claros no prompt. |
 
 ---
 
@@ -1427,14 +1477,14 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 
 **Ainda dependem de validação com stakeholder antes das sessões correspondentes:**
 
-- [ ] **Paginação do endpoint `ListarExtrato`** — documentação Omie incompleta; validar com Galhardo. *(S5)*
-- [ ] **`ListarContasPagar.filtrar_por_status`** aceita múltiplos valores? *(S5)*
-- [ ] **Saldo do Omie:** qual endpoint expõe saldo no 1º dia do mês como fallback de `balance_start`? *(S10)*
-- [ ] **Credenciais Omie sandbox** — quando estarão disponíveis? *(S5+)*
-- [ ] **Chave Anthropic** com budget configurado — responsabilidade de quem? *(S9)*
-- [ ] **Storage de backups** — S3, GCS, cold storage local? Retenção desejada além dos 30 dias mínimos? *(S16)*
-- [ ] **Ambiente de staging** — onde hospedar? AWS ECS, Render, Railway? *(S18)*
-- [ ] **Política de senhas** — rotação periódica, complexidade? (doc não define) *(S4)*
+- [ ] **Paginação do endpoint `ListarExtrato`** — documentação Omie incompleta; validar com Galhardo. _(S5)_
+- [ ] **`ListarContasPagar.filtrar_por_status`** aceita múltiplos valores? _(S5)_
+- [ ] **Saldo do Omie:** qual endpoint expõe saldo no 1º dia do mês como fallback de `balance_start`? _(S10)_
+- [ ] **Credenciais Omie sandbox** — quando estarão disponíveis? _(S5+)_
+- [ ] **Chave Anthropic** com budget configurado — responsabilidade de quem? _(S9)_
+- [ ] **Storage de backups** — S3, GCS, cold storage local? Retenção desejada além dos 30 dias mínimos? _(S16)_
+- [ ] **Ambiente de staging** — onde hospedar? AWS ECS, Render, Railway? _(S18)_
+- [ ] **Política de senhas** — rotação periódica, complexidade? (doc não define) _(S4)_
 
 ---
 
@@ -1442,18 +1492,18 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 
 > Premissa: time de 2 – 3 devs full-stack sênior + 1 dev focado em integrações/IA.
 
-| Fase | Sessões | Duração estimada | Entregável |
-|---|---|---|---|
-| **Fundação** | S0, S1, S2 | 1,5 semana | Esqueleto pronto, CI verde. |
-| **Auth + Cadastros** | S3, S4 | 1 semana | Login, gestão de usuários. |
-| **Omie + Clientes** | S5, S6, S7 | 2 semanas | CRUD clientes + detalhe. |
-| **Pipeline conciliação** | S8, S9, S10 | 3 semanas | Upload → parsing → matching end-to-end. |
-| **Revisão + Export** | S11, S12, S13, S14 | 3 semanas | Tela de revisão completa + Excel. |
-| **Admin + Hardening** | S15, S16, S17 | 1,5 semana | Tipos de anomalia + segurança + obs. |
-| **E2E + Deploy** | S18 | 1 semana | Produção com runbooks. |
+| Fase                     | Sessões            | Duração estimada | Entregável                              |
+| ------------------------ | ------------------ | ---------------- | --------------------------------------- |
+| **Fundação**             | S0, S1, S2         | 1,5 semana       | Esqueleto pronto, CI verde.             |
+| **Auth + Cadastros**     | S3, S4             | 1 semana         | Login, gestão de usuários.              |
+| **Omie + Clientes**      | S5, S6, S7         | 2 semanas        | CRUD clientes + detalhe.                |
+| **Pipeline conciliação** | S8, S9, S10        | 3 semanas        | Upload → parsing → matching end-to-end. |
+| **Revisão + Export**     | S11, S12, S13, S14 | 3 semanas        | Tela de revisão completa + Excel.       |
+| **Admin + Hardening**    | S15, S16, S17      | 1,5 semana       | Tipos de anomalia + segurança + obs.    |
+| **E2E + Deploy**         | S18                | 1 semana         | Produção com runbooks.                  |
 
 **Total MVP: ~13 semanas** (alinhado à estimativa anterior).
 
 ---
 
-*Documento vivo — atualizar ao final de cada sessão com decisões tomadas, deltas em relação ao plano e links para PRs.*
+_Documento vivo — atualizar ao final de cada sessão com decisões tomadas, deltas em relação ao plano e links para PRs._
