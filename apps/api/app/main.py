@@ -4,8 +4,8 @@ Esqueleto mínimo da S0. A S1 expande com logging estruturado, exception
 handlers globais e middlewares de segurança. A S3 adiciona auth.
 """
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

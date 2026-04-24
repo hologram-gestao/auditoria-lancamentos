@@ -17,14 +17,13 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Injeta URL do DB vinda das Settings (substitui driver async por sync para o Alembic)
+# Injeta URL do DB vinda das Settings
 _settings = get_settings()
-_sync_url = _settings.DATABASE_URL.replace("+psycopg", "").replace("postgresql+", "postgresql+psycopg2://" if False else "postgresql://")
 config.set_main_option("sqlalchemy.url", _settings.DATABASE_URL)
 
 # Em S2, importar Base e todos os modelos aqui:
 # from app.db.base import Base
-# from app.db.models import *  # noqa: F401,F403
+# from app.db.models import *
 # target_metadata = Base.metadata
 target_metadata = None
 

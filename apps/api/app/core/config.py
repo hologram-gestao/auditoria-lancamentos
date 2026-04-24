@@ -7,7 +7,7 @@ NÃO logar nem expor `OMIE_ENCRYPTION_KEY`, `JWT_SECRET` ou `ANTHROPIC_API_KEY`
 em lugar algum. Ver CLAUDE.md §3.
 """
 
-from enum import Enum
+from enum import StrEnum
 from functools import lru_cache
 from typing import Literal
 
@@ -15,7 +15,7 @@ from pydantic import Field, HttpUrl, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Environment(str, Enum):
+class Environment(StrEnum):
     """Ambientes suportados."""
 
     DEVELOPMENT = "development"
@@ -23,7 +23,7 @@ class Environment(str, Enum):
     PRODUCTION = "production"
 
 
-class LogLevel(str, Enum):
+class LogLevel(StrEnum):
     """Níveis de log."""
 
     DEBUG = "debug"
@@ -32,7 +32,7 @@ class LogLevel(str, Enum):
     ERROR = "error"
 
 
-class CacheBackend(str, Enum):
+class CacheBackend(StrEnum):
     """Backends suportados pelo cache L2."""
 
     MEMORY = "memory"
