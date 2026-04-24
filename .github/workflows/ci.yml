@@ -64,7 +64,7 @@ jobs:
           POSTGRES_USER: auditoria
           POSTGRES_PASSWORD: ci_password
           POSTGRES_DB: auditoria_test
-        ports: ["5432:5432"]
+        ports: ['5432:5432']
         options: >-
           --health-cmd pg_isready
           --health-interval 5s
@@ -72,7 +72,7 @@ jobs:
           --health-retries 5
       redis:
         image: redis:7-alpine
-        ports: ["6379:6379"]
+        ports: ['6379:6379']
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s
@@ -84,10 +84,11 @@ jobs:
       REDIS_URL: redis://localhost:6379/0
       ENVIRONMENT: development
       LOG_LEVEL: warning
-      # Chaves fake de 64 chars hex válidos apenas para CI (não são segredos reais)
-      OMIE_ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000000
-      JWT_SECRET: 1111111111111111111111111111111111111111111111111111111111111111
-      ANTHROPIC_API_KEY: sk-ant-ci-fake
+      # Chaves fake de 64 chars hex válidos apenas para CI (não são segredos reais).
+      # Aspas obrigatórias: sem elas o YAML interpreta como número (0, 1.11e+63, etc.)
+      OMIE_ENCRYPTION_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
+      JWT_SECRET: '1111111111111111111111111111111111111111111111111111111111111111'
+      ANTHROPIC_API_KEY: 'sk-ant-ci-fake'
 
     steps:
       - uses: actions/checkout@v4
@@ -95,9 +96,9 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@v3
         with:
-          version: "0.5.0"
+          version: '0.5.0'
           enable-cache: true
-          cache-dependency-glob: "apps/api/uv.lock"
+          cache-dependency-glob: 'apps/api/uv.lock'
 
       - name: Setup Python
         run: uv python install 3.12
@@ -118,7 +119,7 @@ jobs:
         run: uv run pytest -v --cov=app --cov-report=term-missing
 
       - name: pip-audit
-        run: uv run pip-audit --ignore-vuln GHSA-xxxx || true  # não bloqueia por enquanto
+        run: uv run pip-audit --ignore-vuln GHSA-xxxx || true # não bloqueia por enquanto
         continue-on-error: true
 
   # ============================================================
@@ -142,7 +143,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: "pnpm"
+          cache: 'pnpm'
 
       - name: Install deps
         run: pnpm install --frozen-lockfile
