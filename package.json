@@ -1,0 +1,41 @@
+{
+  "name": "auditoria-lancamentos",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sistema de Auditoria de Lançamentos — Hologram Gestão",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  },
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "dev:web": "pnpm --filter @auditoria/web dev",
+    "build:web": "pnpm --filter @auditoria/web build",
+    "lint:web": "pnpm --filter @auditoria/web lint",
+    "type-check:web": "pnpm --filter @auditoria/web type-check",
+    "test:web": "pnpm --filter @auditoria/web test",
+    "e2e:web": "pnpm --filter @auditoria/web e2e",
+    "lint": "pnpm -r lint",
+    "type-check": "pnpm -r type-check",
+    "test": "pnpm -r test",
+    "format": "pnpm -r format",
+    "prepare": "husky || true"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.5.0",
+    "@commitlint/config-conventional": "^19.5.0",
+    "husky": "^9.1.6",
+    "lint-staged": "^15.2.10",
+    "prettier": "^3.3.3"
+  },
+  "commitlint": {
+    "extends": [
+      "@commitlint/config-conventional"
+    ]
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,json,md,yml,yaml}": [
+      "prettier --write"
+    ]
+  }
+}

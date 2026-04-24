@@ -1,0 +1,105 @@
+name: auditoria
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: auditoria-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-auditoria}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_in_dev_only}
+      POSTGRES_DB: ${POSTGRES_DB:-auditoria_dev}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-auditoria} -d ${POSTGRES_DB:-auditoria_dev}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: auditoria-redis
+    restart: unless-stopped
+    command: ["redis-server", "--maxmemory-policy", "allkeys-lru", "--maxmemory", "256mb"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    container_name: auditoria-api
+    restart: unless-stopped
+    env_file:
+      - ../apps/api/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-auditoria}:${POSTGRES_PASSWORD:-change_me_in_dev_only}@postgres:5432/${POSTGRES_DB:-auditoria_dev}
+      REDIS_URL: redis://redis:6379/0
+      ALLOWED_ORIGINS: http://localhost:${WEB_PORT:-3000}
+      FRONTEND_URL: http://localhost:${WEB_PORT:-3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ../apps/api:/app:ro
+    command: ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    container_name: auditoria-worker
+    restart: unless-stopped
+    env_file:
+      - ../apps/api/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-auditoria}:${POSTGRES_PASSWORD:-change_me_in_dev_only}@postgres:5432/${POSTGRES_DB:-auditoria_dev}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../apps/api:/app:ro
+    # Worker ARQ será configurado em S10 — por enquanto, mantido desabilitado.
+    # command: ["uv", "run", "arq", "app.workers.arq_worker.WorkerSettings"]
+    profiles: ["workers"]
+
+  web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web
+    container_name: auditoria-web
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-8000}
+      INTERNAL_API_URL: http://api:8000
+      NEXT_PUBLIC_ENVIRONMENT: ${ENVIRONMENT:-development}
+    depends_on:
+      - api
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+
+volumes:
+  postgres-data:
+  redis-data:

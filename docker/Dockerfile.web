@@ -1,0 +1,64 @@
+# syntax=docker/dockerfile:1.7
+
+# ============================================================
+# Stage 1 — deps (instala dependências do monorepo via pnpm)
+# ============================================================
+FROM node:20-alpine AS deps
+
+RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+
+WORKDIR /workspace
+
+# Copia manifestos do monorepo para aproveitar cache
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
+COPY apps/web/package.json apps/web/
+COPY packages/shared-types/package.json packages/shared-types/
+
+RUN pnpm install --frozen-lockfile || pnpm install
+
+# ============================================================
+# Stage 2 — build
+# ============================================================
+FROM node:20-alpine AS builder
+
+RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+
+WORKDIR /workspace
+
+COPY --from=deps /workspace/node_modules ./node_modules
+COPY --from=deps /workspace/apps/web/node_modules ./apps/web/node_modules
+COPY --from=deps /workspace/packages/shared-types/node_modules ./packages/shared-types/node_modules
+
+# Código
+COPY . .
+
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN pnpm --filter @auditoria/web build
+
+# ============================================================
+# Stage 3 — runtime
+# ============================================================
+FROM node:20-alpine AS runtime
+
+WORKDIR /app
+
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000
+
+RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
+
+# Aproveita o output standalone do Next.js (configurar em next.config se quiser)
+COPY --from=builder --chown=nextjs:nodejs /workspace/apps/web/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /workspace/apps/web/.next/static ./apps/web/.next/static
+COPY --from=builder --chown=nextjs:nodejs /workspace/apps/web/public ./apps/web/public
+
+USER nextjs
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget --quiet --tries=1 --spider http://localhost:3000 || exit 1
+
+CMD ["node", "apps/web/server.js"]

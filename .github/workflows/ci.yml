@@ -1,0 +1,179 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancela runs antigos da mesma branch em push novo
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # ============================================================
+  # Path filtering: decide quais jobs rodam baseado no diff
+  # ============================================================
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      web: ${{ steps.filter.outputs.web }}
+      shared: ${{ steps.filter.outputs.shared }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'apps/api/**'
+              - 'docker/Dockerfile.api'
+              - '.github/workflows/ci.yml'
+            web:
+              - 'apps/web/**'
+              - 'packages/shared-types/**'
+              - 'docker/Dockerfile.web'
+              - 'package.json'
+              - 'pnpm-workspace.yaml'
+              - '.github/workflows/ci.yml'
+            shared:
+              - 'packages/shared-types/**'
+
+  # ============================================================
+  # Backend — Python / FastAPI
+  # ============================================================
+  api:
+    name: API (lint · type · test)
+    needs: changes
+    if: ${{ needs.changes.outputs.api == 'true' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: auditoria
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: auditoria_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+psycopg://auditoria:ci_password@localhost:5432/auditoria_test
+      REDIS_URL: redis://localhost:6379/0
+      ENVIRONMENT: development
+      LOG_LEVEL: warning
+      # Chaves fake de 64 chars hex válidos apenas para CI (não são segredos reais)
+      OMIE_ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000000
+      JWT_SECRET: 1111111111111111111111111111111111111111111111111111111111111111
+      ANTHROPIC_API_KEY: sk-ant-ci-fake
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.5.0"
+          enable-cache: true
+          cache-dependency-glob: "apps/api/uv.lock"
+
+      - name: Setup Python
+        run: uv python install 3.12
+
+      - name: Install deps
+        run: uv sync --all-extras
+
+      - name: Ruff check
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Mypy
+        run: uv run mypy app
+
+      - name: Pytest
+        run: uv run pytest -v --cov=app --cov-report=term-missing
+
+      - name: pip-audit
+        run: uv run pip-audit --ignore-vuln GHSA-xxxx || true  # não bloqueia por enquanto
+        continue-on-error: true
+
+  # ============================================================
+  # Frontend — Next.js / TypeScript
+  # ============================================================
+  web:
+    name: Web (lint · type · test)
+    needs: changes
+    if: ${{ needs.changes.outputs.web == 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "pnpm"
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint:web
+
+      - name: Type check
+        run: pnpm type-check:web
+
+      - name: Test
+        run: pnpm test:web
+
+      - name: npm audit
+        run: pnpm audit --audit-level=high
+        continue-on-error: true
+
+  # ============================================================
+  # Summary — um único job obrigatório para branch protection
+  # ============================================================
+  ci:
+    name: CI
+    if: always()
+    needs: [changes, api, web]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summary
+        run: |
+          echo "changes=${{ needs.changes.result }}"
+          echo "api=${{ needs.api.result }}"
+          echo "web=${{ needs.web.result }}"
+          if [[ "${{ needs.api.result }}" == "failure" || "${{ needs.web.result }}" == "failure" ]]; then
+            exit 1
+          fi

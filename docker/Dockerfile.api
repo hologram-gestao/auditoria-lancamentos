@@ -1,0 +1,72 @@
+# syntax=docker/dockerfile:1.7
+
+# ============================================================
+# Stage 1 — build (instala deps com uv)
+# ============================================================
+FROM python:3.12-slim-bookworm AS builder
+
+# uv vem via COPY-from oficial da Astral (imagem leve, sem dependências)
+COPY --from=ghcr.io/astral-sh/uv:0.5.0 /uv /usr/local/bin/uv
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Instala deps do sistema para builds nativos (psycopg, cryptography, lxml, etc.)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        libpq-dev \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Primeiro copia apenas o manifesto para aproveitar cache Docker de layers
+COPY apps/api/pyproject.toml apps/api/uv.lock* /app/
+
+# Sincroniza deps (cria /opt/venv). --frozen garante que usa lockfile se existir.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --no-install-project --all-extras
+
+# Copia código após resolver deps (maximiza cache)
+COPY apps/api /app/
+
+# Instala o próprio projeto
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --all-extras
+
+# ============================================================
+# Stage 2 — runtime (imagem mínima)
+# ============================================================
+FROM python:3.12-slim-bookworm AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:$PATH"
+
+# Apenas runtime libs (sem compiladores)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libpq5 \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Usuário não-root
+RUN groupadd -r app && useradd -r -g app -s /bin/false app
+
+WORKDIR /app
+
+# Copia venv e código do builder
+COPY --from=builder --chown=app:app /opt/venv /opt/venv
+COPY --from=builder --chown=app:app /app /app
+
+USER app
+
+EXPOSE 8000
+
+# Healthcheck (duplica o do compose para quando rodar solto)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()" || exit 1
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

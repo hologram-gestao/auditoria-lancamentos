@@ -1,0 +1,25 @@
+# Arquivos e pastas não copiados para o build context do Docker.
+# Aplica-se a todos os Dockerfiles que usam a raiz como contexto.
+
+**/node_modules
+**/.next
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.turbo
+**/coverage
+**/dist
+**/build
+.git
+.github
+.vscode
+.idea
+**/*.log
+**/.env
+**/.env.*
+!**/.env.example
+Docs/
+playwright-report/
+test-results/
