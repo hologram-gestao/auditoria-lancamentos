@@ -59,12 +59,13 @@ postgres-data/
 redis-data/
 
 # ============================================================
-# Editors / IDEs
+# Editors / IDEs / AI assistants
 # ============================================================
 .vscode/*
 !.vscode/settings.json.example
 !.vscode/extensions.json
 .idea/
+.claude/
 *.swp
 *.swo
 *~
