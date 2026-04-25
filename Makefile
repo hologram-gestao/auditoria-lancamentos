@@ -85,7 +85,7 @@ db-downgrade: ## Reverte 1 migration
 
 .PHONY: db-seed
 db-seed: ## Popula o banco com dados iniciais
-	$(API) uv run python scripts/seed-dev.py
+	$(API) uv run python -m scripts.seed_dev
 
 .PHONY: db-reset
 db-reset: ## DROP + CREATE + migrate + seed (APENAS EM DEV)

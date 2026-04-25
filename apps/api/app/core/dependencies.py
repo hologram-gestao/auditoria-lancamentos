@@ -1,15 +1,15 @@
-"""Dependencies do FastAPI compartilhadas — auth, RBAC, settings.
+"""Dependencies do FastAPI compartilhadas — auth, RBAC, settings, DB.
 
 Use sempre via `Depends(...)` em rotas. **Proibido** acessar `session` global,
 `Settings()` direto ou JWT manualmente fora destas funções.
 
-Hoje (S1):
-    - `get_settings` (já em `app.core.config`)
+Hoje (S2):
+    - `get_settings` (em `app.core.config`)
+    - `DbSessionDep` — sessão SQLAlchemy async com rollback automático
     - `get_current_user` — extrai e valida JWT do cookie HttpOnly
     - `require_admin` / `require_manager_or_admin` — RBAC por role
 
-Em S2 (DB ativo):
-    - `get_db` — sessão SQLAlchemy async
+Em S3 (auth real):
     - `get_current_user` passa a validar `users.active = true` no DB
     - `require_client_access(client_id)` — checa `client_assignments`
 """
@@ -20,13 +20,18 @@ from typing import Annotated
 
 from fastapi import Cookie, Depends
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
 from app.core.exceptions import ForbiddenError, UnauthorizedError
 from app.core.security import TOKEN_TYPE_ACCESS, decode_token
+from app.db.session import get_db_session
 
 # Nome do cookie HttpOnly que carrega o access JWT — não é um valor de senha.
 ACCESS_TOKEN_COOKIE = "access_token"  # noqa: S105
+
+# Sessão DB por request. Use em rotas: `db: DbSessionDep`.
+DbSessionDep = Annotated[AsyncSession, Depends(get_db_session)]
 
 
 class CurrentUser(BaseModel):

@@ -199,7 +199,7 @@ cd apps/web && pnpm dev
 
 # DB
 cd apps/api && alembic upgrade head
-cd apps/api && uv run python scripts/seed-dev.py
+cd apps/api && uv run python -m scripts.seed_dev
 cd apps/api && alembic revision --autogenerate -m "descrição"
 
 # Lint / type / test

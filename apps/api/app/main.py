@@ -16,13 +16,16 @@ from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from starlette.middleware.base import BaseHTTPMiddleware
 from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from app import __version__
 from app.core.config import get_settings
+from app.core.dependencies import DbSessionDep
 from app.core.exceptions import AppError, ErrorCode, to_error_response
 from app.core.logging import get_logger, setup_logging
+from app.db.session import close_db, init_db
 
 CORRELATION_HEADER = "X-Correlation-ID"
 
@@ -31,14 +34,19 @@ CORRELATION_HEADER = "X-Correlation-ID"
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Ciclo de vida da aplicação.
 
-    S2+: inicializa pools de DB e Redis aqui (close no shutdown).
-    S5+: inicializa connection pool do httpx (Omie/Claude).
+    S2 (atual): inicializa pool de DB no startup, fecha no shutdown.
+    S5+: connection pool do httpx (Omie/Claude).
     """
-    setup_logging(get_settings())
+    settings = get_settings()
+    setup_logging(settings)
+    init_db(settings)
     log = get_logger(__name__)
     log.info("app_started", version=__version__)
-    yield
-    log.info("app_shutdown")
+    try:
+        yield
+    finally:
+        await close_db()
+        log.info("app_shutdown")
 
 
 class CorrelationIdMiddleware(BaseHTTPMiddleware):
@@ -147,9 +155,14 @@ def create_app() -> FastAPI:
         return {"status": "ok", "version": __version__}
 
     @app.get("/health/ready", tags=["system"])
-    async def ready() -> dict[str, str]:
-        """Readiness probe — S2 expandirá com check de DB + Redis."""
-        return {"status": "ready"}
+    async def ready(db: DbSessionDep) -> dict[str, str]:
+        """Readiness probe — verifica que DB responde a um SELECT 1.
+
+        Usado pelo orquestrador (Docker/ECS) para decidir se a instância
+        pode receber tráfego. Falha aqui = container não entra no LB.
+        """
+        await db.execute(text("SELECT 1"))
+        return {"status": "ready", "db": "ok"}
 
     return app
 
