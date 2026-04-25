@@ -6,6 +6,7 @@
 .env.*.local
 *.pem
 *.key
+cookies.txt
 
 # ============================================================
 # Node / pnpm / Next.js
