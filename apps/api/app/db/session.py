@@ -80,13 +80,23 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 async def get_db_session() -> AsyncIterator[AsyncSession]:
     """Async generator de AsyncSession para uso em `Depends()`.
 
-    Cada request recebe uma session nova. Commit é responsabilidade do caller —
-    em caso de exceção, rollback automático via context manager.
+    Política de transação por request:
+        - Cada request abre uma session nova.
+        - Se o handler retornar com sucesso, `commit()` persiste qualquer
+          mudança pendente. Para handlers de leitura pura, commit é no-op.
+        - Se levantar exceção (validação, erro de domínio, exception genérica),
+          `rollback()` desfaz tudo e a exceção segue para o exception_handler
+          global, que converte em resposta JSON.
+
+    Sem o `commit()` aqui, escritas via `flush()` no repositório sumiam ao final
+    do request — o teste de integração não pega isso porque usa transação
+    única por teste com rollback explícito (vide `tests/conftest.py`).
     """
     session_factory = get_session_factory()
     async with session_factory() as session:
         try:
             yield session
+            await session.commit()
         except Exception:
             await session.rollback()
             raise
