@@ -26,10 +26,12 @@ class AuthenticatedUser(BaseModel):
     """Dados públicos do usuário autenticado, enviados ao frontend para popular o store.
 
     NUNCA inclui `password_hash`, `created_at`, etc.
+    `email` é `str` (não `EmailStr`) — validação estrita só na entrada
+    (`LoginRequest`); na saída precisa serializar qualquer linha existente.
     """
 
     id: str  # UUID em string (evita parsing client-side)
-    email: EmailStr
+    email: str
     name: str
     role: str  # "admin" | "manager"
 

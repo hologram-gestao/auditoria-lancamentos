@@ -42,11 +42,18 @@ class UpdateUserRequest(BaseModel):
 
 
 class UserResponse(BaseModel):
-    """Representação pública de um usuário. NUNCA inclui `password_hash`."""
+    """Representação pública de um usuário. NUNCA inclui `password_hash`.
+
+    `email` é `str` (e não `EmailStr`) propositalmente: validação estrita acontece
+    apenas no INPUT (CreateUserRequest/UpdateUserRequest). Aqui, qualquer linha
+    no banco tem que ser serializável — caso contrário, um único registro com
+    e-mail historicamente tolerado mas agora rejeitado pelo email-validator
+    (e.g. TLDs reservados como `.local`/`.test`) derruba a listagem inteira.
+    """
 
     id: UUID  # serializado como string em JSON
     name: str
-    email: EmailStr
+    email: str
     role: str  # value do StrEnum
     active: bool
     created_at: datetime
