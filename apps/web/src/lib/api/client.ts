@@ -151,7 +151,16 @@ async function rawFetch<T>(path: string, init: RequestInit, options: FetchOption
   }
 
   const json = (await res.json()) as ApiSuccess<T> | T;
-  if (json !== null && typeof json === 'object' && 'data' in json) {
+  // Auto-unwrap apenas quando `data` é a ÚNICA chave do envelope.
+  // Respostas paginadas (`{ data, pagination }`) e payloads que coincidentemente
+  // tenham um campo `data` ficam intactas — caller decide como ler.
+  if (
+    json !== null &&
+    typeof json === 'object' &&
+    !Array.isArray(json) &&
+    Object.keys(json).length === 1 &&
+    'data' in json
+  ) {
     return (json as ApiSuccess<T>).data;
   }
   return json as T;
