@@ -39,12 +39,26 @@ if sys.platform == "win32":
 
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
+from app.core.rate_limit import limiter as _rate_limiter
 from app.db.models import Base
 from app.db.session import get_db_session
 from app.main import app as fastapi_app
 
 if TYPE_CHECKING:
     from testcontainers.postgres import PostgresContainer
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter() -> Iterator[None]:
+    """Limpa contadores in-memory do slowapi entre testes.
+
+    Sem isso, testes em sequência (mesmo IP 127.0.0.1) acumulam contagens e
+    estouram o limit do /auth/login. Testes específicos que validam o limit
+    sobem o contador intencionalmente — esta fixture garante isolamento.
+    """
+    _rate_limiter.reset()
+    yield
+    _rate_limiter.reset()
 
 
 # ----------------------------------------------------------------------

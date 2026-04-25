@@ -37,7 +37,7 @@ from app.db.models import (
 )
 from app.db.session import close_db, get_session_factory, init_db
 
-DEFAULT_ADMIN_EMAIL = "admin@hologram.local"
+DEFAULT_ADMIN_EMAIL = "admin@hologram.com.br"
 DEFAULT_ADMIN_NAME = "Admin Dev"
 DEFAULT_ADMIN_PASSWORD = "ChangeMeIn1stLogin!"  # noqa: S105
 

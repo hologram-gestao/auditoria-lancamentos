@@ -16,6 +16,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 from starlette.middleware.base import BaseHTTPMiddleware
 from structlog.contextvars import bind_contextvars, clear_contextvars
@@ -23,9 +24,11 @@ from structlog.contextvars import bind_contextvars, clear_contextvars
 from app import __version__
 from app.core.config import get_settings
 from app.core.dependencies import DbSessionDep
-from app.core.exceptions import AppError, ErrorCode, to_error_response
+from app.core.exceptions import AppError, ErrorCode, RateLimitedError, to_error_response
 from app.core.logging import get_logger, setup_logging
+from app.core.rate_limit import limiter
 from app.db.session import close_db, init_db
+from app.modules.auth import routes as auth_routes
 
 CORRELATION_HEADER = "X-Correlation-ID"
 
@@ -76,7 +79,8 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
 
 
 def _register_exception_handlers(app: FastAPI) -> None:
-    """Conecta handlers para AppError, RequestValidationError e fallback genérico."""
+    """Conecta handlers para AppError, RequestValidationError, RateLimitExceeded
+    e fallback genérico."""
     log = get_logger("app.exceptions")
 
     @app.exception_handler(AppError)
@@ -89,6 +93,19 @@ def _register_exception_handlers(app: FastAPI) -> None:
             metadata=exc.metadata,
         )
         return JSONResponse(status_code=exc.status_code, content=to_error_response(exc))
+
+    @app.exception_handler(RateLimitExceeded)
+    async def _handle_rate_limit(_request: Request, exc: RateLimitExceeded) -> JSONResponse:
+        # Converte o erro do slowapi no nosso formato padrão
+        rate_err = RateLimitedError(
+            f"Rate limit excedido: {exc.detail}",
+            user_message="Muitas tentativas. Aguarde 1 minuto antes de tentar novamente.",
+        )
+        log.warning("rate_limit_exceeded", detail=str(exc.detail))
+        return JSONResponse(
+            status_code=rate_err.status_code,
+            content=to_error_response(rate_err),
+        )
 
     @app.exception_handler(RequestValidationError)
     async def _handle_validation_error(
@@ -147,7 +164,13 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Rate limit (slowapi) — anexado ao app.state para o decorator funcionar.
+    # O Limiter singleton vive em `app.core.rate_limit`, com decorators aplicados
+    # diretamente nas rotas (ex: `@limiter.limit("5/5minutes")` em /auth/login).
+    app.state.limiter = limiter
+
     _register_exception_handlers(app)
+    app.include_router(auth_routes.router)
 
     @app.get("/health", tags=["system"])
     async def health() -> dict[str, str]:

@@ -3,20 +3,20 @@
 Use sempre via `Depends(...)` em rotas. **Proibido** acessar `session` global,
 `Settings()` direto ou JWT manualmente fora destas funções.
 
-Hoje (S2):
+Hoje (S3):
     - `get_settings` (em `app.core.config`)
     - `DbSessionDep` — sessão SQLAlchemy async com rollback automático
-    - `get_current_user` — extrai e valida JWT do cookie HttpOnly
+    - `get_current_user` — extrai JWT do cookie + valida `users.active = true` no DB
     - `require_admin` / `require_manager_or_admin` — RBAC por role
 
-Em S3 (auth real):
-    - `get_current_user` passa a validar `users.active = true` no DB
+Em S6 (clientes):
     - `require_client_access(client_id)` — checa `client_assignments`
 """
 
 from __future__ import annotations
 
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import Cookie, Depends
 from pydantic import BaseModel
@@ -26,47 +26,67 @@ from app.core.config import Settings, get_settings
 from app.core.exceptions import ForbiddenError, UnauthorizedError
 from app.core.security import TOKEN_TYPE_ACCESS, decode_token
 from app.db.session import get_db_session
+from app.modules.auth.repository import AuthRepository
 
-# Nome do cookie HttpOnly que carrega o access JWT — não é um valor de senha.
+# Nomes dos cookies HttpOnly — nomes de cookie, não credenciais.
 ACCESS_TOKEN_COOKIE = "access_token"  # noqa: S105
+REFRESH_TOKEN_COOKIE = "refresh_token"  # noqa: S105
 
 # Sessão DB por request. Use em rotas: `db: DbSessionDep`.
 DbSessionDep = Annotated[AsyncSession, Depends(get_db_session)]
 
 
 class CurrentUser(BaseModel):
-    """User autenticado, extraído do JWT.
+    """User autenticado e ATIVO no DB. Garantido por `get_current_user`."""
 
-    Em S2, ganhará campos vindos do DB (email, name) após validação de `active`.
-    """
-
-    id: str  # users.id (UUID)
+    id: str  # users.id (UUID em string)
+    email: str
+    name: str
     role: str  # "admin" | "manager"
 
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 
-def get_current_user(
+async def get_current_user(
     settings: SettingsDep,
+    db: DbSessionDep,
     access_token: Annotated[str | None, Cookie(alias=ACCESS_TOKEN_COOKIE)] = None,
 ) -> CurrentUser:
     """Extrai o usuário atual do cookie HttpOnly `access_token`.
 
-    Erros possíveis:
-        - 401 `UNAUTHORIZED`: cookie ausente, JWT inválido, claims malformados.
-        - 401 `TOKEN_EXPIRED`: assinatura válida mas `exp` no passado
-          (frontend deve tentar refresh).
+    Validações em ordem:
+        1. Cookie presente.
+        2. JWT válido (assinatura, formato, type=access, não expirado).
+        3. **`users.active = true` no DB** — query a cada request (CLAUDE.md §3.12).
+           Usuário desativado pelo Admin perde acesso instantaneamente, mesmo com
+           JWT vivo até a expiração natural.
 
-    Em S2:
-        Acrescenta consulta ao DB para validar `users.active = true` —
-        usuário desativado perde acesso na próxima request, mesmo com JWT vivo.
+    Erros possíveis:
+        - 401 `UNAUTHORIZED`: cookie ausente, JWT inválido, user inativo/inexistente.
+        - 401 `TOKEN_EXPIRED`: assinatura ok mas `exp` no passado
+          (frontend deve tentar `/api/v1/auth/refresh`).
     """
     if not access_token:
         raise UnauthorizedError("Cookie de acesso ausente.")
 
     payload = decode_token(access_token, settings, expected_type=TOKEN_TYPE_ACCESS)
-    return CurrentUser(id=payload.sub, role=payload.role)
+
+    try:
+        user_id = UUID(payload.sub)
+    except ValueError as exc:
+        raise UnauthorizedError("Sub do token inválido.") from exc
+
+    user = await AuthRepository(db).get_by_id(user_id)
+    if user is None or not user.active:
+        raise UnauthorizedError("Sessão expirou ou usuário inativo.")
+
+    return CurrentUser(
+        id=str(user.id),
+        email=user.email,
+        name=user.name,
+        role=user.role,
+    )
 
 
 CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
