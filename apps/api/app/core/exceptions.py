@@ -27,6 +27,7 @@ class ErrorCode(StrEnum):
     TOKEN_EXPIRED = "TOKEN_EXPIRED"  # noqa: S105
     FORBIDDEN = "FORBIDDEN"
     NOT_FOUND = "NOT_FOUND"
+    CONFLICT = "CONFLICT"
     DUPLICATE_FILE = "DUPLICATE_FILE"
     RATE_LIMITED = "RATE_LIMITED"
     OMIE_AUTH_ERROR = "OMIE_AUTH_ERROR"
@@ -112,6 +113,28 @@ class NotFoundError(AppError):
     code = ErrorCode.NOT_FOUND
     status_code = 404
     default_user_message = "Recurso não encontrado."
+
+
+class ConflictError(AppError):
+    """409 — operação conflita com estado atual (genérica)."""
+
+    code = ErrorCode.CONFLICT
+    status_code = 409
+    default_user_message = "Operação conflita com o estado atual."
+
+
+class EmailAlreadyExistsError(ConflictError):
+    """409 — tentou criar/atualizar usuário com e-mail já em uso."""
+
+    default_user_message = "Este e-mail já está em uso."
+
+
+class CannotDeactivateSelfError(AppError):
+    """403 — admin tentou desativar a si mesmo (Doc §8.2)."""
+
+    code = ErrorCode.FORBIDDEN
+    status_code = 403
+    default_user_message = "Você não pode desativar a si mesmo."
 
 
 class DuplicateFileError(AppError):
