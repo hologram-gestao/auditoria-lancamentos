@@ -1480,7 +1480,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 - [ ] **Paginação do endpoint `ListarExtrato`** — documentação Omie incompleta; validar com Galhardo. _(S5)_
 - [ ] **`ListarContasPagar.filtrar_por_status`** aceita múltiplos valores? _(S5)_
 - [ ] **Saldo do Omie:** qual endpoint expõe saldo no 1º dia do mês como fallback de `balance_start`? _(S10)_
-- [ ] **Credenciais Omie sandbox** — quando estarão disponíveis? _(S5+)_
+- [ ] ⚠️ **CRÍTICO — Credenciais Omie sandbox.** Pedro confirmou 25/04/2026 que ainda não tem. S5–S15 são implementadas com `respx` mockando respostas baseadas na doc oficial. **Lembrá-lo antes da S18 (deploy)** para obter as credenciais e validar o fluxo end-to-end contra a API real. _(S5–S18)_
 - [ ] **Chave Anthropic** com budget configurado — responsabilidade de quem? _(S9)_
 - [ ] **Storage de backups** — S3, GCS, cold storage local? Retenção desejada além dos 30 dias mínimos? _(S16)_
 - [ ] **Ambiente de staging** — onde hospedar? AWS ECS, Render, Railway? _(S18)_
