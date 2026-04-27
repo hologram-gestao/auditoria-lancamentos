@@ -94,6 +94,9 @@ class Settings(BaseSettings):
 
     OMIE_BASE_URL: str = "https://app.omie.com.br/api/v1"
     OMIE_TIMEOUT_SECONDS: int = 15
+    # Timeout específico do "Testar conexão" (S6 §3.3): mais agressivo que o
+    # default — usuário está na UI esperando feedback rápido.
+    OMIE_TEST_CONNECTION_TIMEOUT_SECONDS: int = 10
 
     # ---------- Limites ----------
     MAX_UPLOAD_SIZE_MB: int = 20

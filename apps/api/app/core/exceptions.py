@@ -137,6 +137,26 @@ class CannotDeactivateSelfError(AppError):
     default_user_message = "Você não pode desativar a si mesmo."
 
 
+class ClientNotAccessibleError(ForbiddenError):
+    """403 — manager tentou acessar cliente fora da sua carteira (S6 §3)."""
+
+    default_user_message = "Você não tem acesso a este cliente."
+
+
+class IncompleteCredentialsError(ValidationAppError):
+    """400 — atualizar credenciais Omie exige App Key E App Secret juntos (S6 §3.4)."""
+
+    default_user_message = (
+        "Para atualizar as credenciais, envie tanto a App Key quanto o App Secret."
+    )
+
+
+class InvalidManagerError(ValidationAppError):
+    """400 — assign para usuário inexistente, inativo ou não-manager (S6 §3.5)."""
+
+    default_user_message = "O usuário selecionado não é um gerente ativo."
+
+
 class DuplicateFileError(AppError):
     """409 — violação de idempotência (mesmo arquivo, conta e mês)."""
 

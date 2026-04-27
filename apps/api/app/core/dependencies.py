@@ -20,11 +20,18 @@ from uuid import UUID
 
 from fastapi import Cookie, Depends
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
-from app.core.exceptions import ForbiddenError, UnauthorizedError
+from app.core.exceptions import (
+    ClientNotAccessibleError,
+    ForbiddenError,
+    NotFoundError,
+    UnauthorizedError,
+)
 from app.core.security import TOKEN_TYPE_ACCESS, decode_token
+from app.db.models import Client, ClientAssignment, UserRole
 from app.db.session import get_db_session
 from app.modules.auth.repository import AuthRepository
 
@@ -108,3 +115,40 @@ def require_manager_or_admin(user: CurrentUserDep) -> CurrentUser:
 
 AdminDep = Annotated[CurrentUser, Depends(require_admin)]
 ManagerOrAdminDep = Annotated[CurrentUser, Depends(require_manager_or_admin)]
+
+
+async def require_client_access(
+    client_id: UUID,
+    user: CurrentUserDep,
+    db: DbSessionDep,
+) -> Client:
+    """RBAC por carteira: admin acessa qualquer cliente; manager apenas se há
+    `client_assignments(client_id, user_id)` (CLAUDE.md §3.11 + S6 §3).
+
+    Retorna o `Client` carregado para evitar uma 2ª query no service. Erros:
+        - 404 NOT_FOUND: cliente inexistente.
+        - 403 FORBIDDEN: manager sem assignment para o cliente.
+    """
+    client = (await db.execute(select(Client).where(Client.id == client_id))).scalar_one_or_none()
+    if client is None:
+        raise NotFoundError("Cliente não encontrado.")
+
+    if user.role == UserRole.ADMIN.value:
+        return client
+
+    assignment = (
+        await db.execute(
+            select(ClientAssignment.id).where(
+                ClientAssignment.client_id == client_id,
+                ClientAssignment.user_id == UUID(user.id),
+            )
+        )
+    ).scalar_one_or_none()
+    if assignment is None:
+        raise ClientNotAccessibleError(
+            f"Manager {user.id} tentou acessar cliente {client_id} fora da carteira.",
+        )
+    return client
+
+
+AccessibleClientDep = Annotated[Client, Depends(require_client_access)]
