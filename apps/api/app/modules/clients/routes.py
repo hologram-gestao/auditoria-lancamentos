@@ -129,7 +129,7 @@ async def test_connection(
 # ----------------------------------------------------------------------
 
 
-@router.post(
+@router.patch(
     "/{client_id}/assign",
     summary="Reatribui cliente a outro gerente (admin-only).",
 )

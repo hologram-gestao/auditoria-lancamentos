@@ -15,6 +15,7 @@ CLAUDE.md §3 (segurança crítica):
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -230,6 +231,7 @@ class ClientService:
         else:
             assignment.user_id = new_user_id
             assignment.assigned_by = current_admin_id
+            assignment.assigned_at = datetime.now(UTC)
             await self._repo.add_assignment(assignment)
 
         return await self.get_client_detail(client_id)

@@ -30,7 +30,7 @@ Cenários cobertos (≥ 15):
         - Apenas omie_app_key sem secret → 400 IncompleteCredentials.
         - Ambos juntos → recriptografa, IVs novos diferentes dos anteriores.
 
-    POST /clients/{id}/assign:
+    PATCH /clients/{id}/assign:
         - Admin reatribui — listagem do manager antigo perde o cliente.
         - Manager → 403.
         - User-alvo não-manager → 400.
@@ -157,7 +157,7 @@ class TestClientsRBAC:
         target_client = await _seed_client(db_session, name="Cliente X", creator=admin, manager=mgr)
         await _login_as(client_with_db, MANAGER_A_EMAIL)
 
-        resp = await client_with_db.post(
+        resp = await client_with_db.patch(
             f"/api/v1/clients/{target_client.id}/assign",
             json={"user_id": str(mgr.id)},
         )
@@ -530,7 +530,7 @@ class TestUpdateClient:
 
 
 # ----------------------------------------------------------------------
-# POST /clients/{id}/assign
+# PATCH /clients/{id}/assign
 # ----------------------------------------------------------------------
 
 
@@ -544,7 +544,7 @@ class TestAssignClient:
         target = await _seed_client(db_session, name="Reassign Me", creator=admin, manager=mgr_a)
         await _login_as(client_with_db, ADMIN_EMAIL)
 
-        resp = await client_with_db.post(
+        resp = await client_with_db.patch(
             f"/api/v1/clients/{target.id}/assign",
             json={"user_id": str(mgr_b.id)},
         )
@@ -574,7 +574,7 @@ class TestAssignClient:
         target = await _seed_client(db_session, name="X", creator=admin, manager=mgr_a)
         await _login_as(client_with_db, MANAGER_A_EMAIL)
 
-        resp = await client_with_db.post(
+        resp = await client_with_db.patch(
             f"/api/v1/clients/{target.id}/assign",
             json={"user_id": str(mgr_b.id)},
         )
@@ -593,7 +593,7 @@ class TestAssignClient:
         target = await _seed_client(db_session, name="C", creator=admin, manager=mgr)
         await _login_as(client_with_db, ADMIN_EMAIL)
 
-        resp = await client_with_db.post(
+        resp = await client_with_db.patch(
             f"/api/v1/clients/{target.id}/assign",
             json={"user_id": str(another_admin.id)},
         )
@@ -614,7 +614,7 @@ class TestAssignClient:
         target = await _seed_client(db_session, name="C", creator=admin, manager=mgr_a)
         await _login_as(client_with_db, ADMIN_EMAIL)
 
-        resp = await client_with_db.post(
+        resp = await client_with_db.patch(
             f"/api/v1/clients/{target.id}/assign",
             json={"user_id": str(mgr_inactive.id)},
         )
@@ -628,7 +628,7 @@ class TestAssignClient:
         target = await _seed_client(db_session, name="C", creator=admin, manager=mgr)
         await _login_as(client_with_db, ADMIN_EMAIL)
 
-        resp = await client_with_db.post(
+        resp = await client_with_db.patch(
             f"/api/v1/clients/{target.id}/assign",
             json={"user_id": str(uuid4())},
         )

@@ -3,8 +3,8 @@
 Schema oficial: Docs/documentation/0. Schema do Banco de Dados e Cache-*.md §client_assignments.
 
 Constraint UNIQUE em `client_id` garante que cada cliente pertence a UM gerente
-por vez. Reatribuição é feita atualizando `user_id` (a coluna `assigned_at`
-permanece a do registro original — auditoria via histórico fica para futuro).
+por vez. Reatribuição atualiza `user_id`, `assigned_by` e `assigned_at`
+(timestamp da última atribuição — backlog BACK 3.5).
 
 CLAUDE.md §3 (RBAC): manager só vê clientes via esta tabela. Toda rota
 que retorna dados de cliente deve filtrar por `client_assignments.user_id`.
