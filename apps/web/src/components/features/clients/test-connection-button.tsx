@@ -2,15 +2,15 @@
 
 /**
  * Botão "Testar conexão" — Doc §9.2 (estados):
- *   - idle    → texto azul clicável "Testar conexão"
+ *   - idle    → link azul "Testar conexão" em sua própria linha
  *   - testing → spinner + "Testando..." (caller desabilita inputs/botões)
- *   - success → ✓ verde "Conexão verificada com sucesso" (persiste)
- *   - failure → X vermelho + mensagem do backend; volta a `idle` se o usuário
- *               alterar as credenciais (controlado pelo caller via `state`).
+ *   - success → alert-card verde "Conexão verificada com sucesso"
+ *   - failure → link "Testar conexão" + alert-card vermelho com a mensagem
+ *               do backend (X + texto), permitindo nova tentativa
  *
- * Stateless: o caller mantém o estado e a referência das credenciais testadas.
- * Esse desacoplamento permite que o modal invalide `success` quando o usuário
- * editar uma credencial após o teste passar.
+ * Stateless: o caller mantém o estado e o ref das credenciais testadas.
+ * O desacoplamento permite invalidar `success` quando o usuário edita uma
+ * credencial após o teste passar (lógica do modal, não daqui).
  */
 
 import { Check, Loader2, X } from 'lucide-react';
@@ -29,13 +29,12 @@ interface TestConnectionButtonProps {
   onClick: () => void;
 }
 
+const ALERT_BASE = 'flex items-start gap-2 rounded-md border px-3 py-2 text-sm';
+
 export function TestConnectionButton({ state, disabled, onClick }: TestConnectionButtonProps) {
   if (state.kind === 'testing') {
     return (
-      <p
-        className="text-muted-foreground inline-flex items-center gap-2 text-sm"
-        aria-live="polite"
-      >
+      <p className="text-muted-foreground flex items-center gap-2 text-sm" aria-live="polite">
         <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
         Testando...
       </p>
@@ -44,39 +43,49 @@ export function TestConnectionButton({ state, disabled, onClick }: TestConnectio
 
   if (state.kind === 'success') {
     return (
-      <p
-        className="inline-flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-400"
+      <div
+        className={cn(
+          ALERT_BASE,
+          'border-emerald-200 bg-emerald-50 text-emerald-800',
+          'dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300',
+        )}
         aria-live="polite"
       >
-        <Check className="h-4 w-4" aria-hidden="true" />
-        Conexão verificada com sucesso
-      </p>
+        <Check className="mt-0.5 h-4 w-4 flex-none" aria-hidden="true" />
+        <span>Conexão verificada com sucesso</span>
+      </div>
     );
   }
 
   return (
-    <div className="space-y-1">
-      <button
-        type="button"
-        onClick={onClick}
-        disabled={disabled}
-        className={cn(
-          'text-sm font-medium underline-offset-4 hover:underline focus-visible:underline',
-          'text-blue-600 dark:text-blue-400',
-          'disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline',
-          'focus-visible:ring-ring rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
-        )}
-      >
-        Testar conexão
-      </button>
+    <div className="space-y-2">
+      <div>
+        <button
+          type="button"
+          onClick={onClick}
+          disabled={disabled}
+          className={cn(
+            'text-sm font-medium underline-offset-4 hover:underline focus-visible:underline',
+            'text-blue-600 dark:text-blue-400',
+            'disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline',
+            'focus-visible:ring-ring rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
+          )}
+        >
+          Testar conexão
+        </button>
+      </div>
       {state.kind === 'failure' && (
-        <p
-          className="text-destructive inline-flex items-center gap-2 text-sm"
+        <div
+          className={cn(
+            ALERT_BASE,
+            'border-red-200 bg-red-50 text-red-800',
+            'dark:border-red-900 dark:bg-red-950/40 dark:text-red-300',
+          )}
           aria-live="assertive"
         >
-          <X className="h-4 w-4" aria-hidden="true" />
-          {state.message}
-        </p>
+          <X className="mt-0.5 h-4 w-4 flex-none" aria-hidden="true" />
+          <span>{state.message}</span>
+        </div>
       )}
     </div>
   );
