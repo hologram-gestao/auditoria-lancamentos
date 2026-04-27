@@ -78,7 +78,10 @@ export function EditClientModal({
   const [showKey, setShowKey] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
   const [testState, setTestState] = useState<TestConnectionState>({ kind: 'idle' });
-  const testedRef = useRef<{ key: string; secret: string } | null>(null);
+  // Última dupla submetida ao test (sucesso OU falha). Manter num ref evita
+  // colocar testState como dep do useEffect — se estivesse, setar `failure`
+  // dispararia o effect que rebobina pra idle antes da UI mostrar a mensagem.
+  const lastTestedRef = useRef<{ key: string; secret: string } | null>(null);
 
   const updateMutation = useUpdateClient(client?.id ?? '');
   const assignMutation = useAssignClient(client?.id ?? '');
@@ -121,7 +124,7 @@ export function EditClientModal({
       setShowKey(false);
       setShowSecret(false);
       setTestState({ kind: 'idle' });
-      testedRef.current = null;
+      lastTestedRef.current = null;
       updateMutation.reset();
       assignMutation.reset();
       testMutation.reset();
@@ -129,18 +132,16 @@ export function EditClientModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, client]);
 
-  // Idem ao create modal: editar credenciais após teste invalida o sucesso.
+  // Volta a `idle` quando o usuário edita key/secret APÓS um teste. Reage só
+  // a mudanças dos campos — testState NÃO é dependência (ver create-client-modal).
   useEffect(() => {
-    if (testState.kind === 'success' && testedRef.current) {
-      const { key, secret } = testedRef.current;
-      if (watchedKey !== key || watchedSecret !== secret) {
-        setTestState({ kind: 'idle' });
-        testedRef.current = null;
-      }
-    } else if (testState.kind === 'failure') {
+    if (lastTestedRef.current === null) return;
+    const { key, secret } = lastTestedRef.current;
+    if (watchedKey !== key || watchedSecret !== secret) {
+      lastTestedRef.current = null;
       setTestState({ kind: 'idle' });
     }
-  }, [watchedKey, watchedSecret, testState]);
+  }, [watchedKey, watchedSecret]);
 
   const credsFilled =
     (watchedKey ?? '').trim().length > 0 || (watchedSecret ?? '').trim().length > 0;
@@ -157,13 +158,10 @@ export function EditClientModal({
         omie_app_key: key,
         omie_app_secret: secret,
       });
-      if (res.ok) {
-        testedRef.current = { key, secret };
-        setTestState({ kind: 'success' });
-      } else {
-        setTestState({ kind: 'failure', message: res.message });
-      }
+      lastTestedRef.current = { key, secret };
+      setTestState(res.ok ? { kind: 'success' } : { kind: 'failure', message: res.message });
     } catch (err) {
+      lastTestedRef.current = { key, secret };
       const message =
         err instanceof ApiError ? err.userMessage : 'Não foi possível testar a conexão.';
       setTestState({ kind: 'failure', message });

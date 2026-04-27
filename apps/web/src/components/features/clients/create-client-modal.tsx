@@ -56,8 +56,11 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
   const [showKey, setShowKey] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
   const [testState, setTestState] = useState<TestConnectionState>({ kind: 'idle' });
-  // Última dupla testada com sucesso — qualquer divergência invalida o `success`.
-  const testedRef = useRef<{ key: string; secret: string } | null>(null);
+  // Última dupla submetida ao test (sucesso OU falha). Ao editar key/secret
+  // o useEffect compara contra esse ref e volta a idle. Manter num ref evita
+  // o testState como dependência do effect — se ele estivesse, setar `failure`
+  // dispararia o effect que rebobina pra idle antes da UI renderizar a mensagem.
+  const lastTestedRef = useRef<{ key: string; secret: string } | null>(null);
 
   const createMutation = useCreateClient();
   const testMutation = useTestConnection();
@@ -78,7 +81,7 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
       setShowKey(false);
       setShowSecret(false);
       setTestState({ kind: 'idle' });
-      testedRef.current = null;
+      lastTestedRef.current = null;
       createMutation.reset();
       testMutation.reset();
     }
@@ -86,19 +89,16 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  // Invalida o "success" se o usuário editar key/secret após um teste OK.
+  // Volta a `idle` quando o usuário edita key/secret APÓS um teste (success
+  // ou failure). Reage só a mudanças nos campos — testState NÃO é dependência.
   useEffect(() => {
-    if (testState.kind === 'success' && testedRef.current) {
-      const { key, secret } = testedRef.current;
-      if (watchedKey !== key || watchedSecret !== secret) {
-        setTestState({ kind: 'idle' });
-        testedRef.current = null;
-      }
-    } else if (testState.kind === 'failure') {
-      // Qualquer alteração após falha volta para idle (permite nova tentativa).
+    if (lastTestedRef.current === null) return;
+    const { key, secret } = lastTestedRef.current;
+    if (watchedKey !== key || watchedSecret !== secret) {
+      lastTestedRef.current = null;
       setTestState({ kind: 'idle' });
     }
-  }, [watchedKey, watchedSecret, testState]);
+  }, [watchedKey, watchedSecret]);
 
   async function handleTest() {
     const key = form.getValues('omie_app_key').trim();
@@ -113,13 +113,10 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
         omie_app_key: key,
         omie_app_secret: secret,
       });
-      if (res.ok) {
-        testedRef.current = { key, secret };
-        setTestState({ kind: 'success' });
-      } else {
-        setTestState({ kind: 'failure', message: res.message });
-      }
+      lastTestedRef.current = { key, secret };
+      setTestState(res.ok ? { kind: 'success' } : { kind: 'failure', message: res.message });
     } catch (err) {
+      lastTestedRef.current = { key, secret };
       const message =
         err instanceof ApiError ? err.userMessage : 'Não foi possível testar a conexão.';
       setTestState({ kind: 'failure', message });

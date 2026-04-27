@@ -18,7 +18,14 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from pathlib import Path
 from typing import Any
+
+# Garante que `apps/api/` está no sys.path quando rodado como `python scripts/seed_dev.py`.
+# Sem isso, `sys.path[0]` é `scripts/` e o `import app.*` falha. Idempotente.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
