@@ -26,11 +26,12 @@ export const usersKeys = {
   list: (params: ListUsersParams) => ['users', 'list', params] as const,
 };
 
-export function useUsersList(params: ListUsersParams) {
+export function useUsersList(params: ListUsersParams, options: { enabled?: boolean } = {}) {
   return useQuery<UserListResponse>({
     queryKey: usersKeys.list(params),
     queryFn: () => listUsers(params),
     placeholderData: keepPreviousData,
+    enabled: options.enabled ?? true,
   });
 }
 
