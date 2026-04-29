@@ -1,25 +1,35 @@
 /**
- * Hooks de TanStack Query para o módulo clients.
+ * Hooks de TanStack Query para o módulo clients (S6 + S7).
  *
  * Convenções:
- *   - Query key: `['clients', 'list', { page, pageSize, search }]`.
- *   - Mutations invalidam `['clients']` (atinge listagem e detalhe S7).
- *   - `placeholderData: keepPreviousData` evita flash da tabela em paginação/busca.
+ *   - Query keys segmentadas: `['clients', 'list', params]`,
+ *     `['clients', 'detail', id]`, `['clients', 'reconciliations', id, params]`.
+ *   - Mutations invalidam `['clients']` raiz (atinge listagem e detalhe).
+ *   - `placeholderData: keepPreviousData` evita flash em paginação/busca.
  *   - `useTestConnection` NÃO invalida nada — é só uma checagem de credenciais.
+ *   - `useSyncAccounts` recebe a resposta (ClientDetail atualizado) e atualiza
+ *     o cache do detalhe diretamente via `setQueryData`. Isso evita um refetch
+ *     adicional após o PATCH (otimização — o back já devolveu o estado novo).
  */
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
   assignClient,
   createClient,
+  getClientDetail,
   listClients,
+  listReconciliations,
+  syncClientAccounts,
   testConnection,
   updateClient,
   type AssignClientPayload,
   type Client,
+  type ClientDetail,
   type ClientListResponse,
   type CreateClientPayload,
   type ListClientsParams,
+  type ReconciliationsListParams,
+  type ReconciliationsListResponse,
   type TestConnectionPayload,
   type TestConnectionResult,
   type UpdateClientPayload,
@@ -28,6 +38,9 @@ import {
 export const clientsKeys = {
   all: ['clients'] as const,
   list: (params: ListClientsParams) => ['clients', 'list', params] as const,
+  detail: (id: string) => ['clients', 'detail', id] as const,
+  reconciliations: (id: string, params: ReconciliationsListParams) =>
+    ['clients', 'reconciliations', id, params] as const,
 };
 
 export function useClientsList(params: ListClientsParams) {
@@ -71,5 +84,39 @@ export function useAssignClient(id: string) {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: clientsKeys.all });
     },
+  });
+}
+
+interface UseClientDetailOptions {
+  enabled?: boolean;
+}
+
+export function useClientDetail(id: string, opts: UseClientDetailOptions = {}) {
+  return useQuery<ClientDetail>({
+    queryKey: clientsKeys.detail(id),
+    queryFn: () => getClientDetail(id),
+    enabled: id.length > 0 && (opts.enabled ?? true),
+  });
+}
+
+export function useSyncAccounts(id: string) {
+  const qc = useQueryClient();
+  return useMutation<ClientDetail, Error, void>({
+    mutationFn: () => syncClientAccounts(id),
+    onSuccess: (detail) => {
+      // Atualiza o cache do detalhe sem refetch — back já devolveu o estado novo.
+      qc.setQueryData(clientsKeys.detail(id), detail);
+      // Invalida o restante (listagens, contadores, etc).
+      void qc.invalidateQueries({ queryKey: clientsKeys.all });
+    },
+  });
+}
+
+export function useReconciliationsList(id: string, params: ReconciliationsListParams) {
+  return useQuery<ReconciliationsListResponse>({
+    queryKey: clientsKeys.reconciliations(id, params),
+    queryFn: () => listReconciliations(id, params),
+    enabled: id.length > 0,
+    placeholderData: keepPreviousData,
   });
 }
