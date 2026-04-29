@@ -1,4 +1,4 @@
-"""Schemas Pydantic do módulo de clientes BPO (S6).
+"""Schemas Pydantic do módulo de clientes BPO (S6 + S7).
 
 Princípios:
     - **Credenciais Omie NUNCA aparecem em response** — nem mascaradas, nem
@@ -12,7 +12,7 @@ Princípios:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -110,4 +110,70 @@ class ClientListResponse(BaseModel):
     """Body de GET /api/v1/clients — lista paginada com metadata de paginação."""
 
     data: list[ClientResponse]
+    pagination: PaginationMeta
+
+
+# ----------------------------------------------------------------------
+# S7 — Detalhe do cliente + cache L1 de contas + histórico de conciliações
+# ----------------------------------------------------------------------
+
+
+class BankAccountResponse(BaseModel):
+    """Conta corrente Omie do cache L1 — exposta na tela de detalhe do cliente.
+
+    `account_type` é `'CC'` (corrente) ou `'CA'` (cartão). Mantemos `str` em
+    vez de enum no response (memória `feedback_pydantic`): se o Omie introduzir
+    um novo `tipo` no futuro, a tela continua funcionando mesmo antes de o
+    backend ser atualizado para reconhecê-lo.
+    """
+
+    id: UUID
+    omie_conta_id: int = Field(..., description="nCodCC do Omie (BigInteger).")
+    name: str
+    bank_name: str
+    account_type: str = Field(..., description="'CC' ou 'CA'.")
+    synced_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ClientDetailResponse(ClientResponse):
+    """Body de GET /api/v1/clients/{id} — detalhe + contas do cache L1.
+
+    Estende `ClientResponse`. `accounts_synced_at` é o MAX(synced_at) entre as
+    linhas; o front usa para mostrar "Sincronizado há Xh". `None` apenas se
+    não há nenhuma conta cacheada (cliente novo + Omie retornou zero contas).
+    """
+
+    accounts: list[BankAccountResponse] = Field(default_factory=list)
+    accounts_synced_at: datetime | None = None
+
+
+class ReconciliationSessionSummary(BaseModel):
+    """Item da lista do histórico de conciliações (S7 BACK 4.2).
+
+    O front resolve o nome da conta via cache do detalhe do cliente
+    (Endpoint A) — aqui só vai o `omie_conta_id`. `error_message` aparece
+    apenas em sessões com `status='error'`.
+    """
+
+    id: UUID
+    omie_conta_id: int
+    reference_month: date
+    status: str
+    created_at: datetime
+    total_file_entries: int = Field(0, ge=0)
+    conciliated_count: int = Field(0, ge=0)
+    sem_omie_count: int = Field(0, ge=0)
+    omie_sem_arquivo_count: int = Field(0, ge=0)
+    anomaly_count: int = Field(0, ge=0)
+    error_message: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class ReconciliationSessionListResponse(BaseModel):
+    """Body de GET /api/v1/clients/{id}/reconciliations — lista paginada."""
+
+    data: list[ReconciliationSessionSummary]
     pagination: PaginationMeta

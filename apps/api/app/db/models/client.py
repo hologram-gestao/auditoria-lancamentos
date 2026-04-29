@@ -20,10 +20,11 @@ claro. Sempre descriptografar em memória, usar e descartar.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import Boolean, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -57,6 +58,17 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         PGUUID(as_uuid=True),
         ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=False,
+    )
+
+    # Timestamp do último sync das contas Omie (cache L1, S7).
+    # NÃO derivar de MAX(omie_accounts_cache.synced_at): se o Omie devolver lista
+    # vazia para um cliente, a tabela fica sem linhas e o MAX volta None — o TTL
+    # nunca dispara e toda request bate o Omie. Manter o estado do sync separado
+    # das linhas resolve isso (cliente sem contas continua respeitando o TTL de 24h).
+    omie_accounts_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
     )
 
     # Relationships

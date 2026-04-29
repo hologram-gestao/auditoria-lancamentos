@@ -12,16 +12,18 @@ Responsabilidades (CLAUDE.md §6):
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import UTC, date, datetime
 from typing import NamedTuple
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.db.models import (
     Client,
     ClientAssignment,
+    OmieAccountCache,
     ReconciliationSession,
     User,
 )
@@ -165,3 +167,116 @@ class ClientRepository:
         self._session.add(assignment)
         await self._session.flush()
         await self._session.refresh(assignment)
+
+    # ------------------------- S7: cache L1 ---------------------------
+
+    async def get_accounts_cache(self, client_id: UUID) -> Sequence[OmieAccountCache]:
+        """Retorna todas as linhas do cache L1 do cliente, ordenadas por nome.
+
+        Ordem por `name ASC` mantém a UI do detalhe estável entre requests
+        (tela mostra cards das contas — sem ordem fixa, embaralha a cada hit
+        no banco). `client_id` é indexado, então o ORDER BY não dói.
+        """
+        stmt = (
+            select(OmieAccountCache)
+            .where(OmieAccountCache.client_id == client_id)
+            .order_by(OmieAccountCache.name.asc())
+        )
+        result = await self._session.execute(stmt)
+        return result.scalars().all()
+
+    async def replace_accounts_cache(
+        self,
+        client: Client,
+        items: Sequence[OmieAccountCache],
+    ) -> datetime:
+        """Substitui o cache L1 do cliente por `items` em uma única transação.
+
+        Estratégia escolhida (Doc §5.2):
+            DELETE de todas as linhas do cliente + INSERT em massa, dentro da
+            mesma transação do request. Vantagens vs. UPSERT por linha:
+                - clean-slate: contas removidas no Omie somem do nosso cache.
+                - idempotência trivial: rodar 2x deixa o estado idêntico.
+                - sem dependência de `INSERT ... ON CONFLICT` (Postgres-only,
+                  difícil de testar com SQLite).
+            UNIQUE(client_id, omie_conta_id) protege contra race entre 2 syncs
+            concorrentes — o segundo a chegar levanta IntegrityError, que o
+            handler global converte em 409, e a UI tenta de novo.
+
+        O `synced_at` final é gravado em `clients.omie_accounts_synced_at`
+        (NÃO derivar de MAX(omie_accounts_cache.synced_at) — quando o Omie
+        devolve lista vazia, o MAX volta None e o TTL não dispara, fazendo
+        toda request bater o Omie. Bug descoberto em 29/04/2026 com Quial).
+
+        Retorna o `synced_at` aplicado (mesmo timestamp para todas as linhas
+        e para a coluna do `Client`).
+        """
+        await self._session.execute(
+            delete(OmieAccountCache).where(OmieAccountCache.client_id == client.id)
+        )
+        synced_at = datetime.now(UTC)
+        for item in items:
+            item.synced_at = synced_at
+            self._session.add(item)
+        client.omie_accounts_synced_at = synced_at
+        # `add` em objeto já tracked é no-op, mas garante a presença na identity
+        # map caso o caller tenha passado um Client detached por algum motivo.
+        self._session.add(client)
+        await self._session.flush()
+        return synced_at
+
+    # ------------------------- S7: histórico de conciliações ----------
+
+    async def list_reconciliations_paginated(
+        self,
+        client_id: UUID,
+        *,
+        page: int,
+        page_size: int,
+        omie_conta_id: int | None = None,
+        month_start: date | None = None,
+        month_end: date | None = None,
+    ) -> tuple[Sequence[ReconciliationSession], int]:
+        """Lista paginada do histórico de conciliações de UM cliente.
+
+        Filtros opcionais (combináveis):
+            - `omie_conta_id`: igual.
+            - `month_start`/`month_end`: range half-open `[start, end)` para
+              filtrar `reference_month` em um mês específico. Caller calcula
+              `[YYYY-MM-01, mês+1-01)` para evitar erro de timezone/granularidade.
+
+        Ordem: `created_at DESC, id DESC` — desempate determinístico quando 2
+        sessões caem no mesmo segundo (pode acontecer em testes).
+        """
+        base = select(ReconciliationSession).where(ReconciliationSession.client_id == client_id)
+        count_base = (
+            select(func.count(ReconciliationSession.id))
+            .select_from(ReconciliationSession)
+            .where(ReconciliationSession.client_id == client_id)
+        )
+
+        if omie_conta_id is not None:
+            base = base.where(ReconciliationSession.omie_conta_id == omie_conta_id)
+            count_base = count_base.where(ReconciliationSession.omie_conta_id == omie_conta_id)
+
+        if month_start is not None and month_end is not None:
+            base = base.where(
+                ReconciliationSession.reference_month >= month_start,
+                ReconciliationSession.reference_month < month_end,
+            )
+            count_base = count_base.where(
+                ReconciliationSession.reference_month >= month_start,
+                ReconciliationSession.reference_month < month_end,
+            )
+
+        base = base.order_by(
+            ReconciliationSession.created_at.desc(),
+            ReconciliationSession.id.desc(),
+        )
+        offset = (page - 1) * page_size
+        base = base.offset(offset).limit(page_size)
+
+        total = (await self._session.execute(count_base)).scalar_one()
+        result = await self._session.execute(base)
+        rows = result.scalars().all()
+        return rows, int(total)

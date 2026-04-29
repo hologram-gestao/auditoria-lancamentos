@@ -15,7 +15,8 @@ CLAUDE.md §3 (segurança crítica):
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from collections.abc import Sequence
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -31,18 +32,23 @@ from app.core.exceptions import (
     OmieFaultError,
     OmieTimeoutError,
 )
-from app.db.models import Client, ClientAssignment, UserRole
+from app.db.models import Client, ClientAssignment, OmieAccountCache, UserRole
 from app.integrations.omie.client import OmieClient, OmieCredentials
+from app.modules.clients.accounts_cache import OmieAccountsCacheService
 from app.modules.clients.repository import ClientRepository, ClientRow
 from app.modules.clients.schemas import (
+    BankAccountResponse,
+    ClientDetailResponse,
     ClientResponse,
     ManagerSummary,
+    ReconciliationSessionSummary,
     TestConnectionResponse,
 )
 from app.modules.users.schemas import PaginationMeta
 
 if TYPE_CHECKING:
     from app.core.config import Settings
+    from app.db.models import ReconciliationSession
 
 
 def _row_to_response(row: ClientRow) -> ClientResponse:
@@ -69,9 +75,18 @@ def _row_to_response(row: ClientRow) -> ClientResponse:
 class ClientService:
     """CRUD + regras de negócio para `clients`."""
 
-    def __init__(self, repository: ClientRepository, settings: Settings) -> None:
+    def __init__(
+        self,
+        repository: ClientRepository,
+        settings: Settings,
+        *,
+        accounts_cache: OmieAccountsCacheService | None = None,
+    ) -> None:
         self._repo = repository
         self._settings = settings
+        # Cache L1 — instanciado on-demand quando não passado pelo caller.
+        # Em testes é injetado com `OmieClient` mockado via respx.
+        self._accounts_cache = accounts_cache or OmieAccountsCacheService(repository, settings)
 
     # ------------------------------ READ ------------------------------
 
@@ -277,6 +292,54 @@ class ClientService:
                 return TestConnectionResponse(ok=False, message=exc.user_message)
         return TestConnectionResponse(ok=True, message="Conexão estabelecida com sucesso")
 
+    # ------------------------------ S7: detalhe + cache L1 ------------
+
+    async def get_client_detail_with_accounts(self, client: Client) -> ClientDetailResponse:
+        """Detalhe completo: Client + manager + count + contas do cache (Endpoint A).
+
+        TTL de 24 h decidido dentro do `OmieAccountsCacheService`. Se o cache
+        miss falhar (Omie indisponível), `AccountsSyncError` propaga e o
+        handler global retorna 502 — alinhado ao padrão do test-connection.
+        """
+        rows, synced_at = await self._accounts_cache.get_or_sync(client)
+        return await self._build_detail_response(client.id, rows, synced_at)
+
+    async def force_sync_accounts(self, client: Client) -> ClientDetailResponse:
+        """Endpoint B: força sync ignorando TTL e retorna o detalhe completo."""
+        rows, synced_at = await self._accounts_cache.force_sync(client)
+        return await self._build_detail_response(client.id, rows, synced_at)
+
+    async def list_reconciliations(
+        self,
+        client_id: UUID,
+        *,
+        page: int,
+        page_size: int,
+        omie_conta_id: int | None,
+        month: str | None,
+    ) -> tuple[list[ReconciliationSessionSummary], PaginationMeta]:
+        """Endpoint C: histórico paginado das sessões de conciliação (S7 BACK 4.2).
+
+        `month` chega como `'YYYY-MM'`. Convertemos pra range half-open
+        `[YYYY-MM-01, próximo-mês-01)` no service — repository fica agnóstico.
+        Mês inválido (formato errado, valores fora de range) → 400.
+        """
+        month_start, month_end = _parse_month_range(month)
+        rows, total = await self._repo.list_reconciliations_paginated(
+            client_id,
+            page=page,
+            page_size=page_size,
+            omie_conta_id=omie_conta_id,
+            month_start=month_start,
+            month_end=month_end,
+        )
+        responses = [_session_to_summary(r) for r in rows]
+        total_pages = (total + page_size - 1) // page_size if page_size else 0
+        pagination = PaginationMeta(
+            page=page, page_size=page_size, total=total, total_pages=total_pages
+        )
+        return responses, pagination
+
     # ------------------------------ INTERNALS -------------------------
 
     def _encrypt_credential(self, plaintext: str) -> tuple[str, str]:
@@ -287,3 +350,49 @@ class ClientService:
         """
         hex_key = self._settings.OMIE_ENCRYPTION_KEY.get_secret_value()
         return encrypt(plaintext, hex_key)
+
+    async def _build_detail_response(
+        self,
+        client_id: UUID,
+        rows: Sequence[OmieAccountCache],
+        synced_at: datetime | None,
+    ) -> ClientDetailResponse:
+        """Compõe `ClientDetailResponse` a partir de Client + manager + cache."""
+        base = await self.get_client_detail(client_id)
+        accounts = [BankAccountResponse.model_validate(r) for r in rows]
+        return ClientDetailResponse(
+            **base.model_dump(),
+            accounts=accounts,
+            accounts_synced_at=synced_at,
+        )
+
+
+# ----------------------------------------------------------------------
+# Helpers de módulo (puros — não dependem do service)
+# ----------------------------------------------------------------------
+
+
+def _session_to_summary(session: ReconciliationSession) -> ReconciliationSessionSummary:
+    """Mapeia ORM `ReconciliationSession` → DTO `ReconciliationSessionSummary`."""
+    return ReconciliationSessionSummary.model_validate(session, from_attributes=True)
+
+
+def _parse_month_range(month: str | None) -> tuple[date | None, date | None]:
+    """Converte `'YYYY-MM'` em range `[start, end)`. None → `(None, None)`.
+
+    Raises:
+        ValidationAppError: formato inválido. Levanta ValueError aqui — caller
+        já valida pelo Pydantic Query (regex), então este caminho é defensivo.
+    """
+    if month is None:
+        return None, None
+    try:
+        year_str, mon_str = month.split("-", 1)
+        year = int(year_str)
+        mon = int(mon_str)
+        start = date(year, mon, 1)
+    except (ValueError, IndexError) as exc:
+        raise ValueError(f"Mês inválido: {month!r} (esperado YYYY-MM).") from exc
+    # Próximo mês — sem timedelta porque "+1 month" não é constante em dias
+    end = date(year + 1, 1, 1) if mon == 12 else date(year, mon + 1, 1)
+    return start, end

@@ -33,6 +33,7 @@ class ErrorCode(StrEnum):
     OMIE_AUTH_ERROR = "OMIE_AUTH_ERROR"
     OMIE_TIMEOUT = "OMIE_TIMEOUT"
     OMIE_FAULT = "OMIE_FAULT"
+    OMIE_SYNC_FAILED = "OMIE_SYNC_FAILED"
     PARSE_ERROR = "PARSE_ERROR"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
@@ -214,6 +215,23 @@ class OmieFaultError(AppError):
     code = ErrorCode.OMIE_FAULT
     status_code = 502
     default_user_message = "Ocorreu um erro ao acessar o Omie."
+
+
+class AccountsSyncError(AppError):
+    """502 — falha ao sincronizar contas correntes com o Omie (S7).
+
+    Wrapper sobre `OmieAuthError`/`OmieFaultError`/`OmieTimeoutError` quando o
+    contexto da falha é especificamente "tentei popular o cache L1 e não
+    consegui". Mantém um código próprio para o front diferenciar a mensagem
+    ("Não foi possível sincronizar as contas no momento") da falha de
+    test-connection.
+    """
+
+    code = ErrorCode.OMIE_SYNC_FAILED
+    status_code = 502
+    default_user_message = (
+        "Não foi possível sincronizar as contas com o Omie no momento. Tente novamente."
+    )
 
 
 # ----------------------------------------------------------------------
