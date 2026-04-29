@@ -56,6 +56,7 @@ import { useUsersList } from '@/hooks/use-users';
 import { ApiError } from '@/lib/api/client';
 import type { Client, UpdateClientPayload } from '@/lib/api/clients';
 import { updateClientSchema, type UpdateClientFormValues } from '@/lib/validation/clients';
+import { useAuthStore } from '@/stores/auth';
 
 import { PasswordInput } from './password-input';
 import { TestConnectionButton, type TestConnectionState } from './test-connection-button';
@@ -74,6 +75,7 @@ export function EditClientModal({
   currentUserRole,
 }: EditClientModalProps) {
   const isAdmin = currentUserRole === 'admin';
+  const currentUserId = useAuthStore((s) => s.user?.id);
 
   const [showKey, setShowKey] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
@@ -322,34 +324,53 @@ export function EditClientModal({
               <FormField
                 control={form.control}
                 name="manager_id"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Gerente Responsável</FormLabel>
-                    <Select
-                      value={field.value ?? ''}
-                      onValueChange={field.onChange}
-                      disabled={inputsDisabled || usersQuery.isLoading}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue
-                            placeholder={
-                              usersQuery.isLoading ? 'Carregando...' : 'Selecione um gerente'
-                            }
-                          />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {managers.map((m) => (
-                          <SelectItem key={m.id} value={m.id}>
-                            {m.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
+                render={({ field }) => {
+                  // Quem está como responsável hoje no DB (vem do client passado via prop).
+                  // Pode ser admin (auto-assign na criação) ou inativo — nesses casos o id
+                  // não casa com nenhum item do select e o trigger renderizaria vazio. A
+                  // linha abaixo torna explícito quem é o atual.
+                  const current = client?.responsible_manager;
+                  const isSelf = current?.id === currentUserId;
+                  const notInSelect =
+                    current !== null &&
+                    current !== undefined &&
+                    !managers.some((m) => m.id === current.id);
+                  return (
+                    <FormItem>
+                      <FormLabel>Gerente Responsável</FormLabel>
+                      {current && (
+                        <p className="text-muted-foreground text-xs">
+                          Responsável atual: {current.name}
+                          {isSelf ? ' (você)' : ''}
+                          {notInSelect ? ' — não-gerente, atribua um manager abaixo' : ''}
+                        </p>
+                      )}
+                      <Select
+                        value={field.value ?? ''}
+                        onValueChange={field.onChange}
+                        disabled={inputsDisabled || usersQuery.isLoading}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue
+                              placeholder={
+                                usersQuery.isLoading ? 'Carregando...' : 'Selecione um gerente'
+                              }
+                            />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {managers.map((m) => (
+                            <SelectItem key={m.id} value={m.id}>
+                              {m.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  );
+                }}
               />
             )}
 
