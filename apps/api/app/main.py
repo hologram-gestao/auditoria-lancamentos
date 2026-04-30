@@ -30,6 +30,7 @@ from app.core.rate_limit import limiter
 from app.db.session import close_db, init_db
 from app.modules.auth import routes as auth_routes
 from app.modules.clients import routes as clients_routes
+from app.modules.reconciliations import routes as reconciliations_routes
 from app.modules.users import routes as users_routes
 
 CORRELATION_HEADER = "X-Correlation-ID"
@@ -175,6 +176,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_routes.router)
     app.include_router(users_routes.router)
     app.include_router(clients_routes.router)
+    app.include_router(reconciliations_routes.router)
 
     @app.get("/health", tags=["system"])
     async def health() -> dict[str, str]:
