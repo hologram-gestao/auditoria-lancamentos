@@ -1,9 +1,9 @@
 /**
  * Schemas Zod do formulário "Nova Conciliação" — Doc §11.1.
  *
- * Esta sessão entrega APENAS o `[FRONT 5.1]`. Validações de hash SHA-256,
- * tamanho máximo (20 MB) e magic bytes são da próxima tarefa (`[FRONT 6.1]`)
- * e não devem ser implementadas aqui.
+ * `[FRONT 5.1]` entregou os campos. `[FRONT 6.1]` adiciona o limite de tamanho
+ * (20 MB). Magic bytes ficam no servidor (S9) — confiança em validação
+ * client-side é proibida pela CLAUDE.md §3.8.
  *
  * Convenções do projeto:
  *   - Mensagens em PT-BR (UI-facing).
@@ -17,6 +17,9 @@ import { z } from 'zod';
 export const ALLOWED_EXTENSIONS = ['pdf', 'csv', 'xls', 'xlsx'] as const;
 export const TOLERANCE_OPTIONS = [1, 2, 3, 5, 7] as const;
 export const DEFAULT_TOLERANCE = 3;
+/** Limite duro alinhado ao backend (Doc §11.3 V2). 20 MB = 20 * 1024 * 1024 bytes. */
+export const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
+export const MAX_FILE_SIZE_LABEL = '20 MB';
 
 export type AllowedExtension = (typeof ALLOWED_EXTENSIONS)[number];
 
@@ -54,9 +57,15 @@ export const newReconciliationSchema = z.object({
     .refine((v) => (TOLERANCE_OPTIONS as readonly number[]).includes(v), {
       message: 'Tolerância inválida.',
     }),
+  // Ordem dos refines importa: vazio → tamanho → extensão. Cada refine só
+  // dispara se o anterior passou (zod retorna no primeiro erro), então o
+  // usuário sempre vê a falha mais "fundamental" primeiro.
   file: z
     .instanceof(File, { message: 'Selecione um arquivo.' })
     .refine((f) => f.size > 0, { message: 'O arquivo está vazio.' })
+    .refine((f) => f.size <= MAX_FILE_SIZE_BYTES, {
+      message: `Arquivo excede o limite de ${MAX_FILE_SIZE_LABEL}.`,
+    })
     .refine(hasAllowedExtension, {
       message: `Extensão não suportada. Use: ${ALLOWED_EXTENSIONS.join(', ').toUpperCase()}.`,
     }),

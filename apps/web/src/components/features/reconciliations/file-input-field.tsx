@@ -85,13 +85,22 @@ export function FileInputField({
             buttonVariants({ variant: 'outline' }),
             'cursor-pointer',
             disabled && 'pointer-events-none opacity-50',
+            // Espelha o destaque que shadcn dá em outros campos via FormMessage:
+            // aqui a borda do gatilho fica vermelha quando o RHF marca o campo
+            // como inválido (V1 sem arquivo, V2 extensão/tamanho fora).
+            ariaInvalid && 'border-destructive text-destructive',
           )}
         >
           <Upload className="h-4 w-4" aria-hidden="true" />
           Escolher arquivo
         </label>
       ) : (
-        <div className="bg-muted/40 flex items-center gap-3 rounded-md border p-3 text-sm">
+        <div
+          className={cn(
+            'bg-muted/40 flex items-center gap-3 rounded-md border p-3 text-sm',
+            ariaInvalid && 'border-destructive',
+          )}
+        >
           <Paperclip className="text-muted-foreground h-4 w-4 shrink-0" aria-hidden="true" />
           <div className="min-w-0 flex-1">
             <p className="truncate font-medium" title={value.name}>

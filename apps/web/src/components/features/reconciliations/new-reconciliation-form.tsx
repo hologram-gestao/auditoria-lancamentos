@@ -1,31 +1,40 @@
 'use client';
 
 /**
- * Formulário "Nova Conciliação" — `[FRONT 5.1]`, Doc §11.1.
+ * Formulário "Nova Conciliação" — `[FRONT 5.1]` + `[FRONT 6.1]`, Doc §11.1–11.3.
  *
- * Esta sessão é APENAS o formulário. Não calcula hash SHA-256 nem chama
- * `/check-duplicate` (`[FRONT 6.1]`) e não dispara o pipeline de parsing (S9).
- * O submit válido apenas mostra um toast informativo — o handler real é
- * conectado nas próximas tarefas.
+ * Pipeline de submit (Doc §11.3, sequencial — para na primeira falha):
+ *   V1. Campos obrigatórios + formato + tamanho ≤ 20 MB → coberto pelo zod
+ *       resolver do RHF. Se há erro, o submit handler nem é chamado.
+ *   V2. SHA-256 do arquivo via `lib/crypto/hash.ts` (Web Crypto API,
+ *       client-side, arquivo NÃO trafega).
+ *   V3. `GET /reconciliations/check-duplicate` — se duplicata, bloqueia
+ *       sem opção de continuar (Doc §11.3 explícito).
  *
- * Decisões:
- *   - Reusa `useClientDetail` (S7) para alimentar o select de contas. Não
- *     existe um endpoint só de "contas" no back; o detalhe já vem com elas.
- *   - Contas são ordenadas por `name` (pt-BR) — UX previsível e estável,
- *     independente da ordem que o Omie devolveu.
- *   - Tipos `'CC'` (corrente) e `'CA'` (cartão) são os conciliáveis (Doc §6.2).
- *     O cache geralmente já vem só com esses, mas filtramos defensivamente.
- *   - Cliente sem contas no cache → select desabilitado + mensagem com link
- *     pra forçar a sincronização na tela de detalhe (Pedro pediu UX clara).
- *   - Erros de detalhe (404 / falha) reaproveitam o `<ErrorState>` do detalhe
- *     reescrito inline aqui para não refatorar S7.
+ * Decisões herdadas de `[FRONT 5.1]`:
+ *   - Reusa `useClientDetail` (S7) para o select de contas.
+ *   - Sem filtro por `account_type` — back já garante CC/CA no cache (Doc §6.2).
+ *   - Sem contas → select desabilitado + link pra sincronização.
+ *
+ * Decisões de `[FRONT 6.1]`:
+ *   - Hash NÃO é pré-calculado no `onChange` do file: arquivos de 20 MB no
+ *     limite custam ~100ms de CPU + alocação. Só rodamos no submit, e o
+ *     `step` reseta para `'idle'` quando o usuário muda de arquivo no
+ *     bloqueio de duplicata — recálculo feito sob demanda.
+ *   - Bloqueio de duplicata exige interação explícita pra sair: o botão
+ *     "Selecionar outro arquivo" limpa o `file` do form e volta o step.
+ *     Submit "Processar" some enquanto o bloqueio está ativo — sem rota
+ *     "continuar mesmo assim".
+ *   - Pipeline de upload + parsing ainda é S9. No caminho feliz, mostramos
+ *     toast informativo e devolvemos o botão para `idle` — placeholder
+ *     intencional até S9.
  */
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { ChevronRight, Info, Loader2 } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Info, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { toast } from 'sonner';
 
@@ -48,11 +57,14 @@ import {
 } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useClientDetail } from '@/hooks/use-clients';
+import { useCheckDuplicate } from '@/hooks/use-reconciliations';
 import { ApiError } from '@/lib/api/client';
 import type { BankAccount } from '@/lib/api/clients';
+import { sha256Hex } from '@/lib/crypto/hash';
 import {
   ALLOWED_EXTENSIONS,
   DEFAULT_TOLERANCE,
+  MAX_FILE_SIZE_LABEL,
   TOLERANCE_OPTIONS,
   currentMonth,
   newReconciliationSchema,
@@ -144,13 +156,72 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
     return sortedAccounts.find((a) => a.omie_conta_id === Number(watchedAccountId)) ?? null;
   }, [sortedAccounts, watchedAccountId]);
 
-  async function onSubmit(_values: NewReconciliationFormValues) {
-    // TODO(FRONT 6.1): calcular hash SHA-256 e chamar /check-duplicate.
-    // TODO(S9): após check, enviar arquivo ao endpoint de parsing.
-    toast.info('Formulário pronto. Processamento será habilitado nas próximas tarefas.');
+  const [step, setStep] = useState<SubmitStep>('idle');
+  const checkDuplicate = useCheckDuplicate();
+
+  async function onSubmit(values: NewReconciliationFormValues) {
+    // V1 (zod resolver): se chegou aqui, campos obrigatórios + formato +
+    // tamanho ≤ 20 MB já passaram. Não precisa repetir.
+
+    // V2 — hash SHA-256 client-side.
+    setStep('hashing');
+    let hash: string;
+    try {
+      hash = await sha256Hex(values.file);
+    } catch (err) {
+      setStep('idle');
+      const message =
+        err instanceof Error ? err.message : 'Não foi possível calcular a assinatura do arquivo.';
+      toast.error(message);
+      return;
+    }
+
+    // V3 — checagem de duplicata no backend.
+    setStep('checking-duplicate');
+    let duplicate: boolean;
+    try {
+      const res = await checkDuplicate.mutateAsync({
+        client_id: clientId,
+        omie_conta_id: values.omie_conta_id,
+        month: values.reference_month,
+        hash,
+      });
+      duplicate = res.duplicate;
+    } catch (err) {
+      setStep('idle');
+      const userMessage =
+        err instanceof ApiError
+          ? err.userMessage
+          : 'Não foi possível verificar a duplicata. Tente novamente.';
+      toast.error(userMessage);
+      return;
+    }
+
+    if (duplicate) {
+      // Bloqueio terminal: usuário precisa trocar arquivo ou cancelar.
+      // Não voltamos para `idle` automaticamente — Doc §11.3 V3 é explícito.
+      setStep('duplicate-blocked');
+      return;
+    }
+
+    // Caminho feliz: aqui em S9 dispara o upload + parsing real.
+    toast.info('Validações OK. Processamento será habilitado em S9.');
+    setStep('idle');
   }
 
-  const isSubmitting = form.formState.isSubmitting;
+  function handleSelectOtherFile() {
+    // O cast é necessário porque o schema exige `File`; defaultValues também
+    // usa o mesmo padrão (cast em `Partial<...>` mais acima). Resetar o
+    // estado do passo é o que devolve o botão "Processar" para a UI.
+    form.setValue('file', undefined as unknown as File, { shouldValidate: false });
+    form.clearErrors('file');
+    setStep('idle');
+  }
+
+  const isPipelineRunning = step === 'hashing' || step === 'checking-duplicate';
+  const isDuplicateBlocked = step === 'duplicate-blocked';
+  const isSubmitting = form.formState.isSubmitting || isPipelineRunning;
+  const inputsDisabled = isSubmitting || isDuplicateBlocked;
 
   return (
     <div className="mx-auto max-w-2xl space-y-8">
@@ -170,7 +241,7 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
                 <Select
                   onValueChange={(v) => field.onChange(Number(v))}
                   value={field.value !== undefined ? String(field.value) : undefined}
-                  disabled={!hasAccounts || isSubmitting}
+                  disabled={!hasAccounts || inputsDisabled}
                 >
                   <FormControl>
                     <SelectTrigger aria-label="Conta bancária">
@@ -227,7 +298,7 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
                   <input
                     type="month"
                     max={maxMonth}
-                    disabled={isSubmitting || !hasAccounts}
+                    disabled={inputsDisabled || !hasAccounts}
                     aria-label="Mês de referência"
                     className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex h-10 w-full rounded-md border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                     {...field}
@@ -267,7 +338,7 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
                   value={
                     field.value !== undefined ? String(field.value) : String(DEFAULT_TOLERANCE)
                   }
-                  disabled={isSubmitting || !hasAccounts}
+                  disabled={inputsDisabled || !hasAccounts}
                 >
                   <FormControl>
                     <SelectTrigger aria-label="Tolerância de data">
@@ -298,29 +369,79 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
                     accept={FILE_ACCEPT}
                     value={field.value ?? null}
                     onChange={(file) => field.onChange(file ?? undefined)}
-                    disabled={isSubmitting || !hasAccounts}
+                    disabled={inputsDisabled || !hasAccounts}
                     aria-invalid={!!fieldState.error}
                   />
                 </FormControl>
                 <FormDescription>
-                  Formatos aceitos: {ALLOWED_EXTENSIONS.join(', ').toUpperCase()}.
+                  Formatos aceitos: {ALLOWED_EXTENSIONS.join(', ').toUpperCase()} · Tamanho máximo:{' '}
+                  {MAX_FILE_SIZE_LABEL}.
                 </FormDescription>
                 <FormMessage />
               </FormItem>
             )}
           />
 
+          {isDuplicateBlocked && <DuplicateBlockAlert />}
+
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button type="button" variant="outline" onClick={onCancel} disabled={isSubmitting}>
+            <Button type="button" variant="outline" onClick={onCancel} disabled={isPipelineRunning}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={isSubmitting || !hasAccounts}>
-              {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
-              Processar
-            </Button>
+            {isDuplicateBlocked ? (
+              <Button type="button" onClick={handleSelectOtherFile}>
+                Selecionar outro arquivo
+              </Button>
+            ) : (
+              <Button type="submit" disabled={isSubmitting || !hasAccounts}>
+                {isPipelineRunning && (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                )}
+                {processButtonLabel(step)}
+              </Button>
+            )}
           </div>
         </form>
       </Form>
+    </div>
+  );
+}
+
+/**
+ * Estados do pipeline de submit (Doc §11.3):
+ *   - `idle`              : botão "Processar" habilitado, nenhum loading.
+ *   - `hashing`           : V2 — calculando SHA-256 client-side.
+ *   - `checking-duplicate`: V3 — request `/check-duplicate` em voo.
+ *   - `duplicate-blocked` : terminal; UI substitui "Processar" por
+ *                           "Selecionar outro arquivo" e mostra alert.
+ */
+type SubmitStep = 'idle' | 'hashing' | 'checking-duplicate' | 'duplicate-blocked';
+
+function processButtonLabel(step: SubmitStep): string {
+  switch (step) {
+    case 'hashing':
+      return 'Gerando hash…';
+    case 'checking-duplicate':
+      return 'Verificando duplicata…';
+    default:
+      return 'Processar';
+  }
+}
+
+function DuplicateBlockAlert() {
+  return (
+    <div
+      role="alert"
+      className="bg-destructive/5 border-destructive/30 text-destructive flex items-start gap-3 rounded-lg border p-4 text-sm"
+    >
+      <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
+      <div className="space-y-1">
+        <p className="font-semibold">Arquivo duplicado</p>
+        <p className="leading-snug">
+          Já existe uma conciliação para esta conta, mês e arquivo. Não é possível criar outra.
+          Selecione um arquivo diferente para continuar.
+        </p>
+      </div>
     </div>
   );
 }
