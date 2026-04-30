@@ -36,22 +36,22 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func, select  # noqa: E402  (sys.path setado acima é pré-requisito)
+from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-from app.core.config import get_settings
-from app.core.crypto import encrypt
-from app.db.models import (
+from app.core.config import get_settings  # noqa: E402
+from app.core.crypto import encrypt  # noqa: E402
+from app.db.models import (  # noqa: E402
     Client,
     ClientAssignment,
     OmieAccountCache,
     User,
     UserRole,
 )
-from app.db.session import close_db, get_session_factory, init_db
+from app.db.session import close_db, get_session_factory, init_db  # noqa: E402
 
 DEMO_CLIENT_NAME = "Padaria Pão Quente Ltda"
 DEMO_FAKE_KEY = "FAKE_DEMO_OMIE_APP_KEY_DO_NOT_USE"

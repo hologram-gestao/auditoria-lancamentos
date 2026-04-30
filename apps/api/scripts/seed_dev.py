@@ -27,22 +27,22 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select  # noqa: E402  (sys.path setado acima é pré-requisito)
+from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 
 # psycopg async não suporta ProactorEventLoop (default Windows)
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-from app.core.config import get_settings
-from app.core.security import hash_password
-from app.db.models import (
+from app.core.config import get_settings  # noqa: E402
+from app.core.security import hash_password  # noqa: E402
+from app.db.models import (  # noqa: E402
     AnomalySeverity,
     AnomalyType,
     User,
     UserRole,
 )
-from app.db.session import close_db, get_session_factory, init_db
+from app.db.session import close_db, get_session_factory, init_db  # noqa: E402
 
 DEFAULT_ADMIN_EMAIL = "admin@hologram.com.br"
 DEFAULT_ADMIN_NAME = "Admin Dev"
