@@ -109,6 +109,21 @@ async function parseErrorBody(res: Response): Promise<ApiErrorBody> {
   };
 }
 
+function buildHeaders(
+  body: BodyInit | null | undefined,
+  extra: Record<string, string> | undefined,
+): Record<string, string> {
+  // Para FormData, deixa o browser definir `Content-Type: multipart/form-data`
+  // com a boundary correta. Setar manualmente quebra o parser do FastAPI.
+  const isMultipart = typeof FormData !== 'undefined' && body instanceof FormData;
+  const hasJsonBody = body !== undefined && body !== null && !isMultipart;
+  return {
+    Accept: 'application/json',
+    ...(hasJsonBody ? { 'Content-Type': 'application/json' } : {}),
+    ...extra,
+  };
+}
+
 async function rawFetch<T>(path: string, init: RequestInit, options: FetchOptions): Promise<T> {
   const url = path.startsWith('http') ? path : `${BASE_URL}${path}`;
   let res: Response;
@@ -116,13 +131,7 @@ async function rawFetch<T>(path: string, init: RequestInit, options: FetchOption
     res = await fetch(url, {
       ...init,
       credentials: 'include',
-      headers: {
-        Accept: 'application/json',
-        ...(init.body !== undefined && init.body !== null
-          ? { 'Content-Type': 'application/json' }
-          : {}),
-        ...options.headers,
-      },
+      headers: buildHeaders(init.body, options.headers),
       signal: options.signal,
     });
   } catch (err) {
@@ -183,6 +192,24 @@ export async function apiPost<T>(
     },
     options,
   );
+}
+
+/**
+ * POST com `multipart/form-data` para uploads de arquivo.
+ *
+ * NÃO seta `Content-Type` propositalmente — o browser injeta o
+ * `multipart/form-data; boundary=...` correto a partir do `FormData`. Setar
+ * manualmente quebra o parsing no servidor (boundary ausente).
+ *
+ * Demais semânticas (cookie HttpOnly, refresh em 401, desempacotamento de
+ * `{data}`, `ApiError`) são compartilhadas com `apiPost` via `rawFetch`.
+ */
+export async function apiPostMultipart<T>(
+  path: string,
+  body: FormData,
+  options: FetchOptions = {},
+): Promise<T> {
+  return rawFetch<T>(path, { method: 'POST', body }, options);
 }
 
 export async function apiPatch<T>(

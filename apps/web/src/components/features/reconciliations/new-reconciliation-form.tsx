@@ -1,15 +1,18 @@
 'use client';
 
 /**
- * Formulário "Nova Conciliação" — `[FRONT 5.1]` + `[FRONT 6.1]`, Doc §11.1–11.3.
+ * Formulário "Nova Conciliação" — `[FRONT 5.1]` + `[FRONT 6.1]` + `[FRONT 7.2]`,
+ * Doc §11.1–11.3 e §12.3.
  *
- * Pipeline de submit (Doc §11.3, sequencial — para na primeira falha):
+ * Pipeline de submit (sequencial — para na primeira falha):
  *   V1. Campos obrigatórios + formato + tamanho ≤ 20 MB → coberto pelo zod
  *       resolver do RHF. Se há erro, o submit handler nem é chamado.
  *   V2. SHA-256 do arquivo via `lib/crypto/hash.ts` (Web Crypto API,
  *       client-side, arquivo NÃO trafega).
  *   V3. `GET /reconciliations/check-duplicate` — se duplicata, bloqueia
  *       sem opção de continuar (Doc §11.3 explícito).
+ *   V4. `POST /reconciliations/parse` — manda arquivo + client_id, espera o
+ *       `ExtractedStatement` da IA, troca `view` para `'preview'` (Doc §12).
  *
  * Decisões herdadas de `[FRONT 5.1]`:
  *   - Reusa `useClientDetail` (S7) para o select de contas.
@@ -25,9 +28,14 @@
  *     "Selecionar outro arquivo" limpa o `file` do form e volta o step.
  *     Submit "Processar" some enquanto o bloqueio está ativo — sem rota
  *     "continuar mesmo assim".
- *   - Pipeline de upload + parsing ainda é S9. No caminho feliz, mostramos
- *     toast informativo e devolvemos o botão para `idle` — placeholder
- *     intencional até S9.
+ *
+ * Decisões de `[FRONT 7.2]`:
+ *   - Preview vive no MESMO componente, alternado por `view: 'form' | 'preview'`.
+ *     Render condicional (não desmontagem) preserva o `useForm` state — se o
+ *     usuário cancelar, todos os values voltam intactos (RHF não é resetado).
+ *     Persistência cross-route (sessionStorage / Zustand) seria cara à toa.
+ *   - "Confirmar e processar" mostra apenas um toast informativo: o endpoint
+ *     real (`POST /reconciliations`) é entregável de `[BACK 8.1]` em S10.
  */
 
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -57,9 +65,10 @@ import {
 } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useClientDetail } from '@/hooks/use-clients';
-import { useCheckDuplicate } from '@/hooks/use-reconciliations';
+import { useCheckDuplicate, useParseStatement } from '@/hooks/use-reconciliations';
 import { ApiError } from '@/lib/api/client';
 import type { BankAccount } from '@/lib/api/clients';
+import type { ParsedStatement } from '@/lib/api/reconciliations';
 import { sha256Hex } from '@/lib/crypto/hash';
 import {
   ALLOWED_EXTENSIONS,
@@ -72,6 +81,7 @@ import {
 } from '@/lib/validation/reconciliations';
 
 import { FileInputField } from './file-input-field';
+import { ParsePreview } from './parse-preview';
 
 const FILE_ACCEPT = ALLOWED_EXTENSIONS.map((ext) => `.${ext}`).join(',');
 
@@ -157,7 +167,10 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
   }, [sortedAccounts, watchedAccountId]);
 
   const [step, setStep] = useState<SubmitStep>('idle');
+  const [view, setView] = useState<View>('form');
+  const [parsed, setParsed] = useState<ParsedStatement | null>(null);
   const checkDuplicate = useCheckDuplicate();
+  const parseStatement = useParseStatement();
 
   async function onSubmit(values: NewReconciliationFormValues) {
     // V1 (zod resolver): se chegou aqui, campos obrigatórios + formato +
@@ -204,9 +217,44 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
       return;
     }
 
-    // Caminho feliz: aqui em S9 dispara o upload + parsing real.
-    toast.info('Validações OK. Processamento será habilitado em S9.');
-    setStep('idle');
+    // V4 — parse via Claude (Doc §12). Endpoint stateless: nada persiste no
+    // back até o usuário confirmar em S10. Erros 4xx/5xx do back já vêm com
+    // `userMessage` em PT-BR (PARSE_ERROR, FILE_TOO_LARGE, INVALID_FILE,
+    // timeout 504, auth fault 502 — ver `lib/api/reconciliations.ts`).
+    setStep('parsing');
+    try {
+      const statement = await parseStatement.mutateAsync({
+        client_id: clientId,
+        file: values.file,
+      });
+      setParsed(statement);
+      setView('preview');
+      setStep('idle');
+    } catch (err) {
+      setStep('idle');
+      const userMessage =
+        err instanceof ApiError
+          ? err.userMessage
+          : 'Não foi possível processar o arquivo. Tente novamente.';
+      toast.error(userMessage);
+    }
+  }
+
+  function handlePreviewCancel() {
+    // Volta ao form sem resetar o RHF: o `useForm` continua montado por causa
+    // do render condicional logo abaixo, então todos os values estão intactos.
+    setParsed(null);
+    setView('form');
+  }
+
+  function handlePreviewConfirm() {
+    // TODO(BACK 8.1 / S10): trocar este toast por uma mutation real:
+    //   POST /api/v1/reconciliations  com  client_id, omie_conta_id,
+    //   reference_month, tolerance_days, file_hash, parsed_statement.
+    // Em sucesso: navegar para `/clientes/{clientId}/conciliacao/{sessionId}/processando`.
+    toast.info(
+      'Confirmação registrada. O processamento será disparado quando o BACK 8.1 estiver pronto.',
+    );
   }
 
   function handleSelectOtherFile() {
@@ -218,10 +266,12 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
     setStep('idle');
   }
 
-  const isPipelineRunning = step === 'hashing' || step === 'checking-duplicate';
+  const isPipelineRunning =
+    step === 'hashing' || step === 'checking-duplicate' || step === 'parsing';
   const isDuplicateBlocked = step === 'duplicate-blocked';
   const isSubmitting = form.formState.isSubmitting || isPipelineRunning;
   const inputsDisabled = isSubmitting || isDuplicateBlocked;
+  const showPreview = view === 'preview' && parsed !== null;
 
   return (
     <div className="mx-auto max-w-2xl space-y-8">
@@ -230,8 +280,27 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
         <h1 className="text-2xl font-semibold">Nova Conciliação</h1>
       </header>
 
+      {showPreview && parsed && (
+        <ParsePreview
+          parsed={parsed}
+          onCancel={handlePreviewCancel}
+          onConfirm={handlePreviewConfirm}
+          isConfirming={false}
+        />
+      )}
+
+      {/* RHF state-preservation: o `<Form>` permanece montado mesmo durante o
+          preview (escondido via `hidden`). Cancelar volta com todos os values
+          do formulário intactos. Desmontar (render condicional `?:`) zeraria
+          o `useForm`. */}
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6" noValidate>
+        <form
+          onSubmit={form.handleSubmit(onSubmit)}
+          className="space-y-6"
+          noValidate
+          hidden={showPreview}
+          aria-hidden={showPreview}
+        >
           <FormField
             control={form.control}
             name="omie_conta_id"
@@ -384,6 +453,8 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
 
           {isDuplicateBlocked && <DuplicateBlockAlert />}
 
+          {step === 'parsing' && <ParsingHint />}
+
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <Button type="button" variant="outline" onClick={onCancel} disabled={isPipelineRunning}>
               Cancelar
@@ -407,15 +478,35 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
   );
 }
 
+function ParsingHint() {
+  // Doc §12.1 — parsing pode levar até 60 s. Avisar o usuário evita
+  // a sensação de travamento (V2/V3 são quase instantâneos; o salto
+  // para o V4 sem aviso parece bug).
+  return (
+    <p
+      role="status"
+      aria-live="polite"
+      className="text-muted-foreground flex items-center gap-2 text-sm"
+    >
+      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+      Extraindo movimentações com IA. Isso pode levar até 60 segundos.
+    </p>
+  );
+}
+
 /**
- * Estados do pipeline de submit (Doc §11.3):
+ * Estados do pipeline de submit (Doc §11.3 + §12):
  *   - `idle`              : botão "Processar" habilitado, nenhum loading.
  *   - `hashing`           : V2 — calculando SHA-256 client-side.
  *   - `checking-duplicate`: V3 — request `/check-duplicate` em voo.
  *   - `duplicate-blocked` : terminal; UI substitui "Processar" por
  *                           "Selecionar outro arquivo" e mostra alert.
+ *   - `parsing`           : V4 — `/reconciliations/parse` em voo (até 60 s).
  */
-type SubmitStep = 'idle' | 'hashing' | 'checking-duplicate' | 'duplicate-blocked';
+type SubmitStep = 'idle' | 'hashing' | 'checking-duplicate' | 'duplicate-blocked' | 'parsing';
+
+/** Visualização atual do componente — alterna entre form e preview do parse. */
+type View = 'form' | 'preview';
 
 function processButtonLabel(step: SubmitStep): string {
   switch (step) {
@@ -423,6 +514,8 @@ function processButtonLabel(step: SubmitStep): string {
       return 'Gerando hash…';
     case 'checking-duplicate':
       return 'Verificando duplicata…';
+    case 'parsing':
+      return 'Processando arquivo…';
     default:
       return 'Processar';
   }
