@@ -138,7 +138,7 @@ show_error_codes = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["pdfplumber.*", "pandas.*"]
+module = ["pdfplumber.*", "pandas.*", "openpyxl.*"]
 ignore_missing_imports = true
 
 # ============================================================

@@ -91,6 +91,10 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: SecretStr = Field(default=SecretStr(""))
     ANTHROPIC_MODEL_DEFAULT: str = "claude-sonnet-4-5"
     ANTHROPIC_MODEL_FALLBACK: str = "claude-opus-4-6"
+    # Timeout total para o parsing IA (S9). Mantém o checklist do BACK 7.1
+    # ("Timeout: 60s") parametrizável para testes — em pytest cai-se para 1s
+    # com `monkeypatch` sem precisar mexer no código.
+    ANTHROPIC_TIMEOUT_SECONDS: float = 60.0
 
     OMIE_BASE_URL: str = "https://app.omie.com.br/api/v1"
     OMIE_TIMEOUT_SECONDS: int = 15

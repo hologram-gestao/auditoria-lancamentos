@@ -34,6 +34,8 @@ class ErrorCode(StrEnum):
     OMIE_TIMEOUT = "OMIE_TIMEOUT"
     OMIE_FAULT = "OMIE_FAULT"
     OMIE_SYNC_FAILED = "OMIE_SYNC_FAILED"
+    ANTHROPIC_AUTH_ERROR = "ANTHROPIC_AUTH_ERROR"
+    ANTHROPIC_TIMEOUT = "ANTHROPIC_TIMEOUT"
     PARSE_ERROR = "PARSE_ERROR"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
@@ -215,6 +217,47 @@ class OmieFaultError(AppError):
     code = ErrorCode.OMIE_FAULT
     status_code = 502
     default_user_message = "Ocorreu um erro ao acessar o Omie."
+
+
+class AnthropicAuthError(AppError):
+    """502 — chave da Anthropic ausente, inválida ou recusada (HTTP 401/403).
+
+    Mensagem para o usuário é genérica de propósito: nunca expor para o cliente
+    final que o problema é "API key" — é configuração interna do BPO.
+    """
+
+    code = ErrorCode.ANTHROPIC_AUTH_ERROR
+    status_code = 502
+    default_user_message = (
+        "Serviço de extração temporariamente indisponível. Tente novamente em instantes."
+    )
+
+
+class AnthropicTimeoutError(AppError):
+    """504 — Anthropic API não respondeu dentro do timeout configurado (60 s)."""
+
+    code = ErrorCode.ANTHROPIC_TIMEOUT
+    status_code = 504
+    default_user_message = "O processamento demorou mais que o esperado. Tente novamente."
+
+
+class AnthropicParseError(ParseError):
+    """422 — IA respondeu mas o conteúdo é inválido / inutilizável.
+
+    Casos cobertos:
+        - Modelo não emitiu o `tool_use` esperado (free-text).
+        - Tool input não passa na validação Pydantic (datas inválidas,
+          campos faltando, valores não numéricos).
+        - Lista `transactions` vazia.
+
+    Reusa o `PARSE_ERROR` da hierarquia para o front tratar com o mesmo
+    `userMessage` da fonte funcional (Doc §12.2).
+    """
+
+    default_user_message = (
+        "Não foi possível extrair movimentações do arquivo. "
+        "Verifique se o arquivo está íntegro e sem proteção por senha."
+    )
 
 
 class AccountsSyncError(AppError):
