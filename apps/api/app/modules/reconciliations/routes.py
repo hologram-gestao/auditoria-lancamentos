@@ -66,9 +66,20 @@ def _get_anthropic_client(
 AnthropicClientDep = Annotated[AnthropicClient, Depends(_get_anthropic_client)]
 
 
-def _get_parse_service(anthropic: AnthropicClientDep) -> ParseService:
-    """Provider para o `ParseService` (BACK 7.1)."""
-    return ParseService(anthropic)
+def _get_parse_service(
+    anthropic: AnthropicClientDep,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ParseService:
+    """Provider para o `ParseService` (BACK 7.1).
+
+    Repassa as flags `MOCK_PARSE` / `MOCK_PARSE_DELAY_SECONDS` — quando
+    ativas (apenas dev/demo, NUNCA prod), o service retorna payload fixo.
+    """
+    return ParseService(
+        anthropic,
+        mock_enabled=settings.MOCK_PARSE,
+        mock_delay_seconds=settings.MOCK_PARSE_DELAY_SECONDS,
+    )
 
 
 ParseServiceDep = Annotated[ParseService, Depends(_get_parse_service)]

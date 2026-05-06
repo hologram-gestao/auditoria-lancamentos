@@ -78,8 +78,11 @@ EXTRACT_MOVEMENTS_TOOL: dict[str, Any] = {
                             ),
                         },
                         "balance": {
-                            "type": ["number", "null"],
-                            "description": "Saldo após a transação. null se não disponível.",
+                            "type": "number",
+                            "description": (
+                                "Saldo após a transação. Omita o campo "
+                                "(NÃO use null) se o documento não fornecer."
+                            ),
                         },
                     },
                     "required": ["date", "description", "amount"],

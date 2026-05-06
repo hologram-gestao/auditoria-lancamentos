@@ -20,6 +20,9 @@ Pipeline para cada formato suportado:
 
 from __future__ import annotations
 
+import asyncio
+from datetime import date
+from decimal import Decimal
 from io import BytesIO
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
@@ -28,7 +31,7 @@ import openpyxl
 
 from app.core.exceptions import ValidationAppError
 from app.core.logging import get_logger
-from app.integrations.anthropic.schemas import ExtractedStatement
+from app.integrations.anthropic.schemas import ExtractedStatement, ExtractedTransaction
 from app.utils.magic_bytes import FileType, validate_upload_type
 
 if TYPE_CHECKING:
@@ -65,8 +68,20 @@ _ALLOWED_EXTENSIONS = {".pdf", ".csv", ".xlsx", ".xls"}
 class ParseService:
     """Orquestra a validação + chamada à IA."""
 
-    def __init__(self, anthropic_client: AnthropicClient) -> None:
+    def __init__(
+        self,
+        anthropic_client: AnthropicClient,
+        *,
+        mock_enabled: bool = False,
+        mock_delay_seconds: float = 0.0,
+    ) -> None:
         self._anthropic = anthropic_client
+        # MOCK EXCLUSIVO DE DEMO — ver `Settings.MOCK_PARSE`. Quando ativo,
+        # `parse_statement` ignora o `AnthropicClient` e devolve o payload
+        # fictício da Padaria. As validações de tamanho/extensão/magic bytes
+        # continuam rodando para que a UX de erro continue fiel.
+        self._mock_enabled = mock_enabled
+        self._mock_delay_seconds = mock_delay_seconds
 
     async def parse_statement(
         self,
@@ -116,6 +131,17 @@ class ParseService:
 
         content, mime_type = self._prepare_content(detected, file_bytes)
         document_kind = _DOCUMENT_KIND[detected]
+
+        if self._mock_enabled:
+            log.warning(
+                "parse_mock_used",
+                bytes_in=len(file_bytes),
+                detected=detected.value,
+                delay_s=self._mock_delay_seconds,
+            )
+            if self._mock_delay_seconds > 0:
+                await asyncio.sleep(self._mock_delay_seconds)
+            return _MOCK_PADARIA_STATEMENT.model_copy(deep=True)
 
         return await self._anthropic.extract_movements(
             content=content,
@@ -243,3 +269,210 @@ def _xlsx_to_text(file_bytes: bytes) -> str:
             user_message="O arquivo XLSX não contém dados legíveis.",
         )
     return "\n".join(parts)
+
+
+# ----------------------------------------------------------------------
+# Payload do mock (Settings.MOCK_PARSE) — ver __init__ do ParseService.
+# Espelha 1:1 o PDF gerado por `d:\tmp\gen_extrato_demo.py` (Padaria Pão
+# Quente, abril/2026). Não tem nada de produção; só serve para gravar
+# vídeo quando a conta da Anthropic está sem crédito.
+# ----------------------------------------------------------------------
+
+_MOCK_TRANSACTIONS: list[ExtractedTransaction] = [
+    ExtractedTransaction(
+        date=date(2026, 4, 2),
+        description="PIX RECEBIDO LUIZA RAMOS",
+        amount=Decimal("32.00"),
+        balance=Decimal("18532.00"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 2),
+        description="TARIFA BANCARIA PACOTE PJ",
+        amount=Decimal("-29.90"),
+        balance=Decimal("18502.10"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 3),
+        description="FORNECEDOR MOINHO PRADO LTDA",
+        amount=Decimal("-1250.00"),
+        balance=Decimal("17252.10"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 3),
+        description="PIX RECEBIDO JOAO PEREIRA",
+        amount=Decimal("78.50"),
+        balance=Decimal("17330.60"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 4),
+        description="DEPOSITO CIELO LIQUIDACAO",
+        amount=Decimal("1245.30"),
+        balance=Decimal("18575.90"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 4),
+        description="PIX RECEBIDO MARIA SOUZA",
+        amount=Decimal("65.00"),
+        balance=Decimal("18640.90"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 5),
+        description="DISTRIBUIDORA LACTOS REI",
+        amount=Decimal("-567.80"),
+        balance=Decimal("18073.10"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 7),
+        description="DEPOSITO STONE LIQUIDACAO",
+        amount=Decimal("893.75"),
+        balance=Decimal("18966.85"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 7),
+        description="FERMENTO BIOLOGICO IND SA",
+        amount=Decimal("-234.50"),
+        balance=Decimal("18732.35"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 8),
+        description="PIX RECEBIDO BRUNO LIMA",
+        amount=Decimal("48.00"),
+        balance=Decimal("18780.35"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 9),
+        description="ENEL DISTRIBUIDORA SP",
+        amount=Decimal("-487.90"),
+        balance=Decimal("18292.45"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 10),
+        description="DEPOSITO CIELO LIQUIDACAO",
+        amount=Decimal("1567.40"),
+        balance=Decimal("19859.85"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 10),
+        description="TRANSF CLIENTE FILIAL B",
+        amount=Decimal("2000.00"),
+        balance=Decimal("21859.85"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 11),
+        description="ALUGUEL IMOVEL ABRIL 2026",
+        amount=Decimal("-4500.00"),
+        balance=Decimal("17359.85"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 14),
+        description="PIX RECEBIDO ANA COSTA",
+        amount=Decimal("28.50"),
+        balance=Decimal("17388.35"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 14),
+        description="DEPOSITO STONE LIQUIDACAO",
+        amount=Decimal("742.10"),
+        balance=Decimal("18130.45"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 15),
+        description="CLARO COMUNICACOES PJ",
+        amount=Decimal("-189.00"),
+        balance=Decimal("17941.45"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 16),
+        description="FOLHA PAGAMENTO 1A QUINZENA",
+        amount=Decimal("-6225.00"),
+        balance=Decimal("11716.45"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 17),
+        description="DEPOSITO CIELO LIQUIDACAO",
+        amount=Decimal("1389.20"),
+        balance=Decimal("13105.65"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 17),
+        description="FORN FARINHA OURO BRANCO",
+        amount=Decimal("-980.00"),
+        balance=Decimal("12125.65"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 20),
+        description="PIX RECEBIDO RICARDO ALMEIDA",
+        amount=Decimal("85.00"),
+        balance=Decimal("12210.65"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 21),
+        description="INSS COMP 04/2026",
+        amount=Decimal("-1890.00"),
+        balance=Decimal("10320.65"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 22),
+        description="DEPOSITO CIELO LIQUIDACAO",
+        amount=Decimal("1678.50"),
+        balance=Decimal("11999.15"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 23),
+        description="COMBUSTIVEL POSTO IPIRANGA",
+        amount=Decimal("-178.00"),
+        balance=Decimal("11821.15"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 24),
+        description="DEPOSITO STONE LIQUIDACAO",
+        amount=Decimal("932.40"),
+        balance=Decimal("12753.55"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 24),
+        description="PIX RECEBIDO PEDRO HENRIQUE",
+        amount=Decimal("42.00"),
+        balance=Decimal("12795.55"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 27),
+        description="FOLHA PAGAMENTO 2A QUINZENA",
+        amount=Decimal("-6225.00"),
+        balance=Decimal("6570.55"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 28),
+        description="FORN EMBALAGENS BR LTDA",
+        amount=Decimal("-345.60"),
+        balance=Decimal("6224.95"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 29),
+        description="DEPOSITO CIELO LIQUIDACAO",
+        amount=Decimal("1456.80"),
+        balance=Decimal("7681.75"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 30),
+        description="TARIFA TED PJ",
+        amount=Decimal("-12.30"),
+        balance=Decimal("7669.45"),
+    ),
+    ExtractedTransaction(
+        date=date(2026, 4, 30),
+        description="IOF MENSAL",
+        amount=Decimal("-8.50"),
+        balance=Decimal("7660.95"),
+    ),
+]
+
+_MOCK_PADARIA_STATEMENT = ExtractedStatement(
+    bank_name="Banco Itaú Unibanco S.A.",
+    account_type="checking",
+    period_start=date(2026, 4, 1),
+    period_end=date(2026, 4, 30),
+    opening_balance=Decimal("18500.00"),
+    closing_balance=Decimal("7660.95"),
+    transactions=_MOCK_TRANSACTIONS,
+)

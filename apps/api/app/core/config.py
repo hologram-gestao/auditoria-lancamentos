@@ -96,6 +96,15 @@ class Settings(BaseSettings):
     # com `monkeypatch` sem precisar mexer no código.
     ANTHROPIC_TIMEOUT_SECONDS: float = 60.0
 
+    # MOCK exclusivo de demo/gravação: quando True, `ParseService` retorna um
+    # payload fixo (extrato fictício da Padaria Pão Quente) sem chamar a
+    # Anthropic. NÃO usar em CI/staging/prod — a flag existe só pra desbloquear
+    # demos quando a conta da Anthropic está sem crédito.
+    MOCK_PARSE: bool = False
+    # Atraso simulado (s) do parsing mockado, pra que a UI de "Processando
+    # arquivo…" seja realista no vídeo. Ignorado quando MOCK_PARSE=False.
+    MOCK_PARSE_DELAY_SECONDS: float = 5.0
+
     OMIE_BASE_URL: str = "https://app.omie.com.br/api/v1"
     OMIE_TIMEOUT_SECONDS: int = 15
     # Timeout específico do "Testar conexão" (S6 §3.3): mais agressivo que o
