@@ -4,7 +4,8 @@
  *
  * S8 (FRONT 6.1) cobre o `check-duplicate`.
  * S9 (FRONT 7.2) adiciona o `parse` (extração via Claude).
- * Sessões posteriores adicionam criação, listagem de entries e exportação.
+ * S10 (FRONT 8.7) adiciona `createReconciliation` + `getSessionStatus`
+ * (criação assíncrona da sessão e polling da tela de progresso).
  *
  * Convenções (CLAUDE.md §6):
  *   - O envelope `{ data: ... }` com chave única é desempacotado em
@@ -19,7 +20,7 @@
  *     formatação para BRL é responsabilidade do consumidor (ver
  *     `lib/format.ts`).
  */
-import { apiGet, apiPostMultipart } from './client';
+import { apiGet, apiPost, apiPostMultipart } from './client';
 
 export interface CheckDuplicateParams {
   client_id: string;
@@ -104,4 +105,73 @@ export async function parseStatement(params: ParseStatementParams): Promise<Pars
   fd.append('client_id', params.client_id);
   fd.append('file', params.file);
   return apiPostMultipart<ParsedStatement>('/api/v1/reconciliations/parse', fd);
+}
+
+// ----------------------------------------------------------------------
+// S10 — POST /api/v1/reconciliations
+// ----------------------------------------------------------------------
+
+/**
+ * Payload do POST /api/v1/reconciliations — espelha `CreateReconciliationRequest`.
+ *
+ * O nome do campo `statement` segue o backend (não `parsed_statement`):
+ * é o `ParsedStatement` devolvido por `/parse`, revalidado no servidor
+ * via `ReconciliationStatementInput`.
+ *
+ * `reference_month` no contrato do back é `date` (`YYYY-MM-01`); o front
+ * normaliza o `YYYY-MM` do input do usuário para o 1º dia aqui antes de
+ * mandar — o backend tem um `field_validator` que normaliza para o dia 1
+ * de qualquer forma, mas mandar já normalizado deixa o tráfego previsível.
+ */
+export interface CreateReconciliationPayload {
+  client_id: string;
+  omie_conta_id: number;
+  /** ISO `YYYY-MM-DD` — sempre dia 1 do mês de referência. */
+  reference_month: string;
+  /** 1 a 7 dias (Doc §11). */
+  date_tolerance_days: number;
+  /** SHA-256 hex (64 chars, lowercase). */
+  file_hash: string;
+  statement: ParsedStatement;
+}
+
+export interface CreateReconciliationResult {
+  session_id: string;
+  /** Sempre `'processing'` no retorno do POST (back enfileira o job antes de responder). */
+  status: 'processing';
+}
+
+export async function createReconciliation(
+  payload: CreateReconciliationPayload,
+): Promise<CreateReconciliationResult> {
+  return apiPost<CreateReconciliationResult>('/api/v1/reconciliations', payload);
+}
+
+// ----------------------------------------------------------------------
+// S10 — GET /api/v1/reconciliations/{id}/status
+// ----------------------------------------------------------------------
+
+/**
+ * Estados possíveis da sessão (Doc §17.1).
+ *
+ * O backend retorna o status como `str` "lenient out" (memória
+ * `feedback_pydantic_strict_input_lenient_output`), então mantemos uma
+ * union literal aqui pra checagem em `switch`/`if`, ciente de que um
+ * estado novo introduzido no back pode aparecer como string desconhecida.
+ */
+export type SessionStatus = 'processing' | 'reviewing' | 'done' | 'error';
+
+export interface SessionStatusResult {
+  session_id: string;
+  status: SessionStatus;
+  conciliated_count: number;
+  sem_omie_count: number;
+  omie_sem_arquivo_count: number;
+  anomaly_count: number;
+  /** `null` quando não há erro; string com a causa quando `status === 'error'`. */
+  error_message: string | null;
+}
+
+export async function getSessionStatus(sessionId: string): Promise<SessionStatusResult> {
+  return apiGet<SessionStatusResult>(`/api/v1/reconciliations/${sessionId}/status`);
 }

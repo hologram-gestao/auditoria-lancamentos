@@ -39,8 +39,9 @@ interface ParsePreviewProps {
   parsed: ParsedStatement;
   onCancel: () => void;
   onConfirm: () => void;
-  /** Mantido para forward-compat com S10 — quando a confirmação virar mutation
-   *  real, este flag desabilita os botões e troca o label. Em S9 fica `false`. */
+  /** `true` enquanto a mutation `POST /api/v1/reconciliations` está em voo
+   *  (S10). Desabilita os botões pra evitar duplo submit; ao virar `true`
+   *  o `Cancelar` também desabilita pra impedir reset do `parsed` no meio. */
   isConfirming: boolean;
 }
 

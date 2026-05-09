@@ -34,8 +34,17 @@
  *     Render condicional (não desmontagem) preserva o `useForm` state — se o
  *     usuário cancelar, todos os values voltam intactos (RHF não é resetado).
  *     Persistência cross-route (sessionStorage / Zustand) seria cara à toa.
- *   - "Confirmar e processar" mostra apenas um toast informativo: o endpoint
- *     real (`POST /reconciliations`) é entregável de `[BACK 8.1]` em S10.
+ *
+ * Decisões de `[FRONT 8.7]` (S10):
+ *   - "Confirmar e processar" agora chama `POST /api/v1/reconciliations`
+ *     com o `ParsedStatement` + a meta do form + o `file_hash` calculado
+ *     no V2. O hash NÃO é recalculado: guardamos em `submittedHash`
+ *     quando o parse devolveu OK (mesmo arquivo + mesmo file_hash que o
+ *     backend acabou de aceitar para checagem de duplicata).
+ *   - Em sucesso → `router.push` para `/clientes/{id}/conciliacao/processando/{sessionId}`
+ *     (a tela de polling de S10 cuida do resto).
+ *   - Em erro do POST → toast com `userMessage` e usuário fica no preview
+ *     pra tentar de novo (o `parsed` continua válido em memória).
  */
 
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -65,7 +74,11 @@ import {
 } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useClientDetail } from '@/hooks/use-clients';
-import { useCheckDuplicate, useParseStatement } from '@/hooks/use-reconciliations';
+import {
+  useCheckDuplicate,
+  useCreateReconciliation,
+  useParseStatement,
+} from '@/hooks/use-reconciliations';
 import { ApiError } from '@/lib/api/client';
 import type { BankAccount } from '@/lib/api/clients';
 import type { ParsedStatement } from '@/lib/api/reconciliations';
@@ -137,6 +150,11 @@ interface FormReadyProps {
 }
 
 function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps) {
+  // `router` local para a navegação em `handlePreviewConfirm` (S10) — o
+  // hook do Next só pode ser chamado em client component, e `FormReady`
+  // já é client (vive sob a diretiva 'use client' do arquivo).
+  const router = useRouter();
+
   // Não filtramos por `account_type` aqui: o backend já garante que apenas
   // contas conciliáveis (CC/CA) entram no cache (Doc §6.2). Um filtro case/
   // whitespace-sensitive no front zera a lista quando o Omie devolve o tipo
@@ -169,8 +187,12 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
   const [step, setStep] = useState<SubmitStep>('idle');
   const [view, setView] = useState<View>('form');
   const [parsed, setParsed] = useState<ParsedStatement | null>(null);
+  // Hash do arquivo aceito pelo /parse — preservado para o POST de criação
+  // da sessão (S10). Resetado junto com `parsed` no cancel/select-other-file.
+  const [submittedHash, setSubmittedHash] = useState<string | null>(null);
   const checkDuplicate = useCheckDuplicate();
   const parseStatement = useParseStatement();
+  const createReconciliation = useCreateReconciliation();
 
   async function onSubmit(values: NewReconciliationFormValues) {
     // V1 (zod resolver): se chegou aqui, campos obrigatórios + formato +
@@ -228,6 +250,9 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
         file: values.file,
       });
       setParsed(statement);
+      // Hash que o backend acabou de aceitar no /check-duplicate — reusamos
+      // no POST /reconciliations sem precisar recalcular o SHA-256.
+      setSubmittedHash(hash);
       setView('preview');
       setStep('idle');
     } catch (err) {
@@ -244,17 +269,43 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
     // Volta ao form sem resetar o RHF: o `useForm` continua montado por causa
     // do render condicional logo abaixo, então todos os values estão intactos.
     setParsed(null);
+    setSubmittedHash(null);
     setView('form');
   }
 
-  function handlePreviewConfirm() {
-    // TODO(BACK 8.1 / S10): trocar este toast por uma mutation real:
-    //   POST /api/v1/reconciliations  com  client_id, omie_conta_id,
-    //   reference_month, tolerance_days, file_hash, parsed_statement.
-    // Em sucesso: navegar para `/clientes/{clientId}/conciliacao/{sessionId}/processando`.
-    toast.info(
-      'Confirmação registrada. O processamento será disparado quando o BACK 8.1 estiver pronto.',
-    );
+  async function handlePreviewConfirm() {
+    if (parsed === null || submittedHash === null) {
+      // Defensive — não deve acontecer (botão só aparece com `parsed` setado),
+      // mas evita rodar a mutation com payload incompleto.
+      toast.error('Não foi possível recuperar o arquivo processado. Reenvie e tente novamente.');
+      return;
+    }
+
+    const values = form.getValues();
+    try {
+      const result = await createReconciliation.mutateAsync({
+        client_id: clientId,
+        omie_conta_id: values.omie_conta_id,
+        // Backend exige `YYYY-MM-DD` (`date`); normaliza pra dia 1 do mês.
+        reference_month: `${values.reference_month}-01`,
+        date_tolerance_days: values.tolerance_days,
+        file_hash: submittedHash,
+        statement: parsed,
+      });
+      // Sai do preview antes de navegar — caso o `router.push` resolva async,
+      // a UI já some o botão "Confirmar" e o usuário não dispara duas vezes.
+      router.push(`/clientes/${clientId}/conciliacao/processando/${result.session_id}`);
+    } catch (err) {
+      // Mantém usuário no preview pra ele tentar de novo (parsed continua válido).
+      // 409 DUPLICATE_FILE pode chegar aqui se outra conciliação for criada
+      // entre o /check-duplicate (V3) e este POST — a userMessage do back já
+      // explica isso em PT-BR.
+      const userMessage =
+        err instanceof ApiError
+          ? err.userMessage
+          : 'Não foi possível iniciar o processamento. Tente novamente.';
+      toast.error(userMessage);
+    }
   }
 
   function handleSelectOtherFile() {
@@ -264,6 +315,7 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
     form.setValue('file', undefined as unknown as File, { shouldValidate: false });
     form.clearErrors('file');
     setStep('idle');
+    setSubmittedHash(null);
   }
 
   const isPipelineRunning =
@@ -284,8 +336,8 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
         <ParsePreview
           parsed={parsed}
           onCancel={handlePreviewCancel}
-          onConfirm={handlePreviewConfirm}
-          isConfirming={false}
+          onConfirm={() => void handlePreviewConfirm()}
+          isConfirming={createReconciliation.isPending}
         />
       )}
 
