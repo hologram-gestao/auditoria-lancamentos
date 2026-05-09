@@ -1,0 +1,299 @@
+"""Orquestrador async do processamento de uma sessão de conciliação (BACK 8.1-8.5).
+
+Ponto de entrada do worker ARQ: `run_reconciliation_processing(ctx, session_id)`.
+
+Fluxo:
+    1. Carrega sessão + cliente + file_entries (eager).
+    2. Chama Omie em memória (extrato + contas pagar/receber). Se falhar →
+       marca a sessão como `error` e encerra.
+    3. Em uma única transação:
+        a. Aplica matches (UPDATE file_entries).
+        b. Insere omie_entries não consumidos.
+        c. Cria anomalias estruturais.
+        d. Atualiza contadores + status='reviewing' + processed_at.
+       Falha no meio = rollback completo desta transação. A sessão original
+       (criada pelo endpoint) já está commitada com `status='processing'`,
+       então conseguimos reabrir uma transação para gravar o `error`.
+
+CLAUDE.md §3.7: nunca expor stack traces ao usuário. O worker:
+    - NUNCA propaga exceção para o redis (poderia vazar credenciais
+      via repr no traceback). Captura tudo, loga, marca a sessão.
+    - Mensagem em PT-BR vem do `AppError.user_message`.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.core.config import Settings
+from app.core.exceptions import AppError
+from app.core.logging import get_logger
+from app.db.models import FileEntrySituation, ReconciliationOmieEntry
+from app.modules.clients.omie_factory import build_omie_client
+from app.modules.reconciliations.processing.anomalies import (
+    _AnomalyTypeMissingError,
+    create_structural_anomalies,
+)
+from app.modules.reconciliations.processing.matcher import (
+    FileEntryForMatch,
+    match,
+)
+from app.modules.reconciliations.processing.omie_fetch import (
+    deduplicate_by_id,
+    fetch_pending,
+    fetch_realized,
+)
+from app.modules.reconciliations.repository import ReconciliationRepository
+
+log = get_logger(__name__)
+
+
+# Mensagens em PT-BR para o `error_message` da sessão. Caller (front) mostra
+# direto na UI — manter curtas e acionáveis. CLAUDE.md §6.
+_ERROR_MSG_INTERNAL = "Erro interno ao processar a conciliação. Tente novamente."
+_ERROR_MSG_SEED_MISSING = (
+    "Catálogo de anomalias não inicializado. Avise o administrador (seed pendente)."
+)
+
+
+async def run_reconciliation_processing(
+    ctx: dict[str, Any],
+    session_id: str,
+) -> None:
+    """Função pública chamada pelo worker ARQ.
+
+    Args:
+        ctx: dicionário de contexto do ARQ. Contém `redis`, `job_id`, etc.
+            Para o session_factory, usamos o `ctx["session_factory"]` se
+            preenchido em `on_startup` — fallback para o singleton global
+            de `app.db.session.get_session_factory()`.
+        session_id: UUID em string (ARQ serializa via msgpack — UUID nativo
+            funciona, mas string é mais portável e evita ambiguidade).
+    """
+    settings: Settings = ctx.get("settings") or _get_settings_singleton()
+    session_factory = ctx.get("session_factory") or _get_session_factory_singleton()
+
+    sid = UUID(session_id)
+    log.info("reconciliation_processing_started", session_id=session_id)
+
+    try:
+        await _execute_processing(sid, settings, session_factory)
+    except AppError as exc:
+        # Erro previsto (Omie/Anthropic/Crypto/etc) — temos `user_message`
+        # confiável em PT-BR.
+        log.warning(
+            "reconciliation_processing_failed",
+            session_id=session_id,
+            code=exc.code.value,
+            message=exc.message,
+        )
+        await _safe_mark_error(sid, session_factory, exc.user_message)
+    except _AnomalyTypeMissingError as exc:
+        log.error(
+            "reconciliation_processing_seed_missing",
+            session_id=session_id,
+            message=str(exc),
+        )
+        await _safe_mark_error(sid, session_factory, _ERROR_MSG_SEED_MISSING)
+    except Exception:
+        # Erro inesperado: NUNCA propagar para o redis. Sentry captura via
+        # exc_info=True (se configurado).
+        log.exception("reconciliation_processing_unexpected", session_id=session_id)
+        await _safe_mark_error(sid, session_factory, _ERROR_MSG_INTERNAL)
+    else:
+        log.info("reconciliation_processing_finished", session_id=session_id)
+
+
+async def _execute_processing(
+    session_id: UUID,
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Caminho feliz — exceções sobem para o `run_reconciliation_processing`."""
+    # 1. Load session + client + entries
+    async with session_factory() as db:
+        repo = ReconciliationRepository(db)
+        session_obj = await repo.get_session_with_client(session_id)
+        if session_obj is None:
+            log.warning("reconciliation_session_not_found", session_id=str(session_id))
+            return
+        # Detach: vamos usar os dados depois fora desta sessão. Cópia explícita
+        # do que importa pro matcher antes de fechar.
+        client = session_obj.client
+        file_entries_for_matcher = [
+            FileEntryForMatch(
+                id=str(entry.id),
+                transaction_date=entry.transaction_date,
+                amount=entry.amount,
+            )
+            for entry in session_obj.file_entries
+        ]
+        period_start = min(e.transaction_date for e in session_obj.file_entries)
+        period_end = max(e.transaction_date for e in session_obj.file_entries)
+        omie_conta_id = session_obj.omie_conta_id
+        reference_month = session_obj.reference_month
+        tolerance_days = session_obj.date_tolerance_days
+
+    # 2. Fetch Omie data — toda a interação com credencial em claro
+    #    acontece dentro do `async with` do OmieClient.
+    omie_client = build_omie_client(client, settings)
+    try:
+        async with omie_client:
+            realized = await fetch_realized(
+                omie_client,
+                omie_conta_id=omie_conta_id,
+                period_start=period_start,
+                period_end=period_end,
+                tolerance_days=tolerance_days,
+            )
+            pending = await fetch_pending(
+                omie_client,
+                omie_conta_id=omie_conta_id,
+                reference_month=reference_month,
+            )
+    finally:
+        # Garantia extra de fechamento se o contexto async falhou antes do __aexit__.
+        await omie_client.aclose()
+
+    omie_movements = deduplicate_by_id([*realized, *pending])
+    log.info(
+        "reconciliation_omie_fetched",
+        session_id=str(session_id),
+        realized=len(realized),
+        pending=len(pending),
+        deduped=len(omie_movements),
+    )
+
+    # 3. Match — função pura, sem I/O.
+    result = match(
+        file_entries_for_matcher,
+        omie_movements,
+        tolerance_days=tolerance_days,
+    )
+    log.info(
+        "reconciliation_matched",
+        session_id=str(session_id),
+        total_file=len(file_entries_for_matcher),
+        matched=len(result.matches),
+        unmatched_omie=len(result.unmatched_omie_indices),
+    )
+
+    # 4. Apply tudo em uma única transação: matches + omie_entries + anomalies + counters.
+    async with session_factory() as db, db.begin():
+        repo = ReconciliationRepository(db)
+
+        match_pairs_uuid = [(UUID(file_id), omie_id) for file_id, omie_id in result.matches]
+        await repo.apply_matches(match_pairs_uuid)
+
+        unmatched_omie = [omie_movements[idx] for idx in result.unmatched_omie_indices]
+        omie_entries = [
+            ReconciliationOmieEntry(
+                session_id=session_id,
+                omie_lancamento_id=mov.omie_id,
+                transaction_date=mov.transaction_date,
+                omie_status=mov.status,
+            )
+            for mov in unmatched_omie
+        ]
+        await repo.add_omie_entries(omie_entries)
+
+        # Re-load file_entries unmatched (com IDs) na MESMA sessão. Não dá pra
+        # reusar os objetos do passo 1 (sessão fechada). Query só pelos que
+        # ficaram `sem_omie` após o `apply_matches`.
+        unmatched_file_entries = await _load_unmatched_file_entries(db, session_id)
+        anomaly_count = await create_structural_anomalies(
+            db,
+            session_id=session_id,
+            unmatched_file_entries=unmatched_file_entries,
+            persisted_omie_entries=omie_entries,
+        )
+
+        total = len(file_entries_for_matcher)
+        conciliated = len(match_pairs_uuid)
+        sem_omie = total - conciliated
+        omie_sem_arquivo = len(unmatched_omie)
+        await repo.update_session_after_matching(
+            session_id,
+            total_file_entries=total,
+            conciliated_count=conciliated,
+            sem_omie_count=sem_omie,
+            omie_sem_arquivo_count=omie_sem_arquivo,
+            anomaly_count=anomaly_count,
+        )
+
+    log.info(
+        "reconciliation_session_reviewing",
+        session_id=str(session_id),
+        conciliated=conciliated,
+        sem_omie=sem_omie,
+        omie_sem_arquivo=omie_sem_arquivo,
+        anomaly_count=anomaly_count,
+    )
+
+
+async def _load_unmatched_file_entries(
+    db: AsyncSession,
+    session_id: UUID,
+) -> list[Any]:
+    """Carrega file_entries com `situation='sem_omie'` da sessão.
+
+    Uma query simples — usado dentro do bloco transacional do worker. Tipo
+    de retorno é `list[ReconciliationFileEntry]`, mas usamos `Any` na
+    assinatura para evitar import de tipo no topo do módulo (poderia ser
+    `from __future__` mas o anomalies module já tipa).
+    """
+    from sqlalchemy import select
+
+    from app.db.models import ReconciliationFileEntry
+
+    rows = await db.execute(
+        select(ReconciliationFileEntry).where(
+            ReconciliationFileEntry.session_id == session_id,
+            ReconciliationFileEntry.situation == FileEntrySituation.SEM_OMIE.value,
+        )
+    )
+    return list(rows.scalars().all())
+
+
+async def _safe_mark_error(
+    session_id: UUID,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_message: str,
+) -> None:
+    """Marca a sessão como `error` em uma transação SEPARADA.
+
+    Best-effort: se este UPDATE também falhar (ex: Postgres caiu), só logamos.
+    A sessão fica em `processing` indefinidamente e o front mostra "ainda
+    processando". Não há `error_message` recovery automático — alguém
+    precisa rodar uma migration manual depois (cenário extremamente raro,
+    aceitável para o MVP).
+    """
+    try:
+        async with session_factory() as db, db.begin():
+            repo = ReconciliationRepository(db)
+            await repo.mark_session_error(session_id, user_message=user_message)
+    except Exception:
+        log.exception("reconciliation_mark_error_failed", session_id=str(session_id))
+
+
+def _get_settings_singleton() -> Settings:
+    """Lazy import para evitar circular: `app.core.config` é leve mas vamos
+    seguir o padrão do resto do projeto (lru_cache singleton).
+    """
+    from app.core.config import get_settings
+
+    return get_settings()
+
+
+def _get_session_factory_singleton() -> async_sessionmaker[AsyncSession]:
+    """Idem — lazy import."""
+    from app.db.session import get_session_factory
+
+    return get_session_factory()
+
+
+# Aliasing exposto para o ARQ — `WorkerSettings.functions = [run_reconciliation_processing]`.
+__all__ = ["run_reconciliation_processing"]

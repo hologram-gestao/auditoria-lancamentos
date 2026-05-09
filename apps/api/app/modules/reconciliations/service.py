@@ -1,8 +1,8 @@
 """Lógica de negócio do módulo de conciliações.
 
-S8 (BACK 6.2): verificação de duplicata pré-criação de sessão (Doc §11.3 V3).
-O front chama esta rota antes de fazer o POST de criação para avisar o
-analista cedo, sem precisar enfrentar o 409 do upload real.
+S8 (BACK 6.2): verificação de duplicata pré-criação de sessão.
+S10 (BACK 8.1 + 8.6): criação atômica da sessão + entries (criptografando
+descrições) e leitura do status para o polling.
 """
 
 from __future__ import annotations
@@ -10,8 +10,23 @@ from __future__ import annotations
 from datetime import date
 from uuid import UUID
 
+from pydantic import SecretStr
+from sqlalchemy.exc import IntegrityError
+
+from app.core.crypto import encrypt
+from app.core.exceptions import DuplicateFileError, NotFoundError
 from app.core.logging import get_logger
+from app.db.models import (
+    FileEntrySituation,
+    ReconciliationFileEntry,
+    ReconciliationSession,
+    ReconciliationStatus,
+)
 from app.modules.reconciliations.repository import ReconciliationRepository
+from app.modules.reconciliations.schemas import (
+    CreateReconciliationRequest,
+    SessionStatusPayload,
+)
 
 logger = get_logger(__name__)
 
@@ -21,6 +36,10 @@ class ReconciliationService:
 
     def __init__(self, repository: ReconciliationRepository) -> None:
         self._repo = repository
+
+    # ------------------------------------------------------------------
+    # BACK 6.2 — verificação de duplicata
+    # ------------------------------------------------------------------
 
     async def check_duplicate(
         self,
@@ -53,3 +72,108 @@ class ReconciliationService:
             duplicate=duplicate,
         )
         return duplicate
+
+    # ------------------------------------------------------------------
+    # BACK 8.1 — criação atômica da sessão
+    # ------------------------------------------------------------------
+
+    async def create_session_with_entries(
+        self,
+        *,
+        request: CreateReconciliationRequest,
+        created_by: UUID,
+        encryption_key: SecretStr,
+    ) -> UUID:
+        """Cria sessão `status='processing'` + file_entries criptografando
+        cada `description` com IV próprio.
+
+        Idempotência: se a UNIQUE
+        `(client_id, omie_conta_id, reference_month, file_hash)` for violada
+        (corrida com outro request), o `IntegrityError` vira `DuplicateFileError`
+        (HTTP 409, code `DUPLICATE_FILE`). O front já fez o check otimista via
+        `/check-duplicate`, mas a janela entre o GET e o POST permite race —
+        cobrir aqui.
+
+        Args:
+            request: payload validado do front (statement do parsing + meta).
+            created_by: UUID do usuário autenticado (vem da dependency).
+            encryption_key: `OMIE_ENCRYPTION_KEY` em SecretStr — passamos
+                explicitamente em vez de pegar de Settings dentro do service
+                pra facilitar teste e deixar o fluxo de credencial mais óbvio
+                (mesma regra que `omie_factory`).
+
+        Returns:
+            UUID da sessão criada — caller usa pra enfileirar o job.
+        """
+        hex_key = encryption_key.get_secret_value()
+        statement = request.statement
+
+        session_obj = ReconciliationSession(
+            client_id=request.client_id,
+            created_by=created_by,
+            omie_conta_id=request.omie_conta_id,
+            reference_month=request.reference_month,
+            date_tolerance_days=request.date_tolerance_days,
+            file_hash=request.file_hash,
+            status=ReconciliationStatus.PROCESSING.value,
+        )
+
+        entries: list[ReconciliationFileEntry] = []
+        for tx in statement.transactions:
+            ct, iv = encrypt(tx.description, hex_key)
+            entries.append(
+                ReconciliationFileEntry(
+                    transaction_date=tx.date,
+                    description_encrypted=ct,
+                    description_iv=iv,
+                    amount=tx.amount,
+                    balance=tx.balance,
+                    situation=FileEntrySituation.SEM_OMIE.value,
+                )
+            )
+
+        try:
+            await self._repo.add_session_with_entries(session_obj, entries)
+        except IntegrityError as exc:
+            # CLAUDE.md §5.8: UNIQUE violation = duplicata.
+            if "uq_recon_sessions_idempotency" in str(exc.orig):
+                raise DuplicateFileError(
+                    "Sessão duplicada para a tupla "
+                    f"(client_id={request.client_id}, conta={request.omie_conta_id}, "
+                    f"mes={request.reference_month}, hash={request.file_hash[:8]})",
+                ) from exc
+            # Outras violações de UNIQUE/FK/etc: relança — vira 500 INTERNAL.
+            raise
+
+        logger.info(
+            "reconciliation_session_created",
+            session_id=str(session_obj.id),
+            client_id=str(request.client_id),
+            total_file_entries=len(entries),
+            month=request.reference_month.isoformat(),
+            tolerance_days=request.date_tolerance_days,
+        )
+        return session_obj.id
+
+    # ------------------------------------------------------------------
+    # BACK 8.6 — leitura para polling
+    # ------------------------------------------------------------------
+
+    async def get_session_status(self, session_id: UUID) -> SessionStatusPayload:
+        """Retorna o estado atual da sessão para o polling do front.
+
+        404 se sessão não existe. RBAC é responsabilidade do caller — esta
+        função assume que `require_client_access` já validou.
+        """
+        session_obj = await self._repo.get_status_view(session_id)
+        if session_obj is None:
+            raise NotFoundError("Sessão de conciliação não encontrada.")
+        return SessionStatusPayload(
+            session_id=session_obj.id,
+            status=session_obj.status,
+            conciliated_count=session_obj.conciliated_count,
+            sem_omie_count=session_obj.sem_omie_count,
+            omie_sem_arquivo_count=session_obj.omie_sem_arquivo_count,
+            anomaly_count=session_obj.anomaly_count,
+            error_message=session_obj.error_message,
+        )

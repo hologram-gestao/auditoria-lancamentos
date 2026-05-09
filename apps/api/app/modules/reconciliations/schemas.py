@@ -2,17 +2,31 @@
 
 S8 (BACK 6.2): response do check-duplicate.
 S9 (BACK 7.1): response do parsing IA.
+S10 (BACK 8.1 + 8.6): payload de criação de sessão e response do polling.
 
 Convenção de envelope (CLAUDE.md §6): respostas de sucesso vão dentro de
-`{"data": {...}}` para que o front trate todas as rotas com o mesmo
-desempacotador.
+`{"data": {...}}`.
+
+Memória `feedback_pydantic_strict_input_lenient_output`: requests usam
+validação rígida (UUID, regex, ge/le); responses usam tipos simples (str)
+para evitar derrubar listagens com registros legados.
 """
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+import re
+from datetime import date as _date
+from decimal import Decimal
+from typing import Annotated, Literal
+from uuid import UUID
 
-from app.integrations.anthropic.schemas import ExtractedStatement
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.integrations.anthropic.schemas import ExtractedStatement, ExtractedTransaction
+
+# ----------------------------------------------------------------------
+# S8 — check-duplicate
+# ----------------------------------------------------------------------
 
 
 class DuplicateCheckPayload(BaseModel):
@@ -27,13 +41,119 @@ class CheckDuplicateResponse(BaseModel):
     data: DuplicateCheckPayload
 
 
+# ----------------------------------------------------------------------
+# S9 — parse
+# ----------------------------------------------------------------------
+
+
 class ParseResponse(BaseModel):
     """Response de POST /api/v1/reconciliations/parse.
 
     Reusa o `ExtractedStatement` do módulo de integração — o shape exposto
-    para o front é exatamente o que veio do tool use, sem renomeação. Se
-    quisermos divergir entre contrato externo e interno depois, é só
-    introduzir um adapter aqui.
+    para o front é exatamente o que veio do tool use, sem renomeação.
     """
 
     data: ExtractedStatement
+
+
+# ----------------------------------------------------------------------
+# S10 — POST /reconciliations
+# ----------------------------------------------------------------------
+
+
+_HASH_PATTERN = re.compile(r"^[a-fA-F0-9]{64}$")
+
+
+class ReconciliationStatementInput(BaseModel):
+    """Statement vindo do parsing (S9), revalidado no servidor.
+
+    Reusa `ExtractedStatement` mas garantindo que `transactions` não esteja
+    vazio (o constraint já existe no schema da Anthropic, mas `min_length=1`
+    aqui torna explícito o contrato do POST).
+    """
+
+    bank_name: str = Field(min_length=1, max_length=200)
+    account_type: Literal["checking", "credit_card"]
+    period_start: _date
+    period_end: _date
+    opening_balance: Decimal
+    closing_balance: Decimal
+    transactions: list[ExtractedTransaction] = Field(min_length=1)
+
+    model_config = ConfigDict(strict=False)
+
+
+class CreateReconciliationRequest(BaseModel):
+    """Body do POST /api/v1/reconciliations.
+
+    O front envia o ParsedStatement (output do S9) + a meta da conciliação
+    (qual cliente, qual conta Omie, mês de referência, hash do arquivo,
+    tolerância). Nada do arquivo original — segue CLAUDE.md §3.10 (arquivo
+    nunca persiste).
+    """
+
+    client_id: UUID
+    omie_conta_id: int = Field(ge=1, description="nCodCC do Omie.")
+    reference_month: _date = Field(
+        description=(
+            "1º dia do mês de referência. O front pode mandar 'YYYY-MM-01' "
+            "ou um Date completo — o validator normaliza pra dia 1."
+        ),
+    )
+    date_tolerance_days: Annotated[int, Field(ge=1, le=7)] = 3
+    file_hash: str = Field(description="SHA-256 hex (64 chars).")
+    statement: ReconciliationStatementInput
+
+    @field_validator("file_hash", mode="after")
+    @classmethod
+    def _normalize_hash(cls, v: str) -> str:
+        if not _HASH_PATTERN.match(v):
+            raise ValueError("file_hash precisa ser SHA-256 em hexadecimal (64 caracteres).")
+        return v.lower()
+
+    @field_validator("reference_month", mode="after")
+    @classmethod
+    def _normalize_to_first_day(cls, v: _date) -> _date:
+        # `reference_month` é Date no DB mas semanticamente é "mês". Normaliza
+        # qualquer data → dia 1, evitando duplicatas por divergência de dia.
+        return v.replace(day=1)
+
+
+class CreateReconciliationPayload(BaseModel):
+    """Conteúdo do envelope da criação."""
+
+    session_id: UUID
+    status: Literal["processing"]
+
+
+class CreateReconciliationResponse(BaseModel):
+    """Response do POST /api/v1/reconciliations (HTTP 201)."""
+
+    data: CreateReconciliationPayload
+
+
+# ----------------------------------------------------------------------
+# S10 — GET /reconciliations/{id}/status
+# ----------------------------------------------------------------------
+
+
+class SessionStatusPayload(BaseModel):
+    """Conteúdo do envelope do polling.
+
+    Usa `str` para o status em vez de Literal para sobreviver a estados
+    legados (memória `feedback_pydantic_strict_input_lenient_output`).
+    """
+
+    session_id: UUID
+    status: str
+    conciliated_count: int
+    sem_omie_count: int
+    omie_sem_arquivo_count: int
+    anomaly_count: int
+    error_message: str | None = None
+
+
+class SessionStatusResponse(BaseModel):
+    """Response do GET /api/v1/reconciliations/{id}/status."""
+
+    data: SessionStatusPayload
