@@ -99,12 +99,17 @@ export function ProcessingScreen({ clientId, sessionId }: ProcessingScreenProps)
 
   // Redirect automático quando processamento termina com sucesso. `replace`
   // remove a tela de processando do histórico do navegador.
+  //
+  // TODO(S11): a rota canônica é `/conciliacao/{sessionId}` (tela de revisão),
+  // mas a S11 ainda não foi entregue. Até lá, redirecionamos pra `/clientes/{id}`
+  // pra evitar 404 — o detalhe do cliente exibe a nova sessão no histórico de
+  // conciliações (S7).
   useEffect(() => {
     const status = statusQuery.data?.status;
     if (status === 'reviewing' || status === 'done') {
-      router.replace(`/conciliacao/${sessionId}`);
+      router.replace(`/clientes/${clientId}`);
     }
-  }, [statusQuery.data?.status, router, sessionId]);
+  }, [statusQuery.data?.status, router, clientId]);
 
   // Toast informativo em erro de fetch (rede caiu, 5xx, etc). NÃO desmonta
   // a tela — o último `data` segue válido. Reset da flag quando o próximo

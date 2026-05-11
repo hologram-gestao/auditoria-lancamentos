@@ -20,6 +20,7 @@ from pydantic import SecretStr
 
 from app.core.crypto import decrypt
 from app.integrations.omie.client import OmieClient, OmieCredentials
+from app.integrations.omie.mock_client import FAKE_DEMO_KEY_PREFIX, MockOmieClient
 
 if TYPE_CHECKING:
     from app.core.config import Settings
@@ -55,4 +56,13 @@ def build_omie_client(
         app_key=SecretStr(app_key),
         app_secret=SecretStr(app_secret),
     )
+
+    # Heurística de cliente-demo: credenciais geradas por `seed_demo_client.py`
+    # começam com `FAKE_DEMO_OMIE_`. Esse prefixo é improvável em key real e o
+    # Omie de produção nunca o aceitaria — usá-lo como flag implícita evita
+    # adicionar coluna/migration no DB e mantém o seed como a única fonte de
+    # ativação. NUNCA usar prefixo similar em credencial real.
+    if app_key.startswith(FAKE_DEMO_KEY_PREFIX):
+        return MockOmieClient(creds, settings)
+
     return OmieClient(creds, settings, http_client=http_client)

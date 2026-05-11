@@ -98,8 +98,9 @@ async def upsert_demo_client(session: AsyncSession, admin: User) -> tuple[Client
     if existing is not None:
         return existing, False
 
-    key_ct, key_iv = encrypt(DEMO_FAKE_KEY, settings.omie_encryption_key)
-    secret_ct, secret_iv = encrypt(DEMO_FAKE_SECRET, settings.omie_encryption_key)
+    hex_key = settings.OMIE_ENCRYPTION_KEY.get_secret_value()
+    key_ct, key_iv = encrypt(DEMO_FAKE_KEY, hex_key)
+    secret_ct, secret_iv = encrypt(DEMO_FAKE_SECRET, hex_key)
 
     client = Client(
         name=DEMO_CLIENT_NAME,
