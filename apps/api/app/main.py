@@ -8,6 +8,7 @@ S3+: rotas de autenticação, clientes, conciliação, etc.
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from uuid import uuid4
@@ -28,9 +29,13 @@ from app.core.exceptions import AppError, ErrorCode, RateLimitedError, to_error_
 from app.core.logging import get_logger, setup_logging
 from app.core.rate_limit import limiter
 from app.db.session import close_db, init_db
+from app.integrations.omie.lancamento_cache import OmieLancamentoCache
+from app.modules.anomaly_types import routes as anomaly_types_routes
 from app.modules.auth import routes as auth_routes
 from app.modules.clients import routes as clients_routes
+from app.modules.omie_data import routes as omie_data_routes
 from app.modules.reconciliations import routes as reconciliations_routes
+from app.modules.reconciliations.review import routes as review_routes
 from app.modules.users import routes as users_routes
 
 CORRELATION_HEADER = "X-Correlation-ID"
@@ -47,10 +52,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     setup_logging(settings)
     init_db(settings)
     log = get_logger(__name__)
+    # Cache L1+L2 de lançamentos Omie individuais (S11). Singleton no app —
+    # L1 in-memory por processo, L2 Redis compartilhado. Se REDIS_URL não
+    # responder, o cache degrada para L1-only (silencioso, ver
+    # `OmieLancamentoCache.populate_from_extrato`).
+    redis_client = None
+    try:
+        from redis.asyncio import from_url as redis_from_url
+
+        redis_client = redis_from_url(settings.REDIS_URL, decode_responses=True)  # type: ignore[no-untyped-call]
+    except Exception as exc:
+        log.warning("redis_init_failed_falling_back_to_l1", error=type(exc).__name__)
+    app.state.omie_lancamento_cache = OmieLancamentoCache(redis=redis_client)
     log.info("app_started", version=__version__)
     try:
         yield
     finally:
+        if redis_client is not None:
+            with contextlib.suppress(Exception):
+                await redis_client.aclose()
         await close_db()
         log.info("app_shutdown")
 
@@ -177,6 +197,13 @@ def create_app() -> FastAPI:
     app.include_router(users_routes.router)
     app.include_router(clients_routes.router)
     app.include_router(reconciliations_routes.router)
+    app.include_router(review_routes.router)
+    app.include_router(omie_data_routes.router)
+    app.include_router(anomaly_types_routes.router)
+
+    # Garante que o atributo existe mesmo antes do lifespan rodar
+    # (alguns testes substituem `dependency_overrides` sem subir lifespan).
+    app.state.omie_lancamento_cache = OmieLancamentoCache(redis=None)
 
     @app.get("/health", tags=["system"])
     async def health() -> dict[str, str]:
