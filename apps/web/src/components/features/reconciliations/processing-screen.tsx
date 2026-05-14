@@ -6,9 +6,9 @@
  * Faz polling em `GET /api/v1/reconciliations/{id}/status` (cadência 3s,
  * configurada em `useSessionStatus`) e renderiza o ciclo de vida da sessão
  * em 4 steps visuais. Quando a sessão sai do `processing`, transita para:
- *   - `reviewing`/`done` → `router.replace('/conciliacao/{id}')` (tela de
- *     revisão é entregável de S11; até lá a navegação resulta em 404,
- *     comportamento esperado nesta sessão).
+ *   - `reviewing`/`done` →
+ *     `router.replace('/clientes/{clientId}/conciliacao/{sessionId}')`
+ *     (tela de revisão entregue em S11).
  *   - `error` → renderiza alert vermelho com a `error_message` da sessão
  *     e CTAs para voltar ao formulário ou ao detalhe do cliente.
  *
@@ -98,18 +98,15 @@ export function ProcessingScreen({ clientId, sessionId }: ProcessingScreenProps)
   }, []);
 
   // Redirect automático quando processamento termina com sucesso. `replace`
-  // remove a tela de processando do histórico do navegador.
-  //
-  // TODO(S11): a rota canônica é `/conciliacao/{sessionId}` (tela de revisão),
-  // mas a S11 ainda não foi entregue. Até lá, redirecionamos pra `/clientes/{id}`
-  // pra evitar 404 — o detalhe do cliente exibe a nova sessão no histórico de
-  // conciliações (S7).
+  // remove a tela de processando do histórico do navegador — pitfall §2 do
+  // briefing da S10 (sem isso, o botão "voltar" voltaria pra cá com polling
+  // de uma sessão já concluída).
   useEffect(() => {
     const status = statusQuery.data?.status;
     if (status === 'reviewing' || status === 'done') {
-      router.replace(`/clientes/${clientId}`);
+      router.replace(`/clientes/${clientId}/conciliacao/${sessionId}`);
     }
-  }, [statusQuery.data?.status, router, clientId]);
+  }, [statusQuery.data?.status, router, clientId, sessionId]);
 
   // Toast informativo em erro de fetch (rede caiu, 5xx, etc). NÃO desmonta
   // a tela — o último `data` segue válido. Reset da flag quando o próximo

@@ -17,19 +17,51 @@
  *   quando `status !== 'processing'` evita continuar o polling depois que
  *   a sessão entra em `reviewing`/`done`/`error`.
  */
-import { useMutation, useQuery, type UseQueryOptions } from '@tanstack/react-query';
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type UseQueryOptions,
+} from '@tanstack/react-query';
 
 import {
   checkDuplicate,
+  createAnomaly,
   createReconciliation,
+  getOmieLancamentos,
   getSessionStatus,
+  listAnomalies,
+  listAnomalyTypes,
+  listAvailableOmieEntries,
+  listFileEntries,
+  listOmieEntries,
   parseStatement,
+  patchAnomaly,
+  patchFileEntry,
+  patchOmieEntry,
+  type AnomalyItem,
+  type AnomalyListResult,
+  type AnomalyTypeItem,
+  type AvailableOmieEntry,
   type CheckDuplicateParams,
   type CheckDuplicateResult,
+  type CreateAnomalyPayload,
   type CreateReconciliationPayload,
   type CreateReconciliationResult,
+  type FileEntryItem,
+  type FileEntryListResult,
+  type ListAnomaliesParams,
+  type ListFileEntriesParams,
+  type ListOmieEntriesParams,
+  type OmieEntryItem,
+  type OmieEntryListResult,
+  type OmieLancamentoItem,
   type ParsedStatement,
   type ParseStatementParams,
+  type PatchAnomalyPayload,
+  type PatchFileEntryPayload,
+  type PatchOmieEntryPayload,
   type SessionStatusResult,
 } from '@/lib/api/reconciliations';
 
@@ -101,4 +133,194 @@ export function useSessionStatus(sessionId: string, options: UseSessionStatusOpt
   };
 
   return useQuery(queryOptions);
+}
+
+// ----------------------------------------------------------------------
+// S11 — Tela de Revisão
+// ----------------------------------------------------------------------
+
+/**
+ * Query keys da revisão (todas escopadas por `sessionId` pra invalidações
+ * cirúrgicas). Convenção:
+ *   - `['review', sessionId, 'file-entries', params]` — listagem paginada.
+ *   - `['review', sessionId, 'omie-entries', params]`.
+ *   - `['review', sessionId, 'anomalies', params]`.
+ *   - `['review', sessionId, 'available-omie', search]` — modal Trocar.
+ *   - `['review', sessionId, 'omie-lancamentos', sortedIds]` — lookup batched.
+ *   - `['anomaly-types']` — catálogo global, raramente muda.
+ *
+ * Invalidações:
+ *   - PATCH file-entry: invalida file-entries + status (contadores).
+ *   - PATCH omie-entry: invalida omie-entries (status não muda — back §9.6).
+ *   - POST/PATCH anomaly: invalida anomalies + status.
+ */
+export const reviewKeys = {
+  all: (sessionId: string) => ['review', sessionId] as const,
+  fileEntries: (sessionId: string, params: Omit<ListFileEntriesParams, 'sessionId'>) =>
+    ['review', sessionId, 'file-entries', params] as const,
+  omieEntries: (sessionId: string, params: Omit<ListOmieEntriesParams, 'sessionId'>) =>
+    ['review', sessionId, 'omie-entries', params] as const,
+  anomalies: (sessionId: string, params: Omit<ListAnomaliesParams, 'sessionId'>) =>
+    ['review', sessionId, 'anomalies', params] as const,
+  availableOmie: (sessionId: string, search: string) =>
+    ['review', sessionId, 'available-omie', search] as const,
+  omieLancamentos: (sessionId: string, ids: number[]) =>
+    ['review', sessionId, 'omie-lancamentos', ids] as const,
+  anomalyTypes: () => ['anomaly-types'] as const,
+};
+
+const statusKey = (sessionId: string) => ['reconciliations', sessionId, 'status'] as const;
+
+// ---- File entries ----
+
+export function useFileEntries(
+  sessionId: string,
+  params: Omit<ListFileEntriesParams, 'sessionId'>,
+) {
+  return useQuery<FileEntryListResult>({
+    queryKey: reviewKeys.fileEntries(sessionId, params),
+    queryFn: () => listFileEntries({ sessionId, ...params }),
+    enabled: sessionId.length > 0,
+    placeholderData: keepPreviousData,
+  });
+}
+
+interface PatchFileEntryVars {
+  entryId: string;
+  payload: PatchFileEntryPayload;
+}
+
+export function usePatchFileEntry(sessionId: string) {
+  const qc = useQueryClient();
+  return useMutation<FileEntryItem, Error, PatchFileEntryVars>({
+    mutationFn: ({ entryId, payload }) => patchFileEntry(sessionId, entryId, payload),
+    onSuccess: () => {
+      // Invalida toda listagem paginada/filtrada (params variam por aba) e
+      // os contadores do header — back recalcula em situations changes.
+      void qc.invalidateQueries({
+        queryKey: ['review', sessionId, 'file-entries'],
+      });
+      void qc.invalidateQueries({ queryKey: statusKey(sessionId) });
+    },
+  });
+}
+
+// ---- Omie entries (divergências) ----
+
+export function useOmieEntries(
+  sessionId: string,
+  params: Omit<ListOmieEntriesParams, 'sessionId'>,
+) {
+  return useQuery<OmieEntryListResult>({
+    queryKey: reviewKeys.omieEntries(sessionId, params),
+    queryFn: () => listOmieEntries({ sessionId, ...params }),
+    enabled: sessionId.length > 0,
+    placeholderData: keepPreviousData,
+  });
+}
+
+interface PatchOmieEntryVars {
+  entryId: string;
+  payload: PatchOmieEntryPayload;
+}
+
+export function usePatchOmieEntry(sessionId: string) {
+  const qc = useQueryClient();
+  return useMutation<OmieEntryItem, Error, PatchOmieEntryVars>({
+    mutationFn: ({ entryId, payload }) => patchOmieEntry(sessionId, entryId, payload),
+    onSuccess: () => {
+      // omie_sem_arquivo_count é estático (back §9.6) — só invalida a aba.
+      void qc.invalidateQueries({
+        queryKey: ['review', sessionId, 'omie-entries'],
+      });
+    },
+  });
+}
+
+// ---- Anomalies ----
+
+export function useAnomalies(sessionId: string, params: Omit<ListAnomaliesParams, 'sessionId'>) {
+  return useQuery<AnomalyListResult>({
+    queryKey: reviewKeys.anomalies(sessionId, params),
+    queryFn: () => listAnomalies({ sessionId, ...params }),
+    enabled: sessionId.length > 0,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useCreateAnomaly(sessionId: string) {
+  const qc = useQueryClient();
+  return useMutation<AnomalyItem, Error, CreateAnomalyPayload>({
+    mutationFn: (payload) => createAnomaly(sessionId, payload),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['review', sessionId, 'anomalies'] });
+      void qc.invalidateQueries({ queryKey: statusKey(sessionId) });
+    },
+  });
+}
+
+interface PatchAnomalyVars {
+  anomalyId: string;
+  payload: PatchAnomalyPayload;
+}
+
+export function usePatchAnomaly(sessionId: string) {
+  const qc = useQueryClient();
+  return useMutation<AnomalyItem, Error, PatchAnomalyVars>({
+    mutationFn: ({ anomalyId, payload }) => patchAnomaly(sessionId, anomalyId, payload),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['review', sessionId, 'anomalies'] });
+      void qc.invalidateQueries({ queryKey: statusKey(sessionId) });
+    },
+  });
+}
+
+// ---- Modal Trocar: lista de candidatos Omie ----
+
+interface UseAvailableOmieEntriesOptions {
+  /** Quando false, não dispara o query — útil enquanto o modal está fechado. */
+  enabled?: boolean;
+}
+
+export function useAvailableOmieEntries(
+  sessionId: string,
+  search: string,
+  options: UseAvailableOmieEntriesOptions = {},
+) {
+  return useQuery<AvailableOmieEntry[]>({
+    queryKey: reviewKeys.availableOmie(sessionId, search),
+    queryFn: () => listAvailableOmieEntries(sessionId, search),
+    enabled: sessionId.length > 0 && (options.enabled ?? true),
+    placeholderData: keepPreviousData,
+  });
+}
+
+// ---- Lookup batched de supplier/category nas linhas conciliadas ----
+
+/**
+ * Ordena os IDs antes de virar query key — sem isso, [1,2] e [2,1] viram
+ * fetches separados. Cache do TanStack indexa por key serializada, então
+ * a estabilidade vem da ordenação.
+ */
+export function useOmieLancamentos(sessionId: string, omieIds: number[]) {
+  const sortedIds = [...omieIds].sort((a, b) => a - b);
+  return useQuery<OmieLancamentoItem[]>({
+    queryKey: reviewKeys.omieLancamentos(sessionId, sortedIds),
+    queryFn: () => getOmieLancamentos(sessionId, sortedIds),
+    enabled: sessionId.length > 0 && sortedIds.length > 0,
+    // Os dados Omie têm cache L2 de 2h no back; no front, 5 min é suficiente
+    // pra evitar tempestade de requests durante navegação entre páginas.
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ---- Catálogo de tipos de anomalia ----
+
+export function useAnomalyTypes() {
+  return useQuery<AnomalyTypeItem[]>({
+    queryKey: reviewKeys.anomalyTypes(),
+    queryFn: listAnomalyTypes,
+    // Catálogo praticamente estático — Infinity até refresh manual da página.
+    staleTime: Infinity,
+  });
 }

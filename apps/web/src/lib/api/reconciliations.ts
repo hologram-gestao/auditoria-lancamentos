@@ -20,7 +20,14 @@
  *     formatação para BRL é responsabilidade do consumidor (ver
  *     `lib/format.ts`).
  */
-import { apiGet, apiPost, apiPostMultipart } from './client';
+import { apiGet, apiPatch, apiPost, apiPostMultipart } from './client';
+
+export interface Pagination {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
 
 export interface CheckDuplicateParams {
   client_id: string;
@@ -174,4 +181,308 @@ export interface SessionStatusResult {
 
 export async function getSessionStatus(sessionId: string): Promise<SessionStatusResult> {
   return apiGet<SessionStatusResult>(`/api/v1/reconciliations/${sessionId}/status`);
+}
+
+// ----------------------------------------------------------------------
+// S11 — Tela de Revisão (BACK 9.1 a 9.10)
+// ----------------------------------------------------------------------
+
+/**
+ * Espelhos diretos dos schemas Pydantic em
+ * `apps/api/app/modules/reconciliations/review/schemas.py`.
+ *
+ * Convenções (memória `feedback_pydantic_strict_input_lenient_output`):
+ *   - Requests: union literais (Pydantic valida estrito → 422 se mudar).
+ *   - Responses: `string` em campos como `situation`, `severity`, `omie_status`
+ *     porque o back serializa em modo lenient. A UI faz mapping defensivo.
+ *   - Decimal vem como `string`. Use `formatBRL` no consumidor.
+ *   - Datas (`transaction_date`): `YYYY-MM-DD` (parse manual via `formatBRDate`).
+ *   - `created_at`: ISO 8601 com timezone (`datetime`).
+ */
+
+// ---- 9.1 / 9.3 — File entries ----
+
+export type FileEntrySituation = 'conciliado' | 'sem_omie' | 'ignorado';
+export type FileEntryUserAction = 'confirm' | 'flag' | 'ignore';
+
+export interface FileEntryItem {
+  id: string;
+  transaction_date: string;
+  description: string;
+  amount: string;
+  balance: string | null;
+  /** String lenient — pode ser `conciliado`, `sem_omie` ou `ignorado`. */
+  situation: string;
+  user_action: string | null;
+  user_note: string | null;
+  omie_lancamento_id: number | null;
+}
+
+export interface ListFileEntriesParams {
+  sessionId: string;
+  page?: number;
+  pageSize?: number;
+  situation?: 'all' | FileEntrySituation;
+  type?: 'all' | 'credit' | 'debit';
+  /** Search aplicado após descrypt no servidor. */
+  search?: string;
+}
+
+export interface FileEntryListResult {
+  data: FileEntryItem[];
+  pagination: Pagination;
+}
+
+function buildFileEntriesQuery(params: ListFileEntriesParams): string {
+  const sp = new URLSearchParams();
+  sp.set('page', String(params.page ?? 1));
+  sp.set('pageSize', String(params.pageSize ?? 20));
+  if (params.situation && params.situation !== 'all') sp.set('situation', params.situation);
+  if (params.type && params.type !== 'all') sp.set('type', params.type);
+  const search = params.search?.trim();
+  if (search) sp.set('search', search);
+  return sp.toString();
+}
+
+export async function listFileEntries(params: ListFileEntriesParams): Promise<FileEntryListResult> {
+  return apiGet<FileEntryListResult>(
+    `/api/v1/reconciliations/${params.sessionId}/file-entries?${buildFileEntriesQuery(params)}`,
+  );
+}
+
+/**
+ * Payload do PATCH /file-entries/{id}. Pydantic v2 distingue chave omitida
+ * de chave com valor `null` via `model_fields_set` — para limpar o vínculo
+ * Omie, mande `omie_lancamento_id: null` explicitamente; para "não tocar",
+ * omita a chave do payload (faça `delete payload.omie_lancamento_id` ou
+ * monte só os campos que mudaram).
+ */
+export interface PatchFileEntryPayload {
+  situation?: FileEntrySituation;
+  user_action?: FileEntryUserAction;
+  user_note?: string | null;
+  omie_lancamento_id?: number | null;
+}
+
+export async function patchFileEntry(
+  sessionId: string,
+  entryId: string,
+  payload: PatchFileEntryPayload,
+): Promise<FileEntryItem> {
+  return apiPatch<FileEntryItem>(
+    `/api/v1/reconciliations/${sessionId}/file-entries/${entryId}`,
+    payload,
+  );
+}
+
+// ---- 9.4 — Available Omie entries (para Trocar Modal) ----
+
+export interface AvailableOmieEntry {
+  omie_id: number;
+  transaction_date: string;
+  description: string;
+  supplier: string | null;
+  category: string | null;
+  amount: string;
+  status: string;
+}
+
+export async function listAvailableOmieEntries(
+  sessionId: string,
+  search?: string,
+): Promise<AvailableOmieEntry[]> {
+  const sp = new URLSearchParams();
+  const trimmed = search?.trim();
+  if (trimmed) sp.set('search', trimmed);
+  const qs = sp.toString();
+  const suffix = qs ? '?' + qs : '';
+  return apiGet<AvailableOmieEntry[]>(
+    `/api/v1/reconciliations/${sessionId}/available-omie-entries${suffix}`,
+  );
+}
+
+// ---- 9.5 / 9.6 — Omie entries (divergências) ----
+
+export type OmieEntryUserAction = 'flag' | 'ignore' | 'resolved';
+
+export interface OmieEntryItem {
+  id: string;
+  omie_lancamento_id: number;
+  transaction_date: string;
+  omie_status: string;
+  supplier: string | null;
+  category: string | null;
+  /** Pode ser null se o cache L2 não tem o lançamento. UI mostra '—'. */
+  amount: string | null;
+  user_action: string | null;
+  user_note: string | null;
+}
+
+export interface ListOmieEntriesParams {
+  sessionId: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface OmieEntryListResult {
+  data: OmieEntryItem[];
+  pagination: Pagination;
+}
+
+export async function listOmieEntries(params: ListOmieEntriesParams): Promise<OmieEntryListResult> {
+  const sp = new URLSearchParams();
+  sp.set('page', String(params.page ?? 1));
+  sp.set('pageSize', String(params.pageSize ?? 20));
+  return apiGet<OmieEntryListResult>(
+    `/api/v1/reconciliations/${params.sessionId}/omie-entries?${sp.toString()}`,
+  );
+}
+
+export interface PatchOmieEntryPayload {
+  user_action?: OmieEntryUserAction;
+  user_note?: string | null;
+}
+
+export async function patchOmieEntry(
+  sessionId: string,
+  entryId: string,
+  payload: PatchOmieEntryPayload,
+): Promise<OmieEntryItem> {
+  return apiPatch<OmieEntryItem>(
+    `/api/v1/reconciliations/${sessionId}/omie-entries/${entryId}`,
+    payload,
+  );
+}
+
+// ---- 9.7 / 9.8 / 9.9 — Anomalies ----
+
+export type AnomalySeverity = 'critical' | 'moderate' | 'info';
+export type AnomalyDetectedBy = 'ai' | 'manual';
+
+export interface AnomalyTypeRef {
+  id: string;
+  code: string;
+  name: string;
+  /** Lenient: `critical` / `moderate` / `info`. */
+  severity: string;
+}
+
+export interface AnomalyRelatedFileEntry {
+  id: string;
+  transaction_date: string;
+  description: string;
+  amount: string;
+}
+
+export interface AnomalyRelatedOmieEntry {
+  id: string;
+  transaction_date: string;
+  omie_lancamento_id: number;
+}
+
+export interface AnomalyItem {
+  id: string;
+  anomaly_type: AnomalyTypeRef;
+  /** Lenient: `ai` ou `manual`. */
+  detected_by: string;
+  resolved: boolean;
+  context: string | null;
+  resolution_note: string | null;
+  created_at: string;
+  related_file_entry: AnomalyRelatedFileEntry | null;
+  related_omie_entry: AnomalyRelatedOmieEntry | null;
+}
+
+export interface ListAnomaliesParams {
+  sessionId: string;
+  page?: number;
+  pageSize?: number;
+  resolved?: 'all' | 'true' | 'false';
+  severity?: 'all' | AnomalySeverity;
+}
+
+export interface AnomalyListResult {
+  data: AnomalyItem[];
+  pagination: Pagination;
+}
+
+export async function listAnomalies(params: ListAnomaliesParams): Promise<AnomalyListResult> {
+  const sp = new URLSearchParams();
+  sp.set('page', String(params.page ?? 1));
+  sp.set('pageSize', String(params.pageSize ?? 20));
+  if (params.resolved && params.resolved !== 'all') sp.set('resolved', params.resolved);
+  if (params.severity && params.severity !== 'all') sp.set('severity', params.severity);
+  return apiGet<AnomalyListResult>(
+    `/api/v1/reconciliations/${params.sessionId}/anomalies?${sp.toString()}`,
+  );
+}
+
+export interface CreateAnomalyPayload {
+  anomaly_type_id: string;
+  /** Mande UM dos dois (file_entry_id XOR omie_entry_id). Nunca os dois. */
+  file_entry_id?: string;
+  omie_entry_id?: string;
+  context?: string;
+}
+
+export async function createAnomaly(
+  sessionId: string,
+  payload: CreateAnomalyPayload,
+): Promise<AnomalyItem> {
+  return apiPost<AnomalyItem>(`/api/v1/reconciliations/${sessionId}/anomalies`, payload);
+}
+
+export interface PatchAnomalyPayload {
+  resolved: boolean;
+  /** Obrigatório com ≥ 10 chars quando `resolved=true`. */
+  resolution_note?: string;
+}
+
+export async function patchAnomaly(
+  sessionId: string,
+  anomalyId: string,
+  payload: PatchAnomalyPayload,
+): Promise<AnomalyItem> {
+  return apiPatch<AnomalyItem>(
+    `/api/v1/reconciliations/${sessionId}/anomalies/${anomalyId}`,
+    payload,
+  );
+}
+
+// ---- 9.2 — Omie lançamentos (lookup batched de supplier/category) ----
+
+export interface OmieLancamentoItem {
+  omie_id: number;
+  transaction_date: string;
+  description: string;
+  supplier: string | null;
+  category: string | null;
+  amount: string;
+  status: string;
+}
+
+export async function getOmieLancamentos(
+  sessionId: string,
+  ids: number[],
+): Promise<OmieLancamentoItem[]> {
+  if (ids.length === 0) return [];
+  const sp = new URLSearchParams();
+  sp.set('ids', ids.join(','));
+  sp.set('session_id', sessionId);
+  return apiGet<OmieLancamentoItem[]>(`/api/v1/omie/lancamentos?${sp.toString()}`);
+}
+
+// ---- 9.10 — Anomaly types catalog ----
+
+export interface AnomalyTypeItem {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  /** Lenient: `critical` / `moderate` / `info`. */
+  severity: string;
+}
+
+export async function listAnomalyTypes(): Promise<AnomalyTypeItem[]> {
+  return apiGet<AnomalyTypeItem[]>('/api/v1/anomaly-types');
 }
