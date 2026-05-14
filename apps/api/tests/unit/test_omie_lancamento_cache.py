@@ -67,7 +67,7 @@ class _StubOmieClient:
     async def listar_extrato(
         self,
         *,
-        n_cod_cc: int,  # noqa: ARG002
+        n_cod_cc: int,
         data_inicial: date,
         data_final: date,
     ) -> list[LancamentoExtrato]:

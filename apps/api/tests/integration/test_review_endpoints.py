@@ -32,7 +32,6 @@ from app.db.models import (
     AnomalyType,
     Client,
     ClientAssignment,
-    FileEntrySituation,
     ReconciliationAnomaly,
     ReconciliationFileEntry,
     ReconciliationOmieEntry,
@@ -51,7 +50,7 @@ MANAGER_B_EMAIL = "review-mgr-b@hologram.com.br"
 PLAIN_PASSWORD = "Senh@ForteParaTeste#1"
 
 FAKE_APP_KEY = "test-app-key-review"
-FAKE_APP_SECRET = "test-app-secret-review"  # noqa: S105
+FAKE_APP_SECRET = "test-app-secret-review"
 
 
 def _hex64(salt: str) -> str:
@@ -90,9 +89,7 @@ async def _seed_client(
     await session.flush()
     if manager is not None:
         session.add(
-            ClientAssignment(
-                client_id=client.id, user_id=manager.id, assigned_by=creator.id
-            )
+            ClientAssignment(client_id=client.id, user_id=manager.id, assigned_by=creator.id)
         )
         await session.flush()
     return client
@@ -195,9 +192,7 @@ async def _seed_anomaly_types(session: AsyncSession) -> dict[str, AnomalyType]:
         if existing is not None:
             types[code] = existing
             continue
-        atype = AnomalyType(
-            code=code, name=name, description=descr, severity=severity, active=True
-        )
+        atype = AnomalyType(code=code, name=name, description=descr, severity=severity, active=True)
         session.add(atype)
         await session.flush()
         types[code] = atype
@@ -244,9 +239,7 @@ class TestListFileEntries:
         )
         await _login(client_with_db, ADMIN_EMAIL)
 
-        resp = await client_with_db.get(
-            f"/api/v1/reconciliations/{sess.id}/file-entries"
-        )
+        resp = await client_with_db.get(f"/api/v1/reconciliations/{sess.id}/file-entries")
         assert resp.status_code == 200, resp.text
         body = resp.json()
         descriptions = sorted(item["description"] for item in body["data"])
@@ -315,9 +308,7 @@ class TestListFileEntries:
         sess = await _seed_session(db_session, client=cli, creator=admin)
         await _login(client_with_db, MANAGER_B_EMAIL)
 
-        resp = await client_with_db.get(
-            f"/api/v1/reconciliations/{sess.id}/file-entries"
-        )
+        resp = await client_with_db.get(f"/api/v1/reconciliations/{sess.id}/file-entries")
         assert resp.status_code == 404
 
 
@@ -482,9 +473,7 @@ class TestUpdateOmieEntry:
         admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
         cli = await _seed_client(db_session, creator=admin)
         sess = await _seed_session(db_session, client=cli, creator=admin)
-        entry = await _seed_omie_entry(
-            db_session, reconciliation=sess, omie_lancamento_id=80001
-        )
+        entry = await _seed_omie_entry(db_session, reconciliation=sess, omie_lancamento_id=80001)
         await _login(client_with_db, ADMIN_EMAIL)
 
         resp = await client_with_db.patch(
@@ -504,9 +493,7 @@ class TestUpdateOmieEntry:
         sess = await _seed_session(db_session, client=cli, creator=admin)
         sess.omie_sem_arquivo_count = 5
         await db_session.flush()
-        entry = await _seed_omie_entry(
-            db_session, reconciliation=sess, omie_lancamento_id=80002
-        )
+        entry = await _seed_omie_entry(db_session, reconciliation=sess, omie_lancamento_id=80002)
         await _login(client_with_db, ADMIN_EMAIL)
 
         await client_with_db.patch(
@@ -559,9 +546,7 @@ class TestAnomalies:
         assert sess.anomaly_count == 1
 
         # Lista
-        resp_list = await client_with_db.get(
-            f"/api/v1/reconciliations/{sess.id}/anomalies"
-        )
+        resp_list = await client_with_db.get(f"/api/v1/reconciliations/{sess.id}/anomalies")
         assert resp_list.status_code == 200
         rows = resp_list.json()["data"]
         assert len(rows) == 1
@@ -575,9 +560,7 @@ class TestAnomalies:
         fe = await _seed_file_entry(
             db_session, reconciliation=sess, description="x", amount=Decimal("-1.00")
         )
-        oe = await _seed_omie_entry(
-            db_session, reconciliation=sess, omie_lancamento_id=42_424
-        )
+        oe = await _seed_omie_entry(db_session, reconciliation=sess, omie_lancamento_id=42_424)
         types = await _seed_anomaly_types(db_session)
         await _login(client_with_db, ADMIN_EMAIL)
 
@@ -731,9 +714,7 @@ class TestAnomalyTypes:
             key=lambda s: {"critical": 1, "moderate": 2, "info": 3}.get(s, 99),
         )
 
-    async def test_unauthenticated_returns_401(
-        self, client_with_db: AsyncClient
-    ) -> None:
+    async def test_unauthenticated_returns_401(self, client_with_db: AsyncClient) -> None:
         resp = await client_with_db.get("/api/v1/anomaly-types")
         assert resp.status_code == 401
 
