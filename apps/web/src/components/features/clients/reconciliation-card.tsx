@@ -25,11 +25,12 @@ import { cn } from '@/lib/utils';
 import { ReconciliationStatusBadge } from './reconciliation-status-badge';
 
 interface ReconciliationCardProps {
+  clientId: string;
   session: ReconciliationSessionSummary;
   accountName: string;
 }
 
-export function ReconciliationCard({ session, accountName }: ReconciliationCardProps) {
+export function ReconciliationCard({ clientId, session, accountName }: ReconciliationCardProps) {
   const isProcessing = session.status === 'processing';
   const isError = session.status === 'error';
   const showCounters = session.status === 'done' || session.status === 'reviewing';
@@ -79,7 +80,7 @@ export function ReconciliationCard({ session, accountName }: ReconciliationCardP
         <span>Criada em {createdAtLabel}</span>
         {!isProcessing && (
           <Link
-            href={`/conciliacao/${session.id}`}
+            href={`/clientes/${clientId}/conciliacao/${session.id}`}
             className="text-primary inline-flex items-center gap-1 font-medium hover:underline"
           >
             Ver detalhes

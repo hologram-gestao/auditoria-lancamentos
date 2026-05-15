@@ -152,6 +152,7 @@ export function ReconciliationsSection({ clientId, accounts }: ReconciliationsSe
           sessions.map((session) => (
             <ReconciliationCard
               key={session.id}
+              clientId={clientId}
               session={session}
               accountName={
                 accountLookup.get(session.omie_conta_id) ?? `Conta #${session.omie_conta_id}`
