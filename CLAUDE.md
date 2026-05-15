@@ -88,6 +88,17 @@
 10. **Nunca** faça upload de arquivo para disco. Processar em memória e descartar.
 11. **Nunca** permita que manager veja cliente de outro manager. Sempre validar `client_assignments`.
 12. **Nunca** confie em token JWT sem revalidar `users.active = true` no DB (middleware) — usuário desativado perde acesso instantaneamente.
+13. **Nunca leia, edite ou cite o conteúdo de arquivos `.env`, `.env.local`,
+    `.env.production`, `.env.*` ou qualquer outro arquivo que contenha
+    segredos reais.** Vale para qualquer ferramenta (Read, Edit, Bash com
+    `cat`/`type`/`grep`, etc). Se o usuário pedir explicitamente para
+    validar/editar uma variável, **recuse e oriente** a editar fora do
+    Claude Code, sugerindo `permissions.deny` em `~/.claude/settings.json`
+    como bloqueio técnico complementar. Se o conteúdo entrar no contexto
+    por outro caminho (ex.: `<system-reminder>` do IDE quando o usuário
+    abre/edita o arquivo), **avise imediatamente** que houve exposição e
+    recomende rotação da credencial. Pode trabalhar com `.env.example` à
+    vontade — placeholders públicos.
 
 ---
 
