@@ -15,7 +15,7 @@ from datetime import date
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile, status
 
 from app.core.config import Settings, get_settings
 from app.core.dependencies import (
@@ -30,6 +30,7 @@ from app.core.exceptions import (
     NotFoundError,
     ValidationAppError,
 )
+from app.core.rate_limit import limiter, user_id_key_func
 from app.integrations.anthropic.client import AnthropicClient
 from app.modules.reconciliations.parse_service import ParseService
 from app.modules.reconciliations.processing.dispatcher import enqueue_processing
@@ -160,10 +161,13 @@ async def check_duplicate(
         "Extrai movimentações do arquivo via IA (Claude). Stateless: nada é "
         "persistido aqui — a sessão será criada por POST /reconciliations "
         "(S10) após o usuário confirmar o preview. RBAC: admin OU "
-        "manager-da-carteira; cliente inacessível devolve 404."
+        "manager-da-carteira; cliente inacessível devolve 404. "
+        "Rate limit: 10/min/usuário — controla custo Anthropic."
     ),
 )
+@limiter.limit("10/minute", key_func=user_id_key_func)
 async def parse_statement(
+    request: Request,
     user: ManagerOrAdminDep,
     db: DbSessionDep,
     settings: Annotated[Settings, Depends(get_settings)],
@@ -205,28 +209,32 @@ async def parse_statement(
         "enfileira o processamento async. RBAC: admin OU "
         "manager-da-carteira; cliente inacessível devolve 404. Idempotência "
         "garantida por UNIQUE (client_id, omie_conta_id, reference_month, "
-        "file_hash) — duplicata retorna 409 DUPLICATE_FILE."
+        "file_hash) — duplicata retorna 409 DUPLICATE_FILE. "
+        "Rate limit: 10/min/usuário — uma sessão = 1 job ARQ + várias "
+        "chamadas Omie."
     ),
 )
+@limiter.limit("10/minute", key_func=user_id_key_func)
 async def create_reconciliation(
+    request: Request,
     user: CurrentUserDep,
     db: DbSessionDep,
     service: ReconciliationServiceDep,
     settings: Annotated[Settings, Depends(get_settings)],
-    request: CreateReconciliationRequest,
+    payload: CreateReconciliationRequest,
 ) -> CreateReconciliationResponse:
     if user.role not in {"admin", "manager"}:
         raise NotFoundError(_CLIENT_NOT_FOUND_MSG)
 
     try:
-        await require_client_access(request.client_id, user, db)
+        await require_client_access(payload.client_id, user, db)
     except ClientNotAccessibleError as exc:
         # Mesma decisão dos outros endpoints (CLAUDE.md §3.11): manager fora
         # da carteira recebe 404, não 403.
         raise NotFoundError(_CLIENT_NOT_FOUND_MSG) from exc
 
     session_id = await service.create_session_with_entries(
-        request=request,
+        request=payload,
         created_by=UUID(user.id),
         encryption_key=settings.OMIE_ENCRYPTION_KEY,
         search_blind_index_key=settings.SEARCH_BLIND_INDEX_KEY,
