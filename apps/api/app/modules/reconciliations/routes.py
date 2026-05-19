@@ -15,7 +15,7 @@ from datetime import date
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile, status
 
 from app.core.config import Settings, get_settings
 from app.core.dependencies import (
@@ -168,6 +168,7 @@ async def check_duplicate(
 @limiter.limit("10/minute", key_func=user_id_key_func)
 async def parse_statement(
     request: Request,
+    response: Response,
     user: ManagerOrAdminDep,
     db: DbSessionDep,
     settings: Annotated[Settings, Depends(get_settings)],
@@ -217,6 +218,7 @@ async def parse_statement(
 @limiter.limit("10/minute", key_func=user_id_key_func)
 async def create_reconciliation(
     request: Request,
+    response: Response,
     user: CurrentUserDep,
     db: DbSessionDep,
     service: ReconciliationServiceDep,

@@ -30,7 +30,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 
 from app.core.dependencies import (
     AccessibleClientDep,
@@ -129,6 +129,7 @@ async def create_client(
 @limiter.limit("30/minute", key_func=user_id_key_func)
 async def test_connection(
     request: Request,
+    response: Response,
     payload: TestConnectionRequest,
     user: ManagerOrAdminDep,
     service: ClientServiceDep,
@@ -182,6 +183,7 @@ async def assign_client(
 @limiter.limit("30/minute", key_func=user_id_key_func)
 async def sync_accounts(
     request: Request,
+    response: Response,
     client: AccessibleClientDep,
     service: ClientServiceDep,
 ) -> ClientDetailResponse:
