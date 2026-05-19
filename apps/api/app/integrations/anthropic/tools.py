@@ -17,6 +17,10 @@ from typing import Any
 EXTRACT_MOVEMENTS_TOOL_NAME = "extract_movements"
 
 # Schema imutável — exposto como dict pra ser passado direto ao SDK.
+# `cache_control: ephemeral` (P1-008): tool definition é estável entre
+# chamadas; marcando como cacheável a Anthropic reusa o tokenization do
+# schema na janela de 5min (prompt caching). Reduz custo significativo no
+# padrão de muitas conciliações em sequência. Ver PLANO §6.2 #2.
 EXTRACT_MOVEMENTS_TOOL: dict[str, Any] = {
     "name": EXTRACT_MOVEMENTS_TOOL_NAME,
     "description": (
@@ -26,6 +30,7 @@ EXTRACT_MOVEMENTS_TOOL: dict[str, Any] = {
         "Datas no formato ISO 8601 (YYYY-MM-DD). Preserva a descrição original. "
         "Não inventa transações; não filtra nenhuma linha."
     ),
+    "cache_control": {"type": "ephemeral"},
     "input_schema": {
         "type": "object",
         "properties": {

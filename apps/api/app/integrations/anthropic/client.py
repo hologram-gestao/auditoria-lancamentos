@@ -224,13 +224,21 @@ class AnthropicClient:
     # ------------------------------------------------------------------
 
     def _build_system_blocks(self) -> list[dict[str, Any]]:
-        """System prompt como bloco — pronto para `cache_control` (S9.4 PLANO).
+        """System prompt como bloco com `cache_control: ephemeral` (P1-008).
 
-        Por ora não setamos `cache_control` ainda (deixa pra S10 quando
-        validamos custo real); manter a estrutura em lista facilita o
-        upgrade futuro sem mudança contratual.
+        O SYSTEM_PROMPT é imutável. Marcar como `ephemeral` ativa o prompt
+        caching da Anthropic — após a 1ª chamada, calls subsequentes na
+        janela de 5min reusam o cache do prompt sem reprocessar tokens.
+        Reduz custo em ~90% no padrão "muitas conciliações na mesma janela".
+        Ver: PLANO §6.2 #2.
         """
-        return [{"type": "text", "text": SYSTEM_PROMPT}]
+        return [
+            {
+                "type": "text",
+                "text": SYSTEM_PROMPT,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
 
     def _build_user_content(
         self,
