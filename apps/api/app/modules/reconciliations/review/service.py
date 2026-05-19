@@ -27,6 +27,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.crypto import decrypt, encrypt
 from app.core.exceptions import NotFoundError, ValidationAppError
 from app.core.logging import get_logger
+from app.core.search_index import compute_query_hmacs
 from app.db.models import (
     AnomalyDetectedBy,
     FileEntrySituation,
@@ -79,10 +80,15 @@ class ReviewService:
         *,
         cache: OmieLancamentoCache,
         encryption_key: SecretStr,
+        search_blind_index_key: SecretStr,
     ) -> None:
         self._repo = repository
         self._cache = cache
         self._hex_key = encryption_key.get_secret_value()
+        # Chave do blind index (S16) — usada só no caminho de search da
+        # listagem de file_entries. Mesma separação cripto: vazar uma não
+        # vaza a outra.
+        self._hex_blind_key = search_blind_index_key.get_secret_value()
         # Sessão "ativa" para correlação em logs de decrypt — cada método público
         # popula no início da operação. Service é instanciado por request via
         # FastAPI Depends, então não há contaminação entre requests.
@@ -107,27 +113,58 @@ class ReviewService:
         page: int,
         page_size: int,
     ) -> tuple[list[ListedFileEntry], PaginationMeta]:
-        """Lista entries com filtros + paginação Python.
+        """Lista entries com filtros + paginação.
 
-        Por que paginar em Python (e não SQL): o filtro `search` precisa
-        rodar APÓS decrypt da descrição — o resultado paginado depende do
-        conjunto pós-filtro. Sessões raramente passam de centenas de linhas
-        (Doc §12.2 limite 20MB → ~500 entries típicos), então é seguro.
+        Filtro `search` (S16): roda em SQL contra `description_search_hmac`
+        (blind index HMAC-SHA256 truncado). Descriptografia só ocorre nas
+        linhas pós-filtro. Termo sem tokens elegíveis (vazio, só pontuação
+        ou tokens curtos `< 3 chars`) retorna 0 resultados — consistente
+        com a UX ("buscar por 'de'" não faz sentido).
+
+        Limitações conhecidas do índice:
+            - Só casa tokens completos: "padar" NÃO encontra "Padaria".
+            - Sessões pré-S16 (`description_search_hmac IS NULL`) ficam
+              fora de qualquer filtro `search` — o LIKE contra NULL é NULL.
+              UI documenta isso ao usuário.
+
+        Paginação continua em Python: ordenada pelo repo (transaction_date,
+        id), descriptografamos, então cortamos a página. Decrypt da página
+        final é barato (≤ page_size linhas). Mover a paginação pra SQL
+        agora não traria ganho — o gargalo de decrypt fica isolado na
+        página corrente em qualquer cenário.
 
         Descrição e nota descriptografadas com IV próprio por linha. Linhas
         com payload corrompido aparecem com `description='[indecifrável]'`
         e nota em branco — falha graciosa em vez de derrubar a página.
         """
         self._current_session_id = session_id
+
+        search_hmacs: list[str] | None = None
+        if search is not None:
+            search_hmacs = compute_query_hmacs(search, self._hex_blind_key)
+            if not search_hmacs:
+                # Termo sem tokens elegíveis — short-circuit, sem ir ao DB.
+                pagination = PaginationMeta(
+                    page=page,
+                    page_size=page_size,
+                    total=0,
+                    total_pages=0,
+                )
+                return [], pagination
+
         rows = await self._repo.list_file_entries_all(
             session_id=session_id,
             situation=situation,
             type_filter=type_filter,
+            search_hmacs=search_hmacs,
         )
 
-        # Decrypt em memória
+        total = len(rows)
+        start = (page - 1) * page_size
+        page_rows = rows[start : start + page_size]
+
         decrypted: list[ListedFileEntry] = []
-        for row in rows:
+        for row in page_rows:
             description = self._decrypt_optional(row.description_encrypted, row.description_iv)
             user_note = self._decrypt_pair(row.user_note_encrypted, row.user_note_iv)
             decrypted.append(
@@ -144,18 +181,6 @@ class ReviewService:
                 )
             )
 
-        # Filtro `search` PÓS-decrypt
-        if search:
-            needle = search.strip().lower()
-            if needle:
-                decrypted = [
-                    item for item in decrypted if needle in (item.description or "").lower()
-                ]
-
-        # Paginação em Python (estável, ordenada pelo repo)
-        total = len(decrypted)
-        start = (page - 1) * page_size
-        page_items = decrypted[start : start + page_size]
         total_pages = (total + page_size - 1) // page_size if page_size else 0
         pagination = PaginationMeta(
             page=page,
@@ -163,7 +188,7 @@ class ReviewService:
             total=total,
             total_pages=total_pages,
         )
-        return page_items, pagination
+        return decrypted, pagination
 
     # ------------------------------------------------------------------
     # BACK 9.3 — Atualizar ação em linha do arquivo

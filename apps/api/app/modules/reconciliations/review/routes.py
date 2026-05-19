@@ -70,6 +70,7 @@ def _get_review_service(
         ReviewRepository(db),
         cache=cache,
         encryption_key=settings.OMIE_ENCRYPTION_KEY,
+        search_blind_index_key=settings.SEARCH_BLIND_INDEX_KEY,
     )
 
 

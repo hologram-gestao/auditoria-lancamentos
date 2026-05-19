@@ -28,6 +28,7 @@ def _make_service() -> ReviewService:
         MagicMock(),
         cache=MagicMock(),
         encryption_key=SecretStr(_FAKE_HEX_KEY),
+        search_blind_index_key=SecretStr(_FAKE_HEX_KEY),
     )
 
 

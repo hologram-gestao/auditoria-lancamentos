@@ -53,6 +53,8 @@ class TestRedactor:
             "set-cookie",
             "encryption_key",
             "OMIE_ENCRYPTION_KEY",
+            "SEARCH_BLIND_INDEX_KEY",
+            "search_blind_index_key",
         ],
     )
     def test_sensitive_keys_are_redacted(self, key: str) -> None:

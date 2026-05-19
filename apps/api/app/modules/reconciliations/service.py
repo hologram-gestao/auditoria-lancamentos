@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.crypto import encrypt
 from app.core.exceptions import DuplicateFileError, NotFoundError
 from app.core.logging import get_logger
+from app.core.search_index import compute_search_hmac
 from app.db.models import (
     FileEntrySituation,
     ReconciliationFileEntry,
@@ -84,6 +85,7 @@ class ReconciliationService:
         request: CreateReconciliationRequest,
         created_by: UUID,
         encryption_key: SecretStr,
+        search_blind_index_key: SecretStr,
     ) -> UUID:
         """Cria sessão `status='processing'` + file_entries criptografando
         cada `description` com IV próprio.
@@ -102,11 +104,16 @@ class ReconciliationService:
                 explicitamente em vez de pegar de Settings dentro do service
                 pra facilitar teste e deixar o fluxo de credencial mais óbvio
                 (mesma regra que `omie_factory`).
+            search_blind_index_key: `SEARCH_BLIND_INDEX_KEY` em SecretStr.
+                Usada para computar o índice de busca paralelo
+                (`description_search_hmac`) que viabiliza filtro `search`
+                em SQL na Tela de Revisão (S16).
 
         Returns:
             UUID da sessão criada — caller usa pra enfileirar o job.
         """
         hex_key = encryption_key.get_secret_value()
+        hex_blind_key = search_blind_index_key.get_secret_value()
         statement = request.statement
 
         session_obj = ReconciliationSession(
@@ -127,11 +134,17 @@ class ReconciliationService:
         entries: list[ReconciliationFileEntry] = []
         for tx in statement.transactions:
             ct, iv = encrypt(tx.description, hex_key)
+            # Blind index (S16) — gravado em paralelo à descrição criptografada.
+            # Pode ser None para descrições só com pontuação/whitespace ou
+            # tokens curtos — nesses casos a linha fica fora do filtro `search`,
+            # mesmo comportamento que sessões pré-S16 (ver migration b6f1c4d29e57).
+            search_hmac = compute_search_hmac(tx.description, hex_blind_key)
             entries.append(
                 ReconciliationFileEntry(
                     transaction_date=tx.date,
                     description_encrypted=ct,
                     description_iv=iv,
+                    description_search_hmac=search_hmac,
                     amount=tx.amount,
                     balance=tx.balance,
                     situation=FileEntrySituation.SEM_OMIE.value,

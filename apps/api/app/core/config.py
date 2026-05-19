@@ -71,6 +71,16 @@ class Settings(BaseSettings):
     JWT_SECRET: SecretStr = Field(
         ..., description="Segredo HMAC do JWT. Gere com `openssl rand -hex 32`."
     )
+    # Chave HMAC do blind index de busca em `description` (S16). NÃO reusar
+    # OMIE_ENCRYPTION_KEY — separação de domínios: comprometer um não dá
+    # vantagem no outro. Mesmo formato (32 bytes hex) por ergonomia operacional.
+    SEARCH_BLIND_INDEX_KEY: SecretStr = Field(
+        ...,
+        description=(
+            "Chave HMAC-SHA256 do blind index de search (64 chars hex). "
+            "Gere com `openssl rand -hex 32`. NÃO reusar OMIE_ENCRYPTION_KEY."
+        ),
+    )
     JWT_ACCESS_EXPIRE_MINUTES: int = 60
     JWT_REFRESH_EXPIRE_DAYS: int = 7
     BCRYPT_COST: int = Field(default=12, ge=10, le=15)
@@ -120,7 +130,7 @@ class Settings(BaseSettings):
     SENTRY_TRACES_SAMPLE_RATE: float = 0.1
 
     # ---------- Validators ----------
-    @field_validator("OMIE_ENCRYPTION_KEY", "JWT_SECRET")
+    @field_validator("OMIE_ENCRYPTION_KEY", "JWT_SECRET", "SEARCH_BLIND_INDEX_KEY")
     @classmethod
     def _validate_hex_key(cls, v: SecretStr) -> SecretStr:
         """Garante que a chave está em hex e tem 256 bits (64 chars)."""

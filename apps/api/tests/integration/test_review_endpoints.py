@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.crypto import decrypt, encrypt
+from app.core.search_index import compute_search_hmac
 from app.core.security import hash_password
 from app.db.models import (
     AnomalyDetectedBy,
@@ -132,14 +133,28 @@ async def _seed_file_entry(
     situation: str = "sem_omie",
     omie_lancamento_id: int | None = None,
     tx_date: date = date(2026, 4, 10),
+    skip_search_hmac: bool = False,
 ) -> ReconciliationFileEntry:
-    hex_key = get_settings().OMIE_ENCRYPTION_KEY.get_secret_value()
+    """Insere file_entry criptografando description e gravando blind index.
+
+    Por default popula `description_search_hmac` (S16) para refletir o
+    caminho de criação real. Testes específicos do path "sessão pré-S16"
+    passam `skip_search_hmac=True` para deixar a coluna NULL.
+    """
+    settings = get_settings()
+    hex_key = settings.OMIE_ENCRYPTION_KEY.get_secret_value()
     ct, iv = encrypt(description, hex_key)
+    if skip_search_hmac:
+        search_hmac: str | None = None
+    else:
+        hex_blind_key = settings.SEARCH_BLIND_INDEX_KEY.get_secret_value()
+        search_hmac = compute_search_hmac(description, hex_blind_key)
     entry = ReconciliationFileEntry(
         session_id=reconciliation.id,
         transaction_date=tx_date,
         description_encrypted=ct,
         description_iv=iv,
+        description_search_hmac=search_hmac,
         amount=amount,
         situation=situation,
         omie_lancamento_id=omie_lancamento_id,
@@ -246,9 +261,13 @@ class TestListFileEntries:
         assert descriptions == ["Pagamento Padaria", "Recebimento Cielo"]
         assert body["pagination"]["total"] == 2
 
-    async def test_filter_search_post_decrypt(
+    async def test_filter_search_uses_blind_index(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
+        """S16: filtro `search` casa via blind index (SQL), com acento/case
+        normalizados. As linhas seedadas com `_seed_file_entry` já incluem
+        `description_search_hmac`.
+        """
         admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
         cli = await _seed_client(db_session, creator=admin)
         sess = await _seed_session(db_session, client=cli, creator=admin)
@@ -266,6 +285,7 @@ class TestListFileEntries:
         )
         await _login(client_with_db, ADMIN_EMAIL)
 
+        # Caso happy: token completo bate.
         resp = await client_with_db.get(
             f"/api/v1/reconciliations/{sess.id}/file-entries",
             params={"search": "padaria"},
@@ -274,6 +294,82 @@ class TestListFileEntries:
         body = resp.json()
         assert body["pagination"]["total"] == 1
         assert body["data"][0]["description"] == "Pagamento Padaria"
+
+        # Insensível a case + acento.
+        resp_upper = await client_with_db.get(
+            f"/api/v1/reconciliations/{sess.id}/file-entries",
+            params={"search": "PADARIA"},
+        )
+        assert resp_upper.json()["pagination"]["total"] == 1
+
+    async def test_filter_search_token_below_min_length_returns_empty(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Termo de busca com apenas tokens < 3 chars devolve 0 — não vai ao DB.
+
+        Comportamento UX consistente: "buscar por 'de'" não faz sentido como
+        índice; UI pode evoluir para sinalizar isso ao usuário.
+        """
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin)
+        await _seed_file_entry(
+            db_session,
+            reconciliation=sess,
+            description="Pagamento de boleto",
+            amount=Decimal("-1.00"),
+        )
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.get(
+            f"/api/v1/reconciliations/{sess.id}/file-entries",
+            params={"search": "de"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["pagination"]["total"] == 0
+
+    async def test_filter_search_skips_legacy_rows_without_hmac(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """S16: linhas pré-migration (`description_search_hmac IS NULL`) ficam
+        fora do filtro `search`. LIKE contra NULL é NULL → falsy em WHERE.
+        Listagem sem `search` continua trazendo a linha normalmente.
+        """
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin)
+        # Linha "legada" — sem o HMAC populado.
+        await _seed_file_entry(
+            db_session,
+            reconciliation=sess,
+            description="Pagamento Antigo Padaria",
+            amount=Decimal("-1.00"),
+            skip_search_hmac=True,
+        )
+        # Linha nova — com HMAC.
+        await _seed_file_entry(
+            db_session,
+            reconciliation=sess,
+            description="Pagamento Novo Padaria",
+            amount=Decimal("-2.00"),
+        )
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        # Sem search: ambas aparecem.
+        resp_all = await client_with_db.get(
+            f"/api/v1/reconciliations/{sess.id}/file-entries",
+        )
+        assert resp_all.json()["pagination"]["total"] == 2
+
+        # Com search: só a linha nova.
+        resp_search = await client_with_db.get(
+            f"/api/v1/reconciliations/{sess.id}/file-entries",
+            params={"search": "padaria"},
+        )
+        assert resp_search.status_code == 200
+        body = resp_search.json()
+        assert body["pagination"]["total"] == 1
+        assert body["data"][0]["description"] == "Pagamento Novo Padaria"
 
     async def test_filter_type_credit_only(
         self, client_with_db: AsyncClient, db_session: AsyncSession
@@ -482,8 +578,9 @@ class TestUpdateFileEntry:
         admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
         cli = await _seed_client(db_session, creator=admin)
         sess = await _seed_session(db_session, client=cli, creator=admin)
-        # entry_a já tem o vínculo Omie 70404.
-        entry_a = await _seed_file_entry(
+        # entry_a já tem o vínculo Omie 70404 — basta persistir pra que o
+        # índice único dispare quando o entry_b tentar o mesmo Omie ID.
+        await _seed_file_entry(
             db_session,
             reconciliation=sess,
             description="A",
@@ -861,6 +958,7 @@ class TestAvailableOmieEntriesPeriod:
             ReviewRepository(db_session),
             cache=cache,
             encryption_key=SecretStr("0" * 64),  # 32 bytes hex — não usado neste path
+            search_blind_index_key=SecretStr("1" * 64),
         )
 
         await service.list_available_omie_entries(
@@ -900,6 +998,7 @@ class TestAvailableOmieEntriesPeriod:
             ReviewRepository(db_session),
             cache=cache,
             encryption_key=SecretStr("0" * 64),
+            search_blind_index_key=SecretStr("1" * 64),
         )
 
         await service.list_available_omie_entries(

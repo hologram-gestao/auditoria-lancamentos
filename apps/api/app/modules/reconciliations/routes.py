@@ -229,6 +229,7 @@ async def create_reconciliation(
         request=request,
         created_by=UUID(user.id),
         encryption_key=settings.OMIE_ENCRYPTION_KEY,
+        search_blind_index_key=settings.SEARCH_BLIND_INDEX_KEY,
     )
     # O commit oficial acontece no `DbSessionDep` ao final do request bem
     # sucedido (`get_db_session`). NÃO commitamos manualmente aqui: na prática,

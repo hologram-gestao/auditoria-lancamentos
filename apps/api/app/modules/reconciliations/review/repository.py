@@ -10,8 +10,9 @@ Cada método assume que o RBAC já foi validado pelo caller (rota) e atua
 apenas sobre persistência. Não loga nem retorna dados descriptografados.
 
 Decisões:
-    - Filtros de `search` em descrições criptografadas NÃO podem rodar no
-      SQL — caller faz pós-decrypt em Python.
+    - Filtro `search` roda em SQL contra `description_search_hmac` (blind
+      index S16). Sessões pré-migration (`description_search_hmac IS NULL`)
+      são naturalmente excluídas — `LIKE` contra NULL é NULL.
     - `_recompute_file_entry_counters` e `_recompute_anomaly_count` centralizam
       a lógica de COUNT pra evitar divergência entre 9.3 e 9.8/9.9.
 """
@@ -76,18 +77,22 @@ class ReviewRepository:
         session_id: UUID,
         situation: str | None,
         type_filter: str | None,
+        search_hmacs: list[str] | None = None,
     ) -> list[ReconciliationFileEntry]:
         """Carrega TODAS as linhas da sessão aplicando filtros SQL-safe.
 
         Filtros aplicados no SQL:
             - `situation` ∈ {conciliado, sem_omie, ignorado}.
             - `type_filter` ∈ {credit, debit} → amount > 0 ou amount < 0.
-
-        Filtro `search` NÃO entra aqui — descrição é criptografada, precisa
-        rodar PÓS-decrypt em Python.
+            - `search_hmacs`: blind index (S16). Cada HMAC vira um
+              `LIKE '% <hmac> %'` ANDado. Linhas com `description_search_hmac
+              IS NULL` (sessões pré-migration) saem da contagem porque LIKE
+              contra NULL é NULL.
 
         Resultados ordenados por `transaction_date asc, id asc` para
-        paginação Pythônica estável.
+        paginação estável. Service ainda pagina em Python — manter custo
+        de decrypt limitado à página final (não há ganho em mover a paginação
+        pro SQL agora que o filtro pesado roda lá).
         """
         stmt = select(ReconciliationFileEntry).where(
             ReconciliationFileEntry.session_id == session_id,
@@ -102,6 +107,15 @@ class ReviewRepository:
             stmt = stmt.where(ReconciliationFileEntry.amount > 0)
         elif type_filter == "debit":
             stmt = stmt.where(ReconciliationFileEntry.amount < 0)
+        if search_hmacs:
+            for hmac_token in search_hmacs:
+                # `% <hmac> %` casa apenas tokens completos — leading/trailing
+                # spaces foram gravados pelo `compute_search_hmac` justamente
+                # para isso. Bindparam protege contra SQL injection (não
+                # interpolamos diretamente).
+                stmt = stmt.where(
+                    ReconciliationFileEntry.description_search_hmac.like(f"% {hmac_token} %")
+                )
         stmt = stmt.order_by(
             asc(ReconciliationFileEntry.transaction_date),
             asc(ReconciliationFileEntry.id),

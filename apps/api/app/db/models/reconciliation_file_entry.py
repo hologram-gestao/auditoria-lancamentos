@@ -82,6 +82,15 @@ class ReconciliationFileEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     description_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
     description_iv: Mapped[str] = mapped_column(String(IV_HEX_LENGTH), nullable=False)
 
+    # Blind index do filtro `search` (S16). Tokens normalizados (lowercase
+    # sem acentos, >= 3 chars) aplicados em HMAC-SHA256 truncado em 16 chars
+    # hex, concatenados com espaços e cercados por leading/trailing space:
+    # " hash1 hash2 hash3 ". Permite SQL `LIKE '% hash %'` antes do decrypt
+    # — descriptografia só ocorre na página final. Ver `app/core/search_index.py`.
+    # Nullable porque sessões pré-S16 não têm o índice; nesses casos o
+    # filtro `search` retorna vazio (decisão registrada).
+    description_search_hmac: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, index=True)
     balance: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
 

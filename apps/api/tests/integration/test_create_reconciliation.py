@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.crypto import decrypt, encrypt
+from app.core.search_index import compute_query_hmacs
 from app.core.security import hash_password
 from app.db.models import (
     Client,
@@ -356,6 +357,14 @@ class TestCreateReconciliationPersistence:
         assert all(r.situation == FileEntrySituation.SEM_OMIE.value for r in rows)
         # Amount preservado em Decimal
         assert all(r.amount == Decimal("100.00") for r in rows)
+
+        # S16 — blind index gravado em paralelo à description criptografada.
+        # Cada linha tem um HMAC do(s) token(s) "mov" + "<day>", então buscar
+        # por "mov" deve bater contra todas as 5 linhas via SQL puro.
+        assert all(r.description_search_hmac is not None for r in rows)
+        hex_blind_key = get_settings().SEARCH_BLIND_INDEX_KEY.get_secret_value()
+        mov_hmac = compute_query_hmacs("mov", hex_blind_key)[0]
+        assert all(f" {mov_hmac} " in (r.description_search_hmac or "") for r in rows)
 
     async def test_persists_period_start_and_end_from_statement(
         self,

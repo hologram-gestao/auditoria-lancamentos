@@ -48,6 +48,7 @@ SENSITIVE_SUBSTRINGS: frozenset[str] = frozenset(
         "authorization",
         "cookie",
         "encryption_key",
+        "blind_index",
     }
 )
 

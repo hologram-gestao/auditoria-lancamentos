@@ -42,6 +42,7 @@ def settings() -> Settings:
         DATABASE_URL="postgresql+psycopg://t:t@localhost:5432/t",
         OMIE_ENCRYPTION_KEY=SecretStr("a" * 64),
         JWT_SECRET=SecretStr("b" * 64),
+        SEARCH_BLIND_INDEX_KEY=SecretStr("c" * 64),
     )  # type: ignore[call-arg]
 
 
