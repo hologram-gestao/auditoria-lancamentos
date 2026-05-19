@@ -83,6 +83,15 @@ class ReviewService:
         self._repo = repository
         self._cache = cache
         self._hex_key = encryption_key.get_secret_value()
+        # Sessão "ativa" para correlação em logs de decrypt — cada método público
+        # popula no início da operação. Service é instanciado por request via
+        # FastAPI Depends, então não há contaminação entre requests.
+        self._current_session_id: UUID | None = None
+        # Contador in-memory de falhas de decrypt — observável por teste e
+        # útil em debug local. Métrica externa (Prometheus/OTel) entra em
+        # S17; até lá o log estruturado `review_decrypt_failed` é a fonte
+        # oficial.
+        self._decrypt_failure_count: int = 0
 
     # ------------------------------------------------------------------
     # BACK 9.1 — Listar movimentações com filtros + paginação Python
@@ -109,6 +118,7 @@ class ReviewService:
         com payload corrompido aparecem com `description='[indecifrável]'`
         e nota em branco — falha graciosa em vez de derrubar a página.
         """
+        self._current_session_id = session_id
         rows = await self._repo.list_file_entries_all(
             session_id=session_id,
             situation=situation,
@@ -175,6 +185,7 @@ class ReviewService:
                 pode ser `null` para limpar). Pydantic não distingue
                 "omitido" de "nulo explícito" — caller passa essa flag.
         """
+        self._current_session_id = session_id
         entry = await self._repo.get_file_entry(session_id=session_id, entry_id=entry_id)
         if entry is None:
             raise NotFoundError("Linha não encontrada nesta sessão de conciliação.")
@@ -352,6 +363,7 @@ class ReviewService:
         amount` virão `None` e a UI mostra placeholder. Para forçar
         repopulação, o front chama /available-omie-entries (que popula).
         """
+        self._current_session_id = session.id
         rows, total = await self._repo.list_omie_entries_paginated(
             session_id=session.id,
             page=page,
@@ -402,6 +414,7 @@ class ReviewService:
         entry_id: UUID,
         body: UpdateOmieEntryRequest,
     ) -> OmieEntryItem:
+        self._current_session_id = session.id
         entry = await self._repo.get_omie_entry(session_id=session.id, entry_id=entry_id)
         if entry is None:
             raise NotFoundError("Divergência Omie não encontrada nesta sessão.")
@@ -458,6 +471,7 @@ class ReviewService:
         page: int,
         page_size: int,
     ) -> tuple[list[AnomalyItem], PaginationMeta]:
+        self._current_session_id = session_id
         rows, total = await self._repo.list_anomalies_paginated(
             session_id=session_id,
             resolved_filter=resolved_filter,
@@ -499,6 +513,7 @@ class ReviewService:
         session_id: UUID,
         body: CreateAnomalyRequest,
     ) -> AnomalyItem:
+        self._current_session_id = session_id
         anomaly_type = await self._repo.get_active_anomaly_type(body.anomaly_type_id)
         if anomaly_type is None:
             raise ValidationAppError(
@@ -589,6 +604,7 @@ class ReviewService:
         anomaly_id: UUID,
         body: ResolveAnomalyRequest,
     ) -> AnomalyItem:
+        self._current_session_id = session_id
         pair = await self._repo.get_anomaly(session_id=session_id, anomaly_id=anomaly_id)
         if pair is None:
             raise NotFoundError("Anomalia não encontrada nesta sessão.")
@@ -646,6 +662,13 @@ class ReviewService:
     # Helpers privados
     # ------------------------------------------------------------------
 
+    # TODO(S17): substituir o contador in-memory + log estruturado por um
+    # counter Prometheus/OpenTelemetry real (`review_decrypt_failures_total`).
+    # Até lá, o warning `review_decrypt_failed` é a fonte oficial — capturado
+    # por Sentry/Loki — e o atributo `_decrypt_failure_count` serve para
+    # detecção em testes. Justificativa: se `OMIE_ENCRYPTION_KEY` for trocada
+    # sem migration, todos os campos viram "[indecifrável]" silenciosamente;
+    # uma métrica permite alerta automático em vez de queixa de usuário.
     def _decrypt_optional(self, ct: str | None, iv: str | None) -> str:
         """Descriptografa um campo obrigatório (description). Falha silenciosa
         retorna placeholder para não derrubar a página."""
@@ -654,7 +677,7 @@ class ReviewService:
         try:
             return decrypt(ct, iv, self._hex_key)
         except Exception:
-            logger.warning("review_decrypt_failed", field="description")
+            self._record_decrypt_failure(field="description")
             return "[indecifrável]"
 
     def _decrypt_pair(self, ct: str | None, iv: str | None) -> str | None:
@@ -664,8 +687,24 @@ class ReviewService:
         try:
             return decrypt(ct, iv, self._hex_key)
         except Exception:
-            logger.warning("review_decrypt_failed", field="user_note_or_context")
+            self._record_decrypt_failure(field="user_note_or_context")
             return None
+
+    def _record_decrypt_failure(self, *, field: str) -> None:
+        """Incrementa contador e emite log estruturado da falha de decrypt.
+
+        Centraliza o efeito colateral — `_decrypt_optional` e `_decrypt_pair`
+        compartilham a mesma trilha de telemetria. Nunca recebe nem loga o
+        ciphertext, IV ou plaintext (CLAUDE.md §3.3).
+        """
+        self._decrypt_failure_count += 1
+        logger.warning(
+            "review_decrypt_failed",
+            field=field,
+            session_id=(
+                str(self._current_session_id) if self._current_session_id is not None else None
+            ),
+        )
 
     def _file_entry_to_listed(self, entry: ReconciliationFileEntry) -> ListedFileEntry:
         return ListedFileEntry(

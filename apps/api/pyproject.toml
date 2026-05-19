@@ -25,6 +25,7 @@ dependencies = [
     # --- Cache / jobs ---
     "redis>=5.1.1",
     "arq>=0.26.1",
+    "cachetools>=5.3",                # TTLCache LRU para caches in-process
 
     # --- Segurança ---
     "cryptography>=43.0.1",           # AES-256-GCM
@@ -63,6 +64,7 @@ dev = [
     "ruff>=0.7.1",
     "mypy>=1.13.0",
     "types-python-jose>=3.3.4.20240106",
+    "types-cachetools>=5.3",
     "pip-audit>=2.7.3",
 ]
 
