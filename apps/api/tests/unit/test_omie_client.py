@@ -69,14 +69,13 @@ class TestSchemas:
         raw = {
             "nCodCC": 12345,
             "descricao": "Sicredi 91263-1",
-            "nCodBanco": 748,
-            "descricaoBanco": "Sicredi",
-            "tipo": "CC",
+            "codigo_banco": "748",
+            "tipo_conta_corrente": "CC",
         }
         cc = ContaCorrente.model_validate(raw)
         assert cc.n_cod_cc == 12345
         assert cc.descricao == "Sicredi 91263-1"
-        assert cc.descricao_banco == "Sicredi"
+        assert cc.codigo_banco == "748"
         assert cc.tipo == "CC"
 
     def test_lancamento_extrato_parse_brazilian_date(self) -> None:
@@ -326,20 +325,18 @@ class TestListarContasCorrentes:
             return_value=httpx.Response(
                 200,
                 json={
-                    "lista_conta_corrente": [
+                    "ListarContasCorrentes": [
                         {
                             "nCodCC": 1,
                             "descricao": "Sicredi",
-                            "nCodBanco": 748,
-                            "descricaoBanco": "Sicredi",
-                            "tipo": "CC",
+                            "codigo_banco": "748",
+                            "tipo_conta_corrente": "CC",
                         },
                         {
                             "nCodCC": 2,
                             "descricao": "Cartão",
-                            "nCodBanco": 0,
-                            "descricaoBanco": "Itaú",
-                            "tipo": "CA",
+                            "codigo_banco": "341",
+                            "tipo_conta_corrente": "CA",
                         },
                     ],
                 },
@@ -353,8 +350,8 @@ class TestListarContasCorrentes:
 
     @respx.mock
     async def test_paginates_until_short_page(self, client: OmieClient) -> None:
-        page1 = {"lista_conta_corrente": [_make_cc(i) for i in range(100)]}
-        page2 = {"lista_conta_corrente": [_make_cc(i) for i in range(100, 150)]}
+        page1 = {"ListarContasCorrentes": [_make_cc(i) for i in range(100)]}
+        page2 = {"ListarContasCorrentes": [_make_cc(i) for i in range(100, 150)]}
         respx.post(_omie_url("geral", "contacorrente")).mock(
             side_effect=[
                 httpx.Response(200, json=page1),
@@ -369,9 +366,8 @@ def _make_cc(idx: int) -> dict[str, Any]:
     return {
         "nCodCC": idx,
         "descricao": f"Conta {idx}",
-        "nCodBanco": 1,
-        "descricaoBanco": "Banco",
-        "tipo": "CC",
+        "codigo_banco": "001",
+        "tipo_conta_corrente": "CC",
     }
 
 

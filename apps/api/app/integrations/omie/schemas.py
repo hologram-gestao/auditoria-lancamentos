@@ -68,16 +68,28 @@ def _parse_brazilian_date(v: str | date | None) -> date | None:
 
 
 class ContaCorrente(BaseModel):
-    """Item de `lista_conta_corrente` retornado por `ListarContasCorrentes`.
+    """Item do array `ListarContasCorrentes` retornado pelo endpoint homônimo.
 
     Doc §6.2 — usado para popular o cache L1 (`omie_accounts_cache`) por cliente.
+
+    Os nomes dos campos seguem o que a API do Omie devolve de fato (ver
+    https://app.omie.com.br/api/v1/geral/contacorrente/). A doc interna v1
+    do projeto descrevia `nCodBanco`/`descricaoBanco`/`tipo`, que NÃO existem
+    nesse endpoint — o Omie devolve `codigo_banco` (string) e
+    `tipo_conta_corrente`, e não devolve o nome do banco por extenso aqui.
     """
 
     n_cod_cc: int = Field(alias="nCodCC", description="ID único no Omie.")
     descricao: str = Field(description="Nome da conta (ex: 'Sicredi 91263-1').")
-    n_cod_banco: int | None = Field(default=None, alias="nCodBanco")
-    descricao_banco: str = Field(alias="descricaoBanco")
-    tipo: str = Field(description="'CC' (corrente) ou 'CA' (cartão).")
+    codigo_banco: str | None = Field(
+        default=None,
+        alias="codigo_banco",
+        description="Código de 3 dígitos do banco (ex: '748' Sicredi, '341' Itaú).",
+    )
+    tipo: str = Field(
+        alias="tipo_conta_corrente",
+        description="'CC' (corrente), 'CA' (cartão), 'CX' (caixinha), etc.",
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 

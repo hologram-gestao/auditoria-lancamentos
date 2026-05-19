@@ -305,7 +305,8 @@ class OmieClient:
     ) -> AsyncIterator[dict[str, Any]]:
         """Helper de paginação para endpoints Omie que usam `pagina/registros_por_pagina`.
 
-        Funciona para `ListarContasCorrentes` (lista_conta_corrente) e
+        Funciona para `ListarContasCorrentes` (`ListarContasCorrentes` — o
+        Omie reusa o nome do método como chave da lista) e
         `ListarContasPagar/Receber` (cadastro). O list_key indica qual chave
         do response contém os items.
 
@@ -365,7 +366,7 @@ class OmieClient:
             module="geral",
             endpoint="contacorrente",
             call_name="ListarContasCorrentes",
-            list_key="lista_conta_corrente",
+            list_key="ListarContasCorrentes",
             extra_param={"apenas_importado_api": "N"},
             page_size=100,
         ):

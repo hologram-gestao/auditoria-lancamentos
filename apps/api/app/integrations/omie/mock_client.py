@@ -64,33 +64,32 @@ _DELAY_LISTAR_TITULOS_SECONDS = 1.0  # 4 chamadas por sessão (pagar/receber x 2
 # Dados mockados — calibrados pra Padaria + abril/2026 + conta Itaú.
 # ----------------------------------------------------------------------
 
-# 3 contas, espelham o seed_demo_client.
+# 3 contas, espelham o seed_demo_client. Formato real do Omie:
+# `ListarContasCorrentes` devolve `codigo_banco` (string) e `tipo_conta_corrente`,
+# sem o nome do banco por extenso.
 _MOCK_CONTAS: list[ContaCorrente] = [
     ContaCorrente.model_validate(
         {
             "nCodCC": 900_000_001,
             "descricao": "Itaú 12345-6 (Principal)",
-            "nCodBanco": 341,
-            "descricaoBanco": "Itaú Unibanco",
-            "tipo": "CC",
+            "codigo_banco": "341",
+            "tipo_conta_corrente": "CC",
         }
     ),
     ContaCorrente.model_validate(
         {
             "nCodCC": 900_000_002,
             "descricao": "Sicredi 91263-1",
-            "nCodBanco": 748,
-            "descricaoBanco": "Sicredi",
-            "tipo": "CC",
+            "codigo_banco": "748",
+            "tipo_conta_corrente": "CC",
         }
     ),
     ContaCorrente.model_validate(
         {
             "nCodCC": 900_000_003,
             "descricao": "Cartão Visa Empresarial 4521",
-            "nCodBanco": 341,
-            "descricaoBanco": "Itaú Unibanco",
-            "tipo": "CA",
+            "codigo_banco": "341",
+            "tipo_conta_corrente": "CA",
         }
     ),
 ]

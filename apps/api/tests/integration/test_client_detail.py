@@ -78,23 +78,24 @@ def _omie_response(items: list[dict[str, Any]]) -> httpx.Response:
     """Wrapper que mimica o payload de `ListarContasCorrentes`.
 
     Page size do client é 100 — uma página com < 100 itens encerra a paginação.
+    A chave do array no envelope é literalmente `ListarContasCorrentes`
+    (mesmo nome do método, ver doc oficial Omie).
     """
-    return httpx.Response(200, json={"lista_conta_corrente": items})
+    return httpx.Response(200, json={"ListarContasCorrentes": items})
 
 
 def _conta_payload(
     *,
     n_cod_cc: int,
     descricao: str = "Conta Teste",
-    descricao_banco: str = "Banco Teste",
+    codigo_banco: str = "999",
     tipo: str = "CC",
 ) -> dict[str, Any]:
     return {
         "nCodCC": n_cod_cc,
         "descricao": descricao,
-        "nCodBanco": 999,
-        "descricaoBanco": descricao_banco,
-        "tipo": tipo,
+        "codigo_banco": codigo_banco,
+        "tipo_conta_corrente": tipo,
     }
 
 
@@ -319,13 +320,13 @@ class TestClientDetail:
                     _conta_payload(
                         n_cod_cc=1001,
                         descricao="Sicredi 91263-1",
-                        descricao_banco="Sicredi",
+                        codigo_banco="748",
                         tipo="CC",
                     ),
                     _conta_payload(
                         n_cod_cc=2002,
                         descricao="Cartão Itaú",
-                        descricao_banco="Itaú",
+                        codigo_banco="341",
                         tipo="CA",
                     ),
                 ]
@@ -457,7 +458,7 @@ class TestClientDetail:
     ) -> None:
         """Regressão (bug descoberto em 29/04 com Quial):
 
-        Quando o Omie retorna `lista_conta_corrente: []`, o cache fica sem
+        Quando o Omie retorna `ListarContasCorrentes: []`, o cache fica sem
         linhas. Antes do fix, `MAX(synced_at)` voltava None na 2ª request e
         o cache miss disparava de novo — toda request batia o Omie.
 

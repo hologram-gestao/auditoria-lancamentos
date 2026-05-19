@@ -186,13 +186,15 @@ class OmieAccountsCacheService:
 def _to_cache_row(client_id: object, conta: ContaCorrente) -> OmieAccountCache:
     """Converte um `ContaCorrente` (DTO Omie) em `OmieAccountCache` (ORM).
 
-    `bank_name` cai num fallback estável quando o Omie não retorna `descricaoBanco`
-    — não bloqueia o sync por dado faltante.
+    `bank_name` recebe o código do banco (string de 3 dígitos) — o
+    `ListarContasCorrentes` do Omie não devolve o nome do banco por extenso.
+    Fallback `"—"` quando o Omie omite o `codigo_banco` (raro). Mapeamento
+    código→nome é tarefa futura (tabela estática ou novo endpoint Omie).
     """
     return OmieAccountCache(
         client_id=client_id,
         omie_conta_id=conta.n_cod_cc,
         name=conta.descricao,
-        bank_name=conta.descricao_banco or "—",
+        bank_name=conta.codigo_banco or "—",
         account_type=conta.tipo,
     )
