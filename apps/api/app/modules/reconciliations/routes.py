@@ -41,6 +41,7 @@ from app.modules.reconciliations.schemas import (
     CreateReconciliationResponse,
     DuplicateCheckPayload,
     ParseResponse,
+    SessionDetailResponse,
     SessionStatusResponse,
 )
 from app.modules.reconciliations.service import ReconciliationService
@@ -293,3 +294,40 @@ async def get_reconciliation_status(
 
     payload = await service.get_session_status(session_id)
     return SessionStatusResponse(data=payload)
+
+
+# ----------------------------------------------------------------------
+# S11 — GET /reconciliations/{id}  (header da Tela de Revisão)
+# ----------------------------------------------------------------------
+
+
+@router.get(
+    "/{session_id}",
+    summary=(
+        "Detalhe da sessão (header da Tela de Revisão). Substitui o scan "
+        "O(N) que o front fazia via histórico paginado do cliente para "
+        "resolver reference_month + omie_conta_id + total_file_entries. "
+        "RBAC idêntico ao /status: manager fora da carteira recebe 404."
+    ),
+)
+async def get_reconciliation_detail(
+    user: ManagerOrAdminDep,
+    db: DbSessionDep,
+    service: ReconciliationServiceDep,
+    session_id: UUID,
+) -> SessionDetailResponse:
+    # Mesma estratégia do /status: carrega a sessão pelo client_id, valida
+    # RBAC, e só então pede o payload completo pro service. Manter as 2
+    # rotas com o MESMO formato de RBAC evita probing (manager fora não
+    # distingue 404-existe de 404-fora-da-carteira).
+    repo_session = await ReconciliationRepository(db).get_detail_view(session_id)
+    if repo_session is None:
+        raise NotFoundError(_SESSION_NOT_FOUND_MSG)
+
+    try:
+        await require_client_access(repo_session.client_id, user, db)
+    except ClientNotAccessibleError as exc:
+        raise NotFoundError(_SESSION_NOT_FOUND_MSG) from exc
+
+    payload = await service.get_session_detail(session_id)
+    return SessionDetailResponse(data=payload)

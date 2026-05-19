@@ -8,11 +8,10 @@
  *   - Default: `movements`. Valores fora do whitelist caem no default.
  *
  * Dados estáticos da sessão (referência, conta, total de movimentações):
- *   - Não temos endpoint de "session detail" no back (intencional na S11).
- *   - Resolvemos via `useReconciliationsList(clientId, {pageSize: 100})`
- *     procurando o sessionId. Em clientes com > 100 conciliações esse
- *     fallback degrada — mas a UX já mostra o que tem (loaders curtos) e
- *     o orquestrador segue funcional.
+ *   - Vêm do endpoint dedicado `GET /api/v1/reconciliations/{id}` via
+ *     `useSessionDetail`. Antes resolvíamos via scan O(N) do histórico
+ *     paginado do cliente (`useReconciliationsList`), que quebrava
+ *     silenciosamente em clientes com > 100 sessões.
  *
  * Contadores vivos:
  *   - `useSessionStatus(sessionId)` sem polling externo (polling só roda
@@ -26,8 +25,7 @@ import { useMemo } from 'react';
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useClientDetail } from '@/hooks/use-clients';
-import { useReconciliationsList } from '@/hooks/use-clients';
-import { useSessionStatus } from '@/hooks/use-reconciliations';
+import { useSessionDetail, useSessionStatus } from '@/hooks/use-reconciliations';
 import { cn } from '@/lib/utils';
 
 import { AnomaliesTab } from './anomalies-tab';
@@ -92,12 +90,9 @@ export function ReviewScreen({ clientId, sessionId }: ReviewScreenProps) {
   // Cliente + contas (cache L1) para resolver nome do cliente e label da conta.
   const clientQuery = useClientDetail(clientId);
 
-  // Sessão (estático): puxa página suficiente do histórico para localizar a sessão.
-  const recsQuery = useReconciliationsList(clientId, { page: 1, pageSize: 100 });
-  const sessionInfo = useMemo(
-    () => recsQuery.data?.data.find((s) => s.id === sessionId),
-    [recsQuery.data, sessionId],
-  );
+  // Sessão (estático): endpoint dedicado — O(1) por sessionId, sem scan.
+  const detailQuery = useSessionDetail(sessionId);
+  const sessionInfo = detailQuery.data;
 
   // Status vivo (contadores). Não polla — só se status virar processing.
   const statusQuery = useSessionStatus(sessionId);

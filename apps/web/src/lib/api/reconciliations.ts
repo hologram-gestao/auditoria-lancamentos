@@ -184,6 +184,38 @@ export async function getSessionStatus(sessionId: string): Promise<SessionStatus
 }
 
 // ----------------------------------------------------------------------
+// S11 — GET /api/v1/reconciliations/{id}  (header da Tela de Revisão)
+// ----------------------------------------------------------------------
+
+/**
+ * Detalhe da sessão. Substitui o scan O(N) que a Tela de Revisão fazia via
+ * `useReconciliationsList(clientId, {pageSize:100}) + .find()` — não cobria
+ * clientes com > 100 sessões. Os campos abaixo são o que o header precisa;
+ * `period_start/end` ficam internos ao back (review service usa em
+ * `/available-omie-entries`).
+ *
+ * `status` em union literal para `switch`/`if`, ciente de que o back
+ * serializa lenient — uma string desconhecida não derruba o consumidor.
+ */
+export interface SessionDetail {
+  session_id: string;
+  client_id: string;
+  omie_conta_id: number;
+  /** ISO `YYYY-MM-DD` (sempre dia 1 do mês de referência). */
+  reference_month: string;
+  status: SessionStatus;
+  total_file_entries: number;
+  conciliated_count: number;
+  sem_omie_count: number;
+  omie_sem_arquivo_count: number;
+  anomaly_count: number;
+}
+
+export async function getSessionDetail(sessionId: string): Promise<SessionDetail> {
+  return apiGet<SessionDetail>(`/api/v1/reconciliations/${sessionId}`);
+}
+
+// ----------------------------------------------------------------------
 // S11 — Tela de Revisão (BACK 9.1 a 9.10)
 // ----------------------------------------------------------------------
 

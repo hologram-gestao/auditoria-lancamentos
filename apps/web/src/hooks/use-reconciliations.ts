@@ -30,6 +30,7 @@ import {
   createAnomaly,
   createReconciliation,
   getOmieLancamentos,
+  getSessionDetail,
   getSessionStatus,
   listAnomalies,
   listAnomalyTypes,
@@ -62,6 +63,7 @@ import {
   type PatchAnomalyPayload,
   type PatchFileEntryPayload,
   type PatchOmieEntryPayload,
+  type SessionDetail,
   type SessionStatusResult,
 } from '@/lib/api/reconciliations';
 
@@ -103,6 +105,25 @@ interface UseSessionStatusOptions {
  * `undefined`) e o consumidor renderiza os steps no estado prévio até o
  * próximo poll bem-sucedido — pitfall §contrato do briefing.
  */
+/**
+ * Detalhe estático da sessão para o header da Tela de Revisão — `reference_month`,
+ * `omie_conta_id`, `total_file_entries`, contadores. Substitui o scan O(N)
+ * que fazia `useReconciliationsList(clientId, {pageSize:100}) + .find()` e
+ * quebrava em clientes com > 100 sessões.
+ *
+ * Cache padrão (sem polling): os contadores vivos vêm do `useSessionStatus`,
+ * que invalida o status key em mutations. Aqui só queremos o "shape" da
+ * sessão (mês, conta, total) que muda raramente.
+ */
+export function useSessionDetail(sessionId: string) {
+  return useQuery<SessionDetail>({
+    queryKey: ['reconciliations', sessionId, 'detail'],
+    queryFn: () => getSessionDetail(sessionId),
+    enabled: sessionId.length > 0,
+    refetchOnWindowFocus: false,
+  });
+}
+
 export function useSessionStatus(sessionId: string, options: UseSessionStatusOptions = {}) {
   const enabled = options.enabled ?? true;
 

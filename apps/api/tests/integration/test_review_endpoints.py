@@ -459,6 +459,76 @@ class TestUpdateFileEntry:
         assert sess.conciliated_count == 1
         assert sess.sem_omie_count == 0
 
+    async def test_trocar_omie_race_caught_by_unique_index(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Race em "Trocar Omie": 2 requests passam pela checagem aplicativa
+        no MESMO instante e ambos tentam gravar o mesmo `omie_lancamento_id`.
+
+        O índice ÚNICO PARCIAL `ix_recon_file_entry_session_omie_unique`
+        (CLAUDE.md §5.4) detecta a colisão; o service captura o
+        `IntegrityError` e devolve a MESMA `ValidationAppError` que o
+        caminho aplicativo — UX idêntica com ou sem race.
+
+        Como simular: monkey-patch da checagem aplicativa para retornar
+        False, forçando o service a chegar até o flush onde o índice
+        dispara o IntegrityError.
+        """
+        from app.modules.reconciliations.review.repository import ReviewRepository
+
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin)
+        # entry_a já tem o vínculo Omie 70404.
+        entry_a = await _seed_file_entry(
+            db_session,
+            reconciliation=sess,
+            description="A",
+            amount=Decimal("-1.00"),
+            omie_lancamento_id=70404,
+            situation="conciliado",
+        )
+        entry_b = await _seed_file_entry(
+            db_session,
+            reconciliation=sess,
+            description="B",
+            amount=Decimal("-2.00"),
+        )
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        # Força a checagem aplicativa a falsear o conflito — simula "ambos
+        # requests passaram pela checagem quase ao mesmo tempo".
+        async def _fake_taken(self: ReviewRepository, **kwargs: object) -> bool:
+            return False
+
+        monkeypatch.setattr(
+            ReviewRepository,
+            "file_entry_omie_id_taken_by_another",
+            _fake_taken,
+        )
+
+        resp = await client_with_db.patch(
+            f"/api/v1/reconciliations/{sess.id}/file-entries/{entry_b.id}",
+            json={"omie_lancamento_id": 70404},
+        )
+        assert resp.status_code == 400, resp.text
+        body = resp.json()
+        assert body["error"]["code"] == "VALIDATION_ERROR"
+        # Mensagem amigável idêntica à do caminho aplicativo (§11 CLAUDE.md).
+        assert "já está vinculado" in body["error"]["userMessage"]
+
+        # Não checamos estado pós-PATCH via SELECT porque o conftest
+        # injeta a MESMA `db_session` do teste no request via override —
+        # quando o flush falha com IntegrityError, toda a transação fica
+        # ROLLBACK ONLY e qualquer query subsequente levanta
+        # PendingRollbackError. O caminho crítico (constraint dispara →
+        # service captura → ValidationAppError com mensagem PT-BR) já
+        # está provado pela resposta HTTP acima; o rollback transacional
+        # da request (DbSessionDep) garante que nada foi persistido.
+
 
 # ----------------------------------------------------------------------
 # BACK 9.6 — PATCH /omie-entries/{id}
@@ -750,3 +820,95 @@ def test_review_routes_registered() -> None:
 
 def test_uuid_type_sanity() -> None:
     assert isinstance(uuid4(), UUID)
+
+
+# ----------------------------------------------------------------------
+# Service `list_available_omie_entries` — período usado (S11 fix)
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestAvailableOmieEntriesPeriod:
+    """Cobre o fix de §S11: `list_available_omie_entries` usa o período REAL
+    da sessão quando disponível e cai no fallback `[reference_month,
+    last_day_of_month]` para sessões pré-migration (period_start IS NULL).
+
+    Unit-style — exercício direto do service com OmieClient e cache
+    mockados, sem subir HTTP. O foco é o período passado a
+    `populate_from_extrato`.
+    """
+
+    async def test_uses_real_period_when_persisted(self, db_session: AsyncSession) -> None:
+        from unittest.mock import AsyncMock
+
+        from pydantic import SecretStr
+
+        from app.modules.reconciliations.review.repository import ReviewRepository
+        from app.modules.reconciliations.review.service import ReviewService
+
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin)
+        # Período real do statement — extrato "quebrado" (15/04 → 14/05).
+        sess.period_start = date(2026, 4, 15)
+        sess.period_end = date(2026, 5, 14)
+        await db_session.flush()
+
+        cache = AsyncMock()
+        cache.populate_from_extrato.return_value = {}
+        omie_client = AsyncMock()
+        service = ReviewService(
+            ReviewRepository(db_session),
+            cache=cache,
+            encryption_key=SecretStr("0" * 64),  # 32 bytes hex — não usado neste path
+        )
+
+        await service.list_available_omie_entries(
+            session=sess,
+            omie_client=omie_client,
+            search=None,
+        )
+
+        # Período expandido = period_real +/- tolerance(3 dias).
+        # period_start=2026-04-15 - 3 = 2026-04-12
+        # period_end=2026-05-14 + 3 = 2026-05-17
+        call_kwargs = cache.populate_from_extrato.call_args.kwargs
+        assert call_kwargs["period_start"] == date(2026, 4, 12)
+        assert call_kwargs["period_end"] == date(2026, 5, 17)
+
+    async def test_falls_back_to_month_bounds_when_period_is_null(
+        self, db_session: AsyncSession
+    ) -> None:
+        from unittest.mock import AsyncMock
+
+        from pydantic import SecretStr
+
+        from app.modules.reconciliations.review.repository import ReviewRepository
+        from app.modules.reconciliations.review.service import ReviewService
+
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin)
+        # Sessão pré-migration — period_start/end ficam None.
+        assert sess.period_start is None
+        assert sess.period_end is None
+
+        cache = AsyncMock()
+        cache.populate_from_extrato.return_value = {}
+        omie_client = AsyncMock()
+        service = ReviewService(
+            ReviewRepository(db_session),
+            cache=cache,
+            encryption_key=SecretStr("0" * 64),
+        )
+
+        await service.list_available_omie_entries(
+            session=sess,
+            omie_client=omie_client,
+            search=None,
+        )
+
+        # Fallback: [2026-04-01, 2026-04-30] ± tolerance(3) → [2026-03-29, 2026-05-03].
+        call_kwargs = cache.populate_from_extrato.call_args.kwargs
+        assert call_kwargs["period_start"] == date(2026, 3, 29)
+        assert call_kwargs["period_end"] == date(2026, 5, 3)

@@ -241,3 +241,17 @@ class ReconciliationRepository:
         stmt = select(ReconciliationSession).where(ReconciliationSession.id == session_id)
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def get_detail_view(
+        self,
+        session_id: UUID,
+    ) -> ReconciliationSession | None:
+        """Carrega a sessão para o endpoint GET /reconciliations/{id}.
+
+        O detail expõe o mesmo escalar carregado por `get_status_view` —
+        as colunas necessárias ao header da Tela de Revisão (reference_month,
+        omie_conta_id, contadores, total_file_entries) já estão na
+        `reconciliation_sessions`. Sem eager-load de relationships porque
+        o front busca client/conta via `useClientDetail` separado.
+        """
+        return await self.get_status_view(session_id)

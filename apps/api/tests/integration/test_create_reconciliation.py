@@ -357,6 +357,47 @@ class TestCreateReconciliationPersistence:
         # Amount preservado em Decimal
         assert all(r.amount == Decimal("100.00") for r in rows)
 
+    async def test_persists_period_start_and_end_from_statement(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        """`period_start/period_end` agora persistem em `reconciliation_sessions`.
+
+        Antes da migration `4a2f9e8b1c3d` o review service usava
+        `[reference_month, last_day_of_month]` como aproximação — quebrava
+        em extratos com período fora do mês (15/04→14/05), faturas de
+        cartão e lançamentos nos primeiros dias do mês seguinte.
+        """
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="X", creator=admin)
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        # Statement com período "quebrado" — não alinha com o mês de referência.
+        broken_statement = _statement()
+        broken_statement["period_start"] = "2026-04-15"
+        broken_statement["period_end"] = "2026-05-14"
+        payload = {
+            "client_id": str(cliente.id),
+            "omie_conta_id": 42,
+            "reference_month": "2026-04-01",
+            "date_tolerance_days": 3,
+            "file_hash": _hex64("period-persist"),
+            "statement": broken_statement,
+        }
+        resp = await client_with_db.post("/api/v1/reconciliations", json=payload)
+        assert resp.status_code == 201, resp.text
+        session_id = UUID(resp.json()["data"]["session_id"])
+
+        sess = (
+            await db_session.execute(
+                select(ReconciliationSession).where(ReconciliationSession.id == session_id)
+            )
+        ).scalar_one()
+        assert sess.period_start == date(2026, 4, 15)
+        assert sess.period_end == date(2026, 5, 14)
+
     async def test_reference_month_normalized_to_first_day(
         self,
         client_with_db: AsyncClient,
@@ -557,6 +598,87 @@ class TestSessionStatusEndpoint:
 
 
 # ----------------------------------------------------------------------
+# S11 — GET /reconciliations/{id}  (header da Tela de Revisão)
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestSessionDetailEndpoint:
+    """RBAC IDÊNTICO ao /status — manager fora da carteira recebe 404, não 403
+    (CLAUDE.md §3.11). Substitui o scan O(N) que o front fazia via histórico
+    paginado do cliente.
+    """
+
+    async def test_unauthenticated_returns_401(self, client_with_db: AsyncClient) -> None:
+        resp = await client_with_db.get(f"/api/v1/reconciliations/{uuid4()}")
+        assert resp.status_code == 401
+
+    async def test_inexistent_session_returns_404(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.get(f"/api/v1/reconciliations/{uuid4()}")
+        assert resp.status_code == 404
+
+    async def test_admin_reads_detail(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="X", creator=admin)
+        sess = await _seed_session(db_session, cliente=cliente, creator=admin)
+        # Popula contadores e totais — devem aparecer no payload.
+        sess.total_file_entries = 42
+        sess.conciliated_count = 30
+        sess.sem_omie_count = 8
+        sess.omie_sem_arquivo_count = 4
+        sess.anomaly_count = 2
+        await db_session.flush()
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.get(f"/api/v1/reconciliations/{sess.id}")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()["data"]
+        assert body["session_id"] == str(sess.id)
+        assert body["client_id"] == str(cliente.id)
+        assert body["omie_conta_id"] == 42
+        assert body["reference_month"] == "2026-04-01"
+        assert body["status"] == "processing"
+        assert body["total_file_entries"] == 42
+        assert body["conciliated_count"] == 30
+        assert body["sem_omie_count"] == 8
+        assert body["omie_sem_arquivo_count"] == 4
+        assert body["anomaly_count"] == 2
+
+    async def test_manager_in_portfolio_reads_detail(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        mgr = await _seed_user(db_session, email=MANAGER_A_EMAIL, role=UserRole.MANAGER)
+        cliente = await _seed_client(db_session, name="X", creator=admin, manager=mgr)
+        sess = await _seed_session(db_session, cliente=cliente, creator=admin)
+        await _login(client_with_db, MANAGER_A_EMAIL)
+
+        resp = await client_with_db.get(f"/api/v1/reconciliations/{sess.id}")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["data"]["session_id"] == str(sess.id)
+
+    async def test_manager_outside_portfolio_returns_404(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        mgr_a = await _seed_user(db_session, email=MANAGER_A_EMAIL, role=UserRole.MANAGER)
+        await _seed_user(db_session, email=MANAGER_B_EMAIL, role=UserRole.MANAGER)
+        cliente_a = await _seed_client(db_session, name="X", creator=admin, manager=mgr_a)
+        sess = await _seed_session(db_session, cliente=cliente_a, creator=admin)
+        await _login(client_with_db, MANAGER_B_EMAIL)
+
+        resp = await client_with_db.get(f"/api/v1/reconciliations/{sess.id}")
+        assert resp.status_code == 404
+
+
+# ----------------------------------------------------------------------
 # Garantia de fixture do app: as rotas estão registradas no FastAPI app.
 # (sanity check para evitar falsos passes se o include_router for esquecido)
 # ----------------------------------------------------------------------
@@ -566,3 +688,4 @@ def test_routes_are_registered_in_app() -> None:
     paths = {route.path for route in fastapi_app.routes}  # type: ignore[attr-defined]
     assert "/api/v1/reconciliations" in paths
     assert "/api/v1/reconciliations/{session_id}/status" in paths
+    assert "/api/v1/reconciliations/{session_id}" in paths

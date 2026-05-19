@@ -25,6 +25,7 @@ from app.db.models import (
 from app.modules.reconciliations.repository import ReconciliationRepository
 from app.modules.reconciliations.schemas import (
     CreateReconciliationRequest,
+    SessionDetailPayload,
     SessionStatusPayload,
 )
 
@@ -113,6 +114,11 @@ class ReconciliationService:
             created_by=created_by,
             omie_conta_id=request.omie_conta_id,
             reference_month=request.reference_month,
+            # Período REAL do statement — essencial para a Tela de Revisão
+            # consultar /available-omie-entries com o intervalo correto
+            # (extratos quebrados, faturas de cartão, atrasos).
+            period_start=statement.period_start,
+            period_end=statement.period_end,
             date_tolerance_days=request.date_tolerance_days,
             file_hash=request.file_hash,
             status=ReconciliationStatus.PROCESSING.value,
@@ -176,4 +182,34 @@ class ReconciliationService:
             omie_sem_arquivo_count=session_obj.omie_sem_arquivo_count,
             anomaly_count=session_obj.anomaly_count,
             error_message=session_obj.error_message,
+        )
+
+    # ------------------------------------------------------------------
+    # S11 — GET /reconciliations/{id}  (header da Tela de Revisão)
+    # ------------------------------------------------------------------
+
+    async def get_session_detail(self, session_id: UUID) -> SessionDetailPayload:
+        """Retorna o detalhe da sessão para o header da Tela de Revisão.
+
+        Espelha `get_session_status` mas devolve `SessionDetailPayload`,
+        incluindo `client_id`, `omie_conta_id`, `reference_month` e
+        `total_file_entries` — campos que o front antes resolvia via
+        scan O(N) do histórico do cliente.
+
+        404 se sessão não existe. RBAC é responsabilidade do caller.
+        """
+        session_obj = await self._repo.get_detail_view(session_id)
+        if session_obj is None:
+            raise NotFoundError("Sessão de conciliação não encontrada.")
+        return SessionDetailPayload(
+            session_id=session_obj.id,
+            client_id=session_obj.client_id,
+            omie_conta_id=session_obj.omie_conta_id,
+            reference_month=session_obj.reference_month,
+            status=session_obj.status,
+            total_file_entries=session_obj.total_file_entries,
+            conciliated_count=session_obj.conciliated_count,
+            sem_omie_count=session_obj.sem_omie_count,
+            omie_sem_arquivo_count=session_obj.omie_sem_arquivo_count,
+            anomaly_count=session_obj.anomaly_count,
         )

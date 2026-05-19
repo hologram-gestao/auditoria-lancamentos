@@ -80,6 +80,13 @@ class ReconciliationSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     omie_conta_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     reference_month: Mapped[date] = mapped_column(SQLDate, nullable=False, index=True)
+    # Período REAL extraído do statement (S9). NULL em sessões pré-migration —
+    # nesse caso, o review service cai no fallback `[reference_month,
+    # last_day_of_month]`. Sem isso, extratos quebrados (15/04→14/05),
+    # faturas de cartão e lançamentos nos primeiros dias do mês seguinte
+    # ficam fora do período Omie consultado em /available-omie-entries.
+    period_start: Mapped[date | None] = mapped_column(SQLDate, nullable=True)
+    period_end: Mapped[date | None] = mapped_column(SQLDate, nullable=True)
     date_tolerance_days: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=3)
     file_hash: Mapped[str] = mapped_column(String(64), nullable=False)  # SHA-256 hex
 

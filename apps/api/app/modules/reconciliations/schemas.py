@@ -157,3 +157,37 @@ class SessionStatusResponse(BaseModel):
     """Response do GET /api/v1/reconciliations/{id}/status."""
 
     data: SessionStatusPayload
+
+
+# ----------------------------------------------------------------------
+# S11 — GET /reconciliations/{id}  (sem /status)
+# ----------------------------------------------------------------------
+
+
+class SessionDetailPayload(BaseModel):
+    """Conteúdo do envelope do GET /reconciliations/{id}.
+
+    Substitui o scan `useReconciliationsList(pageSize:100) + .find()` do
+    front da tela de revisão. Expõe só o que o header da tela precisa —
+    `period_start/period_end` ficam internos ao back (review service usa
+    no /available-omie-entries).
+
+    Status `str` lenient (memória `feedback_pydantic_strict_input_lenient_output`).
+    """
+
+    session_id: UUID
+    client_id: UUID
+    omie_conta_id: int
+    reference_month: _date
+    status: str
+    total_file_entries: int
+    conciliated_count: int
+    sem_omie_count: int
+    omie_sem_arquivo_count: int
+    anomaly_count: int
+
+
+class SessionDetailResponse(BaseModel):
+    """Response do GET /api/v1/reconciliations/{id}."""
+
+    data: SessionDetailPayload

@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from pydantic import SecretStr
+from sqlalchemy.exc import IntegrityError
 
 from app.core.crypto import decrypt, encrypt
 from app.core.exceptions import NotFoundError, ValidationAppError
@@ -60,6 +61,13 @@ logger = get_logger(__name__)
 
 # Mínimo de chars para resolution_note quando `resolved=true` (Doc §17.3).
 _RESOLUTION_NOTE_MIN_LENGTH = 10
+
+# Mensagem PT-BR única para conflito de vínculo Omie — reusada pelo caminho
+# aplicativo (checagem otimista) e pelo caminho do IntegrityError (race),
+# garantindo UX idêntica em ambos.
+_OMIE_ID_TAKEN_USER_MSG = (
+    "Este lançamento Omie já está vinculado a outra movimentação. Escolha outro."
+)
 
 
 class ReviewService:
@@ -192,10 +200,7 @@ class ReviewService:
                     if taken:
                         raise ValidationAppError(
                             f"Omie ID {new_id} já está vinculado a outra linha desta sessão.",
-                            user_message=(
-                                "Este lançamento Omie já está vinculado a outra "
-                                "movimentação. Escolha outro."
-                            ),
+                            user_message=_OMIE_ID_TAKEN_USER_MSG,
                         )
                     entry.omie_lancamento_id = new_id
                 # Se o caller não decidiu uma situation explícita, marca como
@@ -219,7 +224,28 @@ class ReviewService:
                 entry.user_note_encrypted = ct
                 entry.user_note_iv = iv
 
-        await self._repo.flush()
+        # Guarda contra race em "Trocar Omie": a checagem aplicativa acima
+        # (`file_entry_omie_id_taken_by_another`) cobre o caso comum em 1
+        # round trip, mas 2 requests concorrentes podem ambos passar pela
+        # checagem antes do flush. O índice único parcial
+        # `ix_recon_file_entry_session_omie_unique` (CLAUDE.md §5.4) detecta
+        # a colisão no banco; aqui convertemos o IntegrityError na MESMA
+        # ValidationAppError para que o caminho de erro fique idêntico,
+        # com ou sem race.
+        try:
+            await self._repo.flush()
+        except IntegrityError as exc:
+            if (
+                omie_lancamento_provided
+                and body.omie_lancamento_id is not None
+                and "ix_recon_file_entry_session_omie_unique" in str(exc.orig)
+            ):
+                raise ValidationAppError(
+                    f"Omie ID {body.omie_lancamento_id} já está vinculado a outra "
+                    "linha desta sessão (race).",
+                    user_message=_OMIE_ID_TAKEN_USER_MSG,
+                ) from exc
+            raise
 
         # Recalcula contadores se mexemos em situation
         if body.situation is not None or omie_lancamento_provided:
@@ -253,15 +279,19 @@ class ReviewService:
         Popula o cache L2 — chamadas subsequentes a /omie/lancamentos
         reaproveitam.
 
-        O `session` precisa vir com `period_start/period_end` derivados.
-        Hoje guardamos `reference_month` na sessão e `period_start/end` no
-        statement do parsing (não persistidos). Para esta versão, usamos
-        `[reference_month, last_day_of_month]` como aproximação razoável —
-        é a mesma lógica do worker em `processing/omie_fetch.fetch_pending`.
-        Quando S12 entregar a UI, o front pode passar overrides via query.
+        Período usado:
+            - Se `session.period_start` E `period_end` estão preenchidos,
+              usa o período REAL do statement (cobre extratos quebrados
+              tipo 15/04→14/05, faturas de cartão e lançamentos nos
+              primeiros dias do mês seguinte).
+            - Fallback `[reference_month, last_day_of_month]` para sessões
+              criadas antes da migration `4a2f9e8b1c3d` — mesma lógica
+              do worker em `processing/omie_fetch.fetch_pending`.
         """
-        # Período = [reference_month, último_dia_do_mês]
-        period_start, period_end = _month_bounds(session.reference_month)
+        if session.period_start is not None and session.period_end is not None:
+            period_start, period_end = session.period_start, session.period_end
+        else:
+            period_start, period_end = _month_bounds(session.reference_month)
         expanded_start, expanded_end = self._repo.expand_period(
             period_start, period_end, session.date_tolerance_days
         )

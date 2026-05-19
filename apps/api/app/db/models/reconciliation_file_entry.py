@@ -23,7 +23,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import BigInteger, ForeignKey, Numeric, String, Text
+from sqlalchemy import BigInteger, ForeignKey, Index, Numeric, String, Text, text
 from sqlalchemy import Date as SQLDate
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -54,6 +54,21 @@ class FileEntryUserAction(StrEnum):
 
 class ReconciliationFileEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "reconciliation_file_entries"
+
+    # Índice único parcial: impede 2 linhas da MESMA sessão de vincularem
+    # o mesmo `omie_lancamento_id`. Reforça CLAUDE.md §5.4 no banco — a
+    # checagem aplicativa (`file_entry_omie_id_taken_by_another`) trata o
+    # caso comum em 1 round trip, este índice é a guarda contra race
+    # entre 2 requests concorrentes de "Trocar Omie".
+    __table_args__ = (
+        Index(
+            "ix_recon_file_entry_session_omie_unique",
+            "session_id",
+            "omie_lancamento_id",
+            unique=True,
+            postgresql_where=text("omie_lancamento_id IS NOT NULL"),
+        ),
+    )
 
     session_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
