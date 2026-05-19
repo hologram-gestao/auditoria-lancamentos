@@ -56,6 +56,14 @@ class _StubRedis:
         return _StubRedisPipeline(self.store)
 
 
+class _FailingMgetRedis(_StubRedis):
+    """Igual ao stub padrão, mas `mget` levanta — simula Redis offline."""
+
+    async def mget(self, *keys: str) -> list[str | None]:
+        self.mget_calls += 1
+        raise ConnectionError("redis offline (simulado)")
+
+
 class _StubOmieClient:
     """Substitui `OmieClient` — só implementa `listar_extrato`. Conta chamadas."""
 
@@ -323,3 +331,68 @@ def test_omie_lancamento_data_to_dict_from_dict_roundtrip() -> None:
     assert recovered.supplier == "Fornecedor Y"
     assert recovered.category == "Aluguel"
     assert recovered.status == "Conciliado"
+
+
+# ----------------------------------------------------------------------
+# Item 1 (hardening S11): L1 com upper bound (TTLCache LRU)
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_l1_cap_evicts_oldest_when_maxsize_exceeded() -> None:
+    """Escrever maxsize+1 entries deve manter apenas maxsize via LRU."""
+    client_id = uuid4()
+    # Cache pequeno para a asserção rodar rápido. O default (10_000) está
+    # validado pela lógica idêntica do cachetools.TTLCache; o objetivo deste
+    # teste é provar que o teto **é aplicado**, não revalidar o cachetools.
+    cache = OmieLancamentoCache(redis=None, l1_maxsize=3)
+
+    # Popula via API pública — usa um stub que devolve N lançamentos distintos.
+    items = [_make_lancamento(omie_id=9000 + i, dia=10) for i in range(4)]
+    omie_client = _StubOmieClient(items)
+    await cache.populate_from_extrato(
+        client_id=client_id,
+        omie_client=omie_client,  # type: ignore[arg-type]
+        omie_conta_id=42,
+        period_start=date(2026, 4, 1),
+        period_end=date(2026, 4, 30),
+    )
+
+    # Após 4 entries com maxsize=3, o L1 deve guardar exatamente 3.
+    assert len(cache._l1) == 3
+
+
+# ----------------------------------------------------------------------
+# Item 2 (hardening S11): falha no Redis read não derruba a request
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_l2_read_failure_falls_back_to_l1_only() -> None:
+    """`mget` levantando exception → degrada para L1 silenciosamente."""
+    client_id = uuid4()
+    redis_stub = _FailingMgetRedis()
+    cache = OmieLancamentoCache(redis=redis_stub)  # type: ignore[arg-type]
+
+    # Popula só o L1 (pulando o Redis) escrevendo um item via API pública.
+    # `populate_from_extrato` chama `pipe.execute` — o pipeline da classe
+    # base não falha; só `mget` falha. Assim o L1 contém 6001 mas o L2 está
+    # "offline" para leituras subsequentes.
+    omie_client = _StubOmieClient([_make_lancamento(omie_id=6001)])
+    await cache.populate_from_extrato(
+        client_id=client_id,
+        omie_client=omie_client,  # type: ignore[arg-type]
+        omie_conta_id=42,
+        period_start=date(2026, 4, 1),
+        period_end=date(2026, 4, 30),
+    )
+
+    # ID presente no L1 → resolvido sem tocar Redis.
+    result_l1 = await cache.get_many(client_id=client_id, omie_ids=[6001])
+    assert 6001 in result_l1
+    assert redis_stub.mget_calls == 0
+
+    # ID ausente do L1 → tenta Redis, `mget` levanta, função NÃO propaga.
+    result_miss = await cache.get_many(client_id=client_id, omie_ids=[6002])
+    assert result_miss == {}
+    assert redis_stub.mget_calls == 1  # tentou exatamente uma vez

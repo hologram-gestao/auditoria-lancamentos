@@ -36,12 +36,13 @@ NÃO logar:
 from __future__ import annotations
 
 import json
-import time
 from collections.abc import Callable
 from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
+
+from cachetools import TTLCache
 
 from app.core.logging import get_logger
 from app.integrations.omie.client import OmieClient
@@ -55,6 +56,13 @@ log = get_logger(__name__)
 # TTL: 2h conforme PLAN_IMPLEMENTACAO S11 e Doc §5.3.
 DEFAULT_TTL_SECONDS = 7200
 _REDIS_KEY_PREFIX = "omie_lancamento"
+
+# Limite de entries do L1. Estimativa: ~100 clientes x ~100 lançamentos
+# típicos por sessão = ~10k entries; cada entry ocupa ~200 B (DTO + tupla-chave
+# UUID + int), totalizando ~2 MB — headroom confortável e impede crescimento
+# ilimitado em uvicorn long-running. Ao bater o teto, TTLCache evita por LRU.
+# Não precisa ser thread-safe: asyncio é single-threaded.
+DEFAULT_L1_MAXSIZE = 10_000
 
 
 class OmieLancamentoData:
@@ -151,11 +159,16 @@ class OmieLancamentoCache:
         *,
         redis: Redis | None,
         ttl_seconds: int = DEFAULT_TTL_SECONDS,
+        l1_maxsize: int = DEFAULT_L1_MAXSIZE,
     ) -> None:
         self._redis = redis
         self._ttl = ttl_seconds
-        # L1: chave (client_id, omie_id) → (data, expires_at_monotonic)
-        self._l1: dict[tuple[UUID, int], tuple[OmieLancamentoData, float]] = {}
+        # L1: chave (client_id, omie_id) → data. TTLCache lida com expiração
+        # lazy via time.monotonic e impõe upper bound LRU.
+        self._l1: TTLCache[tuple[UUID, int], OmieLancamentoData] = TTLCache(
+            maxsize=l1_maxsize,
+            ttl=ttl_seconds,
+        )
 
     # ------------------------------------------------------------------
     # Lookup (read path)
@@ -203,28 +216,15 @@ class OmieLancamentoCache:
             )
             return found
 
-        # L2 — promove ao L1 quando encontra
-        if self._redis is not None and missing_in_l1:
-            l2_keys = [self._redis_key(client_id, oid) for oid in missing_in_l1]
-            values = await self._redis.mget(*l2_keys)
-            for oid, raw in zip(missing_in_l1, values, strict=True):
-                if raw is None:
-                    continue
-                try:
-                    data_dict = json.loads(raw)
-                    data = OmieLancamentoData.from_dict(data_dict)
-                except (ValueError, KeyError, TypeError):
-                    # Payload corrompido — descarta silenciosamente. Próxima
-                    # rodada vai re-popular via extrato. Não logamos o
-                    # conteúdo (regra: nada de plaintext de dados Omie).
-                    log.warning(
-                        "omie_lancamento_cache_l2_corrupted",
-                        client_id=str(client_id),
-                        omie_id=oid,
-                    )
-                    continue
-                found[oid] = data
-                self._l1_put(client_id, oid, data)
+        # L2 — promove ao L1 quando encontra. Falha do Redis NÃO derruba a
+        # request: degrada para "só L1" (paridade com o write em
+        # `populate_from_extrato`, que já tem try/except equivalente).
+        if self._redis is not None:
+            await self._fetch_from_l2_into(
+                client_id=client_id,
+                omie_ids=missing_in_l1,
+                found=found,
+            )
 
         log.info(
             "omie_lancamento_cache_lookup",
@@ -308,18 +308,56 @@ class OmieLancamentoCache:
     # ------------------------------------------------------------------
 
     def _l1_get(self, client_id: UUID, omie_id: int) -> OmieLancamentoData | None:
-        """Lookup L1 com expiração lazy (não roda evict thread)."""
-        entry = self._l1.get((client_id, omie_id))
-        if entry is None:
-            return None
-        data, expires_at = entry
-        if time.monotonic() >= expires_at:
-            self._l1.pop((client_id, omie_id), None)
-            return None
-        return data
+        """Lookup L1 — TTLCache trata expiração e LRU sozinho."""
+        return self._l1.get((client_id, omie_id))
 
     def _l1_put(self, client_id: UUID, omie_id: int, data: OmieLancamentoData) -> None:
-        self._l1[(client_id, omie_id)] = (data, time.monotonic() + self._ttl)
+        self._l1[(client_id, omie_id)] = data
 
     def _redis_key(self, client_id: UUID, omie_id: int) -> str:
         return f"{_REDIS_KEY_PREFIX}:{client_id}:{omie_id}"
+
+    async def _fetch_from_l2_into(
+        self,
+        *,
+        client_id: UUID,
+        omie_ids: list[int],
+        found: dict[int, OmieLancamentoData],
+    ) -> None:
+        """Lê o que falta no L1 a partir do Redis e mescla em `found`.
+
+        - Caller já garantiu `self._redis is not None` e `omie_ids` não vazio
+          (caso contrário só passa um no-op).
+        - Falha do Redis loga warning estruturado e retorna silenciosamente —
+          a chamada `get_many` continua com o que tiver de L1.
+        """
+        if not omie_ids or self._redis is None:
+            return
+        l2_keys = [self._redis_key(client_id, oid) for oid in omie_ids]
+        try:
+            values = await self._redis.mget(*l2_keys)
+        except Exception as exc:
+            log.warning(
+                "omie_lancamento_cache_l2_read_failed",
+                client_id=str(client_id),
+                count=len(l2_keys),
+                error=type(exc).__name__,
+            )
+            return
+        for oid, raw in zip(omie_ids, values, strict=True):
+            if raw is None:
+                continue
+            try:
+                data = OmieLancamentoData.from_dict(json.loads(raw))
+            except (ValueError, KeyError, TypeError):
+                # Payload corrompido — descarta silenciosamente. Próxima
+                # rodada vai re-popular via extrato. Não logamos o conteúdo
+                # (regra: nada de plaintext de dados Omie).
+                log.warning(
+                    "omie_lancamento_cache_l2_corrupted",
+                    client_id=str(client_id),
+                    omie_id=oid,
+                )
+                continue
+            found[oid] = data
+            self._l1_put(client_id, oid, data)
