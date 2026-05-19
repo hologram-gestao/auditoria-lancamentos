@@ -16,7 +16,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import Boolean, ForeignKey, String, Text
+from sqlalchemy import Boolean, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -40,6 +40,25 @@ class AnomalyDetectedBy(StrEnum):
 
 class ReconciliationAnomaly(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "reconciliation_anomalies"
+
+    # Compostos antecipam o gargalo de `list_anomalies_paginated`
+    # (review/repository.py) em sessões com muitas anomalias: o filtro
+    # principal é por `session_id` e o cruzamento usa `(resolved)` ou
+    # JOIN em `anomaly_type_id`. Os índices single-column existentes em
+    # `session_id` e `resolved` permanecem — servem queries de contagem
+    # global e dashboards futuros.
+    __table_args__ = (
+        Index(
+            "ix_recon_anomalies_session_resolved",
+            "session_id",
+            "resolved",
+        ),
+        Index(
+            "ix_recon_anomalies_session_type",
+            "session_id",
+            "anomaly_type_id",
+        ),
+    )
 
     session_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
