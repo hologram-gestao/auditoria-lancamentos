@@ -41,6 +41,13 @@ _SIGNATURES: dict[FileType, list[bytes]] = {
 _MIN_HEAD_BYTES = 8  # Suficiente para detectar todas as assinaturas binárias
 _CSV_SAMPLE_BYTES = 1024  # Amostra para heurística textual
 
+# Bytes que NÃO aparecem em texto plano legítimo. Todos os controles ASCII
+# (< 32) exceto \t (9), \n (10) e \r (13). Se mais de 5% do sample for
+# control char, descartamos como binário — evita falso-positivo de CSV em
+# payloads pseudoaleatórios que casualmente contêm `;` e `\n`.
+_CSV_MAX_CONTROL_RATIO = 0.05
+_TEXT_WHITESPACE = (9, 10, 13)  # \t, \n, \r
+
 
 def detect_file_type(content: bytes) -> FileType:
     """Detecta o tipo do arquivo pelos primeiros bytes.
@@ -61,22 +68,35 @@ def detect_file_type(content: bytes) -> FileType:
             if content.startswith(sig):
                 return file_type
 
-    # 2. Heurística CSV — texto válido com separadores e quebras de linha
-    sample = content[:_CSV_SAMPLE_BYTES]
+    # 2. Heurística CSV — texto válido com separadores e quebras de linha.
+    if _looks_like_csv(content[:_CSV_SAMPLE_BYTES]):
+        return FileType.CSV
+
+    return FileType.UNKNOWN
+
+
+def _looks_like_csv(sample: bytes) -> bool:
+    """Heurística textual para CSV.
+
+    Antes de qualquer decode, descartamos sample com control chars demais
+    (binário pseudoaleatório casualmente casa `;` + `\\n` no check final).
+    Em seguida, decode UTF-8 ou latin-1 e exige separador + quebra de linha.
+    """
+    control_bytes = sum(1 for b in sample if b < 32 and b not in _TEXT_WHITESPACE)
+    if control_bytes / len(sample) > _CSV_MAX_CONTROL_RATIO:
+        return False
+
     try:
         text = sample.decode("utf-8", errors="strict")
     except UnicodeDecodeError:
         try:
             text = sample.decode("latin-1", errors="strict")
         except UnicodeDecodeError:
-            return FileType.UNKNOWN
+            return False
 
     has_separator = any(sep in text for sep in (",", ";", "\t"))
     has_newline = "\n" in text or "\r" in text
-    if has_separator and has_newline:
-        return FileType.CSV
-
-    return FileType.UNKNOWN
+    return has_separator and has_newline
 
 
 def validate_upload_type(content: bytes, allowed: set[FileType]) -> FileType:
