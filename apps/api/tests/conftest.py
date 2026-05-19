@@ -39,6 +39,7 @@ if sys.platform == "win32":
 
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
+from app.core.config import get_settings
 from app.core.rate_limit import limiter as _rate_limiter
 from app.db.models import Base
 from app.db.session import get_db_session
@@ -46,6 +47,20 @@ from app.main import app as fastapi_app
 
 if TYPE_CHECKING:
     from testcontainers.postgres import PostgresContainer
+
+
+@pytest.fixture(autouse=True)
+def _force_real_parse(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Neutraliza `MOCK_PARSE=true` se vier do `.env` local (P1-007).
+
+    `MOCK_PARSE=true` faz o ParseService devolver um statement fixo (Padaria
+    Pão Quente) sem chamar a Anthropic — útil pra demos, mas quebra testes
+    que esperam payload real (ex: `test_admin_can_parse_any_client` espera
+    Sicredi). Forçamos `false` em toda execução de teste e zeramos o cache
+    do singleton `get_settings` para que o novo valor seja lido.
+    """
+    monkeypatch.setenv("MOCK_PARSE", "false")
+    get_settings.cache_clear()
 
 
 @pytest.fixture(autouse=True)
