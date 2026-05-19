@@ -165,7 +165,10 @@ class Settings(BaseSettings):
         a env var em staging/prod, JWT vaza em qualquer hop não-TLS. Falha
         rápido no startup em vez de servir cookies inseguros.
         """
-        if self.ENVIRONMENT in (Environment.STAGING, Environment.PRODUCTION) and not self.COOKIE_SECURE:
+        if (
+            self.ENVIRONMENT in (Environment.STAGING, Environment.PRODUCTION)
+            and not self.COOKIE_SECURE
+        ):
             raise ValueError(
                 f"COOKIE_SECURE deve ser True em ENVIRONMENT={self.ENVIRONMENT.value}. "
                 "Setar `COOKIE_SECURE=true` no .env do deploy."
