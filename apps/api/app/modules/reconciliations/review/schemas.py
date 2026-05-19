@@ -213,9 +213,11 @@ class AnomalyListResponse(BaseModel):
 class CreateAnomalyRequest(BaseModel):
     """Body do POST /api/v1/reconciliations/{id}/anomalies.
 
-    Validações cross-field:
-        - exatamente UM entre `file_entry_id` e `omie_entry_id` (XOR).
-        - `context` opcional.
+    Validações cross-field (XOR estrito — Doc §14.5):
+        - EXATAMENTE UM entre `file_entry_id` e `omie_entry_id`. Nem zero,
+          nem os dois. Anomalia órfã (zero) gera linha sem âncora no
+          relatório Excel; anomalia com dois cria ambiguidade no JOIN.
+        - `context` opcional, ≤ 2000 chars.
     """
 
     anomaly_type_id: UUID
@@ -225,15 +227,20 @@ class CreateAnomalyRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_xor(self) -> CreateAnomalyRequest:
-        # Aceita "nenhum"? Doc §14.5 diz que é sempre vinculada a uma
-        # linha — mas pra evitar quebra em demo flexibilizamos: aceita
-        # nenhum (caso analista queira anomalia "estrutural" não-aderente).
-        # Rejeita os DOIS — anomalia não pode referenciar 2 linhas ao mesmo
-        # tempo.
-        if self.file_entry_id is not None and self.omie_entry_id is not None:
+        # XOR estrito (P1-004): a flexibilização "aceita zero" foi
+        # introduzida durante a demo e nunca foi usada em cliente real.
+        # Removida antes do deploy.
+        has_file = self.file_entry_id is not None
+        has_omie = self.omie_entry_id is not None
+        if has_file and has_omie:
             raise ValueError(
                 "Anomalia só pode referenciar UMA linha — envie file_entry_id "
                 "OU omie_entry_id, não os dois."
+            )
+        if not has_file and not has_omie:
+            raise ValueError(
+                "Anomalia precisa estar vinculada a uma linha do arquivo "
+                "(file_entry_id) OU a um lançamento Omie (omie_entry_id)."
             )
         return self
 
@@ -251,11 +258,23 @@ class ResolveAnomalyRequest(BaseModel):
     """Body do PATCH /api/v1/reconciliations/{id}/anomalies/{anomaly_id}.
 
     Quando `resolved=true`, `resolution_note` precisa ter ≥ 10 chars
-    (Doc §17.3). Validação roda no service para emitir mensagem PT-BR.
+    (Doc §17.3). Validação no schema (P2-002) — antes só rodava no service,
+    o que deixava o OpenAPI/clients gerados sem a regra.
     """
 
     resolved: bool
     resolution_note: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def _validate_note_when_resolved(self) -> ResolveAnomalyRequest:
+        if self.resolved:
+            stripped = (self.resolution_note or "").strip()
+            if len(stripped) < 10:
+                raise ValueError(
+                    "Para resolver uma anomalia, descreva o que foi feito em "
+                    "pelo menos 10 caracteres."
+                )
+        return self
 
 
 class ResolveAnomalyResponse(BaseModel):

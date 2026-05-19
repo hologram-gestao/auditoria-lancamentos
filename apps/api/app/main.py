@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from app import __version__
@@ -101,6 +102,49 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Injeta headers de segurança em toda response (P0-002).
+
+    PLANO §5.1 #12. HSTS só é setado em prod (em dev http://localhost faz o
+    browser ignorar mesmo, mas evitamos confusão de cache local). Os demais
+    valem em todos os ambientes:
+
+      - `X-Content-Type-Options: nosniff` — bloqueia MIME sniffing.
+      - `X-Frame-Options: DENY` — bloqueia clickjacking (defesa em
+        profundidade junto com CSP frame-ancestors).
+      - `Referrer-Policy: same-origin` — não vaza URL completa em
+        navegações cross-origin.
+      - `Permissions-Policy` zera APIs sensíveis que esta API REST não usa.
+
+    CSP NÃO é setado aqui — esta API só serve JSON, sem HTML; o front Next
+    define sua própria CSP via `headers()` em `next.config.mjs`.
+    """
+
+    def __init__(self, app: object, *, is_production: bool) -> None:
+        super().__init__(app)  # type: ignore[arg-type]
+        self._is_production = is_production
+
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        response = await call_next(request)
+        if self._is_production:
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains"
+            )
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        response.headers.setdefault(
+            "Permissions-Policy",
+            "accelerometer=(), camera=(), geolocation=(), gyroscope=(), "
+            "magnetometer=(), microphone=(), payment=(), usb=()",
+        )
+        return response
+
+
 def _register_exception_handlers(app: FastAPI) -> None:
     """Conecta handlers para AppError, RequestValidationError, RateLimitExceeded
     e fallback genérico."""
@@ -178,7 +222,22 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json" if not settings.is_production else None,
     )
 
+    # Starlette aplica middlewares em ordem REVERSA de `add_middleware` — o
+    # último adicionado é o mais externo (primeiro a tocar a request).
+    # Ordem desejada (do externo pro interno):
+    #   CORS  → SecurityHeaders → TrustedHost → CorrelationId → handler
+    # Por isso adicionamos do mais interno para o mais externo abaixo. CORS
+    # por último é convenção do FastAPI: garante que preflight OPTIONS
+    # responda corretamente antes de qualquer outro middleware tocar.
     app.add_middleware(CorrelationIdMiddleware)
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=settings.allowed_hosts_list,
+    )
+    app.add_middleware(
+        SecurityHeadersMiddleware,
+        is_production=settings.is_production,
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.allowed_origins_list,

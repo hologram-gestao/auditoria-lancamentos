@@ -30,7 +30,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from app.core.dependencies import (
     AccessibleClientDep,
@@ -39,6 +39,7 @@ from app.core.dependencies import (
     ManagerOrAdminDep,
     SettingsDep,
 )
+from app.core.rate_limit import limiter, user_id_key_func
 from app.db.models import UserRole
 from app.modules.clients.repository import ClientRepository
 from app.modules.clients.schemas import (
@@ -120,9 +121,14 @@ async def create_client(
 
 @router.post(
     "/test-connection",
-    summary="Testa credenciais Omie sem persistir. Retorna ok+message para a UI.",
+    summary=(
+        "Testa credenciais Omie sem persistir. Retorna ok+message para a UI. "
+        "Rate limit: 30/min/usuário — chama Omie."
+    ),
 )
+@limiter.limit("30/minute", key_func=user_id_key_func)
 async def test_connection(
+    request: Request,
     payload: TestConnectionRequest,
     user: ManagerOrAdminDep,
     service: ClientServiceDep,
@@ -168,9 +174,14 @@ async def assign_client(
 
 @router.patch(
     "/{client_id}/sync-accounts",
-    summary="Força sincronização das contas Omie do cliente, ignorando o TTL do cache L1.",
+    summary=(
+        "Força sincronização das contas Omie do cliente, ignorando o TTL do "
+        "cache L1. Rate limit: 30/min/usuário — chama Omie."
+    ),
 )
+@limiter.limit("30/minute", key_func=user_id_key_func)
 async def sync_accounts(
+    request: Request,
     client: AccessibleClientDep,
     service: ClientServiceDep,
 ) -> ClientDetailResponse:

@@ -5,10 +5,14 @@ Princípios (CLAUDE.md §3):
     - Usuário inativo retorna o MESMO erro genérico — não vazar que o email existe.
     - bcrypt sempre via `app.core.security` (cost ≥ 12).
     - Tokens (access + refresh) são JWT HS256 com `jti` único.
+    - Timing constante no login: usuário inexistente também consome um
+      `verify_password` contra hash dummy, equalizando o tempo de resposta
+      (P0-003 — bloqueia enumeração de emails por timing diff).
 """
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -18,6 +22,7 @@ from app.core.security import (
     create_access_token,
     create_refresh_token,
     decode_token,
+    hash_password,
     verify_password,
 )
 from app.modules.auth.repository import AuthRepository
@@ -33,6 +38,18 @@ if TYPE_CHECKING:
 GENERIC_LOGIN_ERROR = "E-mail ou senha incorretos."
 
 
+@lru_cache(maxsize=1)
+def _dummy_bcrypt_hash() -> str:
+    """Hash bcrypt pré-computado para equalizar o tempo de `login()` (P0-003).
+
+    Gerado uma vez por processo, sob lazy init. O cost segue o padrão do
+    projeto (12, conforme `hash_password` default). A senha dummy é
+    arbitrária — só importa que `verify_password("anything", hash)` execute
+    o bcrypt completo para consumir o mesmo tempo do caminho positivo.
+    """
+    return hash_password("timing-equalization-not-a-credential", cost=12)
+
+
 class AuthService:
     """Operações de autenticação."""
 
@@ -46,9 +63,17 @@ class AuthService:
         Erros:
             - `UnauthorizedError` (401, código UNAUTHORIZED) com mensagem genérica
               em todos os casos: email inexistente, senha errada, usuário inativo.
+
+        Timing constante (P0-003): mesmo quando o email não existe no DB,
+        consumimos um `verify_password` contra um hash dummy pré-computado.
+        Sem isso, atacante mede `t_response` e enumera emails válidos pela
+        ausência do bcrypt (~150-200ms cost=12). Combinado ao rate limit
+        do `/login` (5/5min/IP), barra enumeração prática.
         """
         user = await self._repo.get_by_email(email)
         if user is None:
+            # Consome bcrypt mesmo sem user — equaliza tempo.
+            verify_password(password, _dummy_bcrypt_hash())
             raise UnauthorizedError(
                 "Login rejeitado: usuário não encontrado.",
                 user_message=GENERIC_LOGIN_ERROR,

@@ -9,9 +9,9 @@ em lugar algum. Ver CLAUDE.md §3.
 
 from enum import StrEnum
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import Field, HttpUrl, SecretStr, field_validator
+from pydantic import Field, HttpUrl, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -96,6 +96,14 @@ class Settings(BaseSettings):
         default="http://localhost:3000",
         description="CSV de origens permitidas no CORS",
     )
+    # CSV de hosts aceitos no header `Host` (TrustedHostMiddleware, P0-005).
+    # Em prod, settar com o(s) FQDN(s) público(s) — protege contra host header
+    # injection (cache poisoning, password reset URL spoofing). Default inclui
+    # `test` (httpx AsyncClient default) e `testserver` (Starlette TestClient).
+    ALLOWED_HOSTS: str = Field(
+        default="localhost,127.0.0.1,test,testserver",
+        description="CSV de hostnames aceitos no header Host. Em prod, settar com FQDN público.",
+    )
 
     # ---------- Integrações ----------
     ANTHROPIC_API_KEY: SecretStr = Field(default=SecretStr(""))
@@ -149,10 +157,30 @@ class Settings(BaseSettings):
             raise ValueError("Chave deve ser hexadecimal válido.") from exc
         return v
 
+    @model_validator(mode="after")
+    def _enforce_secure_cookie_in_prod(self) -> Self:
+        """Em staging/production, exige COOKIE_SECURE=True (P0-001).
+
+        Default `False` existe pra dev local em HTTP. Quando o deploy esquece
+        a env var em staging/prod, JWT vaza em qualquer hop não-TLS. Falha
+        rápido no startup em vez de servir cookies inseguros.
+        """
+        if self.ENVIRONMENT in (Environment.STAGING, Environment.PRODUCTION) and not self.COOKIE_SECURE:
+            raise ValueError(
+                f"COOKIE_SECURE deve ser True em ENVIRONMENT={self.ENVIRONMENT.value}. "
+                "Setar `COOKIE_SECURE=true` no .env do deploy."
+            )
+        return self
+
     @property
     def allowed_origins_list(self) -> list[str]:
         """Retorna ALLOWED_ORIGINS como lista, após split por vírgula."""
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
+
+    @property
+    def allowed_hosts_list(self) -> list[str]:
+        """Retorna ALLOWED_HOSTS como lista, após split por vírgula."""
+        return [host.strip() for host in self.ALLOWED_HOSTS.split(",") if host.strip()]
 
     @property
     def is_production(self) -> bool:
