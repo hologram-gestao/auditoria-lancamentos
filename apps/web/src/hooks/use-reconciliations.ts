@@ -37,6 +37,7 @@ import {
   listAvailableOmieEntries,
   listFileEntries,
   listOmieEntries,
+  discardReconciliation,
   parseStatement,
   patchAnomaly,
   patchFileEntry,
@@ -105,6 +106,29 @@ export function useReprocessReconciliation(sessionId: string, clientId?: string)
           queryKey: ['clients', clientId, 'reconciliations'],
         });
       }
+    },
+  });
+}
+
+/**
+ * "Descartar" uma sessão em `status='error'` (soft-delete).
+ *
+ * Após sucesso, invalida a lista de conciliações do cliente (a sessão
+ * descartada some) e também invalida o detail da sessão — se o caller
+ * estiver na tela de revisão de uma sessão descartada, vai detectar
+ * 404 e levar pra fora.
+ */
+export function useDiscardReconciliation(sessionId: string, clientId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, void>({
+    mutationFn: () => discardReconciliation(sessionId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ['clients', clientId, 'reconciliations'],
+      });
+      void queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
+      // O contador de conciliações na lista de clientes pode mudar.
+      void queryClient.invalidateQueries({ queryKey: ['clients'] });
     },
   });
 }

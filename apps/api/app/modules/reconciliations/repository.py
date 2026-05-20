@@ -47,7 +47,12 @@ class ReconciliationRepository:
         reference_month: date,
         file_hash: str,
     ) -> bool:
-        """Retorna True se já existe sessão com a tupla idempotente.
+        """Retorna True se já existe sessão ATIVA com a tupla idempotente.
+
+        Ignora sessões descartadas (`deleted_at IS NOT NULL`) — depois de
+        descartar uma sessão, o usuário pode criar uma nova com o mesmo
+        arquivo no mesmo mês. O índice UNIQUE no banco também é parcial,
+        então a consistência fica garantida em ambas as camadas.
 
         Não carrega a `ReconciliationSession` inteira: seleciona apenas o `id`
         com `LIMIT 1` para que o Postgres responda direto pelo índice da
@@ -60,6 +65,7 @@ class ReconciliationRepository:
                 ReconciliationSession.omie_conta_id == omie_conta_id,
                 ReconciliationSession.reference_month == reference_month,
                 ReconciliationSession.file_hash == file_hash,
+                ReconciliationSession.deleted_at.is_(None),
             )
             .limit(1)
         )
@@ -105,7 +111,13 @@ class ReconciliationRepository:
         self,
         session_id: UUID,
     ) -> ReconciliationSession | None:
-        """Carrega a sessão com `client` e `file_entries` eager.
+        """Carrega a sessão ATIVA com `client` e `file_entries` eager.
+
+        Sessões descartadas (`deleted_at IS NOT NULL`) são tratadas como
+        404 — se o worker pegar um job em fila apontando pra uma sessão
+        que foi descartada nesse meio-tempo, simplesmente termina silencioso
+        (vide `_execute_processing`, que já loga "session_not_found" nesse
+        caso).
 
         Necessário para o worker: o `client` traz as credenciais Omie
         criptografadas; os `file_entries` alimentam o matcher. Como todos os
@@ -113,7 +125,10 @@ class ReconciliationRepository:
         """
         stmt = (
             select(ReconciliationSession)
-            .where(ReconciliationSession.id == session_id)
+            .where(
+                ReconciliationSession.id == session_id,
+                ReconciliationSession.deleted_at.is_(None),
+            )
             .options(
                 selectinload(ReconciliationSession.client),
                 selectinload(ReconciliationSession.file_entries),
@@ -277,6 +292,31 @@ class ReconciliationRepository:
             )
         )
 
+    async def soft_delete_session(self, session_id: UUID) -> None:
+        """Marca a sessão como descartada (`deleted_at = now()`).
+
+        Caso de uso: usuário clica em "Descartar" no card de sessão em
+        erro. Operação é **idempotente** — chamar 2x não tem efeito.
+        Não toca em `file_entries`/`omie_entries`/`anomalies`: o histórico
+        fica preservado pra auditoria; o filtro `deleted_at IS NULL` em
+        todas as queries de leitura/listagem esconde a sessão da UI.
+
+        Libera a tupla idempotente (client_id, omie_conta_id,
+        reference_month, file_hash) pra criar uma sessão nova com o
+        mesmo arquivo — o índice UNIQUE no banco é parcial com
+        `WHERE deleted_at IS NULL` (ver migration `d1e8a4b9f2c5`).
+        """
+        from datetime import UTC, datetime
+
+        await self._session.execute(
+            update(ReconciliationSession)
+            .where(
+                ReconciliationSession.id == session_id,
+                ReconciliationSession.deleted_at.is_(None),
+            )
+            .values(deleted_at=datetime.now(UTC))
+        )
+
     # ------------------------------------------------------------------
     # Worker — leitura de anomalies (BACK 8.5)
     # ------------------------------------------------------------------
@@ -298,11 +338,17 @@ class ReconciliationRepository:
     ) -> ReconciliationSession | None:
         """Carrega APENAS os campos necessários ao endpoint de status.
 
+        Filtra sessões descartadas — front trata como 404 mesma coisa que
+        sessão inexistente.
+
         Não eager-loadingo o `client` aqui: o RBAC busca o cliente via
         `require_client_access`, e o restante dos relationships não é
         usado pelo polling.
         """
-        stmt = select(ReconciliationSession).where(ReconciliationSession.id == session_id)
+        stmt = select(ReconciliationSession).where(
+            ReconciliationSession.id == session_id,
+            ReconciliationSession.deleted_at.is_(None),
+        )
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 

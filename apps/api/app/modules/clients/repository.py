@@ -71,11 +71,15 @@ class ClientRepository:
         """
         manager = aliased(User)
 
-        # Subquery escalar: conta de sessões por cliente. Correlate evita o
-        # SQLAlchemy referenciar `clients` da query externa duas vezes.
+        # Subquery escalar: conta de sessões ATIVAS por cliente (descarte
+        # de erros não infla o contador). Correlate evita o SQLAlchemy
+        # referenciar `clients` da query externa duas vezes.
         recon_count_sq = (
             select(func.count(ReconciliationSession.id))
-            .where(ReconciliationSession.client_id == Client.id)
+            .where(
+                ReconciliationSession.client_id == Client.id,
+                ReconciliationSession.deleted_at.is_(None),
+            )
             .correlate(Client)
             .scalar_subquery()
         )
@@ -118,7 +122,10 @@ class ClientRepository:
         manager = aliased(User)
         recon_count_sq = (
             select(func.count(ReconciliationSession.id))
-            .where(ReconciliationSession.client_id == Client.id)
+            .where(
+                ReconciliationSession.client_id == Client.id,
+                ReconciliationSession.deleted_at.is_(None),
+            )
             .correlate(Client)
             .scalar_subquery()
         )
@@ -248,11 +255,20 @@ class ClientRepository:
         Ordem: `created_at DESC, id DESC` — desempate determinístico quando 2
         sessões caem no mesmo segundo (pode acontecer em testes).
         """
-        base = select(ReconciliationSession).where(ReconciliationSession.client_id == client_id)
+        # Esconde sessões descartadas (soft-delete). Sessões em error
+        # descartadas pela UI não aparecem mais no histórico do cliente,
+        # mas continuam no banco pra auditoria.
+        base = select(ReconciliationSession).where(
+            ReconciliationSession.client_id == client_id,
+            ReconciliationSession.deleted_at.is_(None),
+        )
         count_base = (
             select(func.count(ReconciliationSession.id))
             .select_from(ReconciliationSession)
-            .where(ReconciliationSession.client_id == client_id)
+            .where(
+                ReconciliationSession.client_id == client_id,
+                ReconciliationSession.deleted_at.is_(None),
+            )
         )
 
         if omie_conta_id is not None:

@@ -20,16 +20,25 @@
  *     intervenção do componente.
  */
 
-import { AlertTriangle, ChevronRight, Loader2, RefreshCw } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Loader2, RefreshCw, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useClientDetail } from '@/hooks/use-clients';
 import {
+  useDiscardReconciliation,
   useReprocessReconciliation,
   useSessionDetail,
   useSessionStatus,
@@ -210,6 +219,8 @@ function ReviewErrorScreen({
 }: ReviewErrorScreenProps) {
   const router = useRouter();
   const reprocessMutation = useReprocessReconciliation(sessionId, clientId);
+  const discardMutation = useDiscardReconciliation(sessionId, clientId);
+  const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false);
 
   async function handleReprocess() {
     try {
@@ -227,6 +238,22 @@ function ReviewErrorScreen({
       toast.error(message);
     }
   }
+
+  async function handleDiscard() {
+    try {
+      await discardMutation.mutateAsync();
+      toast.success('Conciliação descartada.');
+      setConfirmDiscardOpen(false);
+      // Após descartar, a sessão some — volta pro detalhe do cliente.
+      router.push(`/clientes/${clientId}`);
+    } catch (err) {
+      const message =
+        err instanceof ApiError ? err.userMessage : 'Não foi possível descartar a conciliação.';
+      toast.error(message);
+    }
+  }
+
+  const isAnyPending = reprocessMutation.isPending || discardMutation.isPending;
 
   return (
     <div className="space-y-6">
@@ -269,7 +296,7 @@ function ReviewErrorScreen({
           <Button
             variant="outline"
             onClick={() => void handleReprocess()}
-            disabled={reprocessMutation.isPending}
+            disabled={isAnyPending}
             aria-live="polite"
           >
             {reprocessMutation.isPending ? (
@@ -279,11 +306,57 @@ function ReviewErrorScreen({
             )}
             {reprocessMutation.isPending ? 'Reprocessando…' : 'Tentar novamente'}
           </Button>
+          <Button
+            variant="ghost"
+            onClick={() => setConfirmDiscardOpen(true)}
+            disabled={isAnyPending}
+            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+          >
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
+            Descartar
+          </Button>
           <Button variant="ghost" asChild>
             <Link href={`/clientes/${clientId}`}>Voltar para o cliente</Link>
           </Button>
         </div>
       </div>
+
+      <Dialog open={confirmDiscardOpen} onOpenChange={setConfirmDiscardOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Descartar esta conciliação?</DialogTitle>
+            <DialogDescription>
+              A conciliação some do histórico do cliente e libera o mesmo arquivo + mês de
+              referência para uma nova tentativa. Esta ação não pode ser desfeita pela interface — o
+              registro fica preservado no banco apenas para auditoria.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setConfirmDiscardOpen(false)}
+              disabled={discardMutation.isPending}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void handleDiscard()}
+              disabled={discardMutation.isPending}
+              aria-live="polite"
+            >
+              {discardMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
+              )}
+              {discardMutation.isPending ? 'Descartando…' : 'Descartar conciliação'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

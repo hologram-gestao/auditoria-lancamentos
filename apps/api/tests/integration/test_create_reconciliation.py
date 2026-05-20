@@ -795,6 +795,133 @@ class TestReprocessReconciliation:
 
 
 # ----------------------------------------------------------------------
+# POST /reconciliations/{id}/discard  (S11.fix — soft-delete de erro)
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestDiscardReconciliation:
+    async def test_unauthenticated_returns_401(self, client_with_db: AsyncClient) -> None:
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{uuid4()}/discard")
+        assert resp.status_code == 401
+
+    async def test_inexistent_session_returns_404(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        await _login(client_with_db, ADMIN_EMAIL)
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{uuid4()}/discard")
+        assert resp.status_code == 404
+
+    async def test_discard_error_session_marks_deleted_at(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+    ) -> None:
+        """Caminho feliz: sessão em error → 204; deleted_at populado."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="X", creator=admin)
+        sess = await _seed_session(
+            db_session,
+            cliente=cliente,
+            creator=admin,
+            status_value="error",
+            error_message="O Omie não respondeu",
+            file_hash=_hex64("discard-happy"),
+        )
+        await _login(client_with_db, ADMIN_EMAIL)
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{sess.id}/discard")
+        assert resp.status_code == 204
+        assert resp.content == b""
+
+        await db_session.refresh(sess)
+        assert sess.deleted_at is not None
+        # Status segue 'error' — soft-delete não muda o histórico.
+        assert sess.status == "error"
+
+    async def test_discard_non_error_session_returns_409(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+    ) -> None:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="Y", creator=admin)
+        sess = await _seed_session(
+            db_session,
+            cliente=cliente,
+            creator=admin,
+            status_value="reviewing",
+            file_hash=_hex64("discard-reviewing"),
+        )
+        await _login(client_with_db, ADMIN_EMAIL)
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{sess.id}/discard")
+        assert resp.status_code == 409, resp.text
+
+        # Não toca o deleted_at em sessão não-error.
+        await db_session.refresh(sess)
+        assert sess.deleted_at is None
+
+    async def test_discard_releases_idempotency_unique(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        """Depois de descartar, criar nova sessão com mesma tupla idempotente
+        NÃO retorna 409 DUPLICATE_FILE — o UNIQUE no banco é parcial
+        (WHERE deleted_at IS NULL)."""
+        del stub_enqueue
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="Z", creator=admin)
+        same_hash = _hex64("discard-reuse")
+        sess = await _seed_session(
+            db_session,
+            cliente=cliente,
+            creator=admin,
+            status_value="error",
+            error_message="erro",
+            file_hash=same_hash,
+        )
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        # 1. Descarta a sessão em erro.
+        resp_discard = await client_with_db.post(f"/api/v1/reconciliations/{sess.id}/discard")
+        assert resp_discard.status_code == 204
+
+        # 2. Tenta criar nova sessão com MESMA tupla idempotente. Antes do
+        #    soft-delete + índice parcial, isso retornaria 409 DUPLICATE_FILE.
+        payload = _create_payload(
+            client_id=cliente.id,
+            omie_conta_id=42,
+            reference_month="2026-04-01",
+            file_hash=same_hash,
+        )
+        resp_create = await client_with_db.post("/api/v1/reconciliations", json=payload)
+        assert resp_create.status_code == 201, resp_create.text
+
+    async def test_manager_outside_portfolio_returns_404(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+    ) -> None:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        mgr_a = await _seed_user(db_session, email=MANAGER_A_EMAIL, role=UserRole.MANAGER)
+        await _seed_user(db_session, email=MANAGER_B_EMAIL, role=UserRole.MANAGER)
+        cliente_a = await _seed_client(db_session, name="A", creator=admin, manager=mgr_a)
+        sess = await _seed_session(
+            db_session,
+            cliente=cliente_a,
+            creator=admin,
+            status_value="error",
+            error_message="erro",
+            file_hash=_hex64("discard-rbac"),
+        )
+        await _login(client_with_db, MANAGER_B_EMAIL)
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{sess.id}/discard")
+        assert resp.status_code == 404
+
+
+# ----------------------------------------------------------------------
 # Garantia de fixture do app: as rotas estão registradas no FastAPI app.
 # (sanity check para evitar falsos passes se o include_router for esquecido)
 # ----------------------------------------------------------------------
@@ -806,3 +933,4 @@ def test_routes_are_registered_in_app() -> None:
     assert "/api/v1/reconciliations/{session_id}/status" in paths
     assert "/api/v1/reconciliations/{session_id}" in paths
     assert "/api/v1/reconciliations/{session_id}/reprocess" in paths
+    assert "/api/v1/reconciliations/{session_id}/discard" in paths

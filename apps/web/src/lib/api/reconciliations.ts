@@ -177,6 +177,22 @@ export async function reprocessReconciliation(
   return apiPost<CreateReconciliationResult>(`/api/v1/reconciliations/${sessionId}/reprocess`, {});
 }
 
+/**
+ * Descarta (soft-delete) uma sessão em `status='error'`.
+ *
+ * Backend marca `deleted_at=now()` — sessão some das listagens, libera a
+ * tupla UNIQUE de idempotência (mesmo arquivo+mês pode virar uma sessão
+ * nova). Retorna 204 No Content.
+ *
+ * Erros relevantes:
+ *   - 404: sessão não existe / manager fora da carteira.
+ *   - 409 (`CONFLICT`): sessão NÃO está em error (já em revisão ou
+ *     concluída) — descarte só vale pra sessões mortas.
+ */
+export async function discardReconciliation(sessionId: string): Promise<void> {
+  await apiPost<void>(`/api/v1/reconciliations/${sessionId}/discard`, {});
+}
+
 // ----------------------------------------------------------------------
 // S10 — GET /api/v1/reconciliations/{id}/status
 // ----------------------------------------------------------------------

@@ -16,13 +16,30 @@
 
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { AlertCircle, ArrowRight, CheckCircle2, Loader2, RefreshCw, XCircle } from 'lucide-react';
+import {
+  AlertCircle,
+  ArrowRight,
+  CheckCircle2,
+  Loader2,
+  RefreshCw,
+  Trash2,
+  XCircle,
+} from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
-import { useReprocessReconciliation } from '@/hooks/use-reconciliations';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { useDiscardReconciliation, useReprocessReconciliation } from '@/hooks/use-reconciliations';
 import { ApiError } from '@/lib/api/client';
 import type { ReconciliationSessionSummary } from '@/lib/api/clients';
 import { cn } from '@/lib/utils';
@@ -38,6 +55,8 @@ interface ReconciliationCardProps {
 export function ReconciliationCard({ clientId, session, accountName }: ReconciliationCardProps) {
   const router = useRouter();
   const reprocessMutation = useReprocessReconciliation(session.id, clientId);
+  const discardMutation = useDiscardReconciliation(session.id, clientId);
+  const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false);
   const isProcessing = session.status === 'processing';
   const isError = session.status === 'error';
   const showCounters = session.status === 'done' || session.status === 'reviewing';
@@ -55,6 +74,18 @@ export function ReconciliationCard({ clientId, session, accountName }: Reconcili
     } catch (err) {
       const message =
         err instanceof ApiError ? err.userMessage : 'Não foi possível reprocessar a conciliação.';
+      toast.error(message);
+    }
+  }
+
+  async function handleDiscard() {
+    try {
+      await discardMutation.mutateAsync();
+      toast.success('Conciliação descartada.');
+      setConfirmDiscardOpen(false);
+    } catch (err) {
+      const message =
+        err instanceof ApiError ? err.userMessage : 'Não foi possível descartar a conciliação.';
       toast.error(message);
     }
   }
@@ -102,23 +133,36 @@ export function ReconciliationCard({ clientId, session, accountName }: Reconcili
 
       <div className="text-muted-foreground flex items-center justify-between gap-2 text-xs">
         <span>Criada em {createdAtLabel}</span>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           {isError && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => void handleReprocess()}
-              disabled={reprocessMutation.isPending}
-              aria-live="polite"
-            >
-              {reprocessMutation.isPending ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-              ) : (
-                <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-              )}
-              {reprocessMutation.isPending ? 'Reprocessando…' : 'Tentar novamente'}
-            </Button>
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void handleReprocess()}
+                disabled={reprocessMutation.isPending || discardMutation.isPending}
+                aria-live="polite"
+              >
+                {reprocessMutation.isPending ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                )}
+                {reprocessMutation.isPending ? 'Reprocessando…' : 'Tentar novamente'}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setConfirmDiscardOpen(true)}
+                disabled={discardMutation.isPending || reprocessMutation.isPending}
+                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+              >
+                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                Descartar
+              </Button>
+            </>
           )}
           {!isProcessing && !isError && (
             <Link
@@ -131,6 +175,44 @@ export function ReconciliationCard({ clientId, session, accountName }: Reconcili
           )}
         </div>
       </div>
+
+      <Dialog open={confirmDiscardOpen} onOpenChange={setConfirmDiscardOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Descartar esta conciliação?</DialogTitle>
+            <DialogDescription>
+              A conciliação some do histórico do cliente e libera <strong>{accountName}</strong> em{' '}
+              <strong>{referenceLabel}</strong> para uma nova tentativa com o mesmo arquivo. Esta
+              ação não pode ser desfeita pela interface — o registro fica preservado no banco apenas
+              para auditoria.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setConfirmDiscardOpen(false)}
+              disabled={discardMutation.isPending}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void handleDiscard()}
+              disabled={discardMutation.isPending}
+              aria-live="polite"
+            >
+              {discardMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
+              )}
+              {discardMutation.isPending ? 'Descartando…' : 'Descartar conciliação'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </article>
   );
 }

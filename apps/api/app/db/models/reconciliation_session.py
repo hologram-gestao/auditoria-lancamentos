@@ -24,12 +24,13 @@ from sqlalchemy import (
     BigInteger,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     SmallInteger,
     String,
     Text,
-    UniqueConstraint,
+    text,
 )
 from sqlalchemy import Date as SQLDate
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
@@ -57,13 +58,21 @@ class ReconciliationStatus(StrEnum):
 
 class ReconciliationSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "reconciliation_sessions"
+    # UNIQUE PARCIAL: a idempotência só vale para sessões ATIVAS
+    # (`deleted_at IS NULL`). Soft-delete libera a tupla pra criar uma
+    # sessão nova com o mesmo arquivo no mesmo mês — caso do botão
+    # "Descartar" na UI de erro. PostgreSQL suporta `WHERE` em índice
+    # único nativamente, SQLAlchemy não modela `UniqueConstraint(where=)`,
+    # então usamos `Index(unique=True, postgresql_where=...)`.
     __table_args__ = (
-        UniqueConstraint(
+        Index(
+            "uq_recon_sessions_idempotency",
             "client_id",
             "omie_conta_id",
             "reference_month",
             "file_hash",
-            name="uq_recon_sessions_idempotency",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
         ),
     )
 
@@ -98,6 +107,17 @@ class ReconciliationSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Soft-delete: NULL = sessão ativa; timestamp = descartada pela UI.
+    # Toda query de leitura/listagem precisa filtrar `WHERE deleted_at IS
+    # NULL` — o índice de idempotência também é parcial pra liberar a
+    # tupla quando a sessão é descartada (criar uma nova com o mesmo
+    # arquivo passa a ser possível).
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
 
     # Saldos calculados ao final do processamento
     balance_start: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)

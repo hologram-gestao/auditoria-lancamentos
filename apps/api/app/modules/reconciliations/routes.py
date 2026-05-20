@@ -9,6 +9,7 @@ S10 (BACK 8.1 + 8.6):
     - GET /api/v1/reconciliations/{session_id}/status
 S11.fix (retry de sessão em erro):
     - POST /api/v1/reconciliations/{session_id}/reprocess
+    - POST /api/v1/reconciliations/{session_id}/discard  (soft-delete)
 """
 
 from __future__ import annotations
@@ -385,6 +386,57 @@ async def reprocess_reconciliation(
             status="processing",
         )
     )
+
+
+# ----------------------------------------------------------------------
+# S11.fix — POST /reconciliations/{id}/discard  (soft-delete de sessão em erro)
+# ----------------------------------------------------------------------
+
+
+@router.post(
+    "/{session_id}/discard",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary=(
+        "Descarta (soft-delete) uma sessão que terminou em `status='error'`. "
+        "Marca `deleted_at=now()`; histórico fica preservado pra auditoria, "
+        "mas a sessão some da UI. Libera o índice UNIQUE de idempotência "
+        "(`client_id, omie_conta_id, reference_month, file_hash`) — usuário "
+        "pode criar uma sessão nova com o mesmo arquivo no mesmo mês. "
+        "Conflito (409): se a sessão NÃO está em error (já processando, em "
+        "revisão ou concluída), recusamos — soft-delete só faz sentido pra "
+        "sessões mortas. Sessões reviewing/done são preservadas pelo "
+        'produto (não há fluxo de "deletar revisão concluída" hoje).'
+    ),
+)
+async def discard_reconciliation(
+    user: ManagerOrAdminDep,
+    db: DbSessionDep,
+    session_id: UUID,
+) -> Response:
+    """Soft-delete da sessão. 204 sem corpo no sucesso."""
+    repo = ReconciliationRepository(db)
+
+    sess = await repo.get_status_view(session_id)
+    if sess is None:
+        raise NotFoundError(_SESSION_NOT_FOUND_MSG)
+
+    try:
+        await require_client_access(sess.client_id, user, db)
+    except ClientNotAccessibleError as exc:
+        raise NotFoundError(_SESSION_NOT_FOUND_MSG) from exc
+
+    if sess.status != ReconciliationStatus.ERROR.value:
+        raise ConflictError(
+            f"Sessão {session_id} não está em erro (status={sess.status}).",
+            user_message=(
+                "Só conciliações em estado de erro podem ser descartadas — "
+                "para sessões concluídas ou em revisão, contate o "
+                "administrador do sistema."
+            ),
+        )
+
+    await repo.soft_delete_session(session_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ----------------------------------------------------------------------
