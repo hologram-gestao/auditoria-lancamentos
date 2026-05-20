@@ -98,87 +98,89 @@ _MOCK_CONTAS: list[ContaCorrente] = [
 # 8 lançamentos do extrato Itaú — 5 batem com o ParsedStatement mock + 3 órfãos.
 # `cNatureza='D'` → débito (saída, signed_amount negativo).
 # `cNatureza='C'` → crédito (entrada, signed_amount positivo).
+# Aliases seguem o response real do Omie (cObservacoes, cSituacao, ...),
+# pra que `model_validate` exercite o mesmo caminho do código de produção.
 _MOCK_EXTRATO_ITAU: list[LancamentoExtrato] = [
     # === Os 5 que vão dar MATCH com o arquivo ===
     LancamentoExtrato.model_validate(
         {
-            "nCodLanc": 70001,
+            "nCodLancamento": 70001,
             "cNatureza": "D",
-            "dDtLanc": "03/04/2026",
-            "nValorLanc": Decimal("1250.00"),
-            "cDescrLanc": "PAG FORNECEDOR MOINHO PRADO",
-            "cStatus": "Conciliado",
+            "dDataLancamento": "03/04/2026",
+            "nValorDocumento": Decimal("1250.00"),
+            "cObservacoes": "PAG FORNECEDOR MOINHO PRADO",
+            "cSituacao": "Conciliado",
         }
     ),
     LancamentoExtrato.model_validate(
         {
-            "nCodLanc": 70002,
+            "nCodLancamento": 70002,
             "cNatureza": "C",
-            "dDtLanc": "04/04/2026",
-            "nValorLanc": Decimal("1245.30"),
-            "cDescrLanc": "CIELO LIQUIDACAO",
-            "cStatus": "Conciliado",
+            "dDataLancamento": "04/04/2026",
+            "nValorDocumento": Decimal("1245.30"),
+            "cObservacoes": "CIELO LIQUIDACAO",
+            "cSituacao": "Conciliado",
         }
     ),
     LancamentoExtrato.model_validate(
         {
-            "nCodLanc": 70003,
+            "nCodLancamento": 70003,
             "cNatureza": "D",
-            "dDtLanc": "09/04/2026",
-            "nValorLanc": Decimal("487.90"),
-            "cDescrLanc": "ENEL CONTA ENERGIA",
-            "cStatus": "Conciliado",
+            "dDataLancamento": "09/04/2026",
+            "nValorDocumento": Decimal("487.90"),
+            "cObservacoes": "ENEL CONTA ENERGIA",
+            "cSituacao": "Conciliado",
         }
     ),
     LancamentoExtrato.model_validate(
         {
-            "nCodLanc": 70004,
+            "nCodLancamento": 70004,
             "cNatureza": "D",
-            "dDtLanc": "16/04/2026",
-            "nValorLanc": Decimal("6225.00"),
-            "cDescrLanc": "FOLHA 1A QUINZ",
-            "cStatus": "Conciliado",
+            "dDataLancamento": "16/04/2026",
+            "nValorDocumento": Decimal("6225.00"),
+            "cObservacoes": "FOLHA 1A QUINZ",
+            "cSituacao": "Conciliado",
         }
     ),
     LancamentoExtrato.model_validate(
         {
-            "nCodLanc": 70005,
+            "nCodLancamento": 70005,
             "cNatureza": "D",
-            "dDtLanc": "21/04/2026",
-            "nValorLanc": Decimal("1890.00"),
-            "cDescrLanc": "GUIA INSS",
-            "cStatus": "Conciliado",
+            "dDataLancamento": "21/04/2026",
+            "nValorDocumento": Decimal("1890.00"),
+            "cObservacoes": "GUIA INSS",
+            "cSituacao": "Conciliado",
         }
     ),
     # === 3 órfãos no Omie — vão pra `reconciliation_omie_entries` sem anomalia ===
     LancamentoExtrato.model_validate(
         {
-            "nCodLanc": 70010,
+            "nCodLancamento": 70010,
             "cNatureza": "C",
-            "dDtLanc": "05/04/2026",
-            "nValorLanc": Decimal("150.00"),
-            "cDescrLanc": "ESTORNO PIX",
-            "cStatus": "Conciliado",
+            "dDataLancamento": "05/04/2026",
+            "nValorDocumento": Decimal("150.00"),
+            "cObservacoes": "ESTORNO PIX",
+            "cSituacao": "Conciliado",
         }
     ),
     LancamentoExtrato.model_validate(
         {
-            "nCodLanc": 70011,
+            "nCodLancamento": 70011,
             "cNatureza": "D",
-            "dDtLanc": "12/04/2026",
-            "nValorLanc": Decimal("2300.00"),
-            "cDescrLanc": "TRANSF INTERNA",
-            "cStatus": "Conciliado",
+            "dDataLancamento": "12/04/2026",
+            "nValorDocumento": Decimal("2300.00"),
+            "cObservacoes": "TRANSF INTERNA",
+            "cSituacao": "Conciliado",
         }
     ),
     LancamentoExtrato.model_validate(
         {
-            "nCodLanc": 70012,
+            "nCodLancamento": 70012,
             "cNatureza": "C",
-            "dDtLanc": "19/04/2026",
-            "nValorLanc": Decimal("187.50"),
-            "cDescrLanc": "RENDIMENTO CDB",
-            "cStatus": "Conciliado",
+            "dDataLancamento": "19/04/2026",
+            "nValorDocumento": Decimal("187.50"),
+            "cObservacoes": "RENDIMENTO CDB",
+            "cSituacao": "Conciliado",
         }
     ),
 ]
@@ -300,7 +302,7 @@ class MockOmieClient(OmieClient):
         # range certo, mas mantemos pra não retornar lançamentos fora da janela).
         await asyncio.sleep(_DELAY_LISTAR_EXTRATO_SECONDS)
         items = _MOCK_EXTRATO_BY_CONTA.get(n_cod_cc, [])
-        filtered = [it for it in items if data_inicial <= it.d_dt_lanc <= data_final]
+        filtered = [it for it in items if data_inicial <= it.d_data_lancamento <= data_final]
         log.info(
             "omie_mock_call",
             call="listar_extrato",

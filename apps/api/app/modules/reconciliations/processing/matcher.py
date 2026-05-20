@@ -44,9 +44,10 @@ class OmieMovement:
     `amount` JÁ vem com sinal aritmético aplicado (débito negativo, crédito
     positivo). Normalização acontece no `omie_fetch`, não aqui.
 
-    `status` é o `cStatus` do extrato (Conciliado/Atrasado/Previsto) ou o
-    `status_titulo` (ATRASADO/PREVISTO) — usado adiante para classificar
-    anomalias `missing_in_file`. O matcher não filtra por status.
+    `status` é o `cSituacao` do extrato (Conciliado/Atrasado/Previsto) ou o
+    canônico DB derivado do filtro `status_titulo` (ATRASADO/AVENCER → Previsto)
+    para títulos — usado adiante para classificar anomalias `missing_in_file`.
+    O matcher não filtra por status.
     """
 
     omie_id: int

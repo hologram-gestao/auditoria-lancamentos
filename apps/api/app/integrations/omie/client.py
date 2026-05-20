@@ -412,9 +412,15 @@ class OmieClient:
     ) -> list[LancamentoExtrato]:
         """Lista lançamentos do extrato para uma conta no período.
 
-        TODO (S5 — Pontos em Aberto): a documentação Omie não especifica se
-        este endpoint pagina. Por ora assumimos que retorna tudo numa chamada;
-        se em produção retornar > N itens, ajustar para paginação.
+        Doc oficial: https://app.omie.com.br/api/v1/financas/extrato/
+        Envelope `eccListarExtratoResponse`, chave do array é
+        `listaMovimentos` (NÃO `extrato`, como a doc interna v1 dizia).
+
+        TODO (S5 — Pontos em Aberto): a doc oficial não documenta paginação
+        nem limite máximo; assumimos response inteira numa chamada. Se um
+        cliente real tiver milhares de lançamentos no período, este endpoint
+        pode estourar timeout/memória — telemetria (`omie_extrato_size`) +
+        timeout per-endpoint estão no backlog (auditoria ALTO-3).
 
         Args:
             n_cod_cc: ID da conta corrente (`nCodCC`).
@@ -432,7 +438,7 @@ class OmieClient:
                 "dPeriodoFinal": data_final.strftime("%d/%m/%Y"),
             },
         )
-        raw_items: list[dict[str, Any]] = resp.get("extrato") or []
+        raw_items: list[dict[str, Any]] = resp.get("listaMovimentos") or []
         return [LancamentoExtrato.model_validate(it) for it in raw_items]
 
     async def listar_contas_pagar(

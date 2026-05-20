@@ -28,7 +28,7 @@ from app.modules.reconciliations.processing.matcher import OmieMovement
 # Mapeia o valor do FILTRO `filtrar_por_status` (UPPERCASE, doc oficial Omie:
 # ATRASADO, AVENCER, ...) para o status CANÔNICO do DB (CamelCase, ver
 # `OmieEntryStatus`: Atrasado, Previsto, Conciliado). O canônico segue o
-# `ListarExtrato.cStatus`, que devolve em CamelCase — usamos a mesma escala
+# `ListarExtrato.cSituacao`, que devolve em CamelCase — usamos a mesma escala
 # em todo o domínio para que `anomalies.create_structural_anomalies` possa
 # comparar contra o enum sem case-insensitive ad hoc.
 #
@@ -64,11 +64,12 @@ async def fetch_realized(
     Período expandido (CLAUDE.md §5.3):
         [period_start - tolerance_days, period_end + tolerance_days]
 
-    Mapeamento de campos:
-        - omie_id          ← n_cod_lanc
-        - transaction_date ← d_dt_lanc
-        - amount           ← signed_amount (D negativo, C positivo)
-        - status           ← c_status (Conciliado | Atrasado | Previsto)
+    Mapeamento de campos (nomes refletem o response real do Omie —
+    auditoria CRÍTICO-1/2, corrigido em 19/05/2026):
+        - omie_id          ← n_cod_lancamento  (alias `nCodLancamento`)
+        - transaction_date ← d_data_lancamento (alias `dDataLancamento`)
+        - amount           ← signed_amount     (D negativo, C positivo)
+        - status           ← c_situacao        (alias `cSituacao`)
         - is_realized      ← True (veio do extrato)
 
     Args:
@@ -94,10 +95,10 @@ async def fetch_realized(
     )
     return [
         OmieMovement(
-            omie_id=item.n_cod_lanc,
-            transaction_date=item.d_dt_lanc,
+            omie_id=item.n_cod_lancamento,
+            transaction_date=item.d_data_lancamento,
             amount=item.signed_amount,
-            status=item.c_status,
+            status=item.c_situacao,
             is_realized=True,
         )
         for item in raw

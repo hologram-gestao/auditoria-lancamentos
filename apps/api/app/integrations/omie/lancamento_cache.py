@@ -46,7 +46,7 @@ from cachetools import TTLCache
 
 from app.core.logging import get_logger
 from app.integrations.omie.client import OmieClient
-from app.integrations.omie.schemas import LancamentoExtrato, OmieEntryNatureza
+from app.integrations.omie.schemas import LancamentoExtrato
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
@@ -126,19 +126,19 @@ class OmieLancamentoData:
     def from_lancamento(cls, item: LancamentoExtrato) -> OmieLancamentoData:
         """Converte `LancamentoExtrato` (Omie) → DTO normalizado.
 
-        Normalização do sinal (CLAUDE.md §5.6): débito vira negativo.
+        Sinal: usa a property `signed_amount` (débito vira negativo, CLAUDE.md §5.6).
+        Description/supplier/category vêm das properties do schema, que
+        escolhem o campo mais legível dentre os pares disponíveis no
+        response do Omie.
         """
-        amount = item.n_valor_lanc
-        if item.c_natureza == OmieEntryNatureza.DEBITO.value:
-            amount = -amount
         return cls(
-            omie_id=item.n_cod_lanc,
-            transaction_date=item.d_dt_lanc,
-            description=item.c_descr_lanc or "",
-            amount=amount,
-            supplier=item.c_fornecedor,
-            category=item.c_categ,
-            status=item.c_status,
+            omie_id=item.n_cod_lancamento,
+            transaction_date=item.d_data_lancamento,
+            description=item.description,
+            amount=item.signed_amount,
+            supplier=item.supplier,
+            category=item.category,
+            status=item.c_situacao,
         )
 
 

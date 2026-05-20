@@ -100,14 +100,14 @@ def _make_lancamento(
 ) -> LancamentoExtrato:
     return LancamentoExtrato.model_validate(
         {
-            "nCodLanc": omie_id,
+            "nCodLancamento": omie_id,
             "cNatureza": natureza,
-            "dDtLanc": f"{dia:02d}/04/2026",
-            "nValorLanc": Decimal(valor),
-            "cDescrLanc": descr,
-            "cFornecedor": fornecedor,
-            "cCateg": categoria,
-            "cStatus": status,
+            "dDataLancamento": f"{dia:02d}/04/2026",
+            "nValorDocumento": Decimal(valor),
+            "cObservacoes": descr,
+            "cRazCliente": fornecedor,
+            "cDesCategoria": categoria,
+            "cSituacao": status,
         }
     )
 

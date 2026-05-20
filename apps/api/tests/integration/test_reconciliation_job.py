@@ -186,7 +186,8 @@ async def _seed_session_with_entries(
 
 
 def _ok_extrato_payload(items: list[dict[str, Any]]) -> dict[str, Any]:
-    return {"extrato": items}
+    """Envelope de `ListarExtrato` — chave canônica `listaMovimentos`."""
+    return {"listaMovimentos": items}
 
 
 def _ok_pagar_payload(items: list[dict[str, Any]]) -> dict[str, Any]:
@@ -243,20 +244,20 @@ class TestJobHappyPath:
                 json=_ok_extrato_payload(
                     [
                         {
-                            "nCodLanc": 1001,
+                            "nCodLancamento": 1001,
                             "cNatureza": "D",
-                            "dDtLanc": "05/04/2026",
-                            "nValorLanc": 100.00,
-                            "cDescrLanc": "Sicredi",
-                            "cStatus": "Conciliado",
+                            "dDataLancamento": "05/04/2026",
+                            "nValorDocumento": 100.00,
+                            "cObservacoes": "Sicredi",
+                            "cSituacao": "Conciliado",
                         },
                         {
-                            "nCodLanc": 1002,
+                            "nCodLancamento": 1002,
                             "cNatureza": "C",
-                            "dDtLanc": "12/04/2026",
-                            "nValorLanc": 250.00,
-                            "cDescrLanc": "Cliente Z",
-                            "cStatus": "Conciliado",
+                            "dDataLancamento": "12/04/2026",
+                            "nValorDocumento": 250.00,
+                            "cObservacoes": "Cliente Z",
+                            "cSituacao": "Conciliado",
                         },
                     ]
                 ),
@@ -443,12 +444,12 @@ class TestJobPrevistoNotAnomaly:
                 json=_ok_extrato_payload(
                     [
                         {
-                            "nCodLanc": 5001,
+                            "nCodLancamento": 5001,
                             "cNatureza": "D",
-                            "dDtLanc": "05/04/2026",
-                            "nValorLanc": 50.00,
-                            "cDescrLanc": "Mov",
-                            "cStatus": "Conciliado",
+                            "dDataLancamento": "05/04/2026",
+                            "nValorDocumento": 50.00,
+                            "cObservacoes": "Mov",
+                            "cSituacao": "Conciliado",
                         }
                     ]
                 ),

@@ -36,7 +36,12 @@ class OmieEntryNatureza(StrEnum):
 
 
 class OmieEntryStatus(StrEnum):
-    """Valores do campo `cStatus` em ListarExtrato."""
+    """Valores do campo `cSituacao` em ListarExtrato (canônico do DB).
+
+    A doc oficial declara `cSituacao` como `string40` sem enumerar; estes
+    são os valores conhecidos em prática. Valores fora do enum não quebram
+    o parsing (o campo é `str`) — apenas não disparam regras de anomalia.
+    """
 
     CONCILIADO = "Conciliado"
     ATRASADO = "Atrasado"
@@ -112,24 +117,68 @@ class ContaCorrente(BaseModel):
 
 
 class LancamentoExtrato(BaseModel):
-    """Item de `extrato` retornado por `ListarExtrato`.
+    """Item de `listaMovimentos` retornado por `ListarExtrato`.
 
-    O valor é absoluto; use `signed_amount` para obter o valor com sinal
-    aplicado por `c_natureza`.
+    Os nomes seguem o response real do Omie (ver
+    https://app.omie.com.br/api/v1/financas/extrato/). A v1 deste schema
+    usava `nCodLanc`, `dDtLanc`, `nValorLanc`, `cDescrLanc`, `cCateg`,
+    `cFornecedor`, `cStatus` — TODOS errados; em prod, `model_validate`
+    falharia (campos com default ficavam None silenciosamente, os
+    obrigatórios estouravam ValidationError). Caso documentado no
+    `Docs/AUDITORIA_OMIE_INTEGRACAO.md` CRÍTICO-1 / CRÍTICO-2.
+
+    Estratégia: os atributos refletem o alias Omie literal, mas expomos
+    properties (`description`, `supplier`, `category`) com a escolha
+    consensual entre os pares disponíveis (`cRazCliente` x `cDesCliente`,
+    `cDesCategoria` x `cCodCategoria`), pra que `lancamento_cache` e
+    consumers fiquem isolados dessa decisão.
     """
 
-    n_cod_lanc: int = Field(alias="nCodLanc", description="ID único do lançamento.")
+    n_cod_lancamento: int = Field(alias="nCodLancamento", description="ID único do lançamento.")
+    n_cod_lanc_relac: int | None = Field(
+        default=None,
+        alias="nCodLancRelac",
+        description=(
+            "ID do lançamento relacionado (parcelamento). Não usado no "
+            "matching atual; persiste no cache pra ser exercitado depois."
+        ),
+    )
     c_natureza: str = Field(alias="cNatureza", description="'D' (débito) ou 'C' (crédito).")
-    d_dt_lanc: date = Field(alias="dDtLanc", description="Data do lançamento.")
-    n_valor_lanc: Decimal = Field(alias="nValorLanc", description="Valor absoluto.")
-    c_descr_lanc: str = Field(alias="cDescrLanc", default="")
-    c_categ: str | None = Field(default=None, alias="cCateg")
-    c_fornecedor: str | None = Field(default=None, alias="cFornecedor")
-    c_status: str = Field(alias="cStatus")
+    d_data_lancamento: date = Field(alias="dDataLancamento", description="Data do lançamento.")
+    n_valor_documento: Decimal = Field(alias="nValorDocumento", description="Valor absoluto.")
+    c_situacao: str = Field(
+        alias="cSituacao",
+        description="Status: 'Conciliado', 'Atrasado', 'Previsto' (string40 na doc).",
+    )
+    c_observacoes: str = Field(
+        default="",
+        alias="cObservacoes",
+        description="Texto livre — usado como descrição na tela de revisão.",
+    )
+    c_cod_categoria: str | None = Field(
+        default=None,
+        alias="cCodCategoria",
+        description="Código da categoria (ex: 'DT').",
+    )
+    c_des_categoria: str | None = Field(
+        default=None,
+        alias="cDesCategoria",
+        description="Descrição da categoria (ex: 'Despesas com IOF').",
+    )
+    c_raz_cliente: str | None = Field(
+        default=None,
+        alias="cRazCliente",
+        description="Razão social do cliente/fornecedor.",
+    )
+    c_des_cliente: str | None = Field(
+        default=None,
+        alias="cDesCliente",
+        description="Nome fantasia do cliente/fornecedor.",
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 
-    @field_validator("d_dt_lanc", mode="before")
+    @field_validator("d_data_lancamento", mode="before")
     @classmethod
     def _parse_date(cls, v: str | date | None) -> date | None:
         return _parse_brazilian_date(v)
@@ -138,8 +187,23 @@ class LancamentoExtrato(BaseModel):
     def signed_amount(self) -> Decimal:
         """Valor com sinal: débito → negativo, crédito → positivo."""
         if self.c_natureza == OmieEntryNatureza.DEBITO.value:
-            return -self.n_valor_lanc
-        return self.n_valor_lanc
+            return -self.n_valor_documento
+        return self.n_valor_documento
+
+    @property
+    def description(self) -> str:
+        """Texto humano do lançamento — usa `cObservacoes`."""
+        return self.c_observacoes or ""
+
+    @property
+    def supplier(self) -> str | None:
+        """Cliente/fornecedor: razão social preferida, fallback nome fantasia."""
+        return self.c_raz_cliente or self.c_des_cliente
+
+    @property
+    def category(self) -> str | None:
+        """Categoria: descrição preferida, fallback código."""
+        return self.c_des_categoria or self.c_cod_categoria
 
 
 # ----------------------------------------------------------------------

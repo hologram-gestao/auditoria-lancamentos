@@ -80,26 +80,49 @@ class TestSchemas:
 
     def test_lancamento_extrato_parse_brazilian_date(self) -> None:
         raw = {
-            "nCodLanc": 99,
+            "nCodLancamento": 99,
             "cNatureza": "C",
-            "dDtLanc": "15/01/2026",
-            "nValorLanc": "1234.56",
-            "cDescrLanc": "Pagamento",
-            "cStatus": "Conciliado",
+            "dDataLancamento": "15/01/2026",
+            "nValorDocumento": "1234.56",
+            "cObservacoes": "Pagamento",
+            "cSituacao": "Conciliado",
         }
         lanc = LancamentoExtrato.model_validate(raw)
-        assert lanc.d_dt_lanc == date(2026, 1, 15)
-        assert lanc.n_valor_lanc == Decimal("1234.56")
+        assert lanc.d_data_lancamento == date(2026, 1, 15)
+        assert lanc.n_valor_documento == Decimal("1234.56")
+
+    def test_lancamento_extrato_supplier_and_category_properties(self) -> None:
+        """Properties resolvem o par (razão/fantasia) e (descrição/código) com fallback."""
+        raw = {
+            "nCodLancamento": 99,
+            "cNatureza": "D",
+            "dDataLancamento": "15/01/2026",
+            "nValorDocumento": "100.00",
+            "cSituacao": "Conciliado",
+            "cRazCliente": "FORNECEDOR ABC LTDA",
+            "cDesCliente": "ABC",
+            "cDesCategoria": "Despesas com energia",
+            "cCodCategoria": "DE",
+        }
+        lanc = LancamentoExtrato.model_validate(raw)
+        assert lanc.supplier == "FORNECEDOR ABC LTDA"  # razão preferida
+        assert lanc.category == "Despesas com energia"  # descrição preferida
+
+        # Sem razão social, cai pro nome fantasia.
+        raw_fallback = {**raw, "cRazCliente": None, "cDesCategoria": None}
+        lanc_fb = LancamentoExtrato.model_validate(raw_fallback)
+        assert lanc_fb.supplier == "ABC"
+        assert lanc_fb.category == "DE"
 
     def test_signed_amount_credito_positive(self) -> None:
         lanc = LancamentoExtrato.model_validate(
             {
-                "nCodLanc": 1,
+                "nCodLancamento": 1,
                 "cNatureza": "C",
-                "dDtLanc": "01/01/2026",
-                "nValorLanc": "100.00",
-                "cDescrLanc": "x",
-                "cStatus": "Conciliado",
+                "dDataLancamento": "01/01/2026",
+                "nValorDocumento": "100.00",
+                "cObservacoes": "x",
+                "cSituacao": "Conciliado",
             }
         )
         assert lanc.signed_amount == Decimal("100.00")
@@ -107,12 +130,12 @@ class TestSchemas:
     def test_signed_amount_debito_negative(self) -> None:
         lanc = LancamentoExtrato.model_validate(
             {
-                "nCodLanc": 1,
+                "nCodLancamento": 1,
                 "cNatureza": "D",
-                "dDtLanc": "01/01/2026",
-                "nValorLanc": "100.00",
-                "cDescrLanc": "x",
-                "cStatus": "Conciliado",
+                "dDataLancamento": "01/01/2026",
+                "nValorDocumento": "100.00",
+                "cObservacoes": "x",
+                "cSituacao": "Conciliado",
             }
         )
         assert lanc.signed_amount == Decimal("-100.00")
@@ -134,12 +157,12 @@ class TestSchemas:
         with pytest.raises(ValueError, match="Data Omie inválida"):
             LancamentoExtrato.model_validate(
                 {
-                    "nCodLanc": 1,
+                    "nCodLancamento": 1,
                     "cNatureza": "C",
-                    "dDtLanc": "2026-01-01",  # ISO em vez de DD/MM/YYYY
-                    "nValorLanc": "10",
-                    "cDescrLanc": "x",
-                    "cStatus": "Conciliado",
+                    "dDataLancamento": "2026-01-01",  # ISO em vez de DD/MM/YYYY
+                    "nValorDocumento": "10",
+                    "cObservacoes": "x",
+                    "cSituacao": "Conciliado",
                 }
             )
 
@@ -415,22 +438,25 @@ class TestListarExtrato:
             return_value=httpx.Response(
                 200,
                 json={
-                    "extrato": [
+                    # Chave canônica do envelope `eccListarExtratoResponse`.
+                    # Guard contra regressão: a v1 do código usava "extrato",
+                    # que NÃO existe no response real.
+                    "listaMovimentos": [
                         {
-                            "nCodLanc": 10,
+                            "nCodLancamento": 10,
                             "cNatureza": "D",
-                            "dDtLanc": "10/01/2026",
-                            "nValorLanc": "500.00",
-                            "cDescrLanc": "Pagamento fornecedor",
-                            "cStatus": "Conciliado",
+                            "dDataLancamento": "10/01/2026",
+                            "nValorDocumento": "500.00",
+                            "cObservacoes": "Pagamento fornecedor",
+                            "cSituacao": "Conciliado",
                         },
                         {
-                            "nCodLanc": 11,
+                            "nCodLancamento": 11,
                             "cNatureza": "C",
-                            "dDtLanc": "12/01/2026",
-                            "nValorLanc": "300.00",
-                            "cDescrLanc": "Recebimento",
-                            "cStatus": "Conciliado",
+                            "dDataLancamento": "12/01/2026",
+                            "nValorDocumento": "300.00",
+                            "cObservacoes": "Recebimento",
+                            "cSituacao": "Conciliado",
                         },
                     ]
                 },
