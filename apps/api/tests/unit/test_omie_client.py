@@ -141,17 +141,23 @@ class TestSchemas:
         assert lanc.signed_amount == Decimal("-100.00")
 
     def test_titulo_parse_data_vencimento(self) -> None:
+        # Campos refletem o response real da Omie: `codigo_cliente_fornecedor`
+        # (int) e `codigo_categoria` (str20) — `nome_fornecedor` e
+        # `descricao_categoria` NÃO existem (auditoria CRÍTICO-5).
         raw = {
             "codigo_lancamento_omie": 42,
             "data_vencimento": "31/03/2026",
             "valor_documento": "550.00",
-            "nome_fornecedor": "ACME",
-            "descricao_categoria": "Despesa Operacional",
-            "status_titulo": "ATRASADO",
+            "codigo_cliente_fornecedor": 1234,
+            "codigo_categoria": "DE",
+            "observacao": "ACME — Despesa Operacional",
+            "status_titulo": "ATR",
         }
         t = TituloAPagarReceber.model_validate(raw)
         assert t.data_vencimento == date(2026, 3, 31)
         assert t.valor_documento == Decimal("550.00")
+        assert t.codigo_cliente_fornecedor == 1234
+        assert t.codigo_categoria == "DE"
 
     def test_invalid_date_raises(self) -> None:
         with pytest.raises(ValueError, match="Data Omie inválida"):
@@ -520,9 +526,9 @@ def _make_titulo(idx: int) -> dict[str, Any]:
         "codigo_lancamento_omie": idx,
         "data_vencimento": "20/01/2026",
         "valor_documento": "100.00",
-        "nome_fornecedor": f"Fornecedor {idx}",
-        "descricao_categoria": "Categoria X",
-        "status_titulo": "ATRASADO",
+        "codigo_cliente_fornecedor": 9000 + idx,
+        "codigo_categoria": "DE",
+        "status_titulo": "ATR",
     }
 
 

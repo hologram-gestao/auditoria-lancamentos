@@ -212,23 +212,59 @@ class LancamentoExtrato(BaseModel):
 
 
 class TituloAPagarReceber(BaseModel):
-    """Item de `cadastro` em ListarContasPagar e ListarContasReceber.
+    """Item de `conta_pagar_cadastro` / `conta_receber_cadastro` em
+    ListarContasPagar / ListarContasReceber.
 
-    Estrutura idêntica nos dois endpoints (Doc §6.2).
+    Estrutura idêntica nos dois endpoints. Os nomes seguem o response real
+    do Omie (ver
+    https://app.omie.com.br/api/v1/financas/contapagar/ e .../contareceber/).
+
+    A v1 deste schema declarava `nome_fornecedor` e `descricao_categoria`,
+    que NÃO existem no response oficial — Pydantic deixava-os como `None`
+    silenciosamente (defaults), e a tela de revisão de títulos ficaria com
+    "—" pra tudo. Caso documentado no `Docs/AUDITORIA_OMIE_INTEGRACAO.md`
+    CRÍTICO-5.
+
+    O Omie devolve apenas códigos (`codigo_cliente_fornecedor`,
+    `codigo_categoria`) — resolver pra nome legível exige chamadas
+    adicionais a `ListarClientes`/`ListarFornecedores`/`ListarCategorias`,
+    o que fica para uma sessão dedicada (vai precisar de cache batch).
+    Por enquanto a tela de revisão exibe o código quando for renderizar.
     """
 
     codigo_lancamento_omie: int = Field(description="ID do título no Omie.")
     data_vencimento: date = Field(description="Data de vencimento.")
     valor_documento: Decimal = Field(description="Valor do título.")
-    nome_fornecedor: str | None = Field(default=None)
-    descricao_categoria: str | None = Field(default=None)
-    status_titulo: str = Field(
+    codigo_cliente_fornecedor: int | None = Field(
+        default=None,
         description=(
-            "Status do título devolvido pelo Omie. A doc oficial não enumera "
-            "os valores; em prática observamos camelCase (ex: 'Atrasado', "
-            "'Previsto', 'Liquidado'). Tratado como str livre para não "
-            "explodir em valor não previsto."
-        )
+            "ID do cliente/fornecedor no Omie. Para resolver o nome legível, "
+            "consultar `ListarClientes` (campo `codigo_cliente_omie`) — não "
+            "implementado ainda."
+        ),
+    )
+    codigo_categoria: str | None = Field(
+        default=None,
+        description=(
+            "Código da categoria (ex: 'DT'). Doc oficial não devolve a "
+            "descrição neste endpoint; resolver via `ListarCategorias` futuro."
+        ),
+    )
+    numero_documento: str | None = Field(
+        default=None,
+        description="Número do documento (ex: '00123/A') — útil pra rastreio na revisão.",
+    )
+    observacao: str | None = Field(
+        default=None,
+        description="Texto livre — útil pra exibir contexto na tela de revisão.",
+    )
+    status_titulo: str = Field(
+        default="",
+        description=(
+            "`string3` na doc oficial — valores não enumerados (`'PAG'`, "
+            "`'ATR'`, etc.). Tratado como str livre. Auditoria A-2 pendente "
+            "(precisa fixture real pra confirmar formato)."
+        ),
     )
 
     @field_validator("data_vencimento", mode="before")

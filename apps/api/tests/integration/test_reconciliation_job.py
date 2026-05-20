@@ -276,9 +276,10 @@ class TestJobHappyPath:
                             "codigo_lancamento_omie": 9999,
                             "data_vencimento": "20/04/2026",
                             "valor_documento": 333.00,
-                            "nome_fornecedor": "Fornecedor Atrasado",
-                            "descricao_categoria": "Outros",
-                            "status_titulo": "Atrasado",
+                            "codigo_cliente_fornecedor": 5001,
+                            "codigo_categoria": "OT",
+                            "observacao": "Fornecedor Atrasado — Outros",
+                            "status_titulo": "ATR",
                         }
                     ]
                 ),
@@ -467,9 +468,10 @@ class TestJobPrevistoNotAnomaly:
                                 "codigo_lancamento_omie": 7777,
                                 "data_vencimento": "30/04/2026",
                                 "valor_documento": 100.00,
-                                "nome_fornecedor": "Futuro",
-                                "descricao_categoria": "X",
-                                "status_titulo": "Previsto",
+                                "codigo_cliente_fornecedor": 7700,
+                                "codigo_categoria": "SV",
+                                "observacao": "Futuro — Serviços",
+                                "status_titulo": "AVN",
                             }
                         ]
                     ),

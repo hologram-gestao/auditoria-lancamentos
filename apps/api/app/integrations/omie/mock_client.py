@@ -193,46 +193,69 @@ _MOCK_EXTRATO_BY_CONTA: dict[int, list[LancamentoExtrato]] = {
 }
 
 
-# Títulos a pagar — 2 atrasados (geram anomalia missing_in_file) + 1 previsto (sem anomalia).
+# Títulos a pagar — 2 atrasados (geram anomalia missing_in_file) + 1 AVENCER.
+# As fixtures passam por `model_validate` (não instância direta) pra exercitar
+# o mesmo caminho de parsing do código de produção. Os nomes refletem o
+# response real do Omie — `codigo_cliente_fornecedor` e `codigo_categoria`
+# em vez dos `nome_fornecedor`/`descricao_categoria` que NÃO existem na API.
 _MOCK_CONTAS_PAGAR_ATRASADO: list[TituloAPagarReceber] = [
-    TituloAPagarReceber(
-        codigo_lancamento_omie=90001,
-        data_vencimento=date(2026, 4, 25),
-        valor_documento=Decimal("890.00"),
-        nome_fornecedor="Distribuidora ABC",
-        descricao_categoria="Insumos",
-        status_titulo=OmieTituloStatus.ATRASADO.value,
+    TituloAPagarReceber.model_validate(
+        {
+            "codigo_lancamento_omie": 90001,
+            "data_vencimento": "25/04/2026",
+            "valor_documento": "890.00",
+            "codigo_cliente_fornecedor": 100001,
+            "codigo_categoria": "DT",
+            "numero_documento": "00001",
+            "observacao": "Distribuidora ABC — Insumos",
+            "status_titulo": OmieTituloStatus.ATRASADO.value,
+        }
     ),
-    TituloAPagarReceber(
-        codigo_lancamento_omie=90002,
-        data_vencimento=date(2026, 4, 28),
-        valor_documento=Decimal("1567.30"),
-        nome_fornecedor="Logística XYZ",
-        descricao_categoria="Transporte",
-        status_titulo=OmieTituloStatus.ATRASADO.value,
+    TituloAPagarReceber.model_validate(
+        {
+            "codigo_lancamento_omie": 90002,
+            "data_vencimento": "28/04/2026",
+            "valor_documento": "1567.30",
+            "codigo_cliente_fornecedor": 100002,
+            "codigo_categoria": "TR",
+            "numero_documento": "00002",
+            "observacao": "Logística XYZ — Transporte",
+            "status_titulo": OmieTituloStatus.ATRASADO.value,
+        }
     ),
 ]
 
 _MOCK_CONTAS_PAGAR_AVENCER: list[TituloAPagarReceber] = [
-    TituloAPagarReceber(
-        codigo_lancamento_omie=90003,
-        data_vencimento=date(2026, 4, 30),
-        valor_documento=Decimal("450.00"),
-        nome_fornecedor="Manutenção JK",
-        descricao_categoria="Serviços",
-        status_titulo="Previsto",  # canonical CamelCase do DB; ver omie_fetch
+    TituloAPagarReceber.model_validate(
+        {
+            "codigo_lancamento_omie": 90003,
+            "data_vencimento": "30/04/2026",
+            "valor_documento": "450.00",
+            "codigo_cliente_fornecedor": 100003,
+            "codigo_categoria": "SV",
+            "numero_documento": "00003",
+            "observacao": "Manutenção JK — Serviços",
+            # `status_titulo` no response da Omie é `string3` — formato real
+            # não documentado; valor genérico aqui pra não acoplar a teste a
+            # uma suposição (auditoria A-2).
+            "status_titulo": "ATR",
+        }
     ),
 ]
 
 # 1 a receber atrasado — gera anomalia missing_in_file.
 _MOCK_CONTAS_RECEBER_ATRASADO: list[TituloAPagarReceber] = [
-    TituloAPagarReceber(
-        codigo_lancamento_omie=80001,
-        data_vencimento=date(2026, 4, 26),
-        valor_documento=Decimal("3200.00"),
-        nome_fornecedor="Cliente Premium W",
-        descricao_categoria="Vendas",
-        status_titulo=OmieTituloStatus.ATRASADO.value,
+    TituloAPagarReceber.model_validate(
+        {
+            "codigo_lancamento_omie": 80001,
+            "data_vencimento": "26/04/2026",
+            "valor_documento": "3200.00",
+            "codigo_cliente_fornecedor": 200001,
+            "codigo_categoria": "VD",
+            "numero_documento": "0801",
+            "observacao": "Cliente Premium W — Vendas",
+            "status_titulo": OmieTituloStatus.ATRASADO.value,
+        }
     ),
 ]
 
