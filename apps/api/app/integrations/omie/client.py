@@ -36,6 +36,7 @@ from tenacity import (
 from app.core.exceptions import (
     OmieAuthError,
     OmieFaultError,
+    OmieServerError,
     OmieTimeoutError,
 )
 from app.core.logging import get_logger
@@ -173,8 +174,10 @@ class OmieClient:
             ) from exc
         except _RetryableHttpError as exc:
             # 5xx persistente após esgotar retries — Tenacity reraise=True relança
-            # a exceção original (não a RetryError).
-            raise OmieTimeoutError(
+            # a exceção original (não a RetryError). Usa `OmieServerError` em vez
+            # de `OmieTimeoutError`: a Omie respondeu, só com 5xx; chamar isso de
+            # "timeout" no log e na UI engana o oncall (caso real em 19/05/2026).
+            raise OmieServerError(
                 f"Erro 5xx persistente em {call_name} ({module}/{endpoint})",
             ) from exc
         except RetryError as exc:  # pragma: no cover  -- fallback defensivo
@@ -210,8 +213,35 @@ class OmieClient:
 
         duration_ms = round((time.monotonic() - started) * 1000)
 
-        # 5xx → retryable. 4xx que não são 200 → erro permanente.
+        # 5xx ambíguo no Omie: pode ser infra (retryable) OU erro PERMANENTE
+        # de validação que o Omie sinaliza no header `OmieAPI-Error`. Casos
+        # vistos em produção:
+        #   - "5001 - Tag [X] não faz parte da estrutura..." (parâmetro inválido)
+        #   - "6 - Consumo redundante detectado. Aguarde 58 segundos..." (a Omie
+        #     rate-limita justamente quando a gente retenta o mesmo erro)
+        # Retry nesses casos só queima rate-limit. Tratamos como fault permanente
+        # e propagamos a mensagem que veio do header — assim o log e o user_message
+        # ficam honestos em vez de virarem "Omie não respondeu".
         if 500 <= response.status_code < 600:
+            omie_api_error = response.headers.get("OmieAPI-Error")
+            if omie_api_error:
+                log.warning(
+                    "omie_call_5xx_permanent",
+                    module=module,
+                    endpoint=endpoint,
+                    call=call_name,
+                    status=response.status_code,
+                    omie_api_error=omie_api_error,
+                    duration_ms=duration_ms,
+                )
+                raise OmieFaultError(
+                    f"5xx permanente em {call_name} ({module}/{endpoint}): {omie_api_error}",
+                    user_message=f"Erro ao acessar o Omie: {omie_api_error}",
+                    metadata={
+                        "status": response.status_code,
+                        "omie_api_error": omie_api_error,
+                    },
+                )
             log.warning(
                 "omie_call_5xx",
                 module=module,
@@ -415,13 +445,15 @@ class OmieClient:
     ) -> list[TituloAPagarReceber]:
         """Lista contas a pagar com `status_titulo` filtrado.
 
-        TODO (S5 — Pontos em Aberto): validar com Galhardo se
-        `filtrar_por_status` aceita múltiplos valores. Por hora a chamada é
-        feita uma vez por status (S10 chamará 2x para ATRASADO + PREVISTO).
+        A doc oficial Omie indica que `filtrar_por_status` aceita CSV (ex.:
+        `"AVENCER,ATRASADO"`). Por ora mantemos chamadas separadas por status
+        para preservar a granularidade do log (uma falha em ATRASADO não
+        invalida o batch de AVENCER) — pode virar otimização futura.
         """
         return await self._listar_titulos(
             endpoint="contapagar",
             call_name="ListarContasPagar",
+            list_key="conta_pagar_cadastro",
             conta_corrente_id=conta_corrente_id,
             data_de=data_de,
             data_ate=data_ate,
@@ -437,10 +469,11 @@ class OmieClient:
         status: OmieTituloStatus,
     ) -> list[TituloAPagarReceber]:
         """Lista contas a receber com `status_titulo` filtrado. Estrutura igual
-        a `listar_contas_pagar`."""
+        a `listar_contas_pagar`, mas envelope usa chave própria."""
         return await self._listar_titulos(
             endpoint="contareceber",
             call_name="ListarContasReceber",
+            list_key="conta_receber_cadastro",
             conta_corrente_id=conta_corrente_id,
             data_de=data_de,
             data_ate=data_ate,
@@ -452,16 +485,22 @@ class OmieClient:
         *,
         endpoint: str,
         call_name: str,
+        list_key: str,
         conta_corrente_id: int,
         data_de: date,
         data_ate: date,
         status: OmieTituloStatus,
     ) -> list[TituloAPagarReceber]:
-        """Implementação compartilhada entre `listar_contas_pagar` e `_receber`."""
+        """Implementação compartilhada entre `listar_contas_pagar` e `_receber`.
+
+        O nome do filtro de conta corrente é `filtrar_conta_corrente` (sem
+        `por_`) — vimos em prod que `filtrar_por_conta_corrente` faz a Omie
+        responder 5001 "Tag não faz parte da estrutura do tipo complexo".
+        """
         extra = {
             "filtrar_por_data_de": data_de.strftime("%d/%m/%Y"),
             "filtrar_por_data_ate": data_ate.strftime("%d/%m/%Y"),
-            "filtrar_por_conta_corrente": conta_corrente_id,
+            "filtrar_conta_corrente": conta_corrente_id,
             "filtrar_por_status": status.value,
         }
         items: list[TituloAPagarReceber] = []
@@ -469,7 +508,7 @@ class OmieClient:
             module="financas",
             endpoint=endpoint,
             call_name=call_name,
-            list_key="cadastro",
+            list_key=list_key,
             extra_param=extra,
             page_size=50,
         ):

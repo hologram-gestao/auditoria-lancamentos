@@ -125,7 +125,7 @@
 4. **Um OmieEntry só matcha uma Movement.** Controle via `set(used_ids)` durante o cruzamento.
 5. **Desempate (ordem):** menor `|days_diff|` → menor `|amount_diff|` → primeiro por `date asc`.
 6. **Normalização Omie:** `cNatureza='D'` → valor negativo; `cNatureza='C'` → positivo.
-7. **Status Omie considerados no matching:** `Conciliado`, `Atrasado`, `Previsto`. Ignorar cancelados.
+7. **Status Omie considerados no matching** (canônico no DB, camelCase): `Conciliado`, `Atrasado`, `Previsto`. Ignorar cancelados. **Atenção à nomenclatura mista da Omie:** o canônico vem de `ListarExtrato.cStatus`; já o FILTRO `filtrar_por_status` em `ListarContasPagar/Receber` usa o enum oficial Omie em UPPERCASE (`ATRASADO`, `AVENCER`, etc) — `"PREVISTO"` NÃO é valor válido como filtro, devolve 5xx. Mapping: filtro `AVENCER` → canônico `Previsto`.
 8. **Idempotência:** `UNIQUE(client_id, omie_conta_id, reference_month, file_hash)`. Duplicata = HTTP 409 `DUPLICATE_FILE`.
 9. **IA nunca decide match.** IA só extrai do arquivo. Cruzamento é código determinístico.
 

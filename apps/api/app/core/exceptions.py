@@ -204,11 +204,25 @@ class OmieAuthError(AppError):
 
 
 class OmieTimeoutError(AppError):
-    """504 — Omie não respondeu em 15 s."""
+    """504 — Omie não respondeu em 15 s (sem resposta HTTP de volta)."""
 
     code = ErrorCode.OMIE_TIMEOUT
     status_code = 504
     default_user_message = "O Omie não respondeu no tempo esperado. Tente novamente."
+
+
+class OmieServerError(AppError):
+    """502 — Omie devolveu 5xx persistente após esgotar retries (problema de infra
+    do lado da Omie, não erro da nossa request).
+
+    Distinto de `OmieTimeoutError` (sem resposta HTTP) e de `OmieFaultError`
+    (Omie respondeu com erro lógico). Existe para que a mensagem ao usuário
+    não diga "Omie não respondeu" quando na verdade ele respondeu com 500.
+    """
+
+    code = ErrorCode.OMIE_FAULT
+    status_code = 502
+    default_user_message = "O Omie está com instabilidade no momento. Tente novamente em instantes."
 
 
 class OmieFaultError(AppError):

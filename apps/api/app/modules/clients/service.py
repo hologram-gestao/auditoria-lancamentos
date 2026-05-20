@@ -30,6 +30,7 @@ from app.core.exceptions import (
     NotFoundError,
     OmieAuthError,
     OmieFaultError,
+    OmieServerError,
     OmieTimeoutError,
 )
 from app.db.models import Client, ClientAssignment, OmieAccountCache, UserRole
@@ -287,6 +288,11 @@ class ClientService:
                 return TestConnectionResponse(
                     ok=False,
                     message="O Omie não respondeu no tempo esperado",
+                )
+            except OmieServerError:
+                return TestConnectionResponse(
+                    ok=False,
+                    message="O Omie está com instabilidade no momento",
                 )
             except OmieFaultError as exc:
                 return TestConnectionResponse(ok=False, message=exc.user_message)

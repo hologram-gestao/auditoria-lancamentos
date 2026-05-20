@@ -29,6 +29,7 @@ from app.core.exceptions import (
     AccountsSyncError,
     OmieAuthError,
     OmieFaultError,
+    OmieServerError,
     OmieTimeoutError,
 )
 from app.core.logging import get_logger
@@ -171,6 +172,14 @@ class OmieAccountsCacheService:
                     "Tente novamente em instantes."
                 ),
                 metadata={"client_id": str(client.id), "cause": "timeout"},
+            ) from exc
+        except OmieServerError as exc:
+            raise AccountsSyncError(
+                f"5xx do Omie ao sincronizar contas do cliente {client.id}: {exc.message}",
+                user_message=(
+                    "O Omie está com instabilidade no momento. Tente novamente em instantes."
+                ),
+                metadata={"client_id": str(client.id), "cause": "server_error"},
             ) from exc
         except OmieFaultError as exc:
             raise AccountsSyncError(

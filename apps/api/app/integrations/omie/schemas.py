@@ -44,10 +44,22 @@ class OmieEntryStatus(StrEnum):
 
 
 class OmieTituloStatus(StrEnum):
-    """Valores do `status_titulo` em ListarContasPagar/Receber."""
+    """Valores aceitos pelo parâmetro `filtrar_por_status` em
+    `ListarContasPagar` / `ListarContasReceber`.
+
+    O Omie documenta (em `ListarContasPagar`):
+        CANCELADO, PAGO, LIQUIDADO, EMABERTO, PAGTO_PARCIAL, VENCEHOJE,
+        AVENCER, ATRASADO
+
+    Para o matching nosso interesse é em títulos **ainda não conciliados** —
+    usamos `ATRASADO` (vencidos) + `AVENCER` (com vencimento futuro). NÃO
+    usar `"PREVISTO"` aqui: a Omie devolve 5001 (caso real em prod 19/05/2026)
+    porque esse valor não existe no enum oficial. O campo `status_titulo`
+    no response **pode** vir como "Previsto" em camelCase — não confundir.
+    """
 
     ATRASADO = "ATRASADO"
-    PREVISTO = "PREVISTO"
+    AVENCER = "AVENCER"
 
 
 def _parse_brazilian_date(v: str | date | None) -> date | None:
@@ -146,7 +158,14 @@ class TituloAPagarReceber(BaseModel):
     valor_documento: Decimal = Field(description="Valor do título.")
     nome_fornecedor: str | None = Field(default=None)
     descricao_categoria: str | None = Field(default=None)
-    status_titulo: str = Field(description="'ATRASADO' ou 'PREVISTO'.")
+    status_titulo: str = Field(
+        description=(
+            "Status do título devolvido pelo Omie. A doc oficial não enumera "
+            "os valores; em prática observamos camelCase (ex: 'Atrasado', "
+            "'Previsto', 'Liquidado'). Tratado como str livre para não "
+            "explodir em valor não previsto."
+        )
+    )
 
     @field_validator("data_vencimento", mode="before")
     @classmethod

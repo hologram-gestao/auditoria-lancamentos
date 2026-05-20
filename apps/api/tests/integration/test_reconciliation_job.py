@@ -189,13 +189,22 @@ def _ok_extrato_payload(items: list[dict[str, Any]]) -> dict[str, Any]:
     return {"extrato": items}
 
 
-def _ok_titulos_payload(items: list[dict[str, Any]]) -> dict[str, Any]:
-    return {"cadastro": items}
+def _ok_pagar_payload(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Resposta de `ListarContasPagar` — chave canônica `conta_pagar_cadastro`."""
+    return {"conta_pagar_cadastro": items}
 
 
-def _empty_titulos_payload() -> dict[str, Any]:
-    """Resposta vazia paginada — `cadastro` ausente faz o paginate parar."""
-    return {"cadastro": []}
+def _ok_receber_payload(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Resposta de `ListarContasReceber` — chave canônica `conta_receber_cadastro`."""
+    return {"conta_receber_cadastro": items}
+
+
+def _empty_pagar_payload() -> dict[str, Any]:
+    return {"conta_pagar_cadastro": []}
+
+
+def _empty_receber_payload() -> dict[str, Any]:
+    return {"conta_receber_cadastro": []}
 
 
 # ----------------------------------------------------------------------
@@ -254,13 +263,13 @@ class TestJobHappyPath:
             )
         )
 
-        # Mock contas pagar/receber — uma chamada por status (ATRASADO/PREVISTO).
+        # Mock contas pagar/receber — uma chamada por status (ATRASADO/AVENCER).
         # Pagar(ATRASADO): 1 título sem correspondente → vira anomaly.
-        # Pagar(PREVISTO), Receber(ATRASADO+PREVISTO): vazios.
+        # Pagar(AVENCER), Receber(ATRASADO+AVENCER): vazios.
         pagar_responses = [
             httpx.Response(
                 200,
-                json=_ok_titulos_payload(
+                json=_ok_pagar_payload(
                     [
                         {
                             "codigo_lancamento_omie": 9999,
@@ -268,16 +277,16 @@ class TestJobHappyPath:
                             "valor_documento": 333.00,
                             "nome_fornecedor": "Fornecedor Atrasado",
                             "descricao_categoria": "Outros",
-                            "status_titulo": "ATRASADO",
+                            "status_titulo": "Atrasado",
                         }
                     ]
                 ),
             ),
-            httpx.Response(200, json=_empty_titulos_payload()),  # PREVISTO vazio
+            httpx.Response(200, json=_empty_pagar_payload()),  # AVENCER vazio
         ]
         receber_responses = [
-            httpx.Response(200, json=_empty_titulos_payload()),  # ATRASADO
-            httpx.Response(200, json=_empty_titulos_payload()),  # PREVISTO
+            httpx.Response(200, json=_empty_receber_payload()),  # ATRASADO
+            httpx.Response(200, json=_empty_receber_payload()),  # AVENCER
         ]
         respx.post(OMIE_PAGAR_URL).mock(side_effect=pagar_responses)
         respx.post(OMIE_RECEBER_URL).mock(side_effect=receber_responses)
@@ -373,10 +382,10 @@ class TestJobMissingInOmie:
             return_value=httpx.Response(200, json=_ok_extrato_payload([]))
         )
         respx.post(OMIE_PAGAR_URL).mock(
-            return_value=httpx.Response(200, json=_empty_titulos_payload())
+            return_value=httpx.Response(200, json=_empty_pagar_payload())
         )
         respx.post(OMIE_RECEBER_URL).mock(
-            return_value=httpx.Response(200, json=_empty_titulos_payload())
+            return_value=httpx.Response(200, json=_empty_receber_payload())
         )
 
         ctx: dict[str, Any] = {"settings": get_settings(), "session_factory": factory}
@@ -414,8 +423,9 @@ class TestJobPrevistoNotAnomaly:
     async def test_previsto_omie_entry_persisted_but_not_anomaly(
         self, factory: async_sessionmaker[AsyncSession]
     ) -> None:
-        """Título PREVISTO sem correspondente: vira omie_entry (registro de
-        divergência) MAS NÃO vira anomaly (Doc §13 — esperado não estar)."""
+        """Título previsto (AVENCER no filtro) sem correspondente: vira
+        omie_entry (registro de divergência) MAS NÃO vira anomaly (Doc §13
+        — esperado não estar)."""
         await _seed_anomaly_types(factory)
         admin = await _seed_admin(factory, "job-previsto-admin@hologram.com.br")
         cliente = await _seed_client(factory, admin.id, "X")
@@ -444,13 +454,13 @@ class TestJobPrevistoNotAnomaly:
                 ),
             )
         )
-        # Pagar PREVISTO devolve 1 título; ATRASADO vazio.
+        # Pagar(AVENCER) devolve 1 título; (ATRASADO) vazio.
         respx.post(OMIE_PAGAR_URL).mock(
             side_effect=[
-                httpx.Response(200, json=_empty_titulos_payload()),  # ATRASADO
+                httpx.Response(200, json=_empty_pagar_payload()),  # ATRASADO
                 httpx.Response(
                     200,
-                    json=_ok_titulos_payload(
+                    json=_ok_pagar_payload(
                         [
                             {
                                 "codigo_lancamento_omie": 7777,
@@ -458,7 +468,7 @@ class TestJobPrevistoNotAnomaly:
                                 "valor_documento": 100.00,
                                 "nome_fornecedor": "Futuro",
                                 "descricao_categoria": "X",
-                                "status_titulo": "PREVISTO",
+                                "status_titulo": "Previsto",
                             }
                         ]
                     ),
@@ -466,7 +476,7 @@ class TestJobPrevistoNotAnomaly:
             ]
         )
         respx.post(OMIE_RECEBER_URL).mock(
-            return_value=httpx.Response(200, json=_empty_titulos_payload())
+            return_value=httpx.Response(200, json=_empty_receber_payload())
         )
 
         ctx: dict[str, Any] = {"settings": get_settings(), "session_factory": factory}
@@ -480,7 +490,7 @@ class TestJobPrevistoNotAnomaly:
             ).scalar_one()
             assert sess.status == "reviewing"
             assert sess.conciliated_count == 1
-            assert sess.omie_sem_arquivo_count == 1  # PREVISTO virou omie_entry
+            assert sess.omie_sem_arquivo_count == 1  # AVENCER virou omie_entry
             assert sess.anomaly_count == 0  # mas NÃO virou anomaly
 
 

@@ -26,7 +26,7 @@ import respx
 from pydantic import SecretStr
 
 from app.core.config import Settings, get_settings
-from app.core.exceptions import OmieAuthError, OmieFaultError, OmieTimeoutError
+from app.core.exceptions import OmieAuthError, OmieFaultError, OmieServerError, OmieTimeoutError
 from app.integrations.omie.client import OmieClient, OmieCredentials
 from app.integrations.omie.schemas import (
     ContaCorrente,
@@ -255,17 +255,54 @@ class TestCallRetry:
         assert result == {"ok": True}
 
     @respx.mock
-    async def test_5xx_persistent_raises_after_retries(self, client: OmieClient) -> None:
+    async def test_5xx_persistent_raises_OmieServerError(self, client: OmieClient) -> None:  # noqa: N802
+        """5xx repetidos sem header `OmieAPI-Error` → infra Omie instável; cai
+        em `OmieServerError` (não `OmieTimeoutError`, que é específico de
+        falta de resposta HTTP)."""
         respx.post(_omie_url("geral", "clientes")).mock(
             return_value=httpx.Response(500, json={"err": "always"})
         )
-        with pytest.raises(OmieTimeoutError):
+        with pytest.raises(OmieServerError):
             await client.call(
                 module="geral",
                 endpoint="clientes",
                 call_name="ListarClientes",
                 param={"pagina": 1},
             )
+
+    @respx.mock
+    async def test_5xx_with_omie_api_error_header_raises_fault_without_retry(
+        self, client: OmieClient
+    ) -> None:
+        """Quando a Omie responde 500 com header `OmieAPI-Error`, o erro é
+        permanente (ex: tag inválida). Não fazer retry — só queima rate-limit
+        e dispara o "Consumo redundante detectado". Foi exatamente o caso
+        observado em 19/05/2026 (`filtrar_por_conta_corrente`)."""
+        # httpx serializa headers como ASCII; o Omie real envia UTF-8 bruto,
+        # mas pra esse teste basta uma versão sem acento que ainda casa em
+        # "5001" e exercita o caminho de header presente.
+        route = respx.post(_omie_url("geral", "clientes")).mock(
+            return_value=httpx.Response(
+                500,
+                headers={
+                    "OmieAPI-Error": (
+                        "5001 - Tag [FILTRAR_POR_CONTA_CORRENTE] nao faz parte da "
+                        "estrutura do tipo complexo [lcpListarRequest]"
+                    )
+                },
+                json={"err": "soap"},
+            )
+        )
+        with pytest.raises(OmieFaultError) as exc_info:
+            await client.call(
+                module="geral",
+                endpoint="clientes",
+                call_name="ListarClientes",
+                param={"pagina": 1},
+            )
+        assert "5001" in str(exc_info.value)
+        # DoD: 1 so request — nada de retry x 3.
+        assert route.call_count == 1
 
     @respx.mock
     async def test_timeout_raises_OmieTimeoutError(  # noqa: N802
@@ -413,8 +450,8 @@ class TestListarExtrato:
 class TestListarTitulos:
     @respx.mock
     async def test_contas_pagar_filtra_status_e_pagina(self, client: OmieClient) -> None:
-        page1 = {"cadastro": [_make_titulo(i) for i in range(50)]}
-        page2 = {"cadastro": [_make_titulo(i) for i in range(50, 73)]}  # < 50 → fim
+        page1 = {"conta_pagar_cadastro": [_make_titulo(i) for i in range(50)]}
+        page2 = {"conta_pagar_cadastro": [_make_titulo(i) for i in range(50, 73)]}  # < 50 → fim
         route = respx.post(_omie_url("financas", "contapagar")).mock(
             side_effect=[
                 httpx.Response(200, json=page1),
@@ -429,21 +466,24 @@ class TestListarTitulos:
         )
         assert len(items) == 73
         assert all(isinstance(t, TituloAPagarReceber) for t in items)
-        # Confere que o status foi enviado no body
+        # Confere que status e nome correto do filtro foram enviados no body
         body = route.calls[0].request.content.decode()
         assert "ATRASADO" in body
-        assert "filtrar_por_conta_corrente" in body
+        assert "filtrar_conta_corrente" in body
+        # `filtrar_por_conta_corrente` (com `_por_`) seria rejeitado com erro
+        # 5001 pela Omie — guard explícito contra regressão.
+        assert "filtrar_por_conta_corrente" not in body
 
     @respx.mock
     async def test_contas_receber_chama_endpoint_correto(self, client: OmieClient) -> None:
         route = respx.post(_omie_url("financas", "contareceber")).mock(
-            return_value=httpx.Response(200, json={"cadastro": []})
+            return_value=httpx.Response(200, json={"conta_receber_cadastro": []})
         )
         items = await client.listar_contas_receber(
             conta_corrente_id=10,
             data_de=date(2026, 1, 1),
             data_ate=date(2026, 1, 31),
-            status=OmieTituloStatus.PREVISTO,
+            status=OmieTituloStatus.AVENCER,
         )
         assert items == []
         assert route.called

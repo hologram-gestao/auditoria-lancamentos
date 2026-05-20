@@ -211,14 +211,14 @@ _MOCK_CONTAS_PAGAR_ATRASADO: list[TituloAPagarReceber] = [
     ),
 ]
 
-_MOCK_CONTAS_PAGAR_PREVISTO: list[TituloAPagarReceber] = [
+_MOCK_CONTAS_PAGAR_AVENCER: list[TituloAPagarReceber] = [
     TituloAPagarReceber(
         codigo_lancamento_omie=90003,
         data_vencimento=date(2026, 4, 30),
         valor_documento=Decimal("450.00"),
         nome_fornecedor="Manutenção JK",
         descricao_categoria="Serviços",
-        status_titulo=OmieTituloStatus.PREVISTO.value,
+        status_titulo="Previsto",  # canonical CamelCase do DB; ver omie_fetch
     ),
 ]
 
@@ -324,7 +324,7 @@ class MockOmieClient(OmieClient):
         bucket = (
             _MOCK_CONTAS_PAGAR_ATRASADO
             if status == OmieTituloStatus.ATRASADO
-            else _MOCK_CONTAS_PAGAR_PREVISTO
+            else _MOCK_CONTAS_PAGAR_AVENCER
         )
         filtered = [t for t in bucket if data_de <= t.data_vencimento <= data_ate]
         log.info(

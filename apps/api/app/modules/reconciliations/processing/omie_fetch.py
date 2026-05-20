@@ -25,15 +25,20 @@ from app.integrations.omie.client import OmieClient
 from app.integrations.omie.schemas import OmieTituloStatus
 from app.modules.reconciliations.processing.matcher import OmieMovement
 
-# `ListarContasPagar/Receber` retorna `status_titulo` em UPPERCASE
-# (`"ATRASADO"`, `"PREVISTO"`); `ListarExtrato.cStatus` retorna em CamelCase
-# (`"Atrasado"`, `"Previsto"`, `"Conciliado"`). O model `OmieEntryStatus`
-# é o canônico do DB (CamelCase) — normalizamos no fetch para que o
-# `anomalies.create_structural_anomalies` possa comparar contra o enum sem
-# case-insensitive ad hoc.
+# Mapeia o valor do FILTRO `filtrar_por_status` (UPPERCASE, doc oficial Omie:
+# ATRASADO, AVENCER, ...) para o status CANÔNICO do DB (CamelCase, ver
+# `OmieEntryStatus`: Atrasado, Previsto, Conciliado). O canônico segue o
+# `ListarExtrato.cStatus`, que devolve em CamelCase — usamos a mesma escala
+# em todo o domínio para que `anomalies.create_structural_anomalies` possa
+# comparar contra o enum sem case-insensitive ad hoc.
+#
+# Por que `AVENCER → Previsto`: AVENCER é só o nome do FILTRO (request) na
+# nomenclatura Omie; o conceito de negócio "título com vencimento futuro" é
+# o que CLAUDE.md §5.7 chama de "Previsto". Mantemos `Previsto` no DB para
+# consistência com o que vem de `ListarExtrato`.
 _TITULO_STATUS_TO_CANONICAL: dict[str, str] = {
     OmieTituloStatus.ATRASADO.value: OmieEntryStatus.ATRASADO.value,
-    OmieTituloStatus.PREVISTO.value: OmieEntryStatus.PREVISTO.value,
+    OmieTituloStatus.AVENCER.value: OmieEntryStatus.PREVISTO.value,
 }
 
 
@@ -129,7 +134,7 @@ async def fetch_pending(
     last_day = _last_day_of_month(reference_month)
     movements: list[OmieMovement] = []
 
-    for status in (OmieTituloStatus.ATRASADO, OmieTituloStatus.PREVISTO):
+    for status in (OmieTituloStatus.ATRASADO, OmieTituloStatus.AVENCER):
         canonical_status = _TITULO_STATUS_TO_CANONICAL[status.value]
         pagar = await omie_client.listar_contas_pagar(
             conta_corrente_id=omie_conta_id,
