@@ -215,9 +215,12 @@ function ReviewErrorScreen({
     try {
       await reprocessMutation.mutateAsync();
       toast.success('Reprocessamento iniciado.');
-      // Refresh força o ReviewScreen a re-buscar o detail (status='processing')
-      // — daí o fluxo de processing/polling assume daqui.
-      router.refresh();
+      // Navega pra tela de processing (mesma URL do create, com polling +
+      // redirect automático pra revisão quando terminar). `router.refresh()`
+      // sozinho não basta — ele recarrega server components mas o
+      // ReviewScreen continua na mesma URL e cai de novo no ReviewErrorScreen
+      // até o TanStack re-buscar o detail e o status virar `processing`.
+      router.push(`/clientes/${clientId}/conciliacao/processando/${sessionId}`);
     } catch (err) {
       const message =
         err instanceof ApiError ? err.userMessage : 'Não foi possível reprocessar a conciliação.';

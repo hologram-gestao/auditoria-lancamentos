@@ -46,8 +46,12 @@ export function ReconciliationCard({ clientId, session, accountName }: Reconcili
     try {
       await reprocessMutation.mutateAsync();
       toast.success('Reprocessamento iniciado.');
-      // Redireciona pra tela de processing — mesmo fluxo do create.
-      router.push(`/clientes/${clientId}/conciliacao/${session.id}`);
+      // Redireciona pra tela de processing — MESMA URL do create
+      // (`new-reconciliation-form`), que tem polling de status + redirect
+      // automático pra revisão quando terminar. `/conciliacao/{id}` (sem
+      // `processando/`) cai na ReviewScreen e fica preso renderizando
+      // ReviewErrorScreen até o status no cache atualizar.
+      router.push(`/clientes/${clientId}/conciliacao/processando/${session.id}`);
     } catch (err) {
       const message =
         err instanceof ApiError ? err.userMessage : 'Não foi possível reprocessar a conciliação.';
