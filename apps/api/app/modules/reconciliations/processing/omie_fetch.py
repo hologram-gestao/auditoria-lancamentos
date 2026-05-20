@@ -17,6 +17,7 @@ Decisões de design:
 
 from __future__ import annotations
 
+import asyncio
 from calendar import monthrange
 from datetime import date, timedelta
 
@@ -24,6 +25,17 @@ from app.db.models import OmieEntryStatus
 from app.integrations.omie.client import OmieClient
 from app.integrations.omie.schemas import OmieTituloStatus
 from app.modules.reconciliations.processing.matcher import OmieMovement
+
+# Pausa entre chamadas SEQUENCIAIS pro mesmo endpoint Omie (listar_contas_pagar
+# com ATRASADO seguido por AVENCER, idem para listar_contas_receber). O Omie
+# tem rate limit por método em paralelo (`X-Omie-ParallelRateLimit: 1/4`); se
+# a 2ª chamada chega antes da 1ª terminar de processar do lado deles, devolve
+# 500 + `1880 - Já existe uma requisição desse método sendo executada`. O
+# Tenacity retenta, mas o backoff inicial (1s) pode não ser suficiente —
+# preferimos espaçar proativamente. 500ms é margem confortável sem deixar o
+# job pesado.
+_INTER_CALL_DELAY_SECONDS = 0.5
+
 
 # Mapeia o valor do FILTRO `filtrar_por_status` (UPPERCASE, doc oficial Omie:
 # ATRASADO, AVENCER, ...) para o status CANÔNICO do DB (CamelCase, ver
@@ -135,7 +147,14 @@ async def fetch_pending(
     last_day = _last_day_of_month(reference_month)
     movements: list[OmieMovement] = []
 
-    for status in (OmieTituloStatus.ATRASADO, OmieTituloStatus.AVENCER):
+    statuses = (OmieTituloStatus.ATRASADO, OmieTituloStatus.AVENCER)
+    for idx, status in enumerate(statuses):
+        # Pausa antes de chamadas subsequentes do MESMO método. A 1ª chamada
+        # (ATRASADO) sai imediato; a 2ª (AVENCER) espera 500ms pra deixar o
+        # Omie liberar o slot paralelo. Faz a mesma coisa pro receber abaixo.
+        if idx > 0:
+            await asyncio.sleep(_INTER_CALL_DELAY_SECONDS)
+
         canonical_status = _TITULO_STATUS_TO_CANONICAL[status.value]
         pagar = await omie_client.listar_contas_pagar(
             conta_corrente_id=omie_conta_id,
@@ -155,6 +174,9 @@ async def fetch_pending(
             for t in pagar
         )
 
+        # Pausa entre pagar e receber DO MESMO STATUS — endpoints diferentes,
+        # mas Omie já mostrou rate-limit cruzado em prod (`1880` rebatendo).
+        await asyncio.sleep(_INTER_CALL_DELAY_SECONDS)
         receber = await omie_client.listar_contas_receber(
             conta_corrente_id=omie_conta_id,
             data_de=reference_month,

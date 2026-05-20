@@ -198,10 +198,16 @@ class OmieClient:
         }
         effective_timeout = timeout_seconds if timeout_seconds is not None else self._timeout
 
+        # Budget de retry calibrado pra suportar o rate limit Omie:
+        #   - 5 tentativas com backoff 1s/2s/4s/8s/16s totalizam ~30s antes
+        #     de desistir. Foi calibrado contra o `1880 - Já existe uma
+        #     requisição` + `6 - Consumo redundante (aguarde 58s)`: a janela
+        #     anterior (3 tentativas, max 8s) esgotava em ~7s e ainda dentro
+        #     do cooldown da Omie. 30s dão margem pro slot paralelo liberar.
         try:
             async for attempt in AsyncRetrying(
-                stop=stop_after_attempt(3),
-                wait=wait_exponential(multiplier=1, min=1, max=8),
+                stop=stop_after_attempt(5),
+                wait=wait_exponential(multiplier=1, min=1, max=16),
                 retry=retry_if_exception_type((httpx.TimeoutException, _RetryableHttpError)),
                 reraise=True,
             ):
@@ -540,17 +546,37 @@ class OmieClient:
         lancamentos = [it for it in raw_items if it.get("nCodLancamento") is not None]
         summary_rows_skipped = len(raw_items) - len(lancamentos)
         # Sinal forte de bug: todos os items foram descartados pelo filtro.
-        # Pode significar (a) extrato realmente vazio com só linhas de saldo
-        # (raro mas possível em conta nova), ou (b) o response usa um campo
-        # diferente de `nCodLancamento` pro ID — nome divergiu da doc
-        # oficial. Loga apenas as CHAVES da primeira linha pra debug
-        # imediato sem vazar valores (CLAUDE.md §3.3).
+        # Possibilidades:
+        #   (a) Extrato realmente vazio com só linhas de saldo (conta nova
+        #       ou Conta Aplicação no Omie, onde a movimentação diária é
+        #       só atualização de `nSaldo`/`nSaldoPrev`).
+        #   (b) Response usa um campo diferente de `nCodLancamento` pro ID
+        #       (nome divergiu da doc oficial).
+        # Loga as chaves DISTINTAS observadas + amostra das 3 primeiras
+        # linhas (truncando texto a 30 chars; valores numéricos passam) —
+        # a diferença entre (a) e (b) fica visível: se todas as 36 linhas
+        # têm as mesmas chaves (`cDesCliente, dDataLancamento, nSaldo,
+        # nSaldoPrev, nValorDocumento`) e os valores em `cDesCliente`
+        # começam com "SALDO", é (a). Se aparecer alguma chave nova
+        # entre as amostras, é (b).
         if not lancamentos and raw_items:
+            distinct_keys: set[str] = set()
+            for it in raw_items:
+                distinct_keys.update(it.keys())
+            sample = [
+                {
+                    k: (v[:30] + "…" if isinstance(v, str) and len(v) > 30 else v)
+                    for k, v in raw_items[idx].items()
+                }
+                for idx in (0, min(len(raw_items) // 2, len(raw_items) - 1), len(raw_items) - 1)
+                if idx < len(raw_items)
+            ]
             log.warning(
                 "omie_extrato_all_rows_skipped",
                 n_cod_cc=n_cod_cc,
                 raw_count=len(raw_items),
-                first_item_keys=sorted(raw_items[0].keys()),
+                distinct_keys=sorted(distinct_keys),
+                sample=sample,
             )
         log.info(
             "omie_extrato_size",

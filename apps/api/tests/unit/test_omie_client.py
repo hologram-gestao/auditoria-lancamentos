@@ -557,6 +557,46 @@ class TestListarExtrato:
         assert items[0].c_natureza == OmieEntryNatureza.DEBITO.value
 
     @respx.mock
+    async def test_listar_extrato_returns_empty_when_only_saldo_rows(
+        self, client: OmieClient
+    ) -> None:
+        """Auditoria UX: extrato 100% saldo (Conta Aplicação, conta nova
+        sem movimentações no período) não levanta exceção — vira lista
+        vazia. O log estruturado `omie_extrato_all_rows_skipped` (com
+        sample + distinct_keys) cuida da observability pro diagnóstico
+        manual. Reproduz o caso real do Austral n_cod_cc=2761773379 com
+        36 linhas todas no formato saldo (20/05/2026)."""
+        respx.post(_omie_url("financas", "extrato")).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "listaMovimentos": [
+                        {
+                            "cDesCliente": "SALDO ANTERIOR",
+                            "dDataLancamento": "01/03/2026",
+                            "nSaldo": "1000.00",
+                            "nSaldoPrev": "1000.00",
+                            "nValorDocumento": 0,
+                        },
+                        {
+                            "cDesCliente": "SALDO POSTERIOR",
+                            "dDataLancamento": "31/03/2026",
+                            "nSaldo": "1500.00",
+                            "nSaldoPrev": "1500.00",
+                            "nValorDocumento": 0,
+                        },
+                    ]
+                },
+            )
+        )
+        items = await client.listar_extrato(
+            n_cod_cc=42,
+            data_inicial=date(2026, 3, 1),
+            data_final=date(2026, 3, 31),
+        )
+        assert items == []
+
+    @respx.mock
     async def test_listar_extrato_filters_saldo_summary_rows(self, client: OmieClient) -> None:
         """Regressão: Omie inclui linhas de saldo (`SALDO ANTERIOR`,
         `SALDO POSTERIOR`) no `listaMovimentos` sem `nCodLancamento` —
