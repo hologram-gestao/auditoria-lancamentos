@@ -26,15 +26,17 @@ from app.integrations.omie.client import OmieClient
 from app.integrations.omie.schemas import OmieTituloStatus
 from app.modules.reconciliations.processing.matcher import OmieMovement
 
-# Pausa entre chamadas SEQUENCIAIS pro mesmo endpoint Omie (listar_contas_pagar
-# com ATRASADO seguido por AVENCER, idem para listar_contas_receber). O Omie
-# tem rate limit por método em paralelo (`X-Omie-ParallelRateLimit: 1/4`); se
-# a 2ª chamada chega antes da 1ª terminar de processar do lado deles, devolve
-# 500 + `1880 - Já existe uma requisição desse método sendo executada`. O
-# Tenacity retenta, mas o backoff inicial (1s) pode não ser suficiente —
-# preferimos espaçar proativamente. 500ms é margem confortável sem deixar o
-# job pesado.
-_INTER_CALL_DELAY_SECONDS = 0.5
+# Pausa entre chamadas Omie em `fetch_pending`. O Omie tem rate limit por
+# método em paralelo (`X-Omie-ParallelRateLimit: 1/4`); se a 2ª chamada do
+# MESMO método chega antes da 1ª terminar de processar do lado deles,
+# devolve 500 + `1880`. Quando esse erro repete, o Omie escala pra cooldown
+# de ~58s (`6 - Consumo redundante`). A combinação que evita o problema é:
+#   (a) 1.5s entre cada chamada — janela razoável pro Omie liberar o slot.
+#   (b) Ordem que INTERCALA endpoints (pagar → receber → receber → pagar)
+#       pra evitar dois `pagar` ou dois `receber` consecutivos. Detalhe
+#       observado em prod: 500ms entre chamadas do MESMO endpoint não
+#       basta — 1.5s + intercalação é a margem que funciona.
+_INTER_CALL_DELAY_SECONDS = 1.5
 
 
 # Mapeia o valor do FILTRO `filtrar_por_status` (UPPERCASE, doc oficial Omie:
@@ -147,52 +149,58 @@ async def fetch_pending(
     last_day = _last_day_of_month(reference_month)
     movements: list[OmieMovement] = []
 
-    statuses = (OmieTituloStatus.ATRASADO, OmieTituloStatus.AVENCER)
-    for idx, status in enumerate(statuses):
-        # Pausa antes de chamadas subsequentes do MESMO método. A 1ª chamada
-        # (ATRASADO) sai imediato; a 2ª (AVENCER) espera 500ms pra deixar o
-        # Omie liberar o slot paralelo. Faz a mesma coisa pro receber abaixo.
+    # Ordem otimizada pra rate limit Omie: alterna PAGAR/RECEBER pra
+    # que duas chamadas do MESMO endpoint nunca fiquem adjacentes. Caso
+    # contrário (atr_pagar → avc_pagar) bate em `1880` mesmo com sleep.
+    # Aqui: pagar_atr → receber_atr → receber_avc → pagar_avc — entre as
+    # duas chamadas de `pagar` há ~3s de gap real (2x sleep + 1 chamada
+    # de receber), suficiente pra o Omie liberar o slot paralelo.
+    call_plan: list[tuple[str, OmieTituloStatus]] = [
+        ("pagar", OmieTituloStatus.ATRASADO),
+        ("receber", OmieTituloStatus.ATRASADO),
+        ("receber", OmieTituloStatus.AVENCER),
+        ("pagar", OmieTituloStatus.AVENCER),
+    ]
+    for idx, (kind, status) in enumerate(call_plan):
         if idx > 0:
             await asyncio.sleep(_INTER_CALL_DELAY_SECONDS)
-
         canonical_status = _TITULO_STATUS_TO_CANONICAL[status.value]
-        pagar = await omie_client.listar_contas_pagar(
-            conta_corrente_id=omie_conta_id,
-            data_de=reference_month,
-            data_ate=last_day,
-            status=status,
-        )
-        movements.extend(
-            OmieMovement(
-                omie_id=t.codigo_lancamento_omie,
-                transaction_date=t.data_vencimento,
-                # Pagar é saída: garante negativo independente do sinal vindo.
-                amount=-abs(t.valor_documento),
-                status=canonical_status,
-                is_realized=False,
+        if kind == "pagar":
+            pagar = await omie_client.listar_contas_pagar(
+                conta_corrente_id=omie_conta_id,
+                data_de=reference_month,
+                data_ate=last_day,
+                status=status,
             )
-            for t in pagar
-        )
-
-        # Pausa entre pagar e receber DO MESMO STATUS — endpoints diferentes,
-        # mas Omie já mostrou rate-limit cruzado em prod (`1880` rebatendo).
-        await asyncio.sleep(_INTER_CALL_DELAY_SECONDS)
-        receber = await omie_client.listar_contas_receber(
-            conta_corrente_id=omie_conta_id,
-            data_de=reference_month,
-            data_ate=last_day,
-            status=status,
-        )
-        movements.extend(
-            OmieMovement(
-                omie_id=t.codigo_lancamento_omie,
-                transaction_date=t.data_vencimento,
-                amount=abs(t.valor_documento),
-                status=canonical_status,
-                is_realized=False,
+            movements.extend(
+                OmieMovement(
+                    omie_id=t.codigo_lancamento_omie,
+                    transaction_date=t.data_vencimento,
+                    # Pagar = saída: garante NEGATIVO independente do sinal vindo.
+                    amount=-abs(t.valor_documento),
+                    status=canonical_status,
+                    is_realized=False,
+                )
+                for t in pagar
             )
-            for t in receber
-        )
+        else:
+            receber = await omie_client.listar_contas_receber(
+                conta_corrente_id=omie_conta_id,
+                data_de=reference_month,
+                data_ate=last_day,
+                status=status,
+            )
+            movements.extend(
+                OmieMovement(
+                    omie_id=t.codigo_lancamento_omie,
+                    transaction_date=t.data_vencimento,
+                    # Receber = entrada: garante POSITIVO independente do sinal vindo.
+                    amount=abs(t.valor_documento),
+                    status=canonical_status,
+                    is_realized=False,
+                )
+                for t in receber
+            )
 
     return movements
 

@@ -393,6 +393,48 @@ class TestCallRetry:
         assert route.call_count == 2
 
     @respx.mock
+    async def test_5xx_redundant_code_uses_directed_sleep(
+        self, client: OmieClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Quando o erro vem com `6 - Consumo redundante. Aguarde N segundos`,
+        o cliente parseia N e dorme N+1s ANTES do retry — em vez de usar o
+        backoff exponencial do Tenacity (1s, 2s...) que e curto demais
+        pro cooldown da Omie (~58s). Caso real Austral 20/05/2026."""
+        sleep_calls: list[float] = []
+
+        async def fake_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+
+        monkeypatch.setattr("app.integrations.omie.client.asyncio.sleep", fake_sleep)
+        responses = [
+            httpx.Response(
+                500,
+                headers={
+                    "OmieAPI-Error": (
+                        "6 - Consumo redundante detectado. "
+                        "Aguarde 58 segundos para tentar novamente (REDUNDANT)."
+                    )
+                },
+                json={"err": "redundant"},
+            ),
+            httpx.Response(200, json={"ok": True}),
+        ]
+        respx.post(_omie_url("geral", "clientes")).mock(side_effect=responses)
+        result = await client.call(
+            module="geral",
+            endpoint="clientes",
+            call_name="ListarClientes",
+            param={"pagina": 1},
+        )
+        assert result == {"ok": True}
+        # Deve haver pelo menos um sleep de >=58s (o cooldown da Omie + 1
+        # de margem). Tenacity tambem adiciona seu proprio sleep, entao
+        # pode haver outras chamadas de sleep com valores menores.
+        assert any(s >= 59 for s in sleep_calls), (
+            f"esperava sleep dirigido >=59s, recebeu {sleep_calls}"
+        )
+
+    @respx.mock
     async def test_timeout_raises_OmieTimeoutError(  # noqa: N802
         self, client: OmieClient
     ) -> None:

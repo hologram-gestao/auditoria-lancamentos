@@ -18,6 +18,8 @@ converter as respostas raw em objetos Pydantic.
 
 from __future__ import annotations
 
+import asyncio
+import re
 import time
 from collections.abc import AsyncIterator
 from datetime import date
@@ -100,6 +102,18 @@ _RETRYABLE_OMIE_API_ERROR_PREFIXES: tuple[str, ...] = (
     "1880",
     "6 -",
 )
+
+# Regex pra extrair o tempo de cooldown do código `6` do Omie:
+#   "6 - Consumo redundante detectado. Aguarde 58 segundos..."
+# A Omie literalmente nos diz quanto esperar — dormir esse tempo antes do
+# retry é mais eficaz que o backoff exponencial padrão. Sem isso, o
+# Tenacity vai retentar antes do cooldown expirar e a Omie só pune mais.
+_REDUNDANT_WAIT_PATTERN = re.compile(r"Aguarde\s+(\d+)\s+segundos?", re.IGNORECASE)
+
+# Sleep máximo respeitando "Aguarde N" do Omie. Cap em 70s — cobre o
+# cooldown observado (58s) com folga, mas não trava o job indefinidamente
+# se a Omie um dia devolver um número absurdo.
+_REDUNDANT_MAX_SLEEP_SECONDS = 70.0
 
 
 class OmieCredentials(BaseModel):
@@ -279,6 +293,29 @@ class OmieClient:
                     for prefix in _RETRYABLE_OMIE_API_ERROR_PREFIXES
                 )
                 if is_retryable:
+                    # Quando o erro vem com "Aguarde N segundos" (código `6`),
+                    # respeitamos esse tempo antes de propagar pro Tenacity.
+                    # O Omie SOMA cada retry feito dentro do cooldown ativo
+                    # (escala 1880 → 6/58s → 6/54s → ...) e mais retries
+                    # cedo só prolongam a punição. Caso real Austral
+                    # 20/05/2026: 5 retries em 16s não bastam, mas dormir
+                    # ~60s e tentar 1x mais funciona.
+                    cooldown_match = _REDUNDANT_WAIT_PATTERN.search(omie_api_error)
+                    if cooldown_match is not None:
+                        cooldown_seconds = min(
+                            float(int(cooldown_match.group(1)) + 1),
+                            _REDUNDANT_MAX_SLEEP_SECONDS,
+                        )
+                        log.warning(
+                            "omie_call_redundant_cooldown_sleep",
+                            module=module,
+                            endpoint=endpoint,
+                            call=call_name,
+                            requested_wait_seconds=int(cooldown_match.group(1)),
+                            effective_sleep_seconds=cooldown_seconds,
+                            omie_api_error=omie_api_error,
+                        )
+                        await asyncio.sleep(cooldown_seconds)
                     log.warning(
                         "omie_call_5xx_retryable",
                         module=module,
