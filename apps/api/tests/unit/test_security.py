@@ -138,8 +138,14 @@ class TestJwtDecode:
 
     def test_invalid_signature_fails(self, settings: Settings) -> None:
         token = create_access_token(subject="u", role="admin", settings=settings)
-        # Flipa último char (parte da assinatura)
-        tampered = token[:-1] + ("A" if token[-1] != "A" else "B")
+        # Substitui a assinatura inteira por algo claramente inválido. A v1
+        # flipava só o último char, mas isso é flaky: dependendo do `iat`
+        # do JWT, o flip podia gerar uma sequência base64url ainda válida e
+        # com assinatura compatível (visto no CI em 20/05/2026). Trocar a
+        # assinatura completa por um literal não-base64url torna o teste
+        # determinístico.
+        header_payload, _signature = token.rsplit(".", 1)
+        tampered = f"{header_payload}.invalidsignature"
         with pytest.raises(UnauthorizedError, match="inválido"):
             decode_token(tampered, settings)
 
