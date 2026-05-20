@@ -495,14 +495,26 @@ class OmieClient:
             timeout_seconds=self._settings.OMIE_TIMEOUT_EXTRATO_SECONDS,
         )
         raw_items: list[dict[str, Any]] = resp.get("listaMovimentos") or []
+        # Omie inclui linhas-resumo de saldo (ex: "SALDO ANTERIOR",
+        # "SALDO POSTERIOR") no `listaMovimentos`. Essas linhas NÃO são
+        # lançamentos — vêm sem `nCodLancamento`, sem `cNatureza` e sem
+        # `cSituacao`, com `nValorDocumento=0` e `cDesCliente="SALDO ..."`.
+        # Se passarem pelo `model_validate`, viram 3 erros de "Field
+        # required" e o job inteiro morre. Filtramos antes do parse —
+        # caso real observado em 20/05/2026 com cliente Austral (extrato
+        # de março/2026, 36 linhas no array, ~2 delas de saldo).
+        lancamentos = [it for it in raw_items if it.get("nCodLancamento") is not None]
+        summary_rows_skipped = len(raw_items) - len(lancamentos)
         log.info(
             "omie_extrato_size",
             n_cod_cc=n_cod_cc,
-            item_count=len(raw_items),
+            item_count=len(lancamentos),
+            raw_count=len(raw_items),
+            summary_rows_skipped=summary_rows_skipped,
             period_start=data_inicial.isoformat(),
             period_end=data_final.isoformat(),
         )
-        return [LancamentoExtrato.model_validate(it) for it in raw_items]
+        return [LancamentoExtrato.model_validate(it) for it in lancamentos]
 
     async def listar_contas_pagar(
         self,

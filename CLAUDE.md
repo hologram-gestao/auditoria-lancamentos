@@ -166,6 +166,24 @@
 - **PR com ≥ 1 review** em `main` protegida.
 - **Nunca** `git push --force` em main, `--no-verify`, `--no-gpg-sign`.
 
+### CI/CD verde (GitHub Actions)
+
+- **`main` precisa terminar com CI verde sempre.** A esteira (`.github/workflows/ci.yml`) é o portão de qualidade — `ruff check` + `ruff format --check` + `mypy` + `pytest` + `pip-audit` no `apps/api`; `lint` + `type-check` + `test` + `npm audit` no `apps/web`. Os 4 do API rodam mesmo em PR/push tocando só web (e vice-versa) — não dá pra esconder regressão atrás de filtro de paths.
+- **Antes de cada push para `main`**, rodar localmente o mesmo conjunto que o CI roda:
+
+  ```bash
+  cd apps/api && uv run ruff check . && uv run ruff format --check . && uv run mypy app/ && uv run pytest -q --no-cov
+  pnpm --filter @auditoria/web lint && pnpm --filter @auditoria/web type-check && pnpm --filter @auditoria/web test
+  ```
+
+- **Se o CI falhar:**
+  1. `gh run view <run-id> --log-failed` pra ler o erro real (não o "summary" — esse engana).
+  2. Reproduzir local com o **mesmo comando do CI** (`uv run pytest -v --cov=app --cov-report=term-missing` no API; coverage muda a quantidade de testes que rodam).
+  3. Push do fix **no commit seguinte** — nunca `git push --force` pra "limpar" CI vermelho do histórico.
+- **Teste flaky** (passa local, falha CI): tratar como bug a ser deflakizado, **não** ignorar. Padrão de root cause comum: timestamp/relógio ms-resolution, ordem de fixture, dependência de rede mockada parcialmente. Documentar a causa no commit do deflake (ex: ver `1185e17`).
+- **Hooks locais** (husky + lint-staged + commitlint) rodam no `git commit`. **Nunca** usar `--no-verify` pra contornar — se o hook falhar, o CI vai falhar igual. Conserta antes.
+- **Quando um job for marcado como `skipped` no CI** (ex: `Web` quando o PR só toca API): isso é esperado pelo `paths-filter`. Mas o status do summary precisa ser verde — se vier vermelho num skip, é bug do workflow, **abrir antes de mergear**.
+
 ### Idioma
 
 - **Código:** inglês.

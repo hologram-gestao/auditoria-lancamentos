@@ -525,6 +525,52 @@ class TestListarExtrato:
         assert items[0].c_natureza == OmieEntryNatureza.DEBITO.value
 
     @respx.mock
+    async def test_listar_extrato_filters_saldo_summary_rows(self, client: OmieClient) -> None:
+        """Regressão: Omie inclui linhas de saldo (`SALDO ANTERIOR`,
+        `SALDO POSTERIOR`) no `listaMovimentos` sem `nCodLancamento` —
+        precisam ser filtradas antes do `model_validate`, senão o parse
+        explode com 3 erros `Field required`. Caso real cliente Austral
+        (20/05/2026, extrato março/2026)."""
+        respx.post(_omie_url("financas", "extrato")).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "listaMovimentos": [
+                        # Linha de SALDO ANTERIOR — sem nCodLancamento.
+                        {
+                            "cDesCliente": "SALDO ANTERIOR",
+                            "nValorDocumento": 0,
+                            "nSaldo": "1000.00",
+                        },
+                        # Lançamento real.
+                        {
+                            "nCodLancamento": 99,
+                            "cNatureza": "D",
+                            "dDataLancamento": "15/03/2026",
+                            "nValorDocumento": "250.00",
+                            "cObservacoes": "Pagamento real",
+                            "cSituacao": "Conciliado",
+                        },
+                        # Linha de SALDO POSTERIOR.
+                        {
+                            "cDesCliente": "SALDO POSTERIOR",
+                            "nValorDocumento": 0,
+                            "nSaldo": "750.00",
+                        },
+                    ]
+                },
+            )
+        )
+        items = await client.listar_extrato(
+            n_cod_cc=42,
+            data_inicial=date(2026, 3, 1),
+            data_final=date(2026, 3, 31),
+        )
+        assert len(items) == 1  # só o lançamento real, 2 linhas de saldo descartadas
+        assert items[0].n_cod_lancamento == 99
+        assert items[0].signed_amount == Decimal("-250.00")
+
+    @respx.mock
     async def test_listar_extrato_uses_dedicated_timeout(self, client: OmieClient) -> None:
         """Auditoria A-3: `listar_extrato` precisa passar o timeout próprio
         (OMIE_TIMEOUT_EXTRATO_SECONDS) em vez do default global, pra acomodar
