@@ -128,6 +128,12 @@ class Settings(BaseSettings):
     # Timeout específico do "Testar conexão" (S6 §3.3): mais agressivo que o
     # default — usuário está na UI esperando feedback rápido.
     OMIE_TEST_CONNECTION_TIMEOUT_SECONDS: int = 10
+    # Timeout específico de `ListarExtrato` (auditoria A-3): o endpoint não
+    # tem paginação documentada — clientes com muitos lançamentos no período
+    # podem devolver respostas grandes. 15s default é apertado pra
+    # transferência + parse. Job ARQ pode esperar mais (não há usuário na
+    # frente da request).
+    OMIE_TIMEOUT_EXTRATO_SECONDS: int = 60
 
     # ---------- Limites ----------
     MAX_UPLOAD_SIZE_MB: int = 20

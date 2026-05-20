@@ -145,6 +145,7 @@ class OmieClient:
         endpoint: str,
         call_name: str,
         param: dict[str, Any],
+        timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
         """Faz uma chamada genérica à API Omie.
 
@@ -156,6 +157,10 @@ class OmieClient:
             endpoint: ex. `"clientes"`, `"contacorrente"`, `"extrato"`.
             call_name: nome do método Omie, ex. `"ListarClientes"`.
             param: dict do parâmetro (será embrulhado em lista pela API).
+            timeout_seconds: override do timeout default desta chamada
+                específica. Útil pra endpoints conhecidos por demorar mais
+                (ex.: `ListarExtrato` sem paginação). Se omitido, usa o
+                `OMIE_TIMEOUT_SECONDS` do `Settings`.
 
         Returns:
             Body parseado como dict (com `faultstring` removido — se houvesse,
@@ -173,6 +178,7 @@ class OmieClient:
             "app_secret": self._credentials.app_secret.get_secret_value(),
             "param": [param],
         }
+        effective_timeout = timeout_seconds if timeout_seconds is not None else self._timeout
 
         try:
             async for attempt in AsyncRetrying(
@@ -182,7 +188,9 @@ class OmieClient:
                 reraise=True,
             ):
                 with attempt:
-                    return await self._do_call(url, body, module, endpoint, call_name)
+                    return await self._do_call(
+                        url, body, module, endpoint, call_name, effective_timeout
+                    )
         except httpx.TimeoutException as exc:
             raise OmieTimeoutError(
                 f"Timeout após retries em {call_name} ({module}/{endpoint})",
@@ -210,12 +218,15 @@ class OmieClient:
         module: str,
         endpoint: str,
         call_name: str,
+        timeout_seconds: float,
     ) -> dict[str, Any]:
         """Executa a request real. Encapsulada para Tenacity wrappar."""
         started = time.monotonic()
 
         try:
-            response = await self._http.post(url, json=body)
+            # Per-request timeout — sobrescreve o timeout do AsyncClient quando
+            # endpoint precisa de janela diferente (ex.: ListarExtrato).
+            response = await self._http.post(url, json=body, timeout=timeout_seconds)
         except httpx.TimeoutException:
             log.warning(
                 "omie_call_timeout",
@@ -364,15 +375,21 @@ class OmieClient:
 
         Funciona para `ListarContasCorrentes` (`ListarContasCorrentes` — o
         Omie reusa o nome do método como chave da lista) e
-        `ListarContasPagar/Receber` (cadastro). O list_key indica qual chave
-        do response contém os items.
+        `ListarContasPagar/Receber` (`conta_pagar_cadastro` /
+        `conta_receber_cadastro`). O `list_key` indica qual chave do
+        response contém os items.
 
-        Quebra quando uma página retorna menos itens que `page_size`. O
-        `max_pages` é uma proteção defensiva contra loop infinito.
+        Critério de parada (em ordem de prioridade):
+          1. `total_de_paginas` no envelope: se a página atual >= total,
+             encerra. Auditoria M-3: economiza 1 request quando a última
+             página vem cheia (ex: cliente com exatamente 100 contas).
+          2. Fallback heurístico `len(items) < page_size`: cobre o caso
+             do Omie não devolver `total_de_paginas` (legado/raro).
+          3. `max_pages`: proteção defensiva contra loop infinito.
 
         Args:
             module/endpoint/call_name: como em `call()`.
-            list_key: chave do dict de resposta com a lista (ex: `"cadastro"`).
+            list_key: chave do dict de resposta com a lista.
             extra_param: parâmetros adicionais além de pagina/registros.
             page_size: tamanho da página (max 100 para a maioria dos endpoints).
             max_pages: proteção contra loop infinito.
@@ -386,6 +403,15 @@ class OmieClient:
             items: list[dict[str, Any]] = resp.get(list_key) or []
             for item in items:
                 yield item
+
+            # Critério primário: total_de_paginas declarado no envelope.
+            total_paginas_raw = resp.get("total_de_paginas")
+            if isinstance(total_paginas_raw, int) and total_paginas_raw > 0:
+                if pagina >= total_paginas_raw:
+                    return
+                continue  # Omie disse que tem mais — segue pra próxima.
+
+            # Fallback heurístico para envelopes sem `total_de_paginas`.
             if len(items) < page_size:
                 return
         log.warning(
@@ -443,11 +469,13 @@ class OmieClient:
         Envelope `eccListarExtratoResponse`, chave do array é
         `listaMovimentos` (NÃO `extrato`, como a doc interna v1 dizia).
 
-        TODO (S5 — Pontos em Aberto): a doc oficial não documenta paginação
-        nem limite máximo; assumimos response inteira numa chamada. Se um
-        cliente real tiver milhares de lançamentos no período, este endpoint
-        pode estourar timeout/memória — telemetria (`omie_extrato_size`) +
-        timeout per-endpoint estão no backlog (auditoria ALTO-3).
+        **Sem paginação documentada** — a doc oficial não declara `pagina`
+        nem `total_de_paginas`. Assumimos response completa em uma chamada.
+        Pra absorver clientes com muitos lançamentos no período, usamos um
+        timeout próprio (`OMIE_TIMEOUT_EXTRATO_SECONDS`, default 60s) em
+        vez do default global (15s) — auditoria A-3. Logamos `omie_extrato_size`
+        pra criar telemetria; se virar gargalo, partir pra split por
+        intervalos menores no caller.
 
         Args:
             n_cod_cc: ID da conta corrente (`nCodCC`).
@@ -464,8 +492,16 @@ class OmieClient:
                 "dPeriodoInicial": data_inicial.strftime("%d/%m/%Y"),
                 "dPeriodoFinal": data_final.strftime("%d/%m/%Y"),
             },
+            timeout_seconds=self._settings.OMIE_TIMEOUT_EXTRATO_SECONDS,
         )
         raw_items: list[dict[str, Any]] = resp.get("listaMovimentos") or []
+        log.info(
+            "omie_extrato_size",
+            n_cod_cc=n_cod_cc,
+            item_count=len(raw_items),
+            period_start=data_inicial.isoformat(),
+            period_end=data_final.isoformat(),
+        )
         return [LancamentoExtrato.model_validate(it) for it in raw_items]
 
     async def listar_contas_pagar(

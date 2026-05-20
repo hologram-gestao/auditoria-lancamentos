@@ -443,6 +443,7 @@ class TestListarContasCorrentes:
 
     @respx.mock
     async def test_paginates_until_short_page(self, client: OmieClient) -> None:
+        # Fallback heurístico sem total_de_paginas no envelope.
         page1 = {"ListarContasCorrentes": [_make_cc(i) for i in range(100)]}
         page2 = {"ListarContasCorrentes": [_make_cc(i) for i in range(100, 150)]}
         respx.post(_omie_url("geral", "contacorrente")).mock(
@@ -453,6 +454,24 @@ class TestListarContasCorrentes:
         )
         contas = await client.listar_contas_correntes()
         assert len(contas) == 150
+
+    @respx.mock
+    async def test_paginates_respects_total_de_paginas(self, client: OmieClient) -> None:
+        """Auditoria M-3: quando o envelope traz `total_de_paginas`, o
+        paginate encerra ao atingi-lo — evita a request extra desperdiçada
+        que a v1 fazia quando a última página vinha exatamente cheia."""
+        page1 = {
+            "ListarContasCorrentes": [_make_cc(i) for i in range(100)],
+            "total_de_paginas": 1,  # explicitamente: só 1 página, exatamente cheia
+            "total_de_registros": 100,
+        }
+        route = respx.post(_omie_url("geral", "contacorrente")).mock(
+            return_value=httpx.Response(200, json=page1)
+        )
+        contas = await client.listar_contas_correntes()
+        assert len(contas) == 100
+        # DoD: UMA chamada só. A v1 fazia 2 (página 1 cheia → tenta página 2 vazia).
+        assert route.call_count == 1
 
 
 def _make_cc(idx: int) -> dict[str, Any]:
@@ -504,6 +523,31 @@ class TestListarExtrato:
         assert items[0].signed_amount == Decimal("-500.00")
         assert items[1].signed_amount == Decimal("300.00")
         assert items[0].c_natureza == OmieEntryNatureza.DEBITO.value
+
+    @respx.mock
+    async def test_listar_extrato_uses_dedicated_timeout(self, client: OmieClient) -> None:
+        """Auditoria A-3: `listar_extrato` precisa passar o timeout próprio
+        (OMIE_TIMEOUT_EXTRATO_SECONDS) em vez do default global, pra acomodar
+        respostas grandes sem split por intervalos."""
+        route = respx.post(_omie_url("financas", "extrato")).mock(
+            return_value=httpx.Response(200, json={"listaMovimentos": []})
+        )
+        await client.listar_extrato(
+            n_cod_cc=42,
+            data_inicial=date(2026, 1, 1),
+            data_final=date(2026, 1, 31),
+        )
+        assert route.called
+        # httpx serializa o timeout no atributo Request.extensions["timeout"].
+        # O timeout default do client é 15s; o extrato deve ter recebido
+        # OMIE_TIMEOUT_EXTRATO_SECONDS (60 default).
+        timeout = route.calls.last.request.extensions.get("timeout")
+        assert timeout is not None
+        # `timeout` é um dict com keys connect/read/write/pool quando dict-like,
+        # ou um float quando escalar — checamos o read timeout (o que mais
+        # importa pra response grande).
+        read = timeout.get("read") if isinstance(timeout, dict) else timeout
+        assert read == 60, f"esperado timeout 60s, recebeu {read!r}"
 
 
 class TestListarTitulos:
