@@ -89,7 +89,9 @@ _MOCK_CONTAS: list[ContaCorrente] = [
             "nCodCC": 900_000_003,
             "descricao": "Cartão Visa Empresarial 4521",
             "codigo_banco": "341",
-            "tipo_conta_corrente": "CA",
+            # `CR` = Cartão de Crédito na nomenclatura Omie. A v1 do mock
+            # usava `CA`, que na verdade é "Conta Aplicação" (auditoria M-1).
+            "tipo_conta_corrente": "CR",
         }
     ),
 ]

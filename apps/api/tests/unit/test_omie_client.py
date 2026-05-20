@@ -260,6 +260,33 @@ class TestCallFault:
                 param={"pagina": 1},
             )
 
+    @respx.mock
+    async def test_auth_via_faultcode_alone_raises_OmieAuthError(  # noqa: N802
+        self, client: OmieClient
+    ) -> None:
+        """Auditoria M-2: faultcode `SOAP-ENV:Client-101` (auth) deve cair
+        em `OmieAuthError` mesmo quando o faultstring não contém nenhuma
+        keyword conhecida — antes da separação string vs code, esse caso
+        virava `OmieFaultError` genérico e o usuário não sabia que era
+        problema de credencial."""
+        respx.post(_omie_url("geral", "clientes")).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    # Mensagem em PT-BR sem nenhuma das keywords de auth conhecidas
+                    "faultstring": "Token rejeitado pelo sistema interno.",
+                    "faultcode": "SOAP-ENV:Client-101",
+                },
+            )
+        )
+        with pytest.raises(OmieAuthError):
+            await client.call(
+                module="geral",
+                endpoint="clientes",
+                call_name="ListarClientes",
+                param={"pagina": 1},
+            )
+
 
 # ----------------------------------------------------------------------
 # Retry em 5xx e timeout

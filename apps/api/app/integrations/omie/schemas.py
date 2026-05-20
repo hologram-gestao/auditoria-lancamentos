@@ -22,10 +22,26 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class OmieAccountType(StrEnum):
-    """Valores do campo `tipo` em ListarContasCorrentes."""
+    """Códigos de `tipo_conta_corrente` em ListarContasCorrentes (Omie).
+
+    Enum **não-exaustivo** — só os tipos relevantes pro matching do MVP.
+    Doc oficial (https://app.omie.com.br/api/v1/geral/contacorrente/)
+    declara 13 valores possíveis (`AC, AD, CA, CC, CE, CG, CN, CP, CR,
+    CV, CX, MT, PG`); o campo `tipo: str` no schema aceita qualquer
+    valor — o enum aqui só nomeia os que tratamos com lógica especial.
+
+    **Atenção semântica** (auditoria M-1, corrigido em 20/05/2026):
+    a v1 deste enum mapeava `CREDIT_CARD = "CA"`, mas na Omie:
+      - `CA` = **Conta Aplicação** (investimento, não cartão!)
+      - `CR` = **Cartão de Crédito**
+    Bugs decorrentes: front renderizava `CA` como "Cartão" e classifica-
+    ria Conta Aplicação como cartão de crédito, com consequências em
+    badges e filtros de UI.
+    """
 
     CHECKING = "CC"  # Conta Corrente
-    CREDIT_CARD = "CA"  # Cartão de Crédito
+    CREDIT_CARD = "CR"  # Cartão de Crédito
+    INVESTMENT = "CA"  # Conta Aplicação
 
 
 class OmieEntryNatureza(StrEnum):
@@ -105,7 +121,12 @@ class ContaCorrente(BaseModel):
     )
     tipo: str = Field(
         alias="tipo_conta_corrente",
-        description="'CC' (corrente), 'CA' (cartão), 'CX' (caixinha), etc.",
+        description=(
+            "Código de 2 letras. Valores possíveis (doc oficial): "
+            "'CC' Conta Corrente, 'CR' Cartão de Crédito, 'CA' Conta "
+            "Aplicação, 'CP' Poupança, 'CX' Caixinha, e mais 8 (`AC`, "
+            "`AD`, `CE`, `CG`, `CN`, `CV`, `MT`, `PG`)."
+        ),
     )
 
     model_config = ConfigDict(populate_by_name=True)

@@ -121,17 +121,22 @@ class ClientListResponse(BaseModel):
 class BankAccountResponse(BaseModel):
     """Conta corrente Omie do cache L1 — exposta na tela de detalhe do cliente.
 
-    `account_type` é `'CC'` (corrente) ou `'CA'` (cartão). Mantemos `str` em
-    vez de enum no response (memória `feedback_pydantic`): se o Omie introduzir
-    um novo `tipo` no futuro, a tela continua funcionando mesmo antes de o
-    backend ser atualizado para reconhecê-lo.
+    `account_type` é o código de 2 letras devolvido pela Omie em
+    `tipo_conta_corrente` — `'CC'` (Conta Corrente), `'CR'` (Cartão de
+    Crédito), `'CA'` (Conta Aplicação), entre outros. Mantemos `str` em
+    vez de enum no response (memória `feedback_pydantic`): se o Omie
+    introduzir um novo tipo, a tela continua funcionando mesmo antes do
+    backend reconhecê-lo formalmente.
     """
 
     id: UUID
     omie_conta_id: int = Field(..., description="nCodCC do Omie (BigInteger).")
     name: str
     bank_name: str
-    account_type: str = Field(..., description="'CC' ou 'CA'.")
+    account_type: str = Field(
+        ...,
+        description="Código Omie: 'CC' (corrente), 'CR' (cartão), 'CA' (aplicação), etc.",
+    )
     synced_at: datetime
 
     model_config = {"from_attributes": True}

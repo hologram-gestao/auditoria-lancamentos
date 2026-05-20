@@ -27,10 +27,21 @@ if TYPE_CHECKING:
 
 
 class OmieAccountType(StrEnum):
-    """Tipo da conta no Omie (mesmo enum usado pelo `tipo` da API)."""
+    """Tipo da conta no Omie (mesmo enum usado pelo `tipo` da API).
+
+    Não-exaustivo — só os tipos com lógica especial no MVP. Doc oficial
+    declara 13 valores; ver `app.integrations.omie.schemas.OmieAccountType`
+    pra detalhes. Coluna `account_type` é `String(10)` e aceita qualquer
+    código devolvido pela Omie.
+
+    **Atenção** (corrigido em 20/05/2026, auditoria M-1): `CA` ≠ cartão!
+      - `CA` = Conta Aplicação (investimento)
+      - `CR` = Cartão de Crédito
+    """
 
     CHECKING = "CC"  # Conta Corrente
-    CREDIT_CARD = "CA"  # Cartão de Crédito
+    CREDIT_CARD = "CR"  # Cartão de Crédito
+    INVESTMENT = "CA"  # Conta Aplicação
 
 
 class OmieAccountCache(UUIDPrimaryKeyMixin, Base):

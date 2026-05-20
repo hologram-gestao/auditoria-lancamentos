@@ -56,7 +56,13 @@ log = get_logger(__name__)
 # Substrings (case-insensitive) em `faultstring` que indicam erro de
 # autenticação. Mapeamos para `OmieAuthError` (sem retry) em vez do genérico
 # `OmieFaultError`. Ordem não importa.
-_AUTH_FAULT_KEYWORDS = (
+#
+# Auditoria M-2 (corrigido em 20/05/2026): a v1 misturava `faultcode` aqui
+# (ex: `"soap-env:client-101"`) — mas o code é um campo separado no payload,
+# não cabe num matching contra `fault_string.lower()`. Separamos em duas
+# listas. Doc oficial não enumera faultcodes; estes vêm da convenção SOAP
+# da Omie + observação empírica (pendência: capturar fault real em dev).
+_AUTH_FAULT_STRING_KEYWORDS: tuple[str, ...] = (
     "app_key",
     "app key",
     "app_secret",
@@ -65,7 +71,16 @@ _AUTH_FAULT_KEYWORDS = (
     "credencial inválida",
     "acesso negado",
     "unauthorized",
-    "soap-env:client-101",  # código clássico de auth no Omie
+)
+
+# Faultcodes (case-insensitive) que o Omie devolve quando a autenticação
+# falhou. Convenção SOAP: `SOAP-ENV:Client-101` (credencial), `-102`/`-103`
+# (escopo da APP), etc. A doc oficial não enumera — quando capturarmos
+# uma fixture real, adicionar aqui com confiança maior.
+_AUTH_FAULT_CODES: tuple[str, ...] = (
+    "soap-env:client-101",
+    "soap-env:client-102",
+    "soap-env:client-103",
 )
 
 
@@ -302,12 +317,24 @@ class OmieClient:
 
     @staticmethod
     def _raise_for_fault(fault: OmieFaultPayload, call_name: str) -> None:
-        """Mapeia faultstring para a exceção correta (auth vs genérico)."""
-        message = fault.fault_string or "Erro Omie sem mensagem"
-        normalized = message.lower()
-        is_auth = any(kw in normalized for kw in _AUTH_FAULT_KEYWORDS)
+        """Mapeia faultstring/faultcode para a exceção correta (auth vs genérico).
 
-        if is_auth:
+        Checagem dupla (auditoria M-2): casa o faultcode contra o enum de
+        códigos SOAP de auth E o faultstring contra os keywords humanos.
+        Antes a v1 misturava ambos em `_AUTH_FAULT_KEYWORDS`, então um
+        fault com `faultcode='SOAP-ENV:Client-101'` mas `faultstring` em
+        português sem nenhuma keyword conhecida caía em `OmieFaultError`
+        e o usuário via "Ocorreu um erro ao acessar o Omie" em vez de
+        "Credenciais Omie inválidas".
+        """
+        message = fault.fault_string or "Erro Omie sem mensagem"
+        normalized_string = message.lower()
+        normalized_code = (fault.fault_code or "").lower()
+
+        is_auth_by_code = normalized_code in _AUTH_FAULT_CODES
+        is_auth_by_string = any(kw in normalized_string for kw in _AUTH_FAULT_STRING_KEYWORDS)
+
+        if is_auth_by_code or is_auth_by_string:
             raise OmieAuthError(
                 f"Auth fault em {call_name}: {message}",
                 metadata={"fault_code": fault.fault_code},

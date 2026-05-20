@@ -16,7 +16,7 @@
  *
  * Decisões herdadas de `[FRONT 5.1]`:
  *   - Reusa `useClientDetail` (S7) para o select de contas.
- *   - Sem filtro por `account_type` — back já garante CC/CA no cache (Doc §6.2).
+ *   - Sem filtro por `account_type` — back já garante CC/CR/CA/CP/CX no cache (Doc §6.2).
  *   - Sem contas → select desabilitado + link pra sincronização.
  *
  * Decisões de `[FRONT 6.1]`:
@@ -596,9 +596,10 @@ function formatAccountLabel(account: BankAccount): string {
     account.bank_name && account.bank_name !== '—'
       ? `${account.name} — ${account.bank_name}`
       : account.name;
-  // Normaliza para tolerar variações como ' CA ', 'ca' que o Omie pode devolver.
+  // Marca cartão de crédito (CR) — auditoria M-1: `CA` na Omie é Conta
+  // Aplicação, não cartão. Normalização tolera espaço/case do Omie.
   const normalizedType = account.account_type.trim().toUpperCase();
-  return normalizedType === 'CA' ? `${base} (Cartão)` : base;
+  return normalizedType === 'CR' ? `${base} (Cartão)` : base;
 }
 
 function Breadcrumb({ clientId, clientName }: { clientId: string; clientName: string }) {
