@@ -30,8 +30,8 @@ from app.core.dependencies import (
     ManagerOrAdminDep,
     require_client_access,
 )
-from app.core.exceptions import ClientNotAccessibleError, NotFoundError
-from app.db.models import Client, ReconciliationSession
+from app.core.exceptions import ClientNotAccessibleError, ConflictError, NotFoundError
+from app.db.models import Client, ReconciliationSession, ReconciliationStatus
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache
 from app.modules.clients.omie_factory import build_omie_client
 from app.modules.reconciliations.review.repository import ReviewRepository
@@ -77,6 +77,12 @@ def _get_review_service(
 ReviewServiceDep = Annotated[ReviewService, Depends(_get_review_service)]
 
 
+_REVIEW_BLOCKED_USER_MSG = (
+    "Esta conciliação terminou em erro e ainda não foi reprocessada. "
+    "Reprocesse a sessão antes de abrir a tela de revisão."
+)
+
+
 async def _load_session_for_rbac(
     *,
     session_id: UUID,
@@ -84,7 +90,18 @@ async def _load_session_for_rbac(
     user_role: str,
     db: AsyncSession,
 ) -> ReconciliationSession:
-    """Carrega a sessão e valida RBAC. 404 em qualquer falha (CLAUDE.md §3.11)."""
+    """Carrega a sessão e valida RBAC + status reviewável (CLAUDE.md §3.11).
+
+    Status:
+      - `processing`/`reviewing`/`done` → segue, endpoints de revisão respondem
+        normalmente (processing terá contadores zerados, vide UX que ainda
+        mostra o polling).
+      - `error` → ConflictError (409). O front intercepta esse status já em
+        `useSessionDetail` (rota /reconciliations/{id}) e mostra a página de
+        erro com botão "Tentar novamente". Esta camada serve como segunda
+        linha de defesa: se o front esquecer o check, a API ainda recusa
+        em vez de servir uma tela de revisão vazia em cima de dados inválidos.
+    """
     sess = (
         await db.execute(
             select(ReconciliationSession).where(ReconciliationSession.id == session_id)
@@ -106,6 +123,12 @@ async def _load_session_for_rbac(
     except NotFoundError as exc:
         # Cliente foi removido — sessão órfã. 404 também.
         raise NotFoundError(_SESSION_NOT_FOUND_MSG) from exc
+
+    if sess.status == ReconciliationStatus.ERROR.value:
+        raise ConflictError(
+            f"Sessão {session_id} em status=error não é reviewável.",
+            user_message=_REVIEW_BLOCKED_USER_MSG,
+        )
     return sess
 
 

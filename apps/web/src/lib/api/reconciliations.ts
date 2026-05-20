@@ -155,6 +155,29 @@ export async function createReconciliation(
 }
 
 // ----------------------------------------------------------------------
+// S11.fix — POST /api/v1/reconciliations/{id}/reprocess
+// ----------------------------------------------------------------------
+
+/**
+ * "Tentar novamente" de uma sessão que terminou em `status='error'`.
+ *
+ * Backend reseta a sessão pra `status='processing'`, mantém as `file_entries`
+ * (resultado do parse Anthropic) e re-enfileira o job ARQ. Resposta é
+ * idêntica ao create — front pode reusar a UI de processing/polling.
+ *
+ * Erros relevantes:
+ *   - 404: sessão não existe / manager fora da carteira.
+ *   - 409 (`CONFLICT`): sessão NÃO está em `error` (já processando, em
+ *     revisão ou concluída) — caller deve refrescar o detail antes de
+ *     mostrar o botão de novo.
+ */
+export async function reprocessReconciliation(
+  sessionId: string,
+): Promise<CreateReconciliationResult> {
+  return apiPost<CreateReconciliationResult>(`/api/v1/reconciliations/${sessionId}/reprocess`, {});
+}
+
+// ----------------------------------------------------------------------
 // S10 — GET /api/v1/reconciliations/{id}/status
 // ----------------------------------------------------------------------
 
@@ -209,6 +232,13 @@ export interface SessionDetail {
   sem_omie_count: number;
   omie_sem_arquivo_count: number;
   anomaly_count: number;
+  /**
+   * `null` quando `status !== 'error'`. Front usa pra renderizar a página
+   * de erro com mensagem amigável + botão "Tentar novamente" antes de
+   * chamar os endpoints de revisão (que retornariam 409 ConflictError
+   * com status='error').
+   */
+  error_message: string | null;
 }
 
 export async function getSessionDetail(sessionId: string): Promise<SessionDetail> {

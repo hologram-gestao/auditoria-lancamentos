@@ -7,6 +7,8 @@ S9 (BACK 7.1):
 S10 (BACK 8.1 + 8.6):
     - POST /api/v1/reconciliations
     - GET /api/v1/reconciliations/{session_id}/status
+S11.fix (retry de sessão em erro):
+    - POST /api/v1/reconciliations/{session_id}/reprocess
 """
 
 from __future__ import annotations
@@ -27,10 +29,12 @@ from app.core.dependencies import (
 from app.core.exceptions import (
     AppError,
     ClientNotAccessibleError,
+    ConflictError,
     NotFoundError,
     ValidationAppError,
 )
 from app.core.rate_limit import limiter, user_id_key_func
+from app.db.models import ReconciliationStatus
 from app.integrations.anthropic.client import AnthropicClient
 from app.modules.reconciliations.parse_service import ParseService
 from app.modules.reconciliations.processing.dispatcher import enqueue_processing
@@ -305,6 +309,82 @@ async def get_reconciliation_status(
 
     payload = await service.get_session_status(session_id)
     return SessionStatusResponse(data=payload)
+
+
+# ----------------------------------------------------------------------
+# S11.fix — POST /reconciliations/{id}/reprocess (retry de sessão em erro)
+# ----------------------------------------------------------------------
+
+
+@router.post(
+    "/{session_id}/reprocess",
+    summary=(
+        "Reprocessa uma sessão que terminou em `status='error'`. Mantém "
+        "as `file_entries` (resultado do parse Anthropic, vale dinheiro), "
+        "limpa dados parciais de matching/anomalias, reset da sessão pra "
+        "`status='processing'`, e re-enfileira o job ARQ. "
+        "Rate limit: 10/min/usuário (igual ao create) — uma sessão = 1 "
+        "job ARQ + várias chamadas Omie. "
+        "Conflito (409): se a sessão NÃO está em error (já processando, "
+        "em revisão ou concluída), recusamos pra não duplicar job."
+    ),
+)
+@limiter.limit("10/minute", key_func=user_id_key_func)
+async def reprocess_reconciliation(
+    request: Request,
+    response: Response,
+    user: ManagerOrAdminDep,
+    db: DbSessionDep,
+    settings: Annotated[Settings, Depends(get_settings)],
+    session_id: UUID,
+) -> CreateReconciliationResponse:
+    """Endpoint de "Tentar novamente" da tela de revisão / lista de conciliações."""
+    repo = ReconciliationRepository(db)
+
+    # 1. Carrega a sessão (validação de existência + status atual).
+    sess = await repo.get_status_view(session_id)
+    if sess is None:
+        raise NotFoundError(_SESSION_NOT_FOUND_MSG)
+
+    # 2. RBAC: manager-da-carteira ou admin. Manager fora → 404 (probing-safe).
+    try:
+        await require_client_access(sess.client_id, user, db)
+    except ClientNotAccessibleError as exc:
+        raise NotFoundError(_SESSION_NOT_FOUND_MSG) from exc
+
+    # 3. Só faz sentido reprocessar quando o estado atual é error.
+    if sess.status != ReconciliationStatus.ERROR.value:
+        raise ConflictError(
+            f"Sessão {session_id} não está em erro (status={sess.status}).",
+            user_message=(
+                "Esta conciliação não está em estado de erro — só sessões "
+                "que terminaram com erro podem ser reprocessadas."
+            ),
+        )
+
+    # 4. Reset transacional + enqueue. O reset roda dentro do mesmo
+    #    `DbSessionDep` (auto-commit no sucesso); se o enqueue ARQ falhar,
+    #    levantamos e o `DbSessionDep` faz rollback, deixando a sessão
+    #    de volta no estado `error` (sem janela de inconsistência).
+    await repo.reset_session_for_reprocess(session_id)
+
+    try:
+        await _enqueue_reconciliation_job(session_id, settings)
+    except Exception as exc:
+        raise AppError(
+            f"Falha ao re-enfileirar job para session_id={session_id}: {exc}",
+            user_message=(
+                "Não foi possível reenviar a conciliação para processamento. "
+                "Tente novamente em instantes."
+            ),
+        ) from exc
+
+    return CreateReconciliationResponse(
+        data=CreateReconciliationPayload(
+            session_id=session_id,
+            status="processing",
+        )
+    )
 
 
 # ----------------------------------------------------------------------

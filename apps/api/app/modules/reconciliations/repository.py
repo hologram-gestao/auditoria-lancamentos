@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import date
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -210,6 +210,70 @@ class ReconciliationRepository:
             .values(
                 status=ReconciliationStatus.ERROR.value,
                 error_message=user_message,
+            )
+        )
+
+    async def reset_session_for_reprocess(self, session_id: UUID) -> None:
+        """Reset a sessão para `status='processing'` pra ser re-enfileirada.
+
+        Caso de uso: sessão entrou em `error` (ex.: Omie devolveu 5xx),
+        problema foi corrigido (credencial atualizada, Omie voltou) e o
+        usuário clicou "Tentar novamente" na UI.
+
+        No fluxo atual, sessões em `error` nunca tiveram matching bem-
+        sucedido (o worker só marca `status='reviewing'` dentro da
+        transação atômica de gravação dos matches; qualquer falha antes
+        cai em `mark_session_error` antes do `apply_matches`). Logo
+        `file_entries` estão como criadas (situation=`sem_omie`,
+        `omie_lancamento_id=NULL`, sem `user_action`), e
+        `omie_entries`/`anomalies` estão vazios.
+
+        Mesmo assim deletamos `omie_entries`/`anomalies` da sessão pra
+        ser defensivo contra mudanças futuras no worker que persistam
+        algo antes do erro — custo é nulo (tabelas vazias).
+
+        Não mexemos em `user_action`/`user_note` de `file_entries`:
+        invariante preservada (sessão em erro nunca permitiu revisão),
+        e se algum dia esse invariante quebrar, preservar trabalho do
+        analista é o comportamento certo.
+        """
+        from app.db.models import ReconciliationFileEntry
+
+        # 1. Limpa dados parciais (defensivo). Cascade da FK também faria,
+        #    mas explícito aqui mostra a intenção e protege contra ordem
+        #    de DELETEs.
+        await self._session.execute(
+            delete(ReconciliationAnomaly).where(ReconciliationAnomaly.session_id == session_id)
+        )
+        await self._session.execute(
+            delete(ReconciliationOmieEntry).where(ReconciliationOmieEntry.session_id == session_id)
+        )
+        # 2. `file_entries`: volta ao estado pós-parse. Se ficaram com
+        #    `omie_lancamento_id` por algum motivo, limpa.
+        await self._session.execute(
+            update(ReconciliationFileEntry)
+            .where(ReconciliationFileEntry.session_id == session_id)
+            .values(
+                situation="sem_omie",
+                omie_lancamento_id=None,
+            )
+        )
+        # 3. Reset da sessão.
+        await self._session.execute(
+            update(ReconciliationSession)
+            .where(ReconciliationSession.id == session_id)
+            .values(
+                status=ReconciliationStatus.PROCESSING.value,
+                error_message=None,
+                processed_at=None,
+                conciliated_count=0,
+                sem_omie_count=0,
+                omie_sem_arquivo_count=0,
+                anomaly_count=0,
+                balance_start=None,
+                balance_end_file=None,
+                balance_end_omie=None,
+                balance_difference=None,
             )
         )
 

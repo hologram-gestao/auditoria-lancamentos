@@ -16,9 +16,14 @@
 
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { AlertCircle, ArrowRight, CheckCircle2, Loader2, XCircle } from 'lucide-react';
+import { AlertCircle, ArrowRight, CheckCircle2, Loader2, RefreshCw, XCircle } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 
+import { Button } from '@/components/ui/button';
+import { useReprocessReconciliation } from '@/hooks/use-reconciliations';
+import { ApiError } from '@/lib/api/client';
 import type { ReconciliationSessionSummary } from '@/lib/api/clients';
 import { cn } from '@/lib/utils';
 
@@ -31,9 +36,24 @@ interface ReconciliationCardProps {
 }
 
 export function ReconciliationCard({ clientId, session, accountName }: ReconciliationCardProps) {
+  const router = useRouter();
+  const reprocessMutation = useReprocessReconciliation(session.id, clientId);
   const isProcessing = session.status === 'processing';
   const isError = session.status === 'error';
   const showCounters = session.status === 'done' || session.status === 'reviewing';
+
+  async function handleReprocess() {
+    try {
+      await reprocessMutation.mutateAsync();
+      toast.success('Reprocessamento iniciado.');
+      // Redireciona pra tela de processing — mesmo fluxo do create.
+      router.push(`/clientes/${clientId}/conciliacao/${session.id}`);
+    } catch (err) {
+      const message =
+        err instanceof ApiError ? err.userMessage : 'Não foi possível reprocessar a conciliação.';
+      toast.error(message);
+    }
+  }
 
   const referenceLabel = formatReferenceMonth(session.reference_month);
   const createdAtLabel = format(new Date(session.created_at), "d 'de' MMM 'de' yyyy 'às' HH'h'mm", {
@@ -76,17 +96,36 @@ export function ReconciliationCard({ clientId, session, accountName }: Reconcili
 
       {showCounters && <Counters session={session} />}
 
-      <div className="text-muted-foreground flex items-center justify-between text-xs">
+      <div className="text-muted-foreground flex items-center justify-between gap-2 text-xs">
         <span>Criada em {createdAtLabel}</span>
-        {!isProcessing && (
-          <Link
-            href={`/clientes/${clientId}/conciliacao/${session.id}`}
-            className="text-primary inline-flex items-center gap-1 font-medium hover:underline"
-          >
-            Ver detalhes
-            <ArrowRight className="h-3 w-3" aria-hidden="true" />
-          </Link>
-        )}
+        <div className="flex items-center gap-3">
+          {isError && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void handleReprocess()}
+              disabled={reprocessMutation.isPending}
+              aria-live="polite"
+            >
+              {reprocessMutation.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              {reprocessMutation.isPending ? 'Reprocessando…' : 'Tentar novamente'}
+            </Button>
+          )}
+          {!isProcessing && !isError && (
+            <Link
+              href={`/clientes/${clientId}/conciliacao/${session.id}`}
+              className="text-primary inline-flex items-center gap-1 font-medium hover:underline"
+            >
+              Ver detalhes
+              <ArrowRight className="h-3 w-3" aria-hidden="true" />
+            </Link>
+          )}
+        </div>
       </div>
     </article>
   );

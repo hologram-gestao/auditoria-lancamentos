@@ -688,6 +688,113 @@ class TestSessionDetailEndpoint:
 
 
 # ----------------------------------------------------------------------
+# POST /reconciliations/{id}/reprocess  (S11.fix — retry de sessão em erro)
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestReprocessReconciliation:
+    async def test_unauthenticated_returns_401(self, client_with_db: AsyncClient) -> None:
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{uuid4()}/reprocess")
+        assert resp.status_code == 401
+
+    async def test_inexistent_session_returns_404(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, stub_enqueue: list[UUID]
+    ) -> None:
+        del stub_enqueue
+        await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        await _login(client_with_db, ADMIN_EMAIL)
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{uuid4()}/reprocess")
+        assert resp.status_code == 404
+
+    async def test_reprocess_resets_error_session_and_enqueues(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        """Caminho feliz: sessão em error vira processing + job enfileirado."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="Austral", creator=admin)
+        sess = await _seed_session(
+            db_session,
+            cliente=cliente,
+            creator=admin,
+            status_value="error",
+            error_message="O Omie não respondeu no tempo esperado. Tente novamente.",
+            file_hash=_hex64("reprocess-happy"),
+        )
+        # Polui contadores pra confirmar que o reset zera.
+        sess.conciliated_count = 5
+        sess.anomaly_count = 2
+        await db_session.flush()
+
+        await _login(client_with_db, ADMIN_EMAIL)
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{sess.id}/reprocess")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()["data"]
+        assert body["session_id"] == str(sess.id)
+        assert body["status"] == "processing"
+
+        # Estado da sessão após o reset.
+        await db_session.refresh(sess)
+        assert sess.status == "processing"
+        assert sess.error_message is None
+        assert sess.processed_at is None
+        assert sess.conciliated_count == 0
+        assert sess.anomaly_count == 0
+
+        # Job foi enfileirado.
+        assert sess.id in stub_enqueue
+
+    async def test_reprocess_non_error_session_returns_409(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        """Sessão em status diferente de error não pode ser reprocessada."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="Y", creator=admin)
+        sess = await _seed_session(
+            db_session,
+            cliente=cliente,
+            creator=admin,
+            status_value="reviewing",
+            file_hash=_hex64("reprocess-conflict"),
+        )
+        await _login(client_with_db, ADMIN_EMAIL)
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{sess.id}/reprocess")
+        assert resp.status_code == 409, resp.text
+        assert "estado de erro" in resp.json()["error"]["userMessage"].lower()
+        # Não enfileira.
+        assert stub_enqueue == []
+
+    async def test_manager_outside_portfolio_returns_404(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        del stub_enqueue
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        mgr_a = await _seed_user(db_session, email=MANAGER_A_EMAIL, role=UserRole.MANAGER)
+        await _seed_user(db_session, email=MANAGER_B_EMAIL, role=UserRole.MANAGER)
+        cliente_a = await _seed_client(db_session, name="A", creator=admin, manager=mgr_a)
+        sess = await _seed_session(
+            db_session,
+            cliente=cliente_a,
+            creator=admin,
+            status_value="error",
+            error_message="erro",
+            file_hash=_hex64("reprocess-rbac"),
+        )
+        await _login(client_with_db, MANAGER_B_EMAIL)
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{sess.id}/reprocess")
+        assert resp.status_code == 404
+
+
+# ----------------------------------------------------------------------
 # Garantia de fixture do app: as rotas estão registradas no FastAPI app.
 # (sanity check para evitar falsos passes se o include_router for esquecido)
 # ----------------------------------------------------------------------
@@ -698,3 +805,4 @@ def test_routes_are_registered_in_app() -> None:
     assert "/api/v1/reconciliations" in paths
     assert "/api/v1/reconciliations/{session_id}/status" in paths
     assert "/api/v1/reconciliations/{session_id}" in paths
+    assert "/api/v1/reconciliations/{session_id}/reprocess" in paths

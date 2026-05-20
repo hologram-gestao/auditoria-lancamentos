@@ -41,6 +41,7 @@ import {
   patchAnomaly,
   patchFileEntry,
   patchOmieEntry,
+  reprocessReconciliation,
   type AnomalyItem,
   type AnomalyListResult,
   type AnomalyTypeItem,
@@ -82,6 +83,29 @@ export function useParseStatement() {
 export function useCreateReconciliation() {
   return useMutation<CreateReconciliationResult, Error, CreateReconciliationPayload>({
     mutationFn: createReconciliation,
+  });
+}
+
+/**
+ * "Tentar novamente" de uma sessão em `status='error'`.
+ *
+ * Após sucesso, invalida o detail e o status da sessão (e a lista de
+ * conciliações do cliente) pra refletir `status='processing'` na UI sem
+ * refresh manual. O caller pode usar o `onSuccess` extra pra redirecionar
+ * pra tela de processing.
+ */
+export function useReprocessReconciliation(sessionId: string, clientId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation<CreateReconciliationResult, Error, void>({
+    mutationFn: () => reprocessReconciliation(sessionId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
+      if (clientId !== undefined) {
+        void queryClient.invalidateQueries({
+          queryKey: ['clients', clientId, 'reconciliations'],
+        });
+      }
+    },
   });
 }
 

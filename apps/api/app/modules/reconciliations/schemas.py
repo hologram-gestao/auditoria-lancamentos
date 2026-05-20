@@ -185,6 +185,10 @@ class SessionDetailPayload(BaseModel):
     sem_omie_count: int
     omie_sem_arquivo_count: int
     anomaly_count: int
+    # Populado pelo worker em `mark_session_error` quando `status='error'`.
+    # Front usa pra renderizar a tela de erro com `error_message` legível
+    # antes de oferecer o botão "Tentar novamente".
+    error_message: str | None = None
 
 
 class SessionDetailResponse(BaseModel):

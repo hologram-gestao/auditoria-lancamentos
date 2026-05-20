@@ -225,4 +225,5 @@ class ReconciliationService:
             sem_omie_count=session_obj.sem_omie_count,
             omie_sem_arquivo_count=session_obj.omie_sem_arquivo_count,
             anomaly_count=session_obj.anomaly_count,
+            error_message=session_obj.error_message,
         )

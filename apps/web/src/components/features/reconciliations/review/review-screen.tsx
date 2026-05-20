@@ -20,12 +20,21 @@
  *     intervenção do componente.
  */
 
+import { AlertTriangle, ChevronRight, Loader2, RefreshCw } from 'lucide-react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useMemo } from 'react';
+import { toast } from 'sonner';
 
+import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useClientDetail } from '@/hooks/use-clients';
-import { useSessionDetail, useSessionStatus } from '@/hooks/use-reconciliations';
+import {
+  useReprocessReconciliation,
+  useSessionDetail,
+  useSessionStatus,
+} from '@/hooks/use-reconciliations';
+import { ApiError } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
 
 import { AnomaliesTab } from './anomalies-tab';
@@ -95,6 +104,8 @@ export function ReviewScreen({ clientId, sessionId }: ReviewScreenProps) {
   const sessionInfo = detailQuery.data;
 
   // Status vivo (contadores). Não polla — só se status virar processing.
+  // Mantemos a chamada incondicional pra respeitar Rules of Hooks — o
+  // `useSessionStatus` por dentro já evita polling quando status='error'.
   const statusQuery = useSessionStatus(sessionId);
 
   const referenceMonthLabel = formatReferenceMonth(sessionInfo?.reference_month);
@@ -116,6 +127,21 @@ export function ReviewScreen({ clientId, sessionId }: ReviewScreenProps) {
   };
 
   const totalFileEntries = sessionInfo?.total_file_entries ?? 0;
+
+  // Sessão em erro: renderiza tela de erro com botão "Tentar novamente" SEM
+  // abrir as abas (cujos endpoints retornariam 409 ConflictError pela guarda
+  // em `_load_session_for_rbac`). Checagem feita depois de todos os hooks
+  // pra respeitar Rules of Hooks.
+  if (sessionInfo?.status === 'error') {
+    return (
+      <ReviewErrorScreen
+        clientId={clientId}
+        sessionId={sessionId}
+        clientName={clientQuery.data?.name}
+        errorMessage={sessionInfo.error_message}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -159,6 +185,102 @@ export function ReviewScreen({ clientId, sessionId }: ReviewScreenProps) {
           />
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+interface ReviewErrorScreenProps {
+  clientId: string;
+  sessionId: string;
+  clientName?: string;
+  errorMessage: string | null;
+}
+
+/**
+ * Tela mostrada quando a sessão está em `status='error'`. Não dispara
+ * nenhum dos endpoints de revisão (que retornariam 409). Oferece o botão
+ * "Tentar novamente" que chama `POST /reconciliations/{id}/reprocess` e
+ * redireciona pra rota de processing (mesmo fluxo do create).
+ */
+function ReviewErrorScreen({
+  clientId,
+  sessionId,
+  clientName,
+  errorMessage,
+}: ReviewErrorScreenProps) {
+  const router = useRouter();
+  const reprocessMutation = useReprocessReconciliation(sessionId, clientId);
+
+  async function handleReprocess() {
+    try {
+      await reprocessMutation.mutateAsync();
+      toast.success('Reprocessamento iniciado.');
+      // Refresh força o ReviewScreen a re-buscar o detail (status='processing')
+      // — daí o fluxo de processing/polling assume daqui.
+      router.refresh();
+    } catch (err) {
+      const message =
+        err instanceof ApiError ? err.userMessage : 'Não foi possível reprocessar a conciliação.';
+      toast.error(message);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <nav aria-label="Breadcrumb" className="text-muted-foreground text-sm">
+        <ol className="flex items-center gap-1.5">
+          <li>
+            <Link href="/clientes" className="hover:text-foreground hover:underline">
+              Clientes
+            </Link>
+          </li>
+          <li aria-hidden="true">
+            <ChevronRight className="h-3.5 w-3.5" />
+          </li>
+          <li>
+            <Link href={`/clientes/${clientId}`} className="hover:text-foreground hover:underline">
+              {clientName ?? 'Cliente'}
+            </Link>
+          </li>
+          <li aria-hidden="true">
+            <ChevronRight className="h-3.5 w-3.5" />
+          </li>
+          <li className="text-foreground font-medium" aria-current="page">
+            Conciliação com erro
+          </li>
+        </ol>
+      </nav>
+
+      <div className="bg-destructive/5 border-destructive/30 text-destructive space-y-4 rounded-lg border p-6">
+        <div className="flex items-start gap-3">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
+          <div className="space-y-1">
+            <h1 className="text-lg font-semibold">Esta conciliação terminou em erro</h1>
+            <p className="text-sm">
+              {errorMessage ?? 'O processamento da conciliação falhou. Tente novamente.'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={() => void handleReprocess()}
+            disabled={reprocessMutation.isPending}
+            aria-live="polite"
+          >
+            {reprocessMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+            )}
+            {reprocessMutation.isPending ? 'Reprocessando…' : 'Tentar novamente'}
+          </Button>
+          <Button variant="ghost" asChild>
+            <Link href={`/clientes/${clientId}`}>Voltar para o cliente</Link>
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

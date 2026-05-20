@@ -1011,3 +1011,69 @@ class TestAvailableOmieEntriesPeriod:
         call_kwargs = cache.populate_from_extrato.call_args.kwargs
         assert call_kwargs["period_start"] == date(2026, 3, 29)
         assert call_kwargs["period_end"] == date(2026, 5, 3)
+
+
+# ----------------------------------------------------------------------
+# Bloqueio de revisão quando session.status='error' (S11.fix)
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestReviewBlockedWhenSessionInError:
+    """Sessões em error não devem expor os endpoints de revisão — caller
+    (front) deve mostrar a tela de erro + botão Reprocessar antes."""
+
+    async def test_list_file_entries_returns_409(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin, status="error")
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.get(f"/api/v1/reconciliations/{sess.id}/file-entries")
+        assert resp.status_code == 409, resp.text
+        body = resp.json()
+        assert body["error"]["code"] == "CONFLICT"
+        assert "reprocesse" in body["error"]["userMessage"].lower()
+
+    async def test_list_anomalies_returns_409(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin, status="error")
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.get(f"/api/v1/reconciliations/{sess.id}/anomalies")
+        assert resp.status_code == 409
+
+    async def test_list_omie_entries_returns_409(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin, status="error")
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.get(f"/api/v1/reconciliations/{sess.id}/omie-entries")
+        assert resp.status_code == 409
+
+    async def test_get_session_detail_still_works_in_error(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """O GET /reconciliations/{id} (não /review) continua acessível —
+        o front precisa dele pra renderizar a tela de erro com
+        `error_message` antes de oferecer o botão Reprocessar."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin, status="error")
+        sess.error_message = "O Omie está com instabilidade no momento."
+        await db_session.flush()
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.get(f"/api/v1/reconciliations/{sess.id}")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()["data"]
+        assert body["status"] == "error"
+        assert body["error_message"] == "O Omie está com instabilidade no momento."
