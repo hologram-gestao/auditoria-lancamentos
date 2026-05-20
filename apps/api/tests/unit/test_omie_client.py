@@ -361,6 +361,38 @@ class TestCallRetry:
         assert route.call_count == 1
 
     @respx.mock
+    async def test_5xx_with_retryable_omie_api_error_does_retry(self, client: OmieClient) -> None:
+        """`1880 - Ja existe uma requisicao desse metodo sendo executada...`
+        e codigos de rate-limit semi-transitorio sao retryable. Diferente
+        do `5001` (tag invalida, permanente), aqui a mensagem do Omie
+        explicitamente diz pra tentar de novo em alguns instantes.
+        Caso real visto no Austral (20/05/2026) com varias chamadas de
+        ListarContasPagar/Receber em sequencia."""
+        responses = [
+            httpx.Response(
+                500,
+                headers={
+                    "OmieAPI-Error": (
+                        "1880 - Ja existe uma requisicao desse metodo sendo "
+                        "executada e voce pode tentar novamente em alguns instantes. (1)"
+                    )
+                },
+                json={"err": "rate-limit"},
+            ),
+            httpx.Response(200, json={"ok": True}),
+        ]
+        route = respx.post(_omie_url("geral", "clientes")).mock(side_effect=responses)
+        result = await client.call(
+            module="geral",
+            endpoint="clientes",
+            call_name="ListarClientes",
+            param={"pagina": 1},
+        )
+        # Sucesso depois do retry — 2 requests (1 falha 1880, 1 ok).
+        assert result == {"ok": True}
+        assert route.call_count == 2
+
+    @respx.mock
     async def test_timeout_raises_OmieTimeoutError(  # noqa: N802
         self, client: OmieClient
     ) -> None:

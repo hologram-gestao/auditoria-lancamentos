@@ -83,6 +83,24 @@ _AUTH_FAULT_CODES: tuple[str, ...] = (
     "soap-env:client-103",
 )
 
+# Prefixos numéricos do `OmieAPI-Error` que indicam erro **transitório** —
+# vale retry com backoff (Tenacity já cuida da espera entre tentativas).
+# A maioria dos OmieAPI-Error é permanente (5001 tag inválida, etc.); os
+# códigos abaixo são exceções confirmadas em prod:
+#   - `1880`: "Já existe uma requisição desse método sendo executada e
+#     você pode tentar novamente em alguns instantes." → o Omie tem rate
+#     limit por método em paralelo (`X-Omie-ParallelRateLimit: 1/4`); se
+#     2 chamadas do mesmo método chegam em quick succession, a 2ª pode
+#     bater nisso.
+#   - `6`: "Consumo redundante detectado. Aguarde N segundos para tentar
+#     novamente (REDUNDANT)." → mesma família, com janela maior.
+# Visto no Austral em 20/05/2026 ao processar mês com várias chamadas
+# de ListarContasPagar/Receber em sequência.
+_RETRYABLE_OMIE_API_ERROR_PREFIXES: tuple[str, ...] = (
+    "1880",
+    "6 -",
+)
+
 
 class OmieCredentials(BaseModel):
     """Par de credenciais descriptografadas em memória.
@@ -239,18 +257,34 @@ class OmieClient:
 
         duration_ms = round((time.monotonic() - started) * 1000)
 
-        # 5xx ambíguo no Omie: pode ser infra (retryable) OU erro PERMANENTE
-        # de validação que o Omie sinaliza no header `OmieAPI-Error`. Casos
-        # vistos em produção:
-        #   - "5001 - Tag [X] não faz parte da estrutura..." (parâmetro inválido)
-        #   - "6 - Consumo redundante detectado. Aguarde 58 segundos..." (a Omie
-        #     rate-limita justamente quando a gente retenta o mesmo erro)
-        # Retry nesses casos só queima rate-limit. Tratamos como fault permanente
-        # e propagamos a mensagem que veio do header — assim o log e o user_message
-        # ficam honestos em vez de virarem "Omie não respondeu".
+        # 5xx ambíguo no Omie: pode ser infra (retryable) OU erro de aplicação
+        # que o Omie sinaliza no header `OmieAPI-Error`. Estratégia:
+        #   - Header presente + código em `_RETRYABLE_OMIE_API_ERROR_PREFIXES`
+        #     (`1880` "já em execução", `6` "consumo redundante") → retryable
+        #     com backoff (Tenacity).
+        #   - Header presente com qualquer outro código (ex: `5001` "tag
+        #     inválida") → erro permanente; propaga a mensagem do header.
+        #   - Sem header → infra Omie genuína (retryable).
         if 500 <= response.status_code < 600:
             omie_api_error = response.headers.get("OmieAPI-Error")
             if omie_api_error:
+                is_retryable = any(
+                    omie_api_error.startswith(prefix)
+                    for prefix in _RETRYABLE_OMIE_API_ERROR_PREFIXES
+                )
+                if is_retryable:
+                    log.warning(
+                        "omie_call_5xx_retryable",
+                        module=module,
+                        endpoint=endpoint,
+                        call=call_name,
+                        status=response.status_code,
+                        omie_api_error=omie_api_error,
+                        duration_ms=duration_ms,
+                    )
+                    raise _RetryableHttpError(
+                        f"5xx retryable em {call_name} ({module}/{endpoint}): {omie_api_error}"
+                    )
                 log.warning(
                     "omie_call_5xx_permanent",
                     module=module,
@@ -505,6 +539,19 @@ class OmieClient:
         # de março/2026, 36 linhas no array, ~2 delas de saldo).
         lancamentos = [it for it in raw_items if it.get("nCodLancamento") is not None]
         summary_rows_skipped = len(raw_items) - len(lancamentos)
+        # Sinal forte de bug: todos os items foram descartados pelo filtro.
+        # Pode significar (a) extrato realmente vazio com só linhas de saldo
+        # (raro mas possível em conta nova), ou (b) o response usa um campo
+        # diferente de `nCodLancamento` pro ID — nome divergiu da doc
+        # oficial. Loga apenas as CHAVES da primeira linha pra debug
+        # imediato sem vazar valores (CLAUDE.md §3.3).
+        if not lancamentos and raw_items:
+            log.warning(
+                "omie_extrato_all_rows_skipped",
+                n_cod_cc=n_cod_cc,
+                raw_count=len(raw_items),
+                first_item_keys=sorted(raw_items[0].keys()),
+            )
         log.info(
             "omie_extrato_size",
             n_cod_cc=n_cod_cc,
