@@ -1420,32 +1420,255 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 
 ### S18 — Testes E2E, Documentação e Deploy
 
-**Objetivo:** qualidade final, docs operacionais e pipeline de deploy.
+**Objetivo:** qualidade final, docs operacionais e pipeline de deploy reprodutível em staging e produção. A plataforma específica (Fly, Render, AWS, etc.) **fica em aberto** — a sessão entrega artefatos agnósticos de plataforma (imagens Docker + workflows com hook configurável) e o **Anexo S18.A** lista as opções com prós/contras para decisão antes da execução desta sessão.
 
-**Pré-requisitos:** S14.
-**Duração estimada:** 2 – 3 sessões (10 – 14 h).
+**Pré-requisitos:** S14 (fluxo principal funcionando), S16 (hardening), S17 (observabilidade).
+**Duração estimada:** 3 – 4 sessões (14 – 18 h). Aumentou em relação à versão original porque agora inclui infra-as-code, runbooks reais, key rotation testada e gate end-to-end contra Omie real (não mais mock).
+
+> **Lembrete crítico antes de começar S18:** confirmar com Pedro/Galhardo se as **credenciais Omie reais** já foram disponibilizadas. Sem elas, o "deploy em staging completo" no DoD não é verificável — vira deploy com mocks, que não comprova nada. _(ver §13)_
+
+---
+
+#### S18.1 — Testes E2E e Contract Tests
 
 **Entregáveis:**
 
-1. **Playwright E2E** cobrindo:
-   - Login → novo cliente → test connection (mock Omie) → novo cliente salvo.
-   - Nova conciliação → upload arquivo PDF fake → confirmar preview → aguardar processamento (mock) → tela de revisão → ações → export.
-2. **Contract tests Omie:** snapshots de payloads reais (respx).
-3. **Dockerfile multi-stage** otimizado (web, api, worker).
-4. **`docker-compose.prod.yml`** com secrets via Docker secrets ou AWS param store.
-5. **GitHub Actions:** build → push ECR → deploy ECS (ou equivalente).
-6. **OpenAPI** auto-gerada via FastAPI; **export de tipos TS** para o frontend (`openapi-typescript`).
-7. **Docs finais:**
-   - `README.md` com onboarding.
-   - `docs/runbook.md` (incidentes comuns: Omie fora, fila travada, key rotation).
-   - `docs/api.md` gerado do OpenAPI.
-   - CLAUDE.md atualizado.
+1. **Playwright E2E** (apps/web/e2e/) cobrindo 3 fluxos críticos:
+   - **Auth & RBAC:** login → manager NÃO vê cliente de outro manager → admin vê todos.
+   - **Onboarding cliente:** novo cliente → test connection (mock Omie OK) → sync_accounts → cliente listado com contas.
+   - **Conciliação end-to-end:** upload PDF fake → preview 5 linhas → confirmar → polling status → tela de revisão → ações (vincular manual, criar anomalia) → export Excel → assert hash do arquivo gerado.
+2. **Contract tests Omie** (apps/api/tests/contract/) com `respx`:
+   - Snapshots versionados de payloads reais (anonimizados) de cada endpoint usado: `ListarContasCorrentes`, `ListarExtrato`, `ListarContasPagar`, `ListarContasReceber`, `ListarClientes`.
+   - Cada snapshot tem um teste que faz `model_validate` e checa que os campos esperados sobrevivem — pega quando Omie muda contrato sem avisar.
+3. **Smoke test pós-deploy** (`scripts/smoke_test.py`): após cada deploy, hits no `/health` e `/health/ready` + uma chamada autenticada de listagem de clientes. CI falha se smoke falhar e dispara rollback (ver S18.3).
 
-**DoD:**
+**DoD parcial S18.1:**
 
-- [ ] E2E roda em CI em < 5 min.
-- [ ] Deploy em staging completo sem intervenção manual.
-- [ ] `docs/runbook.md` cobre pelo menos 5 cenários de incidente.
+- [ ] Playwright roda em CI em < 5 min com `--reporter=github`.
+- [ ] Cada endpoint Omie tem ≥ 1 snapshot de payload real + teste de schema.
+- [ ] Smoke test passa contra ambiente local (compose) e contra staging.
+
+---
+
+#### S18.2 — Build artifacts (Docker prod-ready)
+
+**Estado atual:** existem `docker/Dockerfile.api` e `docker/Dockerfile.web` multi-stage funcionais para dev. O `docker-compose.yml` é dev-only (volume bind no código, worker desligado).
+
+**Entregáveis:**
+
+1. **Refinar Dockerfiles para prod:**
+   - `docker/Dockerfile.api`: garantir `--no-dev` no `uv sync`, fixar versão do uv (`COPY --from=ghcr.io/astral-sh/uv:0.5.x`), label `org.opencontainers.image.{source,version,revision}`, `STOPSIGNAL SIGTERM` explícito.
+   - `docker/Dockerfile.web`: confirmar `output: 'standalone'` no `next.config.mjs`, build args `NEXT_PUBLIC_*` injetados em build-time, telemetria desligada.
+   - **Mesma imagem da API serve para worker** — `CMD` é sobrescrito no compose/plataforma (`arq app.workers.arq_worker.WorkerSettings`).
+2. **`docker-compose.prod.yml`** (no diretório `docker/`):
+   - Sem volume bind no código (a imagem É o código).
+   - Worker habilitado por padrão (sem `profiles: ["workers"]`).
+   - Sem portas expostas no host pra `postgres` e `redis` (apenas rede interna).
+   - Health checks em todos os serviços com `start_period` realista.
+   - `restart: unless-stopped` em todos.
+   - **Sem valores de fallback `change_me_in_dev_only`** — se a env var não vier, o compose deve falhar (`${VAR:?VAR is required}`).
+   - Útil pra: rodar local de prod (debugging), deploy em VPS single-box (Hetzner/DO droplet), staging mínimo. **Não é** a única forma de deploy possível — plataformas como Fly têm seu próprio `fly.toml` que substitui o compose.
+3. **OpenAPI export automático:**
+   - `apps/api/scripts/export_openapi.py` gera `packages/shared-types/openapi.json` a partir do `app.main:app`.
+   - Step no CI roda esse script e roda `openapi-typescript packages/shared-types/openapi.json -o packages/shared-types/api-types.ts`.
+   - PR de divergência (CI falha se o tipo gerado mudou e não foi commitado) — força sincronização front/back.
+
+**DoD parcial S18.2:**
+
+- [ ] `docker build -f docker/Dockerfile.api .` resulta em imagem ≤ 250 MB.
+- [ ] `docker build -f docker/Dockerfile.web .` resulta em imagem ≤ 200 MB.
+- [ ] `docker compose -f docker/docker-compose.prod.yml up` sobe stack completa sem volume bind.
+- [ ] Imagens rodam como **usuário não-root** (já estão; manter verificado).
+- [ ] CI gera `api-types.ts` e falha se houver drift.
+
+---
+
+#### S18.3 — Pipeline de deploy (CI/CD)
+
+**Princípio:** o workflow do GitHub Actions faz `build + push para registry + chama hook de deploy específico da plataforma`. O hook é a **única parte que muda** entre plataformas — o resto é genérico.
+
+**Entregáveis:**
+
+1. **`.github/workflows/deploy.yml`** (separado do CI):
+   - **Triggers:** `push` em `main` → deploy automático para `staging`. `workflow_dispatch` com input `environment=production` → deploy manual para prod.
+   - **Jobs em ordem:**
+     1. `build-and-push-api` — `docker buildx build --platform linux/amd64` → push para registry (GHCR por padrão, configurável via secret). Tags: `sha-${{ github.sha }}` + `latest-${env}`.
+     2. `build-and-push-web` — idem para a imagem web.
+     3. `run-migrations` — roda `alembic upgrade head` contra o DB do environment alvo. Bloqueia o restante se falhar.
+     4. `deploy` — chama o **hook da plataforma** (ver abaixo).
+     5. `smoke-test` — `scripts/smoke_test.py` contra o env recém-deployado. Falha aqui dispara `rollback`.
+     6. `rollback` (condicional) — re-aplica a tag `sha-${{ github.event.before }}` da imagem anterior.
+   - **Concurrency:** `group: deploy-${{ inputs.environment }}` com `cancel-in-progress: false` (nunca matar deploy no meio).
+2. **Hook de deploy parametrizado** (`.github/workflows/_deploy_hook.yml`, reusable workflow):
+   - Recebe `image_tag`, `environment` como inputs.
+   - Implementa **uma** das estratégias (a decidir, ver Anexo S18.A):
+     - **Fly.io:** `flyctl deploy --image $IMAGE_TAG --strategy rolling --app auditoria-api-${env}` (idem worker, idem web).
+     - **Render:** `curl -X POST $RENDER_DEPLOY_HOOK_URL` (configura imagem por env var).
+     - **AWS ECS:** `aws ecs update-service --task-definition ... --force-new-deployment`.
+   - Trocar plataforma = trocar este arquivo, sem mexer no `deploy.yml` principal.
+3. **Estratégia de release das migrations:**
+   - Migrations rodam **antes** do deploy do código novo, contra o DB compartilhado pelo env. Falha em migration aborta deploy.
+   - **Regra de ouro:** toda migration precisa ser compatível com a versão N e N-1 do código (additive-only durante uma janela, depois cleanup numa migration seguinte). Documentar isso no `docs/runbook.md`.
+   - Worker e API sobem na mesma versão (mesma imagem) — não há janela em que worker novo bata num schema velho.
+4. **GitHub Environments:**
+   - `staging` (auto-deploy de main) e `production` (manual + required reviewer).
+   - Secrets segregados por environment — nunca compartilhar `OMIE_ENCRYPTION_KEY` entre staging e prod.
+
+**DoD parcial S18.3:**
+
+- [ ] Push em main → staging deployado automaticamente em < 8 min (build + push + migrate + deploy + smoke).
+- [ ] `workflow_dispatch` com `environment=production` exige aprovação manual configurada no GitHub Environment.
+- [ ] Smoke test falho aciona rollback automático para a imagem anterior.
+- [ ] Migration falha aborta deploy (código novo nunca sobe contra DB com schema incompatível).
+
+---
+
+#### S18.4 — Runtime concerns (secrets, health, backup, key rotation)
+
+1. **Estratégia de secrets** (genérica; mapeamento por plataforma no Anexo):
+   - **Source of truth:** secret manager da plataforma (Fly Secrets, Render Env Groups, AWS Secrets Manager). Nunca em `.env` commitado.
+   - **GitHub Actions** acessa via OIDC quando possível (sem long-lived tokens); fallback é GitHub Encrypted Secrets.
+   - **Lista de secrets obrigatórios por env**: `OMIE_ENCRYPTION_KEY` (32 bytes hex), `JWT_SECRET` (64 bytes), `ANTHROPIC_API_KEY`, `DATABASE_URL`, `REDIS_URL`, `SENTRY_DSN_API`, `SENTRY_DSN_WEB`. Documentar em `docs/runbook.md` com formato esperado de cada um.
+2. **Endpoints de saúde** (alguns já existem do S17 — confirmar e estender):
+   - `GET /health` — liveness, sempre 200 se o processo está vivo. Usado por orquestrador.
+   - `GET /health/ready` — readiness: faz `SELECT 1` no DB e `PING` no Redis. 503 se qualquer um falhar. Plataforma usa pra decidir quando rotear tráfego.
+   - **Worker:** ARQ não tem HTTP por default. Adicionar `apps/api/scripts/worker_healthcheck.py` que escreve heartbeat num key Redis com TTL 60s; plataforma roda esse script como healthcheck.
+3. **Backups automatizados** (Postgres):
+   - Cron diário (3h BRT): `pg_dump -Fc` → gzip → upload pra object storage (S3/R2/GCS — escolha junto com a plataforma).
+   - Retenção: 30 dias diários + 12 mensais. Implementar via lifecycle rule no bucket.
+   - Backup encriptado **client-side** com GPG antes do upload (key separada do `OMIE_ENCRYPTION_KEY`).
+   - Script: `apps/api/scripts/backup_postgres.sh`. Roda como CronJob na plataforma (Fly: `fly machine run --schedule daily`; AWS: EventBridge → ECS task).
+   - **Teste de restore mensal** documentado no runbook — backup que nunca foi restaurado não é backup.
+4. **Key rotation** (re-aproveita `scripts/rotate-encryption-key.py` do S16):
+   - Documentar procedimento no runbook: gera key nova → modo dual-key ativado via env var → re-encripta todos os registros → desativa key velha → remove env var de transição.
+   - Smoke test pós-rotation: criar cliente novo com creds Omie + reabrir cliente existente; ambos devem decifrar.
+5. **Domínios e TLS:**
+   - `app.auditoria.hologram.com.br` (front) + `api.auditoria.hologram.com.br` (API), ou subdomínios definidos pela Hologram.
+   - TLS via Let's Encrypt automático (todas as 3 plataformas candidatas suportam).
+   - `staging.app.auditoria.hologram.com.br` para o env de staging.
+   - **CORS** na API restringido aos domínios reais (sem `*`).
+
+**DoD parcial S18.4:**
+
+- [ ] Nenhum secret aparece em `git log`, `docker history`, logs de CI ou logs de runtime (grep automático no CI).
+- [ ] `/health` e `/health/ready` retornam payloads esperados em 3 envs (local/staging/prod).
+- [ ] Backup diário aparece no bucket por 7 dias seguidos sem intervenção.
+- [ ] Restore de backup arbitrário funciona em ambiente isolado (documentar no runbook).
+- [ ] Key rotation executada em staging end-to-end sem downtime perceptível.
+
+---
+
+#### S18.5 — Documentação final
+
+1. **`README.md` (raiz)** — onboarding em < 15 min:
+   - Pré-requisitos (Docker, uv, pnpm via corepack, Postgres opcional local).
+   - Comandos pra subir dev (`docker compose -f docker/docker-compose.yml up -d postgres redis` + dois `uv run` e um `pnpm dev`).
+   - Como rodar testes, lint, mypy.
+   - Link pro CLAUDE.md, runbook, api docs.
+2. **`docs/runbook.md`** — 10+ cenários de incidente:
+   - "Omie API fora — como segurar fila e comunicar usuário."
+   - "Fila ARQ travada — diagnóstico e drain."
+   - "Key rotation — passo a passo."
+   - "Rollback de deploy — quando automático falha."
+   - "DB lento — queries para investigar (`pg_stat_activity`, locks)."
+   - "Recuperar backup específico — comando exato + checklist de validação."
+   - "Vazamento suspeito de credencial — playbook (rotate immediately, audit log, comunicar Pedro)."
+   - "Usuário desativado ainda consegue logar — debug do JWT middleware."
+   - "Reconciliação 'travada' em `processing` — quando reprocessar vs descartar."
+   - "Custos Claude explodindo — investigação + budget alert."
+3. **`docs/api.md`** — gerada do OpenAPI exportado em S18.2. Build no CI publica HTML estático (ReDoc) num path `/api/docs` da API ou separado.
+4. **`docs/architecture.md`** — diagrama do fluxo (já existe `Docs/flow/Fluxograma.png`; consolidar + diagrama de deploy com a plataforma escolhida).
+5. **`CLAUDE.md`** — atualizar §2 (Infra) com a plataforma escolhida e §8 (comandos) com os comandos de deploy. Remover "AWS ECS / Docker Swarm (prod — a decidir)" → substituir pelo decidido.
+6. **Decision record** em `Docs/decisions/0001-deploy-platform.md` — ADR justificando a plataforma escolhida, alternativas consideradas, trade-offs aceitos.
+
+**DoD parcial S18.5:**
+
+- [ ] Onboarding cego: um dev novo (ou Claude num projeto fresh) consegue subir o dev seguindo só o README, sem perguntar nada.
+- [ ] Runbook tem ≥ 10 cenários, cada um com comandos exatos.
+- [ ] OpenAPI export está sincronizado em todo PR.
+- [ ] ADR de plataforma commitado em `Docs/decisions/`.
+
+---
+
+#### DoD agregado da S18
+
+- [ ] Todos os DoD parciais (S18.1 a S18.5) ✅.
+- [ ] Push em main faz deploy completo em staging em < 8 min sem intervenção.
+- [ ] Smoke test passa em staging.
+- [ ] Pelo menos 1 deploy manual de production foi executado e auditado.
+- [ ] Sentry recebeu eventos reais de staging e prod (não só synthetic).
+- [ ] Onboarding cego validado por terceiro.
+
+---
+
+#### Anexo S18.A — Plataformas candidatas
+
+> A escolha entre essas plataformas é uma conversa separada com a Hologram (latência BR, budget, comfort do time com cada stack). Esta sessão entrega artefatos agnósticos; a integração específica vai num hook de deploy parametrizado (ver S18.3). Os 3 candidatos abaixo são os que sobreviveram à triagem inicial (Heroku ficou de fora pelo preço e Vercel-only não atende worker + Postgres BR).
+
+##### Opção A — Vercel (web) + Fly.io (api/worker) + Neon (Postgres) + Upstash (Redis)
+
+**Características:**
+
+- **Região:** Fly `gru` (São Paulo) + Neon `sa-east-1`. Latência mínima para Omie.
+- **DX:** deploy via `git push` em todos os 4 componentes. `fly.toml` versionado.
+- **Custo estimado:** US$ 30 – 70/mês começando, escala linear com uso.
+- **Workers:** Fly Machines suportam workers persistentes nativamente.
+- **Backups Postgres:** Neon faz PITR automático (até 7 dias no free, 30 dias no pago).
+
+**Trade-offs:**
+
+- 4 dashboards diferentes (Vercel, Fly, Neon, Upstash) — mais lugares para olhar, menos lugares para configurar.
+- Fly tem reputação de instabilidade ocasional em incidents — mitigado por staging idêntico a prod.
+- Free tier suficiente para staging; produção precisa upgrade em pelo menos Fly + Neon.
+
+**Setup mínimo:**
+
+- 3 apps no Fly: `auditoria-api-staging`, `auditoria-worker-staging`, `auditoria-web` (se quiser SSR no Fly em vez de Vercel — alternativa).
+- 1 projeto Neon com branches `main` (prod) e `staging`.
+- 1 banco Upstash compartilhado entre staging/prod com keys separadas.
+
+##### Opção B — Render (tudo)
+
+**Características:**
+
+- **Região:** `oregon`, `frankfurt`, `singapore`. **Sem BR** — latência Omie ~150ms × 4 chamadas ≈ +600ms por conciliação.
+- **DX:** uma única plataforma com `render.yaml` versionado descreve API + Worker + Web + Postgres + Redis.
+- **Custo estimado:** US$ 25 – 60/mês começando. Free tier dorme após 15min — não serve para staging real.
+- **Workers:** Background Worker é um tipo de service first-class.
+- **Backups Postgres:** snapshot diário automático, retenção 7 dias no plano starter.
+
+**Trade-offs:**
+
+- Sem região BR. Aceitar +600ms de latência por conciliação. Para uso interno com analista esperando ~30s, é tolerável.
+- Render é mais "magic" — menos controle quando algo dá errado.
+- Migração para outro lugar é fácil porque é tudo Docker padrão.
+
+##### Opção C — AWS sa-east-1 (ECS Fargate + RDS + ElastiCache + S3 + CloudFront)
+
+**Características:**
+
+- **Região:** `sa-east-1` (São Paulo). Latência mínima.
+- **DX:** Terraform/CDK obrigatório. ECR para imagens. Secrets Manager nativo. IAM, VPC, ALB, target groups.
+- **Custo estimado:** US$ 80 – 150/mês mesmo com tráfego mínimo (RDS + Fargate + NAT Gateway pesam no baseline).
+- **Workers:** ECS Service com `desired_count` separado.
+- **Backups:** RDS automated backups + snapshots manuais.
+
+**Trade-offs:**
+
+- 5–10x mais código de infra que as outras opções. Justifica-se se Hologram já é AWS-shop ou se há requisitos de compliance específicos (ex.: cliente final exige hospedagem AWS BR).
+- Curva de aprendizado alta — operação é trabalho contínuo.
+- Pode ser destino futuro (migrar de Opção A para C quando virar produto sério) sem reescrever nada — tudo já é Docker.
+
+##### Recomendação preliminar
+
+**Opção A** (Vercel + Fly + Neon + Upstash) para o MVP, com migração planejada para **Opção C** se/quando virar produto externo da Hologram. Razões:
+
+1. Única que mantém latência BR em todos os componentes.
+2. Custo controlável.
+3. Deploy via `git push`, sem Terraform.
+4. Pode-se trocar pra Opção C sem reescrever nada — é só trocar o hook de deploy e o destino dos secrets.
+
+**Próxima decisão necessária antes de iniciar S18:** Pedro confirma com a Hologram qual opção seguir, abre ADR `Docs/decisions/0001-deploy-platform.md` registrando a escolha e o S18 pode começar.
 
 ---
 
@@ -1483,7 +1706,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 - [ ] ⚠️ **CRÍTICO — Credenciais Omie sandbox.** Pedro confirmou 25/04/2026 que ainda não tem. S5–S15 são implementadas com `respx` mockando respostas baseadas na doc oficial. **Lembrá-lo antes da S18 (deploy)** para obter as credenciais e validar o fluxo end-to-end contra a API real. _(S5–S18)_
 - [ ] **Chave Anthropic** com budget configurado — responsabilidade de quem? _(S9)_
 - [ ] **Storage de backups** — S3, GCS, cold storage local? Retenção desejada além dos 30 dias mínimos? _(S16)_
-- [ ] **Ambiente de staging** — onde hospedar? AWS ECS, Render, Railway? _(S18)_
+- [ ] **Plataforma de deploy (staging + prod)** — 3 candidatos pré-analisados no **Anexo S18.A** do plano: (A) Vercel + Fly + Neon + Upstash, (B) Render full-stack, (C) AWS sa-east-1. Decisão pendente de alinhamento com Hologram. Recomendação preliminar: Opção A. _(S18)_
 - [ ] **Política de senhas** — rotação periódica, complexidade? (doc não define) _(S4)_
 
 ---

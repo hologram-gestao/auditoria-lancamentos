@@ -279,15 +279,11 @@ Quando o usuário não tiver decidido, **pergunte** antes de presumir:
 ## 11. Comunicação ao Final de Tarefa
 
 Toda vez que Claude termina uma tarefa solicitada pelo usuário, a resposta final
-**DEVE** conter três partes nesta ordem:
+**DEVE** conter duas partes nesta ordem:
 
 1. **Resumo executivo** — bullets curtos de "o que mudou" (arquivos novos /
-   modificados, tamanho do diff, hash do commit, status do CI). É o formato
-   que já vinha sendo entregue.
-2. **Explicação do que foi feito** — prosa cobrindo decisões de design
-   não-óbvias, padrões reusados, edge cases tratados e dívidas conhecidas.
-   Foco no _porquê_ — o _o quê_ já está no diff e no commit.
-3. **Passo a passo de teste** — instruções detalhadas para o usuário validar
+   modificados, tamanho do diff, hash do commit, status do CI).
+2. **Passo a passo de teste** — instruções detalhadas para o usuário validar
    a entrega manualmente:
    - Comandos exatos (assumir **Windows + Git Bash**, `uv` em
      `~/.local/bin`, `pnpm` via corepack — ver `MEMORY.md`).
@@ -300,7 +296,7 @@ Toda vez que Claude termina uma tarefa solicitada pelo usuário, a resposta fina
      chegar.
 
 Evite "você já sabe" — o usuário pode voltar à entrega depois de dias e não
-lembrar dos comandos. **Nunca responder só com bullets de resumo.**
+lembrar dos comandos.
 
 ---
 
