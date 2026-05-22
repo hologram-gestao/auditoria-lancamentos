@@ -157,6 +157,7 @@ export function ReviewScreen({ clientId, sessionId }: ReviewScreenProps) {
       <ReviewHeader
         clientId={clientId}
         clientName={clientQuery.data?.name ?? 'Cliente'}
+        sessionId={sessionId}
         referenceMonthLabel={referenceMonthLabel}
         accountLabel={accountLabel}
         counts={counts}

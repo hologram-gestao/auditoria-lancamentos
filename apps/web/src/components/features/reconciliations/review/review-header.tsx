@@ -6,7 +6,8 @@
  *   - Nome da conta bancária (resolvido via cache `useClientDetail`)
  *   - Contadores em tempo real (atualizam via `useSessionStatus` que é
  *     invalidado pelas mutations de file-entry e anomaly).
- *   - Botão "Exportar Relatório" — placeholder até S14.
+ *   - Botão "Exportar Relatório" — chama BACK 10.1 (S14) e dispara o
+ *     download do XLSX via objectURL.
  *
  * Decisão sobre dados estáticos vs vivos:
  *   - `referenceMonth`, `accountName` são estáticos; vêm via props pra
@@ -16,16 +17,19 @@
  *     props (já invalidado por todas as mutations).
  */
 
-import { AlertTriangle, ChevronRight, Download, FileWarning } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Download, FileWarning, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
+import { useExportReconciliation } from '@/hooks/use-reconciliations';
+import { ApiError, NetworkError } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
 
 interface ReviewHeaderProps {
   clientId: string;
   clientName: string;
+  sessionId: string;
   /** Texto formatado em PT-BR (ex: "Abril/2026"). */
   referenceMonthLabel: string;
   /** "{Nome conta} · {Banco}" — pode ser undefined se cache ainda hidratando. */
@@ -42,10 +46,29 @@ interface ReviewHeaderProps {
 export function ReviewHeader({
   clientId,
   clientName,
+  sessionId,
   referenceMonthLabel,
   accountLabel,
   counts,
 }: ReviewHeaderProps) {
+  const exportMutation = useExportReconciliation(sessionId);
+
+  function handleExport(): void {
+    exportMutation.mutate(undefined, {
+      onSuccess: ({ blob, filename }) => {
+        // Fallback de filename: backend manda sempre, mas se algum dia
+        // o header não vier (proxy reescrevendo, mock em teste), evitamos
+        // baixar "blob" sem extensão.
+        const finalName = filename ?? `Conciliacao_${referenceMonthLabel.replace('/', '-')}.xlsx`;
+        triggerBrowserDownload(blob, finalName);
+      },
+      onError: (err) => {
+        const userMessage = resolveExportErrorMessage(err);
+        toast.error(userMessage);
+      },
+    });
+  }
+
   return (
     <header className="space-y-3 border-b pb-4">
       <nav aria-label="Trilha de navegação" className="text-muted-foreground text-sm">
@@ -76,13 +99,21 @@ export function ReviewHeader({
 
         <Button
           size="sm"
-          onClick={() => {
-            // TODO(S14): substituir por export real (BACK 10.1).
-            toast.info('Exportação será habilitada na S14.');
-          }}
+          onClick={handleExport}
+          disabled={exportMutation.isPending}
+          aria-label="Exportar relatório Excel"
         >
-          <Download className="h-4 w-4" aria-hidden="true" />
-          Exportar Relatório
+          {exportMutation.isPending ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              Gerando...
+            </>
+          ) : (
+            <>
+              <Download className="h-4 w-4" aria-hidden="true" />
+              Exportar Relatório
+            </>
+          )}
         </Button>
       </div>
 
@@ -140,4 +171,37 @@ function CountChip({ icon, label, value, className }: CountChipProps) {
       <span>{label}</span>
     </span>
   );
+}
+
+/**
+ * Cria um link temporário e dispara o `click()` — padrão idiomático para
+ * download de blob. `URL.revokeObjectURL` no fim libera a memória do
+ * blob (Chrome/Firefox seguram a referência indefinidamente sem o revoke).
+ */
+function triggerBrowserDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Mapeia erros conhecidos do export para mensagens PT-BR amigáveis.
+ *
+ * Reusa o `userMessage` do backend (já localizado) quando disponível —
+ * para 404/409/auth o servidor já manda em PT-BR. Fallback genérico
+ * cobre os casos restantes (5xx, rede, parse).
+ */
+function resolveExportErrorMessage(err: Error): string {
+  if (err instanceof ApiError) {
+    return err.userMessage;
+  }
+  if (err instanceof NetworkError) {
+    return err.userMessage;
+  }
+  return 'Não foi possível gerar o relatório. Tente novamente em instantes.';
 }

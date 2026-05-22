@@ -20,7 +20,8 @@
  *     formatação para BRL é responsabilidade do consumidor (ver
  *     `lib/format.ts`).
  */
-import { apiGet, apiPatch, apiPost, apiPostMultipart } from './client';
+import { apiGet, apiPatch, apiPost, apiPostBlob, apiPostMultipart } from './client';
+import type { BlobResponse } from './client';
 
 export interface Pagination {
   page: number;
@@ -559,6 +560,25 @@ export interface AnomalyTypeItem {
   description: string;
   /** Lenient: `critical` / `moderate` / `info`. */
   severity: string;
+}
+
+// ---- S14 BACK 10.1 — Excel export ----
+
+/**
+ * Gera o relatório Excel da sessão. Espelha
+ * `POST /api/v1/reconciliations/{session_id}/export` (S14).
+ *
+ * Erros mapeados (backend usa o envelope padrão `{ error: { code, ... } }`):
+ *   - 404 NOT_FOUND     → sessão inexistente, soft-deletada ou fora da
+ *                         carteira do manager (probing-safe).
+ *   - 409 CONFLICT      → status `processing` ou `error` (não exportável).
+ *   - 401 UNAUTHORIZED  → cookies inválidos/ausentes.
+ *
+ * Retorno: blob XLSX + filename ASCII vindo do `Content-Disposition`. O
+ * caller é responsável por disparar o download (ex: anchor + objectURL).
+ */
+export async function exportReconciliation(sessionId: string): Promise<BlobResponse> {
+  return apiPostBlob(`/api/v1/reconciliations/${sessionId}/export`);
 }
 
 export async function listAnomalyTypes(): Promise<AnomalyTypeItem[]> {

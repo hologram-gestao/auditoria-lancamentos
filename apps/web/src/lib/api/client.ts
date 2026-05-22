@@ -224,4 +224,86 @@ export async function apiDelete<T>(path: string, options: FetchOptions = {}): Pr
   return rawFetch<T>(path, { method: 'DELETE' }, options);
 }
 
+/**
+ * Resposta binária com filename extraído do header (Content-Disposition).
+ *
+ * Usada por downloads de relatório (S14 Excel) onde o caller precisa do
+ * blob + nome do arquivo sugerido pelo backend. Filename ASCII vem do
+ * cabeçalho `filename="..."`; se ausente, devolve `null` (caller decide
+ * fallback).
+ */
+export interface BlobResponse {
+  blob: Blob;
+  filename: string | null;
+}
+
+/**
+ * Extrai o `filename` ASCII do `Content-Disposition` (RFC 6266).
+ *
+ * Regra: pega o que está entre aspas após `filename=`. Ignora `filename*`
+ * (versão UTF-8 RFC 5987) por dois motivos:
+ *   - o backend já sanitiza o ASCII pra ser equivalente (sem acentos);
+ *   - decodificar `filename*=UTF-8''...` adiciona superfície de bug por
+ *     baixo ganho.
+ */
+function parseFilenameFromContentDisposition(header: string | null): string | null {
+  if (!header) return null;
+  const match = /filename="([^"]+)"/.exec(header);
+  return match?.[1] ?? null;
+}
+
+/**
+ * POST que devolve binário + filename — base para downloads (Excel, PDF).
+ *
+ * Reusa o fluxo de auth (cookies, refresh em 401, redirect em login expirado)
+ * e a desserialização de `ApiError` no `{ error: {...} }` padrão. Diferença
+ * do `apiPost`: nunca tenta `.json()` no caso de sucesso; devolve um
+ * `Blob` cru pra que o caller chame `URL.createObjectURL` e dispare o
+ * download nativo do browser.
+ */
+export async function apiPostBlob(
+  path: string,
+  body?: unknown,
+  options: FetchOptions = {},
+): Promise<BlobResponse> {
+  const url = path.startsWith('http') ? path : `${BASE_URL}${path}`;
+  const init: RequestInit = {
+    method: 'POST',
+    body: body === undefined ? null : JSON.stringify(body),
+  };
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...init,
+      credentials: 'include',
+      headers: buildHeaders(init.body, options.headers),
+      signal: options.signal,
+    });
+  } catch (err) {
+    throw new NetworkError(err);
+  }
+
+  if (res.status === 401 && !options.skipRefresh) {
+    const errBody = await parseErrorBody(res);
+    if (errBody.code === 'TOKEN_EXPIRED') {
+      const renewed = await refreshOnce();
+      if (renewed) {
+        return apiPostBlob(path, body, { ...options, skipRefresh: true });
+      }
+      redirectToLogin();
+    }
+    throw new ApiError(res.status, errBody);
+  }
+
+  if (!res.ok) {
+    const errBody = await parseErrorBody(res);
+    throw new ApiError(res.status, errBody);
+  }
+
+  const blob = await res.blob();
+  const filename = parseFilenameFromContentDisposition(res.headers.get('Content-Disposition'));
+  return { blob, filename };
+}
+
 export const apiBaseUrl = BASE_URL;

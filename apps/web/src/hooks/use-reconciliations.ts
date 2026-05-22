@@ -25,10 +25,12 @@ import {
   type UseQueryOptions,
 } from '@tanstack/react-query';
 
+import type { BlobResponse } from '@/lib/api/client';
 import {
   checkDuplicate,
   createAnomaly,
   createReconciliation,
+  exportReconciliation,
   getOmieLancamentos,
   getSessionDetail,
   getSessionStatus,
@@ -130,6 +132,24 @@ export function useDiscardReconciliation(sessionId: string, clientId: string) {
       // O contador de conciliações na lista de clientes pode mudar.
       void queryClient.invalidateQueries({ queryKey: ['clients'] });
     },
+  });
+}
+
+/**
+ * Geração do relatório Excel (S14 BACK 10.1).
+ *
+ * Por que `useMutation` e não `useQuery`:
+ *   Export é uma ação manual (clique do usuário) que precisa rodar SEM
+ *   cache — duas sessões diferentes devem gerar arquivos diferentes
+ *   sem disputar a mesma key. Mutation também entrega `isPending` pro
+ *   botão e `onError`/`onSuccess` para o toast.
+ *
+ * Caller fica responsável pelo download (ex: criar `<a>` com
+ * `URL.createObjectURL(blob)`) — o hook devolve `{ blob, filename }`.
+ */
+export function useExportReconciliation(sessionId: string) {
+  return useMutation<BlobResponse, Error, void>({
+    mutationFn: () => exportReconciliation(sessionId),
   });
 }
 
