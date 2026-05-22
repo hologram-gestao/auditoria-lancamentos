@@ -36,6 +36,7 @@ from app.modules.auth import routes as auth_routes
 from app.modules.clients import routes as clients_routes
 from app.modules.omie_data import routes as omie_data_routes
 from app.modules.reconciliations import routes as reconciliations_routes
+from app.modules.reconciliations.export import routes as export_routes
 from app.modules.reconciliations.review import routes as review_routes
 from app.modules.users import routes as users_routes
 
@@ -255,6 +256,7 @@ def create_app() -> FastAPI:
     app.include_router(clients_routes.router)
     app.include_router(reconciliations_routes.router)
     app.include_router(review_routes.router)
+    app.include_router(export_routes.router)
     app.include_router(omie_data_routes.router)
     app.include_router(anomaly_types_routes.router)
 
