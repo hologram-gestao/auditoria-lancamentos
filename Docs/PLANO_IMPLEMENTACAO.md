@@ -46,6 +46,7 @@
     - [S16 — Hardening de Segurança](#s16--hardening-de-segurança)
     - [S17 — Observabilidade e Logs Estruturados](#s17--observabilidade-e-logs-estruturados)
     - [S18 — Testes E2E, Documentação e Deploy](#s18--testes-e2e-documentação-e-deploy)
+    - [S19 — Qualificação Inteligente de Lançamentos (Seção 11 ClickUp)](#s19--qualificação-inteligente-de-lançamentos)
 12. [Riscos e Mitigações](#12-riscos-e-mitigações)
 13. [Pontos em Aberto (precisam de validação)](#13-pontos-em-aberto)
 
@@ -1672,6 +1673,72 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 
 ---
 
+### S19 — Qualificação Inteligente de Lançamentos
+
+**Origem:** pedido de sócio da Hologram, posterior ao plano original. A reconciliação atual (S10–S14) só valida **valor + data** (CLAUDE.md §5.1–§5.2). Esta sessão adiciona uma camada **semântica + histórica** sobre os pares já conciliados — pega casos como _"TARIFA BANCÁRIA"_ classificada no Omie como _"Pagamento de Cartão"_.
+
+**Objetivo:** detectar inconsistência de classificação entre o que o extrato bancário descreve e o que o Omie tem como fornecedor/categoria. Gerar anomalias auditáveis pelo analista. Permitir que tendências e desvios apareçam em relatórios futuros (Fase 2).
+
+**Pré-requisitos:** S14 (export Excel) + S15 (tipos de anomalia framework).
+**Duração estimada:** 2 sessões (12 – 16 h). Pode rodar em paralelo com S16/S17; deve estar pronto antes do deploy final (S18) se for parte do MVP. Caso a Hologram decida adiar, vira release "1.1" pós-deploy.
+
+> **Decisão pendente:** S19 entra no MVP ou fica para release pós-deploy? Impacta o cronograma do S18.
+
+---
+
+#### Escopo MVP — 3 camadas de análise
+
+##### Camada 1 — Verificação semântica via IA (Claude)
+
+Para cada par `(file_entry, omie_entry)` conciliado, monta tupla `(descricao_extrato, fornecedor_omie, categoria_omie)`. Bate em lote (50 pares por chamada, prompt caching ativo — CLAUDE.md §6) no Claude com prompt estruturado pedindo classificação `ok | suspeita | incoerente`. Custo estimado: < US$ 0.05/sessão com cache. Resultado vira anomalias `qualificacao_suspeita` (severity moderate) e `qualificacao_incoerente` (severity high).
+
+##### Camada 2 — Padrão histórico (SQL determinístico — sem IA, sem custo)
+
+Para cada par, query nas últimas 3 conciliações `reviewing|done` do mesmo cliente. Agrega por `(supplier, category)`. Se categoria atual ≠ moda histórica AND moda tem ≥ 2 ocorrências → flag `padrao_quebrado` (severity low). Cenário típico: fornecedor _"MOINHO PRADO"_ sempre classificado como _"Material de Construção"_, mas dessa vez veio _"Tarifa"_.
+
+##### Camada 3 — Outliers de valor (SQL determinístico)
+
+Para cada par, calcula `avg ± 3σ` de amount por `(client, supplier)` nas últimas 6 conciliações. Se `|amount| > avg + 3σ` AND amostra ≥ 5 → flag `valor_outlier` (severity low). Pega cobranças anômalas (ex: tarifa mensal de R$ 30 vira R$ 500).
+
+---
+
+#### Entregáveis
+
+1. **Novo módulo** `apps/api/app/modules/reconciliations/qualification/` com `semantic.py`, `historical.py`, `outliers.py` + `service.py` que orquestra as 3 camadas em ordem.
+2. **4 novos tipos de anomalia** no seed (S15): `qualificacao_suspeita`, `qualificacao_incoerente`, `padrao_quebrado`, `valor_outlier`.
+3. **Nova etapa no pipeline** (`job.py`): roda após `match()`, antes de `update_session_after_matching`. Em uma única transação extra (após a do matching) — falha não derruba a sessão, só não registra qualificação.
+4. **Feature flag** `QUALIFICATION_ENABLED` (default true; permite desligar se Anthropic ficar fora).
+5. **Excel — aba 2 (Movimentação)**: nova coluna **"Análise"** entre "Categoria Omie" e "Situação", com ícone (✅ / ⚠️ / ❌) baseado no maior severity de anomalia da linha.
+6. **Excel — aba 1 (Resumo)**: novo bloco "Qualificação" com 5 contadores (coerentes, suspeitas, incoerentes, outliers, padrão quebrado).
+7. **Excel — aba 5 (Anomalias)**: novas linhas dos 4 tipos novos (sem mudança no código — o loop já é genérico por anomaly_type).
+8. **Endpoint de override** `POST /api/v1/reconciliations/.../anomalies/{id}/resolve` (verificar se já existe do S11; estender se sim). Analista pode marcar qualquer qualificação como "ok manualmente" com nota — persistida em `resolution_note_encrypted` (CLAUDE.md §4).
+9. **Frontend** (FRONT 11.2 — task separada): chip de status por linha na aba Movimentação da revisão + filtro "Mostrar só com qualificação suspeita" + modal de override.
+10. **Logging de custo Claude**: token usage por sessão estruturado no log (`structlog`), pra observabilidade da S17.
+
+---
+
+#### DoD
+
+- [ ] Testes unitários (≥ 1 por camada: semantic com Claude mockado via `respx`, historical/outliers contra DB real com fixtures).
+- [ ] Teste de integração end-to-end: sessão Sicredi Mar/2026 como fixture (já temos dados reais no DB), 13 pares conciliados, asserts no número de anomalias geradas.
+- [ ] Feature flag testada em ambos os estados (`true` gera anomalias, `false` não toca o pipeline).
+- [ ] Cost report: token usage logado e dentro do orçamento estimado.
+- [ ] CI verde.
+- [ ] Excel da sessão Sicredi Mar/2026 reprocessada mostra os 4 novos contadores + coluna Análise.
+
+---
+
+#### Fora de escopo (Fase 2 — pós-MVP)
+
+- **Dashboard de tendências**: gráfico mês-a-mês de categorias mais frequentes por cliente.
+- **Regras customizáveis por cliente**: analista cria mapeamento manual (_"sempre que descrição contém X, deve ser categoria Y"_).
+- **Comparativo entre clientes** com mesmo setor (benchmark).
+- **Re-análise sob demanda**: analista pode disparar nova análise de qualificação numa sessão já fechada.
+
+Anotar essas extensões como issues técnicas no backlog após o release do MVP. Reusam a infraestrutura desta sessão; não exigem refatoração.
+
+---
+
 ## 12. Riscos e Mitigações
 
 | Risco                                         | Impacto                     | Mitigação                                                                                                                                                                                |
@@ -1708,6 +1775,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 - [ ] **Storage de backups** — S3, GCS, cold storage local? Retenção desejada além dos 30 dias mínimos? _(S16)_
 - [ ] **Plataforma de deploy (staging + prod)** — 3 candidatos pré-analisados no **Anexo S18.A** do plano: (A) Vercel + Fly + Neon + Upstash, (B) Render full-stack, (C) AWS sa-east-1. Decisão pendente de alinhamento com Hologram. Recomendação preliminar: Opção A. _(S18)_
 - [ ] **Política de senhas** — rotação periódica, complexidade? (doc não define) _(S4)_
+- [ ] **S19 entra no MVP ou vira release pós-deploy?** Pedido novo de sócio da Hologram (qualificação inteligente de lançamentos). Impacta o cronograma do S18. _(S19)_
 
 ---
 
@@ -1724,8 +1792,9 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 | **Revisão + Export**     | S11, S12, S13, S14 | 3 semanas        | Tela de revisão completa + Excel.       |
 | **Admin + Hardening**    | S15, S16, S17      | 1,5 semana       | Tipos de anomalia + segurança + obs.    |
 | **E2E + Deploy**         | S18                | 1 semana         | Produção com runbooks.                  |
+| **Qualificação**         | S19                | ~1 semana        | Análise semântica IA (ver §13).         |
 
-**Total MVP: ~13 semanas** (alinhado à estimativa anterior).
+**Total MVP base: ~13 semanas.** S19 adiciona ~1 semana caso entre no MVP; caso contrário, vira release 1.1 pós-deploy.
 
 ---
 
