@@ -14,6 +14,7 @@ queries separadas com IN clause; nada de N+1 silencioso.
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import delete, select, update
@@ -184,8 +185,12 @@ class ReconciliationRepository:
         sem_omie_count: int,
         omie_sem_arquivo_count: int,
         anomaly_count: int,
+        balance_start: Decimal | None = None,
+        balance_end_file: Decimal | None = None,
+        balance_end_omie: Decimal | None = None,
+        balance_difference: Decimal | None = None,
     ) -> None:
-        """Atualiza contadores + status='reviewing' + processed_at=now()."""
+        """Atualiza contadores + saldos + status='reviewing' + processed_at=now()."""
         from datetime import UTC, datetime
 
         await self._session.execute(
@@ -198,6 +203,10 @@ class ReconciliationRepository:
                 sem_omie_count=sem_omie_count,
                 omie_sem_arquivo_count=omie_sem_arquivo_count,
                 anomaly_count=anomaly_count,
+                balance_start=balance_start,
+                balance_end_file=balance_end_file,
+                balance_end_omie=balance_end_omie,
+                balance_difference=balance_difference,
                 processed_at=datetime.now(UTC),
                 error_message=None,
             )

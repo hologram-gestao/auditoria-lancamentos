@@ -23,6 +23,9 @@ CLAUDE.md §3.7: nunca expor stack traces ao usuário. O worker:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -37,6 +40,7 @@ from app.modules.reconciliations.processing.anomalies import (
     _AnomalyTypeMissingError,
     create_structural_anomalies,
 )
+from app.modules.reconciliations.processing.balances import compute_balances
 from app.modules.reconciliations.processing.matcher import (
     FileEntryForMatch,
     match,
@@ -49,6 +53,20 @@ from app.modules.reconciliations.processing.omie_fetch import (
 from app.modules.reconciliations.repository import ReconciliationRepository
 
 log = get_logger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _FileEntryBalanceSnap:
+    """Snapshot detached do `ReconciliationFileEntry` pra cálculo de saldos.
+
+    Cópia explícita do que importa pra `compute_balances` antes da sessão
+    SQLAlchemy fechar (mesma estratégia do `FileEntryForMatch`).
+    """
+
+    transaction_date: date
+    amount: Decimal
+    balance: Decimal | None
+    created_at: datetime
 
 
 # Mensagens em PT-BR para o `error_message` da sessão. Caller (front) mostra
@@ -128,6 +146,17 @@ async def _execute_processing(
                 id=str(entry.id),
                 transaction_date=entry.transaction_date,
                 amount=entry.amount,
+            )
+            for entry in session_obj.file_entries
+        ]
+        # Snapshot pro cálculo de saldos pós-Omie (depois de fechar a sessão).
+        # Tuplas em vez do model porque vamos usar fora do contexto async.
+        file_entries_for_balance = [
+            _FileEntryBalanceSnap(
+                transaction_date=entry.transaction_date,
+                amount=entry.amount,
+                balance=entry.balance,
+                created_at=entry.created_at,
             )
             for entry in session_obj.file_entries
         ]
@@ -215,6 +244,21 @@ async def _execute_processing(
         conciliated = len(match_pairs_uuid)
         sem_omie = total - conciliated
         omie_sem_arquivo = len(unmatched_omie)
+
+        # Saldos: derivados das file_entries (start/end_file) + movimentos
+        # Omie realizados no período estrito (end_omie). Função pura — testada
+        # em unit. Falha silenciosa se faltar dado: campos viram None e a
+        # aba 1 do Excel mostra "Indisponível".
+        # mypy não infere que dataclasses concretas satisfazem o Protocol
+        # de `compute_balances` (limitação de structural typing + invariância
+        # de Sequence). Tipos checados em runtime via duck typing.
+        balances = compute_balances(
+            file_entries_for_balance,  # type: ignore[arg-type]
+            omie_movements,  # type: ignore[arg-type]
+            period_start=period_start,
+            period_end=period_end,
+        )
+
         await repo.update_session_after_matching(
             session_id,
             total_file_entries=total,
@@ -222,6 +266,10 @@ async def _execute_processing(
             sem_omie_count=sem_omie,
             omie_sem_arquivo_count=omie_sem_arquivo,
             anomaly_count=anomaly_count,
+            balance_start=balances.balance_start,
+            balance_end_file=balances.balance_end_file,
+            balance_end_omie=balances.balance_end_omie,
+            balance_difference=balances.balance_difference,
         )
 
     log.info(
@@ -231,6 +279,16 @@ async def _execute_processing(
         sem_omie=sem_omie,
         omie_sem_arquivo=omie_sem_arquivo,
         anomaly_count=anomaly_count,
+        balance_start=str(balances.balance_start) if balances.balance_start is not None else None,
+        balance_end_file=str(balances.balance_end_file)
+        if balances.balance_end_file is not None
+        else None,
+        balance_end_omie=str(balances.balance_end_omie)
+        if balances.balance_end_omie is not None
+        else None,
+        balance_difference=str(balances.balance_difference)
+        if balances.balance_difference is not None
+        else None,
     )
 
 
