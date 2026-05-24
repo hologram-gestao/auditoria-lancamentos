@@ -11,7 +11,7 @@
  * Dispensar o cookie é trabalho do backend (logout limpa). O Zustand só reflete.
  */
 
-import { LogOut, Settings, Users as UsersIcon } from 'lucide-react';
+import { AlertTriangle, LogOut, Settings, Users as UsersIcon } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -134,6 +134,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   icon={<Settings className="h-4 w-4" />}
                 >
                   Usuários
+                </SidebarLink>
+                <SidebarLink
+                  href="/configuracoes/anomalias"
+                  pathname={pathname}
+                  icon={<AlertTriangle className="h-4 w-4" />}
+                >
+                  Tipos de Anomalia
                 </SidebarLink>
               </>
             )}
