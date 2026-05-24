@@ -47,16 +47,31 @@ class _AnomalyTypeMissingError(Exception):
 
 
 async def _load_anomaly_type_ids(session: AsyncSession) -> dict[str, UUID]:
-    """Carrega os IDs dos `AnomalyType` necessários por code.
+    """Carrega os IDs dos `AnomalyType` ATIVOS necessários por code.
 
     Faz UMA query (`code IN (...)`) e devolve dict — evita N+1.
+
+    Distingue dois cenários de ausência:
+        - Tipo NÃO existe no DB (qualquer state) → seed não rodou → falha alta
+          (`_AnomalyTypeMissingError`). Sentry + error_message PT-BR no front.
+        - Tipo existe mas `active=False` → admin desativou via S15 BACK 11.1
+          → silently omitido do dict. `create_structural_anomalies` pula a
+          criação dessas anomalias para conciliações NOVAS. Anomalias antigas
+          permanecem (FK em `reconciliation_anomalies` é `ondelete=RESTRICT`).
     """
     needed = {ANOMALY_CODE_MISSING_IN_OMIE, ANOMALY_CODE_MISSING_IN_FILE}
     rows = await session.execute(
-        select(AnomalyType.id, AnomalyType.code).where(AnomalyType.code.in_(needed))
+        select(AnomalyType.id, AnomalyType.code, AnomalyType.active).where(
+            AnomalyType.code.in_(needed)
+        )
     )
-    by_code: dict[str, UUID] = {code: type_id for type_id, code in rows.all()}
-    missing = needed - by_code.keys()
+    by_code: dict[str, UUID] = {}
+    existing_codes: set[str] = set()
+    for type_id, code, active in rows.all():
+        existing_codes.add(code)
+        if active:
+            by_code[code] = type_id
+    missing = needed - existing_codes
     if missing:
         raise _AnomalyTypeMissingError(
             f"AnomalyType ausente(s) no DB: {sorted(missing)}. Rodou `pnpm db:seed`?"
@@ -95,32 +110,36 @@ async def create_structural_anomalies(
         Total de anomalias criadas (= len(missing_in_omie) + len(Atrasado)).
     """
     type_ids = await _load_anomaly_type_ids(session)
-    missing_in_omie_id = type_ids[ANOMALY_CODE_MISSING_IN_OMIE]
-    missing_in_file_id = type_ids[ANOMALY_CODE_MISSING_IN_FILE]
+    # `.get()` em vez de `[...]` — se o admin desativou o tipo (S15 BACK 11.1),
+    # ele simplesmente não vem no dict e os blocos abaixo são pulados em silêncio.
+    missing_in_omie_id = type_ids.get(ANOMALY_CODE_MISSING_IN_OMIE)
+    missing_in_file_id = type_ids.get(ANOMALY_CODE_MISSING_IN_FILE)
 
     anomalies: list[ReconciliationAnomaly] = []
 
-    for entry in unmatched_file_entries:
-        anomalies.append(
-            ReconciliationAnomaly(
-                session_id=session_id,
-                anomaly_type_id=missing_in_omie_id,
-                file_entry_id=entry.id,
-                detected_by=AnomalyDetectedBy.AI.value,
+    if missing_in_omie_id is not None:
+        for entry in unmatched_file_entries:
+            anomalies.append(
+                ReconciliationAnomaly(
+                    session_id=session_id,
+                    anomaly_type_id=missing_in_omie_id,
+                    file_entry_id=entry.id,
+                    detected_by=AnomalyDetectedBy.AI.value,
+                )
             )
-        )
 
-    for omie_entry in persisted_omie_entries:
-        if omie_entry.omie_status != OmieEntryStatus.ATRASADO.value:
-            continue
-        anomalies.append(
-            ReconciliationAnomaly(
-                session_id=session_id,
-                anomaly_type_id=missing_in_file_id,
-                omie_entry_id=omie_entry.id,
-                detected_by=AnomalyDetectedBy.AI.value,
+    if missing_in_file_id is not None:
+        for omie_entry in persisted_omie_entries:
+            if omie_entry.omie_status != OmieEntryStatus.ATRASADO.value:
+                continue
+            anomalies.append(
+                ReconciliationAnomaly(
+                    session_id=session_id,
+                    anomaly_type_id=missing_in_file_id,
+                    omie_entry_id=omie_entry.id,
+                    detected_by=AnomalyDetectedBy.AI.value,
+                )
             )
-        )
 
     if anomalies:
         session.add_all(anomalies)

@@ -146,6 +146,25 @@ class ClientNotAccessibleError(ForbiddenError):
     default_user_message = "Você não tem acesso a este cliente."
 
 
+class AnomalyTypeCodeAlreadyExistsError(ConflictError):
+    """409 — admin tentou criar tipo com `code` já em uso (S15 BACK 11.1)."""
+
+    default_user_message = "Já existe um tipo de anomalia com este código."
+
+
+class AnomalyTypeInUseError(ConflictError):
+    """409 — admin tentou DELETE em tipo referenciado por anomalias existentes.
+
+    O catálogo é histórico — apagar quebraria a renderização de anomalias
+    antigas. Front orienta o admin a desativar (PATCH active=false) em vez
+    de excluir.
+    """
+
+    default_user_message = (
+        "Este tipo está em uso por anomalias existentes — desative em vez de excluir."
+    )
+
+
 class IncompleteCredentialsError(ValidationAppError):
     """400 — atualizar credenciais Omie exige App Key E App Secret juntos (S6 §3.4)."""
 
