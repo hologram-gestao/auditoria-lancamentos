@@ -1690,7 +1690,7 @@ S0 ─► S1 ─► S2 ─┬─► S3 ─► S4 ─► S5 ─► S6 ─► S7 �
 
 ##### Camada 1 — Verificação semântica via IA (Claude)
 
-Para cada par `(file_entry, omie_entry)` conciliado, monta tupla `(descricao_extrato, fornecedor_omie, categoria_omie)`. Bate em lote (50 pares por chamada, prompt caching ativo — CLAUDE.md §6) no Claude com prompt estruturado pedindo classificação `ok | suspeita | incoerente`. Custo estimado: < US$ 0.05/sessão com cache. Resultado vira anomalias `qualificacao_suspeita` (severity moderate) e `qualificacao_incoerente` (severity high).
+Para cada par `(file_entry, omie_entry)` conciliado, monta tupla `(descricao_extrato, fornecedor_omie, categoria_omie)`. Bate em lote (50 pares por chamada, prompt caching ativo — CLAUDE.md §7) no Claude com prompt estruturado pedindo classificação `ok | suspeita | incoerente`. Custo estimado: < US$ 0.05/sessão com cache. Resultado vira anomalias `qualificacao_suspeita` (severity moderate) e `qualificacao_incoerente` (severity high).
 
 ##### Camada 2 — Padrão histórico (SQL determinístico — sem IA, sem custo)
 

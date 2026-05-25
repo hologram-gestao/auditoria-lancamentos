@@ -1,7 +1,7 @@
 """Acesso ao DB para o módulo de gestão de usuários (admin-only).
 
 Repository fica fino — só queries. Regras (email único, admin não desativa
-a si próprio, etc.) ficam no service. Padrão CLAUDE.md §6.
+a si próprio, etc.) ficam no service. Padrão CLAUDE.md §7.
 """
 
 from __future__ import annotations

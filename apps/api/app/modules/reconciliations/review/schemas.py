@@ -1,6 +1,6 @@
 """Schemas Pydantic da Tela de Revisão (S11 BACK 9.1, 9.3-9.9).
 
-Convenções (CLAUDE.md §6):
+Convenções (CLAUDE.md §7):
     - Envelope `{ data, pagination? }`.
     - Datas como `date` ISO 8601 na serialização.
     - Decimal serializado como string para não perder precisão no JSON.

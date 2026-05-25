@@ -2,7 +2,7 @@
  * Tela de detalhe do cliente — `/clientes/{clientId}`. Doc §10.1.
  *
  * Server component que apenas extrai o `clientId` de `params` e delega
- * para `<ClientDetailClient>`. Mantém a regra do CLAUDE.md §6: "server
+ * para `<ClientDetailClient>`. Mantém a regra do CLAUDE.md §7: "server
  * components por padrão" — o trabalho client-side fica isolado no
  * orquestrador, com TanStack Query controlando a busca dos dados.
  */

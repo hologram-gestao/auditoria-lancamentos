@@ -242,9 +242,9 @@ Coisas que **estão certas e não devem ser mexidas**:
 - **Fix sugerido:**
   - Adicionar paginação defensiva via `_paginate()` (já existe). Mesmo se Omie hoje retorna tudo numa chamada, paginar com page_size grande é compatível.
   - Logar `WARNING` quando uma única chamada retornar > N itens (sinal de que pode ter mais).
-  - Esclarecer com o Galhardo (TODO já mapeado em CLAUDE.md §9).
+  - Esclarecer com o Galhardo (TODO já mapeado em CLAUDE.md §10).
 - **Effort:** ⚙️
-- **Referências:** CLAUDE.md §9 "Pontos em Aberto", Doc Omie.
+- **Referências:** CLAUDE.md §10 "Pontos em Aberto", Doc Omie.
 
 #### P1-007: Test `test_admin_can_parse_any_client` quebra com `MOCK_PARSE=true` no `.env` local
 
@@ -297,7 +297,7 @@ Coisas que **estão certas e não devem ser mexidas**:
 - **Impacto:** header de revisão mostra contador divergente por alguns segundos em uso simultâneo.
 - **Fix sugerido (futuro):** trigger DB que mantém contadores ou UPDATE relativo (`SET conciliated_count = conciliated_count + 1`). Para o MVP, documentar "best-effort" no schema da response.
 - **Effort:** ⚙️
-- **Referências:** CLAUDE.md §10 "Escalabilidade considerada".
+- **Referências:** CLAUDE.md §11 "Escalabilidade considerada".
 
 #### P2-002: `ResolveAnomalyRequest` valida `resolution_note ≥ 10` no service, não no schema
 
@@ -505,7 +505,7 @@ Coisas que **estão certas e não devem ser mexidas**:
 | Bundle size do front                                  |             NÃO MEDIDO¹ |
 
 ¹ Limitação metodológica: `pip-audit` travou o sistema, `uv pip install` de bandit/radon/pytest-cov falhou por TLS/cert. Pedro precisa rodar manualmente fora do Claude.
-² Estimativa visual; CLAUDE.md §6 proíbe `// TODO: fix later` no código — TODOs vivem em comentários explicativos linkando para sessões/pontos em aberto.
+² Estimativa visual; CLAUDE.md §7 proíbe `// TODO: fix later` no código — TODOs vivem em comentários explicativos linkando para sessões/pontos em aberto.
 
 ---
 

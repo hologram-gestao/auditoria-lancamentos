@@ -4,7 +4,7 @@ S8 (BACK 6.2): response do check-duplicate.
 S9 (BACK 7.1): response do parsing IA.
 S10 (BACK 8.1 + 8.6): payload de criação de sessão e response do polling.
 
-Convenção de envelope (CLAUDE.md §6): respostas de sucesso vão dentro de
+Convenção de envelope (CLAUDE.md §7): respostas de sucesso vão dentro de
 `{"data": {...}}`.
 
 Memória `feedback_pydantic_strict_input_lenient_output`: requests usam

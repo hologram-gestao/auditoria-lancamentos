@@ -1,6 +1,6 @@
 """Acesso ao DB para o módulo de auth.
 
-Mantemos repository separado de service (CLAUDE.md §6) — repository só lida
+Mantemos repository separado de service (CLAUDE.md §7) — repository só lida
 com SQLAlchemy/Postgres; service só lida com regras de negócio.
 """
 

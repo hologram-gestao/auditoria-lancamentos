@@ -521,7 +521,7 @@ class TestJobOmieAuthError:
             file_hash=_hex64("auth-err"),
         )
 
-        # Omie devolve 200 + faultstring com keyword de auth (CLAUDE.md §6 client.py)
+        # Omie devolve 200 + faultstring com keyword de auth (CLAUDE.md §7 client.py)
         respx.post(OMIE_EXTRATO_URL).mock(
             return_value=httpx.Response(
                 200,

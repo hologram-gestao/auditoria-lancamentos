@@ -1,6 +1,6 @@
 """Acesso ao DB do módulo de clientes BPO.
 
-Responsabilidades (CLAUDE.md §6):
+Responsabilidades (CLAUDE.md §7):
     - **Apenas SQL/ORM** — regras de negócio, criptografia e RBAC ficam no
       service / dependencies.
     - Listagem com filtro RBAC já aplicado pelo caller (passa `manager_id` ou

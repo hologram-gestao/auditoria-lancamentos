@@ -7,7 +7,7 @@
  * S10 (FRONT 8.7) adiciona `createReconciliation` + `getSessionStatus`
  * (criação assíncrona da sessão e polling da tela de progresso).
  *
- * Convenções (CLAUDE.md §6):
+ * Convenções (CLAUDE.md §7):
  *   - O envelope `{ data: ... }` com chave única é desempacotado em
  *     `apiGet`/`apiPostMultipart`, então as funções devolvem o payload direto.
  *   - O backend aceita o hash em case-insensitive, mas armazena lowercase;

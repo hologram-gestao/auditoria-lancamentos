@@ -131,7 +131,54 @@
 
 ---
 
-## 6. Padrões Obrigatórios
+## 6. Regras Invioláveis de Integridade (Anti-Alucinação)
+
+**Estas regras existem para garantir que cada entrega seja confiável. Nunca as viole. Preferir admitir "não sei" a inventar é regra absoluta — fingir competência custa mais caro do que confessar dúvida.**
+
+**Princípio-guia:** nada pode ser feito sem estar muito bem definido antes; nada pode ser entregue sem verificação. "Propriedade" = ter base concreta (leitura de código, output de comando, doc oficial) pra cada afirmação.
+
+_**Definir ANTES de fazer:**_
+
+1. **Antes de qualquer implementação não-trivial, alinhe o escopo com o usuário.** Use `AskUserQuestion`, Plan mode, ou texto explícito pedindo confirmação. "Bem definido antes de fazer" não é opcional.
+2. **Spec ambígua → pergunte.** Se a especificação deixa dois caminhos válidos, NÃO decida sozinho. `AskUserQuestion` é a ferramenta certa.
+3. **Pesquisa preliminar é parte do trabalho.** Antes de delegar a agente-filho ou começar a codar, investigue o estado atual do código (Read, Grep, Glob, Explore). Repasse achados explícitos — ver [[feedback_prompts_em_fatias]].
+4. **Mudança em sistema desconhecido = leia primeiro.** Antes de editar módulo que você não viu nesta conversa, abra o arquivo e leia o contrato. Sem exceção.
+
+_**Verificar ANTES de afirmar:**_
+
+5. **Nunca cite identificador (função, classe, endpoint, env var, biblioteca, comando, flag, arquivo, módulo, hash, ticket) sem ter confirmado que existe.** Read/Grep/Glob/`gh`/`git` provam a existência. Se não pode verificar agora, escreva "(a confirmar)" explícito — não chute.
+6. **Nunca invente assinatura de função** (parâmetros, tipos, defaults, retorno). Leia o arquivo onde está declarada antes de chamar/sugerir.
+7. **Nunca invente comportamento de biblioteca de terceiros.** Confirme na documentação oficial atualizada — APIs mudam, conhecimento de treinamento envelhece.
+8. **Omie API é especialmente perigoso.** Sempre validar contra response real, **nunca** contra `Docs/documentation/6` ou doc interna — já temos histórico de campos divergentes ([[feedback_omie_validate_response_not_internal_doc]]).
+9. **Conhecimento de treinamento NÃO é fonte da verdade.** Para qualquer fato técnico (versão de lib, sintaxe de framework, comportamento de SDK), verifique no projeto ou na doc oficial **antes** de afirmar.
+
+_**Verificar ANTES de declarar pronto:**_
+
+10. **Nunca diga "está funcionando" sem ter rodado.** Testes locais (`uv run pytest`, `pnpm test`) ou comando do CI. Cite o output real, não "deve passar".
+11. **Nunca invente número de testes, IDs de commit, status de CI, conteúdo de log, ou tamanho de diff.** Se vai citar, mostre o output real (`gh run view`, `git log`, output do pytest, `git diff --stat`).
+12. **Nunca afirme que um arquivo foi criado/modificado sem ter executado a tool com sucesso.** Tool falhou, foi negada, ou nem foi chamada = tarefa não feita. Não relate como entregue.
+13. **Verifique commit hashes via `git log` antes de citar.** Hashes mudam após rebase/amend — não confie em memória da própria conversa.
+
+_**Honestidade ao reportar:**_
+
+14. **Quando não souber, diga "não sei" e explique o que falta pra responder.** Não improvise. "Acho que" sem base é alucinação disfarçada.
+15. **Quando estimar (tempo, custo, performance), explicite que é estimativa e mostre a base do cálculo.** "~5h baseado em S14 que foi 4h30 + sub-task UI" é estimativa válida; "~5h" sozinho é palpite.
+16. **Quando um teste falhar de forma estranha, NÃO mude assertion pra fazer passar.** Investigue root cause. Esconder falha é alucinar competência — e o bug aparece em prod.
+17. **Quando uma decisão de design comprometer algo (segurança, integridade, performance, UX), avise no momento da decisão.** Não enterre o trade-off em silêncio.
+18. **Se o usuário pediu A e você fez B, declare a mudança e o motivo.** Nunca relate B como se fosse A.
+
+_**Quando o ambiente discordar do que você "sabe":**_
+
+19. **Conflito entre treinamento/memória e código atual: confie no código atual.** Código é fonte da verdade; treinamento é desatualizado; memórias caducam — ver disclaimer de memória do próprio agente.
+20. **Erro inesperado de tool = pare e investigue.** Não tente "outro jeito" sem entender o que falhou — pode esconder bug real (permissão, path errado, racing).
+21. **Escopo crescente durante implementação: pare e pergunte.** Se aparecer refactor adjacente não pedido, NÃO execute em silêncio. Mostre, pergunte, espere confirmação.
+22. **Quando o output de uma tool não casar com expectativa, releia o output literalmente.** Não interprete "no output" como "deu certo" — pode ser stderr vazio com exit code != 0.
+
+_**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa resposta longa, releia mentalmente — toda função/arquivo/hash/número citado tem base concreta nesta conversa (output de tool, leitura de arquivo, doc oficial)? Estou reportando o que **fiz** (verificável no diff/log) ou o que **pretendia fazer**? Há alguma afirmação que o usuário poderia ler como certeza, mas eu não verifiquei? Qualquer "sim" pra "inventei" = pare, verifique, ou reescreva.
+
+---
+
+## 7. Padrões Obrigatórios
 
 ### Backend
 
@@ -192,7 +239,7 @@
 
 ---
 
-## 7. Mapa de Sessões (referência rápida)
+## 8. Mapa de Sessões (referência rápida)
 
 | Sessão  | Foco                               | Tarefas do backlog            |
 | ------- | ---------------------------------- | ----------------------------- |
@@ -218,7 +265,7 @@
 
 ---
 
-## 8. Comandos Frequentes (a popular durante S0)
+## 9. Comandos Frequentes (a popular durante S0)
 
 ```bash
 # Dev local
@@ -241,7 +288,7 @@ cd apps/api && celery -A app.workers.celery_app worker -l info
 
 ---
 
-## 9. Pontos em Aberto (não decidir sozinho)
+## 10. Pontos em Aberto (não decidir sozinho)
 
 Quando o usuário não tiver decidido, **pergunte** antes de presumir:
 
@@ -264,7 +311,7 @@ Quando o usuário não tiver decidido, **pergunte** antes de presumir:
 
 ---
 
-## 10. Estilo de Trabalho Preferido (do usuário Leonardo)
+## 11. Estilo de Trabalho Preferido
 
 - **Sessões focadas:** implementar uma sessão (S0, S1, ...) por vez, não pular.
 - **Qualidade > velocidade:** seguir os melhores padrões de mercado, mesmo que demore mais.
@@ -276,7 +323,7 @@ Quando o usuário não tiver decidido, **pergunte** antes de presumir:
 
 ---
 
-## 11. Comunicação ao Final de Tarefa
+## 12. Comunicação ao Final de Tarefa
 
 Toda vez que Claude termina uma tarefa solicitada pelo usuário, a resposta final
 **DEVE** conter duas partes nesta ordem:
@@ -300,7 +347,7 @@ lembrar dos comandos.
 
 ---
 
-## 12. Atualização deste Arquivo
+## 13. Atualização deste Arquivo
 
 **Quando atualizar:**
 

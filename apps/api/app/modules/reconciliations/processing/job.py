@@ -70,7 +70,7 @@ class _FileEntryBalanceSnap:
 
 
 # Mensagens em PT-BR para o `error_message` da sessão. Caller (front) mostra
-# direto na UI — manter curtas e acionáveis. CLAUDE.md §6.
+# direto na UI — manter curtas e acionáveis. CLAUDE.md §7.
 _ERROR_MSG_INTERNAL = "Erro interno ao processar a conciliação. Tente novamente."
 _ERROR_MSG_SEED_MISSING = (
     "Catálogo de anomalias não inicializado. Avise o administrador (seed pendente)."
