@@ -36,6 +36,10 @@ function SidebarLink({ href, pathname, icon, children }: SidebarLinkProps) {
       href={href}
       className={cn(
         'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
+        // focus-visible:ring* alinha com o restante da UI (shadcn padrão).
+        // Sem isso, o foco do Tab no sidebar caía no outline default do
+        // navegador (1px preto), inconsistente com o resto da página.
+        'focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
         active ? 'bg-muted text-foreground font-medium' : 'text-muted-foreground hover:bg-muted',
       )}
     >

@@ -46,13 +46,16 @@ export function AnomalyTypeDeleteConfirm({
       toast.success('Tipo excluído.');
       onOpenChange(false);
     } catch (err) {
-      if (err instanceof ApiError && err.code === 'CONFLICT') {
-        toast.error('Este tipo está em uso. Desative em vez de excluir.');
-        onOpenChange(false);
-        return;
-      }
+      // CONFLICT (409): backend já manda userMessage acionável
+      // ("Este tipo está em uso por anomalias existentes — desative em
+      // vez de excluir"). Passamos direto, sem override, pra não perder
+      // a informação. Fecha o modal pra não deixar o usuário travado
+      // num botão que não vai funcionar.
       const msg = err instanceof ApiError ? err.userMessage : 'Não foi possível excluir o tipo.';
       toast.error(msg);
+      if (err instanceof ApiError && err.code === 'CONFLICT') {
+        onOpenChange(false);
+      }
     }
   }
 
