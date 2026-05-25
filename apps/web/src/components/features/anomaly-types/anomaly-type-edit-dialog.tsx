@@ -31,6 +31,7 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -114,17 +115,24 @@ export function AnomalyTypeEditDialog({
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4" noValidate>
-            <FormItem>
-              <FormLabel>Código</FormLabel>
-              <FormControl>
-                <Input
-                  value={anomalyType?.code ?? ''}
-                  readOnly
-                  disabled
-                  className="font-mono text-sm"
-                />
-              </FormControl>
-            </FormItem>
+            {/*
+              Campo readonly fora do react-hook-form — usa <Label>/<Input>
+              puros em vez de <FormItem>/<FormLabel>/<FormControl>, que
+              dependem de <FormField> pai (useFormField lê contexto que
+              não existe sem ele). Visual segue o mesmo design.
+            */}
+            <div className="space-y-2">
+              <Label htmlFor="anomaly-type-code">Código</Label>
+              <Input
+                id="anomaly-type-code"
+                value={anomalyType?.code ?? ''}
+                readOnly
+                disabled
+                className="font-mono text-sm"
+                title="Código imutável após criação — anomalias antigas o referenciam por chave."
+                aria-readonly="true"
+              />
+            </div>
 
             <FormField
               control={form.control}
