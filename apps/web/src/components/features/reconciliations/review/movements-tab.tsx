@@ -39,6 +39,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import {
   Table,
   TableBody,
@@ -49,12 +50,19 @@ import {
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
-import { useFileEntries, useOmieLancamentos, usePatchFileEntry } from '@/hooks/use-reconciliations';
+import {
+  useAllSessionAnomalies,
+  useFileEntries,
+  useOmieLancamentos,
+  usePatchFileEntry,
+} from '@/hooks/use-reconciliations';
 import { ApiError } from '@/lib/api/client';
-import type { FileEntryItem } from '@/lib/api/reconciliations';
+import type { AnomalyItem, FileEntryItem } from '@/lib/api/reconciliations';
 import { formatBRDate, formatBRL } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
+import { QualificationCell, isQualificationAnomaly } from './qualification-cell';
+import { QualificationOverrideDialog } from './qualification-override-dialog';
 import { RegistrarAnomaliaModal } from './registrar-anomalia-modal';
 import { SituationBadge } from './situation-badge';
 import { TrocarLancamentoModal } from './trocar-lancamento-modal';
@@ -114,6 +122,29 @@ export function MovementsTab({ sessionId }: MovementsTabProps) {
   const [noteDraft, setNoteDraft] = useState('');
   const [trocarFor, setTrocarFor] = useState<FileEntryItem | null>(null);
   const [anomalyFor, setAnomalyFor] = useState<FileEntryItem | null>(null);
+  const [overrideFor, setOverrideFor] = useState<FileEntryItem | null>(null);
+  const [onlySuspect, setOnlySuspect] = useState(false);
+
+  // S19 — Lookup `file_entry_id` → anomalias de qualificação pendentes.
+  // Usa hook que pagina internamente; key tem prefixo `['review', sid, 'anomalies']`
+  // pra ser invalidada por `usePatchAnomaly` / `useCreateAnomaly`.
+  const anomaliesQuery = useAllSessionAnomalies(sessionId);
+  const qualificationByEntry = useMemo(() => {
+    const map = new Map<string, AnomalyItem[]>();
+    anomaliesQuery.data?.forEach((a) => {
+      if (a.resolved) return;
+      if (!isQualificationAnomaly(a)) return;
+      const feId = a.related_file_entry?.id;
+      if (feId === undefined || feId === null) return;
+      const bucket = map.get(feId);
+      if (bucket === undefined) {
+        map.set(feId, [a]);
+      } else {
+        bucket.push(a);
+      }
+    });
+    return map;
+  }, [anomaliesQuery.data]);
 
   const patchMutation = usePatchFileEntry(sessionId);
 
@@ -145,14 +176,21 @@ export function MovementsTab({ sessionId }: MovementsTabProps) {
   }
 
   const isLoading = listQuery.isLoading;
-  const items = listQuery.data?.data ?? [];
+  // O Switch "Apenas qualificação suspeita" filtra client-side; pode esvaziar a
+  // página atual mesmo com `total > 0` no back. Pediríamos um filtro server-side
+  // pra ficar consistente, mas isso exige endpoint novo (fora do escopo S19).
+  const items = useMemo(() => {
+    const raw = listQuery.data?.data ?? [];
+    return onlySuspect ? raw.filter((e) => qualificationByEntry.has(e.id)) : raw;
+  }, [listQuery.data?.data, onlySuspect, qualificationByEntry]);
   const pagination = listQuery.data?.pagination;
   const totalPages = pagination?.totalPages ?? 0;
   const total = pagination?.total ?? 0;
   const fromIndex = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const toIndex = Math.min(page * pageSize, total);
 
-  const hasAnyFilter = situation !== 'all' || type !== 'all' || debouncedSearch.trim() !== '';
+  const hasAnyFilter =
+    situation !== 'all' || type !== 'all' || debouncedSearch.trim() !== '' || onlySuspect;
 
   return (
     <div className="space-y-4">
@@ -223,6 +261,18 @@ export function MovementsTab({ sessionId }: MovementsTabProps) {
             </SelectContent>
           </Select>
         </div>
+
+        <div className="flex items-center gap-2 pb-1">
+          <Switch
+            id="filter-only-suspect"
+            checked={onlySuspect}
+            onCheckedChange={setOnlySuspect}
+            aria-label="Apenas qualificação suspeita"
+          />
+          <label htmlFor="filter-only-suspect" className="cursor-pointer text-sm">
+            Apenas qualificação suspeita
+          </label>
+        </div>
       </div>
 
       <div className="rounded-md border">
@@ -235,6 +285,7 @@ export function MovementsTab({ sessionId }: MovementsTabProps) {
               <TableHead className="w-48">Fornecedor Omie</TableHead>
               <TableHead className="w-48">Categoria Omie</TableHead>
               <TableHead className="w-32">Situação</TableHead>
+              <TableHead className="w-20 text-center">Análise</TableHead>
               <TableHead className="w-12" aria-label="Ações" />
             </TableRow>
           </TableHeader>
@@ -243,7 +294,7 @@ export function MovementsTab({ sessionId }: MovementsTabProps) {
 
             {!isLoading && items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} className="text-muted-foreground py-10 text-center text-sm">
+                <TableCell colSpan={8} className="text-muted-foreground py-10 text-center text-sm">
                   {hasAnyFilter
                     ? 'Nenhuma movimentação encontrada com os filtros selecionados.'
                     : 'Nenhuma movimentação cadastrada.'}
@@ -257,6 +308,7 @@ export function MovementsTab({ sessionId }: MovementsTabProps) {
                 const omieData =
                   entry.omie_lancamento_id !== null ? omieById.get(entry.omie_lancamento_id) : null;
                 const amountNum = Number(entry.amount);
+                const qualificationAnomalies = qualificationByEntry.get(entry.id) ?? [];
                 return (
                   <RowFragment
                     key={entry.id}
@@ -264,6 +316,8 @@ export function MovementsTab({ sessionId }: MovementsTabProps) {
                     amountNum={amountNum}
                     supplier={omieData?.supplier ?? null}
                     category={omieData?.category ?? null}
+                    qualificationAnomalies={qualificationAnomalies}
+                    onOpenOverride={() => setOverrideFor(entry)}
                     onConfirm={() =>
                       applyPatch(entry, { user_action: 'confirm' }, 'Movimentação confirmada.')
                     }
@@ -352,6 +406,22 @@ export function MovementsTab({ sessionId }: MovementsTabProps) {
           }}
         />
       )}
+
+      {overrideFor !== null && (
+        <QualificationOverrideDialog
+          sessionId={sessionId}
+          anomalies={qualificationByEntry.get(overrideFor.id) ?? []}
+          entry={{
+            transaction_date: overrideFor.transaction_date,
+            description: overrideFor.description,
+            amount: overrideFor.amount,
+          }}
+          open={overrideFor !== null}
+          onOpenChange={(open) => {
+            if (!open) setOverrideFor(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -361,6 +431,8 @@ interface RowFragmentProps {
   amountNum: number;
   supplier: string | null;
   category: string | null;
+  qualificationAnomalies: AnomalyItem[];
+  onOpenOverride: () => void;
   onConfirm: () => void;
   onTrocar: () => void;
   onAnotar: () => void;
@@ -380,6 +452,8 @@ function RowFragment({
   amountNum,
   supplier,
   category,
+  qualificationAnomalies,
+  onOpenOverride,
   onConfirm,
   onTrocar,
   onAnotar,
@@ -424,6 +498,9 @@ function RowFragment({
         <TableCell>
           <SituationBadge situation={entry.situation} />
         </TableCell>
+        <TableCell className="text-center">
+          <QualificationCell anomalies={qualificationAnomalies} onOpenOverride={onOpenOverride} />
+        </TableCell>
         <TableCell>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -457,7 +534,7 @@ function RowFragment({
       </TableRow>
       {isEditingNote && (
         <TableRow>
-          <TableCell colSpan={7} className="bg-muted/30">
+          <TableCell colSpan={8} className="bg-muted/30">
             <div className="space-y-2">
               <Textarea
                 value={noteDraft}
@@ -487,7 +564,7 @@ function SkeletonRows({ pageSize }: { pageSize: number }) {
     <>
       {Array.from({ length: Math.min(pageSize, 8) }).map((_, i) => (
         <TableRow key={i}>
-          <TableCell colSpan={7}>
+          <TableCell colSpan={8}>
             <div className="bg-muted h-6 animate-pulse rounded" />
           </TableCell>
         </TableRow>

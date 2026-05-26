@@ -337,6 +337,51 @@ export function useAnomalies(sessionId: string, params: Omit<ListAnomaliesParams
   });
 }
 
+/**
+ * Carrega TODAS as anomalias da sessão paginando internamente (S19 FRONT 12.2).
+ *
+ * A aba Movimentações precisa de um lookup completo por `file_entry_id`
+ * pra renderizar o indicador de qualificação em cada linha — o endpoint
+ * limita `pageSize` a 50, então buscamos a primeira página e, se houver
+ * `totalPages > 1`, requisitamos o restante em paralelo.
+ *
+ * Key compartilhada o prefixo `['review', sessionId, 'anomalies', ...]` com
+ * `useAnomalies` para que `usePatchAnomaly` / `useCreateAnomaly` invalidem
+ * ambos via prefix-match do TanStack.
+ */
+const ALL_ANOMALIES_PAGE_SIZE = 50;
+
+export function useAllSessionAnomalies(sessionId: string) {
+  return useQuery<AnomalyItem[]>({
+    queryKey: ['review', sessionId, 'anomalies', 'all'],
+    queryFn: async () => {
+      const first = await listAnomalies({
+        sessionId,
+        page: 1,
+        pageSize: ALL_ANOMALIES_PAGE_SIZE,
+        resolved: 'all',
+        severity: 'all',
+      });
+      const totalPages = first.pagination.totalPages;
+      if (totalPages <= 1) return first.data;
+      const remaining = await Promise.all(
+        Array.from({ length: totalPages - 1 }, (_, i) =>
+          listAnomalies({
+            sessionId,
+            page: i + 2,
+            pageSize: ALL_ANOMALIES_PAGE_SIZE,
+            resolved: 'all',
+            severity: 'all',
+          }),
+        ),
+      );
+      return [first.data, ...remaining.map((r) => r.data)].flat();
+    },
+    enabled: sessionId.length > 0,
+    placeholderData: keepPreviousData,
+  });
+}
+
 export function useCreateAnomaly(sessionId: string) {
   const qc = useQueryClient();
   return useMutation<AnomalyItem, Error, CreateAnomalyPayload>({
