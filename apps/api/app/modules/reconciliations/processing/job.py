@@ -24,7 +24,7 @@ CLAUDE.md §3.7: nunca expor stack traces ao usuário. O worker:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -35,6 +35,7 @@ from app.core.config import Settings
 from app.core.exceptions import AppError
 from app.core.logging import get_logger
 from app.db.models import FileEntrySituation, ReconciliationOmieEntry
+from app.integrations.omie.lancamento_cache import OmieLancamentoCache
 from app.modules.clients.omie_factory import build_omie_client
 from app.modules.reconciliations.processing.anomalies import (
     _AnomalyTypeMissingError,
@@ -169,6 +170,11 @@ async def _execute_processing(
     # 2. Fetch Omie data — toda a interação com credencial em claro
     #    acontece dentro do `async with` do OmieClient.
     omie_client = build_omie_client(client, settings)
+    # Cache L1-only local ao worker (sem Redis): popula com supplier/category
+    # de cada lançamento da janela atual pra alimentar a qualificação (S19).
+    # Em prod o cache singleton da web vive em outro processo — replicar
+    # via L2 compartilhado é melhoria futura (PLANO §S19).
+    lancamento_cache = OmieLancamentoCache(redis=None)
     try:
         async with omie_client:
             realized = await fetch_realized(
@@ -183,6 +189,23 @@ async def _execute_processing(
                 omie_conta_id=omie_conta_id,
                 reference_month=reference_month,
             )
+            if settings.QUALIFICATION_ENABLED:
+                # Popula cache com supplier/category. Mesma janela expandida
+                # que `fetch_realized` consumiu — 1 chamada Omie redundante
+                # mas isolada (vide TODO no docstring do módulo).
+                try:
+                    await lancamento_cache.populate_from_extrato(
+                        client_id=client.id,
+                        omie_client=omie_client,
+                        omie_conta_id=omie_conta_id,
+                        period_start=period_start - timedelta(days=tolerance_days),
+                        period_end=period_end + timedelta(days=tolerance_days),
+                    )
+                except Exception:
+                    log.warning(
+                        "qualification_cache_populate_failed",
+                        session_id=str(session_id),
+                    )
     finally:
         # Garantia extra de fechamento se o contexto async falhou antes do __aexit__.
         await omie_client.aclose()
@@ -233,12 +256,25 @@ async def _execute_processing(
         # reusar os objetos do passo 1 (sessão fechada). Query só pelos que
         # ficaram `sem_omie` após o `apply_matches`.
         unmatched_file_entries = await _load_unmatched_file_entries(db, session_id)
-        anomaly_count = await create_structural_anomalies(
+        structural_count = await create_structural_anomalies(
             db,
             session_id=session_id,
             unmatched_file_entries=unmatched_file_entries,
             persisted_omie_entries=omie_entries,
         )
+
+        # Qualificação (S19 BACK 12.1): IA + histórico + outlier sobre os
+        # pares conciliados. Roda na MESMA transação — falha NÃO derruba
+        # o matching (try/except + log). Reusa a mesma sessão SQLAlchemy.
+        qualification_count = await _run_qualification_safely(
+            db,
+            settings=settings,
+            session_id=session_id,
+            client_id=client.id,
+            match_pairs=match_pairs_uuid,
+            cache=lancamento_cache,
+        )
+        anomaly_count = structural_count + qualification_count
 
         total = len(file_entries_for_matcher)
         conciliated = len(match_pairs_uuid)
@@ -335,6 +371,72 @@ async def _safe_mark_error(
             await repo.mark_session_error(session_id, user_message=user_message)
     except Exception:
         log.exception("reconciliation_mark_error_failed", session_id=str(session_id))
+
+
+async def _run_qualification_safely(
+    db: AsyncSession,
+    *,
+    settings: Settings,
+    session_id: UUID,
+    client_id: UUID,
+    match_pairs: list[tuple[UUID, int]],
+    cache: OmieLancamentoCache,
+) -> int:
+    """Roda a qualificação (S19) com try/except total — falha NÃO derruba.
+
+    Args:
+        db: AsyncSession ATIVA na mesma transação do matching.
+        settings: já carregado pelo caller.
+        session_id, client_id, match_pairs: contexto da sessão atual.
+        cache: cache local com lançamentos atuais já populados (supplier/category).
+
+    Returns:
+        Quantidade de anomalias de qualificação criadas. 0 quando a flag
+        está desligada, quando não há pares, ou quando algo falhou e o
+        bloco caiu no except.
+    """
+    if not settings.QUALIFICATION_ENABLED:
+        log.info("qualification_disabled", session_id=str(session_id))
+        return 0
+    if not match_pairs:
+        return 0
+    # Imports locais pra evitar carregar a dependência da Anthropic
+    # quando a feature flag tá desligada (`pnpm dev` em devs sem
+    # ANTHROPIC_API_KEY funciona normalmente).
+    from app.integrations.anthropic.client import AnthropicClient
+    from app.modules.reconciliations.qualification import qualify_session
+
+    anthropic = AnthropicClient(
+        api_key=settings.ANTHROPIC_API_KEY,
+        model=settings.ANTHROPIC_MODEL_DEFAULT,
+        timeout=settings.ANTHROPIC_TIMEOUT_SECONDS,
+    )
+    # SAVEPOINT (nested transaction): se o `qualify_session` falhar — seja
+    # numa query, num flush quebrado, ou na chamada Anthropic — dá rollback
+    # SÓ das anomalias parciais que ele inseriu, sem abortar a transação
+    # outer (matching + estruturais já persistidos). Sem savepoint, um
+    # `IntegrityError` aqui marcaria a session SQLAlchemy como "aborted"
+    # e o `update_session_after_matching` adiante falharia.
+    try:
+        async with db.begin_nested():
+            report = await qualify_session(
+                db,
+                session_id=session_id,
+                client_id=client_id,
+                match_pairs=match_pairs,
+                cache=cache,
+                anthropic_client=anthropic,
+                encryption_key=settings.OMIE_ENCRYPTION_KEY,
+            )
+        log.info(
+            "qualification_done",
+            session_id=str(session_id),
+            **report.as_log_dict(),
+        )
+        return report.suspeitas + report.incoerentes + report.padrao_quebrado + report.valor_outlier
+    except Exception:
+        log.exception("qualification_failed", session_id=str(session_id))
+        return 0
 
 
 def _get_settings_singleton() -> Settings:

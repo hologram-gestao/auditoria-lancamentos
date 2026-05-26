@@ -17,6 +17,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
+
+QualificationStatus = Literal["ok", "suspeita", "incoerente", "padrao_quebrado", "outlier"]
 
 
 @dataclass(frozen=True)
@@ -44,6 +47,14 @@ class SummarySheetData:
     anomaly_critical_unresolved: int
     generated_at_brt: datetime
     generated_by_email: str
+    # Qualificação (S19): contadores agregados. `qualif_coerentes` =
+    # file_entries conciliados SEM anomalia de qualificação na sessão.
+    # Defaults zero pra compatibilidade com fixtures pré-S19.
+    qualif_coerentes: int = 0
+    qualif_suspeitas: int = 0
+    qualif_incoerentes: int = 0
+    qualif_padrao_quebrado: int = 0
+    qualif_valor_outlier: int = 0
 
 
 @dataclass(frozen=True)
@@ -58,6 +69,10 @@ class FileEntryRow:
     category: str | None
     situation: str  # conciliado | sem_omie | ignorado
     user_note: str | None
+    # Status de qualificação (S19). `None` quando a sessão é pré-S19 ou
+    # quando a flag QUALIFICATION_ENABLED estava desligada — renderer
+    # mostra `—` nesse caso pra distinguir de "ok" explícito.
+    qualification_status: QualificationStatus | None = None
 
 
 @dataclass(frozen=True)

@@ -236,6 +236,7 @@ class TestSheet2Movimentacao:
             "Saldo",
             "Fornecedor Omie",
             "Categoria Omie",
+            "Análise",
             "Situação",
             "Observação",
         ]

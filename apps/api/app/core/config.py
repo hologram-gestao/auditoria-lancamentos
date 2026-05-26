@@ -139,6 +139,16 @@ class Settings(BaseSettings):
     MAX_UPLOAD_SIZE_MB: int = 20
     PARSE_TIMEOUT_SECONDS: int = 60
 
+    # ---------- Qualificação (S19) ----------
+    # Ativa a etapa de qualificação semântica/histórica/outlier no pipeline
+    # (BACK 12.1). Default `True`. Setar `False` para desligar rapidamente
+    # se a Anthropic ficar fora ou se houver picos de custo — o matching
+    # base segue funcionando sem essa camada.
+    QUALIFICATION_ENABLED: bool = Field(
+        default=True,
+        description="Ativa análise de qualificação no pipeline de conciliação (S19).",
+    )
+
     # ---------- Observabilidade ----------
     SENTRY_DSN: str | None = None
     SENTRY_TRACES_SAMPLE_RATE: float = 0.1

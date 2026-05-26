@@ -105,6 +105,18 @@ _SITUATION_LABEL = {
 # cache L2 expirou). "—" (em-dash) é mais legível que "N/D" pro analista.
 _PLACEHOLDER = "—"
 
+# Ícones da coluna "Análise" (aba 2) — agrupa o pior status por linha.
+# `ok` → verde, `suspeita` e `padrao_quebrado` → amarelo, `incoerente`
+# → vermelho, `outlier` → amarelo (severity INFO, mesma cor que suspeita).
+# `None` (sessão pré-S19 / flag off) → placeholder.
+_QUALIFICATION_ICON = {
+    "ok": "✅",
+    "suspeita": "⚠️",
+    "padrao_quebrado": "⚠️",
+    "outlier": "⚠️",
+    "incoerente": "❌",
+}
+
 
 # ======================================================================
 # Entry point
@@ -255,8 +267,28 @@ def _build_sheet1_summary(ws: Worksheet, data: SummarySheetData) -> None:
             value_cell.fill = FILL_CRITICAL_UNRESOLVED
             value_cell.font = FONT_CRITICAL_UNRESOLVED
 
+    # ---- Qualificação (S19) ----------------------------------------------
+    # Sempre renderizamos o bloco — mesmo em sessões pré-S19 ou com a
+    # flag desligada, todos os contadores vêm zero (default do dataclass)
+    # e o analista percebe que a camada não foi executada.
+    qualif_start = anomalies_start + len(breakdown) + 2
+    ws.cell(row=qualif_start, column=1, value="Qualificação").font = FONT_SUBTITLE
+    ws.merge_cells(start_row=qualif_start, start_column=1, end_row=qualif_start, end_column=4)
+
+    qualif_breakdown = [
+        ("Coerentes", data.qualif_coerentes),
+        ("Suspeitas", data.qualif_suspeitas),
+        ("Incoerentes", data.qualif_incoerentes),
+        ("Padrão quebrado", data.qualif_padrao_quebrado),
+        ("Valor outlier", data.qualif_valor_outlier),
+    ]
+    for offset, (label, value) in enumerate(qualif_breakdown, start=1):
+        row = qualif_start + offset
+        ws.cell(row=row, column=1, value=label).font = FONT_BOLD
+        ws.cell(row=row, column=2, value=value)
+
     # ---- Rodapé ----------------------------------------------------------
-    footer_row = anomalies_start + len(breakdown) + 2
+    footer_row = qualif_start + len(qualif_breakdown) + 2
     footer_cell = ws.cell(
         row=footer_row,
         column=1,
@@ -290,6 +322,7 @@ _SHEET2_HEADERS = [
     ("Saldo", 16),
     ("Fornecedor Omie", 32),
     ("Categoria Omie", 28),
+    ("Análise", 12),
     ("Situação", 18),
     ("Observação", 36),
 ]
@@ -309,12 +342,18 @@ def _build_sheet2_movimentacao(ws: Worksheet, rows: Sequence[FileEntryRow]) -> N
         balance_cell.number_format = NUMBER_FORMAT_BRL
         ws.cell(row=excel_row, column=5, value=row.supplier or _PLACEHOLDER)
         ws.cell(row=excel_row, column=6, value=row.category or _PLACEHOLDER)
+        analysis_value = (
+            _QUALIFICATION_ICON.get(row.qualification_status, _PLACEHOLDER)
+            if row.qualification_status is not None
+            else _PLACEHOLDER
+        )
+        ws.cell(row=excel_row, column=7, value=analysis_value).alignment = ALIGN_CENTER
         ws.cell(
             row=excel_row,
-            column=7,
+            column=8,
             value=_SITUATION_LABEL.get(row.situation, row.situation),
         ).alignment = ALIGN_CENTER
-        ws.cell(row=excel_row, column=8, value=row.user_note or "").alignment = ALIGN_LEFT
+        ws.cell(row=excel_row, column=9, value=row.user_note or "").alignment = ALIGN_LEFT
 
         fill = fill_for_situation(row.situation)
         if fill is not None:

@@ -122,6 +122,43 @@ ANOMALY_TYPES_SEED: list[dict[str, Any]] = [
             "ser refinada para uma categoria mais específica do plano de contas."
         ),
     },
+    # S19 — Qualificação inteligente de lançamentos (BACK 12.1).
+    {
+        "code": "qualificacao_suspeita",
+        "name": "Qualificação suspeita (IA)",
+        "severity": AnomalySeverity.MODERATE,
+        "description": (
+            "Categoria ou fornecedor do Omie pode estar incoerente com a descrição "
+            "do extrato (análise IA, confiança média)."
+        ),
+    },
+    {
+        "code": "qualificacao_incoerente",
+        "name": "Qualificação incoerente (IA)",
+        "severity": AnomalySeverity.CRITICAL,
+        "description": (
+            "Categoria ou fornecedor do Omie diverge claramente da descrição do "
+            "extrato (análise IA, alta confiança)."
+        ),
+    },
+    {
+        "code": "padrao_quebrado",
+        "name": "Padrão histórico quebrado",
+        "severity": AnomalySeverity.INFO,
+        "description": (
+            "Categoria atual difere da mais frequente para este fornecedor nas "
+            "últimas 3 conciliações do cliente."
+        ),
+    },
+    {
+        "code": "valor_outlier",
+        "name": "Valor fora do padrão",
+        "severity": AnomalySeverity.INFO,
+        "description": (
+            "Valor da movimentação está fora do padrão (>3 desvios-padrão) histórico "
+            "para este fornecedor (amostra >= 5 conciliações)."
+        ),
+    },
 ]
 
 
@@ -149,7 +186,13 @@ async def seed_admin(session: AsyncSession) -> None:
 
 
 async def seed_anomaly_types(session: AsyncSession) -> None:
-    """Insere/atualiza catálogo canônico de 8 tipos de anomalia."""
+    """Insere/atualiza catálogo canônico de tipos de anomalia.
+
+    Idempotente por `code`: novos tipos são adicionados sem duplicar os
+    pré-existentes. Versão original tinha 8 tipos; S19 (BACK 12.1)
+    adicionou +4 (qualificacao_suspeita, qualificacao_incoerente,
+    padrao_quebrado, valor_outlier).
+    """
     inserted = 0
     skipped = 0
     for item in ANOMALY_TYPES_SEED:

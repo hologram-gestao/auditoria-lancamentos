@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from calendar import monthrange
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -47,8 +48,15 @@ from app.modules.reconciliations.export.schemas import (
     ExportPayload,
     FileEntryRow,
     OmieDivergenceRow,
+    QualificationStatus,
     SemOmieRow,
     SummarySheetData,
+)
+from app.modules.reconciliations.qualification.service import (
+    ANOMALY_CODE_PADRAO_QUEBRADO,
+    ANOMALY_CODE_QUALIF_INCOERENTE,
+    ANOMALY_CODE_QUALIF_SUSPEITA,
+    ANOMALY_CODE_VALOR_OUTLIER,
 )
 
 if TYPE_CHECKING:
@@ -144,6 +152,14 @@ class ExportService:
             1 for e in file_entries if e.situation == FileEntrySituation.IGNORADO.value
         )
 
+        # Aggrega o status de qualificação pior por file_entry_id (S19).
+        # Map: file_entry_id -> QualificationStatus | None
+        qualif_status_by_entry = _compute_qualification_status_by_entry(anomalies_rows)
+        qualif_counters = _compute_qualification_counters(
+            file_entries=file_entries,
+            status_by_entry=qualif_status_by_entry,
+        )
+
         summary = self._build_summary(
             client=client,
             session=session,
@@ -152,9 +168,10 @@ class ExportService:
             ignored_count=ignored_count,
             anomalies=anomalies_rows,
             current_user_email=current_user_email,
+            qualif_counters=qualif_counters,
         )
 
-        file_entry_rows = self._build_file_entry_rows(file_entries, cached)
+        file_entry_rows = self._build_file_entry_rows(file_entries, cached, qualif_status_by_entry)
         omie_div_rows = self._build_omie_divergence_rows(omie_entries, cached)
         sem_omie_rows = self._build_sem_omie_rows(file_entries)
         anomaly_rows = self._build_anomaly_rows(
@@ -351,6 +368,7 @@ class ExportService:
         ignored_count: int,
         anomalies: list[tuple[ReconciliationAnomaly, AnomalyType]],
         current_user_email: str,
+        qualif_counters: _QualifCounters,
     ) -> SummarySheetData:
         anomaly_critical = sum(
             1 for _, atype in anomalies if atype.severity == AnomalySeverity.CRITICAL.value
@@ -390,12 +408,18 @@ class ExportService:
             anomaly_critical_unresolved=anomaly_critical_unresolved,
             generated_at_brt=datetime.now(UTC).astimezone(_BRT),
             generated_by_email=current_user_email,
+            qualif_coerentes=qualif_counters.coerentes,
+            qualif_suspeitas=qualif_counters.suspeitas,
+            qualif_incoerentes=qualif_counters.incoerentes,
+            qualif_padrao_quebrado=qualif_counters.padrao_quebrado,
+            qualif_valor_outlier=qualif_counters.valor_outlier,
         )
 
     def _build_file_entry_rows(
         self,
         file_entries: list[ReconciliationFileEntry],
         cached: dict[int, OmieLancamentoData],
+        qualif_status_by_entry: dict[UUID, QualificationStatus],
     ) -> list[FileEntryRow]:
         rows: list[FileEntryRow] = []
         for entry in file_entries:
@@ -412,6 +436,14 @@ class ExportService:
                 if data is not None:
                     supplier = data.supplier
                     category = data.category
+            # Status de qualificação: explícito "ok" pra conciliados sem
+            # anomalia de qualificação (analista lê como "IA validou");
+            # `None` pra sem_omie/ignorado (qualificação não rodou nesses).
+            qualif: QualificationStatus | None
+            if entry.situation == FileEntrySituation.CONCILIADO.value:
+                qualif = qualif_status_by_entry.get(entry.id, "ok")
+            else:
+                qualif = None
             rows.append(
                 FileEntryRow(
                     transaction_date=entry.transaction_date,
@@ -422,6 +454,7 @@ class ExportService:
                     category=category,
                     situation=entry.situation,
                     user_note=note,
+                    qualification_status=qualif,
                 )
             )
         return rows
@@ -630,6 +663,114 @@ def _format_brl(amount: Decimal) -> str:
 # ----------------------------------------------------------------------
 # Funções utilitárias usadas pela rota — RBAC e status já cuidados nela;
 # aqui só exposes o builder + checagem de status compatível com export.
+# ----------------------------------------------------------------------
+
+
+# ----------------------------------------------------------------------
+# Helpers de qualificação (S19)
+# ----------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class _QualifCounters:
+    """Contadores agregados pra aba 1 do Excel."""
+
+    coerentes: int
+    suspeitas: int
+    incoerentes: int
+    padrao_quebrado: int
+    valor_outlier: int
+
+
+# Ordem do PIOR pro melhor — usado pra agregar a `pior anomalia` quando
+# um mesmo file_entry tem múltiplas. `incoerente` > `outlier` ≈
+# `padrao_quebrado` > `suspeita`. Outlier/padrão_quebrado têm severity
+# INFO no catálogo; usamos `padrao_quebrado` antes pq mexer no
+# fornecedor sugere classificação errada (mais grave do que valor).
+_QUALIF_STATUS_RANK: dict[str, int] = {
+    "incoerente": 0,
+    "padrao_quebrado": 1,
+    "outlier": 2,
+    "suspeita": 3,
+}
+
+
+def _compute_qualification_status_by_entry(
+    anomalies: list[tuple[ReconciliationAnomaly, AnomalyType]],
+) -> dict[UUID, QualificationStatus]:
+    """Pra cada file_entry com anomalia de qualificação AI, escolhe a pior.
+
+    Anomalias sem `file_entry_id` (ex: estruturais `missing_in_file`) são
+    ignoradas — não são de qualificação.
+    """
+    by_entry: dict[UUID, QualificationStatus] = {}
+    for anomaly, atype in anomalies:
+        if anomaly.file_entry_id is None:
+            continue
+        status = _code_to_qualif_status(atype.code)
+        if status is None:
+            continue
+        current = by_entry.get(anomaly.file_entry_id)
+        if current is None or _QUALIF_STATUS_RANK[status] < _QUALIF_STATUS_RANK[current]:
+            by_entry[anomaly.file_entry_id] = status
+    return by_entry
+
+
+def _code_to_qualif_status(code: str) -> QualificationStatus | None:
+    """Mapeia `anomaly_type.code` → `QualificationStatus` da aba 2.
+
+    `None` quando o code não é de qualificação (estrutural ou pré-S19).
+    """
+    if code == ANOMALY_CODE_QUALIF_INCOERENTE:
+        return "incoerente"
+    if code == ANOMALY_CODE_QUALIF_SUSPEITA:
+        return "suspeita"
+    if code == ANOMALY_CODE_PADRAO_QUEBRADO:
+        return "padrao_quebrado"
+    if code == ANOMALY_CODE_VALOR_OUTLIER:
+        return "outlier"
+    return None
+
+
+def _compute_qualification_counters(
+    *,
+    file_entries: list[ReconciliationFileEntry],
+    status_by_entry: dict[UUID, QualificationStatus],
+) -> _QualifCounters:
+    """Contadores agregados pra Aba 1.
+
+    - `coerentes` = file_entries CONCILIADAS sem flag (qualificação rodou
+      e disse "ok" implicitamente). Inclui entries sem flag mesmo quando
+      a sessão é pré-S19 — nesse caso todos viram "coerentes" e o
+      analista entende pela ausência de outras anomalias.
+    - Outros = contagem por código.
+    """
+    suspeitas = sum(1 for s in status_by_entry.values() if s == "suspeita")
+    incoerentes = sum(1 for s in status_by_entry.values() if s == "incoerente")
+    padrao = sum(1 for s in status_by_entry.values() if s == "padrao_quebrado")
+    outlier = sum(1 for s in status_by_entry.values() if s == "outlier")
+    conciliados = sum(1 for e in file_entries if e.situation == FileEntrySituation.CONCILIADO.value)
+    # `coerentes` = conciliados que NÃO têm anomalia de qualificação.
+    # Um conciliado pode ter mais de uma flag mas só conta 1x aqui.
+    flagged_ids: set[UUID] = set(status_by_entry.keys())
+    coerentes = sum(
+        1
+        for e in file_entries
+        if e.situation == FileEntrySituation.CONCILIADO.value and e.id not in flagged_ids
+    )
+    # Sanity check (não asserta — só pra teste de regressão futura).
+    _ = conciliados
+    return _QualifCounters(
+        coerentes=coerentes,
+        suspeitas=suspeitas,
+        incoerentes=incoerentes,
+        padrao_quebrado=padrao,
+        valor_outlier=outlier,
+    )
+
+
+# ----------------------------------------------------------------------
+# Loaders
 # ----------------------------------------------------------------------
 
 
