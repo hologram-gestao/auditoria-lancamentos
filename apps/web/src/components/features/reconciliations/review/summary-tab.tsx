@@ -3,16 +3,16 @@
 /**
  * Aba 4 — Resumo (FRONT 9.17, Doc §14.7).
  *
- * Decisão pragmática (briefing §17): a S11 não tem endpoint dedicado de
- * saldos consolidados (entrega S14). Aqui mostramos:
- *   - Placeholder explícito para a tabela de saldos (substituído por
- *     dados reais quando S14 chegar).
- *   - Indicadores agregados via lista paginada (pedimos pageSize=50, 1
- *     página) — para o MVP de demo, isso cobre clientes com até 50
- *     movimentações. Para volumes maiores, deixamos um aviso explícito
- *     e o `% conciliado` cai pra estimativa a partir dos contadores.
- *   - Breakdown de anomalias a partir de uma listagem ampla
- *     (`pageSize=50`, sem filtro). TODO em S14: endpoint agregado.
+ * Renderiza:
+ *   - Saldos consolidados (saldo inicial, saldo final arquivo, saldo final
+ *     Omie, diferença + status Conferido/Divergente). Vem do
+ *     `SessionDetail` calculado pelo worker pós-matching
+ *     (`processing/balances.py`).
+ *   - Indicadores agregados via lista paginada (pageSize=50, 1 página) —
+ *     cobre clientes com até 50 movimentações por categoria. Acima disso,
+ *     mostra aviso explícito de truncamento.
+ *   - Breakdown de anomalias via listagem ampla (`pageSize=50`, sem
+ *     filtro). Para sessões com >50 anomalias, breakdown fica truncado.
  *
  * NÃO usa charts. Texto + tabela apenas (briefing §"O que NÃO fazer").
  */
@@ -29,20 +29,55 @@ interface SummaryCounts {
   anomaly: number;
 }
 
+interface SummaryBalances {
+  /** Decimal serializado como string. `null` em sessões legadas. */
+  start: string | null;
+  endFile: string | null;
+  endOmie: string | null;
+  difference: string | null;
+}
+
 interface SummaryTabProps {
   sessionId: string;
   totalFileEntries: number;
   counts: SummaryCounts;
   referenceMonthLabel: string;
+  /** undefined enquanto o `useSessionDetail` ainda carrega. */
+  balances: SummaryBalances | undefined;
 }
 
 const AGGREGATION_LIMIT = 50;
+
+/**
+ * Mesma regra da aba 1 do Excel (CLAUDE.md §5.1: tolerância de R$ 0,01).
+ * Diferença ≤ R$ 0,01 é "Conferido"; acima é "Divergente".
+ */
+function resolveBalanceStatus(difference: string | null): {
+  label: string;
+  className: string;
+} {
+  if (difference === null) {
+    return { label: 'Indisponível', className: 'text-muted-foreground' };
+  }
+  const value = Number(difference);
+  if (Math.abs(value) <= 0.01) {
+    return {
+      label: 'Conferido',
+      className: 'text-emerald-700 dark:text-emerald-300',
+    };
+  }
+  return {
+    label: 'Divergente',
+    className: 'text-red-700 dark:text-red-300 font-semibold',
+  };
+}
 
 export function SummaryTab({
   sessionId,
   totalFileEntries,
   counts,
   referenceMonthLabel,
+  balances,
 }: SummaryTabProps) {
   // Pega uma página de 50 com TODAS as situações pra calcular créditos/débitos
   // somados localmente. Acima de 50, a soma fica subestimada → mostramos aviso.
@@ -91,13 +126,53 @@ export function SummaryTab({
     <div className="space-y-6">
       <section className="space-y-2">
         <h2 className="text-lg font-semibold">Saldos consolidados</h2>
-        <div className="bg-muted/40 rounded-md border border-dashed p-4 text-sm">
-          <p className="text-muted-foreground">
-            Saldos consolidados (saldo anterior, saldo arquivo, saldo Omie, diferença) serão
-            exibidos após a entrega da S14. Esta tela já reflete os contadores e indicadores
-            agregados disponíveis hoje.
-          </p>
-        </div>
+        {balances === undefined ? (
+          <div className="text-muted-foreground bg-muted/40 rounded-md border border-dashed p-4 text-sm">
+            Carregando saldos…
+          </div>
+        ) : (
+          (() => {
+            const status = resolveBalanceStatus(balances.difference);
+            return (
+              <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <Indicator
+                  label="Saldo inicial"
+                  value={
+                    balances.start === null ? 'Indisponível' : formatBRL(Number(balances.start))
+                  }
+                />
+                <Indicator
+                  label="Saldo final (arquivo)"
+                  value={
+                    balances.endFile === null ? 'Indisponível' : formatBRL(Number(balances.endFile))
+                  }
+                />
+                <Indicator
+                  label="Saldo final (Omie)"
+                  value={
+                    balances.endOmie === null ? 'Indisponível' : formatBRL(Number(balances.endOmie))
+                  }
+                  hint={
+                    balances.endOmie === null
+                      ? 'Sessão legada — reprocessar para calcular'
+                      : undefined
+                  }
+                />
+                <div className="bg-card space-y-0.5 rounded-md border p-3">
+                  <dt className="text-muted-foreground text-xs">Status</dt>
+                  <dd className={`text-xl font-semibold tabular-nums ${status.className}`}>
+                    {status.label}
+                  </dd>
+                  {balances.difference !== null && status.label === 'Divergente' && (
+                    <p className="text-muted-foreground text-[10px]">
+                      Diferença: {formatBRL(Number(balances.difference))}
+                    </p>
+                  )}
+                </div>
+              </dl>
+            );
+          })()
+        )}
       </section>
 
       <section className="space-y-2">
@@ -133,7 +208,8 @@ export function SummaryTab({
         {anomaliesTruncated && (
           <p className="text-muted-foreground text-xs">
             Há mais de {AGGREGATION_LIMIT} anomalias nesta sessão; o breakdown acima considera
-            apenas as {AGGREGATION_LIMIT} primeiras. Endpoint agregado dedicado entra na S14.
+            apenas as {AGGREGATION_LIMIT} primeiras. Use a aba &quot;Anomalias&quot; para a lista
+            completa paginada.
           </p>
         )}
       </section>

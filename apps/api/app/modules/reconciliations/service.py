@@ -226,4 +226,8 @@ class ReconciliationService:
             omie_sem_arquivo_count=session_obj.omie_sem_arquivo_count,
             anomaly_count=session_obj.anomaly_count,
             error_message=session_obj.error_message,
+            balance_start=session_obj.balance_start,
+            balance_end_file=session_obj.balance_end_file,
+            balance_end_omie=session_obj.balance_end_omie,
+            balance_difference=session_obj.balance_difference,
         )

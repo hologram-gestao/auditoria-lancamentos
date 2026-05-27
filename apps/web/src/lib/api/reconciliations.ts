@@ -256,6 +256,15 @@ export interface SessionDetail {
    * com status='error').
    */
   error_message: string | null;
+  /**
+   * Saldos agregados calculados pós-matching. Decimal serializado como
+   * `string` (mesma convenção do `amount` em FileEntry). `null` em sessões
+   * legadas processadas antes do balance fix; UI exibe "Indisponível".
+   */
+  balance_start: string | null;
+  balance_end_file: string | null;
+  balance_end_omie: string | null;
+  balance_difference: string | null;
 }
 
 export async function getSessionDetail(sessionId: string): Promise<SessionDetail> {

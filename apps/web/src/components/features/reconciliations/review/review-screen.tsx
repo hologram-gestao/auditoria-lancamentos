@@ -192,6 +192,16 @@ export function ReviewScreen({ clientId, sessionId }: ReviewScreenProps) {
             totalFileEntries={totalFileEntries}
             counts={counts}
             referenceMonthLabel={referenceMonthLabel}
+            balances={
+              sessionInfo === undefined
+                ? undefined
+                : {
+                    start: sessionInfo.balance_start,
+                    endFile: sessionInfo.balance_end_file,
+                    endOmie: sessionInfo.balance_end_omie,
+                    difference: sessionInfo.balance_difference,
+                  }
+            }
           />
         </TabsContent>
       </Tabs>

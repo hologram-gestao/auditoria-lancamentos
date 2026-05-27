@@ -189,6 +189,13 @@ class SessionDetailPayload(BaseModel):
     # Front usa pra renderizar a tela de erro com `error_message` legível
     # antes de oferecer o botão "Tentar novamente".
     error_message: str | None = None
+    # Saldos agregados da sessão. Calculados pós-matching em
+    # `processing/balances.py` (commit cad9dbb). NULL em sessões legadas
+    # processadas antes do backfill; front mostra "Indisponível" nessas.
+    balance_start: Decimal | None = None
+    balance_end_file: Decimal | None = None
+    balance_end_omie: Decimal | None = None
+    balance_difference: Decimal | None = None
 
 
 class SessionDetailResponse(BaseModel):
