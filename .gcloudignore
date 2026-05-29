@@ -1,0 +1,56 @@
+# `.gcloudignore` — exclui do upload pra Cloud Build.
+# Sintaxe igual `.gitignore`. NÃO usado em runtime — só pra build.
+# (Dockerfile.api e Dockerfile.web fazem `COPY apps/api/...` e `COPY .`,
+# então mantemos `apps/`, `packages/`, manifestos da raiz e Dockerfiles.)
+
+# VCS / metadata
+.git/
+.github/
+.husky/
+.gitignore
+.gitattributes
+.editorconfig
+
+# Caches / build outputs locais
+node_modules/
+**/node_modules/
+**/.venv/
+.venv/
+**/__pycache__/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.turbo/
+**/coverage/
+**/dist/
+**/build/
+**/.next/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Secrets / env local — defesa em profundidade (Dockerfile não copia .env)
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+
+# Docs / arquivos de dev pesados — não usados nos builds Cloud Run
+Docs/
+README.md
+docker-compose*.yml
+.claude/
+CLAUDE.md
+
+# Logs
+*.log
+*.tmp
+
+# Misc
+*.tsbuildinfo
+.coverage
