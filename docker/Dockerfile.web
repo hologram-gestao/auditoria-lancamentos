@@ -32,6 +32,14 @@ COPY --from=deps /workspace/packages/shared-types/node_modules ./packages/shared
 # Código
 COPY . .
 
+# Variáveis `NEXT_PUBLIC_*` são embutidas no bundle durante `next build`
+# — runtime env var não funciona pra elas. Por isso recebemos como
+# build-arg e seta como ENV antes do build rodar.
+# Default `http://localhost:8000` casa com `next.config.mjs:8` (dev local).
+# Em prod, CI passa `--build-arg NEXT_PUBLIC_API_URL=https://api.....`.
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+
 ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN pnpm --filter @auditoria/web build
@@ -45,20 +53,29 @@ WORKDIR /app
 
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
-    PORT=3000
+    PORT=8080 \
+    HOSTNAME=0.0.0.0
 
 RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
 
-# Aproveita o output standalone do Next.js (configurar em next.config se quiser)
+# Aproveita o output standalone do Next.js (next.config.mjs:43)
 COPY --from=builder --chown=nextjs:nodejs /workspace/apps/web/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /workspace/apps/web/.next/static ./apps/web/.next/static
-COPY --from=builder --chown=nextjs:nodejs /workspace/apps/web/public ./apps/web/public
+# Nota: apps/web/public/ NÃO existe no projeto (sem static assets).
+# Se um dia adicionar (ex: favicon, imagens), descomenta a linha abaixo:
+# COPY --from=builder --chown=nextjs:nodejs /workspace/apps/web/public ./apps/web/public
 
 USER nextjs
 
-EXPOSE 3000
+# Cloud Run injeta PORT=8080 por default — alinhamento com a API.
+EXPOSE 8080
 
+# wget usa shell form (sem []) — `${PORT}` expande no /bin/sh. Usar 127.0.0.1
+# em vez de `localhost` porque Alpine resolve `localhost` pra IPv6 (`::1`)
+# primeiro, e Next.js só binda em IPv4 (`0.0.0.0`).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget --quiet --tries=1 --spider http://localhost:3000 || exit 1
+    CMD wget --quiet --tries=1 --spider "http://127.0.0.1:${PORT:-8080}/" || exit 1
 
+# Exec form: `node` vira PID 1 direto — SIGTERM do Cloud Run vai direto pro
+# server.js. Next.js standalone server lê `PORT` da env automaticamente.
 CMD ["node", "apps/web/server.js"]

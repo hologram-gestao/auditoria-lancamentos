@@ -63,10 +63,14 @@ COPY --from=builder --chown=app:app /app /app
 
 USER app
 
-EXPOSE 8000
+# Cloud Run injeta PORT=8080 por default; o fallback alinha com o EXPOSE.
+EXPOSE 8080
 
-# Healthcheck (duplica o do compose para quando rodar solto)
+# Healthcheck usa $PORT pra acompanhar a porta real (curl já instalado no
+# runtime stage). `-fsS` falha em status != 2xx sem barulhar no log.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()" || exit 1
+    CMD curl -fsS "http://localhost:${PORT:-8080}/health" >/dev/null || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Shell form com `exec` pra: (1) expandir $PORT e (2) substituir o PID do shell
+# pelo uvicorn — assim SIGTERM do Cloud Run chega direto no app (shutdown limpo).
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
