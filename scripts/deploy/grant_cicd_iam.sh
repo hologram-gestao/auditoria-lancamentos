@@ -30,13 +30,18 @@ echo ""
 # ------------------------------------------------------------------
 # Roles para os service accounts impersonados via WIF (rodam o workflow)
 # ------------------------------------------------------------------
-# - cloudbuild.builds.editor: dispara `gcloud builds submit`.
-# - run.developer:            faz `services update` e `jobs update/execute`.
-# - iam.serviceAccountUser:   permite Cloud Run deploy "as" essa SA
-#                             (revisão nova precisa rodar com a SA do service).
+# - cloudbuild.builds.builder: dispara `gcloud builds submit`. NÃO usar
+#                              o `editor` (insuficiente): workflow do
+#                              GitHub Actions sobe source pro bucket
+#                              <project>_cloudbuild, o que exige
+#                              serviceusage.services.use + storage.*
+#                              que só vem com `builder`.
+# - run.developer:             faz `services update` e `jobs update/execute`.
+# - iam.serviceAccountUser:    permite Cloud Run deploy "as" essa SA
+#                              (revisão nova precisa rodar com a SA do service).
 
 GRANT_ROLES=(
-  "roles/cloudbuild.builds.editor"
+  "roles/cloudbuild.builds.builder"
   "roles/run.developer"
 )
 
