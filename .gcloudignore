@@ -42,7 +42,7 @@ Thumbs.db
 
 # Docs / arquivos de dev pesados — não usados nos builds Cloud Run
 Docs/
-README.md
+/README.md
 docker-compose*.yml
 .claude/
 CLAUDE.md

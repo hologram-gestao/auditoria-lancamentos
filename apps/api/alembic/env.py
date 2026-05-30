@@ -34,7 +34,10 @@ if config.config_file_name is not None:
 
 # Injeta URL do DB vinda das Settings (já vem com driver async +psycopg)
 _settings = get_settings()
-config.set_main_option("sqlalchemy.url", _settings.DATABASE_URL)
+# Escapa % → %% porque o ConfigParser interno do alembic aplica
+# interpolação BasicInterpolation em set_main_option — senhas
+# URL-encoded (%3D, %2B etc) quebram com ValueError.
+config.set_main_option("sqlalchemy.url", _settings.DATABASE_URL.replace("%", "%%"))
 
 target_metadata = Base.metadata
 
