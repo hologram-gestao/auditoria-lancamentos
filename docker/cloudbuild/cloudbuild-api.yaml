@@ -1,0 +1,32 @@
+# Cloud Build config for API image.
+# Used by:
+#   - manual deploy (gcloud builds submit --config=...)
+#   - .github/workflows/deploy-dev.yml
+#   - .github/workflows/deploy-prod.yml (when wired up)
+#
+# DOCKER_BUILDKIT=1 é obrigatório porque Dockerfile.api usa
+# `RUN --mount=type=cache` (cache do uv) — recurso BuildKit-only.
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    env:
+      - 'DOCKER_BUILDKIT=1'
+    args:
+      [
+        'build',
+        '-f',
+        'docker/Dockerfile.api',
+        '-t',
+        'southamerica-east1-docker.pkg.dev/${PROJECT_ID}/auditoria/auditoria-api:${_TAG}',
+        '.',
+      ]
+
+images:
+  - 'southamerica-east1-docker.pkg.dev/${PROJECT_ID}/auditoria/auditoria-api:${_TAG}'
+
+substitutions:
+  _TAG: dev
+
+options:
+  # Sem isso Cloud Build tenta criar bucket GCS pra logs e falha em
+  # projetos sem o default bucket habilitado.
+  logging: CLOUD_LOGGING_ONLY

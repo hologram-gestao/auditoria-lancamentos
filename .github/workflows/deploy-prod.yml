@@ -1,0 +1,75 @@
+name: Deploy to Prod
+
+# ESQUELETO — não-funcional até infra prod existir.
+# Bloqueado por workflow_dispatch + tag check pra evitar disparo acidental.
+# Quando criar services Cloud Run *-prod (auditoria-api-prod, auditoria-web-prod,
+# auditoria-api-migrate-prod), e configurar a variable API_URL_PROD no
+# environment 'production' do GitHub, é só remover o `if: false` abaixo.
+#
+# Diferenças vs deploy-dev.yml:
+#   - Trigger: tag `v*.*.*` (semver) ou workflow_dispatch.
+#   - Environment 'production' tem required reviewer (você).
+#   - Services: *-prod ao invés de *-dev.
+#   - Secret name pattern: *-prod (db-url, jwt-secret, etc).
+#
+# Pra ativar de fato no futuro:
+#   1. Criar services Cloud Run prod (mesmo pattern que dev).
+#   2. Setar vars.API_URL_PROD em Settings → Environments → production → Variables.
+#   3. Remover `if: false` dos jobs.
+#   4. (opcional) Adicionar step de smoke test pós-deploy.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'What to deploy'
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - api
+          - web
+      run_migrations:
+        description: 'Run migrations'
+        required: true
+        type: boolean
+        default: true
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  REGION: southamerica-east1
+  PROJECT_ID: liberdade-assessoria
+  AR_HOST: southamerica-east1-docker.pkg.dev
+  AR_REPO: auditoria
+  API_SERVICE: auditoria-api-prod
+  WEB_SERVICE: auditoria-web-prod
+  MIGRATE_JOB: auditoria-api-migrate-prod
+
+jobs:
+  guard:
+    name: Block until prod infra exists
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "::error::Prod infra ainda não foi criada."
+          echo "Ver comentários no topo de deploy-prod.yml pra ativar."
+          exit 1
+
+  # Quando ativar de verdade, copia a estrutura do deploy-dev.yml com:
+  #   - service_account: ${{ secrets.GCP_API_SERVICE_ACCOUNT }} (mesmo SA — RBAC
+  #     do SA é controlado por bindings de secret, não por nome)
+  #   - --substitutions=_TAG=$GITHUB_REF_NAME (ex: v1.2.3)
+  #   - imagens prod com tag semver: auditoria-api:v1.2.3 (E também atualizar :latest)
+  #   - env environment: production  → exige reviewer

@@ -1,0 +1,281 @@
+name: Deploy to Dev
+
+# Estratégia:
+#   push em main           → roda só nos services cujo path mudou (paths-filter).
+#   workflow_dispatch      → escolhe target (all/api/web) e se roda migrations.
+#
+# Ordem dentro do workflow (quando ambos rodam):
+#   build-api → migrate → deploy-api    e em paralelo:    build-web → deploy-web
+#                                              ↑
+#                                              deploy-web aguarda deploy-api
+#                                              (success OU skipped) pra evitar
+#                                              Web fresco apontando pra API velha.
+#
+# Concurrency: cancel-in-progress=false. Deploy nunca se cancela no meio —
+# evita schema half-applied ou revisão zumbi.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/api/**'
+      - 'apps/web/**'
+      - 'packages/**'
+      - 'docker/**'
+      - 'pnpm-lock.yaml'
+      - 'package.json'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/deploy-dev.yml'
+
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'What to deploy'
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - api
+          - web
+      run_migrations:
+        description: 'Run migrations (only when target includes api)'
+        required: true
+        type: boolean
+        default: true
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # WIF
+
+env:
+  REGION: southamerica-east1
+  PROJECT_ID: liberdade-assessoria
+  AR_HOST: southamerica-east1-docker.pkg.dev
+  AR_REPO: auditoria
+  API_SERVICE: auditoria-api-dev
+  WEB_SERVICE: auditoria-web-dev
+  MIGRATE_JOB: auditoria-api-migrate-dev
+
+jobs:
+  # ------------------------------------------------------------------
+  # Path filter — decide quais frentes (api/web) rodam em push events
+  # ------------------------------------------------------------------
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      web: ${{ steps.filter.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'apps/api/**'
+              - 'docker/Dockerfile.api'
+              - 'docker/cloudbuild/cloudbuild-api.yaml'
+            web:
+              - 'apps/web/**'
+              - 'packages/shared-types/**'
+              - 'docker/Dockerfile.web'
+              - 'docker/cloudbuild/cloudbuild-web.yaml'
+              - 'pnpm-lock.yaml'
+              - 'package.json'
+              - 'pnpm-workspace.yaml'
+
+  # ------------------------------------------------------------------
+  # API — build → migrate → deploy
+  # ------------------------------------------------------------------
+  build-api:
+    name: Build API image
+    needs: changes
+    if: |
+      (github.event_name == 'push' && needs.changes.outputs.api == 'true') ||
+      (github.event_name == 'workflow_dispatch' && (inputs.target == 'all' || inputs.target == 'api'))
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Auth GCP (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_API_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Cloud Build API
+        run: |
+          gcloud builds submit \
+            --config=docker/cloudbuild/cloudbuild-api.yaml \
+            --substitutions=_TAG=dev \
+            --project=${{ env.PROJECT_ID }} \
+            .
+
+  migrate:
+    name: Run DB migrations
+    needs: build-api
+    if: |
+      needs.build-api.result == 'success' &&
+      (github.event_name == 'push' || inputs.run_migrations == true)
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Auth GCP (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_API_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Re-resolve :dev digest in migrate Job
+        # Job guarda o digest no manifest; sem update, próxima execução
+        # roda imagem velha. Esse update força re-resolução.
+        run: |
+          gcloud run jobs update ${{ env.MIGRATE_JOB }} \
+            --image=${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/auditoria-api:dev \
+            --region=${{ env.REGION }} \
+            --project=${{ env.PROJECT_ID }}
+
+      - name: Execute alembic upgrade head
+        run: |
+          gcloud run jobs execute ${{ env.MIGRATE_JOB }} \
+            --region=${{ env.REGION }} \
+            --project=${{ env.PROJECT_ID }} \
+            --wait
+
+  deploy-api:
+    name: Deploy API revision
+    needs: migrate
+    if: needs.migrate.result == 'success'
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Auth GCP (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_API_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy
+        # DEPLOYED_AT serve 2 propósitos:
+        #   1. Força criação de revisão nova (gcloud sem mudanças = no-op).
+        #   2. Audit trail visível na console.
+        run: |
+          gcloud run services update ${{ env.API_SERVICE }} \
+            --image=${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/auditoria-api:dev \
+            --region=${{ env.REGION }} \
+            --project=${{ env.PROJECT_ID }} \
+            --update-env-vars=DEPLOYED_AT=$(date -u +%Y%m%dT%H%M%SZ) \
+            --quiet
+
+  # ------------------------------------------------------------------
+  # Web — build → deploy (espera deploy-api se ele rodar)
+  # ------------------------------------------------------------------
+  build-web:
+    name: Build Web image
+    needs: changes
+    if: |
+      (github.event_name == 'push' && needs.changes.outputs.web == 'true') ||
+      (github.event_name == 'workflow_dispatch' && (inputs.target == 'all' || inputs.target == 'web'))
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Auth GCP (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_WEB_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Validate API_URL_DEV env variable
+        # NEXT_PUBLIC_API_URL é embutido no bundle JS — sem URL real,
+        # frontend tenta chamar http://localhost:8000 em runtime e quebra.
+        run: |
+          if [ -z "${{ vars.API_URL_DEV }}" ]; then
+            echo "::error::vars.API_URL_DEV não está definida no environment 'development'."
+            echo "Configure em Settings → Environments → development → Variables."
+            exit 1
+          fi
+          echo "Using API_URL_DEV=${{ vars.API_URL_DEV }}"
+
+      - name: Cloud Build Web (NEXT_PUBLIC_API_URL embedded)
+        run: |
+          gcloud builds submit \
+            --config=docker/cloudbuild/cloudbuild-web.yaml \
+            --substitutions=_TAG=dev,_API_URL=${{ vars.API_URL_DEV }} \
+            --project=${{ env.PROJECT_ID }} \
+            .
+
+  deploy-web:
+    name: Deploy Web revision
+    needs: [build-web, deploy-api]
+    if: |
+      always() &&
+      needs.build-web.result == 'success' &&
+      (needs.deploy-api.result == 'success' || needs.deploy-api.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Auth GCP (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_WEB_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy
+        run: |
+          gcloud run services update ${{ env.WEB_SERVICE }} \
+            --image=${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/auditoria-web:dev \
+            --region=${{ env.REGION }} \
+            --project=${{ env.PROJECT_ID }} \
+            --update-env-vars=DEPLOYED_AT=$(date -u +%Y%m%dT%H%M%SZ) \
+            --quiet
+
+  # ------------------------------------------------------------------
+  # Summary — sempre roda, agrega status de tudo (útil pra ver de relance)
+  # ------------------------------------------------------------------
+  summary:
+    name: Deploy summary
+    needs: [changes, build-api, migrate, deploy-api, build-web, deploy-web]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print results
+        run: |
+          echo "=== Deploy to Dev — resultados ==="
+          echo "changes:    ${{ needs.changes.result }}"
+          echo "build-api:  ${{ needs.build-api.result }}"
+          echo "migrate:    ${{ needs.migrate.result }}"
+          echo "deploy-api: ${{ needs.deploy-api.result }}"
+          echo "build-web:  ${{ needs.build-web.result }}"
+          echo "deploy-web: ${{ needs.deploy-web.result }}"
+          # Falha o summary se qualquer job não-skipped deu failure
+          # (skipped por path-filter é OK; cancelled/failure não é).
+          for r in \
+            "${{ needs.build-api.result }}" \
+            "${{ needs.migrate.result }}" \
+            "${{ needs.deploy-api.result }}" \
+            "${{ needs.build-web.result }}" \
+            "${{ needs.deploy-web.result }}"; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "::error::Algum job falhou — ver acima"
+              exit 1
+            fi
+          done
