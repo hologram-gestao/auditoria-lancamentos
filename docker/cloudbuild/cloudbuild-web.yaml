@@ -1,0 +1,41 @@
+# Cloud Build config for Web image.
+# Used by:
+#   - manual deploy (gcloud builds submit --config=...)
+#   - .github/workflows/deploy-dev.yml
+#   - .github/workflows/deploy-prod.yml (when wired up)
+#
+# NEXT_PUBLIC_API_URL é build-arg porque Next.js inline NEXT_PUBLIC_*
+# no bundle estático durante `next build`. Runtime env não funciona.
+# Default casa com dev local (`next.config.mjs`). Workflow sobrescreve
+# com a URL real da API (Cloud Run dev / custom domain).
+#
+# machineType E2_HIGHCPU_8 corta o build de ~10min (default 1vCPU) pra
+# ~2min. pnpm install + next build são CPU-bound. Custo extra: ~$0.01/build.
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    env:
+      - 'DOCKER_BUILDKIT=1'
+    args:
+      [
+        'build',
+        '-f',
+        'docker/Dockerfile.web',
+        '--build-arg',
+        'NEXT_PUBLIC_API_URL=${_API_URL}',
+        '-t',
+        'southamerica-east1-docker.pkg.dev/${PROJECT_ID}/auditoria/auditoria-web:${_TAG}',
+        '.',
+      ]
+
+images:
+  - 'southamerica-east1-docker.pkg.dev/${PROJECT_ID}/auditoria/auditoria-web:${_TAG}'
+
+substitutions:
+  _TAG: dev
+  _API_URL: http://localhost:8000
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+timeout: 1200s
