@@ -2,10 +2,12 @@
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 
-// URL pública do backend — fim do `connect-src` da CSP.
-// Em build de produção, NEXT_PUBLIC_API_URL é OBRIGATÓRIO (caso contrário a
-// CSP bloqueia qualquer fetch). Em dev/test cai pra localhost:8000.
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+// URL interna da API — usada pelo proxy `/api/v1/*` (rewrites abaixo). O
+// browser nunca vê essa URL: chamadas saem como `/api/v1/...` (mesma origem
+// do Web) e o Next reverse-proxia pra esse host server-side. Em prod, Cloud
+// Run injeta como env var. Em dev local, vem de `.env.local`. Em build sem
+// a var setada (CI lint), fallback pra localhost evita crash no `next build`.
+const INTERNAL_API_URL = process.env.INTERNAL_API_URL ?? 'http://localhost:8000';
 
 /**
  * Content-Security-Policy do front (P0-002).
@@ -18,8 +20,10 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
  *   profundo (next/script nonce strategy) — fica como dívida P2.
  * - `frame-ancestors 'none'` substitui `X-Frame-Options: DENY` em browsers
  *   modernos; mantemos os dois (defesa em profundidade).
- * - `connect-src` autoriza só `self` e o backend — bloqueia exfiltração
- *   via fetch para domínios externos.
+ * - `connect-src 'self'` é suficiente porque todas as chamadas pra API vão
+ *   pra `/api/v1/*` (mesma origem) e são proxiadas server-side via rewrites.
+ *   Browser nunca toca a URL real do backend — evita problemas de cookie
+ *   cross-site (PSL em *.run.app) e fecha exfiltração via fetch externo.
  */
 const CSP = [
   "default-src 'self'",
@@ -27,7 +31,7 @@ const CSP = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
-  `connect-src 'self' ${API_URL}`,
+  "connect-src 'self'",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",
@@ -68,6 +72,19 @@ const nextConfig = {
       {
         source: '/:path*',
         headers: baseHeaders,
+      },
+    ];
+  },
+
+  // Proxy reverso BFF: browser fala com Next em `/api/v1/*` (mesma origem),
+  // Next encaminha pra API real server-side. Resolve o problema do cookie
+  // HttpOnly cross-site quando Web e API estão em sub-domínios diferentes
+  // sob a PSL (caso *.run.app sem custom domain comum).
+  async rewrites() {
+    return [
+      {
+        source: '/api/v1/:path*',
+        destination: `${INTERNAL_API_URL}/api/v1/:path*`,
       },
     ];
   },

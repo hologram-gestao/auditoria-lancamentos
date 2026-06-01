@@ -10,11 +10,12 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_in_dev_only}
       POSTGRES_DB: ${POSTGRES_DB:-auditoria_dev}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - '${POSTGRES_PORT:-5432}:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-auditoria} -d ${POSTGRES_DB:-auditoria_dev}"]
+      test:
+        ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-auditoria} -d ${POSTGRES_DB:-auditoria_dev}']
       interval: 5s
       timeout: 5s
       retries: 5
@@ -23,13 +24,13 @@ services:
     image: redis:7-alpine
     container_name: auditoria-redis
     restart: unless-stopped
-    command: ["redis-server", "--maxmemory-policy", "allkeys-lru", "--maxmemory", "256mb"]
+    command: ['redis-server', '--maxmemory-policy', 'allkeys-lru', '--maxmemory', '256mb']
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - '${REDIS_PORT:-6379}:6379'
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
       timeout: 3s
       retries: 5
@@ -53,12 +54,18 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "${API_PORT:-8000}:8000"
+      - '${API_PORT:-8000}:8000'
     volumes:
       - ../apps/api:/app:ro
-    command: ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    command: ['uv', 'run', 'uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', '8000']
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -83,7 +90,7 @@ services:
       - ../apps/api:/app:ro
     # Worker ARQ será configurado em S10 — por enquanto, mantido desabilitado.
     # command: ["uv", "run", "arq", "app.workers.arq_worker.WorkerSettings"]
-    profiles: ["workers"]
+    profiles: ['workers']
 
   web:
     build:
@@ -92,13 +99,15 @@ services:
     container_name: auditoria-web
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-8000}
+      # Browser fala com Next em /api/v1/* (mesma origem); Next reverse-proxia
+      # server-side pra `INTERNAL_API_URL`. Em docker-compose o hostname é o
+      # service name `api`.
       INTERNAL_API_URL: http://api:8000
       NEXT_PUBLIC_ENVIRONMENT: ${ENVIRONMENT:-development}
     depends_on:
       - api
     ports:
-      - "${WEB_PORT:-3000}:3000"
+      - '${WEB_PORT:-3000}:3000'
 
 volumes:
   postgres-data:

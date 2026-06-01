@@ -202,22 +202,14 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Validate API_URL_DEV env variable
-        # NEXT_PUBLIC_API_URL é embutido no bundle JS — sem URL real,
-        # frontend tenta chamar http://localhost:8000 em runtime e quebra.
-        run: |
-          if [ -z "${{ vars.API_URL_DEV }}" ]; then
-            echo "::error::vars.API_URL_DEV não está definida no environment 'development'."
-            echo "Configure em Settings → Environments → development → Variables."
-            exit 1
-          fi
-          echo "Using API_URL_DEV=${{ vars.API_URL_DEV }}"
-
-      - name: Cloud Build Web (NEXT_PUBLIC_API_URL embedded)
+      - name: Cloud Build Web
+        # Build agnóstico de ambiente — a URL da API entra como runtime env
+        # var no step de deploy abaixo, não como build-arg (ver BFF proxy
+        # em next.config.mjs).
         run: |
           gcloud builds submit \
             --config=docker/cloudbuild/cloudbuild-web.yaml \
-            --substitutions=_TAG=dev,_API_URL=${{ vars.API_URL_DEV }} \
+            --substitutions=_TAG=dev \
             --project=${{ env.PROJECT_ID }} \
             .
 
@@ -239,13 +231,25 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
+      - name: Validate API_URL_DEV env variable
+        # INTERNAL_API_URL é lida server-side pelo Next pra fazer reverse
+        # proxy das chamadas /api/v1/*. Sem ela setada, browser não fala
+        # com backend em runtime.
+        run: |
+          if [ -z "${{ vars.API_URL_DEV }}" ]; then
+            echo "::error::vars.API_URL_DEV não está definida no environment 'development'."
+            echo "Configure em Settings → Environments → development → Variables."
+            exit 1
+          fi
+          echo "Using INTERNAL_API_URL=${{ vars.API_URL_DEV }}"
+
       - name: Deploy
         run: |
           gcloud run services update ${{ env.WEB_SERVICE }} \
             --image=${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/auditoria-web:dev \
             --region=${{ env.REGION }} \
             --project=${{ env.PROJECT_ID }} \
-            --update-env-vars=DEPLOYED_AT=$(date -u +%Y%m%dT%H%M%SZ) \
+            --update-env-vars="^|^INTERNAL_API_URL=${{ vars.API_URL_DEV }}|DEPLOYED_AT=$(date -u +%Y%m%dT%H%M%SZ)" \
             --quiet
 
   # ------------------------------------------------------------------
