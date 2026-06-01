@@ -20,6 +20,8 @@ steps:
         'build',
         '-f',
         'docker/Dockerfile.web',
+        '--build-arg',
+        'INTERNAL_API_URL=${_API_URL}',
         '-t',
         'southamerica-east1-docker.pkg.dev/${PROJECT_ID}/auditoria/auditoria-web:${_TAG}',
         '.',
@@ -30,6 +32,7 @@ images:
 
 substitutions:
   _TAG: dev
+  _API_URL: http://localhost:8000
 
 options:
   logging: CLOUD_LOGGING_ONLY
