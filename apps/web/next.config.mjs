@@ -4,9 +4,12 @@ const IS_PROD = process.env.NODE_ENV === 'production';
 
 // URL interna da API — usada pelo proxy `/api/v1/*` (rewrites abaixo). O
 // browser nunca vê essa URL: chamadas saem como `/api/v1/...` (mesma origem
-// do Web) e o Next reverse-proxia pra esse host server-side. Em prod, Cloud
-// Run injeta como env var. Em dev local, vem de `.env.local`. Em build sem
-// a var setada (CI lint), fallback pra localhost evita crash no `next build`.
+// do Web) e o Next reverse-proxia pra esse host server-side.
+//
+// IMPORTANTE: Next 14 resolve `process.env` em rewrites durante o `next build`,
+// não em runtime. Por isso essa variável precisa estar setada NO BUILD — vem
+// como `ARG`/`ENV` no `Dockerfile.web`. Setar só em runtime no Cloud Run não
+// funciona (cai pro fallback localhost e ECONNREFUSED).
 const INTERNAL_API_URL = process.env.INTERNAL_API_URL ?? 'http://localhost:8000';
 
 /**

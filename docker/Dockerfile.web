@@ -33,10 +33,14 @@ COPY --from=deps /workspace/packages/shared-types/node_modules ./packages/shared
 COPY . .
 
 # Browser chama `/api/v1/*` (mesma origem) e Next reverse-proxia pra
-# `INTERNAL_API_URL` server-side (ver `next.config.mjs rewrites`). Como é
-# runtime env (não NEXT_PUBLIC_*), não precisa build-arg — Cloud Run injeta
-# na revisão. Sem essa var setada em runtime, Next cai pro fallback
-# `http://localhost:8000` (útil só pra dev local).
+# `INTERNAL_API_URL` server-side (ver `next.config.mjs rewrites`).
+# Tem que vir como build-arg porque o Next 14 resolve `process.env` em
+# rewrites durante o `next build` — runtime env var não funciona aqui
+# (cai pro fallback localhost).
+# Default casa com dev local. Em prod, CI passa `--build-arg`.
+ARG INTERNAL_API_URL=http://localhost:8000
+ENV INTERNAL_API_URL=${INTERNAL_API_URL}
+
 ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN pnpm --filter @auditoria/web build
