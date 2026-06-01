@@ -32,14 +32,11 @@ COPY --from=deps /workspace/packages/shared-types/node_modules ./packages/shared
 # Código
 COPY . .
 
-# Variáveis `NEXT_PUBLIC_*` são embutidas no bundle durante `next build`
-# — runtime env var não funciona pra elas. Por isso recebemos como
-# build-arg e seta como ENV antes do build rodar.
-# Default `http://localhost:8000` casa com `next.config.mjs:8` (dev local).
-# Em prod, CI passa `--build-arg NEXT_PUBLIC_API_URL=https://api.....`.
-ARG NEXT_PUBLIC_API_URL=http://localhost:8000
-ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
-
+# Browser chama `/api/v1/*` (mesma origem) e Next reverse-proxia pra
+# `INTERNAL_API_URL` server-side (ver `next.config.mjs rewrites`). Como é
+# runtime env (não NEXT_PUBLIC_*), não precisa build-arg — Cloud Run injeta
+# na revisão. Sem essa var setada em runtime, Next cai pro fallback
+# `http://localhost:8000` (útil só pra dev local).
 ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN pnpm --filter @auditoria/web build

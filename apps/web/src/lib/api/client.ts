@@ -13,7 +13,11 @@
  * Não usar `localStorage`/`sessionStorage` para tokens — cookies HttpOnly bastam.
  */
 
-const BASE_URL = process.env['NEXT_PUBLIC_API_URL']?.replace(/\/$/, '') ?? 'http://localhost:8000';
+// URLs relativas — Next age como reverse proxy via `rewrites()` em
+// `next.config.mjs`, encaminhando `/api/v1/*` pro backend server-side.
+// Browser nunca toca o domínio real da API → cookie HttpOnly fica na mesma
+// origem do Web (resolve cross-site PSL em *.run.app sem custom domain).
+const BASE_URL = '';
 
 const API_PREFIX = '/api/v1';
 const REFRESH_PATH = `${API_PREFIX}/auth/refresh`;
