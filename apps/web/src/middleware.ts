@@ -42,7 +42,10 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // Roda em todas as rotas EXCETO assets, _next, favicon e arquivos estáticos.
-  // Inclui `/login` para fazer o redirect-quando-já-logado.
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\..*).*)'],
+  // Roda em todas as rotas EXCETO assets, _next, favicon, arquivos estáticos
+  // e o proxy `/api/*` (chamadas pro backend que o Next reverse-proxia via
+  // rewrites). Sem excluir `api`, o middleware redirecionaria POST de login
+  // pra /login (307), e o browser repetia o POST em /login → 405. O backend
+  // valida o cookie real; aqui basta evitar o falso positivo.
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|.*\\..*).*)'],
 };
