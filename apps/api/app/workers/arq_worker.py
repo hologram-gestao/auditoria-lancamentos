@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings, get_settings
 from app.core.logging import get_logger, setup_logging
+from app.core.redis_config import build_redis_settings
 from app.db.session import close_db, get_session_factory, init_db
 from app.modules.reconciliations.processing.job import run_reconciliation_processing
 
@@ -71,7 +72,7 @@ async def on_shutdown(_ctx: dict[str, Any]) -> None:
 
 def _redis_settings() -> RedisSettings:
     """Lê `REDIS_URL` na primeira chamada — settings são singleton."""
-    return RedisSettings.from_dsn(get_settings().REDIS_URL)
+    return build_redis_settings(get_settings().REDIS_URL)
 
 
 class WorkerSettings:
