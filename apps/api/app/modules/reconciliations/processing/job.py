@@ -23,6 +23,7 @@ CLAUDE.md §3.7: nunca expor stack traces ao usuário. O worker:
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -73,6 +74,10 @@ class _FileEntryBalanceSnap:
 # Mensagens em PT-BR para o `error_message` da sessão. Caller (front) mostra
 # direto na UI — manter curtas e acionáveis. CLAUDE.md §7.
 _ERROR_MSG_INTERNAL = "Erro interno ao processar a conciliação. Tente novamente."
+_ERROR_MSG_TIMEOUT = (
+    "Processamento cancelado por exceder o tempo máximo. "
+    "Pode descartar esta sessão e tentar novamente."
+)
 _ERROR_MSG_SEED_MISSING = (
     "Catálogo de anomalias não inicializado. Avise o administrador (seed pendente)."
 )
@@ -117,6 +122,15 @@ async def run_reconciliation_processing(
             message=str(exc),
         )
         await _safe_mark_error(sid, session_factory, _ERROR_MSG_SEED_MISSING)
+    except asyncio.CancelledError:
+        # ARQ matou o job por estourar job_timeout (ver WorkerSettings).
+        # CancelledError herda de BaseException, então o `except Exception`
+        # abaixo NÃO pegava — a sessão ficava em `processing` zumbi.
+        # `asyncio.shield` protege o cleanup de ser cancelado de novo no meio.
+        # Re-raise pra ARQ marcar o job como failed e liberar o lock.
+        log.error("reconciliation_processing_timeout", session_id=session_id)
+        await asyncio.shield(_safe_mark_error(sid, session_factory, _ERROR_MSG_TIMEOUT))
+        raise
     except Exception:
         # Erro inesperado: NUNCA propagar para o redis. Sentry captura via
         # exc_info=True (se configurado).
