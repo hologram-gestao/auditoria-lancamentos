@@ -41,9 +41,12 @@ import { useSessionStatus } from '@/hooks/use-reconciliations';
 import { ApiError } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
 
-/** 5 minutos em ms — Doc §13.1 e DoD do briefing. Const explícita pra ser
- *  trivial reduzir em dev/teste manual ("temporariamente baixe pra 30_000"). */
-const TIMEOUT_MS = 5 * 60 * 1000;
+/** 15 minutos em ms — alinhado com `WorkerSettings.job_timeout=900s` do
+ *  ARQ. Em extratos reais (11+ pares) a qualificação semântica (Anthropic
+ *  por par) regularmente passa de 5min; antes a tela mostrava "demorando
+ *  demais" enquanto o backend ainda estava trabalhando normalmente.
+ *  Const explícita pra ser trivial reduzir em dev/teste manual. */
+const TIMEOUT_MS = 15 * 60 * 1000;
 
 /** Thresholds (em ms desde a montagem) que ativam cada step de proxy. */
 const STEP_THRESHOLDS_MS = {
@@ -90,8 +93,8 @@ export function ProcessingScreen({ clientId, sessionId }: ProcessingScreenProps)
     return () => clearInterval(tick);
   }, []);
 
-  // Timer de timeout (5 min). Independente do tick acima pra não rearmar a
-  // cada update do `elapsedMs`. Roda uma vez na montagem.
+  // Timer de timeout (15 min — ver TIMEOUT_MS). Independente do tick acima
+  // pra não rearmar a cada update do `elapsedMs`. Roda uma vez na montagem.
   useEffect(() => {
     const t = setTimeout(() => setTimedOut(true), TIMEOUT_MS);
     return () => clearTimeout(t);
@@ -151,8 +154,8 @@ export function ProcessingScreen({ clientId, sessionId }: ProcessingScreenProps)
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold">Processando conciliação</h1>
         <p className="text-muted-foreground text-sm">
-          Aguarde enquanto buscamos os lançamentos no Omie e cruzamos com as movimentações do
-          arquivo. Isso pode levar até 2 minutos.
+          Aguarde enquanto buscamos os lançamentos no Omie, cruzamos com as movimentações do arquivo
+          e qualificamos cada par com IA. Isso pode levar até 15 minutos.
         </p>
       </header>
 
