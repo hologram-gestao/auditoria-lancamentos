@@ -90,6 +90,45 @@ def _create_app() -> FastAPI:
     return app
 
 
+async def _arq_supervisor() -> None:
+    """Roda o ARQ worker em loop com backoff — não deixa drop de conexão
+    intermitente matar o container.
+
+    Antes: ``arq.async_run()`` direto. Qualquer falha (drop idle do
+    Upstash, blip de DNS no Cloud Run) propagava pra ``asyncio.gather``,
+    o container morria, Cloud Run reiniciava do zero. Em horários ruins
+    isso virava loop de crash a cada 3-5 min.
+
+    Agora: capturamos a exceção, logamos, esperamos com backoff
+    exponencial (1s, 2s, 4s, 8s, 16s, 30s, ...) e instanciamos novo
+    worker. O servidor HTTP de ``/health`` continua respondendo durante
+    todo o ciclo — Cloud Run só reinicia se ele mesmo cair.
+    """
+    log = get_logger(__name__)
+    backoff = 1.0
+    max_backoff = 30.0
+
+    while True:
+        try:
+            # mypy reclama porque WorkerSettings não herda WorkerSettingsBase,
+            # mas ARQ usa duck typing — atributos ClassVar bastam.
+            arq = create_worker(WorkerSettings)  # type: ignore[arg-type]
+            await arq.async_run()
+            # async_run só retorna em shutdown limpo; aguarda um pouco e
+            # reinicia (não esperado em produção, mas evita busy loop).
+            backoff = 1.0
+            await asyncio.sleep(1)
+        except Exception as exc:  # supervisor não pode propagar — qualquer crash vira backoff+retry
+            log.warning(
+                "arq_worker_crashed_restarting",
+                error=str(exc),
+                error_type=type(exc).__name__,
+                backoff_seconds=backoff,
+            )
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, max_backoff)
+
+
 async def main() -> None:
     """Roda ARQ worker + servidor HTTP concorrentemente."""
     settings = get_settings()
@@ -108,13 +147,11 @@ async def main() -> None:
             access_log=False,
         )
     )
-    # mypy reclama porque WorkerSettings não herda WorkerSettingsBase, mas
-    # ARQ usa duck typing — atributos ClassVar bastam.
-    arq = create_worker(WorkerSettings)  # type: ignore[arg-type]
 
-    # ARQ e uvicorn compartilham o mesmo event loop. Se um morrer, gather
-    # propaga a exceção — Cloud Run reinicia o container.
-    await asyncio.gather(server.serve(), arq.async_run())
+    # ARQ rodando sob supervisor próprio — uvicorn segue vivo independente
+    # de blips do Redis. Se o uvicorn morrer (probe /health falhar muito), aí
+    # sim Cloud Run reinicia o container.
+    await asyncio.gather(server.serve(), _arq_supervisor())
 
 
 if __name__ == "__main__":
