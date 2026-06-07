@@ -93,8 +93,8 @@ export function ProcessingScreen({ clientId, sessionId }: ProcessingScreenProps)
     return () => clearInterval(tick);
   }, []);
 
-  // Timer de timeout (5 min). Independente do tick acima pra não rearmar a
-  // cada update do `elapsedMs`. Roda uma vez na montagem.
+  // Timer de timeout (15 min — ver TIMEOUT_MS). Independente do tick acima
+  // pra não rearmar a cada update do `elapsedMs`. Roda uma vez na montagem.
   useEffect(() => {
     const t = setTimeout(() => setTimedOut(true), TIMEOUT_MS);
     return () => clearTimeout(t);
