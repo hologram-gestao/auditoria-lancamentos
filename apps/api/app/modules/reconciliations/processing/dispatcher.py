@@ -19,9 +19,9 @@ from __future__ import annotations
 from uuid import UUID
 
 from arq import create_pool
-from arq.connections import RedisSettings
 
 from app.core.logging import get_logger
+from app.core.redis_config import build_redis_settings
 
 log = get_logger(__name__)
 
@@ -52,8 +52,7 @@ async def enqueue_processing(
             commitada com `status='processing'`, então um job_failed manual
             pode ser disparado depois para retomar.
     """
-    settings = RedisSettings.from_dsn(redis_url)
-    pool = await create_pool(settings)
+    pool = await create_pool(build_redis_settings(redis_url))
     try:
         job = await pool.enqueue_job(RECONCILIATION_JOB_NAME, str(session_id))
         if job is None:
