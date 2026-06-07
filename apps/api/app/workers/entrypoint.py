@@ -66,7 +66,8 @@ def _create_app() -> FastAPI:
         settings = get_settings()
         client: redis_async.Redis | None = None
         try:
-            client = redis_async.from_url(settings.REDIS_URL)
+            # redis-py async ainda sem stubs completos — assinatura inferida.
+            client = redis_async.from_url(settings.REDIS_URL)  # type: ignore[no-untyped-call]
             pong = await asyncio.wait_for(client.ping(), timeout=_HEALTH_REDIS_TIMEOUT_S)
             if pong:
                 return JSONResponse(
