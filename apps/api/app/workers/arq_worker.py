@@ -87,6 +87,11 @@ class WorkerSettings:
     on_startup = staticmethod(on_startup)
     on_shutdown = staticmethod(on_shutdown)
     max_jobs: ClassVar[int] = 4
-    job_timeout: ClassVar[int] = 300  # 5 minutos
+    # 15 minutos — pipeline real (parse IA + Omie + matching + qualificação
+    # IA via Anthropic) regularmente passa de 5min em extratos grandes. O
+    # cancel via asyncio.wait_for sobe como BaseException (CancelledError),
+    # que não é capturada pelo try/except interno do `_run_qualification_safely`
+    # — o job morre e a sessão fica em `status='processing'` pra sempre.
+    job_timeout: ClassVar[int] = 900
     keep_result: ClassVar[int] = 60  # mantém resultado no Redis por 1min (debug)
     max_tries: ClassVar[int] = 1  # job já trata erros — sem retry automático
