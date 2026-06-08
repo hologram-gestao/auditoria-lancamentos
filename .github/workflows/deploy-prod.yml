@@ -55,7 +55,9 @@ env:
   AR_REPO: auditoria
   API_SERVICE: auditoria-api-prod
   WEB_SERVICE: auditoria-web-prod
+  WORKER_SERVICE: auditoria-worker-prod
   MIGRATE_JOB: auditoria-api-migrate-prod
+  CLEANUP_JOB: auditoria-api-cleanup-stuck-prod
 
 jobs:
   guard:
@@ -73,3 +75,10 @@ jobs:
   #   - --substitutions=_TAG=$GITHUB_REF_NAME (ex: v1.2.3)
   #   - imagens prod com tag semver: auditoria-api:v1.2.3 (E também atualizar :latest)
   #   - env environment: production  → exige reviewer
+  #   - deploy-worker (espelho do dev): roda depois de deploy-api, sem build
+  #     próprio, faz apenas `gcloud run services update auditoria-worker-prod
+  #     --image=:vX.Y.Z`. Requer Upstash Redis prod (free tier do Upstash só
+  #     comporta 1 DB; staging+prod separados exigem plano pago ou outra
+  #     conta). Bloqueado pela mesma decisão arquitetural de prod separado.
+  #   - re-resolve digest do cleanup Job prod (espelho do dev) dentro do
+  #     migrate, igual fazemos pro CLEANUP_JOB em dev.

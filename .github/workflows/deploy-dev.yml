@@ -5,11 +5,11 @@ name: Deploy to Dev
 #   workflow_dispatch      → escolhe target (all/api/web) e se roda migrations.
 #
 # Ordem dentro do workflow (quando ambos rodam):
-#   build-api → migrate → deploy-api    e em paralelo:    build-web → deploy-web
-#                                              ↑
-#                                              deploy-web aguarda deploy-api
-#                                              (success OU skipped) pra evitar
-#                                              Web fresco apontando pra API velha.
+#   build-api → migrate → deploy-api → deploy-worker    e em paralelo:    build-web → deploy-web
+#                                            ↑                                            ↑
+#                                            worker compartilha imagem com API            deploy-web aguarda deploy-api
+#                                            (sem build próprio; só `services update`     (success OU skipped) pra evitar
+#                                             pra puxar :dev novo)                        Web fresco apontando pra API velha.
 #
 # Concurrency: cancel-in-progress=false. Deploy nunca se cancela no meio —
 # evita schema half-applied ou revisão zumbi.
@@ -59,7 +59,9 @@ env:
   AR_REPO: auditoria
   API_SERVICE: auditoria-api-dev
   WEB_SERVICE: auditoria-web-dev
+  WORKER_SERVICE: auditoria-worker-dev
   MIGRATE_JOB: auditoria-api-migrate-dev
+  CLEANUP_JOB: auditoria-api-cleanup-stuck-dev
 
 jobs:
   # ------------------------------------------------------------------
@@ -146,6 +148,16 @@ jobs:
             --region=${{ env.REGION }} \
             --project=${{ env.PROJECT_ID }}
 
+      - name: Re-resolve :dev digest in cleanup Job
+        # Mesmo problema do migrate Job: o cleanup roda via Cloud Scheduler
+        # de hora em hora e guarda o digest no manifest. Sem update, o cron
+        # roda imagem velha pra sempre depois que :dev avança.
+        run: |
+          gcloud run jobs update ${{ env.CLEANUP_JOB }} \
+            --image=${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/auditoria-api:dev \
+            --region=${{ env.REGION }} \
+            --project=${{ env.PROJECT_ID }}
+
       - name: Execute alembic upgrade head
         run: |
           gcloud run jobs execute ${{ env.MIGRATE_JOB }} \
@@ -174,6 +186,54 @@ jobs:
         #   2. Audit trail visível na console.
         run: |
           gcloud run services update ${{ env.API_SERVICE }} \
+            --image=${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/auditoria-api:dev \
+            --region=${{ env.REGION }} \
+            --project=${{ env.PROJECT_ID }} \
+            --update-env-vars=DEPLOYED_AT=$(date -u +%Y%m%dT%H%M%SZ) \
+            --quiet
+
+  # ------------------------------------------------------------------
+  # Worker — deploy depois da API (mesma imagem :dev)
+  # ------------------------------------------------------------------
+  # Worker compartilha a imagem `auditoria-api:dev` (entrypoint diferente,
+  # configurado manualmente no service: `python -m app.workers.entrypoint`).
+  # Por isso esse job NÃO builda — só faz `services update` pra forçar
+  # nova revisão com o digest atualizado de :dev.
+  #
+  # Decisões deliberadas (registradas pra não recair em mudanças
+  # desnecessárias):
+  #   - Sem `--args`: command/args foram configurados manualmente no service
+  #     (Fase 3 do Setup Redis); sobrescrever aqui arriscaria voltar pro
+  #     `arq` cru, sem /health e sem supervisor.
+  #   - Sem `--set-secrets`: secrets do worker já estão ligados manualmente
+  #     (DATABASE_URL, REDIS_URL, OMIE_ENCRYPTION_KEY, ANTHROPIC_API_KEY,
+  #     SEARCH_BLIND_INDEX_KEY). Passar a flag exigiria listar todas — e
+  #     omitir uma derrubaria o worker.
+  #   - Sem `--service-account`: já tá configurada como `auditoria-worker-sa`
+  #     no service. Reusamos `GCP_API_SERVICE_ACCOUNT` só pra autenticar
+  #     o WIF (api-sa tem `iam.serviceAccountUser` sobre worker-sa).
+  #   - Sem `--min-instances/--max-instances`: setados manualmente (1/1).
+  #
+  # Resumo: o único campo que muda a cada push é a imagem (`--image=:dev`
+  # re-resolve digest) e o `DEPLOYED_AT` (força revisão nova).
+  deploy-worker:
+    name: Deploy Worker revision
+    needs: deploy-api
+    if: needs.deploy-api.result == 'success'
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Auth GCP (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_API_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy
+        run: |
+          gcloud run services update ${{ env.WORKER_SERVICE }} \
             --image=${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/auditoria-api:dev \
             --region=${{ env.REGION }} \
             --project=${{ env.PROJECT_ID }} \
@@ -256,25 +316,27 @@ jobs:
   # ------------------------------------------------------------------
   summary:
     name: Deploy summary
-    needs: [changes, build-api, migrate, deploy-api, build-web, deploy-web]
+    needs: [changes, build-api, migrate, deploy-api, deploy-worker, build-web, deploy-web]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Print results
         run: |
           echo "=== Deploy to Dev — resultados ==="
-          echo "changes:    ${{ needs.changes.result }}"
-          echo "build-api:  ${{ needs.build-api.result }}"
-          echo "migrate:    ${{ needs.migrate.result }}"
-          echo "deploy-api: ${{ needs.deploy-api.result }}"
-          echo "build-web:  ${{ needs.build-web.result }}"
-          echo "deploy-web: ${{ needs.deploy-web.result }}"
+          echo "changes:       ${{ needs.changes.result }}"
+          echo "build-api:     ${{ needs.build-api.result }}"
+          echo "migrate:       ${{ needs.migrate.result }}"
+          echo "deploy-api:    ${{ needs.deploy-api.result }}"
+          echo "deploy-worker: ${{ needs.deploy-worker.result }}"
+          echo "build-web:     ${{ needs.build-web.result }}"
+          echo "deploy-web:    ${{ needs.deploy-web.result }}"
           # Falha o summary se qualquer job não-skipped deu failure
           # (skipped por path-filter é OK; cancelled/failure não é).
           for r in \
             "${{ needs.build-api.result }}" \
             "${{ needs.migrate.result }}" \
             "${{ needs.deploy-api.result }}" \
+            "${{ needs.deploy-worker.result }}" \
             "${{ needs.build-web.result }}" \
             "${{ needs.deploy-web.result }}"; do
             if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
