@@ -5,7 +5,7 @@ Princípios (CLAUDE.md §3 + Doc §12):
       Construtor recusa chave vazia → `AnthropicAuthError`.
     - **NUNCA logar** prompt, resposta da IA ou chave. Logs trazem somente
       `model`, `duration_ms`, `bytes_in`, `transaction_count`, `attempt`.
-    - **Timeout total = `ANTHROPIC_TIMEOUT_SECONDS`** (padrão 60 s).
+    - **Timeout total = `ANTHROPIC_TIMEOUT_SECONDS`** (padrão 150 s).
     - **1 retry** em 5xx / timeout / connection error (checklist do BACK 7.1).
     - Após esgotar retries, mapeia para `AnthropicTimeoutError`.
 

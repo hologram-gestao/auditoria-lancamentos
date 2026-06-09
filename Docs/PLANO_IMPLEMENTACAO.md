@@ -1739,6 +1739,14 @@ Anotar essas extensões como issues técnicas no backlog após o release do MVP.
 
 ---
 
+### S20+ — Auditoria Contínua sobre o Omie (eixo novo)
+
+A partir dos transcritos de 08/06/2026 (Laio, citando Galhardo), abriu-se um eixo de produto que **engloba** a conciliação file-driven (S0–S19) e inverte a prioridade do dia-a-dia: auditar a qualidade dos lançamentos **do próprio Omie, sem extrato bancário**. As sessões S20–S27 (perfil/contexto por cliente, motor de Audit Run, checks determinísticos, tempestividade, recorrências, rotinas agendadas, notificações Slack/email, frontend do supervisor) vivem em documento separado:
+
+➡️ **[PLANO_S20_AUDITORIA_CONTINUA.md](PLANO_S20_AUDITORIA_CONTINUA.md)**
+
+---
+
 ## 12. Riscos e Mitigações
 
 | Risco                                         | Impacto                     | Mitigação                                                                                                                                                                                |

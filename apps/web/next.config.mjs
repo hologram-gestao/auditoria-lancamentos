@@ -94,6 +94,14 @@ const nextConfig = {
 
   experimental: {
     typedRoutes: true,
+    // O proxy reverso dos `rewrites` acima usa o `proxyTimeout` do Next, cujo
+    // default é 30s. O `/parse` chama o Claude e leva ~75s em extratos grandes;
+    // aos 30s o Next derrubava o socket (ECONNRESET) e devolvia um
+    // "Internal Server Error" (500, text/html) ao browser — mesmo com o backend
+    // respondendo 200 depois. 160s fica ACIMA do `ANTHROPIC_TIMEOUT_SECONDS`
+    // (150s) do backend de propósito: assim o erro LIMPO do backend (504 com
+    // userMessage em PT) vence, em vez do 500 genérico do proxy.
+    proxyTimeout: 160_000,
   },
 };
 

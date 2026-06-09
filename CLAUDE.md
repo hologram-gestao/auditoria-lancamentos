@@ -2,7 +2,7 @@
 
 > **Para futuras conversas com Claude:** este arquivo é o _primer_ obrigatório. Leia-o antes de qualquer ação. Ele é atualizado continuamente conforme decisões são tomadas.
 >
-> **Status do projeto:** 📐 Em fase de planejamento — nenhum código escrito ainda. Toda estrutura de pastas e arquivos citada aqui **ainda precisa ser criada** conforme as sessões do plano.
+> **Status do projeto:** 🚀 Sessões **S0–S19 implementadas e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain configurado (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). A conciliação file-driven funciona ponta a ponta (upload → IA → matching → revisão → Excel). Próximo eixo: **S20+ — auditoria contínua sobre o Omie** (em planejamento, ver [Docs/PLANO_S20_AUDITORIA_CONTINUA.md](Docs/PLANO_S20_AUDITORIA_CONTINUA.md)). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 
 ---
 
@@ -20,7 +20,8 @@
 
 - **Funcional:** `Docs/documentation/` (arquivos 0 a 18, numerados sequencialmente).
 - **Backlog:** `Docs/List _ Auditora de Lançamentos - Backlog _ Hologram (Lista) - TAREFAS.pdf`.
-- **Plano de implementação:** [Docs/PLANO_IMPLEMENTACAO.md](Docs/PLANO_IMPLEMENTACAO.md) — sessões S0–S18.
+- **Plano de implementação:** [Docs/PLANO_IMPLEMENTACAO.md](Docs/PLANO_IMPLEMENTACAO.md) — sessões S0–S19 (conciliação file-driven).
+- **Plano do pivot:** [Docs/PLANO_S20_AUDITORIA_CONTINUA.md](Docs/PLANO_S20_AUDITORIA_CONTINUA.md) — eixo S20–S27 (auditoria contínua sobre o Omie, sem extrato).
 - **Fluxograma:** `Docs/flow/Fluxograma Completo - sistema de conciliação.png`.
 
 **Convenção de IDs de tarefa:** quando o usuário citar `[BACK 1.1]` ou `[FRONT 9.12]`, isso vem do PDF do backlog. Mapeie para a sessão correspondente (S3, S12, etc.) consultando o PLANO.
@@ -61,14 +62,15 @@
 ### Estrutura do repositório
 
 - **Monorepo simples** (1 repo no GitHub) com `apps/api` + `apps/web` + `packages/shared-types`
-- Orquestração via **Makefile** na raiz + scripts nativos de cada workspace
+- Orquestração via **scripts pnpm na raiz** (`pnpm dev:api`, `dev:worker`, `dev:web`, `infra:up`, `db:migrate`, `db:seed`, …). Há um `Makefile`, mas `make` não está disponível no ambiente Windows do dev — **prefira os scripts pnpm** (ver `MEMORY.md`).
 - Deploys independentes via **path filters** no GitHub Actions
 
 ### Infra
 
-- Docker + Docker Compose (dev), AWS ECS / Docker Swarm (prod — a decidir)
-- GitHub Actions para CI/CD
-- Sentry + Grafana/Loki para observabilidade
+- **Dev local:** Docker Compose (`docker/docker-compose.yml`) sobe Postgres + Redis.
+- **Deploy (dev):** **Google Cloud Run** no GCP `liberdade-assessoria`, região `southamerica-east1`. Imagens no **Artifact Registry** (`southamerica-east1-docker.pkg.dev`), build via **Cloud Build**. Serviços: API, worker e web; migration/cleanup rodam como **Cloud Run Jobs**. Redis gerenciado (Upstash sobre TLS).
+- **CI/CD:** GitHub Actions — `ci.yml` (qualidade) + `deploy-dev.yml` / `deploy-prod.yml`.
+- **Observabilidade:** Sentry + Grafana/Loki.
 
 ---
 
@@ -78,7 +80,7 @@
 
 1. **Nunca** armazene `OMIE_ENCRYPTION_KEY`, `JWT_SECRET`, `ANTHROPIC_API_KEY` em código, banco, log ou resposta. Apenas env vars.
 2. **Nunca** retorne hash de senha, credenciais descriptografadas ou tokens em respostas de API.
-3. **Nunca** logue: senhas, credenciais Omie, JWTs, conteúdo de arquivos. Use `[REDACTED]`. O redactor do structlog (a ser configurado em S1) mascara automaticamente chaves sensíveis.
+3. **Nunca** logue: senhas, credenciais Omie, JWTs, conteúdo de arquivos. Use `[REDACTED]`. O redactor do structlog (em `apps/api/app/core/logging.py`) mascara automaticamente chaves sensíveis.
 4. **Nunca** use `float` para valores monetários. Sempre `Decimal` (Python) ou string/BigInt de centavos (TS). `DECIMAL(14,2)` no DB.
 5. **Nunca** use IDs sequenciais em rotas públicas. Sempre UUID v4.
 6. **Nunca** acesse `session` / DB global. Sempre via `Depends` do FastAPI.
@@ -253,7 +255,7 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
 | **S7**  | Detalhe cliente + cache L1         | BACK 4.1, 4.2 · FRONT 4.3     |
 | **S8**  | Formulário + validações            | FRONT 5.1, 6.1 · BACK 6.2     |
 | **S9**  | Parsing Claude                     | BACK 7.1 · FRONT 7.2          |
-| **S10** | Processamento async (Celery)       | BACK 8.1–8.6 · FRONT 8.7      |
+| **S10** | Processamento async (ARQ)          | BACK 8.1–8.6 · FRONT 8.7      |
 | **S11** | Revisão — backend + cache L2       | BACK 9.1–9.10                 |
 | **S12** | Revisão — estrutura + aba 1        | FRONT 9.11–9.14               |
 | **S13** | Revisão — abas 2, 3, 4             | FRONT 9.15–9.17               |
@@ -262,28 +264,31 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
 | **S16** | Hardening de segurança             | — (transversal)               |
 | **S17** | Observabilidade                    | — (transversal)               |
 | **S18** | E2E + deploy + docs                | — (finalização)               |
+| **S19** | Qualificação (`qualification`)     | BACK 12.1 · FRONT 12.2        |
+
+> **S20+ (pivot — auditoria contínua sobre o Omie):** eixo S20–S27, em planejamento. Não está na tabela acima; ver [Docs/PLANO_S20_AUDITORIA_CONTINUA.md](Docs/PLANO_S20_AUDITORIA_CONTINUA.md).
 
 ---
 
-## 9. Comandos Frequentes (a popular durante S0)
+## 9. Comandos Frequentes
+
+Preferir os **scripts pnpm da raiz** (ver `package.json`); `make` não funciona no ambiente.
 
 ```bash
-# Dev local
-docker compose up -d postgres redis
-cd apps/api && uv run uvicorn app.main:app --reload
-cd apps/web && pnpm dev
+# Dev local (scripts pnpm da raiz)
+pnpm infra:up        # docker compose: postgres + redis
+pnpm dev:api         # uvicorn app.main:app --reload
+pnpm dev:worker      # ARQ worker (python -m scripts.run_worker)
+pnpm dev:web         # Next.js dev
 
 # DB
-cd apps/api && alembic upgrade head
-cd apps/api && uv run python -m scripts.seed_dev
-cd apps/api && alembic revision --autogenerate -m "descrição"
+pnpm db:migrate      # alembic upgrade head
+pnpm db:seed         # python -m scripts.seed_dev
+cd apps/api && uv run alembic revision --autogenerate -m "descrição"
 
-# Lint / type / test
-cd apps/api && ruff check . && ruff format --check . && mypy . && pytest
-cd apps/web && pnpm lint && pnpm type-check && pnpm test && pnpm e2e
-
-# Worker
-cd apps/api && celery -A app.workers.celery_app worker -l info
+# Lint / type / test (mesmo conjunto do CI — ver §7)
+cd apps/api && uv run ruff check . && uv run ruff format --check . && uv run mypy app/ && uv run pytest -q --no-cov
+pnpm --filter @auditoria/web lint && pnpm --filter @auditoria/web type-check && pnpm --filter @auditoria/web test
 ```
 
 ---
@@ -292,22 +297,23 @@ cd apps/api && celery -A app.workers.celery_app worker -l info
 
 Quando o usuário não tiver decidido, **pergunte** antes de presumir:
 
-**Decididos em 24/04/2026:**
+**Decididos:**
 
-- [x] ~~Framework Python~~ → **FastAPI**
-- [x] ~~Job runner~~ → **ARQ**
-- [x] ~~PM Python~~ → **uv** | ~~PM Frontend~~ → **pnpm**
-- [x] ~~Monorepo vs polyrepo~~ → **Monorepo simples**
+- [x] ~~Framework Python~~ → **FastAPI** _(24/04/2026)_
+- [x] ~~Job runner~~ → **ARQ** _(24/04/2026)_
+- [x] ~~PM Python~~ → **uv** | ~~PM Frontend~~ → **pnpm** _(24/04/2026)_
+- [x] ~~Monorepo vs polyrepo~~ → **Monorepo simples** _(24/04/2026)_
+- [x] ~~Ambiente de staging/deploy~~ → **Google Cloud Run** (GCP `liberdade-assessoria`, `southamerica-east1`); dev no ar.
+- [x] ~~Credenciais Omie sandbox~~ → **não existe sandbox no Omie.** Testes contra conta real (Quial), localmente; **nunca** comitar credenciais; rotacionar se vazar.
 
-**Ainda em aberto (aguardando stakeholder):**
+**Ainda em aberto (aguardando stakeholder / a confirmar):**
 
-- [ ] Credenciais Omie sandbox disponíveis? _S5+_
-- [ ] Chave Anthropic com budget. _S9_
+- [ ] Chave Anthropic com budget de longo prazo (parsing roda em dev, mas confirmar limite). _S9_
 - [ ] Paginação de `ListarExtrato` (doc Omie incompleta — validar com Galhardo). _S5_
 - [ ] `ListarContasPagar.filtrar_por_status` aceita múltiplos valores? _S5_
 - [ ] Endpoint Omie que expõe saldo em data específica (fallback de `balance_start`). _S10_
-- [ ] Ambiente de staging (AWS ECS, Render, Railway, outro). _S18_
 - [ ] Política de senhas (rotação, complexidade). _S4_
+- [ ] Ambiente de **produção** (o de dev já roda no Cloud Run; falta promover/configurar prod). _S18_
 
 ---
 
@@ -369,4 +375,4 @@ lembrar dos comandos.
 
 ---
 
-_Versão 1.0 — 24/04/2026. Alinhado à documentação em `Docs/documentation/` e ao plano em `Docs/PLANO_IMPLEMENTACAO.md`._
+_Versão 1.1 — 09/06/2026. Atualizado o status (S0–S19 em dev), worker (ARQ, não Celery), deploy (Google Cloud Run/GCP) e o eixo S20+. Alinhado à documentação em `Docs/documentation/`, ao plano em `Docs/PLANO_IMPLEMENTACAO.md` e ao pivot em `Docs/PLANO_S20_AUDITORIA_CONTINUA.md`._
