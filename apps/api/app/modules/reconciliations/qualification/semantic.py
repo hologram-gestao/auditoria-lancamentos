@@ -32,10 +32,17 @@ from app.modules.reconciliations.qualification.schemas import (
 
 log = get_logger(__name__)
 
-# Lote de 50 pares por chamada. Empírico: payload do tool input com 50
-# pares fica < 6 KB; resposta < 4 KB. Folga confortável dentro do contexto
-# de 200k tokens da Sonnet 4.5. Caso aumente muito a descrição, ajustar.
+# Lote de 50 pares por chamada — amortiza o prompt + tool definition no cache
+# (CLAUDE.md §7 / PLANO §6.2).
 SEMANTIC_BATCH_SIZE = 50
+
+# Teto de tokens de saída por chamada. 50 vereditos com `motivo` de até 200
+# chars cada chegam a ~4.5k tokens; o valor antigo (4096) TRUNCAVA o tool_use
+# em extratos grandes, devolvendo `results` vazio — os 50 pares do lote viravam
+# "ok" sem análise, silenciosamente (falso-negativo de auditoria, visto em prod
+# 09/06/2026). 8192 dá ~2x de folga; se `qualification_semantic_truncated`
+# aparecer no log, reduzir o lote.
+_MAX_OUTPUT_TOKENS = 8192
 
 # Limite do `motivo` por par — alinha com a coluna `context_encrypted`
 # do `reconciliation_anomalies` (Text, sem limite duro, mas mantemos
@@ -221,7 +228,7 @@ async def _analyze_batch(
 
     message = await sdk_client.messages.create(
         model=anthropic_client._model,
-        max_tokens=4096,
+        max_tokens=_MAX_OUTPUT_TOKENS,
         system=system_blocks,
         tools=[_QUALIFY_TOOL],
         tool_choice={"type": "tool", "name": QUALIFY_TOOL_NAME},
@@ -244,6 +251,12 @@ async def _analyze_batch(
             }
         ],
     )
+
+    # Defesa contra truncamento silencioso: se o modelo bateu no teto de tokens,
+    # o tool_use volta cortado e `results` vazio — os pares do lote viram "ok"
+    # sem análise. Logamos pra que isso seja VISÍVEL, não um falso-negativo mudo.
+    if getattr(message, "stop_reason", None) == "max_tokens":
+        log.warning("qualification_semantic_truncated", batch_size=len(batch))
 
     tokens = _extract_tokens(message)
     raw_items = _extract_tool_results(message)
