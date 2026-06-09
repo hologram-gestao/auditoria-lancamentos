@@ -213,6 +213,12 @@ jobs:
   #     no service. Reusamos `GCP_API_SERVICE_ACCOUNT` só pra autenticar
   #     o WIF (api-sa tem `iam.serviceAccountUser` sobre worker-sa).
   #   - Sem `--min-instances/--max-instances`: setados manualmente (1/1).
+  #   - `--no-cpu-throttling` (CPU always-on): setado manualmente em 09/06/2026.
+  #     OBRIGATÓRIO — sem isso o Cloud Run corta a CPU fora de request HTTP, e o
+  #     worker ARQ (que roda jobs em background, não em handler HTTP) congela
+  #     durante `await` de I/O: Redis timeout, chamada Claude travada por minutos,
+  #     job morto por job_timeout. `services update --image/--update-env-vars`
+  #     preserva a annotation; só se perde se o serviço for recriado do zero.
   #
   # Resumo: o único campo que muda a cada push é a imagem (`--image=:dev`
   # re-resolve digest) e o `DEPLOYED_AT` (força revisão nova).

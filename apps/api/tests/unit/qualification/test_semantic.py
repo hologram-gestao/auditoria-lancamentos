@@ -19,6 +19,7 @@ from pydantic import SecretStr
 from app.integrations.anthropic.client import AnthropicClient
 from app.modules.reconciliations.qualification.schemas import QualificationPair
 from app.modules.reconciliations.qualification.semantic import (
+    _MAX_OUTPUT_TOKENS,
     QUALIFY_TOOL_NAME,
     SEMANTIC_BATCH_SIZE,
     analyze_pairs,
@@ -215,3 +216,22 @@ async def test_analyze_pairs_truncates_long_motivo() -> None:
     results, _tokens, _calls = await analyze_pairs([p1], anthropic_client=client)
     assert len(results) == 1
     assert len(results[0].motivo) <= 200
+
+
+async def test_analyze_pairs_uses_max_output_tokens_8192() -> None:
+    # Regressão (prod 09/06/2026): max_tokens=4096 truncava o tool_use em lotes
+    # de 50 vereditos, devolvendo `results` vazio — 50 pares viravam "ok" sem
+    # análise (falso-negativo de auditoria). O teto agora é 8192.
+    p1 = _pair()
+    fake = _FakeAnthropic(
+        side_effect=[_tool_response([{"pair_id": p1.pair_id, "status": "ok", "motivo": "ok"}])]
+    )
+    client = AnthropicClient(
+        api_key=SecretStr("fake"),
+        model="claude-sonnet-4-5",
+        timeout=10.0,
+        anthropic_client=fake,
+    )
+    await analyze_pairs([p1], anthropic_client=client)
+    assert fake.messages.calls[0]["max_tokens"] == _MAX_OUTPUT_TOKENS
+    assert _MAX_OUTPUT_TOKENS == 8192
