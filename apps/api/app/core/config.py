@@ -109,10 +109,14 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: SecretStr = Field(default=SecretStr(""))
     ANTHROPIC_MODEL_DEFAULT: str = "claude-sonnet-4-5"
     ANTHROPIC_MODEL_FALLBACK: str = "claude-opus-4-6"
-    # Timeout total para o parsing IA (S9). Mantém o checklist do BACK 7.1
-    # ("Timeout: 60s") parametrizável para testes — em pytest cai-se para 1s
-    # com `monkeypatch` sem precisar mexer no código.
-    ANTHROPIC_TIMEOUT_SECONDS: float = 60.0
+    # Timeout total para o parsing IA (S9). Subido de 60s → 150s: extratos reais
+    # grandes (ex.: 143 transações) levam ~75s na extração via Claude e estouravam
+    # o default antigo, devolvendo 504. Continua parametrizável para testes — em
+    # pytest cai-se para 1s com `monkeypatch` sem mexer no código.
+    # ACOPLAMENTO: o proxy do BFF (Next `experimental.proxyTimeout` em
+    # apps/web/next.config.mjs) precisa ficar ACIMA deste valor (160s). Se o BFF
+    # cortar antes, o usuário vê um 500 genérico mesmo com o backend respondendo.
+    ANTHROPIC_TIMEOUT_SECONDS: float = 150.0
 
     # MOCK exclusivo de demo/gravação: quando True, `ParseService` retorna um
     # payload fixo (extrato fictício da Padaria Pão Quente) sem chamar a

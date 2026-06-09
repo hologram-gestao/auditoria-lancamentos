@@ -267,7 +267,7 @@ class AnthropicAuthError(AppError):
 
 
 class AnthropicTimeoutError(AppError):
-    """504 — Anthropic API não respondeu dentro do timeout configurado (60 s)."""
+    """504 — Anthropic API não respondeu dentro do timeout configurado (150 s)."""
 
     code = ErrorCode.ANTHROPIC_TIMEOUT
     status_code = 504
