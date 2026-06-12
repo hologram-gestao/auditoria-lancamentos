@@ -95,3 +95,11 @@ class WorkerSettings:
     job_timeout: ClassVar[int] = 900
     keep_result: ClassVar[int] = 60  # mantém resultado no Redis por 1min (debug)
     max_tries: ClassVar[int] = 1  # job já trata erros — sem retry automático
+    # Default do ARQ é 0.5s. O ARQ é poll-based (zrangebyscore na fila a cada
+    # ciclo), então o worker ocioso bate no Redis 2x/s = ~5,2M comandos/mês —
+    # estoura o free tier do Upstash (500k/mês) em ~3 dias, mesmo sem nenhum
+    # job rodando. 15s derruba isso pra ~172k/mês, com folga. Trade-off: um job
+    # recém-enfileirado é pego em até 15s; irrelevante perto do job_timeout de
+    # 900s e do fluxo com revisão humana. Em prod com Redis de cota maior,
+    # baixar este valor melhora a latência de pickup.
+    poll_delay: ClassVar[int] = 15
