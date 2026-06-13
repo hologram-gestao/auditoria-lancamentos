@@ -66,23 +66,42 @@ interface FetchOptions {
   signal?: AbortSignal;
 }
 
-/** Promise de refresh em andamento — deduplica retries paralelos. */
-let inflightRefresh: Promise<boolean> | null = null;
+/**
+ * Resultado de uma tentativa de refresh:
+ *   - `renewed`   → backend emitiu novo par de cookies (res.ok).
+ *   - `invalid`   → refresh token ausente/expirado/inválido (401). Sessão acabou
+ *                   de verdade; cabe redirecionar para /login.
+ *   - `transient` → falha de rede ou 5xx do servidor (cold start, deploy, blip).
+ *                   NÃO desloga — a sessão provavelmente ainda é válida; o caller
+ *                   deixa o erro borbulhar para retry, sem mandar pro /login.
+ */
+type RefreshOutcome = 'renewed' | 'invalid' | 'transient';
 
-async function performRefresh(): Promise<boolean> {
+/** Promise de refresh em andamento — deduplica retries paralelos. */
+let inflightRefresh: Promise<RefreshOutcome> | null = null;
+
+async function performRefresh(): Promise<RefreshOutcome> {
+  let res: Response;
   try {
-    const res = await fetch(`${BASE_URL}${REFRESH_PATH}`, {
+    res = await fetch(`${BASE_URL}${REFRESH_PATH}`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
     });
-    return res.ok;
   } catch {
-    return false;
+    // Offline / DNS / conexão cortada — transitório, nunca um logout.
+    return 'transient';
   }
+  if (res.ok) {
+    return 'renewed';
+  }
+  // SÓ um 401 explícito significa "refresh token não vale mais" → logout real.
+  // 5xx (502/503 de deploy, cold start) e demais status são soluços do servidor:
+  // deslogar aí derruba uma sessão válida (root cause do bug de logout intermitente).
+  return res.status === 401 ? 'invalid' : 'transient';
 }
 
-function refreshOnce(): Promise<boolean> {
+function refreshOnce(): Promise<RefreshOutcome> {
   if (inflightRefresh === null) {
     inflightRefresh = performRefresh().finally(() => {
       inflightRefresh = null;
@@ -145,11 +164,16 @@ async function rawFetch<T>(path: string, init: RequestInit, options: FetchOption
   if (res.status === 401 && !options.skipRefresh) {
     const body = await parseErrorBody(res);
     if (body.code === 'TOKEN_EXPIRED') {
-      const renewed = await refreshOnce();
-      if (renewed) {
+      const outcome = await refreshOnce();
+      if (outcome === 'renewed') {
         return rawFetch<T>(path, init, { ...options, skipRefresh: true });
       }
-      redirectToLogin();
+      // Só redireciona quando o refresh foi DEFINITIVAMENTE rejeitado (401).
+      // Em falha transitória (5xx/rede) mantém o usuário logado e deixa o erro
+      // subir para retry — não força /login num soluço do servidor.
+      if (outcome === 'invalid') {
+        redirectToLogin();
+      }
     }
     throw new ApiError(res.status, body);
   }
@@ -291,11 +315,13 @@ export async function apiPostBlob(
   if (res.status === 401 && !options.skipRefresh) {
     const errBody = await parseErrorBody(res);
     if (errBody.code === 'TOKEN_EXPIRED') {
-      const renewed = await refreshOnce();
-      if (renewed) {
+      const outcome = await refreshOnce();
+      if (outcome === 'renewed') {
         return apiPostBlob(path, body, { ...options, skipRefresh: true });
       }
-      redirectToLogin();
+      if (outcome === 'invalid') {
+        redirectToLogin();
+      }
     }
     throw new ApiError(res.status, errBody);
   }
