@@ -35,7 +35,7 @@
 ### Backend
 
 - **Python 3.12+** gerenciado via **`uv`** (workspaces habilitados)
-- **FastAPI 0.110+**
+- **FastAPI 0.115+**
 - **SQLAlchemy 2.0** (async) + **Alembic**
 - **PostgreSQL 16** + **psycopg3** async
 - **Pydantic v2** (DTOs + settings)
@@ -45,8 +45,8 @@
 - **python-jose** para JWT, **bcrypt** direto (cost ≥ 12) — passlib não é usado (incompatível com bcrypt 5.x)
 - **openpyxl** para Excel
 - **structlog** para logs estruturados
-- **pytest + pytest-asyncio + respx + testcontainers**
-- **ruff + black + mypy strict**
+- **pytest + pytest-asyncio + respx + testcontainers + hypothesis** (property-based)
+- **ruff (lint + format) + mypy strict**
 
 ### Frontend
 
@@ -189,7 +189,7 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
 - **Módulos de domínio** seguem padrão `routes.py / service.py / repository.py / schemas.py`.
 - **Exceptions custom** (`AppError` → `DuplicateFileError`, `OmieAuthError`, etc.) com `code` e `user_message`. Exception handler global converte para formato §9 do PLANO.
 - **Dependency Injection** via `Depends`. Proibido estado global.
-- **Lint obrigatório:** ruff (`E, F, I, N, W, UP, B, C4, SIM, RUF`), black (line-length 100), mypy strict.
+- **Lint obrigatório:** ruff (`E, F, I, N, W, UP, B, C4, SIM, RUF, S, A, ASYNC, ANN, PT, TID`) + ruff format (line-length 100), mypy strict.
 
 ### Frontend
 
@@ -355,6 +355,8 @@ lembrar dos comandos.
 
 ## 13. Atualização deste Arquivo
 
+**Manter este arquivo atualizado é obrigação contínua — parte do _Definition of Done_, não um extra.** Sempre que uma tarefa disparar um dos gatilhos de _"Quando atualizar"_ abaixo, atualize o CLAUDE.md **na mesma entrega** (mesmo PR/commit que fez a mudança) e ajuste o rodapé de versão. Não acumule "atualizo depois": primer desatualizado induz erro nas próximas conversas e custa mais caro que um parágrafo a mais. Na dúvida se algo se qualifica, trate como gatilho — ou **pergunte** (§6, §10). Esse passo conversa com a §12: o fim de tarefa é o momento natural de revisar se o primer precisa mudar.
+
 **Quando atualizar:**
 
 - Decisão arquitetural tomada (confirmar framework, job runner, etc.).
@@ -374,5 +376,7 @@ lembrar dos comandos.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.2 — 11/06/2026. Adicionada a obrigação contínua de manter este primer atualizado (§13, parte do Definition of Done). Varredura de stack contra o código: corrigido o formatter (`ruff format`, não black) em §2/§7, completada a lista de regras ruff (`+ S, A, ASYNC, ANN, PT, TID`), FastAPI alinhado para 0.115+ e `hypothesis` incluído no conjunto de testes. Status S0–S19 em dev e eixo S20+ revalidados contra git log e estrutura de `apps/api`._
 
 _Versão 1.1 — 09/06/2026. Atualizado o status (S0–S19 em dev), worker (ARQ, não Celery), deploy (Google Cloud Run/GCP) e o eixo S20+. Alinhado à documentação em `Docs/documentation/`, ao plano em `Docs/PLANO_IMPLEMENTACAO.md` e ao pivot em `Docs/PLANO_S20_AUDITORIA_CONTINUA.md`._
