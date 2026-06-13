@@ -61,8 +61,19 @@ def _set_auth_cookies(
     refresh_token: str,
     settings: Settings,
 ) -> None:
-    """Seta cookies HttpOnly + Secure (prod) + SameSite=lax para access e refresh."""
+    """Seta cookies HttpOnly + Secure (prod) + SameSite=lax para access e refresh.
+
+    O `max_age` dos DOIS cookies = lifetime da SESSÃO (refresh). O `access_token`
+    propositalmente sobrevive ao `exp` do JWT (que segue curto): quando o access
+    expira, o cookie continua presente, o middleware do front (que só checa
+    presença) deixa navegar, e a 1ª request pega TOKEN_EXPIRED → refresh em
+    silêncio. Sem isso, o browser apaga o cookie ao expirar o JWT e a navegação
+    seguinte cai no /login mesmo com refresh válido (bug de logout intermitente).
+    O JWT expirado dentro do cookie é inofensivo — `decode_token` o rejeita.
+    """
     domain = _cookie_domain(settings)
+    # Cookie persiste pela SESSÃO; a validade REAL é o `exp` do JWT, não o max_age.
+    session_max_age = settings.JWT_REFRESH_EXPIRE_DAYS * 24 * 60 * 60
     response.set_cookie(
         key=ACCESS_TOKEN_COOKIE,
         value=access_token,
@@ -70,7 +81,7 @@ def _set_auth_cookies(
         secure=settings.COOKIE_SECURE,
         samesite=settings.COOKIE_SAMESITE,
         domain=domain,
-        max_age=settings.JWT_ACCESS_EXPIRE_MINUTES * 60,
+        max_age=session_max_age,
         path="/",
     )
     response.set_cookie(
@@ -80,7 +91,7 @@ def _set_auth_cookies(
         secure=settings.COOKIE_SECURE,
         samesite=settings.COOKIE_SAMESITE,
         domain=domain,
-        max_age=settings.JWT_REFRESH_EXPIRE_DAYS * 24 * 60 * 60,
+        max_age=session_max_age,
         path=AUTH_PATH_PREFIX,  # refresh só é enviado nas rotas de auth (escopo mínimo)
     )
 
