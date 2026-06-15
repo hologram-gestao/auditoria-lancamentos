@@ -10,9 +10,13 @@ Padrão CLAUDE.md §3.11 + P0-004:
       (DB próprio é o cap natural).
 
 Storage backend:
-    - Default: in-memory (`memory://`) — suficiente para dev e single-instance.
-    - Em prod multi-instância: setar env var `RATELIMIT_STORAGE_URI=redis://...`
-      (slowapi consome essa env automaticamente via `limits` library).
+    - Hoje: in-memory (`memory://`) por processo. Com várias instâncias
+      (Cloud Run maxScale>1) o limite NÃO é compartilhado — cada instância tem
+      seu próprio contador. Aceitável como hardening de baixo risco por ora.
+    - Limite consistente entre instâncias exigiria um storage compartilhado
+      passado EXPLICITAMENTE ao `Limiter` (`storage_uri=...`) — o slowapi NÃO lê
+      `RATELIMIT_STORAGE_URI` do ambiente sozinho. Decisão de storage adiada
+      para o refactoring de infra (saída do Redis; possível edge/Cloud Armor).
 
 Key functions:
     - `get_remote_address`: IP do cliente (default; usado em /login).
