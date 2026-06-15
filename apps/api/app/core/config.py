@@ -64,6 +64,15 @@ class Settings(BaseSettings):
     REDIS_URL: str = Field(default="redis://localhost:6379/0")
     CACHE_BACKEND: CacheBackend = CacheBackend.MEMORY
 
+    # ---------- Rate limit ----------
+    # Storage do rate-limit (slowapi/limits). None/vazio → in-memory: ok para dev,
+    # testes e single-instance. Em prod multi-instância (Cloud Run maxScale>1),
+    # apontar para o MESMO Redis do REDIS_URL — de preferência via o mesmo secret,
+    # para acompanhar migração de Redis sem drift — tornando o limite consistente
+    # entre instâncias. O Limiter recebe este valor EXPLICITAMENTE (o slowapi não
+    # lê esta env sozinho); ver `core.rate_limit`.
+    RATELIMIT_STORAGE_URI: str | None = None
+
     # ---------- Segurança ----------
     OMIE_ENCRYPTION_KEY: SecretStr = Field(
         ..., description="Chave AES-256 em hex (64 chars). Gere com `openssl rand -hex 32`."

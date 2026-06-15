@@ -10,9 +10,14 @@ Padrão CLAUDE.md §3.11 + P0-004:
       (DB próprio é o cap natural).
 
 Storage backend:
-    - Default: in-memory (`memory://`) — suficiente para dev e single-instance.
-    - Em prod multi-instância: setar env var `RATELIMIT_STORAGE_URI=redis://...`
-      (slowapi consome essa env automaticamente via `limits` library).
+    - Sem `RATELIMIT_STORAGE_URI` → in-memory (`memory://`): ok para dev, testes
+      e single-instance.
+    - Em prod multi-instância (Cloud Run maxScale>1): setar `RATELIMIT_STORAGE_URI`
+      para um Redis compartilhado → limite consistente entre instâncias. O valor é
+      passado EXPLICITAMENTE no `Limiter` abaixo (o slowapi NÃO lê essa env
+      sozinho). Resiliência: `in_memory_fallback_enabled` + `swallow_errors` fazem
+      um Redis fora do ar degradar para memória (per-instance) em vez de derrubar
+      requests (ex.: bloquear o login).
 
 Key functions:
     - `get_remote_address`: IP do cliente (default; usado em /login).
@@ -43,6 +48,8 @@ from app.core.config import get_settings
 
 if TYPE_CHECKING:
     from starlette.requests import Request
+
+    from app.core.config import Settings
 
 # Nome do cookie HTTP, não uma credencial — duplicado de `core.dependencies`
 # para manter este módulo livre do import do FastAPI.
@@ -81,9 +88,23 @@ def user_id_key_func(request: Request) -> str:
     return get_remote_address(request)
 
 
+def _resolve_storage_uri(settings: Settings) -> str:
+    """URI do storage do rate-limit. Sem config → in-memory (dev/test/single-instance)."""
+    return settings.RATELIMIT_STORAGE_URI or "memory://"
+
+
 # Singleton — anexado a `app.state` em `main.create_app()`.
+#
+# `storage_uri` é passado EXPLICITAMENTE: o slowapi NÃO lê `RATELIMIT_STORAGE_URI`
+# do ambiente sozinho. Com um Redis configurado, o limite fica consistente entre
+# instâncias (Cloud Run maxScale>1). O rate-limit NUNCA pode derrubar o login:
+#   - `in_memory_fallback_enabled`: Redis fora do ar → degrada para memória.
+#   - `swallow_errors`: erro de storage é logado, não vira 500 na request.
 limiter = Limiter(
     key_func=get_remote_address,
     default_limits=[],  # nenhum limit global; aplicar por rota
     headers_enabled=True,  # X-RateLimit-* nos headers de resposta
+    storage_uri=_resolve_storage_uri(get_settings()),
+    in_memory_fallback_enabled=True,
+    swallow_errors=True,
 )
