@@ -136,7 +136,7 @@ def _cache_with(
     entries: list[tuple[int, str, str]],
 ) -> OmieLancamentoCache:
     """Cria um cache L1-only populado manualmente com `(omie_id, supplier, category)`."""
-    cache = OmieLancamentoCache(redis=None)
+    cache = OmieLancamentoCache()
     for omie_id, supplier, category in entries:
         data = OmieLancamentoData(
             omie_id=omie_id,

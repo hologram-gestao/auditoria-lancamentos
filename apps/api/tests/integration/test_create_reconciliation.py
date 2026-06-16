@@ -171,25 +171,25 @@ def _create_payload(
     }
 
 
-# Stub do dispatcher: registra cada chamada e retorna um job_id fake.
-# Sobrescreve `_enqueue_reconciliation_job` (não o `enqueue_processing` mais
-# baixo) — o endpoint chama o wrapper, então temos um único ponto de override.
+# Stub do agendamento: registra cada `session_id` agendado e NÃO dispara a
+# BackgroundTask real (o TestClient do Starlette executaria o processamento de
+# verdade após a resposta). Sobrescreve `_schedule_reconciliation_processing` —
+# ponto único de override no endpoint.
 @pytest.fixture
 def stub_enqueue() -> Iterator[list[UUID]]:
-    """Substitui o enfileiramento real por um stub. Devolve a lista de
-    `session_id` enfileirados — testes podem assert nesta lista."""
-    enqueued: list[UUID] = []
+    """Substitui o agendamento real por um stub. Devolve a lista de
+    `session_id` agendados — testes podem assert nesta lista."""
+    scheduled: list[UUID] = []
 
-    async def _stub(session_id: UUID, _settings: object) -> str:
-        enqueued.append(session_id)
-        return f"stubbed-job-{session_id}"
+    def _stub(_background_tasks: object, session_id: UUID) -> None:
+        scheduled.append(session_id)
 
-    original = reconciliation_routes._enqueue_reconciliation_job  # type: ignore[attr-defined]
-    reconciliation_routes._enqueue_reconciliation_job = _stub  # type: ignore[attr-defined]
+    original = reconciliation_routes._schedule_reconciliation_processing  # type: ignore[attr-defined]
+    reconciliation_routes._schedule_reconciliation_processing = _stub  # type: ignore[attr-defined]
     try:
-        yield enqueued
+        yield scheduled
     finally:
-        reconciliation_routes._enqueue_reconciliation_job = original  # type: ignore[attr-defined]
+        reconciliation_routes._schedule_reconciliation_processing = original  # type: ignore[attr-defined]
 
 
 # ----------------------------------------------------------------------

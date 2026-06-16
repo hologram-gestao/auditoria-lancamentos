@@ -2,7 +2,9 @@
 
 > **Para futuras conversas com Claude:** este arquivo é o _primer_ obrigatório. Leia-o antes de qualquer ação. Ele é atualizado continuamente conforme decisões são tomadas.
 >
-> **Status do projeto:** 🚀 Sessões **S0–S19 implementadas e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain configurado (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). A conciliação file-driven funciona ponta a ponta (upload → IA → matching → revisão → Excel). Próximo eixo: **S20+ — auditoria contínua sobre o Omie** (em planejamento, ver [Docs/PLANO_S20_AUDITORIA_CONTINUA.md](Docs/PLANO_S20_AUDITORIA_CONTINUA.md)). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
+> **Status do projeto:** 🚀 Sessões **S0–S19 implementadas e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain configurado (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). A conciliação file-driven funciona ponta a ponta (upload → IA → matching → revisão → Excel). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
+>
+> **Roadmap atual (PRD 15/06/2026 → FASE 0–5):** o roadmap foi reordenado pelo PRD em [Docs/NextSteps/](Docs/NextSteps/). O plano de execução é [Docs/PLANO_PROXIMOS_PASSOS.md](Docs/PLANO_PROXIMOS_PASSOS.md) (sessões **S20+**): **FASE 0 ✅ CONCLUÍDA (S20)** — Redis/ARQ removido, processamento via `BackgroundTasks` ([BACK 0.1]); os 2 bugs já estavam corrigidos (auth #19, timeout #16). **FASE 1–2** conciliação e lançamento de **fatura de cartão**. **FASE 3** glossário por cliente. **FASE 4** Open Finance (Pluggy). **FASE 5** rotinas automáticas de auditoria (absorve o antigo S20–S27). ⚠️ **Uma reversão do PRD ainda NÃO está no código** (e portanto §5 abaixo segue valendo como está até a fase aterrissar): a tolerância de data ainda é parametrizável (default 3) — o PRD a torna **zero** na FASE 1 (S21), mudando comportamento da conta corrente.
 
 ---
 
@@ -20,8 +22,10 @@
 
 - **Funcional:** `Docs/documentation/` (arquivos 0 a 18, numerados sequencialmente).
 - **Backlog:** `Docs/List _ Auditora de Lançamentos - Backlog _ Hologram (Lista) - TAREFAS.pdf`.
-- **Plano de implementação:** [Docs/PLANO_IMPLEMENTACAO.md](Docs/PLANO_IMPLEMENTACAO.md) — sessões S0–S19 (conciliação file-driven).
-- **Plano do pivot:** [Docs/PLANO_S20_AUDITORIA_CONTINUA.md](Docs/PLANO_S20_AUDITORIA_CONTINUA.md) — eixo S20–S27 (auditoria contínua sobre o Omie, sem extrato).
+- **PRD vigente (roadmap):** `Docs/NextSteps/PRD - Próximos Passos-20260615173056.md` — FASE 0–5 (estabilização, cartão, glossário, Pluggy, rotinas).
+- **Plano de execução vigente:** [Docs/PLANO_PROXIMOS_PASSOS.md](Docs/PLANO_PROXIMOS_PASSOS.md) — sessões **S20+** derivadas do PRD. **É o plano ativo daqui pra frente.**
+- **Plano histórico (S0–S19):** [Docs/PLANO_IMPLEMENTACAO.md](Docs/PLANO_IMPLEMENTACAO.md) — conciliação file-driven, já construída.
+- **Plano antigo do pivot (SUPERSEDED):** [Docs/PLANO_S20_AUDITORIA_CONTINUA.md](Docs/PLANO_S20_AUDITORIA_CONTINUA.md) — auditoria contínua; **absorvido na FASE 5** do plano vigente. Útil só como material de origem (rastreabilidade dos transcritos + modelo de dados).
 - **Fluxograma:** `Docs/flow/Fluxograma Completo - sistema de conciliação.png`.
 
 **Convenção de IDs de tarefa:** quando o usuário citar `[BACK 1.1]` ou `[FRONT 9.12]`, isso vem do PDF do backlog. Mapeie para a sessão correspondente (S3, S12, etc.) consultando o PLANO.
@@ -30,7 +34,7 @@
 
 ## 2. Stack (decisões formalizadas)
 
-**Todas as 5 decisões operacionais foram confirmadas em 24/04/2026:** FastAPI + ARQ + uv + pnpm + monorepo simples.
+**Decisões operacionais (24/04/2026):** FastAPI + uv + pnpm + monorepo simples. _O ARQ/Redis foi removido na FASE 0 (16/06/2026) — background jobs agora rodam via `BackgroundTasks` nativo do FastAPI._
 
 ### Backend
 
@@ -40,7 +44,7 @@
 - **PostgreSQL 16** + **psycopg3** async
 - **Pydantic v2** (DTOs + settings)
 - **httpx** (async HTTP client)
-- **ARQ** (async-first Redis queue) para background jobs — integração nativa com código async
+- **`BackgroundTasks` nativo do FastAPI** para o processamento assíncrono da conciliação (Omie + matching + qualificação) — sem broker, sem Redis (FASE 0). Teto via `asyncio.timeout(RECONCILIATION_TIMEOUT_SECONDS)`; rede de segurança no cron `mark_stuck_sessions_as_error`.
 - **cryptography** para AES-256-GCM
 - **python-jose** para JWT, **bcrypt** direto (cost ≥ 12) — passlib não é usado (incompatível com bcrypt 5.x)
 - **openpyxl** para Excel
@@ -62,13 +66,13 @@
 ### Estrutura do repositório
 
 - **Monorepo simples** (1 repo no GitHub) com `apps/api` + `apps/web` + `packages/shared-types`
-- Orquestração via **scripts pnpm na raiz** (`pnpm dev:api`, `dev:worker`, `dev:web`, `infra:up`, `db:migrate`, `db:seed`, …). Há um `Makefile`, mas `make` não está disponível no ambiente Windows do dev — **prefira os scripts pnpm** (ver `MEMORY.md`).
+- Orquestração via **scripts pnpm na raiz** (`pnpm dev:api`, `dev:web`, `infra:up`, `db:migrate`, `db:seed`, …). Há um `Makefile`, mas `make` não está disponível no ambiente Windows do dev — **prefira os scripts pnpm** (ver `MEMORY.md`).
 - Deploys independentes via **path filters** no GitHub Actions
 
 ### Infra
 
-- **Dev local:** Docker Compose (`docker/docker-compose.yml`) sobe Postgres + Redis.
-- **Deploy (dev):** **Google Cloud Run** no GCP `liberdade-assessoria`, região `southamerica-east1`. Imagens no **Artifact Registry** (`southamerica-east1-docker.pkg.dev`), build via **Cloud Build**. Serviços: API, worker e web; migration/cleanup rodam como **Cloud Run Jobs**. Redis gerenciado (Upstash sobre TLS).
+- **Dev local:** Docker Compose (`docker/docker-compose.yml`) sobe **Postgres** (sem Redis desde a FASE 0).
+- **Deploy (dev):** **Google Cloud Run** no GCP `liberdade-assessoria`, região `southamerica-east1`. Imagens no **Artifact Registry** (`southamerica-east1-docker.pkg.dev`), build via **Cloud Build**. Serviços: API e web; migration/cleanup rodam como **Cloud Run Jobs**. **Sem worker e sem Redis/Upstash** (FASE 0). ⚠️ A API precisa de **`--no-cpu-throttling` + `min-instances ≥ 1`** porque o processamento roda em `BackgroundTasks` fora do handler HTTP (ver §10).
 - **CI/CD:** GitHub Actions — `ci.yml` (qualidade) + `deploy-dev.yml` / `deploy-prod.yml`.
 - **Observabilidade:** Sentry + Grafana/Loki.
 
@@ -255,8 +259,8 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
 | **S7**  | Detalhe cliente + cache L1         | BACK 4.1, 4.2 · FRONT 4.3     |
 | **S8**  | Formulário + validações            | FRONT 5.1, 6.1 · BACK 6.2     |
 | **S9**  | Parsing Claude                     | BACK 7.1 · FRONT 7.2          |
-| **S10** | Processamento async (ARQ)          | BACK 8.1–8.6 · FRONT 8.7      |
-| **S11** | Revisão — backend + cache L2       | BACK 9.1–9.10                 |
+| **S10** | Processamento async (BG Tasks)     | BACK 8.1–8.6 · FRONT 8.7      |
+| **S11** | Revisão — backend + cache L1       | BACK 9.1–9.10                 |
 | **S12** | Revisão — estrutura + aba 1        | FRONT 9.11–9.14               |
 | **S13** | Revisão — abas 2, 3, 4             | FRONT 9.15–9.17               |
 | **S14** | Exportação Excel                   | BACK 10.1                     |
@@ -276,9 +280,8 @@ Preferir os **scripts pnpm da raiz** (ver `package.json`); `make` não funciona 
 
 ```bash
 # Dev local (scripts pnpm da raiz)
-pnpm infra:up        # docker compose: postgres + redis
-pnpm dev:api         # uvicorn app.main:app --reload
-pnpm dev:worker      # ARQ worker (python -m scripts.run_worker)
+pnpm infra:up        # docker compose: postgres (sem Redis desde a FASE 0)
+pnpm dev:api         # uvicorn app.main:app --reload (processa conciliação via BackgroundTasks)
 pnpm dev:web         # Next.js dev
 
 # DB
@@ -300,7 +303,7 @@ Quando o usuário não tiver decidido, **pergunte** antes de presumir:
 **Decididos:**
 
 - [x] ~~Framework Python~~ → **FastAPI** _(24/04/2026)_
-- [x] ~~Job runner~~ → **ARQ** _(24/04/2026)_
+- [x] ~~Job runner~~ → **`BackgroundTasks` do FastAPI** _(FASE 0, 16/06/2026 — ARQ/Redis removido por overengineering; antes era ARQ)_
 - [x] ~~PM Python~~ → **uv** | ~~PM Frontend~~ → **pnpm** _(24/04/2026)_
 - [x] ~~Monorepo vs polyrepo~~ → **Monorepo simples** _(24/04/2026)_
 - [x] ~~Ambiente de staging/deploy~~ → **Google Cloud Run** (GCP `liberdade-assessoria`, `southamerica-east1`); dev no ar.
@@ -314,6 +317,14 @@ Quando o usuário não tiver decidido, **pergunte** antes de presumir:
 - [ ] Endpoint Omie que expõe saldo em data específica (fallback de `balance_start`). _S10_
 - [ ] Política de senhas (rotação, complexidade). _S4_
 - [ ] Ambiente de **produção** (o de dev já roda no Cloud Run; falta promover/configurar prod). _S18_
+
+**Novos (do PRD FASE 0–5 — detalhe em [Docs/PLANO_PROXIMOS_PASSOS.md](Docs/PLANO_PROXIMOS_PASSOS.md)):**
+
+- [ ] **Tolerância de data zero** passa a valer **também para conta corrente**? Muda comportamento em prod (hoje é parametrizável, default 3). _FASE 1 / S21_
+- [ ] **Quebra do invariante "Omie read-only":** aprovar escrita no Omie (`IncluirContaPagar`) só no fluxo de lançamento de cartão. Endpoint/campos/idempotência a confirmar contra Omie real. _FASE 2 / S24_
+- [ ] **Cloud Run `--no-cpu-throttling` + `min-instances ≥ 1`** na API após remover Redis (senão BackgroundTasks congela). Custo aceitável? _FASE 0 / S20_
+- [ ] **Pluggy interna vs Cubos** (proposta Arthur Souza, 16/06) + cobertura de Sicredi/BNB/Cora + primeiro endpoint público (webhook). _FASE 4_
+- [ ] **Campo de departamento/rateio** na response Omie (bloqueia check `sem_departamento`); Slack (app vs webhook) e provedor de email; persona supervisor (role nova vs reuso). _FASE 5_
 
 ---
 
@@ -376,6 +387,10 @@ lembrar dos comandos.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.4 — 16/06/2026. **FASE 0 / S20 (BACK 0.1) aterrissou:** Redis/ARQ removido — background jobs agora via `BackgroundTasks` nativo do FastAPI; cache de lançamentos virou **L1-only** (L2 Redis existia só p/ coerência com o worker separado, que não existe mais). §2 (stack/infra), §8 (mapa S10/S11), §9 (comandos) e §10 (job runner) atualizados como lei atual. Teto do processamento via `asyncio.timeout(RECONCILIATION_TIMEOUT_SECONDS=900)` + cron de cleanup como rede de segurança. Gate local verde (ruff/mypy/507 pytest). §5 (tolerância de data) **não** alterado de propósito — muda só na FASE 1. ⚠️ Cloud Run da API exige `--no-cpu-throttling` + `min-instances ≥ 1` (§10)._
+
+_Versão 1.3 — 15/06/2026. Reordenação do roadmap pelo PRD de 15/06 (FASE 0–5). Status (§ topo) e Fontes da Verdade (§1) passam a apontar o plano vigente [Docs/PLANO_PROXIMOS_PASSOS.md](Docs/PLANO_PROXIMOS_PASSOS.md); o [PLANO_S20_AUDITORIA_CONTINUA.md](Docs/PLANO_S20_AUDITORIA_CONTINUA.md) foi marcado **superseded** (absorvido na FASE 5). §10 ganhou os pontos em aberto do PRD. Os 2 bugs da FASE 0 já estavam resolvidos (auth #19, timeout #16)._
 
 _Versão 1.2 — 11/06/2026. Adicionada a obrigação contínua de manter este primer atualizado (§13, parte do Definition of Done). Varredura de stack contra o código: corrigido o formatter (`ruff format`, não black) em §2/§7, completada a lista de regras ruff (`+ S, A, ASYNC, ANN, PT, TID`), FastAPI alinhado para 0.115+ e `hypothesis` incluído no conjunto de testes. Status S0–S19 em dev e eixo S20+ revalidados contra git log e estrutura de `apps/api`._
 

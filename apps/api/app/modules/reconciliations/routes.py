@@ -18,7 +18,18 @@ from datetime import date
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 
 from app.core.config import Settings, get_settings
 from app.core.dependencies import (
@@ -28,7 +39,6 @@ from app.core.dependencies import (
     require_client_access,
 )
 from app.core.exceptions import (
-    AppError,
     ClientNotAccessibleError,
     ConflictError,
     NotFoundError,
@@ -38,7 +48,7 @@ from app.core.rate_limit import limiter, user_id_key_func
 from app.db.models import ReconciliationStatus
 from app.integrations.anthropic.client import AnthropicClient
 from app.modules.reconciliations.parse_service import ParseService
-from app.modules.reconciliations.processing.dispatcher import enqueue_processing
+from app.modules.reconciliations.processing.job import run_reconciliation_processing
 from app.modules.reconciliations.repository import ReconciliationRepository
 from app.modules.reconciliations.schemas import (
     CheckDuplicateResponse,
@@ -96,14 +106,21 @@ def _get_parse_service(
 ParseServiceDep = Annotated[ParseService, Depends(_get_parse_service)]
 
 
-# Provider do dispatcher de jobs — função em vez de import direto para que
-# testes sobrescrevam via `dependency_overrides` e evitem subir Redis real.
-async def _enqueue_reconciliation_job(
+# Ponto único de agendamento do processamento — função de módulo (não chamada
+# direta ao `add_task`) para que os testes a sobrescrevam via monkeypatch e
+# não disparem o processamento real (o TestClient do Starlette executa as
+# BackgroundTasks de verdade após a resposta).
+def _schedule_reconciliation_processing(
+    background_tasks: BackgroundTasks,
     session_id: UUID,
-    settings: Settings,
-) -> str:
-    """Wrapper async sobre o dispatcher — separa o ponto de override."""
-    return await enqueue_processing(session_id, redis_url=settings.REDIS_URL)
+) -> None:
+    """Agenda `run_reconciliation_processing` como BackgroundTask do FastAPI.
+
+    Roda depois que a resposta HTTP é enviada, no mesmo processo. A sessão já
+    foi commitada antes desta chamada (ver `create_reconciliation`), então a
+    task — que abre a própria DB session — enxerga a linha recém-criada.
+    """
+    background_tasks.add_task(run_reconciliation_processing, str(session_id))
 
 
 _MONTH_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
@@ -211,19 +228,20 @@ async def parse_statement(
     "",
     status_code=status.HTTP_201_CREATED,
     summary=(
-        "Cria sessão de conciliação a partir do ParsedStatement (S9) e "
-        "enfileira o processamento async. RBAC: admin OU "
+        "Cria sessão de conciliação a partir do ParsedStatement (S9) e agenda "
+        "o processamento como BackgroundTask do FastAPI. RBAC: admin OU "
         "manager-da-carteira; cliente inacessível devolve 404. Idempotência "
         "garantida por UNIQUE (client_id, omie_conta_id, reference_month, "
         "file_hash) — duplicata retorna 409 DUPLICATE_FILE. "
-        "Rate limit: 10/min/usuário — uma sessão = 1 job ARQ + várias "
-        "chamadas Omie."
+        "Rate limit: 10/min/usuário — uma sessão = 1 processamento em "
+        "background + várias chamadas Omie."
     ),
 )
 @limiter.limit("10/minute", key_func=user_id_key_func)
 async def create_reconciliation(
     request: Request,
     response: Response,
+    background_tasks: BackgroundTasks,
     user: CurrentUserDep,
     db: DbSessionDep,
     service: ReconciliationServiceDep,
@@ -246,27 +264,16 @@ async def create_reconciliation(
         encryption_key=settings.OMIE_ENCRYPTION_KEY,
         search_blind_index_key=settings.SEARCH_BLIND_INDEX_KEY,
     )
-    # O commit oficial acontece no `DbSessionDep` ao final do request bem
-    # sucedido (`get_db_session`). NÃO commitamos manualmente aqui: na prática,
-    # o ARQ leva ~segundos para um worker pollar o job (polling padrão > 500ms),
-    # enquanto o commit transacional do request fica em microssegundos depois
-    # do enqueue. A janela de race "worker picks up before DB commit" é
-    # estatisticamente desprezível para o MVP. Em produção, se virar
-    # problema, mover o `enqueue_processing` para um middleware after-commit.
-
-    try:
-        await _enqueue_reconciliation_job(session_id, settings)
-    except Exception as exc:
-        # Enqueue falhou. Levantar AppError → handler global responde 500 e
-        # o `DbSessionDep` faz rollback (sessão NÃO é persistida). Usuário
-        # tenta de novo, sem inconsistência.
-        raise AppError(
-            f"Falha ao enfileirar job para session_id={session_id}: {exc}",
-            user_message=(
-                "Sessão criada, mas a fila de processamento está indisponível. "
-                "Tente novamente em instantes."
-            ),
-        ) from exc
+    # NÃO commitamos manualmente: o `DbSessionDep` (`get_db_session`) commita
+    # no teardown da dependência, que no FastAPI ≥0.106 roda ANTES de a resposta
+    # ser enviada — logo ANTES das BackgroundTasks (que rodam depois da
+    # resposta). A task abre sua PRÓPRIA DB session e enxerga a linha já
+    # commitada, sem race. (Em testes, o override de `get_db_session` faz só
+    # `yield` sem commit, preservando o rollback de isolamento da fixture.)
+    #
+    # Sem broker: o processamento (Omie + matching + qualificação) roda em
+    # background no próprio processo da API. `add_task` é in-memory e não falha.
+    _schedule_reconciliation_processing(background_tasks, session_id)
 
     return CreateReconciliationResponse(
         data=CreateReconciliationPayload(
@@ -323,20 +330,20 @@ async def get_reconciliation_status(
         "Reprocessa uma sessão que terminou em `status='error'`. Mantém "
         "as `file_entries` (resultado do parse Anthropic, vale dinheiro), "
         "limpa dados parciais de matching/anomalias, reset da sessão pra "
-        "`status='processing'`, e re-enfileira o job ARQ. "
+        "`status='processing'`, e reagenda o processamento em background. "
         "Rate limit: 10/min/usuário (igual ao create) — uma sessão = 1 "
-        "job ARQ + várias chamadas Omie. "
+        "processamento em background + várias chamadas Omie. "
         "Conflito (409): se a sessão NÃO está em error (já processando, "
-        "em revisão ou concluída), recusamos pra não duplicar job."
+        "em revisão ou concluída), recusamos pra não duplicar processamento."
     ),
 )
 @limiter.limit("10/minute", key_func=user_id_key_func)
 async def reprocess_reconciliation(
     request: Request,
     response: Response,
+    background_tasks: BackgroundTasks,
     user: ManagerOrAdminDep,
     db: DbSessionDep,
-    settings: Annotated[Settings, Depends(get_settings)],
     session_id: UUID,
 ) -> CreateReconciliationResponse:
     """Endpoint de "Tentar novamente" da tela de revisão / lista de conciliações."""
@@ -363,22 +370,13 @@ async def reprocess_reconciliation(
             ),
         )
 
-    # 4. Reset transacional + enqueue. O reset roda dentro do mesmo
-    #    `DbSessionDep` (auto-commit no sucesso); se o enqueue ARQ falhar,
-    #    levantamos e o `DbSessionDep` faz rollback, deixando a sessão
-    #    de volta no estado `error` (sem janela de inconsistência).
+    # 4. Reset + agendamento. Idem create: o commit é do `DbSessionDep` (roda
+    #    no teardown da dependência, antes da resposta — logo antes da
+    #    BackgroundTask), então a task vê o reset já persistido. Sem commit
+    #    manual aqui (preserva o isolamento da fixture de teste).
     await repo.reset_session_for_reprocess(session_id)
 
-    try:
-        await _enqueue_reconciliation_job(session_id, settings)
-    except Exception as exc:
-        raise AppError(
-            f"Falha ao re-enfileirar job para session_id={session_id}: {exc}",
-            user_message=(
-                "Não foi possível reenviar a conciliação para processamento. "
-                "Tente novamente em instantes."
-            ),
-        ) from exc
+    _schedule_reconciliation_processing(background_tasks, session_id)
 
     return CreateReconciliationResponse(
         data=CreateReconciliationPayload(
