@@ -60,7 +60,7 @@ rebuild: ## Reconstrói as imagens Docker
 # ---------- Dev (sem Docker) ----------
 .PHONY: dev-api
 dev-api: ## Roda a API em modo dev (hot reload)
-	$(API) uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+	$(API) uv run uvicorn app.main:app --reload --reload-dir app --host 0.0.0.0 --port 8000
 
 .PHONY: dev-web
 dev-web: ## Roda o frontend em modo dev

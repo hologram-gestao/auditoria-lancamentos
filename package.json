@@ -9,7 +9,7 @@
   },
   "packageManager": "pnpm@9.12.0",
   "scripts": {
-    "dev:api": "cd apps/api && uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+    "dev:api": "cd apps/api && uv run uvicorn app.main:app --reload --reload-dir app --host 0.0.0.0 --port 8000",
     "dev:web": "pnpm --filter @auditoria/web dev",
     "infra:up": "docker compose -f docker/docker-compose.yml --env-file .env up -d postgres",
     "infra:down": "docker compose -f docker/docker-compose.yml --env-file .env down",
