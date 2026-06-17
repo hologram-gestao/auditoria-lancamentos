@@ -366,8 +366,9 @@ async def test_pipeline_creates_qualification_anomaly_when_enabled(
 
     monkeypatch.setattr(AnthropicClient, "_get_client", lambda self: fake)
 
-    ctx: dict[str, Any] = {"settings": get_settings(), "session_factory": factory}
-    await run_reconciliation_processing(ctx, str(session_id))
+    await run_reconciliation_processing(
+        str(session_id), settings=get_settings(), session_factory=factory
+    )
 
     async with factory() as s:
         sess = (
@@ -440,8 +441,9 @@ async def test_pipeline_skips_qualification_when_flag_disabled(
 
     monkeypatch.setattr(AnthropicClient, "_get_client", lambda self: _BoomAnthropic())
 
-    ctx: dict[str, Any] = {"settings": get_settings(), "session_factory": factory}
-    await run_reconciliation_processing(ctx, str(session_id))
+    await run_reconciliation_processing(
+        str(session_id), settings=get_settings(), session_factory=factory
+    )
 
     async with factory() as s:
         sess = (
@@ -502,8 +504,9 @@ async def test_pipeline_survives_anthropic_failure(
 
     monkeypatch.setattr(AnthropicClient, "_get_client", lambda self: _BoomAnthropic())
 
-    ctx: dict[str, Any] = {"settings": get_settings(), "session_factory": factory}
-    await run_reconciliation_processing(ctx, str(session_id))
+    await run_reconciliation_processing(
+        str(session_id), settings=get_settings(), session_factory=factory
+    )
 
     async with factory() as s:
         sess = (

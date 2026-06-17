@@ -1,6 +1,6 @@
 """Testes de integração do job de processamento (S10 / BACK 8.2-8.5).
 
-Aborda: chamar `run_reconciliation_processing(ctx, session_id)` direto, com
+Aborda: chamar `run_reconciliation_processing(session_id, ...)` direto, com
 o Omie mockado por `respx`. Assert no resultado persistido (file_entries
 matched, omie_entries inseridos, anomalies, status='reviewing').
 
@@ -12,8 +12,8 @@ Cenários cobertos:
     - File entry sem correspondente → anomaly `missing_in_omie`.
     - `Previsto` não vira anomaly (mesmo que vire omie_entry sem match).
 
-NÃO cobre o agendamento real no Redis — o `run_reconciliation_processing`
-é chamado diretamente (idiomático em ARQ — docs.helpmanual.io/#testing).
+NÃO cobre o agendamento via BackgroundTasks — o `run_reconciliation_processing`
+é chamado diretamente, com `settings` + `session_factory` de teste.
 """
 
 from __future__ import annotations
@@ -294,8 +294,9 @@ class TestJobHappyPath:
         respx.post(OMIE_RECEBER_URL).mock(side_effect=receber_responses)
 
         # Run job
-        ctx: dict[str, Any] = {"settings": get_settings(), "session_factory": factory}
-        await run_reconciliation_processing(ctx, str(session_id))
+        await run_reconciliation_processing(
+            str(session_id), settings=get_settings(), session_factory=factory
+        )
 
         # Asserts
         async with factory() as s:
@@ -390,8 +391,9 @@ class TestJobMissingInOmie:
             return_value=httpx.Response(200, json=_empty_receber_payload())
         )
 
-        ctx: dict[str, Any] = {"settings": get_settings(), "session_factory": factory}
-        await run_reconciliation_processing(ctx, str(session_id))
+        await run_reconciliation_processing(
+            str(session_id), settings=get_settings(), session_factory=factory
+        )
 
         async with factory() as s:
             sess = (
@@ -482,8 +484,9 @@ class TestJobPrevistoNotAnomaly:
             return_value=httpx.Response(200, json=_empty_receber_payload())
         )
 
-        ctx: dict[str, Any] = {"settings": get_settings(), "session_factory": factory}
-        await run_reconciliation_processing(ctx, str(session_id))
+        await run_reconciliation_processing(
+            str(session_id), settings=get_settings(), session_factory=factory
+        )
 
         async with factory() as s:
             sess = (
@@ -532,8 +535,9 @@ class TestJobOmieAuthError:
             )
         )
 
-        ctx: dict[str, Any] = {"settings": get_settings(), "session_factory": factory}
-        await run_reconciliation_processing(ctx, str(session_id))
+        await run_reconciliation_processing(
+            str(session_id), settings=get_settings(), session_factory=factory
+        )
 
         async with factory() as s:
             sess = (

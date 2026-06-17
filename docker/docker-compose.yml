@@ -20,21 +20,6 @@ services:
       timeout: 5s
       retries: 5
 
-  redis:
-    image: redis:7-alpine
-    container_name: auditoria-redis
-    restart: unless-stopped
-    command: ['redis-server', '--maxmemory-policy', 'allkeys-lru', '--maxmemory', '256mb']
-    ports:
-      - '${REDIS_PORT:-6379}:6379'
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
   api:
     build:
       context: ..
@@ -45,13 +30,10 @@ services:
       - ../apps/api/.env
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-auditoria}:${POSTGRES_PASSWORD:-change_me_in_dev_only}@postgres:5432/${POSTGRES_DB:-auditoria_dev}
-      REDIS_URL: redis://redis:6379/0
       ALLOWED_ORIGINS: http://localhost:${WEB_PORT:-3000}
       FRONTEND_URL: http://localhost:${WEB_PORT:-3000}
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     ports:
       - '${API_PORT:-8000}:8000'
@@ -69,28 +51,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-
-  worker:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.api
-    container_name: auditoria-worker
-    restart: unless-stopped
-    env_file:
-      - ../apps/api/.env
-    environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-auditoria}:${POSTGRES_PASSWORD:-change_me_in_dev_only}@postgres:5432/${POSTGRES_DB:-auditoria_dev}
-      REDIS_URL: redis://redis:6379/0
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ../apps/api:/app:ro
-    # Worker ARQ será configurado em S10 — por enquanto, mantido desabilitado.
-    # command: ["uv", "run", "arq", "app.workers.arq_worker.WorkerSettings"]
-    profiles: ['workers']
 
   web:
     build:
@@ -111,4 +71,3 @@ services:
 
 volumes:
   postgres-data:
-  redis-data:

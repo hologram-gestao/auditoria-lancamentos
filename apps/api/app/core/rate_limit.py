@@ -3,7 +3,7 @@
 Padrão CLAUDE.md §3.11 + P0-004:
     - /auth/login: 5 tentativas / 5 min / IP.
     - /reconciliations/parse: 10/min / usuário — chama Anthropic ($$).
-    - POST /reconciliations: 10/min / usuário — enfileira job ARQ.
+    - POST /reconciliations: 10/min / usuário — agenda processamento em background.
     - /clients/test-connection: 30/min / usuário — chama Omie.
     - /clients/{id}/sync-accounts: 30/min / usuário — chama Omie.
     - Demais autenticados (CRUD em DB): sem limit explícito por enquanto

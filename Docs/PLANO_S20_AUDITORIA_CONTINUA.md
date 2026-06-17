@@ -1,6 +1,19 @@
 # Plano S20+ — Auditoria Contínua sobre o Omie
 
-> **Status:** 📐 Em planejamento — nenhuma linha escrita. Documento para validação **antes** de codar (CLAUDE.md §6.1).
+> ## ⛔ SUPERSEDED (15/06/2026) — ver [PLANO_PROXIMOS_PASSOS.md](PLANO_PROXIMOS_PASSOS.md)
+>
+> O PRD de 15/06/2026 ([Docs/NextSteps/PRD - Próximos Passos](NextSteps/PRD%20-%20Pr%C3%B3ximos%20Passos-20260615173056.md)) reordenou o roadmap. O eixo de auditoria contínua descrito aqui (antigo **S20–S27**) foi **absorvido na FASE 5** do novo plano, com duas mudanças:
+>
+> 1. **Sem Redis/ARQ** — o PRD remove o Redis (FASE 0). O agendamento das rotinas passa a ser **Cloud Scheduler → Cloud Run Job** (padrão do cleanup `mark_stuck_sessions_as_error.py`), não mais "reusa ARQ" como este doc assumia.
+> 2. **Reposicionado para médio/longo prazo** — entra **depois** de cartão (FASE 1/2) e Pluggy (FASE 4).
+>
+> **A renumeração antiga S20–S27 está aposentada.** O mapeamento sessão-a-sessão para as novas sessões (S32–S38, mais S26/S27 para glossário) está no **[Anexo A do novo plano](PLANO_PROXIMOS_PASSOS.md#anexo-a--mapa-do-antigo-s20s27--fase-5)**.
+>
+> **Por que este doc ainda existe:** a **rastreabilidade transcrito→pedido** (§2) e o **detalhamento do modelo de dados** (§3) continuam válidos como material de origem da FASE 5. Leia-os como insumo, mas a **ordem, a numeração e a infra valem o que está no novo plano**.
+
+---
+
+> **Status original:** 📐 Em planejamento — nenhuma linha escrita. Documento para validação **antes** de codar (CLAUDE.md §6.1).
 > **Origem:** transcritos de **08/06/2026** (áudios do **Laio**, citando as provocações do **Galhardo** — gestor de tesouraria/BP financeiro).
 > **Relação com o plano principal:** estende [PLANO_IMPLEMENTACAO.md](PLANO_IMPLEMENTACAO.md). As sessões S0–S19 entregam **conciliação file-driven**; este documento abre o eixo **auditoria contínua sobre o Omie** (S20–S27).
 

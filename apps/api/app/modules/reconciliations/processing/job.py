@@ -1,6 +1,9 @@
 """Orquestrador async do processamento de uma sessão de conciliação (BACK 8.1-8.5).
 
-Ponto de entrada do worker ARQ: `run_reconciliation_processing(ctx, session_id)`.
+Ponto de entrada como **FastAPI BackgroundTask**:
+`run_reconciliation_processing(session_id)`. Agendado por
+`POST /reconciliations` e `/reprocess` via `BackgroundTasks.add_task` — roda
+DEPOIS da resposta HTTP, no mesmo processo da API (FASE 0: sem Redis/ARQ).
 
 Fluxo:
     1. Carrega sessão + cliente + file_entries (eager).
@@ -15,9 +18,10 @@ Fluxo:
        (criada pelo endpoint) já está commitada com `status='processing'`,
        então conseguimos reabrir uma transação para gravar o `error`.
 
-CLAUDE.md §3.7: nunca expor stack traces ao usuário. O worker:
-    - NUNCA propaga exceção para o redis (poderia vazar credenciais
-      via repr no traceback). Captura tudo, loga, marca a sessão.
+CLAUDE.md §3.7: nunca expor stack traces ao usuário. O processamento:
+    - NUNCA propaga exceção para o caller (a request HTTP já respondeu;
+      um traceback poderia vazar credenciais via repr). Captura tudo, loga,
+      marca a sessão como `error`.
     - Mensagem em PT-BR vem do `AppError.user_message`.
 """
 
@@ -84,27 +88,36 @@ _ERROR_MSG_SEED_MISSING = (
 
 
 async def run_reconciliation_processing(
-    ctx: dict[str, Any],
     session_id: str,
+    *,
+    settings: Settings | None = None,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> None:
-    """Função pública chamada pelo worker ARQ.
+    """Processa uma sessão de conciliação em background (FastAPI BackgroundTasks).
+
+    Roda DEPOIS da resposta HTTP, no mesmo processo da API. Abre suas PRÓPRIAS
+    sessions de DB (a session da request já foi fechada quando isto executa);
+    por isso recebe um `session_factory`, não uma `AsyncSession`.
 
     Args:
-        ctx: dicionário de contexto do ARQ. Contém `redis`, `job_id`, etc.
-            Para o session_factory, usamos o `ctx["session_factory"]` se
-            preenchido em `on_startup` — fallback para o singleton global
-            de `app.db.session.get_session_factory()`.
-        session_id: UUID em string (ARQ serializa via msgpack — UUID nativo
-            funciona, mas string é mais portável e evita ambiguidade).
+        session_id: UUID em string.
+        settings: injetável para teste. Em runtime cai no singleton global.
+        session_factory: injetável para teste. Em runtime cai no singleton
+            global inicializado no `lifespan` da app (`get_session_factory`).
     """
-    settings: Settings = ctx.get("settings") or _get_settings_singleton()
-    session_factory = ctx.get("session_factory") or _get_session_factory_singleton()
+    resolved_settings = settings or _get_settings_singleton()
+    resolved_factory = session_factory or _get_session_factory_singleton()
 
     sid = UUID(session_id)
     log.info("reconciliation_processing_started", session_id=session_id)
 
     try:
-        await _execute_processing(sid, settings, session_factory)
+        # Teto de tempo do processamento — substitui o antigo `job_timeout=900`
+        # do ARQ. Sem ele, uma BackgroundTask travada num `await` seguraria uma
+        # conexão do pool indefinidamente. Ao estourar, `asyncio.timeout`
+        # cancela `_execute_processing` por dentro e levanta `TimeoutError` aqui.
+        async with asyncio.timeout(resolved_settings.RECONCILIATION_TIMEOUT_SECONDS):
+            await _execute_processing(sid, resolved_settings, resolved_factory)
     except AppError as exc:
         # Erro previsto (Omie/Anthropic/Crypto/etc) — temos `user_message`
         # confiável em PT-BR.
@@ -114,28 +127,34 @@ async def run_reconciliation_processing(
             code=exc.code.value,
             message=exc.message,
         )
-        await _safe_mark_error(sid, session_factory, exc.user_message)
+        await _safe_mark_error(sid, resolved_factory, exc.user_message)
     except _AnomalyTypeMissingError as exc:
         log.error(
             "reconciliation_processing_seed_missing",
             session_id=session_id,
             message=str(exc),
         )
-        await _safe_mark_error(sid, session_factory, _ERROR_MSG_SEED_MISSING)
-    except asyncio.CancelledError:
-        # ARQ matou o job por estourar job_timeout (ver WorkerSettings).
-        # CancelledError herda de BaseException, então o `except Exception`
-        # abaixo NÃO pegava — a sessão ficava em `processing` zumbi.
-        # `asyncio.shield` protege o cleanup de ser cancelado de novo no meio.
-        # Re-raise pra ARQ marcar o job como failed e liberar o lock.
+        await _safe_mark_error(sid, resolved_factory, _ERROR_MSG_SEED_MISSING)
+    except TimeoutError:
+        # Estourou RECONCILIATION_TIMEOUT_SECONDS. `_execute_processing` foi
+        # cancelado por dentro do `asyncio.timeout` e convertido em TimeoutError.
         log.error("reconciliation_processing_timeout", session_id=session_id)
-        await asyncio.shield(_safe_mark_error(sid, session_factory, _ERROR_MSG_TIMEOUT))
+        await _safe_mark_error(sid, resolved_factory, _ERROR_MSG_TIMEOUT)
+    except asyncio.CancelledError:
+        # Cancelamento EXTERNO (shutdown do processo / instância Cloud Run
+        # reciclada). CancelledError herda de BaseException, então o
+        # `except Exception` abaixo NÃO pega. Marca a sessão best-effort e
+        # RE-PROPAGA (higiene asyncio: nunca engolir CancelledError).
+        # `asyncio.shield` protege o cleanup de ser cancelado de novo no meio.
+        # Rede de segurança final: cron `mark_stuck_sessions_as_error` (25min).
+        log.error("reconciliation_processing_cancelled", session_id=session_id)
+        await asyncio.shield(_safe_mark_error(sid, resolved_factory, _ERROR_MSG_TIMEOUT))
         raise
     except Exception:
-        # Erro inesperado: NUNCA propagar para o redis. Sentry captura via
+        # Erro inesperado: NUNCA propagar para o caller. Sentry captura via
         # exc_info=True (se configurado).
         log.exception("reconciliation_processing_unexpected", session_id=session_id)
-        await _safe_mark_error(sid, session_factory, _ERROR_MSG_INTERNAL)
+        await _safe_mark_error(sid, resolved_factory, _ERROR_MSG_INTERNAL)
     else:
         log.info("reconciliation_processing_finished", session_id=session_id)
 
@@ -184,11 +203,12 @@ async def _execute_processing(
     # 2. Fetch Omie data — toda a interação com credencial em claro
     #    acontece dentro do `async with` do OmieClient.
     omie_client = build_omie_client(client, settings)
-    # Cache L1-only local ao worker (sem Redis): popula com supplier/category
-    # de cada lançamento da janela atual pra alimentar a qualificação (S19).
-    # Em prod o cache singleton da web vive em outro processo — replicar
-    # via L2 compartilhado é melhoria futura (PLANO §S19).
-    lancamento_cache = OmieLancamentoCache(redis=None)
+    # Cache L1 local a este processamento: popula supplier/category de cada
+    # lançamento da janela atual pra alimentar a qualificação (S19). É uma
+    # instância própria, não o singleton do app — a Tela de Revisão popula o
+    # cache dela sob demanda (mesmo comportamento de antes; o que mudou é que
+    # não há mais L2 Redis, então cada cache vive no seu processo).
+    lancamento_cache = OmieLancamentoCache()
     try:
         async with omie_client:
             realized = await fetch_realized(
@@ -469,5 +489,5 @@ def _get_session_factory_singleton() -> async_sessionmaker[AsyncSession]:
     return get_session_factory()
 
 
-# Aliasing exposto para o ARQ — `WorkerSettings.functions = [run_reconciliation_processing]`.
+# Exposto para o agendamento via BackgroundTasks no módulo de rotas.
 __all__ = ["run_reconciliation_processing"]

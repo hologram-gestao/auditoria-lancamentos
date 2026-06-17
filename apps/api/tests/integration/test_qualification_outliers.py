@@ -129,7 +129,7 @@ def _cache_for_supplier(
     omie_ids: list[int],
     supplier: str,
 ) -> OmieLancamentoCache:
-    cache = OmieLancamentoCache(redis=None)
+    cache = OmieLancamentoCache()
     for oid in omie_ids:
         cache._l1[(client_id, oid)] = OmieLancamentoData(
             omie_id=oid,

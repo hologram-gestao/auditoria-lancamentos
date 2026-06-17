@@ -1,5 +1,13 @@
 # Plano de Implementação — Sistema de Auditoria de Lançamentos (Hologram)
 
+> ## 📌 Documento histórico (S0–S19) — roadmap atual em [PLANO_PROXIMOS_PASSOS.md](PLANO_PROXIMOS_PASSOS.md)
+>
+> Este plano cobre as sessões **S0–S19** (conciliação file-driven), **já construídas e em dev**. Continua válido como referência do que existe. As próximas sessões (**S20+**) seguem o PRD de 15/06/2026 e estão em [PLANO_PROXIMOS_PASSOS.md](PLANO_PROXIMOS_PASSOS.md) (FASE 0–5).
+>
+> **⚠️ Reversão arquitetural pendente:** a §6.3/§6.4 deste documento recomendava _"jobs via broker (ARQ/Redis) desde o MVP, não FastAPI.BackgroundTasks"_. O PRD **reverte** isso — a **FASE 0 (S20)** remove o Redis/ARQ e migra para `BackgroundTasks`, porque o volume atual (sessões manuais, uma por vez) não justifica o broker, e a rede de segurança contra "task morre com o processo" já existe (cron de cleanup de sessões travadas via Cloud Scheduler). Ao ler a §6 abaixo, considere essa decisão **superada para o eixo novo**.
+
+---
+
 > **Versão 2.0 — reescrita completa em 24/04/2026** alinhando stack (Python + Next.js) à documentação oficial em `Docs/documentation/` e ao backlog em `Docs/List _ Auditora de Lançamentos - Backlog _ Hologram (Lista) - TAREFAS.pdf`.
 >
 > **Público-alvo:** time de desenvolvimento (back Python, front Next.js, IA/integrações, DevOps).

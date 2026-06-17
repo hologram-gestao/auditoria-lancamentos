@@ -29,7 +29,6 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
-    async_sessionmaker,
     create_async_engine,
 )
 
@@ -140,17 +139,30 @@ async def db_engine(db_url: str) -> AsyncIterator[AsyncEngine]:
 
 @pytest.fixture
 async def db_session(db_engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
-    """AsyncSession em transação com rollback automático ao fim do teste."""
-    session_factory = async_sessionmaker(
-        db_engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
-    )
-    async with session_factory() as session:
-        await session.begin()
+    """AsyncSession isolada por teste, robusta a `commit()` da aplicação.
+
+    A session roda dentro de uma transação EXTERNA na conexão; com
+    `join_transaction_mode="create_savepoint"`, qualquer `commit()` do código
+    da app (ex.: o handler commitando a sessão de conciliação antes de agendar
+    a BackgroundTask) opera sobre um SAVEPOINT — os dados ficam visíveis dentro
+    do teste, mas o `rollback()` da transação externa no teardown desfaz tudo,
+    sem vazar estado entre testes. Isso espelha o commit real de produção
+    (`get_db_session`), em vez de mascará-lo.
+    """
+    async with db_engine.connect() as connection:
+        trans = await connection.begin()
+        session = AsyncSession(
+            bind=connection,
+            expire_on_commit=False,
+            autoflush=False,
+            join_transaction_mode="create_savepoint",
+        )
         try:
             yield session
         finally:
-            await session.rollback()
             await session.close()
+            if trans.is_active:
+                await trans.rollback()
 
 
 # ----------------------------------------------------------------------

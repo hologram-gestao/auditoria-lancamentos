@@ -32,13 +32,6 @@ class LogLevel(StrEnum):
     ERROR = "error"
 
 
-class CacheBackend(StrEnum):
-    """Backends suportados pelo cache L2."""
-
-    MEMORY = "memory"
-    REDIS = "redis"
-
-
 class Settings(BaseSettings):
     """Configuração global da aplicação, carregada de variáveis de ambiente."""
 
@@ -59,10 +52,6 @@ class Settings(BaseSettings):
         description="URL do Postgres com driver psycopg async "
         "(ex: postgresql+psycopg://user:pass@host:5432/db)",
     )
-
-    # ---------- Redis ----------
-    REDIS_URL: str = Field(default="redis://localhost:6379/0")
-    CACHE_BACKEND: CacheBackend = CacheBackend.MEMORY
 
     # ---------- Segurança ----------
     OMIE_ENCRYPTION_KEY: SecretStr = Field(
@@ -135,13 +124,20 @@ class Settings(BaseSettings):
     # Timeout específico de `ListarExtrato` (auditoria A-3): o endpoint não
     # tem paginação documentada — clientes com muitos lançamentos no período
     # podem devolver respostas grandes. 15s default é apertado pra
-    # transferência + parse. Job ARQ pode esperar mais (não há usuário na
-    # frente da request).
+    # transferência + parse. O processamento em background pode esperar mais
+    # (não há usuário na frente da request).
     OMIE_TIMEOUT_EXTRATO_SECONDS: int = 60
 
     # ---------- Limites ----------
     MAX_UPLOAD_SIZE_MB: int = 20
     PARSE_TIMEOUT_SECONDS: int = 60
+    # Tempo máximo do processamento assíncrono de uma conciliação (busca Omie +
+    # matching + qualificação), rodando via FastAPI BackgroundTasks. Substitui o
+    # antigo `WorkerSettings.job_timeout=900` do ARQ: sem um teto, uma task em
+    # background poderia segurar uma conexão do pool indefinidamente. Ao estourar,
+    # `run_reconciliation` marca a sessão como `error` (mesma mensagem de timeout).
+    # O cron `mark_stuck_sessions_as_error` (25min) segue como rede de segurança.
+    RECONCILIATION_TIMEOUT_SECONDS: float = 900.0
 
     # ---------- Qualificação (S19) ----------
     # Ativa a etapa de qualificação semântica/histórica/outlier no pipeline
