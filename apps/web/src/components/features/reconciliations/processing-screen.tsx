@@ -41,11 +41,11 @@ import { useSessionStatus } from '@/hooks/use-reconciliations';
 import { ApiError } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
 
-/** 15 minutos em ms — alinhado com `WorkerSettings.job_timeout=900s` do
- *  ARQ. Em extratos reais (11+ pares) a qualificação semântica (Anthropic
- *  por par) regularmente passa de 5min; antes a tela mostrava "demorando
- *  demais" enquanto o backend ainda estava trabalhando normalmente.
- *  Const explícita pra ser trivial reduzir em dev/teste manual. */
+/** 15 minutos em ms — alinhado com `RECONCILIATION_TIMEOUT_SECONDS=900s` do
+ *  backend (teto do processamento em background). Em extratos reais (11+ pares)
+ *  a qualificação semântica (Anthropic por par) regularmente passa de 5min;
+ *  antes a tela mostrava "demorando demais" enquanto o backend ainda estava
+ *  trabalhando normalmente. Const explícita pra ser trivial reduzir em dev. */
 const TIMEOUT_MS = 15 * 60 * 1000;
 
 /** Thresholds (em ms desde a montagem) que ativam cada step de proxy. */

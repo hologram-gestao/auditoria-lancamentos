@@ -163,8 +163,8 @@ export async function createReconciliation(
  * "Tentar novamente" de uma sessão que terminou em `status='error'`.
  *
  * Backend reseta a sessão pra `status='processing'`, mantém as `file_entries`
- * (resultado do parse Anthropic) e re-enfileira o job ARQ. Resposta é
- * idêntica ao create — front pode reusar a UI de processing/polling.
+ * (resultado do parse Anthropic) e reagenda o processamento em background.
+ * Resposta é idêntica ao create — front pode reusar a UI de processing/polling.
  *
  * Erros relevantes:
  *   - 404: sessão não existe / manager fora da carteira.

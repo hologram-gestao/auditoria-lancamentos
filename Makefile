@@ -34,12 +34,12 @@ env: ## Copia .env.example para .env em todos os lugares
 
 # ---------- Docker ----------
 .PHONY: up
-up: ## Sobe todos os serviços (postgres, redis, api, worker, web)
+up: ## Sobe todos os serviços (postgres, api, web)
 	$(COMPOSE) up -d
 
 .PHONY: up-infra
-up-infra: ## Sobe apenas infra (postgres + redis) — útil para dev local fora do container
-	$(COMPOSE) up -d postgres redis
+up-infra: ## Sobe apenas infra (postgres) — útil para dev local fora do container
+	$(COMPOSE) up -d postgres
 
 .PHONY: down
 down: ## Desliga todos os serviços
@@ -61,10 +61,6 @@ rebuild: ## Reconstrói as imagens Docker
 .PHONY: dev-api
 dev-api: ## Roda a API em modo dev (hot reload)
 	$(API) uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-
-.PHONY: dev-worker
-dev-worker: ## Roda o worker ARQ
-	$(API) uv run arq app.workers.arq_worker.WorkerSettings
 
 .PHONY: dev-web
 dev-web: ## Roda o frontend em modo dev

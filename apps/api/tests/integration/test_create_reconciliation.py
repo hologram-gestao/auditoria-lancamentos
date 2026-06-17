@@ -10,8 +10,9 @@ Cobre BACK 8.1 e 8.6:
       pra dia 1; statement vazio → 400.
     - GET /status: shape correto, RBAC consistente.
 
-NÃO testa o worker real — o ARQ enqueue é sobrescrito por um stub que
-apenas registra a chamada. O job é testado em `test_reconciliation_job.py`.
+NÃO testa o processamento real — o agendamento da BackgroundTask é sobrescrito
+por um stub que apenas registra a chamada. O job é testado em
+`test_reconciliation_job.py`.
 """
 
 from __future__ import annotations

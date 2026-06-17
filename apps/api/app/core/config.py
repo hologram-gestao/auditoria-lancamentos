@@ -124,8 +124,8 @@ class Settings(BaseSettings):
     # Timeout específico de `ListarExtrato` (auditoria A-3): o endpoint não
     # tem paginação documentada — clientes com muitos lançamentos no período
     # podem devolver respostas grandes. 15s default é apertado pra
-    # transferência + parse. Job ARQ pode esperar mais (não há usuário na
-    # frente da request).
+    # transferência + parse. O processamento em background pode esperar mais
+    # (não há usuário na frente da request).
     OMIE_TIMEOUT_EXTRATO_SECONDS: int = 60
 
     # ---------- Limites ----------
