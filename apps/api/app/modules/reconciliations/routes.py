@@ -264,13 +264,16 @@ async def create_reconciliation(
         encryption_key=settings.OMIE_ENCRYPTION_KEY,
         search_blind_index_key=settings.SEARCH_BLIND_INDEX_KEY,
     )
-    # NÃO commitamos manualmente: o `DbSessionDep` (`get_db_session`) commita
-    # no teardown da dependência, que no FastAPI ≥0.106 roda ANTES de a resposta
-    # ser enviada — logo ANTES das BackgroundTasks (que rodam depois da
-    # resposta). A task abre sua PRÓPRIA DB session e enxerga a linha já
-    # commitada, sem race. (Em testes, o override de `get_db_session` faz só
-    # `yield` sem commit, preservando o rollback de isolamento da fixture.)
-    #
+    # Commit ANTES de agendar. A BackgroundTask roda no MESMO processo, abrindo
+    # sua PRÓPRIA DB session — precisa enxergar a sessão já commitada.
+    # EMPÍRICO: a BackgroundTask executa ANTES do commit de teardown do
+    # `get_db_session` → sem este commit, a task lê a sessão antes de existir e
+    # sai com `reconciliation_session_not_found`, deixando-a presa em
+    # `processing`. (O ARQ mascarava isso: o worker pollava o Redis segundos
+    # depois, com o commit já feito.) Commit explícito torna a ordem
+    # determinística. Em teste a fixture usa SAVEPOINT — não vaza estado (conftest).
+    await db.commit()
+
     # Sem broker: o processamento (Omie + matching + qualificação) roda em
     # background no próprio processo da API. `add_task` é in-memory e não falha.
     _schedule_reconciliation_processing(background_tasks, session_id)
@@ -370,11 +373,11 @@ async def reprocess_reconciliation(
             ),
         )
 
-    # 4. Reset + agendamento. Idem create: o commit é do `DbSessionDep` (roda
-    #    no teardown da dependência, antes da resposta — logo antes da
-    #    BackgroundTask), então a task vê o reset já persistido. Sem commit
-    #    manual aqui (preserva o isolamento da fixture de teste).
+    # 4. Reset + agendamento. Idem create: commit explícito ANTES de agendar pra
+    #    a BackgroundTask (mesmo processo, session própria) enxergar o reset já
+    #    persistido — a task roda antes do commit de teardown do `get_db_session`.
     await repo.reset_session_for_reprocess(session_id)
+    await db.commit()
 
     _schedule_reconciliation_processing(background_tasks, session_id)
 
