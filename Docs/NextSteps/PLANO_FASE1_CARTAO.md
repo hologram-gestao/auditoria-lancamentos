@@ -1,0 +1,221 @@
+# Plano de Implementação — FASE 1: Conciliação de Faturas de Cartão
+
+> **Versão 1.0 — 18/06/2026.** Plano de execução das 9 tarefas da FASE 1 (ClickUp),
+> derivado do PRD [Docs/NextSteps/PRD - Próximos Passos](PRD%20-%20Pr%C3%B3ximos%20Passos-20260615173056.md)
+> e detalhado contra o **código atual** (refs `arquivo:linha` verificadas em 18/06).
+>
+> **Status:** FASE 0 (remoção Redis/ARQ) ✅ merged + em dev. FASE 1 **em planejamento — nenhuma linha escrita.**
+>
+> **Como usar:** cada tarefa abaixo é autocontida (objetivo, arquivos reais, passos, DoD = checklist do ClickUp, dependências). Faz-se **uma por vez**. Este doc existe pra qualquer sessão retomar sem depender do chat. Antes de iniciar uma tarefa, releia [§ Riscos críticos](#riscos-críticos) e o bloco da tarefa.
+>
+> **Tarefas (ClickUp):** `[GERAL 1.1]` validar ListarExtrato (Galhardo) · `[BACK 1.2]` migration ENUM+seed · `[BACK 1.3]` contas cartão no cache · `[FRONT 1.4]` tela de upload · `[BACK 1.5]` prompt Claude · `[BACK 1.6]` tolerância zero · `[BACK 1.7]` cruzamento · `[FRONT 1.8]` tela de revisão · `[BACK 1.9]` export Excel.
+
+---
+
+## Riscos críticos
+
+### 🔴 #1 — `CA` ≠ Cartão de Crédito no código (CONFLITO com as tasks). Bloqueia em GERAL 1.1.
+
+As tasks **[GERAL 1.1]** e **[BACK 1.3]** assumem que conta de cartão tem `tipo = "CA"`. **O código diz o contrário** e há auditoria registrada:
+
+- [omie_account_cache.py:37-44](../../apps/api/app/db/models/omie_account_cache.py#L37-L44) e [integrations/omie/schemas.py:33-44](../../apps/api/app/integrations/omie/schemas.py#L33-L44): **`CR` = Cartão de Crédito**, **`CA` = Conta Aplicação (investimento)**, `CC` = Conta Corrente.
+- Comentário no próprio código: _"auditoria M-1, corrigido em 20/05/2026: a v1 mapeava `CREDIT_CARD = 'CA'` … front renderizava `CA` como Cartão e classificaria Conta Aplicação como cartão"_.
+
+**Ou seja: implementar como a task escreveu (`CA`=cartão) reintroduz exatamente o bug M-1 já corrigido.** Quem decide o valor real é o Omie. **A GERAL 1.1 (validação com Galhardo) deve confirmar qual `tipo` o Omie devolve para contas de cartão de um cliente real** antes de cravar o mapeamento. Hipótese forte (código + auditoria): é **`CR`**.
+
+→ **Mitigação no plano:** centralizar o mapeamento `tipo Omie → account_type` num único ponto e tratar o código de cartão como **uma constante a confirmar em 1.1** (default da hipótese atual: `CR`). Toda a fundação (coluna, endpoint, cache, matcher) é construída sem depender do valor; só o mapeamento final fica gated.
+
+### 🟠 #2 — Tolerância zero muda comportamento da **conta corrente** (já em prod)
+
+[BACK 1.6]/[BACK 1.7] tornam o matching de data **fixo** para CC **e** cartão (hoje CC usa `date_tolerance_days` parametrizável, default 3 — [reconciliation_session.py:99](../../apps/api/app/db/models/reconciliation_session.py#L99), [matcher.py](../../apps/api/app/modules/reconciliations/processing/matcher.py)). Nova regra (idêntica p/ CC e CA):
+
+| Condição                                                                    | `situation`                  | Anomalia                      |
+| --------------------------------------------------------------------------- | ---------------------------- | ----------------------------- |
+| valor bate (`\|diff\| ≤ 0,01`) **e data igual**                             | `conciliado`                 | —                             |
+| valor bate **e data diverge em ≤ 3 dias** (`DATE_DIVERGENCE_RANGE=3`, fixo) | `conciliado_data_divergente` | `wrong_date` (auto)           |
+| valor não bate com nenhum candidato                                         | `sem_omie`                   | `missing_in_omie` (já existe) |
+
+Isso é **mudança de comportamento em prod para CC** (decisão do PRD/Laio: "extrato bancário é tolerância zero"). **DoD obrigatório:** teste de regressão de conta corrente. Atualizar CLAUDE.md §5.2/§5.3 (regra de tolerância) no PR que aterrissar a 1.6/1.7.
+
+---
+
+## Deltas de modelo de dados (o que muda no schema)
+
+1. **`reconciliation_file_entries.situation`** ([reconciliation_file_entry.py:39-44, 97-98](../../apps/api/app/db/models/reconciliation_file_entry.py#L39-L98)) — hoje `String(20)` + enum app-level (`sem_omie`/`conciliado`/`ignorado`). Adicionar `conciliado_data_divergente` (**26 chars > 20** → **alargar a coluna p/ `String(30)`**; não é ENUM nativo PG, então não há `ALTER TYPE`). _(BACK 1.2)_
+2. **`reconciliation_sessions.account_type`** — coluna **nova** (`String`, `'checking'`|`'credit_card'`, default `'checking'` p/ linhas existentes — não-destrutivo). Não existe hoje ([reconciliation_session.py](../../apps/api/app/db/models/reconciliation_session.py)). _(BACK 1.3)_
+3. **`reconciliation_sessions.date_tolerance_days`** — **mantém a coluna** (sem migration destrutiva), mas novas sessões gravam **0**; request deixa de aceitar o campo. _(BACK 1.6)_
+4. **`anomaly_types`** — inserir `wrong_date` (severity `moderate`, idempotente). Hoje o catálogo é semeado em [seed_dev.py:52+](../../apps/api/scripts/seed_dev.py#L52); prod recebe via **migration de dados** (o Cloud Run Job `migrate` roda `alembic upgrade head`). _(BACK 1.2)_
+
+`omie_accounts_cache.account_type` **já é `String(10)`** e guarda o código cru do Omie (CC/CR/CA/…) — não precisa de migration ([omie_account_cache.py:62](../../apps/api/app/db/models/omie_account_cache.py#L62)).
+
+---
+
+## Dependências e ordem de execução
+
+```
+GERAL 1.1 (Galhardo) ──gate──► mapeamento tipo→credit_card (em 1.3) + validação live do cruzamento CA (1.7) + fatura real (1.5)
+
+BACK 1.2 (ENUM/seed) ──► BACK 1.6 (tolerância) ──► BACK 1.7 (cruzamento) ──► FRONT 1.8 (revisão)
+                                                              └──► BACK 1.9 (export)
+BACK 1.3 (account_type) ──► FRONT 1.4 (upload)   e   ──► BACK 1.7
+BACK 1.5 (prompt) ── (quase independente; valida com fatura real)
+```
+
+**Ordem recomendada** (faz CC funcionar primeiro; partes específicas de cartão ficam gated em 1.1):
+
+| Ordem | Task          | Bloqueada por Galhardo (1.1)? | Por quê agora                                                                             |
+| ----- | ------------- | ----------------------------- | ----------------------------------------------------------------------------------------- |
+| 1     | **BACK 1.2**  | ❌ não                        | Fundação (situation + anomalia `wrong_date`).                                             |
+| 2     | **BACK 1.6**  | ❌ não                        | Comportamento de tolerância (CC+CA).                                                      |
+| 3     | **BACK 1.7**  | 🟡 parcial                    | Algoritmo roda já p/ CC e em testes sintéticos p/ CA; **validação live CA** espera 1.1.   |
+| 4     | **BACK 1.3**  | 🟡 parcial                    | Plumbing (coluna+endpoint+cache) livre; **mapeamento `tipo`→`credit_card`** gated em 1.1. |
+| 5     | **BACK 1.5**  | 🟡 parcial                    | Prompt livre; **marcar concluída** exige fatura real (1.1/cliente real).                  |
+| 6     | **FRONT 1.4** | 🟡 parcial                    | Depende de 1.3; rótulo "(Cartão)" depende do código confirmado em 1.1.                    |
+| 7     | **FRONT 1.8** | ❌ não (após 1.7)             | UI sobre dados que 1.7 já produz (testável sintético).                                    |
+| 8     | **BACK 1.9**  | ❌ não (após 1.7)             | Export sobre dados que 1.7 já produz.                                                     |
+| —     | **GERAL 1.1** | —                             | Externa (Galhardo). Destrava os 🟡 acima.                                                 |
+
+> Enquanto 1.1 não volta: dá pra entregar **tudo funcionando e testado para conta corrente** + **estrutura pronta para cartão**, deixando o **valor do `tipo`** como o único ponto gated. Quando o Galhardo confirmar, é trocar 1 constante + validar live.
+
+---
+
+## Tarefas
+
+### [GERAL 1.1] Validar ListarExtrato para contas de cartão com Galhardo 🔴 externa
+
+**Objetivo:** confirmar contra Omie real, **antes** do cruzamento de cartão (BACK 1.7), que `ListarExtrato` funciona para contas de cartão e quais campos/formato retorna.
+**O que validar (ClickUp):**
+
+- `ListarExtrato` aceita o `nCodCC` de uma conta de cartão (hipótese: trata como qualquer conta) → confirmar comportamento real.
+- Campos retornados p/ cartão são os mesmos de CC (`nCodLanc`, `cNatureza`, `dDtLanc`, `nValorLanc`, `cCateg`, `cFornecedor`) → confirmar presença e formato.
+- Lançamentos criados via `IncluirContaPagar` aparecem no `ListarExtrato` da conta cartão → confirmar (é a base do cruzamento da FASE 2).
+
+**⚠️ Validar TAMBÉM (não está na task, mas é o risco #1):** qual `tipo` o Omie devolve em `ListarContasCorrentes` para uma conta de **cartão de crédito** real — `CR` (hipótese do código) ou `CA` (hipótese da task)? Pedir ao Galhardo o print/JSON do `tipo_conta_corrente` de uma conta de cartão. **Isto destrava o mapeamento da BACK 1.3.**
+**Saída esperada:** resposta real (JSON) de `ListarExtrato` + `ListarContasCorrentes` de uma conta de cartão de um cliente real. Anexar no card.
+**Dependência:** Galhardo (em andamento). Bloqueia o mapeamento de 1.3 e a validação live de 1.7.
+
+---
+
+### [BACK 1.2] Migration de schema — novo valor de situação + seed da anomalia ❌ não bloqueada
+
+**Objetivo:** habilitar `conciliado_data_divergente` e a anomalia `wrong_date`.
+**Arquivos:** [reconciliation_file_entry.py](../../apps/api/app/db/models/reconciliation_file_entry.py) (enum+coluna) · nova migration em `apps/api/alembic/versions/` · [seed_dev.py:52+](../../apps/api/scripts/seed_dev.py#L52) · [anomaly_type.py](../../apps/api/app/db/models/anomaly_type.py).
+**Passos:**
+
+1. `FileEntrySituation`: adicionar `CONCILIADO_DATA_DIVERGENTE = "conciliado_data_divergente"`.
+2. Migration Alembic: **alargar** `reconciliation_file_entries.situation` de `String(20)` → `String(30)` (26 chars não cabem em 20!). Não-destrutivo.
+3. Mesma migration (ou outra de dados): **INSERT idempotente** em `anomaly_types` do `wrong_date` (`name="Data do lançamento diverge do extrato ou fatura"`, `description="O valor do lançamento bate com o arquivo enviado, mas a data registrada no Omie é diferente da data no arquivo. Pode indicar erro de lançamento manual ou ajuste automático de data para dia útil."`, `severity="moderate"`, `active=true`). `ON CONFLICT (code) DO NOTHING` ou checar existência.
+4. Espelhar o `wrong_date` em `seed_dev.py` (dev/local).
+   **DoD (ClickUp):** coluna aceita os 4 valores; migration não afeta registros existentes; `wrong_date` inserido com os campos exatos; inserção idempotente (não falha se já existir).
+   **Notas:** a task chama de "ENUM" mas é `String` + enum Python — o "ENUM" real é só alargar a coluna e adicionar o valor no enum. CI verde + migration reversível (`downgrade` volta p/ `String(20)`? só se não houver linhas com o valor novo — documentar).
+
+---
+
+### [BACK 1.6] Hardcodar tolerância zero e remover campo do backend ❌ não bloqueada
+
+**Objetivo:** fixar a regra de data no backend (exato → `conciliado`; ≤3d → `conciliado_data_divergente`) e remover `date_tolerance_days` da request.
+**Arquivos:** [matcher.py](../../apps/api/app/modules/reconciliations/processing/matcher.py) · [reconciliations/schemas.py:103](../../apps/api/app/modules/reconciliations/schemas.py#L103) · [service.py (create_session_with_entries)](../../apps/api/app/modules/reconciliations/service.py#L82) · [job.py (expansão de período)](../../apps/api/app/modules/reconciliations/processing/job.py#L199-L217) · [reconciliation_session.py:99](../../apps/api/app/db/models/reconciliation_session.py#L99).
+**Passos:**
+
+1. Constante `DATE_DIVERGENCE_RANGE = 3` no matcher (fixa, não exposta).
+2. Remover `date_tolerance_days` do request schema (`CreateReconciliationRequest`); se enviado, **ignorar** (não falhar).
+3. `create_session_with_entries`: gravar `date_tolerance_days = 0` em novas sessões (coluna mantida; default do model pode ir p/ 0).
+4. `job.py`: a janela Omie buscada passa a expandir por `DATE_DIVERGENCE_RANGE` (3), não por `tolerance_days`.
+   **DoD (ClickUp):** backend ignora `date_tolerance_days` no body; coluna recebe 0 em novas sessões (sem migration destrutiva); matching usa data exata p/ `conciliado`; range de 3 dias fixo no código e não exposto.
+   **Notas:** o miolo da lógica de `conciliado_data_divergente` é a BACK 1.7 — aqui é a parametrização/constante + remoção do campo. ⚠️ muda CC (risco #2).
+
+---
+
+### [BACK 1.7] Lógica de cruzamento para faturas de cartão 🟡 validação live gated em 1.1
+
+**Objetivo:** reusar o matcher para gerar `conciliado_data_divergente` + anomalia `wrong_date`; mesmo algoritmo p/ CC e cartão.
+**Arquivos:** [matcher.py](../../apps/api/app/modules/reconciliations/processing/matcher.py) · [processing/anomalies.py](../../apps/api/app/modules/reconciliations/processing/anomalies.py) · [processing/omie_fetch.py](../../apps/api/app/modules/reconciliations/processing/omie_fetch.py) · [job.py](../../apps/api/app/modules/reconciliations/processing/job.py).
+**Regras (idênticas CC e CA):** ver tabela em [Riscos #2](#riscos-críticos). Omie via `ListarExtrato` (`financas/extrato`, `nCodCC`=conta, período = mês de referência). Contexto da anomalia: `"Data arquivo: {X} · Data Omie: {Y}"`, `detected_by='ai'`.
+**Particularidade de parcelas:** cada parcela da fatura é cruzada **individualmente**. Se o Omie tem 1 lançamento pelo total da compra parcelada e a fatura tem N parcelas, as N parcelas ficam `sem_omie` — o sistema **não agrupa**; analista revisa.
+**DoD (ClickUp):** `credit_card` e `checking` usam o mesmo algoritmo; `conciliado_data_divergente` correto p/ ≤3d; `wrong_date` gerada p/ cada linha divergente; contexto com data arquivo + data Omie lado a lado; lançamentos Omie da conta cartão sem correspondente vão p/ `reconciliation_omie_entries`.
+**Dependências:** BACK 1.2, 1.6, 1.3. **GERAL 1.1** p/ validar o caminho CA contra Omie real (o algoritmo em si é testável com `respx`/fixtures p/ CC e CA antes disso).
+
+---
+
+### [BACK 1.3] Incluir contas de cartão no cache e no endpoint de contas 🟡 mapeamento gated em 1.1
+
+**Objetivo:** o cache e o endpoint de contas passam a incluir contas de cartão; a sessão grava `account_type`.
+**Arquivos:** [accounts_cache.py](../../apps/api/app/modules/clients/accounts_cache.py) · [omie_account_cache.py](../../apps/api/app/db/models/omie_account_cache.py) (já tem `account_type`) · [clients/schemas.py (BankAccountResponse)](../../apps/api/app/modules/clients/schemas.py#L121-L154) · endpoint `GET /api/v1/clients/{id}` · **nova coluna** `account_type` em [reconciliation_session.py](../../apps/api/app/db/models/reconciliation_session.py) + migration · [service.create_session_with_entries](../../apps/api/app/modules/reconciliations/service.py#L82).
+**Passos:**
+
+1. Cache: garantir que `ListarContasCorrentes` inclui todos os tipos (hoje o filtro do form não filtra por tipo — confirmar que CR/CA entram no cache). `account_type` já guarda o código cru.
+2. `BankAccountResponse` já expõe `account_type` (código Omie) — confirmar que o endpoint devolve contas de cartão também.
+3. Migration: adicionar `account_type String` em `reconciliation_sessions` (default `'checking'`, não-destrutivo).
+4. **Mapeamento `tipo` Omie → `account_type` (PONTO GATED 1.1):** num único helper, `tipo == CÓDIGO_CARTÃO → 'credit_card'`, senão `'checking'`. `CÓDIGO_CARTÃO` = **`CR`** (hipótese atual; confirmar em 1.1; **não usar `CA`** — risco #1).
+5. `create_session_with_entries`: setar `account_type` da sessão a partir do tipo da conta selecionada.
+   **DoD (ClickUp):** cache guarda CC e cartão; `account_type` reflete o `tipo` Omie; `GET /clients/{id}` devolve ambos com `account_type` exposto; sessão com conta cartão → `account_type='credit_card'`; conta CC → `'checking'` (sem regressão).
+   **⚠️ Desvio consciente da task:** a task escreve `CA`; o plano usa `CR` (código + auditoria M-1). Reconciliar com Galhardo em 1.1 e registrar a decisão.
+
+---
+
+### [BACK 1.5] Adaptar prompt da Claude API para faturas de cartão 🟡 validação com fatura real
+
+**Objetivo:** o prompt de extração trata as particularidades da fatura.
+**Arquivos:** [anthropic/prompts.py:19-72](../../apps/api/app/integrations/anthropic/prompts.py#L19-L72) · [anthropic/tools.py:24-107](../../apps/api/app/integrations/anthropic/tools.py#L24-L107) · [anthropic/schemas.py:48-92](../../apps/api/app/integrations/anthropic/schemas.py#L48-L92).
+**Regras a cobrir:** parcelas individualizadas (3x → 3 objetos, data real de cada, valor unitário; padrões `1/3`,`2/3`); estornos = crédito (amount positivo); encargos (juros/IOF/multa) = transações separadas com descrição exata; pagamento da fatura **não** incluir (pertence ao extrato CC); sinal (compras/encargos negativos, créditos positivos).
+**DoD (ClickUp):** `account_type='credit_card'` quando fatura; 3x → 3 objetos com data/valor unitário; estornos positivos; encargos separados; pagamento de fatura fora; **validar com fatura real de cliente ativo antes de concluir**.
+**Notas:** a infra já suporta `account_type` (`checking`/`credit_card`) no tool/prompt — é refino do guia de extração. A validação final precisa de fatura real (coordenar com 1.1/Galhardo).
+
+---
+
+### [FRONT 1.4] Adaptar tela de upload para faturas de cartão 🟡 rótulo gated em 1.1
+
+**Objetivo:** o formulário de nova conciliação muda dinamicamente ao selecionar conta de cartão.
+**Arquivos:** [new-reconciliation-form.tsx](../../apps/web/src/components/features/reconciliations/new-reconciliation-form.tsx) (rótulos, `formatAccountLabel` ~594-603, campo tolerância 433-480) · [lib/validation/reconciliations.ts:17-19](../../apps/web/src/lib/validation/reconciliations.ts#L17-L19) (zod tolerância) · tela de prévia do parsing.
+**Passos / DoD (ClickUp):**
+
+- Select: contas de cartão com sufixo `"(Cartão)"`; CC sem sufixo. _(o label de cartão já existe p/ `CR`; confirmar o código em 1.1)_
+- Ao selecionar cartão: label `"Arquivo do Extrato"`→`"Arquivo da Fatura"`; texto auxiliar "PDF ou XLS da fatura… Máx 20MB"; nota "Inclua somente o arquivo da fatura… O pagamento aparecerá no extrato da conta corrente — não inclua aqui."; badge azul "Cartão de Crédito" no header.
+- Prévia (cartão): título "Prévia da fatura — {conta}"; legenda "Valores negativos = compras · positivos = estornos/créditos"; 5 primeiras linhas Data/Descrição/Valor.
+- **Remover campo "Tolerância de Data"** do form p/ ambos os tipos (coordena com BACK 1.6); nenhum dropdown/slider/input de tolerância.
+  **Dependência:** BACK 1.3 (account_type exposto no endpoint de contas).
+
+---
+
+### [FRONT 1.8] Adaptações na tela de revisão para faturas de cartão (após 1.7)
+
+**Objetivo:** ajustes visuais/funcionais na tela de revisão p/ contexto de cartão (mesma estrutura).
+**Arquivos:** [review/movements-tab.tsx:215-229](../../apps/web/src/components/features/reconciliations/review/movements-tab.tsx#L215-L229) (filtros) · header da revisão · aba de anomalias · aba resumo.
+**Passos / DoD (ClickUp):**
+
+- Header: badge tipo de conta (Conta Corrente cinza / Cartão azul); título "Conciliação · Cartão · {conta} · {Mês/Ano}".
+- Aba Movimentações: filtro com labels **"Compras (amount<0)" / "Estornos (amount>0)"** em vez de Débitos/Créditos; linhas `conciliado_data_divergente` com badge laranja "⚠ Data divergente" + tooltip/expansão "Data no arquivo: {X} · Data no Omie: {Y}"; anomalia `wrong_date` linkada à linha na aba Anomalias.
+- Aba Resumo: indicadores Total de compras / estornos / encargos (IOF/juros/multa por descrição) / Saldo da fatura.
+  **Dependência:** BACK 1.7 (produz `conciliado_data_divergente` + `wrong_date`), BACK 1.3 (account_type).
+
+---
+
+### [BACK 1.9] Adaptar exportação Excel para faturas de cartão (após 1.7)
+
+**Objetivo:** o Excel reflete que é fatura de cartão (título diferente + coluna de data Omie p/ linhas divergentes).
+**Arquivos:** módulo de export `apps/api/app/modules/reconciliations/export/` — **localizar no código ao iniciar** os pontos exatos (nomes de abas, cabeçalhos, colunas; openpyxl).
+**Passos / DoD (ClickUp):**
+
+- Aba 2 (Movimentação x Lançamento): p/ cartão, adicionar coluna **"Data Omie"** ao lado de "Data"; linhas `conciliado_data_divergente` → preencher Data Omie + célula fundo laranja claro; `conciliado` sem divergência → Data Omie vazia; **CC → coluna não aparece** (sem mudança de layout).
+- Aba 1 (Resumo): cartão → cabeçalho "CONCILIAÇÃO DE FATURA — {CARTÃO} | {conta} | {Mês/Ano}"; CC → mantém "CONCILIAÇÃO BANCÁRIA — {BANCO} | {conta} | {Mês/Ano}".
+  **Dependência:** BACK 1.7 (dados divergentes), BACK 1.3 (account_type).
+
+---
+
+## Decisões em aberto (confirmar antes de cravar)
+
+- [ ] **(risco #1) Código Omie do cartão:** `CR` (código/auditoria) vs `CA` (task). Resolver em **GERAL 1.1** com Galhardo (JSON real). Default do plano: `CR`.
+- [ ] **(risco #2) Tolerância zero na conta corrente** muda comportamento em prod — confirmar que está aprovado (PRD diz que sim; tasks 1.6/1.7 codificam). DoD: regressão de CC + atualizar CLAUDE.md §5.
+- [ ] **Migration `downgrade` da situation** (`String(30)`→`String(20)`) só é segura sem linhas com o valor novo — documentar como irreversível na prática após uso.
+- [ ] **Encargos no resumo (FRONT 1.8):** "identificados pela descrição" (IOF/juros/multa) — definir heurística (palavras-chave) e onde calcular (front a partir das linhas, ou backend).
+
+---
+
+## Como retomar (qualquer sessão)
+
+1. Ler [§ Riscos críticos](#riscos-críticos) e a tabela de ordem.
+2. Pegar a próxima task não-feita na ordem recomendada que **não** esteja bloqueada por 1.1 (se 1.1 ainda aberta).
+3. Abrir os arquivos listados na task, reler o contrato, implementar, rodar o gate local (CLAUDE.md §7), abrir PR por task (ou agrupado por afinidade — alinhar com o usuário).
+4. Atualizar este doc (checkbox/▶) e o CLAUDE.md quando uma regra inviolável mudar (tolerância §5).
+
+_Documento vivo — uma task por vez; o usuário cronometra cada uma._
