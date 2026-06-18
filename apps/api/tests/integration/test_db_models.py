@@ -260,6 +260,38 @@ class TestReconciliationStack:
         assert len(loaded.anomalies) == 1
         assert loaded.anomalies[0].detected_by == AnomalyDetectedBy.AI.value
 
+    async def test_file_entry_accepts_conciliado_data_divergente(
+        self, db_session: AsyncSession
+    ) -> None:
+        """FASE 1 (BACK 1.2): a coluna `situation` (String(30)) aceita o novo
+        valor `conciliado_data_divergente` (26 chars — não cabia em String(20))."""
+        admin = await _make_user(db_session, email="divergente@test.com")
+        client = await _make_client(db_session, created_by=admin.id, name="Divergente")
+        recon = ReconciliationSession(
+            client_id=client.id,
+            created_by=admin.id,
+            omie_conta_id=1,
+            reference_month=date(2026, 3, 1),
+            file_hash="d" * 64,
+            status=ReconciliationStatus.PROCESSING.value,
+        )
+        db_session.add(recon)
+        await db_session.flush()
+        fe = ReconciliationFileEntry(
+            session_id=recon.id,
+            transaction_date=date(2026, 3, 10),
+            description_encrypted="ct",
+            description_iv=FAKE_IV_DESC,
+            amount=Decimal("100.00"),
+            situation=FileEntrySituation.CONCILIADO_DATA_DIVERGENTE.value,
+        )
+        db_session.add(fe)
+        # flush emite o INSERT — falharia com DataError se `situation` ainda
+        # fosse String(20) (o valor tem 26 chars). refresh re-lê do DB (async).
+        await db_session.flush()
+        await db_session.refresh(fe)
+        assert fe.situation == "conciliado_data_divergente"
+
     async def test_idempotency_unique_constraint(self, db_session: AsyncSession) -> None:
         """UNIQUE(client_id, omie_conta_id, reference_month, file_hash)."""
         admin = await _make_user(db_session, email="id@test.com")
