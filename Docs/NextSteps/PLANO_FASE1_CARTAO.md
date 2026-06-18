@@ -4,7 +4,7 @@
 > derivado do PRD [Docs/NextSteps/PRD - Próximos Passos](PRD%20-%20Pr%C3%B3ximos%20Passos-20260615173056.md)
 > e detalhado contra o **código atual** (refs `arquivo:linha` verificadas em 18/06).
 >
-> **Status:** FASE 0 (remoção Redis/ARQ) ✅ merged + em dev. FASE 1 **em planejamento — nenhuma linha escrita.**
+> **Status:** FASE 0 ✅ merged. FASE 1 em andamento — **BACK 1.2 ✅ (PR #23)**; **GERAL 1.1 resolvido** (18/06 — ver Riscos #1); demais tasks na fila.
 >
 > **Como usar:** cada tarefa abaixo é autocontida (objetivo, arquivos reais, passos, DoD = checklist do ClickUp, dependências). Faz-se **uma por vez**. Este doc existe pra qualquer sessão retomar sem depender do chat. Antes de iniciar uma tarefa, releia [§ Riscos críticos](#riscos-críticos) e o bloco da tarefa.
 >
@@ -14,16 +14,19 @@
 
 ## Riscos críticos
 
-### 🔴 #1 — `CA` ≠ Cartão de Crédito no código (CONFLITO com as tasks). Bloqueia em GERAL 1.1.
+### ✅ #1 — RESOLVIDO (18/06): `CR` = Cartão de Crédito (confirmado com dado real da Austral)
 
-As tasks **[GERAL 1.1]** e **[BACK 1.3]** assumem que conta de cartão tem `tipo = "CA"`. **O código diz o contrário** e há auditoria registrada:
+As tasks **[GERAL 1.1]** e **[BACK 1.3]** assumiam `tipo = "CA"` para cartão. **Estava errado.** Validado contra a resposta real do Omie (cache das 21 contas da Austral, cliente que tem cartões cadastrados):
 
-- [omie_account_cache.py:37-44](../../apps/api/app/db/models/omie_account_cache.py#L37-L44) e [integrations/omie/schemas.py:33-44](../../apps/api/app/integrations/omie/schemas.py#L33-L44): **`CR` = Cartão de Crédito**, **`CA` = Conta Aplicação (investimento)**, `CC` = Conta Corrente.
-- Comentário no próprio código: _"auditoria M-1, corrigido em 20/05/2026: a v1 mapeava `CREDIT_CARD = 'CA'` … front renderizava `CA` como Cartão e classificaria Conta Aplicação como cartão"_.
+- **`CR` = Cartão de Crédito** — as 6 contas `CR` da Austral são bandeiras: `ELO - AUSTRAL INSTALACAO`, `VISA - ESTER SILVA CARDIM`, etc.
+- **`CA` = Conta Aplicação (investimento)** — `Bradesco - APLICACAO CDB`, `Sicredi - Dividendos`, `Banco do Nordeste - Aplicação`.
+- `CC` = Conta Corrente (13) · `CX` = Caixinha (2).
 
-**Ou seja: implementar como a task escreveu (`CA`=cartão) reintroduz exatamente o bug M-1 já corrigido.** Quem decide o valor real é o Omie. **A GERAL 1.1 (validação com Galhardo) deve confirmar qual `tipo` o Omie devolve para contas de cartão de um cliente real** antes de cravar o mapeamento. Hipótese forte (código + auditoria): é **`CR`**.
+Bate com o código atual e a auditoria M-1 ([omie_account_cache.py:37-44](../../apps/api/app/db/models/omie_account_cache.py#L37-L44), [integrations/omie/schemas.py:33-44](../../apps/api/app/integrations/omie/schemas.py#L33-L44)). **Decisão cravada: `tipo == 'CR'` → `account_type = 'credit_card'`; o resto → `'checking'`.** Usar `CA` reintroduziria o bug M-1 — **não usar**.
 
-→ **Mitigação no plano:** centralizar o mapeamento `tipo Omie → account_type` num único ponto e tratar o código de cartão como **uma constante a confirmar em 1.1** (default da hipótese atual: `CR`). Toda a fundação (coluna, endpoint, cache, matcher) é construída sem depender do valor; só o mapeamento final fica gated.
+Galhardo confirmou (Slack 18/06): cartão _"fica no mesmo bloco"_ e _"tem os mesmos lançamentos de conta corrente"_ → `ListarContasCorrentes` devolve as contas `CR` na mesma resposta e `ListarExtrato` funciona com os mesmos campos. **GERAL 1.1 itens 1 e 2: confirmados.** Item 3 (`IncluirContaPagar` aparece no extrato) fica para validar live na **FASE 2** — não bloqueia a FASE 1.
+
+> Nota: um cliente pode ter **vários** cartões (Austral tem 6 contas `CR` — ELO/VISA de titulares diferentes). Cada cartão é uma conta a conciliar separadamente. O cache já guarda as contas `CR` (não precisa "incluir" — ver BACK 1.3).
 
 ### 🟠 #2 — Tolerância zero muda comportamento da **conta corrente** (já em prod)
 
@@ -53,7 +56,7 @@ Isso é **mudança de comportamento em prod para CC** (decisão do PRD/Laio: "ex
 ## Dependências e ordem de execução
 
 ```
-GERAL 1.1 (Galhardo) ──gate──► mapeamento tipo→credit_card (em 1.3) + validação live do cruzamento CA (1.7) + fatura real (1.5)
+GERAL 1.1 ✅ RESOLVIDO (CR=cartão) → mapeamento de 1.3 destravado. Falta só: uma FATURA real de cartão p/ validar 1.5/1.7 live (a Austral serve de exemplo de contas CR).
 
 BACK 1.2 (ENUM/seed) ──► BACK 1.6 (tolerância) ──► BACK 1.7 (cruzamento) ──► FRONT 1.8 (revisão)
                                                               └──► BACK 1.9 (export)
@@ -61,7 +64,7 @@ BACK 1.3 (account_type) ──► FRONT 1.4 (upload)   e   ──► BACK 1.7
 BACK 1.5 (prompt) ── (quase independente; valida com fatura real)
 ```
 
-**Ordem recomendada** (faz CC funcionar primeiro; partes específicas de cartão ficam gated em 1.1):
+**Ordem recomendada** — ⚠️ a coluna "Bloqueada por Galhardo" abaixo é a **análise inicial**; com a **GERAL 1.1 resolvida**, veja a ordem atualizada na **nota após a tabela**.
 
 | Ordem | Task          | Bloqueada por Galhardo (1.1)? | Por quê agora                                                                             |
 | ----- | ------------- | ----------------------------- | ----------------------------------------------------------------------------------------- |
@@ -75,13 +78,13 @@ BACK 1.5 (prompt) ── (quase independente; valida com fatura real)
 | 8     | **BACK 1.9**  | ❌ não (após 1.7)             | Export sobre dados que 1.7 já produz.                                                     |
 | —     | **GERAL 1.1** | —                             | Externa (Galhardo). Destrava os 🟡 acima.                                                 |
 
-> Enquanto 1.1 não volta: dá pra entregar **tudo funcionando e testado para conta corrente** + **estrutura pronta para cartão**, deixando o **valor do `tipo`** como o único ponto gated. Quando o Galhardo confirmar, é trocar 1 constante + validar live.
+> **Atualizado 18/06 — GERAL 1.1 resolvida (`CR` = cartão):** nada mais está gated por Galhardo. A FASE 1 inteira pode ser implementada; só a **BACK 1.5** precisa de uma fatura de cartão real pra fechar a validação. **Ordem sugerida:** BACK 1.2 ✅ → **1.6 → 1.7 → 1.3 → FRONT 1.4 → FRONT 1.8 → 1.9** (1.5 quando a fatura chegar).
 
 ---
 
 ## Tarefas
 
-### [GERAL 1.1] Validar ListarExtrato para contas de cartão com Galhardo 🔴 externa
+### [GERAL 1.1] Validar ListarExtrato para contas de cartão com Galhardo ✅ resolvido (18/06)
 
 **Objetivo:** confirmar contra Omie real, **antes** do cruzamento de cartão (BACK 1.7), que `ListarExtrato` funciona para contas de cartão e quais campos/formato retorna.
 **O que validar (ClickUp):**
@@ -90,9 +93,7 @@ BACK 1.5 (prompt) ── (quase independente; valida com fatura real)
 - Campos retornados p/ cartão são os mesmos de CC (`nCodLanc`, `cNatureza`, `dDtLanc`, `nValorLanc`, `cCateg`, `cFornecedor`) → confirmar presença e formato.
 - Lançamentos criados via `IncluirContaPagar` aparecem no `ListarExtrato` da conta cartão → confirmar (é a base do cruzamento da FASE 2).
 
-**⚠️ Validar TAMBÉM (não está na task, mas é o risco #1):** qual `tipo` o Omie devolve em `ListarContasCorrentes` para uma conta de **cartão de crédito** real — `CR` (hipótese do código) ou `CA` (hipótese da task)? Pedir ao Galhardo o print/JSON do `tipo_conta_corrente` de uma conta de cartão. **Isto destrava o mapeamento da BACK 1.3.**
-**Saída esperada:** resposta real (JSON) de `ListarExtrato` + `ListarContasCorrentes` de uma conta de cartão de um cliente real. Anexar no card.
-**Dependência:** Galhardo (em andamento). Bloqueia o mapeamento de 1.3 e a validação live de 1.7.
+**✅ Resultado (18/06):** Galhardo confirmou no Slack — cartão _"fica no mesmo bloco"_ e _"tem os mesmos lançamentos de conta corrente"_ (itens 1 e 2 ok). E o **risco #1 foi resolvido com dado real**: nas 21 contas da Austral, cartão = `tipo` **`CR`** (contas ELO/VISA), `CA` = aplicação. **Mapeamento cravado: `CR` → `credit_card`.** Item 3 (`IncluirContaPagar` aparece no extrato) → validar live na **FASE 2**; não bloqueia a FASE 1. _Pendente (opcional): anexar no card o JSON real de `ListarExtrato` de uma conta `CR` da Austral._
 
 ---
 
@@ -146,10 +147,10 @@ BACK 1.5 (prompt) ── (quase independente; valida com fatura real)
 1. Cache: garantir que `ListarContasCorrentes` inclui todos os tipos (hoje o filtro do form não filtra por tipo — confirmar que CR/CA entram no cache). `account_type` já guarda o código cru.
 2. `BankAccountResponse` já expõe `account_type` (código Omie) — confirmar que o endpoint devolve contas de cartão também.
 3. Migration: adicionar `account_type String` em `reconciliation_sessions` (default `'checking'`, não-destrutivo).
-4. **Mapeamento `tipo` Omie → `account_type` (PONTO GATED 1.1):** num único helper, `tipo == CÓDIGO_CARTÃO → 'credit_card'`, senão `'checking'`. `CÓDIGO_CARTÃO` = **`CR`** (hipótese atual; confirmar em 1.1; **não usar `CA`** — risco #1).
+4. **Mapeamento `tipo` Omie → `account_type` (CONFIRMADO):** num único helper, `tipo == 'CR' → 'credit_card'`, senão `'checking'`. (`CR` = cartão confirmado com dado real da Austral — risco #1 resolvido; **não usar `CA`** = aplicação.)
 5. `create_session_with_entries`: setar `account_type` da sessão a partir do tipo da conta selecionada.
    **DoD (ClickUp):** cache guarda CC e cartão; `account_type` reflete o `tipo` Omie; `GET /clients/{id}` devolve ambos com `account_type` exposto; sessão com conta cartão → `account_type='credit_card'`; conta CC → `'checking'` (sem regressão).
-   **⚠️ Desvio consciente da task:** a task escreve `CA`; o plano usa `CR` (código + auditoria M-1). Reconciliar com Galhardo em 1.1 e registrar a decisão.
+   **✅ Resolvido (risco #1):** a task escreve `CA`, mas o `tipo` real do cartão é `CR` (confirmado nas contas ELO/VISA da Austral; `CA` = aplicação). Usar `CR`.
 
 ---
 
@@ -204,7 +205,7 @@ BACK 1.5 (prompt) ── (quase independente; valida com fatura real)
 
 ## Decisões em aberto (confirmar antes de cravar)
 
-- [ ] **(risco #1) Código Omie do cartão:** `CR` (código/auditoria) vs `CA` (task). Resolver em **GERAL 1.1** com Galhardo (JSON real). Default do plano: `CR`.
+- [x] **(risco #1) Código Omie do cartão:** **RESOLVIDO (18/06)** — é `CR` (dado real da Austral: contas ELO/VISA = `CR`; `CA` = aplicação). Mapeamento: `CR`→`credit_card`.
 - [ ] **(risco #2) Tolerância zero na conta corrente** muda comportamento em prod — confirmar que está aprovado (PRD diz que sim; tasks 1.6/1.7 codificam). DoD: regressão de CC + atualizar CLAUDE.md §5.
 - [ ] **Migration `downgrade` da situation** (`String(30)`→`String(20)`) só é segura sem linhas com o valor novo — documentar como irreversível na prática após uso.
 - [ ] **Encargos no resumo (FRONT 1.8):** "identificados pela descrição" (IOF/juros/multa) — definir heurística (palavras-chave) e onde calcular (front a partir das linhas, ou backend).
