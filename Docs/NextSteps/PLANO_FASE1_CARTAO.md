@@ -4,7 +4,7 @@
 > derivado do PRD [Docs/NextSteps/PRD - Próximos Passos](PRD%20-%20Pr%C3%B3ximos%20Passos-20260615173056.md)
 > e detalhado contra o **código atual** (refs `arquivo:linha` verificadas em 18/06).
 >
-> **Status:** FASE 0 ✅ merged. FASE 1 em andamento numa branch de integração `feat/fase1-cartao` (1 PR por task pra ela; merge único na `main` no fim) — **GERAL 1.1 ✅**, **BACK 1.2 ✅**, **BACK 1.3 ✅**, **BACK 1.6 ✅** (engine de matching completa: exato/divergente/sem match); demais tasks na fila. Próxima na ordem: **BACK 1.7** (cartão usa a mesma engine).
+> **Status:** FASE 0 ✅ merged. FASE 1 em andamento numa branch de integração `feat/fase1-cartao` (1 PR por task pra ela; merge único na `main` no fim) — **GERAL 1.1 ✅**, **BACK 1.2 ✅**, **BACK 1.3 ✅**, **BACK 1.6 ✅**, **BACK 1.7 ✅** (cartão usa a mesma engine + contexto da anomalia); demais tasks na fila. Próxima na ordem: **FRONT 1.4** (upload). Falta backend: **BACK 1.5** (prompt — precisa de fatura real) e **BACK 1.9** (export).
 >
 > **Como usar:** cada tarefa abaixo é autocontida (objetivo, arquivos reais, passos, DoD = checklist do ClickUp, dependências). Faz-se **uma por vez**. Este doc existe pra qualquer sessão retomar sem depender do chat. Antes de iniciar uma tarefa, releia [§ Riscos críticos](#riscos-críticos) e o bloco da tarefa.
 >
@@ -129,7 +129,9 @@ BACK 1.5 (prompt) ── (quase independente; valida com fatura real)
 
 ---
 
-### [BACK 1.7] Lógica de cruzamento para faturas de cartão 🟡 validação live gated em 1.1
+### [BACK 1.7] Lógica de cruzamento para faturas de cartão ✅ feito (19/06)
+
+**✅ Resultado (19/06):** a engine de matching/classificação já vinha da 1.6 (mesmo algoritmo p/ `credit_card` e `checking` — o `job.py` não ramifica por tipo). A 1.7 fechou o que faltava: **contexto da anomalia `wrong_date`** (`context_encrypted` = `"Data arquivo: X · Data Omie: Y"`, cifrado AES-256 via helper `_build_wrong_date_anomalies`; o job monta o `DivergentMatch` com as datas e passa a `encryption_key`). Confirmado por leitura que `fetch_realized`/`fetch_pending` são agnósticos a tipo de conta (cartão = só outro `nCodCC` via `ListarExtrato`), então itens 1 e 5 já funcionavam. Testes novos: sessão `credit_card` ponta a ponta (exato/divergente/3 parcelas sem*omie/omie sem correspondente → omie_entries) + asserção do contexto decifrado. Gate verde (527 pytest). \_Validação com fatura real fica na BACK 1.5 (prompt) quando a Austral mandar.*
 
 **Objetivo:** reusar o matcher para gerar `conciliado_data_divergente` + anomalia `wrong_date`; mesmo algoritmo p/ CC e cartão.
 **Arquivos:** [matcher.py](../../apps/api/app/modules/reconciliations/processing/matcher.py) · [processing/anomalies.py](../../apps/api/app/modules/reconciliations/processing/anomalies.py) · [processing/omie_fetch.py](../../apps/api/app/modules/reconciliations/processing/omie_fetch.py) · [job.py](../../apps/api/app/modules/reconciliations/processing/job.py).

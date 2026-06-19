@@ -31,7 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import get_settings
-from app.core.crypto import encrypt
+from app.core.crypto import decrypt, encrypt
 from app.core.security import hash_password
 from app.db.models import (
     AnomalySeverity,
@@ -150,6 +150,7 @@ async def _seed_session_with_entries(
     created_by: UUID,
     transactions: list[tuple[date, str, Decimal]],
     file_hash: str,
+    account_type: str = "checking",
 ) -> UUID:
     """Cria uma sessão `processing` + entries pré-criptografados."""
     hex_key = get_settings().OMIE_ENCRYPTION_KEY.get_secret_value()
@@ -158,8 +159,9 @@ async def _seed_session_with_entries(
             client_id=client_id,
             created_by=created_by,
             omie_conta_id=42,
+            account_type=account_type,
             reference_month=date(2026, 4, 1),
-            date_tolerance_days=3,
+            date_tolerance_days=0,
             file_hash=file_hash,
             status="processing",
             balance_start=Decimal("0.00"),
@@ -487,6 +489,154 @@ class TestJobDateDivergence:
             }
             assert code_by_file[divergente.id] == ANOMALY_CODE_WRONG_DATE
             assert code_by_file[sem_match.id] == ANOMALY_CODE_MISSING_IN_OMIE
+
+            # BACK 1.7 — contexto da anomalia wrong_date: data arquivo + data
+            # Omie lado a lado, criptografado. Linha divergente: arquivo 10/04,
+            # Omie 12/04.
+            hex_key = get_settings().OMIE_ENCRYPTION_KEY.get_secret_value()
+            wd = next(a for a in anomalies if a.file_entry_id == divergente.id)
+            assert wd.context_encrypted is not None
+            assert wd.context_iv is not None
+            assert (
+                decrypt(wd.context_encrypted, wd.context_iv, hex_key)
+                == "Data arquivo: 10/04/2026 · Data Omie: 12/04/2026"
+            )
+            # A anomalia missing_in_omie (sem match) não tem contexto.
+            mio = next(a for a in anomalies if a.file_entry_id == sem_match.id)
+            assert mio.context_encrypted is None
+
+
+@pytest.mark.integration
+class TestJobCreditCard:
+    """FASE 1 (BACK 1.7) — fatura de cartão usa a MESMA engine de cruzamento.
+
+    Cobre: `account_type='credit_card'` classifica igual ao checking (item 1);
+    parcelas são cruzadas individualmente, sem agrupar (particularidade); e
+    lançamento Omie do cartão sem correspondente vai p/ omie_entries (item 5).
+    """
+
+    @respx.mock
+    async def test_card_session_same_engine_with_parcelas(
+        self, factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        await _seed_anomaly_types(factory)
+        admin = await _seed_admin(factory, "job-card-admin@hologram.com.br")
+        cliente = await _seed_client(factory, admin.id, "Cartão ELO Austral")
+
+        session_id = await _seed_session_with_entries(
+            factory,
+            client_id=cliente.id,
+            created_by=admin.id,
+            account_type="credit_card",
+            transactions=[
+                (date(2026, 4, 5), "Compra exata", Decimal("-100.00")),  # exata
+                (date(2026, 4, 10), "Compra divergente", Decimal("-250.00")),  # Omie +2 dias
+                # Compra parcelada 3x — 3 linhas na fatura, R$50 cada. O Omie
+                # tem 1 lançamento pelo total (R$150). Não agrupa → 3x sem_omie.
+                (date(2026, 4, 8), "Tênis 1/3", Decimal("-50.00")),
+                (date(2026, 4, 9), "Tênis 2/3", Decimal("-50.00")),
+                (date(2026, 4, 10), "Tênis 3/3", Decimal("-50.00")),
+            ],
+            file_hash=_hex64("card-parcelas"),
+        )
+
+        respx.post(OMIE_EXTRATO_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_ok_extrato_payload(
+                    [
+                        {
+                            "nCodLancamento": 3001,
+                            "cNatureza": "D",
+                            "dDataLancamento": "05/04/2026",
+                            "nValorDocumento": 100.00,
+                            "cObservacoes": "Compra exata",
+                            "cSituacao": "Conciliado",
+                        },
+                        {
+                            "nCodLancamento": 3002,
+                            "cNatureza": "D",
+                            "dDataLancamento": "12/04/2026",  # +2 dias de 10/04
+                            "nValorDocumento": 250.00,
+                            "cObservacoes": "Compra divergente",
+                            "cSituacao": "Conciliado",
+                        },
+                        {
+                            "nCodLancamento": 3003,
+                            "cNatureza": "D",
+                            "dDataLancamento": "08/04/2026",
+                            "nValorDocumento": 150.00,  # total da compra parcelada
+                            "cObservacoes": "Tênis 3x",
+                            "cSituacao": "Conciliado",
+                        },
+                    ]
+                ),
+            )
+        )
+        respx.post(OMIE_PAGAR_URL).mock(
+            return_value=httpx.Response(200, json=_empty_pagar_payload())
+        )
+        respx.post(OMIE_RECEBER_URL).mock(
+            return_value=httpx.Response(200, json=_empty_receber_payload())
+        )
+
+        await run_reconciliation_processing(
+            str(session_id), settings=get_settings(), session_factory=factory
+        )
+
+        async with factory() as s:
+            sess = (
+                await s.execute(
+                    select(ReconciliationSession).where(ReconciliationSession.id == session_id)
+                )
+            ).scalar_one()
+            assert sess.status == "reviewing", sess.error_message
+            assert sess.account_type == "credit_card"
+            # exata + divergente conciliadas; 3 parcelas sem_omie.
+            assert sess.conciliated_count == 2
+            assert sess.sem_omie_count == 3
+            # 3 missing_in_omie (parcelas) + 1 wrong_date (divergente).
+            assert sess.anomaly_count == 4
+
+            entries = (
+                (
+                    await s.execute(
+                        select(ReconciliationFileEntry).where(
+                            ReconciliationFileEntry.session_id == session_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            by_amount: dict[Decimal, list[ReconciliationFileEntry]] = {}
+            for e in entries:
+                by_amount.setdefault(e.amount, []).append(e)
+
+            assert by_amount[Decimal("-100.00")][0].situation == FileEntrySituation.CONCILIADO.value
+            assert (
+                by_amount[Decimal("-250.00")][0].situation
+                == FileEntrySituation.CONCILIADO_DATA_DIVERGENTE.value
+            )
+            # As 3 parcelas (R$50) ficam sem_omie — sistema NÃO agrupa.
+            parcelas = by_amount[Decimal("-50.00")]
+            assert len(parcelas) == 3
+            assert all(p.situation == FileEntrySituation.SEM_OMIE.value for p in parcelas)
+
+            # Item 5: lançamento Omie do cartão sem correspondente (o total
+            # R$150 da compra parcelada) vai p/ reconciliation_omie_entries.
+            omie_rows = (
+                (
+                    await s.execute(
+                        select(ReconciliationOmieEntry).where(
+                            ReconciliationOmieEntry.session_id == session_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert {o.omie_lancamento_id for o in omie_rows} == {3003}
 
 
 @pytest.mark.integration

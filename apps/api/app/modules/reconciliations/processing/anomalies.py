@@ -16,11 +16,14 @@ esperado não aparecer no extrato. Sem alerta. Doc §13 §17.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import date
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.crypto import encrypt
 from app.db.models import (
     AnomalyDetectedBy,
     AnomalyType,
@@ -37,6 +40,21 @@ ANOMALY_CODE_MISSING_IN_OMIE = "missing_in_omie"
 ANOMALY_CODE_MISSING_IN_FILE = "missing_in_file"
 # FASE 1: linha conciliada por valor mas com data divergente (1-3 dias).
 ANOMALY_CODE_WRONG_DATE = "wrong_date"
+
+
+@dataclass(frozen=True, slots=True)
+class DivergentMatch:
+    """Uma linha conciliada por valor mas com data divergente (1-3 dias).
+
+    Alimenta a anomalia `wrong_date`: o `context_encrypted` guarda a data do
+    arquivo e a data do Omie lado a lado para a Tela de Revisão (FASE 1 /
+    BACK 1.7). As datas são em claro (CLAUDE.md §4.4 permite), mas o contexto
+    da anomalia é criptografado por consistência com o resto da tabela.
+    """
+
+    file_entry_id: UUID
+    file_date: date
+    omie_date: date
 
 
 class _AnomalyTypeMissingError(Exception):
@@ -90,13 +108,45 @@ async def _load_anomaly_type_ids(
     return by_code
 
 
+def _build_wrong_date_anomalies(
+    *,
+    session_id: UUID,
+    wrong_date_type_id: UUID,
+    divergent: list[DivergentMatch],
+    encryption_key: str | None,
+) -> list[ReconciliationAnomaly]:
+    """Monta as anomalias `wrong_date`, cifrando o contexto data-arquivo/data-Omie.
+
+    `encryption_key` é obrigatória aqui (CLAUDE.md §4 — `context_encrypted`).
+    Levanta `ValueError` se ausente em vez de criar a anomalia sem contexto.
+    """
+    if encryption_key is None:
+        raise ValueError("encryption_key é obrigatória quando há divergências (wrong_date).")
+    result: list[ReconciliationAnomaly] = []
+    for dm in divergent:
+        context = f"Data arquivo: {dm.file_date:%d/%m/%Y} · Data Omie: {dm.omie_date:%d/%m/%Y}"
+        ct, iv = encrypt(context, encryption_key)
+        result.append(
+            ReconciliationAnomaly(
+                session_id=session_id,
+                anomaly_type_id=wrong_date_type_id,
+                file_entry_id=dm.file_entry_id,
+                detected_by=AnomalyDetectedBy.AI.value,
+                context_encrypted=ct,
+                context_iv=iv,
+            )
+        )
+    return result
+
+
 async def create_structural_anomalies(
     session: AsyncSession,
     *,
     session_id: UUID,
     unmatched_file_entries: list[ReconciliationFileEntry],
     persisted_omie_entries: list[ReconciliationOmieEntry],
-    divergent_file_entry_ids: list[UUID] | None = None,
+    divergent_matches: list[DivergentMatch] | None = None,
+    encryption_key: str | None = None,
 ) -> int:
     """Cria as anomalias estruturais e devolve o total.
 
@@ -117,15 +167,18 @@ async def create_structural_anomalies(
         persisted_omie_entries: list[OmieEntry] já inseridos. Apenas os com
             `omie_status='Atrasado'` viram `missing_in_file`. `Previsto` é
             ignorado (Doc §13 — esperado não estar no extrato).
-        divergent_file_entry_ids: IDs das linhas conciliadas com data
-            divergente (FASE 1) — cada uma vira uma anomaly `wrong_date`. O
-            tipo `wrong_date` só é exigido no DB quando esta lista é não-vazia.
+        divergent_matches: linhas conciliadas com data divergente (FASE 1) —
+            cada uma vira uma anomaly `wrong_date` com `context_encrypted`
+            guardando "Data arquivo: X · Data Omie: Y". O tipo `wrong_date` só
+            é exigido no DB quando esta lista é não-vazia.
+        encryption_key: chave AES-256 hex (CLAUDE.md §4) para cifrar o contexto
+            das anomalias `wrong_date`. Obrigatória quando há `divergent_matches`.
 
     Returns:
         Total de anomalias criadas (missing_in_omie + Atrasado + wrong_date).
     """
-    divergent_ids = divergent_file_entry_ids or []
-    type_ids = await _load_anomaly_type_ids(session, include_wrong_date=bool(divergent_ids))
+    divergent = divergent_matches or []
+    type_ids = await _load_anomaly_type_ids(session, include_wrong_date=bool(divergent))
     # `.get()` em vez de `[...]` — se o admin desativou o tipo (S15 BACK 11.1),
     # ele simplesmente não vem no dict e os blocos abaixo são pulados em silêncio.
     missing_in_omie_id = type_ids.get(ANOMALY_CODE_MISSING_IN_OMIE)
@@ -159,19 +212,18 @@ async def create_structural_anomalies(
             )
 
     # FASE 1: cada linha conciliada com data divergente (1-3 dias) ganha uma
-    # anomalia `wrong_date`. A `situation='conciliado_data_divergente'` já foi
-    # gravada em `apply_matches`; aqui só registramos o alerta. O contexto
-    # "data arquivo x data Omie" lado a lado é enriquecido na BACK 1.7.
-    if wrong_date_id is not None:
-        for file_entry_id in divergent_ids:
-            anomalies.append(
-                ReconciliationAnomaly(
-                    session_id=session_id,
-                    anomaly_type_id=wrong_date_id,
-                    file_entry_id=file_entry_id,
-                    detected_by=AnomalyDetectedBy.AI.value,
-                )
+    # anomalia `wrong_date` com o contexto "Data arquivo / Data Omie"
+    # criptografado (BACK 1.7). A `situation='conciliado_data_divergente'` já
+    # foi gravada em `apply_matches`.
+    if wrong_date_id is not None and divergent:
+        anomalies.extend(
+            _build_wrong_date_anomalies(
+                session_id=session_id,
+                wrong_date_type_id=wrong_date_id,
+                divergent=divergent,
+                encryption_key=encryption_key,
             )
+        )
 
     if anomalies:
         session.add_all(anomalies)
