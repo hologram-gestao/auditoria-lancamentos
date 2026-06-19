@@ -56,6 +56,23 @@ class ReconciliationStatus(StrEnum):
     ERROR = "error"
 
 
+class SessionAccountType(StrEnum):
+    """Tipo (normalizado) da conta conciliada na sessão — FASE 1.
+
+    NÃO é o código cru do Omie (`CC`/`CR`/`CA`/…, esse vive em
+    `omie_accounts_cache.account_type`). É a classificação que o produto
+    usa: conta corrente vs. cartão. Derivado do `tipo` Omie da conta
+    selecionada em `create_session_with_entries` — apenas `CR` (Cartão de
+    Crédito) → `credit_card`; o resto → `checking`.
+
+    A UI (badge "Cartão", filtros) e o export (coluna "Data Omie") ramificam
+    neste campo; a regra de tolerância de data (FASE 1) é a mesma p/ os dois.
+    """
+
+    CHECKING = "checking"
+    CREDIT_CARD = "credit_card"
+
+
 class ReconciliationSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "reconciliation_sessions"
     # UNIQUE PARCIAL: a idempotência só vale para sessões ATIVAS
@@ -88,6 +105,16 @@ class ReconciliationSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
     )
     omie_conta_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # Tipo normalizado da conta conciliada: 'checking' (conta corrente) ou
+    # 'credit_card' (cartão). Derivado do `tipo` Omie da conta selecionada em
+    # create_session_with_entries (CR → credit_card; resto → checking). O
+    # server_default 'checking' cobre as linhas pré-migration (não-destrutivo).
+    account_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=SessionAccountType.CHECKING.value,
+        server_default=text("'checking'"),
+    )
     reference_month: Mapped[date] = mapped_column(SQLDate, nullable=False, index=True)
     # Período REAL extraído do statement (S9). NULL em sessões pré-migration —
     # nesse caso, o review service cai no fallback `[reference_month,

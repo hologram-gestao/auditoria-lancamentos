@@ -35,6 +35,7 @@ from app.db.models import (
     Client,
     ClientAssignment,
     FileEntrySituation,
+    OmieAccountCache,
     ReconciliationFileEntry,
     ReconciliationSession,
     User,
@@ -116,6 +117,26 @@ async def _seed_client(
         )
         await session.flush()
     return client
+
+
+async def _seed_account(
+    session: AsyncSession,
+    *,
+    client: Client,
+    omie_conta_id: int,
+    tipo: str,
+) -> OmieAccountCache:
+    """Semeia uma conta no cache L1 com o `tipo` Omie cru (CC/CR/CA/…)."""
+    account = OmieAccountCache(
+        client_id=client.id,
+        omie_conta_id=omie_conta_id,
+        name=f"Conta {omie_conta_id}",
+        bank_name="237",
+        account_type=tipo,
+    )
+    session.add(account)
+    await session.flush()
+    return account
 
 
 async def _login(client: AsyncClient, email: str) -> None:
@@ -433,6 +454,116 @@ class TestCreateReconciliationPersistence:
             )
         ).scalar_one()
         assert sess.reference_month == date(2026, 4, 1)
+
+
+# ----------------------------------------------------------------------
+# POST /reconciliations — account_type derivado do tipo Omie (BACK 1.3)
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestCreateReconciliationAccountType:
+    """A sessão grava `account_type` a partir do `tipo` Omie da conta
+    SELECIONADA (cache L1), não do palpite da IA no statement.
+
+    Risco #1 da FASE 1: só `CR` (Cartão de Crédito) → 'credit_card'; `CA`
+    (Conta Aplicação) e qualquer outro → 'checking'. Mapear `CA` p/ cartão
+    reintroduziria o bug M-1.
+    """
+
+    async def _create_and_load(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        *,
+        cliente: Client,
+        omie_conta_id: int,
+        file_hash: str,
+    ) -> ReconciliationSession:
+        resp = await client_with_db.post(
+            "/api/v1/reconciliations",
+            json=_create_payload(
+                client_id=cliente.id,
+                omie_conta_id=omie_conta_id,
+                file_hash=file_hash,
+            ),
+        )
+        assert resp.status_code == 201, resp.text
+        session_id = UUID(resp.json()["data"]["session_id"])
+        return (
+            await db_session.execute(
+                select(ReconciliationSession).where(ReconciliationSession.id == session_id)
+            )
+        ).scalar_one()
+
+    async def test_credit_card_account_maps_to_credit_card(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="Austral", creator=admin)
+        await _seed_account(db_session, client=cliente, omie_conta_id=777, tipo="CR")
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        sess = await self._create_and_load(
+            client_with_db, db_session, cliente=cliente, omie_conta_id=777, file_hash=_hex64("cr")
+        )
+        assert sess.account_type == "credit_card"
+
+    async def test_checking_account_maps_to_checking(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="X", creator=admin)
+        await _seed_account(db_session, client=cliente, omie_conta_id=42, tipo="CC")
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        sess = await self._create_and_load(
+            client_with_db, db_session, cliente=cliente, omie_conta_id=42, file_hash=_hex64("cc")
+        )
+        assert sess.account_type == "checking"
+
+    async def test_investment_account_maps_to_checking_not_card(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        """Guarda anti-M-1: `CA` é Conta Aplicação (investimento), NÃO cartão."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="X", creator=admin)
+        await _seed_account(db_session, client=cliente, omie_conta_id=99, tipo="CA")
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        sess = await self._create_and_load(
+            client_with_db, db_session, cliente=cliente, omie_conta_id=99, file_hash=_hex64("ca")
+        )
+        assert sess.account_type == "checking"
+
+    async def test_uncached_account_defaults_to_checking(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        """Conta não cacheada (None) → default 'checking' (sem regressão CC)."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="X", creator=admin)
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        sess = await self._create_and_load(
+            client_with_db,
+            db_session,
+            cliente=cliente,
+            omie_conta_id=1234,
+            file_hash=_hex64("uncached"),
+        )
+        assert sess.account_type == "checking"
 
 
 # ----------------------------------------------------------------------

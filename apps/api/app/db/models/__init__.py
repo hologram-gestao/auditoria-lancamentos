@@ -20,7 +20,11 @@ from app.db.models.reconciliation_omie_entry import (
     OmieEntryUserAction,
     ReconciliationOmieEntry,
 )
-from app.db.models.reconciliation_session import ReconciliationSession, ReconciliationStatus
+from app.db.models.reconciliation_session import (
+    ReconciliationSession,
+    ReconciliationStatus,
+    SessionAccountType,
+)
 from app.db.models.user import User, UserRole
 
 __all__ = [
@@ -42,6 +46,7 @@ __all__ = [
     "ReconciliationOmieEntry",
     "ReconciliationSession",
     "ReconciliationStatus",
+    "SessionAccountType",
     "User",
     "UserRole",
 ]
