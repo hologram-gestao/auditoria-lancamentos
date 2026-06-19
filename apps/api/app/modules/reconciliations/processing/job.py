@@ -43,6 +43,7 @@ from app.db.models import FileEntrySituation, ReconciliationOmieEntry
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache
 from app.modules.clients.omie_factory import build_omie_client
 from app.modules.reconciliations.processing.anomalies import (
+    DivergentMatch,
     _AnomalyTypeMissingError,
     create_structural_anomalies,
 )
@@ -257,18 +258,29 @@ async def _execute_processing(
     #    (default do matcher) — não há mais tolerância parametrizável (FASE 1).
     result = match(file_entries_for_matcher, omie_movements)
 
+    # Mapas data-por-id p/ classificar e montar o contexto da anomalia
+    # wrong_date (BACK 1.7: "Data arquivo / Data Omie").
+    file_date_by_id = {fe.id: fe.transaction_date for fe in file_entries_for_matcher}
+    omie_date_by_id = {mov.omie_id: mov.transaction_date for mov in omie_movements}
+
     # Classifica cada match pelo days_diff (CLAUDE.md §5.2, FASE 1):
     #   days_diff == 0  → conciliado (data exata)
     #   1 ≤ days ≤ 3    → conciliado_data_divergente (+ anomalia wrong_date)
     matches_to_apply: list[tuple[UUID, int, str]] = []
-    divergent_file_ids: list[UUID] = []
+    divergent_matches: list[DivergentMatch] = []
     for file_id, omie_id in result.matches:
         file_uuid = UUID(file_id)
         if result.days_diff_by_file_id[file_id] == 0:
             situation = FileEntrySituation.CONCILIADO.value
         else:
             situation = FileEntrySituation.CONCILIADO_DATA_DIVERGENTE.value
-            divergent_file_ids.append(file_uuid)
+            divergent_matches.append(
+                DivergentMatch(
+                    file_entry_id=file_uuid,
+                    file_date=file_date_by_id[file_id],
+                    omie_date=omie_date_by_id[omie_id],
+                )
+            )
         matches_to_apply.append((file_uuid, omie_id, situation))
 
     log.info(
@@ -276,7 +288,7 @@ async def _execute_processing(
         session_id=str(session_id),
         total_file=len(file_entries_for_matcher),
         matched=len(result.matches),
-        divergent=len(divergent_file_ids),
+        divergent=len(divergent_matches),
         unmatched_omie=len(result.unmatched_omie_indices),
     )
 
@@ -310,7 +322,8 @@ async def _execute_processing(
             session_id=session_id,
             unmatched_file_entries=unmatched_file_entries,
             persisted_omie_entries=omie_entries,
-            divergent_file_entry_ids=divergent_file_ids,
+            divergent_matches=divergent_matches,
+            encryption_key=settings.OMIE_ENCRYPTION_KEY.get_secret_value(),
         )
 
         # Qualificação (S19 BACK 12.1): IA + histórico + outlier sobre os
