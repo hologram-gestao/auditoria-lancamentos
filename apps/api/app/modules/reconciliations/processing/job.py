@@ -48,6 +48,7 @@ from app.modules.reconciliations.processing.anomalies import (
 )
 from app.modules.reconciliations.processing.balances import compute_balances
 from app.modules.reconciliations.processing.matcher import (
+    DATE_DIVERGENCE_RANGE,
     FileEntryForMatch,
     match,
 )
@@ -198,7 +199,6 @@ async def _execute_processing(
         period_end = max(e.transaction_date for e in session_obj.file_entries)
         omie_conta_id = session_obj.omie_conta_id
         reference_month = session_obj.reference_month
-        tolerance_days = session_obj.date_tolerance_days
 
     # 2. Fetch Omie data — toda a interação com credencial em claro
     #    acontece dentro do `async with` do OmieClient.
@@ -216,7 +216,7 @@ async def _execute_processing(
                 omie_conta_id=omie_conta_id,
                 period_start=period_start,
                 period_end=period_end,
-                tolerance_days=tolerance_days,
+                tolerance_days=DATE_DIVERGENCE_RANGE,
             )
             pending = await fetch_pending(
                 omie_client,
@@ -232,8 +232,8 @@ async def _execute_processing(
                         client_id=client.id,
                         omie_client=omie_client,
                         omie_conta_id=omie_conta_id,
-                        period_start=period_start - timedelta(days=tolerance_days),
-                        period_end=period_end + timedelta(days=tolerance_days),
+                        period_start=period_start - timedelta(days=DATE_DIVERGENCE_RANGE),
+                        period_end=period_end + timedelta(days=DATE_DIVERGENCE_RANGE),
                     )
                 except Exception:
                     log.warning(
@@ -253,17 +253,30 @@ async def _execute_processing(
         deduped=len(omie_movements),
     )
 
-    # 3. Match — função pura, sem I/O.
-    result = match(
-        file_entries_for_matcher,
-        omie_movements,
-        tolerance_days=tolerance_days,
-    )
+    # 3. Match — função pura, sem I/O. Usa o range fixo DATE_DIVERGENCE_RANGE
+    #    (default do matcher) — não há mais tolerância parametrizável (FASE 1).
+    result = match(file_entries_for_matcher, omie_movements)
+
+    # Classifica cada match pelo days_diff (CLAUDE.md §5.2, FASE 1):
+    #   days_diff == 0  → conciliado (data exata)
+    #   1 ≤ days ≤ 3    → conciliado_data_divergente (+ anomalia wrong_date)
+    matches_to_apply: list[tuple[UUID, int, str]] = []
+    divergent_file_ids: list[UUID] = []
+    for file_id, omie_id in result.matches:
+        file_uuid = UUID(file_id)
+        if result.days_diff_by_file_id[file_id] == 0:
+            situation = FileEntrySituation.CONCILIADO.value
+        else:
+            situation = FileEntrySituation.CONCILIADO_DATA_DIVERGENTE.value
+            divergent_file_ids.append(file_uuid)
+        matches_to_apply.append((file_uuid, omie_id, situation))
+
     log.info(
         "reconciliation_matched",
         session_id=str(session_id),
         total_file=len(file_entries_for_matcher),
         matched=len(result.matches),
+        divergent=len(divergent_file_ids),
         unmatched_omie=len(result.unmatched_omie_indices),
     )
 
@@ -271,8 +284,10 @@ async def _execute_processing(
     async with session_factory() as db, db.begin():
         repo = ReconciliationRepository(db)
 
+        # Pares (file_id, omie_id) p/ a qualificação (S19) — inclui exatos e
+        # divergentes (ambos estão conciliados por valor).
         match_pairs_uuid = [(UUID(file_id), omie_id) for file_id, omie_id in result.matches]
-        await repo.apply_matches(match_pairs_uuid)
+        await repo.apply_matches(matches_to_apply)
 
         unmatched_omie = [omie_movements[idx] for idx in result.unmatched_omie_indices]
         omie_entries = [
@@ -295,6 +310,7 @@ async def _execute_processing(
             session_id=session_id,
             unmatched_file_entries=unmatched_file_entries,
             persisted_omie_entries=omie_entries,
+            divergent_file_entry_ids=divergent_file_ids,
         )
 
         # Qualificação (S19 BACK 12.1): IA + histórico + outlier sobre os

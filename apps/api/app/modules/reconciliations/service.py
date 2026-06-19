@@ -154,7 +154,10 @@ class ReconciliationService:
             # (extratos quebrados, faturas de cartão, atrasos).
             period_start=statement.period_start,
             period_end=statement.period_end,
-            date_tolerance_days=request.date_tolerance_days,
+            # FASE 1: tolerância de data agora é fixa no matcher
+            # (DATE_DIVERGENCE_RANGE). Novas sessões gravam 0; a coluna é
+            # mantida só por histórico (sessões antigas guardam o valor antigo).
+            date_tolerance_days=0,
             file_hash=request.file_hash,
             status=ReconciliationStatus.PROCESSING.value,
         )
@@ -199,7 +202,6 @@ class ReconciliationService:
             account_type=account_type,
             total_file_entries=len(entries),
             month=request.reference_month.isoformat(),
-            tolerance_days=request.date_tolerance_days,
         )
         return session_obj.id
 

@@ -2,7 +2,11 @@
 
 CLAUDE.md §5 — regras invioláveis:
     1. Tolerância de valor: |a - b| ≤ 0.01 BRL (hardcoded, em Decimal).
-    2. Tolerância de data: parametrizável por sessão (default 3 dias).
+    2. Range de data FIXO (DATE_DIVERGENCE_RANGE = 3 dias) — FASE 1 deixou de
+       ser parametrizável por sessão (CLAUDE.md §5.2). O matcher casa
+       candidatos até este range; o caller (job.py) classifica pelo
+       `days_diff`: 0 → conciliado (data exata); 1-3 → conciliado_data_
+       divergente (+ anomalia wrong_date); > 3 → sem match.
     3. Um OmieMovement só pode matchar UMA FileEntry — controle via set de
        índices consumidos.
     4. Desempate (CLAUDE.md §5.5): menor |days_diff| → menor |amount_diff| →
@@ -22,6 +26,12 @@ from decimal import Decimal
 
 # Tolerância fixa em centavos. CLAUDE.md §5.1: NÃO é parametrizável.
 AMOUNT_TOLERANCE: Decimal = Decimal("0.01")
+
+# Range fixo de divergência de data, em dias. CLAUDE.md §5.2: NÃO é
+# parametrizável (FASE 1 — antes era tolerância por sessão, default 3). O
+# matcher casa candidatos até este range; quem classifica conciliado (exato)
+# vs conciliado_data_divergente (1-3 dias) é o caller, via `days_diff`.
+DATE_DIVERGENCE_RANGE: int = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,19 +69,27 @@ class OmieMovement:
 
 @dataclass(frozen=True, slots=True)
 class MatchResult:
-    """Saída do matcher — apenas pares de índices + lista de Omie sobrando.
+    """Saída do matcher — pares de índices + Omie sobrando + days_diff por par.
 
-    `matches`: pares `(file_entry.id, OmieMovement.omie_id)`. O caller
-    aplica isso atualizando `situation='conciliado'` e `omie_lancamento_id`.
+    `matches`: pares `(file_entry.id, OmieMovement.omie_id)`. O caller aplica
+    atualizando `omie_lancamento_id` e a `situation` — que agora depende do
+    `days_diff` (ver `days_diff_by_file_id`): exato → `conciliado`, 1-3 dias →
+    `conciliado_data_divergente`.
 
     `unmatched_omie_indices`: índices da lista original de movimentos Omie
     que NÃO foram consumidos. Usar índice (e não objeto) preserva a ordem
     original e evita confusão se houver IDs duplicados (não deveria, mas
     defesa em profundidade).
+
+    `days_diff_by_file_id`: para cada `file_entry.id` em `matches`, o
+    |dias de diferença| entre a data do arquivo e a do lançamento Omie casado
+    (0 ≤ valor ≤ DATE_DIVERGENCE_RANGE). É o que permite o caller separar
+    `conciliado` (== 0) de `conciliado_data_divergente` (1-3) sem recalcular.
     """
 
     matches: list[tuple[str, int]]
     unmatched_omie_indices: list[int]
+    days_diff_by_file_id: dict[str, int]
 
 
 def _amount_within_tolerance(a: Decimal, b: Decimal) -> bool:
@@ -82,7 +100,7 @@ def _amount_within_tolerance(a: Decimal, b: Decimal) -> bool:
 def match(
     file_entries: list[FileEntryForMatch],
     omie_movements: list[OmieMovement],
-    tolerance_days: int,
+    tolerance_days: int = DATE_DIVERGENCE_RANGE,
 ) -> MatchResult:
     """Cruza arquivo x Omie aplicando as regras invioláveis.
 
@@ -106,14 +124,19 @@ def match(
         omie_movements: lista combinada de movimentações Omie (extrato +
             títulos). Ordem dentro da lista NÃO afeta o resultado — o desempate
             é determinístico por (days_diff, amount_diff, date).
-        tolerance_days: tolerância parametrizável (CLAUDE.md §5.2). Default
-            do produto é 3, mas o matcher aceita qualquer inteiro ≥ 0.
+        tolerance_days: range de busca de candidatos (CLAUDE.md §5.2). Default
+            é `DATE_DIVERGENCE_RANGE` (3) — fixo no produto desde a FASE 1. O
+            parâmetro existe só para testar o algoritmo com outros ranges; o
+            sistema sempre usa o default. Aceita qualquer inteiro ≥ 0.
 
     Returns:
-        `MatchResult` com pares (file_id, omie_id) e índices Omie sobrando.
+        `MatchResult` com pares (file_id, omie_id), índices Omie sobrando e o
+        `days_diff_by_file_id` (para o caller classificar conciliado x
+        conciliado_data_divergente).
     """
     used_omie_indices: set[int] = set()
     matches: list[tuple[str, int]] = []
+    days_diff_by_file_id: dict[str, int] = {}
 
     for file_entry in file_entries:
         candidate_indices: list[int] = []
@@ -146,9 +169,17 @@ def match(
         candidate_indices.sort(key=_sort_key)
         chosen = candidate_indices[0]
         used_omie_indices.add(chosen)
-        matches.append((file_entry.id, omie_movements[chosen].omie_id))
+        chosen_omie = omie_movements[chosen]
+        matches.append((file_entry.id, chosen_omie.omie_id))
+        days_diff_by_file_id[file_entry.id] = abs(
+            (file_entry.transaction_date - chosen_omie.transaction_date).days
+        )
 
     unmatched_omie_indices = [
         idx for idx in range(len(omie_movements)) if idx not in used_omie_indices
     ]
-    return MatchResult(matches=matches, unmatched_omie_indices=unmatched_omie_indices)
+    return MatchResult(
+        matches=matches,
+        unmatched_omie_indices=unmatched_omie_indices,
+        days_diff_by_file_id=days_diff_by_file_id,
+    )

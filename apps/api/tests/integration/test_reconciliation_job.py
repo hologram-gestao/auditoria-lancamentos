@@ -48,6 +48,7 @@ from app.db.models import (
 from app.modules.reconciliations.processing.anomalies import (
     ANOMALY_CODE_MISSING_IN_FILE,
     ANOMALY_CODE_MISSING_IN_OMIE,
+    ANOMALY_CODE_WRONG_DATE,
 )
 from app.modules.reconciliations.processing.job import run_reconciliation_processing
 
@@ -87,6 +88,7 @@ async def _seed_anomaly_types(factory: async_sessionmaker[AsyncSession]) -> None
         for code, severity in (
             (ANOMALY_CODE_MISSING_IN_OMIE, AnomalySeverity.CRITICAL),
             (ANOMALY_CODE_MISSING_IN_FILE, AnomalySeverity.CRITICAL),
+            (ANOMALY_CODE_WRONG_DATE, AnomalySeverity.MODERATE),
         ):
             existing = await s.scalar(select(AnomalyType).where(AnomalyType.code == code))
             if existing is None:
@@ -360,6 +362,131 @@ class TestJobHappyPath:
             assert anomalies[0].omie_entry_id == omie_rows[0].id
             assert anomalies[0].file_entry_id is None
             assert anomalies[0].detected_by == "ai"
+
+
+@pytest.mark.integration
+class TestJobDateDivergence:
+    """FASE 1 (BACK 1.6) — regressão de conta corrente: a tolerância de data
+    deixou de casar como `conciliado`. Agora numa única sessão:
+        - data exata        → conciliado
+        - 1-3 dias divergência → conciliado_data_divergente + anomalia wrong_date
+        - sem candidato     → sem_omie + anomalia missing_in_omie
+    """
+
+    @respx.mock
+    async def test_exact_divergent_and_unmatched_in_one_session(
+        self, factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        await _seed_anomaly_types(factory)
+        admin = await _seed_admin(factory, "job-divergence-admin@hologram.com.br")
+        cliente = await _seed_client(factory, admin.id, "Conta Corrente X")
+
+        session_id = await _seed_session_with_entries(
+            factory,
+            client_id=cliente.id,
+            created_by=admin.id,
+            transactions=[
+                (date(2026, 4, 5), "Exata", Decimal("-100.00")),  # mesmo dia
+                (date(2026, 4, 10), "Divergente", Decimal("-200.00")),  # Omie +2 dias
+                (date(2026, 4, 20), "Sem match", Decimal("-300.00")),  # nada no Omie
+            ],
+            file_hash=_hex64("divergence"),
+        )
+
+        respx.post(OMIE_EXTRATO_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_ok_extrato_payload(
+                    [
+                        {
+                            "nCodLancamento": 2001,
+                            "cNatureza": "D",
+                            "dDataLancamento": "05/04/2026",  # exato
+                            "nValorDocumento": 100.00,
+                            "cObservacoes": "Exata",
+                            "cSituacao": "Conciliado",
+                        },
+                        {
+                            "nCodLancamento": 2002,
+                            "cNatureza": "D",
+                            "dDataLancamento": "12/04/2026",  # +2 dias de 10/04
+                            "nValorDocumento": 200.00,
+                            "cObservacoes": "Divergente",
+                            "cSituacao": "Conciliado",
+                        },
+                    ]
+                ),
+            )
+        )
+        respx.post(OMIE_PAGAR_URL).mock(
+            return_value=httpx.Response(200, json=_empty_pagar_payload())
+        )
+        respx.post(OMIE_RECEBER_URL).mock(
+            return_value=httpx.Response(200, json=_empty_receber_payload())
+        )
+
+        await run_reconciliation_processing(
+            str(session_id), settings=get_settings(), session_factory=factory
+        )
+
+        async with factory() as s:
+            sess = (
+                await s.execute(
+                    select(ReconciliationSession).where(ReconciliationSession.id == session_id)
+                )
+            ).scalar_one()
+            assert sess.status == "reviewing", sess.error_message
+            # 2 casados (exato + divergente) contam como conciliated; 1 sem match.
+            assert sess.conciliated_count == 2
+            assert sess.sem_omie_count == 1
+            # anomalias: 1 wrong_date (divergente) + 1 missing_in_omie (sem match).
+            assert sess.anomaly_count == 2
+
+            entries = (
+                (
+                    await s.execute(
+                        select(ReconciliationFileEntry).where(
+                            ReconciliationFileEntry.session_id == session_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            by_amount = {e.amount: e for e in entries}
+            exata = by_amount[Decimal("-100.00")]
+            divergente = by_amount[Decimal("-200.00")]
+            sem_match = by_amount[Decimal("-300.00")]
+
+            assert exata.situation == FileEntrySituation.CONCILIADO.value
+            assert exata.omie_lancamento_id == 2001
+            assert divergente.situation == FileEntrySituation.CONCILIADO_DATA_DIVERGENTE.value
+            assert divergente.omie_lancamento_id == 2002
+            assert sem_match.situation == FileEntrySituation.SEM_OMIE.value
+            assert sem_match.omie_lancamento_id is None
+
+            # Anomalias linkadas às linhas certas, pelo code do tipo.
+            type_by_id = {
+                t.id: t.code for t in (await s.execute(select(AnomalyType))).scalars().all()
+            }
+            anomalies = (
+                (
+                    await s.execute(
+                        select(ReconciliationAnomaly).where(
+                            ReconciliationAnomaly.session_id == session_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            code_by_file = {
+                a.file_entry_id: type_by_id[a.anomaly_type_id]
+                for a in anomalies
+                if a.file_entry_id is not None
+            }
+            assert code_by_file[divergente.id] == ANOMALY_CODE_WRONG_DATE
+            assert code_by_file[sem_match.id] == ANOMALY_CODE_MISSING_IN_OMIE
 
 
 @pytest.mark.integration

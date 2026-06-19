@@ -180,24 +180,25 @@ class ReconciliationRepository:
 
     async def apply_matches(
         self,
-        matches: list[tuple[UUID, int]],
+        matches: list[tuple[UUID, int, str]],
     ) -> None:
-        """Aplica os pares (file_entry_id, omie_lancamento_id) nas linhas.
+        """Aplica os matches `(file_entry_id, omie_lancamento_id, situation)`.
 
-        Atualiza `situation='conciliado'` e `omie_lancamento_id` para cada
-        par. Faz UPDATE individual (não bulk) porque o número de matches é
-        bounded por `total_file_entries` (geralmente < 200) — performance
-        é dominada por outras etapas, e UPDATE individual é mais legível
-        que `update().values()` com CASE/WHEN.
+        Atualiza `omie_lancamento_id` e a `situation` de cada linha casada. A
+        `situation` vem JÁ decidida pelo caller (job.py): `conciliado` para
+        data exata, `conciliado_data_divergente` para 1-3 dias de divergência
+        (FASE 1 — ver matcher.DATE_DIVERGENCE_RANGE). Faz UPDATE individual
+        (não bulk) porque o número de matches é bounded por
+        `total_file_entries` (geralmente < 200) — performance é dominada por
+        outras etapas, e UPDATE individual é mais legível que
+        `update().values()` com CASE/WHEN.
         """
-        from app.db.models import FileEntrySituation
-
-        for file_entry_id, omie_lancamento_id in matches:
+        for file_entry_id, omie_lancamento_id, situation in matches:
             await self._session.execute(
                 update(ReconciliationFileEntry)
                 .where(ReconciliationFileEntry.id == file_entry_id)
                 .values(
-                    situation=FileEntrySituation.CONCILIADO.value,
+                    situation=situation,
                     omie_lancamento_id=omie_lancamento_id,
                 )
             )
