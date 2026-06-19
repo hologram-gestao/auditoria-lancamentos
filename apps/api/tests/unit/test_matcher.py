@@ -21,6 +21,7 @@ import pytest
 
 from app.modules.reconciliations.processing.matcher import (
     AMOUNT_TOLERANCE,
+    DATE_DIVERGENCE_RANGE,
     FileEntryForMatch,
     OmieMovement,
     match,
@@ -183,6 +184,43 @@ class TestMatcherGreedyConsumption:
         result = match(files, omie, tolerance_days=3)
         assert sorted(result.matches) == [("F1", 1), ("F2", 2)]
         assert result.unmatched_omie_indices == []
+
+
+@pytest.mark.unit
+class TestMatcherDaysDiff:
+    """FASE 1 (BACK 1.6): o matcher expõe `days_diff_by_file_id` para o caller
+    classificar conciliado (exato) vs conciliado_data_divergente (1-3 dias)."""
+
+    def test_range_default_is_three(self) -> None:
+        assert DATE_DIVERGENCE_RANGE == 3
+
+    def test_exact_match_records_zero(self) -> None:
+        files = [_file("F1", date(2026, 4, 15), "100.00")]
+        omie = [_omie(1, date(2026, 4, 15), "100.00")]
+        result = match(files, omie)  # sem tolerance_days → usa o default fixo
+        assert result.matches == [("F1", 1)]
+        assert result.days_diff_by_file_id == {"F1": 0}
+
+    def test_divergent_match_records_days_diff(self) -> None:
+        files = [_file("F1", date(2026, 4, 15), "100.00")]
+        omie = [_omie(1, date(2026, 4, 17), "100.00")]  # +2 dias
+        result = match(files, omie)
+        assert result.matches == [("F1", 1)]
+        assert result.days_diff_by_file_id == {"F1": 2}
+
+    def test_default_range_matches_up_to_three_days(self) -> None:
+        files = [_file("F1", date(2026, 4, 15), "100.00")]
+        omie = [_omie(1, date(2026, 4, 18), "100.00")]  # +3 dias = limite
+        result = match(files, omie)
+        assert result.matches == [("F1", 1)]
+        assert result.days_diff_by_file_id == {"F1": 3}
+
+    def test_unmatched_file_absent_from_days_diff(self) -> None:
+        files = [_file("F1", date(2026, 4, 15), "100.00")]
+        omie = [_omie(1, date(2026, 4, 25), "100.00")]  # +10 dias → não casa
+        result = match(files, omie)
+        assert result.matches == []
+        assert result.days_diff_by_file_id == {}
 
 
 @pytest.mark.unit

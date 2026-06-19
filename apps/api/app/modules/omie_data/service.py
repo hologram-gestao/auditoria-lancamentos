@@ -16,6 +16,7 @@ from uuid import UUID
 from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
 from app.modules.omie_data.schemas import OmieLancamentoItem
+from app.modules.reconciliations.processing.matcher import DATE_DIVERGENCE_RANGE
 from app.modules.reconciliations.review.repository import ReviewRepository
 from app.modules.reconciliations.review.service import _month_bounds
 
@@ -77,8 +78,11 @@ class OmieLancamentoService:
             # o período da sessão. Quando o usuário abre /omie-entries pela
             # 1ª vez, esse caminho aquece o cache pra toda a sessão.
             period_start, period_end = _month_bounds(sess.reference_month)
+            # FASE 1: range fixo (não mais a tolerância por sessão) — garante
+            # que sessões novas (date_tolerance_days=0) ainda busquem a janela
+            # ±3 dias necessária pra achar lançamentos com data divergente.
             expanded_start, expanded_end = self._repo.expand_period(
-                period_start, period_end, sess.date_tolerance_days
+                period_start, period_end, DATE_DIVERGENCE_RANGE
             )
             omie_client = omie_client_factory()
             try:

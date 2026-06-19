@@ -123,7 +123,10 @@ class ReconciliationSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # ficam fora do período Omie consultado em /available-omie-entries.
     period_start: Mapped[date | None] = mapped_column(SQLDate, nullable=True)
     period_end: Mapped[date | None] = mapped_column(SQLDate, nullable=True)
-    date_tolerance_days: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=3)
+    # FASE 1: tolerância de data deixou de ser parametrizável — é fixa no
+    # matcher (DATE_DIVERGENCE_RANGE=3). Coluna mantida só por histórico (não-
+    # destrutivo); novas sessões gravam 0 e o job NÃO lê mais este valor.
+    date_tolerance_days: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
     file_hash: Mapped[str] = mapped_column(String(64), nullable=False)  # SHA-256 hex
 
     status: Mapped[str] = mapped_column(

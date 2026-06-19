@@ -4,7 +4,7 @@
 > derivado do PRD [Docs/NextSteps/PRD - Próximos Passos](PRD%20-%20Pr%C3%B3ximos%20Passos-20260615173056.md)
 > e detalhado contra o **código atual** (refs `arquivo:linha` verificadas em 18/06).
 >
-> **Status:** FASE 0 ✅ merged. FASE 1 em andamento numa branch de integração `feat/fase1-cartao` (1 PR por task pra ela; merge único na `main` no fim) — **GERAL 1.1 ✅**, **BACK 1.2 ✅**, **BACK 1.3 ✅**; demais tasks na fila. Próxima na ordem: **BACK 1.6**.
+> **Status:** FASE 0 ✅ merged. FASE 1 em andamento numa branch de integração `feat/fase1-cartao` (1 PR por task pra ela; merge único na `main` no fim) — **GERAL 1.1 ✅**, **BACK 1.2 ✅**, **BACK 1.3 ✅**, **BACK 1.6 ✅** (engine de matching completa: exato/divergente/sem match); demais tasks na fila. Próxima na ordem: **BACK 1.7** (cartão usa a mesma engine).
 >
 > **Como usar:** cada tarefa abaixo é autocontida (objetivo, arquivos reais, passos, DoD = checklist do ClickUp, dependências). Faz-se **uma por vez**. Este doc existe pra qualquer sessão retomar sem depender do chat. Antes de iniciar uma tarefa, releia [§ Riscos críticos](#riscos-críticos) e o bloco da tarefa.
 >
@@ -28,9 +28,9 @@ Galhardo confirmou (Slack 18/06): cartão _"fica no mesmo bloco"_ e _"tem os mes
 
 > Nota: um cliente pode ter **vários** cartões (Austral tem 6 contas `CR` — ELO/VISA de titulares diferentes). Cada cartão é uma conta a conciliar separadamente. O cache já guarda as contas `CR` (não precisa "incluir" — ver BACK 1.3).
 
-### 🟠 #2 — Tolerância zero muda comportamento da **conta corrente** (já em prod)
+### ✅ #2 — IMPLEMENTADO (19/06, BACK 1.6): tolerância zero também na **conta corrente**
 
-[BACK 1.6]/[BACK 1.7] tornam o matching de data **fixo** para CC **e** cartão (hoje CC usa `date_tolerance_days` parametrizável, default 3 — [reconciliation_session.py:99](../../apps/api/app/db/models/reconciliation_session.py#L99), [matcher.py](../../apps/api/app/modules/reconciliations/processing/matcher.py)). Nova regra (idêntica p/ CC e CA):
+A regra de matching de data agora é **fixa** para CC **e** cartão (`DATE_DIVERGENCE_RANGE=3`, não mais `date_tolerance_days`). ⚠️ **Continua sendo mudança de comportamento em prod para a CC** — só "vale" quando a branch de integração for mergeada na `main`. Mitigado com teste de regressão de CC no job (exato/divergente/sem match) + CLAUDE.md §5.2/§5.3 atualizado. Regra (idêntica p/ CC e cartão):
 
 | Condição                                                                    | `situation`                  | Anomalia                      |
 | --------------------------------------------------------------------------- | ---------------------------- | ----------------------------- |
@@ -112,7 +112,9 @@ BACK 1.5 (prompt) ── (quase independente; valida com fatura real)
 
 ---
 
-### [BACK 1.6] Hardcodar tolerância zero e remover campo do backend ❌ não bloqueada
+### [BACK 1.6] Hardcodar tolerância zero e remover campo do backend ✅ feito (19/06)
+
+**✅ Resultado (19/06) — escopo Opção A (engine genérica completa, decidido com o usuário):** a 1.6 absorveu a geração de `conciliado_data_divergente` + `wrong_date` (antes pensada p/ a 1.7), pra não deixar estado intermediário regredido e tornar o teste de regressão da CC significativo. Implementado: `DATE_DIVERGENCE_RANGE=3` no matcher; `MatchResult.days_diff_by_file_id`; `job.py` classifica exato→`conciliado`, 1-3d→`conciliado_data_divergente` (+ `wrong_date` via `create_structural_anomalies(divergent_file_entry_ids=...)`), >3d→`sem_omie`; `apply_matches` recebe a `situation`; `date_tolerance_days` removido do request (ignorado), coluna mantida e novas sessões gravam 0; range fixo também na janela Omie do `job.py`, `omie_data/service.py` (revisão) e `export/service.py`. CLAUDE.md §5.2/§5.3 atualizado. Testes: regressão CC no job (exato/divergente/sem match) + matcher days_diff + create ignora campo. Gate verde. **➡️ Sobra p/ a BACK 1.7:** só o que é específico de cartão (fetch via `ListarExtrato` da conta cartão, parcelas individualizadas, omie_entries do cartão, contexto "data arquivo x data Omie" na anomalia) — a engine de classificação já está pronta e é reusada.
 
 **Objetivo:** fixar a regra de data no backend (exato → `conciliado`; ≤3d → `conciliado_data_divergente`) e remover `date_tolerance_days` da request.
 **Arquivos:** [matcher.py](../../apps/api/app/modules/reconciliations/processing/matcher.py) · [reconciliations/schemas.py:103](../../apps/api/app/modules/reconciliations/schemas.py#L103) · [service.py (create_session_with_entries)](../../apps/api/app/modules/reconciliations/service.py#L82) · [job.py (expansão de período)](../../apps/api/app/modules/reconciliations/processing/job.py#L199-L217) · [reconciliation_session.py:99](../../apps/api/app/db/models/reconciliation_session.py#L99).

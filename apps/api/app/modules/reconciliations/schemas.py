@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 from datetime import date as _date
 from decimal import Decimal
-from typing import Annotated, Literal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -87,9 +87,12 @@ class CreateReconciliationRequest(BaseModel):
     """Body do POST /api/v1/reconciliations.
 
     O front envia o ParsedStatement (output do S9) + a meta da conciliação
-    (qual cliente, qual conta Omie, mês de referência, hash do arquivo,
-    tolerância). Nada do arquivo original — segue CLAUDE.md §3.10 (arquivo
-    nunca persiste).
+    (qual cliente, qual conta Omie, mês de referência, hash do arquivo).
+    Nada do arquivo original — segue CLAUDE.md §3.10 (arquivo nunca persiste).
+
+    FASE 1: a tolerância de data deixou de ser parametrizável — é fixa no
+    backend (`matcher.DATE_DIVERGENCE_RANGE`). `date_tolerance_days` não é
+    mais aceito; se o front enviar, o Pydantic ignora (extra="ignore", default).
     """
 
     client_id: UUID
@@ -100,7 +103,6 @@ class CreateReconciliationRequest(BaseModel):
             "ou um Date completo — o validator normaliza pra dia 1."
         ),
     )
-    date_tolerance_days: Annotated[int, Field(ge=1, le=7)] = 3
     file_hash: str = Field(description="SHA-256 hex (64 chars).")
     statement: ReconciliationStatementInput
 

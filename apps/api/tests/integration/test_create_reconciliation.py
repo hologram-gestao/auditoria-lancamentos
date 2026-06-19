@@ -637,6 +637,34 @@ class TestCreateReconciliationValidation:
         resp = await client_with_db.post("/api/v1/reconciliations", json=payload)
         assert resp.status_code == 400
 
+    async def test_date_tolerance_days_in_body_is_ignored(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        """FASE 1 (BACK 1.6): o campo `date_tolerance_days` foi removido do
+        schema. Se o front legado enviar, o backend ignora (não 422) e grava
+        0 na sessão — a tolerância agora é fixa no matcher."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="X", creator=admin)
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        # _create_payload já inclui "date_tolerance_days": 3 — deve ser ignorado.
+        resp = await client_with_db.post(
+            "/api/v1/reconciliations",
+            json=_create_payload(client_id=cliente.id),
+        )
+        assert resp.status_code == 201, resp.text
+        session_id = UUID(resp.json()["data"]["session_id"])
+
+        sess = (
+            await db_session.execute(
+                select(ReconciliationSession).where(ReconciliationSession.id == session_id)
+            )
+        ).scalar_one()
+        assert sess.date_tolerance_days == 0
+
 
 # ----------------------------------------------------------------------
 # GET /reconciliations/{id}/status (BACK 8.6)
