@@ -68,6 +68,17 @@ ANOMALY_TYPES_SEED: list[dict[str, Any]] = [
             "mas não aparece no extrato. Pode indicar título lançado errado ou pagamento perdido."
         ),
     },
+    # FASE 1 — conciliação de fatura de cartão (BACK 1.2).
+    {
+        "code": "wrong_date",
+        "name": "Data do lançamento diverge do extrato ou fatura",
+        "severity": AnomalySeverity.MODERATE,
+        "description": (
+            "O valor do lançamento bate com o arquivo enviado, mas a data registrada "
+            "no Omie é diferente da data no arquivo. Pode indicar erro de lançamento "
+            "manual ou ajuste automático de data para dia útil."
+        ),
+    },
     {
         "code": "wrong_account",
         "name": "Lançamento possivelmente na conta errada",

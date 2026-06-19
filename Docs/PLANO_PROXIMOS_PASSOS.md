@@ -119,6 +119,8 @@ O PRD lista dois bugs na FASE 0, mas **ambos já foram corrigidos e testados** a
 
 ## FASE 1 — Conciliação de faturas de cartão
 
+> **📋 Plano de execução detalhado (ativo): [Docs/NextSteps/PLANO_FASE1_CARTAO.md](NextSteps/PLANO_FASE1_CARTAO.md).** As 9 tarefas do ClickUp (`GERAL 1.1`, `BACK 1.2–1.9`, `FRONT 1.4/1.8`) estão quebradas lá com arquivos reais, ordem, dependências e DoD — **é o que vale para implementar**. O esboço S21–S23 abaixo fica como visão de alto nível. ⚠️ As tarefas do ClickUp assumem `CA`=cartão, mas o código (e a auditoria M-1) dizem **`CR`=cartão, `CA`=aplicação** — resolver com Galhardo em `GERAL 1.1` (risco #1 do plano detalhado).
+>
 > **Tese:** reusar o pipeline de conta corrente (upload → IA → cruzamento → revisão) com adaptações para cartão. O sistema **já distingue tipo de conta** no Omie (`CC` corrente, `CR` cartão, `CA` aplicação — [omie_account_cache.py:29-45](../apps/api/app/db/models/omie_account_cache.py#L29-L45), DTO [schemas.py:103-133](../apps/api/app/integrations/omie/schemas.py#L103-L133)), e o label de cartão já aparece no form (`formatAccountLabel` marca `CR` com "(Cartão)"). A base existe — a FASE 1 é adaptação, não greenfield.
 
 **Critério de sucesso (PRD):** operador concilia uma fatura de cartão **real** ponta a ponta, sem subir o extrato da conta corrente, e exporta o relatório em **< 5 min**.
