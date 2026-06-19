@@ -4,7 +4,7 @@
 > derivado do PRD [Docs/NextSteps/PRD - Próximos Passos](PRD%20-%20Pr%C3%B3ximos%20Passos-20260615173056.md)
 > e detalhado contra o **código atual** (refs `arquivo:linha` verificadas em 18/06).
 >
-> **Status:** FASE 0 ✅ merged. FASE 1 em andamento — **BACK 1.2 ✅ (PR #23)**; **GERAL 1.1 resolvido** (18/06 — ver Riscos #1); demais tasks na fila.
+> **Status:** FASE 0 ✅ merged. FASE 1 em andamento numa branch de integração `feat/fase1-cartao` (1 PR por task pra ela; merge único na `main` no fim) — **GERAL 1.1 ✅**, **BACK 1.2 ✅**, **BACK 1.3 ✅**; demais tasks na fila. Próxima na ordem: **BACK 1.6**.
 >
 > **Como usar:** cada tarefa abaixo é autocontida (objetivo, arquivos reais, passos, DoD = checklist do ClickUp, dependências). Faz-se **uma por vez**. Este doc existe pra qualquer sessão retomar sem depender do chat. Antes de iniciar uma tarefa, releia [§ Riscos críticos](#riscos-críticos) e o bloco da tarefa.
 >
@@ -138,7 +138,9 @@ BACK 1.5 (prompt) ── (quase independente; valida com fatura real)
 
 ---
 
-### [BACK 1.3] Incluir contas de cartão no cache e no endpoint de contas 🟡 mapeamento gated em 1.1
+### [BACK 1.3] Incluir contas de cartão no cache e no endpoint de contas ✅ feito (19/06)
+
+**✅ Resultado (19/06):** o cache já incluía todos os tipos (`listar_contas_correntes` não filtra — confirmado); `BankAccountResponse.account_type` já expunha o código Omie. Adicionados: coluna `reconciliation_sessions.account_type` (migration `b2f7c4a9d318`, server_default `'checking'`, não-destrutiva — backfill verificado no dev + round-trip), enum `SessionAccountType`, helper `session_account_type_from_omie_tipo` (**`CR`→`credit_card`; resto, incl. `CA` e None → `checking`** — anti-M-1) e derivação em `create_session_with_entries` a partir do `tipo` cacheado (server-side, não do palpite da IA). Corrigido docstring enganoso em `client.py` (`CA`=cartão → `CR`=cartão). Testes: 4 de integração (CR/CC/CA/uncached) + 7 unit do mapeamento. Gate verde (519 pytest).
 
 **Objetivo:** o cache e o endpoint de contas passam a incluir contas de cartão; a sessão grava `account_type`.
 **Arquivos:** [accounts_cache.py](../../apps/api/app/modules/clients/accounts_cache.py) · [omie_account_cache.py](../../apps/api/app/db/models/omie_account_cache.py) (já tem `account_type`) · [clients/schemas.py (BankAccountResponse)](../../apps/api/app/modules/clients/schemas.py#L121-L154) · endpoint `GET /api/v1/clients/{id}` · **nova coluna** `account_type` em [reconciliation_session.py](../../apps/api/app/db/models/reconciliation_session.py) + migration · [service.create_session_with_entries](../../apps/api/app/modules/reconciliations/service.py#L82).

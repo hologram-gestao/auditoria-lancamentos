@@ -19,9 +19,11 @@ from app.core.logging import get_logger
 from app.core.search_index import compute_search_hmac
 from app.db.models import (
     FileEntrySituation,
+    OmieAccountType,
     ReconciliationFileEntry,
     ReconciliationSession,
     ReconciliationStatus,
+    SessionAccountType,
 )
 from app.modules.reconciliations.repository import ReconciliationRepository
 from app.modules.reconciliations.schemas import (
@@ -31,6 +33,22 @@ from app.modules.reconciliations.schemas import (
 )
 
 logger = get_logger(__name__)
+
+
+def session_account_type_from_omie_tipo(omie_tipo: str | None) -> str:
+    """Mapeia o `tipo` Omie da conta selecionada → `account_type` da sessão.
+
+    Regra cravada (Risco #1 da FASE 1, validado com dado real da Austral em
+    18/06): **apenas** `CR` (Cartão de Crédito) vira `credit_card`. Qualquer
+    outro tipo — incluindo `CA` (Conta Aplicação) e `None` (conta não
+    cacheada) — vira `checking`.
+
+    ⚠️ NUNCA mapear `CA` para cartão: era exatamente o bug M-1 (auditoria
+    20/05/2026) — `CA` é investimento, não cartão.
+    """
+    if omie_tipo == OmieAccountType.CREDIT_CARD.value:  # "CR"
+        return SessionAccountType.CREDIT_CARD.value
+    return SessionAccountType.CHECKING.value
 
 
 class ReconciliationService:
@@ -116,10 +134,20 @@ class ReconciliationService:
         hex_blind_key = search_blind_index_key.get_secret_value()
         statement = request.statement
 
+        # account_type vem do `tipo` Omie da conta SELECIONADA (cache L1),
+        # não do palpite da IA no statement (CLAUDE.md §3.8 — não confiar no
+        # client). Conta não cacheada → None → default 'checking'.
+        omie_tipo = await self._repo.get_cached_account_type(
+            client_id=request.client_id,
+            omie_conta_id=request.omie_conta_id,
+        )
+        account_type = session_account_type_from_omie_tipo(omie_tipo)
+
         session_obj = ReconciliationSession(
             client_id=request.client_id,
             created_by=created_by,
             omie_conta_id=request.omie_conta_id,
+            account_type=account_type,
             reference_month=request.reference_month,
             # Período REAL do statement — essencial para a Tela de Revisão
             # consultar /available-omie-entries com o intervalo correto
@@ -168,6 +196,7 @@ class ReconciliationService:
             "reconciliation_session_created",
             session_id=str(session_obj.id),
             client_id=str(request.client_id),
+            account_type=account_type,
             total_file_entries=len(entries),
             month=request.reference_month.isoformat(),
             tolerance_days=request.date_tolerance_days,

@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.models import (
+    OmieAccountCache,
     ReconciliationAnomaly,
     ReconciliationFileEntry,
     ReconciliationOmieEntry,
@@ -72,6 +73,31 @@ class ReconciliationRepository:
         )
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none() is not None
+
+    # ------------------------------------------------------------------
+    # Tipo da conta selecionada (BACK 1.3 — FASE 1)
+    # ------------------------------------------------------------------
+
+    async def get_cached_account_type(
+        self,
+        *,
+        client_id: UUID,
+        omie_conta_id: int,
+    ) -> str | None:
+        """Retorna o `tipo` Omie cru (CC/CR/CA/…) da conta no cache L1, ou None.
+
+        Usado por `create_session_with_entries` para derivar o `account_type`
+        da sessão (`CR` → `credit_card`). `None` = conta não cacheada (cache
+        vazio/expirado ou `omie_conta_id` inexistente para o cliente) — nesse
+        caso o service cai no default `'checking'` (não-bloqueante).
+        """
+        account = await self._session.scalar(
+            select(OmieAccountCache).where(
+                OmieAccountCache.client_id == client_id,
+                OmieAccountCache.omie_conta_id == omie_conta_id,
+            )
+        )
+        return account.account_type if account is not None else None
 
     # ------------------------------------------------------------------
     # Criação atômica (BACK 8.1)
