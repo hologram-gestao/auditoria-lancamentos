@@ -72,7 +72,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useClientDetail } from '@/hooks/use-clients';
 import {
   useCheckDuplicate,
@@ -80,14 +79,12 @@ import {
   useParseStatement,
 } from '@/hooks/use-reconciliations';
 import { ApiError } from '@/lib/api/client';
-import type { BankAccount } from '@/lib/api/clients';
+import { isCreditCardAccount, type BankAccount } from '@/lib/api/clients';
 import type { ParsedStatement } from '@/lib/api/reconciliations';
 import { sha256Hex } from '@/lib/crypto/hash';
 import {
   ALLOWED_EXTENSIONS,
-  DEFAULT_TOLERANCE,
   MAX_FILE_SIZE_LABEL,
-  TOLERANCE_OPTIONS,
   currentMonth,
   newReconciliationSchema,
   type NewReconciliationFormValues,
@@ -97,9 +94,6 @@ import { FileInputField } from './file-input-field';
 import { ParsePreview } from './parse-preview';
 
 const FILE_ACCEPT = ALLOWED_EXTENSIONS.map((ext) => `.${ext}`).join(',');
-
-const TOLERANCE_TOOLTIP =
-  'Margem de dias entre a data do lançamento no banco e no Omie. Um lançamento do dia 31 pode estar registrado no Omie no dia 2 do mês seguinte; a tolerância evita falsos positivos. Padrão é 3 dias.';
 
 interface NewReconciliationFormProps {
   clientId: string;
@@ -172,7 +166,6 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
     // o resolver Zod cuida de exigir os campos. Tipagem do RHF aceita
     // `Partial<>` em defaultValues, mas para manter strict-friendly usamos cast.
     defaultValues: {
-      tolerance_days: DEFAULT_TOLERANCE,
       reference_month: '',
     } as Partial<NewReconciliationFormValues> as NewReconciliationFormValues,
     mode: 'onSubmit',
@@ -183,6 +176,11 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
     if (watchedAccountId === undefined || watchedAccountId === null) return null;
     return sortedAccounts.find((a) => a.omie_conta_id === Number(watchedAccountId)) ?? null;
   }, [sortedAccounts, watchedAccountId]);
+  // FRONT 1.4: a tela muda dinamicamente p/ fatura de cartão quando a conta
+  // selecionada é cartão (account_type === 'CR'; ⚠️ nunca 'CA' — bug M-1).
+  const isCardSelected = selectedAccount
+    ? isCreditCardAccount(selectedAccount.account_type)
+    : false;
 
   const [step, setStep] = useState<SubmitStep>('idle');
   const [view, setView] = useState<View>('form');
@@ -288,7 +286,6 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
         omie_conta_id: values.omie_conta_id,
         // Backend exige `YYYY-MM-DD` (`date`); normaliza pra dia 1 do mês.
         reference_month: `${values.reference_month}-01`,
-        date_tolerance_days: values.tolerance_days,
         file_hash: submittedHash,
         statement: parsed,
       });
@@ -329,12 +326,24 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
     <div className="mx-auto max-w-2xl space-y-8">
       <header className="space-y-3">
         <Breadcrumb clientId={clientId} clientName={clientName} />
-        <h1 className="text-2xl font-semibold">Nova Conciliação</h1>
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="text-2xl font-semibold">Nova Conciliação</h1>
+          {isCardSelected && (
+            <span
+              className="inline-flex items-center rounded-md bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 ring-1 ring-inset ring-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:ring-blue-900"
+              aria-live="polite"
+            >
+              Cartão de Crédito
+            </span>
+          )}
+        </div>
       </header>
 
       {showPreview && parsed && (
         <ParsePreview
           parsed={parsed}
+          isCard={isCardSelected}
+          accountName={selectedAccount?.name ?? ''}
           onCancel={handlePreviewCancel}
           onConfirm={() => void handlePreviewConfirm()}
           isConfirming={createReconciliation.isPending}
@@ -432,59 +441,10 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
 
           <FormField
             control={form.control}
-            name="tolerance_days"
-            render={({ field }) => (
-              <FormItem>
-                <div className="flex items-center gap-1.5">
-                  <FormLabel>Tolerância de Data</FormLabel>
-                  <TooltipProvider delayDuration={150}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          aria-label="Ajuda sobre tolerância de data"
-                          className="text-muted-foreground hover:text-foreground focus-visible:ring-ring rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
-                        >
-                          <Info className="h-4 w-4" aria-hidden="true" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top" className="text-xs leading-snug">
-                        {TOLERANCE_TOOLTIP}
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </div>
-                <Select
-                  onValueChange={(v) => field.onChange(Number(v))}
-                  value={
-                    field.value !== undefined ? String(field.value) : String(DEFAULT_TOLERANCE)
-                  }
-                  disabled={inputsDisabled || !hasAccounts}
-                >
-                  <FormControl>
-                    <SelectTrigger aria-label="Tolerância de data">
-                      <SelectValue />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    {TOLERANCE_OPTIONS.map((opt) => (
-                      <SelectItem key={opt} value={String(opt)}>
-                        {opt === 1 ? '1 dia' : `${opt} dias`}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          <FormField
-            control={form.control}
             name="file"
             render={({ field, fieldState }) => (
               <FormItem>
-                <FormLabel>Arquivo</FormLabel>
+                <FormLabel>{isCardSelected ? 'Arquivo da Fatura' : 'Arquivo do Extrato'}</FormLabel>
                 <FormControl>
                   <FileInputField
                     accept={FILE_ACCEPT}
@@ -495,9 +455,11 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
                   />
                 </FormControl>
                 <FormDescription>
-                  Formatos aceitos: {ALLOWED_EXTENSIONS.join(', ').toUpperCase()} · Tamanho máximo:{' '}
-                  {MAX_FILE_SIZE_LABEL}.
+                  {isCardSelected
+                    ? `PDF ou XLS da fatura do cartão. Formatos aceitos: PDF, XLS, XLSX. Máx ${MAX_FILE_SIZE_LABEL}.`
+                    : `Formatos aceitos: ${ALLOWED_EXTENSIONS.join(', ').toUpperCase()} · Tamanho máximo: ${MAX_FILE_SIZE_LABEL}.`}
                 </FormDescription>
+                {isCardSelected && <CardInvoiceNote />}
                 <FormMessage />
               </FormItem>
             )}
@@ -591,15 +553,31 @@ function DuplicateBlockAlert() {
   );
 }
 
+/**
+ * Nota informativa exibida abaixo do file input quando a conta é cartão
+ * (FRONT 1.4): o pagamento da fatura vive no extrato da conta corrente, não
+ * na fatura — evita o usuário misturar os dois arquivos.
+ */
+function CardInvoiceNote() {
+  return (
+    <p role="note" className="text-muted-foreground flex items-start gap-2 text-xs leading-snug">
+      <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      <span>
+        Inclua somente o arquivo da fatura do cartão. O pagamento da fatura aparecerá no extrato da
+        conta corrente — não inclua aqui.
+      </span>
+    </p>
+  );
+}
+
 function formatAccountLabel(account: BankAccount): string {
   const base =
     account.bank_name && account.bank_name !== '—'
       ? `${account.name} — ${account.bank_name}`
       : account.name;
-  // Marca cartão de crédito (CR) — auditoria M-1: `CA` na Omie é Conta
-  // Aplicação, não cartão. Normalização tolera espaço/case do Omie.
-  const normalizedType = account.account_type.trim().toUpperCase();
-  return normalizedType === 'CR' ? `${base} (Cartão)` : base;
+  // Cartão (CR) ganha sufixo "(Cartão)". `isCreditCardAccount` cuida do M-1
+  // (`CA` é aplicação, não cartão) e da normalização de espaço/caixa do Omie.
+  return isCreditCardAccount(account.account_type) ? `${base} (Cartão)` : base;
 }
 
 function Breadcrumb({ clientId, clientName }: { clientId: string; clientName: string }) {

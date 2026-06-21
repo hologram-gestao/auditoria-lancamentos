@@ -15,8 +15,6 @@
 import { z } from 'zod';
 
 export const ALLOWED_EXTENSIONS = ['pdf', 'csv', 'xls', 'xlsx'] as const;
-export const TOLERANCE_OPTIONS = [1, 2, 3, 5, 7] as const;
-export const DEFAULT_TOLERANCE = 3;
 /** Limite duro alinhado ao backend (Doc §11.3 V2). 20 MB = 20 * 1024 * 1024 bytes. */
 export const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
 export const MAX_FILE_SIZE_LABEL = '20 MB';
@@ -51,12 +49,8 @@ export const newReconciliationSchema = z.object({
     .string()
     .regex(/^\d{4}-\d{2}$/, 'Selecione o mês de referência.')
     .refine(notInFuture, { message: 'O mês de referência não pode ser futuro.' }),
-  tolerance_days: z.coerce
-    .number({ invalid_type_error: 'Selecione uma tolerância válida.' })
-    .int()
-    .refine((v) => (TOLERANCE_OPTIONS as readonly number[]).includes(v), {
-      message: 'Tolerância inválida.',
-    }),
+  // FASE 1 (BACK 1.6): tolerância de data deixou de ser parametrizável — é
+  // fixa no backend. O campo saiu do formulário (FRONT 1.4) e do request.
   // Ordem dos refines importa: vazio → tamanho → extensão. Cada refine só
   // dispara se o anterior passou (zod retorna no primeiro erro), então o
   // usuário sempre vê a falha mais "fundamental" primeiro.

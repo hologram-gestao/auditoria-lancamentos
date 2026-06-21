@@ -4,7 +4,7 @@
 > derivado do PRD [Docs/NextSteps/PRD - Próximos Passos](PRD%20-%20Pr%C3%B3ximos%20Passos-20260615173056.md)
 > e detalhado contra o **código atual** (refs `arquivo:linha` verificadas em 18/06).
 >
-> **Status:** FASE 0 ✅ merged. FASE 1 em andamento numa branch de integração `feat/fase1-cartao` (1 PR por task pra ela; merge único na `main` no fim) — **GERAL 1.1 ✅**, **BACK 1.2 ✅**, **BACK 1.3 ✅**, **BACK 1.6 ✅**, **BACK 1.7 ✅** (cartão usa a mesma engine + contexto da anomalia); demais tasks na fila. Próxima na ordem: **FRONT 1.4** (upload). Falta backend: **BACK 1.5** (prompt — precisa de fatura real) e **BACK 1.9** (export).
+> **Status:** FASE 0 ✅ merged. FASE 1 em andamento numa branch de integração `feat/fase1-cartao` (1 PR por task pra ela; merge único na `main` no fim) — **GERAL 1.1 ✅**, **BACK 1.2 ✅**, **BACK 1.3 ✅**, **BACK 1.6 ✅**, **BACK 1.7 ✅**, **FRONT 1.4 ✅** (6/9 feitas). Próxima na ordem: **FRONT 1.8** (revisão). Falta também: **BACK 1.5** (prompt — precisa de fatura real) e **BACK 1.9** (export).
 >
 > **Como usar:** cada tarefa abaixo é autocontida (objetivo, arquivos reais, passos, DoD = checklist do ClickUp, dependências). Faz-se **uma por vez**. Este doc existe pra qualquer sessão retomar sem depender do chat. Antes de iniciar uma tarefa, releia [§ Riscos críticos](#riscos-críticos) e o bloco da tarefa.
 >
@@ -170,7 +170,9 @@ BACK 1.5 (prompt) ── (quase independente; valida com fatura real)
 
 ---
 
-### [FRONT 1.4] Adaptar tela de upload para faturas de cartão 🟡 rótulo gated em 1.1
+### [FRONT 1.4] Adaptar tela de upload para faturas de cartão ✅ feito (20/06)
+
+**✅ Resultado (20/06):** detecção de cartão por **`CR`** via helper `isCreditCardAccount` em `lib/api/clients.ts` (anti-M-1; `formatAccountLabel` refatorado p/ usá-lo — o sufixo "(Cartão)" já existia). Form: `isCardSelected` (do `selectedAccount`) dirige label `Arquivo do Extrato`↔`Arquivo da Fatura`, texto auxiliar de fatura, nota `CardInvoiceNote`, e badge azul "Cartão de Crédito" no header. Prévia (`parse-preview.tsx`): props `isCard`/`accountName` → título "Prévia da fatura — {conta}" + legenda compras/estornos. **Tolerância removida** do schema zod, do form e do `CreateReconciliationPayload` (backend ignora desde 1.6). Testes: `isCreditCardAccount` (unit), schema sem tolerância, `ParsePreview` cartão/CC, render default do form (tolerância removida + label CC; `ui/select` mockado pois Radix não resolve no vitest). Gate verde (lint, type-check, 16 testes novos). _Modo-cartão dinâmico do form (depende do Radix Select) → verificação manual/E2E._
 
 **Objetivo:** o formulário de nova conciliação muda dinamicamente ao selecionar conta de cartão.
 **Arquivos:** [new-reconciliation-form.tsx](../../apps/web/src/components/features/reconciliations/new-reconciliation-form.tsx) (rótulos, `formatAccountLabel` ~594-603, campo tolerância 433-480) · [lib/validation/reconciliations.ts:17-19](../../apps/web/src/lib/validation/reconciliations.ts#L17-L19) (zod tolerância) · tela de prévia do parsing.
