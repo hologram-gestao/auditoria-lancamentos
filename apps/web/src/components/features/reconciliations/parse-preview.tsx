@@ -37,6 +37,10 @@ const PREVIEW_ROW_LIMIT = 5;
 
 interface ParsePreviewProps {
   parsed: ParsedStatement;
+  /** FRONT 1.4: conta de cartão → título/legenda específicos de fatura. */
+  isCard: boolean;
+  /** Nome da conta selecionada — usado no título da prévia de fatura. */
+  accountName: string;
   onCancel: () => void;
   onConfirm: () => void;
   /** `true` enquanto a mutation `POST /api/v1/reconciliations` está em voo
@@ -45,7 +49,14 @@ interface ParsePreviewProps {
   isConfirming: boolean;
 }
 
-export function ParsePreview({ parsed, onCancel, onConfirm, isConfirming }: ParsePreviewProps) {
+export function ParsePreview({
+  parsed,
+  isCard,
+  accountName,
+  onCancel,
+  onConfirm,
+  isConfirming,
+}: ParsePreviewProps) {
   const previewRows = parsed.transactions.slice(0, PREVIEW_ROW_LIMIT);
   const totalCount = parsed.transactions.length;
   const hasMore = totalCount > PREVIEW_ROW_LIMIT;
@@ -54,11 +65,16 @@ export function ParsePreview({ parsed, onCancel, onConfirm, isConfirming }: Pars
     <section aria-labelledby="parse-preview-title" className="space-y-6">
       <header className="space-y-1">
         <h2 id="parse-preview-title" className="text-xl font-semibold">
-          Confirme as movimentações extraídas
+          {isCard ? `Prévia da fatura — ${accountName}` : 'Confirme as movimentações extraídas'}
         </h2>
         <p className="text-muted-foreground text-sm">
           Verifique se os dados abaixo correspondem ao arquivo enviado antes de confirmar.
         </p>
+        {isCard && (
+          <p className="text-muted-foreground text-xs">
+            Valores negativos = compras · Valores positivos = estornos ou créditos.
+          </p>
+        )}
       </header>
 
       <MetadataGrid parsed={parsed} totalCount={totalCount} />

@@ -116,9 +116,24 @@ export interface BankAccount {
   omie_conta_id: number;
   name: string;
   bank_name: string;
-  /** 'CC' (conta corrente) ou 'CA' (cartão). Tratamos como string para tolerar tipos novos do Omie. */
+  /**
+   * Código de 2 letras do Omie: `CC` (conta corrente), `CR` (cartão de
+   * crédito), `CA` (conta aplicação/investimento), etc. Tratamos como string
+   * para tolerar tipos novos do Omie. ⚠️ `CA` ≠ cartão (auditoria M-1) — para
+   * detectar cartão use `isCreditCardAccount`.
+   */
   account_type: string;
   synced_at: string;
+}
+
+/**
+ * Detecta conta de cartão de crédito pelo `account_type` do Omie.
+ *
+ * Cartão = `CR`. ⚠️ NÃO usar `CA` (Conta Aplicação/investimento — bug M-1,
+ * auditoria 20/05/2026). Normaliza espaço/caixa que o Omie às vezes devolve.
+ */
+export function isCreditCardAccount(accountType: string): boolean {
+  return accountType.trim().toUpperCase() === 'CR';
 }
 
 export interface ClientDetail extends Client {

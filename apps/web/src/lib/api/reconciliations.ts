@@ -136,8 +136,6 @@ export interface CreateReconciliationPayload {
   omie_conta_id: number;
   /** ISO `YYYY-MM-DD` — sempre dia 1 do mês de referência. */
   reference_month: string;
-  /** 1 a 7 dias (Doc §11). */
-  date_tolerance_days: number;
   /** SHA-256 hex (64 chars, lowercase). */
   file_hash: string;
   statement: ParsedStatement;
