@@ -34,8 +34,9 @@ from app.core.exceptions import (
     AnthropicTimeoutError,
 )
 from app.integrations.anthropic.client import AnthropicClient
+from app.integrations.anthropic.prompts import SYSTEM_PROMPT
 from app.integrations.anthropic.schemas import ExtractedStatement, ExtractedTransaction
-from app.integrations.anthropic.tools import EXTRACT_MOVEMENTS_TOOL_NAME
+from app.integrations.anthropic.tools import EXTRACT_MOVEMENTS_TOOL, EXTRACT_MOVEMENTS_TOOL_NAME
 
 # ----------------------------------------------------------------------
 # Helpers / fakes
@@ -124,6 +125,26 @@ def _valid_payload() -> dict[str, Any]:
     }
 
 
+def _card_invoice_payload() -> dict[str, Any]:
+    """Payload de fatura de cartão (BACK 1.5): parcelas individuais, estorno com
+    amount positivo, encargo (IOF) como linha separada negativa, sem pagamento."""
+    return {
+        "bank_name": "Nubank",
+        "account_type": "credit_card",
+        "period_start": "2026-04-01",
+        "period_end": "2026-04-30",
+        "opening_balance": "0.00",
+        "closing_balance": "-450.00",
+        "transactions": [
+            {"date": "2026-04-05", "description": "TENIS LOJA X 1/3", "amount": "-100.00"},
+            {"date": "2026-04-05", "description": "TENIS LOJA X 2/3", "amount": "-100.00"},
+            {"date": "2026-04-05", "description": "TENIS LOJA X 3/3", "amount": "-100.00"},
+            {"date": "2026-04-10", "description": "ESTORNO COMPRA Y", "amount": "50.00"},
+            {"date": "2026-04-30", "description": "IOF", "amount": "-200.00"},
+        ],
+    }
+
+
 def _ok_message() -> _Message:
     return _Message([_ToolUseBlock(name=EXTRACT_MOVEMENTS_TOOL_NAME, payload=_valid_payload())])
 
@@ -140,6 +161,46 @@ def _make_client(fake: _FakeAnthropic) -> AnthropicClient:
 # ----------------------------------------------------------------------
 # Schemas — coerções e validações
 # ----------------------------------------------------------------------
+
+
+class TestCardInvoiceExtraction:
+    """FASE 1 / BACK 1.5 — a extração de fatura de cartão.
+
+    A validação final com fatura REAL é deferida (item 6 do checklist) até o
+    cliente mandar uma; aqui cobrimos o shape da saída (parcelas individuais,
+    estorno positivo, encargo separado) e a presença das regras no prompt/tool.
+    """
+
+    def test_card_payload_parses_with_card_shape(self) -> None:
+        stmt = ExtractedStatement.model_validate(_card_invoice_payload())
+        assert stmt.account_type == "credit_card"
+        # Parcelas: 3 linhas individuais com valor unitário (não agrupadas).
+        parcelas = [t for t in stmt.transactions if "/3" in t.description]
+        assert len(parcelas) == 3
+        assert all(t.amount == Decimal("-100.00") for t in parcelas)
+        # Estorno: crédito com amount positivo.
+        estorno = next(t for t in stmt.transactions if "ESTORNO" in t.description)
+        assert estorno.amount == Decimal("50.00")
+        # Encargo (IOF): transação separada, negativa.
+        iof = next(t for t in stmt.transactions if t.description == "IOF")
+        assert iof.amount == Decimal("-200.00")
+
+    def test_system_prompt_cobre_regras_de_fatura(self) -> None:
+        p = SYSTEM_PROMPT.lower()
+        assert "parcela" in p
+        assert "estorno" in p
+        assert "iof" in p
+        assert "juros" in p
+        assert "multa" in p
+        # Regra de não incluir o pagamento da fatura.
+        assert "pagamento" in p
+
+    def test_tool_transactions_description_menciona_cartao(self) -> None:
+        desc = EXTRACT_MOVEMENTS_TOOL["input_schema"]["properties"]["transactions"][
+            "description"
+        ].lower()
+        assert "parcela" in desc
+        assert "estorno" in desc
 
 
 class TestExtractedStatementSchema:

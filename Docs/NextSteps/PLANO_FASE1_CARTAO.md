@@ -4,7 +4,7 @@
 > derivado do PRD [Docs/NextSteps/PRD - Próximos Passos](PRD%20-%20Pr%C3%B3ximos%20Passos-20260615173056.md)
 > e detalhado contra o **código atual** (refs `arquivo:linha` verificadas em 18/06).
 >
-> **Status:** FASE 0 ✅ merged. FASE 1 em andamento numa branch de integração `feat/fase1-cartao` (1 PR por task pra ela; merge único na `main` no fim) — **GERAL 1.1 ✅**, **BACK 1.2 ✅**, **BACK 1.3 ✅**, **BACK 1.6 ✅**, **BACK 1.7 ✅**, **FRONT 1.4 ✅**, **FRONT 1.8 ✅**, **BACK 1.9 ✅** (8/9 feitas). Falta só **BACK 1.5** (prompt — precisa de **fatura de cartão real**). Depois: PR final integração→main (regressão CC + tirar a branch dos triggers do ci.yml).
+> **Status:** FASE 0 ✅ merged. **FASE 1 — 9/9 tasks em código** na branch de integração `feat/fase1-cartao` (1 PR por task; merge único na `main` no fim): GERAL 1.1, BACK 1.2/1.3/1.6/1.7/1.9, FRONT 1.4/1.8 ✅ + **BACK 1.5 ✅ (código)** — a única ressalva é a **validação com fatura de cartão real** (item 6 do DoD), deferida até o Galhardo mandar; se a IA errar em algo, ajusta-se o prompt. **Próximo:** quando a fatura chegar, revalidar a 1.5; depois **PR final integração→main** (teste de regressão CC + remover a branch dos triggers do `ci.yml`).
 >
 > **Como usar:** cada tarefa abaixo é autocontida (objetivo, arquivos reais, passos, DoD = checklist do ClickUp, dependências). Faz-se **uma por vez**. Este doc existe pra qualquer sessão retomar sem depender do chat. Antes de iniciar uma tarefa, releia [§ Riscos críticos](#riscos-críticos) e o bloco da tarefa.
 >
@@ -160,7 +160,9 @@ BACK 1.5 (prompt) ── (quase independente; valida com fatura real)
 
 ---
 
-### [BACK 1.5] Adaptar prompt da Claude API para faturas de cartão 🟡 validação com fatura real
+### [BACK 1.5] Adaptar prompt da Claude API para faturas de cartão ✅ código feito (22/06) · 🟡 validação com fatura real pendente
+
+**✅ Resultado (22/06):** o `SYSTEM_PROMPT` (`anthropic/prompts.py`) ganhou as regras 9-12 de fatura de cartão — parcelas como linhas individuais (valor unitário + data, sem agrupar; padrões `1/3`,`2/3`), estornos com `amount` positivo, encargos (juros/IOF/multa) como transações separadas com descrição exata, e **não incluir o pagamento da fatura**. A descrição do array `transactions` na tool (`anthropic/tools.py`) reforça o mesmo (também cacheada). **Schema não mudou** — já suportava tudo (account_type Literal, transactions list). Testes unit: fatura parseável (parcelas/estorno+/IOF-) + prompt/tool cobrem as regras. **🟡 Falta só o item 6 do DoD — validar com fatura REAL** (deferido até o Galhardo mandar; se a IA errar, ajusta-se o prompt). 293 testes unit.
 
 **Objetivo:** o prompt de extração trata as particularidades da fatura.
 **Arquivos:** [anthropic/prompts.py:19-72](../../apps/api/app/integrations/anthropic/prompts.py#L19-L72) · [anthropic/tools.py:24-107](../../apps/api/app/integrations/anthropic/tools.py#L24-L107) · [anthropic/schemas.py:48-92](../../apps/api/app/integrations/anthropic/schemas.py#L48-L92).
