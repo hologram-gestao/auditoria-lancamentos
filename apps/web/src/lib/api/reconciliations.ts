@@ -239,6 +239,9 @@ export interface SessionDetail {
   session_id: string;
   client_id: string;
   omie_conta_id: number;
+  /** Tipo normalizado da conta (FASE 1): `'checking'` ou `'credit_card'`.
+   *  String lenient — a Tela de Revisão ramifica nisso (badge/título/labels). */
+  account_type: string;
   /** ISO `YYYY-MM-DD` (sempre dia 1 do mês de referência). */
   reference_month: string;
   status: SessionStatus;

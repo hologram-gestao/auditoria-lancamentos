@@ -4,7 +4,7 @@
 > derivado do PRD [Docs/NextSteps/PRD - Próximos Passos](PRD%20-%20Pr%C3%B3ximos%20Passos-20260615173056.md)
 > e detalhado contra o **código atual** (refs `arquivo:linha` verificadas em 18/06).
 >
-> **Status:** FASE 0 ✅ merged. FASE 1 em andamento numa branch de integração `feat/fase1-cartao` (1 PR por task pra ela; merge único na `main` no fim) — **GERAL 1.1 ✅**, **BACK 1.2 ✅**, **BACK 1.3 ✅**, **BACK 1.6 ✅**, **BACK 1.7 ✅**, **FRONT 1.4 ✅** (6/9 feitas). Próxima na ordem: **FRONT 1.8** (revisão). Falta também: **BACK 1.5** (prompt — precisa de fatura real) e **BACK 1.9** (export).
+> **Status:** FASE 0 ✅ merged. FASE 1 em andamento numa branch de integração `feat/fase1-cartao` (1 PR por task pra ela; merge único na `main` no fim) — **GERAL 1.1 ✅**, **BACK 1.2 ✅**, **BACK 1.3 ✅**, **BACK 1.6 ✅**, **BACK 1.7 ✅**, **FRONT 1.4 ✅**, **FRONT 1.8 ✅** (7/9 feitas). Faltam: **BACK 1.9** (export Excel) e **BACK 1.5** (prompt — precisa de fatura real).
 >
 > **Como usar:** cada tarefa abaixo é autocontida (objetivo, arquivos reais, passos, DoD = checklist do ClickUp, dependências). Faz-se **uma por vez**. Este doc existe pra qualquer sessão retomar sem depender do chat. Antes de iniciar uma tarefa, releia [§ Riscos críticos](#riscos-críticos) e o bloco da tarefa.
 >
@@ -186,7 +186,9 @@ BACK 1.5 (prompt) ── (quase independente; valida com fatura real)
 
 ---
 
-### [FRONT 1.8] Adaptações na tela de revisão para faturas de cartão (após 1.7)
+### [FRONT 1.8] Adaptações na tela de revisão para faturas de cartão ✅ feito (20/06)
+
+**✅ Resultado (20/06):** **backend** expõe `account_type` no `SessionDetailPayload` (+ serviço) → o `review-screen` deriva `isCard` e passa pro header/abas. **Header** (`review-header.tsx`): badge de tipo (Conta Corrente cinza / Cartão azul) + título "Conciliação · {Cartão|Conta Corrente} · {conta} · {Mês/Ano}". **Movimentações** (`movements-tab.tsx`): filtro de tipo vira Compras/Estornos no cartão; linha `conciliado_data_divergente` → badge laranja "⚠ Data divergente" (`situation-badge.tsx`) com tooltip "Data no arquivo: X · Data no Omie: Y" (data Omie do lançamento já no lookup batched). **Resumo** (`summary-tab.tsx`): no cartão, Total de compras/estornos/encargos (IOF/juros/multa por descrição, helper `isChargeDescription`) + Saldo da fatura (`balance_end_file`). Anomalia `wrong_date` já aparece linkada na aba Anomalias (listagem genérica por `related_file_entry`). Testes: situation-badge, review-header, isChargeDescription + backend expõe account*type. Gate verde (ruff/mypy backend; lint/type-check + 16 testes front). \_Modo-cartão das abas (Radix Select) → manual/E2E.*
 
 **Objetivo:** ajustes visuais/funcionais na tela de revisão p/ contexto de cartão (mesma estrutura).
 **Arquivos:** [review/movements-tab.tsx:215-229](../../apps/web/src/components/features/reconciliations/review/movements-tab.tsx#L215-L229) (filtros) · header da revisão · aba de anomalias · aba resumo.

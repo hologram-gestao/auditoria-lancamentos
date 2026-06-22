@@ -249,6 +249,7 @@ class ReconciliationService:
             session_id=session_obj.id,
             client_id=session_obj.client_id,
             omie_conta_id=session_obj.omie_conta_id,
+            account_type=session_obj.account_type,
             reference_month=session_obj.reference_month,
             status=session_obj.status,
             total_file_entries=session_obj.total_file_entries,
