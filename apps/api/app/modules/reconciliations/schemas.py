@@ -180,6 +180,9 @@ class SessionDetailPayload(BaseModel):
     session_id: UUID
     client_id: UUID
     omie_conta_id: int
+    # Tipo normalizado da conta (FASE 1): 'checking' ou 'credit_card'. A Tela
+    # de Revisão ramifica nisso (badge/título/labels de cartão). `str` lenient.
+    account_type: str
     reference_month: _date
     status: str
     total_file_entries: int

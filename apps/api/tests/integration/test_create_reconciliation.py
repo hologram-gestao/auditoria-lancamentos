@@ -812,6 +812,8 @@ class TestSessionDetailEndpoint:
         assert body["session_id"] == str(sess.id)
         assert body["client_id"] == str(cliente.id)
         assert body["omie_conta_id"] == 42
+        # FRONT 1.8: o detalhe expõe o account_type da sessão (default 'checking').
+        assert body["account_type"] == "checking"
         assert body["reference_month"] == "2026-04-01"
         assert body["status"] == "processing"
         assert body["total_file_entries"] == 42

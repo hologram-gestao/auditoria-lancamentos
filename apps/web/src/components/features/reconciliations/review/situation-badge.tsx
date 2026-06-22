@@ -8,9 +8,25 @@ import { cn } from '@/lib/utils';
 
 interface SituationBadgeProps {
   situation: string;
+  /** Tooltip nativo — usado p/ `conciliado_data_divergente` mostrar as datas. */
+  title?: string;
 }
 
-export function SituationBadge({ situation }: SituationBadgeProps) {
+export function SituationBadge({ situation, title }: SituationBadgeProps) {
+  if (situation === 'conciliado_data_divergente') {
+    return (
+      <span
+        title={title}
+        className={cn(
+          'inline-flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-800',
+          'dark:bg-orange-900/40 dark:text-orange-200',
+        )}
+      >
+        <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+        Data divergente
+      </span>
+    );
+  }
   if (situation === 'conciliado') {
     return (
       <span
