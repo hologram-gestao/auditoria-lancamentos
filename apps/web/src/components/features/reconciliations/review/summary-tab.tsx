@@ -39,6 +39,8 @@ interface SummaryBalances {
 
 interface SummaryTabProps {
   sessionId: string;
+  /** FRONT 1.8: cartão → indicadores de fatura (compras/estornos/encargos/saldo). */
+  isCard: boolean;
   totalFileEntries: number;
   counts: SummaryCounts;
   referenceMonthLabel: string;
@@ -47,6 +49,17 @@ interface SummaryTabProps {
 }
 
 const AGGREGATION_LIMIT = 50;
+
+/**
+ * Palavras-chave de encargos de fatura de cartão (FRONT 1.8) — identificados
+ * pela descrição, conforme a task. Match case-insensitive por substring.
+ */
+const CHARGE_KEYWORDS = ['iof', 'juros', 'multa'] as const;
+
+export function isChargeDescription(description: string): boolean {
+  const d = description.toLowerCase();
+  return CHARGE_KEYWORDS.some((kw) => d.includes(kw));
+}
 
 /**
  * Mesma regra da aba 1 do Excel (CLAUDE.md §5.1: tolerância de R$ 0,01).
@@ -74,6 +87,7 @@ function resolveBalanceStatus(difference: string | null): {
 
 export function SummaryTab({
   sessionId,
+  isCard,
   totalFileEntries,
   counts,
   referenceMonthLabel,
@@ -105,6 +119,15 @@ export function SummaryTab({
     () => Math.abs(sumAmounts(debitsQuery.data?.data ?? [])),
     [debitsQuery.data],
   );
+  // FRONT 1.8 (cartão): total de encargos (IOF/juros/multa) identificados pela
+  // descrição entre as compras. Mesma janela de 50 das somas acima → herda o
+  // mesmo aviso de truncamento (`debitsTruncated`).
+  const encargosTotal = useMemo(() => {
+    const charges = (debitsQuery.data?.data ?? []).filter((e) =>
+      isChargeDescription(e.description),
+    );
+    return Math.abs(sumAmounts(charges));
+  }, [debitsQuery.data]);
 
   const creditsTruncated = (creditsQuery.data?.pagination.total ?? 0) > AGGREGATION_LIMIT;
   const debitsTruncated = (debitsQuery.data?.pagination.total ?? 0) > AGGREGATION_LIMIT;
@@ -180,16 +203,56 @@ export function SummaryTab({
         <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Indicator label="Mês de referência" value={referenceMonthLabel || '—'} />
           <Indicator label="Total movimentações" value={String(totalFileEntries)} />
-          <Indicator
-            label="Total créditos"
-            value={formatBRL(creditsTotal)}
-            hint={creditsTruncated ? `Soma das primeiras ${AGGREGATION_LIMIT} entradas` : undefined}
-          />
-          <Indicator
-            label="Total débitos"
-            value={formatBRL(debitsTotal)}
-            hint={debitsTruncated ? `Soma das primeiras ${AGGREGATION_LIMIT} entradas` : undefined}
-          />
+          {isCard ? (
+            <>
+              <Indicator
+                label="Total de compras"
+                value={formatBRL(debitsTotal)}
+                hint={
+                  debitsTruncated ? `Soma das primeiras ${AGGREGATION_LIMIT} entradas` : undefined
+                }
+              />
+              <Indicator
+                label="Total de estornos"
+                value={formatBRL(creditsTotal)}
+                hint={
+                  creditsTruncated ? `Soma das primeiras ${AGGREGATION_LIMIT} entradas` : undefined
+                }
+              />
+              <Indicator
+                label="Total de encargos"
+                value={formatBRL(encargosTotal)}
+                hint={
+                  debitsTruncated
+                    ? `IOF/juros/multa nas primeiras ${AGGREGATION_LIMIT} compras`
+                    : 'IOF, juros e multa (por descrição)'
+                }
+              />
+              <Indicator
+                label="Saldo da fatura"
+                value={
+                  balances?.endFile == null ? 'Indisponível' : formatBRL(Number(balances.endFile))
+                }
+              />
+            </>
+          ) : (
+            <>
+              <Indicator
+                label="Total créditos"
+                value={formatBRL(creditsTotal)}
+                hint={
+                  creditsTruncated ? `Soma das primeiras ${AGGREGATION_LIMIT} entradas` : undefined
+                }
+              />
+              <Indicator
+                label="Total débitos"
+                value={formatBRL(debitsTotal)}
+                hint={
+                  debitsTruncated ? `Soma das primeiras ${AGGREGATION_LIMIT} entradas` : undefined
+                }
+              />
+            </>
+          )}
           <Indicator label="Conciliados" value={String(counts.conciliated)} />
           <Indicator label="Sem Omie" value={String(counts.semOmie)} />
           <Indicator label="Omie sem arquivo" value={String(counts.omieSemArquivo)} />

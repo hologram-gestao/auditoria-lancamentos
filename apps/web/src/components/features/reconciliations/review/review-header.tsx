@@ -32,8 +32,10 @@ interface ReviewHeaderProps {
   sessionId: string;
   /** Texto formatado em PT-BR (ex: "Abril/2026"). */
   referenceMonthLabel: string;
-  /** "{Nome conta} · {Banco}" — pode ser undefined se cache ainda hidratando. */
-  accountLabel: string | undefined;
+  /** Nome da conta (sem banco) — undefined enquanto o cache hidrata. */
+  accountName: string | undefined;
+  /** FRONT 1.8: cartão de crédito → badge azul + título "Cartão". */
+  isCard: boolean;
   /** Status vivo da sessão para contadores. */
   counts: {
     conciliated: number;
@@ -48,10 +50,21 @@ export function ReviewHeader({
   clientName,
   sessionId,
   referenceMonthLabel,
-  accountLabel,
+  accountName,
+  isCard,
   counts,
 }: ReviewHeaderProps) {
   const exportMutation = useExportReconciliation(sessionId);
+  // Título: "Conciliação · {tipo} · {conta} · {Mês/Ano}" (FRONT 1.8). Segmentos
+  // vazios (conta ainda hidratando, mês ausente) são omitidos.
+  const title = [
+    'Conciliação',
+    isCard ? 'Cartão' : 'Conta Corrente',
+    accountName,
+    referenceMonthLabel,
+  ]
+    .filter((seg): seg is string => Boolean(seg))
+    .join(' · ');
 
   function handleExport(): void {
     exportMutation.mutate(undefined, {
@@ -90,11 +103,9 @@ export function ReviewHeader({
       </nav>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold">Revisão da conciliação</h1>
-          {accountLabel !== undefined && (
-            <p className="text-muted-foreground text-sm">{accountLabel}</p>
-          )}
+        <div className="flex flex-wrap items-center gap-2">
+          <AccountTypeBadge isCard={isCard} />
+          <h1 className="text-2xl font-semibold">{title}</h1>
         </div>
 
         <Button
@@ -148,6 +159,22 @@ export function ReviewHeader({
         />
       </div>
     </header>
+  );
+}
+
+/** Badge do tipo de conta (FRONT 1.8): Conta Corrente cinza / Cartão azul. */
+function AccountTypeBadge({ isCard }: { isCard: boolean }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold ring-1 ring-inset',
+        isCard
+          ? 'bg-blue-50 text-blue-700 ring-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:ring-blue-900'
+          : 'bg-slate-100 text-slate-700 ring-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700',
+      )}
+    >
+      {isCard ? 'Cartão de Crédito' : 'Conta Corrente'}
+    </span>
   );
 }
 
