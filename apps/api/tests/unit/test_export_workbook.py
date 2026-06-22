@@ -23,6 +23,7 @@ from app.modules.reconciliations.export.schemas import (
 )
 from app.modules.reconciliations.export.styles import (
     COLOR_CRITICAL_UNRESOLVED_BG,
+    COLOR_DATA_DIVERGENTE,
     COLOR_HEADER_BG,
     COLOR_ROW_ATRASADO,
     COLOR_ROW_CONCILIADO,
@@ -77,6 +78,7 @@ def _summary(**overrides: object) -> SummarySheetData:
 def _payload(**overrides: object) -> ExportPayload:
     base = ExportPayload(
         filename="Conciliacao_Cliente_Teste_Sicredi_04-2026",
+        is_card=False,
         summary=_summary(),
         file_entries=[],
         omie_divergences=[],
@@ -121,12 +123,20 @@ class TestSheet1Summary:
         wb = load_workbook(buf)
         ws = wb[SHEET_NAME_SUMMARY]
 
-        assert ws["A1"].value == "Relatório de Conciliação"
+        # CC (is_card=False) → título bancário tipado (FASE 1 / BACK 1.9).
+        assert ws["A1"].value == "CONCILIAÇÃO BANCÁRIA — Sicredi | Sicredi 91263-1 | Abril/2026"
         assert ws["B3"].value == "Cliente Teste S/A"
         assert ws["B4"].value == "Sicredi"
         assert ws["B5"].value == "Sicredi 91263-1"
         assert ws["B6"].value == "Abril/2026"
         assert ws["A8"].value == "Elaborado por Hologram Gestão"
+
+    def test_card_title_is_fatura(self) -> None:
+        # Cartão (is_card=True) → título de fatura (FASE 1 / BACK 1.9).
+        buf = build_workbook(_payload(is_card=True))
+        wb = load_workbook(buf)
+        ws = wb[SHEET_NAME_SUMMARY]
+        assert ws["A1"].value == "CONCILIAÇÃO DE FATURA — CARTÃO | Sicredi 91263-1 | Abril/2026"
 
     def test_balance_row_marks_conferido_when_diff_zero(self) -> None:
         buf = build_workbook(_payload())
@@ -337,6 +347,75 @@ class TestSheet2Movimentacao:
         ws = self._build(row)
         assert ws.cell(row=2, column=5).value == "—"  # type: ignore[attr-defined]
         assert ws.cell(row=2, column=6).value == "—"  # type: ignore[attr-defined]
+
+
+# ======================================================================
+# Aba 2 — cartão (FASE 1 / BACK 1.9): coluna "Data Omie"
+# ======================================================================
+
+
+@pytest.mark.unit
+class TestSheet2MovimentacaoCartao:
+    def _build_card(self, *rows: FileEntryRow) -> object:
+        buf = build_workbook(_payload(is_card=True, file_entries=list(rows)))
+        wb = load_workbook(buf)
+        return wb[SHEET_NAME_MOVIMENTACAO]
+
+    def test_data_omie_column_after_data(self) -> None:
+        ws = self._build_card()
+        assert ws.cell(row=1, column=1).value == "Data"  # type: ignore[attr-defined]
+        assert ws.cell(row=1, column=2).value == "Data Omie"  # type: ignore[attr-defined]
+        assert ws.cell(row=1, column=3).value == "Descrição"  # type: ignore[attr-defined]
+
+    def test_cc_has_no_data_omie_column(self) -> None:
+        # Contraste: CC não ganha a coluna — col 2 segue sendo "Descrição".
+        buf = build_workbook(_payload(is_card=False))
+        wb = load_workbook(buf)
+        ws = wb[SHEET_NAME_MOVIMENTACAO]
+        assert ws.cell(row=1, column=2).value == "Descrição"
+
+    def test_divergente_fills_data_omie_orange(self) -> None:
+        from datetime import date
+
+        row = FileEntryRow(
+            transaction_date=date(2026, 4, 10),
+            description="Compra divergente",
+            amount=Decimal("-250.00"),
+            balance=None,
+            supplier="Loja X",
+            category="Compras",
+            situation="conciliado_data_divergente",
+            user_note=None,
+            omie_date=date(2026, 4, 12),
+        )
+        ws = self._build_card(row)
+        omie_cell = ws.cell(row=2, column=2)  # type: ignore[attr-defined]
+        val = omie_cell.value
+        assert val is not None
+        assert (getattr(val, "year", 0), getattr(val, "month", 0), getattr(val, "day", 0)) == (
+            2026,
+            4,
+            12,
+        )
+        assert _hex(omie_cell.fill.start_color.rgb) == COLOR_DATA_DIVERGENTE
+
+    def test_conciliado_sem_divergencia_data_omie_vazia(self) -> None:
+        from datetime import date
+
+        row = FileEntryRow(
+            transaction_date=date(2026, 4, 10),
+            description="Compra exata",
+            amount=Decimal("-100.00"),
+            balance=None,
+            supplier="Loja Y",
+            category="Compras",
+            situation="conciliado",
+            user_note=None,
+            omie_date=date(2026, 4, 10),
+        )
+        ws = self._build_card(row)
+        # Conciliado sem divergência → "Data Omie" vazia (mesmo tendo match).
+        assert ws.cell(row=2, column=2).value is None  # type: ignore[attr-defined]
 
 
 # ======================================================================

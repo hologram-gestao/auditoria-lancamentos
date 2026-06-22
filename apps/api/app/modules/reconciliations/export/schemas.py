@@ -67,12 +67,16 @@ class FileEntryRow:
     balance: Decimal | None
     supplier: str | None  # do cache L2; None quando não houver vínculo / não cacheado
     category: str | None
-    situation: str  # conciliado | sem_omie | ignorado
+    situation: str  # conciliado | conciliado_data_divergente | sem_omie | ignorado
     user_note: str | None
     # Status de qualificação (S19). `None` quando a sessão é pré-S19 ou
     # quando a flag QUALIFICATION_ENABLED estava desligada — renderer
     # mostra `—` nesse caso pra distinguir de "ok" explícito.
     qualification_status: QualificationStatus | None = None
+    # FASE 1 (BACK 1.9): data do lançamento Omie casado. Renderizada na coluna
+    # "Data Omie" (só no export de cartão) para linhas `conciliado_data_
+    # divergente`. `None` quando não há match ou o cache não tinha o lançamento.
+    omie_date: date | None = None
 
 
 @dataclass(frozen=True)
@@ -114,6 +118,9 @@ class ExportPayload:
     """Tudo que o workbook precisa renderizar — encapsulado pelo service."""
 
     filename: str  # sem extensão (".xlsx" é adicionado em routes.py)
+    # FASE 1 (BACK 1.9): cartão → título de fatura na Aba 1 + coluna "Data Omie"
+    # na Aba 2. CC mantém o layout sem a coluna extra.
+    is_card: bool
     summary: SummarySheetData
     file_entries: list[FileEntryRow] = field(default_factory=list)
     omie_divergences: list[OmieDivergenceRow] = field(default_factory=list)

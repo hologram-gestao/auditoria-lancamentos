@@ -44,6 +44,7 @@ from app.modules.reconciliations.export.styles import (
     BORDER_CELL,
     FILL_ATRASADO,
     FILL_CRITICAL_UNRESOLVED,
+    FILL_DATA_DIVERGENTE,
     FILL_HEADER,
     FILL_SEM_OMIE,
     FONT_BOLD,
@@ -97,9 +98,13 @@ _OMIE_STATUS_LABEL = {
 
 _SITUATION_LABEL = {
     "conciliado": "Conciliado",
+    "conciliado_data_divergente": "Conciliado (data divergente)",
     "sem_omie": "Sem Omie",
     "ignorado": "Ignorado",
 }
+
+# FASE 1 (BACK 1.9): situation das linhas conciliadas com data divergente.
+_SITUATION_DATA_DIVERGENTE = "conciliado_data_divergente"
 
 # Placeholder usado quando dado opcional vem como None (ex: supplier do
 # cache L2 expirou). "—" (em-dash) é mais legível que "N/D" pro analista.
@@ -138,10 +143,11 @@ def build_workbook(payload: ExportPayload) -> BytesIO:
         summary_ws = wb.create_sheet()
     summary_ws.title = SHEET_NAME_SUMMARY
 
-    _build_sheet1_summary(summary_ws, payload.summary)
+    _build_sheet1_summary(summary_ws, payload.summary, payload.is_card)
     _build_sheet2_movimentacao(
         wb.create_sheet(title=SHEET_NAME_MOVIMENTACAO),
         payload.file_entries,
+        payload.is_card,
     )
     _build_sheet3_divergencias(
         wb.create_sheet(title=SHEET_NAME_DIVERGENCIAS),
@@ -167,14 +173,21 @@ def build_workbook(payload: ExportPayload) -> BytesIO:
 # ======================================================================
 
 
-def _build_sheet1_summary(ws: Worksheet, data: SummarySheetData) -> None:
+def _build_sheet1_summary(ws: Worksheet, data: SummarySheetData, is_card: bool) -> None:
     ws.column_dimensions["A"].width = 28
     ws.column_dimensions["B"].width = 32
     ws.column_dimensions["C"].width = 18
     ws.column_dimensions["D"].width = 18
 
-    # Título
-    ws["A1"] = "Relatório de Conciliação"
+    # Título tipado por conta (FASE 1 / BACK 1.9): cartão vira "CONCILIAÇÃO DE
+    # FATURA — CARTÃO | …"; conta corrente, "CONCILIAÇÃO BANCÁRIA — {banco} | …".
+    if is_card:
+        title = f"CONCILIAÇÃO DE FATURA — CARTÃO | {data.account_name} | {data.period_pt_br}"
+    else:
+        title = (
+            f"CONCILIAÇÃO BANCÁRIA — {data.bank_name} | {data.account_name} | {data.period_pt_br}"
+        )
+    ws["A1"] = title
     ws["A1"].font = FONT_TITLE
     ws.merge_cells("A1:D1")
 
@@ -315,8 +328,10 @@ def _resolve_balance_status(balance_difference: Decimal | None) -> str:
 # ======================================================================
 
 
-_SHEET2_HEADERS = [
-    ("Data", 14),
+_SHEET2_HEADER_DATA = ("Data", 14)
+# FASE 1 (BACK 1.9): só no export de cartão, ao lado da "Data" (data do arquivo).
+_SHEET2_HEADER_DATA_OMIE = ("Data Omie", 14)
+_SHEET2_HEADERS_REST = [
     ("Descrição", 48),
     ("Valor", 16),
     ("Saldo", 16),
@@ -328,37 +343,62 @@ _SHEET2_HEADERS = [
 ]
 
 
-def _build_sheet2_movimentacao(ws: Worksheet, rows: Sequence[FileEntryRow]) -> None:
-    _write_table_header(ws, _SHEET2_HEADERS)
+def _build_sheet2_movimentacao(ws: Worksheet, rows: Sequence[FileEntryRow], is_card: bool) -> None:
+    # Cartão ganha a coluna "Data Omie" logo após "Data"; CC mantém o layout.
+    headers = [_SHEET2_HEADER_DATA]
+    if is_card:
+        headers.append(_SHEET2_HEADER_DATA_OMIE)
+    headers = [*headers, *_SHEET2_HEADERS_REST]
+    _write_table_header(ws, headers)
+    total_cols = len(headers)
 
     for offset, row in enumerate(rows):
         excel_row = offset + 2
+        is_divergente = row.situation == _SITUATION_DATA_DIVERGENTE
+        col = 1
         ws.cell(
-            row=excel_row, column=1, value=row.transaction_date
+            row=excel_row, column=col, value=row.transaction_date
         ).number_format = NUMBER_FORMAT_DATE
-        ws.cell(row=excel_row, column=2, value=row.description).alignment = ALIGN_LEFT
-        ws.cell(row=excel_row, column=3, value=row.amount).number_format = NUMBER_FORMAT_BRL
-        balance_cell = ws.cell(row=excel_row, column=4, value=row.balance)
-        balance_cell.number_format = NUMBER_FORMAT_BRL
-        ws.cell(row=excel_row, column=5, value=row.supplier or _PLACEHOLDER)
-        ws.cell(row=excel_row, column=6, value=row.category or _PLACEHOLDER)
+        col += 1
+        # Coluna "Data Omie" (só cartão): preenchida só para linhas com data
+        # divergente; conciliado sem divergência (e sem_omie) ficam vazias.
+        if is_card:
+            omie_cell = ws.cell(
+                row=excel_row, column=col, value=row.omie_date if is_divergente else None
+            )
+            omie_cell.number_format = NUMBER_FORMAT_DATE
+            col += 1
+        ws.cell(row=excel_row, column=col, value=row.description).alignment = ALIGN_LEFT
+        col += 1
+        ws.cell(row=excel_row, column=col, value=row.amount).number_format = NUMBER_FORMAT_BRL
+        col += 1
+        ws.cell(row=excel_row, column=col, value=row.balance).number_format = NUMBER_FORMAT_BRL
+        col += 1
+        ws.cell(row=excel_row, column=col, value=row.supplier or _PLACEHOLDER)
+        col += 1
+        ws.cell(row=excel_row, column=col, value=row.category or _PLACEHOLDER)
+        col += 1
         analysis_value = (
             _QUALIFICATION_ICON.get(row.qualification_status, _PLACEHOLDER)
             if row.qualification_status is not None
             else _PLACEHOLDER
         )
-        ws.cell(row=excel_row, column=7, value=analysis_value).alignment = ALIGN_CENTER
+        ws.cell(row=excel_row, column=col, value=analysis_value).alignment = ALIGN_CENTER
+        col += 1
         ws.cell(
-            row=excel_row,
-            column=8,
-            value=_SITUATION_LABEL.get(row.situation, row.situation),
+            row=excel_row, column=col, value=_SITUATION_LABEL.get(row.situation, row.situation)
         ).alignment = ALIGN_CENTER
-        ws.cell(row=excel_row, column=9, value=row.user_note or "").alignment = ALIGN_LEFT
+        col += 1
+        ws.cell(row=excel_row, column=col, value=row.user_note or "").alignment = ALIGN_LEFT
 
         fill = fill_for_situation(row.situation)
         if fill is not None:
-            for col_idx in range(1, len(_SHEET2_HEADERS) + 1):
+            for col_idx in range(1, total_cols + 1):
                 ws.cell(row=excel_row, column=col_idx).fill = fill
+        # Destaque laranja da célula "Data Omie" nas linhas divergentes — após
+        # o fill da linha (que é verde de conciliado), pra sobrescrever só ela.
+        if is_card and is_divergente:
+            ws.cell(row=excel_row, column=2).fill = FILL_DATA_DIVERGENTE
 
     ws.freeze_panes = "A2"
 

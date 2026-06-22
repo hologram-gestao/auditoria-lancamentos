@@ -4,7 +4,7 @@
 > derivado do PRD [Docs/NextSteps/PRD - Próximos Passos](PRD%20-%20Pr%C3%B3ximos%20Passos-20260615173056.md)
 > e detalhado contra o **código atual** (refs `arquivo:linha` verificadas em 18/06).
 >
-> **Status:** FASE 0 ✅ merged. FASE 1 em andamento numa branch de integração `feat/fase1-cartao` (1 PR por task pra ela; merge único na `main` no fim) — **GERAL 1.1 ✅**, **BACK 1.2 ✅**, **BACK 1.3 ✅**, **BACK 1.6 ✅**, **BACK 1.7 ✅**, **FRONT 1.4 ✅**, **FRONT 1.8 ✅** (7/9 feitas). Faltam: **BACK 1.9** (export Excel) e **BACK 1.5** (prompt — precisa de fatura real).
+> **Status:** FASE 0 ✅ merged. FASE 1 em andamento numa branch de integração `feat/fase1-cartao` (1 PR por task pra ela; merge único na `main` no fim) — **GERAL 1.1 ✅**, **BACK 1.2 ✅**, **BACK 1.3 ✅**, **BACK 1.6 ✅**, **BACK 1.7 ✅**, **FRONT 1.4 ✅**, **FRONT 1.8 ✅**, **BACK 1.9 ✅** (8/9 feitas). Falta só **BACK 1.5** (prompt — precisa de **fatura de cartão real**). Depois: PR final integração→main (regressão CC + tirar a branch dos triggers do ci.yml).
 >
 > **Como usar:** cada tarefa abaixo é autocontida (objetivo, arquivos reais, passos, DoD = checklist do ClickUp, dependências). Faz-se **uma por vez**. Este doc existe pra qualquer sessão retomar sem depender do chat. Antes de iniciar uma tarefa, releia [§ Riscos críticos](#riscos-críticos) e o bloco da tarefa.
 >
@@ -201,7 +201,9 @@ BACK 1.5 (prompt) ── (quase independente; valida com fatura real)
 
 ---
 
-### [BACK 1.9] Adaptar exportação Excel para faturas de cartão (após 1.7)
+### [BACK 1.9] Adaptar exportação Excel para faturas de cartão ✅ feito (22/06)
+
+**✅ Resultado (22/06):** `ExportPayload.is_card` (do `session.account_type`) + `FileEntryRow.omie_date` (data do lançamento Omie casado, do cache que o service já consulta). **Aba 1** (`workbook._build_sheet1_summary`): título tipado — cartão "CONCILIAÇÃO DE FATURA — CARTÃO | {conta} | {Mês/Ano}", CC "CONCILIAÇÃO BANCÁRIA — {banco} | {conta} | {Mês/Ano}" (decisão do usuário: aplicar o formato tipado nos dois; o genérico "Relatório de Conciliação" some). **Aba 2** (`_build_sheet2_movimentacao`): no cartão, coluna "Data Omie" ao lado de "Data"; `conciliado_data_divergente` → data Omie + célula laranja (`FILL_DATA_DIVERGENTE`); conciliado sem divergência → vazia; CC → sem coluna. Testes: título cartão/CC + Aba 2 cartão (coluna/laranja/vazia) e CC (sem coluna); teste do A1 atualizado. Sem migration. 290 testes unit (43 export). _Validação com fatura real fica na BACK 1.5._
 
 **Objetivo:** o Excel reflete que é fatura de cartão (título diferente + coluna de data Omie p/ linhas divergentes).
 **Arquivos:** módulo de export `apps/api/app/modules/reconciliations/export/` — **localizar no código ao iniciar** os pontos exatos (nomes de abas, cabeçalhos, colunas; openpyxl).

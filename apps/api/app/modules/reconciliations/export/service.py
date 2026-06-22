@@ -42,6 +42,7 @@ from app.db.models import (
     ReconciliationFileEntry,
     ReconciliationOmieEntry,
     ReconciliationSession,
+    SessionAccountType,
 )
 from app.modules.reconciliations.export.schemas import (
     AnomalyRow,
@@ -199,6 +200,7 @@ class ExportService:
 
         return ExportPayload(
             filename=filename,
+            is_card=session.account_type == SessionAccountType.CREDIT_CARD.value,
             summary=summary,
             file_entries=file_entry_rows,
             omie_divergences=omie_div_rows,
@@ -434,11 +436,13 @@ class ExportService:
             )
             supplier: str | None = None
             category: str | None = None
+            omie_date: date | None = None
             if entry.omie_lancamento_id is not None:
                 data = cached.get(entry.omie_lancamento_id)
                 if data is not None:
                     supplier = data.supplier
                     category = data.category
+                    omie_date = data.transaction_date
             # Status de qualificação: explícito "ok" pra conciliados sem
             # anomalia de qualificação (analista lê como "IA validou");
             # `None` pra sem_omie/ignorado (qualificação não rodou nesses).
@@ -458,6 +462,7 @@ class ExportService:
                     situation=entry.situation,
                     user_note=note,
                     qualification_status=qualif,
+                    omie_date=omie_date,
                 )
             )
         return rows
