@@ -151,8 +151,9 @@ async def _seed_session_with_entries(
     transactions: list[tuple[date, str, Decimal]],
     file_hash: str,
     account_type: str = "checking",
+    status_value: str = "processing",
 ) -> UUID:
-    """Cria uma sessão `processing` + entries pré-criptografados."""
+    """Cria uma sessão + entries pré-criptografados (default `processing`)."""
     hex_key = get_settings().OMIE_ENCRYPTION_KEY.get_secret_value()
     async with factory() as s, s.begin():
         sess = ReconciliationSession(
@@ -163,7 +164,7 @@ async def _seed_session_with_entries(
             reference_month=date(2026, 4, 1),
             date_tolerance_days=0,
             file_hash=file_hash,
-            status="processing",
+            status=status_value,
             balance_start=Decimal("0.00"),
         )
         s.add(sess)
@@ -637,6 +638,65 @@ class TestJobCreditCard:
                 .all()
             )
             assert {o.omie_lancamento_id for o in omie_rows} == {3003}
+
+
+@pytest.mark.integration
+class TestJobCancelGuard:
+    """Guard de cancelamento: se a sessão foi cancelada (→ error) durante o
+    processamento, o `update_session_after_matching` (WHERE status='processing')
+    NÃO a ressuscita como `reviewing`."""
+
+    @respx.mock
+    async def test_cancelled_session_not_overwritten_by_job(
+        self, factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        await _seed_anomaly_types(factory)
+        admin = await _seed_admin(factory, "job-cancel-admin@hologram.com.br")
+        cliente = await _seed_client(factory, admin.id, "X")
+        # Sessão já em 'error' simula um cancelamento ocorrido ANTES do update final.
+        session_id = await _seed_session_with_entries(
+            factory,
+            client_id=cliente.id,
+            created_by=admin.id,
+            transactions=[(date(2026, 4, 5), "Compra", Decimal("-100.00"))],
+            file_hash=_hex64("cancel-guard"),
+            status_value="error",
+        )
+        respx.post(OMIE_EXTRATO_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_ok_extrato_payload(
+                    [
+                        {
+                            "nCodLancamento": 1,
+                            "cNatureza": "D",
+                            "dDataLancamento": "05/04/2026",
+                            "nValorDocumento": 100.00,
+                            "cObservacoes": "Compra",
+                            "cSituacao": "Conciliado",
+                        }
+                    ]
+                ),
+            )
+        )
+        respx.post(OMIE_PAGAR_URL).mock(
+            return_value=httpx.Response(200, json=_empty_pagar_payload())
+        )
+        respx.post(OMIE_RECEBER_URL).mock(
+            return_value=httpx.Response(200, json=_empty_receber_payload())
+        )
+
+        await run_reconciliation_processing(
+            str(session_id), settings=get_settings(), session_factory=factory
+        )
+
+        async with factory() as s:
+            sess = (
+                await s.execute(
+                    select(ReconciliationSession).where(ReconciliationSession.id == session_id)
+                )
+            ).scalar_one()
+            assert sess.status == "error"  # guard preservou o cancelamento
 
 
 @pytest.mark.integration

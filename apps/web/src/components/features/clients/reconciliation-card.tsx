@@ -39,7 +39,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { useDiscardReconciliation, useReprocessReconciliation } from '@/hooks/use-reconciliations';
+import {
+  useCancelReconciliation,
+  useDiscardReconciliation,
+  useReprocessReconciliation,
+} from '@/hooks/use-reconciliations';
 import { ApiError } from '@/lib/api/client';
 import type { ReconciliationSessionSummary } from '@/lib/api/clients';
 import { cn } from '@/lib/utils';
@@ -56,7 +60,9 @@ export function ReconciliationCard({ clientId, session, accountName }: Reconcili
   const router = useRouter();
   const reprocessMutation = useReprocessReconciliation(session.id, clientId);
   const discardMutation = useDiscardReconciliation(session.id, clientId);
+  const cancelMutation = useCancelReconciliation(session.id, clientId);
   const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false);
+  const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
   const isProcessing = session.status === 'processing';
   const isError = session.status === 'error';
   const showCounters = session.status === 'done' || session.status === 'reviewing';
@@ -81,11 +87,23 @@ export function ReconciliationCard({ clientId, session, accountName }: Reconcili
   async function handleDiscard() {
     try {
       await discardMutation.mutateAsync();
-      toast.success('Conciliação descartada.');
+      toast.success('Conciliação excluída.');
       setConfirmDiscardOpen(false);
     } catch (err) {
       const message =
-        err instanceof ApiError ? err.userMessage : 'Não foi possível descartar a conciliação.';
+        err instanceof ApiError ? err.userMessage : 'Não foi possível excluir a conciliação.';
+      toast.error(message);
+    }
+  }
+
+  async function handleCancel() {
+    try {
+      await cancelMutation.mutateAsync();
+      toast.success('Processamento cancelado.');
+      setConfirmCancelOpen(false);
+    } catch (err) {
+      const message =
+        err instanceof ApiError ? err.userMessage : 'Não foi possível cancelar o processamento.';
       toast.error(message);
     }
   }
@@ -134,35 +152,40 @@ export function ReconciliationCard({ clientId, session, accountName }: Reconcili
       <div className="text-muted-foreground flex items-center justify-between gap-2 text-xs">
         <span>Criada em {createdAtLabel}</span>
         <div className="flex flex-wrap items-center gap-2">
+          {isProcessing && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setConfirmCancelOpen(true)}
+              disabled={cancelMutation.isPending}
+              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+              aria-live="polite"
+            >
+              {cancelMutation.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <XCircle className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              {cancelMutation.isPending ? 'Cancelando…' : 'Cancelar'}
+            </Button>
+          )}
           {isError && (
-            <>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => void handleReprocess()}
-                disabled={reprocessMutation.isPending || discardMutation.isPending}
-                aria-live="polite"
-              >
-                {reprocessMutation.isPending ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                ) : (
-                  <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-                )}
-                {reprocessMutation.isPending ? 'Reprocessando…' : 'Tentar novamente'}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setConfirmDiscardOpen(true)}
-                disabled={discardMutation.isPending || reprocessMutation.isPending}
-                className="text-destructive hover:text-destructive hover:bg-destructive/10"
-              >
-                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                Descartar
-              </Button>
-            </>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void handleReprocess()}
+              disabled={reprocessMutation.isPending || discardMutation.isPending}
+              aria-live="polite"
+            >
+              {reprocessMutation.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              {reprocessMutation.isPending ? 'Reprocessando…' : 'Tentar novamente'}
+            </Button>
           )}
           {!isProcessing && !isError && (
             <Link
@@ -173,16 +196,30 @@ export function ReconciliationCard({ clientId, session, accountName }: Reconcili
               <ArrowRight className="h-3 w-3" aria-hidden="true" />
             </Link>
           )}
+          {/* Excluir (soft-delete) p/ reviewing/done/error — não pra processing. */}
+          {!isProcessing && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setConfirmDiscardOpen(true)}
+              disabled={discardMutation.isPending || reprocessMutation.isPending}
+              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+            >
+              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+              Excluir
+            </Button>
+          )}
         </div>
       </div>
 
       <Dialog open={confirmDiscardOpen} onOpenChange={setConfirmDiscardOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Descartar esta conciliação?</DialogTitle>
+            <DialogTitle>Excluir esta conciliação?</DialogTitle>
             <DialogDescription>
               A conciliação some do histórico do cliente e libera <strong>{accountName}</strong> em{' '}
-              <strong>{referenceLabel}</strong> para uma nova tentativa com o mesmo arquivo. Esta
+              <strong>{referenceLabel}</strong> para uma nova conciliação com o mesmo arquivo. Esta
               ação não pode ser desfeita pela interface — o registro fica preservado no banco apenas
               para auditoria.
             </DialogDescription>
@@ -194,7 +231,7 @@ export function ReconciliationCard({ clientId, session, accountName }: Reconcili
               onClick={() => setConfirmDiscardOpen(false)}
               disabled={discardMutation.isPending}
             >
-              Cancelar
+              Voltar
             </Button>
             <Button
               type="button"
@@ -208,7 +245,44 @@ export function ReconciliationCard({ clientId, session, accountName }: Reconcili
               ) : (
                 <Trash2 className="h-4 w-4" aria-hidden="true" />
               )}
-              {discardMutation.isPending ? 'Descartando…' : 'Descartar conciliação'}
+              {discardMutation.isPending ? 'Excluindo…' : 'Excluir conciliação'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={confirmCancelOpen} onOpenChange={setConfirmCancelOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cancelar o processamento?</DialogTitle>
+            <DialogDescription>
+              A conciliação de <strong>{accountName}</strong> em <strong>{referenceLabel}</strong>{' '}
+              será interrompida e marcada como erro. Depois você poderá reprocessar ou excluir. O
+              processamento em andamento pode levar alguns segundos para parar.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setConfirmCancelOpen(false)}
+              disabled={cancelMutation.isPending}
+            >
+              Voltar
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void handleCancel()}
+              disabled={cancelMutation.isPending}
+              aria-live="polite"
+            >
+              {cancelMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <XCircle className="h-4 w-4" aria-hidden="true" />
+              )}
+              {cancelMutation.isPending ? 'Cancelando…' : 'Cancelar processamento'}
             </Button>
           </DialogFooter>
         </DialogContent>
