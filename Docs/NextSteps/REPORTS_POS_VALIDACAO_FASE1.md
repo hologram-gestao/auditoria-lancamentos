@@ -182,8 +182,8 @@ SAÍDA (−). A IA vê a palavra "APLICACAO" (que associa a saída) com valor PO
 
 ## Report #3 — CSV grande (Banco Inter) falha no parse com mensagem enganosa
 
-**Status:** 🔴 Aberto (causa raiz identificada com alta confiança via código+aritmética; confirmar o
-modo exato de falha com log de prod). **Raiz independente de #1/#2.**
+**Status:** 🔴 Aberto (causa raiz **corroborada por log de prod**; falta só o teste do CSV curto p/
+cravar 100%). **Raiz independente de #1/#2.**
 
 ### Report
 
@@ -191,7 +191,8 @@ modo exato de falha com log de prod). **Raiz independente de #1/#2.**
 > erro... pedindo para verificar integridade do arquivo e se é protegido por senha."_ — 27/06/2026
 
 - **Cliente:** DM Construções · Banco Inter (077) · conta corrente · Maio/2026. **Em prod.**
-- **Arquivo:** CSV ~18,5 KB, **~245 lançamentos** (extrato Banco Inter, muitos PIX com nomes longos).
+- **Arquivo:** CSV ~18,5 KB, **~220 lançamentos** (estimado do tamanho; extrato Banco Inter, muitos
+  PIX com nomes longos).
 - **Erro exibido:** _"...Verifique se o arquivo está íntegro e sem proteção por senha."_
 
 ### Diagnóstico (causa raiz — alta confiança)
@@ -204,23 +205,30 @@ modo exato de falha com log de prod). **Raiz independente de #1/#2.**
    — "JSON inválido ou `transactions` vazio" da extração via IA. A mensagem é genérica e fala em
    "proteção por senha" (conceito de PDF) → **enganosa para CSV** (sub-bug de UX).
 3. **Causa raiz: truncamento de output.** `extract_movements` usa `max_tokens=8192`
-   ([`client.py:59`](../../apps/api/app/integrations/anthropic/client.py#L59)). ~245 transações × ~40–50
+   ([`client.py:59`](../../apps/api/app/integrations/anthropic/client.py#L59)). ~220 transações × ~40–50
    tokens de JSON cada (descrições PIX longas) ≈ **10–13k tokens de saída ≫ 8192** → o `tool_use` é
    cortado no meio do array → input incompleto/ inválido → `AnthropicParseError`.
-4. **Corroboração forte:** a Camada 1 da **qualificação JÁ sofreu exatamente isso** — comentário em
+4. **Log de prod (26/06) corrobora.** Na janela do teste (12:22–12:55 UTC):
+   - 4× `anthropic_tool_validation_failed` com **`error_count=1`** (a DM não aparece nos `extract_ok`,
+     logo é uma dessas) — bate com **1 transação final truncada** (objeto incompleto = 1 erro Pydantic).
+   - Os maiores `anthropic_extract_ok` da janela tiveram **119** e **88** transações (e levaram **81–95 s**!).
+     O **maior sucesso = 119**; a DM tem mais → estourou o teto. _(Confirma o limiar: < ~120 passa, ~220 trunca.)_
+   - `stop_reason` **não** é logado no `extract_movements` (só na qualificação) — por isso o teste do
+     CSV curto fecha 100%.
+5. **Corroboração de design:** a Camada 1 da **qualificação JÁ sofreu exatamente isso** — comentário em
    [`semantic.py:42`](../../apps/api/app/modules/reconciliations/qualification/semantic.py#L42): _"o
    valor antigo (4096) TRUNCAVA o tool_use em extratos grandes, devolvendo `results` vazio"_ — e foi
    mitigada com batching de 50 + `max_tokens=8192` + log `qualification_semantic_truncated`. O
    `extract_movements` ficou com 8192 **sem batching e sem checar `stop_reason==max_tokens`** → fica
    vulnerável a extratos grandes (CC com centenas de PIX é o pior caso).
 
-### Como confirmar (decisivo)
+### Como confirmar
 
-- **Teste rápido:** subir o MESMO CSV cortado p/ ~30 linhas → se processar, é tamanho/truncamento.
-- **Log de prod** (Cloud Shell): procurar a tentativa de parse —
+- **Log de prod — FEITO (26/06):** corrobora (ver Diagnóstico §4). Query usada:
   `gcloud logging read 'resource.type="cloud_run_revision" AND ("anthropic_tool_validation_failed" OR "anthropic_extract_ok")' --project=liberdade-assessoria --freshness=2d`.
-  Ausência de `anthropic_extract_ok` + presença de `anthropic_tool_validation_failed` (ou nenhum) na
-  janela do teste confirma a falha na extração.
+- **Teste do CSV curto — PENDENTE (clincher):** subir o MESMO CSV cortado p/ ~30 linhas. Se
+  processar → truncamento confirmado 100%. Se falhar mesmo curto → NÃO é tamanho (seria formato/
+  conteúdo de alguma linha) e reinvestigamos.
 
 ### Opções de fix
 
