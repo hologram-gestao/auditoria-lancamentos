@@ -148,6 +148,9 @@ export type ReconciliationStatus = 'processing' | 'reviewing' | 'done' | 'error'
 export interface ReconciliationSessionSummary {
   id: string;
   omie_conta_id: number;
+  /** Tipo normalizado da conta (FASE 1). Card do histórico mostra o badge
+   *  "Cartão de Crédito" quando `'credit_card'`. */
+  account_type: 'checking' | 'credit_card';
   /** ISO date `YYYY-MM-DD` representando o primeiro dia do mês de referência. */
   reference_month: string;
   status: string;

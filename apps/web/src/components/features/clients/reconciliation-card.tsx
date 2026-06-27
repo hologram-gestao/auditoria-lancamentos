@@ -65,6 +65,7 @@ export function ReconciliationCard({ clientId, session, accountName }: Reconcili
   const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
   const isProcessing = session.status === 'processing';
   const isError = session.status === 'error';
+  const isCard = session.account_type === 'credit_card';
   const showCounters = session.status === 'done' || session.status === 'reviewing';
 
   async function handleReprocess() {
@@ -117,7 +118,20 @@ export function ReconciliationCard({ clientId, session, accountName }: Reconcili
     <article className="bg-card space-y-3 rounded-lg border p-4 shadow-sm">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-0.5">
-          <p className="text-sm font-medium leading-tight">{accountName}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-medium leading-tight">{accountName}</p>
+            {isCard && (
+              <span
+                className={cn(
+                  'inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold ring-1 ring-inset',
+                  'bg-blue-50 text-blue-700 ring-blue-200',
+                  'dark:bg-blue-950 dark:text-blue-300 dark:ring-blue-900',
+                )}
+              >
+                Cartão de Crédito
+              </span>
+            )}
+          </div>
           <p className="text-muted-foreground text-xs">{referenceLabel}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
