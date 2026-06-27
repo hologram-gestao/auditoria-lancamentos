@@ -239,8 +239,14 @@ def _xlsx_to_text(file_bytes: bytes) -> str:
         ValidationAppError: arquivo XLSX corrompido ou criptografado
             (openpyxl explode com `BadZipFile` / `InvalidFileException`).
     """
+    # NÃO usar `read_only=True`: nesse modo o openpyxl confia na tag
+    # `<dimension>` do XML e itera só o range declarado. Extratos exportados
+    # por banco (ex.: Banco Inter / DM Construções, jun/2026) vêm com
+    # `<dimension>` errada/menor que os dados → `iter_rows` lia só as primeiras
+    # linhas e a IA extraía 1 de ~20 lançamentos (Report #4). O modo normal lê
+    # todas as células de fato. Custo de memória é aceitável (upload ≤ 20 MB).
     try:
-        wb = openpyxl.load_workbook(BytesIO(file_bytes), read_only=True, data_only=True)
+        wb = openpyxl.load_workbook(BytesIO(file_bytes), data_only=True)
     except Exception as exc:
         raise ValidationAppError(
             f"XLSX inválido ou corrompido: {exc}",
