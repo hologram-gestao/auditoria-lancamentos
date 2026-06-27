@@ -21,6 +21,10 @@
 | --- | ------------------------------------------------- | --------------------------------------------------------------- | --------- |
 | 1   | Resgate de conta aplicação vira "sem Omie"        | Tolerância de valor R$ 0,01 não absorve o rendimento do resgate | 🔴 Aberto |
 | 2   | Qualificação (IA) marca APLICACAO como incoerente | IA não sabe que é conta aplicação (semântica entrada/saída ⇄)   | 🔴 Aberto |
+| 3   | CSV grande (Banco Inter) falha no parse           | Truncamento do output da IA (max_tokens=8192 < ~245 linhas)     | 🔴 Aberto |
+
+> **Raízes distintas:** #1 e #2 compartilham a raiz "conta aplicação" (abaixo). **#3 é independente**
+> (truncamento de extração + mensagem de erro enganosa) — não tem a ver com aplicação.
 
 ## ⭐ Causa raiz comum (reports #1 e #2)
 
@@ -173,3 +177,64 @@ SAÍDA (−). A IA vê a palavra "APLICACAO" (que associa a saída) com valor PO
 
 **Pendente** — junto com o #1 (mesma raiz: conta aplicação). Provável fix combinado se virar uma
 "mini-fase aplicação"; ou (a)+(b) pontuais.
+
+---
+
+## Report #3 — CSV grande (Banco Inter) falha no parse com mensagem enganosa
+
+**Status:** 🔴 Aberto (causa raiz identificada com alta confiança via código+aritmética; confirmar o
+modo exato de falha com log de prod). **Raiz independente de #1/#2.**
+
+### Report
+
+> _"@Pedro testando a ferramenta da DM Construções o sistema não processou em CSV, apareceu esse
+> erro... pedindo para verificar integridade do arquivo e se é protegido por senha."_ — 27/06/2026
+
+- **Cliente:** DM Construções · Banco Inter (077) · conta corrente · Maio/2026. **Em prod.**
+- **Arquivo:** CSV ~18,5 KB, **~245 lançamentos** (extrato Banco Inter, muitos PIX com nomes longos).
+- **Erro exibido:** _"...Verifique se o arquivo está íntegro e sem proteção por senha."_
+
+### Diagnóstico (causa raiz — alta confiança)
+
+1. **O CSV é corretamente detectado como CSV** ([`magic_bytes.py`](../../apps/api/app/utils/magic_bytes.py)
+   — tem `;`+`\n`, decodifica latin-1) → **não** cai no caminho XLSX. O `_decode_text` do client faz
+   fallback latin-1 com `errors="replace"`, então **não é erro de encoding** (apesar do mojibake do
+   arquivo).
+2. **O erro real é `AnthropicParseError`** ([`exceptions.py:208`](../../apps/api/app/core/exceptions.py#L208))
+   — "JSON inválido ou `transactions` vazio" da extração via IA. A mensagem é genérica e fala em
+   "proteção por senha" (conceito de PDF) → **enganosa para CSV** (sub-bug de UX).
+3. **Causa raiz: truncamento de output.** `extract_movements` usa `max_tokens=8192`
+   ([`client.py:59`](../../apps/api/app/integrations/anthropic/client.py#L59)). ~245 transações × ~40–50
+   tokens de JSON cada (descrições PIX longas) ≈ **10–13k tokens de saída ≫ 8192** → o `tool_use` é
+   cortado no meio do array → input incompleto/ inválido → `AnthropicParseError`.
+4. **Corroboração forte:** a Camada 1 da **qualificação JÁ sofreu exatamente isso** — comentário em
+   [`semantic.py:42`](../../apps/api/app/modules/reconciliations/qualification/semantic.py#L42): _"o
+   valor antigo (4096) TRUNCAVA o tool_use em extratos grandes, devolvendo `results` vazio"_ — e foi
+   mitigada com batching de 50 + `max_tokens=8192` + log `qualification_semantic_truncated`. O
+   `extract_movements` ficou com 8192 **sem batching e sem checar `stop_reason==max_tokens`** → fica
+   vulnerável a extratos grandes (CC com centenas de PIX é o pior caso).
+
+### Como confirmar (decisivo)
+
+- **Teste rápido:** subir o MESMO CSV cortado p/ ~30 linhas → se processar, é tamanho/truncamento.
+- **Log de prod** (Cloud Shell): procurar a tentativa de parse —
+  `gcloud logging read 'resource.type="cloud_run_revision" AND ("anthropic_tool_validation_failed" OR "anthropic_extract_ok")' --project=liberdade-assessoria --freshness=2d`.
+  Ausência de `anthropic_extract_ok` + presença de `anthropic_tool_validation_failed` (ou nenhum) na
+  janela do teste confirma a falha na extração.
+
+### Opções de fix
+
+- **(a) Subir `max_tokens`** do extract (ex.: 32k/64k — Sonnet/Opus suportam). Simples; extrato
+  gigante ainda pode estourar.
+- **(b) Chunkar a extração** em lotes de N linhas (como a qualificação faz 50/lote) e mesclar.
+  Robusto p/ qualquer tamanho; mais complexo (continuidade de saldo, dedup, período).
+- **(c) Parser determinístico p/ CSV** (Data;Descrição;Valor;Saldo é estruturado — dispensa IA).
+  Barato e robusto, mas exige tratar formato por banco (Inter, etc.).
+- **(d) Detectar truncamento** (`stop_reason==max_tokens`) + log + **corrigir a mensagem enganosa**
+  ("extrato muito grande / divida o período"; tirar "proteção por senha" p/ CSV). _Quick win de UX
+  independente do resto._
+
+### Decisão
+
+**Pendente.** Inclinação: **(a)+(d)** como fix rápido (sobe o teto + melhora erro/telemetria) e
+avaliar **(b)** como solução robusta de longo prazo. Confirmar o modo de falha com o log antes.
