@@ -17,12 +17,12 @@
 
 ## Índice
 
-| #   | Título                                            | Causa raiz                                                       | Status    |
-| --- | ------------------------------------------------- | ---------------------------------------------------------------- | --------- |
-| 1   | Resgate de conta aplicação vira "sem Omie"        | Tolerância de valor R$ 0,01 não absorve o rendimento do resgate  | 🔴 Aberto |
-| 2   | Qualificação (IA) marca APLICACAO como incoerente | IA não sabe que é conta aplicação (semântica entrada/saída ⇄)    | 🔴 Aberto |
-| 3   | CSV grande (Banco Inter) falha no parse           | Truncamento do output da IA (max_tokens=8192 < ~220 linhas)      | 🔴 Aberto |
-| 4   | XLSX (DM) extrai só 1 de ~20 transações           | `_xlsx_to_text` lê só ~3 linhas (openpyxl read_only + dimension) | 🔴 Aberto |
+| #   | Título                                            | Causa raiz                                                       | Status            |
+| --- | ------------------------------------------------- | ---------------------------------------------------------------- | ----------------- |
+| 1   | Resgate de conta aplicação vira "sem Omie"        | Tolerância de valor R$ 0,01 não absorve o rendimento do resgate  | 🔴 Aberto         |
+| 2   | Qualificação (IA) marca APLICACAO como incoerente | IA não sabe que é conta aplicação (semântica entrada/saída ⇄)    | 🔴 Aberto         |
+| 3   | CSV grande (Banco Inter) falha no parse           | Truncamento do output da IA (max_tokens=8192 < ~220 linhas)      | 🟢 Corrigido (PR) |
+| 4   | XLSX (DM) extrai só 1 de ~20 transações           | `_xlsx_to_text` lê só ~3 linhas (openpyxl read_only + dimension) | 🟢 Corrigido (PR) |
 
 > **Raízes distintas:** #1 e #2 = raiz "conta aplicação" (abaixo). **#3 e #4 = robustez da extração**
 > (cada um por um motivo diferente: #3 trunca o _output_ por excesso de linhas; #4 lê _input_
@@ -185,8 +185,8 @@ SAÍDA (−). A IA vê a palavra "APLICACAO" (que associa a saída) com valor PO
 
 ## Report #3 — CSV grande (Banco Inter) falha no parse com mensagem enganosa
 
-**Status:** 🔴 Aberto (causa raiz **corroborada por log de prod**; falta só o teste do CSV curto p/
-cravar 100%). **Raiz independente de #1/#2.**
+**Status:** 🟢 Corrigido (em PR p/ `feat/fase1-cartao`). Causa corroborada por log de prod; fix =
+teto de tokens + detecção de truncamento. **Raiz independente de #1/#2.**
 
 ### Report
 
@@ -247,16 +247,22 @@ cravar 100%). **Raiz independente de #1/#2.**
 
 ### Decisão
 
-**Pendente.** Inclinação: **(a)+(d)** como fix rápido (sobe o teto + melhora erro/telemetria) e
-avaliar **(b)** como solução robusta de longo prazo. Confirmar o modo de falha com o log antes.
+**✅ Implementado (a)+(d)** — commit `b90f1fe`, branch `fix/extracao-robustez` → PR p/ `feat/fase1-cartao`:
+
+- `_MAX_OUTPUT_TOKENS` 8192 → **32768** (cobre ~480 linhas; é só teto, não custa mais p/ extrato pequeno).
+- `extract_movements` detecta `stop_reason=max_tokens` → loga `anthropic_extract_truncated` + devolve
+  erro acionável _"envie um período menor / divida em quinzenas"_ (some a msg enganosa de "senha").
+- Teste unitário do truncamento. Gate verde (544 pytest, sem regressão).
+- **(b) parser determinístico** fica como melhoria futura (não necessária agora — o teto resolve os
+  casos reais; o erro acionável cobre o extremo).
 
 ---
 
 ## Report #4 — XLSX (DM) extrai só 1 de ~20 transações ("só as 3 primeiras linhas")
 
-**Status:** 🔴 Aberto (causa provável: rendering do XLSX lê só ~3 linhas; corroborado por log,
-confirmar mecanismo com re-save). **Raiz: robustez da extração (junto com #3, mas mecanismo
-diferente).**
+**Status:** 🟢 Corrigido (em PR p/ `feat/fase1-cartao`). Causa **confirmada por repro** (openpyxl
+`read_only` + `<dimension>` errada); fix = remover `read_only`. **Raiz: robustez da extração (junto
+com #3, mecanismo diferente).**
 
 ### Report
 
@@ -303,7 +309,11 @@ diferente).**
 
 ### Decisão
 
-**Pendente.** (a) conserta o #4 já; mas **#3+#4 juntos reforçam (b)** — a extração via IA se mostrou
-frágil em extrato real (trunca quando é grande, lê incompleto quando é XLSX). Um parser determinístico
-p/ os formatos estruturados (CSV/XLSX) seria a solução de fundo; IA fica para PDF/fatura (onde é
-insubstituível). Decidir escopo com o usuário.
+**✅ Implementado (a)** — commit `8107584`, branch `fix/extracao-robustez` → PR p/ `feat/fase1-cartao`:
+
+- `_xlsx_to_text` sem `read_only=True` → lê todas as células de fato (não depende da `<dimension>`).
+- **Causa confirmada por repro** (script `repro_xlsx_dimension.py`): com `<dimension>` adulterada,
+  `read_only=True` → 1 linha; `read_only=False` → 40. Teste unitário de regressão fixa o comportamento.
+- Gate verde (544 pytest, incl. `test_parse_endpoint` — sem regressão no caminho XLSX normal).
+- **(b) parser determinístico** fica como melhoria futura (a extração via IA é frágil em extrato real —
+  vale reconsiderar um parser p/ CSV/XLSX estruturado depois; IA fica essencial p/ PDF/fatura).
