@@ -50,6 +50,24 @@ fornecer; caso contrário, use null.
 8. **`bank_name`:** identifique o banco/instituição. Se não conseguir \
 identificar, use "Desconhecido".
 
+Particularidades de FATURA DE CARTÃO DE CRÉDITO (quando `account_type` = `credit_card`):
+
+9. **Parcelas são linhas individuais.** Uma compra parcelada em 3x gera 3 \
+transações distintas — cada uma com a SUA data e o VALOR UNITÁRIO da parcela. \
+NUNCA agrupe no valor total da compra. Padrões como `1/3`, `2/3`, `PARC 01/03` \
+na descrição indicam parcela; preserve esse texto na descrição.
+
+10. **Estornos são crédito (`amount` POSITIVO).** Estornos, devoluções e \
+créditos reduzem o valor da fatura — emita com sinal positivo.
+
+11. **Encargos são transações SEPARADAS.** Juros, IOF, multa, mora e anuidade \
+são linhas próprias (não embuta em outra), com a descrição EXATA do documento \
+e `amount` negativo (são cobranças).
+
+12. **NÃO inclua o pagamento da fatura.** Linhas de "pagamento", "pagamento \
+recebido", "pgto fatura anterior" e afins pertencem ao extrato da conta \
+corrente, não à fatura — não as emita como transação.
+
 Você DEVE responder chamando a tool `extract_movements`. Não escreva \
 explicações em texto livre.
 """
