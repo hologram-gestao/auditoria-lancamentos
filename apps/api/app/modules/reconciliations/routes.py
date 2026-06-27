@@ -398,15 +398,13 @@ async def reprocess_reconciliation(
     "/{session_id}/discard",
     status_code=status.HTTP_204_NO_CONTENT,
     summary=(
-        "Descarta (soft-delete) uma sessão que terminou em `status='error'`. "
-        "Marca `deleted_at=now()`; histórico fica preservado pra auditoria, "
-        "mas a sessão some da UI. Libera o índice UNIQUE de idempotência "
-        "(`client_id, omie_conta_id, reference_month, file_hash`) — usuário "
-        "pode criar uma sessão nova com o mesmo arquivo no mesmo mês. "
-        "Conflito (409): se a sessão NÃO está em error (já processando, em "
-        "revisão ou concluída), recusamos — soft-delete só faz sentido pra "
-        "sessões mortas. Sessões reviewing/done são preservadas pelo "
-        'produto (não há fluxo de "deletar revisão concluída" hoje).'
+        "Exclui (soft-delete) uma conciliação em `reviewing`, `done` ou "
+        "`error`. Marca `deleted_at=now()`; o histórico fica preservado pra "
+        "auditoria, mas a sessão some da UI. Libera o índice UNIQUE de "
+        "idempotência (`client_id, omie_conta_id, reference_month, file_hash`) "
+        "— usuário pode recriar a mesma conta+mês+arquivo (refazer). "
+        "Conflito (409): sessão em `processing` NÃO pode ser excluída — "
+        "cancele o processamento antes (`POST /cancel`)."
     ),
 )
 async def discard_reconciliation(
@@ -426,17 +424,70 @@ async def discard_reconciliation(
     except ClientNotAccessibleError as exc:
         raise NotFoundError(_SESSION_NOT_FOUND_MSG) from exc
 
-    if sess.status != ReconciliationStatus.ERROR.value:
+    # Só bloqueia o que está em processamento (o job ainda escreve nela) — para
+    # essas, o caminho é cancelar primeiro. reviewing/done/error podem ser
+    # excluídas (soft-delete libera a tupla de idempotência pra refazer).
+    if sess.status == ReconciliationStatus.PROCESSING.value:
         raise ConflictError(
-            f"Sessão {session_id} não está em erro (status={sess.status}).",
+            f"Sessão {session_id} está em processamento (status={sess.status}).",
             user_message=(
-                "Só conciliações em estado de erro podem ser descartadas — "
-                "para sessões concluídas ou em revisão, contate o "
-                "administrador do sistema."
+                "Não é possível excluir uma conciliação em processamento. "
+                "Cancele o processamento primeiro."
             ),
         )
 
     await repo.soft_delete_session(session_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ----------------------------------------------------------------------
+# POST /reconciliations/{id}/cancel  (cancela uma sessão em processamento)
+# ----------------------------------------------------------------------
+
+
+@router.post(
+    "/{session_id}/cancel",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary=(
+        "Cancela uma conciliação em `processing`: marca `status='error'` com "
+        "uma mensagem de cancelamento. A BackgroundTask em andamento não é "
+        "interrompida (não dá pra matar a task), mas o `update_session_after_"
+        "matching` final tem guarda `WHERE status='processing'` — então o job "
+        "não sobrescreve o cancelamento. Depois de cancelada, a sessão vira "
+        "`error`: o usuário pode reprocessar ou excluir. Conflito (409): "
+        "sessão que NÃO está em processamento (já em revisão/concluída/erro)."
+    ),
+)
+async def cancel_reconciliation(
+    user: ManagerOrAdminDep,
+    db: DbSessionDep,
+    session_id: UUID,
+) -> Response:
+    """Cancela o processamento marcando a sessão como erro. 204 no sucesso."""
+    repo = ReconciliationRepository(db)
+
+    sess = await repo.get_status_view(session_id)
+    if sess is None:
+        raise NotFoundError(_SESSION_NOT_FOUND_MSG)
+
+    try:
+        await require_client_access(sess.client_id, user, db)
+    except ClientNotAccessibleError as exc:
+        raise NotFoundError(_SESSION_NOT_FOUND_MSG) from exc
+
+    if sess.status != ReconciliationStatus.PROCESSING.value:
+        raise ConflictError(
+            f"Sessão {session_id} não está em processamento (status={sess.status}).",
+            user_message=(
+                "Só conciliações em processamento podem ser canceladas. "
+                "Para as demais, use Excluir."
+            ),
+        )
+
+    await repo.mark_session_error(
+        session_id,
+        user_message="Processamento cancelado pelo usuário.",
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

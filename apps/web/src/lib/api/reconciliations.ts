@@ -192,6 +192,19 @@ export async function discardReconciliation(sessionId: string): Promise<void> {
   await apiPost<void>(`/api/v1/reconciliations/${sessionId}/discard`, {});
 }
 
+/**
+ * Cancela uma conciliação em `processing` — marca `status='error'` ("cancelado
+ * pelo usuário"). A BackgroundTask em andamento não é interrompida, mas o
+ * backend tem guarda pra não sobrescrever o cancelamento. Depois, a sessão fica
+ * em `error` (pode reprocessar ou excluir). 204 No Content.
+ *
+ * Erros: 404 (inexistente / fora da carteira); 409 (`CONFLICT`) se NÃO está em
+ * processamento (já em revisão/concluída/erro).
+ */
+export async function cancelReconciliation(sessionId: string): Promise<void> {
+  await apiPost<void>(`/api/v1/reconciliations/${sessionId}/cancel`, {});
+}
+
 // ----------------------------------------------------------------------
 // S10 — GET /api/v1/reconciliations/{id}/status
 // ----------------------------------------------------------------------

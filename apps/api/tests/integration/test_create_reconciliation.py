@@ -1001,11 +1001,13 @@ class TestDiscardReconciliation:
         # Status segue 'error' — soft-delete não muda o histórico.
         assert sess.status == "error"
 
-    async def test_discard_non_error_session_returns_409(
+    async def test_discard_reviewing_session_now_allowed(
         self,
         client_with_db: AsyncClient,
         db_session: AsyncSession,
     ) -> None:
+        """A partir da feature de excluir conciliação, reviewing/done podem ser
+        soft-deletadas (antes só error)."""
         admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
         cliente = await _seed_client(db_session, name="Y", creator=admin)
         sess = await _seed_session(
@@ -1017,9 +1019,31 @@ class TestDiscardReconciliation:
         )
         await _login(client_with_db, ADMIN_EMAIL)
         resp = await client_with_db.post(f"/api/v1/reconciliations/{sess.id}/discard")
+        assert resp.status_code == 204, resp.text
+
+        await db_session.refresh(sess)
+        assert sess.deleted_at is not None
+
+    async def test_discard_processing_returns_409(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+    ) -> None:
+        """Em processamento NÃO pode ser excluída (o job ainda escreve nela) —
+        o caminho é cancelar primeiro."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="Y", creator=admin)
+        sess = await _seed_session(
+            db_session,
+            cliente=cliente,
+            creator=admin,
+            status_value="processing",
+            file_hash=_hex64("discard-processing"),
+        )
+        await _login(client_with_db, ADMIN_EMAIL)
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{sess.id}/discard")
         assert resp.status_code == 409, resp.text
 
-        # Não toca o deleted_at em sessão não-error.
         await db_session.refresh(sess)
         assert sess.deleted_at is None
 
@@ -1084,6 +1108,82 @@ class TestDiscardReconciliation:
 
 
 # ----------------------------------------------------------------------
+# POST /reconciliations/{id}/cancel  (cancela sessão em processamento)
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestCancelReconciliation:
+    async def test_unauthenticated_returns_401(self, client_with_db: AsyncClient) -> None:
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{uuid4()}/cancel")
+        assert resp.status_code == 401
+
+    async def test_inexistent_session_returns_404(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        await _login(client_with_db, ADMIN_EMAIL)
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{uuid4()}/cancel")
+        assert resp.status_code == 404
+
+    async def test_cancel_processing_marks_error(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Caminho feliz: sessão em processing → 204; status vira error."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="X", creator=admin)
+        sess = await _seed_session(
+            db_session,
+            cliente=cliente,
+            creator=admin,
+            status_value="processing",
+            file_hash=_hex64("cancel-happy"),
+        )
+        await _login(client_with_db, ADMIN_EMAIL)
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{sess.id}/cancel")
+        assert resp.status_code == 204, resp.text
+
+        await db_session.refresh(sess)
+        assert sess.status == "error"
+        assert sess.error_message is not None
+        assert "cancelado" in sess.error_message.lower()
+
+    async def test_cancel_non_processing_returns_409(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="Y", creator=admin)
+        sess = await _seed_session(
+            db_session,
+            cliente=cliente,
+            creator=admin,
+            status_value="reviewing",
+            file_hash=_hex64("cancel-reviewing"),
+        )
+        await _login(client_with_db, ADMIN_EMAIL)
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{sess.id}/cancel")
+        assert resp.status_code == 409, resp.text
+
+    async def test_manager_outside_portfolio_returns_404(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        mgr_a = await _seed_user(db_session, email=MANAGER_A_EMAIL, role=UserRole.MANAGER)
+        await _seed_user(db_session, email=MANAGER_B_EMAIL, role=UserRole.MANAGER)
+        cliente_a = await _seed_client(db_session, name="A", creator=admin, manager=mgr_a)
+        sess = await _seed_session(
+            db_session,
+            cliente=cliente_a,
+            creator=admin,
+            status_value="processing",
+            file_hash=_hex64("cancel-rbac"),
+        )
+        await _login(client_with_db, MANAGER_B_EMAIL)
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{sess.id}/cancel")
+        assert resp.status_code == 404
+
+
+# ----------------------------------------------------------------------
 # Garantia de fixture do app: as rotas estão registradas no FastAPI app.
 # (sanity check para evitar falsos passes se o include_router for esquecido)
 # ----------------------------------------------------------------------
@@ -1096,3 +1196,4 @@ def test_routes_are_registered_in_app() -> None:
     assert "/api/v1/reconciliations/{session_id}" in paths
     assert "/api/v1/reconciliations/{session_id}/reprocess" in paths
     assert "/api/v1/reconciliations/{session_id}/discard" in paths
+    assert "/api/v1/reconciliations/{session_id}/cancel" in paths

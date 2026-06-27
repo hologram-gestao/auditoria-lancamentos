@@ -39,6 +39,7 @@ import {
   listAvailableOmieEntries,
   listFileEntries,
   listOmieEntries,
+  cancelReconciliation,
   discardReconciliation,
   parseStatement,
   patchAnomaly,
@@ -131,6 +132,25 @@ export function useDiscardReconciliation(sessionId: string, clientId: string) {
       void queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
       // O contador de conciliações na lista de clientes pode mudar.
       void queryClient.invalidateQueries({ queryKey: ['clients'] });
+    },
+  });
+}
+
+/**
+ * "Cancelar" uma sessão em `status='processing'` — marca como `error`.
+ *
+ * Após sucesso, invalida a lista de conciliações do cliente (o card re-renderiza
+ * como erro, com Reprocessar/Excluir) e o detail da sessão.
+ */
+export function useCancelReconciliation(sessionId: string, clientId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, void>({
+    mutationFn: () => cancelReconciliation(sessionId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ['clients', clientId, 'reconciliations'],
+      });
+      void queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
     },
   });
 }

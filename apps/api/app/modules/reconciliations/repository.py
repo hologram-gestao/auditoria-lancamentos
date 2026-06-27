@@ -217,12 +217,21 @@ class ReconciliationRepository:
         balance_end_omie: Decimal | None = None,
         balance_difference: Decimal | None = None,
     ) -> None:
-        """Atualiza contadores + saldos + status='reviewing' + processed_at=now()."""
+        """Atualiza contadores + saldos + status='reviewing' + processed_at=now().
+
+        Guarda de cancelamento (`WHERE status='processing'`): se o usuário
+        cancelou a sessão (→ `error`) enquanto o job rodava, este UPDATE casa
+        0 linhas e o cancelamento prevalece — o job não ressuscita a sessão
+        cancelada como `reviewing`.
+        """
         from datetime import UTC, datetime
 
         await self._session.execute(
             update(ReconciliationSession)
-            .where(ReconciliationSession.id == session_id)
+            .where(
+                ReconciliationSession.id == session_id,
+                ReconciliationSession.status == ReconciliationStatus.PROCESSING.value,
+            )
             .values(
                 status=ReconciliationStatus.REVIEWING.value,
                 total_file_entries=total_file_entries,
