@@ -17,14 +17,17 @@
 
 ## Índice
 
-| #   | Título                                            | Causa raiz                                                      | Status    |
-| --- | ------------------------------------------------- | --------------------------------------------------------------- | --------- |
-| 1   | Resgate de conta aplicação vira "sem Omie"        | Tolerância de valor R$ 0,01 não absorve o rendimento do resgate | 🔴 Aberto |
-| 2   | Qualificação (IA) marca APLICACAO como incoerente | IA não sabe que é conta aplicação (semântica entrada/saída ⇄)   | 🔴 Aberto |
-| 3   | CSV grande (Banco Inter) falha no parse           | Truncamento do output da IA (max_tokens=8192 < ~245 linhas)     | 🔴 Aberto |
+| #   | Título                                            | Causa raiz                                                       | Status    |
+| --- | ------------------------------------------------- | ---------------------------------------------------------------- | --------- |
+| 1   | Resgate de conta aplicação vira "sem Omie"        | Tolerância de valor R$ 0,01 não absorve o rendimento do resgate  | 🔴 Aberto |
+| 2   | Qualificação (IA) marca APLICACAO como incoerente | IA não sabe que é conta aplicação (semântica entrada/saída ⇄)    | 🔴 Aberto |
+| 3   | CSV grande (Banco Inter) falha no parse           | Truncamento do output da IA (max_tokens=8192 < ~220 linhas)      | 🔴 Aberto |
+| 4   | XLSX (DM) extrai só 1 de ~20 transações           | `_xlsx_to_text` lê só ~3 linhas (openpyxl read_only + dimension) | 🔴 Aberto |
 
-> **Raízes distintas:** #1 e #2 compartilham a raiz "conta aplicação" (abaixo). **#3 é independente**
-> (truncamento de extração + mensagem de erro enganosa) — não tem a ver com aplicação.
+> **Raízes distintas:** #1 e #2 = raiz "conta aplicação" (abaixo). **#3 e #4 = robustez da extração**
+> (cada um por um motivo diferente: #3 trunca o _output_ por excesso de linhas; #4 lê _input_
+> incompleto do XLSX). Juntos reforçam a opção de um **parser determinístico** p/ CSV/XLSX
+> estruturado — ver fix (c)/(b) dos dois.
 
 ## ⭐ Causa raiz comum (reports #1 e #2)
 
@@ -246,3 +249,61 @@ cravar 100%). **Raiz independente de #1/#2.**
 
 **Pendente.** Inclinação: **(a)+(d)** como fix rápido (sobe o teto + melhora erro/telemetria) e
 avaliar **(b)** como solução robusta de longo prazo. Confirmar o modo de falha com o log antes.
+
+---
+
+## Report #4 — XLSX (DM) extrai só 1 de ~20 transações ("só as 3 primeiras linhas")
+
+**Status:** 🔴 Aberto (causa provável: rendering do XLSX lê só ~3 linhas; corroborado por log,
+confirmar mecanismo com re-save). **Raiz: robustez da extração (junto com #3, mas mecanismo
+diferente).**
+
+### Report
+
+> _"@Pedro teste também em xlsx não funcionou 100%, só puxou as 3 primeiras linhas do extrato."_
+> — 27/06/2026
+
+- **Cliente:** DM Construções · **XLSX** (mesmo extrato do #3, em planilha) · Maio/2026. **Em prod.**
+- **Preview:** BANCO **"Desconhecido"**, **1 movimentação** (21/05 PIX ENVIADO −R$ 30.000,00), saldos
+  vindos das linhas 11/13 da planilha.
+- **Real:** o XLSX tem ~20+ lançamentos (linhas 11–43). Só **1** foi extraído.
+
+### Diagnóstico (causa provável — corroborada por log)
+
+1. **Pipeline XLSX:** `_xlsx_to_text` (openpyxl) renderiza a planilha em TSV → manda pro IA como
+   bloco de texto ([`parse_service.py:217-219`](../../apps/api/app/modules/reconciliations/parse_service.py#L217)).
+2. **NÃO é truncamento de output (#3).** Só 1 transação saiu → output minúsculo. O problema é o
+   **input incompleto**: o IA só "viu" ~3 linhas (daí o BANCO "Desconhecido" e os saldos das 1ªs linhas).
+3. **Log de prod corrobora:** 3× `anthropic_extract_ok` com `transaction_count=1` e **`bytes_in=432`**.
+   Para XLSX, `bytes_in` = **tamanho do TEXTO RENDERIZADO** (`_prepare_content` faz `text.encode()`).
+   **432 bytes ≈ ~3 linhas**; a planilha cheia (~43 linhas × 6 colunas com nomes/CNPJs) renderizaria
+   vários KB → **`_xlsx_to_text` leu só ~3 linhas.** (3× = colega re-testou o mesmo arquivo. _Confirmar
+   timing: foram ~9:30–9:48 BRT?_)
+4. **Mecanismo provável:** `openpyxl.load_workbook(..., read_only=True)`
+   ([`parse_service.py:243`](../../apps/api/app/modules/reconciliations/parse_service.py#L243)) confia
+   na tag `<dimension>` do arquivo no modo streaming; **XLSX exportado por banco frequentemente tem
+   `<dimension>` ausente/errada** → o leitor read_only para nas poucas linhas declaradas. (A confirmar:
+   inspecionar a `<dimension>` ou testar sem `read_only` / após re-salvar no Excel.)
+
+### Como confirmar
+
+- **Timing:** os 432-byte/txn=1 events batem com a hora do teste do XLSX? (cheap)
+- **Decisivo (não precisa do arquivo sensível):** re-salvar o XLSX no Excel (Save As .xlsx — reescreve
+  a `<dimension>`) e re-subir. Se extrair **tudo** → confirma `read_only` + dimension. Se continuar 1 →
+  reinvestigar (`max_row`/abas/merge).
+
+### Opções de fix
+
+- **(a) `_xlsx_to_text` sem `read_only`** (ou `ws.reset_dimensions()` / `calculate_dimension(force=True)`)
+  → lê todas as linhas. Simples e direto; custo: mais memória em XLSX gigante (aceitável — extrato
+  mensal é pequeno). **← fix mínimo do #4.**
+- **(b) Parser determinístico p/ CSV/XLSX estruturado** (Data/Lançamento/Valor/Saldo é tabular —
+  dispensa IA). Mesma opção (c) do #3 → **resolve #3 e #4 de uma vez** e elimina a fragilidade da IA
+  em extrato real.
+
+### Decisão
+
+**Pendente.** (a) conserta o #4 já; mas **#3+#4 juntos reforçam (b)** — a extração via IA se mostrou
+frágil em extrato real (trunca quando é grande, lê incompleto quando é XLSX). Um parser determinístico
+p/ os formatos estruturados (CSV/XLSX) seria a solução de fundo; IA fica para PDF/fatura (onde é
+insubstituível). Decidir escopo com o usuário.
