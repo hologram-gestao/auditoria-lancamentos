@@ -17,9 +17,27 @@
 
 ## Índice
 
-| #   | Título                                     | Causa raiz                                                      | Status    |
-| --- | ------------------------------------------ | --------------------------------------------------------------- | --------- |
-| 1   | Resgate de conta aplicação vira "sem Omie" | Tolerância de valor R$ 0,01 não absorve o rendimento do resgate | 🔴 Aberto |
+| #   | Título                                            | Causa raiz                                                      | Status    |
+| --- | ------------------------------------------------- | --------------------------------------------------------------- | --------- |
+| 1   | Resgate de conta aplicação vira "sem Omie"        | Tolerância de valor R$ 0,01 não absorve o rendimento do resgate | 🔴 Aberto |
+| 2   | Qualificação (IA) marca APLICACAO como incoerente | IA não sabe que é conta aplicação (semântica entrada/saída ⇄)   | 🔴 Aberto |
+
+## ⭐ Causa raiz comum (reports #1 e #2)
+
+Os dois reports são sintomas da **mesma raiz-tema: o sistema não trata "Conta Aplicação" (Omie
+`tipo=CA`) como um tipo de conta próprio.** Hoje `session_account_type_from_omie_tipo` mapeia só
+`CR → credit_card`; **`CA` cai em `checking`** — ou seja, a aplicação é tratada como conta corrente,
+mas a semântica dela é diferente:
+
+- **Sinal invertido:** numa aplicação, **APLICACAO = entrada (+)** e **RESGATE = saída (−)** (o
+  oposto da conta corrente). → quebra a **qualificação** (#2).
+- **Resgate carrega rendimento:** o valor do resgate no banco ≠ valor da transferência no Omie. →
+  quebra o **matching** (#1).
+
+**Implicação:** assim como _cartão_ virou a FASE 1, **conta aplicação pode merecer tratamento
+próprio** (um `account_type='investment'` derivado de `tipo=CA`, com regras de matching +
+qualificação específicas). Decidir o escopo com o usuário/Galhardo antes de codar — pode ser um
+fix pontual (b/c de cada report) ou uma "mini-fase aplicação".
 
 ---
 
@@ -98,3 +116,60 @@ sem rendimento acumulado, por isso bateu exato.)_
 **Pendente.** Precisa de (1) alinhamento com Galhardo/produto — _como a Hologram quer que resgate
 de aplicação concilie? o rendimento aparece como quê?_ — e (2) verificar se os reports 2–4
 compartilham a mesma causa raiz (aplicação/transferência/rendimento) antes de desenhar o fix.
+Ver **"Causa raiz comum"** no topo — #1 e #2 são a mesma raiz (conta aplicação não tratada).
+
+---
+
+## Report #2 — Qualificação (IA) marca APLICACAO como incoerente em conta aplicação
+
+**Status:** 🔴 Aberto (diagnóstico confirmado; mesma raiz-tema do #1 — ver "Causa raiz comum").
+
+### Report
+
+> _"@Pedro Aqui diz que o lançamento de aplicação deveria ter sido registrado como saída, mas na
+> verdade é uma entrada mesmo, tanto no extrato como no Omie estão corretos."_ — 27/06/2026
+
+- **Mesma conciliação do #1:** Horus · `Itaú CDB-DI` (aplicação) · Maio/2026.
+- **Lançamento:** `18/05 · APLICACAO · +R$ 207.000,00`. No extrato Itaú (CDB) é uma APLICACAO; no
+  Omie é "Entrada de Transferência" +207.000,00, Conciliado. **Ambos corretos** — aplicar dinheiro
+  ENTRA no CDB (positivo). _(Este foi o "1 conciliado" do #1 — casou exato porque aplicação não
+  tem rendimento embutido.)_
+- **Sintoma:** anomalia crítica **"Qualificação incoerente (IA)"**: _"APLICACAO (saída para
+  investimento) classificada como 'Entrada de Transferência'; deveria ser saída/aplicação
+  financeira."_ → **falso-positivo**.
+
+### Diagnóstico (causa raiz — **CONFIRMADA**)
+
+A anomalia vem da **Camada 1 da qualificação** (S19) — o check semântico via Claude em
+[`qualification/semantic.py`](../../apps/api/app/modules/reconciliations/qualification/semantic.py).
+O modelo recebe `(descricao_extrato, fornecedor_omie, categoria_omie, valor)` e decide
+`ok | suspeita | incoerente`.
+
+**O payload NÃO informa o tipo da conta** (`_build_user_payload` manda só descrição/fornecedor/
+categoria/valor — nada diz que é conta aplicação/CDB). E o `_SYSTEM_PROMPT` assume a **perspectiva
+da conta corrente**, onde "APLICACAO" = dinheiro saindo:
+
+> "o sinal indica natureza (negativo=saída, positivo=entrada)... Categoria de receita em valor
+> negativo (ou vice-versa) → incoerente."
+
+Na **conta aplicação (CDB) a perspectiva é invertida**: APLICACAO = ENTRADA (+) e RESGATE =
+SAÍDA (−). A IA vê a palavra "APLICACAO" (que associa a saída) com valor POSITIVO + categoria
+"Entrada de Transferência", lê como contradição e marca **incoerente** — sendo que está tudo certo.
+
+**Conclusão:** falso-positivo da qualificação porque a IA não sabe que a conta é de aplicação.
+
+### Opções de fix
+
+- **(a) Dar contexto de conta à qualificação.** Passar o tipo da conta no payload + regra no
+  `_SYSTEM_PROMPT`: _"Em conta de aplicação/investimento (CDB), APLICACAO é ENTRADA (+) e RESGATE é
+  SAÍDA (−); transferências entre contas próprias são coerentes."_ Requer identificar a conta como
+  aplicação (Omie `tipo=CA`, já no cache). **← mais correto.**
+- **(b) Pular transferência entre contas próprias da Camada 1.** Categoria "Entrada/Saída de
+  Transferência" não é classificação contábil a auditar (é movimentação interna) → excluir do check.
+- **(c) Não rodar qualificação em conta aplicação (CA).** Mais simples, mas perde a auditoria
+  semântica do resto da conta.
+
+### Decisão
+
+**Pendente** — junto com o #1 (mesma raiz: conta aplicação). Provável fix combinado se virar uma
+"mini-fase aplicação"; ou (a)+(b) pontuais.
