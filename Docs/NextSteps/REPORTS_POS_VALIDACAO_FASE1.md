@@ -17,40 +17,44 @@
 
 ## Índice
 
-| #   | Título                                            | Causa raiz                                                       | Status    |
-| --- | ------------------------------------------------- | ---------------------------------------------------------------- | --------- |
-| 1   | Resgate de conta aplicação vira "sem Omie"        | Tolerância de valor R$ 0,01 não absorve o rendimento do resgate  | 🔴 Aberto |
-| 2   | Qualificação (IA) marca APLICACAO como incoerente | IA não sabe que é conta aplicação (semântica entrada/saída ⇄)    | 🔴 Aberto |
-| 3   | CSV grande (Banco Inter) falha no parse           | Truncamento do output da IA (max_tokens=8192 < ~220 linhas)      | 🔴 Aberto |
-| 4   | XLSX (DM) extrai só 1 de ~20 transações           | `_xlsx_to_text` lê só ~3 linhas (openpyxl read_only + dimension) | 🔴 Aberto |
+| #   | Título                                            | Causa raiz                                                          | Status            |
+| --- | ------------------------------------------------- | ------------------------------------------------------------------- | ----------------- |
+| 1   | Resgate de conta aplicação vira "sem Omie"        | IA extrai o valor BRUTO; Omie usa o LÍQUIDO creditado (dif. IOF+IR) | 🔴 Aberto         |
+| 2   | Qualificação (IA) marca APLICACAO como incoerente | IA não sabe que é conta aplicação (semântica entrada/saída ⇄)       | 🔴 Aberto         |
+| 3   | CSV grande (Banco Inter) falha no parse           | Truncamento do output da IA (max_tokens=8192 < ~220 linhas)         | 🟢 Corrigido (PR) |
+| 4   | XLSX (DM) extrai só 1 de ~20 transações           | `_xlsx_to_text` lê só ~3 linhas (openpyxl read_only + dimension)    | 🟢 Corrigido (PR) |
 
-> **Raízes distintas:** #1 e #2 = raiz "conta aplicação" (abaixo). **#3 e #4 = robustez da extração**
-> (cada um por um motivo diferente: #3 trunca o _output_ por excesso de linhas; #4 lê _input_
-> incompleto do XLSX). Juntos reforçam a opção de um **parser determinístico** p/ CSV/XLSX
-> estruturado — ver fix (c)/(b) dos dois.
+> **Raízes (revisado 27/06):** **#2** = semântica de "conta aplicação" (a IA não sabe que
+> APLICACAO=entrada / RESGATE=saída). **#1, #3 e #4 = extração** — #1 a IA pega a coluna de valor
+> errada (bruto vs líquido) no extrato de CDB; #3 trunca o _output_ por excesso de linhas; #4 lê
+> _input_ incompleto do XLSX. _(O #1 era classificado junto do #2 como "conta aplicação"; a correção
+> mostrou que é problema de extração.)_ Os de extração reforçam a ideia de um **parser determinístico**
+> p/ CSV/XLSX estruturado + extração mais precisa de extratos com várias colunas de valor.
 
-## ⭐ Causa raiz comum (reports #1 e #2)
+## ⭐ Sobre conta aplicação (reports #1 e #2)
 
-Os dois reports são sintomas da **mesma raiz-tema: o sistema não trata "Conta Aplicação" (Omie
-`tipo=CA`) como um tipo de conta próprio.** Hoje `session_account_type_from_omie_tipo` mapeia só
-`CR → credit_card`; **`CA` cai em `checking`** — ou seja, a aplicação é tratada como conta corrente,
-mas a semântica dela é diferente:
+> **Revisão 27/06:** estes dois NÃO compartilham mais a mesma causa raiz. A 1ª análise os juntou em
+> "o sistema não trata Conta Aplicação como tipo próprio"; ao reexaminar, **só o #2 é semântica de
+> aplicação** — o **#1 é extração** (a IA pega a coluna de valor errada no extrato do CDB). Ainda
+> ambos aparecem em conta de aplicação, então valem o mesmo contexto, mas os fixes são diferentes.
 
-- **Sinal invertido:** numa aplicação, **APLICACAO = entrada (+)** e **RESGATE = saída (−)** (o
-  oposto da conta corrente). → quebra a **qualificação** (#2).
-- **Resgate carrega rendimento:** o valor do resgate no banco ≠ valor da transferência no Omie. →
-  quebra o **matching** (#1).
+- **#2 — semântica:** numa aplicação, **APLICACAO = entrada (+)** e **RESGATE = saída (−)** (o oposto
+  da conta corrente); a IA da qualificação não sabe disso. Fix = dar contexto de conta à qualificação.
+  _(Hoje `session_account_type_from_omie_tipo` mapeia só `CR → credit_card`; `CA` cai em `checking` —
+  então a aplicação é tratada como conta corrente. Identificar `tipo=CA` ajuda neste e em futuros casos.)_
+- **#1 — extração:** o valor que move a conta (e que o Omie registra) é o **líquido creditado**; a IA
+  extraiu o **bruto**. Fix = extrair o valor líquido. Mais perto de #3/#4 (robustez de extração).
 
-**Implicação:** assim como _cartão_ virou a FASE 1, **conta aplicação pode merecer tratamento
-próprio** (um `account_type='investment'` derivado de `tipo=CA`, com regras de matching +
-qualificação específicas). Decidir o escopo com o usuário/Galhardo antes de codar — pode ser um
-fix pontual (b/c de cada report) ou uma "mini-fase aplicação".
+**Implicação:** ainda pode fazer sentido um **tratamento próprio de conta aplicação** (`tipo=CA`)
+para a qualificação (#2); o #1 resolve-se melhorando a extração. Decidir escopo com o grupo/Galhardo.
 
 ---
 
 ## Report #1 — Resgate de conta aplicação vira "sem Omie"
 
-**Status:** 🔴 Aberto (diagnóstico confirmado; fix depende de decisão de produto + reports 2–4).
+**Status:** 🔴 Aberto. **⚠️ CORREÇÃO 27/06:** a 1ª análise atribuiu a diferença a "rendimento" —
+**estava errado**. O extrato do CDB prova que a diferença é **imposto (IOF + IR)**, e a raiz real é
+**a IA extrair a coluna de valor errada** (bruto em vez do líquido creditado). Ver abaixo.
 
 ### Report
 
@@ -97,39 +101,54 @@ sempre **um pouco maior** que o da transferência no Omie:
 O matcher exige `|a − b| ≤ R$ 0,01` (CLAUDE.md §5.1, **regra dura, não parametrizável**) → não
 pareia → cada lado vira "sem Omie" / "Omie sem arquivo".
 
-**Por que o valor difere:** muito provavelmente **rendimento (e/ou IR) do resgate** — no resgate
-do CDB o banco credita _principal + rendimento_, mas o Omie registra a transferência por outro
-valor (provavelmente o principal). A diferença cresce com valor/tempo aplicado, coerente com
-rendimento. _(A confirmar com o financeiro/Galhardo — o "1 conciliado" provavelmente é um resgate
-sem rendimento acumulado, por isso bateu exato.)_
+**Por que o valor difere — é IMPOSTO (IOF + IR), NÃO rendimento.** O extrato do CDB (mandado no #2)
+tem **várias colunas de valor**: `Valor(*)` (bruto, já com rendimento acumulado) · `IOF` · `IR` ·
+`Valor creditado` (líquido) · `Valor principal`. A **IA extraiu o `Valor(*)` (bruto)**; o que de
+fato sai pra conta corrente — e o **Omie registra — é o `Valor creditado` (líquido = bruto − IOF − IR)**:
 
-**Conclusão:** o sistema está tecnicamente "certo" (os valores realmente divergem), mas para
-**resgate de conta aplicação** essa diferença é esperada → vira **falso-positivo**.
+| Data  | Valor bruto (extraído) | IOF   | IR     | Valor creditado (= Omie) | Diferença |
+| ----- | ---------------------- | ----- | ------ | ------------------------ | --------- |
+| 11/05 | 15.100,96              | —     | 100,11 | 15.000,85                | IR        |
+| 25/05 | 5.011,09               | 9,94  | 0,70   | 5.000,45                 | IOF + IR  |
+| 27/05 | 33.092,97              | 84,68 | 8,16   | 33.000,13                | IOF + IR  |
+
+O **rendimento** (ex.: ~444,96 em 11/05 = bruto − principal 14.656,00) está embutido nos **dois**
+valores — **não é a diferença**.
+
+⚠️ **Generalização (não assumir "imposto" sempre):** a raiz é a IA **escolher a coluna de valor
+errada** num extrato com múltiplas colunas (bruto vs líquido). No CDB Itaú a diferença é IOF+IR; em
+**outros extratos/bancos** a diferença pode ter **outra natureza** (rendimento, tarifas, IOF, IR,
+etc.). O fix correto não é codar "subtrair imposto", e sim **conciliar pelo valor líquido
+efetivamente movimentado** (o que o Omie registra).
+
+**Conclusão:** **não é lacuna de tolerância nem regra de conta aplicação** — é **extração da coluna
+errada**. Se a extração pegar o valor líquido creditado, os valores batem exato e conciliam.
 
 ### Opções de fix
 
-- **(a) Tolerância maior só para "Transferência".** Casar lançamentos de categoria _Saída/Entrada
-  de Transferência_ por data + faixa/% de valor, registrando a diferença como rendimento.
-  ⚠️ Hoje o `fetch_realized` **não carrega a categoria** do Omie pro matcher → mexe em fetch +
-  matcher + classificação de anomalia. Afrouxar a tolerância tem que ser cirúrgico (só
-  transferência), senão gera falso-match no resto.
-- **(b) Transferência entre contas próprias não é anomalia crítica.** Marcar como
-  "conciliado com divergência de valor/rendimento" (análogo ao `conciliado_data_divergente`, mas
-  para valor) em vez de "sem Omie". **← inclinação atual.**
-- **(c) Manter** e orientar conferência manual do resgate (a diferença é rendimento a contabilizar).
+- **(a) Extrair o valor LÍQUIDO efetivamente movimentado.** Em extrato com várias colunas de valor
+  (CDB/aplicação), usar o "valor creditado/debitado" — bate exato com o Omie, concilia sem tolerância.
+  Via prompt da extração (ensinar a IA a pegar o valor que de fato move a conta) e/ou parser
+  determinístico (liga com #3/#4). **← caminho mais correto.**
+- **(b) Matcher tolera a diferença e a registra.** Marcar "conciliado com divergência" (análogo ao
+  `conciliado_data_divergente`, mas pra valor) em vez de "sem Omie". Mais frágil — afrouxar valor é
+  regra dura (§5.1) e a diferença varia por extrato; só se (a) não for viável.
+- **(c) Confirmar a contabilização com o financeiro:** o IOF/IR retido e o rendimento bruto são (ou
+  não) lançados no Omie? Isso decide se viram lançamentos a conciliar à parte ou se são ignorados.
 
 ### Decisão
 
-**Pendente.** Precisa de (1) alinhamento com Galhardo/produto — _como a Hologram quer que resgate
-de aplicação concilie? o rendimento aparece como quê?_ — e (2) verificar se os reports 2–4
-compartilham a mesma causa raiz (aplicação/transferência/rendimento) antes de desenhar o fix.
-Ver **"Causa raiz comum"** no topo — #1 e #2 são a mesma raiz (conta aplicação não tratada).
+**Pendente.** Confirmar com o grupo: (1) a conciliação do resgate é pelo **valor líquido creditado**
+(o que o Omie registra)? (2) IOF/IR e rendimento têm lançamento próprio no Omie? Fix provável: **(a)
+extrair o valor líquido**. _(Atenção: a diferença ser IOF+IR é específica deste CDB Itaú — em outros
+extratos a diferença pode ter outra natureza; não generalizar "imposto".)_
 
 ---
 
 ## Report #2 — Qualificação (IA) marca APLICACAO como incoerente em conta aplicação
 
-**Status:** 🔴 Aberto (diagnóstico confirmado; mesma raiz-tema do #1 — ver "Causa raiz comum").
+**Status:** 🔴 Aberto (diagnóstico confirmado; semântica de conta aplicação — ver "Sobre conta
+aplicação". Obs.: o #1, após correção, NÃO é mais a mesma raiz).
 
 ### Report
 
@@ -139,8 +158,9 @@ Ver **"Causa raiz comum"** no topo — #1 e #2 são a mesma raiz (conta aplicaç
 - **Mesma conciliação do #1:** Horus · `Itaú CDB-DI` (aplicação) · Maio/2026.
 - **Lançamento:** `18/05 · APLICACAO · +R$ 207.000,00`. No extrato Itaú (CDB) é uma APLICACAO; no
   Omie é "Entrada de Transferência" +207.000,00, Conciliado. **Ambos corretos** — aplicar dinheiro
-  ENTRA no CDB (positivo). _(Este foi o "1 conciliado" do #1 — casou exato porque aplicação não
-  tem rendimento embutido.)_
+  ENTRA no CDB (positivo). _(Este foi o "1 conciliado" do #1 — casou exato porque a APLICACAO é só o
+  principal depositado, sem IOF/IR/rendimento embutido; é o resgate que tem a diferença, não a
+  aplicação.)_
 - **Sintoma:** anomalia crítica **"Qualificação incoerente (IA)"**: _"APLICACAO (saída para
   investimento) classificada como 'Entrada de Transferência'; deveria ser saída/aplicação
   financeira."_ → **falso-positivo**.
@@ -178,15 +198,16 @@ SAÍDA (−). A IA vê a palavra "APLICACAO" (que associa a saída) com valor PO
 
 ### Decisão
 
-**Pendente** — junto com o #1 (mesma raiz: conta aplicação). Provável fix combinado se virar uma
-"mini-fase aplicação"; ou (a)+(b) pontuais.
+**Pendente.** Fix = dar contexto de conta à qualificação (opção (a)+(b)). Não depende do #1 (raízes
+diferentes após a correção). Confirmar com o grupo só o entendimento contábil (APLICACAO=entrada,
+RESGATE=saída em conta de aplicação).
 
 ---
 
 ## Report #3 — CSV grande (Banco Inter) falha no parse com mensagem enganosa
 
-**Status:** 🔴 Aberto (causa raiz **corroborada por log de prod**; falta só o teste do CSV curto p/
-cravar 100%). **Raiz independente de #1/#2.**
+**Status:** 🟢 Corrigido (em PR p/ `feat/fase1-cartao`). Causa corroborada por log de prod; fix =
+teto de tokens + detecção de truncamento. **Raiz independente de #1/#2.**
 
 ### Report
 
@@ -247,16 +268,22 @@ cravar 100%). **Raiz independente de #1/#2.**
 
 ### Decisão
 
-**Pendente.** Inclinação: **(a)+(d)** como fix rápido (sobe o teto + melhora erro/telemetria) e
-avaliar **(b)** como solução robusta de longo prazo. Confirmar o modo de falha com o log antes.
+**✅ Implementado (a)+(d)** — commit `b90f1fe`, branch `fix/extracao-robustez` → PR p/ `feat/fase1-cartao`:
+
+- `_MAX_OUTPUT_TOKENS` 8192 → **32768** (cobre ~480 linhas; é só teto, não custa mais p/ extrato pequeno).
+- `extract_movements` detecta `stop_reason=max_tokens` → loga `anthropic_extract_truncated` + devolve
+  erro acionável _"envie um período menor / divida em quinzenas"_ (some a msg enganosa de "senha").
+- Teste unitário do truncamento. Gate verde (544 pytest, sem regressão).
+- **(b) parser determinístico** fica como melhoria futura (não necessária agora — o teto resolve os
+  casos reais; o erro acionável cobre o extremo).
 
 ---
 
 ## Report #4 — XLSX (DM) extrai só 1 de ~20 transações ("só as 3 primeiras linhas")
 
-**Status:** 🔴 Aberto (causa provável: rendering do XLSX lê só ~3 linhas; corroborado por log,
-confirmar mecanismo com re-save). **Raiz: robustez da extração (junto com #3, mas mecanismo
-diferente).**
+**Status:** 🟢 Corrigido (em PR p/ `feat/fase1-cartao`). Causa **confirmada por repro** (openpyxl
+`read_only` + `<dimension>` errada); fix = remover `read_only`. **Raiz: robustez da extração (junto
+com #3, mecanismo diferente).**
 
 ### Report
 
@@ -303,7 +330,11 @@ diferente).**
 
 ### Decisão
 
-**Pendente.** (a) conserta o #4 já; mas **#3+#4 juntos reforçam (b)** — a extração via IA se mostrou
-frágil em extrato real (trunca quando é grande, lê incompleto quando é XLSX). Um parser determinístico
-p/ os formatos estruturados (CSV/XLSX) seria a solução de fundo; IA fica para PDF/fatura (onde é
-insubstituível). Decidir escopo com o usuário.
+**✅ Implementado (a)** — commit `8107584`, branch `fix/extracao-robustez` → PR p/ `feat/fase1-cartao`:
+
+- `_xlsx_to_text` sem `read_only=True` → lê todas as células de fato (não depende da `<dimension>`).
+- **Causa confirmada por repro** (script `repro_xlsx_dimension.py`): com `<dimension>` adulterada,
+  `read_only=True` → 1 linha; `read_only=False` → 40. Teste unitário de regressão fixa o comportamento.
+- Gate verde (544 pytest, incl. `test_parse_endpoint` — sem regressão no caminho XLSX normal).
+- **(b) parser determinístico** fica como melhoria futura (a extração via IA é frágil em extrato real —
+  vale reconsiderar um parser p/ CSV/XLSX estruturado depois; IA fica essencial p/ PDF/fatura).

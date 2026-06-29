@@ -67,8 +67,9 @@ class _TextBlock:
 class _Message:
     """Mensagem com `.content` lista de blocks — formato consumido pelo client."""
 
-    def __init__(self, blocks: list[Any]) -> None:
+    def __init__(self, blocks: list[Any], *, stop_reason: str | None = None) -> None:
         self.content = blocks
+        self.stop_reason = stop_reason
 
 
 class _FakeMessages:
@@ -366,6 +367,29 @@ class TestToolUseEdgeCases:
                 mime_type="application/pdf",
                 document_kind="x",
             )
+
+    async def test_max_tokens_stop_reason_raises_truncation_error(self) -> None:
+        """Report #3: extrato grande estoura o teto de tokens → `stop_reason`
+        vira `max_tokens` e o `tool_use` volta truncado. O client detecta e
+        devolve um erro ACIONÁVEL ('divida o período'), não a mensagem genérica
+        de 'íntegro/sem proteção por senha' (que confunde no caso de CSV)."""
+        fake = _FakeAnthropic(
+            side_effect=_Message(
+                [_ToolUseBlock(name=EXTRACT_MOVEMENTS_TOOL_NAME, payload=_valid_payload())],
+                stop_reason="max_tokens",
+            )
+        )
+        client = _make_client(fake)
+
+        with pytest.raises(AnthropicParseError) as exc_info:
+            await client.extract_movements(
+                content=b"data;data;data\n" * 100,
+                mime_type="text/csv",
+                document_kind="extrato bancário em CSV",
+            )
+        # Mensagem ao usuário é a específica de truncamento, não a genérica.
+        assert "período menor" in exc_info.value.user_message
+        assert "senha" not in exc_info.value.user_message
 
     async def test_brazilian_date_in_tool_input_raises_parse_error(self) -> None:
         """Modelo desobedeceu instruções de data — schema rejeita; client mapeia."""
