@@ -75,6 +75,7 @@ async def qualify_session(
     cache: OmieLancamentoCache,
     anthropic_client: AnthropicClient,
     encryption_key: SecretStr,
+    account_type: str = "checking",
 ) -> QualificationReport:
     """Executa as 3 camadas e persiste anomalias na transação atual.
 
@@ -131,7 +132,9 @@ async def qualify_session(
         return QualificationReport(skipped_reason="no_pairs_built")
 
     # 5. Roda as 3 camadas — cada uma independente.
-    semantic_results, tokens, calls = await _run_semantic(pairs, anthropic_client=anthropic_client)
+    semantic_results, tokens, calls = await _run_semantic(
+        pairs, anthropic_client=anthropic_client, account_type=account_type
+    )
     historical_results = await _run_historical(
         db,
         client_id=client_id,
@@ -243,9 +246,12 @@ async def _run_semantic(
     pairs: list[QualificationPair],
     *,
     anthropic_client: AnthropicClient,
+    account_type: str,
 ) -> tuple[list[SemanticResult], TokenUsage, int]:
     try:
-        return await semantic.analyze_pairs(pairs, anthropic_client=anthropic_client)
+        return await semantic.analyze_pairs(
+            pairs, anthropic_client=anthropic_client, account_type=account_type
+        )
     except Exception:
         log.exception("qualification_semantic_failed", pairs=len(pairs))
         return [], TokenUsage(), 0

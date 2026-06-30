@@ -336,6 +336,7 @@ async def _execute_processing(
             client_id=client.id,
             match_pairs=match_pairs_uuid,
             cache=lancamento_cache,
+            account_type=session_obj.account_type,
         )
         anomaly_count = structural_count + qualification_count
 
@@ -444,6 +445,7 @@ async def _run_qualification_safely(
     client_id: UUID,
     match_pairs: list[tuple[UUID, int]],
     cache: OmieLancamentoCache,
+    account_type: str,
 ) -> int:
     """Roda a qualificação (S19) com try/except total — falha NÃO derruba.
 
@@ -490,6 +492,7 @@ async def _run_qualification_safely(
                 cache=cache,
                 anthropic_client=anthropic,
                 encryption_key=settings.OMIE_ENCRYPTION_KEY,
+                account_type=account_type,
             )
         log.info(
             "qualification_done",
