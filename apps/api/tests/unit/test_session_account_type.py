@@ -1,8 +1,9 @@
-"""Unit — mapeamento `tipo` Omie → `account_type` da sessão (BACK 1.3).
+"""Unit — mapeamento `tipo` Omie → `account_type` da sessão (BACK 1.3 + aplicação).
 
-Regra cravada (Risco #1 da FASE 1): só `CR` (Cartão de Crédito) → 'credit_card';
-qualquer outro tipo — incluindo `CA` (Conta Aplicação) e None — → 'checking'.
-Mapear `CA` para cartão era o bug M-1 (auditoria 20/05/2026).
+Regra: `CR` (Cartão de Crédito) → 'credit_card'; `CA` (Conta Aplicação) →
+'investment' (mini-fase conta aplicação, 27/06); qualquer outro tipo —
+incluindo None — → 'checking'. ⚠️ Mapear `CA` para CARTÃO era o bug M-1
+(auditoria 20/05/2026) — segue proibido; `CA` é investimento.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from app.modules.reconciliations.service import session_account_type_from_omie_t
     [
         ("CR", "credit_card"),  # Cartão de Crédito — único que vira cartão
         ("CC", "checking"),  # Conta Corrente
-        ("CA", "checking"),  # Conta Aplicação (investimento) — NÃO é cartão (M-1)
+        ("CA", "investment"),  # Conta Aplicação (investimento) — NUNCA cartão (M-1)
         ("CX", "checking"),  # Caixinha
         ("PG", "checking"),  # qualquer outro código Omie
         (None, "checking"),  # conta não cacheada

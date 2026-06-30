@@ -528,13 +528,16 @@ class TestCreateReconciliationAccountType:
         )
         assert sess.account_type == "checking"
 
-    async def test_investment_account_maps_to_checking_not_card(
+    async def test_investment_account_maps_to_investment_not_card(
         self,
         client_with_db: AsyncClient,
         db_session: AsyncSession,
         stub_enqueue: list[UUID],
     ) -> None:
-        """Guarda anti-M-1: `CA` é Conta Aplicação (investimento), NÃO cartão."""
+        """`CA` (Conta Aplicação) → 'investment' (mini-fase conta aplicação).
+
+        Guarda anti-M-1: continua NÃO sendo cartão — `CA` é investimento.
+        """
         admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
         cliente = await _seed_client(db_session, name="X", creator=admin)
         await _seed_account(db_session, client=cliente, omie_conta_id=99, tipo="CA")
@@ -543,7 +546,7 @@ class TestCreateReconciliationAccountType:
         sess = await self._create_and_load(
             client_with_db, db_session, cliente=cliente, omie_conta_id=99, file_hash=_hex64("ca")
         )
-        assert sess.account_type == "checking"
+        assert sess.account_type == "investment"
 
     async def test_uncached_account_defaults_to_checking(
         self,

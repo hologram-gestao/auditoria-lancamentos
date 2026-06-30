@@ -1,5 +1,6 @@
 /**
- * Testes do header da revisão (FRONT 1.8 — badge de tipo + título de cartão).
+ * Testes do header da revisão (FRONT 1.8 — badge de tipo + título).
+ * Mini-fase conta aplicação: terceiro tipo "Conta Aplicação" (verde).
  */
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
@@ -22,6 +23,7 @@ describe('ReviewHeader', () => {
         referenceMonthLabel="Abril/2026"
         accountName="Nubank PJ"
         isCard
+        isInvestment={false}
         counts={counts}
       />,
     );
@@ -40,6 +42,7 @@ describe('ReviewHeader', () => {
         referenceMonthLabel="Abril/2026"
         accountName="Sicredi 91263-1"
         isCard={false}
+        isInvestment={false}
         counts={counts}
       />,
     );
@@ -47,6 +50,27 @@ describe('ReviewHeader', () => {
     expect(
       screen.getByRole('heading', {
         name: 'Conciliação · Conta Corrente · Sicredi 91263-1 · Abril/2026',
+      }),
+    ).toBeVisible();
+  });
+
+  it('aplicação: badge verde "Conta Aplicação" + título "Conciliação · Aplicação · …"', () => {
+    render(
+      <ReviewHeader
+        clientId="c1"
+        clientName="Cliente X"
+        sessionId="s1"
+        referenceMonthLabel="Maio/2026"
+        accountName="Itaú CDB-DI"
+        isCard={false}
+        isInvestment
+        counts={counts}
+      />,
+    );
+    expect(screen.getByText('Conta Aplicação')).toBeVisible();
+    expect(
+      screen.getByRole('heading', {
+        name: 'Conciliação · Aplicação · Itaú CDB-DI · Maio/2026',
       }),
     ).toBeVisible();
   });
@@ -60,6 +84,7 @@ describe('ReviewHeader', () => {
         referenceMonthLabel="Abril/2026"
         accountName={undefined}
         isCard
+        isInvestment={false}
         counts={counts}
       />,
     );

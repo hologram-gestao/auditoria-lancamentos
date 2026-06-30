@@ -196,6 +196,16 @@ class TestCardInvoiceExtraction:
         # Regra de não incluir o pagamento da fatura.
         assert "pagamento" in p
 
+    def test_system_prompt_cobre_regras_de_aplicacao(self) -> None:
+        """Report #1: extrato de aplicação usa o VALOR LÍQUIDO (não o bruto)."""
+        p = SYSTEM_PROMPT.lower()
+        assert "investment" in p
+        assert "líquido" in p
+        assert "valor creditado" in p
+        # Direção invertida (APLICACAO=entrada, RESGATE=saída).
+        assert "aplicacao" in p
+        assert "resgate" in p
+
     def test_tool_transactions_description_menciona_cartao(self) -> None:
         desc = EXTRACT_MOVEMENTS_TOOL["input_schema"]["properties"]["transactions"][
             "description"

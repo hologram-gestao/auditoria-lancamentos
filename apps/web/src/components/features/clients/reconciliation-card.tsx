@@ -66,6 +66,7 @@ export function ReconciliationCard({ clientId, session, accountName }: Reconcili
   const isProcessing = session.status === 'processing';
   const isError = session.status === 'error';
   const isCard = session.account_type === 'credit_card';
+  const isInvestment = session.account_type === 'investment';
   const showCounters = session.status === 'done' || session.status === 'reviewing';
 
   async function handleReprocess() {
@@ -129,6 +130,17 @@ export function ReconciliationCard({ clientId, session, accountName }: Reconcili
                 )}
               >
                 Cartão de Crédito
+              </span>
+            )}
+            {isInvestment && (
+              <span
+                className={cn(
+                  'inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold ring-1 ring-inset',
+                  'bg-emerald-50 text-emerald-700 ring-emerald-200',
+                  'dark:bg-emerald-950 dark:text-emerald-300 dark:ring-emerald-900',
+                )}
+              >
+                Conta Aplicação
               </span>
             )}
           </div>

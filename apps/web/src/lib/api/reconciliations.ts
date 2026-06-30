@@ -60,10 +60,10 @@ export async function checkDuplicate(params: CheckDuplicateParams): Promise<Chec
  * Datas: `YYYY-MM-DD` (ISO 8601 estrito, parsing manual no front pra
  * evitar timezone-shift do `new Date('2026-04-01')`).
  *
- * `account_type`: union literal idêntico ao back. Se um dia o back aceitar
- * um terceiro tipo, o `Literal` lá explode antes de chegar aqui.
+ * `account_type`: union literal idêntico ao back (checking / credit_card /
+ * investment). Se o back aceitar um novo tipo, o `Literal` lá explode primeiro.
  */
-export type ParsedAccountType = 'checking' | 'credit_card';
+export type ParsedAccountType = 'checking' | 'credit_card' | 'investment';
 
 export interface ParsedTransaction {
   /** Data ISO 8601 (YYYY-MM-DD). */
