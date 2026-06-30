@@ -1,15 +1,10 @@
 name: CI
 
-# A branch de integração da FASE 1 (`feat/fase1-cartao`) entra nos triggers para
-# que cada task-PR contra ela rode o mesmo gate de qualidade da `main` (ruff +
-# mypy + pytest + audit). NÃO está no `deploy-dev.yml` de propósito: a integração
-# não pode auto-deployar pro Cloud Run dev (os sócios testam a FASE 0 lá).
-# Remover esta branch dos triggers no PR final `feat/fase1-cartao → main`.
 on:
   push:
-    branches: [main, feat/fase1-cartao]
+    branches: [main]
   pull_request:
-    branches: [main, feat/fase1-cartao]
+    branches: [main]
 
 # Cancela runs antigos da mesma branch em push novo
 concurrency:
