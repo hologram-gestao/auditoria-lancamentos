@@ -57,20 +57,23 @@ class ReconciliationStatus(StrEnum):
 
 
 class SessionAccountType(StrEnum):
-    """Tipo (normalizado) da conta conciliada na sessão — FASE 1.
+    """Tipo (normalizado) da conta conciliada na sessão — FASE 1 + conta aplicação.
 
     NÃO é o código cru do Omie (`CC`/`CR`/`CA`/…, esse vive em
     `omie_accounts_cache.account_type`). É a classificação que o produto
-    usa: conta corrente vs. cartão. Derivado do `tipo` Omie da conta
-    selecionada em `create_session_with_entries` — apenas `CR` (Cartão de
-    Crédito) → `credit_card`; o resto → `checking`.
+    usa. Derivado do `tipo` Omie da conta selecionada em
+    `create_session_with_entries`: `CR` (Cartão de Crédito) → `credit_card`;
+    `CA` (Conta Aplicação) → `investment`; o resto → `checking`.
 
-    A UI (badge "Cartão", filtros) e o export (coluna "Data Omie") ramificam
-    neste campo; a regra de tolerância de data (FASE 1) é a mesma p/ os dois.
+    A UI (badge, filtros, título) e o export ramificam neste campo; a regra de
+    tolerância de data (FASE 1) é a mesma p/ todos. O `investment` ainda dirige
+    a semântica de aplicação (APLICACAO=entrada/RESGATE=saída) na qualificação
+    e a extração do valor líquido (mini-fase conta aplicação).
     """
 
     CHECKING = "checking"
     CREDIT_CARD = "credit_card"
+    INVESTMENT = "investment"
 
 
 class ReconciliationSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):

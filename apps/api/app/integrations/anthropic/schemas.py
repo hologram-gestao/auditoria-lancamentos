@@ -79,7 +79,7 @@ class ExtractedStatement(BaseModel):
     model_config = ConfigDict(strict=False)
 
     bank_name: str = Field(min_length=1)
-    account_type: Literal["checking", "credit_card"]
+    account_type: Literal["checking", "credit_card", "investment"]
     period_start: _date_type
     period_end: _date_type
     opening_balance: Decimal

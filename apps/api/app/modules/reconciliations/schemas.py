@@ -73,7 +73,7 @@ class ReconciliationStatementInput(BaseModel):
     """
 
     bank_name: str = Field(min_length=1, max_length=200)
-    account_type: Literal["checking", "credit_card"]
+    account_type: Literal["checking", "credit_card", "investment"]
     period_start: _date
     period_end: _date
     opening_balance: Decimal

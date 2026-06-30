@@ -38,16 +38,22 @@ logger = get_logger(__name__)
 def session_account_type_from_omie_tipo(omie_tipo: str | None) -> str:
     """Mapeia o `tipo` Omie da conta selecionada → `account_type` da sessão.
 
-    Regra cravada (Risco #1 da FASE 1, validado com dado real da Austral em
-    18/06): **apenas** `CR` (Cartão de Crédito) vira `credit_card`. Qualquer
-    outro tipo — incluindo `CA` (Conta Aplicação) e `None` (conta não
-    cacheada) — vira `checking`.
+    Regra:
+        - `CR` (Cartão de Crédito) → `credit_card` (Risco #1 da FASE 1,
+          validado com dado real da Austral em 18/06).
+        - `CA` (Conta Aplicação) → `investment` (mini-fase conta aplicação,
+          27/06): a aplicação inverte entrada/saída vs conta corrente e o
+          resgate precisa do valor líquido — a qualificação e a extração
+          ramificam nisso.
+        - Qualquer outro tipo — incluindo `None` (conta não cacheada) → `checking`.
 
     ⚠️ NUNCA mapear `CA` para cartão: era exatamente o bug M-1 (auditoria
     20/05/2026) — `CA` é investimento, não cartão.
     """
     if omie_tipo == OmieAccountType.CREDIT_CARD.value:  # "CR"
         return SessionAccountType.CREDIT_CARD.value
+    if omie_tipo == OmieAccountType.INVESTMENT.value:  # "CA"
+        return SessionAccountType.INVESTMENT.value
     return SessionAccountType.CHECKING.value
 
 
