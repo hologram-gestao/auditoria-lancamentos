@@ -65,11 +65,13 @@ export function formatBRDate(iso: string): string {
 }
 
 /** Mapeia o `account_type` do parse IA para rótulo em PT-BR. */
-export function formatAccountType(type: 'checking' | 'credit_card'): string {
+export function formatAccountType(type: 'checking' | 'credit_card' | 'investment'): string {
   switch (type) {
     case 'checking':
       return 'Conta Corrente';
     case 'credit_card':
       return 'Cartão de Crédito';
+    case 'investment':
+      return 'Conta Aplicação';
   }
 }

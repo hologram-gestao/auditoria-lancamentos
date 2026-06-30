@@ -36,6 +36,8 @@ interface ReviewHeaderProps {
   accountName: string | undefined;
   /** FRONT 1.8: cartão de crédito → badge azul + título "Cartão". */
   isCard: boolean;
+  /** Conta aplicação (CA) → badge verde + título "Aplicação". */
+  isInvestment: boolean;
   /** Status vivo da sessão para contadores. */
   counts: {
     conciliated: number;
@@ -52,17 +54,16 @@ export function ReviewHeader({
   referenceMonthLabel,
   accountName,
   isCard,
+  isInvestment,
   counts,
 }: ReviewHeaderProps) {
   const exportMutation = useExportReconciliation(sessionId);
   // Título: "Conciliação · {tipo} · {conta} · {Mês/Ano}" (FRONT 1.8). Segmentos
   // vazios (conta ainda hidratando, mês ausente) são omitidos.
-  const title = [
-    'Conciliação',
-    isCard ? 'Cartão' : 'Conta Corrente',
-    accountName,
-    referenceMonthLabel,
-  ]
+  let accountTypeLabel = 'Conta Corrente';
+  if (isCard) accountTypeLabel = 'Cartão';
+  else if (isInvestment) accountTypeLabel = 'Aplicação';
+  const title = ['Conciliação', accountTypeLabel, accountName, referenceMonthLabel]
     .filter((seg): seg is string => Boolean(seg))
     .join(' · ');
 
@@ -104,7 +105,7 @@ export function ReviewHeader({
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex flex-wrap items-center gap-2">
-          <AccountTypeBadge isCard={isCard} />
+          <AccountTypeBadge isCard={isCard} isInvestment={isInvestment} />
           <h1 className="text-2xl font-semibold">{title}</h1>
         </div>
 
@@ -162,18 +163,28 @@ export function ReviewHeader({
   );
 }
 
-/** Badge do tipo de conta (FRONT 1.8): Conta Corrente cinza / Cartão azul. */
-function AccountTypeBadge({ isCard }: { isCard: boolean }) {
+/** Badge do tipo de conta: Conta Corrente cinza / Cartão azul / Aplicação verde. */
+function AccountTypeBadge({ isCard, isInvestment }: { isCard: boolean; isInvestment: boolean }) {
+  let label = 'Conta Corrente';
+  let colorClass =
+    'bg-slate-100 text-slate-700 ring-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700';
+  if (isCard) {
+    label = 'Cartão de Crédito';
+    colorClass =
+      'bg-blue-50 text-blue-700 ring-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:ring-blue-900';
+  } else if (isInvestment) {
+    label = 'Conta Aplicação';
+    colorClass =
+      'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:ring-emerald-900';
+  }
   return (
     <span
       className={cn(
         'inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold ring-1 ring-inset',
-        isCard
-          ? 'bg-blue-50 text-blue-700 ring-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:ring-blue-900'
-          : 'bg-slate-100 text-slate-700 ring-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700',
+        colorClass,
       )}
     >
-      {isCard ? 'Cartão de Crédito' : 'Conta Corrente'}
+      {label}
     </span>
   );
 }

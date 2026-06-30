@@ -127,6 +127,8 @@ export function ReviewScreen({ clientId, sessionId }: ReviewScreenProps) {
   }, [clientQuery.data, sessionInfo]);
   // FRONT 1.8: tipo normalizado da sessão ('credit_card' p/ fatura de cartão).
   const isCard = sessionInfo?.account_type === 'credit_card';
+  // Mini-fase conta aplicação ('investment' p/ extrato de CDB/aplicação).
+  const isInvestment = sessionInfo?.account_type === 'investment';
 
   const counts = {
     conciliated: statusQuery.data?.conciliated_count ?? sessionInfo?.conciliated_count ?? 0,
@@ -162,6 +164,7 @@ export function ReviewScreen({ clientId, sessionId }: ReviewScreenProps) {
         referenceMonthLabel={referenceMonthLabel}
         accountName={accountName}
         isCard={isCard}
+        isInvestment={isInvestment}
         counts={counts}
       />
 
