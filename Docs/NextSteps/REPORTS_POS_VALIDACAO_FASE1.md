@@ -17,12 +17,12 @@
 
 ## Índice
 
-| #   | Título                                            | Causa raiz                                                          | Status            |
-| --- | ------------------------------------------------- | ------------------------------------------------------------------- | ----------------- |
-| 1   | Resgate de conta aplicação vira "sem Omie"        | IA extrai o valor BRUTO; Omie usa o LÍQUIDO creditado (dif. IOF+IR) | 🔴 Aberto         |
-| 2   | Qualificação (IA) marca APLICACAO como incoerente | IA não sabe que é conta aplicação (semântica entrada/saída ⇄)       | 🔴 Aberto         |
-| 3   | CSV grande (Banco Inter) falha no parse           | Truncamento do output da IA (max_tokens=8192 < ~220 linhas)         | 🟢 Corrigido (PR) |
-| 4   | XLSX (DM) extrai só 1 de ~20 transações           | `_xlsx_to_text` lê só ~3 linhas (openpyxl read_only + dimension)    | 🟢 Corrigido (PR) |
+| #   | Título                                            | Causa raiz                                                          | Status              |
+| --- | ------------------------------------------------- | ------------------------------------------------------------------- | ------------------- |
+| 1   | Resgate de conta aplicação vira "sem Omie"        | IA extrai o valor BRUTO; Omie usa o LÍQUIDO creditado (dif. IOF+IR) | 🟢 Corrigido (PR)\* |
+| 2   | Qualificação (IA) marca APLICACAO como incoerente | IA não sabe que é conta aplicação (semântica entrada/saída ⇄)       | 🟢 Corrigido (PR)\* |
+| 3   | CSV grande (Banco Inter) falha no parse           | Truncamento do output da IA (max_tokens=8192 < ~220 linhas)         | 🟢 Corrigido (PR)   |
+| 4   | XLSX (DM) extrai só 1 de ~20 transações           | `_xlsx_to_text` lê só ~3 linhas (openpyxl read_only + dimension)    | 🟢 Corrigido (PR)   |
 
 > **Raízes (revisado 27/06):** **#2** = semântica de "conta aplicação" (a IA não sabe que
 > APLICACAO=entrada / RESGATE=saída). **#1, #3 e #4 = extração** — #1 a IA pega a coluna de valor
@@ -45,16 +45,25 @@
 - **#1 — extração:** o valor que move a conta (e que o Omie registra) é o **líquido creditado**; a IA
   extraiu o **bruto**. Fix = extrair o valor líquido. Mais perto de #3/#4 (robustez de extração).
 
-**Implicação:** ainda pode fazer sentido um **tratamento próprio de conta aplicação** (`tipo=CA`)
-para a qualificação (#2); o #1 resolve-se melhorando a extração. Decidir escopo com o grupo/Galhardo.
+**Implicação → ✅ IMPLEMENTADO como "mini-fase conta aplicação"** (decisão do usuário, 27/06; PR
+`feat/conta-aplicacao → feat/fase1-cartao`): introduzido `account_type='investment'` (de `tipo=CA`)
+ponta a ponta — back (enum + mapping CA→investment + schemas), front (badge/título "Conta Aplicação"),
+qualificação (#2: regra de semântica invertida) e extração (#1: valor líquido). Respostas do grupo
+confirmaram: conciliar pelo **valor líquido pago/recebido**; aplicação inverte entrada/saída;
+IOF/IR + rendimento bruto são lançados no Omie no **último dia do mês** (consolidado, não por resgate).
+
+> **\* Status "Corrigido (PR)" de #1 e #2:** o código está pronto e testado (gate verde), mas os fixes
+> mudam o comportamento do **IA** — a prova final é a **validação real na Horus pós-deploy** (#2:
+> some a anomalia "Qualificação incoerente" da APLICACAO; #1: resgates extraem o líquido e conciliam).
 
 ---
 
 ## Report #1 — Resgate de conta aplicação vira "sem Omie"
 
-**Status:** 🔴 Aberto. **⚠️ CORREÇÃO 27/06:** a 1ª análise atribuiu a diferença a "rendimento" —
-**estava errado**. O extrato do CDB prova que a diferença é **imposto (IOF + IR)**, e a raiz real é
-**a IA extrair a coluna de valor errada** (bruto em vez do líquido creditado). Ver abaixo.
+**Status:** 🟢 Corrigido (em PR, validação real pendente). **⚠️ CORREÇÃO 27/06:** a 1ª análise
+atribuiu a diferença a "rendimento" — **estava errado**. O extrato do CDB prova que a diferença é
+**imposto (IOF + IR)**, e a raiz real é **a IA extrair a coluna de valor errada** (bruto em vez do
+líquido creditado). Ver abaixo.
 
 ### Report
 
@@ -138,17 +147,19 @@ errada**. Se a extração pegar o valor líquido creditado, os valores batem exa
 
 ### Decisão
 
-**Pendente.** Confirmar com o grupo: (1) a conciliação do resgate é pelo **valor líquido creditado**
-(o que o Omie registra)? (2) IOF/IR e rendimento têm lançamento próprio no Omie? Fix provável: **(a)
-extrair o valor líquido**. _(Atenção: a diferença ser IOF+IR é específica deste CDB Itaú — em outros
-extratos a diferença pode ter outra natureza; não generalizar "imposto".)_
+**✅ Implementado (Etapa 4 da mini-fase, commit `24be961`).** Grupo confirmou: conciliar pelo
+**valor líquido pago/recebido**. Fix = regra no `SYSTEM_PROMPT` de extração: em conta `investment`,
+emitir o **valor líquido creditado** (não o bruto); APLICACAO=entrada/RESGATE=saída; IOF/IR/rendimento
+não viram linhas (são lançados à parte no fim do mês). _(Não generalizou "imposto" — a regra é "use o
+líquido movimentado", robusta a outras naturezas de diferença.)_ **Validação real pendente:** re-subir
+o extrato CDB da Horus → resgates extraem o líquido → conciliam.
 
 ---
 
 ## Report #2 — Qualificação (IA) marca APLICACAO como incoerente em conta aplicação
 
-**Status:** 🔴 Aberto (diagnóstico confirmado; semântica de conta aplicação — ver "Sobre conta
-aplicação". Obs.: o #1, após correção, NÃO é mais a mesma raiz).
+**Status:** 🟢 Corrigido (em PR, validação real pendente). Semântica de conta aplicação — ver "Sobre
+conta aplicação". Obs.: o #1, após correção, NÃO é mais a mesma raiz.
 
 ### Report
 
@@ -198,9 +209,11 @@ SAÍDA (−). A IA vê a palavra "APLICACAO" (que associa a saída) com valor PO
 
 ### Decisão
 
-**Pendente.** Fix = dar contexto de conta à qualificação (opção (a)+(b)). Não depende do #1 (raízes
-diferentes após a correção). Confirmar com o grupo só o entendimento contábil (APLICACAO=entrada,
-RESGATE=saída em conta de aplicação).
+**✅ Implementado (Etapa 3 da mini-fase, commit `101646c`).** Grupo confirmou a semântica invertida.
+Fix = threada `account_type` da sessão até o `semantic.py`; quando `investment`, injeta uma regra no
+system prompt (bloco separado p/ não invalidar o cache): APLICACAO=entrada, RESGATE=saída,
+transferência entre contas próprias é coerente → não marcar incoerente por sinal/direção. **Validação
+real pendente:** re-rodar a conciliação da Horus → some a anomalia "Qualificação incoerente".
 
 ---
 
