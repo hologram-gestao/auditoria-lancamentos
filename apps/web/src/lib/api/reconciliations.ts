@@ -60,10 +60,10 @@ export async function checkDuplicate(params: CheckDuplicateParams): Promise<Chec
  * Datas: `YYYY-MM-DD` (ISO 8601 estrito, parsing manual no front pra
  * evitar timezone-shift do `new Date('2026-04-01')`).
  *
- * `account_type`: union literal idêntico ao back. Se um dia o back aceitar
- * um terceiro tipo, o `Literal` lá explode antes de chegar aqui.
+ * `account_type`: union literal idêntico ao back (checking / credit_card /
+ * investment). Se o back aceitar um novo tipo, o `Literal` lá explode primeiro.
  */
-export type ParsedAccountType = 'checking' | 'credit_card';
+export type ParsedAccountType = 'checking' | 'credit_card' | 'investment';
 
 export interface ParsedTransaction {
   /** Data ISO 8601 (YYYY-MM-DD). */
@@ -136,8 +136,6 @@ export interface CreateReconciliationPayload {
   omie_conta_id: number;
   /** ISO `YYYY-MM-DD` — sempre dia 1 do mês de referência. */
   reference_month: string;
-  /** 1 a 7 dias (Doc §11). */
-  date_tolerance_days: number;
   /** SHA-256 hex (64 chars, lowercase). */
   file_hash: string;
   statement: ParsedStatement;
@@ -194,6 +192,19 @@ export async function discardReconciliation(sessionId: string): Promise<void> {
   await apiPost<void>(`/api/v1/reconciliations/${sessionId}/discard`, {});
 }
 
+/**
+ * Cancela uma conciliação em `processing` — marca `status='error'` ("cancelado
+ * pelo usuário"). A BackgroundTask em andamento não é interrompida, mas o
+ * backend tem guarda pra não sobrescrever o cancelamento. Depois, a sessão fica
+ * em `error` (pode reprocessar ou excluir). 204 No Content.
+ *
+ * Erros: 404 (inexistente / fora da carteira); 409 (`CONFLICT`) se NÃO está em
+ * processamento (já em revisão/concluída/erro).
+ */
+export async function cancelReconciliation(sessionId: string): Promise<void> {
+  await apiPost<void>(`/api/v1/reconciliations/${sessionId}/cancel`, {});
+}
+
 // ----------------------------------------------------------------------
 // S10 — GET /api/v1/reconciliations/{id}/status
 // ----------------------------------------------------------------------
@@ -241,6 +252,9 @@ export interface SessionDetail {
   session_id: string;
   client_id: string;
   omie_conta_id: number;
+  /** Tipo normalizado da conta (FASE 1): `'checking'` ou `'credit_card'`.
+   *  String lenient — a Tela de Revisão ramifica nisso (badge/título/labels). */
+  account_type: string;
   /** ISO `YYYY-MM-DD` (sempre dia 1 do mês de referência). */
   reference_month: string;
   status: SessionStatus;

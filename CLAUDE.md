@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 Sessões **S0–S19 implementadas e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain configurado (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). A conciliação file-driven funciona ponta a ponta (upload → IA → matching → revisão → Excel). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> **Roadmap atual (PRD 15/06/2026 → FASE 0–5):** o roadmap foi reordenado pelo PRD em [Docs/NextSteps/](Docs/NextSteps/). O plano de execução é [Docs/PLANO_PROXIMOS_PASSOS.md](Docs/PLANO_PROXIMOS_PASSOS.md) (sessões **S20+**): **FASE 0 ✅ CONCLUÍDA (S20)** — Redis/ARQ removido, processamento via `BackgroundTasks` ([BACK 0.1]); os 2 bugs já estavam corrigidos (auth #19, timeout #16). **FASE 1–2** conciliação e lançamento de **fatura de cartão**. **FASE 3** glossário por cliente. **FASE 4** Open Finance (Pluggy). **FASE 5** rotinas automáticas de auditoria (absorve o antigo S20–S27). ⚠️ **Uma reversão do PRD ainda NÃO está no código** (e portanto §5 abaixo segue valendo como está até a fase aterrissar): a tolerância de data ainda é parametrizável (default 3) — o PRD a torna **zero** na FASE 1 (S21), mudando comportamento da conta corrente.
+> **Roadmap atual (PRD 15/06/2026 → FASE 0–5):** o roadmap foi reordenado pelo PRD em [Docs/NextSteps/](Docs/NextSteps/). O plano de execução é [Docs/PLANO_PROXIMOS_PASSOS.md](Docs/PLANO_PROXIMOS_PASSOS.md) (sessões **S20+**): **FASE 0 ✅ CONCLUÍDA (S20)** — Redis/ARQ removido, processamento via `BackgroundTasks` ([BACK 0.1]); os 2 bugs já estavam corrigidos (auth #19, timeout #16). **FASE 1–2** conciliação e lançamento de **fatura de cartão**. **FASE 3** glossário por cliente. **FASE 4** Open Finance (Pluggy). **FASE 5** rotinas automáticas de auditoria (absorve o antigo S20–S27). ✅ **A tolerância de data fixa já está no código** (FASE 1 / BACK 1.6, na branch de integração `feat/fase1-cartao` — ainda não na `main`): o matching usa `DATE_DIVERGENCE_RANGE = 3` fixo — data exata → `conciliado`; 1–3 dias → `conciliado_data_divergente` (+ anomalia `wrong_date`); > 3 → `sem_omie`. Vale **também para conta corrente** → muda comportamento em prod quando a FASE 1 for mergeada na main. Ver §5.2.
 
 ---
 
@@ -126,8 +126,8 @@
 ## 5. Regras Invioláveis de Domínio (Matching)
 
 1. **Tolerância de valor:** `|a − b| ≤ 0.01 BRL`. Hard-coded, não parametrizável.
-2. **Tolerância de data:** parametrizável por sessão (1/2/3/5/7 dias); padrão 3.
-3. **Período Omie expandido:** `[period_start − tol, period_end + tol]`.
+2. **Tolerância de data:** **fixa, não parametrizável** (FASE 1) — constante `DATE_DIVERGENCE_RANGE = 3` no matcher. Classificação por `|days_diff|`: `== 0` → `conciliado` (data exata); `1–3` → `conciliado_data_divergente` (+ anomalia `wrong_date`); `> 3` → sem match (linha fica `sem_omie`). Vale para conta corrente **e** cartão. O request não aceita mais `date_tolerance_days` (ignorado se enviado); a coluna homônima é mantida só por histórico e novas sessões gravam 0.
+3. **Período Omie expandido:** `[period_start − DATE_DIVERGENCE_RANGE, period_end + DATE_DIVERGENCE_RANGE]` (3 dias fixos) — vale no processamento (`job.py`), na tela de revisão (`/available-omie-entries`) e no export.
 4. **Um OmieEntry só matcha uma Movement.** Controle via `set(used_ids)` durante o cruzamento.
 5. **Desempate (ordem):** menor `|days_diff|` → menor `|amount_diff|` → primeiro por `date asc`.
 6. **Normalização Omie:** `cNatureza='D'` → valor negativo; `cNatureza='C'` → positivo.
@@ -320,7 +320,7 @@ Quando o usuário não tiver decidido, **pergunte** antes de presumir:
 
 **Novos (do PRD FASE 0–5 — detalhe em [Docs/PLANO_PROXIMOS_PASSOS.md](Docs/PLANO_PROXIMOS_PASSOS.md)):**
 
-- [ ] **Tolerância de data zero** passa a valer **também para conta corrente**? Muda comportamento em prod (hoje é parametrizável, default 3). _FASE 1 / S21_
+- [x] ~~**Tolerância de data zero** também para conta corrente~~ → **SIM, aprovado + implementado** (FASE 1 / BACK 1.6): exato → `conciliado`; 1–3 dias → `conciliado_data_divergente` + `wrong_date`; > 3 → `sem_omie`. Vale p/ CC e cartão (`DATE_DIVERGENCE_RANGE=3` fixo). Na branch de integração; muda o comportamento da CC em prod quando a FASE 1 for mergeada. Ver §5.2.
 - [ ] **Quebra do invariante "Omie read-only":** aprovar escrita no Omie (`IncluirContaPagar`) só no fluxo de lançamento de cartão. Endpoint/campos/idempotência a confirmar contra Omie real. _FASE 2 / S24_
 - [ ] **Cloud Run `--no-cpu-throttling` + `min-instances ≥ 1`** na API após remover Redis (senão BackgroundTasks congela). Custo aceitável? _FASE 0 / S20_
 - [ ] **Pluggy interna vs Cubos** (proposta Arthur Souza, 16/06) + cobertura de Sicredi/BNB/Cora + primeiro endpoint público (webhook). _FASE 4_
@@ -387,6 +387,8 @@ lembrar dos comandos.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.5 — 19/06/2026. **FASE 1 / BACK 1.6 (tolerância de data fixa) na branch de integração `feat/fase1-cartao`:** a tolerância deixou de ser parametrizável — `DATE_DIVERGENCE_RANGE = 3` fixo no matcher. Classificação: data exata → `conciliado`; 1–3 dias → `conciliado_data_divergente` (+ `wrong_date`); > 3 → `sem_omie`. Vale para CC **e** cartão (muda comportamento da CC em prod quando a FASE 1 for mergeada). §5.2/§5.3 reescritos como lei atual, nota do topo e ponto em aberto §10 marcados resolvidos. `date_tolerance_days` removido do request (ignorado se enviado); coluna mantida (novas sessões = 0). O range fixo também rege a janela Omie no processamento, na revisão e no export. Gate local verde (ruff/mypy/pytest — matcher 20, + regressão CC e divergência no job). **Ainda não na `main`** (integração)._
 
 _Versão 1.4 — 16/06/2026. **FASE 0 / S20 (BACK 0.1) aterrissou:** Redis/ARQ removido — background jobs agora via `BackgroundTasks` nativo do FastAPI; cache de lançamentos virou **L1-only** (L2 Redis existia só p/ coerência com o worker separado, que não existe mais). §2 (stack/infra), §8 (mapa S10/S11), §9 (comandos) e §10 (job runner) atualizados como lei atual. Teto do processamento via `asyncio.timeout(RECONCILIATION_TIMEOUT_SECONDS=900)` + cron de cleanup como rede de segurança. Gate local verde (ruff/mypy/507 pytest). §5 (tolerância de data) **não** alterado de propósito — muda só na FASE 1. ⚠️ Cloud Run da API exige `--no-cpu-throttling` + `min-instances ≥ 1` (§10)._
 

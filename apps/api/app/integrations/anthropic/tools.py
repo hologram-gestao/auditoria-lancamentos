@@ -63,7 +63,13 @@ EXTRACT_MOVEMENTS_TOOL: dict[str, Any] = {
             },
             "transactions": {
                 "type": "array",
-                "description": "Todas as movimentações na ordem em que aparecem.",
+                "description": (
+                    "Todas as movimentações na ordem em que aparecem. Em faturas de "
+                    "cartão: cada parcela é uma linha (valor unitário + data da "
+                    "parcela, sem agrupar); estornos com amount positivo; encargos "
+                    "(juros/IOF/multa) como linhas separadas; NÃO incluir o "
+                    "pagamento da fatura."
+                ),
                 "items": {
                     "type": "object",
                     "properties": {

@@ -11,6 +11,7 @@ Datas em CLARO — necessárias para SQL filtering/sorting.
 
 Estados (Doc §17.2):
     sem_omie → conciliado
+    sem_omie → conciliado_data_divergente  (valor bate, data diverge ≤3 dias — FASE 1)
     sem_omie → ignorado
     conciliado ↔ ignorado (restaurar)
 """
@@ -42,6 +43,10 @@ class FileEntrySituation(StrEnum):
     SEM_OMIE = "sem_omie"
     CONCILIADO = "conciliado"
     IGNORADO = "ignorado"
+    # FASE 1 (cartão/BACK 1.2): valor bate com o Omie mas a data diverge em
+    # ≤ DATE_DIVERGENCE_RANGE dias. Conciliado, porém sinalizado — gera a
+    # anomalia `wrong_date`. 26 chars → coluna `situation` é String(30).
+    CONCILIADO_DATA_DIVERGENTE = "conciliado_data_divergente"
 
 
 class FileEntryUserAction(StrEnum):
@@ -94,8 +99,10 @@ class ReconciliationFileEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, index=True)
     balance: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
 
+    # String(30): 'conciliado_data_divergente' tem 26 chars e não cabe em 20
+    # (coluna alargada na migration da FASE 1 — ver alembic/versions).
     situation: Mapped[str] = mapped_column(
-        String(20),
+        String(30),
         nullable=False,
         default=FileEntrySituation.SEM_OMIE.value,
         index=True,

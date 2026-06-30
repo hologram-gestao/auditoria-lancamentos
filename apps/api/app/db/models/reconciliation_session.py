@@ -56,6 +56,26 @@ class ReconciliationStatus(StrEnum):
     ERROR = "error"
 
 
+class SessionAccountType(StrEnum):
+    """Tipo (normalizado) da conta conciliada na sessão — FASE 1 + conta aplicação.
+
+    NÃO é o código cru do Omie (`CC`/`CR`/`CA`/…, esse vive em
+    `omie_accounts_cache.account_type`). É a classificação que o produto
+    usa. Derivado do `tipo` Omie da conta selecionada em
+    `create_session_with_entries`: `CR` (Cartão de Crédito) → `credit_card`;
+    `CA` (Conta Aplicação) → `investment`; o resto → `checking`.
+
+    A UI (badge, filtros, título) e o export ramificam neste campo; a regra de
+    tolerância de data (FASE 1) é a mesma p/ todos. O `investment` ainda dirige
+    a semântica de aplicação (APLICACAO=entrada/RESGATE=saída) na qualificação
+    e a extração do valor líquido (mini-fase conta aplicação).
+    """
+
+    CHECKING = "checking"
+    CREDIT_CARD = "credit_card"
+    INVESTMENT = "investment"
+
+
 class ReconciliationSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "reconciliation_sessions"
     # UNIQUE PARCIAL: a idempotência só vale para sessões ATIVAS
@@ -88,6 +108,16 @@ class ReconciliationSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
     )
     omie_conta_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # Tipo normalizado da conta conciliada: 'checking' (conta corrente) ou
+    # 'credit_card' (cartão). Derivado do `tipo` Omie da conta selecionada em
+    # create_session_with_entries (CR → credit_card; resto → checking). O
+    # server_default 'checking' cobre as linhas pré-migration (não-destrutivo).
+    account_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=SessionAccountType.CHECKING.value,
+        server_default=text("'checking'"),
+    )
     reference_month: Mapped[date] = mapped_column(SQLDate, nullable=False, index=True)
     # Período REAL extraído do statement (S9). NULL em sessões pré-migration —
     # nesse caso, o review service cai no fallback `[reference_month,
@@ -96,7 +126,10 @@ class ReconciliationSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # ficam fora do período Omie consultado em /available-omie-entries.
     period_start: Mapped[date | None] = mapped_column(SQLDate, nullable=True)
     period_end: Mapped[date | None] = mapped_column(SQLDate, nullable=True)
-    date_tolerance_days: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=3)
+    # FASE 1: tolerância de data deixou de ser parametrizável — é fixa no
+    # matcher (DATE_DIVERGENCE_RANGE=3). Coluna mantida só por histórico (não-
+    # destrutivo); novas sessões gravam 0 e o job NÃO lê mais este valor.
+    date_tolerance_days: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
     file_hash: Mapped[str] = mapped_column(String(64), nullable=False)  # SHA-256 hex
 
     status: Mapped[str] = mapped_column(

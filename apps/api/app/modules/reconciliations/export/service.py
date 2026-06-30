@@ -42,6 +42,7 @@ from app.db.models import (
     ReconciliationFileEntry,
     ReconciliationOmieEntry,
     ReconciliationSession,
+    SessionAccountType,
 )
 from app.modules.reconciliations.export.schemas import (
     AnomalyRow,
@@ -52,6 +53,7 @@ from app.modules.reconciliations.export.schemas import (
     SemOmieRow,
     SummarySheetData,
 )
+from app.modules.reconciliations.processing.matcher import DATE_DIVERGENCE_RANGE
 from app.modules.reconciliations.qualification.service import (
     ANOMALY_CODE_PADRAO_QUEBRADO,
     ANOMALY_CODE_QUALIF_INCOERENTE,
@@ -198,6 +200,7 @@ class ExportService:
 
         return ExportPayload(
             filename=filename,
+            is_card=session.account_type == SessionAccountType.CREDIT_CARD.value,
             summary=summary,
             file_entries=file_entry_rows,
             omie_divergences=omie_div_rows,
@@ -315,8 +318,10 @@ class ExportService:
         # Popula via extrato do período expandido (mesma estratégia do
         # ReviewService.list_available_omie_entries).
         period_start, period_end = _resolve_session_period(session)
-        expanded_start = period_start - timedelta(days=session.date_tolerance_days)
-        expanded_end = period_end + timedelta(days=session.date_tolerance_days)
+        # FASE 1: range fixo (não mais a tolerância por sessão) — sessões novas
+        # gravam date_tolerance_days=0, então usar a coluna encolheria a janela.
+        expanded_start = period_start - timedelta(days=DATE_DIVERGENCE_RANGE)
+        expanded_end = period_end + timedelta(days=DATE_DIVERGENCE_RANGE)
 
         try:
             populated = await self._cache.populate_from_extrato(
@@ -431,11 +436,13 @@ class ExportService:
             )
             supplier: str | None = None
             category: str | None = None
+            omie_date: date | None = None
             if entry.omie_lancamento_id is not None:
                 data = cached.get(entry.omie_lancamento_id)
                 if data is not None:
                     supplier = data.supplier
                     category = data.category
+                    omie_date = data.transaction_date
             # Status de qualificação: explícito "ok" pra conciliados sem
             # anomalia de qualificação (analista lê como "IA validou");
             # `None` pra sem_omie/ignorado (qualificação não rodou nesses).
@@ -455,6 +462,7 @@ class ExportService:
                     situation=entry.situation,
                     user_note=note,
                     qualification_status=qualif,
+                    omie_date=omie_date,
                 )
             )
         return rows

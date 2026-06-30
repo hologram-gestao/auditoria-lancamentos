@@ -43,11 +43,13 @@ from app.db.models import FileEntrySituation, ReconciliationOmieEntry
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache
 from app.modules.clients.omie_factory import build_omie_client
 from app.modules.reconciliations.processing.anomalies import (
+    DivergentMatch,
     _AnomalyTypeMissingError,
     create_structural_anomalies,
 )
 from app.modules.reconciliations.processing.balances import compute_balances
 from app.modules.reconciliations.processing.matcher import (
+    DATE_DIVERGENCE_RANGE,
     FileEntryForMatch,
     match,
 )
@@ -198,7 +200,6 @@ async def _execute_processing(
         period_end = max(e.transaction_date for e in session_obj.file_entries)
         omie_conta_id = session_obj.omie_conta_id
         reference_month = session_obj.reference_month
-        tolerance_days = session_obj.date_tolerance_days
 
     # 2. Fetch Omie data — toda a interação com credencial em claro
     #    acontece dentro do `async with` do OmieClient.
@@ -216,7 +217,7 @@ async def _execute_processing(
                 omie_conta_id=omie_conta_id,
                 period_start=period_start,
                 period_end=period_end,
-                tolerance_days=tolerance_days,
+                tolerance_days=DATE_DIVERGENCE_RANGE,
             )
             pending = await fetch_pending(
                 omie_client,
@@ -232,8 +233,8 @@ async def _execute_processing(
                         client_id=client.id,
                         omie_client=omie_client,
                         omie_conta_id=omie_conta_id,
-                        period_start=period_start - timedelta(days=tolerance_days),
-                        period_end=period_end + timedelta(days=tolerance_days),
+                        period_start=period_start - timedelta(days=DATE_DIVERGENCE_RANGE),
+                        period_end=period_end + timedelta(days=DATE_DIVERGENCE_RANGE),
                     )
                 except Exception:
                     log.warning(
@@ -253,17 +254,41 @@ async def _execute_processing(
         deduped=len(omie_movements),
     )
 
-    # 3. Match — função pura, sem I/O.
-    result = match(
-        file_entries_for_matcher,
-        omie_movements,
-        tolerance_days=tolerance_days,
-    )
+    # 3. Match — função pura, sem I/O. Usa o range fixo DATE_DIVERGENCE_RANGE
+    #    (default do matcher) — não há mais tolerância parametrizável (FASE 1).
+    result = match(file_entries_for_matcher, omie_movements)
+
+    # Mapas data-por-id p/ classificar e montar o contexto da anomalia
+    # wrong_date (BACK 1.7: "Data arquivo / Data Omie").
+    file_date_by_id = {fe.id: fe.transaction_date for fe in file_entries_for_matcher}
+    omie_date_by_id = {mov.omie_id: mov.transaction_date for mov in omie_movements}
+
+    # Classifica cada match pelo days_diff (CLAUDE.md §5.2, FASE 1):
+    #   days_diff == 0  → conciliado (data exata)
+    #   1 ≤ days ≤ 3    → conciliado_data_divergente (+ anomalia wrong_date)
+    matches_to_apply: list[tuple[UUID, int, str]] = []
+    divergent_matches: list[DivergentMatch] = []
+    for file_id, omie_id in result.matches:
+        file_uuid = UUID(file_id)
+        if result.days_diff_by_file_id[file_id] == 0:
+            situation = FileEntrySituation.CONCILIADO.value
+        else:
+            situation = FileEntrySituation.CONCILIADO_DATA_DIVERGENTE.value
+            divergent_matches.append(
+                DivergentMatch(
+                    file_entry_id=file_uuid,
+                    file_date=file_date_by_id[file_id],
+                    omie_date=omie_date_by_id[omie_id],
+                )
+            )
+        matches_to_apply.append((file_uuid, omie_id, situation))
+
     log.info(
         "reconciliation_matched",
         session_id=str(session_id),
         total_file=len(file_entries_for_matcher),
         matched=len(result.matches),
+        divergent=len(divergent_matches),
         unmatched_omie=len(result.unmatched_omie_indices),
     )
 
@@ -271,8 +296,10 @@ async def _execute_processing(
     async with session_factory() as db, db.begin():
         repo = ReconciliationRepository(db)
 
+        # Pares (file_id, omie_id) p/ a qualificação (S19) — inclui exatos e
+        # divergentes (ambos estão conciliados por valor).
         match_pairs_uuid = [(UUID(file_id), omie_id) for file_id, omie_id in result.matches]
-        await repo.apply_matches(match_pairs_uuid)
+        await repo.apply_matches(matches_to_apply)
 
         unmatched_omie = [omie_movements[idx] for idx in result.unmatched_omie_indices]
         omie_entries = [
@@ -295,6 +322,8 @@ async def _execute_processing(
             session_id=session_id,
             unmatched_file_entries=unmatched_file_entries,
             persisted_omie_entries=omie_entries,
+            divergent_matches=divergent_matches,
+            encryption_key=settings.OMIE_ENCRYPTION_KEY.get_secret_value(),
         )
 
         # Qualificação (S19 BACK 12.1): IA + histórico + outlier sobre os
@@ -307,6 +336,7 @@ async def _execute_processing(
             client_id=client.id,
             match_pairs=match_pairs_uuid,
             cache=lancamento_cache,
+            account_type=session_obj.account_type,
         )
         anomaly_count = structural_count + qualification_count
 
@@ -415,6 +445,7 @@ async def _run_qualification_safely(
     client_id: UUID,
     match_pairs: list[tuple[UUID, int]],
     cache: OmieLancamentoCache,
+    account_type: str,
 ) -> int:
     """Roda a qualificação (S19) com try/except total — falha NÃO derruba.
 
@@ -461,6 +492,7 @@ async def _run_qualification_safely(
                 cache=cache,
                 anthropic_client=anthropic,
                 encryption_key=settings.OMIE_ENCRYPTION_KEY,
+                account_type=account_type,
             )
         log.info(
             "qualification_done",

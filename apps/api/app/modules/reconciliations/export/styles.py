@@ -33,6 +33,9 @@ COLOR_ROW_IGNORADO = "EEEEEE"  # cinza claro
 # Aba 3 — Atrasado em vermelho claro
 COLOR_ROW_ATRASADO = "FFE2E2"
 
+# Aba 2 (cartão) — célula "Data Omie" de linha com data divergente (laranja claro)
+COLOR_DATA_DIVERGENTE = "FFE8CC"
+
 # Aba 1 — destaque para anomalias críticas não resolvidas
 COLOR_CRITICAL_UNRESOLVED_BG = "FFB3B3"
 COLOR_CRITICAL_UNRESOLVED_FG = "7F1D1D"
@@ -75,6 +78,7 @@ FILL_CONCILIADO = _solid_fill(COLOR_ROW_CONCILIADO)
 FILL_SEM_OMIE = _solid_fill(COLOR_ROW_SEM_OMIE)
 FILL_IGNORADO = _solid_fill(COLOR_ROW_IGNORADO)
 FILL_ATRASADO = _solid_fill(COLOR_ROW_ATRASADO)
+FILL_DATA_DIVERGENTE = _solid_fill(COLOR_DATA_DIVERGENTE)
 FILL_CRITICAL_UNRESOLVED = _solid_fill(COLOR_CRITICAL_UNRESOLVED_BG)
 
 # ---------------------------------------------------------------------------
@@ -96,7 +100,9 @@ ALIGN_RIGHT = Alignment(horizontal="right", vertical="center")
 
 def fill_for_situation(situation: str) -> PatternFill | None:
     """Retorna o `PatternFill` da situation. `None` quando não há regra."""
-    if situation == "conciliado":
+    if situation in ("conciliado", "conciliado_data_divergente"):
+        # Divergente também é conciliada (valor bate) — linha verde; o destaque
+        # da data fica na célula "Data Omie" (FILL_DATA_DIVERGENTE), só no cartão.
         return FILL_CONCILIADO
     if situation == "sem_omie":
         return FILL_SEM_OMIE

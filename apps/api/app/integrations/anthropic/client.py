@@ -53,10 +53,14 @@ from app.integrations.anthropic.tools import (
 
 log = get_logger(__name__)
 
-# Limite defensivo de tokens de saída — a soma de todos os transactions deve
-# caber. Faturas/extratos típicos têm < 200 linhas; com folga generosa para
-# faturas grandes mantemos 8k.
-_MAX_OUTPUT_TOKENS = 8192
+# Teto de tokens de saída — a soma de TODOS os transactions extraídos deve caber
+# aqui, senão o `tool_use` é truncado e a extração falha (Report #3: extrato de
+# conta corrente com ~220 PIX exigia ~10-13k tokens e estourava o antigo 8192,
+# devolvendo `AnthropicParseError` com mensagem genérica). 32k cobre extratos
+# bem grandes (~480 linhas). É só um TETO — extrato pequeno não consome mais nem
+# custa mais. Acima disso, `extract_movements` detecta `stop_reason=max_tokens`
+# e devolve um erro claro ("divida o período") em vez de falha silenciosa.
+_MAX_OUTPUT_TOKENS = 32768
 
 
 class _RetryableAnthropicError(Exception):
@@ -208,6 +212,28 @@ class AnthropicClient:
             ) from exc
 
         duration_ms = round((time.monotonic() - started) * 1000)
+
+        # Truncamento: se o modelo bateu no teto de tokens, o `tool_use` volta
+        # cortado e o `_extract_tool_payload` falharia com a mensagem genérica
+        # (que ainda fala em "proteção por senha" — confunde no caso de CSV).
+        # Detectamos explicitamente e devolvemos um erro acionável (Report #3).
+        if getattr(message, "stop_reason", None) == "max_tokens":
+            log.warning(
+                "anthropic_extract_truncated",
+                model=chosen_model,
+                bytes_in=len(content),
+                duration_ms=duration_ms,
+                max_tokens=_MAX_OUTPUT_TOKENS,
+            )
+            raise AnthropicParseError(
+                "Extração truncada: stop_reason=max_tokens.",
+                user_message=(
+                    "O extrato tem movimentações demais para processar de uma vez. "
+                    "Envie um período menor (por exemplo, divida o mês em duas "
+                    "quinzenas) e tente novamente."
+                ),
+            )
+
         statement = self._extract_tool_payload(message)
 
         log.info(

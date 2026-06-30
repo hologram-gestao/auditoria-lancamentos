@@ -164,6 +164,10 @@ class ReconciliationSessionSummary(BaseModel):
 
     id: UUID
     omie_conta_id: int
+    # Tipo normalizado da conta (FASE 1): 'checking' ou 'credit_card'. O card
+    # do histórico ramifica nisso pra mostrar o badge "Cartão de Crédito".
+    # `str` lenient (memória `feedback_pydantic_strict_input_lenient_output`).
+    account_type: str
     reference_month: date
     status: str
     created_at: datetime

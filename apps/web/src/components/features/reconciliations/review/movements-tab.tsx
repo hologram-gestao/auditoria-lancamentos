@@ -69,6 +69,8 @@ import { TrocarLancamentoModal } from './trocar-lancamento-modal';
 
 interface MovementsTabProps {
   sessionId: string;
+  /** FRONT 1.8: cartão → filtro de tipo vira Compras/Estornos. */
+  isCard: boolean;
 }
 
 type SituationFilter = 'all' | 'conciliado' | 'sem_omie' | 'ignorado';
@@ -78,7 +80,7 @@ const PAGE_SIZES = [10, 20, 50] as const;
 const DEFAULT_PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE_MS = 300;
 
-export function MovementsTab({ sessionId }: MovementsTabProps) {
+export function MovementsTab({ sessionId, isCard }: MovementsTabProps) {
   const [situation, setSituation] = useState<SituationFilter>('all');
   const [type, setType] = useState<TypeFilter>('all');
   const [searchInput, setSearchInput] = useState('');
@@ -110,9 +112,16 @@ export function MovementsTab({ sessionId }: MovementsTabProps) {
 
   const omieLookupQuery = useOmieLancamentos(sessionId, omieIdsInPage);
   const omieById = useMemo(() => {
-    const map = new Map<number, { supplier: string | null; category: string | null }>();
+    const map = new Map<
+      number,
+      { supplier: string | null; category: string | null; date: string }
+    >();
     omieLookupQuery.data?.forEach((item) => {
-      map.set(item.omie_id, { supplier: item.supplier, category: item.category });
+      map.set(item.omie_id, {
+        supplier: item.supplier,
+        category: item.category,
+        date: item.transaction_date,
+      });
     });
     return map;
   }, [omieLookupQuery.data]);
@@ -222,8 +231,8 @@ export function MovementsTab({ sessionId }: MovementsTabProps) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todos</SelectItem>
-              <SelectItem value="credit">Créditos</SelectItem>
-              <SelectItem value="debit">Débitos</SelectItem>
+              <SelectItem value="credit">{isCard ? 'Estornos' : 'Créditos'}</SelectItem>
+              <SelectItem value="debit">{isCard ? 'Compras' : 'Débitos'}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -309,6 +318,13 @@ export function MovementsTab({ sessionId }: MovementsTabProps) {
                   entry.omie_lancamento_id !== null ? omieById.get(entry.omie_lancamento_id) : null;
                 const amountNum = Number(entry.amount);
                 const qualificationAnomalies = qualificationByEntry.get(entry.id) ?? [];
+                // FRONT 1.8: linha conciliada com data divergente → tooltip
+                // "Data no arquivo: X · Data no Omie: Y" (o lançamento Omie já
+                // foi buscado no lookup batched desta página).
+                const divergenceTitle =
+                  entry.situation === 'conciliado_data_divergente' && omieData
+                    ? `Data no arquivo: ${formatBRDate(entry.transaction_date)} · Data no Omie: ${formatBRDate(omieData.date)}`
+                    : undefined;
                 return (
                   <RowFragment
                     key={entry.id}
@@ -316,6 +332,7 @@ export function MovementsTab({ sessionId }: MovementsTabProps) {
                     amountNum={amountNum}
                     supplier={omieData?.supplier ?? null}
                     category={omieData?.category ?? null}
+                    divergenceTitle={divergenceTitle}
                     qualificationAnomalies={qualificationAnomalies}
                     onOpenOverride={() => setOverrideFor(entry)}
                     onConfirm={() =>
@@ -431,6 +448,8 @@ interface RowFragmentProps {
   amountNum: number;
   supplier: string | null;
   category: string | null;
+  /** Tooltip da linha divergente (FRONT 1.8): data arquivo · data Omie. */
+  divergenceTitle?: string;
   qualificationAnomalies: AnomalyItem[];
   onOpenOverride: () => void;
   onConfirm: () => void;
@@ -452,6 +471,7 @@ function RowFragment({
   amountNum,
   supplier,
   category,
+  divergenceTitle,
   qualificationAnomalies,
   onOpenOverride,
   onConfirm,
@@ -496,7 +516,7 @@ function RowFragment({
           {entry.omie_lancamento_id === null ? '—' : (category ?? '—')}
         </TableCell>
         <TableCell>
-          <SituationBadge situation={entry.situation} />
+          <SituationBadge situation={entry.situation} title={divergenceTitle} />
         </TableCell>
         <TableCell className="text-center">
           <QualificationCell anomalies={qualificationAnomalies} onOpenOverride={onOpenOverride} />

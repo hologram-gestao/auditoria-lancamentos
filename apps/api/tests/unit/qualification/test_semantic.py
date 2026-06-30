@@ -235,3 +235,43 @@ async def test_analyze_pairs_uses_max_output_tokens_8192() -> None:
     await analyze_pairs([p1], anthropic_client=client)
     assert fake.messages.calls[0]["max_tokens"] == _MAX_OUTPUT_TOKENS
     assert _MAX_OUTPUT_TOKENS == 8192
+
+
+async def test_investment_account_injects_aplicacao_rule() -> None:
+    """Report #2: conta aplicação injeta o bloco de semântica invertida no
+    system prompt (APLICACAO=entrada, RESGATE=saída) como 2º bloco."""
+    p1 = _pair()
+    fake = _FakeAnthropic(
+        side_effect=[_tool_response([{"pair_id": p1.pair_id, "status": "ok", "motivo": "ok"}])]
+    )
+    client = AnthropicClient(
+        api_key=SecretStr("fake"),
+        model="claude-sonnet-4-5",
+        timeout=10.0,
+        anthropic_client=fake,
+    )
+    await analyze_pairs([p1], anthropic_client=client, account_type="investment")
+
+    system_blocks = fake.messages.calls[0]["system"]
+    assert len(system_blocks) == 2  # _SYSTEM_PROMPT + regra de aplicação
+    rule_text = system_blocks[1]["text"]
+    assert "CONTA DE APLICAÇÃO" in rule_text
+    assert "RESGATE" in rule_text
+
+
+async def test_checking_account_does_not_inject_aplicacao_rule() -> None:
+    """Conta corrente (default) NÃO injeta a regra — só o system prompt base."""
+    p1 = _pair()
+    fake = _FakeAnthropic(
+        side_effect=[_tool_response([{"pair_id": p1.pair_id, "status": "ok", "motivo": "ok"}])]
+    )
+    client = AnthropicClient(
+        api_key=SecretStr("fake"),
+        model="claude-sonnet-4-5",
+        timeout=10.0,
+        anthropic_client=fake,
+    )
+    await analyze_pairs([p1], anthropic_client=client)  # default checking
+
+    system_blocks = fake.messages.calls[0]["system"]
+    assert len(system_blocks) == 1

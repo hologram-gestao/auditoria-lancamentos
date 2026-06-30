@@ -35,6 +35,7 @@ from app.db.models import (
     Client,
     ClientAssignment,
     FileEntrySituation,
+    OmieAccountCache,
     ReconciliationFileEntry,
     ReconciliationSession,
     User,
@@ -116,6 +117,26 @@ async def _seed_client(
         )
         await session.flush()
     return client
+
+
+async def _seed_account(
+    session: AsyncSession,
+    *,
+    client: Client,
+    omie_conta_id: int,
+    tipo: str,
+) -> OmieAccountCache:
+    """Semeia uma conta no cache L1 com o `tipo` Omie cru (CC/CR/CA/…)."""
+    account = OmieAccountCache(
+        client_id=client.id,
+        omie_conta_id=omie_conta_id,
+        name=f"Conta {omie_conta_id}",
+        bank_name="237",
+        account_type=tipo,
+    )
+    session.add(account)
+    await session.flush()
+    return account
 
 
 async def _login(client: AsyncClient, email: str) -> None:
@@ -436,6 +457,119 @@ class TestCreateReconciliationPersistence:
 
 
 # ----------------------------------------------------------------------
+# POST /reconciliations — account_type derivado do tipo Omie (BACK 1.3)
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestCreateReconciliationAccountType:
+    """A sessão grava `account_type` a partir do `tipo` Omie da conta
+    SELECIONADA (cache L1), não do palpite da IA no statement.
+
+    Risco #1 da FASE 1: só `CR` (Cartão de Crédito) → 'credit_card'; `CA`
+    (Conta Aplicação) e qualquer outro → 'checking'. Mapear `CA` p/ cartão
+    reintroduziria o bug M-1.
+    """
+
+    async def _create_and_load(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        *,
+        cliente: Client,
+        omie_conta_id: int,
+        file_hash: str,
+    ) -> ReconciliationSession:
+        resp = await client_with_db.post(
+            "/api/v1/reconciliations",
+            json=_create_payload(
+                client_id=cliente.id,
+                omie_conta_id=omie_conta_id,
+                file_hash=file_hash,
+            ),
+        )
+        assert resp.status_code == 201, resp.text
+        session_id = UUID(resp.json()["data"]["session_id"])
+        return (
+            await db_session.execute(
+                select(ReconciliationSession).where(ReconciliationSession.id == session_id)
+            )
+        ).scalar_one()
+
+    async def test_credit_card_account_maps_to_credit_card(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="Austral", creator=admin)
+        await _seed_account(db_session, client=cliente, omie_conta_id=777, tipo="CR")
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        sess = await self._create_and_load(
+            client_with_db, db_session, cliente=cliente, omie_conta_id=777, file_hash=_hex64("cr")
+        )
+        assert sess.account_type == "credit_card"
+
+    async def test_checking_account_maps_to_checking(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="X", creator=admin)
+        await _seed_account(db_session, client=cliente, omie_conta_id=42, tipo="CC")
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        sess = await self._create_and_load(
+            client_with_db, db_session, cliente=cliente, omie_conta_id=42, file_hash=_hex64("cc")
+        )
+        assert sess.account_type == "checking"
+
+    async def test_investment_account_maps_to_investment_not_card(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        """`CA` (Conta Aplicação) → 'investment' (mini-fase conta aplicação).
+
+        Guarda anti-M-1: continua NÃO sendo cartão — `CA` é investimento.
+        """
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="X", creator=admin)
+        await _seed_account(db_session, client=cliente, omie_conta_id=99, tipo="CA")
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        sess = await self._create_and_load(
+            client_with_db, db_session, cliente=cliente, omie_conta_id=99, file_hash=_hex64("ca")
+        )
+        assert sess.account_type == "investment"
+
+    async def test_uncached_account_defaults_to_checking(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        """Conta não cacheada (None) → default 'checking' (sem regressão CC)."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="X", creator=admin)
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        sess = await self._create_and_load(
+            client_with_db,
+            db_session,
+            cliente=cliente,
+            omie_conta_id=1234,
+            file_hash=_hex64("uncached"),
+        )
+        assert sess.account_type == "checking"
+
+
+# ----------------------------------------------------------------------
 # POST /reconciliations — Idempotência (409 DUPLICATE_FILE)
 # ----------------------------------------------------------------------
 
@@ -505,6 +639,34 @@ class TestCreateReconciliationValidation:
         payload = _create_payload(client_id=cliente.id, transactions=[])
         resp = await client_with_db.post("/api/v1/reconciliations", json=payload)
         assert resp.status_code == 400
+
+    async def test_date_tolerance_days_in_body_is_ignored(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        """FASE 1 (BACK 1.6): o campo `date_tolerance_days` foi removido do
+        schema. Se o front legado enviar, o backend ignora (não 422) e grava
+        0 na sessão — a tolerância agora é fixa no matcher."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="X", creator=admin)
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        # _create_payload já inclui "date_tolerance_days": 3 — deve ser ignorado.
+        resp = await client_with_db.post(
+            "/api/v1/reconciliations",
+            json=_create_payload(client_id=cliente.id),
+        )
+        assert resp.status_code == 201, resp.text
+        session_id = UUID(resp.json()["data"]["session_id"])
+
+        sess = (
+            await db_session.execute(
+                select(ReconciliationSession).where(ReconciliationSession.id == session_id)
+            )
+        ).scalar_one()
+        assert sess.date_tolerance_days == 0
 
 
 # ----------------------------------------------------------------------
@@ -653,6 +815,8 @@ class TestSessionDetailEndpoint:
         assert body["session_id"] == str(sess.id)
         assert body["client_id"] == str(cliente.id)
         assert body["omie_conta_id"] == 42
+        # FRONT 1.8: o detalhe expõe o account_type da sessão (default 'checking').
+        assert body["account_type"] == "checking"
         assert body["reference_month"] == "2026-04-01"
         assert body["status"] == "processing"
         assert body["total_file_entries"] == 42
@@ -840,11 +1004,13 @@ class TestDiscardReconciliation:
         # Status segue 'error' — soft-delete não muda o histórico.
         assert sess.status == "error"
 
-    async def test_discard_non_error_session_returns_409(
+    async def test_discard_reviewing_session_now_allowed(
         self,
         client_with_db: AsyncClient,
         db_session: AsyncSession,
     ) -> None:
+        """A partir da feature de excluir conciliação, reviewing/done podem ser
+        soft-deletadas (antes só error)."""
         admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
         cliente = await _seed_client(db_session, name="Y", creator=admin)
         sess = await _seed_session(
@@ -856,9 +1022,31 @@ class TestDiscardReconciliation:
         )
         await _login(client_with_db, ADMIN_EMAIL)
         resp = await client_with_db.post(f"/api/v1/reconciliations/{sess.id}/discard")
+        assert resp.status_code == 204, resp.text
+
+        await db_session.refresh(sess)
+        assert sess.deleted_at is not None
+
+    async def test_discard_processing_returns_409(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+    ) -> None:
+        """Em processamento NÃO pode ser excluída (o job ainda escreve nela) —
+        o caminho é cancelar primeiro."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="Y", creator=admin)
+        sess = await _seed_session(
+            db_session,
+            cliente=cliente,
+            creator=admin,
+            status_value="processing",
+            file_hash=_hex64("discard-processing"),
+        )
+        await _login(client_with_db, ADMIN_EMAIL)
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{sess.id}/discard")
         assert resp.status_code == 409, resp.text
 
-        # Não toca o deleted_at em sessão não-error.
         await db_session.refresh(sess)
         assert sess.deleted_at is None
 
@@ -923,6 +1111,82 @@ class TestDiscardReconciliation:
 
 
 # ----------------------------------------------------------------------
+# POST /reconciliations/{id}/cancel  (cancela sessão em processamento)
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestCancelReconciliation:
+    async def test_unauthenticated_returns_401(self, client_with_db: AsyncClient) -> None:
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{uuid4()}/cancel")
+        assert resp.status_code == 401
+
+    async def test_inexistent_session_returns_404(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        await _login(client_with_db, ADMIN_EMAIL)
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{uuid4()}/cancel")
+        assert resp.status_code == 404
+
+    async def test_cancel_processing_marks_error(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Caminho feliz: sessão em processing → 204; status vira error."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="X", creator=admin)
+        sess = await _seed_session(
+            db_session,
+            cliente=cliente,
+            creator=admin,
+            status_value="processing",
+            file_hash=_hex64("cancel-happy"),
+        )
+        await _login(client_with_db, ADMIN_EMAIL)
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{sess.id}/cancel")
+        assert resp.status_code == 204, resp.text
+
+        await db_session.refresh(sess)
+        assert sess.status == "error"
+        assert sess.error_message is not None
+        assert "cancelado" in sess.error_message.lower()
+
+    async def test_cancel_non_processing_returns_409(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="Y", creator=admin)
+        sess = await _seed_session(
+            db_session,
+            cliente=cliente,
+            creator=admin,
+            status_value="reviewing",
+            file_hash=_hex64("cancel-reviewing"),
+        )
+        await _login(client_with_db, ADMIN_EMAIL)
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{sess.id}/cancel")
+        assert resp.status_code == 409, resp.text
+
+    async def test_manager_outside_portfolio_returns_404(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        mgr_a = await _seed_user(db_session, email=MANAGER_A_EMAIL, role=UserRole.MANAGER)
+        await _seed_user(db_session, email=MANAGER_B_EMAIL, role=UserRole.MANAGER)
+        cliente_a = await _seed_client(db_session, name="A", creator=admin, manager=mgr_a)
+        sess = await _seed_session(
+            db_session,
+            cliente=cliente_a,
+            creator=admin,
+            status_value="processing",
+            file_hash=_hex64("cancel-rbac"),
+        )
+        await _login(client_with_db, MANAGER_B_EMAIL)
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{sess.id}/cancel")
+        assert resp.status_code == 404
+
+
+# ----------------------------------------------------------------------
 # Garantia de fixture do app: as rotas estão registradas no FastAPI app.
 # (sanity check para evitar falsos passes se o include_router for esquecido)
 # ----------------------------------------------------------------------
@@ -935,3 +1199,4 @@ def test_routes_are_registered_in_app() -> None:
     assert "/api/v1/reconciliations/{session_id}" in paths
     assert "/api/v1/reconciliations/{session_id}/reprocess" in paths
     assert "/api/v1/reconciliations/{session_id}/discard" in paths
+    assert "/api/v1/reconciliations/{session_id}/cancel" in paths

@@ -517,9 +517,12 @@ class OmieClient:
         )
 
     async def listar_contas_correntes(self) -> list[ContaCorrente]:
-        """Lista todas as contas correntes do cliente, com paginação automática.
+        """Lista TODAS as contas do cliente, com paginação automática.
 
-        Inclui contas tipo `CC` (corrente) e `CA` (cartão) — ambas conciliáveis.
+        Não filtra por tipo — devolve `CC` (Conta Corrente), `CR` (Cartão de
+        Crédito), `CA` (Conta Aplicação) e demais códigos. Conciliáveis hoje:
+        `CC` e `CR` (cartão — FASE 1). ⚠️ `CA` é investimento, NÃO cartão
+        (auditoria M-1, 20/05/2026) — não confundir.
         """
         items: list[ContaCorrente] = []
         async for raw in self._paginate(

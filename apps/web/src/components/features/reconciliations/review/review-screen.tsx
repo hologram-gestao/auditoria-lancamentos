@@ -118,14 +118,17 @@ export function ReviewScreen({ clientId, sessionId }: ReviewScreenProps) {
   const statusQuery = useSessionStatus(sessionId);
 
   const referenceMonthLabel = formatReferenceMonth(sessionInfo?.reference_month);
-  const accountLabel = useMemo(() => {
+  const accountName = useMemo(() => {
     if (sessionInfo === undefined || clientQuery.data === undefined) return undefined;
     const account = clientQuery.data.accounts.find(
       (a) => a.omie_conta_id === sessionInfo.omie_conta_id,
     );
-    if (account === undefined) return `Conta Omie ${sessionInfo.omie_conta_id}`;
-    return `${account.name} · ${account.bank_name}`;
+    return account?.name ?? `Conta Omie ${sessionInfo.omie_conta_id}`;
   }, [clientQuery.data, sessionInfo]);
+  // FRONT 1.8: tipo normalizado da sessão ('credit_card' p/ fatura de cartão).
+  const isCard = sessionInfo?.account_type === 'credit_card';
+  // Mini-fase conta aplicação ('investment' p/ extrato de CDB/aplicação).
+  const isInvestment = sessionInfo?.account_type === 'investment';
 
   const counts = {
     conciliated: statusQuery.data?.conciliated_count ?? sessionInfo?.conciliated_count ?? 0,
@@ -159,7 +162,9 @@ export function ReviewScreen({ clientId, sessionId }: ReviewScreenProps) {
         clientName={clientQuery.data?.name ?? 'Cliente'}
         sessionId={sessionId}
         referenceMonthLabel={referenceMonthLabel}
-        accountLabel={accountLabel}
+        accountName={accountName}
+        isCard={isCard}
+        isInvestment={isInvestment}
         counts={counts}
       />
 
@@ -178,7 +183,7 @@ export function ReviewScreen({ clientId, sessionId }: ReviewScreenProps) {
         </TabsList>
 
         <TabsContent value="movements">
-          <MovementsTab sessionId={sessionId} />
+          <MovementsTab sessionId={sessionId} isCard={isCard} />
         </TabsContent>
         <TabsContent value="divergencias">
           <OmieDivergencesTab sessionId={sessionId} />
@@ -189,6 +194,7 @@ export function ReviewScreen({ clientId, sessionId }: ReviewScreenProps) {
         <TabsContent value="resumo">
           <SummaryTab
             sessionId={sessionId}
+            isCard={isCard}
             totalFileEntries={totalFileEntries}
             counts={counts}
             referenceMonthLabel={referenceMonthLabel}

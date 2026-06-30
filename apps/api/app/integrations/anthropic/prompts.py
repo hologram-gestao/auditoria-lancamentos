@@ -41,14 +41,48 @@ intermediários não são transações — não inclua.
 declarado. `closing_balance` é o saldo final declarado. Se o documento não \
 apresentar, use 0.
 
-6. **`account_type`:** use `checking` para conta corrente / poupança / \
-investimento. Use `credit_card` para fatura de cartão de crédito.
+6. **`account_type`:** use `checking` para conta corrente / poupança; \
+`investment` para conta de aplicação / investimento (extrato de CDB, fundo, \
+RDB, tesouro, etc.); `credit_card` para fatura de cartão de crédito.
 
 7. **`balance` por linha:** use o saldo após a movimentação se o documento \
 fornecer; caso contrário, use null.
 
 8. **`bank_name`:** identifique o banco/instituição. Se não conseguir \
 identificar, use "Desconhecido".
+
+Particularidades de FATURA DE CARTÃO DE CRÉDITO (quando `account_type` = `credit_card`):
+
+9. **Parcelas são linhas individuais.** Uma compra parcelada em 3x gera 3 \
+transações distintas — cada uma com a SUA data e o VALOR UNITÁRIO da parcela. \
+NUNCA agrupe no valor total da compra. Padrões como `1/3`, `2/3`, `PARC 01/03` \
+na descrição indicam parcela; preserve esse texto na descrição.
+
+10. **Estornos são crédito (`amount` POSITIVO).** Estornos, devoluções e \
+créditos reduzem o valor da fatura — emita com sinal positivo.
+
+11. **Encargos são transações SEPARADAS.** Juros, IOF, multa, mora e anuidade \
+são linhas próprias (não embuta em outra), com a descrição EXATA do documento \
+e `amount` negativo (são cobranças).
+
+12. **NÃO inclua o pagamento da fatura.** Linhas de "pagamento", "pagamento \
+recebido", "pgto fatura anterior" e afins pertencem ao extrato da conta \
+corrente, não à fatura — não as emita como transação.
+
+Particularidades de CONTA DE APLICAÇÃO / INVESTIMENTO (quando `account_type` = `investment`):
+
+13. **Use o VALOR LÍQUIDO efetivamente creditado/debitado.** Extratos de CDB / \
+aplicação trazem VÁRIAS colunas de valor para a mesma linha (ex.: valor bruto, \
+IOF, IR, valor creditado, valor principal). Emita SEMPRE o **valor líquido** que \
+de fato entra/sai da conta — a coluna "valor creditado" / "valor líquido" (já \
+descontados IOF e IR), NUNCA o valor bruto. É o líquido que casa com o lançamento \
+da contabilidade.
+
+14. **Sinal pela ótica da conta de aplicação.** APLICACAO (aplicar dinheiro) é \
+ENTRADA na aplicação → `amount` POSITIVO. RESGATE é SAÍDA da aplicação → `amount` \
+NEGATIVO. NÃO emita IOF, IR nem rendimento como transações separadas: eles já \
+estão embutidos na diferença entre bruto e líquido e são lançados à parte pela \
+contabilidade (último dia do mês).
 
 Você DEVE responder chamando a tool `extract_movements`. Não escreva \
 explicações em texto livre.

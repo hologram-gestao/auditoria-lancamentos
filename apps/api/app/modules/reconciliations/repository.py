@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.models import (
+    OmieAccountCache,
     ReconciliationAnomaly,
     ReconciliationFileEntry,
     ReconciliationOmieEntry,
@@ -72,6 +73,31 @@ class ReconciliationRepository:
         )
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none() is not None
+
+    # ------------------------------------------------------------------
+    # Tipo da conta selecionada (BACK 1.3 — FASE 1)
+    # ------------------------------------------------------------------
+
+    async def get_cached_account_type(
+        self,
+        *,
+        client_id: UUID,
+        omie_conta_id: int,
+    ) -> str | None:
+        """Retorna o `tipo` Omie cru (CC/CR/CA/…) da conta no cache L1, ou None.
+
+        Usado por `create_session_with_entries` para derivar o `account_type`
+        da sessão (`CR` → `credit_card`). `None` = conta não cacheada (cache
+        vazio/expirado ou `omie_conta_id` inexistente para o cliente) — nesse
+        caso o service cai no default `'checking'` (não-bloqueante).
+        """
+        account = await self._session.scalar(
+            select(OmieAccountCache).where(
+                OmieAccountCache.client_id == client_id,
+                OmieAccountCache.omie_conta_id == omie_conta_id,
+            )
+        )
+        return account.account_type if account is not None else None
 
     # ------------------------------------------------------------------
     # Criação atômica (BACK 8.1)
@@ -154,24 +180,25 @@ class ReconciliationRepository:
 
     async def apply_matches(
         self,
-        matches: list[tuple[UUID, int]],
+        matches: list[tuple[UUID, int, str]],
     ) -> None:
-        """Aplica os pares (file_entry_id, omie_lancamento_id) nas linhas.
+        """Aplica os matches `(file_entry_id, omie_lancamento_id, situation)`.
 
-        Atualiza `situation='conciliado'` e `omie_lancamento_id` para cada
-        par. Faz UPDATE individual (não bulk) porque o número de matches é
-        bounded por `total_file_entries` (geralmente < 200) — performance
-        é dominada por outras etapas, e UPDATE individual é mais legível
-        que `update().values()` com CASE/WHEN.
+        Atualiza `omie_lancamento_id` e a `situation` de cada linha casada. A
+        `situation` vem JÁ decidida pelo caller (job.py): `conciliado` para
+        data exata, `conciliado_data_divergente` para 1-3 dias de divergência
+        (FASE 1 — ver matcher.DATE_DIVERGENCE_RANGE). Faz UPDATE individual
+        (não bulk) porque o número de matches é bounded por
+        `total_file_entries` (geralmente < 200) — performance é dominada por
+        outras etapas, e UPDATE individual é mais legível que
+        `update().values()` com CASE/WHEN.
         """
-        from app.db.models import FileEntrySituation
-
-        for file_entry_id, omie_lancamento_id in matches:
+        for file_entry_id, omie_lancamento_id, situation in matches:
             await self._session.execute(
                 update(ReconciliationFileEntry)
                 .where(ReconciliationFileEntry.id == file_entry_id)
                 .values(
-                    situation=FileEntrySituation.CONCILIADO.value,
+                    situation=situation,
                     omie_lancamento_id=omie_lancamento_id,
                 )
             )
@@ -190,12 +217,21 @@ class ReconciliationRepository:
         balance_end_omie: Decimal | None = None,
         balance_difference: Decimal | None = None,
     ) -> None:
-        """Atualiza contadores + saldos + status='reviewing' + processed_at=now()."""
+        """Atualiza contadores + saldos + status='reviewing' + processed_at=now().
+
+        Guarda de cancelamento (`WHERE status='processing'`): se o usuário
+        cancelou a sessão (→ `error`) enquanto o job rodava, este UPDATE casa
+        0 linhas e o cancelamento prevalece — o job não ressuscita a sessão
+        cancelada como `reviewing`.
+        """
         from datetime import UTC, datetime
 
         await self._session.execute(
             update(ReconciliationSession)
-            .where(ReconciliationSession.id == session_id)
+            .where(
+                ReconciliationSession.id == session_id,
+                ReconciliationSession.status == ReconciliationStatus.PROCESSING.value,
+            )
             .values(
                 status=ReconciliationStatus.REVIEWING.value,
                 total_file_entries=total_file_entries,

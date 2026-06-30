@@ -23,6 +23,7 @@ import json
 from typing import Any
 
 from app.core.logging import get_logger
+from app.db.models import SessionAccountType
 from app.integrations.anthropic.client import AnthropicClient
 from app.modules.reconciliations.qualification.schemas import (
     QualificationPair,
@@ -144,10 +145,31 @@ da decisão. Para `ok` rotineiros, o motivo pode ser "coerente".
 """
 
 
+# Bloco adicional injetado SÓ quando a conta é de aplicação (CDB/investimento) —
+# Report #2 da validação pós-FASE 1. Nessas contas a lógica de entrada/saída é
+# INVERTIDA vs conta corrente; sem este contexto a IA marcava a APLICACAO (que
+# é entrada na aplicação) como "incoerente". Vai como bloco SEPARADO pra não
+# invalidar o cache do `_SYSTEM_PROMPT` nas conciliações comuns.
+_INVESTMENT_RULE = """\
+ATENÇÃO — esta conciliação é de uma CONTA DE APLICAÇÃO (CDB/investimento). Nela a \
+lógica de entrada/saída é INVERTIDA em relação à conta corrente:
+
+- APLICACAO (aplicar dinheiro) é uma ENTRADA na conta de aplicação (positivo).
+- RESGATE (resgatar) é uma SAÍDA da conta de aplicação (negativo).
+- Transferências entre contas próprias da empresa (APLICACAO, RESGATE, \
+"transferência entre contas") são movimentações internas e SEMPRE coerentes com \
+categorias do tipo "Entrada de Transferência" / "Saída de Transferência".
+
+NÃO marque 'incoerente' por causa do sinal ou da direção dessas operações — \
+marque 'ok'.
+"""
+
+
 async def analyze_pairs(
     pairs: list[QualificationPair],
     *,
     anthropic_client: AnthropicClient,
+    account_type: str = "checking",
 ) -> tuple[list[SemanticResult], TokenUsage, int]:
     """Roda Camada 1 em lotes de até `SEMANTIC_BATCH_SIZE` pares.
 
@@ -157,6 +179,9 @@ async def analyze_pairs(
         anthropic_client: cliente já configurado (`AnthropicClient` do
             `app.integrations.anthropic.client`). Caller decide se passa
             um real (worker) ou um fake (testes via dependency_overrides).
+        account_type: tipo normalizado da conta da sessão. Quando
+            `'investment'` (conta aplicação), injeta a regra de semântica
+            de aplicação no prompt (Report #2). Default `'checking'`.
 
     Returns:
         Tupla `(results, tokens, calls)`:
@@ -180,7 +205,9 @@ async def analyze_pairs(
 
     for start in range(0, len(pairs), SEMANTIC_BATCH_SIZE):
         batch = pairs[start : start + SEMANTIC_BATCH_SIZE]
-        batch_results, batch_tokens = await _analyze_batch(batch, anthropic_client=anthropic_client)
+        batch_results, batch_tokens = await _analyze_batch(
+            batch, anthropic_client=anthropic_client, account_type=account_type
+        )
         results.extend(batch_results)
         tokens = TokenUsage(
             input_tokens=tokens.input_tokens + batch_tokens.input_tokens,
@@ -196,6 +223,7 @@ async def _analyze_batch(
     batch: list[QualificationPair],
     *,
     anthropic_client: AnthropicClient,
+    account_type: str,
 ) -> tuple[list[SemanticResult], TokenUsage]:
     """Chama o Claude para UM lote (≤ 50 pares) via tool use estruturado.
 
@@ -218,13 +246,17 @@ async def _analyze_batch(
     sdk_client = anthropic_client._get_client()
 
     user_payload = _build_user_payload(batch)
-    system_blocks = [
+    system_blocks: list[dict[str, Any]] = [
         {
             "type": "text",
             "text": _SYSTEM_PROMPT,
             "cache_control": {"type": "ephemeral"},
         }
     ]
+    # Conta aplicação: injeta a regra de semântica invertida como bloco SEPARADO
+    # (mantém o cache do _SYSTEM_PROMPT comum). Report #2.
+    if account_type == SessionAccountType.INVESTMENT.value:
+        system_blocks.append({"type": "text", "text": _INVESTMENT_RULE})
 
     message = await sdk_client.messages.create(
         model=anthropic_client._model,
