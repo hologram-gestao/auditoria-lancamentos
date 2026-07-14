@@ -64,6 +64,29 @@ export function formatBRDate(iso: string): string {
   return `${day}/${month}/${year}`;
 }
 
+/**
+ * Desloca uma data ISO `YYYY-MM-DD` em `deltaDays` (pode ser negativo) e
+ * devolve outra string `YYYY-MM-DD`. A aritmética roda em UTC para não sofrer
+ * o timezone-shift do `new Date(iso)` local (mesmo motivo de `formatBRDate`).
+ * Em qualquer string fora do formato, devolve a entrada inalterada.
+ *
+ * Usado por FRONT 02.1: a data do Omie de uma linha conciliada é derivada do
+ * `days_diff` assinado do contrato — `omie = transaction_date - days_diff`.
+ */
+export function shiftISODate(iso: string, deltaDays: number): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!match) {
+    return iso;
+  }
+  const [, year, month, day] = match;
+  const base = Date.UTC(Number(year), Number(month) - 1, Number(day));
+  const shifted = new Date(base + deltaDays * 86_400_000);
+  const y = shifted.getUTCFullYear();
+  const m = String(shifted.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(shifted.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 /** Mapeia o `account_type` do parse IA para rótulo em PT-BR. */
 export function formatAccountType(type: 'checking' | 'credit_card'): string {
   switch (type) {

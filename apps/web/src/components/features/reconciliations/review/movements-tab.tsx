@@ -58,7 +58,7 @@ import {
 } from '@/hooks/use-reconciliations';
 import { ApiError } from '@/lib/api/client';
 import type { AnomalyItem, FileEntryItem } from '@/lib/api/reconciliations';
-import { formatBRDate, formatBRL } from '@/lib/format';
+import { formatBRDate, formatBRL, shiftISODate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 import { QualificationCell, isQualificationAnomaly } from './qualification-cell';
@@ -279,7 +279,7 @@ export function MovementsTab({ sessionId }: MovementsTabProps) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-28">Data</TableHead>
+              <TableHead className="w-36">Data</TableHead>
               <TableHead>Descrição</TableHead>
               <TableHead className="w-36 text-right">Valor</TableHead>
               <TableHead className="w-48">Fornecedor Omie</TableHead>
@@ -475,7 +475,9 @@ function RowFragment({
   return (
     <>
       <TableRow>
-        <TableCell className="text-sm">{formatBRDate(entry.transaction_date)}</TableCell>
+        <TableCell className="text-sm">
+          <DateCell entry={entry} />
+        </TableCell>
         <TableCell className="text-sm">
           <div className="flex flex-col">
             <span>{entry.description}</span>
@@ -556,6 +558,39 @@ function RowFragment({
         </TableRow>
       )}
     </>
+  );
+}
+
+/**
+ * Célula "Data" (FRONT 02.4 / BACK 02.4). Quando a linha conciliou com
+ * divergência de data (`days_diff` assinado e ≠ 0), exibe as DUAS datas —
+ * extrato e Omie — mais o desvio em dias, para que a divergência não suma
+ * do entregável visual. `days_diff = data_extrato - data_omie`, logo a data
+ * do Omie é `transaction_date - days_diff`. Quando `days_diff` é `0` ou
+ * `null` (linha não conciliada / sessão legada), mostra só a data do extrato.
+ */
+function DateCell({ entry }: { entry: FileEntryItem }) {
+  const daysDiff = entry.days_diff;
+  const fileDate = formatBRDate(entry.transaction_date);
+
+  if (daysDiff === null || daysDiff === 0) {
+    return <span>{fileDate}</span>;
+  }
+
+  const omieDate = formatBRDate(shiftISODate(entry.transaction_date, -daysDiff));
+  const absDays = Math.abs(daysDiff);
+  const diffLabel = `${absDays} ${absDays === 1 ? 'dia' : 'dias'}`;
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span>{fileDate}</span>
+      <span
+        className="text-amber-700 dark:text-amber-300 text-xs"
+        title={`Data no extrato: ${fileDate} · Data no Omie: ${omieDate} — divergência de ${diffLabel}`}
+      >
+        Omie {omieDate} · {diffLabel}
+      </span>
+    </div>
   );
 }
 

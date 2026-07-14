@@ -81,7 +81,7 @@ import {
 } from '@/hooks/use-reconciliations';
 import { ApiError } from '@/lib/api/client';
 import type { BankAccount } from '@/lib/api/clients';
-import type { ParsedStatement } from '@/lib/api/reconciliations';
+import type { ChecksumResult, ParsedStatement } from '@/lib/api/reconciliations';
 import { sha256Hex } from '@/lib/crypto/hash';
 import {
   ALLOWED_EXTENSIONS,
@@ -97,6 +97,20 @@ import { FileInputField } from './file-input-field';
 import { ParsePreview } from './parse-preview';
 
 const FILE_ACCEPT = ALLOWED_EXTENSIONS.map((ext) => `.${ext}`).join(',');
+
+/**
+ * Código do erro de truncamento da IA (BACK 02.1). Quando o `POST /parse`
+ * responde 422 com este code, a extração foi cortada no meio (`stop_reason ==
+ * "max_tokens"`) e NADA foi importado — surfaçamos como erro persistente.
+ */
+const PARSE_TRUNCATED_CODE = 'ADL-PARSE-TRUNCADO';
+
+/**
+ * Código do 409 de duplicata (BACK 02.6). O `POST /parse` agora barra o
+ * arquivo já importado ANTES de chamar a IA. Chega aqui quando o pré-check V3
+ * foi pulado ou houve corrida entre o `/check-duplicate` e o `/parse`.
+ */
+const DUPLICATE_FILE_CODE = 'DUPLICATE_FILE';
 
 const TOLERANCE_TOOLTIP =
   'Margem de dias entre a data do lançamento no banco e no Omie. Um lançamento do dia 31 pode estar registrado no Omie no dia 2 do mês seguinte; a tolerância evita falsos positivos. Padrão é 3 dias.';
@@ -187,6 +201,16 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
   const [step, setStep] = useState<SubmitStep>('idle');
   const [view, setView] = useState<View>('form');
   const [parsed, setParsed] = useState<ParsedStatement | null>(null);
+  // Resultado do checksum de saldos (BACK 02.3) que acompanha o parse. Quando
+  // `ok=false`, a prévia bloqueia a confirmação e exibe `reason`.
+  const [checksum, setChecksum] = useState<ChecksumResult | null>(null);
+  // Mensagem de parse TRUNCADO (BACK 02.1 / ADL-PARSE-TRUNCADO): erro
+  // persistente e amigável no form — a sessão falhou, nada foi importado.
+  const [parseError, setParseError] = useState<string | null>(null);
+  // Mensagem do 409 de duplicata vindo do próprio `/parse` (BACK 02.6). Guarda
+  // a `userMessage` do back (com a data de importação) para um alerta acionável
+  // — `null` no caminho de duplicata do pré-check V3 (que não tem essa data).
+  const [duplicateInfo, setDuplicateInfo] = useState<string | null>(null);
   // Hash do arquivo aceito pelo /parse — preservado para o POST de criação
   // da sessão (S10). Resetado junto com `parsed` no cancel/select-other-file.
   const [submittedHash, setSubmittedHash] = useState<string | null>(null);
@@ -198,45 +222,53 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
     // V1 (zod resolver): se chegou aqui, campos obrigatórios + formato +
     // tamanho ≤ 20 MB já passaram. Não precisa repetir.
 
-    // V2 — hash SHA-256 client-side.
+    // Nova tentativa: limpa erros persistentes de uma tentativa anterior.
+    setParseError(null);
+    setDuplicateInfo(null);
+
+    // V2 — hash SHA-256 client-side. OPCIONAL (BACK 02.6): o servidor recalcula
+    // o hash do conteúdo no /parse e é a autoridade da dedup. Se o cálculo local
+    // falhar (ex: crypto.subtle indisponível), NÃO bloqueamos — seguimos para o
+    // /parse, que revalida no servidor. O hash, quando disponível, é reusado no
+    // pré-check V3 e no POST de criação (S10).
     setStep('hashing');
-    let hash: string;
+    let hash: string | null = null;
     try {
       hash = await sha256Hex(values.file);
-    } catch (err) {
-      setStep('idle');
-      const message =
-        err instanceof Error ? err.message : 'Não foi possível calcular a assinatura do arquivo.';
-      toast.error(message);
-      return;
+    } catch {
+      hash = null;
     }
 
-    // V3 — checagem de duplicata no backend.
-    setStep('checking-duplicate');
-    let duplicate: boolean;
-    try {
-      const res = await checkDuplicate.mutateAsync({
-        client_id: clientId,
-        omie_conta_id: values.omie_conta_id,
-        month: values.reference_month,
-        hash,
-      });
-      duplicate = res.duplicate;
-    } catch (err) {
-      setStep('idle');
-      const userMessage =
-        err instanceof ApiError
-          ? err.userMessage
-          : 'Não foi possível verificar a duplicata. Tente novamente.';
-      toast.error(userMessage);
-      return;
-    }
+    // V3 — pré-check advisory de duplicata (só quando temos o hash local). O
+    // /parse (V4) faz a dedup definitiva no servidor, então sem hash aqui
+    // apenas pulamos direto para o parse.
+    if (hash !== null) {
+      setStep('checking-duplicate');
+      let duplicate: boolean;
+      try {
+        const res = await checkDuplicate.mutateAsync({
+          client_id: clientId,
+          omie_conta_id: values.omie_conta_id,
+          month: values.reference_month,
+          hash,
+        });
+        duplicate = res.duplicate;
+      } catch (err) {
+        setStep('idle');
+        const userMessage =
+          err instanceof ApiError
+            ? err.userMessage
+            : 'Não foi possível verificar a duplicata. Tente novamente.';
+        toast.error(userMessage);
+        return;
+      }
 
-    if (duplicate) {
-      // Bloqueio terminal: usuário precisa trocar arquivo ou cancelar.
-      // Não voltamos para `idle` automaticamente — Doc §11.3 V3 é explícito.
-      setStep('duplicate-blocked');
-      return;
+      if (duplicate) {
+        // Bloqueio terminal: usuário precisa trocar arquivo ou cancelar.
+        // Não voltamos para `idle` automaticamente — Doc §11.3 V3 é explícito.
+        setStep('duplicate-blocked');
+        return;
+      }
     }
 
     // V4 — parse via Claude (Doc §12). Endpoint stateless: nada persiste no
@@ -245,23 +277,39 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
     // timeout 504, auth fault 502 — ver `lib/api/reconciliations.ts`).
     setStep('parsing');
     try {
-      const statement = await parseStatement.mutateAsync({
+      const result = await parseStatement.mutateAsync({
         client_id: clientId,
         file: values.file,
       });
-      setParsed(statement);
-      // Hash que o backend acabou de aceitar no /check-duplicate — reusamos
-      // no POST /reconciliations sem precisar recalcular o SHA-256.
+      setParsed(result.statement);
+      setChecksum(result.checksum);
+      // Hash local (quando calculado) — reusado no POST /reconciliations sem
+      // recalcular. Pode ser `null` se o cálculo client-side falhou; nesse caso
+      // o botão de confirmar já orienta reenviar (o create exige o hash).
       setSubmittedHash(hash);
       setView('preview');
       setStep('idle');
     } catch (err) {
-      setStep('idle');
+      const apiErr = err instanceof ApiError ? err : null;
       const userMessage =
-        err instanceof ApiError
-          ? err.userMessage
-          : 'Não foi possível processar o arquivo. Tente novamente.';
-      toast.error(userMessage);
+        apiErr?.userMessage ?? 'Não foi possível processar o arquivo. Tente novamente.';
+      if (apiErr?.code === PARSE_TRUNCATED_CODE) {
+        // Truncamento (BACK 02.1): erro persistente e prominente no form — a
+        // extração perdeu linhas e NADA foi importado. Não é uma tela que
+        // "parece certa"; o operador precisa dividir o arquivo e reenviar.
+        setStep('idle');
+        setParseError(userMessage);
+      } else if (apiErr?.code === DUPLICATE_FILE_CODE) {
+        // Duplicata barrada DENTRO do /parse (BACK 02.6), sem gastar IA. Bloqueio
+        // terminal com mensagem acionável (quando importado + para onde ir) —
+        // não um erro genérico de framework. Reusa o step `duplicate-blocked`
+        // para trocar "Processar" por "Selecionar outro arquivo".
+        setStep('duplicate-blocked');
+        setDuplicateInfo(userMessage);
+      } else {
+        setStep('idle');
+        toast.error(userMessage);
+      }
     }
   }
 
@@ -269,6 +317,7 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
     // Volta ao form sem resetar o RHF: o `useForm` continua montado por causa
     // do render condicional logo abaixo, então todos os values estão intactos.
     setParsed(null);
+    setChecksum(null);
     setSubmittedHash(null);
     setView('form');
   }
@@ -316,6 +365,8 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
     form.clearErrors('file');
     setStep('idle');
     setSubmittedHash(null);
+    setParseError(null);
+    setDuplicateInfo(null);
   }
 
   const isPipelineRunning =
@@ -323,7 +374,7 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
   const isDuplicateBlocked = step === 'duplicate-blocked';
   const isSubmitting = form.formState.isSubmitting || isPipelineRunning;
   const inputsDisabled = isSubmitting || isDuplicateBlocked;
-  const showPreview = view === 'preview' && parsed !== null;
+  const showPreview = view === 'preview' && parsed !== null && checksum !== null;
 
   return (
     <div className="mx-auto max-w-2xl space-y-8">
@@ -332,9 +383,10 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
         <h1 className="text-2xl font-semibold">Nova Conciliação</h1>
       </header>
 
-      {showPreview && parsed && (
+      {showPreview && parsed && checksum && (
         <ParsePreview
           parsed={parsed}
+          checksum={checksum}
           onCancel={handlePreviewCancel}
           onConfirm={() => void handlePreviewConfirm()}
           isConfirming={createReconciliation.isPending}
@@ -489,7 +541,11 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
                   <FileInputField
                     accept={FILE_ACCEPT}
                     value={field.value ?? null}
-                    onChange={(file) => field.onChange(file ?? undefined)}
+                    onChange={(file) => {
+                      field.onChange(file ?? undefined);
+                      // Trocar o arquivo dissolve o erro de truncamento anterior.
+                      setParseError(null);
+                    }}
                     disabled={inputsDisabled || !hasAccounts}
                     aria-invalid={!!fieldState.error}
                   />
@@ -503,7 +559,14 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
             )}
           />
 
-          {isDuplicateBlocked && <DuplicateBlockAlert />}
+          {isDuplicateBlocked &&
+            (duplicateInfo !== null ? (
+              <DuplicateParseAlert clientId={clientId} message={duplicateInfo} />
+            ) : (
+              <DuplicateBlockAlert />
+            ))}
+
+          {parseError !== null && <TruncatedParseAlert message={parseError} />}
 
           {step === 'parsing' && <ParsingHint />}
 
@@ -586,6 +649,57 @@ function DuplicateBlockAlert() {
           Já existe uma conciliação para esta conta, mês e arquivo. Não é possível criar outra.
           Selecione um arquivo diferente para continuar.
         </p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Alerta acionável do 409 de duplicata vindo do `POST /parse` (BACK 02.6).
+ * Diferente do `DuplicateBlockAlert` do pré-check V3, este traz a `userMessage`
+ * do backend (com a DATA em que o extrato foi importado) e um caminho claro
+ * PARA ONDE ir: o histórico de conciliações do cliente, onde a conciliação
+ * existente pode ser aberta. O `session_id` da duplicata não é exposto no
+ * corpo do erro (só em logs/Sentry), então navegamos para a lista do cliente
+ * em vez de um deep-link à sessão específica.
+ */
+function DuplicateParseAlert({ clientId, message }: { clientId: string; message: string }) {
+  return (
+    <div
+      role="alert"
+      className="bg-destructive/5 border-destructive/30 text-destructive flex items-start gap-3 rounded-lg border p-4 text-sm"
+    >
+      <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
+      <div className="space-y-2">
+        <div className="space-y-1">
+          <p className="font-semibold">Este extrato já foi importado</p>
+          <p className="leading-snug">{message}</p>
+        </div>
+        <Button asChild variant="outline" size="sm">
+          <Link href={`/clientes/${clientId}`}>Ver conciliações do cliente</Link>
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Alerta persistente de parse TRUNCADO (BACK 02.1 / ADL-PARSE-TRUNCADO).
+ * A extração foi cortada no meio e NADA foi importado — o operador precisa
+ * dividir o arquivo em períodos menores e reenviar. `message` é a `userMessage`
+ * em PT-BR vinda do backend (já pronta para exibição). Token destrutivo — este
+ * é um erro de dado, não um aviso de sucesso.
+ */
+function TruncatedParseAlert({ message }: { message: string }) {
+  return (
+    <div
+      role="alert"
+      className="bg-destructive/5 border-destructive/30 text-destructive flex items-start gap-3 rounded-lg border p-4 text-sm"
+    >
+      <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
+      <div className="space-y-1">
+        <p className="font-semibold">Arquivo grande demais — extração interrompida</p>
+        <p className="leading-snug">{message}</p>
       </div>
     </div>
   );
