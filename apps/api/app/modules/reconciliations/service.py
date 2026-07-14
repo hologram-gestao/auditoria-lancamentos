@@ -7,7 +7,7 @@ descrições) e leitura do status para o polling.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import SecretStr
@@ -75,6 +75,25 @@ class ReconciliationService:
         )
         return duplicate
 
+    async def find_parse_duplicate(
+        self,
+        *,
+        client_id: UUID,
+        file_hash: str,
+    ) -> tuple[UUID, datetime] | None:
+        """BACK 02.6 — sessão ativa que já importou este conteúdo, ou None.
+
+        Usada pelo `POST /parse` para barrar a duplicata ANTES de chamar a IA
+        (custo). Sessões em `error` não contam (reimportar é permitido). RBAC
+        sobre `client_id` é responsabilidade do caller (route valida acesso).
+        Retorna `(session_id, created_at)` da mais recente.
+        """
+        row = await self._repo.find_active_session_by_hash(client_id=client_id, file_hash=file_hash)
+        if row is None:
+            return None
+        session_id, created_at, _status = row
+        return session_id, created_at
+
     # ------------------------------------------------------------------
     # BACK 8.1 — criação atômica da sessão
     # ------------------------------------------------------------------
@@ -129,6 +148,13 @@ class ReconciliationService:
             date_tolerance_days=request.date_tolerance_days,
             file_hash=request.file_hash,
             status=ReconciliationStatus.PROCESSING.value,
+            # BACK 02.3 — saldos gravados A PARTIR DO PARSE (deixam de ser NULL).
+            # `opening_balance`/`closing_balance` do statement são a fonte da
+            # verdade (sempre presentes, Decimal), mais confiável que derivar do
+            # `balance` por linha (que falta em faturas de cartão). O job usa
+            # esses valores em `compute_balances` e NÃO os sobrescreve com None.
+            balance_start=statement.opening_balance,
+            balance_end_file=statement.closing_balance,
         )
 
         entries: list[ReconciliationFileEntry] = []

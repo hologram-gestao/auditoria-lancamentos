@@ -59,10 +59,14 @@ class OmieMovement:
 
 @dataclass(frozen=True, slots=True)
 class MatchResult:
-    """Saída do matcher — apenas pares de índices + lista de Omie sobrando.
+    """Saída do matcher — triplas de match + lista de Omie sobrando.
 
-    `matches`: pares `(file_entry.id, OmieMovement.omie_id)`. O caller
-    aplica isso atualizando `situation='conciliado'` e `omie_lancamento_id`.
+    `matches`: triplas `(file_entry.id, OmieMovement.omie_id, days_diff)`. O
+    caller aplica atualizando `situation='conciliado'`, `omie_lancamento_id` e
+    `days_diff`. `days_diff` é ASSINADO (BACK 02.4):
+    `transaction_date(arquivo) - transaction_date(omie)` em dias — `0` = data
+    exata; `±N` = casou dentro da tolerância mas com divergência (não pode
+    sumir do entregável).
 
     `unmatched_omie_indices`: índices da lista original de movimentos Omie
     que NÃO foram consumidos. Usar índice (e não objeto) preserva a ordem
@@ -70,7 +74,7 @@ class MatchResult:
     defesa em profundidade).
     """
 
-    matches: list[tuple[str, int]]
+    matches: list[tuple[str, int, int]]
     unmatched_omie_indices: list[int]
 
 
@@ -113,7 +117,7 @@ def match(
         `MatchResult` com pares (file_id, omie_id) e índices Omie sobrando.
     """
     used_omie_indices: set[int] = set()
-    matches: list[tuple[str, int]] = []
+    matches: list[tuple[str, int, int]] = []
 
     for file_entry in file_entries:
         candidate_indices: list[int] = []
@@ -146,7 +150,13 @@ def match(
         candidate_indices.sort(key=_sort_key)
         chosen = candidate_indices[0]
         used_omie_indices.add(chosen)
-        matches.append((file_entry.id, omie_movements[chosen].omie_id))
+        # BACK 02.4 — days_diff ASSINADO (nao `abs`): arquivo - omie. Preserva
+        # a direcao da divergencia (+ = arquivo depois do Omie). O tie-break
+        # acima usa `abs`; o valor persistido guarda o sinal.
+        signed_days_diff = (
+            file_entry.transaction_date - omie_movements[chosen].transaction_date
+        ).days
+        matches.append((file_entry.id, omie_movements[chosen].omie_id, signed_days_diff))
 
     unmatched_omie_indices = [
         idx for idx in range(len(omie_movements)) if idx not in used_omie_indices

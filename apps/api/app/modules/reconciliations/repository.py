@@ -13,7 +13,7 @@ queries separadas com IN clause; nada de N+1 silencioso.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -72,6 +72,45 @@ class ReconciliationRepository:
         )
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none() is not None
+
+    async def find_active_session_by_hash(
+        self,
+        *,
+        client_id: UUID,
+        file_hash: str,
+    ) -> tuple[UUID, datetime, str] | None:
+        """Sessão ATIVA (não `error`, não descartada) com esse (client_id, hash).
+
+        BACK 02.6 — dedup do `POST /parse` ANTES de qualquer chamada à IA.
+        No parse só existem `client_id` + hash do conteúdo (recalculado no
+        servidor); `omie_conta_id`/`reference_month` só chegam no
+        `POST /reconciliations`. Por isso a checagem é por (client_id, hash) —
+        mais ampla que a UNIQUE completa, mas o mesmo conteúdo para o mesmo
+        cliente é praticamente sempre reenvio.
+
+        Sessões em `error` NÃO contam (reimportar é permitido — não se pune o
+        usuário pelo erro do sistema). Descartadas (`deleted_at`) idem. Retorna
+        a mais recente `(id, created_at, status)` ou `None`.
+        """
+        stmt = (
+            select(
+                ReconciliationSession.id,
+                ReconciliationSession.created_at,
+                ReconciliationSession.status,
+            )
+            .where(
+                ReconciliationSession.client_id == client_id,
+                ReconciliationSession.file_hash == file_hash,
+                ReconciliationSession.deleted_at.is_(None),
+                ReconciliationSession.status != ReconciliationStatus.ERROR.value,
+            )
+            .order_by(ReconciliationSession.created_at.desc())
+            .limit(1)
+        )
+        row = (await self._session.execute(stmt)).first()
+        if row is None:
+            return None
+        return row.id, row.created_at, row.status
 
     # ------------------------------------------------------------------
     # Criação atômica (BACK 8.1)
@@ -154,25 +193,27 @@ class ReconciliationRepository:
 
     async def apply_matches(
         self,
-        matches: list[tuple[UUID, int]],
+        matches: list[tuple[UUID, int, int]],
     ) -> None:
-        """Aplica os pares (file_entry_id, omie_lancamento_id) nas linhas.
+        """Aplica as triplas (file_entry_id, omie_lancamento_id, days_diff).
 
-        Atualiza `situation='conciliado'` e `omie_lancamento_id` para cada
-        par. Faz UPDATE individual (não bulk) porque o número de matches é
-        bounded por `total_file_entries` (geralmente < 200) — performance
-        é dominada por outras etapas, e UPDATE individual é mais legível
-        que `update().values()` com CASE/WHEN.
+        Atualiza `situation='conciliado'`, `omie_lancamento_id` e `days_diff`
+        (assinado; 0 = data exata — BACK 02.4) para cada linha conciliada. Faz
+        UPDATE individual (não bulk) porque o número de matches é bounded por
+        `total_file_entries` (geralmente < 200) — performance é dominada por
+        outras etapas, e UPDATE individual é mais legível que `update().values()`
+        com CASE/WHEN.
         """
         from app.db.models import FileEntrySituation
 
-        for file_entry_id, omie_lancamento_id in matches:
+        for file_entry_id, omie_lancamento_id, days_diff in matches:
             await self._session.execute(
                 update(ReconciliationFileEntry)
                 .where(ReconciliationFileEntry.id == file_entry_id)
                 .values(
                     situation=FileEntrySituation.CONCILIADO.value,
                     omie_lancamento_id=omie_lancamento_id,
+                    days_diff=days_diff,
                 )
             )
 
@@ -280,6 +321,9 @@ class ReconciliationRepository:
             .values(
                 situation="sem_omie",
                 omie_lancamento_id=None,
+                # BACK 02.4 — zera a divergência de data; o re-matching regrava
+                # para as linhas que voltarem a conciliar.
+                days_diff=None,
             )
         )
         # 3. Reset da sessão.
@@ -294,8 +338,10 @@ class ReconciliationRepository:
                 sem_omie_count=0,
                 omie_sem_arquivo_count=0,
                 anomaly_count=0,
-                balance_start=None,
-                balance_end_file=None,
+                # BACK 02.3 — `balance_start`/`balance_end_file` vêm do PARSE
+                # (gravados na criação) e são preservados no reprocess, igual às
+                # `file_entries`: reprocessar não re-extrai o arquivo. Só os
+                # saldos DERIVADOS do matching (end_omie/difference) são zerados.
                 balance_end_omie=None,
                 balance_difference=None,
             )

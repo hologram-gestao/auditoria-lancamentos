@@ -79,6 +79,8 @@ def compute_balances(
     *,
     period_start: date,
     period_end: date,
+    opening_balance: Decimal | None = None,
+    closing_balance: Decimal | None = None,
 ) -> SessionBalances:
     """Calcula os 4 saldos.
 
@@ -103,11 +105,20 @@ def compute_balances(
     first = ordered[0]
     last = ordered[-1]
 
-    balance_start: Decimal | None = None
-    if first.balance is not None:
+    # BACK 02.3 — o saldo do PARSE (opening/closing do statement) é a fonte da
+    # verdade quando informado: sempre presente (Decimal) e não depende do
+    # `balance` por linha, que falta em faturas de cartão. Só caímos na
+    # derivação por linha quando o parse não passou os saldos (sessões legadas /
+    # chamadas de teste antigas).
+    balance_start: Decimal | None
+    if opening_balance is not None:
+        balance_start = opening_balance
+    elif first.balance is not None:
         balance_start = first.balance - first.amount
+    else:
+        balance_start = None
 
-    balance_end_file = last.balance
+    balance_end_file = closing_balance if closing_balance is not None else last.balance
 
     balance_end_omie: Decimal | None = None
     if balance_start is not None:

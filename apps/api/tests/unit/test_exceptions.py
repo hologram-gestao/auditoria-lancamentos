@@ -114,6 +114,16 @@ class TestErrorCodeEnum:
             assert " " not in code.value
 
     def test_code_value_equals_name(self) -> None:
-        """Convenção: nome do enum == valor (facilita debug)."""
+        """Convenção: nome do enum == valor (facilita debug).
+
+        Exceção documentada (Sprint 2 / BACK 02.1): `PARSE_TRUNCATED` carrega o
+        código de contrato mandado pelo PRD — `ADL-PARSE-TRUNCADO` — que o front
+        usa para distinguir truncamento de um parse malformado. O código
+        externo é fixado pela spec, não pela convenção interna.
+        """
+        exempt = {ErrorCode.PARSE_TRUNCATED}
         for code in ErrorCode:
+            if code in exempt:
+                continue
             assert code.value == code.name
+        assert ErrorCode.PARSE_TRUNCATED.value == "ADL-PARSE-TRUNCADO"

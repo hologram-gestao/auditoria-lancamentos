@@ -69,6 +69,20 @@ class TestRedactor:
         out = _redact_sensitive(None, "info", {key: "valor-ok"})
         assert out[key] == "valor-ok", f"Key '{key}' deveria passar intacta"
 
+    @pytest.mark.parametrize("key", ["input_tokens", "output_tokens"])
+    def test_token_count_keys_are_allowlisted(self, key: str) -> None:
+        """BACK 02.2: contagens de tokens são inteiros de telemetria, não
+        segredos — o allowlist SAFE_KEYS as preserva apesar da substring
+        'token'. É o número que o evento parse_concluido existe para reportar."""
+        out = _redact_sensitive(None, "info", {key: 32000})
+        assert out[key] == 32000, f"Key '{key}' deveria passar intacta (SAFE_KEYS)"
+
+    @pytest.mark.parametrize("key", ["token", "access_token", "refresh_token"])
+    def test_generic_token_keys_still_redacted(self, key: str) -> None:
+        """O allowlist é match EXATO — não afrouxa `token` genérico."""
+        out = _redact_sensitive(None, "info", {key: "valor-secreto"})
+        assert out[key] == "[REDACTED]", f"Key '{key}' deveria continuar mascarada"
+
     def test_multiple_keys_partial_redaction(self) -> None:
         event = {
             "user_id": "abc-123",

@@ -325,7 +325,18 @@ _SHEET2_HEADERS = [
     ("Análise", 12),
     ("Situação", 18),
     ("Observação", 36),
+    # BACK 02.4 — divergência de data da linha conciliada. Não pode sumir do
+    # entregável: mostra `+N`/`-N` dias quando a data do arquivo diverge da
+    # data do Omie; vazio para data exata ou linha não conciliada.
+    ("Divergência (dias)", 18),
 ]
+
+
+def _format_days_diff(days_diff: int | None) -> str:
+    """`+N`/`-N` quando há divergência; vazio para 0 (exata) ou None (sem match)."""
+    if days_diff is None or days_diff == 0:
+        return ""
+    return f"{days_diff:+d}"
 
 
 def _build_sheet2_movimentacao(ws: Worksheet, rows: Sequence[FileEntryRow]) -> None:
@@ -354,6 +365,9 @@ def _build_sheet2_movimentacao(ws: Worksheet, rows: Sequence[FileEntryRow]) -> N
             value=_SITUATION_LABEL.get(row.situation, row.situation),
         ).alignment = ALIGN_CENTER
         ws.cell(row=excel_row, column=9, value=row.user_note or "").alignment = ALIGN_LEFT
+        ws.cell(
+            row=excel_row, column=10, value=_format_days_diff(row.days_diff)
+        ).alignment = ALIGN_CENTER
 
         fill = fill_for_situation(row.situation)
         if fill is not None:

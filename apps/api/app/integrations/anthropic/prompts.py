@@ -50,6 +50,13 @@ fornecer; caso contrário, use null.
 8. **`bank_name`:** identifique o banco/instituição. Se não conseguir \
 identificar, use "Desconhecido".
 
+9. **`is_payment` (só faturas de cartão):** marque `is_payment: true` APENAS \
+nas linhas de PAGAMENTO da fatura ANTERIOR (ex: "PAGAMENTO FATURA", "PGTO \
+EFETUADO", "PAGAMENTO RECEBIDO" — o crédito que quita o saldo anterior do \
+cartão). Continue extraindo essa linha normalmente (não a omita) — apenas \
+marque-a. Para compras, encargos, juros, estornos e para QUALQUER linha de \
+conta corrente, use `false` ou omita o campo.
+
 Você DEVE responder chamando a tool `extract_movements`. Não escreva \
 explicações em texto livre.
 """

@@ -178,6 +178,7 @@ class ReviewService:
                     user_action=row.user_action,
                     user_note=user_note,
                     omie_lancamento_id=row.omie_lancamento_id,
+                    days_diff=row.days_diff,
                 )
             )
 
@@ -742,6 +743,7 @@ class ReviewService:
             user_action=entry.user_action,
             user_note=self._decrypt_pair(entry.user_note_encrypted, entry.user_note_iv),
             omie_lancamento_id=entry.omie_lancamento_id,
+            days_diff=entry.days_diff,
         )
 
     def _anomaly_to_item(

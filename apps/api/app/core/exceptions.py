@@ -37,6 +37,10 @@ class ErrorCode(StrEnum):
     ANTHROPIC_AUTH_ERROR = "ANTHROPIC_AUTH_ERROR"
     ANTHROPIC_TIMEOUT = "ANTHROPIC_TIMEOUT"
     PARSE_ERROR = "PARSE_ERROR"
+    # Sprint 2 / BACK 02.1: a IA truncou a saída (`stop_reason == "max_tokens"`).
+    # Perda silenciosa de transação — o parse falha de forma explícita e NÃO
+    # grava nada. Código não-genérico para o front distinguir do PARSE_ERROR.
+    PARSE_TRUNCATED = "ADL-PARSE-TRUNCADO"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
@@ -291,6 +295,50 @@ class AnthropicParseError(ParseError):
         "Não foi possível extrair movimentações do arquivo. "
         "Verifique se o arquivo está íntegro e sem proteção por senha."
     )
+
+
+class AnthropicTruncatedError(AppError):
+    """422 — a IA truncou a saída (`stop_reason == "max_tokens"`) (BACK 02.1).
+
+    Este é o defeito mais grave que a Sprint 2 fecha: uma fatura grande
+    estoura o teto de tokens de saída, o JSON do `tool_use` trunca no meio e
+    a extração perde transações **em silêncio**. Aqui isso vira erro
+    EXPLÍCITO e não-retryável: nenhum dado parcial é gravado.
+
+    Erro de negócio/limite = 4xx (nunca 5xx). Código próprio
+    `ADL-PARSE-TRUNCADO` para o front distinguir de um parse malformado
+    (PARSE_ERROR) e orientar o usuário (arquivo grande demais → dividir).
+
+    Carrega os tokens/stop_reason da resposta para o evento `parse_concluido`
+    (BACK 02.2) poder emiti-los também no caminho de truncamento.
+    """
+
+    code = ErrorCode.PARSE_TRUNCATED
+    status_code = 422
+    default_user_message = (
+        "O arquivo é grande demais para ser processado de uma vez e a extração "
+        "foi truncada. Nenhum dado foi importado. Divida o arquivo em períodos "
+        "menores e tente novamente."
+    )
+
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        user_message: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        model: str | None = None,
+    ) -> None:
+        super().__init__(message, user_message=user_message, metadata=metadata)
+        # Metadados da resposta truncada — consumidos pelo evento
+        # `parse_concluido` (BACK 02.2) no caminho de erro. `stop_reason` é
+        # sempre "max_tokens" aqui (é o que define este erro).
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        self.model = model
+        self.stop_reason = "max_tokens"
 
 
 class AccountsSyncError(AppError):
