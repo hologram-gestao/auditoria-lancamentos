@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import base64
 import time
+from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
 from anthropic import (
@@ -42,6 +43,7 @@ from app.core.exceptions import (
     AnthropicAuthError,
     AnthropicParseError,
     AnthropicTimeoutError,
+    AnthropicTruncatedError,
 )
 from app.core.logging import get_logger
 from app.integrations.anthropic.prompts import SYSTEM_PROMPT, build_user_prompt
@@ -53,10 +55,30 @@ from app.integrations.anthropic.tools import (
 
 log = get_logger(__name__)
 
-# Limite defensivo de tokens de saída — a soma de todos os transactions deve
-# caber. Faturas/extratos típicos têm < 200 linhas; com folga generosa para
-# faturas grandes mantemos 8k.
-_MAX_OUTPUT_TOKENS = 8192
+# Fallback do teto de tokens de saída quando o caller não injeta um valor
+# explícito (default = `Settings.ADL_PARSE_MAX_OUTPUT_TOKENS`, 32.000). Antes
+# era `_MAX_OUTPUT_TOKENS = 8192` hardcoded, 1/8 do que o `claude-sonnet-4-5`
+# permite: um teto baixo trunca o `tool_use` JSON no meio em faturas grandes e
+# a extração perde transações EM SILÊNCIO (BACK 02.1). O valor real vem do
+# Settings via construtor; este default só cobre call sites internos/testes.
+_DEFAULT_MAX_OUTPUT_TOKENS = 32_000
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractionResult:
+    """Resultado da extração + metadados da resposta da Anthropic (BACK 02.1/02.2).
+
+    Além do `statement` validado, carrega `stop_reason` e a contagem de tokens
+    (`input_tokens`/`output_tokens`) — usados pelo evento de instrumentação
+    `parse_concluido` (BACK 02.2) para responder, em uma semana de uso, quantos
+    tokens uma fatura real consome. `model` é o modelo efetivamente usado.
+    """
+
+    statement: ExtractedStatement
+    stop_reason: str | None
+    input_tokens: int | None
+    output_tokens: int | None
+    model: str
 
 
 class _RetryableAnthropicError(Exception):
@@ -91,11 +113,16 @@ class AnthropicClient:
         api_key: SecretStr,
         model: str,
         timeout: float,
+        max_output_tokens: int = _DEFAULT_MAX_OUTPUT_TOKENS,
         anthropic_client: _AsyncAnthropicLike | None = None,
     ) -> None:
         self._api_key = api_key
         self._model = model
         self._timeout = timeout
+        # Teto de tokens de saída (BACK 02.1). Vem do
+        # `Settings.ADL_PARSE_MAX_OUTPUT_TOKENS` (route/job); validado na subida
+        # contra o cap do modelo em `validate_parse_output_config`.
+        self._max_output_tokens = max_output_tokens
         self._injected_client: _AsyncAnthropicLike | None = anthropic_client
 
     # ------------------------------------------------------------------
@@ -144,7 +171,7 @@ class AnthropicClient:
         mime_type: str,
         document_kind: str,
         model: str | None = None,
-    ) -> ExtractedStatement:
+    ) -> ExtractionResult:
         """Extrai `ExtractedStatement` chamando a Anthropic via tool use.
 
         Args:
@@ -159,11 +186,14 @@ class AnthropicClient:
                 construtor (ex. `claude-sonnet-4-5`).
 
         Returns:
-            `ExtractedStatement` validado.
+            `ExtractionResult` — statement validado + `stop_reason` e contagem
+            de tokens da resposta (para o evento `parse_concluido`, BACK 02.2).
 
         Raises:
             AnthropicAuthError: chave inválida/ausente, 401, 403.
             AnthropicTimeoutError: timeout esgotado após retry.
+            AnthropicTruncatedError: `stop_reason == "max_tokens"` — a saída
+                truncou (perda silenciosa de transação). Nada é extraído.
             AnthropicParseError: modelo não chamou a tool, ou tool input
                 não passa na validação Pydantic.
         """
@@ -208,6 +238,31 @@ class AnthropicClient:
             ) from exc
 
         duration_ms = round((time.monotonic() - started) * 1000)
+        stop_reason = self._read_stop_reason(message)
+        input_tokens, output_tokens = self._read_usage(message)
+
+        # BACK 02.1 — perda silenciosa de transação: se a IA truncou a saída
+        # (`stop_reason == "max_tokens"`), o JSON do `tool_use` está cortado no
+        # meio. NÃO extraímos nada (dado parcial jamais é gravado) — erramos
+        # explícito. Os metadados vão na exceção para o evento `parse_concluido`
+        # emitir também no caminho de truncamento (BACK 02.2).
+        if stop_reason == "max_tokens":
+            log.warning(
+                "anthropic_extract_truncated",
+                model=chosen_model,
+                duration_ms=duration_ms,
+                bytes_in=len(content),
+                max_output_tokens=self._max_output_tokens,
+                output_tokens=output_tokens,
+            )
+            raise AnthropicTruncatedError(
+                "Anthropic truncou a saída (stop_reason=max_tokens); "
+                f"teto={self._max_output_tokens}, output_tokens={output_tokens}.",
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                model=chosen_model,
+            )
+
         statement = self._extract_tool_payload(message)
 
         log.info(
@@ -216,8 +271,38 @@ class AnthropicClient:
             duration_ms=duration_ms,
             bytes_in=len(content),
             transaction_count=len(statement.transactions),
+            stop_reason=stop_reason,
+            output_tokens=output_tokens,
         )
-        return statement
+        return ExtractionResult(
+            statement=statement,
+            stop_reason=stop_reason,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            model=chosen_model,
+        )
+
+    # ------------------------------------------------------------------
+    # Leitura de metadados da resposta (stop_reason + usage)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _read_stop_reason(message: Any) -> str | None:
+        """Lê `message.stop_reason` de forma defensiva (pode faltar em fakes)."""
+        return getattr(message, "stop_reason", None)
+
+    @staticmethod
+    def _read_usage(message: Any) -> tuple[int | None, int | None]:
+        """Lê `usage.input_tokens`/`usage.output_tokens` de forma defensiva.
+
+        O SDK expõe `message.usage.input_tokens` e `.output_tokens`. Se o
+        objeto não tiver `usage` (fakes de teste antigos), devolve `(None,
+        None)` — o evento de instrumentação registra a ausência sem quebrar.
+        """
+        usage = getattr(message, "usage", None)
+        if usage is None:
+            return None, None
+        return getattr(usage, "input_tokens", None), getattr(usage, "output_tokens", None)
 
     # ------------------------------------------------------------------
     # Construção de mensagens
@@ -305,7 +390,7 @@ class AnthropicClient:
         try:
             return await client.messages.create(
                 model=model,
-                max_tokens=_MAX_OUTPUT_TOKENS,
+                max_tokens=self._max_output_tokens,
                 system=system_blocks,
                 tools=[EXTRACT_MOVEMENTS_TOOL],
                 tool_choice={"type": "tool", "name": EXTRACT_MOVEMENTS_TOOL_NAME},

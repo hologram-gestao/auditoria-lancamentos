@@ -29,10 +29,14 @@ from typing import TYPE_CHECKING
 
 import openpyxl
 
-from app.core.exceptions import ValidationAppError
+from app.core.exceptions import AnthropicTruncatedError, ValidationAppError
 from app.core.logging import get_logger
 from app.integrations.anthropic.schemas import ExtractedStatement, ExtractedTransaction
 from app.utils.magic_bytes import FileType, validate_upload_type
+
+# Rótulo de `modelo` para o caminho de mock de demo (Settings.MOCK_PARSE) — não
+# houve chamada real à Anthropic, então não há tokens nem modelo de verdade.
+_MOCK_MODEL_LABEL = "mock-demo"
 
 if TYPE_CHECKING:
     from app.integrations.anthropic.client import AnthropicClient
@@ -132,21 +136,97 @@ class ParseService:
         content, mime_type = self._prepare_content(detected, file_bytes)
         document_kind = _DOCUMENT_KIND[detected]
 
+        file_size = len(file_bytes)
+
         if self._mock_enabled:
             log.warning(
                 "parse_mock_used",
-                bytes_in=len(file_bytes),
+                bytes_in=file_size,
                 detected=detected.value,
                 delay_s=self._mock_delay_seconds,
             )
             if self._mock_delay_seconds > 0:
                 await asyncio.sleep(self._mock_delay_seconds)
-            return _MOCK_PADARIA_STATEMENT.model_copy(deep=True)
+            mock_stmt = _MOCK_PADARIA_STATEMENT.model_copy(deep=True)
+            self._emit_parse_concluido(
+                input_tokens=None,
+                output_tokens=None,
+                stop_reason=None,
+                n_transacoes=len(mock_stmt.transactions),
+                file_bytes=file_size,
+                modelo=_MOCK_MODEL_LABEL,
+            )
+            return mock_stmt
 
-        return await self._anthropic.extract_movements(
-            content=content,
-            mime_type=mime_type,
-            document_kind=document_kind,
+        # BACK 02.1: `extract_movements` devolve `ExtractionResult` (statement +
+        # stop_reason + tokens). BACK 02.2: emitimos `parse_concluido` nos DOIS
+        # caminhos — sucesso e truncamento (`AnthropicTruncatedError`) — para o
+        # baseline da métrica de perda silenciosa. Só o statement volta para o
+        # contrato do /parse.
+        try:
+            result = await self._anthropic.extract_movements(
+                content=content,
+                mime_type=mime_type,
+                document_kind=document_kind,
+            )
+        except AnthropicTruncatedError as exc:
+            self._emit_parse_concluido(
+                input_tokens=exc.input_tokens,
+                output_tokens=exc.output_tokens,
+                stop_reason=exc.stop_reason,
+                n_transacoes=0,  # truncou → nada extraído, nada gravado
+                file_bytes=file_size,
+                modelo=exc.model,
+            )
+            raise
+
+        self._emit_parse_concluido(
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            stop_reason=result.stop_reason,
+            n_transacoes=len(result.statement.transactions),
+            file_bytes=file_size,
+            modelo=result.model,
+        )
+        return result.statement
+
+    # ------------------------------------------------------------------
+    # Instrumentação (BACK 02.2)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _emit_parse_concluido(
+        *,
+        input_tokens: int | None,
+        output_tokens: int | None,
+        stop_reason: str | None,
+        n_transacoes: int,
+        file_bytes: int,
+        modelo: str | None,
+    ) -> None:
+        """Emite o evento de instrumentação `parse_concluido` (BACK 02.2).
+
+        É o baseline da métrica desta sprint (fração de sessões truncadas e
+        não detectadas) e responde, em uma semana de uso, quantos tokens uma
+        fatura real consome (`output_tokens`).
+
+        Campos EXATOS: `session_id`, `input_tokens`, `output_tokens`,
+        `stop_reason`, `n_transacoes`, `file_bytes`, `modelo`. `session_id` é
+        `None` porque o `POST /parse` é stateless — a sessão só nasce depois no
+        `POST /reconciliations`; o `correlation_id` do middleware já amarra o
+        evento ao request. SEM PII: nenhum conteúdo/descrição/nome de arquivo,
+        nenhuma credencial. `input_tokens`/`output_tokens` sobrevivem ao redactor
+        via `SAFE_KEYS` (são contagens, não segredos).
+        """
+        log.info(
+            "parse_concluido",
+            session_id=None,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            stop_reason=stop_reason,
+            n_transacoes=n_transacoes,
+            file_bytes=file_bytes,
+            modelo=modelo,
         )
 
     # ------------------------------------------------------------------

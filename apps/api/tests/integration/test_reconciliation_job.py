@@ -325,6 +325,9 @@ class TestJobHappyPath:
             )
             assert all(e.situation == FileEntrySituation.CONCILIADO.value for e in entries)
             assert {e.omie_lancamento_id for e in entries} == {1001, 1002}
+            # BACK 02.4 — days_diff persistido (não NULL) em toda linha
+            # conciliada; datas exatas → 0.
+            assert {e.days_diff for e in entries} == {0}
 
             # Omie entry: 1 inserido (Atrasado), com status original.
             omie_rows = (
@@ -359,6 +362,69 @@ class TestJobHappyPath:
             assert anomalies[0].omie_entry_id == omie_rows[0].id
             assert anomalies[0].file_entry_id is None
             assert anomalies[0].detected_by == "ai"
+
+    @respx.mock
+    async def test_days_diff_persisted_for_divergent_date(
+        self, factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        """BACK 02.4 — arquivo 05/04 casa com Omie 07/04 (2 dias, dentro da
+        tolerância). A linha vira `conciliado` com `days_diff = -2` PERSISTIDO
+        no Postgres real — a divergência não some do entregável."""
+        await _seed_anomaly_types(factory)
+        admin = await _seed_admin(factory, "job-daysdiff-admin@hologram.com.br")
+        cliente = await _seed_client(factory, admin.id, "X")
+        session_id = await _seed_session_with_entries(
+            factory,
+            client_id=cliente.id,
+            created_by=admin.id,
+            transactions=[(date(2026, 4, 5), "Compra divergente", Decimal("-100.00"))],
+            file_hash=_hex64("days-diff"),
+        )
+        respx.post(OMIE_EXTRATO_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_ok_extrato_payload(
+                    [
+                        {
+                            "nCodLancamento": 2001,
+                            "cNatureza": "D",
+                            "dDataLancamento": "07/04/2026",  # 2 dias depois do arquivo
+                            "nValorDocumento": 100.00,
+                            "cObservacoes": "Compra",
+                            "cSituacao": "Conciliado",
+                        }
+                    ]
+                ),
+            )
+        )
+        respx.post(OMIE_PAGAR_URL).mock(
+            side_effect=[
+                httpx.Response(200, json=_empty_pagar_payload()),
+                httpx.Response(200, json=_empty_pagar_payload()),
+            ]
+        )
+        respx.post(OMIE_RECEBER_URL).mock(
+            side_effect=[
+                httpx.Response(200, json=_empty_receber_payload()),
+                httpx.Response(200, json=_empty_receber_payload()),
+            ]
+        )
+
+        ctx: dict[str, Any] = {"settings": get_settings(), "session_factory": factory}
+        await run_reconciliation_processing(ctx, str(session_id))
+
+        async with factory() as s:
+            entry = (
+                await s.execute(
+                    select(ReconciliationFileEntry).where(
+                        ReconciliationFileEntry.session_id == session_id
+                    )
+                )
+            ).scalar_one()
+            assert entry.situation == FileEntrySituation.CONCILIADO.value
+            assert entry.omie_lancamento_id == 2001
+            # arquivo(05) - omie(07) = -2 (assinado, preservado)
+            assert entry.days_diff == -2
 
 
 @pytest.mark.integration

@@ -108,11 +108,27 @@ class Settings(BaseSettings):
     # ---------- Integrações ----------
     ANTHROPIC_API_KEY: SecretStr = Field(default=SecretStr(""))
     ANTHROPIC_MODEL_DEFAULT: str = "claude-sonnet-4-5"
-    ANTHROPIC_MODEL_FALLBACK: str = "claude-opus-4-6"
     # Timeout total para o parsing IA (S9). Mantém o checklist do BACK 7.1
     # ("Timeout: 60s") parametrizável para testes — em pytest cai-se para 1s
     # com `monkeypatch` sem precisar mexer no código.
     ANTHROPIC_TIMEOUT_SECONDS: float = 60.0
+    # Teto de tokens de SAÍDA do parsing IA (Sprint 2 / BACK 02.1). Antes era
+    # `_MAX_OUTPUT_TOKENS = 8192` hardcoded no client — 1/8 do que o
+    # `claude-sonnet-4-5` permite (cap de saída 64.000). Um teto baixo faz o
+    # `tool_use` JSON truncar no meio em faturas grandes → perda SILENCIOSA de
+    # transacao. O default 32.000 e 4x o teto antigo e metade do cap do modelo
+    # (folga para crescer sem encostar no limite). Validado na subida
+    # (`validate_parse_output_config` no lifespan): se exceder o cap de saída
+    # do modelo em uso, o serviço NÃO inicia — falha ruidosa, nunca um HTTP 400
+    # silencioso em produção. Ver `app/integrations/anthropic/model_limits.py`.
+    ADL_PARSE_MAX_OUTPUT_TOKENS: int = Field(
+        default=32_000,
+        ge=1,
+        description=(
+            "Teto de tokens de saída da extração IA. Default 32.000. Validado na "
+            "subida contra o cap de saída do modelo (Models API `max_tokens`)."
+        ),
+    )
 
     # MOCK exclusivo de demo/gravação: quando True, `ParseService` retorna um
     # payload fixo (extrato fictício da Padaria Pão Quente) sem chamar a

@@ -1,7 +1,8 @@
 """Modelo AnomalyType — catálogo de tipos de anomalia detectáveis.
 
 Schema oficial: Docs/documentation/0. Schema do Banco de Dados e Cache-*.md §anomaly_types.
-Seed inicial: 8 tipos pré-cadastrados (ver scripts/seed-dev.py).
+Seed: 6 tipos COM detector (2 estruturais + 4 de qualificação S19). Os 6 tipos
+sem detector foram removidos na Sprint 2 (BACK 02.5) — ver scripts/seed_dev.py.
 
 Fase 1 (atual): admin apenas ativa/desativa tipos.
 Fase 2 (futura): admin cria tipos custom via UI.

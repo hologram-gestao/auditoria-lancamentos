@@ -239,9 +239,41 @@ class TestSheet2Movimentacao:
             "Análise",
             "Situação",
             "Observação",
+            "Divergência (dias)",  # BACK 02.4
         ]
         for col, label in enumerate(expected, start=1):
             assert ws.cell(row=1, column=col).value == label  # type: ignore[attr-defined]
+
+    def test_days_diff_column_shows_divergence(self) -> None:
+        """BACK 02.4 — a divergência de data não pode sumir do entregável."""
+        from datetime import date
+
+        diverging = FileEntryRow(
+            transaction_date=date(2026, 4, 10),
+            description="Compra com data divergente",
+            amount=Decimal("-150.00"),
+            balance=None,
+            supplier="Fornecedor",
+            category="Despesa",
+            situation="conciliado",
+            user_note=None,
+            days_diff=-1,
+        )
+        exact = FileEntryRow(
+            transaction_date=date(2026, 4, 11),
+            description="Compra data exata",
+            amount=Decimal("-50.00"),
+            balance=None,
+            supplier=None,
+            category=None,
+            situation="conciliado",
+            user_note=None,
+            days_diff=0,
+        )
+        ws = self._build(diverging, exact)
+        # Coluna 10 = "Divergência (dias)". Divergente mostra o sinal; exata, vazio.
+        assert ws.cell(row=2, column=10).value == "-1"  # type: ignore[attr-defined]
+        assert ws.cell(row=3, column=10).value in ("", None)  # type: ignore[attr-defined]
 
     def test_header_has_header_fill(self) -> None:
         ws = self._build()

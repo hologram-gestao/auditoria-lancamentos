@@ -73,6 +73,10 @@ class FileEntryRow:
     # quando a flag QUALIFICATION_ENABLED estava desligada — renderer
     # mostra `—` nesse caso pra distinguir de "ok" explícito.
     qualification_status: QualificationStatus | None = None
+    # BACK 02.4 — divergência de data (assinado, em dias) da linha conciliada.
+    # A coluna no Excel garante que a divergência não desapareça do entregável.
+    # None = não conciliada / sessão legada; 0 = data exata.
+    days_diff: int | None = None
 
 
 @dataclass(frozen=True)

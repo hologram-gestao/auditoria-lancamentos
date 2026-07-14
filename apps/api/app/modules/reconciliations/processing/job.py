@@ -166,6 +166,12 @@ async def _execute_processing(
         omie_conta_id = session_obj.omie_conta_id
         reference_month = session_obj.reference_month
         tolerance_days = session_obj.date_tolerance_days
+        # BACK 02.3 — saldos do parse persistidos na criação. Capturados aqui
+        # (antes da sessão SQLAlchemy fechar) para alimentar `compute_balances`
+        # como fonte da verdade de balance_start/balance_end_file — o job NÃO
+        # os regride para None em faturas sem `balance` por linha.
+        parse_balance_start = session_obj.balance_start
+        parse_balance_end_file = session_obj.balance_end_file
 
     # 2. Fetch Omie data — toda a interação com credencial em claro
     #    acontece dentro do `async with` do OmieClient.
@@ -237,8 +243,13 @@ async def _execute_processing(
     async with session_factory() as db, db.begin():
         repo = ReconciliationRepository(db)
 
-        match_pairs_uuid = [(UUID(file_id), omie_id) for file_id, omie_id in result.matches]
-        await repo.apply_matches(match_pairs_uuid)
+        # BACK 02.4 — apply_matches grava também o days_diff assinado. Downstream
+        # (qualificação, contadores) só precisa dos pares (file_id, omie_id).
+        matches_with_days = [
+            (UUID(file_id), omie_id, days_diff) for file_id, omie_id, days_diff in result.matches
+        ]
+        await repo.apply_matches(matches_with_days)
+        match_pairs_uuid = [(file_id, omie_id) for file_id, omie_id, _dd in matches_with_days]
 
         unmatched_omie = [omie_movements[idx] for idx in result.unmatched_omie_indices]
         omie_entries = [
@@ -293,6 +304,8 @@ async def _execute_processing(
             omie_movements,  # type: ignore[arg-type]
             period_start=period_start,
             period_end=period_end,
+            opening_balance=parse_balance_start,
+            closing_balance=parse_balance_end_file,
         )
 
         await repo.update_session_after_matching(

@@ -20,6 +20,8 @@ Cobertura:
 
 from __future__ import annotations
 
+import hashlib
+from datetime import date
 from io import BytesIO
 from typing import TYPE_CHECKING, Any
 
@@ -31,7 +33,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.crypto import encrypt
 from app.core.security import hash_password
-from app.db.models import Client, ClientAssignment, User, UserRole
+from app.db.models import (
+    Client,
+    ClientAssignment,
+    ReconciliationSession,
+    ReconciliationStatus,
+    User,
+    UserRole,
+)
 from app.integrations.anthropic.client import AnthropicClient
 from app.integrations.anthropic.tools import EXTRACT_MOVEMENTS_TOOL_NAME
 from app.main import app as fastapi_app
@@ -474,11 +483,16 @@ class TestParseIntegration:
             files={"file": ("extrato.pdf", _minimal_pdf_bytes(), "application/pdf")},
         )
         assert resp.status_code == 200, resp.text
-        data = resp.json()["data"]
+        body = resp.json()
+        data = body["data"]
         assert data["bank_name"] == "Sicredi"
         assert data["account_type"] == "checking"
         assert data["period_start"] == "2026-04-01"
         assert len(data["transactions"]) == 2
+        # BACK 02.3 — checksum na response; o fixture fecha (1000 + (-500+734.56)).
+        assert body["checksum"]["ok"] is True
+        assert body["checksum"]["reason"] is None
+        assert body["checksum"]["account_type"] == "checking"
 
     async def test_signs_preserved(
         self,
@@ -501,6 +515,35 @@ class TestParseIntegration:
         # Pagamento → débito → negativo. Recebimento → crédito → positivo.
         assert float(txs[0]["amount"]) < 0
         assert float(txs[1]["amount"]) > 0
+
+    async def test_checksum_failure_blocks_preview(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        override_anthropic: dict[str, Any],
+    ) -> None:
+        """BACK 02.3 — parse que não fecha: 200 com statement, mas checksum.ok
+        False + razão para o front bloquear a confirmação da prévia."""
+        bad = _ok_payload()
+        # Adultera uma linha → o extrato deixa de fechar.
+        bad["transactions"][0]["amount"] = "-600.00"
+        override_anthropic["fake"] = _FakeAnthropic(
+            side_effect=_Message([_ToolUseBlock(payload=bad)])
+        )
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="X", creator=admin)
+        await _login_as(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.post(
+            "/api/v1/reconciliations/parse",
+            data={"client_id": str(cliente.id)},
+            files={"file": ("extrato.pdf", _minimal_pdf_bytes(), "application/pdf")},
+        )
+        assert resp.status_code == 200, resp.text
+        checksum = resp.json()["checksum"]
+        assert checksum["ok"] is False
+        assert checksum["reason"] is not None
+        assert "não fecha" in checksum["reason"]
 
     async def test_csv_happy_path(
         self,
@@ -640,3 +683,154 @@ class TestParseIntegration:
         assert body["error"]["code"] == "ANTHROPIC_AUTH_ERROR"
         # Mensagem ao usuário não menciona "API key" — defesa em profundidade.
         assert "key" not in body["error"]["userMessage"].lower()
+
+
+async def _seed_session(
+    db: AsyncSession,
+    *,
+    client_id: object,
+    created_by: object,
+    file_hash: str,
+    status: str,
+) -> ReconciliationSession:
+    """Seed de uma ReconciliationSession com hash/status dados (BACK 02.6)."""
+    sess = ReconciliationSession(
+        client_id=client_id,
+        created_by=created_by,
+        omie_conta_id=42,
+        reference_month=date(2026, 4, 1),
+        date_tolerance_days=3,
+        file_hash=file_hash,
+        status=status,
+    )
+    db.add(sess)
+    await db.flush()
+    return sess
+
+
+@pytest.mark.integration
+class TestParseDuplicate:
+    """BACK 02.6 — dedup DENTRO do /parse, ANTES da IA (zero chamadas)."""
+
+    async def test_duplicate_blocked_before_ai_call(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        override_anthropic: dict[str, Any],
+    ) -> None:
+        fake = _FakeAnthropic(side_effect=_ok_message())
+        override_anthropic["fake"] = fake
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="X", creator=admin)
+        content = _minimal_pdf_bytes()
+        file_hash = hashlib.sha256(content).hexdigest()
+        await _seed_session(
+            db_session,
+            client_id=cliente.id,
+            created_by=admin.id,
+            file_hash=file_hash,
+            status=ReconciliationStatus.REVIEWING.value,
+        )
+        await _login_as(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.post(
+            "/api/v1/reconciliations/parse",
+            data={"client_id": str(cliente.id)},
+            files={"file": ("extrato.pdf", content, "application/pdf")},
+        )
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["error"]["code"] == "DUPLICATE_FILE"
+        assert "importado" in resp.json()["error"]["userMessage"].lower()
+        # ZERO chamadas à Anthropic — o freio é ANTES da IA.
+        assert fake.messages.calls == []
+
+    async def test_error_session_allows_reimport(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        override_anthropic: dict[str, Any],
+    ) -> None:
+        fake = _FakeAnthropic(side_effect=_ok_message())
+        override_anthropic["fake"] = fake
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="X", creator=admin)
+        content = _minimal_pdf_bytes()
+        file_hash = hashlib.sha256(content).hexdigest()
+        # Sessão anterior em ERROR → reimportar é permitido.
+        await _seed_session(
+            db_session,
+            client_id=cliente.id,
+            created_by=admin.id,
+            file_hash=file_hash,
+            status=ReconciliationStatus.ERROR.value,
+        )
+        await _login_as(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.post(
+            "/api/v1/reconciliations/parse",
+            data={"client_id": str(cliente.id)},
+            files={"file": ("extrato.pdf", content, "application/pdf")},
+        )
+        assert resp.status_code == 200, resp.text
+        # IA FOI chamada (reimport permitido) — 1 chamada.
+        assert len(fake.messages.calls) == 1
+
+    async def test_same_content_other_client_is_not_duplicate(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        override_anthropic: dict[str, Any],
+    ) -> None:
+        # Mesmo arquivo em cliente DIFERENTE é legítimo (fora de escopo do dedup).
+        fake = _FakeAnthropic(side_effect=_ok_message())
+        override_anthropic["fake"] = fake
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente_a = await _seed_client(db_session, name="A", creator=admin)
+        cliente_b = await _seed_client(db_session, name="B", creator=admin)
+        content = _minimal_pdf_bytes()
+        file_hash = hashlib.sha256(content).hexdigest()
+        await _seed_session(
+            db_session,
+            client_id=cliente_a.id,
+            created_by=admin.id,
+            file_hash=file_hash,
+            status=ReconciliationStatus.DONE.value,
+        )
+        await _login_as(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.post(
+            "/api/v1/reconciliations/parse",
+            data={"client_id": str(cliente_b.id)},
+            files={"file": ("extrato.pdf", content, "application/pdf")},
+        )
+        assert resp.status_code == 200, resp.text
+        assert len(fake.messages.calls) == 1
+
+
+@pytest.mark.integration
+class TestParseSizeNonRegression:
+    """BACK 02.8 — o teto PERMANECE 20 MB: um arquivo de 14 MB continua
+    conciliando (não pode passar a receber erro)."""
+
+    async def test_14mb_file_still_parses(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        override_anthropic: dict[str, Any],
+    ) -> None:
+        override_anthropic["fake"] = _FakeAnthropic(side_effect=_ok_message())
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="X", creator=admin)
+        await _login_as(client_with_db, ADMIN_EMAIL)
+
+        # 14 MB — bem abaixo do teto de 20 MB.
+        big_ok = b"%PDF-1.7\n" + b"x" * (14 * 1024 * 1024)
+        assert len(big_ok) < get_settings().max_upload_bytes
+
+        resp = await client_with_db.post(
+            "/api/v1/reconciliations/parse",
+            data={"client_id": str(cliente.id)},
+            files={"file": ("grande.pdf", big_ok, "application/pdf")},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["data"]["bank_name"] == "Sicredi"
