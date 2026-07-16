@@ -61,6 +61,7 @@ from app.modules.reconciliations.schemas import (
     SessionStatusResponse,
 )
 from app.modules.reconciliations.service import ReconciliationService
+from app.utils.upload import parse_content_length, read_upload_within_limit
 
 router = APIRouter(prefix="/api/v1/reconciliations", tags=["reconciliations"])
 
@@ -203,7 +204,15 @@ async def parse_statement(
     except ClientNotAccessibleError as exc:
         raise NotFoundError(_CLIENT_NOT_FOUND_MSG) from exc
 
-    file_bytes = await file.read()
+    # BACK 02.8 — valida o tamanho ANTES de carregar o arquivo inteiro: pré-check
+    # por Content-Length + leitura em streaming com corte no teto (fonte única em
+    # Settings). Antes, o `await file.read()` alocava o arquivo todo e só depois
+    # o `parse_service` conferia o tamanho — o limite não protegia a memória.
+    file_bytes = await read_upload_within_limit(
+        file,
+        declared_content_length=parse_content_length(request.headers.get("content-length")),
+        max_bytes=settings.max_upload_bytes,
+    )
 
     if not file_bytes:
         raise ValidationAppError(
