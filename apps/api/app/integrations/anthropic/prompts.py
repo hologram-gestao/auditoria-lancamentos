@@ -65,9 +65,13 @@ créditos reduzem o valor da fatura — emita com sinal positivo.
 são linhas próprias (não embuta em outra), com a descrição EXATA do documento \
 e `amount` negativo (são cobranças).
 
-12. **NÃO inclua o pagamento da fatura.** Linhas de "pagamento", "pagamento \
-recebido", "pgto fatura anterior" e afins pertencem ao extrato da conta \
-corrente, não à fatura — não as emita como transação.
+12. **Pagamento da fatura anterior: EXTRAIA e MARQUE com `is_payment: true`.** \
+Linhas de "PAGAMENTO FATURA", "PGTO EFETUADO", "pagamento recebido", "pgto \
+fatura anterior" e afins (o crédito que quita o saldo anterior do cartão) \
+devem ser extraídas normalmente — não as omita (regra 4) — e marcadas com \
+`is_payment: true`. Elas são excluídas do checksum de saldos, que precisa \
+fechar no total da fatura. Para compras, encargos, juros e estornos, e para \
+QUALQUER linha de conta corrente ou aplicação, use `false` ou omita o campo.
 
 Particularidades de CONTA DE APLICAÇÃO / INVESTIMENTO (quando `account_type` = `investment`):
 

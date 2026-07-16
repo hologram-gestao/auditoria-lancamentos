@@ -50,6 +50,7 @@ from app.core.rate_limit import limiter, user_id_key_func
 from app.db.models import ReconciliationStatus
 from app.integrations.anthropic.client import AnthropicClient
 from app.modules.reconciliations.parse_service import ParseService
+from app.modules.reconciliations.processing.checksum import compute_checksum
 from app.modules.reconciliations.processing.job import run_reconciliation_processing
 from app.modules.reconciliations.repository import ReconciliationRepository
 from app.modules.reconciliations.schemas import (
@@ -251,7 +252,11 @@ async def parse_statement(
         filename=file.filename,
         max_upload_bytes=settings.max_upload_bytes,
     )
-    return ParseResponse(data=statement)
+    # BACK 02.3 — checksum de saldos: a rede que pega o parse incompleto que a
+    # detecção de truncamento deixar passar. Vai na response para o front
+    # bloquear a confirmação da prévia quando `ok=False` e exibir o motivo.
+    checksum = compute_checksum(statement)
+    return ParseResponse(data=statement, checksum=checksum)
 
 
 # ----------------------------------------------------------------------
