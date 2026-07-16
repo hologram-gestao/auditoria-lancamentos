@@ -13,7 +13,7 @@ queries separadas com IN clause; nada de N+1 silencioso.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -73,6 +73,45 @@ class ReconciliationRepository:
         )
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none() is not None
+
+    async def find_active_session_by_hash(
+        self,
+        *,
+        client_id: UUID,
+        file_hash: str,
+    ) -> tuple[UUID, datetime, str] | None:
+        """Sessão ATIVA (não `error`, não descartada) com esse (client_id, hash).
+
+        BACK 02.6 — dedup do `POST /parse` ANTES de qualquer chamada à IA.
+        No parse só existem `client_id` + hash do conteúdo (recalculado no
+        servidor); `omie_conta_id`/`reference_month` só chegam no
+        `POST /reconciliations`. Por isso a checagem é por (client_id, hash) —
+        mais ampla que a UNIQUE completa, mas o mesmo conteúdo para o mesmo
+        cliente é praticamente sempre reenvio.
+
+        Sessões em `error` NÃO contam (reimportar é permitido — não se pune o
+        usuário pelo erro do sistema). Descartadas (`deleted_at`) idem. Retorna
+        a mais recente `(id, created_at, status)` ou `None`.
+        """
+        stmt = (
+            select(
+                ReconciliationSession.id,
+                ReconciliationSession.created_at,
+                ReconciliationSession.status,
+            )
+            .where(
+                ReconciliationSession.client_id == client_id,
+                ReconciliationSession.file_hash == file_hash,
+                ReconciliationSession.deleted_at.is_(None),
+                ReconciliationSession.status != ReconciliationStatus.ERROR.value,
+            )
+            .order_by(ReconciliationSession.created_at.desc())
+            .limit(1)
+        )
+        row = (await self._session.execute(stmt)).first()
+        if row is None:
+            return None
+        return row.id, row.created_at, row.status
 
     # ------------------------------------------------------------------
     # Tipo da conta selecionada (BACK 1.3 — FASE 1)

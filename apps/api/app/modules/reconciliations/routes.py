@@ -14,6 +14,7 @@ S11.fix (retry de sessão em erro):
 
 from __future__ import annotations
 
+import hashlib
 from datetime import date
 from typing import Annotated
 from uuid import UUID
@@ -41,6 +42,7 @@ from app.core.dependencies import (
 from app.core.exceptions import (
     ClientNotAccessibleError,
     ConflictError,
+    DuplicateFileError,
     NotFoundError,
     ValidationAppError,
 )
@@ -195,6 +197,7 @@ async def parse_statement(
     response: Response,
     user: ManagerOrAdminDep,
     db: DbSessionDep,
+    service: ReconciliationServiceDep,
     settings: Annotated[Settings, Depends(get_settings)],
     parser: ParseServiceDep,
     client_id: Annotated[UUID, Form(description="UUID do cliente.")],
@@ -219,6 +222,28 @@ async def parse_statement(
         raise ValidationAppError(
             "Arquivo enviado está vazio.",
             user_message="O arquivo enviado está vazio.",
+        )
+
+    # BACK 02.6 — dedup DENTRO do /parse, ANTES de qualquer chamada à IA (custo).
+    # O hash é do CONTEÚDO, recalculado no servidor (nunca confiar no hash que o
+    # cliente manda no /check-duplicate). Se já existe sessão ATIVA do cliente
+    # com esse conteúdo → 409 sem pagar a Anthropic. Sessão anterior em `error`
+    # não conta: reimportar é permitido (não punir o usuário por erro do sistema).
+    file_hash = hashlib.sha256(file_bytes).hexdigest()
+    duplicate = await service.find_parse_duplicate(client_id=client_id, file_hash=file_hash)
+    if duplicate is not None:
+        dup_session_id, imported_at = duplicate
+        raise DuplicateFileError(
+            f"Conteúdo já importado para client_id={client_id} "
+            f"(sessão {dup_session_id}, hash {file_hash[:8]}).",
+            user_message=(
+                f"Este extrato já foi importado em {imported_at.strftime('%d/%m/%Y')}. "
+                "Abra a conciliação existente para revisá-la em vez de reenviar."
+            ),
+            metadata={
+                "session_id": str(dup_session_id),
+                "imported_at": imported_at.isoformat(),
+            },
         )
 
     statement = await parser.parse_statement(
