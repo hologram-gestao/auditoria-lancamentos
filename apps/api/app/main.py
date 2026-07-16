@@ -29,6 +29,7 @@ from app.core.exceptions import AppError, ErrorCode, RateLimitedError, to_error_
 from app.core.logging import get_logger, setup_logging
 from app.core.rate_limit import limiter
 from app.db.session import close_db, init_db
+from app.integrations.anthropic.model_limits import validate_parse_output_config
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache
 from app.modules.anomaly_types import routes as anomaly_types_routes
 from app.modules.auth import routes as auth_routes
@@ -54,6 +55,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     setup_logging(settings)
     init_db(settings)
     log = get_logger(__name__)
+    # BACK 02.1 — fail-fast: `ADL_PARSE_MAX_OUTPUT_TOKENS` não pode exceder o cap
+    # de saída do modelo em uso. Se exceder, o serviço NÃO sobe — melhor do que
+    # descobrir com um HTTP 400 da Anthropic no meio de uma conciliação.
+    await validate_parse_output_config(settings)
     log.info("app_started", version=__version__)
     try:
         yield

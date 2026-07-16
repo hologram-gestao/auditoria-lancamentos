@@ -60,6 +60,11 @@ log = get_logger(__name__)
 # bem grandes (~480 linhas). É só um TETO — extrato pequeno não consome mais nem
 # custa mais. Acima disso, `extract_movements` detecta `stop_reason=max_tokens`
 # e devolve um erro claro ("divida o período") em vez de falha silenciosa.
+#
+# BACK 02.1 — o valor virou configurável (`Settings.ADL_PARSE_MAX_OUTPUT_TOKENS`,
+# injetado no construtor); esta constante é só o default. O `lifespan` valida na
+# subida que o configurado não excede o cap de saída do modelo (`model_limits`),
+# em vez de descobrir isso num HTTP 400 da Anthropic no meio de uma conciliação.
 _MAX_OUTPUT_TOKENS = 32768
 
 
@@ -95,11 +100,13 @@ class AnthropicClient:
         api_key: SecretStr,
         model: str,
         timeout: float,
+        max_output_tokens: int = _MAX_OUTPUT_TOKENS,
         anthropic_client: _AsyncAnthropicLike | None = None,
     ) -> None:
         self._api_key = api_key
         self._model = model
         self._timeout = timeout
+        self._max_output_tokens = max_output_tokens
         self._injected_client: _AsyncAnthropicLike | None = anthropic_client
 
     # ------------------------------------------------------------------
@@ -223,7 +230,7 @@ class AnthropicClient:
                 model=chosen_model,
                 bytes_in=len(content),
                 duration_ms=duration_ms,
-                max_tokens=_MAX_OUTPUT_TOKENS,
+                max_tokens=self._max_output_tokens,
             )
             raise AnthropicParseError(
                 "Extração truncada: stop_reason=max_tokens.",
@@ -331,7 +338,7 @@ class AnthropicClient:
         try:
             return await client.messages.create(
                 model=model,
-                max_tokens=_MAX_OUTPUT_TOKENS,
+                max_tokens=self._max_output_tokens,
                 system=system_blocks,
                 tools=[EXTRACT_MOVEMENTS_TOOL],
                 tool_choice={"type": "tool", "name": EXTRACT_MOVEMENTS_TOOL_NAME},

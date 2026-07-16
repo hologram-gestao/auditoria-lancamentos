@@ -86,6 +86,7 @@ def _get_anthropic_client(
         api_key=settings.ANTHROPIC_API_KEY,
         model=settings.ANTHROPIC_MODEL_DEFAULT,
         timeout=settings.ANTHROPIC_TIMEOUT_SECONDS,
+        max_output_tokens=settings.ADL_PARSE_MAX_OUTPUT_TOKENS,
     )
 
 
