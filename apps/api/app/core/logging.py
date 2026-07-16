@@ -54,6 +54,19 @@ SENSITIVE_SUBSTRINGS: frozenset[str] = frozenset(
 
 REDACTED_VALUE = "[REDACTED]"
 
+# Allowlist exato (normalizado) de chaves que CONTÊM uma substring sensível mas
+# são comprovadamente NÃO-sensíveis: contagens de tokens da Anthropic
+# (`input_tokens`/`output_tokens`, BACK 02.2) são inteiros de billing/telemetria,
+# nunca segredos. Sem isso, o match por substring "token" mascararia o próprio
+# número que o evento `parse_concluido` existe para reportar. Match EXATO — não
+# afrouxa `token`/`access_token`/`refresh_token`, que continuam mascarados.
+SAFE_KEYS: frozenset[str] = frozenset(
+    {
+        "input_tokens",
+        "output_tokens",
+    }
+)
+
 
 def _redact_sensitive(
     _logger: Any,
@@ -68,6 +81,8 @@ def _redact_sensitive(
         # Normaliza separadores (hífen, espaço) para underscore — match consistente
         # entre keys como `api_key`, `api-key`, `api key`, `X-API-KEY`, etc.
         key_normalized = key.lower().replace("-", "_").replace(" ", "_")
+        if key_normalized in SAFE_KEYS:
+            continue
         if any(sub in key_normalized for sub in SENSITIVE_SUBSTRINGS):
             event_dict[key] = REDACTED_VALUE
     return event_dict

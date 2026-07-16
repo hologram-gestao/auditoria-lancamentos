@@ -19,6 +19,8 @@
  *     ou em monocromia.
  */
 
+import { AlertTriangle, CheckCircle2 } from 'lucide-react';
+
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -29,7 +31,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import type { ParsedStatement, ParsedTransaction } from '@/lib/api/reconciliations';
+import type { ChecksumResult, ParsedStatement, ParsedTransaction } from '@/lib/api/reconciliations';
 import { formatAccountType, formatBRDate, formatBRL } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -37,6 +39,12 @@ const PREVIEW_ROW_LIMIT = 5;
 
 interface ParsePreviewProps {
   parsed: ParsedStatement;
+  /**
+   * Resultado do checksum de saldos (BACK 02.3). Quando `ok=false`, a prévia
+   * BLOQUEIA a confirmação e exibe `reason` — é a defesa contra parse
+   * incompleto (linhas perdidas fazem a identidade de saldos não fechar).
+   */
+  checksum: ChecksumResult;
   onCancel: () => void;
   onConfirm: () => void;
   /** `true` enquanto a mutation `POST /api/v1/reconciliations` está em voo
@@ -45,10 +53,17 @@ interface ParsePreviewProps {
   isConfirming: boolean;
 }
 
-export function ParsePreview({ parsed, onCancel, onConfirm, isConfirming }: ParsePreviewProps) {
+export function ParsePreview({
+  parsed,
+  checksum,
+  onCancel,
+  onConfirm,
+  isConfirming,
+}: ParsePreviewProps) {
   const previewRows = parsed.transactions.slice(0, PREVIEW_ROW_LIMIT);
   const totalCount = parsed.transactions.length;
   const hasMore = totalCount > PREVIEW_ROW_LIMIT;
+  const checksumBlocked = !checksum.ok;
 
   return (
     <section aria-labelledby="parse-preview-title" className="space-y-6">
@@ -60,6 +75,8 @@ export function ParsePreview({ parsed, onCancel, onConfirm, isConfirming }: Pars
           Verifique se os dados abaixo correspondem ao arquivo enviado antes de confirmar.
         </p>
       </header>
+
+      <ChecksumBanner checksum={checksum} />
 
       <MetadataGrid parsed={parsed} totalCount={totalCount} />
 
@@ -105,11 +122,75 @@ export function ParsePreview({ parsed, onCancel, onConfirm, isConfirming }: Pars
         <Button type="button" variant="outline" onClick={onCancel} disabled={isConfirming}>
           Cancelar
         </Button>
-        <Button type="button" onClick={onConfirm} disabled={isConfirming}>
+        <Button
+          type="button"
+          onClick={onConfirm}
+          disabled={isConfirming || checksumBlocked}
+          aria-describedby={checksumBlocked ? 'checksum-block-reason' : undefined}
+        >
           Confirmar e processar
         </Button>
       </div>
     </section>
+  );
+}
+
+/**
+ * Banner do checksum de saldos (BACK 02.3 / FRONT 02.2).
+ *   - `ok=false` → alerta destrutivo com a razão (PT-BR do backend) e os
+ *     valores esperado × calculado × diferença; a confirmação fica bloqueada.
+ *   - `ok=true`  → confirmação discreta de que os saldos fecham.
+ * Cores por token semântico (`destructive`); o verde do sucesso segue o padrão
+ * de status já usado na revisão (emerald), reservando `--primary` para ações.
+ */
+function ChecksumBanner({ checksum }: { checksum: ChecksumResult }) {
+  if (checksum.ok) {
+    return (
+      <div
+        role="status"
+        className="flex items-center gap-2 rounded-md border border-emerald-600/30 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"
+      >
+        <CheckCircle2 className="h-5 w-5 shrink-0" aria-hidden="true" />
+        <span>
+          Saldos conferem: a soma das movimentações fecha com o saldo final declarado (diferença{' '}
+          {formatBRL(checksum.difference)}).
+        </span>
+      </div>
+    );
+  }
+
+  const isCard = checksum.account_type === 'credit_card';
+  return (
+    <div
+      role="alert"
+      className="bg-destructive/5 border-destructive/30 text-destructive space-y-2 rounded-lg border p-4 text-sm"
+    >
+      <div className="flex items-start gap-3">
+        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
+        <div className="space-y-1" id="checksum-block-reason">
+          <p className="font-semibold">Os saldos não fecham — importação bloqueada</p>
+          <p className="leading-snug">
+            {checksum.reason ??
+              'A soma das movimentações extraídas não bate com o saldo final do documento. ' +
+                'Pode haver linhas faltando no arquivo processado.'}
+          </p>
+        </div>
+      </div>
+      <dl className="grid grid-cols-1 gap-x-6 gap-y-1 pl-8 text-xs sm:grid-cols-3">
+        <ChecksumFigure label={isCard ? 'Total da fatura' : 'Saldo final esperado'} value={checksum.expected} />
+        <ChecksumFigure label="Calculado das linhas" value={checksum.computed} />
+        <ChecksumFigure label="Diferença" value={checksum.difference} />
+      </dl>
+    </div>
+  );
+}
+
+function ChecksumFigure({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col">
+      <dt className="uppercase tracking-wide opacity-80">{label}</dt>
+      <dd className="font-mono font-medium tabular-nums">{formatBRL(value)}</dd>
+    </div>
   );
 }
 

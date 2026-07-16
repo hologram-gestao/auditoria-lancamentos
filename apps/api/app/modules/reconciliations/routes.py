@@ -14,6 +14,7 @@ S11.fix (retry de sessão em erro):
 
 from __future__ import annotations
 
+import hashlib
 from datetime import date
 from typing import Annotated
 from uuid import UUID
@@ -31,6 +32,7 @@ from app.core.exceptions import (
     AppError,
     ClientNotAccessibleError,
     ConflictError,
+    DuplicateFileError,
     NotFoundError,
     ValidationAppError,
 )
@@ -38,6 +40,7 @@ from app.core.rate_limit import limiter, user_id_key_func
 from app.db.models import ReconciliationStatus
 from app.integrations.anthropic.client import AnthropicClient
 from app.modules.reconciliations.parse_service import ParseService
+from app.modules.reconciliations.processing.checksum import compute_checksum
 from app.modules.reconciliations.processing.dispatcher import enqueue_processing
 from app.modules.reconciliations.repository import ReconciliationRepository
 from app.modules.reconciliations.schemas import (
@@ -51,6 +54,7 @@ from app.modules.reconciliations.schemas import (
     SessionStatusResponse,
 )
 from app.modules.reconciliations.service import ReconciliationService
+from app.utils.upload import parse_content_length, read_upload_within_limit
 
 router = APIRouter(prefix="/api/v1/reconciliations", tags=["reconciliations"])
 
@@ -75,6 +79,7 @@ def _get_anthropic_client(
         api_key=settings.ANTHROPIC_API_KEY,
         model=settings.ANTHROPIC_MODEL_DEFAULT,
         timeout=settings.ANTHROPIC_TIMEOUT_SECONDS,
+        max_output_tokens=settings.ADL_PARSE_MAX_OUTPUT_TOKENS,
     )
 
 
@@ -167,7 +172,10 @@ async def check_duplicate(
         "persistido aqui — a sessão será criada por POST /reconciliations "
         "(S10) após o usuário confirmar o preview. RBAC: admin OU "
         "manager-da-carteira; cliente inacessível devolve 404. "
-        "Rate limit: 10/min/usuário — controla custo Anthropic."
+        "Dedup (BACK 02.6): se já existe sessão ativa (não em erro) do cliente "
+        "com o MESMO conteúdo (hash SHA-256 recalculado no servidor), devolve "
+        "409 DUPLICATE_FILE SEM chamar a IA. Rate limit: 10/min/usuário — "
+        "controla custo Anthropic."
     ),
 )
 @limiter.limit("10/minute", key_func=user_id_key_func)
@@ -176,6 +184,7 @@ async def parse_statement(
     response: Response,
     user: ManagerOrAdminDep,
     db: DbSessionDep,
+    service: ReconciliationServiceDep,
     settings: Annotated[Settings, Depends(get_settings)],
     parser: ParseServiceDep,
     client_id: Annotated[UUID, Form(description="UUID do cliente.")],
@@ -186,7 +195,14 @@ async def parse_statement(
     except ClientNotAccessibleError as exc:
         raise NotFoundError(_CLIENT_NOT_FOUND_MSG) from exc
 
-    file_bytes = await file.read()
+    # BACK 02.8 — valida o tamanho ANTES de carregar o arquivo inteiro: pré-check
+    # por Content-Length + leitura em streaming com corte no teto (20 MB, fonte
+    # única em Settings). Rejeita arquivo grande sem alocar o conteúdo todo.
+    file_bytes = await read_upload_within_limit(
+        file,
+        declared_content_length=parse_content_length(request.headers.get("content-length")),
+        max_bytes=settings.max_upload_bytes,
+    )
 
     if not file_bytes:
         raise ValidationAppError(
@@ -194,12 +210,38 @@ async def parse_statement(
             user_message="O arquivo enviado está vazio.",
         )
 
+    # BACK 02.6 — dedup DENTRO do /parse, ANTES de qualquer chamada à IA (custo).
+    # O hash é do CONTEÚDO, recalculado no servidor (nunca confiar no hash do
+    # cliente). Se já existe sessão ATIVA (não `error`) do cliente com esse
+    # conteúdo → 409 sem chamar a Anthropic. Sessão anterior em `error` →
+    # reimportar é permitido (não punir o usuário pelo erro do sistema).
+    file_hash = hashlib.sha256(file_bytes).hexdigest()
+    duplicate = await service.find_parse_duplicate(client_id=client_id, file_hash=file_hash)
+    if duplicate is not None:
+        dup_session_id, imported_at = duplicate
+        raise DuplicateFileError(
+            f"Conteúdo já importado para client_id={client_id} "
+            f"(sessão {dup_session_id}, hash {file_hash[:8]}).",
+            user_message=(
+                f"Este extrato já foi importado em {imported_at.strftime('%d/%m/%Y')}. "
+                "Abra a conciliação existente para revisá-la em vez de reenviar."
+            ),
+            metadata={
+                "session_id": str(dup_session_id),
+                "imported_at": imported_at.isoformat(),
+            },
+        )
+
     statement = await parser.parse_statement(
         file_bytes=file_bytes,
         filename=file.filename,
         max_upload_bytes=settings.max_upload_bytes,
     )
-    return ParseResponse(data=statement)
+    # BACK 02.3 — checksum de saldos: a rede que pega o parse incompleto que o
+    # truncamento (BACK 02.1) deixar passar. Vai na response para o front
+    # bloquear a confirmação da prévia quando `ok=False` e exibir o motivo.
+    checksum = compute_checksum(statement)
+    return ParseResponse(data=statement, checksum=checksum)
 
 
 # ----------------------------------------------------------------------

@@ -23,7 +23,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import BigInteger, ForeignKey, Index, Numeric, String, Text, text
+from sqlalchemy import BigInteger, ForeignKey, Index, Integer, Numeric, String, Text, text
 from sqlalchemy import Date as SQLDate
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -101,6 +101,14 @@ class ReconciliationFileEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         index=True,
     )
     omie_lancamento_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    # BACK 02.4 — divergência de data (assinado, em dias) da linha conciliada:
+    # `transaction_date(arquivo) - transaction_date(omie)`. 0 = data exata;
+    # ±N = casou dentro da tolerância mas com divergência (não pode sumir do
+    # entregável). NULL = não conciliada (sem_omie/ignorado) ou sessão legada
+    # (pré-migration). Gravado pelo matcher via `apply_matches`; a tela (FRONT)
+    # e o Excel exibem quando != 0.
+    days_diff: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     user_action: Mapped[str | None] = mapped_column(String(20), nullable=True)
 

@@ -89,6 +89,17 @@ EXTRACT_MOVEMENTS_TOOL: dict[str, Any] = {
                                 "(NÃO use null) se o documento não fornecer."
                             ),
                         },
+                        "is_payment": {
+                            "type": "boolean",
+                            "description": (
+                                "True SOMENTE para linhas de PAGAMENTO da fatura "
+                                "anterior em faturas de cartão (ex: 'PAGAMENTO "
+                                "FATURA', 'PGTO EFETUADO', crédito que quita o "
+                                "saldo anterior). Para conta corrente e para "
+                                "qualquer compra/encargo/estorno, omita o campo "
+                                "ou use false."
+                            ),
+                        },
                     },
                     "required": ["date", "description", "amount"],
                 },

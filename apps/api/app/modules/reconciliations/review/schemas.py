@@ -38,6 +38,11 @@ class ListedFileEntry(BaseModel):
     user_action: str | None
     user_note: str | None
     omie_lancamento_id: int | None
+    # BACK 02.4 — divergência de data (assinado, em dias) da linha conciliada.
+    # `transaction_date(arquivo) - transaction_date(omie)`; 0 = data exata; None
+    # = não conciliada ou sessão legada. A tela (FRONT 02.1) exibe as duas datas
+    # quando != 0 (data do Omie = transaction_date - days_diff).
+    days_diff: int | None = None
 
     model_config = ConfigDict(from_attributes=False)
 

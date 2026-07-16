@@ -10,7 +10,8 @@ Uso:
 Senha do admin é configurável via env var `SEED_ADMIN_PASSWORD`. Default é
 um valor de dev óbvio que NUNCA deve ser usado em prod (nem mesmo staging).
 
-Seed do catálogo segue Doc §0 §anomaly_types — 8 tipos pré-cadastrados.
+Seed do catálogo: 6 tipos COM detector — 2 estruturais (missing_in_*) + 4 de
+qualificação (S19). Os 6 tipos sem detector foram removidos (BACK 02.5).
 """
 
 from __future__ import annotations
@@ -68,60 +69,16 @@ ANOMALY_TYPES_SEED: list[dict[str, Any]] = [
             "mas não aparece no extrato. Pode indicar título lançado errado ou pagamento perdido."
         ),
     },
-    {
-        "code": "wrong_account",
-        "name": "Lançamento possivelmente na conta errada",
-        "severity": AnomalySeverity.CRITICAL,
-        "description": (
-            "Suspeita de que o lançamento foi associado a uma conta bancária "
-            "diferente da que aparece no extrato fornecido."
-        ),
-    },
-    {
-        "code": "inconsistent_category",
-        "name": "Mesma descrição, categorias diferentes entre meses",
-        "severity": AnomalySeverity.MODERATE,
-        "description": (
-            "Padrões de descrição idênticos em meses diferentes mas com "
-            "categorias financeiras divergentes — sugere erro de classificação."
-        ),
-    },
-    {
-        "code": "category_mismatch_nature",
-        "name": "Categoria incompatível com a natureza do lançamento",
-        "severity": AnomalySeverity.MODERATE,
-        "description": (
-            "Categoria de despesa marcada em lançamento de receita (ou vice-versa). "
-            "Pode indicar erro de cadastro no Omie."
-        ),
-    },
-    {
-        "code": "internal_transfer_as_revenue",
-        "name": "Transferência interna classificada como receita",
-        "severity": AnomalySeverity.CRITICAL,
-        "description": (
-            "Movimento entre contas do mesmo cliente classificado como receita — "
-            "infla artificialmente o resultado e distorce relatórios contábeis."
-        ),
-    },
-    {
-        "code": "possible_duplicate",
-        "name": "Possível lançamento duplicado",
-        "severity": AnomalySeverity.MODERATE,
-        "description": (
-            "Dois ou mais lançamentos no Omie com mesmo valor, fornecedor e data "
-            "próxima — pode indicar duplicação."
-        ),
-    },
-    {
-        "code": "classification_improvement",
-        "name": "Sugestão de padronização de categoria",
-        "severity": AnomalySeverity.INFO,
-        "description": (
-            "Lançamento com categoria genérica (ex: 'Outras despesas') que poderia "
-            "ser refinada para uma categoria mais específica do plano de contas."
-        ),
-    },
+    # BACK 02.5 (Sprint 2) — REMOVIDOS 6 tipos que nenhum código gerava:
+    # wrong_account, inconsistent_category, category_mismatch_nature,
+    # internal_transfer_as_revenue, possible_duplicate, classification_improvement.
+    # "Schema sem lógica é uma promessa que o produto não cumpre": estavam no
+    # catálogo (admin/UI os via) mas nenhum detector os emitia. Sem requisito
+    # que os peça, o padrão é REMOVER (sem overengineering — não inventar regra
+    # nova). A migration `a3d5e1c9f7b2` remove os órfãos de bancos já semeados.
+    # Ver decisions.md ADR-006-S2. Restam só tipos COM detector: os 2
+    # estruturais (missing_in_*, processing/anomalies.py) e os 4 de
+    # qualificação (qualification/service.py, S19).
     # S19 — Qualificação inteligente de lançamentos (BACK 12.1).
     {
         "code": "qualificacao_suspeita",

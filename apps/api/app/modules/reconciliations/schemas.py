@@ -46,14 +46,53 @@ class CheckDuplicateResponse(BaseModel):
 # ----------------------------------------------------------------------
 
 
+class ChecksumResult(BaseModel):
+    """Resultado do checksum de saldos do parse (BACK 02.3).
+
+    O checksum é a defesa contra parse INCOMPLETO — se linhas sumiram (ex: o
+    truncamento que o BACK 02.1 deixar passar) ou um valor foi adulterado, a
+    identidade não fecha e `ok=False`, com `reason` em PT-BR para o front
+    BLOQUEAR a confirmação da prévia e exibir o motivo.
+
+    Identidades (tolerância R$ 0,01, aritmética Decimal):
+        - Conta corrente: `saldo_inicial + Σ(movimentações) == saldo_final`.
+        - Cartão: `Σ(movimentações exceto is_payment, invertendo o sinal de
+          débito) == total_da_fatura` (o saldo final declarado). Ver ⚠️ S-1.
+
+    ⚠️ **S-1 (ASSUMIDA — NÃO TESTADA / RISCO):** para cartão, assume-se que o
+    pagamento da fatura anterior NÃO entra no checksum e que o total da fatura
+    é o `closing_balance` declarado. É semântica contábil do BPO (a confirmar
+    com o Galhardo), não decisão nossa. O QA não reprova por essa suposição.
+    """
+
+    ok: bool
+    account_type: Literal["checking", "credit_card"]
+    # Alvo declarado no documento (saldo final / total da fatura).
+    expected: Decimal
+    # Valor reconstruído a partir das transações extraídas.
+    computed: Decimal
+    # `expected - computed` (assinado). |difference| <= 0.01 ⇒ ok.
+    difference: Decimal
+    tolerance: Decimal
+    # PT-BR quando `ok=False`; None quando fecha. Front exibe direto.
+    reason: str | None = None
+
+
 class ParseResponse(BaseModel):
     """Response de POST /api/v1/reconciliations/parse.
 
-    Reusa o `ExtractedStatement` do módulo de integração — o shape exposto
-    para o front é exatamente o que veio do tool use, sem renomeação.
+    `data` reusa o `ExtractedStatement` do módulo de integração — o shape
+    exposto para o front é exatamente o que veio do tool use, sem renomeação
+    (aditivo: consumidores existentes de `data` seguem funcionando).
+
+    `checksum` (BACK 02.3) é o sinal de bloqueio da prévia: quando
+    `checksum.ok=False`, o front bloqueia a confirmação e mostra
+    `checksum.reason`. O statement continua no `data` para a prévia poder
+    exibir os valores e a divergência.
     """
 
     data: ExtractedStatement
+    checksum: ChecksumResult
 
 
 # ----------------------------------------------------------------------

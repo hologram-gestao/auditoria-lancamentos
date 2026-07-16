@@ -455,6 +455,7 @@ class ExportService:
                     situation=entry.situation,
                     user_note=note,
                     qualification_status=qualif,
+                    days_diff=entry.days_diff,
                 )
             )
         return rows

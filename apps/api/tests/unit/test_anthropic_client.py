@@ -32,6 +32,7 @@ from app.core.exceptions import (
     AnthropicAuthError,
     AnthropicParseError,
     AnthropicTimeoutError,
+    AnthropicTruncatedError,
 )
 from app.integrations.anthropic.client import AnthropicClient
 from app.integrations.anthropic.schemas import ExtractedStatement, ExtractedTransaction
@@ -63,11 +64,31 @@ class _TextBlock:
         self.text = text
 
 
-class _Message:
-    """Mensagem com `.content` lista de blocks — formato consumido pelo client."""
+class _Usage:
+    """Espelha `message.usage` (input_tokens/output_tokens)."""
 
-    def __init__(self, blocks: list[Any]) -> None:
+    def __init__(self, *, input_tokens: int, output_tokens: int) -> None:
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+
+
+class _Message:
+    """Mensagem com `.content` lista de blocks — formato consumido pelo client.
+
+    `stop_reason`/`usage` são opcionais (fakes antigos não os setam; o client
+    lê defensivamente). BACK 02.1 usa `stop_reason` para detectar truncamento.
+    """
+
+    def __init__(
+        self,
+        blocks: list[Any],
+        *,
+        stop_reason: str | None = None,
+        usage: _Usage | None = None,
+    ) -> None:
         self.content = blocks
+        self.stop_reason = stop_reason
+        self.usage = usage
 
 
 class _FakeMessages:
@@ -219,12 +240,13 @@ class TestExtractMovementsHappyPath:
         fake = _FakeAnthropic(side_effect=_ok_message())
         client = _make_client(fake)
 
-        stmt = await client.extract_movements(
+        result = await client.extract_movements(
             content=b"%PDF-1.7\n...",
             mime_type="application/pdf",
             document_kind="extrato em PDF",
         )
 
+        stmt = result.statement
         assert isinstance(stmt, ExtractedStatement)
         assert stmt.bank_name == "Sicredi"
         assert stmt.transactions[0].amount == Decimal("-500.00")
@@ -397,12 +419,12 @@ class TestSdkErrorMapping:
             side_effect=[_api_status_error(500), _ok_message()],
         )
         client = _make_client(fake)
-        stmt = await client.extract_movements(
+        result = await client.extract_movements(
             content=b"%PDF-",
             mime_type="application/pdf",
             document_kind="x",
         )
-        assert stmt.bank_name == "Sicredi"
+        assert result.statement.bank_name == "Sicredi"
         assert len(fake.messages.calls) == 2
 
     async def test_5xx_persistent_raises_timeout(self) -> None:
@@ -427,12 +449,12 @@ class TestSdkErrorMapping:
             ],
         )
         client = _make_client(fake)
-        stmt = await client.extract_movements(
+        result = await client.extract_movements(
             content=b"%PDF-",
             mime_type="application/pdf",
             document_kind="x",
         )
-        assert stmt.bank_name == "Sicredi"
+        assert result.statement.bank_name == "Sicredi"
 
     async def test_4xx_non_auth_raises_parse_error(self) -> None:
         """413 (payload too large) ou 400 (request mal formado) não passa por
@@ -450,6 +472,57 @@ class TestSdkErrorMapping:
 # ----------------------------------------------------------------------
 # Configuração ausente
 # ----------------------------------------------------------------------
+
+
+class TestTruncationIsError:
+    """BACK 02.1 — `stop_reason == "max_tokens"` = perda silenciosa → erro.
+
+    O teste que prova o bug de hoje: um `tool_use` truncado NÃO pode gerar um
+    statement, mesmo que o payload parcial por acaso valide. O client erra
+    ANTES de extrair — zero dado.
+    """
+
+    async def test_max_tokens_stop_reason_raises_truncated(self) -> None:
+        # Payload até VÁLIDO, mas stop_reason=max_tokens ⇒ a saída foi cortada.
+        fake = _FakeAnthropic(
+            side_effect=_Message(
+                [_ToolUseBlock(name=EXTRACT_MOVEMENTS_TOOL_NAME, payload=_valid_payload())],
+                stop_reason="max_tokens",
+                usage=_Usage(input_tokens=1200, output_tokens=32000),
+            )
+        )
+        client = _make_client(fake)
+        with pytest.raises(AnthropicTruncatedError) as excinfo:
+            await client.extract_movements(
+                content=b"%PDF-",
+                mime_type="application/pdf",
+                document_kind="x",
+            )
+        # Metadados propagam para o evento parse_concluido (BACK 02.2).
+        assert excinfo.value.output_tokens == 32000
+        assert excinfo.value.input_tokens == 1200
+        assert excinfo.value.stop_reason == "max_tokens"
+        assert excinfo.value.code.value == "ADL-PARSE-TRUNCADO"
+        assert excinfo.value.status_code == 422
+
+    async def test_end_turn_stop_reason_still_ok(self) -> None:
+        # stop_reason normal (end_turn/tool_use) NÃO é truncamento.
+        fake = _FakeAnthropic(
+            side_effect=_Message(
+                [_ToolUseBlock(name=EXTRACT_MOVEMENTS_TOOL_NAME, payload=_valid_payload())],
+                stop_reason="tool_use",
+                usage=_Usage(input_tokens=800, output_tokens=1500),
+            )
+        )
+        client = _make_client(fake)
+        result = await client.extract_movements(
+            content=b"%PDF-",
+            mime_type="application/pdf",
+            document_kind="x",
+        )
+        assert result.statement.bank_name == "Sicredi"
+        assert result.stop_reason == "tool_use"
+        assert result.output_tokens == 1500
 
 
 class TestMissingApiKey:

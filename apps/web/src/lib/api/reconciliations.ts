@@ -74,6 +74,12 @@ export interface ParsedTransaction {
   amount: string;
   /** Saldo após a transação. Pode ser null em faturas de cartão. */
   balance: string | null;
+  /**
+   * BACK 02.3 — `true` só para linhas de PAGAMENTO da fatura anterior (cartão).
+   * Excluídas do checksum do cartão. Conta corrente: sempre `false`. Ausente no
+   * tool_use ⇒ `false` (o back aplica o default).
+   */
+  is_payment: boolean;
 }
 
 export interface ParsedStatement {
@@ -86,6 +92,42 @@ export interface ParsedStatement {
   opening_balance: string;
   closing_balance: string;
   transactions: ParsedTransaction[];
+}
+
+/**
+ * Resultado do checksum de saldos do parse — espelha `ChecksumResult`
+ * (apps/api/app/modules/reconciliations/schemas.py, BACK 02.3).
+ *
+ * É a defesa contra parse INCOMPLETO: se linhas sumiram (ex: truncamento) ou
+ * um valor foi adulterado, a identidade de saldos não fecha e `ok=false`. O
+ * front BLOQUEIA a confirmação da prévia e exibe `reason` (PT-BR, já pronto).
+ *
+ * Identidades (tolerância R$ 0,01):
+ *   - Conta corrente: `saldo_inicial + Σ == saldo_final`.
+ *   - Cartão: `Σ(exceto is_payment) == total_da_fatura` (closing_balance).
+ *
+ * Valores monetários (`expected`, `computed`, `difference`, `tolerance`) chegam
+ * como `string` (Decimal serializado). `reason` é `null` quando `ok=true`.
+ */
+export interface ChecksumResult {
+  ok: boolean;
+  account_type: ParsedAccountType;
+  expected: string;
+  computed: string;
+  difference: string;
+  tolerance: string;
+  reason: string | null;
+}
+
+/**
+ * Resposta completa de `POST /parse` — espelha `ParseResponse` (BACK 02.3):
+ * o statement extraído + o resultado do checksum como IRMÃOS do `data`.
+ * Por ter duas chaves (`data` + `checksum`), o auto-unwrap de `{data}` do
+ * `rawFetch` NÃO dispara — o front lê os dois campos explicitamente.
+ */
+export interface ParseResult {
+  statement: ParsedStatement;
+  checksum: ChecksumResult;
 }
 
 export interface ParseStatementParams {
@@ -107,12 +149,23 @@ export interface ParseStatementParams {
  *     pós-IA falhou.
  *   - 502: falha de auth na Claude API.
  *   - 504: timeout (60 s) na Claude API.
+ *   - 422 `ADL-PARSE-TRUNCADO` (BACK 02.1): a IA truncou a saída
+ *     (`stop_reason == "max_tokens"`) — nenhum dado gravado; o front surfaça
+ *     como erro amigável (arquivo grande demais), nunca como sucesso silencioso.
+ *
+ * Retorna `{ statement, checksum }`: `ParseResponse` tem `data` + `checksum`
+ * como irmãos, então o auto-unwrap de `{data}` do `rawFetch` não dispara e o
+ * objeto chega inteiro — desempacotamos aqui para um shape explícito.
  */
-export async function parseStatement(params: ParseStatementParams): Promise<ParsedStatement> {
+export async function parseStatement(params: ParseStatementParams): Promise<ParseResult> {
   const fd = new FormData();
   fd.append('client_id', params.client_id);
   fd.append('file', params.file);
-  return apiPostMultipart<ParsedStatement>('/api/v1/reconciliations/parse', fd);
+  const res = await apiPostMultipart<{ data: ParsedStatement; checksum: ChecksumResult }>(
+    '/api/v1/reconciliations/parse',
+    fd,
+  );
+  return { statement: res.data, checksum: res.checksum };
 }
 
 // ----------------------------------------------------------------------
@@ -304,6 +357,13 @@ export interface FileEntryItem {
   user_action: string | null;
   user_note: string | null;
   omie_lancamento_id: number | null;
+  /**
+   * BACK 02.4 — divergência de data (assinada, em dias) da linha conciliada.
+   * `transaction_date(arquivo) - transaction_date(omie)`; `0` = data exata;
+   * `null` = linha não conciliada ou sessão legada (processada antes do fix).
+   * A data do Omie é derivada como `transaction_date - days_diff`.
+   */
+  days_diff: number | null;
 }
 
 export interface ListFileEntriesParams {

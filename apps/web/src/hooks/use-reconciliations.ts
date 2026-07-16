@@ -62,7 +62,7 @@ import {
   type OmieEntryItem,
   type OmieEntryListResult,
   type OmieLancamentoItem,
-  type ParsedStatement,
+  type ParseResult,
   type ParseStatementParams,
   type PatchAnomalyPayload,
   type PatchFileEntryPayload,
@@ -78,7 +78,7 @@ export function useCheckDuplicate() {
 }
 
 export function useParseStatement() {
-  return useMutation<ParsedStatement, Error, ParseStatementParams>({
+  return useMutation<ParseResult, Error, ParseStatementParams>({
     mutationFn: parseStatement,
   });
 }

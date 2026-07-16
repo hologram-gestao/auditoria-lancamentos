@@ -54,6 +54,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     setup_logging(settings)
     init_db(settings)
     log = get_logger(__name__)
+    # BACK 02.1 — fail-fast: `ADL_PARSE_MAX_OUTPUT_TOKENS` não pode exceder o
+    # cap de saída do modelo em uso. Se exceder, o serviço NÃO sobe (em vez de
+    # devolver um HTTP 400 silencioso da Anthropic no meio de uma conciliação).
+    from app.integrations.anthropic.model_limits import validate_parse_output_config
+
+    await validate_parse_output_config(settings)
     # Cache L1+L2 de lançamentos Omie individuais (S11). Singleton no app —
     # L1 in-memory por processo, L2 Redis compartilhado. Se REDIS_URL não
     # responder, o cache degrada para L1-only (silencioso, ver
