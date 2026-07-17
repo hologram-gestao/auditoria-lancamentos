@@ -106,6 +106,13 @@ class Settings(BaseSettings):
     # apps/web/next.config.mjs) precisa ficar ACIMA deste valor (160s). Se o BFF
     # cortar antes, o usuário vê um 500 genérico mesmo com o backend respondendo.
     ANTHROPIC_TIMEOUT_SECONDS: float = 150.0
+    # BACK 02.1 — teto de tokens de SAÍDA do parsing. Era hardcoded no client;
+    # virou configurável para dar caminho de ajuste sem deploy quando um extrato
+    # maior aparecer. O default preserva o valor que já rodava em produção.
+    # Validado na subida contra o cap de saída do modelo (`model_limits`): um
+    # valor acima do que a Anthropic aceita derruba o serviço no boot, em vez de
+    # virar HTTP 400 no meio de uma conciliação.
+    ADL_PARSE_MAX_OUTPUT_TOKENS: int = 32_768
 
     # MOCK exclusivo de demo/gravação: quando True, `ParseService` retorna um
     # payload fixo (extrato fictício da Padaria Pão Quente) sem chamar a

@@ -475,6 +475,7 @@ async def _run_qualification_safely(
         api_key=settings.ANTHROPIC_API_KEY,
         model=settings.ANTHROPIC_MODEL_DEFAULT,
         timeout=settings.ANTHROPIC_TIMEOUT_SECONDS,
+        max_output_tokens=settings.ADL_PARSE_MAX_OUTPUT_TOKENS,
     )
     # SAVEPOINT (nested transaction): se o `qualify_session` falhar — seja
     # numa query, num flush quebrado, ou na chamada Anthropic — dá rollback

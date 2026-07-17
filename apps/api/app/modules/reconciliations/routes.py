@@ -14,6 +14,7 @@ S11.fix (retry de sessão em erro):
 
 from __future__ import annotations
 
+import hashlib
 from datetime import date
 from typing import Annotated
 from uuid import UUID
@@ -41,6 +42,7 @@ from app.core.dependencies import (
 from app.core.exceptions import (
     ClientNotAccessibleError,
     ConflictError,
+    DuplicateFileError,
     NotFoundError,
     ValidationAppError,
 )
@@ -48,6 +50,7 @@ from app.core.rate_limit import limiter, user_id_key_func
 from app.db.models import ReconciliationStatus
 from app.integrations.anthropic.client import AnthropicClient
 from app.modules.reconciliations.parse_service import ParseService
+from app.modules.reconciliations.processing.checksum import compute_checksum
 from app.modules.reconciliations.processing.job import run_reconciliation_processing
 from app.modules.reconciliations.repository import ReconciliationRepository
 from app.modules.reconciliations.schemas import (
@@ -61,6 +64,7 @@ from app.modules.reconciliations.schemas import (
     SessionStatusResponse,
 )
 from app.modules.reconciliations.service import ReconciliationService
+from app.utils.upload import parse_content_length, read_upload_within_limit
 
 router = APIRouter(prefix="/api/v1/reconciliations", tags=["reconciliations"])
 
@@ -85,6 +89,7 @@ def _get_anthropic_client(
         api_key=settings.ANTHROPIC_API_KEY,
         model=settings.ANTHROPIC_MODEL_DEFAULT,
         timeout=settings.ANTHROPIC_TIMEOUT_SECONDS,
+        max_output_tokens=settings.ADL_PARSE_MAX_OUTPUT_TOKENS,
     )
 
 
@@ -193,6 +198,7 @@ async def parse_statement(
     response: Response,
     user: ManagerOrAdminDep,
     db: DbSessionDep,
+    service: ReconciliationServiceDep,
     settings: Annotated[Settings, Depends(get_settings)],
     parser: ParseServiceDep,
     client_id: Annotated[UUID, Form(description="UUID do cliente.")],
@@ -203,7 +209,15 @@ async def parse_statement(
     except ClientNotAccessibleError as exc:
         raise NotFoundError(_CLIENT_NOT_FOUND_MSG) from exc
 
-    file_bytes = await file.read()
+    # BACK 02.8 — valida o tamanho ANTES de carregar o arquivo inteiro: pré-check
+    # por Content-Length + leitura em streaming com corte no teto (fonte única em
+    # Settings). Antes, o `await file.read()` alocava o arquivo todo e só depois
+    # o `parse_service` conferia o tamanho — o limite não protegia a memória.
+    file_bytes = await read_upload_within_limit(
+        file,
+        declared_content_length=parse_content_length(request.headers.get("content-length")),
+        max_bytes=settings.max_upload_bytes,
+    )
 
     if not file_bytes:
         raise ValidationAppError(
@@ -211,12 +225,38 @@ async def parse_statement(
             user_message="O arquivo enviado está vazio.",
         )
 
+    # BACK 02.6 — dedup DENTRO do /parse, ANTES de qualquer chamada à IA (custo).
+    # O hash é do CONTEÚDO, recalculado no servidor (nunca confiar no hash que o
+    # cliente manda no /check-duplicate). Se já existe sessão ATIVA do cliente
+    # com esse conteúdo → 409 sem pagar a Anthropic. Sessão anterior em `error`
+    # não conta: reimportar é permitido (não punir o usuário por erro do sistema).
+    file_hash = hashlib.sha256(file_bytes).hexdigest()
+    duplicate = await service.find_parse_duplicate(client_id=client_id, file_hash=file_hash)
+    if duplicate is not None:
+        dup_session_id, imported_at = duplicate
+        raise DuplicateFileError(
+            f"Conteúdo já importado para client_id={client_id} "
+            f"(sessão {dup_session_id}, hash {file_hash[:8]}).",
+            user_message=(
+                f"Este extrato já foi importado em {imported_at.strftime('%d/%m/%Y')}. "
+                "Abra a conciliação existente para revisá-la em vez de reenviar."
+            ),
+            metadata={
+                "session_id": str(dup_session_id),
+                "imported_at": imported_at.isoformat(),
+            },
+        )
+
     statement = await parser.parse_statement(
         file_bytes=file_bytes,
         filename=file.filename,
         max_upload_bytes=settings.max_upload_bytes,
     )
-    return ParseResponse(data=statement)
+    # BACK 02.3 — checksum de saldos: a rede que pega o parse incompleto que a
+    # detecção de truncamento deixar passar. Vai na response para o front
+    # bloquear a confirmação da prévia quando `ok=False` e exibir o motivo.
+    checksum = compute_checksum(statement)
+    return ParseResponse(data=statement, checksum=checksum)
 
 
 # ----------------------------------------------------------------------

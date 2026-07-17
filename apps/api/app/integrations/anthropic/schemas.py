@@ -59,6 +59,20 @@ class ExtractedTransaction(BaseModel):
     description: str = Field(min_length=1, description="Descrição preservada do documento.")
     amount: Decimal = Field(description="Valor com sinal: positivo = crédito, negativo = débito.")
     balance: Decimal | None = Field(default=None, description="Saldo após a transação.")
+    # BACK 02.3 — checksum de cartão: marca linhas de PAGAMENTO da fatura
+    # anterior. O prompt manda extrair TODA movimentação visível, e numa fatura
+    # o pagamento da fatura anterior aparece — então a IA o inclui. Não
+    # excluímos (perderia o dado); MARCAMOS, para que o checksum do cartão some
+    # tudo EXCETO os pagamentos e feche no total da fatura.
+    # Default False: só faturas de cartão têm pagamento a marcar; conta corrente
+    # e conta aplicação nunca marcam. Chave ausente no tool_use = False.
+    is_payment: bool = Field(
+        default=False,
+        description=(
+            "True apenas para linhas de PAGAMENTO da fatura anterior (cartão). "
+            "Excluídas do checksum do cartão. Conta corrente/aplicação: sempre False."
+        ),
+    )
 
     @field_validator("amount", mode="before")
     @classmethod

@@ -46,14 +46,63 @@ class CheckDuplicateResponse(BaseModel):
 # ----------------------------------------------------------------------
 
 
+class ChecksumResult(BaseModel):
+    """Resultado do checksum de saldos do parse (BACK 02.3).
+
+    O checksum é a defesa contra parse INCOMPLETO — se linhas sumiram (ex: o
+    truncamento que o teto de tokens deixar passar) ou um valor foi adulterado,
+    a identidade não fecha e `ok=False`, com `reason` em PT-BR para o front
+    BLOQUEAR a confirmação da prévia e exibir o motivo.
+
+    Identidades (tolerância R$ 0,01, aritmética Decimal — CLAUDE.md §4.4/§5.1):
+        - Conta corrente: `saldo_inicial + Σ(movimentações) == saldo_final`.
+        - Cartão: `Σ(movimentações exceto is_payment, invertendo o sinal de
+          débito) == total_da_fatura` (o saldo final declarado). Ver ⚠️ S-1.
+        - Conta aplicação (`investment`): **não se aplica** (`applicable=False`)
+          — ver abaixo.
+
+    ⚠️ **S-1 (ASSUMIDA — NÃO TESTADA / RISCO):** para cartão, assume-se que o
+    pagamento da fatura anterior NÃO entra no checksum e que o total da fatura
+    é o `closing_balance` declarado. É semântica contábil do BPO (a confirmar
+    com o Galhardo), não decisão nossa.
+
+    **`investment` não é verificável por identidade de saldo.** O prompt manda
+    NÃO emitir IOF, IR nem rendimento como transações (`prompts.py`, regra 14):
+    eles entram no saldo sem virar movimentação. Logo `inicial + Σ != final`
+    por construção, e aplicar a regra de conta corrente bloquearia conciliações
+    VÁLIDAS. Por isso `applicable=False` e `ok=True` — os números seguem sendo
+    calculados de verdade (informativos), mas não barram a prévia.
+    """
+
+    ok: bool
+    # False quando a identidade não é verificável para o tipo de conta
+    # (`investment`). Nesse caso `ok` é sempre True e o front não deve exibir
+    # o checksum como veredito — não há o que afirmar.
+    applicable: bool
+    account_type: Literal["checking", "credit_card", "investment"]
+    # Alvo declarado no documento (saldo final / total da fatura).
+    expected: Decimal
+    # Valor reconstruído a partir das transações extraídas.
+    computed: Decimal
+    # `expected - computed` (assinado). |difference| <= tolerance ⇒ ok.
+    difference: Decimal
+    tolerance: Decimal
+    # Motivo acionável em PT-BR; preenchido só quando `ok=False`.
+    reason: str | None = None
+
+
 class ParseResponse(BaseModel):
     """Response de POST /api/v1/reconciliations/parse.
 
     Reusa o `ExtractedStatement` do módulo de integração — o shape exposto
     para o front é exatamente o que veio do tool use, sem renomeação.
+
+    `checksum` (BACK 02.3) é o sinal de bloqueio da prévia: quando
+    `checksum.ok=False`, o front bloqueia a confirmação e mostra `reason`.
     """
 
     data: ExtractedStatement
+    checksum: ChecksumResult
 
 
 # ----------------------------------------------------------------------

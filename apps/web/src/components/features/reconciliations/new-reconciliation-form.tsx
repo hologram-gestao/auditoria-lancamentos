@@ -80,7 +80,7 @@ import {
 } from '@/hooks/use-reconciliations';
 import { ApiError } from '@/lib/api/client';
 import { isCreditCardAccount, type BankAccount } from '@/lib/api/clients';
-import type { ParsedStatement } from '@/lib/api/reconciliations';
+import type { ChecksumResult, ParsedStatement } from '@/lib/api/reconciliations';
 import { sha256Hex } from '@/lib/crypto/hash';
 import {
   ALLOWED_EXTENSIONS,
@@ -185,6 +185,7 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
   const [step, setStep] = useState<SubmitStep>('idle');
   const [view, setView] = useState<View>('form');
   const [parsed, setParsed] = useState<ParsedStatement | null>(null);
+  const [checksum, setChecksum] = useState<ChecksumResult | null>(null);
   // Hash do arquivo aceito pelo /parse — preservado para o POST de criação
   // da sessão (S10). Resetado junto com `parsed` no cancel/select-other-file.
   const [submittedHash, setSubmittedHash] = useState<string | null>(null);
@@ -243,11 +244,14 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
     // timeout 504, auth fault 502 — ver `lib/api/reconciliations.ts`).
     setStep('parsing');
     try {
-      const statement = await parseStatement.mutateAsync({
+      const { statement, checksum } = await parseStatement.mutateAsync({
         client_id: clientId,
         file: values.file,
       });
       setParsed(statement);
+      // BACK 02.3 — o checksum acompanha a prévia: quando não fecha, a
+      // confirmação é bloqueada e o motivo aparece na tela.
+      setChecksum(checksum);
       // Hash que o backend acabou de aceitar no /check-duplicate — reusamos
       // no POST /reconciliations sem precisar recalcular o SHA-256.
       setSubmittedHash(hash);
@@ -342,6 +346,7 @@ function FormReady({ clientId, clientName, accounts, onCancel }: FormReadyProps)
       {showPreview && parsed && (
         <ParsePreview
           parsed={parsed}
+          checksum={checksum}
           isCard={isCardSelected}
           accountName={selectedAccount?.name ?? ''}
           onCancel={handlePreviewCancel}

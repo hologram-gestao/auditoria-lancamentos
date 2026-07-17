@@ -40,8 +40,12 @@ EXTRACT_MOVEMENTS_TOOL: dict[str, Any] = {
             },
             "account_type": {
                 "type": "string",
-                "enum": ["checking", "credit_card"],
-                "description": "checking = conta corrente; credit_card = cartão.",
+                "enum": ["checking", "credit_card", "investment"],
+                "description": (
+                    "checking = conta corrente / poupança; credit_card = fatura de "
+                    "cartão de crédito; investment = conta de aplicação / "
+                    "investimento (CDB, fundo, RDB, tesouro)."
+                ),
             },
             "period_start": {
                 "type": "string",
@@ -67,8 +71,8 @@ EXTRACT_MOVEMENTS_TOOL: dict[str, Any] = {
                     "Todas as movimentações na ordem em que aparecem. Em faturas de "
                     "cartão: cada parcela é uma linha (valor unitário + data da "
                     "parcela, sem agrupar); estornos com amount positivo; encargos "
-                    "(juros/IOF/multa) como linhas separadas; NÃO incluir o "
-                    "pagamento da fatura."
+                    "(juros/IOF/multa) como linhas separadas; o pagamento da fatura "
+                    "anterior TAMBÉM é extraído, marcado com is_payment=true."
                 ),
                 "items": {
                     "type": "object",
@@ -93,6 +97,18 @@ EXTRACT_MOVEMENTS_TOOL: dict[str, Any] = {
                             "description": (
                                 "Saldo após a transação. Omita o campo "
                                 "(NÃO use null) se o documento não fornecer."
+                            ),
+                        },
+                        "is_payment": {
+                            "type": "boolean",
+                            "description": (
+                                "True SOMENTE para linhas de PAGAMENTO da fatura "
+                                "anterior em faturas de cartão (ex: 'PAGAMENTO "
+                                "FATURA', 'PGTO EFETUADO', crédito que quita o "
+                                "saldo anterior). Excluídas do checksum da fatura. "
+                                "Para conta corrente, conta aplicação e para "
+                                "qualquer compra/encargo/estorno, omita o campo "
+                                "ou use false."
                             ),
                         },
                     },
