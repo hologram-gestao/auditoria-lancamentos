@@ -74,6 +74,12 @@ export interface ParsedTransaction {
   amount: string;
   /** Saldo após a transação. Pode ser null em faturas de cartão. */
   balance: string | null;
+  /**
+   * `true` só nas linhas de PAGAMENTO da fatura anterior (cartão) — excluídas
+   * do checksum, que precisa fechar no total da fatura. Opcional porque o back
+   * usa default `false` e omite a chave quando não se aplica.
+   */
+  is_payment?: boolean;
 }
 
 export interface ParsedStatement {
@@ -86,6 +92,37 @@ export interface ParsedStatement {
   opening_balance: string;
   closing_balance: string;
   transactions: ParsedTransaction[];
+}
+
+/**
+ * Resultado do checksum de saldos (BACK 02.3) — espelha `ChecksumResult`.
+ * Valores monetários chegam como `string` (Decimal serializado, nunca float).
+ * `reason` é `null` quando `ok=true`.
+ *
+ * `applicable=false` significa que a identidade de saldo NÃO é verificável
+ * para o tipo de conta — hoje só `investment`, cujo rendimento/IOF/IR entram
+ * no saldo sem virar movimentação. Nesse caso `ok` é sempre `true` e a UI não
+ * deve exibir veredito: não há o que afirmar.
+ */
+export interface ChecksumResult {
+  ok: boolean;
+  applicable: boolean;
+  account_type: ParsedAccountType;
+  expected: string;
+  computed: string;
+  difference: string;
+  tolerance: string;
+  reason: string | null;
+}
+
+/**
+ * Resposta completa de `POST /parse` — o statement extraído + o checksum,
+ * IRMÃOS dentro do envelope. Por ter duas chaves (`data` + `checksum`), o
+ * auto-unwrap de `{data}` do `rawFetch` não dispara e o objeto chega inteiro.
+ */
+export interface ParseResult {
+  statement: ParsedStatement;
+  checksum: ChecksumResult;
 }
 
 export interface ParseStatementParams {
@@ -108,11 +145,15 @@ export interface ParseStatementParams {
  *   - 502: falha de auth na Claude API.
  *   - 504: timeout (60 s) na Claude API.
  */
-export async function parseStatement(params: ParseStatementParams): Promise<ParsedStatement> {
+export async function parseStatement(params: ParseStatementParams): Promise<ParseResult> {
   const fd = new FormData();
   fd.append('client_id', params.client_id);
   fd.append('file', params.file);
-  return apiPostMultipart<ParsedStatement>('/api/v1/reconciliations/parse', fd);
+  const res = await apiPostMultipart<{ data: ParsedStatement; checksum: ChecksumResult }>(
+    '/api/v1/reconciliations/parse',
+    fd,
+  );
+  return { statement: res.data, checksum: res.checksum };
 }
 
 // ----------------------------------------------------------------------

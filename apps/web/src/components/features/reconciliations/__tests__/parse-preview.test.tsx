@@ -1,5 +1,10 @@
 /**
- * Testes da prévia do parsing (FRONT 1.4 — adaptações de fatura de cartão).
+ * Testes da prévia do parsing.
+ *
+ * Cobre duas features que convivem no mesmo componente:
+ *   - FRONT 1.4 (FASE 1): adaptações de fatura de cartão (título/legenda).
+ *   - BACK 02.3 (Sprint 2): o checksum de saldos BLOQUEIA a confirmação
+ *     quando o extrato não fecha — a defesa contra parse incompleto.
  *
  * Componente de props planas (sem Radix), então o render é determinístico.
  */
@@ -7,7 +12,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ParsePreview } from '@/components/features/reconciliations/parse-preview';
-import type { ParsedStatement } from '@/lib/api/reconciliations';
+import type { ChecksumResult, ParsedStatement } from '@/lib/api/reconciliations';
 
 function makeParsed(account_type: ParsedStatement['account_type']): ParsedStatement {
   return {
@@ -21,6 +26,20 @@ function makeParsed(account_type: ParsedStatement['account_type']): ParsedStatem
   };
 }
 
+function makeChecksum(overrides: Partial<ChecksumResult> = {}): ChecksumResult {
+  return {
+    ok: true,
+    applicable: true,
+    account_type: 'checking',
+    expected: '100.00',
+    computed: '100.00',
+    difference: '0.00',
+    tolerance: '0.01',
+    reason: null,
+    ...overrides,
+  };
+}
+
 const noop = vi.fn();
 
 describe('ParsePreview — fatura de cartão', () => {
@@ -28,6 +47,7 @@ describe('ParsePreview — fatura de cartão', () => {
     render(
       <ParsePreview
         parsed={makeParsed('credit_card')}
+        checksum={makeChecksum({ account_type: 'credit_card' })}
         isCard
         accountName="Nubank PJ"
         onCancel={noop}
@@ -45,6 +65,7 @@ describe('ParsePreview — fatura de cartão', () => {
     render(
       <ParsePreview
         parsed={makeParsed('checking')}
+        checksum={makeChecksum()}
         isCard={false}
         accountName="Sicredi 91263-1"
         onCancel={noop}
@@ -56,5 +77,84 @@ describe('ParsePreview — fatura de cartão', () => {
       screen.getByRole('heading', { name: 'Confirme as movimentações extraídas' }),
     ).toBeVisible();
     expect(screen.queryByText(/Valores negativos = compras/)).toBeNull();
+  });
+});
+
+describe('ParsePreview — bloqueio por checksum (BACK 02.3)', () => {
+  const REASON = 'O extrato não fecha: diferença de R$ 42,00. Revise antes de conciliar.';
+
+  it('checksum ok: confirmação liberada e sem alerta', () => {
+    render(
+      <ParsePreview
+        parsed={makeParsed('checking')}
+        checksum={makeChecksum({ ok: true })}
+        isCard={false}
+        accountName="Sicredi"
+        onCancel={noop}
+        onConfirm={noop}
+        isConfirming={false}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Confirmar e processar' })).toBeEnabled();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('checksum falhou: bloqueia a confirmação e mostra o motivo do backend', () => {
+    render(
+      <ParsePreview
+        parsed={makeParsed('checking')}
+        checksum={makeChecksum({ ok: false, reason: REASON })}
+        isCard={false}
+        accountName="Sicredi"
+        onCancel={noop}
+        onConfirm={noop}
+        isConfirming={false}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Confirmar e processar' })).toBeDisabled();
+    expect(screen.getByRole('alert')).toHaveTextContent(/Os saldos não fecham/);
+    expect(screen.getByRole('alert')).toHaveTextContent(/diferença de R\$ 42,00/);
+    // Sem rota de "continuar mesmo assim": o cancelar vira a saída explícita.
+    expect(screen.getByRole('button', { name: 'Selecionar outro arquivo' })).toBeVisible();
+  });
+
+  it('conta aplicação: não bloqueia mesmo com diferença (applicable=false)', () => {
+    // Rendimento/IOF/IR entram no saldo sem virar movimentação — a identidade
+    // não fecha nem num parse perfeito, então não pode virar veredito.
+    render(
+      <ParsePreview
+        parsed={makeParsed('investment')}
+        checksum={makeChecksum({
+          ok: true,
+          applicable: false,
+          account_type: 'investment',
+          expected: '1530.00',
+          computed: '1500.00',
+          difference: '30.00',
+        })}
+        isCard={false}
+        accountName="BTG CDB"
+        onCancel={noop}
+        onConfirm={noop}
+        isConfirming={false}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Confirmar e processar' })).toBeEnabled();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('checksum null (chamada legada): não bloqueia', () => {
+    render(
+      <ParsePreview
+        parsed={makeParsed('checking')}
+        checksum={null}
+        isCard={false}
+        accountName="Sicredi"
+        onCancel={noop}
+        onConfirm={noop}
+        isConfirming={false}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Confirmar e processar' })).toBeEnabled();
   });
 });

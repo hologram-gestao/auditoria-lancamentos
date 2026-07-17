@@ -19,6 +19,8 @@
  *     ou em monocromia.
  */
 
+import { AlertTriangle } from 'lucide-react';
+
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -29,7 +31,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import type { ParsedStatement, ParsedTransaction } from '@/lib/api/reconciliations';
+import type { ChecksumResult, ParsedStatement, ParsedTransaction } from '@/lib/api/reconciliations';
 import { formatAccountType, formatBRDate, formatBRL } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -37,6 +39,13 @@ const PREVIEW_ROW_LIMIT = 5;
 
 interface ParsePreviewProps {
   parsed: ParsedStatement;
+  /**
+   * BACK 02.3 — checksum de saldos. Quando `ok=false`, a confirmação é
+   * BLOQUEADA e o motivo é exibido: é a defesa contra parse incompleto
+   * (linhas perdidas fazem a identidade de saldos não fechar).
+   * `null` = prévia sem checksum (ex.: chamada legada) → não bloqueia.
+   */
+  checksum: ChecksumResult | null;
   /** FRONT 1.4: conta de cartão → título/legenda específicos de fatura. */
   isCard: boolean;
   /** Nome da conta selecionada — usado no título da prévia de fatura. */
@@ -51,6 +60,7 @@ interface ParsePreviewProps {
 
 export function ParsePreview({
   parsed,
+  checksum,
   isCard,
   accountName,
   onCancel,
@@ -60,6 +70,10 @@ export function ParsePreview({
   const previewRows = parsed.transactions.slice(0, PREVIEW_ROW_LIMIT);
   const totalCount = parsed.transactions.length;
   const hasMore = totalCount > PREVIEW_ROW_LIMIT;
+  // Só bloqueia quando o checksum é aplicável E não fechou. Conta aplicação
+  // (`applicable=false`) nunca bloqueia: rendimento/IOF/IR entram no saldo sem
+  // virar movimentação, então a identidade não fecha nem num parse perfeito.
+  const checksumBlocks = checksum !== null && checksum.applicable && !checksum.ok;
 
   return (
     <section aria-labelledby="parse-preview-title" className="space-y-6">
@@ -117,15 +131,47 @@ export function ParsePreview({
         background.
       </div>
 
+      {checksumBlocks && checksum?.reason && <ChecksumBlockAlert reason={checksum.reason} />}
+
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <Button type="button" variant="outline" onClick={onCancel} disabled={isConfirming}>
-          Cancelar
+          {checksumBlocks ? 'Selecionar outro arquivo' : 'Cancelar'}
         </Button>
-        <Button type="button" onClick={onConfirm} disabled={isConfirming}>
+        <Button
+          type="button"
+          onClick={onConfirm}
+          disabled={isConfirming || checksumBlocks}
+          title={
+            checksumBlocks
+              ? 'Os saldos do arquivo não fecham — revise o extrato antes de conciliar.'
+              : undefined
+          }
+        >
           Confirmar e processar
         </Button>
       </div>
     </section>
+  );
+}
+
+/**
+ * BACK 02.3 — bloqueio por checksum. Mesmo padrão visual do
+ * `DuplicateBlockAlert` do formulário: sem rota de "continuar mesmo assim",
+ * porque conciliar um extrato que não fecha propaga o erro para o Omie.
+ * A `reason` vem pronta do backend (PT-BR, com os valores e a diferença).
+ */
+function ChecksumBlockAlert({ reason }: { reason: string }) {
+  return (
+    <div
+      role="alert"
+      className="bg-destructive/5 border-destructive/30 text-destructive flex items-start gap-3 rounded-lg border p-4 text-sm"
+    >
+      <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
+      <div className="space-y-1">
+        <p className="font-semibold">Os saldos não fecham</p>
+        <p className="leading-snug">{reason}</p>
+      </div>
+    </div>
   );
 }
 
