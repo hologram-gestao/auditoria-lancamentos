@@ -40,8 +40,12 @@ EXTRACT_MOVEMENTS_TOOL: dict[str, Any] = {
             },
             "account_type": {
                 "type": "string",
-                "enum": ["checking", "credit_card"],
-                "description": "checking = conta corrente; credit_card = cartão.",
+                "enum": ["checking", "credit_card", "investment"],
+                "description": (
+                    "checking = conta corrente / poupança; credit_card = fatura de "
+                    "cartão de crédito; investment = conta de aplicação / "
+                    "investimento (CDB, fundo, RDB, tesouro)."
+                ),
             },
             "period_start": {
                 "type": "string",
