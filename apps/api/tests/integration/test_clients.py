@@ -48,7 +48,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.crypto import decrypt, encrypt
+from app.core.crypto import ClientCipher, encrypt
+from app.core.crypto_service import (
+    AAD_CLIENT_APP_KEY,
+    AAD_CLIENT_APP_SECRET,
+    field_locator,
+    load_client_cipher,
+)
 from app.core.security import hash_password
 from app.db.models import Client, ClientAssignment, User, UserRole
 
@@ -287,11 +293,26 @@ class TestCreateClient:
         assert FAKE_APP_SECRET not in row.omie_app_secret_encrypted
         # IVs são distintos (cada operação gera seu próprio)
         assert row.omie_app_key_iv != row.omie_app_secret_iv
-        # Descriptografar com a chave volta ao plaintext (round-trip ok)
-        hex_key = get_settings().OMIE_ENCRYPTION_KEY.get_secret_value()
-        assert decrypt(row.omie_app_key_encrypted, row.omie_app_key_iv, hex_key) == FAKE_APP_KEY
+        # Sprint 3: envelope versionado v<n>:<key_id>: + DEK-por-cliente (não bare)
+        assert row.omie_app_key_encrypted.startswith("v1:")
+        assert not ClientCipher.is_legacy(row.omie_app_key_encrypted)
+        assert row.dek_wrapped is not None  # cliente novo nasce com DEK embrulhada
+        # Round-trip via o ClientCipher do cliente (DEK + AAD), não a chave global.
+        cipher = await load_client_cipher(row, settings=get_settings())
         assert (
-            decrypt(row.omie_app_secret_encrypted, row.omie_app_secret_iv, hex_key)
+            cipher.decrypt(
+                row.omie_app_key_encrypted,
+                row.omie_app_key_iv,
+                field_locator(AAD_CLIENT_APP_KEY, row.id),
+            )
+            == FAKE_APP_KEY
+        )
+        assert (
+            cipher.decrypt(
+                row.omie_app_secret_encrypted,
+                row.omie_app_secret_iv,
+                field_locator(AAD_CLIENT_APP_SECRET, row.id),
+            )
             == FAKE_APP_SECRET
         )
 
@@ -506,10 +527,17 @@ class TestUpdateClient:
         assert target.omie_app_secret_iv != old_iv_secret
         # Ciphertext mudou
         assert target.omie_app_key_encrypted != old_ct_key
-        # Round-trip com a chave bate com o novo plaintext
-        hex_key = get_settings().OMIE_ENCRYPTION_KEY.get_secret_value()
+        # PATCH recifra no envelope corrente + provisiona a DEK (cliente era legado).
+        assert target.omie_app_key_encrypted.startswith("v1:")
+        assert target.dek_wrapped is not None
+        # Round-trip via o ClientCipher do cliente (DEK + AAD) bate com o novo plaintext.
+        cipher = await load_client_cipher(target, settings=get_settings())
         assert (
-            decrypt(target.omie_app_key_encrypted, target.omie_app_key_iv, hex_key)
+            cipher.decrypt(
+                target.omie_app_key_encrypted,
+                target.omie_app_key_iv,
+                field_locator(AAD_CLIENT_APP_KEY, target.id),
+            )
             == "nova-app-key-xyz"
         )
 

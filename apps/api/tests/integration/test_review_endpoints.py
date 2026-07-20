@@ -24,7 +24,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.crypto import decrypt, encrypt
+from app.core.crypto import encrypt
+from app.core.crypto_service import (
+    AAD_FILE_ENTRY_USER_NOTE,
+    field_locator,
+    load_client_cipher,
+)
 from app.core.search_index import compute_search_hmac
 from app.core.security import hash_password
 from app.db.models import (
@@ -438,14 +443,18 @@ class TestUpdateFileEntry:
         assert body["situation"] == "ignorado"
         assert body["user_note"] == "Não relacionado"
 
-        # Persistido + criptografado
+        # Persistido no envelope v1 (DEK-por-cliente + AAD) — a nota é cifrada
+        # com a DEK provisionada no PATCH; decifra via o ClientCipher do cliente.
         await db_session.refresh(entry)
-        hex_key = get_settings().OMIE_ENCRYPTION_KEY.get_secret_value()
+        await db_session.refresh(cli)
+        cipher = await load_client_cipher(cli, settings=get_settings())
         assert entry.user_note_encrypted is not None
         assert entry.user_note_iv is not None
-        assert decrypt(entry.user_note_encrypted, entry.user_note_iv, hex_key) == (
-            "Não relacionado"
-        )
+        assert cipher.decrypt(
+            entry.user_note_encrypted,
+            entry.user_note_iv,
+            field_locator(AAD_FILE_ENTRY_USER_NOTE, entry.id),
+        ) == ("Não relacionado")
 
     async def test_trocar_omie_id_duplicate_in_session_returns_400(
         self, client_with_db: AsyncClient, db_session: AsyncSession
@@ -938,8 +947,6 @@ class TestAvailableOmieEntriesPeriod:
     async def test_uses_real_period_when_persisted(self, db_session: AsyncSession) -> None:
         from unittest.mock import AsyncMock
 
-        from pydantic import SecretStr
-
         from app.modules.reconciliations.review.repository import ReviewRepository
         from app.modules.reconciliations.review.service import ReviewService
 
@@ -957,8 +964,7 @@ class TestAvailableOmieEntriesPeriod:
         service = ReviewService(
             ReviewRepository(db_session),
             cache=cache,
-            encryption_key=SecretStr("0" * 64),  # 32 bytes hex — não usado neste path
-            search_blind_index_key=SecretStr("1" * 64),
+            settings=get_settings(),
         )
 
         await service.list_available_omie_entries(
@@ -979,8 +985,6 @@ class TestAvailableOmieEntriesPeriod:
     ) -> None:
         from unittest.mock import AsyncMock
 
-        from pydantic import SecretStr
-
         from app.modules.reconciliations.review.repository import ReviewRepository
         from app.modules.reconciliations.review.service import ReviewService
 
@@ -997,8 +1001,7 @@ class TestAvailableOmieEntriesPeriod:
         service = ReviewService(
             ReviewRepository(db_session),
             cache=cache,
-            encryption_key=SecretStr("0" * 64),
-            search_blind_index_key=SecretStr("1" * 64),
+            settings=get_settings(),
         )
 
         await service.list_available_omie_entries(

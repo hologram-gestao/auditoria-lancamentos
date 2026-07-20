@@ -18,18 +18,24 @@ from typing import TYPE_CHECKING
 import httpx
 from pydantic import SecretStr
 
-from app.core.crypto import decrypt
+from app.core.crypto_service import (
+    AAD_CLIENT_APP_KEY,
+    AAD_CLIENT_APP_SECRET,
+    field_locator,
+)
 from app.integrations.omie.client import OmieClient, OmieCredentials
 from app.integrations.omie.mock_client import FAKE_DEMO_KEY_PREFIX, MockOmieClient
 
 if TYPE_CHECKING:
     from app.core.config import Settings
+    from app.core.crypto import ClientCipher
     from app.db.models import Client
 
 
 def build_omie_client(
     client: Client,
     settings: Settings,
+    cipher: ClientCipher,
     *,
     http_client: httpx.AsyncClient | None = None,
 ) -> OmieClient:
@@ -37,7 +43,10 @@ def build_omie_client(
 
     Args:
         client: ORM `Client` carregado (precisa dos 4 campos `*_encrypted`/`*_iv`).
-        settings: `Settings` com a `OMIE_ENCRYPTION_KEY`.
+        settings: `Settings` da aplicação.
+        cipher: `ClientCipher` do cliente (DEK já desembrulhada) — construído no
+            caller com `crypto_service.load_client_cipher`. Decifra tanto o novo
+            envelope `v<n>:` (DEK + AAD) quanto linhas bare legadas (chave global).
         http_client: `AsyncClient` opcional. Use em testes pra que o `respx` capte
             as chamadas; em produção, omitir → o `OmieClient` cria o seu próprio
             (com fechamento automático em `aclose()`).
@@ -46,12 +55,19 @@ def build_omie_client(
         `OmieClient` pronto pra chamar `listar_contas_correntes()`, etc.
 
     Raises:
-        CryptoError: chave inválida ou ciphertext adulterado (exception handler
-            global converte em 500 INTERNAL_ERROR).
+        CryptoError: DEK ausente, chave inválida ou ciphertext adulterado/fora de
+            contexto (exception handler global converte em 500 INTERNAL_ERROR).
     """
-    hex_key = settings.OMIE_ENCRYPTION_KEY.get_secret_value()
-    app_key = decrypt(client.omie_app_key_encrypted, client.omie_app_key_iv, hex_key)
-    app_secret = decrypt(client.omie_app_secret_encrypted, client.omie_app_secret_iv, hex_key)
+    app_key = cipher.decrypt(
+        client.omie_app_key_encrypted,
+        client.omie_app_key_iv,
+        field_locator(AAD_CLIENT_APP_KEY, client.id),
+    )
+    app_secret = cipher.decrypt(
+        client.omie_app_secret_encrypted,
+        client.omie_app_secret_iv,
+        field_locator(AAD_CLIENT_APP_SECRET, client.id),
+    )
     creds = OmieCredentials(
         app_key=SecretStr(app_key),
         app_secret=SecretStr(app_secret),

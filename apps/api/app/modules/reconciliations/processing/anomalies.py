@@ -18,12 +18,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from uuid import UUID
+from typing import TYPE_CHECKING
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.crypto import encrypt
+from app.core.crypto_service import AAD_ANOMALY_CONTEXT, field_locator
 from app.db.models import (
     AnomalyDetectedBy,
     AnomalyType,
@@ -32,6 +33,9 @@ from app.db.models import (
     ReconciliationFileEntry,
     ReconciliationOmieEntry,
 )
+
+if TYPE_CHECKING:
+    from app.core.crypto import ClientCipher
 
 # Códigos canônicos do seed (CLAUDE.md §11). String literal aqui para evitar
 # import circular com seed_dev e porque os codes são contrato persistido no
@@ -113,21 +117,25 @@ def _build_wrong_date_anomalies(
     session_id: UUID,
     wrong_date_type_id: UUID,
     divergent: list[DivergentMatch],
-    encryption_key: str | None,
+    cipher: ClientCipher | None,
 ) -> list[ReconciliationAnomaly]:
     """Monta as anomalias `wrong_date`, cifrando o contexto data-arquivo/data-Omie.
 
-    `encryption_key` é obrigatória aqui (CLAUDE.md §4 — `context_encrypted`).
-    Levanta `ValueError` se ausente em vez de criar a anomalia sem contexto.
+    `cipher` (DEK do cliente) é obrigatório aqui (CLAUDE.md §4 —
+    `context_encrypted`). Levanta `ValueError` se ausente em vez de criar a
+    anomalia sem contexto. O `id` da anomalia é gerado ANTES de cifrar para
+    compor o AAD (client_id‖tabela‖coluna‖pk).
     """
-    if encryption_key is None:
-        raise ValueError("encryption_key é obrigatória quando há divergências (wrong_date).")
+    if cipher is None:
+        raise ValueError("cipher é obrigatório quando há divergências (wrong_date).")
     result: list[ReconciliationAnomaly] = []
     for dm in divergent:
+        anomaly_id = uuid4()
         context = f"Data arquivo: {dm.file_date:%d/%m/%Y} · Data Omie: {dm.omie_date:%d/%m/%Y}"
-        ct, iv = encrypt(context, encryption_key)
+        ct, iv = cipher.encrypt(context, field_locator(AAD_ANOMALY_CONTEXT, anomaly_id))
         result.append(
             ReconciliationAnomaly(
+                id=anomaly_id,
                 session_id=session_id,
                 anomaly_type_id=wrong_date_type_id,
                 file_entry_id=dm.file_entry_id,
@@ -146,7 +154,7 @@ async def create_structural_anomalies(
     unmatched_file_entries: list[ReconciliationFileEntry],
     persisted_omie_entries: list[ReconciliationOmieEntry],
     divergent_matches: list[DivergentMatch] | None = None,
-    encryption_key: str | None = None,
+    cipher: ClientCipher | None = None,
 ) -> int:
     """Cria as anomalias estruturais e devolve o total.
 
@@ -171,8 +179,9 @@ async def create_structural_anomalies(
             cada uma vira uma anomaly `wrong_date` com `context_encrypted`
             guardando "Data arquivo: X · Data Omie: Y". O tipo `wrong_date` só
             é exigido no DB quando esta lista é não-vazia.
-        encryption_key: chave AES-256 hex (CLAUDE.md §4) para cifrar o contexto
-            das anomalias `wrong_date`. Obrigatória quando há `divergent_matches`.
+        cipher: `ClientCipher` do cliente (DEK) para cifrar o contexto das
+            anomalias `wrong_date` no envelope corrente + AAD. Obrigatório
+            quando há `divergent_matches`.
 
     Returns:
         Total de anomalias criadas (missing_in_omie + Atrasado + wrong_date).
@@ -221,7 +230,7 @@ async def create_structural_anomalies(
                 session_id=session_id,
                 wrong_date_type_id=wrong_date_id,
                 divergent=divergent,
-                encryption_key=encryption_key,
+                cipher=cipher,
             )
         )
 

@@ -24,12 +24,14 @@ from uuid import uuid4
 
 import pytest
 from openpyxl import load_workbook
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.crypto import encrypt
 from app.core.security import hash_password
 from app.db.models import (
+    AccessAudit,
     AnomalySeverity,
     AnomalyType,
     Client,
@@ -275,6 +277,36 @@ class TestExportEndpoint:
         mov = wb["Movimentação x Lançamento"]
         descriptions = {mov.cell(row=r, column=2).value for r in (2, 3)}
         assert descriptions == {"Pagamento Padaria", "Recebimento Cielo"}
+
+    async def test_export_writes_access_audit_row(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """BACK 03.5 — exportar o relatório de um cliente grava 1 linha
+        action='export' (a leitura que mais decifra), só com IDs."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        await _seed_account_cache(db_session, client=cli, omie_conta_id=42)
+        sess = await _seed_session(db_session, client=cli, creator=admin)
+        await _seed_file_entry(
+            db_session, recon=sess, description="Pagamento X", amount=Decimal("-10.00")
+        )
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{sess.id}/export")
+        assert resp.status_code == 200, resp.text
+
+        rows = (
+            (await db_session.execute(select(AccessAudit).where(AccessAudit.action == "export")))
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.client_id == cli.id
+        assert row.session_id == sess.id
+        assert row.user_id == admin.id
+        # SÓ IDs — nenhum dado do cliente (nome) na linha de auditoria.
+        assert cli.name not in str(row.rota)
 
     async def test_manager_in_portfolio_downloads_xlsx(
         self, client_with_db: AsyncClient, db_session: AsyncSession

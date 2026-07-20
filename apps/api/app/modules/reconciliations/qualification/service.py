@@ -23,13 +23,17 @@ Identificadores `AnomalyType`:
 
 from __future__ import annotations
 
-from uuid import UUID
+from typing import TYPE_CHECKING
+from uuid import UUID, uuid4
 
-from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.crypto import decrypt, encrypt
+from app.core.crypto_service import (
+    AAD_ANOMALY_CONTEXT,
+    AAD_FILE_ENTRY_DESCRIPTION,
+    field_locator,
+)
 from app.core.logging import get_logger
 from app.db.models import (
     AnomalyDetectedBy,
@@ -37,6 +41,9 @@ from app.db.models import (
     ReconciliationAnomaly,
     ReconciliationFileEntry,
 )
+
+if TYPE_CHECKING:
+    from app.core.crypto import ClientCipher
 from app.integrations.anthropic.client import AnthropicClient
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache, OmieLancamentoData
 from app.modules.reconciliations.qualification import historical, outliers, semantic
@@ -74,7 +81,7 @@ async def qualify_session(
     match_pairs: list[tuple[UUID, int]],
     cache: OmieLancamentoCache,
     anthropic_client: AnthropicClient,
-    encryption_key: SecretStr,
+    cipher: ClientCipher,
     account_type: str = "checking",
 ) -> QualificationReport:
     """Executa as 3 camadas e persiste anomalias na transação atual.
@@ -88,8 +95,9 @@ async def qualify_session(
             populados pelo caller (`populate_from_extrato`). Histórico
             faz lookup-only.
         anthropic_client: cliente Anthropic configurado.
-        encryption_key: chave AES-256 hex (CLAUDE.md §4) para cifrar o
-            `motivo` em `context_encrypted`.
+        cipher: `ClientCipher` do cliente (DEK) — decifra as descrições dos
+            file_entries e cifra o `motivo` em `context_encrypted` (envelope
+            corrente + AAD).
 
     Returns:
         `QualificationReport` com contadores + token usage. Caller loga
@@ -121,12 +129,11 @@ async def qualify_session(
     file_entries_by_id = {fe.id: fe for fe in file_entries}
 
     # 4. Monta a lista de pares completos.
-    hex_key = encryption_key.get_secret_value()
     pairs = _build_pairs(
         match_pairs=match_pairs,
         cached=cached,
         file_entries_by_id=file_entries_by_id,
-        hex_key=hex_key,
+        cipher=cipher,
     )
     if not pairs:
         return QualificationReport(skipped_reason="no_pairs_built")
@@ -175,7 +182,7 @@ async def qualify_session(
                 anomaly_type_id=type_id,
                 file_entry_id=pair.file_entry_id,
                 motivo=sr.motivo,
-                hex_key=hex_key,
+                cipher=cipher,
             )
         )
         if sr.status == "incoerente":
@@ -196,7 +203,7 @@ async def qualify_session(
                 anomaly_type_id=type_id,
                 file_entry_id=pair.file_entry_id,
                 motivo=hr.motivo,
-                hex_key=hex_key,
+                cipher=cipher,
             )
         )
         padrao += 1
@@ -214,7 +221,7 @@ async def qualify_session(
                 anomaly_type_id=type_id,
                 file_entry_id=pair.file_entry_id,
                 motivo=or_.motivo,
-                hex_key=hex_key,
+                cipher=cipher,
             )
         )
         outlier_count += 1
@@ -332,7 +339,7 @@ def _build_pairs(
     match_pairs: list[tuple[UUID, int]],
     cached: dict[int, OmieLancamentoData],
     file_entries_by_id: dict[UUID, ReconciliationFileEntry],
-    hex_key: str,
+    cipher: ClientCipher,
 ) -> list[QualificationPair]:
     """Monta `QualificationPair` por par, decifrando a descrição."""
     pairs: list[QualificationPair] = []
@@ -345,7 +352,11 @@ def _build_pairs(
             )
             continue
         try:
-            description = decrypt(entry.description_encrypted, entry.description_iv, hex_key)
+            description = cipher.decrypt(
+                entry.description_encrypted,
+                entry.description_iv,
+                field_locator(AAD_FILE_ENTRY_DESCRIPTION, entry.id),
+            )
         except Exception:
             log.warning(
                 "qualification_pair_decrypt_failed",
@@ -375,11 +386,17 @@ def _build_anomaly(
     anomaly_type_id: UUID,
     file_entry_id: UUID,
     motivo: str,
-    hex_key: str,
+    cipher: ClientCipher,
 ) -> ReconciliationAnomaly:
-    """Cria `ReconciliationAnomaly` com `context_encrypted` populado."""
-    ct, iv = encrypt(motivo, hex_key)
+    """Cria `ReconciliationAnomaly` com `context_encrypted` populado.
+
+    O `id` da anomalia é gerado ANTES de cifrar para compor o AAD
+    (client_id‖tabela‖coluna‖pk).
+    """
+    anomaly_id = uuid4()
+    ct, iv = cipher.encrypt(motivo, field_locator(AAD_ANOMALY_CONTEXT, anomaly_id))
     return ReconciliationAnomaly(
+        id=anomaly_id,
         session_id=session_id,
         anomaly_type_id=anomaly_type_id,
         file_entry_id=file_entry_id,

@@ -24,7 +24,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, LargeBinary, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -52,6 +52,13 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     omie_app_key_iv: Mapped[str] = mapped_column(String(IV_HEX_LENGTH), nullable=False)
     omie_app_secret_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
     omie_app_secret_iv: Mapped[str] = mapped_column(String(IV_HEX_LENGTH), nullable=False)
+
+    # DEK-por-cliente (Sprint 3, BACK 03.3): a Data Encryption Key deste cliente,
+    # embrulhada pela KEK do KMS (envelope encryption). A DEK em claro só existe
+    # em memória, pelo tempo da operação — NUNCA persiste em claro nem é logada.
+    # Nullable nesta migration: clientes NOVOS já nascem com DEK; os legados
+    # ganham a DEK no backfill (BACK 03.4), após o qual vira NOT-NULL efetivo.
+    dek_wrapped: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, default=None)
 
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_by: Mapped[UUID] = mapped_column(

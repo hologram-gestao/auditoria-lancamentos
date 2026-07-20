@@ -31,12 +31,14 @@ import asyncio
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.alerting import Alert, AlertCode, send_alert
 from app.core.config import Settings
+from app.core.crypto_service import provision_client_cipher
 from app.core.exceptions import AppError
 from app.core.logging import get_logger
 from app.db.models import FileEntrySituation, ReconciliationOmieEntry
@@ -59,6 +61,9 @@ from app.modules.reconciliations.processing.omie_fetch import (
     fetch_realized,
 )
 from app.modules.reconciliations.repository import ReconciliationRepository
+
+if TYPE_CHECKING:
+    from app.core.crypto import ClientCipher
 
 log = get_logger(__name__)
 
@@ -129,19 +134,23 @@ async def run_reconciliation_processing(
             code=exc.code.value,
             message=exc.message,
         )
-        await _safe_mark_error(sid, resolved_factory, exc.user_message)
+        await _safe_mark_error(sid, resolved_factory, exc.user_message, settings=resolved_settings)
     except _AnomalyTypeMissingError as exc:
         log.error(
             "reconciliation_processing_seed_missing",
             session_id=session_id,
             message=str(exc),
         )
-        await _safe_mark_error(sid, resolved_factory, _ERROR_MSG_SEED_MISSING)
+        await _safe_mark_error(
+            sid, resolved_factory, _ERROR_MSG_SEED_MISSING, settings=resolved_settings
+        )
     except TimeoutError:
         # Estourou RECONCILIATION_TIMEOUT_SECONDS. `_execute_processing` foi
         # cancelado por dentro do `asyncio.timeout` e convertido em TimeoutError.
         log.error("reconciliation_processing_timeout", session_id=session_id)
-        await _safe_mark_error(sid, resolved_factory, _ERROR_MSG_TIMEOUT)
+        await _safe_mark_error(
+            sid, resolved_factory, _ERROR_MSG_TIMEOUT, settings=resolved_settings
+        )
     except asyncio.CancelledError:
         # Cancelamento EXTERNO (shutdown do processo / instância Cloud Run
         # reciclada). CancelledError herda de BaseException, então o
@@ -150,13 +159,17 @@ async def run_reconciliation_processing(
         # `asyncio.shield` protege o cleanup de ser cancelado de novo no meio.
         # Rede de segurança final: cron `mark_stuck_sessions_as_error` (25min).
         log.error("reconciliation_processing_cancelled", session_id=session_id)
-        await asyncio.shield(_safe_mark_error(sid, resolved_factory, _ERROR_MSG_TIMEOUT))
+        await asyncio.shield(
+            _safe_mark_error(sid, resolved_factory, _ERROR_MSG_TIMEOUT, settings=resolved_settings)
+        )
         raise
     except Exception:
         # Erro inesperado: NUNCA propagar para o caller. Sentry captura via
         # exc_info=True (se configurado).
         log.exception("reconciliation_processing_unexpected", session_id=session_id)
-        await _safe_mark_error(sid, resolved_factory, _ERROR_MSG_INTERNAL)
+        await _safe_mark_error(
+            sid, resolved_factory, _ERROR_MSG_INTERNAL, settings=resolved_settings
+        )
     else:
         log.info("reconciliation_processing_finished", session_id=session_id)
 
@@ -200,10 +213,26 @@ async def _execute_processing(
         period_end = max(e.transaction_date for e in session_obj.file_entries)
         omie_conta_id = session_obj.omie_conta_id
         reference_month = session_obj.reference_month
+        account_type = session_obj.account_type
+
+        # Provisiona a DEK do cliente (gera+embrulha via KMS se legado) DENTRO
+        # desta sessão, onde `client` está anexado. O processamento ESCREVE
+        # campos cifrados (anomalias wrong_date, motivo da qualificação), então
+        # precisa da DEK; o mesmo `cipher` (bytes em memória) serve para ler as
+        # credenciais Omie e para as escritas nos blocos seguintes.
+        needs_dek_persist = client.dek_wrapped is None
+        cipher = await provision_client_cipher(client, settings=settings)
+        if needs_dek_persist:
+            # Persistir a DEK recém-gerada é essencial: sem isso cada run geraria
+            # uma DEK efêmera nova e o dado cifrado antes ficaria indecifrável.
+            # `refresh` recarrega os atributos (o commit os expira) para que o
+            # `client` siga utilizável, detached, nos passos seguintes.
+            await db.commit()
+            await db.refresh(client)
 
     # 2. Fetch Omie data — toda a interação com credencial em claro
     #    acontece dentro do `async with` do OmieClient.
-    omie_client = build_omie_client(client, settings)
+    omie_client = build_omie_client(client, settings, cipher)
     # Cache L1 local a este processamento: popula supplier/category de cada
     # lançamento da janela atual pra alimentar a qualificação (S19). É uma
     # instância própria, não o singleton do app — a Tela de Revisão popula o
@@ -323,7 +352,7 @@ async def _execute_processing(
             unmatched_file_entries=unmatched_file_entries,
             persisted_omie_entries=omie_entries,
             divergent_matches=divergent_matches,
-            encryption_key=settings.OMIE_ENCRYPTION_KEY.get_secret_value(),
+            cipher=cipher,
         )
 
         # Qualificação (S19 BACK 12.1): IA + histórico + outlier sobre os
@@ -336,7 +365,8 @@ async def _execute_processing(
             client_id=client.id,
             match_pairs=match_pairs_uuid,
             cache=lancamento_cache,
-            account_type=session_obj.account_type,
+            account_type=account_type,
+            cipher=cipher,
         )
         anomaly_count = structural_count + qualification_count
 
@@ -420,14 +450,20 @@ async def _safe_mark_error(
     session_id: UUID,
     session_factory: async_sessionmaker[AsyncSession],
     user_message: str,
+    *,
+    settings: Settings,
 ) -> None:
-    """Marca a sessão como `error` em uma transação SEPARADA.
+    """Marca a sessão como `error` em uma transação SEPARADA e ALERTA o plantão.
 
     Best-effort: se este UPDATE também falhar (ex: Postgres caiu), só logamos.
     A sessão fica em `processing` indefinidamente e o front mostra "ainda
     processando". Não há `error_message` recovery automático — alguém
     precisa rodar uma migration manual depois (cenário extremamente raro,
     aceitável para o MVP).
+
+    BACK 03.6 — sessão em `error` CONTA como falha no monitoramento mesmo NÃO
+    sendo 5xx (cobre o `ADL-PARSE-TRUNCADO` da Sprint 2, que hoje não dispararia
+    nada). O alerta leva só session_id + code + a mensagem PT-BR genérica (sem PII).
     """
     try:
         async with session_factory() as db, db.begin():
@@ -435,6 +471,15 @@ async def _safe_mark_error(
             await repo.mark_session_error(session_id, user_message=user_message)
     except Exception:
         log.exception("reconciliation_mark_error_failed", session_id=str(session_id))
+
+    await send_alert(
+        Alert(
+            code=AlertCode.SESSION_ERROR,
+            message=user_message,
+            session_id=str(session_id),
+        ),
+        settings,
+    )
 
 
 async def _run_qualification_safely(
@@ -446,6 +491,7 @@ async def _run_qualification_safely(
     match_pairs: list[tuple[UUID, int]],
     cache: OmieLancamentoCache,
     account_type: str,
+    cipher: ClientCipher,
 ) -> int:
     """Roda a qualificação (S19) com try/except total — falha NÃO derruba.
 
@@ -454,6 +500,8 @@ async def _run_qualification_safely(
         settings: já carregado pelo caller.
         session_id, client_id, match_pairs: contexto da sessão atual.
         cache: cache local com lançamentos atuais já populados (supplier/category).
+        cipher: `ClientCipher` do cliente (DEK) — decifra descrições e cifra o
+            motivo das anomalias de qualificação no envelope corrente + AAD.
 
     Returns:
         Quantidade de anomalias de qualificação criadas. 0 quando a flag
@@ -492,7 +540,7 @@ async def _run_qualification_safely(
                 match_pairs=match_pairs,
                 cache=cache,
                 anthropic_client=anthropic,
-                encryption_key=settings.OMIE_ENCRYPTION_KEY,
+                cipher=cipher,
                 account_type=account_type,
             )
         log.info(

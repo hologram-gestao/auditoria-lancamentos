@@ -25,11 +25,18 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.crypto import decrypt
+from app.core.alerting import Alert, AlertCode, send_alert
+from app.core.crypto_service import (
+    AAD_ANOMALY_RESOLUTION_NOTE,
+    AAD_FILE_ENTRY_DESCRIPTION,
+    AAD_FILE_ENTRY_USER_NOTE,
+    AAD_OMIE_ENTRY_USER_NOTE,
+    field_locator,
+    load_client_cipher,
+)
 from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
 from app.db.models import (
@@ -62,6 +69,8 @@ from app.modules.reconciliations.qualification.service import (
 )
 
 if TYPE_CHECKING:
+    from app.core.config import Settings
+    from app.core.crypto import ClientCipher
     from app.integrations.omie.client import OmieClient
     from app.integrations.omie.lancamento_cache import (
         OmieLancamentoCache,
@@ -79,6 +88,9 @@ _BRT = timezone(timedelta(hours=-3))
 # de controle. Backslash escapado em raw string.
 _FILENAME_INVALID_RE = re.compile(r'[\\/:*?"<>|\x00-\x1F]+')
 _FILENAME_WHITESPACE_RE = re.compile(r"\s+")
+
+# Mensagem (sem PII) do alerta de falha de decifragem no export (BACK 03.6).
+_EXPORT_DECRYPT_ALERT_MSG = "Falha de decifragem durante o export do relatorio ('[indecifravel]')."
 
 _PT_BR_MONTHS = {
     1: "Janeiro",
@@ -104,11 +116,14 @@ class ExportService:
         db: AsyncSession,
         *,
         cache: OmieLancamentoCache,
-        encryption_key: SecretStr,
+        settings: Settings,
     ) -> None:
         self._db = db
         self._cache = cache
-        self._hex_key = encryption_key.get_secret_value()
+        self._settings = settings
+        # Contador de falhas de decrypt neste export — alerta o plantão uma vez
+        # ao final (BACK 03.6), ligado aos warnings `export_decrypt_failed`.
+        self._decrypt_failures = 0
 
     async def build_payload(
         self,
@@ -173,12 +188,31 @@ class ExportService:
             qualif_counters=qualif_counters,
         )
 
-        file_entry_rows = self._build_file_entry_rows(file_entries, cached, qualif_status_by_entry)
-        omie_div_rows = self._build_omie_divergence_rows(omie_entries, cached)
-        sem_omie_rows = self._build_sem_omie_rows(file_entries)
-        anomaly_rows = self._build_anomaly_rows(
-            anomalies_rows, file_entries=file_entries, omie_entries=omie_entries
+        # Export é read-only: `load` (não provisiona DEK). Um cliente com dados
+        # cifrados v1 já tem DEK; linhas bare legadas são lidas com a chave global.
+        cipher = await load_client_cipher(client, settings=self._settings)
+        file_entry_rows = self._build_file_entry_rows(
+            cipher, file_entries, cached, qualif_status_by_entry
         )
+        omie_div_rows = self._build_omie_divergence_rows(cipher, omie_entries, cached)
+        sem_omie_rows = self._build_sem_omie_rows(cipher, file_entries)
+        anomaly_rows = self._build_anomaly_rows(
+            cipher, anomalies_rows, file_entries=file_entries, omie_entries=omie_entries
+        )
+
+        # BACK 03.6 — falha de decifragem no export (a leitura que mais decifra)
+        # ALERTA o plantão, ligada aos warnings `export_decrypt_failed`. Uma vez
+        # por export, sem PII (só session_id + client_id + code).
+        if self._decrypt_failures:
+            await send_alert(
+                Alert(
+                    code=AlertCode.DECRYPT_FAILED,
+                    message=_EXPORT_DECRYPT_ALERT_MSG,
+                    session_id=str(session.id),
+                    client_id=str(client.id),
+                ),
+                self._settings,
+            )
 
         filename = build_filename(
             client_name=client.name,
@@ -422,6 +456,7 @@ class ExportService:
 
     def _build_file_entry_rows(
         self,
+        cipher: ClientCipher,
         file_entries: list[ReconciliationFileEntry],
         cached: dict[int, OmieLancamentoData],
         qualif_status_by_entry: dict[UUID, QualificationStatus],
@@ -429,10 +464,20 @@ class ExportService:
         rows: list[FileEntryRow] = []
         for entry in file_entries:
             description = self._decrypt_required(
-                entry.description_encrypted, entry.description_iv, field="description"
+                cipher,
+                entry.description_encrypted,
+                entry.description_iv,
+                AAD_FILE_ENTRY_DESCRIPTION,
+                entry.id,
+                field="description",
             )
             note = self._decrypt_optional(
-                entry.user_note_encrypted, entry.user_note_iv, field="user_note"
+                cipher,
+                entry.user_note_encrypted,
+                entry.user_note_iv,
+                AAD_FILE_ENTRY_USER_NOTE,
+                entry.id,
+                field="user_note",
             )
             supplier: str | None = None
             category: str | None = None
@@ -469,6 +514,7 @@ class ExportService:
 
     def _build_omie_divergence_rows(
         self,
+        cipher: ClientCipher,
         omie_entries: list[ReconciliationOmieEntry],
         cached: dict[int, OmieLancamentoData],
     ) -> list[OmieDivergenceRow]:
@@ -476,7 +522,12 @@ class ExportService:
         for entry in omie_entries:
             data = cached.get(entry.omie_lancamento_id)
             note = self._decrypt_optional(
-                entry.user_note_encrypted, entry.user_note_iv, field="omie_user_note"
+                cipher,
+                entry.user_note_encrypted,
+                entry.user_note_iv,
+                AAD_OMIE_ENTRY_USER_NOTE,
+                entry.id,
+                field="omie_user_note",
             )
             rows.append(
                 OmieDivergenceRow(
@@ -490,16 +541,28 @@ class ExportService:
             )
         return rows
 
-    def _build_sem_omie_rows(self, file_entries: list[ReconciliationFileEntry]) -> list[SemOmieRow]:
+    def _build_sem_omie_rows(
+        self, cipher: ClientCipher, file_entries: list[ReconciliationFileEntry]
+    ) -> list[SemOmieRow]:
         rows: list[SemOmieRow] = []
         for entry in file_entries:
             if entry.situation != FileEntrySituation.SEM_OMIE.value:
                 continue
             description = self._decrypt_required(
-                entry.description_encrypted, entry.description_iv, field="description"
+                cipher,
+                entry.description_encrypted,
+                entry.description_iv,
+                AAD_FILE_ENTRY_DESCRIPTION,
+                entry.id,
+                field="description",
             )
             note = self._decrypt_optional(
-                entry.user_note_encrypted, entry.user_note_iv, field="user_note"
+                cipher,
+                entry.user_note_encrypted,
+                entry.user_note_iv,
+                AAD_FILE_ENTRY_USER_NOTE,
+                entry.id,
+                field="user_note",
             )
             rows.append(
                 SemOmieRow(
@@ -513,6 +576,7 @@ class ExportService:
 
     def _build_anomaly_rows(
         self,
+        cipher: ClientCipher,
         anomalies: list[tuple[ReconciliationAnomaly, AnomalyType]],
         *,
         file_entries: list[ReconciliationFileEntry],
@@ -529,8 +593,11 @@ class ExportService:
                 omie_entry_map=omie_entry_map,
             )
             note = self._decrypt_optional(
+                cipher,
                 anomaly.resolution_note_encrypted,
                 anomaly.resolution_note_iv,
+                AAD_ANOMALY_RESOLUTION_NOTE,
+                anomaly.id,
                 field="resolution_note",
             )
             rows.append(
@@ -570,21 +637,41 @@ class ExportService:
     # acoplamento entre módulos)
     # ------------------------------------------------------------------
 
-    def _decrypt_required(self, ct: str | None, iv: str | None, *, field: str) -> str:
+    def _decrypt_required(
+        self,
+        cipher: ClientCipher,
+        ct: str | None,
+        iv: str | None,
+        aad_pair: tuple[str, str],
+        pk: UUID,
+        *,
+        field: str,
+    ) -> str:
         if not ct or not iv:
             return ""
         try:
-            return decrypt(ct, iv, self._hex_key)
+            return cipher.decrypt(ct, iv, field_locator(aad_pair, pk))
         except Exception:
+            self._decrypt_failures += 1
             logger.warning("export_decrypt_failed", field=field)
             return "[indecifrável]"
 
-    def _decrypt_optional(self, ct: str | None, iv: str | None, *, field: str) -> str | None:
+    def _decrypt_optional(
+        self,
+        cipher: ClientCipher,
+        ct: str | None,
+        iv: str | None,
+        aad_pair: tuple[str, str],
+        pk: UUID,
+        *,
+        field: str,
+    ) -> str | None:
         if ct is None or iv is None:
             return None
         try:
-            return decrypt(ct, iv, self._hex_key)
+            return cipher.decrypt(ct, iv, field_locator(aad_pair, pk))
         except Exception:
+            self._decrypt_failures += 1
             logger.warning("export_decrypt_failed", field=field)
             return None
 

@@ -30,7 +30,9 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 
+from app.core.audit import AccessAction, record_access
 from app.core.config import Settings, get_settings
+from app.core.crypto_service import load_client_cipher
 from app.core.dependencies import (
     CurrentUserDep,
     DbSessionDep,
@@ -77,7 +79,7 @@ def _get_export_service(
     return ExportService(
         db,
         cache=cache,
-        encryption_key=settings.OMIE_ENCRYPTION_KEY,
+        settings=settings,
     )
 
 
@@ -129,7 +131,18 @@ async def export_reconciliation(
     if client_row is None:
         raise NotFoundError(_SESSION_NOT_FOUND_MSG)
 
-    omie_client = build_omie_client(client_row, settings)
+    # BACK 03.5 — auditoria `export`: a leitura que MAIS decifra dado sensível.
+    # commit=False: caminho de sucesso; o commit de fim de request persiste.
+    await record_access(
+        db,
+        user_id=UUID(current_user.id),
+        client_id=sess.client_id,
+        session_id=session_id,
+        action=AccessAction.EXPORT,
+    )
+
+    cipher = await load_client_cipher(client_row, settings=settings)
+    omie_client = build_omie_client(client_row, settings, cipher)
     try:
         payload = await service.build_payload(
             session=sess,

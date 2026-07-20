@@ -37,6 +37,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from sqlalchemy import text  # noqa: E402
 
+from app.core.alerting import Alert, AlertCode, send_alert  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 from app.core.logging import get_logger, setup_logging  # noqa: E402
 from app.db.session import close_db, get_session_factory, init_db  # noqa: E402
@@ -85,6 +86,20 @@ async def main() -> None:
             count=count,
             threshold_minutes=STUCK_THRESHOLD_MINUTES,
         )
+        # BACK 03.6 — ausência de heartbeat: se o watchdog encontrou sessões
+        # travadas, o processamento assíncrono não deu sinal de vida. Alerta o
+        # plantão (sem PII — só a contagem). count<=0 = tudo bem, não alerta.
+        if isinstance(count, int) and count > 0:
+            await send_alert(
+                Alert(
+                    code=AlertCode.HEARTBEAT_MISSING,
+                    message=(
+                        f"{count} sessao(oes) travada(s) em 'processing' marcada(s) como "
+                        "error pelo watchdog (ausencia de heartbeat)."
+                    ),
+                ),
+                settings,
+            )
     finally:
         await close_db()
 
