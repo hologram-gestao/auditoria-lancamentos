@@ -15,8 +15,15 @@ name: Deploy to Prod
 # Pra ativar de fato no futuro:
 #   1. Criar services Cloud Run prod (mesmo pattern que dev).
 #   2. Setar vars.API_URL_PROD em Settings → Environments → production → Variables.
-#   3. Remover `if: false` dos jobs.
-#   4. (opcional) Adicionar step de smoke test pós-deploy.
+#   3. Rodar `bash scripts/setup-gcp.sh prod` (provisiona a KEK do KMS -prod e
+#      os secrets de alerta -prod, isolados dos de dev) ANTES do primeiro deploy
+#      — senão o wrap/unwrap 500a e o alerting não sobe. Adicionar o VALOR real
+#      do canal de plantão de PROD (pelo menos um: webhook ou e-mail).
+#   4. Remover `if: false` dos jobs; injetar KEK_KMS_KEY_NAME + montar
+#      ALERT_WEBHOOK_URL/ALERT_EMAIL_TO (secrets abaixo) no serviço da API E nos
+#      jobs (migração/cleanup/synthetic), paridade — igual ao deploy-dev.yml.
+#   5. Espelhar o job `smoke-alert` (dispara o alerta sintético e prova entrega;
+#      gate do pipeline) e o `Register runtime invariant`.
 
 on:
   push:
@@ -57,6 +64,13 @@ env:
   WEB_SERVICE: auditoria-web-prod
   MIGRATE_JOB: auditoria-api-migrate-prod
   CLEANUP_JOB: auditoria-api-cleanup-stuck-prod
+  # KEK do KMS -prod (isolada da de dev). Provisionada por scripts/setup-gcp.sh prod.
+  KEK_KMS_KEY_NAME: projects/liberdade-assessoria/locations/southamerica-east1/keyRings/auditoria-prod/cryptoKeys/omie-encryption-kek
+  # Alerting -prod (isolado do de dev). Secrets provisionados por setup-gcp.sh prod;
+  # o operador adiciona o VALOR do canal de plantão de PROD. Fail-closed no boot.
+  ALERT_WEBHOOK_SECRET: alert-webhook-url-prod
+  ALERT_EMAIL_SECRET: alert-email-to-prod
+  SYNTHETIC_JOB: auditoria-api-alert-synthetic-prod
 
 jobs:
   guard:
