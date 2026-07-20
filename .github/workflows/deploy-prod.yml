@@ -21,9 +21,13 @@ name: Deploy to Prod
 #      do canal de plantão de PROD (pelo menos um: webhook ou e-mail).
 #   4. Remover `if: false` dos jobs; injetar KEK_KMS_KEY_NAME + montar
 #      ALERT_WEBHOOK_URL/ALERT_EMAIL_TO (secrets abaixo) no serviço da API E nos
-#      jobs (migração/cleanup/synthetic), paridade — igual ao deploy-dev.yml.
-#   5. Espelhar o job `smoke-alert` (dispara o alerta sintético e prova entrega;
-#      gate do pipeline) e o `Register runtime invariant`.
+#      jobs (migração/cleanup), paridade — igual ao deploy-dev.yml.
+#   5. Espelhar o job `smoke-alert` (roda scripts/smoke_alert_delivery.py: loga
+#      como admin de monitoração e dispara POST /api/v1/system/alert-test — gatilho
+#      sintético da 03.6 — provando a ENTREGA; gate do pipeline) e o
+#      `Register runtime invariant`. Bootstrap manual em production:
+#      criar o admin de monitoração + secrets SMOKE_ADMIN_EMAIL/SMOKE_ADMIN_PASSWORD
+#      e a Variable API_URL_PROD no Environment 'production' (ver setup-gcp.sh prod).
 
 on:
   push:
@@ -70,7 +74,10 @@ env:
   # o operador adiciona o VALOR do canal de plantão de PROD. Fail-closed no boot.
   ALERT_WEBHOOK_SECRET: alert-webhook-url-prod
   ALERT_EMAIL_SECRET: alert-email-to-prod
-  SYNTHETIC_JOB: auditoria-api-alert-synthetic-prod
+  # Ao ativar: setar API_BASE_URL: ${{ vars.API_URL_PROD }} no env do JOB
+  # `smoke-alert` (variable de ENVIRONMENT só resolve dentro de um job que
+  # declara `environment: production`; no topo do workflow não resolveria).
+  # O smoke dispara o gatilho sintético da 03.6 (POST /api/v1/system/alert-test).
 
 jobs:
   guard:

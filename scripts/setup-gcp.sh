@@ -5,7 +5,9 @@
 #   - Req. 1 / INFRA 03.1: KEK no Cloud KMS (envelope encryption). O backend
 #     (03.3/03.4) faz wrap/unwrap das DEKs por cliente contra ela; nunca sai do KMS.
 #   - Req. 4 / INFRA 03.7: secrets do canal de alerta (ALERT_WEBHOOK_URL/
-#     ALERT_EMAIL_TO) + o Cloud Run Job do alerta SINTÉTICO (gate do smoke).
+#     ALERT_EMAIL_TO). A PROVA de entrega (smoke pós-deploy) dispara o gatilho
+#     SINTÉTICO da 03.6 — POST /api/v1/system/alert-test no serviço já deployado —
+#     como admin de monitoração; ver instruções de bootstrap no fim.
 #
 # ⚠️ ORDEM IMPORTA: rode este script ANTES do próximo deploy — o `--update-secrets
 #    ...:latest` do workflow FALHA se o secret não tiver versão (semeamos vazia).
@@ -43,11 +45,6 @@ PROJECT_ID="${PROJECT_ID:-liberdade-assessoria}"
 REGION="${REGION:-southamerica-east1}"
 AR_HOST="${AR_HOST:-southamerica-east1-docker.pkg.dev}"
 AR_REPO="${AR_REPO:-auditoria}"
-
-# Tag da imagem da API por ambiente (espelha os workflows: dev usa :dev, prod
-# também atualiza :latest). O Job sintético é (re)apontado a cada deploy.
-if [[ "$ENV" == "dev" ]]; then IMAGE_TAG="dev"; else IMAGE_TAG="latest"; fi
-API_IMAGE="${AR_HOST}/${PROJECT_ID}/${AR_REPO}/auditoria-api:${IMAGE_TAG}"
 
 # Keyring sufixado por ambiente → dev e prod NUNCA compartilham KEK.
 KEYRING="${KEYRING:-auditoria-${ENV}}"
@@ -178,38 +175,14 @@ ensure_alert_secret "$ALERT_WEBHOOK_SECRET"
 ensure_alert_secret "$ALERT_EMAIL_SECRET"
 
 # ------------------------------------------------------------------
-# 5. Cloud Run Job do alerta SINTÉTICO (o gate do smoke pós-deploy)
-#    Roda a MESMA imagem/SA, com os secrets do canal + a KEK. O entrypoint é o
-#    CONTRATO com a 03.6: `python -m app.cli.alert_synthetic_check` — dispara um
-#    alerta real com nonce e sai !=0 se não entregou. Se o backend nomear o
-#    módulo diferente, ajuste o --command/--args (uma linha) e re-rode.
-#    Best-effort: se a imagem ainda não foi buildada, avisa e segue (o job é
-#    (re)apontado a cada deploy no workflow).
+# 5. Contrato com o backend (03.3/03.6) e o deploy — nomes canônicos
+#    A prova de ENTREGA (smoke pós-deploy) NÃO cria recurso de cloud aqui: ela
+#    roda no runner do CI, faz login como admin de MONITORAÇÃO e dispara o
+#    gatilho SINTÉTICO da 03.6 (POST /api/v1/system/alert-test) contra o serviço
+#    vivo. Isso exige um bootstrap manual (não versionado) — instruções abaixo.
 # ------------------------------------------------------------------
-SYNTHETIC_JOB="auditoria-api-alert-synthetic-${ENV}"
-echo ""
-echo "--- Cloud Run Job ${SYNTHETIC_JOB} ---"
-if gcloud run jobs describe "$SYNTHETIC_JOB" \
-     --region="$REGION" --project="$PROJECT_ID" >/dev/null 2>&1; then
-  echo "  já existe — ok (o deploy re-aponta imagem/secrets)"
-else
-  echo "  criando…"
-  gcloud run jobs create "$SYNTHETIC_JOB" \
-    --image="$API_IMAGE" \
-    --region="$REGION" --project="$PROJECT_ID" \
-    --service-account="$RUNTIME_SA" \
-    --command="python" \
-    --args="-m,app.cli.alert_synthetic_check" \
-    --set-env-vars="KEK_KMS_KEY_NAME=${KEK_KMS_KEY_NAME}" \
-    --set-secrets="ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_SECRET}:latest,ALERT_EMAIL_TO=${ALERT_EMAIL_SECRET}:latest" \
-    --max-retries=0 \
-    --quiet \
-    || echo "::warning:: não criou ${SYNTHETIC_JOB} (imagem ${API_IMAGE} ainda não existe? faça o 1º build e re-rode)."
-fi
-
-# ------------------------------------------------------------------
-# 6. Contrato com o backend (03.3/03.6) e o deploy — nomes canônicos
-# ------------------------------------------------------------------
+GH_ENV="$([[ "$ENV" == "dev" ]] && echo development || echo production)"
+API_URL_VAR="$([[ "$ENV" == "dev" ]] && echo API_URL_DEV || echo API_URL_PROD)"
 echo ""
 echo "=== ✓ Provisionamento (${ENV}) concluído ==="
 echo ""
@@ -217,9 +190,22 @@ echo "1) KMS — injetado nos deploys (NÃO é segredo, é resource path):"
 echo "     KEK_KMS_KEY_NAME=${KEK_KMS_KEY_NAME}"
 echo ""
 echo "2) Alerta — adicione o VALOR real do canal compartilhado (pelo menos UM;"
-echo "   fail-closed se ambos vazios). Ex.:"
+echo "   fail-closed: sem canal entregável o serviço NEM SOBE). Ex.:"
 echo "     printf 'https://hooks.slack.com/...' | gcloud secrets versions add ${ALERT_WEBHOOK_SECRET} --data-file=- --project=${PROJECT_ID}"
 echo "     printf 'plantao-adl@hologram.com.br' | gcloud secrets versions add ${ALERT_EMAIL_SECRET} --data-file=- --project=${PROJECT_ID}"
 echo "   Os deploys montam ${ALERT_WEBHOOK_SECRET}/${ALERT_EMAIL_SECRET} como"
 echo "   ALERT_WEBHOOK_URL/ALERT_EMAIL_TO no serviço da API E nos jobs (paridade)."
+echo "   OBS: o canal de e-mail só entrega se ALERT_SMTP_HOST também estiver"
+echo "   configurado no serviço; o webhook é o canal deliverable por padrão."
+echo ""
+echo "3) Smoke de ENTREGA (03.7) — bootstrap manual, 1× por ambiente:"
+echo "   a) Crie um admin DEDICADO de monitoração (perfil admin, senha forte)."
+echo "      Ex.: SEED_ADMIN_EMAIL=smoke-monitor@hologram.com.br \\"
+echo "           SEED_ADMIN_PASSWORD='<forte>' <rodar seed/criação de usuário>"
+echo "   b) No GitHub → Settings → Environments → ${GH_ENV} → Secrets, adicione:"
+echo "        SMOKE_ADMIN_EMAIL     = o e-mail do admin de monitoração"
+echo "        SMOKE_ADMIN_PASSWORD  = a senha dele (NUNCA no repo/log)"
+echo "   c) Confirme a Variable ${API_URL_VAR} no mesmo Environment (base da API)."
+echo "   O job smoke-alert loga como esse admin e dispara /system/alert-test;"
+echo "   se a notificação não chegar (delivered=false), o pipeline REPROVA."
 echo ""
