@@ -42,6 +42,14 @@ if TYPE_CHECKING:
 
 log = get_logger(__name__)
 
+# Mensagem canônica do gatilho SINTÉTICO — compartilhada pelo endpoint HTTP admin
+# (`app/modules/system/routes.py`) e pelo CLI de deploy
+# (`app/cli/alert_synthetic_check.py`, o Job da INFRA 03.7). Sem PII.
+SYNTHETIC_ALERT_MESSAGE = (
+    "Teste sintetico de alerta do ADL — a chegada desta mensagem prova que o "
+    "canal de plantao esta entregando alertas."
+)
+
 
 class AlertConfigError(RuntimeError):
     """Fail-closed: nenhum canal de alerta entregável em staging/production."""

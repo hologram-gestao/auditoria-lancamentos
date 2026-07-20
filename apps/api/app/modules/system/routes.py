@@ -9,16 +9,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.core.alerting import Alert, AlertCode, send_alert
+from app.core.alerting import SYNTHETIC_ALERT_MESSAGE, Alert, AlertCode, send_alert
 from app.core.dependencies import AdminDep, SettingsDep
 from app.modules.system.schemas import SyntheticAlertResponse, SyntheticAlertResult
 
 router = APIRouter(prefix="/api/v1/system", tags=["system"])
-
-_SYNTHETIC_MESSAGE = (
-    "Teste sintetico de alerta do ADL — a chegada desta mensagem prova que o "
-    "canal de plantao esta entregando alertas."
-)
 
 
 @router.post(
@@ -35,7 +30,7 @@ async def trigger_synthetic_alert(
     settings: SettingsDep,
 ) -> SyntheticAlertResponse:
     result = await send_alert(
-        Alert(code=AlertCode.SYNTHETIC, message=_SYNTHETIC_MESSAGE),
+        Alert(code=AlertCode.SYNTHETIC, message=SYNTHETIC_ALERT_MESSAGE),
         settings,
     )
     return SyntheticAlertResponse(
