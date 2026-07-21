@@ -5,6 +5,7 @@ todos para autogenerate (`alembic revision --autogenerate`).
 """
 
 from app.db.base import Base
+from app.db.models.access_audit import AccessAudit
 from app.db.models.anomaly_type import AnomalySeverity, AnomalyType
 from app.db.models.client import IV_HEX_LENGTH, Client
 from app.db.models.client_assignment import ClientAssignment
@@ -29,6 +30,7 @@ from app.db.models.user import User, UserRole
 
 __all__ = [
     "IV_HEX_LENGTH",
+    "AccessAudit",
     "AnomalyDetectedBy",
     "AnomalySeverity",
     "AnomalyType",

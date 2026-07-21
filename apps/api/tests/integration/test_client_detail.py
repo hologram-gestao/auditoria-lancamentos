@@ -39,12 +39,14 @@ from uuid import uuid4
 import httpx
 import pytest
 import respx
+import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.crypto import encrypt
 from app.core.security import hash_password
+from app.core.telemetry import EVENT_ACESSO_NEGADO
 from app.db.models import (
     Client,
     ClientAssignment,
@@ -260,6 +262,30 @@ class TestDetailRBAC:
 
         resp = await client_with_db.get(f"/api/v1/clients/{cliente_b.id}")
         assert resp.status_code == 403
+
+    async def test_manager_other_portfolio_emits_acesso_negado(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """BACK 03.2 — negar acesso fora da carteira emite `acesso_negado`
+        (só IDs) no ponto onde `ClientNotAccessibleError` é levantado."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        mgr_a = await _seed_user(db_session, email=MANAGER_A_EMAIL, role=UserRole.MANAGER)
+        mgr_b = await _seed_user(db_session, email=MANAGER_B_EMAIL, role=UserRole.MANAGER)
+        cliente_b = await _seed_client(db_session, name="Do B", creator=admin, manager=mgr_b)
+        await _login_as(client_with_db, MANAGER_A_EMAIL)
+
+        with structlog.testing.capture_logs() as logs:
+            resp = await client_with_db.get(f"/api/v1/clients/{cliente_b.id}")
+
+        assert resp.status_code == 403
+        negados = [entry for entry in logs if entry.get("event") == EVENT_ACESSO_NEGADO]
+        assert len(negados) == 1, f"esperava 1 acesso_negado, veio {negados}"
+        evt = negados[0]
+        assert evt["client_id_alvo"] == str(cliente_b.id)
+        assert evt["user_id"] == str(mgr_a.id)
+        assert evt["rota"] == f"/api/v1/clients/{cliente_b.id}"
+        # Só IDs — nenhum dado do cliente-alvo (nome/razão) no evento.
+        assert "Do B" not in str(evt)
 
     async def test_manager_other_portfolio_returns_403_on_sync_accounts(
         self, client_with_db: AsyncClient, db_session: AsyncSession

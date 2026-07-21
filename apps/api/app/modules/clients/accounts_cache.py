@@ -25,6 +25,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
+from app.core.crypto_service import load_client_cipher
 from app.core.exceptions import (
     AccountsSyncError,
     OmieAuthError,
@@ -151,7 +152,11 @@ class OmieAccountsCacheService:
     async def _fetch_omie_accounts(self, client: Client) -> list[ContaCorrente]:
         """Chama Omie.listar_contas_correntes; converte exceções Omie em
         AccountsSyncError com user_message específico."""
-        omie_client = self._omie_client_override or build_omie_client(client, self._settings)
+        if self._omie_client_override is not None:
+            omie_client = self._omie_client_override
+        else:
+            cipher = await load_client_cipher(client, settings=self._settings)
+            omie_client = build_omie_client(client, self._settings, cipher)
         owns_client = self._omie_client_override is None
         try:
             return await omie_client.listar_contas_correntes()

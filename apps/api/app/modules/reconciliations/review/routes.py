@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
+from app.core.crypto_service import load_client_cipher
 from app.core.dependencies import (
     DbSessionDep,
     ManagerOrAdminDep,
@@ -69,8 +70,7 @@ def _get_review_service(
     return ReviewService(
         ReviewRepository(db),
         cache=cache,
-        encryption_key=settings.OMIE_ENCRYPTION_KEY,
-        search_blind_index_key=settings.SEARCH_BLIND_INDEX_KEY,
+        settings=settings,
     )
 
 
@@ -233,7 +233,8 @@ async def list_available_omie_entries(
     if client is None:
         raise NotFoundError(_SESSION_NOT_FOUND_MSG)
 
-    omie_client = build_omie_client(client, settings)
+    cipher = await load_client_cipher(client, settings=settings)
+    omie_client = build_omie_client(client, settings, cipher)
     try:
         data = await service.list_available_omie_entries(
             session=sess,

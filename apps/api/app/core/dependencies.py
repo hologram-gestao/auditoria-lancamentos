@@ -22,7 +22,9 @@ from fastapi import Cookie, Depends
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from structlog.contextvars import get_contextvars
 
+from app.core.audit import AccessAction, record_access
 from app.core.config import Settings, get_settings
 from app.core.exceptions import (
     ClientNotAccessibleError,
@@ -31,6 +33,7 @@ from app.core.exceptions import (
     UnauthorizedError,
 )
 from app.core.security import TOKEN_TYPE_ACCESS, decode_token
+from app.core.telemetry import emit_acesso_negado
 from app.db.models import Client, ClientAssignment, UserRole
 from app.db.session import get_db_session
 from app.modules.auth.repository import AuthRepository
@@ -128,6 +131,11 @@ async def require_client_access(
     Retorna o `Client` carregado para evitar uma 2ª query no service. Erros:
         - 404 NOT_FOUND: cliente inexistente.
         - 403 FORBIDDEN: manager sem assignment para o cliente.
+
+    Ao negar acesso a um manager fora da carteira, emite o evento
+    `acesso_negado` (só IDs, sem PII) **antes** de levantar
+    `ClientNotAccessibleError` — a conversão 403→404 anti-enumeração feita nas
+    rotas de leitura permanece intacta (Sprint 3, Req. 3).
     """
     client = (await db.execute(select(Client).where(Client.id == client_id))).scalar_one_or_none()
     if client is None:
@@ -145,6 +153,24 @@ async def require_client_access(
         )
     ).scalar_one_or_none()
     if assignment is None:
+        # `rota` vem do path já vinculado pelo CorrelationIdMiddleware nos
+        # contextvars do structlog — evita propagar `Request` por 11 call sites.
+        rota = str(get_contextvars().get("path", ""))
+        # Evento (telemetria/alerting) + linha de auditoria (registro LGPD
+        # durável), ambos ANTES da conversão 403→404 anti-enumeração das rotas
+        # de leitura — auditoria e anti-enumeração convivem (CONTEXT.md).
+        emit_acesso_negado(user_id=user.id, client_id_alvo=str(client_id), rota=rota)
+        # `commit=True`: a request vai terminar em erro e o `get_db_session`
+        # daria ROLLBACK — sem o commit a linha de `denied` se perderia. Aqui a
+        # única escrita pendente é a própria auditoria (a dependency só fez SELECT).
+        await record_access(
+            db,
+            user_id=UUID(user.id),
+            client_id=client_id,
+            action=AccessAction.DENIED,
+            rota=rota,
+            commit=True,
+        )
         raise ClientNotAccessibleError(
             f"Manager {user.id} tentou acessar cliente {client_id} fora da carteira.",
         )

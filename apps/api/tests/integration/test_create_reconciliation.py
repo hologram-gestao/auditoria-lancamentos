@@ -28,7 +28,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.crypto import decrypt, encrypt
+from app.core.crypto import encrypt
+from app.core.crypto_service import (
+    AAD_FILE_ENTRY_DESCRIPTION,
+    field_locator,
+    load_client_cipher,
+)
 from app.core.search_index import compute_query_hmacs
 from app.core.security import hash_password
 from app.db.models import (
@@ -367,11 +372,18 @@ class TestCreateReconciliationPersistence:
         ivs = {r.description_iv for r in rows}
         assert len(ivs) == 5
 
-        # Descrição persistida criptografada — descriptografando recupera o
-        # plaintext exato.
-        hex_key = get_settings().OMIE_ENCRYPTION_KEY.get_secret_value()
+        # Descrição persistida no envelope v1 (DEK-por-cliente + AAD) — decifra
+        # via o ClientCipher do cliente (a criação de sessão provisiona a DEK).
+        await db_session.refresh(cliente)
+        assert cliente.dek_wrapped is not None
+        cipher = await load_client_cipher(cliente, settings=get_settings())
         decrypted_descriptions = {
-            decrypt(r.description_encrypted, r.description_iv, hex_key) for r in rows
+            cipher.decrypt(
+                r.description_encrypted,
+                r.description_iv,
+                field_locator(AAD_FILE_ENTRY_DESCRIPTION, r.id),
+            )
+            for r in rows
         }
         assert decrypted_descriptions == {f"Mov {day}" for day in (2, 5, 10, 15, 20)}
 
