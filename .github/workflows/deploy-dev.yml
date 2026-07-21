@@ -63,6 +63,21 @@ env:
   WEB_SERVICE: auditoria-web-dev
   MIGRATE_JOB: auditoria-api-migrate-dev
   CLEANUP_JOB: auditoria-api-cleanup-stuck-dev
+  # Nome canônico do recurso da KEK (Cloud KMS) — provisionado 1× por ambiente
+  # via scripts/setup-gcp.sh dev. NÃO é segredo (é um resource path), então vai
+  # como env var comum. O backend usa este nome pra wrap/unwrap das DEKs por
+  # cliente (Sprint 3, Req. 1). Precisa estar no serviço da API E no job de
+  # migração (o backfill roda no job) — paridade garantida abaixo.
+  KEK_KMS_KEY_NAME: projects/liberdade-assessoria/locations/southamerica-east1/keyRings/auditoria-dev/cryptoKeys/omie-encryption-kek
+  # Alerting (Sprint 3, Req. 4 / INFRA 03.7) — secrets do canal COMPARTILHADO de
+  # plantão. Provisionados por scripts/setup-gcp.sh dev; o VALOR real é adicionado
+  # pelo operador (não versionado). Montados como ALERT_WEBHOOK_URL/ALERT_EMAIL_TO
+  # no serviço da API E nos jobs (paridade). Fail-closed no boot se ambos vazios.
+  ALERT_WEBHOOK_SECRET: alert-webhook-url-dev
+  ALERT_EMAIL_SECRET: alert-email-to-dev
+  # NB: a base da API (vars.API_URL_DEV) é uma variable de ENVIRONMENT — só
+  # resolve dentro de um job que declara `environment:`. Por isso ela é setada no
+  # env do job `smoke-alert` (abaixo), não aqui no topo (onde não resolveria).
 
 jobs:
   # ------------------------------------------------------------------
@@ -143,9 +158,16 @@ jobs:
       - name: Re-resolve :dev digest in migrate Job
         # Job guarda o digest no manifest; sem update, próxima execução
         # roda imagem velha. Esse update força re-resolução.
+        #
+        # KEK_KMS_KEY_NAME vai TAMBÉM aqui (paridade com o serviço da API): o
+        # backfill de cripto (Sprint 3, Req. 2/03.4) roda neste job e precisa do
+        # unwrap das DEKs — sem a var, o job falha no boot. `--update-env-vars`
+        # faz merge (não zera as outras vars do job).
         run: |
           gcloud run jobs update ${{ env.MIGRATE_JOB }} \
             --image=${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/auditoria-api:dev \
+            --update-env-vars=KEK_KMS_KEY_NAME=${{ env.KEK_KMS_KEY_NAME }} \
+            --update-secrets=ALERT_WEBHOOK_URL=${{ env.ALERT_WEBHOOK_SECRET }}:latest,ALERT_EMAIL_TO=${{ env.ALERT_EMAIL_SECRET }}:latest \
             --region=${{ env.REGION }} \
             --project=${{ env.PROJECT_ID }}
 
@@ -156,6 +178,8 @@ jobs:
         run: |
           gcloud run jobs update ${{ env.CLEANUP_JOB }} \
             --image=${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/auditoria-api:dev \
+            --update-env-vars=KEK_KMS_KEY_NAME=${{ env.KEK_KMS_KEY_NAME }} \
+            --update-secrets=ALERT_WEBHOOK_URL=${{ env.ALERT_WEBHOOK_SECRET }}:latest,ALERT_EMAIL_TO=${{ env.ALERT_EMAIL_SECRET }}:latest \
             --region=${{ env.REGION }} \
             --project=${{ env.PROJECT_ID }}
 
@@ -202,8 +226,84 @@ jobs:
             --image=${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/auditoria-api:dev \
             --region=${{ env.REGION }} \
             --project=${{ env.PROJECT_ID }} \
-            --update-env-vars=DEPLOYED_AT=$(date -u +%Y%m%dT%H%M%SZ) \
+            --update-env-vars=DEPLOYED_AT=$(date -u +%Y%m%dT%H%M%SZ),KEK_KMS_KEY_NAME=${{ env.KEK_KMS_KEY_NAME }} \
+            --update-secrets=ALERT_WEBHOOK_URL=${{ env.ALERT_WEBHOOK_SECRET }}:latest,ALERT_EMAIL_TO=${{ env.ALERT_EMAIL_SECRET }}:latest \
             --quiet
+
+  # ------------------------------------------------------------------
+  # Smoke — prova de ENTREGA do alerta (Sprint 3, Req. 4 / INFRA 03.7)
+  # ------------------------------------------------------------------
+  # "Alerta configurado" NÃO conta sem entrega provada. Este job dispara o gatilho
+  # SINTÉTICO da 03.6 (POST /api/v1/system/alert-test, admin-only) contra o
+  # serviço da API JÁ deployado e configurado — o backend chama send_alert(SYNTHETIC)
+  # ao(s) canal(is) real(is). Se a notificação não chegar (delivered=false) o
+  # pipeline é REPROVADO.
+  #
+  # Por que o endpoint e não um Cloud Run Job: a 03.6 entregou o gatilho como
+  # endpoint HTTP (não como módulo runnable), e um Job novo não sobe o app sem o
+  # conjunto completo de secrets (DATABASE_URL + chaves de cripto) que só o
+  # serviço tem. Bater no serviço vivo exercita o caminho REAL de dispatch.
+  #
+  # Fail-closed é garantido ANTES daqui, no boot do serviço: verify_alert_config
+  # no lifespan RECUSA subir sem canal entregável → deploy-api falha → o smoke
+  # nem chega a rodar (needs: deploy-api). Aqui provamos a ENTREGA de verdade.
+  smoke-alert:
+    name: Smoke — synthetic alert delivery
+    needs: deploy-api
+    if: needs.deploy-api.result == 'success'
+    runs-on: ubuntu-latest
+    environment: development
+    env:
+      # Environment variable → só resolve aqui dentro (job com `environment:`).
+      API_BASE_URL: ${{ vars.API_URL_DEV }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Auth GCP (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_API_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Trigger synthetic alert via 03.6 endpoint and assert delivery
+        # scripts/smoke_alert_delivery.py (stdlib puro): login como admin de
+        # monitoração → POST /api/v1/system/alert-test → assert data.delivered.
+        # Sai != 0 se a notificação não chegou. Nunca imprime senha/cookie/PII.
+        env:
+          SMOKE_ADMIN_EMAIL: ${{ secrets.SMOKE_ADMIN_EMAIL }}
+          SMOKE_ADMIN_PASSWORD: ${{ secrets.SMOKE_ADMIN_PASSWORD }}
+        run: |
+          if [ -z "${API_BASE_URL}" ]; then
+            echo "::error::vars.API_URL_DEV não definida no environment 'development'."
+            exit 1
+          fi
+          python3 scripts/smoke_alert_delivery.py
+
+      - name: Register runtime invariant (heartbeat depende disto)
+        if: always()
+        # O watchdog/heartbeat do processamento assíncrono só funciona com CPU
+        # always-on e sem scale-to-zero. Estes flags são setados MANUALMENTE no
+        # serviço (custo pendente de aprovação — ver CLAUDE.md §10). Aqui só
+        # CONFIRMAMOS/REGISTRAMOS (read-only) e AVISAMOS se regrediram — não
+        # falhamos o deploy nem alteramos custo unilateralmente.
+        run: |
+          echo "=== Invariante de runtime da API (${API_SERVICE}) ==="
+          MIN_INST=$(gcloud run services describe "${API_SERVICE}" \
+            --region="${REGION}" --project="${PROJECT_ID}" \
+            --format="value(spec.template.metadata.annotations['autoscaling.knative.dev/minScale'])" 2>/dev/null || echo "")
+          THROTTLE=$(gcloud run services describe "${API_SERVICE}" \
+            --region="${REGION}" --project="${PROJECT_ID}" \
+            --format="value(spec.template.metadata.annotations['run.googleapis.com/cpu-throttling'])" 2>/dev/null || echo "")
+          echo "min-instances (minScale) = '${MIN_INST:-<vazio>}'  (requer >= 1)"
+          echo "cpu-throttling           = '${THROTTLE:-<vazio>}'  (requer 'false' = no-cpu-throttling)"
+          if [ -z "${MIN_INST}" ] || [ "${MIN_INST}" = "0" ]; then
+            echo "::warning::min-instances < 1 — heartbeat do async pode congelar (ver CLAUDE.md §10)."
+          fi
+          if [ "${THROTTLE}" != "false" ]; then
+            echo "::warning::cpu-throttling não está 'false' — CPU estrangulada fora de requests quebra o heartbeat."
+          fi
 
   # ------------------------------------------------------------------
   # Web — build → deploy (espera deploy-api se ele rodar)
@@ -281,7 +381,7 @@ jobs:
   # ------------------------------------------------------------------
   summary:
     name: Deploy summary
-    needs: [changes, build-api, migrate, deploy-api, build-web, deploy-web]
+    needs: [changes, build-api, migrate, deploy-api, smoke-alert, build-web, deploy-web]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -292,14 +392,18 @@ jobs:
           echo "build-api:     ${{ needs.build-api.result }}"
           echo "migrate:       ${{ needs.migrate.result }}"
           echo "deploy-api:    ${{ needs.deploy-api.result }}"
+          echo "smoke-alert:   ${{ needs.smoke-alert.result }}"
           echo "build-web:     ${{ needs.build-web.result }}"
           echo "deploy-web:    ${{ needs.deploy-web.result }}"
           # Falha o summary se qualquer job não-skipped deu failure
           # (skipped por path-filter é OK; cancelled/failure não é).
+          # smoke-alert entra como GATE: se a entrega do alerta falhar, o
+          # pipeline é reprovado (Req. 4 — "alerta configurado" não basta).
           for r in \
             "${{ needs.build-api.result }}" \
             "${{ needs.migrate.result }}" \
             "${{ needs.deploy-api.result }}" \
+            "${{ needs.smoke-alert.result }}" \
             "${{ needs.build-web.result }}" \
             "${{ needs.deploy-web.result }}"; do
             if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
