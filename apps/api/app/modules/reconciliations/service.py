@@ -8,12 +8,13 @@ descrições) e leitura do status para o polling.
 from __future__ import annotations
 
 from datetime import date, datetime
-from uuid import UUID
+from typing import TYPE_CHECKING
+from uuid import UUID, uuid4
 
 from pydantic import SecretStr
 from sqlalchemy.exc import IntegrityError
 
-from app.core.crypto import encrypt
+from app.core.crypto_service import AAD_FILE_ENTRY_DESCRIPTION, field_locator
 from app.core.exceptions import DuplicateFileError, NotFoundError
 from app.core.logging import get_logger
 from app.core.search_index import compute_search_hmac
@@ -25,6 +26,9 @@ from app.db.models import (
     ReconciliationStatus,
     SessionAccountType,
 )
+
+if TYPE_CHECKING:
+    from app.core.crypto import ClientCipher
 from app.modules.reconciliations.repository import ReconciliationRepository
 from app.modules.reconciliations.schemas import (
     CreateReconciliationRequest,
@@ -127,7 +131,7 @@ class ReconciliationService:
         *,
         request: CreateReconciliationRequest,
         created_by: UUID,
-        encryption_key: SecretStr,
+        cipher: ClientCipher,
         search_blind_index_key: SecretStr,
     ) -> UUID:
         """Cria sessão `status='processing'` + file_entries criptografando
@@ -143,10 +147,11 @@ class ReconciliationService:
         Args:
             request: payload validado do front (statement do parsing + meta).
             created_by: UUID do usuário autenticado (vem da dependency).
-            encryption_key: `OMIE_ENCRYPTION_KEY` em SecretStr — passamos
-                explicitamente em vez de pegar de Settings dentro do service
-                pra facilitar teste e deixar o fluxo de credencial mais óbvio
-                (mesma regra que `omie_factory`).
+            cipher: `ClientCipher` do cliente (DEK) — cifra cada `description`
+                no envelope corrente + AAD (client_id‖tabela‖coluna‖pk). O
+                `pk` (id do file_entry) é gerado ANTES de cifrar. Construído no
+                route com `provision_client_cipher` (mesma regra que
+                `omie_factory`: cripto no boundary async, service recebe pronto).
             search_blind_index_key: `SEARCH_BLIND_INDEX_KEY` em SecretStr.
                 Usada para computar o índice de busca paralelo
                 (`description_search_hmac`) que viabiliza filtro `search`
@@ -155,7 +160,6 @@ class ReconciliationService:
         Returns:
             UUID da sessão criada — caller usa pra enfileirar o job.
         """
-        hex_key = encryption_key.get_secret_value()
         hex_blind_key = search_blind_index_key.get_secret_value()
         statement = request.statement
 
@@ -189,7 +193,12 @@ class ReconciliationService:
 
         entries: list[ReconciliationFileEntry] = []
         for tx in statement.transactions:
-            ct, iv = encrypt(tx.description, hex_key)
+            # `id` gerado ANTES de cifrar — compõe o AAD (pk) que amarra o
+            # ciphertext a ESTA linha (default `uuid4` só valeria no flush).
+            entry_id = uuid4()
+            ct, iv = cipher.encrypt(
+                tx.description, field_locator(AAD_FILE_ENTRY_DESCRIPTION, entry_id)
+            )
             # Blind index (S16) — gravado em paralelo à descrição criptografada.
             # Pode ser None para descrições só com pontuação/whitespace ou
             # tokens curtos — nesses casos a linha fica fora do filtro `search`,
@@ -197,6 +206,7 @@ class ReconciliationService:
             search_hmac = compute_search_hmac(tx.description, hex_blind_key)
             entries.append(
                 ReconciliationFileEntry(
+                    id=entry_id,
                     transaction_date=tx.date,
                     description_encrypted=ct,
                     description_iv=iv,

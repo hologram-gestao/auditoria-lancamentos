@@ -23,6 +23,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from app import __version__
+from app.core.alerting import verify_alert_config
 from app.core.config import get_settings
 from app.core.dependencies import DbSessionDep
 from app.core.exceptions import AppError, ErrorCode, RateLimitedError, to_error_response
@@ -38,6 +39,7 @@ from app.modules.omie_data import routes as omie_data_routes
 from app.modules.reconciliations import routes as reconciliations_routes
 from app.modules.reconciliations.export import routes as export_routes
 from app.modules.reconciliations.review import routes as review_routes
+from app.modules.system import routes as system_routes
 from app.modules.users import routes as users_routes
 
 CORRELATION_HEADER = "X-Correlation-ID"
@@ -59,6 +61,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # de saída do modelo em uso. Se exceder, o serviço NÃO sobe — melhor do que
     # descobrir com um HTTP 400 da Anthropic no meio de uma conciliação.
     await validate_parse_output_config(settings)
+    # BACK 03.6 — fail-closed: em staging/production, sem NENHUM canal de alerta
+    # entregável o serviço NÃO sobe (nunca rodar com alerting mudo). Em dev, warn.
+    verify_alert_config(settings)
     log.info("app_started", version=__version__)
     try:
         yield
@@ -249,6 +254,7 @@ def create_app() -> FastAPI:
     app.include_router(export_routes.router)
     app.include_router(omie_data_routes.router)
     app.include_router(anomaly_types_routes.router)
+    app.include_router(system_routes.router)
 
     # Cache L1 de lançamentos Omie (S11) — singleton in-memory por processo.
     # Instanciado aqui (não no lifespan) para existir mesmo quando testes

@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import select
 
 from app.core.config import Settings, get_settings
+from app.core.crypto_service import load_client_cipher
 from app.core.dependencies import (
     DbSessionDep,
     ManagerOrAdminDep,
@@ -124,9 +125,10 @@ async def get_omie_lancamentos(
     cache: OmieLancamentoCache = request.app.state.omie_lancamento_cache
     service = OmieLancamentoService(ReviewRepository(db), cache)
 
+    cipher = await load_client_cipher(client, settings=settings)
     items = await service.fetch_lancamentos(
         session_id=session_id,
         omie_ids=parsed_ids,
-        omie_client_factory=lambda: build_omie_client(client, settings),
+        omie_client_factory=lambda: build_omie_client(client, settings, cipher),
     )
     return OmieLancamentoListResponse(data=items)

@@ -12,24 +12,33 @@ from uuid import uuid4
 
 import pytest
 import structlog
-from pydantic import SecretStr
 
+from app.core.crypto import ClientCipher
+from app.core.crypto_service import AAD_FILE_ENTRY_DESCRIPTION, AAD_FILE_ENTRY_USER_NOTE
 from app.modules.reconciliations.review.service import ReviewService
 
 # 32 bytes (256 bits) em hex — chave válida para AES-256, valor irrelevante:
 # nada vai ser de fato criptografado nestes testes; só queremos que `decrypt`
 # falhe em payloads inválidos.
 _FAKE_HEX_KEY = "0" * 64
+_PK = uuid4()
 
 
 def _make_service() -> ReviewService:
     """Service com repo e cache mockados — helpers de decrypt não tocam neles."""
+    settings = MagicMock()
+    settings.SEARCH_BLIND_INDEX_KEY.get_secret_value.return_value = _FAKE_HEX_KEY
     return ReviewService(
         MagicMock(),
         cache=MagicMock(),
-        encryption_key=SecretStr(_FAKE_HEX_KEY),
-        search_blind_index_key=SecretStr(_FAKE_HEX_KEY),
+        settings=settings,
     )
+
+
+def _cipher() -> ClientCipher:
+    """Cipher sem DEK — payloads bare inválidos caem no path legado e falham,
+    exatamente o que estes testes querem exercitar."""
+    return ClientCipher(client_id="c", dek=None, key_id="k1", legacy_hex_key=_FAKE_HEX_KEY)
 
 
 # ----------------------------------------------------------------------
@@ -42,7 +51,7 @@ def test_decrypt_optional_failure_increments_counter_and_returns_placeholder() -
     service._current_session_id = uuid4()
 
     # Hex válidos mas tamanhos incoerentes → CryptoError dentro de decrypt.
-    result = service._decrypt_optional(ct="dead", iv="beef")
+    result = service._decrypt_optional(_cipher(), "dead", "beef", AAD_FILE_ENTRY_DESCRIPTION, _PK)
 
     assert result == "[indecifrável]"
     assert service._decrypt_failure_count == 1
@@ -52,7 +61,7 @@ def test_decrypt_pair_failure_increments_counter_and_returns_none() -> None:
     service = _make_service()
     service._current_session_id = uuid4()
 
-    result = service._decrypt_pair(ct="dead", iv="beef")
+    result = service._decrypt_pair(_cipher(), "dead", "beef", AAD_FILE_ENTRY_USER_NOTE, _PK)
 
     assert result is None
     assert service._decrypt_failure_count == 1
@@ -63,9 +72,9 @@ def test_multiple_failures_accumulate_in_counter() -> None:
     service = _make_service()
     service._current_session_id = uuid4()
 
-    service._decrypt_optional(ct="zz", iv="zz")
-    service._decrypt_pair(ct="zz", iv="zz")
-    service._decrypt_optional(ct="zz", iv="zz")
+    service._decrypt_optional(_cipher(), "zz", "zz", AAD_FILE_ENTRY_DESCRIPTION, _PK)
+    service._decrypt_pair(_cipher(), "zz", "zz", AAD_FILE_ENTRY_USER_NOTE, _PK)
+    service._decrypt_optional(_cipher(), "zz", "zz", AAD_FILE_ENTRY_DESCRIPTION, _PK)
 
     assert service._decrypt_failure_count == 3
 
@@ -77,16 +86,16 @@ def test_multiple_failures_accumulate_in_counter() -> None:
 
 def test_decrypt_optional_with_none_inputs_does_not_count_as_failure() -> None:
     service = _make_service()
-    assert service._decrypt_optional(ct=None, iv=None) == ""
-    assert service._decrypt_optional(ct="x", iv=None) == ""
-    assert service._decrypt_optional(ct=None, iv="x") == ""
+    assert service._decrypt_optional(_cipher(), None, None, AAD_FILE_ENTRY_DESCRIPTION, _PK) == ""
+    assert service._decrypt_optional(_cipher(), "x", None, AAD_FILE_ENTRY_DESCRIPTION, _PK) == ""
+    assert service._decrypt_optional(_cipher(), None, "x", AAD_FILE_ENTRY_DESCRIPTION, _PK) == ""
     assert service._decrypt_failure_count == 0
 
 
 def test_decrypt_pair_with_none_inputs_does_not_count_as_failure() -> None:
     service = _make_service()
-    assert service._decrypt_pair(ct=None, iv=None) is None
-    assert service._decrypt_pair(ct="x", iv=None) is None
+    assert service._decrypt_pair(_cipher(), None, None, AAD_FILE_ENTRY_USER_NOTE, _PK) is None
+    assert service._decrypt_pair(_cipher(), "x", None, AAD_FILE_ENTRY_USER_NOTE, _PK) is None
     assert service._decrypt_failure_count == 0
 
 
@@ -102,8 +111,8 @@ def test_decrypt_failure_emits_structured_log_with_session_id() -> None:
     service._current_session_id = sid
 
     with structlog.testing.capture_logs() as captured:
-        service._decrypt_optional(ct="bad", iv="bad")
-        service._decrypt_pair(ct="bad", iv="bad")
+        service._decrypt_optional(_cipher(), "bad", "bad", AAD_FILE_ENTRY_DESCRIPTION, _PK)
+        service._decrypt_pair(_cipher(), "bad", "bad", AAD_FILE_ENTRY_USER_NOTE, _PK)
 
     events = [c for c in captured if c.get("event") == "review_decrypt_failed"]
     assert len(events) == 2
@@ -120,7 +129,7 @@ def test_decrypt_failure_log_session_id_is_none_when_not_set() -> None:
     # service._current_session_id permanece None (default do __init__)
 
     with structlog.testing.capture_logs() as captured:
-        service._decrypt_optional(ct="bad", iv="bad")
+        service._decrypt_optional(_cipher(), "bad", "bad", AAD_FILE_ENTRY_DESCRIPTION, _PK)
 
     events = [c for c in captured if c.get("event") == "review_decrypt_failed"]
     assert len(events) == 1

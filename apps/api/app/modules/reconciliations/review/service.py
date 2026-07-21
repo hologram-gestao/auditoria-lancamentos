@@ -19,12 +19,21 @@ from __future__ import annotations
 
 from datetime import date
 from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from pydantic import SecretStr
 from sqlalchemy.exc import IntegrityError
 
-from app.core.crypto import decrypt, encrypt
+from app.core.alerting import Alert, AlertCode, dispatch_alert_nowait
+from app.core.crypto_service import (
+    AAD_ANOMALY_CONTEXT,
+    AAD_ANOMALY_RESOLUTION_NOTE,
+    AAD_FILE_ENTRY_DESCRIPTION,
+    AAD_FILE_ENTRY_USER_NOTE,
+    AAD_OMIE_ENTRY_USER_NOTE,
+    field_locator,
+    load_client_cipher,
+    provision_client_cipher,
+)
 from app.core.exceptions import NotFoundError, ValidationAppError
 from app.core.logging import get_logger
 from app.core.search_index import compute_query_hmacs
@@ -53,6 +62,8 @@ from app.modules.reconciliations.review.schemas import (
 from app.modules.users.schemas import PaginationMeta
 
 if TYPE_CHECKING:
+    from app.core.config import Settings
+    from app.core.crypto import ClientCipher
     from app.integrations.omie.client import OmieClient
     from app.integrations.omie.lancamento_cache import (
         OmieLancamentoCache,
@@ -62,6 +73,11 @@ logger = get_logger(__name__)
 
 # Mínimo de chars para resolution_note quando `resolved=true` (Doc §17.3).
 _RESOLUTION_NOTE_MIN_LENGTH = 10
+
+# Mensagem (sem PII) do alerta de falha de decifragem (BACK 03.6). Uma troca de
+# chave sem backfill viraria '[indecifrável]' em massa — o alerta liga esse
+# sintoma ao plantão em vez de virar queixa de usuário.
+_DECRYPT_ALERT_MSG = "Falha de decifragem na Tela de Revisao ('[indecifravel]')."
 
 # Mensagem PT-BR única para conflito de vínculo Omie — reusada pelo caminho
 # aplicativo (checagem otimista) e pelo caminho do IntegrityError (race),
@@ -79,16 +95,15 @@ class ReviewService:
         repository: ReviewRepository,
         *,
         cache: OmieLancamentoCache,
-        encryption_key: SecretStr,
-        search_blind_index_key: SecretStr,
+        settings: Settings,
     ) -> None:
         self._repo = repository
         self._cache = cache
-        self._hex_key = encryption_key.get_secret_value()
+        self._settings = settings
         # Chave do blind index (S16) — usada só no caminho de search da
         # listagem de file_entries. Mesma separação cripto: vazar uma não
         # vaza a outra.
-        self._hex_blind_key = search_blind_index_key.get_secret_value()
+        self._hex_blind_key = settings.SEARCH_BLIND_INDEX_KEY.get_secret_value()
         # Sessão "ativa" para correlação em logs de decrypt — cada método público
         # popula no início da operação. Service é instanciado por request via
         # FastAPI Depends, então não há contaminação entre requests.
@@ -98,6 +113,30 @@ class ReviewService:
         # S17; até lá o log estruturado `review_decrypt_failed` é a fonte
         # oficial.
         self._decrypt_failure_count: int = 0
+
+    # ------------------------------------------------------------------
+    # Cipher por cliente (Sprint 3, BACK 03.3) — resolvido 1x por operação
+    # ------------------------------------------------------------------
+
+    async def _cipher_for_client(self, client_id: UUID, *, provision: bool) -> ClientCipher:
+        """Constrói o `ClientCipher` do cliente (desembrulha a DEK via KMS).
+
+        `provision=True` nos caminhos de ESCRITA (garante DEK, gerando+embrulhando
+        se o cliente for legado); `provision=False` na LEITURA (DEK só se já existe;
+        linhas bare legadas são lidas com a chave global).
+        """
+        client = await self._repo.get_client(client_id)
+        if client is None:
+            raise NotFoundError("Cliente da sessão não encontrado.")
+        if provision:
+            return await provision_client_cipher(client, settings=self._settings)
+        return await load_client_cipher(client, settings=self._settings)
+
+    async def _cipher_for_session_id(self, session_id: UUID, *, provision: bool) -> ClientCipher:
+        session = await self._repo.get_session(session_id)
+        if session is None:
+            raise NotFoundError("Sessão de conciliação não encontrada.")
+        return await self._cipher_for_client(session.client_id, provision=provision)
 
     # ------------------------------------------------------------------
     # BACK 9.1 — Listar movimentações com filtros + paginação Python
@@ -163,10 +202,23 @@ class ReviewService:
         start = (page - 1) * page_size
         page_rows = rows[start : start + page_size]
 
+        cipher = await self._cipher_for_session_id(session_id, provision=False)
         decrypted: list[ListedFileEntry] = []
         for row in page_rows:
-            description = self._decrypt_optional(row.description_encrypted, row.description_iv)
-            user_note = self._decrypt_pair(row.user_note_encrypted, row.user_note_iv)
+            description = self._decrypt_optional(
+                cipher,
+                row.description_encrypted,
+                row.description_iv,
+                AAD_FILE_ENTRY_DESCRIPTION,
+                row.id,
+            )
+            user_note = self._decrypt_pair(
+                cipher,
+                row.user_note_encrypted,
+                row.user_note_iv,
+                AAD_FILE_ENTRY_USER_NOTE,
+                row.id,
+            )
             decrypted.append(
                 ListedFileEntry(
                     id=row.id,
@@ -214,6 +266,7 @@ class ReviewService:
         entry = await self._repo.get_file_entry(session_id=session_id, entry_id=entry_id)
         if entry is None:
             raise NotFoundError("Linha não encontrada nesta sessão de conciliação.")
+        cipher = await self._cipher_for_session_id(session_id, provision=True)
 
         # Trocar Omie
         if omie_lancamento_provided:
@@ -256,7 +309,9 @@ class ReviewService:
                 entry.user_note_encrypted = None
                 entry.user_note_iv = None
             else:
-                ct, iv = encrypt(body.user_note, self._hex_key)
+                ct, iv = cipher.encrypt(
+                    body.user_note, field_locator(AAD_FILE_ENTRY_USER_NOTE, entry.id)
+                )
                 entry.user_note_encrypted = ct
                 entry.user_note_iv = iv
 
@@ -297,7 +352,7 @@ class ReviewService:
             omie_lancamento_changed=omie_lancamento_provided,
         )
 
-        return self._file_entry_to_listed(entry)
+        return self._file_entry_to_listed(cipher, entry)
 
     # ------------------------------------------------------------------
     # BACK 9.4 — Lançamentos disponíveis para "Trocar"
@@ -401,10 +456,17 @@ class ReviewService:
             omie_ids=omie_ids,
         )
 
+        cipher = await self._cipher_for_client(session.client_id, provision=False)
         items: list[OmieEntryItem] = []
         for row in rows:
             data = cached.get(row.omie_lancamento_id)
-            user_note = self._decrypt_pair(row.user_note_encrypted, row.user_note_iv)
+            user_note = self._decrypt_pair(
+                cipher,
+                row.user_note_encrypted,
+                row.user_note_iv,
+                AAD_OMIE_ENTRY_USER_NOTE,
+                row.id,
+            )
             items.append(
                 OmieEntryItem(
                     id=row.id,
@@ -443,6 +505,7 @@ class ReviewService:
         entry = await self._repo.get_omie_entry(session_id=session.id, entry_id=entry_id)
         if entry is None:
             raise NotFoundError("Divergência Omie não encontrada nesta sessão.")
+        cipher = await self._cipher_for_client(session.client_id, provision=True)
 
         if body.user_action is not None:
             entry.user_action = body.user_action
@@ -451,7 +514,9 @@ class ReviewService:
                 entry.user_note_encrypted = None
                 entry.user_note_iv = None
             else:
-                ct, iv = encrypt(body.user_note, self._hex_key)
+                ct, iv = cipher.encrypt(
+                    body.user_note, field_locator(AAD_OMIE_ENTRY_USER_NOTE, entry.id)
+                )
                 entry.user_note_encrypted = ct
                 entry.user_note_iv = iv
 
@@ -480,7 +545,13 @@ class ReviewService:
             category=data.category if data is not None else None,
             amount=data.amount if data is not None else None,
             user_action=entry.user_action,
-            user_note=self._decrypt_pair(entry.user_note_encrypted, entry.user_note_iv),
+            user_note=self._decrypt_pair(
+                cipher,
+                entry.user_note_encrypted,
+                entry.user_note_iv,
+                AAD_OMIE_ENTRY_USER_NOTE,
+                entry.id,
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -510,8 +581,10 @@ class ReviewService:
         file_entries = await self._repo.get_file_entries_by_ids(file_entry_ids)
         omie_entries = await self._repo.get_omie_entries_by_ids(omie_entry_ids)
 
+        cipher = await self._cipher_for_session_id(session_id, provision=False)
         items = [
             self._anomaly_to_item(
+                cipher=cipher,
                 anomaly=anomaly,
                 anomaly_type_row=atype,
                 file_entries=file_entries,
@@ -572,12 +645,18 @@ class ReviewService:
                     ),
                 )
 
+        # `id` gerado ANTES de cifrar — compõe o AAD (pk) do context_encrypted.
+        anomaly_id = uuid4()
         context_ct: str | None = None
         context_iv: str | None = None
+        cipher = await self._cipher_for_session_id(session_id, provision=True)
         if body.context:
-            context_ct, context_iv = encrypt(body.context, self._hex_key)
+            context_ct, context_iv = cipher.encrypt(
+                body.context, field_locator(AAD_ANOMALY_CONTEXT, anomaly_id)
+            )
 
         anomaly = ReconciliationAnomaly(
+            id=anomaly_id,
             session_id=session_id,
             anomaly_type_id=anomaly_type.id,
             file_entry_id=body.file_entry_id,
@@ -612,6 +691,7 @@ class ReviewService:
             else {}
         )
         return self._anomaly_to_item(
+            cipher=cipher,
             anomaly=anomaly,
             anomaly_type_row=anomaly_type,
             file_entries=file_entries,
@@ -634,6 +714,7 @@ class ReviewService:
         if pair is None:
             raise NotFoundError("Anomalia não encontrada nesta sessão.")
         anomaly, anomaly_type = pair
+        cipher = await self._cipher_for_session_id(session_id, provision=True)
 
         if body.resolved:
             note = (body.resolution_note or "").strip()
@@ -645,7 +726,7 @@ class ReviewService:
                         "ao menos 10 caracteres."
                     ),
                 )
-            ct, iv = encrypt(note, self._hex_key)
+            ct, iv = cipher.encrypt(note, field_locator(AAD_ANOMALY_RESOLUTION_NOTE, anomaly.id))
             anomaly.resolution_note_encrypted = ct
             anomaly.resolution_note_iv = iv
             anomaly.resolved = True
@@ -677,6 +758,7 @@ class ReviewService:
             else {}
         )
         return self._anomaly_to_item(
+            cipher=cipher,
             anomaly=anomaly,
             anomaly_type_row=anomaly_type,
             file_entries=file_entries,
@@ -694,23 +776,37 @@ class ReviewService:
     # detecção em testes. Justificativa: se `OMIE_ENCRYPTION_KEY` for trocada
     # sem migration, todos os campos viram "[indecifrável]" silenciosamente;
     # uma métrica permite alerta automático em vez de queixa de usuário.
-    def _decrypt_optional(self, ct: str | None, iv: str | None) -> str:
+    def _decrypt_optional(
+        self,
+        cipher: ClientCipher,
+        ct: str | None,
+        iv: str | None,
+        aad_pair: tuple[str, str],
+        pk: UUID,
+    ) -> str:
         """Descriptografa um campo obrigatório (description). Falha silenciosa
         retorna placeholder para não derrubar a página."""
         if not ct or not iv:
             return ""
         try:
-            return decrypt(ct, iv, self._hex_key)
+            return cipher.decrypt(ct, iv, field_locator(aad_pair, pk))
         except Exception:
             self._record_decrypt_failure(field="description")
             return "[indecifrável]"
 
-    def _decrypt_pair(self, ct: str | None, iv: str | None) -> str | None:
+    def _decrypt_pair(
+        self,
+        cipher: ClientCipher,
+        ct: str | None,
+        iv: str | None,
+        aad_pair: tuple[str, str],
+        pk: UUID,
+    ) -> str | None:
         """Descriptografa pair opcional. None passa direto. Erro vira None."""
         if ct is None or iv is None:
             return None
         try:
-            return decrypt(ct, iv, self._hex_key)
+            return cipher.decrypt(ct, iv, field_locator(aad_pair, pk))
         except Exception:
             self._record_decrypt_failure(field="user_note_or_context")
             return None
@@ -723,30 +819,49 @@ class ReviewService:
         ciphertext, IV ou plaintext (CLAUDE.md §3.3).
         """
         self._decrypt_failure_count += 1
-        logger.warning(
-            "review_decrypt_failed",
-            field=field,
-            session_id=(
-                str(self._current_session_id) if self._current_session_id is not None else None
-            ),
-        )
+        sid = str(self._current_session_id) if self._current_session_id is not None else None
+        logger.warning("review_decrypt_failed", field=field, session_id=sid)
+        # BACK 03.6 — falha de decifragem ('[indecifrável]') ALERTA o plantão,
+        # ligada a este counter já existente. Dispara UMA vez por request (na 1ª
+        # falha) para não inundar o canal; fire-and-forget (contexto síncrono),
+        # sem PII (só session_id + code).
+        if self._decrypt_failure_count == 1:
+            dispatch_alert_nowait(
+                Alert(code=AlertCode.DECRYPT_FAILED, message=_DECRYPT_ALERT_MSG, session_id=sid),
+                self._settings,
+            )
 
-    def _file_entry_to_listed(self, entry: ReconciliationFileEntry) -> ListedFileEntry:
+    def _file_entry_to_listed(
+        self, cipher: ClientCipher, entry: ReconciliationFileEntry
+    ) -> ListedFileEntry:
         return ListedFileEntry(
             id=entry.id,
             transaction_date=entry.transaction_date,
-            description=self._decrypt_optional(entry.description_encrypted, entry.description_iv),
+            description=self._decrypt_optional(
+                cipher,
+                entry.description_encrypted,
+                entry.description_iv,
+                AAD_FILE_ENTRY_DESCRIPTION,
+                entry.id,
+            ),
             amount=entry.amount,
             balance=entry.balance,
             situation=entry.situation,
             user_action=entry.user_action,
-            user_note=self._decrypt_pair(entry.user_note_encrypted, entry.user_note_iv),
+            user_note=self._decrypt_pair(
+                cipher,
+                entry.user_note_encrypted,
+                entry.user_note_iv,
+                AAD_FILE_ENTRY_USER_NOTE,
+                entry.id,
+            ),
             omie_lancamento_id=entry.omie_lancamento_id,
         )
 
     def _anomaly_to_item(
         self,
         *,
+        cipher: ClientCipher,
         anomaly: ReconciliationAnomaly,
         anomaly_type_row: object,
         file_entries: dict[UUID, ReconciliationFileEntry],
@@ -757,7 +872,13 @@ class ReviewService:
             related_file = AnomalyRelatedFileEntry(
                 id=fe.id,
                 transaction_date=fe.transaction_date,
-                description=self._decrypt_optional(fe.description_encrypted, fe.description_iv),
+                description=self._decrypt_optional(
+                    cipher,
+                    fe.description_encrypted,
+                    fe.description_iv,
+                    AAD_FILE_ENTRY_DESCRIPTION,
+                    fe.id,
+                ),
                 amount=fe.amount,
             )
         related_omie: AnomalyRelatedOmieEntry | None = None
@@ -780,9 +901,19 @@ class ReviewService:
             ),
             detected_by=anomaly.detected_by,
             resolved=anomaly.resolved,
-            context=self._decrypt_pair(anomaly.context_encrypted, anomaly.context_iv),
+            context=self._decrypt_pair(
+                cipher,
+                anomaly.context_encrypted,
+                anomaly.context_iv,
+                AAD_ANOMALY_CONTEXT,
+                anomaly.id,
+            ),
             resolution_note=self._decrypt_pair(
-                anomaly.resolution_note_encrypted, anomaly.resolution_note_iv
+                cipher,
+                anomaly.resolution_note_encrypted,
+                anomaly.resolution_note_iv,
+                AAD_ANOMALY_RESOLUTION_NOTE,
+                anomaly.id,
             ),
             created_at=anomaly.created_at,
             related_file_entry=related_file,

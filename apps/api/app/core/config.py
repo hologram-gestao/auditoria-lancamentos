@@ -74,6 +74,29 @@ class Settings(BaseSettings):
     JWT_REFRESH_EXPIRE_DAYS: int = 7
     BCRYPT_COST: int = Field(default=12, ge=10, le=15)
 
+    # ---------- Envelope encryption / KMS (Sprint 3, BACK 03.3) ----------
+    # Nome do recurso KEK no Cloud KMS (ex.:
+    # `projects/liberdade-assessoria/locations/southamerica-east1/keyRings/adl/cryptoKeys/kek`).
+    # Quando SETADO, o wrap/unwrap da DEK-por-cliente é feito no KMS e a KEK
+    # NUNCA sai do KMS. Quando None (dev/test — não há sandbox de KMS, mesma
+    # política do Omie), cai no wrapper LOCAL que deriva uma KEK de
+    # `OMIE_ENCRYPTION_KEY` via HKDF (domínio separado). O isolamento
+    # DEK-por-cliente (uma DEK distinta por cliente + AAD) vale nos DOIS modos;
+    # só o blast radius da KEK depende do KMS real (prod). Default None é
+    # CI-safe (não vira campo obrigatório).
+    KEK_KMS_KEY_NAME: str | None = Field(
+        default=None,
+        description="Recurso KEK no Cloud KMS. None → wrapper local (dev/test).",
+    )
+    # Identificador da geração de chave gravado no envelope (`v<n>:<key_id>:`).
+    # A leitura multi-chave usa o key_id para saber qual KEK/DEK aplicar. Um
+    # valor por era de chave; a rotação da KEK (fora de escopo desta sprint)
+    # incrementaria isto.
+    KEK_KEY_ID: str = Field(
+        default="k1",
+        description="key_id gravado no envelope cripto (v<n>:<key_id>:...).",
+    )
+
     # ---------- Cookies ----------
     COOKIE_SECURE: bool = False
     COOKIE_DOMAIN: str | None = None
@@ -160,6 +183,28 @@ class Settings(BaseSettings):
     SENTRY_DSN: str | None = None
     SENTRY_TRACES_SAMPLE_RATE: float = 0.1
 
+    # ---------- Alerting (Sprint 3, BACK 03.6) ----------
+    # Destino do alerta de produção do ADL — SEMPRE um endereço COMPARTILHADO da
+    # equipe de plantão da Hologram (nunca uma pessoa; fator ônibus). Defaults
+    # None são CI-safe. O fail-closed (`verify_alert_config`) exige ao menos um
+    # canal ENTREGÁVEL em staging/production; em dev degrada com warning.
+    ALERT_WEBHOOK_URL: str | None = Field(
+        default=None,
+        description="Webhook (ex.: Slack) do canal de plantão. Segredo — nunca logar.",
+    )
+    ALERT_EMAIL_TO: str | None = Field(
+        default=None,
+        description="E-mail COMPARTILHADO de plantão (grupo, não pessoa). Requer ALERT_SMTP_HOST.",
+    )
+    ALERT_SMTP_HOST: str | None = None
+    ALERT_SMTP_PORT: int = 587
+    ALERT_SMTP_USER: str | None = None
+    ALERT_SMTP_PASSWORD: SecretStr = Field(default=SecretStr(""))
+    ALERT_EMAIL_FROM: str = "adl-alertas@hologram.com.br"
+    # Timeout do dispatch do webhook — curto: alerta é fire-and-forget, não pode
+    # segurar o event loop nem a request que o disparou.
+    ALERT_WEBHOOK_TIMEOUT_SECONDS: float = 5.0
+
     # ---------- Validators ----------
     @field_validator("OMIE_ENCRYPTION_KEY", "JWT_SECRET", "SEARCH_BLIND_INDEX_KEY")
     @classmethod
@@ -219,6 +264,20 @@ class Settings(BaseSettings):
     @property
     def max_upload_bytes(self) -> int:
         return self.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+
+    @property
+    def has_webhook_alert(self) -> bool:
+        return bool(self.ALERT_WEBHOOK_URL)
+
+    @property
+    def has_email_alert(self) -> bool:
+        """E-mail só é ENTREGÁVEL se há destino E transporte SMTP configurados."""
+        return bool(self.ALERT_EMAIL_TO) and bool(self.ALERT_SMTP_HOST)
+
+    @property
+    def has_alert_channel(self) -> bool:
+        """True se há ao menos um canal de alerta ENTREGÁVEL (webhook ou e-mail)."""
+        return self.has_webhook_alert or self.has_email_alert
 
 
 @lru_cache(maxsize=1)
