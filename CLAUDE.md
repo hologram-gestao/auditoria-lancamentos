@@ -82,7 +82,7 @@
 
 **Estas regras valem para 100 % do código. Nunca as viole, mesmo que o usuário peça.**
 
-1. **Nunca** armazene `OMIE_ENCRYPTION_KEY`, `JWT_SECRET`, `ANTHROPIC_API_KEY` em código, banco, log ou resposta. Apenas env vars.
+1. **Nunca** armazene `OMIE_ENCRYPTION_KEY`, `JWT_SECRET`, `ANTHROPIC_API_KEY`, `ALERT_WEBHOOK_URL` — nem o material da **KEK/DEK** (Sprint 3) — em código, banco, log ou resposta. Apenas env vars / GCP Secret Manager / Cloud KMS. O `alerting` loga só o `code` do alerta, nunca a URL do webhook.
 2. **Nunca** retorne hash de senha, credenciais descriptografadas ou tokens em respostas de API.
 3. **Nunca** logue: senhas, credenciais Omie, JWTs, conteúdo de arquivos. Use `[REDACTED]`. O redactor do structlog (em `apps/api/app/core/logging.py`) mascara automaticamente chaves sensíveis.
 4. **Nunca** use `float` para valores monetários. Sempre `Decimal` (Python) ou string/BigInt de centavos (TS). `DECIMAL(14,2)` no DB.
@@ -105,12 +105,35 @@
     abre/edita o arquivo), **avise imediatamente** que houve exposição e
     recomende rotação da credencial. Pode trabalhar com `.env.example` à
     vontade — placeholders públicos.
+14. **Landmines do envelope crypto por cliente (Sprint 3) — quebrar = outage/perda de dado:**
+    - **Nunca trocar `KEK_KEY_ID`** (manter `k1`). O decrypt sempre usa a KEK
+      atual e a rotação só provisiona DEK quando `dek_wrapped IS NULL` — não há
+      caminho de re-embrulho no código. Trocar = todos os clientes ficam
+      indecifráveis.
+    - **Manter `OMIE_ENCRYPTION_KEY` sempre setada** — lê dado bare-legado e
+      deriva a KEK local (dev/test). Removê-la = outage.
+    - **Nunca ligar/desligar Cloud KMS sobre um DB que já tenha DEKs do outro
+      wrapper** (KMS ⇄ local) — sem migração no código = outage.
+    - **Alerting é fail-closed em staging/prod:** sem canal entregável
+      (`ALERT_WEBHOOK_URL`/`ALERT_EMAIL_TO`) o serviço **não sobe**
+      (`verify_alert_config` no lifespan). Em dev degrada com warning.
 
 ---
 
 ## 4. Regras Invioláveis de Dados
 
-1. **Campos criptografados (AES-256-GCM):**
+1. **Campos criptografados (AES-256-GCM, envelope com DEK por cliente — Sprint 3):**
+   Cada cliente tem uma **DEK** própria (Data Encryption Key), guardada
+   **embrulhada** em `clients.dek_wrapped`; a **KEK** (Key Encryption Key) faz
+   wrap/unwrap da DEK — **Cloud KMS** em staging/prod (a KEK nunca sai do KMS,
+   recurso em `KEK_KMS_KEY_NAME`), **wrapper local** derivado de
+   `OMIE_ENCRYPTION_KEY` via HKDF (domínio separado) em dev/test. O envelope
+   (`v<ver>:<key_id>:<hex>`) liga o ciphertext ao cliente via **AAD** —
+   ciphertext de um cliente **não** decifra em outro. Dado bare-legado ainda é
+   lido com a `OMIE_ENCRYPTION_KEY`. Falha de decrypt **levanta erro** no
+   caminho de credencial (nunca retorna texto); na tela de revisão/Excel vira
+   `[indecifrável]` + métrica `decrypt_failed` (não célula silenciosamente
+   vazia sem sinal). Campos:
    - `clients.omie_app_key_encrypted`, `omie_app_secret_encrypted`
    - `reconciliation_file_entries.description_encrypted`, `user_note_encrypted`
    - `reconciliation_omie_entries.user_note_encrypted`
@@ -120,6 +143,10 @@
 4. **Datas em claro** (`transaction_date`, `reference_month`) — necessárias para SQL ordering/filtering.
 5. **Nenhum dado identificável do cliente final persiste em claro** — CNPJ, razão social, fornecedores, categorias, nomes de contas são **sempre buscados do Omie em tempo real** e mantidos apenas em cache com TTL.
 6. **Arquivo original nunca persiste** — processado em memória e descartado.
+7. **Trilha de acesso (`access_audit`, LGPD — Sprint 3):** toda visualização,
+   exportação ou negação de acesso a relatório grava 1 linha com **só IDs**
+   (`user_id`, `client_id`, `session_id`, `action ∈ {denied, view, export}`,
+   `rota`, `timestamp`) — **nunca PII** (CNPJ, razão social, nomes).
 
 ---
 
@@ -387,6 +414,8 @@ lembrar dos comandos.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.6 — 22/07/2026. **Sprint 3 (Cripto por cliente, auditoria de acesso e alerta) — na `develop`, PR #38 aguardando review p/ `main`:** §3 e §4 atualizados como lei atual. Cripto migrou para **envelope com DEK por cliente**: cada cliente tem uma DEK própria embrulhada em `clients.dek_wrapped`; a KEK faz wrap/unwrap (**Cloud KMS** em staging/prod via `KEK_KMS_KEY_NAME`, **wrapper local** derivado de `OMIE_ENCRYPTION_KEY`/HKDF em dev/test); AAD liga o ciphertext ao cliente. Nova regra §3.14 com os **landmines** (nunca trocar `KEK_KEY_ID`=`k1`, manter `OMIE_ENCRYPTION_KEY`, não alternar KMS⇄local sobre DB com DEKs, alerting fail-closed em prod/staging). Nova regra §4.7: trilha `access_audit` (LGPD — {denied,view,export}, só IDs). Migrations aditivas (`dek_wrapped`, `access_audit`) reversíveis; endpoint `POST /system/alert-test` admin-only. ⚠️ Deploy exige provisionamento GCP prévio (`scripts/setup-gcp.sh <env>`: KEK no KMS + secrets de alerta + IAM) e backfill das DEKs pós-deploy — ver `scripts/environments-runbook.md`._
 
 _Versão 1.5 — 19/06/2026. **FASE 1 / BACK 1.6 (tolerância de data fixa) na branch de integração `feat/fase1-cartao`:** a tolerância deixou de ser parametrizável — `DATE_DIVERGENCE_RANGE = 3` fixo no matcher. Classificação: data exata → `conciliado`; 1–3 dias → `conciliado_data_divergente` (+ `wrong_date`); > 3 → `sem_omie`. Vale para CC **e** cartão (muda comportamento da CC em prod quando a FASE 1 for mergeada). §5.2/§5.3 reescritos como lei atual, nota do topo e ponto em aberto §10 marcados resolvidos. `date_tolerance_days` removido do request (ignorado se enviado); coluna mantida (novas sessões = 0). O range fixo também rege a janela Omie no processamento, na revisão e no export. Gate local verde (ruff/mypy/pytest — matcher 20, + regressão CC e divergência no job). **Ainda não na `main`** (integração)._
 
