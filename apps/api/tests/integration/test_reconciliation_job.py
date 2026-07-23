@@ -31,7 +31,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import get_settings
-from app.core.crypto import decrypt, encrypt
+from app.core.crypto import encrypt
+from app.core.crypto_service import (
+    AAD_ANOMALY_CONTEXT,
+    field_locator,
+    load_client_cipher,
+)
 from app.core.security import hash_password
 from app.db.models import (
     AnomalySeverity,
@@ -492,14 +497,21 @@ class TestJobDateDivergence:
             assert code_by_file[sem_match.id] == ANOMALY_CODE_MISSING_IN_OMIE
 
             # BACK 1.7 — contexto da anomalia wrong_date: data arquivo + data
-            # Omie lado a lado, criptografado. Linha divergente: arquivo 10/04,
-            # Omie 12/04.
-            hex_key = get_settings().OMIE_ENCRYPTION_KEY.get_secret_value()
+            # Omie lado a lado, cifrado no envelope v1 (DEK-por-cliente + AAD).
+            # Linha divergente: arquivo 10/04, Omie 12/04.
+            client_row = (
+                await s.execute(select(Client).where(Client.id == cliente.id))
+            ).scalar_one()
+            cipher = await load_client_cipher(client_row, settings=get_settings())
             wd = next(a for a in anomalies if a.file_entry_id == divergente.id)
             assert wd.context_encrypted is not None
             assert wd.context_iv is not None
             assert (
-                decrypt(wd.context_encrypted, wd.context_iv, hex_key)
+                cipher.decrypt(
+                    wd.context_encrypted,
+                    wd.context_iv,
+                    field_locator(AAD_ANOMALY_CONTEXT, wd.id),
+                )
                 == "Data arquivo: 10/04/2026 · Data Omie: 12/04/2026"
             )
             # A anomalia missing_in_omie (sem match) não tem contexto.

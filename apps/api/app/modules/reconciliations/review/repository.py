@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import (
     AnomalySeverity,
     AnomalyType,
+    Client,
     FileEntrySituation,
     ReconciliationAnomaly,
     ReconciliationFileEntry,
@@ -65,6 +66,11 @@ class ReviewRepository:
 
     async def get_session(self, session_id: UUID) -> ReconciliationSession | None:
         stmt = select(ReconciliationSession).where(ReconciliationSession.id == session_id)
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def get_client(self, client_id: UUID) -> Client | None:
+        """Carrega o `Client` (precisa de `dek_wrapped` para o envelope cripto)."""
+        stmt = select(Client).where(Client.id == client_id)
         return (await self._session.execute(stmt)).scalar_one_or_none()
 
     # ------------------------------------------------------------------

@@ -32,7 +32,9 @@ from fastapi import (
     status,
 )
 
+from app.core.audit import AccessAction, record_access
 from app.core.config import Settings, get_settings
+from app.core.crypto_service import provision_client_cipher
 from app.core.dependencies import (
     CurrentUserDep,
     DbSessionDep,
@@ -292,16 +294,21 @@ async def create_reconciliation(
         raise NotFoundError(_CLIENT_NOT_FOUND_MSG)
 
     try:
-        await require_client_access(payload.client_id, user, db)
+        client = await require_client_access(payload.client_id, user, db)
     except ClientNotAccessibleError as exc:
         # Mesma decisão dos outros endpoints (CLAUDE.md §3.11): manager fora
         # da carteira recebe 404, não 403.
         raise NotFoundError(_CLIENT_NOT_FOUND_MSG) from exc
 
+    # Provisiona a DEK do cliente (gera+embrulha se legado) e cifra as descrições
+    # dos file_entries no envelope corrente + AAD. O `client` está anexado a `db`,
+    # então a `dek_wrapped` recém-gerada é persistida no commit abaixo, junto da
+    # sessão — atômico.
+    cipher = await provision_client_cipher(client, settings=settings)
     session_id = await service.create_session_with_entries(
         request=payload,
         created_by=UUID(user.id),
-        encryption_key=settings.OMIE_ENCRYPTION_KEY,
+        cipher=cipher,
         search_blind_index_key=settings.SEARCH_BLIND_INDEX_KEY,
     )
     # Commit ANTES de agendar. A BackgroundTask roda no MESMO processo, abrindo
@@ -563,6 +570,16 @@ async def get_reconciliation_detail(
         await require_client_access(repo_session.client_id, user, db)
     except ClientNotAccessibleError as exc:
         raise NotFoundError(_SESSION_NOT_FOUND_MSG) from exc
+
+    # BACK 03.5 — auditoria `view`: abrir a tela de conciliação de uma sessão.
+    # NÃO no /status (polling) — só aqui, no header da tela (guardrail de volume).
+    await record_access(
+        db,
+        user_id=UUID(user.id),
+        client_id=repo_session.client_id,
+        session_id=session_id,
+        action=AccessAction.VIEW,
+    )
 
     payload = await service.get_session_detail(session_id)
     return SessionDetailResponse(data=payload)

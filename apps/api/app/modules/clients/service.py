@@ -18,12 +18,18 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 from pydantic import SecretStr
 
-from app.core.crypto import encrypt
+from app.core.crypto_service import (
+    AAD_CLIENT_APP_KEY,
+    AAD_CLIENT_APP_SECRET,
+    field_locator,
+    new_client_dek,
+    provision_client_cipher,
+)
 from app.core.exceptions import (
     IncompleteCredentialsError,
     InvalidManagerError,
@@ -138,15 +144,23 @@ class ClientService:
     ) -> ClientResponse:
         """Cria cliente com credenciais criptografadas + auto-assign do criador.
 
-        Cada credencial é criptografada em chamada SEPARADA do `encrypt()` →
-        IVs distintos (CLAUDE.md §4.2). O texto plano só vive em memória local
-        e é descartado quando esta função retorna.
+        Sprint 3: cada cliente nasce com uma DEK própria (gerada e embrulhada
+        pela KEK do KMS). As credenciais são cifradas no envelope versionado
+        `v<n>:<key_id>:` + AAD (client_id‖tabela‖coluna‖pk). O `client.id` é
+        gerado ANTES para compor o AAD (o default `uuid4` só valeria no flush).
+        Cada credencial usa IV próprio; o texto plano só vive em memória local.
         """
-        ct_key, iv_key = self._encrypt_credential(omie_app_key)
-        ct_secret, iv_secret = self._encrypt_credential(omie_app_secret)
+        client_id = uuid4()
+        cipher, dek_wrapped = await new_client_dek(client_id, settings=self._settings)
+        ct_key, iv_key = cipher.encrypt(omie_app_key, field_locator(AAD_CLIENT_APP_KEY, client_id))
+        ct_secret, iv_secret = cipher.encrypt(
+            omie_app_secret, field_locator(AAD_CLIENT_APP_SECRET, client_id)
+        )
 
         client = Client(
+            id=client_id,
             name=name,
+            dek_wrapped=dek_wrapped,
             omie_app_key_encrypted=ct_key,
             omie_app_key_iv=iv_key,
             omie_app_secret_encrypted=ct_secret,
@@ -190,8 +204,15 @@ class ClientService:
         # Pares possíveis: ambos None (ignora), ambos preenchidos (recriptografa),
         # apenas um → 400 (evita silenciosamente manter credenciais inconsistentes).
         if omie_app_key is not None and omie_app_secret is not None:
-            ct_key, iv_key = self._encrypt_credential(omie_app_key)
-            ct_secret, iv_secret = self._encrypt_credential(omie_app_secret)
+            # Provisiona a DEK se o cliente for legado (dek_wrapped None) e
+            # recifra no envelope corrente com AAD amarrado à linha.
+            cipher = await provision_client_cipher(client, settings=self._settings)
+            ct_key, iv_key = cipher.encrypt(
+                omie_app_key, field_locator(AAD_CLIENT_APP_KEY, client.id)
+            )
+            ct_secret, iv_secret = cipher.encrypt(
+                omie_app_secret, field_locator(AAD_CLIENT_APP_SECRET, client.id)
+            )
             client.omie_app_key_encrypted = ct_key
             client.omie_app_key_iv = iv_key
             client.omie_app_secret_encrypted = ct_secret
@@ -347,15 +368,6 @@ class ClientService:
         return responses, pagination
 
     # ------------------------------ INTERNALS -------------------------
-
-    def _encrypt_credential(self, plaintext: str) -> tuple[str, str]:
-        """Wrapper sobre `core.crypto.encrypt` com a chave da config.
-
-        Mantém o acesso ao `OMIE_ENCRYPTION_KEY` numa única função — caso
-        precisemos de fallback de chave (rotação), o ponto de mudança é único.
-        """
-        hex_key = self._settings.OMIE_ENCRYPTION_KEY.get_secret_value()
-        return encrypt(plaintext, hex_key)
 
     async def _build_detail_response(
         self,
