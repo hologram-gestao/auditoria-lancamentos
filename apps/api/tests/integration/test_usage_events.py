@@ -47,7 +47,7 @@ from app.modules.usage_events.repository import UsageEventRepository
 from app.modules.usage_events.schemas import UsageEventName
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import AsyncIterator, Iterator
 
     from httpx import AsyncClient
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -312,11 +312,22 @@ class TestConciliacaoCriadaEmitter:
 
 
 @pytest.fixture
-async def factory(db_engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    """sessionmaker apontando pro DB do testcontainers — passado ao job."""
-    return async_sessionmaker(
+async def factory(db_engine: AsyncEngine) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    """sessionmaker apontando pro DB do testcontainers — passado ao job.
+
+    Diferente da fixture `db_session`, o que passa por aqui é **commitado de
+    verdade** (o job roda na sua própria transação, como em produção) e por isso
+    NÃO é desfeito pelo rollback de fim de teste. Sem a limpeza abaixo, as linhas
+    do job vazam para os testes seguintes — foi o que quebrou
+    `test_payload_invalido_retorna_400`, que lia a tabela inteira.
+    `usage_events` precisa ser citada explicitamente: é log append-only, sem FK,
+    então o `CASCADE` de `users`/`clients` não a alcança.
+    """
+    yield async_sessionmaker(
         db_engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
     )
+    async with db_engine.begin() as conn:
+        await conn.execute(text("TRUNCATE usage_events, users, clients RESTART IDENTITY CASCADE"))
 
 
 async def _seed_job_fixtures(
@@ -544,7 +555,10 @@ class TestUsageEventsEndpoint:
         resp = await client_with_db.post("/api/v1/usage-events", json=body)
 
         assert resp.status_code == 400, resp.text
-        rows = await db_session.execute(select(UsageEvent))
+        # Escopado à sessão do teste (convenção do arquivo): a tabela é um log
+        # global e outros testes commitam nela de verdade — assertar a tabela
+        # inteira vazia mediria a ordem de execução, não o endpoint.
+        rows = await db_session.execute(select(UsageEvent).where(UsageEvent.session_id == sess.id))
         assert list(rows.scalars().all()) == []
 
     async def test_via_fora_do_enum_retorna_400(

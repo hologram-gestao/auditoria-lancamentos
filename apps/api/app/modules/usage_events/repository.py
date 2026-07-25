@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +36,12 @@ class UsageEventRepository:
         `uq_usage_events_event_session` — a idempotência mora no banco, não numa
         checagem prévia em Python (que perderia a corrida entre dois requests).
 
+        **O `index_where` NÃO é decorativo:** o índice é PARCIAL
+        (`WHERE session_id IS NOT NULL`) e o Postgres não infere índice parcial
+        a partir das colunas sozinhas — sem repetir o predicado, o INSERT morre
+        com `42P10: there is no unique or exclusion constraint matching the ON
+        CONFLICT specification` e o fail-soft engole o erro, gravando NADA.
+
         **SAVEPOINT obrigatório:** este INSERT roda dentro da transação de quem
         chamou (a request que cria a conciliação, a transação do job). Sem o
         `begin_nested`, qualquer erro aqui marcaria a session SQLAlchemy como
@@ -45,7 +51,10 @@ class UsageEventRepository:
         stmt = (
             pg_insert(UsageEvent)
             .values(event=event, session_id=session_id, props=props)
-            .on_conflict_do_nothing(index_elements=["event", "session_id"])
+            .on_conflict_do_nothing(
+                index_elements=["event", "session_id"],
+                index_where=text("session_id IS NOT NULL"),
+            )
             .returning(UsageEvent.id)
         )
         async with self._session.begin_nested():

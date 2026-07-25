@@ -215,12 +215,16 @@ class TestNotificationOnSettle:
         session_id, client_id, user_id = await _seed_job_fixtures(
             factory, email="notif-job-err@hologram.com.br"
         )
+        # Como o Omie REALMENTE sinaliza credencial inválida: HTTP 200 + fault no
+        # corpo (client.py `_raise_for_fault`; mesma forma de
+        # test_reconciliation_job.py:876). Um 401 cai no ramo "status inesperado"
+        # e vira `OMIE_FAULT` — que é outro erro, não o de autenticação.
         respx.post(OMIE_EXTRATO_URL).mock(
             return_value=httpx.Response(
-                401,
+                200,
                 json={
-                    "faultstring": "Client Id/Secret inválidos",
-                    "faultcode": "SOAP-ENV:Client",
+                    "faultstring": "App Key inválida",
+                    "faultcode": "SOAP-ENV:Client-101",
                 },
             )
         )
