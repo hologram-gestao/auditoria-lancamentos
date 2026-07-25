@@ -16,13 +16,19 @@ from __future__ import annotations
 
 import re
 from datetime import date as _date
+from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.core.exceptions import ErrorCode
 from app.integrations.anthropic.schemas import ExtractedStatement, ExtractedTransaction
+
+#: Códigos aceitos em `ReconciliationFileInput.error_code`. Fechado por
+#: construção: é o mesmo enum que o handler global usa nas respostas de erro.
+_VALID_ERROR_CODES: frozenset[str] = frozenset(code.value for code in ErrorCode)
 
 # ----------------------------------------------------------------------
 # S8 — check-duplicate
@@ -99,10 +105,16 @@ class ParseResponse(BaseModel):
 
     `checksum` (BACK 02.3) é o sinal de bloqueio da prévia: quando
     `checksum.ok=False`, o front bloqueia a confirmação e mostra `reason`.
+
+    `file_hash` (BACK 04.2) é o SHA-256 do conteúdo **calculado pelo servidor**
+    sobre os bytes efetivamente recebidos (S0/A10). O front devolve ESTE valor
+    ao criar/anexar a conciliação, em vez de calcular um por conta própria —
+    dedup e identidade de parte passam a se apoiar no mesmo número.
     """
 
     data: ExtractedStatement
     checksum: ChecksumResult
+    file_hash: str
 
 
 # ----------------------------------------------------------------------
@@ -132,12 +144,85 @@ class ReconciliationStatementInput(BaseModel):
     model_config = ConfigDict(strict=False)
 
 
+#: Teto de partes por request. Uma fatura quebrada em mais de 20 PDFs não é um
+#: caso de uso — é um upload acidental de pasta inteira. Barrar aqui protege o
+#: guardrail do PRD ("o tempo de conciliação não pode subir com múltiplos
+#: arquivos") antes de qualquer trabalho ser feito.
+MAX_FILES_PER_REQUEST = 20
+
+
+class ReconciliationFileInput(BaseModel):
+    """Uma **parte** (arquivo) de uma conciliação — BACK 04.2.
+
+    Duas formas mutuamente exclusivas, e exatamente uma tem de vir:
+
+    - `statement` preenchido → a parte foi extraída com sucesso em `/parse` e
+      suas linhas entram na sessão (`status='parsed'`);
+    - `error_code` preenchido → a extração daquela parte FALHOU. A parte é
+      registrada mesmo assim (`status='error'`, sem linhas) para que a tela
+      diga **qual** arquivo falhou e ofereça removê-lo. Sem isso, um upload de
+      3 PDFs em que o 2º falha vira uma conciliação silenciosamente incompleta.
+
+    `error_code` é validado contra o enum canônico `ErrorCode` — código, nunca
+    mensagem: texto livre aqui seria porta de PII e de linguagem interna
+    vazando para o usuário (S2/R9).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    file_hash: str = Field(description="SHA-256 hex (64 chars) devolvido por /parse.")
+    filename: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Nome do arquivo. Persistido CIFRADO (pode conter razão social).",
+    )
+    statement: ReconciliationStatementInput | None = None
+    error_code: str | None = Field(
+        default=None,
+        description="Código canônico do erro quando a extração desta parte falhou.",
+    )
+
+    @field_validator("file_hash", mode="after")
+    @classmethod
+    def _normalize_hash(cls, v: str) -> str:
+        if not _HASH_PATTERN.match(v):
+            raise ValueError("file_hash precisa ser SHA-256 em hexadecimal (64 caracteres).")
+        return v.lower()
+
+    @field_validator("error_code", mode="after")
+    @classmethod
+    def _known_error_code(cls, v: str | None) -> str | None:
+        if v is not None and v not in _VALID_ERROR_CODES:
+            raise ValueError("error_code precisa ser um código canônico da API.")
+        return v
+
+    @model_validator(mode="after")
+    def _exactly_one_outcome(self) -> ReconciliationFileInput:
+        if (self.statement is None) == (self.error_code is None):
+            raise ValueError(
+                "Cada arquivo precisa de `statement` (extração ok) OU `error_code` "
+                "(extração falhou) — nunca os dois, nunca nenhum."
+            )
+        return self
+
+    @property
+    def parsed_ok(self) -> bool:
+        return self.statement is not None
+
+
 class CreateReconciliationRequest(BaseModel):
     """Body do POST /api/v1/reconciliations.
 
     O front envia o ParsedStatement (output do S9) + a meta da conciliação
     (qual cliente, qual conta Omie, mês de referência, hash do arquivo).
     Nada do arquivo original — segue CLAUDE.md §3.10 (arquivo nunca persiste).
+
+    **BACK 04.2 — N arquivos.** Uma conciliação é *uma conta + um mês* com N
+    partes consolidadas num só resumo, então o campo canônico é `files`. A
+    forma antiga (`file_hash` + `statement` soltos, 1 arquivo) continua aceita
+    e é normalizada para uma lista de um item — é **legada**: existe só para o
+    front atual não quebrar enquanto migra para a gaveta multi-upload. Mandar
+    as duas formas na mesma request é erro.
 
     FASE 1: a tolerância de data deixou de ser parametrizável — é fixa no
     backend (`matcher.DATE_DIVERGENCE_RANGE`). `date_tolerance_days` não é
@@ -152,15 +237,16 @@ class CreateReconciliationRequest(BaseModel):
             "ou um Date completo — o validator normaliza pra dia 1."
         ),
     )
-    file_hash: str = Field(description="SHA-256 hex (64 chars).")
-    statement: ReconciliationStatementInput
-
-    @field_validator("file_hash", mode="after")
-    @classmethod
-    def _normalize_hash(cls, v: str) -> str:
-        if not _HASH_PATTERN.match(v):
-            raise ValueError("file_hash precisa ser SHA-256 em hexadecimal (64 caracteres).")
-        return v.lower()
+    files: list[ReconciliationFileInput] = Field(
+        default_factory=list,
+        max_length=MAX_FILES_PER_REQUEST,
+        description="Partes da conciliação. Forma canônica (BACK 04.2).",
+    )
+    # --- Forma LEGADA (1 arquivo). Não usar em código novo. ---
+    file_hash: str | None = Field(default=None, description="LEGADO: use `files`.")
+    statement: ReconciliationStatementInput | None = Field(
+        default=None, description="LEGADO: use `files`."
+    )
 
     @field_validator("reference_month", mode="after")
     @classmethod
@@ -169,12 +255,71 @@ class CreateReconciliationRequest(BaseModel):
         # qualquer data → dia 1, evitando duplicatas por divergência de dia.
         return v.replace(day=1)
 
+    @model_validator(mode="after")
+    def _normalize_files(self) -> CreateReconciliationRequest:
+        legacy = self.file_hash is not None or self.statement is not None
+        if self.files and legacy:
+            raise ValueError(
+                "Envie `files` OU o par legado (`file_hash` + `statement`), não os dois."
+            )
+        if not self.files:
+            if self.file_hash is None or self.statement is None:
+                raise ValueError(
+                    "Informe `files` com ao menos um arquivo (ou o par legado "
+                    "`file_hash` + `statement`)."
+                )
+            self.files = [
+                ReconciliationFileInput(file_hash=self.file_hash, statement=self.statement)
+            ]
+        _reject_duplicate_hashes(self.files)
+        if not any(f.parsed_ok for f in self.files):
+            # Sem nenhuma parte extraída não há uma única linha para conciliar —
+            # a sessão nasceria vazia e o processamento quebraria ao calcular o
+            # período (min/max sobre lista vazia).
+            raise ValueError(
+                "Ao menos um arquivo precisa ter sido extraído com sucesso "
+                "para criar a conciliação."
+            )
+        return self
+
+
+class AttachFilesRequest(BaseModel):
+    """Body do POST /api/v1/reconciliations/{id}/files — cenário S-3.
+
+    "Criei a conciliação com a parte 1 e a parte 2 chegou no dia seguinte."
+    Sem este caminho, a nova unicidade (uma conciliação por conta+mês) daria
+    409 e o usuário ficaria sem saída.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    files: list[ReconciliationFileInput] = Field(min_length=1, max_length=MAX_FILES_PER_REQUEST)
+
+    @model_validator(mode="after")
+    def _no_duplicates(self) -> AttachFilesRequest:
+        _reject_duplicate_hashes(self.files)
+        return self
+
+
+def _reject_duplicate_hashes(files: list[ReconciliationFileInput]) -> None:
+    """Mesma parte duas vezes NA MESMA request — barra antes de tocar o banco.
+
+    A UNIQUE `(session_id, file_hash)` pegaria depois, mas como 409 genérico de
+    integridade; aqui vira 422 com a mensagem certa e sem escrever nada.
+    """
+    hashes = [f.file_hash for f in files]
+    if len(set(hashes)) != len(hashes):
+        raise ValueError("Há arquivos repetidos (mesmo conteúdo) na mesma requisição.")
+
 
 class CreateReconciliationPayload(BaseModel):
     """Conteúdo do envelope da criação."""
 
     session_id: UUID
     status: Literal["processing"]
+    # Nº de partes registradas na sessão (BACK 04.2) — o resumo indica quantos
+    # arquivos compõem a conciliação.
+    total_files: int = 0
 
 
 class CreateReconciliationResponse(BaseModel):
@@ -243,6 +388,10 @@ class SessionDetailPayload(BaseModel):
     # Front usa pra renderizar a tela de erro com `error_message` legível
     # antes de oferecer o botão "Tentar novamente".
     error_message: str | None = None
+    # BACK 04.4 — CÓDIGO canônico do desfecho de erro. É o que a tela mostra
+    # ("cód. X") e o que o usuário reporta ao suporte; a mensagem interna
+    # nunca aparece (S2/R9). NULL fora do estado de erro e em sessões antigas.
+    error_code: str | None = None
     # Saldos agregados da sessão. Calculados pós-matching em
     # `processing/balances.py` (commit cad9dbb). NULL em sessões legadas
     # processadas antes do backfill; front mostra "Indisponível" nessas.
@@ -250,9 +399,71 @@ class SessionDetailPayload(BaseModel):
     balance_end_file: Decimal | None = None
     balance_end_omie: Decimal | None = None
     balance_difference: Decimal | None = None
+    # BACK 04.2 — nº de partes (arquivos) consolidadas nesta conciliação.
+    # Default 0 (e não REQUIRED) por higiene Pydantic v2, mas o service sempre
+    # popula: sessões migradas têm 1 parte, criadas na Sprint 4 têm N.
+    total_files: int = 0
 
 
 class SessionDetailResponse(BaseModel):
     """Response do GET /api/v1/reconciliations/{id}."""
 
     data: SessionDetailPayload
+
+
+# ----------------------------------------------------------------------
+# BACK 04.2 — GET /reconciliations/{id}/files
+# ----------------------------------------------------------------------
+
+
+class SessionFileItem(BaseModel):
+    """Uma parte da conciliação, como a UI precisa vê-la.
+
+    `filename` já vem DECIFRADO (o nome é cifrado em repouso). `None` nas
+    partes migradas da Sprint 3, que não têm nome guardado em lugar nenhum —
+    a UI mostra "Arquivo N" nesses casos, não uma célula vazia.
+    """
+
+    file_id: UUID
+    filename: str | None = None
+    # 'parsed' (linhas carregadas) | 'error' (extração falhou). `str` lenient.
+    status: str
+    # Código canônico quando `status='error'` — a tela mostra o código, nunca
+    # a linguagem interna do erro (S2/R9).
+    error_code: str | None = None
+    entry_count: int
+    created_at: datetime
+
+
+class SessionFilesPayload(BaseModel):
+    """Conteúdo do envelope de GET /reconciliations/{id}/files."""
+
+    session_id: UUID
+    total_files: int
+    files: list[SessionFileItem]
+
+
+class SessionFilesResponse(BaseModel):
+    """Response do GET /api/v1/reconciliations/{id}/files."""
+
+    data: SessionFilesPayload
+
+
+class AttachFilesPayload(BaseModel):
+    """Conteúdo do envelope de anexar/remover parte.
+
+    `reprocessing=True` avisa o front que o cruzamento Omie foi re-agendado (a
+    sessão voltou para `processing`) — é o sinal para reativar o polling da
+    lista/detalhe. `False` quando a operação não mudou o conjunto de linhas
+    (ex.: anexar só o registro de uma parte que falhou na extração).
+    """
+
+    session_id: UUID
+    total_files: int
+    reprocessing: bool
+
+
+class AttachFilesResponse(BaseModel):
+    """Response de POST/DELETE em /api/v1/reconciliations/{id}/files."""
+
+    data: AttachFilesPayload

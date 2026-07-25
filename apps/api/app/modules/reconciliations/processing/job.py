@@ -28,22 +28,31 @@ CLAUDE.md §3.7: nunca expor stack traces ao usuário. O processamento:
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.alerting import Alert, AlertCode, send_alert
 from app.core.config import Settings
 from app.core.crypto_service import provision_client_cipher
-from app.core.exceptions import AppError
+from app.core.exceptions import AppError, ErrorCode
 from app.core.logging import get_logger
-from app.db.models import FileEntrySituation, ReconciliationOmieEntry
+from app.db.models import (
+    FileEntrySituation,
+    ReconciliationOmieEntry,
+    ReconciliationSession,
+    ReconciliationStatus,
+)
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache
 from app.modules.clients.omie_factory import build_omie_client
+from app.modules.notifications.repository import NotificationRepository
+from app.modules.notifications.service import NotificationService
 from app.modules.reconciliations.processing.anomalies import (
     DivergentMatch,
     _AnomalyTypeMissingError,
@@ -61,6 +70,8 @@ from app.modules.reconciliations.processing.omie_fetch import (
     fetch_realized,
 )
 from app.modules.reconciliations.repository import ReconciliationRepository
+from app.modules.usage_events.repository import UsageEventRepository
+from app.modules.usage_events.service import UsageEventService
 
 if TYPE_CHECKING:
     from app.core.crypto import ClientCipher
@@ -118,6 +129,42 @@ async def run_reconciliation_processing(
     sid = UUID(session_id)
     log.info("reconciliation_processing_started", session_id=session_id)
 
+    # BACK 04.1 — relógio do `duracao_s` do evento `conciliacao_concluida`.
+    # `monotonic` (não `datetime.now`) porque é uma DURAÇÃO: imune a ajuste de
+    # relógio/NTP no meio de um processamento longo.
+    started_at = time.monotonic()
+
+    try:
+        await _run_and_settle(sid, resolved_settings, resolved_factory)
+    finally:
+        # Evento de conclusão + notificação saem em TODOS os desfechos —
+        # sucesso, erro, timeout e cancelamento —, por isso `finally` e não uma
+        # chamada por branch (uma delas seria esquecida no próximo `except`
+        # adicionado, e o usuário ficaria sem aviso justamente no caso raro).
+        # `shield` porque o caminho de cancelamento externo já está sendo
+        # derrubado: sem ele, o `await` aqui morreria antes de gravar.
+        await asyncio.shield(
+            _settle_terminal_side_effects(
+                sid,
+                resolved_factory,
+                duracao_s=int(time.monotonic() - started_at),
+            )
+        )
+
+
+async def _run_and_settle(
+    sid: UUID,
+    resolved_settings: Settings,
+    resolved_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Executa o processamento e ATERRISSA a sessão num estado terminal.
+
+    Nunca propaga exceção (exceto `CancelledError`, re-propagada por higiene
+    asyncio): toda falha vira `status='error'` com mensagem PT-BR. Separado de
+    `run_reconciliation_processing` para que a emissão do evento de conclusão
+    fique num `finally` só, sem duplicar a chamada em cada branch de `except`.
+    """
+    session_id = str(sid)
     try:
         # Teto de tempo do processamento — substitui o antigo `job_timeout=900`
         # do ARQ. Sem ele, uma BackgroundTask travada num `await` seguraria uma
@@ -134,7 +181,13 @@ async def run_reconciliation_processing(
             code=exc.code.value,
             message=exc.message,
         )
-        await _safe_mark_error(sid, resolved_factory, exc.user_message, settings=resolved_settings)
+        await _safe_mark_error(
+            sid,
+            resolved_factory,
+            exc.user_message,
+            settings=resolved_settings,
+            error_code=exc.code.value,
+        )
     except _AnomalyTypeMissingError as exc:
         log.error(
             "reconciliation_processing_seed_missing",
@@ -142,14 +195,22 @@ async def run_reconciliation_processing(
             message=str(exc),
         )
         await _safe_mark_error(
-            sid, resolved_factory, _ERROR_MSG_SEED_MISSING, settings=resolved_settings
+            sid,
+            resolved_factory,
+            _ERROR_MSG_SEED_MISSING,
+            settings=resolved_settings,
+            error_code=ErrorCode.INTERNAL_ERROR.value,
         )
     except TimeoutError:
         # Estourou RECONCILIATION_TIMEOUT_SECONDS. `_execute_processing` foi
         # cancelado por dentro do `asyncio.timeout` e convertido em TimeoutError.
         log.error("reconciliation_processing_timeout", session_id=session_id)
         await _safe_mark_error(
-            sid, resolved_factory, _ERROR_MSG_TIMEOUT, settings=resolved_settings
+            sid,
+            resolved_factory,
+            _ERROR_MSG_TIMEOUT,
+            settings=resolved_settings,
+            error_code=ErrorCode.RECONCILIATION_TIMEOUT.value,
         )
     except asyncio.CancelledError:
         # Cancelamento EXTERNO (shutdown do processo / instância Cloud Run
@@ -160,7 +221,13 @@ async def run_reconciliation_processing(
         # Rede de segurança final: cron `mark_stuck_sessions_as_error` (25min).
         log.error("reconciliation_processing_cancelled", session_id=session_id)
         await asyncio.shield(
-            _safe_mark_error(sid, resolved_factory, _ERROR_MSG_TIMEOUT, settings=resolved_settings)
+            _safe_mark_error(
+                sid,
+                resolved_factory,
+                _ERROR_MSG_TIMEOUT,
+                settings=resolved_settings,
+                error_code=ErrorCode.RECONCILIATION_CANCELLED.value,
+            )
         )
         raise
     except Exception:
@@ -168,7 +235,11 @@ async def run_reconciliation_processing(
         # exc_info=True (se configurado).
         log.exception("reconciliation_processing_unexpected", session_id=session_id)
         await _safe_mark_error(
-            sid, resolved_factory, _ERROR_MSG_INTERNAL, settings=resolved_settings
+            sid,
+            resolved_factory,
+            _ERROR_MSG_INTERNAL,
+            settings=resolved_settings,
+            error_code=ErrorCode.INTERNAL_ERROR.value,
         )
     else:
         log.info("reconciliation_processing_finished", session_id=session_id)
@@ -433,8 +504,6 @@ async def _load_unmatched_file_entries(
     assinatura para evitar import de tipo no topo do módulo (poderia ser
     `from __future__` mas o anomalies module já tipa).
     """
-    from sqlalchemy import select
-
     from app.db.models import ReconciliationFileEntry
 
     rows = await db.execute(
@@ -452,6 +521,7 @@ async def _safe_mark_error(
     user_message: str,
     *,
     settings: Settings,
+    error_code: str,
 ) -> None:
     """Marca a sessão como `error` em uma transação SEPARADA e ALERTA o plantão.
 
@@ -468,7 +538,9 @@ async def _safe_mark_error(
     try:
         async with session_factory() as db, db.begin():
             repo = ReconciliationRepository(db)
-            await repo.mark_session_error(session_id, user_message=user_message)
+            await repo.mark_session_error(
+                session_id, user_message=user_message, error_code=error_code
+            )
     except Exception:
         log.exception("reconciliation_mark_error_failed", session_id=str(session_id))
 
@@ -480,6 +552,82 @@ async def _safe_mark_error(
         ),
         settings,
     )
+
+
+async def _settle_terminal_side_effects(
+    session_id: UUID,
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    duracao_s: int,
+) -> None:
+    """Efeitos do desfecho: evento de métrica (04.1) + notificação in-app (04.4).
+
+    Os dois juntos porque dependem exatamente da mesma leitura — o estado
+    terminal real da sessão. Separá-los custaria uma 2ª query e abriria a
+    janela para métrica e aviso discordarem sobre o que aconteceu.
+
+    O `status` é **lido do banco**, não deduzido do caminho que o job
+
+    percorreu: uma sessão cancelada pelo usuário no meio termina em `error`
+    mesmo com o caminho feliz chegando ao fim (o
+    `update_session_after_matching` casa 0 linhas por causa da guarda
+    `WHERE status='processing'`). Ler é a única fonte que não mente — e é o que
+    faz a notificação dizer "Erro" quando o usuário cancelou, em vez de
+    "Processada".
+
+    Não faz nada quando:
+        - a sessão sumiu (descartada/inexistente) — não houve conclusão;
+        - a sessão continua em `processing` — o job caiu antes de aterrissar
+          num estado terminal (ex.: `_safe_mark_error` também falhou). Avisar
+          "acabou" aqui seria mentir, e é justamente o caso que o cron
+          `mark_stuck_sessions_as_error` existe pra pegar.
+
+    Fail-soft por fora: nem métrica nem aviso podem derrubar o job, que a esta
+    altura já entregou o trabalho de verdade.
+    """
+    try:
+        async with session_factory() as db, db.begin():
+            row = (
+                await db.execute(
+                    select(
+                        ReconciliationSession.status,
+                        ReconciliationSession.client_id,
+                        ReconciliationSession.created_by,
+                        ReconciliationSession.omie_conta_id,
+                        ReconciliationSession.reference_month,
+                        ReconciliationSession.error_code,
+                    ).where(
+                        ReconciliationSession.id == session_id,
+                        ReconciliationSession.deleted_at.is_(None),
+                    )
+                )
+            ).first()
+            if row is None or row.status == ReconciliationStatus.PROCESSING.value:
+                log.info(
+                    "reconciliation_terminal_side_effects_skipped",
+                    session_id=str(session_id),
+                    status=row.status if row is not None else None,
+                )
+                return
+
+            await UsageEventService(UsageEventRepository(db)).emit_conciliacao_concluida(
+                session_id=session_id,
+                duracao_s=duracao_s,
+                status=row.status,
+            )
+            # BACK 04.4 — o aviso que responde "como é que ela sabe que acabou?".
+            # Vai para o AUTOR da conciliação (`created_by`).
+            await NotificationService(NotificationRepository(db)).notify_session_settled(
+                session_id=session_id,
+                client_id=row.client_id,
+                user_id=row.created_by,
+                status=row.status,
+                omie_conta_id=row.omie_conta_id,
+                reference_month=row.reference_month,
+                error_code=row.error_code,
+            )
+    except Exception:
+        log.warning("reconciliation_terminal_side_effects_failed", session_id=str(session_id))
 
 
 async def _run_qualification_safely(

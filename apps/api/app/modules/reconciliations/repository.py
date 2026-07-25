@@ -17,18 +17,21 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.models import (
     OmieAccountCache,
     ReconciliationAnomaly,
+    ReconciliationFile,
     ReconciliationFileEntry,
+    ReconciliationFileStatus,
     ReconciliationOmieEntry,
     ReconciliationSession,
     ReconciliationStatus,
 )
+from app.modules.reconciliations.totals import SessionCounters, compute_session_counters
 
 
 class ReconciliationRepository:
@@ -49,30 +52,62 @@ class ReconciliationRepository:
         reference_month: date,
         file_hash: str,
     ) -> bool:
-        """Retorna True se já existe sessão ATIVA com a tupla idempotente.
+        """True se a conciliação ATIVA de (cliente, conta, mês) já tem esta parte.
+
+        **Sprint 4 (BACK 04.2):** o hash desceu de nível. Antes a pergunta era
+        "existe sessão com esta tupla de 4 colunas?"; agora é "a conciliação
+        desta conta+mês já contém um arquivo com este conteúdo?" — um JOIN com
+        `reconciliation_files`. O endpoint `/check-duplicate` mantém a mesma
+        assinatura; o que mudou é o que "duplicata" significa.
 
         Ignora sessões descartadas (`deleted_at IS NOT NULL`) — depois de
-        descartar uma sessão, o usuário pode criar uma nova com o mesmo
-        arquivo no mesmo mês. O índice UNIQUE no banco também é parcial,
-        então a consistência fica garantida em ambas as camadas.
-
-        Não carrega a `ReconciliationSession` inteira: seleciona apenas o `id`
-        com `LIMIT 1` para que o Postgres responda direto pelo índice da
-        UNIQUE — gasto de I/O constante e mínimo.
+        descartar, o usuário pode recriar com o mesmo arquivo no mesmo mês. O
+        índice UNIQUE no banco também é parcial, então a consistência fica
+        garantida em ambas as camadas.
         """
         stmt = (
-            select(ReconciliationSession.id)
+            select(ReconciliationFile.id)
+            .join(
+                ReconciliationSession,
+                ReconciliationSession.id == ReconciliationFile.session_id,
+            )
             .where(
                 ReconciliationSession.client_id == client_id,
                 ReconciliationSession.omie_conta_id == omie_conta_id,
                 ReconciliationSession.reference_month == reference_month,
-                ReconciliationSession.file_hash == file_hash,
                 ReconciliationSession.deleted_at.is_(None),
+                ReconciliationFile.file_hash == file_hash,
             )
             .limit(1)
         )
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none() is not None
+
+    async def find_active_session_for_account_month(
+        self,
+        *,
+        client_id: UUID,
+        omie_conta_id: int,
+        reference_month: date,
+    ) -> UUID | None:
+        """Conciliação ATIVA de (cliente, conta, mês), ou None — BACK 04.2.
+
+        Uma conciliação por conta+mês é a nova regra. Quem já tem uma e quer
+        acrescentar uma parte deve ANEXAR (`POST /{id}/files`), não recriar;
+        este método é o que permite responder isso com uma mensagem acionável
+        em vez de um 409 de violação de índice.
+        """
+        session_id: UUID | None = await self._session.scalar(
+            select(ReconciliationSession.id)
+            .where(
+                ReconciliationSession.client_id == client_id,
+                ReconciliationSession.omie_conta_id == omie_conta_id,
+                ReconciliationSession.reference_month == reference_month,
+                ReconciliationSession.deleted_at.is_(None),
+            )
+            .limit(1)
+        )
+        return session_id
 
     async def find_active_session_by_hash(
         self,
@@ -92,6 +127,10 @@ class ReconciliationRepository:
         Sessões em `error` NÃO contam (reimportar é permitido — não se pune o
         usuário pelo erro do sistema). Descartadas (`deleted_at`) idem. Retorna
         a mais recente `(id, created_at, status)` ou `None`.
+
+        Sprint 4: procura o hash em `reconciliation_files` (por ARQUIVO), não
+        mais na coluna legada da sessão — senão o dedup do `/parse` pararia de
+        enxergar as partes 2..N de qualquer conciliação multi-arquivo.
         """
         stmt = (
             select(
@@ -99,9 +138,13 @@ class ReconciliationRepository:
                 ReconciliationSession.created_at,
                 ReconciliationSession.status,
             )
+            .join(
+                ReconciliationFile,
+                ReconciliationFile.session_id == ReconciliationSession.id,
+            )
             .where(
                 ReconciliationSession.client_id == client_id,
-                ReconciliationSession.file_hash == file_hash,
+                ReconciliationFile.file_hash == file_hash,
                 ReconciliationSession.deleted_at.is_(None),
                 ReconciliationSession.status != ReconciliationStatus.ERROR.value,
             )
@@ -168,6 +211,115 @@ class ReconciliationRepository:
         if entries:
             self._session.add_all(entries)
             await self._session.flush()
+
+    # ------------------------------------------------------------------
+    # Partes da conciliação (BACK 04.2)
+    # ------------------------------------------------------------------
+
+    async def add_files_with_entries(
+        self,
+        session_id: UUID,
+        parts: list[tuple[ReconciliationFile, list[ReconciliationFileEntry]]],
+    ) -> None:
+        """Insere N partes e as linhas de cada uma, já vinculadas (`file_id`).
+
+        O vínculo linha→parte é o que torna a remoção de uma parte cirúrgica: o
+        `ON DELETE CASCADE` leva só as linhas dela. Um `flush` por parte garante
+        o `file.id` populado ANTES de setar as entries (sem depender de ordem
+        de INSERT do ORM).
+
+        Commit é do caller (padrão do módulo).
+        """
+        for file_obj, entries in parts:
+            file_obj.session_id = session_id
+            self._session.add(file_obj)
+            await self._session.flush()
+            for entry in entries:
+                entry.session_id = session_id
+                entry.file_id = file_obj.id
+            if entries:
+                self._session.add_all(entries)
+                await self._session.flush()
+
+    async def list_files(self, session_id: UUID) -> list[tuple[ReconciliationFile, int]]:
+        """Partes da sessão + quantas linhas cada uma trouxe, mais antiga primeiro.
+
+        Uma query só (LEFT JOIN + GROUP BY) — a contagem por parte num loop
+        seria N+1 numa tela que já é chamada a cada abertura de conciliação.
+        """
+        stmt = (
+            select(ReconciliationFile, func.count(ReconciliationFileEntry.id))
+            .outerjoin(
+                ReconciliationFileEntry,
+                ReconciliationFileEntry.file_id == ReconciliationFile.id,
+            )
+            .where(ReconciliationFile.session_id == session_id)
+            .group_by(ReconciliationFile.id)
+            .order_by(ReconciliationFile.created_at, ReconciliationFile.id)
+        )
+        rows = await self._session.execute(stmt)
+        return [(row[0], row[1]) for row in rows.all()]
+
+    async def compute_counters(self, session_id: UUID) -> SessionCounters:
+        """Totalizadores DERIVADOS das linhas — fonte única (BACK 04.3).
+
+        Fina de propósito: a regra mora em `totals.py`, compartilhada com a
+        revisão e com a materialização que a lista lê. O repository só expõe o
+        acesso para o service não importar o módulo de regra direto.
+        """
+        return await compute_session_counters(self._session, session_id)
+
+    async def count_files(self, session_id: UUID) -> int:
+        """Nº de partes da sessão (inclui as que falharam na extração)."""
+        total: int | None = await self._session.scalar(
+            select(func.count(ReconciliationFile.id)).where(
+                ReconciliationFile.session_id == session_id
+            )
+        )
+        return total or 0
+
+    async def existing_file_hashes(self, session_id: UUID, hashes: list[str]) -> set[str]:
+        """Interseção entre os hashes informados e os que a sessão já tem.
+
+        Pré-check do anexo: permite responder "a parte X é duplicata, mas a Y é
+        nova" — a UNIQUE sozinha só diria que a operação toda falhou.
+        """
+        if not hashes:
+            return set()
+        rows = await self._session.execute(
+            select(ReconciliationFile.file_hash).where(
+                ReconciliationFile.session_id == session_id,
+                ReconciliationFile.file_hash.in_(hashes),
+            )
+        )
+        return set(rows.scalars().all())
+
+    async def get_file(self, session_id: UUID, file_id: UUID) -> ReconciliationFile | None:
+        """Uma parte da sessão. Filtra por `session_id` de propósito: o id da
+        parte vem da URL e não pode servir para alcançar outra conciliação."""
+        file_obj: ReconciliationFile | None = await self._session.scalar(
+            select(ReconciliationFile).where(
+                ReconciliationFile.id == file_id,
+                ReconciliationFile.session_id == session_id,
+            )
+        )
+        return file_obj
+
+    async def count_parsed_files(self, session_id: UUID) -> int:
+        """Nº de partes que efetivamente trouxeram linhas (`status='parsed'`)."""
+        total: int | None = await self._session.scalar(
+            select(func.count(ReconciliationFile.id)).where(
+                ReconciliationFile.session_id == session_id,
+                ReconciliationFile.status == ReconciliationFileStatus.PARSED.value,
+            )
+        )
+        return total or 0
+
+    async def delete_file(self, file_id: UUID) -> None:
+        """Remove a parte. As linhas dela vão junto pelo `ON DELETE CASCADE`."""
+        await self._session.execute(
+            delete(ReconciliationFile).where(ReconciliationFile.id == file_id)
+        )
 
     # ------------------------------------------------------------------
     # Worker — leitura (BACK 8.2 + 8.4)
@@ -284,6 +436,7 @@ class ReconciliationRepository:
                 balance_difference=balance_difference,
                 processed_at=datetime.now(UTC),
                 error_message=None,
+                error_code=None,
             )
         )
 
@@ -292,12 +445,18 @@ class ReconciliationRepository:
         session_id: UUID,
         *,
         user_message: str,
+        error_code: str | None = None,
     ) -> None:
-        """Marca a sessão como `status='error'` e popula `error_message`.
+        """Marca a sessão como `status='error'` + `error_message` + `error_code`.
 
         Usado pelo worker quando alguma etapa falha (Omie indisponível,
         parsing inconsistente, etc). O `user_message` é em PT-BR — vem do
         `AppError.user_message` da exceção que disparou.
+
+        `error_code` (Sprint 4) é o CÓDIGO canônico do desfecho: é o que a tela
+        de erro e a notificação mostram para o usuário reportar, sem expor a
+        linguagem interna (S2/R9). Opcional para não quebrar callers antigos —
+        `None` deixa a coluna nula e a UI cai na mensagem.
 
         Esta operação roda em transação SEPARADA do matching: se o matching
         falhou e fez rollback, ainda assim conseguimos marcar o erro porque
@@ -309,6 +468,7 @@ class ReconciliationRepository:
             .values(
                 status=ReconciliationStatus.ERROR.value,
                 error_message=user_message,
+                error_code=error_code,
             )
         )
 
@@ -364,6 +524,7 @@ class ReconciliationRepository:
             .values(
                 status=ReconciliationStatus.PROCESSING.value,
                 error_message=None,
+                error_code=None,
                 processed_at=None,
                 conciliated_count=0,
                 sem_omie_count=0,

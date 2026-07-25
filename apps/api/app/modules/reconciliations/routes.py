@@ -10,6 +10,10 @@ S10 (BACK 8.1 + 8.6):
 S11.fix (retry de sessão em erro):
     - POST /api/v1/reconciliations/{session_id}/reprocess
     - POST /api/v1/reconciliations/{session_id}/discard  (soft-delete)
+S4 (BACK 04.2 — N arquivos por conciliação):
+    - POST   /api/v1/reconciliations/{session_id}/files            (anexar partes)
+    - GET    /api/v1/reconciliations/{session_id}/files            (listar partes)
+    - DELETE /api/v1/reconciliations/{session_id}/files/{file_id}  (remover parte)
 """
 
 from __future__ import annotations
@@ -34,7 +38,7 @@ from fastapi import (
 
 from app.core.audit import AccessAction, record_access
 from app.core.config import Settings, get_settings
-from app.core.crypto_service import provision_client_cipher
+from app.core.crypto_service import load_client_cipher, provision_client_cipher
 from app.core.dependencies import (
     CurrentUserDep,
     DbSessionDep,
@@ -45,17 +49,21 @@ from app.core.exceptions import (
     ClientNotAccessibleError,
     ConflictError,
     DuplicateFileError,
+    ErrorCode,
     NotFoundError,
     ValidationAppError,
 )
 from app.core.rate_limit import limiter, user_id_key_func
-from app.db.models import ReconciliationStatus
+from app.db.models import Client, ReconciliationStatus
 from app.integrations.anthropic.client import AnthropicClient
 from app.modules.reconciliations.parse_service import ParseService
 from app.modules.reconciliations.processing.checksum import compute_checksum
 from app.modules.reconciliations.processing.job import run_reconciliation_processing
 from app.modules.reconciliations.repository import ReconciliationRepository
 from app.modules.reconciliations.schemas import (
+    AttachFilesPayload,
+    AttachFilesRequest,
+    AttachFilesResponse,
     CheckDuplicateResponse,
     CreateReconciliationPayload,
     CreateReconciliationRequest,
@@ -63,9 +71,12 @@ from app.modules.reconciliations.schemas import (
     DuplicateCheckPayload,
     ParseResponse,
     SessionDetailResponse,
+    SessionFilesResponse,
     SessionStatusResponse,
 )
 from app.modules.reconciliations.service import ReconciliationService
+from app.modules.usage_events.repository import UsageEventRepository
+from app.modules.usage_events.service import UsageEventService
 from app.utils.upload import parse_content_length, read_upload_within_limit
 
 router = APIRouter(prefix="/api/v1/reconciliations", tags=["reconciliations"])
@@ -139,12 +150,37 @@ _CLIENT_NOT_FOUND_MSG = "Cliente não encontrado."
 _SESSION_NOT_FOUND_MSG = "Sessão de conciliação não encontrada."
 
 
+async def _client_for_session(
+    db: DbSessionDep,
+    user: CurrentUserDep,
+    session_id: UUID,
+) -> Client:
+    """Resolve sessão → cliente aplicando o RBAC padrão do módulo.
+
+    Ponto único do trio (carrega a sessão, valida a carteira, devolve o
+    `Client` já carregado para o cipher) usado pelas rotas de partes — repetir
+    esse bloco em cada handler é onde a checagem some numa rota nova.
+    Manager fora da carteira recebe **404**, igual às demais rotas de sessão,
+    para não distinguir "não existe" de "não é sua" (CLAUDE.md §3.11).
+    """
+    repo_session = await ReconciliationRepository(db).get_status_view(session_id)
+    if repo_session is None:
+        raise NotFoundError(_SESSION_NOT_FOUND_MSG)
+    try:
+        return await require_client_access(repo_session.client_id, user, db)
+    except ClientNotAccessibleError as exc:
+        raise NotFoundError(_SESSION_NOT_FOUND_MSG) from exc
+
+
 @router.get(
     "/check-duplicate",
     summary=(
-        "Verifica se já existe sessão com (client, conta, mês, hash). "
-        "RBAC: admin OU manager-da-carteira; cliente inacessível devolve 404 "
-        "para não vazar a existência."
+        "Verifica se a conciliação de (client, conta, mês) já contém um arquivo "
+        "com este hash. Sprint 4: o hash desceu para `reconciliation_files` — "
+        "'duplicata' passou a significar 'esta parte já está nesta "
+        "conciliação', não 'já existe sessão com esta tupla'. RBAC: admin OU "
+        "manager-da-carteira; cliente inacessível devolve 404 para não vazar a "
+        "existência."
     ),
 )
 async def check_duplicate(
@@ -258,7 +294,10 @@ async def parse_statement(
     # detecção de truncamento deixar passar. Vai na response para o front
     # bloquear a confirmação da prévia quando `ok=False` e exibir o motivo.
     checksum = compute_checksum(statement)
-    return ParseResponse(data=statement, checksum=checksum)
+    # BACK 04.2 — devolve o hash calculado AQUI, sobre os bytes recebidos. O
+    # front repassa este valor ao criar/anexar a conciliação em vez de calcular
+    # o dele: a identidade da parte passa a ter uma origem só (S0/A10).
+    return ParseResponse(data=statement, checksum=checksum, file_hash=file_hash)
 
 
 # ----------------------------------------------------------------------
@@ -270,13 +309,16 @@ async def parse_statement(
     "",
     status_code=status.HTTP_201_CREATED,
     summary=(
-        "Cria sessão de conciliação a partir do ParsedStatement (S9) e agenda "
-        "o processamento como BackgroundTask do FastAPI. RBAC: admin OU "
-        "manager-da-carteira; cliente inacessível devolve 404. Idempotência "
-        "garantida por UNIQUE (client_id, omie_conta_id, reference_month, "
-        "file_hash) — duplicata retorna 409 DUPLICATE_FILE. "
-        "Rate limit: 10/min/usuário — uma sessão = 1 processamento em "
-        "background + várias chamadas Omie."
+        "Cria a conciliação a partir de N arquivos já extraídos (S9) e agenda "
+        "o processamento como BackgroundTask do FastAPI. Uma conciliação = "
+        "UMA conta + UM mês, com N partes consolidadas num só resumo: a "
+        "unicidade é UNIQUE (client_id, omie_conta_id, reference_month) e a "
+        "duplicata de arquivo é UNIQUE (session_id, file_hash). Já existir "
+        "conciliação para a conta+mês retorna 409 indicando anexar o arquivo à "
+        "existente (POST /{id}/files); parte repetida retorna 409 "
+        "DUPLICATE_FILE. RBAC: admin OU manager-da-carteira; cliente "
+        "inacessível devolve 404. Rate limit: 10/min/usuário — uma sessão = 1 "
+        "processamento em background + várias chamadas Omie."
     ),
 )
 @limiter.limit("10/minute", key_func=user_id_key_func)
@@ -305,11 +347,22 @@ async def create_reconciliation(
     # então a `dek_wrapped` recém-gerada é persistida no commit abaixo, junto da
     # sessão — atômico.
     cipher = await provision_client_cipher(client, settings=settings)
-    session_id = await service.create_session_with_entries(
+    session_id, total_files = await service.create_session_with_entries(
         request=payload,
         created_by=UUID(user.id),
         cipher=cipher,
         search_blind_index_key=settings.SEARCH_BLIND_INDEX_KEY,
+    )
+    # BACK 04.1 — `conciliacao_criada` é o DENOMINADOR da métrica de outcome da
+    # Sprint 4. Emitido aqui, no ponto real do fluxo, e ANTES do commit abaixo:
+    # a linha do evento é atômica com a criação da sessão (não existe sessão
+    # criada sem evento, nem evento de sessão que não nasceu). A emissão é
+    # fail-soft com SAVEPOINT — instrumentação quebrada não derruba a criação.
+    await UsageEventService(UsageEventRepository(db)).emit_conciliacao_criada(
+        session_id=session_id,
+        client_id=payload.client_id,
+        n_arquivos=total_files,
+        criado_por=UUID(user.id),
     )
     # Commit ANTES de agendar. A BackgroundTask roda no MESMO processo, abrindo
     # sua PRÓPRIA DB session — precisa enxergar a sessão já commitada.
@@ -329,6 +382,122 @@ async def create_reconciliation(
         data=CreateReconciliationPayload(
             session_id=session_id,
             status="processing",
+            total_files=total_files,
+        )
+    )
+
+
+# ----------------------------------------------------------------------
+# BACK 04.2 — partes (arquivos) de uma conciliação
+# ----------------------------------------------------------------------
+
+
+@router.post(
+    "/{session_id}/files",
+    status_code=status.HTTP_201_CREATED,
+    summary=(
+        "Anexa N arquivos (partes) a uma conciliação existente e re-consolida: "
+        "só as partes novas são incorporadas, as linhas somam na MESMA sessão e "
+        "o cruzamento Omie roda UMA vez sobre o conjunto. É o cenário S-3 ('a "
+        "parte 2 chegou no dia seguinte') — sem ele a unicidade conta+mês seria "
+        "um beco sem saída. Conflito (409): conciliação em `processing` (o job "
+        "está escrevendo nela), conciliação `done`, ou parte já presente "
+        "(mesmo hash → DUPLICATE_FILE). RBAC: admin OU manager-da-carteira; "
+        "fora da carteira devolve 404. Rate limit: 10/min/usuário."
+    ),
+)
+@limiter.limit("10/minute", key_func=user_id_key_func)
+async def attach_reconciliation_files(
+    request: Request,
+    response: Response,
+    background_tasks: BackgroundTasks,
+    user: ManagerOrAdminDep,
+    db: DbSessionDep,
+    service: ReconciliationServiceDep,
+    settings: Annotated[Settings, Depends(get_settings)],
+    session_id: UUID,
+    payload: AttachFilesRequest,
+) -> AttachFilesResponse:
+    client = await _client_for_session(db, user, session_id)
+
+    cipher = await provision_client_cipher(client, settings=settings)
+    total_files, needs_reprocess = await service.attach_files(
+        session_id=session_id,
+        files=payload.files,
+        cipher=cipher,
+        search_blind_index_key=settings.SEARCH_BLIND_INDEX_KEY,
+    )
+    # Mesma ordem do create: commit ANTES de agendar, senão a BackgroundTask
+    # (que abre a própria DB session) lê o estado antigo.
+    await db.commit()
+    if needs_reprocess:
+        _schedule_reconciliation_processing(background_tasks, session_id)
+
+    return AttachFilesResponse(
+        data=AttachFilesPayload(
+            session_id=session_id,
+            total_files=total_files,
+            reprocessing=needs_reprocess,
+        )
+    )
+
+
+@router.get(
+    "/{session_id}/files",
+    summary=(
+        "Lista as partes (arquivos) da conciliação com o nome DECIFRADO, o "
+        "status de cada uma (`parsed`/`error`) e quantas linhas trouxe. É o que "
+        "permite a tela dizer QUAL parte falhou (código genérico, nunca a "
+        "mensagem interna) e oferecer removê-la. RBAC: admin OU "
+        "manager-da-carteira; fora da carteira devolve 404."
+    ),
+)
+async def list_reconciliation_files(
+    user: ManagerOrAdminDep,
+    db: DbSessionDep,
+    service: ReconciliationServiceDep,
+    settings: Annotated[Settings, Depends(get_settings)],
+    session_id: UUID,
+) -> SessionFilesResponse:
+    client = await _client_for_session(db, user, session_id)
+    # LEITURA → `load_client_cipher` (não provisiona DEK; cliente legado lê
+    # linhas bare com a chave global).
+    cipher = await load_client_cipher(client, settings=settings)
+    payload = await service.list_session_files(session_id=session_id, cipher=cipher)
+    return SessionFilesResponse(data=payload)
+
+
+@router.delete(
+    "/{session_id}/files/{file_id}",
+    summary=(
+        "Remove uma parte da conciliação e re-consolida o restante. As linhas "
+        "daquela parte saem junto (ON DELETE CASCADE via `file_entries."
+        "file_id`); as das outras partes ficam intactas. Conflito (409): "
+        "conciliação em `processing`, ou tentativa de remover a ÚLTIMA parte "
+        "com lançamentos (para descartar tudo, exclua a conciliação). RBAC: "
+        "admin OU manager-da-carteira; fora da carteira devolve 404."
+    ),
+)
+async def remove_reconciliation_file(
+    background_tasks: BackgroundTasks,
+    user: ManagerOrAdminDep,
+    db: DbSessionDep,
+    service: ReconciliationServiceDep,
+    session_id: UUID,
+    file_id: UUID,
+) -> AttachFilesResponse:
+    await _client_for_session(db, user, session_id)
+
+    total_files, needs_reprocess = await service.remove_file(session_id=session_id, file_id=file_id)
+    await db.commit()
+    if needs_reprocess:
+        _schedule_reconciliation_processing(background_tasks, session_id)
+
+    return AttachFilesResponse(
+        data=AttachFilesPayload(
+            session_id=session_id,
+            total_files=total_files,
+            reprocessing=needs_reprocess,
         )
     )
 
@@ -534,6 +703,7 @@ async def cancel_reconciliation(
     await repo.mark_session_error(
         session_id,
         user_message="Processamento cancelado pelo usuário.",
+        error_code=ErrorCode.RECONCILIATION_CANCELLED.value,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

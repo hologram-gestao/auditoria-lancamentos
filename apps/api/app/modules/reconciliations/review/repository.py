@@ -22,7 +22,7 @@ from __future__ import annotations
 from datetime import date
 from uuid import UUID
 
-from sqlalchemy import asc, case, desc, func, select, update
+from sqlalchemy import asc, case, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
@@ -35,6 +35,7 @@ from app.db.models import (
     ReconciliationOmieEntry,
     ReconciliationSession,
 )
+from app.modules.reconciliations.totals import refresh_session_counters
 
 # Ordem custom de severidade (critical → moderate → info) usada em queries
 # de listagem de anomalias e tipos. CASE..WHEN é mais direto que adicionar
@@ -105,6 +106,10 @@ class ReviewRepository:
         )
         if situation in {
             FileEntrySituation.CONCILIADO.value,
+            # FASE 1: linha que casou por valor com data divergente ≤3 dias.
+            # Sem ela na lista de aceitos, o filtro era silenciosamente
+            # ignorado e a aba devolvia TUDO — pior que devolver nada.
+            FileEntrySituation.CONCILIADO_DATA_DIVERGENTE.value,
             FileEntrySituation.SEM_OMIE.value,
             FileEntrySituation.IGNORADO.value,
         }:
@@ -184,40 +189,24 @@ class ReviewRepository:
         return {oid for oid in rows if oid is not None}
 
     async def recompute_file_entry_counters(self, session_id: UUID) -> tuple[int, int]:
-        """Re-conta `conciliated_count` e `sem_omie_count` da sessão.
+        """Re-materializa os totalizadores da sessão. Delega à **fonte única**.
 
-        Centralizado para evitar divergência entre handlers que alteram
-        `situation` (BACK 9.3 hoje; BACK 14 expand quando entrar).
+        Sprint 4 (BACK 04.3): a regra de contagem saiu daqui e foi para
+        `app.modules.reconciliations.totals`, compartilhada com o detalhe e com
+        a lista. Duas correções vieram junto:
 
-        `omie_sem_arquivo_count` não muda — depende de `omie_entries`, não de
-        `file_entries`. Esta função NÃO altera essa coluna.
+        - `conciliado_data_divergente` agora CONTA como conciliado (antes só
+          `conciliado` contava — bastava o analista tocar numa linha para o
+          contador da lista cair sozinho, sem nada ter mudado de fato);
+        - as cinco colunas são atualizadas juntas, não só duas — atualizar um
+          subconjunto foi por onde a divergência entrou.
 
         Returns:
-            Tupla (conciliated_count, sem_omie_count) após o UPDATE.
+            Tupla (conciliated_count, sem_omie_count) após o UPDATE — assinatura
+            preservada para os callers existentes.
         """
-        rows = (
-            await self._session.execute(
-                select(
-                    ReconciliationFileEntry.situation,
-                    func.count(ReconciliationFileEntry.id),
-                )
-                .where(ReconciliationFileEntry.session_id == session_id)
-                .group_by(ReconciliationFileEntry.situation)
-            )
-        ).all()
-        conciliated = 0
-        sem_omie = 0
-        for situation_value, count_value in rows:
-            if situation_value == FileEntrySituation.CONCILIADO.value:
-                conciliated = int(count_value)
-            elif situation_value == FileEntrySituation.SEM_OMIE.value:
-                sem_omie = int(count_value)
-        await self._session.execute(
-            update(ReconciliationSession)
-            .where(ReconciliationSession.id == session_id)
-            .values(conciliated_count=conciliated, sem_omie_count=sem_omie)
-        )
-        return conciliated, sem_omie
+        counters = await refresh_session_counters(self._session, session_id)
+        return counters.conciliated_count, counters.sem_omie_count
 
     # ------------------------------------------------------------------
     # Omie entries (9.5, 9.6)
@@ -367,22 +356,13 @@ class ReviewRepository:
         await self._session.flush()
 
     async def recompute_anomaly_count(self, session_id: UUID) -> int:
-        """Recalcula `anomaly_count` na sessão (TOTAL — resolvidas + pendentes)."""
-        total = int(
-            (
-                await self._session.execute(
-                    select(func.count(ReconciliationAnomaly.id)).where(
-                        ReconciliationAnomaly.session_id == session_id,
-                    )
-                )
-            ).scalar_one()
-        )
-        await self._session.execute(
-            update(ReconciliationSession)
-            .where(ReconciliationSession.id == session_id)
-            .values(anomaly_count=total)
-        )
-        return total
+        """Recalcula `anomaly_count` na sessão (TOTAL — resolvidas + pendentes).
+
+        Também delega à fonte única (BACK 04.3): criar/resolver uma anomalia
+        re-materializa TODOS os totalizadores, não só o de anomalias.
+        """
+        counters = await refresh_session_counters(self._session, session_id)
+        return counters.anomaly_count
 
     # Helpers compartilhados com o serviço de anomaly types (BACK 9.10).
 

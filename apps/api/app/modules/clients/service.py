@@ -44,6 +44,7 @@ from app.integrations.omie.client import OmieClient, OmieCredentials
 from app.modules.clients.accounts_cache import OmieAccountsCacheService
 from app.modules.clients.repository import ClientRepository, ClientRow
 from app.modules.clients.schemas import (
+    UI_STATUS_TO_DB,
     BankAccountResponse,
     ClientDetailResponse,
     ClientResponse,
@@ -344,14 +345,22 @@ class ClientService:
         page_size: int,
         omie_conta_id: int | None,
         month: str | None,
+        status: str | None = None,
     ) -> tuple[list[ReconciliationSessionSummary], PaginationMeta]:
-        """Endpoint C: histórico paginado das sessões de conciliação (S7 BACK 4.2).
+        """Lista paginada das conciliações do cliente (S7 BACK 4.2 + BACK 04.3).
 
         `month` chega como `'YYYY-MM'`. Convertemos pra range half-open
         `[YYYY-MM-01, próximo-mês-01)` no service — repository fica agnóstico.
         Mês inválido (formato errado, valores fora de range) → 400.
+
+        `status` chega no vocabulário do PRODUTO ("Em processamento" /
+        "Processada" / "Erro") e é traduzido AQUI para os status do banco —
+        `processed` cobre `reviewing` E `done`. A tradução mora no service
+        porque é regra de produto, não de persistência; o repository recebe a
+        lista já resolvida.
         """
         month_start, month_end = _parse_month_range(month)
+        statuses = UI_STATUS_TO_DB.get(status) if status else None
         rows, total = await self._repo.list_reconciliations_paginated(
             client_id,
             page=page,
@@ -359,8 +368,9 @@ class ClientService:
             omie_conta_id=omie_conta_id,
             month_start=month_start,
             month_end=month_end,
+            statuses=statuses,
         )
-        responses = [_session_to_summary(r) for r in rows]
+        responses = [_session_to_summary(session, total_files) for session, total_files in rows]
         total_pages = (total + page_size - 1) // page_size if page_size else 0
         pagination = PaginationMeta(
             page=page, page_size=page_size, total=total, total_pages=total_pages
@@ -390,9 +400,17 @@ class ClientService:
 # ----------------------------------------------------------------------
 
 
-def _session_to_summary(session: ReconciliationSession) -> ReconciliationSessionSummary:
-    """Mapeia ORM `ReconciliationSession` → DTO `ReconciliationSessionSummary`."""
-    return ReconciliationSessionSummary.model_validate(session, from_attributes=True)
+def _session_to_summary(
+    session: ReconciliationSession,
+    total_files: int,
+) -> ReconciliationSessionSummary:
+    """Mapeia ORM `ReconciliationSession` → DTO `ReconciliationSessionSummary`.
+
+    `total_files` vem da subquery da listagem (não de um acesso a relationship —
+    todos são `lazy="raise"`, e seria N+1 mesmo que não fossem).
+    """
+    summary = ReconciliationSessionSummary.model_validate(session, from_attributes=True)
+    return summary.model_copy(update={"total_files": total_files})
 
 
 def _parse_month_range(month: str | None) -> tuple[date | None, date | None]:

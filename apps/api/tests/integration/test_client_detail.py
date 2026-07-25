@@ -25,7 +25,7 @@ Cenários:
         - Filtra por omie_conta_id.
         - Filtra por month=YYYY-MM (range half-open do mês).
         - Filtros combinados.
-        - Paginação respeita pageSize (default 10, max 50).
+        - Paginação respeita pageSize (default 20, max 100 — BACK 04.3).
         - Sessão com status='error' expõe error_message.
 """
 
@@ -669,7 +669,9 @@ class TestReconciliationsHistory:
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["pagination"]["total"] == 3
-        assert body["pagination"]["pageSize"] == 10  # default S7
+        # Sprint 4 (BACK 04.3): a lista virou a visão principal do cliente e o
+        # padrão de listas do design-system é ~20 por página (era 10 na S7).
+        assert body["pagination"]["pageSize"] == 20
 
         # s3 (mais recente) primeiro, depois s2, depois s1
         ids_in_order = [item["id"] for item in body["data"]]

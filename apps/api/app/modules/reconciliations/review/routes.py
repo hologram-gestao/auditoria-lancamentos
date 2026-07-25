@@ -142,7 +142,10 @@ async def _load_session_for_rbac(
     summary=(
         "Lista movimentações da sessão com filtros (situation, type, search) "
         "e paginação. Descriptografa `description` e `user_note` no servidor "
-        "antes de retornar. Filtro `search` aplica-se PÓS-decrypt em memória."
+        "antes de retornar. Filtro `search` aplica-se PÓS-decrypt em memória. "
+        "`situation` aceita `conciliado_data_divergente` (FASE 1) — sem ele a "
+        "aba não conseguia mostrar as linhas que casaram com data divergente, "
+        "e a soma dos filtros não fechava com o contador do detalhe."
     ),
 )
 async def list_file_entries(
@@ -150,7 +153,10 @@ async def list_file_entries(
     db: DbSessionDep,
     service: ReviewServiceDep,
     session_id: UUID,
-    situation: Annotated[Literal["all", "conciliado", "sem_omie", "ignorado"], Query()] = "all",
+    situation: Annotated[
+        Literal["all", "conciliado", "conciliado_data_divergente", "sem_omie", "ignorado"],
+        Query(),
+    ] = "all",
     type_filter: Annotated[Literal["all", "credit", "debit"], Query(alias="type")] = "all",
     search: Annotated[str | None, Query(max_length=200)] = None,
     page: Annotated[int, Query(ge=1)] = 1,
