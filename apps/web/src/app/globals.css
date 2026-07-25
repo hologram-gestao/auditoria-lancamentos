@@ -20,6 +20,18 @@
     --accent-foreground: 240 5.9% 10%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
+    /* Tokens semânticos de feedback — nunca hardcodar cor em componente.
+       `info` é AZUL: âmbar (warning) não pode ser fundo de card/banner
+       informativo (design-system). `success` é verde (toast de sucesso). */
+    --success: 142.1 76.2% 36.3%;
+    --success-foreground: 0 0% 98%;
+    --success-muted: 141.7 76.6% 96.1%;
+    --warning: 32.1 94.6% 43.7%;
+    --warning-foreground: 0 0% 98%;
+    --warning-muted: 48 100% 96.1%;
+    --info: 221.2 83.2% 53.3%;
+    --info-foreground: 0 0% 98%;
+    --info-muted: 213.8 100% 96.9%;
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
     --ring: 240 5.9% 10%;
@@ -43,6 +55,15 @@
     --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
+    --success: 142.1 70.6% 45.3%;
+    --success-foreground: 144.9 80.4% 10%;
+    --success-muted: 144.3 61.2% 12%;
+    --warning: 35.5 91.7% 32.9%;
+    --warning-foreground: 20.9 91.7% 14.1%;
+    --warning-muted: 28.4 72.5% 12%;
+    --info: 217.2 91.2% 59.8%;
+    --info-foreground: 226.2 57% 12%;
+    --info-muted: 224.4 64.3% 14%;
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
     --ring: 240 4.9% 83.9%;

@@ -139,7 +139,9 @@ export function ProcessingScreen({ clientId, sessionId }: ProcessingScreenProps)
   }
 
   function handleBackToForm() {
-    router.push(`/clientes/${clientId}/conciliacao/nova`);
+    // Sprint 4: a criação virou uma GAVETA aberta da lista — a página
+    // `/conciliacao/nova` não existe mais. O destino é a lista do cliente.
+    router.push(`/clientes/${clientId}`);
   }
 
   function handleBackToClient() {
@@ -243,7 +245,7 @@ function StepRow({ index, label, state }: StepRowProps) {
 function StepIcon({ state, index }: { state: StepState; index: number }) {
   if (state === 'done') {
     return (
-      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+      <span className="bg-success-muted text-success flex h-7 w-7 items-center justify-center rounded-full">
         <Check className="h-4 w-4" aria-hidden="true" />
       </span>
     );
@@ -287,7 +289,7 @@ function ErrorAlert({ message, onBackToForm, onBackToClient }: ErrorAlertProps) 
           Voltar para o cliente
         </Button>
         <Button size="sm" onClick={onBackToForm}>
-          Voltar ao formulário
+          Criar outra conciliação
         </Button>
       </div>
     </section>
@@ -303,8 +305,10 @@ function TimeoutAlert({ onRefresh, onBackToForm }: TimeoutAlertProps) {
   return (
     <section
       role="status"
-      // Âmbar — não é erro fatal; o backend pode ainda concluir.
-      className="space-y-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200"
+      // Token `warning` (não hex/`amber-*`): é um AVISO — o backend ainda pode
+      // concluir —, não um erro fatal. Âmbar aqui é legítimo porque isto é um
+      // alerta de atenção, e não um banner informativo.
+      className="border-warning/40 bg-warning-muted text-warning-foreground space-y-3 rounded-lg border p-4"
     >
       <div className="flex items-start gap-3">
         <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
@@ -313,14 +317,14 @@ function TimeoutAlert({ onRefresh, onBackToForm }: TimeoutAlertProps) {
             O processamento está demorando mais que o esperado
           </p>
           <p className="text-sm leading-snug">
-            Atualize para verificar o resultado, ou volte ao formulário para iniciar uma nova
-            conciliação.
+            Atualize para verificar o resultado, ou volte para a lista — você será avisado no
+            sino quando terminar.
           </p>
         </div>
       </div>
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <Button variant="outline" size="sm" onClick={onBackToForm}>
-          Voltar ao formulário
+          Voltar para as conciliações
         </Button>
         <Button size="sm" onClick={onRefresh}>
           <RefreshCw className="h-4 w-4" aria-hidden="true" />
