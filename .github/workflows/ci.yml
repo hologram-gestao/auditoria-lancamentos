@@ -154,12 +154,144 @@ jobs:
         continue-on-error: true
 
   # ============================================================
+  # Frontend — gate de a11y (axe-core em browser real)
+  # ============================================================
+  #
+  # Roda `apps/web/e2e/a11y-mocked.spec.ts`: a API é interceptada NO BROWSER
+  # (`page.route`) e o cookie de sessão é semeado, então a suíte sobe contra
+  # `next build` + servidor standalone — sem Postgres, sem seed, sem
+  # credenciais. É o que torna este gate possível no CI (ver ADR-004-INFRA).
+  #
+  # A suíte `e2e/a11y.spec.ts` (ambiente completo: Postgres + API + seed +
+  # E2E_PASSWORD/E2E_CLIENT_ID) continua OPCIONAL e roda só localmente — por
+  # isso este job aponta para UM arquivo, e não para o `testDir` inteiro: sem
+  # aquelas vars ela faria `test.skip` e deixaria o gate verde sem medir nada.
+  web_a11y:
+    name: Web (a11y · axe-core)
+    needs: changes
+    if: ${{ needs.changes.outputs.web == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      A11Y_SPEC: e2e/a11y-mocked.spec.ts
+      E2E_BASE_URL: http://127.0.0.1:3100
+      # A suíte mocka `**/api/v1/**` no browser; o rewrite do Next nunca é
+      # exercido. A var existe só porque o `next build` a resolve estaticamente.
+      INTERNAL_API_URL: http://127.0.0.1:8000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      # Falha ANTES de qualquer coisa cara se o artefato que o gate mede sumir.
+      # CI que referencia arquivo inexistente é vermelho garantido — melhor que
+      # seja explícito aqui do que um "no tests found" no fim do job.
+      - name: Check a11y spec exists
+        run: test -f "apps/web/$A11Y_SPEC" || { echo "::error::apps/web/$A11Y_SPEC não existe — o gate de a11y não tem o que rodar."; exit 1; }
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      # `--with-deps` instala as libs de sistema do Chromium (libnspr4, libnss3,
+      # libatk, libgbm, libasound…). Sem elas o browser baixa mas não sobe.
+      - name: Install Chromium + system deps
+        run: pnpm --filter @auditoria/web exec playwright install --with-deps chromium
+
+      - name: Build web (standalone)
+        run: pnpm --filter @auditoria/web build
+
+      # `output: standalone` do Next NÃO empacota `.next/static` nem `public/`.
+      - name: Assemble standalone assets
+        run: |
+          cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
+          if [ -d apps/web/public ]; then
+            cp -r apps/web/public apps/web/.next/standalone/apps/web/public
+          fi
+
+      - name: Start standalone server
+        env:
+          PORT: '3100'
+          HOSTNAME: 127.0.0.1
+          NODE_ENV: production
+        run: |
+          node apps/web/.next/standalone/apps/web/server.js > /tmp/web-server.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf -o /dev/null "$E2E_BASE_URL/login"; then
+              echo "servidor de produção respondendo em $E2E_BASE_URL"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::servidor standalone não subiu em 60s"
+          cat /tmp/web-server.log
+          exit 1
+
+      # O próprio spec reprova em qualquer violação `critical`/`serious`.
+      - name: Run axe-core a11y suite
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: a11y-report.json
+        run: pnpm --filter @auditoria/web exec playwright test "$A11Y_SPEC" --reporter=github,json
+
+      # Rede de segurança contra o modo de falha que motivou este job: suíte que
+      # se auto-pula e deixa o gate VERDE sem ter medido nada.
+      - name: Assert the gate actually ran
+        if: always()
+        run: |
+          node -e '
+            const fs = require("fs");
+            const path = "apps/web/a11y-report.json";
+            if (!fs.existsSync(path)) {
+              console.error("::error::relatório do Playwright não foi gerado — a suíte de a11y não chegou a rodar.");
+              process.exit(1);
+            }
+            const { stats = {} } = JSON.parse(fs.readFileSync(path, "utf8"));
+            console.log(`expected=${stats.expected} unexpected=${stats.unexpected} skipped=${stats.skipped} flaky=${stats.flaky}`);
+            if (!(stats.expected > 0)) {
+              console.error("::error::nenhum teste de a11y passou de fato — gate verde sem medir nada.");
+              process.exit(1);
+            }
+            if (stats.skipped > 0) {
+              console.error(`::error::${stats.skipped} teste(s) de a11y foram pulados — o gate precisa rodar todos.`);
+              process.exit(1);
+            }
+          '
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-a11y-report
+          path: |
+            apps/web/playwright-report/
+            apps/web/test-results/
+            apps/web/a11y-report.json
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ============================================================
   # Summary — um único job obrigatório para branch protection
   # ============================================================
   ci:
     name: CI
     if: always()
-    needs: [changes, api, web]
+    needs: [changes, api, web, web_a11y]
     runs-on: ubuntu-latest
     steps:
       - name: Summary
@@ -167,6 +299,7 @@ jobs:
           echo "changes=${{ needs.changes.result }}"
           echo "api=${{ needs.api.result }}"
           echo "web=${{ needs.web.result }}"
-          if [[ "${{ needs.api.result }}" == "failure" || "${{ needs.web.result }}" == "failure" ]]; then
+          echo "web_a11y=${{ needs.web_a11y.result }}"
+          if [[ "${{ needs.api.result }}" == "failure" || "${{ needs.web.result }}" == "failure" || "${{ needs.web_a11y.result }}" == "failure" ]]; then
             exit 1
           fi

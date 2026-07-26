@@ -1,0 +1,111 @@
+#!/bin/bash
+# Roda LOCALMENTE o mesmo gate de a11y que o CI executa no job `web_a11y`
+# (`.github/workflows/ci.yml`): `apps/web/e2e/a11y-mocked.spec.ts` contra o
+# servidor de PRODUÇÃO do Next (build standalone), com a API interceptada no
+# browser pelo próprio spec (`page.route`).
+#
+# Por que existe: quando o CI reprovar, o dev precisa reproduzir a falha com o
+# MESMO comando — sem isso o ciclo vira "muda e torce". Os passos aqui são
+# espelho 1:1 dos steps do job; se um mudar, mude os dois.
+#
+# NÃO precisa de Postgres, seed, API no ar nem credenciais. A suíte irmã
+# `e2e/a11y.spec.ts` (ambiente completo) continua sendo outra coisa e NÃO roda
+# aqui de propósito: sem `E2E_PASSWORD`/`E2E_CLIENT_ID` ela faz `test.skip` e
+# deixaria o gate verde sem ter medido nada.
+#
+# Uso:
+#   bash scripts/a11y-gate.sh          # porta 3100
+#   A11Y_PORT=3200 bash scripts/a11y-gate.sh
+#
+# Pré-requisito de máquina: as libs de sistema do Chromium. Se o browser baixar
+# mas não subir (`libnspr4.so: cannot open shared object file`), rode uma vez:
+#   pnpm --filter @auditoria/web exec playwright install --with-deps chromium
+# (exige root/apt). Sem root, use o container que já traz as libs:
+#   docker run --rm -it -v "$PWD":/w -w /w mcr.microsoft.com/playwright:v1.48.0-jammy \
+#     bash scripts/a11y-gate.sh
+set -euo pipefail
+
+PORT="${A11Y_PORT:-3100}"
+BASE_URL="http://127.0.0.1:${PORT}"
+SPEC="e2e/a11y-mocked.spec.ts"
+REPORT="a11y-report.json"
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+if [[ ! -f "apps/web/${SPEC}" ]]; then
+  echo "ERRO: apps/web/${SPEC} não existe — o gate de a11y não tem o que rodar." >&2
+  exit 1
+fi
+
+SERVER_PID=""
+cleanup() {
+  if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
+    kill "$SERVER_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+
+echo "==> Chromium + libs de sistema"
+pnpm --filter @auditoria/web exec playwright install --with-deps chromium
+
+# `INTERNAL_API_URL` é resolvida pelo `next build` (rewrite estático), não em
+# runtime. Aqui ela nunca é exercida: o spec intercepta `**/api/v1/**` no browser.
+echo "==> Build standalone"
+INTERNAL_API_URL="http://127.0.0.1:8000" pnpm --filter @auditoria/web build
+
+# `output: standalone` do Next NÃO empacota `.next/static` nem `public/`.
+echo "==> Assets do standalone"
+rm -rf apps/web/.next/standalone/apps/web/.next/static
+cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
+if [[ -d apps/web/public ]]; then
+  rm -rf apps/web/.next/standalone/apps/web/public
+  cp -r apps/web/public apps/web/.next/standalone/apps/web/public
+fi
+
+echo "==> Servidor de produção em ${BASE_URL}"
+PORT="$PORT" HOSTNAME="127.0.0.1" NODE_ENV="production" \
+  INTERNAL_API_URL="http://127.0.0.1:8000" \
+  node apps/web/.next/standalone/apps/web/server.js &
+SERVER_PID=$!
+
+for _ in $(seq 1 60); do
+  if curl -sf -o /dev/null "${BASE_URL}/login"; then
+    break
+  fi
+  sleep 1
+done
+if ! curl -sf -o /dev/null "${BASE_URL}/login"; then
+  echo "ERRO: servidor standalone não subiu em 60s." >&2
+  exit 1
+fi
+
+echo "==> axe-core (reprova em critical/serious)"
+set +e
+E2E_BASE_URL="$BASE_URL" PLAYWRIGHT_JSON_OUTPUT_NAME="$REPORT" \
+  pnpm --filter @auditoria/web exec playwright test "$SPEC" --reporter=list,json
+TEST_EXIT=$?
+set -e
+
+# Rede de segurança contra o modo de falha que motivou este gate: suíte que se
+# auto-pula e devolve "tudo verde" sem ter medido nada.
+node -e '
+  const fs = require("fs");
+  const path = "apps/web/'"$REPORT"'";
+  if (!fs.existsSync(path)) {
+    console.error("ERRO: relatório do Playwright não foi gerado — a suíte não chegou a rodar.");
+    process.exit(1);
+  }
+  const { stats = {} } = JSON.parse(fs.readFileSync(path, "utf8"));
+  console.log(`expected=${stats.expected} unexpected=${stats.unexpected} skipped=${stats.skipped} flaky=${stats.flaky}`);
+  if (!(stats.expected > 0)) {
+    console.error("ERRO: nenhum teste de a11y passou de fato — verde sem medir nada.");
+    process.exit(1);
+  }
+  if (stats.skipped > 0) {
+    console.error(`ERRO: ${stats.skipped} teste(s) de a11y foram pulados — o gate precisa rodar todos.`);
+    process.exit(1);
+  }
+'
+
+exit "$TEST_EXIT"
