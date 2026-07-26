@@ -244,10 +244,22 @@ jobs:
           exit 1
 
       # O próprio spec reprova em qualquer violação `critical`/`serious`.
+      #
+      # `--retries=0` sobrescreve o `retries: process.env.CI ? 1 : 0` do
+      # `playwright.config.ts`. Com retry, uma violação que aparece na 1ª
+      # tentativa e some na 2ª vira `flaky` — e o Playwright sai **0**, ou seja,
+      # gate verde com violação `serious` REAL medida. Parte das violações desta
+      # sprint é de estado de carregamento (`aria-prohibited-attr` no skeleton),
+      # exatamente o perfil que aparece e some conforme o axe rode antes ou
+      # depois dos dados chegarem. A11y é determinístico: se flakeia, o defeito é
+      # do spec e precisa aparecer.
+      #
+      # `--trace=retain-on-failure` repõe o trace que o config só gerava
+      # `on-first-retry` — sem ele o artefato de falha viria sem trace.
       - name: Run axe-core a11y suite
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: a11y-report.json
-        run: pnpm --filter @auditoria/web exec playwright test "$A11Y_SPEC" --reporter=github,json
+        run: pnpm --filter @auditoria/web exec playwright test "$A11Y_SPEC" --retries=0 --trace=retain-on-failure --reporter=github,json
 
       # Rede de segurança contra o modo de falha que motivou este job: suíte que
       # se auto-pula e deixa o gate VERDE sem ter medido nada.
@@ -269,6 +281,14 @@ jobs:
             }
             if (stats.skipped > 0) {
               console.error(`::error::${stats.skipped} teste(s) de a11y foram pulados — o gate precisa rodar todos.`);
+              process.exit(1);
+            }
+            // Rede do `--retries=0` acima: se alguém reintroduzir retry (no
+            // config ou no comando), `flaky` volta a existir e o Playwright sai
+            // 0 mesmo com violação medida. Aqui o job fica vermelho de qualquer
+            // forma.
+            if (stats.flaky > 0) {
+              console.error(`::error::${stats.flaky} teste(s) de a11y ficaram FLAKY — violação intermitente conta como violação. Rode o gate sem retry (--retries=0) e corrija o spec.`);
               process.exit(1);
             }
           '

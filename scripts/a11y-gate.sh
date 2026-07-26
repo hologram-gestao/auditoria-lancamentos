@@ -80,10 +80,18 @@ if ! curl -sf -o /dev/null "${BASE_URL}/login"; then
   exit 1
 fi
 
+# `--retries=0` sobrescreve o `retries: process.env.CI ? 1 : 0` do
+# `playwright.config.ts`. Com retry, uma violação que aparece na 1ª tentativa e
+# some na 2ª é classificada como `flaky` e o Playwright sai **0** — gate verde
+# com violação `serious` real medida. A11y é determinístico: violação
+# intermitente (típica de estado de carregamento) é violação, não ruído.
+# `--trace=retain-on-failure` repõe o trace que o config só gerava
+# `on-first-retry`.
 echo "==> axe-core (reprova em critical/serious)"
 set +e
 E2E_BASE_URL="$BASE_URL" PLAYWRIGHT_JSON_OUTPUT_NAME="$REPORT" \
-  pnpm --filter @auditoria/web exec playwright test "$SPEC" --reporter=list,json
+  pnpm --filter @auditoria/web exec playwright test "$SPEC" \
+    --retries=0 --trace=retain-on-failure --reporter=list,json
 TEST_EXIT=$?
 set -e
 
@@ -104,6 +112,12 @@ node -e '
   }
   if (stats.skipped > 0) {
     console.error(`ERRO: ${stats.skipped} teste(s) de a11y foram pulados — o gate precisa rodar todos.`);
+    process.exit(1);
+  }
+  // Rede do `--retries=0` acima: se o retry voltar (config ou comando), `flaky`
+  // volta a existir e o Playwright sai 0 mesmo com violação medida.
+  if (stats.flaky > 0) {
+    console.error(`ERRO: ${stats.flaky} teste(s) de a11y ficaram FLAKY — violação intermitente conta como violação. Rode sem retry e corrija o spec.`);
     process.exit(1);
   }
 '
