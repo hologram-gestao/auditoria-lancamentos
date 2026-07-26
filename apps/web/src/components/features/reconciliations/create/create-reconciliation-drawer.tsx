@@ -398,7 +398,7 @@ function DrawerContent({
           {conflictSessionId !== null && (
             <div
               role="alert"
-              className="border-info/40 bg-info-muted text-info-foreground flex items-start gap-3 rounded-md border p-3 text-sm"
+              className="border-info/40 bg-info-muted text-info flex items-start gap-3 rounded-md border p-3 text-sm"
             >
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
               <div className="space-y-2">

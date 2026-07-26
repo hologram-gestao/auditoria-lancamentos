@@ -179,7 +179,7 @@ function ClientNavLink({ href, active, icon, children }: ClientNavLinkProps) {
 
 function ClientShellSkeleton() {
   return (
-    <div className="space-y-6" aria-busy="true" aria-label="Carregando cliente">
+    <div role="status" className="space-y-6" aria-busy="true" aria-label="Carregando cliente">
       <div className="space-y-3">
         <div className="bg-muted h-3 w-32 animate-pulse rounded" />
         <div className="flex items-center gap-3">

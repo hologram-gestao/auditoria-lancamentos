@@ -19,6 +19,7 @@ export default function ClientAccountsPage({ params }: { params: { clientId: str
 function AccountsFallback() {
   return (
     <div
+      role="status"
       className="space-y-2 rounded-lg border p-4"
       aria-busy="true"
       aria-label="Carregando contas bancárias"

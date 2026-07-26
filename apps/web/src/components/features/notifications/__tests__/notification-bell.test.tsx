@@ -173,4 +173,36 @@ describe('NotificationBell — acessibilidade', () => {
     const { container } = render(<NotificationBell />);
     await assertNoA11yViolations(container);
   });
+
+  /**
+   * Regressão do `aria-hidden-focus` (reprovação do QA, 6 nós).
+   *
+   * O teste acima não pegava o defeito por DOIS motivos, e os dois importam:
+   *   1. ele nunca ABRIA o sino — e o `aria-hidden` do Radix só aparece com o
+   *      popover aberto;
+   *   2. ele passava o `container` do render, e o popover é portalado para o
+   *      `document.body` — ou seja, o axe olhava para o lado errado da página.
+   *
+   * Aqui o sino abre e o axe roda sobre o `document.body` inteiro, com um
+   * pedaço de chrome focável ao lado (o que a página real tem: sidebar, campo
+   * de busca). No modo modal, o Radix marcaria esse chrome com `aria-hidden`
+   * mantendo-o focável — e o axe reprova.
+   */
+  it('com o popover ABERTO não esconde do leitor de tela nada que siga focável', async () => {
+    const user = userEvent.setup();
+    render(
+      <div>
+        <aside>
+          <a href="/clientes">Clientes</a>
+        </aside>
+        <header>
+          <input aria-label="Buscar" />
+          <NotificationBell />
+        </header>
+      </div>,
+    );
+    await user.click(screen.getByRole('button', { name: /Notificações/ }));
+    await screen.findByRole('menu');
+    await assertNoA11yViolations(document.body);
+  });
 });

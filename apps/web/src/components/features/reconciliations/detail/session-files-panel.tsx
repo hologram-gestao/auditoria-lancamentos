@@ -64,7 +64,7 @@ export function SessionFilesPanel({ sessionId, isProcessing }: SessionFilesPanel
 
   if (filesQuery.isLoading) {
     return (
-      <div className="bg-card space-y-2 rounded-lg border p-4" aria-label="Carregando arquivos">
+      <div role="status" className="bg-card space-y-2 rounded-lg border p-4" aria-label="Carregando arquivos">
         <div className="bg-muted h-4 w-40 animate-pulse rounded" />
         <div className="bg-muted h-4 w-full animate-pulse rounded" />
       </div>

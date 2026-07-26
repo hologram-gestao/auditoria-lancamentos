@@ -38,9 +38,21 @@ test.beforeEach(async ({ page }) => {
   test.skip(PASSWORD === '' || CLIENT_ID === '', 'defina E2E_PASSWORD e E2E_CLIENT_ID');
   await page.goto('/login');
   await page.getByLabel('E-mail').fill(EMAIL);
-  await page.getByLabel('Senha').fill(PASSWORD);
+  // `exact: true`: o botão de olho se chama "Mostrar senha" e o casamento
+  // padrão do `getByLabel` é por SUBSTRING — sem isto, "Senha" resolveria para
+  // dois elementos e o strict mode do Playwright reprovaria.
+  await page.getByLabel('Senha', { exact: true }).fill(PASSWORD);
   await page.getByRole('button', { name: /entrar/i }).click();
   await page.waitForURL('**/clientes');
+});
+
+test('Login', async ({ page }) => {
+  // O `beforeEach` já autenticou; voltar ao /login exercita a tela em si. Ela
+  // é a porta de entrada de TODA a suíte: quando o campo de senha ficou sem
+  // nome acessível, a suíte inteira parou no `beforeEach` (defeito 86e2ggm7r).
+  await page.goto('/login');
+  await expect(page.getByLabel('Senha', { exact: true })).toHaveAttribute('type', 'password');
+  await analyze(page, 'login');
 });
 
 test('Lista de Conciliações do cliente', async ({ page }) => {

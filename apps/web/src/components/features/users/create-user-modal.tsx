@@ -12,8 +12,8 @@
  */
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Eye, EyeOff, Loader2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Loader2 } from 'lucide-react';
+import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 
@@ -35,6 +35,7 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import {
   Select,
   SelectContent,
@@ -52,7 +53,6 @@ interface CreateUserModalProps {
 }
 
 export function CreateUserModal({ open, onOpenChange }: CreateUserModalProps) {
-  const [showPassword, setShowPassword] = useState(false);
   const createMutation = useCreateUser();
 
   const form = useForm<CreateUserFormValues>({
@@ -64,7 +64,6 @@ export function CreateUserModal({ open, onOpenChange }: CreateUserModalProps) {
   useEffect(() => {
     if (!open) {
       form.reset();
-      setShowPassword(false);
       createMutation.reset();
     }
     // form/createMutation são estáveis; rodar só quando o modal abrir/fechar.
@@ -167,29 +166,11 @@ export function CreateUserModal({ open, onOpenChange }: CreateUserModalProps) {
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Senha inicial</FormLabel>
+                  {/* Filho DIRETO do `<FormControl>`: com uma `<div>` no meio, o
+                      Slot do Radix daria o `id` do `FormItem` à div e o rótulo
+                      "Senha inicial" apontaria para o nada. */}
                   <FormControl>
-                    <div className="relative">
-                      <Input
-                        type={showPassword ? 'text' : 'password'}
-                        autoComplete="new-password"
-                        disabled={isSubmitting}
-                        className="pr-10"
-                        {...field}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword((v) => !v)}
-                        aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
-                        aria-pressed={showPassword}
-                        className="text-muted-foreground hover:text-foreground focus-visible:ring-ring absolute inset-y-0 right-0 flex items-center rounded-md pr-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
-                      >
-                        {showPassword ? (
-                          <EyeOff className="h-4 w-4" aria-hidden="true" />
-                        ) : (
-                          <Eye className="h-4 w-4" aria-hidden="true" />
-                        )}
-                      </button>
-                    </div>
+                    <PasswordInput autoComplete="new-password" disabled={isSubmitting} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

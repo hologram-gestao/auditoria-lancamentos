@@ -32,6 +32,7 @@ import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -80,7 +81,15 @@ export function NotificationBell() {
   }
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
+    // `modal={false}`: no modo modal (default) o Radix chama `hideOthers()` e
+    // marca TODO o resto da página com `aria-hidden` — mas o resto continua
+    // focável. Quem navega por teclado sai do popover e cai em controles que o
+    // leitor de tela não enxerga ("foco no vazio"); é a violação
+    // `aria-hidden-focus` do axe. Um sino de notificações não é um diálogo: ele
+    // não precisa esconder a página nem travar o scroll. Sem o modo modal, o
+    // Radix segue cuidando de Escape, clique fora, setas e devolução do foco ao
+    // gatilho — só não mente para a tecnologia assistiva.
+    <DropdownMenu open={open} onOpenChange={setOpen} modal={false}>
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
@@ -108,7 +117,10 @@ export function NotificationBell() {
         {unread > 0 ? `${unread} notificações não lidas` : 'Nenhuma notificação não lida'}
       </span>
 
-      <DropdownMenuContent align="end" className="w-80">
+      {/* O scroll fica no PRÓPRIO content: uma `<ul>` aqui dentro seria um
+          `role="list"` dentro de `role="menu"` — filho não permitido
+          (`aria-required-children`, critical). Os itens são `menuitem`. */}
+      <DropdownMenuContent align="end" className="max-h-96 w-80 overflow-y-auto">
         <DropdownMenuLabel>Notificações</DropdownMenuLabel>
         <DropdownMenuSeparator />
 
@@ -126,35 +138,26 @@ export function NotificationBell() {
             Nenhuma notificação por aqui.
           </p>
         ) : (
-          <ul className="max-h-80 overflow-y-auto">
-            {items.map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  onClick={() => handleOpenItem(item)}
-                  className={cn(
-                    'hover:bg-muted focus-visible:ring-ring w-full cursor-pointer rounded-sm px-2 py-2 text-left text-sm focus-visible:outline-none focus-visible:ring-2',
-                    item.read_at == null && 'font-medium',
-                  )}
-                >
-                  <span className="flex items-start gap-2">
-                    {item.read_at == null && (
-                      <span
-                        className="bg-info mt-1.5 h-2 w-2 shrink-0 rounded-full"
-                        aria-hidden="true"
-                      />
-                    )}
-                    <span className="min-w-0">
-                      <span className="block">{notificationText(item)}</span>
-                      <span className="text-muted-foreground block text-xs">
-                        {formatNotificationTime(item.created_at)}
-                      </span>
-                    </span>
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          items.map((item) => (
+            <DropdownMenuItem
+              key={item.id}
+              onSelect={() => handleOpenItem(item)}
+              className={cn(
+                'cursor-pointer items-start gap-2 py-2',
+                item.read_at == null && 'font-medium',
+              )}
+            >
+              {item.read_at == null && (
+                <span className="bg-info mt-1.5 h-2 w-2 shrink-0 rounded-full" aria-hidden="true" />
+              )}
+              <span className="min-w-0">
+                <span className="block">{notificationText(item)}</span>
+                <span className="text-muted-foreground block text-xs">
+                  {formatNotificationTime(item.created_at)}
+                </span>
+              </span>
+            </DropdownMenuItem>
+          ))
         )}
       </DropdownMenuContent>
     </DropdownMenu>

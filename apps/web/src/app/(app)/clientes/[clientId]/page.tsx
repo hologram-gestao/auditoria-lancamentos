@@ -26,7 +26,7 @@ export default function ClientReconciliationsPage({
 
 function ListFallback() {
   return (
-    <div className="space-y-3" aria-busy="true" aria-label="Carregando conciliações">
+    <div role="status" className="space-y-3" aria-busy="true" aria-label="Carregando conciliações">
       {Array.from({ length: 4 }).map((_, i) => (
         <div key={i} className="bg-card space-y-3 rounded-lg border p-4 shadow-sm">
           <div className="bg-muted h-4 w-1/3 animate-pulse rounded" />

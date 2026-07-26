@@ -206,7 +206,7 @@ function ProcessingPanel() {
   return (
     <div
       role="status"
-      className="border-info/40 bg-info-muted text-info-foreground flex items-start gap-3 rounded-lg border p-6"
+      className="border-info/40 bg-info-muted text-info flex items-start gap-3 rounded-lg border p-6"
     >
       <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin" aria-hidden="true" />
       <div className="space-y-1">
@@ -349,7 +349,7 @@ function ErrorPanel({
 
 function DetailSkeleton() {
   return (
-    <div className="space-y-6" aria-busy="true" aria-label="Carregando conciliação">
+    <div role="status" className="space-y-6" aria-busy="true" aria-label="Carregando conciliação">
       <div className="bg-muted h-7 w-72 animate-pulse rounded" />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {Array.from({ length: 6 }).map((_, i) => (

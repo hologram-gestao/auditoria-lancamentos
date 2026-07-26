@@ -254,4 +254,20 @@ describe('Detalhe — acessibilidade', () => {
     const { container } = renderScreen();
     await assertNoA11yViolations(container);
   });
+
+  /**
+   * Regressão do `aria-prohibited-attr` no SKELETON (reprovação do QA): o
+   * esqueleto era uma `<div>` com `aria-busy` + `aria-label`, e `aria-label`
+   * em role genérico é proibido — o "Carregando conciliação" nunca chegava a
+   * ser anunciado. `role="status"` valida o rótulo E faz o estado ser
+   * anunciado. Faltava um teste do estado de LOADING: os dois acima só cobriam
+   * a tela já carregada.
+   */
+  it('não tem violações critical/serious no estado de carregamento', async () => {
+    detailState.data = undefined;
+    detailState.isLoading = true;
+    const { container } = renderScreen();
+    expect(screen.getByRole('status', { name: 'Carregando conciliação' })).toBeInTheDocument();
+    await assertNoA11yViolations(container);
+  });
 });

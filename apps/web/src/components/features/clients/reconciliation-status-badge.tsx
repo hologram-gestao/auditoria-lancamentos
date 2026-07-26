@@ -38,10 +38,15 @@ export function reconciliationStatusLabel(status: string): string {
   }
 }
 
+/**
+ * ⚠️ Sobre fundo `-muted` o texto é o token SÓLIDO, nunca `-foreground` —
+ * `-foreground` é o par do fundo sólido (branco sobre `bg-success`) e aqui
+ * daria branco sobre quase-branco (~1.05:1), com o rótulo sumindo da tela.
+ */
 const STATUS_CLASSES: Record<string, string> = {
-  processing: 'bg-info-muted text-info-foreground ring-info/30',
-  reviewing: 'bg-success-muted text-success-foreground ring-success/30',
-  done: 'bg-success-muted text-success-foreground ring-success/30',
+  processing: 'bg-info-muted text-info ring-info/30',
+  reviewing: 'bg-success-muted text-success ring-success/30',
+  done: 'bg-success-muted text-success ring-success/30',
   error: 'bg-destructive/10 text-destructive ring-destructive/30',
 };
 

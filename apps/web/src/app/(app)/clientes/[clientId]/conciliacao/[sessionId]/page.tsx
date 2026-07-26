@@ -24,7 +24,7 @@ export default function ReconciliationDetailPage({ params }: PageProps) {
 
 function DetailFallback() {
   return (
-    <div className="space-y-6" aria-busy="true" aria-label="Carregando conciliação">
+    <div role="status" className="space-y-6" aria-busy="true" aria-label="Carregando conciliação">
       <div className="bg-muted h-7 w-72 animate-pulse rounded" />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {Array.from({ length: 6 }).map((_, i) => (

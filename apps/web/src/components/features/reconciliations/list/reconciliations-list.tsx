@@ -277,7 +277,7 @@ function readMonth(raw: string | null): string | null {
 
 function ListSkeleton() {
   return (
-    <div aria-label="Carregando conciliações" className="space-y-3">
+    <div role="status" aria-label="Carregando conciliações" className="space-y-3">
       {Array.from({ length: 4 }).map((_, i) => (
         <div key={i} className="bg-card space-y-3 rounded-lg border p-4 shadow-sm">
           <div className="flex justify-between">

@@ -71,7 +71,7 @@ export function UploadItemRow({ item, onRemove, disabled }: UploadItemRowProps) 
                 barrar parte a parte impediria justamente o caso de uso do
                 multi-arquivo. O veredito do conjunto sai no detalhe (R3). */}
             {item.result.checksum.applicable && !item.result.checksum.ok && (
-              <p className="text-warning-foreground text-xs">
+              <p className="text-warning text-xs">
                 Os saldos deste arquivo não fecham (diferença de{' '}
                 {formatBRL(item.result.checksum.difference)}). A conciliação segue, mas confira o
                 resumo depois.
@@ -80,7 +80,7 @@ export function UploadItemRow({ item, onRemove, disabled }: UploadItemRowProps) 
           </>
         )}
         {item.errorMessage !== undefined && (
-          <p className={cn('text-xs', isDuplicate ? 'text-warning-foreground' : 'text-destructive')}>
+          <p className={cn('text-xs', isDuplicate ? 'text-warning' : 'text-destructive')}>
             {item.errorMessage}
             {item.errorCode !== undefined && ` (cód. ${item.errorCode})`}
           </p>

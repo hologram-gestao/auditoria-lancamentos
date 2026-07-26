@@ -308,7 +308,7 @@ function TimeoutAlert({ onRefresh, onBackToForm }: TimeoutAlertProps) {
       // Token `warning` (não hex/`amber-*`): é um AVISO — o backend ainda pode
       // concluir —, não um erro fatal. Âmbar aqui é legítimo porque isto é um
       // alerta de atenção, e não um banner informativo.
-      className="border-warning/40 bg-warning-muted text-warning-foreground space-y-3 rounded-lg border p-4"
+      className="border-warning/40 bg-warning-muted text-warning space-y-3 rounded-lg border p-4"
     >
       <div className="flex items-start gap-3">
         <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />

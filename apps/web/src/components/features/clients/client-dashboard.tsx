@@ -167,7 +167,7 @@ function StatTile({ icon, label, value, hint, badge }: StatTileProps) {
 
 function DashboardSkeleton() {
   return (
-    <div className="space-y-6" aria-busy="true" aria-label="Carregando painel">
+    <div role="status" className="space-y-6" aria-busy="true" aria-label="Carregando painel">
       <div className="bg-muted h-6 w-56 animate-pulse rounded" />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (

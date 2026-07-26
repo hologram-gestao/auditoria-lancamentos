@@ -180,7 +180,7 @@ export function BankAccountsScreen({ clientId }: { clientId: string }) {
 
 function AccountsSkeleton() {
   return (
-    <div className="space-y-2 rounded-lg border p-4" aria-label="Carregando contas bancárias">
+    <div role="status" className="space-y-2 rounded-lg border p-4" aria-label="Carregando contas bancárias">
       {Array.from({ length: 5 }).map((_, i) => (
         <div key={i} className="flex gap-4">
           <div className="bg-muted h-4 flex-1 animate-pulse rounded" />
