@@ -6,7 +6,9 @@
  *   - Lista de Conciliações do cliente (R1) — incl. gaveta de criação (R2);
  *   - Contas Bancárias (R6);
  *   - Detalhe da conciliação (R3);
- *   - Sino de notificações no header (R4).
+ *   - Sino de notificações no header (R4);
+ *   - Modal "Trocar lançamento" (tela pré-existente S12/S13, incluída pelo
+ *     follow-up 86e2gy1n0 — ela não estava sob nenhuma suíte de a11y).
  *
  * ⚠️ Requer ambiente completo no ar (ver `e2e/README.md`) — não roda no
  * `pnpm test`. A checagem equivalente em jsdom, que roda em toda esteira, está
@@ -79,6 +81,69 @@ test('Detalhe da conciliação', async ({ page }) => {
   await page.getByRole('link', { name: /Abrir conciliação/ }).first().click();
   await page.waitForURL('**/conciliacao/**');
   await analyze(page, 'detalhe da conciliação');
+});
+
+/**
+ * Modal "Trocar lançamento" (follow-up 86e2gy1n0).
+ *
+ * Além do axe, este teste **opera o modal só com teclado**: era exatamente esse
+ * o defeito (linhas com `onClick` e nada focável), e nenhuma regra do axe o
+ * detecta. Ele para antes de acionar o "Confirmar" de propósito — pressioná-lo
+ * gravaria um `PATCH` no ambiente de teste. O que precisa ser provado é que o
+ * controle é alcançável, selecionável e que a ação primária habilita; a
+ * gravação em si já é coberta pelo teste de componente.
+ */
+test('Modal "Trocar lançamento" — a11y e seleção por teclado', async ({ page }) => {
+  await page.goto(`/clientes/${CLIENT_ID}`);
+  await page.getByRole('link', { name: /Abrir conciliação/ }).first().click();
+  await page.waitForURL('**/conciliacao/**');
+
+  // "Trocar lançamento" só existe em linha `conciliado`; percorre os menus até
+  // achar uma (em vez de assumir que a 1ª linha da seed é conciliada).
+  const menus = page.getByRole('button', { name: 'Abrir ações' });
+  const total = Math.min(await menus.count(), 10);
+  let aberto = false;
+  for (let i = 0; i < total && !aberto; i++) {
+    await menus.nth(i).click();
+    const item = page.getByRole('menuitem', { name: 'Trocar lançamento' });
+    if (await item.isVisible().catch(() => false)) {
+      await item.click();
+      aberto = true;
+    } else {
+      await page.keyboard.press('Escape');
+    }
+  }
+  test.skip(!aberto, 'nenhuma movimentação conciliada na seed — nada a trocar');
+
+  const dialog = page.getByRole('dialog', { name: /Selecionar lançamento Omie correto/ });
+  await expect(dialog).toBeVisible();
+  await analyze(page, 'modal trocar lançamento');
+
+  const radios = dialog.getByRole('radio');
+  test.skip((await radios.count()) === 0, 'sem candidatos Omie disponíveis na seed');
+
+  const primeiro = radios.first();
+  let alcancado = false;
+  for (let i = 0; i < 40 && !alcancado; i++) {
+    await page.keyboard.press('Tab');
+    alcancado = await primeiro.evaluate((el) => el === document.activeElement);
+  }
+  expect(alcancado, 'o radio do candidato precisa ser alcançável por Tab').toBe(true);
+
+  await page.keyboard.press('Enter');
+  await expect(primeiro).toBeChecked();
+
+  const confirmar = dialog.getByRole('button', { name: 'Confirmar' });
+  await expect(confirmar).toBeEnabled();
+  for (let i = 0; i < 40; i++) {
+    if (await confirmar.evaluate((el) => el === document.activeElement)) break;
+    await page.keyboard.press('Tab');
+  }
+  await expect(confirmar).toBeFocused();
+
+  // Com um candidato selecionado o axe roda de novo: o estado selecionado é o
+  // que antes carregava o `aria-selected` inválido na linha.
+  await analyze(page, 'modal trocar lançamento (candidato selecionado)');
 });
 
 test('Sino de notificações', async ({ page }) => {

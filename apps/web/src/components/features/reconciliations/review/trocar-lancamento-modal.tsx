@@ -8,8 +8,22 @@
  *   - Busca por valor/descrição com debounce 300ms; back já retorna
  *     candidatos no período expandido subtraindo IDs já vinculados em
  *     outras linhas (BACK 9.4).
- *   - Click na linha = seleção (radio implícito) → highlight.
+ *   - Seleção por **radio de verdade** na 1ª coluna; clicar na linha também
+ *     seleciona (conveniência de mouse) → highlight.
  *   - Confirmar → `PATCH /file-entries/{id}` com `omie_lancamento_id`.
+ *
+ * **A11y (86e2gy1n0).** A seleção era um "radio implícito": `onClick` no `<tr>`
+ * + `aria-selected`. Dois defeitos: (1) WCAG 2.1.1 — `<tr>` não é focável e não
+ * tinha handler de teclado, então escolher um candidato exigia MOUSE; (2)
+ * `aria-selected` é proibido em `role="row"` fora de `grid`/`treegrid`.
+ *
+ * A correção usa `<input type="radio">` NATIVO em vez de `role="listbox"` +
+ * `role="option"` nas linhas: `option` precisa ser *owned* por um `listbox`, e
+ * entre o wrapper e o `<tr>` existem `<table>`/`<tbody>` (roles `table`/
+ * `rowgroup`) — daria `aria-required-children`. Só sairia com `role="presentation"`
+ * na tabela inteira, o que destruiria a semântica tabular dos candidatos.
+ * O radio nativo agrupa por `name` (sem exigir wrapper no DOM), traz navegação
+ * por setas e o estado de seleção de graça, e leva o `aria-selected` embora.
  *
  * Reset de estado ao fechar (pitfall §7 do briefing): `useEffect` no `open`
  * limpa search e selection. Não dá pra confiar em destructuring por
@@ -40,7 +54,7 @@ import {
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { useAvailableOmieEntries, usePatchFileEntry } from '@/hooks/use-reconciliations';
 import { ApiError } from '@/lib/api/client';
-import type { FileEntryItem } from '@/lib/api/reconciliations';
+import type { AvailableOmieEntry, FileEntryItem } from '@/lib/api/reconciliations';
 import { formatBRDate, formatBRL } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -54,6 +68,20 @@ interface TrocarLancamentoModalProps {
 }
 
 const SEARCH_DEBOUNCE_MS = 300;
+
+/**
+ * Nome acessível do radio do candidato. O rótulo repete os dados da linha
+ * porque o leitor de tela anuncia o controle, não a `<tr>` inteira — "radio,
+ * não marcado" sozinho não diz qual lançamento está sendo escolhido.
+ */
+function candidateLabel(item: AvailableOmieEntry): string {
+  const parts = [
+    formatBRDate(item.transaction_date),
+    item.description,
+    formatBRL(item.amount, { signed: true }),
+  ];
+  return `Selecionar lançamento ${parts.join(' · ')}`;
+}
 
 export function TrocarLancamentoModal({
   sessionId,
@@ -78,6 +106,9 @@ export function TrocarLancamentoModal({
   });
   const candidates = candidatesQuery.data ?? [];
   const patchMutation = usePatchFileEntry(sessionId);
+  // Radio nativo agrupa por `name` — escopado pela linha de origem para dois
+  // modais nunca compartilharem grupo se um dia coexistirem no DOM.
+  const radioGroupName = `omie-candidate-${entry.id}`;
 
   async function handleConfirm() {
     if (selectedId === null) return;
@@ -128,9 +159,12 @@ export function TrocarLancamentoModal({
         </div>
 
         <div className="max-h-80 overflow-auto rounded-md border">
-          <Table>
+          <Table scrollRegionLabel="Lançamentos Omie candidatos (rolável horizontalmente)">
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10">
+                  <span className="sr-only">Selecionar</span>
+                </TableHead>
                 <TableHead className="w-28">Data</TableHead>
                 <TableHead>Descrição / Fornecedor</TableHead>
                 <TableHead className="w-40">Categoria</TableHead>
@@ -141,14 +175,14 @@ export function TrocarLancamentoModal({
             <TableBody>
               {candidatesQuery.isLoading && (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-muted-foreground py-6 text-center text-sm">
+                  <TableCell colSpan={6} className="text-muted-foreground py-6 text-center text-sm">
                     Carregando candidatos…
                   </TableCell>
                 </TableRow>
               )}
               {!candidatesQuery.isLoading && candidates.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-muted-foreground py-6 text-center text-sm">
+                  <TableCell colSpan={6} className="text-muted-foreground py-6 text-center text-sm">
                     Nenhum lançamento disponível.
                   </TableCell>
                 </TableRow>
@@ -164,8 +198,29 @@ export function TrocarLancamentoModal({
                         'cursor-pointer',
                         isSelected && 'bg-primary/10 hover:bg-primary/15',
                       )}
-                      aria-selected={isSelected}
+                      data-state={isSelected ? 'selected' : undefined}
                     >
+                      <TableCell className="py-4 pl-4 pr-0">
+                        <input
+                          type="radio"
+                          name={radioGroupName}
+                          value={item.omie_id}
+                          checked={isSelected}
+                          onChange={() => setSelectedId(item.omie_id)}
+                          // Setas e Espaço já vêm do radio nativo; Enter não faz
+                          // nada fora de um <form>, e é a tecla que o operador
+                          // tenta primeiro. Sem isto, "Tab até o candidato e
+                          // Enter" não seleciona nada.
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              setSelectedId(item.omie_id);
+                            }
+                          }}
+                          className="accent-primary size-4 cursor-pointer align-middle"
+                          aria-label={candidateLabel(item)}
+                        />
+                      </TableCell>
                       <TableCell className="text-sm">
                         {formatBRDate(item.transaction_date)}
                       </TableCell>
