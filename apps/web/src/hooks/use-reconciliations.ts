@@ -25,11 +25,13 @@ import {
   type UseQueryOptions,
 } from '@tanstack/react-query';
 
+import { clientsKeys } from '@/hooks/use-clients';
 import type { BlobResponse } from '@/lib/api/client';
 import {
   checkDuplicate,
   createAnomaly,
   createReconciliation,
+  deleteSessionFile,
   exportReconciliation,
   getOmieLancamentos,
   getSessionDetail,
@@ -39,6 +41,7 @@ import {
   listAvailableOmieEntries,
   listFileEntries,
   listOmieEntries,
+  listSessionFiles,
   cancelReconciliation,
   discardReconciliation,
   parseStatement,
@@ -49,6 +52,7 @@ import {
   type AnomalyItem,
   type AnomalyListResult,
   type AnomalyTypeItem,
+  type AttachFilesResult,
   type AvailableOmieEntry,
   type CheckDuplicateParams,
   type CheckDuplicateResult,
@@ -69,6 +73,7 @@ import {
   type PatchFileEntryPayload,
   type PatchOmieEntryPayload,
   type SessionDetail,
+  type SessionFilesResult,
   type SessionStatusResult,
 } from '@/lib/api/reconciliations';
 
@@ -106,7 +111,7 @@ export function useReprocessReconciliation(sessionId: string, clientId?: string)
       void queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
       if (clientId !== undefined) {
         void queryClient.invalidateQueries({
-          queryKey: ['clients', clientId, 'reconciliations'],
+          queryKey: clientsKeys.reconciliationsAll(clientId),
         });
       }
     },
@@ -127,7 +132,7 @@ export function useDiscardReconciliation(sessionId: string, clientId: string) {
     mutationFn: () => discardReconciliation(sessionId),
     onSuccess: () => {
       void queryClient.invalidateQueries({
-        queryKey: ['clients', clientId, 'reconciliations'],
+        queryKey: clientsKeys.reconciliationsAll(clientId),
       });
       void queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
       // O contador de conciliações na lista de clientes pode mudar.
@@ -148,7 +153,7 @@ export function useCancelReconciliation(sessionId: string, clientId: string) {
     mutationFn: () => cancelReconciliation(sessionId),
     onSuccess: () => {
       void queryClient.invalidateQueries({
-        queryKey: ['clients', clientId, 'reconciliations'],
+        queryKey: clientsKeys.reconciliationsAll(clientId),
       });
       void queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
     },
@@ -194,14 +199,20 @@ interface UseSessionStatusOptions {
  * próximo poll bem-sucedido — pitfall §contrato do briefing.
  */
 /**
- * Detalhe estático da sessão para o header da Tela de Revisão — `reference_month`,
- * `omie_conta_id`, `total_file_entries`, contadores. Substitui o scan O(N)
- * que fazia `useReconciliationsList(clientId, {pageSize:100}) + .find()` e
- * quebrava em clientes com > 100 sessões.
+ * Detalhe da sessão — **fonte única** dos totalizadores e dos saldos da tela
+ * de detalhe (Sprint 4 / R3).
  *
- * Cache padrão (sem polling): os contadores vivos vêm do `useSessionStatus`,
- * que invalida o status key em mutations. Aqui só queremos o "shape" da
- * sessão (mês, conta, total) que muda raramente.
+ * O backend materializa esses números (`reconciliations.totals`), então lista e
+ * detalhe leem o MESMO valor e não divergem — o front não recalcula nada
+ * (learning "valor derivado calculado em 2 lugares diverge").
+ *
+ * **Poda o próprio polling:** 3 s enquanto a sessão está em `processing`,
+ * parando ao virar `reviewing`/`done`/`error`. É o que faz o detalhe de uma
+ * conciliação recém-criada sair sozinho da tela de progresso para os
+ * totalizadores, sem o usuário recarregar.
+ *
+ * Todas as mutations da revisão invalidam o prefixo `['reconciliations', id]`,
+ * então os contadores do topo acompanham as edições feitas nas abas.
  */
 export function useSessionDetail(sessionId: string) {
   return useQuery<SessionDetail>({
@@ -209,6 +220,45 @@ export function useSessionDetail(sessionId: string) {
     queryFn: () => getSessionDetail(sessionId),
     enabled: sessionId.length > 0,
     refetchOnWindowFocus: false,
+    refetchInterval: (query) =>
+      query.state.data?.status === 'processing' ? STATUS_POLL_INTERVAL_MS : false,
+    refetchIntervalInBackground: false,
+  });
+}
+
+/**
+ * Partes (arquivos) da conciliação — Sprint 4 / R5.
+ *
+ * O detalhe usa para mostrar QUANTOS arquivos compõem a conciliação e QUAL
+ * parte falhou. Reconsulta quando a sessão muda de estado (o job pode marcar
+ * uma parte como `error`), por isso a key é escopada por `sessionId` e as
+ * mutations de anexar/remover a invalidam.
+ */
+export function useSessionFiles(sessionId: string, options: { enabled?: boolean } = {}) {
+  return useQuery<SessionFilesResult>({
+    queryKey: ['reconciliations', sessionId, 'files'],
+    queryFn: () => listSessionFiles(sessionId),
+    enabled: sessionId.length > 0 && (options.enabled ?? true),
+    refetchOnWindowFocus: false,
+  });
+}
+
+/**
+ * Remove uma parte e re-consolida o restante (BACK 04.2).
+ *
+ * Invalida o prefixo da sessão: a lista de partes muda, e `reprocessing=true`
+ * significa que a sessão voltou para `processing` — o `useSessionDetail`
+ * precisa reler para o polling de progresso reativar.
+ */
+export function useDeleteSessionFile(sessionId: string) {
+  const qc = useQueryClient();
+  return useMutation<AttachFilesResult, Error, string>({
+    mutationFn: (fileId) => deleteSessionFile(sessionId, fileId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: sessionKey(sessionId) });
+      void qc.invalidateQueries({ queryKey: ['review', sessionId] });
+      void qc.invalidateQueries({ queryKey: clientsKeys.all });
+    },
   });
 }
 
@@ -278,7 +328,13 @@ export const reviewKeys = {
   anomalyTypes: () => ['anomaly-types'] as const,
 };
 
-const statusKey = (sessionId: string) => ['reconciliations', sessionId, 'status'] as const;
+/**
+ * Prefixo que cobre `detail` E `status` da sessão. As mutations da revisão
+ * invalidam o PREFIXO (não só o `status`) para que os totalizadores do topo do
+ * detalhe — que vêm do `detail`, a fonte única — acompanhem as edições feitas
+ * nas abas. Invalidar só o `status` deixava o topo defasado do conteúdo.
+ */
+const sessionKey = (sessionId: string) => ['reconciliations', sessionId] as const;
 
 // ---- File entries ----
 
@@ -309,7 +365,7 @@ export function usePatchFileEntry(sessionId: string) {
       void qc.invalidateQueries({
         queryKey: ['review', sessionId, 'file-entries'],
       });
-      void qc.invalidateQueries({ queryKey: statusKey(sessionId) });
+      void qc.invalidateQueries({ queryKey: sessionKey(sessionId) });
     },
   });
 }
@@ -408,7 +464,7 @@ export function useCreateAnomaly(sessionId: string) {
     mutationFn: (payload) => createAnomaly(sessionId, payload),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['review', sessionId, 'anomalies'] });
-      void qc.invalidateQueries({ queryKey: statusKey(sessionId) });
+      void qc.invalidateQueries({ queryKey: sessionKey(sessionId) });
     },
   });
 }
@@ -424,7 +480,7 @@ export function usePatchAnomaly(sessionId: string) {
     mutationFn: ({ anomalyId, payload }) => patchAnomaly(sessionId, anomalyId, payload),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['review', sessionId, 'anomalies'] });
-      void qc.invalidateQueries({ queryKey: statusKey(sessionId) });
+      void qc.invalidateQueries({ queryKey: sessionKey(sessionId) });
     },
   });
 }

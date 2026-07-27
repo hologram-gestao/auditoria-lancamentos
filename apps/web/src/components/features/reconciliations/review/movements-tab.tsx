@@ -285,7 +285,7 @@ export function MovementsTab({ sessionId, isCard }: MovementsTabProps) {
       </div>
 
       <div className="rounded-md border">
-        <Table>
+        <Table scrollRegionLabel="Movimentações (rolável horizontalmente)">
           <TableHeader>
             <TableRow>
               <TableHead className="w-28">Data</TableHead>

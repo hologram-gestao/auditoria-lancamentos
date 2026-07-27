@@ -39,6 +39,10 @@ export const clientsKeys = {
   all: ['clients'] as const,
   list: (params: ListClientsParams) => ['clients', 'list', params] as const,
   detail: (id: string) => ['clients', 'detail', id] as const,
+  /** Prefixo de TODAS as páginas/filtros da lista de um cliente — use este
+   *  para invalidar (o `queryKey` completo inclui os `params` e nunca casaria
+   *  com um `invalidateQueries` de outra combinação de filtros). */
+  reconciliationsAll: (id: string) => ['clients', 'reconciliations', id] as const,
   reconciliations: (id: string, params: ReconciliationsListParams) =>
     ['clients', 'reconciliations', id, params] as const,
 };
@@ -112,11 +116,36 @@ export function useSyncAccounts(id: string) {
   });
 }
 
+/**
+ * Cadência do polling de LISTA (Sprint 4 / R2). Trabalho NOVO: o app já tinha
+ * poll de UMA sessão (`useSessionStatus`), nunca de nível-lista.
+ *
+ * 3 s é a mesma cadência do poll de sessão — a lista é o lugar onde a pessoa
+ * espera ver "Em processamento" virar "Processada" sem recarregar.
+ */
+const LIST_POLL_INTERVAL_MS = 3000;
+
+/**
+ * Lista de conciliações do cliente, com **polling enquanto houver alguma linha
+ * em `processing`** — e parando quando não houver.
+ *
+ * É isso que faz a conciliação recém-criada aparecer sozinha e mudar de status
+ * na tela, sem o usuário ficar preso numa tela de progresso. Sem nenhuma linha
+ * processando o intervalo vira `false`: nada de martelar o backend à toa.
+ *
+ * `refetchIntervalInBackground: false` — aba fora de foco não gera tráfego.
+ */
 export function useReconciliationsList(id: string, params: ReconciliationsListParams) {
   return useQuery<ReconciliationsListResponse>({
     queryKey: clientsKeys.reconciliations(id, params),
     queryFn: () => listReconciliations(id, params),
     enabled: id.length > 0,
     placeholderData: keepPreviousData,
+    refetchInterval: (query) => {
+      const rows = query.state.data?.data;
+      if (rows === undefined) return false;
+      return rows.some((row) => row.status === 'processing') ? LIST_POLL_INTERVAL_MS : false;
+    },
+    refetchIntervalInBackground: false,
   });
 }

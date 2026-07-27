@@ -20,15 +20,24 @@
  *     formatação para BRL é responsabilidade do consumidor (ver
  *     `lib/format.ts`).
  */
-import { apiGet, apiPatch, apiPost, apiPostBlob, apiPostMultipart } from './client';
+import type {
+  AttachFilesPayload,
+  ChecksumResult as ChecksumContract,
+  CreateReconciliationPayload as CreateReconciliationContract,
+  CreateReconciliationRequest,
+  ExtractedStatement,
+  PaginationMeta,
+  ReconciliationFileInput,
+  SessionDetailPayload,
+  SessionFileItem,
+  SessionFilesPayload,
+  SessionStatusPayload,
+} from '@/lib/contracts';
+
+import { apiDelete, apiGet, apiPatch, apiPost, apiPostBlob, apiPostMultipart } from './client';
 import type { BlobResponse } from './client';
 
-export interface Pagination {
-  page: number;
-  pageSize: number;
-  total: number;
-  totalPages: number;
-}
+export type Pagination = PaginationMeta;
 
 export interface CheckDuplicateParams {
   client_id: string;
@@ -54,75 +63,52 @@ export async function checkDuplicate(params: CheckDuplicateParams): Promise<Chec
 }
 
 /**
- * Tipo do extrato extraído — espelha `ExtractedStatement` do back
- * (apps/api/app/integrations/anthropic/schemas.py).
- *
- * Datas: `YYYY-MM-DD` (ISO 8601 estrito, parsing manual no front pra
- * evitar timezone-shift do `new Date('2026-04-01')`).
- *
- * `account_type`: union literal idêntico ao back (checking / credit_card /
- * investment). Se o back aceitar um novo tipo, o `Literal` lá explode primeiro.
+ * `checking` | `credit_card` | `investment`, derivado do contrato: se o backend
+ * aceitar um tipo novo, ele aparece aqui sozinho na próxima geração e o `tsc`
+ * cobra os `switch` exaustivos que dependem dele.
  */
-export type ParsedAccountType = 'checking' | 'credit_card' | 'investment';
-
-export interface ParsedTransaction {
-  /** Data ISO 8601 (YYYY-MM-DD). */
-  date: string;
-  /** Descrição preservada do documento. */
-  description: string;
-  /** Valor com sinal (positivo = crédito, negativo = débito). String porque é Decimal no back. */
-  amount: string;
-  /** Saldo após a transação. Pode ser null em faturas de cartão. */
-  balance: string | null;
-  /**
-   * `true` só nas linhas de PAGAMENTO da fatura anterior (cartão) — excluídas
-   * do checksum, que precisa fechar no total da fatura. Opcional porque o back
-   * usa default `false` e omite a chave quando não se aplica.
-   */
-  is_payment?: boolean;
-}
-
-export interface ParsedStatement {
-  bank_name: string;
-  account_type: ParsedAccountType;
-  /** Início do período (YYYY-MM-DD). */
-  period_start: string;
-  /** Fim do período (YYYY-MM-DD). */
-  period_end: string;
-  opening_balance: string;
-  closing_balance: string;
-  transactions: ParsedTransaction[];
-}
+export type ParsedAccountType = ExtractedStatement['account_type'];
 
 /**
- * Resultado do checksum de saldos (BACK 02.3) — espelha `ChecksumResult`.
- * Valores monetários chegam como `string` (Decimal serializado, nunca float).
- * `reason` é `null` quando `ok=true`.
+ * Uma movimentação extraída (contrato `ExtractedTransaction`).
  *
- * `applicable=false` significa que a identidade de saldo NÃO é verificável
- * para o tipo de conta — hoje só `investment`, cujo rendimento/IOF/IR entram
- * no saldo sem virar movimentação. Nesse caso `ok` é sempre `true` e a UI não
- * deve exibir veredito: não há o que afirmar.
+ * `amount`/`balance` chegam como `string` (Decimal do Pydantic v2 — precisão
+ * preservada). `is_payment` só é `true` nas linhas de PAGAMENTO da fatura
+ * anterior (cartão), excluídas do checksum.
  */
-export interface ChecksumResult {
-  ok: boolean;
-  applicable: boolean;
-  account_type: ParsedAccountType;
-  expected: string;
-  computed: string;
-  difference: string;
-  tolerance: string;
-  reason: string | null;
-}
+export type ParsedTransaction = ExtractedStatement['transactions'][number];
 
 /**
- * Resposta completa de `POST /parse` — o statement extraído + o checksum,
- * IRMÃOS dentro do envelope. Por ter duas chaves (`data` + `checksum`), o
+ * Extrato/fatura extraído pela IA (contrato `ExtractedStatement`). Datas em
+ * `YYYY-MM-DD` — fazer parse manual no front (ver `lib/format`), nunca
+ * `new Date(iso)`, que é UTC e volta um dia no Brasil.
+ */
+export type ParsedStatement = ExtractedStatement;
+
+/**
+ * Checksum de saldos (BACK 02.3 — contrato `ChecksumResult`).
+ *
+ * `applicable=false` significa que a identidade de saldo NÃO é verificável para
+ * o tipo de conta (hoje só `investment`, cujo rendimento/IOF/IR entram no saldo
+ * sem virar movimentação). Nesse caso `ok` é sempre `true` e a UI não deve
+ * exibir veredito: não há o que afirmar.
+ */
+export type ChecksumResult = ChecksumContract;
+
+/**
+ * Resposta completa de `POST /parse` — statement extraído + checksum +
+ * `file_hash`, IRMÃOS dentro do envelope. Por ter mais de uma chave, o
  * auto-unwrap de `{data}` do `rawFetch` não dispara e o objeto chega inteiro.
+ *
+ * `fileHash` é o hash **recalculado no servidor** (S0/A10: duplicata é sempre
+ * por hash do servidor). O SHA-256 client-side existe só para a checagem
+ * barata de duplicata ANTES de gastar uma chamada de IA — quem vai no payload
+ * de criação é este aqui.
  */
 export interface ParseResult {
   statement: ParsedStatement;
   checksum: ChecksumResult;
+  fileHash: string;
 }
 
 export interface ParseStatementParams {
@@ -135,25 +121,28 @@ export interface ParseStatementParams {
  * `multipart/form-data` e devolve o `ExtractedStatement`. Stateless: nada
  * persiste no back até o usuário confirmar (S10).
  *
- * Erros conhecidos do back (resposta JSON envelope `{error}` → `ApiError`):
- *   - 400 `INVALID_FILE`: extensão fora do allowlist, magic bytes não bate,
- *     arquivo vazio, .xls não suportado.
- *   - 400 `FILE_TOO_LARGE`: > MAX_UPLOAD_SIZE_MB.
- *   - 404: cliente inacessível (manager fora da carteira ou inexistente).
- *   - 422 `PARSE_ERROR`: IA não devolveu tool_use válido ou validação
+ * Erros conhecidos do back (envelope `{error}` → `ApiError`), com o `code`
+ * canônico do enum `ErrorCode` — conferidos no router, não de memória:
+ *   - `VALIDATION_ERROR`: arquivo vazio, acima do teto, extensão/magic bytes
+ *     fora do allowlist.
+ *   - `DUPLICATE_FILE` (409): o CONTEÚDO já foi importado numa sessão ativa
+ *     deste cliente. O `/parse` deduplica por hash recalculado no servidor
+ *     ANTES de chamar a IA — a duplicata não custa dinheiro.
+ *   - `NOT_FOUND` (404): cliente inacessível (fora da carteira ou inexistente).
+ *   - `PARSE_ERROR` (422): a IA não devolveu `tool_use` válido, ou a validação
  *     pós-IA falhou.
- *   - 502: falha de auth na Claude API.
- *   - 504: timeout (60 s) na Claude API.
+ *   - `ANTHROPIC_AUTH_ERROR` (502) / `ANTHROPIC_TIMEOUT` (504).
  */
 export async function parseStatement(params: ParseStatementParams): Promise<ParseResult> {
   const fd = new FormData();
   fd.append('client_id', params.client_id);
   fd.append('file', params.file);
-  const res = await apiPostMultipart<{ data: ParsedStatement; checksum: ChecksumResult }>(
-    '/api/v1/reconciliations/parse',
-    fd,
-  );
-  return { statement: res.data, checksum: res.checksum };
+  const res = await apiPostMultipart<{
+    data: ParsedStatement;
+    checksum: ChecksumResult;
+    file_hash: string;
+  }>('/api/v1/reconciliations/parse', fd);
+  return { statement: res.data, checksum: res.checksum, fileHash: res.file_hash };
 }
 
 // ----------------------------------------------------------------------
@@ -161,37 +150,78 @@ export async function parseStatement(params: ParseStatementParams): Promise<Pars
 // ----------------------------------------------------------------------
 
 /**
- * Payload do POST /api/v1/reconciliations — espelha `CreateReconciliationRequest`.
+ * Payload do POST /api/v1/reconciliations (contrato `CreateReconciliationRequest`).
  *
- * O nome do campo `statement` segue o backend (não `parsed_statement`):
- * é o `ParsedStatement` devolvido por `/parse`, revalidado no servidor
- * via `ReconciliationStatementInput`.
+ * **Sprint 4:** o campo canônico é `files` — uma conciliação é *uma conta + um
+ * mês* com N partes consolidadas num só resumo. A forma legada (`file_hash` +
+ * `statement` soltos) ainda é aceita pelo backend, mas o front não a usa mais.
  *
- * `reference_month` no contrato do back é `date` (`YYYY-MM-01`); o front
- * normaliza o `YYYY-MM` do input do usuário para o 1º dia aqui antes de
- * mandar — o backend tem um `field_validator` que normaliza para o dia 1
- * de qualquer forma, mas mandar já normalizado deixa o tráfego previsível.
+ * Cada parte traz OU `statement` (extração ok) OU `error_code` (extração
+ * falhou) — nunca os dois. Registrar a parte que falhou é o que permite a tela
+ * dizer QUAL arquivo deu problema e oferecer removê-lo, em vez de a conciliação
+ * nascer silenciosamente incompleta.
+ *
+ * `reference_month` no contrato é `date` (`YYYY-MM-01`); o front normaliza o
+ * `YYYY-MM` do input para o dia 1 antes de mandar (o backend normalizaria de
+ * qualquer forma, mas assim o tráfego fica previsível).
  */
-export interface CreateReconciliationPayload {
-  client_id: string;
-  omie_conta_id: number;
-  /** ISO `YYYY-MM-DD` — sempre dia 1 do mês de referência. */
-  reference_month: string;
-  /** SHA-256 hex (64 chars, lowercase). */
-  file_hash: string;
-  statement: ParsedStatement;
-}
-
-export interface CreateReconciliationResult {
-  session_id: string;
-  /** Sempre `'processing'` no retorno do POST (back enfileira o job antes de responder). */
-  status: 'processing';
-}
+export type CreateReconciliationPayload = CreateReconciliationRequest;
+export type ReconciliationFilePart = ReconciliationFileInput;
+export type CreateReconciliationResult = CreateReconciliationContract;
 
 export async function createReconciliation(
   payload: CreateReconciliationPayload,
 ): Promise<CreateReconciliationResult> {
   return apiPost<CreateReconciliationResult>('/api/v1/reconciliations', payload);
+}
+
+// ----------------------------------------------------------------------
+// Sprint 4 / BACK 04.2 — partes (arquivos) de uma conciliação
+// ----------------------------------------------------------------------
+
+export type SessionFile = SessionFileItem;
+export type SessionFilesResult = SessionFilesPayload;
+export type AttachFilesResult = AttachFilesPayload;
+
+/**
+ * Anexa N partes a uma conciliação existente — cenário S-3 ("a parte 2 chegou
+ * no dia seguinte"). Só as partes novas são incorporadas; o cruzamento Omie
+ * roda UMA vez sobre o conjunto.
+ *
+ * `reprocessing=true` na resposta avisa que a sessão voltou para `processing`
+ * (o cruzamento foi reagendado) — é o sinal para o polling da lista/detalhe
+ * voltar a rodar.
+ *
+ * Erros: 409 `CONFLICT` (conciliação em processamento ou concluída), 409
+ * `DUPLICATE_FILE` (parte já presente), 404 (fora da carteira).
+ */
+export async function attachSessionFiles(
+  sessionId: string,
+  files: ReconciliationFilePart[],
+): Promise<AttachFilesResult> {
+  return apiPost<AttachFilesResult>(`/api/v1/reconciliations/${sessionId}/files`, { files });
+}
+
+/**
+ * Partes da conciliação com o nome DECIFRADO e o status de cada uma. É o que
+ * permite dizer qual parte falhou (código, nunca a mensagem interna).
+ * `filename` é `null` nas partes migradas da Sprint 3 — a UI mostra
+ * "Arquivo N", não célula vazia.
+ */
+export async function listSessionFiles(sessionId: string): Promise<SessionFilesResult> {
+  return apiGet<SessionFilesResult>(`/api/v1/reconciliations/${sessionId}/files`);
+}
+
+/**
+ * Remove uma parte e re-consolida o restante. 409 quando a conciliação está em
+ * `processing` ou quando é a ÚLTIMA parte com lançamentos (nesse caso o caminho
+ * é excluir a conciliação inteira).
+ */
+export async function deleteSessionFile(
+  sessionId: string,
+  fileId: string,
+): Promise<AttachFilesResult> {
+  return apiDelete<AttachFilesResult>(`/api/v1/reconciliations/${sessionId}/files/${fileId}`);
 }
 
 // ----------------------------------------------------------------------
@@ -260,16 +290,7 @@ export async function cancelReconciliation(sessionId: string): Promise<void> {
  */
 export type SessionStatus = 'processing' | 'reviewing' | 'done' | 'error';
 
-export interface SessionStatusResult {
-  session_id: string;
-  status: SessionStatus;
-  conciliated_count: number;
-  sem_omie_count: number;
-  omie_sem_arquivo_count: number;
-  anomaly_count: number;
-  /** `null` quando não há erro; string com a causa quando `status === 'error'`. */
-  error_message: string | null;
-}
+export type SessionStatusResult = SessionStatusPayload;
 
 export async function getSessionStatus(sessionId: string): Promise<SessionStatusResult> {
   return apiGet<SessionStatusResult>(`/api/v1/reconciliations/${sessionId}/status`);
@@ -289,38 +310,22 @@ export async function getSessionStatus(sessionId: string): Promise<SessionStatus
  * `status` em union literal para `switch`/`if`, ciente de que o back
  * serializa lenient — uma string desconhecida não derruba o consumidor.
  */
-export interface SessionDetail {
-  session_id: string;
-  client_id: string;
-  omie_conta_id: number;
-  /** Tipo normalizado da conta (FASE 1): `'checking'` ou `'credit_card'`.
-   *  String lenient — a Tela de Revisão ramifica nisso (badge/título/labels). */
-  account_type: string;
-  /** ISO `YYYY-MM-DD` (sempre dia 1 do mês de referência). */
-  reference_month: string;
-  status: SessionStatus;
-  total_file_entries: number;
-  conciliated_count: number;
-  sem_omie_count: number;
-  omie_sem_arquivo_count: number;
-  anomaly_count: number;
-  /**
-   * `null` quando `status !== 'error'`. Front usa pra renderizar a página
-   * de erro com mensagem amigável + botão "Tentar novamente" antes de
-   * chamar os endpoints de revisão (que retornariam 409 ConflictError
-   * com status='error').
-   */
-  error_message: string | null;
-  /**
-   * Saldos agregados calculados pós-matching. Decimal serializado como
-   * `string` (mesma convenção do `amount` em FileEntry). `null` em sessões
-   * legadas processadas antes do balance fix; UI exibe "Indisponível".
-   */
-  balance_start: string | null;
-  balance_end_file: string | null;
-  balance_end_omie: string | null;
-  balance_difference: string | null;
-}
+/**
+ * Detalhe da sessão (contrato `SessionDetailPayload`).
+ *
+ * Substitui o scan O(N) que a Tela de Revisão fazia via
+ * `useReconciliationsList(clientId, {pageSize:100}) + .find()` — não cobria
+ * clientes com > 100 sessões.
+ *
+ * Notas de contrato:
+ *   - `status` e `account_type` são `string` (lenient out) — a UI ramifica com
+ *     fallback, sem quebrar se o backend introduzir um valor novo;
+ *   - os saldos (`balance_*`) são Decimal serializado como `string` e podem ser
+ *     `null` em sessões legadas (UI exibe "Indisponível");
+ *   - `error_code` é o CÓDIGO canônico do desfecho (S2/R9) — a tela mostra
+ *     "(cód. X)", nunca `error_message`, que é linguagem interna.
+ */
+export type SessionDetail = SessionDetailPayload;
 
 export async function getSessionDetail(sessionId: string): Promise<SessionDetail> {
   return apiGet<SessionDetail>(`/api/v1/reconciliations/${sessionId}`);
