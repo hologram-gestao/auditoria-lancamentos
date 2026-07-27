@@ -35,6 +35,8 @@ from app.core.security import hash_password
 from app.db.models import (
     Client,
     ClientAssignment,
+    ReconciliationFile,
+    ReconciliationFileStatus,
     ReconciliationSession,
     User,
     UserRole,
@@ -133,12 +135,22 @@ async def _seed_reconciliation(
         omie_conta_id=omie_conta_id,
         reference_month=reference_month,
         date_tolerance_days=3,
-        file_hash=file_hash,
+        # Sprint 4: o hash mora em `reconciliation_files` (por arquivo). A
+        # coluna legada fica NULL, como nas sessões criadas pela API hoje.
+        file_hash=None,
         status=status,
         balance_start=Decimal("0.00"),
         processed_at=datetime.now(UTC) - timedelta(days=1),
     )
     session.add(sess)
+    await session.flush()
+    session.add(
+        ReconciliationFile(
+            session_id=sess.id,
+            file_hash=file_hash,
+            status=ReconciliationFileStatus.PARSED.value,
+        )
+    )
     await session.flush()
     return sess
 
@@ -388,9 +400,12 @@ class TestCheckDuplicateDomain:
     async def test_different_hash_does_not_count_as_duplicate(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
-        """Mesma conta, mesmo mês, hash diferente → UNIQUE de 4 colunas
-        garante que NÃO é duplicata. O upload do extrato corrigido tem que
-        ser permitido."""
+        """Mesma conta, mesmo mês, hash diferente → NÃO é duplicata.
+
+        Sprint 4: a pergunta do `/check-duplicate` virou "esta conciliação já
+        contém este arquivo?" (`UNIQUE(session_id, file_hash)`). Uma parte nova
+        da mesma fatura — ou o extrato corrigido — nunca pode ser bloqueada
+        pelas partes que já entraram."""
         admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
         mgr = await _seed_user(db_session, email=MANAGER_A_EMAIL, role=UserRole.MANAGER)
         cliente = await _seed_client(db_session, name="X", creator=admin, manager=mgr)

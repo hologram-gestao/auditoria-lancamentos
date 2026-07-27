@@ -39,6 +39,7 @@ from sqlalchemy import text  # noqa: E402
 
 from app.core.alerting import Alert, AlertCode, send_alert  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
+from app.core.exceptions import ErrorCode  # noqa: E402
 from app.core.logging import get_logger, setup_logging  # noqa: E402
 from app.db.session import close_db, get_session_factory, init_db  # noqa: E402
 
@@ -70,12 +71,20 @@ async def main() -> None:
                     UPDATE reconciliation_sessions
                     SET status = 'error',
                         error_message = :msg,
+                        -- Sprint 4: o código acompanha a mensagem em TODO
+                        -- caminho que marca erro. Sem ele aqui, a sessão que o
+                        -- watchdog derruba seria a única sem "cód. X" na tela.
+                        error_code = :code,
                         updated_at = NOW()
                     WHERE status = 'processing'
                       AND updated_at < NOW() - (:minutes || ' minutes')::interval
                     """
                 ),
-                {"msg": _ERROR_MSG, "minutes": STUCK_THRESHOLD_MINUTES},
+                {
+                    "msg": _ERROR_MSG,
+                    "code": ErrorCode.RECONCILIATION_TIMEOUT.value,
+                    "minutes": STUCK_THRESHOLD_MINUTES,
+                },
             )
         # ``Result.rowcount`` existe em runtime mas o stub do SQLAlchemy 2.x
         # marca como ``-1`` pra Core async — pegamos via ``getattr`` pra

@@ -2,9 +2,13 @@
 
 Schema oficial: Docs/documentation/0. Schema do Banco de Dados e Cache-*.md §reconciliation_sessions.
 
-Idempotência: UNIQUE(client_id, omie_conta_id, reference_month, file_hash) —
-um arquivo só pode ser processado uma vez para a mesma conta/mês. Duplicata
-retorna HTTP 409 DUPLICATE_FILE (Doc §11.3 V3).
+Idempotência (Sprint 4 / BACK 04.2): **UNIQUE(client_id, omie_conta_id,
+reference_month)** — uma conciliação por conta+mês, com N arquivos (partes)
+consolidados num só resumo. A duplicata de ARQUIVO desceu um nível, para
+`UNIQUE(session_id, file_hash)` em `reconciliation_files`. Tentar criar uma 2ª
+conciliação para a mesma conta+mês retorna 409 (o caminho certo é anexar o
+arquivo à conciliação existente); reenviar a mesma parte retorna 409
+DUPLICATE_FILE (Doc §11.3 V3).
 
 Estados (Doc §17.1):
     processing → reviewing → done
@@ -42,6 +46,7 @@ from app.db.models._mixins import TimestampMixin, UUIDPrimaryKeyMixin
 if TYPE_CHECKING:
     from app.db.models.client import Client
     from app.db.models.reconciliation_anomaly import ReconciliationAnomaly
+    from app.db.models.reconciliation_file import ReconciliationFile
     from app.db.models.reconciliation_file_entry import ReconciliationFileEntry
     from app.db.models.reconciliation_omie_entry import ReconciliationOmieEntry
     from app.db.models.user import User
@@ -80,17 +85,20 @@ class ReconciliationSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "reconciliation_sessions"
     # UNIQUE PARCIAL: a idempotência só vale para sessões ATIVAS
     # (`deleted_at IS NULL`). Soft-delete libera a tupla pra criar uma
-    # sessão nova com o mesmo arquivo no mesmo mês — caso do botão
-    # "Descartar" na UI de erro. PostgreSQL suporta `WHERE` em índice
-    # único nativamente, SQLAlchemy não modela `UniqueConstraint(where=)`,
+    # conciliação nova para a mesma conta/mês — caso do botão "Descartar"
+    # na UI de erro. PostgreSQL suporta `WHERE` em índice único
+    # nativamente, SQLAlchemy não modela `UniqueConstraint(where=)`,
     # então usamos `Index(unique=True, postgresql_where=...)`.
+    #
+    # Sprint 4: o `file_hash` SAIU desta chave (uma conciliação = conta+mês,
+    # com N arquivos). A duplicata de arquivo vive em
+    # `reconciliation_files.uq_recon_files_session_hash`.
     __table_args__ = (
         Index(
-            "uq_recon_sessions_idempotency",
+            "uq_recon_sessions_account_month",
             "client_id",
             "omie_conta_id",
             "reference_month",
-            "file_hash",
             unique=True,
             postgresql_where=text("deleted_at IS NULL"),
         ),
@@ -130,7 +138,12 @@ class ReconciliationSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # matcher (DATE_DIVERGENCE_RANGE=3). Coluna mantida só por histórico (não-
     # destrutivo); novas sessões gravam 0 e o job NÃO lê mais este valor.
     date_tolerance_days: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
-    file_hash: Mapped[str] = mapped_column(String(64), nullable=False)  # SHA-256 hex
+    # LEGADO (Sprint 4): o hash desceu para `reconciliation_files.file_hash`,
+    # por ARQUIVO. A coluna virou nullable e é mantida só por histórico —
+    # sessões novas gravam NULL e NENHUMA query de negócio a lê. Não a
+    # reintroduza: a fonte da verdade de "que arquivos compõem esta
+    # conciliação" é a tabela `reconciliation_files`.
+    file_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)  # SHA-256 hex
 
     status: Mapped[str] = mapped_column(
         String(20),
@@ -139,6 +152,12 @@ class ReconciliationSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         index=True,
     )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Sprint 4 (BACK 04.4): CÓDIGO canônico do desfecho de erro
+    # (`app.core.exceptions.ErrorCode`). A mensagem em PT-BR continua em
+    # `error_message`; o código é o que a tela e a notificação exibem para o
+    # usuário reportar (S2/R9 — nunca a linguagem interna). NULL em sessões
+    # anteriores à Sprint 4 e em toda sessão que não falhou.
+    error_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Soft-delete: NULL = sessão ativa; timestamp = descartada pela UI.
@@ -168,6 +187,12 @@ class ReconciliationSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Relationships
     client: Mapped[Client] = relationship("Client", back_populates="reconciliations", lazy="raise")
     user: Mapped[User] = relationship("User", foreign_keys=[created_by], lazy="raise")
+    files: Mapped[list[ReconciliationFile]] = relationship(
+        "ReconciliationFile",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        lazy="raise",
+    )
     file_entries: Mapped[list[ReconciliationFileEntry]] = relationship(
         "ReconciliationFileEntry",
         back_populates="session",

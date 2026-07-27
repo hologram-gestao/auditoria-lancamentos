@@ -17,6 +17,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.db.models import ReconciliationStatus
 from app.modules.users.schemas import PaginationMeta
 
 
@@ -154,12 +155,27 @@ class ClientDetailResponse(ClientResponse):
     accounts_synced_at: datetime | None = None
 
 
+#: Vocabulário de status do PRODUTO → status do banco (Sprint 4, R1/§17).
+#: "Processada" cobre `reviewing` (aguardando revisão) e `done` (revisada): do
+#: ponto de vista de quem opera a lista, ambas terminaram de processar. O
+#: filtro da UI trabalha com as chaves; o banco, com os valores.
+UI_STATUS_TO_DB: dict[str, list[str]] = {
+    "processing": [ReconciliationStatus.PROCESSING.value],
+    "processed": [ReconciliationStatus.REVIEWING.value, ReconciliationStatus.DONE.value],
+    "error": [ReconciliationStatus.ERROR.value],
+}
+
+
 class ReconciliationSessionSummary(BaseModel):
-    """Item da lista do histórico de conciliações (S7 BACK 4.2).
+    """Item da lista de conciliações do cliente (S7 BACK 4.2 + BACK 04.3).
 
     O front resolve o nome da conta via cache do detalhe do cliente
     (Endpoint A) — aqui só vai o `omie_conta_id`. `error_message` aparece
     apenas em sessões com `status='error'`.
+
+    Os contadores vêm das COLUNAS da sessão, materializadas pela fonte única
+    (`reconciliations.totals`) — a lista não recalcula nada e por isso não
+    diverge do detalhe.
     """
 
     id: UUID
@@ -177,6 +193,11 @@ class ReconciliationSessionSummary(BaseModel):
     omie_sem_arquivo_count: int = Field(0, ge=0)
     anomaly_count: int = Field(0, ge=0)
     error_message: str | None = None
+    # BACK 04.4 — código canônico do erro; o card mostra "(cód. X)".
+    error_code: str | None = None
+    # BACK 04.2/04.3 — nº de partes (arquivos) da conciliação. O card da lista
+    # mostra "3 arquivos"; vem de subquery na própria query da listagem.
+    total_files: int = Field(0, ge=0)
 
     model_config = {"from_attributes": True}
 

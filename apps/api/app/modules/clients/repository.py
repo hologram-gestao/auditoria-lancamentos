@@ -24,6 +24,7 @@ from app.db.models import (
     Client,
     ClientAssignment,
     OmieAccountCache,
+    ReconciliationFile,
     ReconciliationSession,
     User,
 )
@@ -243,22 +244,43 @@ class ClientRepository:
         omie_conta_id: int | None = None,
         month_start: date | None = None,
         month_end: date | None = None,
-    ) -> tuple[Sequence[ReconciliationSession], int]:
-        """Lista paginada do histórico de conciliações de UM cliente.
+        statuses: Sequence[str] | None = None,
+    ) -> tuple[Sequence[tuple[ReconciliationSession, int]], int]:
+        """Lista paginada das conciliações de UM cliente (S7 BACK 4.2 + BACK 04.3).
 
-        Filtros opcionais (combináveis):
+        Filtros opcionais, **combináveis com E**:
             - `omie_conta_id`: igual.
             - `month_start`/`month_end`: range half-open `[start, end)` para
               filtrar `reference_month` em um mês específico. Caller calcula
               `[YYYY-MM-01, mês+1-01)` para evitar erro de timezone/granularidade.
+            - `statuses`: lista de status do BANCO já traduzida pelo service a
+              partir do vocabulário do produto ("Processada" = reviewing OU
+              done). O repository não conhece esse mapeamento.
+
+        Devolve `(sessão, nº de arquivos)` por item. A contagem vem de uma
+        **subquery correlata na mesma query** — contar arquivo por item num
+        loop seria N+1 numa tela que pagina de 20 em 20 (guardrail do PRD: a
+        lista não pode ficar mais lenta com a paginação).
+
+        Os totalizadores por item saem das COLUNAS da sessão, materializadas
+        pela fonte única (`totals.refresh_session_counters`) — a lista não
+        recalcula nada, e por isso não diverge do detalhe.
 
         Ordem: `created_at DESC, id DESC` — desempate determinístico quando 2
         sessões caem no mesmo segundo (pode acontecer em testes).
         """
+        files_count = (
+            select(func.count(ReconciliationFile.id))
+            .where(ReconciliationFile.session_id == ReconciliationSession.id)
+            .correlate(ReconciliationSession)
+            .scalar_subquery()
+            .label("total_files")
+        )
+
         # Esconde sessões descartadas (soft-delete). Sessões em error
         # descartadas pela UI não aparecem mais no histórico do cliente,
         # mas continuam no banco pra auditoria.
-        base = select(ReconciliationSession).where(
+        base = select(ReconciliationSession, files_count).where(
             ReconciliationSession.client_id == client_id,
             ReconciliationSession.deleted_at.is_(None),
         )
@@ -285,6 +307,10 @@ class ClientRepository:
                 ReconciliationSession.reference_month < month_end,
             )
 
+        if statuses:
+            base = base.where(ReconciliationSession.status.in_(statuses))
+            count_base = count_base.where(ReconciliationSession.status.in_(statuses))
+
         base = base.order_by(
             ReconciliationSession.created_at.desc(),
             ReconciliationSession.id.desc(),
@@ -292,7 +318,9 @@ class ClientRepository:
         offset = (page - 1) * page_size
         base = base.offset(offset).limit(page_size)
 
+        # `total` = COUNT com os MESMOS filtros (senão o rodapé "x-y de N"
+        # mente quando há filtro ativo). Paginar DEPOIS de filtrar.
         total = (await self._session.execute(count_base)).scalar_one()
         result = await self._session.execute(base)
-        rows = result.scalars().all()
+        rows = [(row[0], int(row[1])) for row in result.all()]
         return rows, int(total)
