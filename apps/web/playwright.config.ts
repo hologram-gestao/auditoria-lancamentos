@@ -26,5 +26,15 @@ export default defineConfig({
     baseURL,
     trace: 'on-first-retry',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  /**
+   * Desktop **e** mobile. O defeito 86e2gwuxn (`scrollable-region-focusable`,
+   * SERIOUS) só existia em viewport estreito: em 390px a tabela transborda e o
+   * wrapper vira região rolável. Rodando só `Desktop Chrome`, nada transbordava
+   * e a suíte passava com o defeito no lugar — a cobertura mobile é o que torna
+   * o gate honesto para o design mobile-first.
+   */
+  projects: [
+    { name: 'desktop', use: { ...devices['Desktop Chrome'] } },
+    { name: 'mobile', use: { ...devices['Pixel 5'] } },
+  ],
 });

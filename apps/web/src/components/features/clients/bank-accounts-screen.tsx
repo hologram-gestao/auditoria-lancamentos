@@ -132,7 +132,7 @@ export function BankAccountsScreen({ clientId }: { clientId: string }) {
           </div>
         ) : (
           <div className="rounded-lg border">
-            <Table>
+            <Table scrollRegionLabel="Contas bancárias (rolável horizontalmente)">
               <TableHeader>
                 <TableRow>
                   <TableHead>Conta</TableHead>
