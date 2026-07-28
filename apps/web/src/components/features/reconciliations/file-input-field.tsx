@@ -131,7 +131,7 @@ export function FileInputField({
  *   - `< 1 MB`  → "X.XX KB"
  *   - `≥ 1 MB`  → "X.XX MB"
  */
-function formatFileSize(bytes: number): string {
+export function formatFileSize(bytes: number): string {
   if (bytes < 1024) {
     return `${bytes} bytes`;
   }

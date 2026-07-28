@@ -35,11 +35,13 @@ from app.integrations.omie.lancamento_cache import OmieLancamentoCache
 from app.modules.anomaly_types import routes as anomaly_types_routes
 from app.modules.auth import routes as auth_routes
 from app.modules.clients import routes as clients_routes
+from app.modules.notifications import routes as notifications_routes
 from app.modules.omie_data import routes as omie_data_routes
 from app.modules.reconciliations import routes as reconciliations_routes
 from app.modules.reconciliations.export import routes as export_routes
 from app.modules.reconciliations.review import routes as review_routes
 from app.modules.system import routes as system_routes
+from app.modules.usage_events import routes as usage_events_routes
 from app.modules.users import routes as users_routes
 
 CORRELATION_HEADER = "X-Correlation-ID"
@@ -254,6 +256,8 @@ def create_app() -> FastAPI:
     app.include_router(export_routes.router)
     app.include_router(omie_data_routes.router)
     app.include_router(anomaly_types_routes.router)
+    app.include_router(notifications_routes.router)
+    app.include_router(usage_events_routes.router)
     app.include_router(system_routes.router)
 
     # Cache L1 de lançamentos Omie (S11) — singleton in-memory por processo.

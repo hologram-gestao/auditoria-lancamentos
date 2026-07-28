@@ -37,6 +37,12 @@ class ErrorCode(StrEnum):
     ANTHROPIC_AUTH_ERROR = "ANTHROPIC_AUTH_ERROR"
     ANTHROPIC_TIMEOUT = "ANTHROPIC_TIMEOUT"
     PARSE_ERROR = "PARSE_ERROR"
+    # Desfechos do processamento em background (Sprint 4). Não viram resposta
+    # HTTP — são gravados em `reconciliation_sessions.error_code` e viajam na
+    # notificação, para o usuário reportar um CÓDIGO em vez de repetir uma
+    # mensagem (S2/R9: a tela nunca mostra linguagem interna).
+    RECONCILIATION_TIMEOUT = "RECONCILIATION_TIMEOUT"
+    RECONCILIATION_CANCELLED = "RECONCILIATION_CANCELLED"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 

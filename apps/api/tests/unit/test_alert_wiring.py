@@ -16,6 +16,7 @@ from app.core.alerting import AlertCode, AlertDeliveryResult
 from app.core.config import Settings
 from app.core.crypto import ClientCipher
 from app.core.crypto_service import AAD_FILE_ENTRY_DESCRIPTION
+from app.core.exceptions import ErrorCode
 
 _FAKE_HEX_KEY = "0" * 64
 
@@ -42,7 +43,13 @@ class TestSessionErrorAlert:
             raise RuntimeError("sem DB neste unit test")
 
         await job._safe_mark_error(
-            uuid4(), _boom_factory, "Erro generico ao processar", settings=Settings()
+            uuid4(),
+            _boom_factory,
+            "Erro generico ao processar",
+            settings=Settings(),
+            # Sprint 4: o código canônico acompanha a marcação de erro (vai para
+            # `reconciliation_sessions.error_code` e para a notificação).
+            error_code=ErrorCode.INTERNAL_ERROR.value,
         )
 
         assert len(captured) == 1

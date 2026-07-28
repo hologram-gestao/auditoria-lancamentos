@@ -12,6 +12,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { QualificationCell } from '@/components/features/reconciliations/review/qualification-cell';
 import type { AnomalyItem } from '@/lib/api/reconciliations';
+import { assertNoA11yViolations } from '@/test/a11y';
 
 function makeAnomaly(
   overrides: Partial<AnomalyItem> & {
@@ -109,5 +110,18 @@ describe('QualificationCell', () => {
   it('não renderiza botão clicável quando o estado é ok', () => {
     render(<QualificationCell anomalies={[]} onOpenOverride={vi.fn()} />);
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  /**
+   * Regressão do `aria-prohibited-attr` (reprovação do QA, 7 nós na aba
+   * Movimentações): o estado "ok" é um `<span>` com `aria-label` e, sem role,
+   * ARIA PROÍBE o atributo — o rótulo era descartado e o ícone não era
+   * anunciado. `role="img"` é o que torna o `aria-label` válido, e é por isso
+   * que o teste checa o ROLE, não só o texto do rótulo.
+   */
+  it('o ícone "ok" tem role que aceita aria-label (e o axe não reprova)', async () => {
+    const { container } = render(<QualificationCell anomalies={[]} onOpenOverride={vi.fn()} />);
+    expect(screen.getByRole('img', { name: 'Qualificação coerente' })).toBeInTheDocument();
+    await assertNoA11yViolations(container);
   });
 });

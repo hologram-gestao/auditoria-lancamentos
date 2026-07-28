@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 # Congelados — fazem parte do AAD persistido.
 AAD_CLIENT_APP_KEY = ("clients", "omie_app_key_encrypted")
 AAD_CLIENT_APP_SECRET = ("clients", "omie_app_secret_encrypted")
+AAD_FILE_NAME = ("reconciliation_files", "filename_encrypted")
 AAD_FILE_ENTRY_DESCRIPTION = ("reconciliation_file_entries", "description_encrypted")
 AAD_FILE_ENTRY_USER_NOTE = ("reconciliation_file_entries", "user_note_encrypted")
 AAD_OMIE_ENTRY_USER_NOTE = ("reconciliation_omie_entries", "user_note_encrypted")

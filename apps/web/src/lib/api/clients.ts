@@ -13,35 +13,24 @@
  *     backend pode introduzir novos tipos do Omie antes do front (memória
  *     `feedback_pydantic` — strict in / lenient out).
  */
+import type {
+  BankAccountResponse,
+  ClientDetailResponse,
+  ClientListResponse as ClientListContract,
+  ClientResponse,
+  ManagerSummary as ManagerSummaryContract,
+  PaginationMeta,
+  ReconciliationSessionListResponse,
+  ReconciliationSessionSummary as ReconciliationSessionSummaryContract,
+  ReconciliationStatusFilter,
+} from '@/lib/contracts';
+
 import { apiGet, apiPatch, apiPost } from './client';
 
-export interface ManagerSummary {
-  id: string;
-  name: string;
-  email: string;
-}
-
-export interface Client {
-  id: string;
-  name: string;
-  active: boolean;
-  created_at: string;
-  updated_at: string;
-  responsible_manager: ManagerSummary | null;
-  reconciliation_count: number;
-}
-
-export interface Pagination {
-  page: number;
-  pageSize: number;
-  total: number;
-  totalPages: number;
-}
-
-export interface ClientListResponse {
-  data: Client[];
-  pagination: Pagination;
-}
+export type ManagerSummary = ManagerSummaryContract;
+export type Client = ClientResponse;
+export type Pagination = PaginationMeta;
+export type ClientListResponse = ClientListContract;
 
 export interface ListClientsParams {
   page?: number;
@@ -111,20 +100,14 @@ export async function assignClient(id: string, payload: AssignClientPayload): Pr
 // S7 — detalhe + cache L1 de contas + histórico de conciliações
 // ---------------------------------------------------------------------------
 
-export interface BankAccount {
-  id: string;
-  omie_conta_id: number;
-  name: string;
-  bank_name: string;
-  /**
-   * Código de 2 letras do Omie: `CC` (conta corrente), `CR` (cartão de
-   * crédito), `CA` (conta aplicação/investimento), etc. Tratamos como string
-   * para tolerar tipos novos do Omie. ⚠️ `CA` ≠ cartão (auditoria M-1) — para
-   * detectar cartão use `isCreditCardAccount`.
-   */
-  account_type: string;
-  synced_at: string;
-}
+/**
+ * Conta bancária do cache L1 do cliente (contrato: `BankAccountResponse`).
+ *
+ * `account_type` é o código de 2 letras do Omie: `CC` (conta corrente), `CR`
+ * (cartão de crédito), `CA` (conta aplicação/investimento), etc. ⚠️ `CA` ≠
+ * cartão (auditoria M-1) — para detectar cartão use `isCreditCardAccount`.
+ */
+export type BankAccount = BankAccountResponse;
 
 /**
  * Detecta conta de cartão de crédito pelo `account_type` do Omie.
@@ -136,32 +119,25 @@ export function isCreditCardAccount(accountType: string): boolean {
   return accountType.trim().toUpperCase() === 'CR';
 }
 
-export interface ClientDetail extends Client {
-  accounts: BankAccount[];
-  /** MAX(synced_at) das contas; null se nenhuma conta foi sincronizada ainda. */
-  accounts_synced_at: string | null;
-}
+/**
+ * Detalhe do cliente + contas do cache L1 (contrato: `ClientDetailResponse`).
+ *
+ * `accounts` e `accounts_synced_at` são OPCIONAIS no contrato (cliente novo,
+ * sem nenhuma conta cacheada) — consumir sempre com `?? []` / `?? null`.
+ */
+export type ClientDetail = ClientDetailResponse;
 
-/** Estados possíveis de uma sessão de conciliação (Doc §10.1). */
+/** Estados possíveis de uma sessão de conciliação no banco (Doc §17.1). */
 export type ReconciliationStatus = 'processing' | 'reviewing' | 'done' | 'error';
 
-export interface ReconciliationSessionSummary {
-  id: string;
-  omie_conta_id: number;
-  /** Tipo normalizado da conta. Card do histórico mostra badge "Cartão de
-   *  Crédito" (`credit_card`) ou "Conta Aplicação" (`investment`). */
-  account_type: 'checking' | 'credit_card' | 'investment';
-  /** ISO date `YYYY-MM-DD` representando o primeiro dia do mês de referência. */
-  reference_month: string;
-  status: string;
-  created_at: string;
-  total_file_entries: number;
-  conciliated_count: number;
-  sem_omie_count: number;
-  omie_sem_arquivo_count: number;
-  anomaly_count: number;
-  error_message: string | null;
-}
+export type ReconciliationSessionSummary = ReconciliationSessionSummaryContract;
+
+/**
+ * Status no vocabulário do PRODUTO usado pelo filtro da lista (Sprint 4):
+ * `processed` cobre `reviewing` e `done` no banco. Vem do contrato — valor
+ * fora da lista devolve 400 no backend.
+ */
+export type ReconciliationStatusFilterValue = ReconciliationStatusFilter;
 
 export interface ReconciliationsListParams {
   page?: number;
@@ -170,12 +146,11 @@ export interface ReconciliationsListParams {
   omie_conta_id?: number;
   /** Mês no formato `YYYY-MM` (mesmo formato do `<input type="month">`). */
   month?: string;
+  /** Status no vocabulário do produto (`processing` | `processed` | `error`). */
+  status?: ReconciliationStatusFilterValue;
 }
 
-export interface ReconciliationsListResponse {
-  data: ReconciliationSessionSummary[];
-  pagination: Pagination;
-}
+export type ReconciliationsListResponse = ReconciliationSessionListResponse;
 
 export async function getClientDetail(id: string): Promise<ClientDetail> {
   return apiGet<ClientDetail>(`/api/v1/clients/${id}`);
@@ -187,15 +162,19 @@ export async function syncClientAccounts(id: string): Promise<ClientDetail> {
   return apiPatch<ClientDetail>(`/api/v1/clients/${id}/sync-accounts`, {});
 }
 
+/** Itens por página padrão da lista de conciliações (design-system: ~20). */
+export const RECONCILIATIONS_DEFAULT_PAGE_SIZE = 20;
+
 function buildReconciliationsQuery(params: ReconciliationsListParams): string {
   const sp = new URLSearchParams();
   sp.set('page', String(params.page ?? 1));
-  sp.set('pageSize', String(params.pageSize ?? 10));
+  sp.set('pageSize', String(params.pageSize ?? RECONCILIATIONS_DEFAULT_PAGE_SIZE));
   if (params.omie_conta_id !== undefined) {
     sp.set('omie_conta_id', String(params.omie_conta_id));
   }
   const month = params.month?.trim();
   if (month) sp.set('month', month);
+  if (params.status !== undefined) sp.set('status', params.status);
   return sp.toString();
 }
 

@@ -63,7 +63,12 @@ export function QualificationCell({ anomalies, onOpenOverride }: QualificationCe
       <TooltipProvider delayDuration={150}>
         <Tooltip>
           <TooltipTrigger asChild>
+            {/* `role="img"`: ARIA PROÍBE `aria-label` em elemento de role
+                genérico (um `<span>` cru) — o rótulo é simplesmente ignorado e
+                o ícone não é anunciado. Com role de imagem o rótulo passa a ser
+                o nome acessível do ícone. */}
             <span
+              role="img"
               className="inline-flex items-center rounded-full bg-emerald-50 p-1 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
               aria-label="Qualificação coerente"
             >
