@@ -348,11 +348,26 @@ jobs:
 
   deploy-web:
     name: Deploy Web revision
-    needs: [build-web, deploy-api]
+    # `deploy-api` SKIPPED tem duas causas opostas, e só uma autoriza publicar
+    # o front:
+    #   (a) o PR não tocou em `apps/api/**` → o path-filter pulou build-api,
+    #       migrate e deploy-api. A API no ar continua correta; publicar o web
+    #       é o comportamento desejado.
+    #   (b) `migrate` FALHOU → `deploy-api` tem `if: needs.migrate.result ==
+    #       'success'`, então vira `skipped` (não `failure`). A API no ar é a
+    #       versão ANTIGA.
+    # Aceitar `skipped` sem distinguir os dois casos publica front novo contra
+    # API velha — foi o que aconteceu no deploy da Sprint 4 (run 30415162142):
+    # `migrate` vermelho, `deploy-api` pulado, `deploy-web` VERDE, e a aplicação
+    # ficou com o sino chamando `/api/v1/notifications/unread-count` → 404.
+    # `migrate` é o que separa os casos: `skipped` = não houve mudança na API;
+    # qualquer outra coisa = a API não subiu.
+    needs: [build-web, deploy-api, migrate]
     if: |
       always() &&
       needs.build-web.result == 'success' &&
-      (needs.deploy-api.result == 'success' || needs.deploy-api.result == 'skipped')
+      (needs.deploy-api.result == 'success' ||
+       (needs.deploy-api.result == 'skipped' && needs.migrate.result == 'skipped'))
     runs-on: ubuntu-latest
     environment: development
     steps:
