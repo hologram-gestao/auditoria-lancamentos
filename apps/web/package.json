@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
+    "gen:types": "openapi-typescript http://localhost:8000/openapi.json -o src/lib/contracts/schema.ts",
     "format": "prettier --write .",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
@@ -45,6 +46,7 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.10.0",
     "@playwright/test": "^1.48.0",
     "@testing-library/jest-dom": "^6.5.0",
     "@testing-library/react": "^16.0.1",
@@ -56,6 +58,7 @@
     "@typescript-eslint/parser": "^8.8.1",
     "@vitest/ui": "^2.1.2",
     "autoprefixer": "^10.4.20",
+    "axe-core": "^4.10.0",
     "eslint": "^8.57.1",
     "eslint-config-next": "^14.2.15",
     "eslint-plugin-import": "^2.31.0",

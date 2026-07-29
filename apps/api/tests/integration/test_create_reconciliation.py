@@ -37,11 +37,18 @@ from app.core.crypto_service import (
 from app.core.search_index import compute_query_hmacs
 from app.core.security import hash_password
 from app.db.models import (
+    AnomalySeverity,
+    AnomalyType,
     Client,
     ClientAssignment,
     FileEntrySituation,
     OmieAccountCache,
+    OmieEntryStatus,
+    ReconciliationAnomaly,
+    ReconciliationFile,
     ReconciliationFileEntry,
+    ReconciliationFileStatus,
+    ReconciliationOmieEntry,
     ReconciliationSession,
     User,
     UserRole,
@@ -594,7 +601,12 @@ class TestCreateReconciliationIdempotency:
         db_session: AsyncSession,
         stub_enqueue: list[UUID],
     ) -> None:
-        """Mesma tupla (client, conta, mês, hash) → 409 DUPLICATE_FILE."""
+        """Sprint 4: 2ª conciliação para a mesma (client, conta, mês) → 409.
+
+        A unicidade da sessão perdeu o `file_hash`: uma conciliação por
+        conta+mês. O 409 carrega o caminho de saída (anexar à existente) na
+        `userMessage` — beco sem saída é defeito de UX, não "erro esperado".
+        """
         admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
         cliente = await _seed_client(db_session, name="X", creator=admin)
         await _login(client_with_db, ADMIN_EMAIL)
@@ -605,11 +617,16 @@ class TestCreateReconciliationIdempotency:
         # 1º POST: 201
         resp1 = await client_with_db.post("/api/v1/reconciliations", json=payload)
         assert resp1.status_code == 201, resp1.text
+        assert resp1.json()["data"]["total_files"] == 1
 
-        # 2º POST com mesma tupla: 409
-        resp2 = await client_with_db.post("/api/v1/reconciliations", json=payload)
+        # 2º POST na mesma conta+mês: 409, mesmo com arquivo DIFERENTE.
+        resp2 = await client_with_db.post(
+            "/api/v1/reconciliations",
+            json=_create_payload(client_id=cliente.id, file_hash=_hex64("outro-arquivo")),
+        )
         assert resp2.status_code == 409, resp2.text
-        assert resp2.json()["error"]["code"] == "DUPLICATE_FILE"
+        assert resp2.json()["error"]["code"] == "CONFLICT"
+        assert "adicione o arquivo" in resp2.json()["error"]["userMessage"].lower()
 
         # Apenas o 1º foi enfileirado — o 2º falha antes do enqueue.
         assert len(stub_enqueue) == 1
@@ -701,7 +718,9 @@ async def _seed_session(
         omie_conta_id=42,
         reference_month=date(2026, 4, 1),
         date_tolerance_days=3,
-        file_hash=file_hash or _hex64("status-test"),
+        # Sprint 4: hash mora em `reconciliation_files` (uma parte por sessão
+        # aqui — é o shape das sessões migradas e do caso single-file).
+        file_hash=None,
         status=status_value,
         error_message=error_message,
         balance_start=Decimal("0.00"),
@@ -712,6 +731,14 @@ async def _seed_session(
         anomaly_count=0,
     )
     session.add(sess)
+    await session.flush()
+    session.add(
+        ReconciliationFile(
+            session_id=sess.id,
+            file_hash=file_hash or _hex64("status-test"),
+            status=ReconciliationFileStatus.PARSED.value,
+        )
+    )
     await session.flush()
     return sess
 
@@ -812,12 +839,59 @@ class TestSessionDetailEndpoint:
         admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
         cliente = await _seed_client(db_session, name="X", creator=admin)
         sess = await _seed_session(db_session, cliente=cliente, creator=admin)
-        # Popula contadores e totais — devem aparecer no payload.
-        sess.total_file_entries = 42
-        sess.conciliated_count = 30
-        sess.sem_omie_count = 8
-        sess.omie_sem_arquivo_count = 4
-        sess.anomaly_count = 2
+        # Sprint 4 / BACK 04.3: o detalhe DERIVA os totalizadores das linhas
+        # (fonte única em `totals.py`) em vez de ecoar as colunas da sessão —
+        # por isso o seed são as LINHAS, não os contadores. Escrever as colunas
+        # à mão criaria um estado que não existe em produção (elas só são
+        # escritas por `refresh_session_counters`, a partir destas mesmas linhas).
+        hex_key = get_settings().OMIE_ENCRYPTION_KEY.get_secret_value()
+        for situation, quantidade in (
+            (FileEntrySituation.CONCILIADO.value, 3),
+            (FileEntrySituation.CONCILIADO_DATA_DIVERGENTE.value, 1),
+            (FileEntrySituation.SEM_OMIE.value, 2),
+        ):
+            for i in range(quantidade):
+                ct, iv = encrypt(f"Movimento {situation} {i}", hex_key)
+                db_session.add(
+                    ReconciliationFileEntry(
+                        session_id=sess.id,
+                        transaction_date=date(2026, 4, 5),
+                        description_encrypted=ct,
+                        description_iv=iv,
+                        amount=Decimal("-10.00"),
+                        situation=situation,
+                    )
+                )
+        for omie_id in (901, 902):
+            db_session.add(
+                ReconciliationOmieEntry(
+                    session_id=sess.id,
+                    omie_lancamento_id=omie_id,
+                    transaction_date=date(2026, 4, 7),
+                    omie_status=OmieEntryStatus.ATRASADO.value,
+                )
+            )
+        anomaly_type = await db_session.scalar(
+            select(AnomalyType).where(AnomalyType.code == "wrong_date")
+        )
+        if anomaly_type is None:
+            anomaly_type = AnomalyType(
+                code="wrong_date",
+                name="Wrong Date",
+                description="Seed de teste",
+                severity=AnomalySeverity.CRITICAL.value,
+                active=True,
+            )
+            db_session.add(anomaly_type)
+            await db_session.flush()
+        db_session.add(
+            ReconciliationAnomaly(
+                session_id=sess.id,
+                anomaly_type_id=anomaly_type.id,
+                detected_by="ai",
+                resolved=False,
+            )
+        )
         await db_session.flush()
         await _login(client_with_db, ADMIN_EMAIL)
 
@@ -831,11 +905,12 @@ class TestSessionDetailEndpoint:
         assert body["account_type"] == "checking"
         assert body["reference_month"] == "2026-04-01"
         assert body["status"] == "processing"
-        assert body["total_file_entries"] == 42
-        assert body["conciliated_count"] == 30
-        assert body["sem_omie_count"] == 8
-        assert body["omie_sem_arquivo_count"] == 4
-        assert body["anomaly_count"] == 2
+        assert body["total_file_entries"] == 6
+        # `conciliado_data_divergente` conta como conciliado (CLAUDE.md §5.2).
+        assert body["conciliated_count"] == 4
+        assert body["sem_omie_count"] == 2
+        assert body["omie_sem_arquivo_count"] == 2
+        assert body["anomaly_count"] == 1
 
     async def test_manager_in_portfolio_reads_detail(
         self, client_with_db: AsyncClient, db_session: AsyncSession
@@ -1068,9 +1143,9 @@ class TestDiscardReconciliation:
         db_session: AsyncSession,
         stub_enqueue: list[UUID],
     ) -> None:
-        """Depois de descartar, criar nova sessão com mesma tupla idempotente
-        NÃO retorna 409 DUPLICATE_FILE — o UNIQUE no banco é parcial
-        (WHERE deleted_at IS NULL)."""
+        """Depois de descartar, criar nova conciliação para a MESMA conta+mês
+        NÃO retorna 409 — o UNIQUE no banco é parcial (WHERE deleted_at IS
+        NULL). Vale igual na Sprint 4, com a chave sem o `file_hash`."""
         del stub_enqueue
         admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
         cliente = await _seed_client(db_session, name="Z", creator=admin)

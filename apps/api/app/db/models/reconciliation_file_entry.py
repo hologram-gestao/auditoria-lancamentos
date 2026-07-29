@@ -81,6 +81,18 @@ class ReconciliationFileEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
         index=True,
     )
+    # Sprint 4 (BACK 04.2) — de QUAL parte (arquivo) esta linha veio. É o que
+    # permite remover uma parte sem corromper a sessão: o `ON DELETE CASCADE`
+    # leva junto exatamente as linhas dela, e as das outras partes ficam.
+    # Nullable por causa das linhas anteriores à Sprint 4 (o backfill aponta
+    # todas para a única parte da sessão, mas a coluna segue nullable para não
+    # exigir NOT NULL sobre dado histórico que possa faltar).
+    file_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("reconciliation_files.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     transaction_date: Mapped[date] = mapped_column(SQLDate, nullable=False)
 
     # Descrição: AES-256-GCM (pode conter nomes, CPF, razão social)

@@ -46,7 +46,9 @@ from app.db.session import close_db, get_session_factory, init_db  # noqa: E402
 
 DEFAULT_ADMIN_EMAIL = "admin@hologram.com.br"
 DEFAULT_ADMIN_NAME = "Admin Dev"
-DEFAULT_ADMIN_PASSWORD = "ChangeMeIn1stLogin!"  # noqa: S105
+# Placeholder de DEV LOCAL apenas — não é segredo. Deploys definem SEED_ADMIN_PASSWORD
+# (ver scripts/environments-runbook.md); o seed nunca roda automaticamente em CI/cloud.
+DEFAULT_ADMIN_PASSWORD = "dev-only-change-me"  # noqa: S105
 
 # Seed canônico (Doc §0 §anomaly_types §seed inicial)
 ANOMALY_TYPES_SEED: list[dict[str, Any]] = [
@@ -193,7 +195,9 @@ async def seed_admin(session: AsyncSession) -> None:
     )
     session.add(admin)
     await session.flush()
-    print(f"[seed] admin criado: {email}  (senha: {password})")
+    print(
+        f"[seed] admin criado: {email}  (senha: definida via SEED_ADMIN_PASSWORD ou default de dev)"
+    )
 
 
 async def seed_anomaly_types(session: AsyncSession) -> None:

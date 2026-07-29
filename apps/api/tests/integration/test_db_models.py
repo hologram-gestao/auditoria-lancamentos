@@ -33,7 +33,9 @@ from app.db.models import (
     OmieAccountType,
     OmieEntryStatus,
     ReconciliationAnomaly,
+    ReconciliationFile,
     ReconciliationFileEntry,
+    ReconciliationFileStatus,
     ReconciliationOmieEntry,
     ReconciliationSession,
     ReconciliationStatus,
@@ -293,7 +295,12 @@ class TestReconciliationStack:
         assert fe.situation == "conciliado_data_divergente"
 
     async def test_idempotency_unique_constraint(self, db_session: AsyncSession) -> None:
-        """UNIQUE(client_id, omie_conta_id, reference_month, file_hash)."""
+        """Sprint 4: UNIQUE(client_id, omie_conta_id, reference_month).
+
+        O `file_hash` SAIU da chave — uma conciliação é uma conta + um mês, com
+        N arquivos. Duas conciliações ativas para a mesma conta+mês violam a
+        unicidade **mesmo com arquivos diferentes** (o caminho certo é anexar).
+        """
         admin = await _make_user(db_session, email="id@test.com")
         client = await _make_client(db_session, created_by=admin.id, name="Idem")
         common = {
@@ -301,12 +308,57 @@ class TestReconciliationStack:
             "created_by": admin.id,
             "omie_conta_id": 1,
             "reference_month": date(2026, 2, 1),
-            "file_hash": "b" * 64,
         }
-        db_session.add(ReconciliationSession(**common))
+        db_session.add(ReconciliationSession(**common, file_hash="b" * 64))
         await db_session.flush()
-        # Tenta inserir duplicata
-        db_session.add(ReconciliationSession(**common))
+        # Mesma conta+mês, arquivo DIFERENTE: agora também é duplicata.
+        db_session.add(ReconciliationSession(**common, file_hash="c" * 64))
+        with pytest.raises(IntegrityError):
+            await db_session.flush()
+
+    async def test_file_hash_unique_per_session(self, db_session: AsyncSession) -> None:
+        """Sprint 4: a duplicata de ARQUIVO é UNIQUE(session_id, file_hash).
+
+        A mesma parte não entra duas vezes na mesma conciliação; uma parte nova
+        (hash diferente) entra sem ser bloqueada pelas anteriores.
+        """
+        admin = await _make_user(db_session, email="files@test.com")
+        client = await _make_client(db_session, created_by=admin.id, name="Partes")
+        recon = ReconciliationSession(
+            client_id=client.id,
+            created_by=admin.id,
+            omie_conta_id=7,
+            reference_month=date(2026, 5, 1),
+            status=ReconciliationStatus.PROCESSING.value,
+        )
+        db_session.add(recon)
+        await db_session.flush()
+
+        db_session.add(
+            ReconciliationFile(
+                session_id=recon.id,
+                file_hash="e" * 64,
+                status=ReconciliationFileStatus.PARSED.value,
+            )
+        )
+        await db_session.flush()
+        # Parte NOVA (hash diferente) é aceita.
+        db_session.add(
+            ReconciliationFile(
+                session_id=recon.id,
+                file_hash="f" * 64,
+                status=ReconciliationFileStatus.PARSED.value,
+            )
+        )
+        await db_session.flush()
+        # Reenvio da MESMA parte é rejeitado.
+        db_session.add(
+            ReconciliationFile(
+                session_id=recon.id,
+                file_hash="e" * 64,
+                status=ReconciliationFileStatus.PARSED.value,
+            )
+        )
         with pytest.raises(IntegrityError):
             await db_session.flush()
 

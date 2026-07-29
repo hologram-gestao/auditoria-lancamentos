@@ -12,7 +12,7 @@
  */
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
@@ -27,6 +27,7 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { login as loginRequest } from '@/lib/api/auth';
 import { ApiError, NetworkError } from '@/lib/api/client';
 import { loginSchema, type LoginFormValues } from '@/lib/validation/auth';
@@ -35,7 +36,6 @@ import { useAuthStore } from '@/stores/auth';
 export default function LoginPage() {
   const router = useRouter();
   const setUser = useAuthStore((s) => s.setUser);
-  const [showPassword, setShowPassword] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const form = useForm<LoginFormValues>({
@@ -112,30 +112,17 @@ export default function LoginPage() {
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Senha</FormLabel>
+                  {/* O `<PasswordInput>` é filho DIRETO do `<FormControl>` de
+                      propósito: o Slot do Radix entrega o `id` do `FormItem`
+                      ao primeiro filho, e com uma `<div>` no meio o rótulo
+                      "Senha" apontava para a div — o input ficava sem nome
+                      acessível. */}
                   <FormControl>
-                    <div className="relative">
-                      <Input
-                        type={showPassword ? 'text' : 'password'}
-                        autoComplete="current-password"
-                        disabled={isSubmitting}
-                        className="pr-10"
-                        {...field}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword((v) => !v)}
-                        aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
-                        aria-pressed={showPassword}
-                        className="text-muted-foreground hover:text-foreground focus-visible:ring-ring absolute inset-y-0 right-0 flex items-center rounded-md pr-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
-                        tabIndex={0}
-                      >
-                        {showPassword ? (
-                          <EyeOff className="h-4 w-4" aria-hidden="true" />
-                        ) : (
-                          <Eye className="h-4 w-4" aria-hidden="true" />
-                        )}
-                      </button>
-                    </div>
+                    <PasswordInput
+                      autoComplete="current-password"
+                      disabled={isSubmitting}
+                      {...field}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

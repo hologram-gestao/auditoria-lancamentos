@@ -16,6 +16,8 @@ import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
+import { NotificationBell } from '@/components/features/notifications/notification-bell';
+import { NavigationOutcomeTracker } from '@/components/features/reconciliations/create/navigation-outcome-tracker';
 import { Button } from '@/components/ui/button';
 import { logout as logoutRequest, refreshSession } from '@/lib/api/auth';
 import { ApiError } from '@/lib/api/client';
@@ -136,10 +138,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="bg-card flex items-center justify-between border-b px-6 py-3">
+    // Shell FIXO: a viewport inteira (`h-dvh`) é dividida entre header e a
+    // faixa de conteúdo; `overflow-hidden` garante que a página nunca rola —
+    // quem rola é só o `<main>` (design-system). `h-dvh` (e não `h-screen`)
+    // porque no mobile a barra do navegador entra/sai e `100vh` corta conteúdo.
+    <div className="flex h-dvh w-full flex-col overflow-hidden">
+      <header className="bg-card flex shrink-0 items-center justify-between border-b px-6 py-3">
         <div className="font-semibold">Auditoria de Lançamentos</div>
         <div className="flex items-center gap-4">
+          <NotificationBell />
           <span className="text-muted-foreground text-sm">
             {user.email}
             <span className="px-2 opacity-60">·</span>
@@ -151,8 +158,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </Button>
         </div>
       </header>
-      <div className="flex flex-1">
-        <aside className="bg-card/50 hidden w-56 border-r p-4 md:block">
+      <div className="flex min-h-0 flex-1">
+        <aside className="bg-card/50 hidden w-56 shrink-0 overflow-y-auto border-r p-4 md:block">
           <nav className="flex flex-col gap-1">
             <SidebarLink
               href="/clientes"
@@ -184,8 +191,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             )}
           </nav>
         </aside>
-        <main className="flex-1 p-6">{children}</main>
+        {/* ÚNICO elemento com rolagem — `min-w-0` evita que uma tabela larga
+            empurre o shell e reintroduza scroll horizontal na página. */}
+        <main className="min-w-0 flex-1 overflow-y-auto p-6">{children}</main>
       </div>
+      {/* Observa a navegação para emitir `autor_navegou_fora` (não renderiza
+          nada). Vive no shell porque precisa sobreviver à troca de rota. */}
+      <NavigationOutcomeTracker />
     </div>
   );
 }

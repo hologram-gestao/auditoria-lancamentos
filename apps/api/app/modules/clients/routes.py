@@ -27,7 +27,7 @@ mesma forma, as rotas com sub-path (`/{id}/assign`, `/{id}/sync-accounts`,
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -197,13 +197,23 @@ async def sync_accounts(
 
 @router.get(
     "/{client_id}/reconciliations",
-    summary="Histórico de sessões de conciliação do cliente (paginado, filtros conta+mês).",
+    summary=(
+        "Lista de conciliações do cliente — a visão principal do cliente "
+        "(ex-'Histórico'). Filtros combináveis com E: conta bancária "
+        "(`omie_conta_id`), mês de referência (`month`, YYYY-MM) e status "
+        "(`status`). O `status` usa o vocabulário do produto: `processing` "
+        "(Em processamento) · `processed` (Processada — cobre `reviewing` e "
+        "`done`) · `error` (Erro). Paginação `?page=&pageSize=` (padrão 20, "
+        "máx. 100); `pagination.total` é a contagem COM os mesmos filtros, "
+        "para o rodapé 'x-y de N'. Cada item traz conta, mês, status, nº de "
+        "arquivos e os contadores. RBAC: admin OU manager-da-carteira."
+    ),
 )
 async def list_client_reconciliations(
     client: AccessibleClientDep,
     service: ClientServiceDep,
     page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=50, alias="pageSize")] = 10,
+    page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
     omie_conta_id: Annotated[int | None, Query(alias="omie_conta_id", ge=1)] = None,
     month: Annotated[
         str | None,
@@ -213,6 +223,15 @@ async def list_client_reconciliations(
             description="Filtro de mês no formato YYYY-MM.",
         ),
     ] = None,
+    status: Annotated[
+        Literal["processing", "processed", "error"] | None,
+        Query(
+            description=(
+                "Status no vocabulário do produto. `processed` cobre "
+                "`reviewing` e `done` no banco. Valor fora da lista → 400."
+            ),
+        ),
+    ] = None,
 ) -> ReconciliationSessionListResponse:
     rows, pagination = await service.list_reconciliations(
         client.id,
@@ -220,6 +239,7 @@ async def list_client_reconciliations(
         page_size=page_size,
         omie_conta_id=omie_conta_id,
         month=month,
+        status=status,
     )
     return ReconciliationSessionListResponse(data=rows, pagination=pagination)
 

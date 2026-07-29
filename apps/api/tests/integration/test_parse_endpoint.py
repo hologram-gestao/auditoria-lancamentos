@@ -36,6 +36,8 @@ from app.core.security import hash_password
 from app.db.models import (
     Client,
     ClientAssignment,
+    ReconciliationFile,
+    ReconciliationFileStatus,
     ReconciliationSession,
     ReconciliationStatus,
     User,
@@ -659,17 +661,29 @@ async def _seed_session(
     file_hash: str,
     status: str,
 ) -> ReconciliationSession:
-    """Seed de uma ReconciliationSession com hash/status dados (BACK 02.6)."""
+    """Seed de uma ReconciliationSession com hash/status dados (BACK 02.6).
+
+    Sprint 4 (BACK 04.2): o hash desceu para `reconciliation_files` — o dedup do
+    `/parse` procura lá. Semear só a sessão deixaria de reproduzir o cenário.
+    """
     sess = ReconciliationSession(
         client_id=client_id,
         created_by=created_by,
         omie_conta_id=42,
         reference_month=date(2026, 4, 1),
         date_tolerance_days=3,
-        file_hash=file_hash,
+        file_hash=None,
         status=status,
     )
     db.add(sess)
+    await db.flush()
+    db.add(
+        ReconciliationFile(
+            session_id=sess.id,
+            file_hash=file_hash,
+            status=ReconciliationFileStatus.PARSED.value,
+        )
+    )
     await db.flush()
     return sess
 

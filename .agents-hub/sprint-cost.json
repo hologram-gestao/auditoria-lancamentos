@@ -1,0 +1,403 @@
+{
+  "history": [
+    {
+      "at": "2026-07-14T00:44:14.841Z",
+      "costUSD": 94.420699,
+      "runs": [
+        {
+          "agent": "agent-infra",
+          "reworkRound": 0,
+          "durationMin": 5,
+          "costUSD": 1.971297,
+          "inputTokens": 31,
+          "outputTokens": 21854,
+          "cacheReadTokens": 1262424,
+          "cacheCreateTokens": 79358
+        },
+        {
+          "agent": "agent-backend",
+          "reworkRound": 0,
+          "durationMin": 76,
+          "costUSD": 73.86522349999998,
+          "inputTokens": 496,
+          "outputTokens": 239065,
+          "cacheReadTokens": 122285757,
+          "cacheCreateTokens": 674324
+        },
+        {
+          "agent": "agent-frontend",
+          "reworkRound": 0,
+          "durationMin": 22,
+          "costUSD": 11.809937500000002,
+          "inputTokens": 213,
+          "outputTokens": 77759,
+          "cacheReadTokens": 15712655,
+          "cacheCreateTokens": 200857
+        },
+        {
+          "agent": "agent-qa",
+          "reworkRound": 0,
+          "durationMin": 18,
+          "costUSD": 6.774241,
+          "inputTokens": 99,
+          "outputTokens": 58692,
+          "cacheReadTokens": 6889652,
+          "cacheCreateTokens": 186162
+        }
+      ]
+    },
+    {
+      "at": "2026-07-14T15:12:46.432Z",
+      "costUSD": 4.325145,
+      "runs": [
+        {
+          "agent": "agent-backend",
+          "reworkRound": 0,
+          "durationMin": 1,
+          "costUSD": 0.6713939999999999,
+          "inputTokens": 11,
+          "outputTokens": 3304,
+          "cacheReadTokens": 276398,
+          "cacheCreateTokens": 45054
+        },
+        {
+          "agent": "agent-infra",
+          "reworkRound": 0,
+          "durationMin": 2,
+          "costUSD": 0.763008,
+          "inputTokens": 15,
+          "outputTokens": 3602,
+          "cacheReadTokens": 401166,
+          "cacheCreateTokens": 47230
+        },
+        {
+          "agent": "agent-frontend",
+          "reworkRound": 0,
+          "durationMin": 2,
+          "costUSD": 0.772576,
+          "inputTokens": 13,
+          "outputTokens": 3685,
+          "cacheReadTokens": 354232,
+          "cacheCreateTokens": 50327
+        },
+        {
+          "agent": "agent-qa",
+          "reworkRound": 0,
+          "durationMin": 7,
+          "costUSD": 2.118167,
+          "inputTokens": 37,
+          "outputTokens": 23062,
+          "cacheReadTokens": 1439264,
+          "cacheCreateTokens": 82180
+        }
+      ]
+    },
+    {
+      "at": "2026-07-14T16:10:37.921Z",
+      "costUSD": 4.845646,
+      "runs": [
+        {
+          "agent": "agent-backend",
+          "reworkRound": 0,
+          "durationMin": 1,
+          "costUSD": 0.5314345,
+          "inputTokens": 6,
+          "outputTokens": 1902,
+          "cacheReadTokens": 96229,
+          "cacheCreateTokens": 43574
+        },
+        {
+          "agent": "agent-infra",
+          "reworkRound": 0,
+          "durationMin": 2,
+          "costUSD": 0.858228,
+          "inputTokens": 15,
+          "outputTokens": 4491,
+          "cacheReadTokens": 440036,
+          "cacheCreateTokens": 52586
+        },
+        {
+          "agent": "agent-frontend",
+          "reworkRound": 0,
+          "durationMin": 1,
+          "costUSD": 0.622054,
+          "inputTokens": 11,
+          "outputTokens": 3482,
+          "cacheReadTokens": 299958,
+          "cacheCreateTokens": 38497
+        },
+        {
+          "agent": "agent-qa",
+          "reworkRound": 0,
+          "durationMin": 8,
+          "costUSD": 2.833929500000001,
+          "inputTokens": 40,
+          "outputTokens": 29482,
+          "cacheReadTokens": 2130159,
+          "cacheCreateTokens": 103160
+        }
+      ]
+    },
+    {
+      "at": "2026-07-20T04:15:13.432Z",
+      "costUSD": 106.99225475000007,
+      "runs": [
+        {
+          "agent": "agent-infra",
+          "reworkRound": 0,
+          "durationMin": 17,
+          "costUSD": 6.4881160000000015,
+          "inputTokens": 110,
+          "outputTokens": 71484,
+          "cacheReadTokens": 6550132,
+          "cacheCreateTokens": 142540
+        },
+        {
+          "agent": "agent-backend",
+          "reworkRound": 0,
+          "durationMin": 111,
+          "costUSD": 79.64991975000007,
+          "inputTokens": 678,
+          "outputTokens": 313216,
+          "cacheReadTokens": 128764645,
+          "cacheCreateTokens": 582749
+        },
+        {
+          "agent": "agent-frontend",
+          "reworkRound": 0,
+          "durationMin": 1,
+          "costUSD": 0.811683,
+          "inputTokens": 11,
+          "outputTokens": 3050,
+          "cacheReadTokens": 290816,
+          "cacheCreateTokens": 58997
+        },
+        {
+          "agent": "agent-qa",
+          "reworkRound": 0,
+          "durationMin": 16,
+          "costUSD": 6.943249,
+          "inputTokens": 80,
+          "outputTokens": 42966,
+          "cacheReadTokens": 7190638,
+          "cacheCreateTokens": 227338
+        },
+        {
+          "agent": "agent-backend",
+          "reworkRound": 1,
+          "durationMin": 9,
+          "costUSD": 2.772109,
+          "inputTokens": 67,
+          "outputTokens": 17827,
+          "cacheReadTokens": 2964758,
+          "cacheCreateTokens": 84372
+        },
+        {
+          "agent": "agent-infra",
+          "reworkRound": 1,
+          "durationMin": 23,
+          "costUSD": 7.535947999999998,
+          "inputTokens": 89,
+          "outputTokens": 91149,
+          "cacheReadTokens": 6771156,
+          "cacheCreateTokens": 187120
+        },
+        {
+          "agent": "agent-qa",
+          "reworkRound": 1,
+          "durationMin": 12,
+          "costUSD": 2.7912299999999997,
+          "inputTokens": 49,
+          "outputTokens": 25491,
+          "cacheReadTokens": 2274860,
+          "cacheCreateTokens": 101628
+        }
+      ]
+    },
+    {
+      "at": "2026-07-21T13:18:07.635Z",
+      "costUSD": 4.0460385,
+      "runs": [
+        {
+          "agent": "agent-infra",
+          "reworkRound": 0,
+          "durationMin": 1,
+          "costUSD": 0.8041595,
+          "inputTokens": 15,
+          "outputTokens": 4598,
+          "cacheReadTokens": 403949,
+          "cacheCreateTokens": 48716
+        },
+        {
+          "agent": "agent-backend",
+          "reworkRound": 0,
+          "durationMin": 1,
+          "costUSD": 0.8270409999999999,
+          "inputTokens": 13,
+          "outputTokens": 3860,
+          "cacheReadTokens": 366672,
+          "cacheCreateTokens": 54714
+        },
+        {
+          "agent": "agent-frontend",
+          "reworkRound": 0,
+          "durationMin": 1,
+          "costUSD": 0.527342,
+          "inputTokens": 8,
+          "outputTokens": 2010,
+          "cacheReadTokens": 149544,
+          "cacheCreateTokens": 40228
+        },
+        {
+          "agent": "agent-qa",
+          "reworkRound": 0,
+          "durationMin": 6,
+          "costUSD": 1.887496,
+          "inputTokens": 33,
+          "outputTokens": 21530,
+          "cacheReadTokens": 1161242,
+          "cacheCreateTokens": 76846
+        }
+      ]
+    },
+    {
+      "at": "2026-07-21T14:17:20.063Z",
+      "costUSD": 3.3999345000000005,
+      "runs": [
+        {
+          "agent": "agent-backend",
+          "reworkRound": 0,
+          "durationMin": 1,
+          "costUSD": 0.7026715,
+          "inputTokens": 11,
+          "outputTokens": 3153,
+          "cacheReadTokens": 284363,
+          "cacheCreateTokens": 48161
+        },
+        {
+          "agent": "agent-infra",
+          "reworkRound": 0,
+          "durationMin": 1,
+          "costUSD": 0.8144135,
+          "inputTokens": 15,
+          "outputTokens": 5043,
+          "cacheReadTokens": 404407,
+          "cacheCreateTokens": 48606
+        },
+        {
+          "agent": "agent-frontend",
+          "reworkRound": 0,
+          "durationMin": 1,
+          "costUSD": 0.5953005,
+          "inputTokens": 9,
+          "outputTokens": 2482,
+          "cacheReadTokens": 215211,
+          "cacheCreateTokens": 42560
+        },
+        {
+          "agent": "agent-qa",
+          "reworkRound": 0,
+          "durationMin": 3,
+          "costUSD": 1.287549,
+          "inputTokens": 26,
+          "outputTokens": 13552,
+          "cacheReadTokens": 865978,
+          "cacheCreateTokens": 51563
+        }
+      ]
+    },
+    {
+      "at": "2026-07-21T14:54:27.704Z",
+      "costUSD": 2.9099235000000006,
+      "runs": [
+        {
+          "agent": "agent-backend",
+          "reworkRound": 0,
+          "durationMin": 1,
+          "costUSD": 0.6351905,
+          "inputTokens": 13,
+          "outputTokens": 3265,
+          "cacheReadTokens": 357301,
+          "cacheCreateTokens": 37485
+        },
+        {
+          "agent": "agent-infra",
+          "reworkRound": 0,
+          "durationMin": 2,
+          "costUSD": 0.7211635000000002,
+          "inputTokens": 15,
+          "outputTokens": 5013,
+          "cacheReadTokens": 418207,
+          "cacheCreateTokens": 38666
+        },
+        {
+          "agent": "agent-frontend",
+          "reworkRound": 0,
+          "durationMin": 1,
+          "costUSD": 0.42611850000000007,
+          "inputTokens": 8,
+          "outputTokens": 2045,
+          "cacheReadTokens": 156967,
+          "cacheCreateTokens": 29647
+        },
+        {
+          "agent": "agent-qa",
+          "reworkRound": 0,
+          "durationMin": 3,
+          "costUSD": 1.1274510000000002,
+          "inputTokens": 18,
+          "outputTokens": 11683,
+          "cacheReadTokens": 596772,
+          "cacheCreateTokens": 53690
+        }
+      ]
+    },
+    {
+      "at": "2026-07-22T14:17:26.062Z",
+      "costUSD": 3.5294484999999995,
+      "runs": [
+        {
+          "agent": "agent-backend",
+          "reworkRound": 0,
+          "durationMin": 1,
+          "costUSD": 0.65213,
+          "inputTokens": 9,
+          "outputTokens": 2543,
+          "cacheReadTokens": 222440,
+          "cacheCreateTokens": 47729
+        },
+        {
+          "agent": "agent-infra",
+          "reworkRound": 0,
+          "durationMin": 2,
+          "costUSD": 0.9329675000000001,
+          "inputTokens": 17,
+          "outputTokens": 4668,
+          "cacheReadTokens": 511805,
+          "cacheCreateTokens": 56028
+        },
+        {
+          "agent": "agent-frontend",
+          "reworkRound": 0,
+          "durationMin": 1,
+          "costUSD": 0.6221384999999999,
+          "inputTokens": 9,
+          "outputTokens": 2631,
+          "cacheReadTokens": 213697,
+          "cacheCreateTokens": 44947
+        },
+        {
+          "agent": "agent-qa",
+          "reworkRound": 0,
+          "durationMin": 3,
+          "costUSD": 1.3222124999999996,
+          "inputTokens": 24,
+          "outputTokens": 12919,
+          "cacheReadTokens": 775815,
+          "cacheCreateTokens": 61121
+        }
+      ]
+    }
+  ],
+  "totalCostUSD": 224.46908975000008
+}

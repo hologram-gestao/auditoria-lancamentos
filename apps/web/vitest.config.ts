@@ -27,5 +27,9 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
     css: false,
+    // `e2e/` é do Playwright (precisa de browser + app no ar). O include
+    // default do vitest pega `*.spec.ts` — sem esta exclusão, `pnpm test`
+    // tentaria rodar a suíte E2E em jsdom e quebraria.
+    exclude: ['**/node_modules/**', '**/dist/**', '**/.next/**', 'e2e/**'],
   },
 });
