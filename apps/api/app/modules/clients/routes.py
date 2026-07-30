@@ -32,12 +32,15 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 
+from app.core.authz import tenant_filter_client_id
 from app.core.dependencies import (
     AccessibleClientDep,
     AdminDep,
     DbSessionDep,
+    EditClientDep,
     ManagerOrAdminDep,
     SettingsDep,
+    SyncOmieAccountsDep,
 )
 from app.core.rate_limit import limiter, user_id_key_func
 from app.db.models import UserRole
@@ -86,7 +89,13 @@ async def list_clients(
     # client_assignments — clientes de outros managers retornam 0 rows.
     manager_filter = None if user.role == UserRole.ADMIN.value else UUID(user.id)
     rows, pagination = await service.list_clients(
-        page=page, page_size=page_size, search=search, manager_id_filter=manager_filter
+        page=page,
+        page_size=page_size,
+        search=search,
+        manager_id_filter=manager_filter,
+        # S5/R3: se algum dia esta rota for aberta a papéis de cliente, a query
+        # já sai restrita ao tenant da LINHA — o guard não é a única defesa.
+        tenant_client_id=tenant_filter_client_id(user),
     )
     return ClientListResponse(data=rows, pagination=pagination)
 
@@ -184,9 +193,13 @@ async def assign_client(
 async def sync_accounts(
     request: Request,
     response: Response,
+    user: SyncOmieAccountsDep,
     client: AccessibleClientDep,
     service: ClientServiceDep,
 ) -> ClientDetailResponse:
+    # `user` aciona o guard da matriz (§4: gerente e operador do cliente PODEM
+    # sincronizar contas); o tenant já foi validado pelo `AccessibleClientDep`.
+    del user
     return await service.force_sync_accounts(client)
 
 
@@ -271,9 +284,14 @@ async def get_client(
 )
 async def update_client(
     payload: UpdateClientRequest,
+    user: EditClientDep,
     client: AccessibleClientDep,
     service: ClientServiceDep,
 ) -> ClientResponse:
+    # Matriz §4 — "Editar dados do cliente": SÓ admin. Papéis de cliente e
+    # manager de sistema recebem 403 aqui (mudança de comportamento para o
+    # manager, declarada no PRD).
+    del user
     # `client` já vem carregado e validado pelo `require_client_access` —
     # se o caller não tem acesso, a dependency lança 403 antes daqui.
     return await service.update_client(

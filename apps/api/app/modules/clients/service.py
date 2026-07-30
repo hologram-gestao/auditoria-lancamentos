@@ -105,6 +105,7 @@ class ClientService:
         page_size: int,
         search: str | None,
         manager_id_filter: UUID | None,
+        tenant_client_id: UUID | None = None,
     ) -> tuple[list[ClientResponse], PaginationMeta]:
         """Lista clientes com filtro RBAC.
 
@@ -112,7 +113,11 @@ class ClientService:
         admin → `None` (vê tudo); manager → `UUID(current_user.id)`.
         """
         rows, total = await self._repo.list_paginated(
-            page=page, page_size=page_size, search=search, manager_id=manager_id_filter
+            page=page,
+            page_size=page_size,
+            search=search,
+            manager_id=manager_id_filter,
+            tenant_client_id=tenant_client_id,
         )
         total_pages = (total + page_size - 1) // page_size if page_size else 0
         responses = [_row_to_response(r) for r in rows]

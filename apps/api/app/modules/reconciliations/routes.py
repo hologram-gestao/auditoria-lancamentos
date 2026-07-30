@@ -42,7 +42,7 @@ from app.core.crypto_service import load_client_cipher, provision_client_cipher
 from app.core.dependencies import (
     CurrentUserDep,
     DbSessionDep,
-    ManagerOrAdminDep,
+    RunReconciliationDep,
     require_client_access,
 )
 from app.core.exceptions import (
@@ -75,6 +75,10 @@ from app.modules.reconciliations.schemas import (
     SessionStatusResponse,
 )
 from app.modules.reconciliations.service import ReconciliationService
+from app.modules.reconciliations.tenant_scope import (
+    require_client_for_session,
+    require_session_access,
+)
 from app.modules.usage_events.repository import UsageEventRepository
 from app.modules.usage_events.service import UsageEventService
 from app.utils.upload import parse_content_length, read_upload_within_limit
@@ -163,13 +167,7 @@ async def _client_for_session(
     Manager fora da carteira recebe **404**, igual às demais rotas de sessão,
     para não distinguir "não existe" de "não é sua" (CLAUDE.md §3.11).
     """
-    repo_session = await ReconciliationRepository(db).get_status_view(session_id)
-    if repo_session is None:
-        raise NotFoundError(_SESSION_NOT_FOUND_MSG)
-    try:
-        return await require_client_access(repo_session.client_id, user, db)
-    except ClientNotAccessibleError as exc:
-        raise NotFoundError(_SESSION_NOT_FOUND_MSG) from exc
+    return await require_client_for_session(db, user, session_id)
 
 
 @router.get(
@@ -184,7 +182,7 @@ async def _client_for_session(
     ),
 )
 async def check_duplicate(
-    user: ManagerOrAdminDep,
+    user: RunReconciliationDep,
     db: DbSessionDep,
     service: ReconciliationServiceDep,
     client_id: Annotated[UUID, Query(description="UUID do cliente.")],
@@ -234,7 +232,7 @@ async def check_duplicate(
 async def parse_statement(
     request: Request,
     response: Response,
-    user: ManagerOrAdminDep,
+    user: RunReconciliationDep,
     db: DbSessionDep,
     service: ReconciliationServiceDep,
     settings: Annotated[Settings, Depends(get_settings)],
@@ -411,7 +409,7 @@ async def attach_reconciliation_files(
     request: Request,
     response: Response,
     background_tasks: BackgroundTasks,
-    user: ManagerOrAdminDep,
+    user: RunReconciliationDep,
     db: DbSessionDep,
     service: ReconciliationServiceDep,
     settings: Annotated[Settings, Depends(get_settings)],
@@ -453,7 +451,7 @@ async def attach_reconciliation_files(
     ),
 )
 async def list_reconciliation_files(
-    user: ManagerOrAdminDep,
+    user: RunReconciliationDep,
     db: DbSessionDep,
     service: ReconciliationServiceDep,
     settings: Annotated[Settings, Depends(get_settings)],
@@ -480,7 +478,7 @@ async def list_reconciliation_files(
 )
 async def remove_reconciliation_file(
     background_tasks: BackgroundTasks,
-    user: ManagerOrAdminDep,
+    user: RunReconciliationDep,
     db: DbSessionDep,
     service: ReconciliationServiceDep,
     session_id: UUID,
@@ -517,22 +515,14 @@ async def remove_reconciliation_file(
     ),
 )
 async def get_reconciliation_status(
-    user: ManagerOrAdminDep,
+    user: RunReconciliationDep,
     db: DbSessionDep,
     service: ReconciliationServiceDep,
     session_id: UUID,
 ) -> SessionStatusResponse:
-    # 1. Carrega a sessão (sem cliente eager) — precisamos do client_id pra
-    #    validar RBAC. Se a sessão não existe → 404.
-    repo_session = await ReconciliationRepository(db).get_status_view(session_id)
-    if repo_session is None:
-        raise NotFoundError(_SESSION_NOT_FOUND_MSG)
-
-    # 2. RBAC por carteira via require_client_access. Manager fora → 404.
-    try:
-        await require_client_access(repo_session.client_id, user, db)
-    except ClientNotAccessibleError as exc:
-        raise NotFoundError(_SESSION_NOT_FOUND_MSG) from exc
+    # Carrega a sessão com o filtro de TENANT no próprio SELECT e aplica a
+    # carteira do usuário `system` — sessão de outro tenant nem é lida (S5/R3).
+    await require_session_access(db, user, session_id)
 
     payload = await service.get_session_status(session_id)
     return SessionStatusResponse(data=payload)
@@ -561,23 +551,15 @@ async def reprocess_reconciliation(
     request: Request,
     response: Response,
     background_tasks: BackgroundTasks,
-    user: ManagerOrAdminDep,
+    user: RunReconciliationDep,
     db: DbSessionDep,
     session_id: UUID,
 ) -> CreateReconciliationResponse:
     """Endpoint de "Tentar novamente" da tela de revisão / lista de conciliações."""
     repo = ReconciliationRepository(db)
 
-    # 1. Carrega a sessão (validação de existência + status atual).
-    sess = await repo.get_status_view(session_id)
-    if sess is None:
-        raise NotFoundError(_SESSION_NOT_FOUND_MSG)
-
-    # 2. RBAC: manager-da-carteira ou admin. Manager fora → 404 (probing-safe).
-    try:
-        await require_client_access(sess.client_id, user, db)
-    except ClientNotAccessibleError as exc:
-        raise NotFoundError(_SESSION_NOT_FOUND_MSG) from exc
+    # Existência + tenant + carteira numa tacada (SELECT já filtrado por tenant).
+    sess = await require_session_access(db, user, session_id)
 
     # 3. Só faz sentido reprocessar quando o estado atual é error.
     if sess.status != ReconciliationStatus.ERROR.value:
@@ -624,21 +606,14 @@ async def reprocess_reconciliation(
     ),
 )
 async def discard_reconciliation(
-    user: ManagerOrAdminDep,
+    user: RunReconciliationDep,
     db: DbSessionDep,
     session_id: UUID,
 ) -> Response:
     """Soft-delete da sessão. 204 sem corpo no sucesso."""
     repo = ReconciliationRepository(db)
 
-    sess = await repo.get_status_view(session_id)
-    if sess is None:
-        raise NotFoundError(_SESSION_NOT_FOUND_MSG)
-
-    try:
-        await require_client_access(sess.client_id, user, db)
-    except ClientNotAccessibleError as exc:
-        raise NotFoundError(_SESSION_NOT_FOUND_MSG) from exc
+    sess = await require_session_access(db, user, session_id)
 
     # Só bloqueia o que está em processamento (o job ainda escreve nela) — para
     # essas, o caminho é cancelar primeiro. reviewing/done/error podem ser
@@ -675,21 +650,14 @@ async def discard_reconciliation(
     ),
 )
 async def cancel_reconciliation(
-    user: ManagerOrAdminDep,
+    user: RunReconciliationDep,
     db: DbSessionDep,
     session_id: UUID,
 ) -> Response:
     """Cancela o processamento marcando a sessão como erro. 204 no sucesso."""
     repo = ReconciliationRepository(db)
 
-    sess = await repo.get_status_view(session_id)
-    if sess is None:
-        raise NotFoundError(_SESSION_NOT_FOUND_MSG)
-
-    try:
-        await require_client_access(sess.client_id, user, db)
-    except ClientNotAccessibleError as exc:
-        raise NotFoundError(_SESSION_NOT_FOUND_MSG) from exc
+    sess = await require_session_access(db, user, session_id)
 
     if sess.status != ReconciliationStatus.PROCESSING.value:
         raise ConflictError(
@@ -723,7 +691,7 @@ async def cancel_reconciliation(
     ),
 )
 async def get_reconciliation_detail(
-    user: ManagerOrAdminDep,
+    user: RunReconciliationDep,
     db: DbSessionDep,
     service: ReconciliationServiceDep,
     session_id: UUID,
@@ -732,14 +700,7 @@ async def get_reconciliation_detail(
     # RBAC, e só então pede o payload completo pro service. Manter as 2
     # rotas com o MESMO formato de RBAC evita probing (manager fora não
     # distingue 404-existe de 404-fora-da-carteira).
-    repo_session = await ReconciliationRepository(db).get_detail_view(session_id)
-    if repo_session is None:
-        raise NotFoundError(_SESSION_NOT_FOUND_MSG)
-
-    try:
-        await require_client_access(repo_session.client_id, user, db)
-    except ClientNotAccessibleError as exc:
-        raise NotFoundError(_SESSION_NOT_FOUND_MSG) from exc
+    repo_session = await require_session_access(db, user, session_id)
 
     # BACK 03.5 — auditoria `view`: abrir a tela de conciliação de uma sessão.
     # NÃO no /status (polling) — só aqui, no header da tela (guardrail de volume).
@@ -749,6 +710,9 @@ async def get_reconciliation_detail(
         client_id=repo_session.client_id,
         session_id=session_id,
         action=AccessAction.VIEW,
+        # Escopo/tenant do ATOR (S5/R6) — a trilha diz de ONDE partiu a leitura.
+        user_scope=user.scope,
+        actor_client_id=user.client_id,
     )
 
     payload = await service.get_session_detail(session_id)

@@ -14,6 +14,7 @@ from datetime import date
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from app.core.authz import tenant_filter_client_id
 from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
 from app.db.models import Notification, NotificationType, ReconciliationStatus
@@ -25,7 +26,7 @@ from app.modules.notifications.schemas import (
 from app.modules.users.schemas import PaginationMeta
 
 if TYPE_CHECKING:
-    from app.core.dependencies import CurrentUser
+    from app.core.authz import CurrentUser
 
 logger = get_logger(__name__)
 
@@ -99,7 +100,11 @@ class NotificationService:
 
     async def unread_count(self, user: CurrentUser) -> int:
         """Contagem de não lidas do usuário autenticado."""
-        return await self._repo.count_unread(user_id=UUID(user.id), is_admin=_is_admin(user))
+        return await self._repo.count_unread(
+            user_id=UUID(user.id),
+            is_admin=_is_admin(user),
+            tenant_client_id=tenant_filter_client_id(user),
+        )
 
     async def list_notifications(
         self,
@@ -113,6 +118,8 @@ class NotificationService:
         rows, total = await self._repo.list_paginated(
             user_id=UUID(user.id),
             is_admin=_is_admin(user),
+            # S5/R3: usuário de cliente filtra pelo próprio tenant, no SELECT.
+            tenant_client_id=tenant_filter_client_id(user),
             page=page,
             page_size=page_size,
             unread_only=unread_only,
@@ -133,6 +140,7 @@ class NotificationService:
             notification_id=notification_id,
             user_id=UUID(user.id),
             is_admin=_is_admin(user),
+            tenant_client_id=tenant_filter_client_id(user),
         )
         if notification is None:
             raise NotFoundError("Notificação não encontrada.")

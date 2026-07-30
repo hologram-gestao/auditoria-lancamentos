@@ -18,6 +18,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 
 from app.core.dependencies import AdminDep, DbSessionDep
+from app.db.models import UserRole
 from app.modules.users.repository import UserRepository
 from app.modules.users.schemas import (
     CreateUserRequest,
@@ -69,7 +70,9 @@ async def create_user(
         name=payload.name,
         email=payload.email,
         password=payload.password,
-        role=payload.role,
+        # `SystemUserRole` é a whitelist do REQUEST (admin/manager); o service
+        # trabalha com o enum completo. Conversão explícita, sem string mágica.
+        role=UserRole(payload.role),
     )
     return UserResponse.model_validate(user)
 
@@ -102,7 +105,7 @@ async def update_user(
         current_user_id=UUID(admin.id),
         name=payload.name,
         email=payload.email,
-        role=payload.role,
+        role=UserRole(payload.role) if payload.role is not None else None,
     )
     return UserResponse.model_validate(user)
 
