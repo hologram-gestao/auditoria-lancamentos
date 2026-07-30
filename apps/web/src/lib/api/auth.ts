@@ -1,16 +1,16 @@
 /**
  * Calls de autenticação. Espelha o contrato de `apps/api/app/modules/auth/schemas.py`.
+ *
+ * Sprint 5 (R2): `AuthenticatedUser`/`UserRole` deixaram de ser redigitados aqui
+ * e passaram a ser **aliases do contrato gerado**. O payload da sessão ganhou
+ * `scope` e `client_id` — mantendo a interface à mão, o front continuaria cego
+ * ao tenant do usuário e o `tsc` não acusaria nada.
  */
+import type { AuthenticatedUser, UserRole } from '@/lib/contracts';
+
 import { apiPost } from './client';
 
-export type UserRole = 'admin' | 'manager';
-
-export interface AuthenticatedUser {
-  id: string;
-  email: string;
-  name: string;
-  role: UserRole;
-}
+export type { AuthenticatedUser, UserRole };
 
 interface LoginPayload {
   email: string;

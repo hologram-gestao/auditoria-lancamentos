@@ -34,6 +34,44 @@ type Schemas = components['schemas'];
 export type PaginationMeta = Schemas['PaginationMeta'];
 
 // ---------------------------------------------------------------------------
+// Sessão, papéis e escopo de tenancy (Sprint 5 / R1 · R2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Usuário autenticado devolvido por `/auth/login` e `/auth/refresh`.
+ *
+ * `role`/`scope`/`client_id` vêm do backend como **fonte única** — o gating de
+ * UI (`lib/authz.ts`) deriva daqui. Redigitar a união de strings aqui seria
+ * exatamente o "shape esperançoso" que o CLAUDE.md proíbe: um papel novo no
+ * backend passaria despercebido em vez de virar erro de compilação.
+ */
+export type AuthenticatedUser = Schemas['AuthenticatedUser'];
+
+/** `admin` | `manager` | `client_manager` | `client_operator`. */
+export type UserRole = Schemas['UserRole'];
+/** `system` (equipe Hologram) | `client` (usuário DO tenant). */
+export type UserScope = Schemas['UserScope'];
+/** Whitelist de papel aceita na API de usuários DO CLIENTE. */
+export type ClientUserRole = Schemas['ClientUserRole'];
+
+// ---------------------------------------------------------------------------
+// Usuários DO CLIENTE — tenant (BACK 05.5 / R5)
+// ---------------------------------------------------------------------------
+
+export type ClientUserResponse = Schemas['ClientUserResponse'];
+export type ClientUserListResponse = Schemas['ClientUserListResponse'];
+export type CreateClientUserRequest = Schemas['CreateClientUserRequest'];
+export type UpdateClientUserRequest = Schemas['UpdateClientUserRequest'];
+
+/**
+ * Query params reais de `GET /clients/{client_id}/users`, lidos do contrato.
+ * `pageSize` é o alias camelCase que o backend declara — não inventar `page_size`.
+ */
+export type ListClientUsersQuery = NonNullable<
+  paths['/api/v1/clients/{client_id}/users']['get']['parameters']['query']
+>;
+
+// ---------------------------------------------------------------------------
 // Clientes / contas (S6 · S7)
 // ---------------------------------------------------------------------------
 

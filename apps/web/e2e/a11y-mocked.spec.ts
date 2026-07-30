@@ -68,17 +68,94 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page, type Route } from '@playwright/test';
 
 const CLIENT_ID = '11111111-1111-4111-8111-111111111111';
+/**
+ * Tenant ALHEIO (FRONT 05.7). O mock responde com um nome distinto de
+ * propósito: se a tela renderizar qualquer coisa dele, o teste vê o vazamento.
+ */
+const OTHER_CLIENT_ID = '99999999-9999-4999-8999-999999999999';
 const SESSION_ID = '22222222-2222-4222-8222-222222222222';
 
 /** Impactos que reprovam o DoD. */
 const BLOCKING = ['critical', 'serious'];
 
+/**
+ * Sprint 5 (R2): o payload da sessão passou a carregar `scope`/`client_id` —
+ * é deles que o gating de UI (`src/lib/authz.ts`) deriva. A fixture reflete o
+ * contrato real; sem `scope`, o front trataria o admin como papel sem escopo.
+ */
 const USER = {
   id: '33333333-3333-4333-8333-333333333333',
   email: 'admin@hologram.com.br',
   name: 'Admin QA',
   role: 'admin',
+  scope: 'system',
+  client_id: null,
 };
+
+/** Usuário da sessão corrente — trocado por teste nos cenários de papel (S5). */
+let sessionUser: Record<string, unknown> = USER;
+
+const CLIENT_MANAGER_USER = {
+  id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  email: 'gerente@cliente-exemplo.com.br',
+  name: 'Gerente do Cliente',
+  role: 'client_manager',
+  scope: 'client',
+  client_id: CLIENT_ID,
+};
+
+const CLIENT_OPERATOR_USER = {
+  id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  email: 'operador@cliente-exemplo.com.br',
+  name: 'Operador do Cliente',
+  role: 'client_operator',
+  scope: 'client',
+  client_id: CLIENT_ID,
+};
+
+const SYSTEM_MANAGER_USER = {
+  id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  email: 'manager@hologram.com.br',
+  name: 'Gerente Hologram',
+  role: 'manager',
+  scope: 'system',
+  client_id: null,
+};
+
+/** Usuários DO tenant, devolvidos por `/clients/{id}/users` (BACK 05.5). */
+const CLIENT_USERS = [
+  {
+    id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    name: 'Joana Prado',
+    email: 'joana@cliente-exemplo.com.br',
+    role: 'client_operator',
+    scope: 'client',
+    client_id: CLIENT_ID,
+    active: true,
+    created_at: '2026-07-01T12:00:00Z',
+    updated_at: '2026-07-01T12:00:00Z',
+  },
+  {
+    id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    name: 'Rui Sales',
+    email: 'rui@cliente-exemplo.com.br',
+    role: 'client_manager',
+    scope: 'client',
+    client_id: CLIENT_ID,
+    active: false,
+    created_at: '2026-07-02T12:00:00Z',
+    updated_at: '2026-07-02T12:00:00Z',
+  },
+];
+
+/**
+ * Screenshots de conferência visual (desktop + mobile, por perfil). Só saem
+ * com `E2E_SHOTS=1` — o CI não precisa delas e `test-results/` é gitignored.
+ */
+async function shot(page: Page, name: string): Promise<void> {
+  if (process.env.E2E_SHOTS !== '1') return;
+  await page.screenshot({ path: `test-results/screenshots/${name}.png`, fullPage: true });
+}
 
 const ACCOUNTS = [
   {
@@ -242,12 +319,25 @@ async function fulfillApi(route: Route): Promise<void> {
       body: JSON.stringify({ data }),
     });
 
-  if (path === '/api/v1/auth/refresh') return json({ user: USER });
+  if (path === '/api/v1/auth/refresh') return json({ user: sessionUser });
+  // Usuários DO tenant (BACK 05.5). Rota literal antes de qualquer fallback.
+  if (path === `/api/v1/clients/${CLIENT_ID}/users`) {
+    return json({
+      data: CLIENT_USERS,
+      pagination: { page: 1, pageSize: 20, total: CLIENT_USERS.length, totalPages: 1 },
+    });
+  }
   if (path === '/api/v1/notifications/unread-count') return json({ unread: 2 });
   if (path === '/api/v1/notifications') return json({ data: NOTIFICATIONS, pagination: PAGINATION });
   if (path.endsWith('/read')) return json({ already_read: false, read_at: '2026-07-26T13:00:00Z' });
   if (path === '/api/v1/clients') return json({ data: [CLIENT_DETAIL], pagination: PAGINATION });
   if (path === `/api/v1/clients/${CLIENT_ID}`) return json(CLIENT_DETAIL);
+  // O tenant alheio RESPONDE 200 de propósito: se o front pedir e renderizar,
+  // o vazamento aparece no teste. Um 403 aqui esconderia o defeito atrás do
+  // backend, e o que se verifica no front é que ele nem chega a pedir.
+  if (path === `/api/v1/clients/${OTHER_CLIENT_ID}`) {
+    return json({ ...CLIENT_DETAIL, id: OTHER_CLIENT_ID, name: 'Cliente de Outro Tenant' });
+  }
   if (path === `/api/v1/clients/${CLIENT_ID}/sync-accounts`) return json(CLIENT_DETAIL);
   if (path === `/api/v1/clients/${CLIENT_ID}/reconciliations`) {
     return json({ data: SESSIONS, pagination: PAGINATION });
@@ -348,6 +438,8 @@ async function measuredContrast(page: Page, selector: string): Promise<number> {
 }
 
 test.beforeEach(async ({ page, context, baseURL }) => {
+  // Volta ao admin: os cenários de papel da S5 trocam este estado de módulo.
+  sessionUser = USER;
   await page.route('**/api/v1/**', fulfillApi);
   // O `src/middleware.ts` decide navegação só pela PRESENÇA do cookie
   // `access_token` (a validação real é do backend). Um valor qualquer basta
@@ -449,6 +541,231 @@ for (const vp of VIEWPORTS) {
       await expect(badge).toHaveText(/Processada/);
       const ratio = await measuredContrast(page, 'text=Processada >> nth=0');
       expect(ratio, `badge "Processada" (${vp.label}): ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
+    });
+  });
+}
+
+/**
+ * Sprint 5 / R5 (FRONT 05.6) — tela "Usuários" do cliente, por PAPEL.
+ *
+ * O que só um browser mede aqui: o CSS computado das badges de papel/status
+ * (tokens `info`/`success`/`destructive` do tema) e a árvore de acessibilidade
+ * da gaveta e do `alertdialog` montados de verdade, em desktop e em 390px.
+ *
+ * O gating é presentacional — a autoridade é o backend. O que se verifica é
+ * que a UI **não oferece** o que o servidor nega, e que o deep link do papel
+ * sem permissão degrada com mensagem em português + caminho de volta, em vez
+ * de tela branca.
+ */
+for (const vp of VIEWPORTS) {
+  test.describe(`Usuários do cliente — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('gerente do cliente vê a lista do tenant (R5)', async ({ page }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/usuarios`);
+
+      await expect(page.getByRole('heading', { name: 'Usuários', level: 2 })).toBeVisible();
+      await expect(page.getByRole('row', { name: /Joana Prado/ })).toBeVisible();
+      await expect(page.getByText('Operador do cliente').first()).toBeVisible();
+      await expect(page.getByText('Inativo').first()).toBeVisible();
+      await shot(page, `client-users-gerente-${vp.label.replace(/\s+/g, '-')}`);
+      await analyze(page, `usuários do cliente — gerente (${vp.label})`);
+    });
+
+    test('gaveta de criação: papel restrito e senha com toggle (R5)', async ({ page }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/usuarios`);
+      await page.getByRole('button', { name: 'Novo usuário' }).first().click();
+
+      const drawer = page.getByRole('dialog');
+      await expect(drawer).toBeVisible();
+      await expect(drawer.getByLabel('Senha inicial')).toHaveAttribute('type', 'password');
+      await shot(page, `client-users-gaveta-${vp.label.replace(/\s+/g, '-')}`);
+      await analyze(page, `gaveta de usuário do cliente (${vp.label})`);
+
+      // O select de papel não pode oferecer papel de SISTEMA.
+      await drawer.getByRole('combobox', { name: /Papel/ }).click();
+      const options = page.getByRole('option');
+      await expect(options).toHaveCount(2);
+      await expect(options.nth(0)).toHaveText('Gerente do cliente');
+      await expect(options.nth(1)).toHaveText('Operador do cliente');
+    });
+
+    test('desativar passa por alertdialog com Cancelar à esquerda (R5)', async ({ page }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/usuarios`);
+      await page.getByRole('button', { name: 'Desativar Joana Prado' }).click();
+
+      const confirm = page.getByRole('alertdialog');
+      await expect(confirm).toBeVisible();
+      // Foco inicial no Cancelar: `Enter` reflexo não pode desativar ninguém.
+      await expect(confirm.getByRole('button', { name: 'Cancelar' })).toBeFocused();
+      await shot(page, `client-users-confirmacao-${vp.label.replace(/\s+/g, '-')}`);
+      await analyze(page, `confirmação de desativar (${vp.label})`);
+    });
+
+    test('operador do cliente não vê a tela nem o item de menu (R4)', async ({ page }) => {
+      sessionUser = CLIENT_OPERATOR_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/usuarios`);
+
+      // `getByRole('alert')` sozinho é ambíguo: o Next injeta o
+      // `#__next-route-announcer__`, que também é `role="alert"`.
+      await expect(
+        page.getByRole('heading', { name: 'Você não tem acesso a esta página' }),
+      ).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Novo usuário' })).toHaveCount(0);
+      // Item de menu ausente — a UI não mostra o que a rota bloqueia.
+      await expect(
+        page.getByRole('navigation', { name: 'Seções do cliente' }).getByText('Usuários'),
+      ).toHaveCount(0);
+      await shot(page, `client-users-operador-${vp.label.replace(/\s+/g, '-')}`);
+      await analyze(page, `usuários do cliente — operador negado (${vp.label})`);
+    });
+
+    test('gerente do SISTEMA opera a carteira mas não gere usuários do tenant (R4)', async ({
+      page,
+    }) => {
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/usuarios`);
+      // `getByRole('alert')` sozinho é ambíguo: o Next injeta o
+      // `#__next-route-announcer__`, que também é `role="alert"`.
+      await expect(
+        page.getByRole('heading', { name: 'Você não tem acesso a esta página' }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole('navigation', { name: 'Seções do cliente' }).getByText('Usuários'),
+      ).toHaveCount(0);
+    });
+  });
+}
+
+/**
+ * Sprint 5 / R4 (FRONT 05.7) — gating de navegação e ações por papel.
+ *
+ * Cada perfil abre a MESMA rota e a UI mostra só o que a matriz permite. A
+ * conferência é por screenshot em desktop **e** mobile 390px nos QUATRO perfis,
+ * porque `grep` prova "existe em algum lugar", não "em todos os contextos".
+ *
+ * A barra lateral do shell é `hidden md:block` — por isso as asserções sobre
+ * ela só correm no viewport desktop; a nav DENTRO do cliente é verificada nos
+ * dois.
+ */
+const PROFILES = [
+  { key: 'admin', user: () => USER, systemArea: true, clientUsers: true, editClient: true },
+  {
+    key: 'manager-sistema',
+    user: () => SYSTEM_MANAGER_USER,
+    systemArea: true,
+    clientUsers: false,
+    editClient: false,
+  },
+  {
+    key: 'gerente-cliente',
+    user: () => CLIENT_MANAGER_USER,
+    systemArea: false,
+    clientUsers: true,
+    editClient: false,
+  },
+  {
+    key: 'operador-cliente',
+    user: () => CLIENT_OPERATOR_USER,
+    systemArea: false,
+    clientUsers: false,
+    editClient: false,
+  },
+] as const;
+
+for (const vp of VIEWPORTS) {
+  const slug = vp.label.replace(/\s+/g, '-');
+  test.describe(`Gating por perfil — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    for (const profile of PROFILES) {
+      test(`${profile.key}: navegação e ações conforme a matriz (R4)`, async ({ page }) => {
+        sessionUser = profile.user();
+        await page.goto(`/clientes/${CLIENT_ID}`);
+        await expect(page.getByRole('heading', { name: 'Conciliações', level: 2 })).toBeVisible();
+
+        const clientNav = page.getByRole('navigation', { name: 'Seções do cliente' });
+        // Conciliação / contas / painel: liberados para os QUATRO papéis.
+        await expect(clientNav.getByText('Conciliações')).toBeVisible();
+        await expect(clientNav.getByText('Contas Bancárias')).toBeVisible();
+        // "Usuários" só para quem administra usuários do tenant.
+        await expect(clientNav.getByText('Usuários')).toHaveCount(profile.clientUsers ? 1 : 0);
+        // §9 (editar dados do cliente, credenciais Omie) é só do admin.
+        await expect(page.getByRole('button', { name: 'Editar cliente' })).toHaveCount(
+          profile.editClient ? 1 : 0,
+        );
+        // Criar conciliação vale para todo papel (matriz: ✅ nas 4 colunas).
+        await expect(page.getByRole('button', { name: 'Criar conciliação' })).toBeVisible();
+
+        if (vp.label === 'desktop') {
+          const sidebar = page.getByRole('navigation').first();
+          // Lista GLOBAL de clientes e configurações do sistema: só equipe Hologram.
+          await expect(sidebar.getByRole('link', { name: 'Clientes' })).toHaveCount(
+            profile.systemArea ? 1 : 0,
+          );
+          await expect(page.getByRole('link', { name: 'Tipos de Anomalia' })).toHaveCount(
+            profile.key === 'admin' ? 1 : 0,
+          );
+        }
+
+        // O chrome compartilhado (header) precisa caber nos DOIS viewports: em
+        // 390px o "Sair" estava sendo cortado fora da tela.
+        const sair = page.getByRole('button', { name: 'Sair' });
+        await expect(sair).toBeVisible();
+        const box = await sair.boundingBox();
+        expect(box, 'o botão Sair precisa ter caixa visível').not.toBeNull();
+        expect(
+          (box?.x ?? 0) + (box?.width ?? 0),
+          `"Sair" cortado fora da viewport (${vp.label})`,
+        ).toBeLessThanOrEqual(vp.size.width);
+
+        await shot(page, `gating-${profile.key}-${slug}`);
+        await analyze(page, `gating ${profile.key} (${vp.label})`);
+      });
+    }
+
+    test('deep link em configurações do sistema degrada em português (R4)', async ({ page }) => {
+      sessionUser = CLIENT_OPERATOR_USER;
+      await page.goto('/configuracoes/usuarios');
+
+      await expect(
+        page.getByRole('heading', { name: 'Você não tem acesso a este recurso' }),
+      ).toBeVisible();
+      // Caminho de volta é a CASA do papel, não a lista global (que ele também
+      // não vê) — senão o "voltar" cai num segundo beco sem saída.
+      await expect(page.getByRole('link', { name: 'Voltar para o início' })).toHaveAttribute(
+        'href',
+        `/clientes/${CLIENT_ID}`,
+      );
+      // Nada do tenant alheio, e nenhum vazamento do erro do framework.
+      await expect(page.locator('#__next_error__')).toHaveCount(0);
+      await shot(page, `deeplink-configuracoes-negado-${slug}`);
+      await analyze(page, `deep link em configurações negado (${vp.label})`);
+    });
+
+    test('deep link em OUTRO tenant degrada sem mostrar dado do alvo (R4)', async ({ page }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${OTHER_CLIENT_ID}`);
+
+      await expect(
+        page.getByRole('heading', { name: 'Você não tem acesso a este recurso' }),
+      ).toBeVisible();
+      // O nome do outro cliente NÃO pode aparecer — nem vindo de uma resposta
+      // 403/404 renderizada por engano.
+      await expect(page.getByText('Cliente de Outro Tenant')).toHaveCount(0);
+      await expect(page.locator('#__next_error__')).toHaveCount(0);
+      await shot(page, `deeplink-outro-tenant-${slug}`);
+      await analyze(page, `deep link cross-tenant negado (${vp.label})`);
+    });
+
+    test('usuário de tenant não para na lista global — vai para a casa dele', async ({ page }) => {
+      sessionUser = CLIENT_OPERATOR_USER;
+      await page.goto('/clientes');
+      await page.waitForURL(`**/clientes/${CLIENT_ID}`);
+      await expect(page.getByRole('heading', { name: 'Conciliações', level: 2 })).toBeVisible();
     });
   });
 }

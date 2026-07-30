@@ -11,7 +11,7 @@
  * Dispensar o cookie é trabalho do backend (logout limpa). O Zustand só reflete.
  */
 
-import { AlertTriangle, LogOut, Settings, Users as UsersIcon } from 'lucide-react';
+import { AlertTriangle, ListChecks, LogOut, Settings, Users as UsersIcon } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -21,6 +21,7 @@ import { NavigationOutcomeTracker } from '@/components/features/reconciliations/
 import { Button } from '@/components/ui/button';
 import { logout as logoutRequest, refreshSession } from '@/lib/api/auth';
 import { ApiError } from '@/lib/api/client';
+import { canManageSystemUsers, homePathFor, isClientScoped, roleLabel } from '@/lib/authz';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth';
 
@@ -143,14 +144,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     // quem rola é só o `<main>` (design-system). `h-dvh` (e não `h-screen`)
     // porque no mobile a barra do navegador entra/sai e `100vh` corta conteúdo.
     <div className="flex h-dvh w-full flex-col overflow-hidden">
-      <header className="bg-card flex shrink-0 items-center justify-between border-b px-6 py-3">
-        <div className="font-semibold">Auditoria de Lançamentos</div>
-        <div className="flex items-center gap-4">
+      {/* Em 390px este header transbordava e o botão "Sair" ficava CORTADO fora
+          da viewport (visto no screenshot mobile de todos os perfis). O título
+          encolhe (`min-w-0` + `truncate`), o e-mail some abaixo de `sm` — não é
+          acionável, e o papel basta para a pessoa saber em que contexto está —
+          e o grupo da direita é `shrink-0`, então "Sair" nunca some. */}
+      <header className="bg-card flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 sm:px-6">
+        <div className="min-w-0 truncate font-semibold">Auditoria de Lançamentos</div>
+        <div className="flex shrink-0 items-center gap-2 sm:gap-4">
           <NotificationBell />
-          <span className="text-muted-foreground text-sm">
-            {user.email}
-            <span className="px-2 opacity-60">·</span>
-            <span className="capitalize">{user.role}</span>
+          <span className="text-muted-foreground flex min-w-0 items-center text-sm">
+            <span className="hidden max-w-[16rem] truncate sm:inline">{user.email}</span>
+            <span className="hidden px-2 sm:inline" aria-hidden="true">
+              ·
+            </span>
+            {/* Rótulo PT-BR da matriz, nunca o enum cru: com os papéis da S5 o
+                `capitalize` do valor exibia "Client_manager". */}
+            <span className="truncate">{roleLabel(user)}</span>
           </span>
           <Button variant="outline" size="sm" onClick={handleLogout}>
             <LogOut className="h-4 w-4" aria-hidden="true" />
@@ -161,14 +171,27 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <div className="flex min-h-0 flex-1">
         <aside className="bg-card/50 hidden w-56 shrink-0 overflow-y-auto border-r p-4 md:block">
           <nav className="flex flex-col gap-1">
-            <SidebarLink
-              href="/clientes"
-              pathname={pathname}
-              icon={<UsersIcon className="h-4 w-4" />}
-            >
-              Clientes
-            </SidebarLink>
-            {user.role === 'admin' && (
+            {/* Gating por perfil (R4): usuário DE tenant não tem lista global de
+                clientes — a casa dele é o próprio cliente. Mostrar "Clientes"
+                para ele seria oferecer uma rota que o servidor nega. */}
+            {isClientScoped(user) ? (
+              <SidebarLink
+                href={homePathFor(user)}
+                pathname={pathname}
+                icon={<ListChecks className="h-4 w-4" />}
+              >
+                Conciliações
+              </SidebarLink>
+            ) : (
+              <SidebarLink
+                href="/clientes"
+                pathname={pathname}
+                icon={<UsersIcon className="h-4 w-4" />}
+              >
+                Clientes
+              </SidebarLink>
+            )}
+            {canManageSystemUsers(user) && (
               <>
                 <div className="text-muted-foreground mt-4 px-3 pb-1 text-xs font-medium uppercase tracking-wide">
                   Configurações
