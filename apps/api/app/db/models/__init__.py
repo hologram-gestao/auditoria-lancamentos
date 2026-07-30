@@ -29,10 +29,24 @@ from app.db.models.reconciliation_session import (
     SessionAccountType,
 )
 from app.db.models.usage_event import UsageEvent
-from app.db.models.user import User, UserRole
+from app.db.models.user import (
+    CLIENT_ROLES,
+    SCOPE_CLIENT_ID_CHECK,
+    SCOPE_CLIENT_ID_CONSTRAINT,
+    SYSTEM_ROLES,
+    ClientUserRole,
+    SystemUserRole,
+    User,
+    UserRole,
+    UserScope,
+)
 
 __all__ = [
+    "CLIENT_ROLES",
     "IV_HEX_LENGTH",
+    "SCOPE_CLIENT_ID_CHECK",
+    "SCOPE_CLIENT_ID_CONSTRAINT",
+    "SYSTEM_ROLES",
     "AccessAudit",
     "AnomalyDetectedBy",
     "AnomalySeverity",
@@ -40,6 +54,7 @@ __all__ = [
     "Base",
     "Client",
     "ClientAssignment",
+    "ClientUserRole",
     "FileEntrySituation",
     "FileEntryUserAction",
     "Notification",
@@ -56,7 +71,9 @@ __all__ = [
     "ReconciliationSession",
     "ReconciliationStatus",
     "SessionAccountType",
+    "SystemUserRole",
     "UsageEvent",
     "User",
     "UserRole",
+    "UserScope",
 ]

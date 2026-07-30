@@ -14,6 +14,7 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.authz import CurrentUser, scoped_by_tenant
 from app.db.models import ReconciliationSession, UsageEvent
 
 
@@ -61,17 +62,21 @@ class UsageEventRepository:
             result = await self._session.execute(stmt)
             return result.scalar_one_or_none() is not None
 
-    async def get_session_client_id(self, session_id: UUID) -> UUID | None:
+    async def get_session_client_id(self, session_id: UUID, *, user: CurrentUser) -> UUID | None:
         """`client_id` da sessão ATIVA, ou `None` se não existe/foi descartada.
 
         Entrada do RBAC do `POST /usage-events`: o `client_id` que sai daqui é o
         que vai para `require_client_access` — o cliente nunca informa a que
         carteira a sessão pertence.
+
+        S5/R3: o `SELECT` já leva `AND client_id = <tenant do usuário>`, então
+        sessão de outro tenant devolve `None` (→ 404) sem nem ser lida.
         """
+        stmt = select(ReconciliationSession.client_id).where(
+            ReconciliationSession.id == session_id,
+            ReconciliationSession.deleted_at.is_(None),
+        )
         client_id: UUID | None = await self._session.scalar(
-            select(ReconciliationSession.client_id).where(
-                ReconciliationSession.id == session_id,
-                ReconciliationSession.deleted_at.is_(None),
-            )
+            scoped_by_tenant(stmt, ReconciliationSession.client_id, user)
         )
         return client_id

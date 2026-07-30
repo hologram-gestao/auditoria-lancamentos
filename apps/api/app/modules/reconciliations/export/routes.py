@@ -36,16 +36,16 @@ from app.core.crypto_service import load_client_cipher
 from app.core.dependencies import (
     CurrentUserDep,
     DbSessionDep,
-    ManagerOrAdminDep,
-    require_client_access,
+    ReviewExportDep,
 )
-from app.core.exceptions import ClientNotAccessibleError, ConflictError, NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError
 from app.core.logging import get_logger
 from app.db.models import Client, ReconciliationStatus
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache
 from app.modules.clients.omie_factory import build_omie_client
-from app.modules.reconciliations.export.service import ExportService, load_session_for_export
+from app.modules.reconciliations.export.service import ExportService
 from app.modules.reconciliations.export.workbook import build_workbook
+from app.modules.reconciliations.tenant_scope import require_session_access
 
 router = APIRouter(
     prefix="/api/v1/reconciliations/{session_id}",
@@ -96,24 +96,19 @@ ExportServiceDep = Annotated[ExportService, Depends(_get_export_service)]
     ),
 )
 async def export_reconciliation(
-    user: ManagerOrAdminDep,
+    user: ReviewExportDep,
     db: DbSessionDep,
     settings: Annotated[Settings, Depends(get_settings)],
     service: ExportServiceDep,
     current_user: CurrentUserDep,
     session_id: UUID,
 ) -> StreamingResponse:
-    sess = await load_session_for_export(db=db, session_id=session_id)
-
-    # RBAC: manager fora da carteira → 404 (CLAUDE.md §3.11). Reusa
-    # `require_client_access` e converte para NotFoundError, idêntico ao
-    # módulo de revisão.
+    # `require_session_access`: SELECT já com `AND client_id = <tenant>` (S5/R3)
+    # + carteira do usuário `system`. Tudo converge para 404 (anti-enumeração),
+    # inclusive sessão órfã de cliente removido.
     try:
-        await require_client_access(sess.client_id, user, db)
-    except ClientNotAccessibleError as exc:
-        raise NotFoundError(_SESSION_NOT_FOUND_MSG) from exc
+        sess = await require_session_access(db, user, session_id)
     except NotFoundError as exc:
-        # Cliente foi removido — sessão órfã. 404 também.
         raise NotFoundError(_SESSION_NOT_FOUND_MSG) from exc
 
     if sess.status not in _EXPORTABLE_STATUSES:
@@ -139,6 +134,9 @@ async def export_reconciliation(
         client_id=sess.client_id,
         session_id=session_id,
         action=AccessAction.EXPORT,
+        # Escopo/tenant do ATOR (S5/R6) — a trilha diz de ONDE partiu a exportação.
+        user_scope=current_user.scope,
+        actor_client_id=current_user.client_id,
     )
 
     cipher = await load_client_cipher(client_row, settings=settings)

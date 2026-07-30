@@ -14,7 +14,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
 
-from app.core.dependencies import DbSessionDep, ManagerOrAdminDep
+from app.core.dependencies import CurrentUserDep, DbSessionDep
 from app.modules.usage_events.repository import UsageEventRepository
 from app.modules.usage_events.schemas import (
     UsageEventPayload,
@@ -51,7 +51,7 @@ UsageEventServiceDep = Annotated[UsageEventService, Depends(_get_usage_event_ser
     ),
 )
 async def record_usage_event(
-    user: ManagerOrAdminDep,
+    user: CurrentUserDep,
     db: DbSessionDep,
     service: UsageEventServiceDep,
     payload: UsageEventRequest,

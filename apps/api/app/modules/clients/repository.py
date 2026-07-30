@@ -58,6 +58,7 @@ class ClientRepository:
         page_size: int,
         search: str | None = None,
         manager_id: UUID | None = None,
+        tenant_client_id: UUID | None = None,
     ) -> tuple[Sequence[ClientRow], int]:
         """Lista paginada de clientes com manager + count de conciliações.
 
@@ -66,6 +67,9 @@ class ClientRepository:
             search: ILIKE em `clients.name` (case-insensitive).
             manager_id: se não-None, filtra por `client_assignments.user_id`
                 (RBAC do manager). Para admin, passar `None`.
+            tenant_client_id: se não-None, restringe ao tenant do usuário
+                (`scope='client'`). Tem PRECEDÊNCIA sobre `manager_id` — um
+                usuário de cliente não tem carteira, tem tenant.
 
         Returns:
             Tupla `(rows, total_count)`. Total é a contagem ANTES da paginação.
@@ -92,7 +96,12 @@ class ClientRepository:
         )
         count_base = select(func.count(Client.id.distinct())).select_from(Client)
 
-        if manager_id is not None:
+        if tenant_client_id is not None:
+            # S5/R3: usuário de cliente enxerga só o PRÓPRIO tenant — filtro na
+            # query, derivado da LINHA do usuário (nunca de URL/payload).
+            base = base.where(Client.id == tenant_client_id)
+            count_base = count_base.where(Client.id == tenant_client_id)
+        elif manager_id is not None:
             # Para manager: filtra clientes da carteira via assignment direto.
             # `outerjoin` acima já está montado, mas o WHERE força inner-equivalent.
             base = base.where(ClientAssignment.user_id == manager_id)
