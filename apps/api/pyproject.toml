@@ -28,6 +28,12 @@ dependencies = [
 
     # --- Segurança ---
     "cryptography>=43.0.1",           # AES-256-GCM
+    # Wrap/unwrap da DEK-por-cliente quando `KEK_KMS_KEY_NAME` está setado
+    # (staging/prod e, hoje, também dev). O import em `core/kms.py` é lazy, mas
+    # NÃO é opcional: sem a lib, todo caminho de ESCRITA em campo cifrado morre
+    # com `ModuleNotFoundError`. Em dev/test sem a var, segue valendo o wrapper
+    # local derivado de OMIE_ENCRYPTION_KEY — a lib só não é exercitada.
+    "google-cloud-kms>=3.0.0",
     "python-jose[cryptography]>=3.3.0",
     "bcrypt>=4.2.0",                  # uso direto (passlib é incompatível com bcrypt 5.x)
 
@@ -142,8 +148,12 @@ plugins = ["pydantic.mypy"]
 module = ["pdfplumber.*", "pandas.*", "openpyxl.*"]
 ignore_missing_imports = true
 
-# google-cloud-kms é provisionado pela task de infra (03.3/03.1); no dev/test/CI
-# roda-se o wrapper local e o import é lazy, então a lib pode não estar instalada.
+# `google-cloud-kms` agora é dependência declarada do projeto (ver [dependencies]).
+# O override segue por causa das transitivas do gRPC/protobuf, que não trazem
+# stubs completos. Historicamente este comentário dizia que a lib era
+# "provisionada pela task de infra" — não era: a infra provisiona a CHAVE no
+# Cloud KMS, não o pacote Python. Isso derrubou o job de backfill em 30/07/2026
+# com `ModuleNotFoundError: No module named 'google'`.
 [[tool.mypy.overrides]]
 module = ["google.*"]
 ignore_missing_imports = true
