@@ -189,6 +189,16 @@ dados via migration idempotente.
 
 ---
 
+## 2026-07-30 — Gate de integração passou com exit 0 e a suíte de tenant INTEIRA pulada [escopo: qa | harness de teste]
+**Sintoma:** primeira execução da suíte da Sprint 5 no sandbox do QA: `463 passed, 426 skipped`, **exit code 0**. Os 426 skips eram TODA a suíte de integração — incluindo os 34 casos negativos cross-tenant que **são** a entrega da sprint. Lido de relance, parecia gate verde; na prática nenhum teste de isolamento rodou.
+**Causa-raiz (blameless):** o sandbox do agent não alcança Postgres a partir do processo Python — nem o socket do Docker (`PermissionError` no testcontainers) nem TCP local (`Connection refused` em `127.0.0.1:<porta>` publicada, que o `/dev/tcp` do bash alcança normalmente). O `conftest.py` faz `pytest.skip` quando o Docker não responde, que é o comportamento correto para não travar o dev — mas skip não distingue "não dá para medir aqui" de "medido e verde", e o exit code é 0 nos dois casos.
+**Correção:** suíte reexecutada DENTRO de um container (`ghcr.io/astral-sh/uv:python3.12-bookworm`) na mesma rede Docker do Postgres, via o escape hatch `TEST_DATABASE_URL` que a BACK 05.1 já havia adicionado — `docker run` funciona, o que falha é a rede do processo Python. Resultado real: **884 passed, 5 skipped** (os 5 são fixtures Omie que exigem credencial real, pré-existentes). `UV_PROJECT_ENVIRONMENT=/venv` é obrigatório no comando, senão o `uv sync` reescreve o `.venv` do worktree do executor.
+**Escopo:** vale para qualquer sprint cuja entrega dependa de teste de integração (DB, constraint, isolamento, agregação em SQL). Não é específico da Sprint 5.
+**Encodado em:** `ADR-010-QA` (comando completo) + `CLAUDE.md` do QA — item novo na checklist de aprovação: conferir a linha de resumo do pytest e tratar skip em massa como gate NÃO executado.
+**Status:** ativo
+
+---
+
 ## 2026-07-28 — Memória do agent (`.claude/memory/`) apagada de novo: 3ª reconstituição das ADRs da Sprint 4 [escopo: infra | orquestração]
 **Sintoma:** `.claude/memory/decisions.md` chegou nesta run **pela terceira vez** só com o stub `ADR-000`, e o `learnings.md` sem as entradas de 26/07 e 27/07 — apesar de o `HANDOFF.md` apontar o QA para as ADRs **por nome** (`ADR-006`). Quem lesse o handoff cairia num arquivo vazio.
 **Causa-raiz:** `.claude/` é gitignored (`.gitignore:69`) e o worktree do agent é re-semeado a cada run do orquestrador — nada escrito lá entra no commit nem sobrevive. Não é erro do agent: ele não tem caminho para persistir.
