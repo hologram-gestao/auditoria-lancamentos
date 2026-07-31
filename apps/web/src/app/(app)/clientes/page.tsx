@@ -204,14 +204,20 @@ export default function ClientesPage() {
                       >
                         <Eye className="h-4 w-4" aria-hidden="true" />
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setEditing(c)}
-                        aria-label={`Editar ${c.name}`}
-                      >
-                        <SquarePen className="h-4 w-4" aria-hidden="true" />
-                      </Button>
+                      {/* Editar cliente é §9 — só admin (PERMISSION_MATRIX
+                          `edit_client`). O backend nega o manager com 403
+                          "Papel manager não tem a permissão edit_client", então
+                          mostrar o botão aqui abriria um modal que só falha. */}
+                      {isAdmin && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setEditing(c)}
+                          aria-label={`Editar ${c.name}`}
+                        >
+                          <SquarePen className="h-4 w-4" aria-hidden="true" />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
