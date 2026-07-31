@@ -24,20 +24,28 @@ class NotificationRepository:
         self._session = session
 
     @staticmethod
-    def _visibility_filter(*, user_id: UUID, is_admin: bool) -> list[ColumnElement[bool]]:
+    def _visibility_filter(
+        *, user_id: UUID, is_admin: bool, tenant_client_id: UUID | None = None
+    ) -> list[ColumnElement[bool]]:
         """Condições de visibilidade — o RBAC da leitura, em SQL.
 
-        Duas camadas, ambas necessárias:
+        Três camadas:
 
         1. `user_id = eu` — notificação é pessoal; ninguém lê a do outro.
-        2. cliente na carteira — se a carteira for reatribuída, as
+        2. **tenant** (S5/R3) — usuário de cliente só vê notificação do próprio
+           `client_id`. Redundante com (1) hoje, e de propósito: se um dia uma
+           notificação for criada para outro usuário do mesmo tenant, ou (1) for
+           afrouxado, o filtro de tenant continua de pé.
+        3. cliente na carteira — se a carteira for reatribuída, as
            notificações antigas daquele cliente **param de aparecer** para o
            manager anterior. Sem isso, a linha antiga continuaria vazando
            conta+mês de um cliente que já não é dele. Admin não tem essa
            restrição (acessa qualquer cliente, CLAUDE.md §3.11).
         """
         conditions: list[ColumnElement[bool]] = [Notification.user_id == user_id]
-        if not is_admin:
+        if tenant_client_id is not None:
+            conditions.append(Notification.client_id == tenant_client_id)
+        elif not is_admin:
             conditions.append(
                 select(ClientAssignment.id)
                 .where(
@@ -48,13 +56,17 @@ class NotificationRepository:
             )
         return conditions
 
-    async def count_unread(self, *, user_id: UUID, is_admin: bool) -> int:
+    async def count_unread(
+        self, *, user_id: UUID, is_admin: bool, tenant_client_id: UUID | None = None
+    ) -> int:
         """Contagem de não lidas. Barata: cai no índice PARCIAL
         `ix_notifications_user_unread`, que só indexa `read_at IS NULL` — não
         cresce com o histórico já lido, e é chamada a cada 15 s por usuário."""
         total: int | None = await self._session.scalar(
             select(func.count(Notification.id)).where(
-                *self._visibility_filter(user_id=user_id, is_admin=is_admin),
+                *self._visibility_filter(
+                    user_id=user_id, is_admin=is_admin, tenant_client_id=tenant_client_id
+                ),
                 Notification.read_at.is_(None),
             )
         )
@@ -65,6 +77,7 @@ class NotificationRepository:
         *,
         user_id: UUID,
         is_admin: bool,
+        tenant_client_id: UUID | None = None,
         page: int,
         page_size: int,
         unread_only: bool = False,
@@ -74,7 +87,9 @@ class NotificationRepository:
         `total` é contado com os MESMOS filtros da página (senão o rodapé mente
         quando `unread_only` está ligado).
         """
-        conditions = self._visibility_filter(user_id=user_id, is_admin=is_admin)
+        conditions = self._visibility_filter(
+            user_id=user_id, is_admin=is_admin, tenant_client_id=tenant_client_id
+        )
         if unread_only:
             conditions.append(Notification.read_at.is_(None))
 
@@ -100,6 +115,7 @@ class NotificationRepository:
         notification_id: UUID,
         user_id: UUID,
         is_admin: bool,
+        tenant_client_id: UUID | None = None,
     ) -> Notification | None:
         """Uma notificação visível para este usuário, ou `None`.
 
@@ -109,7 +125,9 @@ class NotificationRepository:
         row: Notification | None = await self._session.scalar(
             select(Notification).where(
                 Notification.id == notification_id,
-                *self._visibility_filter(user_id=user_id, is_admin=is_admin),
+                *self._visibility_filter(
+                    user_id=user_id, is_admin=is_admin, tenant_client_id=tenant_client_id
+                ),
             )
         )
         return row

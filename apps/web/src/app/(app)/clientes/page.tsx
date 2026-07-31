@@ -3,9 +3,13 @@
 /**
  * Tela de Clientes — Doc §9.1.
  *
- * RBAC visual:
- *   - Admin: vê todas as colunas (incluindo gerente responsável).
- *   - Manager: vê apenas a própria carteira; sem coluna de gerente.
+ * RBAC visual (matriz do R4, via `lib/authz` — nunca `role === '...'` local):
+ *   - Admin: vê todas as colunas (incluindo gerente responsável) e cria/edita.
+ *   - Manager do sistema: vê apenas a própria carteira; sem coluna de gerente.
+ *   - Usuário DE tenant (Sprint 5): **não tem lista global**. Ele é levado para
+ *     o próprio cliente — um `AccessDenied` aqui seria um beco sem saída logo
+ *     no destino padrão pós-login (`middleware.ts` manda todo mundo a
+ *     `/clientes`).
  *
  * O backend já filtra por carteira no GET /clients (manager nunca recebe
  * dados de outro manager) — esta tela apenas oculta visualmente a coluna
@@ -45,6 +49,7 @@ import { useClientsList } from '@/hooks/use-clients';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { ApiError } from '@/lib/api/client';
 import type { Client } from '@/lib/api/clients';
+import { hasPermission, homePathFor, isClientScoped } from '@/lib/authz';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth';
 
@@ -54,6 +59,15 @@ type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
 export default function ClientesPage() {
   const router = useRouter();
   const currentUser = useAuthStore((s) => s.user);
+
+  // Usuário de tenant não passa por esta lista: vai direto para o próprio
+  // cliente. Presentacional — quem nega de fato é o backend.
+  const clientScoped = isClientScoped(currentUser);
+  useEffect(() => {
+    if (clientScoped && currentUser !== null) {
+      router.replace(homePathFor(currentUser));
+    }
+  }, [clientScoped, currentUser, router]);
 
   const [searchInput, setSearchInput] = useState('');
   const debouncedSearch = useDebouncedValue(searchInput, 300);
@@ -73,12 +87,15 @@ export default function ClientesPage() {
   );
   const { data, isLoading, isFetching, isError, error } = useClientsList(queryParams);
 
-  if (currentUser === null) {
-    // O layout pai já redireciona; este branch só satisfaz o type-checker.
+  if (currentUser === null || clientScoped) {
+    // O layout pai já redireciona quando não há usuário; para o usuário de
+    // tenant o `useEffect` acima já mandou para a casa dele — não renderiza a
+    // lista global nem por um frame.
     return null;
   }
 
-  const isAdmin = currentUser.role === 'admin';
+  // "Gerente responsável" e criar/editar cliente são §9 — admin do sistema.
+  const isAdmin = hasPermission(currentUser, 'edit_client');
   const total = data?.pagination.total ?? 0;
   const rows = data?.data ?? [];
   const totalPages = data?.pagination.totalPages ?? 0;
@@ -187,14 +204,20 @@ export default function ClientesPage() {
                       >
                         <Eye className="h-4 w-4" aria-hidden="true" />
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setEditing(c)}
-                        aria-label={`Editar ${c.name}`}
-                      >
-                        <SquarePen className="h-4 w-4" aria-hidden="true" />
-                      </Button>
+                      {/* Editar cliente é §9 — só admin (PERMISSION_MATRIX
+                          `edit_client`). O backend nega o manager com 403
+                          "Papel manager não tem a permissão edit_client", então
+                          mostrar o botão aqui abriria um modal que só falha. */}
+                      {isAdmin && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setEditing(c)}
+                          aria-label={`Editar ${c.name}`}
+                        >
+                          <SquarePen className="h-4 w-4" aria-hidden="true" />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -256,7 +279,6 @@ export default function ClientesPage() {
         open={editing !== null}
         onOpenChange={(o) => !o && setEditing(null)}
         client={editing}
-        currentUserRole={currentUser.role}
       />
     </div>
   );

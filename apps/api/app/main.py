@@ -42,6 +42,7 @@ from app.modules.reconciliations.export import routes as export_routes
 from app.modules.reconciliations.review import routes as review_routes
 from app.modules.system import routes as system_routes
 from app.modules.usage_events import routes as usage_events_routes
+from app.modules.users import client_routes as client_users_routes
 from app.modules.users import routes as users_routes
 
 CORRELATION_HEADER = "X-Correlation-ID"
@@ -250,6 +251,7 @@ def create_app() -> FastAPI:
     _register_exception_handlers(app)
     app.include_router(auth_routes.router)
     app.include_router(users_routes.router)
+    app.include_router(client_users_routes.router)
     app.include_router(clients_routes.router)
     app.include_router(reconciliations_routes.router)
     app.include_router(review_routes.router)

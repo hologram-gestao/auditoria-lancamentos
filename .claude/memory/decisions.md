@@ -367,3 +367,465 @@ Sem o negativo, "passou" não distingue "o gate funciona" de "o gate não mede n
 
 **Consequência.** `git archive <commit> | tar -x` vira o primeiro passo de toda
 revisão de CI — é o que expõe untracked que o worktree esconde.
+
+---
+
+# Sprint 5 — Multi-tenancy e usuários por cliente (consolidado pelo QA em 30/07/2026)
+
+> Envelope por agent. Texto preservado como o autor escreveu; o QA só consolida
+> (single-writer) e acrescenta o próprio bloco no fim.
+
+<!-- ===== agent-backend ===== -->
+
+---
+
+## ADR-008 — Tenancy por extensão de `users`: `scope` + `client_id` com CHECK no banco (Sprint 5 / BACK 05.1)
+
+**Data:** 2026-07-30 · **Status:** ativo · **Escopo:** `apps/api/app/db/models/user.py`, migration `d5c81a4e9b27`, `apps/api/app/modules/users/schemas.py`
+
+**Contexto.** `users` só distinguia `admin`/`manager` (equipe Hologram); o escopo
+do `manager` vinha de `client_assignments`. Não havia noção de "usuário que
+pertence a um cliente". O PRD fechou a decisão: **estender** a tabela, não criar
+uma segunda (duplicar dobra a superfície de bug de sessão).
+
+**Decisão.**
+1. `scope` (`system|client`, NOT NULL, `server_default 'system'`) + `client_id`
+   (FK `clients`, `ON DELETE RESTRICT`, nulável, indexada). Backfill idempotente
+   (convergente, não incremental) marca todo usuário existente como `system`.
+2. **A integridade mora no banco**: CHECK `ck_users_scope_client_id` garante
+   `client ⇒ client_id NOT NULL` e `system ⇒ client_id NULL`. Validação de
+   aplicação não substitui — o critério da sprint exige rejeição pelo Postgres.
+3. **Enum é fonte única.** `SystemUserRole`/`ClientUserRole` são whitelists que
+   REFERENCIAM `UserRole.X.value` (nunca redigitam a string), e
+   `SYSTEM_ROLES`/`CLIENT_ROLES` derivam delas. Teste unitário garante que todo
+   papel novo caia numa das duas — senão a matriz de permissões nasce incompleta.
+4. **Whitelist no request de usuários do SISTEMA.** Ampliar `UserRole` abriu um
+   buraco silencioso: `POST /api/v1/users` passaria a aceitar `client_manager`
+   com `scope='system'`, estado que a CHECK **não** pega (ela só cruza `scope`
+   com `client_id`). O request passou a ser `SystemUserRole`.
+
+**Landmines verificados contra banco real (não presumidos).**
+- **Ciclo de FK.** `users.client_id → clients.id` fecha ciclo com
+  `clients.created_by → users.id`. Sem `use_alter=True` + nome explícito, o
+  `Base.metadata.create_all` dos testes não ordena as tabelas.
+- **A NAMING_CONVENTION do `Base` vale DENTRO da migration.** O `alembic/env.py`
+  passa `target_metadata`, então `create_check_constraint`/`drop_constraint`
+  também expandem `ck_%(table_name)s_%(constraint_name)s`. Passar o nome já
+  prefixado gera `ck_users_ck_users_scope_client_id` — e o `downgrade` quebra
+  procurando um nome que não existe. Passe o **label**, não o nome final.
+
+**Consequência.** O tenant do usuário passa a ser uma coluna da MESMA linha que
+`get_current_user` já lê para checar `active` — base para a 05.3 decidir acesso
+sem query extra e sem valor stale.
+
+## ADR-009 — Escape hatch `TEST_DATABASE_URL` no conftest (Sprint 5)
+
+**Data:** 2026-07-30 · **Status:** ativo · **Escopo:** `apps/api/tests/conftest.py`
+
+**Contexto.** O sandbox do agent não alcança o socket do Docker nem TCP local a
+partir do processo Python (`PermissionError` ao criar `AF_UNIX`;
+`Connection refused` em `127.0.0.1`). Resultado: **todo** teste de integração era
+pulado — inaceitável numa sprint cuja entrega É teste de isolamento.
+
+**Decisão.** Se `TEST_DATABASE_URL` estiver setada, `pg_container`/`db_url` usam
+esse Postgres (descartável) em vez de subir um testcontainer. A variável **não
+existe no CI**, então lá nada muda. Com ela, dá para rodar o pytest dentro de um
+container `--network host` apontando para um Postgres publicado no host.
+
+**Consequência.** O gate de integração volta a ser executável (e verificável) de
+dentro do sandbox — sem mascarar falha com skip.
+
+## ADR-010 — Negação cross-tenant tem UM caminho de gravação; `denied` não vira 4ª ação (Sprint 5 / BACK 05.2)
+
+**Data:** 2026-07-30 · **Status:** ativo · **Escopo:** `apps/api/app/core/audit.py`, `app/core/telemetry.py`, `app/db/models/access_audit.py`, migration `e9a4b71c3d68`
+
+**Contexto.** A `access_audit` (S3) só sabia o tenant ALVO. Com tenants, "negaram
+acesso ao cliente B" não responde "quem pediu" — a negação cross-tenant fica cega.
+
+**Decisão.**
+1. `user_scope` + `actor_client_id` na linha (sem FK, coerente com o log
+   append-only da S3). Backfill convergente marca o histórico como `system`.
+2. **`denied` continua sendo a ação.** Cross-tenant é PROPRIEDADE do ator, já
+   derivável: `user_scope='client' AND actor_client_id IS DISTINCT FROM client_id`.
+   Uma 4ª ação partiria as consultas da S3 em duas e exigiria backfill de
+   reclassificação — custo sem ganho.
+3. **`record_cross_tenant_denied` é o caminho único**: emite
+   `acesso_cross_tenant_negado` (S5, 4 props do PRD) **e** `acesso_negado` (S3 —
+   removê-lo zeraria a métrica da sprint anterior) **e** grava 1 linha com
+   `commit=True`. Três coisas que só fazem sentido juntas ⇒ uma função, não três
+   chamadas por call site.
+4. `record_access` exige `user_scope`/`actor_client_id` **sem default**. Default
+   faria um call site novo gravar `system` em silêncio — trilha que mente é pior
+   que trilha ausente.
+
+**Landmine encontrado.** `review/routes.py` remontava um `CurrentUser` sintético
+a partir de `id`+`role` (email/name vazios) só para reusar `require_client_access`.
+Com tenancy isso zera `scope`/`client_id`: todo acesso de usuário de cliente
+seria auditado — e autorizado — como `system`. **Objeto de identidade nunca se
+remonta parcialmente; propaga-se.** Corrigido nos 9 call sites.
+
+**Consequência.** `CurrentUser` passou a carregar `scope`/`client_id` vindos da
+MESMA linha que já checa `active` — sem query nova, sem valor stale. É a base que
+a 05.3 usa para `resolve_client_access`.
+
+## ADR-011 — `app/core/authz.py`: a decisão de acesso é pura, o efeito colateral é do guard (Sprint 5 / BACK 05.3)
+
+**Data:** 2026-07-30 · **Status:** ativo · **Escopo:** `apps/api/app/core/authz.py`, `app/core/dependencies.py`, `app/core/security.py`, `app/modules/auth/`
+
+**Contexto.** A sprint exige UMA função de autorização consultada pela rota **e**
+pela camada de dados. `dependencies.py` não servia: ele grava auditoria e levanta
+HTTP, coisas que um `SELECT` de repositório não pode fazer.
+
+**Decisão.**
+1. **Módulo novo `core/authz.py`** com `CurrentUser` + a regra. `dependencies.py`
+   importa dele (nunca o contrário) — sem ciclo, e a decisão fica testável sem
+   subir FastAPI.
+2. **`resolve_client_access` é PURA** (retorna `bool`). Quem nega é o guard
+   (`deny_client_access`: 1 linha `denied` + 403). Assim a camada de dados usa a
+   mesma função sem auditar cada leitura.
+3. **`tenant_filter_client_id`** projeta a MESMA regra em `WHERE` — não é segunda
+   implementação, é a mesma decisão em outra forma.
+4. **Matriz declarativa** `PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]]`
+   + `require_permission(...)` como fábrica de dependency. Zero `if role ==` em
+   rota. Teste parametrizado cobre as 24 células, e um teste garante que
+   `set(PERMISSION_MATRIX) == set(Permission)` (permissão nova sem célula = KeyError
+   em produção).
+
+**Landmine de deploy.** `scope`/`client_id` no `TokenPayload` **precisam de
+default**. Claim novo obrigatório invalida todo token já emitido: no instante do
+deploy, `model_validate` falharia e **toda** sessão viraria 401. Claim novo em
+JWT é sempre aditivo com default.
+
+**Mudança de comportamento declarada.** A matriz do PRD marca ❌ em "editar dados
+do cliente" para o `manager` de sistema — antes ele editava os clientes da
+carteira. Implementado como o spec manda, **sinalizado no HANDOFF** para
+confirmação do stakeholder.
+
+**Consequência.** O guardrail de performance é medido, não afirmado: um teste
+conta as sentenças SQL de um request e prova 1 único `SELECT FROM users` e zero
+consultas a `client_assignments` para usuário de cliente.
+
+## ADR-012 — Filtro de tenant no SELECT + lista canônica como denominador (Sprint 5 / BACK 05.4)
+
+**Data:** 2026-07-30 · **Status:** ativo · **Escopo:** `apps/api/app/core/authz.py` (`scoped_by_tenant`), `app/modules/reconciliations/tenant_scope.py`, `app/core/sensitive_endpoints.py`
+
+**Contexto.** Negar na rota é necessário e insuficiente: endpoint novo que
+esqueça o guard vazaria. E "100% dos endpoints sensíveis cobertos" não significa
+nada sem um denominador escrito.
+
+**Decisão.**
+1. **`scoped_by_tenant(stmt, coluna, user)`** projeta a decisão do `authz` em
+   `WHERE`. Toda rota com `session_id` passa por UM loader
+   (`require_session_access`) cujo `SELECT` já leva `AND client_id = <tenant>`.
+2. **Lista canônica em CÓDIGO** (`SENSITIVE_ENDPOINTS`) + a contraparte
+   `NON_TENANT_ENDPOINTS`, com a página `docs/endpoints-sensiveis-sprint5.md`
+   **gerada** a partir dela. Um teste confronta a lista com `app.routes` e falha
+   quando (a) a lista tem endpoint que não existe, (b) existe rota `/api/v1` sem
+   classificação, (c) aparece rota com `{client_id}`/`{session_id}` fora da lista.
+   Lista que não quebra o CI vira documento morto em duas sprints.
+3. **Caso negativo parametrizado** sobre a lista inteira, com **body válido** —
+   um 422 de validação passaria sem nunca chegar na autorização e a cobertura
+   seria falsa.
+
+**Landmine (achado pela suíte, não por revisão).** O filtro na query **apagou a
+auditoria**: com a sessão alheia virando "inexistente", o fluxo nunca chegava a
+`require_client_access` e a linha `denied` sumia — R3 desligou R6 em silêncio.
+Correção: `audit_session_tenant_miss` faz UMA consulta no caminho de falha; se o
+recurso existe em outro tenant, grava a negação e devolve o mesmo 404.
+**Sempre que um filtro passa a matar uma busca, confira o que MORREU junto com
+ela** (auditoria, métrica, notificação).
+
+**Consequência.** Cobertura medida, não afirmada: 28/34 endpoints com caso
+negativo verde nesta task; os 6 restantes (usuários do cliente) fecham na 05.5.
+
+## ADR-013 — Usuários do cliente: 3 travas, e o `AND client_id` mora no SELECT (Sprint 5 / BACK 05.5)
+
+**Data:** 2026-07-30 · **Status:** ativo · **Escopo:** `apps/api/app/modules/users/` (client_routes/service/repository/schemas)
+
+**Contexto.** O `UserService` da §8 operava só por `user_id`, **sem** noção de
+tenant. Expor CRUD ao gerente do cliente em cima disso é IDOR pronto: bastaria
+forjar o `user_id` para editar/desativar usuário de outro tenant — ou um admin
+do sistema.
+
+**Decisão.**
+1. **Estender, não duplicar.** O router novo (`client_routes.py`) só muda o
+   PREFIXO; a lógica reusa `UserService`/`UserRepository`.
+2. **Três travas, todas necessárias:** matriz (`ManageClientUsersDep`) → tenant
+   (`AccessibleClientDep`, a função única do 05.3) → **anti-IDOR**
+   (`get_by_id_in_tenant`: `AND client_id = :tenant` **no SELECT**, não numa
+   comparação depois de carregar). Alvo alheio não retorna linha; 404 antes de
+   qualquer escrita.
+3. **Anti-escalação por AUSÊNCIA, não por checagem.** `role` é `ClientUserRole`
+   (422 automático) e `client_id`/`scope` **não existem** no schema de entrada,
+   com `extra="forbid"` — enviá-los é 4xx, não "ignorado em silêncio". Campo que
+   não existe não tem como ser validado errado.
+4. **Senha mínima de 10 no schema**, porque `hash_password` só trunca em 72
+   bytes e nunca impôs mínimo.
+
+**Detalhe que evita virar oráculo.** `users.email` é único GLOBALMENTE. Colisão
+com e-mail de OUTRO tenant devolve 409 com mensagem genérica — dizer de quem é
+o e-mail transformaria a criação num enumerador cross-tenant.
+
+**Divergência declarada.** A descrição da task dizia "manager do sistema segue a
+carteira"; a matriz do PRD §4 marca ❌ para ele em "gerir usuários do cliente".
+Segui a **matriz** (spec explícita) e sinalizei no HANDOFF para confirmação —
+reverter é uma linha em `PERMISSION_MATRIX` + o teste.
+
+<!-- ===== agent-frontend ===== -->
+
+---
+
+## ADR-005-FE — Gating de UI numa função só (`lib/authz.ts`), indexada por PAPEL (Sprint 5 / FRONT 05.6)
+
+**Data:** 2026-07-30 · **Status:** ativo · **Escopo:** `apps/web/src/lib/authz.ts`
+
+**Contexto.** A matriz do R4 (PRD §4) tem 6 ações × 4 papéis. O padrão que existia no
+front era `user.role === 'admin'` espalhado (`configuracoes/usuarios/page.tsx:64`,
+`edit-client-modal.tsx:77`, `(app)/layout.tsx:171`) — e a task proíbe explicitamente
+("grep confirma ausência de checagem de papel espalhada por componente").
+
+**Decisão.** Uma função (`hasPermission(user, permission)`) sobre um
+`PERMISSION_MATRIX` **indexado por papel**, não por permissão:
+`Record<UserRole, readonly Permission[]>`, com `UserRole` vindo do **contrato gerado**.
+Assim um papel novo no backend **não compila** até alguém decidir o que ele enxerga —
+o inverso (indexar por permissão) deixaria o papel novo passar silenciosamente com
+zero permissões, que é o mesmo bug com cara de segurança.
+
+`canAccessClient` espelha `resolve_client_access` só até onde o front consegue: para
+`scope='client'` a decisão é completa (é o próprio `client_id`); para `system` devolve
+`true`, porque a carteira mora em `client_assignments`, que o front não conhece — quem
+nega é o backend e a tela degrada pela resposta, nunca por adivinhação.
+
+**Consequência.** Ampliar `UserRole` no contrato quebrou a compilação em 2 lugares
+(`clientes/page.tsx`, `client-shell.tsx`) via a prop `currentUserRole: 'admin' |
+'manager'` do `EditClientModal` — exatamente o efeito desejado. A prop foi removida em
+favor de `hasPermission(user, 'edit_client')`.
+
+**Isto não é segurança.** A autoridade é `app/core/authz.py` (decide pela LINHA do
+usuário a cada request). O middleware do Next também não é barreira (CVE-2025-29927).
+O que este módulo evita é o defeito de UX de mostrar botão que devolve 403.
+
+## ADR-006-FE — `AlertDialog` construído sobre o `@radix-ui/react-dialog` instalado (Sprint 5 / FRONT 05.6)
+
+**Data:** 2026-07-30 · **Status:** ativo · **Escopo:** `apps/web/src/components/ui/alert-dialog.tsx`
+
+**Contexto.** O design-system manda confirmação destrutiva em `AlertDialog` (nunca
+`<div fixed inset-0>` manual). `@radix-ui/react-alert-dialog` não está instalado, e
+adicioná-lo altera o `pnpm-lock.yaml` da **raiz** — fora do `AGENT_PATHS_FRONTEND`
+(`apps/web/`). Lockfile fora do commit = `ERR_PNPM_OUTDATED_LOCKFILE` no CI, que é o
+vermelho que a Sprint 4 já pagou (ADR-009-QA).
+
+**Decisão.** Implementar a semântica de alertdialog sobre o `@radix-ui/react-dialog`
+já presente: `role="alertdialog"` (o Radix aplica `...contentProps` **depois** do seu
+`role: "dialog"` — conferido em `dist/index.mjs:223-228`, não presumido), sem dismiss
+por clique/foco fora, sem botão "X", foco inicial no **Cancelar** via contexto+ref
+(um `data-*` não passaria pelo tipo do `Button`). Foco preso, `aria-modal`, portal e
+restauração de foco continuam do Radix.
+
+**Consequência.** Zero dependência nova, zero risco de lockfile. Se o pacote oficial
+for preferido, o componente é drop-in (mesma superfície de export) — mas o `pnpm add`
+tem de vir acompanhado do commit do lockfile da raiz por quem tem esse escopo.
+
+## ADR-007-FE — Estado inativo se comunica por BADGE, nunca por `opacity` na linha (Sprint 5 / FRONT 05.6)
+
+**Data:** 2026-07-30 · **Status:** ativo · **Escopo:** `apps/web/src/components/features/client-users/`
+
+**Contexto.** O padrão `cn(!u.active && 'opacity-60')` na `<TableRow>` foi copiado de
+`configuracoes/usuarios` (S4). Contra o Chromium real (axe via Playwright, container
+`mcr.microsoft.com/playwright:v1.59.1-noble`), ele derrubou **3 elementos de uma vez**
+para abaixo de 4.5:1 — e-mail `2.57:1`, badge de papel `2.42:1`, badge "Inativo"
+`2.81:1`: três violações `serious`. O `opacity` compõe sobre o fundo e some com o
+contraste que o token garantia; nem o axe em jsdom (que desliga `color-contrast`) nem
+o `theme-contrast.test.ts` (que mede TOKEN, não o composto) veriam isso.
+
+**Decisão.** Nada de `opacity` para estado em linha de tabela. A badge "Inativo"
+(`bg-destructive/10` + `text-destructive`, par já travado pelo teste de tokens) é o
+sinal. Na mesma verificação: `<Table>` já traz o wrapper rolável **focável** — um
+segundo `overflow-x-auto` por fora faz a tabela espremer em 390px em vez de rolar.
+
+**Consequência / follow-up.** `apps/web/src/app/(app)/configuracoes/usuarios/page.tsx:178`
+tem o MESMO `opacity-60` e não está sob nenhuma suíte de a11y — defeito real,
+pré-existente, fora do escopo da FRONT 05.6/05.7.
+
+## ADR-008-FE — Rota negada degrada com mensagem, e o "voltar" é a casa do PAPEL (Sprint 5 / FRONT 05.7)
+
+**Data:** 2026-07-30 · **Status:** ativo · **Escopo:** `apps/web/src/components/shared/access-denied.tsx`, `(app)/configuracoes/*`, `client-shell.tsx`, `(app)/clientes/page.tsx`
+
+**Contexto.** O padrão que existia era `router.replace('/clientes')` silencioso para
+quem não é admin (`configuracoes/usuarios/page.tsx`, `anomalias/anomaly-types-page.tsx`).
+Com usuários DE tenant isso quebra duas vezes: (1) o destino do redirect é outra rota
+que ele também não vê; (2) redirect silencioso não explica nada — a pessoa acha que
+clicou errado.
+
+**Decisão.**
+- Rota sem permissão renderiza `AccessDenied`: motivo em PT-BR **sem citar o recurso
+  alheio** + um caminho de volta. Nunca tela branca, nunca `error.message` do Next.
+- O caminho de volta é `homePathFor(user)`: `/clientes` para a equipe Hologram,
+  `/clientes/{client_id}` para usuário de tenant. Mandar todo mundo para a lista
+  global daria um segundo beco sem saída.
+- **Exceção deliberada — `/clientes`:** ali o usuário de tenant é *redirecionado*
+  para a casa dele, não bloqueado. É o destino padrão pós-login
+  (`middleware.ts:HOME_PATH`); um `AccessDenied` seria a primeira tela após entrar.
+- **Cross-tenant é decidido ANTES do fetch** (`useClientDetail({enabled: canAccess})`):
+  o request nem sai. Deixar o backend responder 403/404 mostraria "não foi possível
+  carregar o cliente" — mensagem tecnicamente verdadeira e errada para quem lê.
+
+**Não é segurança.** O `AccessDenied` é UX; a autoridade é o backend, e o middleware
+do Next não é barreira (CVE-2025-29927). O que ele impede é o defeito de UX.
+
+## ADR-009-FE — Gerente do SISTEMA perde "Editar cliente": mudança declarada, não regressão (Sprint 5 / FRONT 05.7)
+
+**Data:** 2026-07-30 · **Status:** ativo · **Escopo:** `client-shell.tsx`, `edit-client-modal.tsx`
+
+**Contexto.** Até a S4 o botão "Editar cliente" aparecia para admin **e** manager de
+sistema (o modal só escondia a atribuição de gerente do não-admin). A matriz do PRD §4
+diz "Editar dados do cliente (§9): admin ✅, gerente sistema ❌".
+
+**Decisão.** Seguir a matriz e esconder o botão para o manager. Verificado no backend
+antes de mudar (não presumido): `PATCH /api/v1/clients/{client_id}` usa `EditClientDep`
+e o próprio código traz o comentário "Matriz §4 … mudança de comportamento para o
+manager, declarada no PRD" (`apps/api/app/modules/clients/routes.py:281-296`). Manter o
+botão só produziria 403.
+
+**Guardrail preservado.** O `manager` não perde nada do que o PRD protege: login e
+carteira seguem iguais (lista global, entrar no cliente, criar/revisar/exportar
+conciliação, sincronizar contas). O que saiu é uma ação que o servidor já nega.
+
+## ADR-010-FE — Chrome compartilhado se valida por screenshot em TODOS os perfis e viewports (Sprint 5 / FRONT 05.7)
+
+**Data:** 2026-07-30 · **Status:** ativo · **Escopo:** `apps/web/src/app/(app)/layout.tsx`, `e2e/a11y-mocked.spec.ts`
+
+**Contexto.** A conferência dos 4 perfis × 2 viewports expôs um defeito que **nenhum
+teste existente pegava e que não era da sprint**: em 390px o header transbordava e o
+botão **"Sair" ficava cortado fora da viewport**. O axe não reprova isso (o elemento
+existe, tem nome acessível e contraste), o vitest em jsdom não tem layout, e o
+screenshot só-desktop não mostrava. É o mesmo padrão do `scrollable-region-focusable`
+da S4: defeito que só existe em viewport estreito.
+
+**Decisão.** Duas coisas, juntas:
+1. Correção: título com `min-w-0 truncate`, e-mail escondido abaixo de `sm` (não é
+   acionável; o papel basta para o contexto), grupo da direita `shrink-0`.
+2. **Trava comportamental**, não visual: asserção de `boundingBox` no e2e —
+   `x + width <= viewport.width` para o botão "Sair", nos dois viewports e nos quatro
+   perfis. Mutação confirmada: com o header antigo o teste falha em `mobile 390px` e
+   passa em `desktop`.
+
+**Regra que fica.** "Existe em algum lugar" (grep) não é "cabe em todos os contextos".
+Chrome compartilhado (header, nav, hambúrguer, drawers) se valida por screenshot
+**aberto** em cada perfil e cada viewport — e o que a imagem revelar vira asserção,
+senão volta na próxima sprint.
+
+<!-- ===== agent-infra ===== -->
+
+---
+
+## ADR-010-INFRA — Sprint 5 (multi-tenancy) não demanda mudança de infra
+
+**Data:** 2026-07-30 · **Status:** ativo · **Escopo:** `.github/**`, `scripts/**`, `docker/**`
+
+**Contexto.** `get-tasks agent-infra` e `get-failed-tasks agent-infra` retornaram
+`[]` na Sprint 5: as 8 tasks do board são BACK 05.1–05.5, FRONT 05.6–05.7 e
+QA 05.8. A dúvida legítima era se alguma delas embute requisito de infra implícito
+(secret novo, provisionamento de 1ª vez, mudança de CI) — o padrão do papel manda
+entregar `scripts/setup-*.sh` ANTES do deploy que usa o recurso.
+
+**Decisão.** Não escrever nada. Verificado contra os arquivos reais, não por
+suposição:
+
+| Requisito potencial | Verificação | Conclusão |
+| --- | --- | --- |
+| Migração da S5 (colunas + CHECK + backfill) | `deploy-dev.yml:141-193` — Job `auditoria-api-migrate-dev` roda `alembic upgrade head` antes de `deploy-api`, com digest re-resolvido e secrets espelhados | coberto |
+| Secret/fila/bucket novo | PRD fecha onboarding com senha inicial pelo gerente (sem e-mail/SSO) | nenhum |
+| Teste de constraint em Postgres real | `ci.yml:60-75` já sobe `postgres:16-alpine` + `DATABASE_URL` em `ubuntu-latest` | coberto |
+
+`git diff --stat origin/main -- .github/ scripts/ docker/` → vazio.
+
+**Consequência.** Sprint sem entrega de infra é resultado válido e explícito, não
+omissão. O acoplamento que sobra é operacional: migração vermelha **para** o deploy
+dev (`if: needs.migrate.result == 'success'`, linha 196) e o `deploy-web` tem guard
+contra subir front novo sobre API velha (linhas 365-370) — logo o custo de um
+`downgrade` mal escrito na BACK 05.1 é pipeline parado, e o QA deve exigir
+`upgrade → downgrade → upgrade` limpo (constraint removida antes das colunas).
+
+<!-- ===== agent-qa ===== -->
+
+## ADR-010-QA — Suíte de integração se roda DENTRO de container, não no sandbox (Sprint 5)
+
+**Data:** 2026-07-30 · **Status:** ativo · **Escopo:** verificação do QA
+
+**Contexto.** O sandbox do agent QA **não alcança Postgres a partir do processo
+Python** — nem via socket do Docker (`PermissionError` no testcontainers) nem via
+TCP local (`Connection refused` em `127.0.0.1:<porta>`, mesmo com a porta
+publicada e respondendo ao `/dev/tcp` do bash). Resultado da primeira execução:
+`463 passed, 426 skipped` — a suíte inteira de isolamento cross-tenant **pulada**,
+com exit code **0**. Uma sprint de fundação de segurança teria sido aprovada sem
+que um único teste de tenant rodasse.
+
+**Decisão.** O QA roda a suíte **dentro de um container**, na mesma rede do
+Postgres — o `docker run` funciona (fala com o daemon), o que falha é a rede do
+processo Python no sandbox:
+
+```bash
+docker network create adl-qa-net && docker network connect adl-qa-net <pg>
+docker run --rm --network adl-qa-net -v <worktree>/apps/api:/work -w /work \
+  -e UV_PROJECT_ENVIRONMENT=/venv -e UV_CACHE_DIR=/cache \
+  -e TEST_DATABASE_URL='postgresql+psycopg://...@<pg>:5432/<db>' \
+  ghcr.io/astral-sh/uv:python3.12-bookworm \
+  bash -c "uv sync --all-extras && uv run pytest -q --no-cov"
+```
+
+`UV_PROJECT_ENVIRONMENT=/venv` é obrigatório: sem ele o `uv sync` reescreve o
+`.venv` do worktree do executor (que aqui era Python 3.14) dentro do container.
+
+**Regra que fica.** `skipped` em massa **não** é verde. Antes de aprovar, o QA
+confere a linha de resumo do pytest: se o número de skips é da ordem da suíte de
+integração, o gate não mediu nada — reproduza em container e só então dê veredito.
+Resultado real desta sprint depois da correção: **884 passed, 5 skipped**
+(os 5 são fixtures Omie que exigem credencial real, pré-existentes).
+
+## ADR-011-QA — Contrato cross-branch se prova REGENERANDO, não lendo (Sprint 5)
+
+**Data:** 2026-07-30 · **Status:** ativo · **Escopo:** verificação do QA
+
+**Contexto.** Backend e frontend commitam em branches separadas. O `gen:types` do
+front (`openapi-typescript http://localhost:8000/openapi.json`) roda contra a API
+que estiver de pé — e o worktree do frontend contém o `apps/api` **de develop**,
+sem as mudanças da sprint. "Rodei o `gen:types`" não prova, portanto, que o
+`schema.ts` commitado corresponde ao backend commitado na OUTRA branch.
+
+**Decisão.** O QA prova por regeneração, não por leitura:
+
+```bash
+# 1. OpenAPI do worktree do BACKEND (não do front)
+uv run python -c "import json;from app.main import app;json.dump(app.openapi(),open('/tmp/openapi-real.json','w'),indent=2)"
+# 2. Regenera o contrato e compara com o commitado no FRONT
+npx openapi-typescript /tmp/openapi-real.json -o /tmp/schema-regen.ts
+diff -u /tmp/schema-regen.ts apps/web/src/lib/contracts/schema.ts   # tem de ser 0
+```
+
+Resultado da Sprint 5: **diff 0** (0 linhas) — critério "`gen:types` diff 0"
+fechado com evidência, e não com a palavra do executor.
+
+**Regra que fica.** Sprint com backend e front em branches distintas: o critério
+"contrato regenerado" só é verificável **cruzando as duas árvores**. Diff ≠ 0 é
+reprovação do executor que ficou para trás, com a definição real citada.
+
+## ADR-012-QA — `scope` precede `role`: a CHECK do banco não cobre essa dupla (Sprint 5)
+
+**Data:** 2026-07-30 · **Status:** ativo · **Escopo:** `apps/api/tests/unit/test_authz_scope_precedence.py`
+
+**Contexto.** A CHECK `ck_users_scope_client_id` (BACK 05.1) cruza `scope` com
+`client_id`, mas **não** cruza `scope` com `role`: a linha `scope='client'` +
+`role='admin'` é representável no Postgres. Nenhum endpoint a produz hoje
+(`SystemUserRole`/`ClientUserRole` fecham os dois requests), e por isso **nenhum
+teste da sprint tinha essa combinação** — a métrica 34/34 não a alcançava.
+
+**Decisão.** Teste do QA que trava a **ordem dos ramos** de
+`resolve_client_access` (escopo primeiro, papel depois). Com a ordem invertida, a
+linha acima passaria pelo ramo "admin libera tudo" e alcançaria todos os tenants.
+Verificado: 5 testes verdes contra o código da 05.3, ruff + mypy limpos.
+
+**Regra que fica.** Quando uma invariante é garantida por **dois** campos e a
+constraint só cobre um par, o par descoberto vira teste — a combinação
+"impossível pela API hoje" é exatamente a que um backfill ou um `UPDATE` manual
+cria amanhã.

@@ -29,6 +29,8 @@ from app.core.logging import get_logger
 # importam a constante, nunca a string crua.
 EVENT_ACESSO_NEGADO = "acesso_negado"
 EVENT_CHAVE_ROTACIONADA = "chave_rotacionada"
+# Sprint 5 (R6): negação de acesso a tenant alheio, com o escopo/tenant do ATOR.
+EVENT_ACESSO_CROSS_TENANT_NEGADO = "acesso_cross_tenant_negado"
 
 _log = get_logger("app.telemetry")
 
@@ -74,4 +76,39 @@ def emit_chave_rotacionada(*, clientes_afetados: int, duracao_s: float) -> None:
         EVENT_CHAVE_ROTACIONADA,
         clientes_afetados=clientes_afetados,
         duracao_s=duracao_s,
+    )
+
+
+def emit_acesso_cross_tenant_negado(
+    *,
+    user_scope: str,
+    tenant_do_token: str | None,
+    tenant_alvo: str,
+    rota: str,
+) -> None:
+    """Emite `acesso_cross_tenant_negado` — acesso negado a tenant alheio (S5/R6).
+
+    Contrato de propriedades fixado pelo PRD da Sprint 5, EXATAMENTE estas quatro:
+    `user_scope`, `tenant_do_token`, `tenant_alvo`, `rota`. A leitura do D+30
+    conta ocorrências por este `event`.
+
+    Convive com `acesso_negado` (S3) em vez de substituí-lo: o D+30 da Sprint 3
+    ainda conta aquele evento, e removê-lo zeraria a métrica anterior. Um é
+    "negou acesso a um cliente", o outro acrescenta a dimensão de TENANT DO ATOR.
+
+    Args:
+        user_scope: escopo do ator (`system`|`client`).
+        tenant_do_token: tenant do ator — `None` para usuário `system`
+            (equipe Hologram não pertence a tenant nenhum).
+        tenant_alvo: id do cliente/tenant cujo dado foi pedido.
+        rota: caminho da request (sem query string).
+
+    Somente IDs e enums — nunca nome, razão social, e-mail ou CNPJ.
+    """
+    _log.warning(
+        EVENT_ACESSO_CROSS_TENANT_NEGADO,
+        user_scope=user_scope,
+        tenant_do_token=tenant_do_token,
+        tenant_alvo=tenant_alvo,
+        rota=rota,
     )

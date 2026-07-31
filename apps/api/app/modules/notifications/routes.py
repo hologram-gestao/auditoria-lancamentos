@@ -16,7 +16,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
-from app.core.dependencies import DbSessionDep, ManagerOrAdminDep
+from app.core.dependencies import CurrentUserDep, DbSessionDep
 from app.modules.notifications.repository import NotificationRepository
 from app.modules.notifications.schemas import (
     MarkReadResponse,
@@ -49,7 +49,7 @@ NotificationServiceDep = Annotated[NotificationService, Depends(_get_notificatio
     ),
 )
 async def get_unread_count(
-    user: ManagerOrAdminDep,
+    user: CurrentUserDep,
     service: NotificationServiceDep,
 ) -> UnreadCountResponse:
     unread = await service.unread_count(user)
@@ -69,7 +69,7 @@ async def get_unread_count(
     ),
 )
 async def list_notifications(
-    user: ManagerOrAdminDep,
+    user: CurrentUserDep,
     service: NotificationServiceDep,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
@@ -91,7 +91,7 @@ async def list_notifications(
     ),
 )
 async def mark_notification_read(
-    user: ManagerOrAdminDep,
+    user: CurrentUserDep,
     service: NotificationServiceDep,
     notification_id: UUID,
 ) -> MarkReadResponse:

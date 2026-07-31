@@ -10,21 +10,31 @@ Hoje (S3):
     - `require_admin` / `require_manager_or_admin` — RBAC por role
 
 Em S6 (clientes):
-    - `require_client_access(client_id)` — checa `client_assignments`
+    - `require_client_access(client_id)` — guard de tenant/carteira
+
+Sprint 5 (R2 + R4): a REGRA de acesso mora em `app.core.authz`
+(`resolve_client_access` + `PERMISSION_MATRIX`). Aqui ficam só os **guards**
+FastAPI que a consultam e o efeito colateral de negar (403 + trilha). Proibida
+segunda implementação da regra fora do `authz`.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import Cookie, Depends
-from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from structlog.contextvars import get_contextvars
 
-from app.core.audit import AccessAction, record_access
+from app.core.audit import record_cross_tenant_denied
+from app.core.authz import (
+    CurrentUser,
+    Permission,
+    has_permission,
+    resolve_client_access,
+)
 from app.core.config import Settings, get_settings
 from app.core.exceptions import (
     ClientNotAccessibleError,
@@ -33,8 +43,7 @@ from app.core.exceptions import (
     UnauthorizedError,
 )
 from app.core.security import TOKEN_TYPE_ACCESS, decode_token
-from app.core.telemetry import emit_acesso_negado
-from app.db.models import Client, ClientAssignment, UserRole
+from app.db.models import Client
 from app.db.session import get_db_session
 from app.modules.auth.repository import AuthRepository
 
@@ -44,15 +53,6 @@ REFRESH_TOKEN_COOKIE = "refresh_token"  # noqa: S105
 
 # Sessão DB por request. Use em rotas: `db: DbSessionDep`.
 DbSessionDep = Annotated[AsyncSession, Depends(get_db_session)]
-
-
-class CurrentUser(BaseModel):
-    """User autenticado e ATIVO no DB. Garantido por `get_current_user`."""
-
-    id: str  # users.id (UUID em string)
-    email: str
-    name: str
-    role: str  # "admin" | "manager"
 
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
@@ -96,6 +96,9 @@ async def get_current_user(
         email=user.email,
         name=user.name,
         role=user.role,
+        # Da LINHA, não do token — ver docstring de `CurrentUser`.
+        scope=user.scope,
+        client_id=user.client_id,
     )
 
 
@@ -120,61 +123,88 @@ AdminDep = Annotated[CurrentUser, Depends(require_admin)]
 ManagerOrAdminDep = Annotated[CurrentUser, Depends(require_manager_or_admin)]
 
 
+async def deny_client_access(db: AsyncSession, user: CurrentUser, client_id: UUID) -> None:
+    """Efeito colateral de negar um tenant: trilha + eventos, depois 403.
+
+    Separado de `resolve_client_access` (a DECISÃO, pura) de propósito: a camada
+    de dados consulta a decisão a cada `SELECT` e não deve auditar nada; o guard
+    de rota audita. Um caminho de gravação só (`record_cross_tenant_denied`).
+    """
+    # A trilha é gravada ANTES da conversão 403→404 anti-enumeração das rotas de
+    # leitura — auditoria e anti-enumeração convivem (CONTEXT.md). A `rota` sai
+    # dos contextvars do structlog.
+    await record_cross_tenant_denied(
+        db,
+        user_id=UUID(user.id),
+        user_scope=user.scope,
+        actor_client_id=user.client_id,
+        target_client_id=client_id,
+    )
+    # Mensagem sem NENHUM dado do tenant alvo (nada de nome/razão social/CNPJ) —
+    # só IDs, que o requisitante já conhece.
+    raise ClientNotAccessibleError(
+        f"Usuário {user.id} (scope={user.scope}) tentou acessar cliente {client_id} "
+        "fora do seu escopo.",
+    )
+
+
 async def require_client_access(
     client_id: UUID,
     user: CurrentUserDep,
     db: DbSessionDep,
 ) -> Client:
-    """RBAC por carteira: admin acessa qualquer cliente; manager apenas se há
-    `client_assignments(client_id, user_id)` (CLAUDE.md §3.11 + S6 §3).
+    """Guard de tenant. Delega a decisão a `authz.resolve_client_access`.
+
+    - `scope='client'` → só o próprio tenant.
+    - `scope='system'` → regra atual (admin tudo, manager pela carteira).
 
     Retorna o `Client` carregado para evitar uma 2ª query no service. Erros:
         - 404 NOT_FOUND: cliente inexistente.
-        - 403 FORBIDDEN: manager sem assignment para o cliente.
+        - 403 FORBIDDEN: fora do escopo (a rota de leitura converte para 404).
 
-    Ao negar acesso a um manager fora da carteira, emite o evento
-    `acesso_negado` (só IDs, sem PII) **antes** de levantar
-    `ClientNotAccessibleError` — a conversão 403→404 anti-enumeração feita nas
-    rotas de leitura permanece intacta (Sprint 3, Req. 3).
+    **Não existe segunda implementação da regra** — este guard só executa o
+    efeito colateral (`deny_client_access`) quando a decisão vem `False`.
     """
     client = (await db.execute(select(Client).where(Client.id == client_id))).scalar_one_or_none()
     if client is None:
         raise NotFoundError("Cliente não encontrado.")
 
-    if user.role == UserRole.ADMIN.value:
-        return client
-
-    assignment = (
-        await db.execute(
-            select(ClientAssignment.id).where(
-                ClientAssignment.client_id == client_id,
-                ClientAssignment.user_id == UUID(user.id),
-            )
-        )
-    ).scalar_one_or_none()
-    if assignment is None:
-        # `rota` vem do path já vinculado pelo CorrelationIdMiddleware nos
-        # contextvars do structlog — evita propagar `Request` por 11 call sites.
-        rota = str(get_contextvars().get("path", ""))
-        # Evento (telemetria/alerting) + linha de auditoria (registro LGPD
-        # durável), ambos ANTES da conversão 403→404 anti-enumeração das rotas
-        # de leitura — auditoria e anti-enumeração convivem (CONTEXT.md).
-        emit_acesso_negado(user_id=user.id, client_id_alvo=str(client_id), rota=rota)
-        # `commit=True`: a request vai terminar em erro e o `get_db_session`
-        # daria ROLLBACK — sem o commit a linha de `denied` se perderia. Aqui a
-        # única escrita pendente é a própria auditoria (a dependency só fez SELECT).
-        await record_access(
-            db,
-            user_id=UUID(user.id),
-            client_id=client_id,
-            action=AccessAction.DENIED,
-            rota=rota,
-            commit=True,
-        )
-        raise ClientNotAccessibleError(
-            f"Manager {user.id} tentou acessar cliente {client_id} fora da carteira.",
-        )
+    if not await resolve_client_access(db, user, client_id):
+        await deny_client_access(db, user, client_id)
     return client
 
 
 AccessibleClientDep = Annotated[Client, Depends(require_client_access)]
+
+
+def require_permission(permission: Permission) -> Callable[[CurrentUser], CurrentUser]:
+    """Fábrica de guard por permissão — consulta a MATRIZ, nunca `if role ==`.
+
+    Uso: `RunReconciliationDep = Annotated[CurrentUser, Depends(require_permission(...))]`.
+    Negado por padrão: papel fora da célula recebe 403 sem vazar dado.
+    """
+
+    def _guard(user: CurrentUserDep) -> CurrentUser:
+        if not has_permission(user, permission):
+            raise ForbiddenError(
+                f"Papel {user.role} não tem a permissão {permission.value}.",
+                user_message="Você não tem permissão para esta ação.",
+            )
+        return user
+
+    return _guard
+
+
+# Guards prontos por permissão da matriz (§4 do PRD). Rotas importam estes —
+# assim a matriz é o único lugar que decide quem pode o quê.
+RunReconciliationDep = Annotated[
+    CurrentUser, Depends(require_permission(Permission.RUN_RECONCILIATION))
+]
+ReviewExportDep = Annotated[CurrentUser, Depends(require_permission(Permission.REVIEW_EXPORT))]
+SyncOmieAccountsDep = Annotated[
+    CurrentUser, Depends(require_permission(Permission.SYNC_OMIE_ACCOUNTS))
+]
+ManageClientUsersDep = Annotated[
+    CurrentUser, Depends(require_permission(Permission.MANAGE_CLIENT_USERS))
+]
+EditClientDep = Annotated[CurrentUser, Depends(require_permission(Permission.EDIT_CLIENT))]

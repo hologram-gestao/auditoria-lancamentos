@@ -14,8 +14,10 @@ import structlog
 
 from app.core.logging import _redact_sensitive
 from app.core.telemetry import (
+    EVENT_ACESSO_CROSS_TENANT_NEGADO,
     EVENT_ACESSO_NEGADO,
     EVENT_CHAVE_ROTACIONADA,
+    emit_acesso_cross_tenant_negado,
     emit_acesso_negado,
     emit_chave_rotacionada,
 )
@@ -92,3 +94,53 @@ class TestRedactorCoversTelemetry:
         assert out["user_id"] == "u"
         assert out["client_id_alvo"] == "c"
         assert out["rota"] == "/r"
+
+
+class TestEmitAcessoCrossTenantNegado:
+    """Sprint 5 / R6 — o evento declarado no PRD, com EXATAMENTE 4 propriedades."""
+
+    def test_emits_exactly_declared_fields(self) -> None:
+        with structlog.testing.capture_logs() as logs:
+            emit_acesso_cross_tenant_negado(
+                user_scope="client",
+                tenant_do_token="tenant-A",
+                tenant_alvo="tenant-B",
+                rota="/api/v1/reconciliations/abc",
+            )
+
+        assert len(logs) == 1
+        entry = logs[0]
+        assert entry["event"] == EVENT_ACESSO_CROSS_TENANT_NEGADO
+        assert entry["log_level"] == "warning"
+        assert entry["user_scope"] == "client"
+        assert entry["tenant_do_token"] == "tenant-A"
+        assert entry["tenant_alvo"] == "tenant-B"
+        assert entry["rota"] == "/api/v1/reconciliations/abc"
+        assert set(entry) - _STRUCTLOG_INTERNAL_KEYS == {
+            "user_scope",
+            "tenant_do_token",
+            "tenant_alvo",
+            "rota",
+        }
+
+    def test_ator_system_nao_tem_tenant(self) -> None:
+        """Usuário da equipe Hologram não pertence a tenant — `None`, não string vazia."""
+        with structlog.testing.capture_logs() as logs:
+            emit_acesso_cross_tenant_negado(
+                user_scope="system",
+                tenant_do_token=None,
+                tenant_alvo="tenant-B",
+                rota="/r",
+            )
+
+        assert logs[0]["tenant_do_token"] is None
+
+    def test_no_pii_in_output(self) -> None:
+        with structlog.testing.capture_logs() as logs:
+            emit_acesso_cross_tenant_negado(
+                user_scope="client", tenant_do_token="a", tenant_alvo="b", rota="/r"
+            )
+
+        serialized = str(logs[0]).lower()
+        for forbidden in ("nome", "razao", "razão", "descr", "email", "cnpj"):
+            assert forbidden not in serialized, f"PII '{forbidden}' vazou no evento"

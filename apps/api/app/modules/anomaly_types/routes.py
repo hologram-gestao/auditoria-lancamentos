@@ -19,7 +19,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response
 
-from app.core.dependencies import AdminDep, DbSessionDep, ManagerOrAdminDep
+from app.core.dependencies import AdminDep, CurrentUserDep, DbSessionDep
 from app.modules.anomaly_types.repository import AnomalyTypeRepository
 from app.modules.anomaly_types.schemas import (
     AnomalyTypeCreate,
@@ -49,7 +49,7 @@ AnomalyTypeServiceDep = Annotated[AnomalyTypeService, Depends(_get_anomaly_type_
     ),
 )
 async def list_anomaly_types(
-    user: ManagerOrAdminDep,
+    user: CurrentUserDep,
     service: AnomalyTypeServiceDep,
     page: Annotated[int | None, Query(ge=1)] = None,
     page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,

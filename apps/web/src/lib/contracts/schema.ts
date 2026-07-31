@@ -144,6 +144,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clients/{client_id}/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista os usuários DO tenant (paginado, busca por nome ou e-mail). Visível ao gerente do cliente e à equipe do sistema; operador do cliente recebe 403. Usuário de outro tenant nunca aparece. */
+        get: operations["list_client_users_api_v1_clients__client_id__users_get"];
+        put?: never;
+        /** Cria usuário do cliente com senha inicial (mínimo 10 caracteres, hash bcrypt). O papel aceita apenas client_manager/client_operator; `client_id` e `scope` são fixados pelo servidor a partir do tenant da rota e não são aceitos no body. E-mail já em uso devolve 409. */
+        post: operations["create_client_user_api_v1_clients__client_id__users_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/users/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Detalhe de um usuário DO tenant. `user_id` de outro tenant (ou de um usuário da equipe Hologram) devolve 404 — o SELECT já filtra por client_id. */
+        get: operations["get_client_user_api_v1_clients__client_id__users__user_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Atualiza nome, e-mail ou papel de um usuário DO tenant (PATCH parcial). O papel aceita apenas client_manager/client_operator. */
+        patch: operations["update_client_user_api_v1_clients__client_id__users__user_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/users/{user_id}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Desativa um usuário do tenant. O acesso é revogado no PRÓXIMO request (o middleware relê `active` a cada chamada). Ninguém desativa a si mesmo. */
+        post: operations["deactivate_client_user_api_v1_clients__client_id__users__user_id__deactivate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/users/{user_id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reativa um usuário do tenant previamente desativado. */
+        post: operations["activate_client_user_api_v1_clients__client_id__users__user_id__activate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clients": {
         parameters: {
             query?: never;
@@ -994,6 +1064,12 @@ export interface components {
          *     NUNCA inclui `password_hash`, `created_at`, etc.
          *     `email` é `str` (não `EmailStr`) — validação estrita só na entrada
          *     (`LoginRequest`); na saída precisa serializar qualquer linha existente.
+         *
+         *     Sprint 5 (R2): `role`/`scope` são os enums do backend (contrato é fonte
+         *     única — o front faz o gating de UI a partir daqui, sem redigitar união de
+         *     strings) e `client_id` diz a que tenant o usuário pertence (`None` para a
+         *     equipe Hologram). Nenhum deles é a fonte da decisão de acesso: o servidor
+         *     decide pela linha (`app.core.authz`).
          */
         AuthenticatedUser: {
             /** Id */
@@ -1002,8 +1078,10 @@ export interface components {
             email: string;
             /** Name */
             name: string;
-            /** Role */
-            role: string;
+            role: components["schemas"]["UserRole"];
+            scope: components["schemas"]["UserScope"];
+            /** Client Id */
+            client_id?: string | null;
         };
         /**
          * AutorNavegouForaProps
@@ -1244,6 +1322,57 @@ export interface components {
             reconciliation_count: number;
         };
         /**
+         * ClientUserListResponse
+         * @description Body de GET /api/v1/clients/{client_id}/users — lista paginada.
+         */
+        ClientUserListResponse: {
+            /** Data */
+            data: components["schemas"]["ClientUserResponse"][];
+            pagination: components["schemas"]["PaginationMeta"];
+        };
+        /**
+         * ClientUserResponse
+         * @description Usuário do cliente. NUNCA inclui `password_hash` nem a senha enviada.
+         */
+        ClientUserResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Email */
+            email: string;
+            /** Role */
+            role: string;
+            /** Scope */
+            scope: string;
+            /** Client Id */
+            client_id: string | null;
+            /** Active */
+            active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * ClientUserRole
+         * @description Whitelist de papel aceita na API de usuários DO CLIENTE (tenant).
+         *
+         *     Impede escalação: um gerente de cliente que forje `role='admin'` recebe 422
+         *     do próprio Pydantic, antes de qualquer regra de service.
+         * @enum {string}
+         */
+        ClientUserRole: "client_manager" | "client_operator";
+        /**
          * CreateAnomalyRequest
          * @description Body do POST /api/v1/reconciliations/{id}/anomalies.
          *
@@ -1287,6 +1416,36 @@ export interface components {
             omie_app_key: string;
             /** Omie App Secret */
             omie_app_secret: string;
+        };
+        /**
+         * CreateClientUserRequest
+         * @description Body de POST /api/v1/clients/{client_id}/users.
+         *
+         *     Note o que **não** está aqui: `client_id` e `scope`. Os dois são fixados
+         *     pelo servidor a partir do tenant da rota — aceitar qualquer um deles no body
+         *     seria o mesmo vetor de escalação que o `role`. Campo desconhecido é
+         *     rejeitado (`extra="forbid"`), então enviá-los dá 422 em vez de ser ignorado
+         *     em silêncio.
+         */
+        CreateClientUserRequest: {
+            /**
+             * Name
+             * @description Nome completo.
+             */
+            name: string;
+            /**
+             * Email
+             * Format: email
+             * @description E-mail único de login.
+             */
+            email: string;
+            /**
+             * Password
+             * @description Senha inicial definida pelo gerente do cliente. Mínimo de 10 caracteres; hash bcrypt (cost ≥12).
+             */
+            password: string;
+            /** @description Papel dentro do cliente: client_manager ou client_operator. */
+            role: components["schemas"]["ClientUserRole"];
         };
         /**
          * CreateReconciliationPayload
@@ -1387,7 +1546,7 @@ export interface components {
              */
             password: string;
             /** @description Perfil: admin ou manager. */
-            role: components["schemas"]["UserRole"];
+            role: components["schemas"]["SystemUserRole"];
         };
         /**
          * DuplicateCheckPayload
@@ -2141,6 +2300,16 @@ export interface components {
             email?: boolean | null;
         };
         /**
+         * SystemUserRole
+         * @description Whitelist de papel aceita na API de usuários do SISTEMA (admin-only).
+         *
+         *     Subconjunto de `UserRole` — os valores são referenciados, nunca redigitados.
+         *     Existe como enum próprio (e não `Literal[...]`) para virar um componente
+         *     NOMEADO no OpenAPI, consumível pelo front sem type inline.
+         * @enum {string}
+         */
+        SystemUserRole: "admin" | "manager";
+        /**
          * TestConnectionRequest
          * @description Body de POST /api/v1/clients/test-connection — credenciais em texto plano.
          *
@@ -2199,6 +2368,17 @@ export interface components {
             omie_app_secret?: string | null;
         };
         /**
+         * UpdateClientUserRequest
+         * @description Body de PATCH /api/v1/clients/{client_id}/users/{user_id} (parcial).
+         */
+        UpdateClientUserRequest: {
+            /** Name */
+            name?: string | null;
+            /** Email */
+            email?: string | null;
+            role?: components["schemas"]["ClientUserRole"] | null;
+        };
+        /**
          * UpdateFileEntryRequest
          * @description Body do PATCH /file-entries/{entry_id}.
          *
@@ -2240,7 +2420,7 @@ export interface components {
             name?: string | null;
             /** Email */
             email?: string | null;
-            role?: components["schemas"]["UserRole"] | null;
+            role?: components["schemas"]["SystemUserRole"] | null;
         };
         /**
          * UsageEventPayload
@@ -2314,10 +2494,24 @@ export interface components {
         };
         /**
          * UserRole
-         * @description Perfis de usuário interno.
+         * @description Perfis de usuário — fonte ÚNICA (proibida string mágica em service/rota).
+         *
+         *     Papéis de SISTEMA (equipe Hologram, `scope='system'`):
+         *         - ADMIN: acesso total.
+         *         - MANAGER: acesso pela carteira (`client_assignments`).
+         *
+         *     Papéis de CLIENTE (`scope='client'`, Sprint 5 / R1+R4):
+         *         - CLIENT_MANAGER: opera o próprio tenant + gere os usuários dele.
+         *         - CLIENT_OPERATOR: opera o próprio tenant, sem gerir usuários.
          * @enum {string}
          */
-        UserRole: "admin" | "manager";
+        UserRole: "admin" | "manager" | "client_manager" | "client_operator";
+        /**
+         * UserScope
+         * @description Escopo de tenancy do usuário — fonte ÚNICA (Sprint 5 / R1).
+         * @enum {string}
+         */
+        UserScope: "system" | "client";
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -2606,6 +2800,220 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_client_users_api_v1_clients__client_id__users_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                pageSize?: number;
+                search?: string | null;
+            };
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientUserListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_client_user_api_v1_clients__client_id__users_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateClientUserRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientUserResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_client_user_api_v1_clients__client_id__users__user_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientUserResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_client_user_api_v1_clients__client_id__users__user_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateClientUserRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientUserResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deactivate_client_user_api_v1_clients__client_id__users__user_id__deactivate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientUserResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activate_client_user_api_v1_clients__client_id__users__user_id__activate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientUserResponse"];
                 };
             };
             /** @description Validation Error */

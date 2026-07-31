@@ -55,6 +55,7 @@ import { useAssignClient, useTestConnection, useUpdateClient } from '@/hooks/use
 import { useUsersList } from '@/hooks/use-users';
 import { ApiError } from '@/lib/api/client';
 import type { Client, UpdateClientPayload } from '@/lib/api/clients';
+import { hasPermission } from '@/lib/authz';
 import { updateClientSchema, type UpdateClientFormValues } from '@/lib/validation/clients';
 import { useAuthStore } from '@/stores/auth';
 
@@ -65,17 +66,17 @@ interface EditClientModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   client: Client | null;
-  currentUserRole: 'admin' | 'manager';
 }
 
-export function EditClientModal({
-  open,
-  onOpenChange,
-  client,
-  currentUserRole,
-}: EditClientModalProps) {
-  const isAdmin = currentUserRole === 'admin';
-  const currentUserId = useAuthStore((s) => s.user?.id);
+export function EditClientModal({ open, onOpenChange, client }: EditClientModalProps) {
+  // Sprint 5 (R4): quem pode editar dados do cliente sai da MATRIZ
+  // (`lib/authz`), não de um `role === 'admin'` local. Antes o papel vinha por
+  // prop tipada `'admin' | 'manager'` — com os papéis de cliente no contrato,
+  // isso deixaria de compilar e, pior, um `client_manager` cairia no ramo
+  // "não-admin" por acidente em vez de por regra.
+  const currentUser = useAuthStore((s) => s.user);
+  const isAdmin = hasPermission(currentUser, 'edit_client');
+  const currentUserId = currentUser?.id;
 
   const [showKey, setShowKey] = useState(false);
   const [showSecret, setShowSecret] = useState(false);

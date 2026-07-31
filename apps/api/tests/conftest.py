@@ -20,6 +20,7 @@ clara, mas testes unitários puros (S1) continuam rodando.
 
 from __future__ import annotations
 
+import os
 import sys
 from collections.abc import AsyncGenerator, AsyncIterator, Iterator
 from typing import TYPE_CHECKING
@@ -92,9 +93,25 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
 # ----------------------------------------------------------------------
 
 
+# Escape hatch para ambientes onde o SDK do Docker não é alcançável a partir do
+# processo de teste (ex.: sandbox de agente sem acesso ao socket), mas existe um
+# Postgres descartável já de pé. NÃO é usado no CI (var ausente lá) — o caminho
+# padrão continua sendo o testcontainers.
+TEST_DATABASE_URL_ENV = "TEST_DATABASE_URL"
+
+
 @pytest.fixture(scope="session")
-def pg_container() -> Iterator[PostgresContainer]:
-    """Sobe um Postgres efêmero. Pula testes se Docker não estiver disponível."""
+def pg_container() -> Iterator[PostgresContainer | None]:
+    """Sobe um Postgres efêmero. Pula testes se Docker não estiver disponível.
+
+    Se `TEST_DATABASE_URL` estiver setada, nenhum container é subido: os testes
+    usam o Postgres apontado por ela (que precisa ser DESCARTÁVEL — o schema é
+    criado e dropado a cada sessão de teste).
+    """
+    if os.getenv(TEST_DATABASE_URL_ENV):
+        yield None
+        return
+
     try:
         from testcontainers.postgres import PostgresContainer as _PgContainer
     except ImportError:
@@ -113,8 +130,12 @@ def pg_container() -> Iterator[PostgresContainer]:
 
 
 @pytest.fixture(scope="session")
-def db_url(pg_container: PostgresContainer) -> str:
-    """URL do Postgres do container, no formato esperado pelo SQLAlchemy async."""
+def db_url(pg_container: PostgresContainer | None) -> str:
+    """URL do Postgres de teste, no formato esperado pelo SQLAlchemy async."""
+    override = os.getenv(TEST_DATABASE_URL_ENV)
+    if override:
+        return override
+    assert pg_container is not None  # garantido pelo fixture acima
     return pg_container.get_connection_url()
 
 

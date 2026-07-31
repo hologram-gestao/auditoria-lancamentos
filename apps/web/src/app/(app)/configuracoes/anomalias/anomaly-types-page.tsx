@@ -4,9 +4,11 @@
  * Tela admin de Tipos de Anomalia — S15 FRONT 11.2 (Fase 1).
  *
  * Defesa em profundidade:
- *   - Middleware Next libera todas rotas autenticadas (não decodifica JWT).
- *   - Esta página (client component) redireciona manager para `/clientes`.
- *   - Backend bloqueia mutações com 403.
+ *   - Middleware Next libera todas rotas autenticadas (não decodifica JWT) e
+ *     NÃO é barreira de segurança (bypass por header — CVE-2025-29927).
+ *   - Esta página (client component) degrada com `AccessDenied` para quem não
+ *     é admin do sistema — gating presentacional, via `lib/authz`.
+ *   - Backend bloqueia mutações com 403. É ele a autoridade.
  *
  * Ordenação default (severidade crítica → moderada → info, depois name asc)
  * vem do backend (`anomaly_types/repository.py`); aqui não reordenamos no
@@ -18,14 +20,14 @@
  */
 
 import { Plus, Search } from 'lucide-react';
-import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { AnomalyTypeCreateDialog } from '@/components/features/anomaly-types/anomaly-type-create-dialog';
 import { AnomalyTypeDeleteConfirm } from '@/components/features/anomaly-types/anomaly-type-delete-confirm';
 import { AnomalyTypeEditDialog } from '@/components/features/anomaly-types/anomaly-type-edit-dialog';
 import { AnomalyTypeToggleConfirm } from '@/components/features/anomaly-types/anomaly-type-toggle-confirm';
 import { AnomalyTypesTable } from '@/components/features/anomaly-types/anomaly-types-table';
+import { AccessDenied } from '@/components/shared/access-denied';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -33,6 +35,7 @@ import { useAnomalyTypesList } from '@/hooks/use-anomaly-types';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import type { AnomalyType } from '@/lib/api/anomaly-types';
 import { ApiError } from '@/lib/api/client';
+import { canManageSystemUsers, homePathFor } from '@/lib/authz';
 import { useAuthStore } from '@/stores/auth';
 
 const PAGE_SIZE = 100;
@@ -45,14 +48,11 @@ function normalize(value: string): string {
 }
 
 export default function AnomalyTypesPage() {
-  const router = useRouter();
   const currentUser = useAuthStore((s) => s.user);
-
-  useEffect(() => {
-    if (currentUser !== null && currentUser.role !== 'admin') {
-      router.replace('/clientes');
-    }
-  }, [currentUser, router]);
+  // Matriz do R4 via `lib/authz` (Sprint 5): configurações do SISTEMA são do
+  // admin. Antes isto era um `router.replace('/clientes')` silencioso — que,
+  // para um usuário DE tenant, mandaria para outra rota que ele também não vê.
+  const canSee = canManageSystemUsers(currentUser);
 
   const [searchInput, setSearchInput] = useState('');
   const debouncedSearch = useDebouncedValue(searchInput, 300);
@@ -63,7 +63,7 @@ export default function AnomalyTypesPage() {
     [includeInactive],
   );
   const { data, isLoading, isError, error } = useAnomalyTypesList(queryParams, {
-    enabled: currentUser?.role === 'admin',
+    enabled: canSee,
   });
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -78,8 +78,16 @@ export default function AnomalyTypesPage() {
     return all.filter((t) => normalize(t.name).includes(q) || normalize(t.code).includes(q));
   }, [data, debouncedSearch]);
 
-  if (currentUser === null || currentUser.role !== 'admin') {
-    return null;
+  if (currentUser === null) return null;
+
+  if (!canSee) {
+    return (
+      <AccessDenied
+        message="As configurações do sistema são restritas ao administrador da Hologram."
+        backHref={homePathFor(currentUser)}
+        backLabel="Voltar para o início"
+      />
+    );
   }
 
   const errorMessage =

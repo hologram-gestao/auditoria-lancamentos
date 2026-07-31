@@ -7,7 +7,11 @@ tokens vão SEMPRE em cookies HttpOnly (Doc §7).
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from pydantic import BaseModel, EmailStr, Field
+
+from app.db.models import UserRole, UserScope
 
 
 class LoginRequest(BaseModel):
@@ -28,12 +32,20 @@ class AuthenticatedUser(BaseModel):
     NUNCA inclui `password_hash`, `created_at`, etc.
     `email` é `str` (não `EmailStr`) — validação estrita só na entrada
     (`LoginRequest`); na saída precisa serializar qualquer linha existente.
+
+    Sprint 5 (R2): `role`/`scope` são os enums do backend (contrato é fonte
+    única — o front faz o gating de UI a partir daqui, sem redigitar união de
+    strings) e `client_id` diz a que tenant o usuário pertence (`None` para a
+    equipe Hologram). Nenhum deles é a fonte da decisão de acesso: o servidor
+    decide pela linha (`app.core.authz`).
     """
 
     id: str  # UUID em string (evita parsing client-side)
     email: str
     name: str
-    role: str  # "admin" | "manager"
+    role: UserRole
+    scope: UserScope
+    client_id: UUID | None = None
 
 
 class LoginResponse(BaseModel):
