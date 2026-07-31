@@ -24,14 +24,14 @@ from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.authz import CurrentUser
 from app.core.config import Settings, get_settings
 from app.core.crypto_service import load_client_cipher
 from app.core.dependencies import (
     DbSessionDep,
-    ManagerOrAdminDep,
-    require_client_access,
+    ReviewExportDep,
 )
-from app.core.exceptions import ClientNotAccessibleError, ConflictError, NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError
 from app.db.models import Client, ReconciliationSession, ReconciliationStatus
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache
 from app.modules.clients.omie_factory import build_omie_client
@@ -51,6 +51,7 @@ from app.modules.reconciliations.review.schemas import (
     UpdateOmieEntryResponse,
 )
 from app.modules.reconciliations.review.service import ReviewService
+from app.modules.reconciliations.tenant_scope import require_session_access
 
 router = APIRouter(
     prefix="/api/v1/reconciliations/{session_id}",
@@ -86,8 +87,7 @@ _REVIEW_BLOCKED_USER_MSG = (
 async def _load_session_for_rbac(
     *,
     session_id: UUID,
-    user_id: str,
-    user_role: str,
+    user: CurrentUser,
     db: AsyncSession,
 ) -> ReconciliationSession:
     """Carrega a sessão e valida RBAC + status reviewável (CLAUDE.md §3.11).
@@ -102,26 +102,15 @@ async def _load_session_for_rbac(
         linha de defesa: se o front esquecer o check, a API ainda recusa
         em vez de servir uma tela de revisão vazia em cima de dados inválidos.
     """
-    sess = (
-        await db.execute(
-            select(ReconciliationSession).where(ReconciliationSession.id == session_id)
-        )
-    ).scalar_one_or_none()
-    if sess is None:
-        raise NotFoundError(_SESSION_NOT_FOUND_MSG)
-    # Reusa `require_client_access` — manager fora → ClientNotAccessibleError → 404.
-    from app.core.dependencies import CurrentUser  # local import evita ciclo de typing
-
+    # `require_session_access`: o SELECT da sessão já leva
+    # `AND client_id = <tenant do usuário>` (S5/R3) e a carteira do usuário
+    # `system` é validada em seguida — tudo com 404 uniforme (anti-enumeração).
+    # O `CurrentUser` REAL é repassado (não um remontado a partir de id+role):
+    # `scope`/`client_id` fazem parte da decisão e da trilha de auditoria.
     try:
-        await require_client_access(
-            sess.client_id,
-            CurrentUser(id=user_id, email="", name="", role=user_role),
-            db,
-        )
-    except ClientNotAccessibleError as exc:
-        raise NotFoundError(_SESSION_NOT_FOUND_MSG) from exc
+        sess = await require_session_access(db, user, session_id)
     except NotFoundError as exc:
-        # Cliente foi removido — sessão órfã. 404 também.
+        # Cobre sessão inexistente, de outro tenant, e cliente removido (órfã).
         raise NotFoundError(_SESSION_NOT_FOUND_MSG) from exc
 
     if sess.status == ReconciliationStatus.ERROR.value:
@@ -149,7 +138,7 @@ async def _load_session_for_rbac(
     ),
 )
 async def list_file_entries(
-    user: ManagerOrAdminDep,
+    user: ReviewExportDep,
     db: DbSessionDep,
     service: ReviewServiceDep,
     session_id: UUID,
@@ -162,7 +151,7 @@ async def list_file_entries(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=50)] = 20,
 ) -> FileEntryListResponse:
-    await _load_session_for_rbac(session_id=session_id, user_id=user.id, user_role=user.role, db=db)
+    await _load_session_for_rbac(session_id=session_id, user=user, db=db)
     rows, pagination = await service.list_file_entries(
         session_id=session_id,
         situation=None if situation == "all" else situation,
@@ -188,14 +177,14 @@ async def list_file_entries(
     ),
 )
 async def update_file_entry(
-    user: ManagerOrAdminDep,
+    user: ReviewExportDep,
     db: DbSessionDep,
     service: ReviewServiceDep,
     session_id: UUID,
     entry_id: UUID,
     body: UpdateFileEntryRequest,
 ) -> UpdateFileEntryResponse:
-    await _load_session_for_rbac(session_id=session_id, user_id=user.id, user_role=user.role, db=db)
+    await _load_session_for_rbac(session_id=session_id, user=user, db=db)
     # `model_fields_set` distingue "chave presente no JSON" de "campo omitido".
     # Sem isso, `omie_lancamento_id=null` (limpar) e omitido (não tocar) ficam
     # idênticos pra Pydantic — ambos viram None.
@@ -223,16 +212,14 @@ async def update_file_entry(
     ),
 )
 async def list_available_omie_entries(
-    user: ManagerOrAdminDep,
+    user: ReviewExportDep,
     db: DbSessionDep,
     service: ReviewServiceDep,
     settings: Annotated[Settings, Depends(get_settings)],
     session_id: UUID,
     search: Annotated[str | None, Query(max_length=200)] = None,
 ) -> AvailableOmieEntriesResponse:
-    sess = await _load_session_for_rbac(
-        session_id=session_id, user_id=user.id, user_role=user.role, db=db
-    )
+    sess = await _load_session_for_rbac(session_id=session_id, user=user, db=db)
     client = (
         await db.execute(select(Client).where(Client.id == sess.client_id))
     ).scalar_one_or_none()
@@ -265,16 +252,14 @@ async def list_available_omie_entries(
     ),
 )
 async def list_omie_entries(
-    user: ManagerOrAdminDep,
+    user: ReviewExportDep,
     db: DbSessionDep,
     service: ReviewServiceDep,
     session_id: UUID,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=50)] = 20,
 ) -> OmieEntryListResponse:
-    sess = await _load_session_for_rbac(
-        session_id=session_id, user_id=user.id, user_role=user.role, db=db
-    )
+    sess = await _load_session_for_rbac(session_id=session_id, user=user, db=db)
     rows, pagination = await service.list_omie_entries(
         session=sess,
         page=page,
@@ -296,16 +281,14 @@ async def list_omie_entries(
     ),
 )
 async def update_omie_entry(
-    user: ManagerOrAdminDep,
+    user: ReviewExportDep,
     db: DbSessionDep,
     service: ReviewServiceDep,
     session_id: UUID,
     entry_id: UUID,
     body: UpdateOmieEntryRequest,
 ) -> UpdateOmieEntryResponse:
-    sess = await _load_session_for_rbac(
-        session_id=session_id, user_id=user.id, user_role=user.role, db=db
-    )
+    sess = await _load_session_for_rbac(session_id=session_id, user=user, db=db)
     updated = await service.update_omie_entry(
         session=sess,
         entry_id=entry_id,
@@ -328,7 +311,7 @@ async def update_omie_entry(
     ),
 )
 async def list_anomalies(
-    user: ManagerOrAdminDep,
+    user: ReviewExportDep,
     db: DbSessionDep,
     service: ReviewServiceDep,
     session_id: UUID,
@@ -337,7 +320,7 @@ async def list_anomalies(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=50)] = 20,
 ) -> AnomalyListResponse:
-    await _load_session_for_rbac(session_id=session_id, user_id=user.id, user_role=user.role, db=db)
+    await _load_session_for_rbac(session_id=session_id, user=user, db=db)
     resolved_filter: bool | None
     if resolved == "true":
         resolved_filter = True
@@ -370,13 +353,13 @@ async def list_anomalies(
     ),
 )
 async def create_anomaly(
-    user: ManagerOrAdminDep,
+    user: ReviewExportDep,
     db: DbSessionDep,
     service: ReviewServiceDep,
     session_id: UUID,
     body: CreateAnomalyRequest,
 ) -> CreateAnomalyResponse:
-    await _load_session_for_rbac(session_id=session_id, user_id=user.id, user_role=user.role, db=db)
+    await _load_session_for_rbac(session_id=session_id, user=user, db=db)
     anomaly = await service.create_anomaly(session_id=session_id, body=body)
     return CreateAnomalyResponse(data=anomaly)
 
@@ -395,14 +378,14 @@ async def create_anomaly(
     ),
 )
 async def resolve_anomaly(
-    user: ManagerOrAdminDep,
+    user: ReviewExportDep,
     db: DbSessionDep,
     service: ReviewServiceDep,
     session_id: UUID,
     anomaly_id: UUID,
     body: ResolveAnomalyRequest,
 ) -> ResolveAnomalyResponse:
-    await _load_session_for_rbac(session_id=session_id, user_id=user.id, user_role=user.role, db=db)
+    await _load_session_for_rbac(session_id=session_id, user=user, db=db)
     anomaly = await service.resolve_anomaly(
         session_id=session_id,
         anomaly_id=anomaly_id,

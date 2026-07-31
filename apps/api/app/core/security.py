@@ -22,25 +22,38 @@ from jose import ExpiredSignatureError, JWTError, jwt
 from pydantic import BaseModel, ValidationError
 
 from app.core.exceptions import TokenExpiredError, UnauthorizedError
+from app.db.models import UserScope
 
 if TYPE_CHECKING:
     from app.core.config import Settings
 
 JWT_ALGORITHM = "HS256"
+# Escopo assumido para tokens sem o claim `scope` (emitidos antes da Sprint 5).
+DEFAULT_TOKEN_SCOPE = UserScope.SYSTEM.value
 # Não são senhas — são literais do claim `type` do JWT. Ruff S105 falso positivo.
 TOKEN_TYPE_ACCESS = "access"  # noqa: S105
 TOKEN_TYPE_REFRESH = "refresh"  # noqa: S105
 
 
 class TokenPayload(BaseModel):
-    """Payload validado de um JWT decodificado."""
+    """Payload validado de um JWT decodificado.
+
+    `scope`/`client_id` (Sprint 5 / R2) têm **default**, e não são obrigatórios,
+    de propósito: tokens emitidos ANTES do deploy desta sprint não trazem os
+    claims novos. Sem o default, `model_validate` falharia e **toda** sessão em
+    curso viraria 401 no momento do deploy. O default é o estado pré-sprint
+    (equipe Hologram, sem tenant) — e, de todo modo, quem DECIDE acesso é a linha
+    do usuário (`CurrentUser`), não estes claims.
+    """
 
     sub: str  # user_id (UUID em string)
-    role: str  # "admin" | "manager"
+    role: str  # ver `app.db.models.UserRole`
     type: str  # TOKEN_TYPE_ACCESS | TOKEN_TYPE_REFRESH
     jti: str  # token id único (UUID) — usado para revogação futura
     iat: int  # issued at (epoch)
     exp: int  # expira em (epoch)
+    scope: str = DEFAULT_TOKEN_SCOPE  # "system" | "client"
+    client_id: str | None = None  # tenant do usuário; None quando scope="system"
 
 
 # ----------------------------------------------------------------------
@@ -95,6 +108,8 @@ def _create_token(
     token_type: str,
     expires_delta: timedelta,
     secret: str,
+    scope: str = DEFAULT_TOKEN_SCOPE,
+    client_id: str | None = None,
 ) -> str:
     """Helper interno — emite JWT assinado com claims padronizados."""
     now = datetime.now(UTC)
@@ -105,11 +120,23 @@ def _create_token(
         "jti": str(uuid4()),
         "iat": int(now.timestamp()),
         "exp": int((now + expires_delta).timestamp()),
+        # Sprint 5: escopo/tenant viajam no token para o front fazer gating sem
+        # uma chamada extra. NÃO são a fonte da decisão de acesso — ver
+        # `app.core.authz`.
+        "scope": scope,
+        "client_id": client_id,
     }
     return jwt.encode(payload, secret, algorithm=JWT_ALGORITHM)
 
 
-def create_access_token(*, subject: str, role: str, settings: Settings) -> str:
+def create_access_token(
+    *,
+    subject: str,
+    role: str,
+    settings: Settings,
+    scope: str = DEFAULT_TOKEN_SCOPE,
+    client_id: str | None = None,
+) -> str:
     """Emite access token (validade `JWT_ACCESS_EXPIRE_MINUTES`, padrão 60)."""
     return _create_token(
         subject=subject,
@@ -117,10 +144,19 @@ def create_access_token(*, subject: str, role: str, settings: Settings) -> str:
         token_type=TOKEN_TYPE_ACCESS,
         expires_delta=timedelta(minutes=settings.JWT_ACCESS_EXPIRE_MINUTES),
         secret=settings.JWT_SECRET.get_secret_value(),
+        scope=scope,
+        client_id=client_id,
     )
 
 
-def create_refresh_token(*, subject: str, role: str, settings: Settings) -> str:
+def create_refresh_token(
+    *,
+    subject: str,
+    role: str,
+    settings: Settings,
+    scope: str = DEFAULT_TOKEN_SCOPE,
+    client_id: str | None = None,
+) -> str:
     """Emite refresh token (validade `JWT_REFRESH_EXPIRE_DAYS`, padrão 7)."""
     return _create_token(
         subject=subject,
@@ -128,6 +164,8 @@ def create_refresh_token(*, subject: str, role: str, settings: Settings) -> str:
         token_type=TOKEN_TYPE_REFRESH,
         expires_delta=timedelta(days=settings.JWT_REFRESH_EXPIRE_DAYS),
         secret=settings.JWT_SECRET.get_secret_value(),
+        scope=scope,
+        client_id=client_id,
     )
 
 

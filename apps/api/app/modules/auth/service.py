@@ -25,6 +25,7 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
+from app.db.models import UserRole, UserScope
 from app.modules.auth.repository import AuthRepository
 from app.modules.auth.schemas import AuthenticatedUser
 
@@ -92,11 +93,7 @@ class AuthService:
                 user_message=GENERIC_LOGIN_ERROR,
             )
 
-        access = create_access_token(subject=str(user.id), role=user.role, settings=self._settings)
-        refresh = create_refresh_token(
-            subject=str(user.id), role=user.role, settings=self._settings
-        )
-        return user, access, refresh
+        return user, *self._issue_tokens(user)
 
     async def refresh(self, *, refresh_token: str) -> tuple[User, str, str]:
         """Valida refresh token e emite novo par (access, refresh).
@@ -116,13 +113,33 @@ class AuthService:
             # User foi deletado/desativado depois do refresh ser emitido — bloqueia.
             raise UnauthorizedError("Sessão expirada. Faça login novamente.")
 
-        new_access = create_access_token(
-            subject=str(user.id), role=user.role, settings=self._settings
+        # Reemite a partir da LINHA atual: se o admin mudou o tenant/escopo desde
+        # o login, o par novo já sai com o valor corrente (Sprint 5 / R2).
+        return user, *self._issue_tokens(user)
+
+    def _issue_tokens(self, user: User) -> tuple[str, str]:
+        """Par (access, refresh) com `scope`/`client_id` do usuário (S5 / R2).
+
+        Ponto ÚNICO de emissão: login e refresh passam por aqui, senão um dos
+        dois esqueceria os claims novos.
+        """
+        subject = str(user.id)
+        client_id = str(user.client_id) if user.client_id else None
+        access = create_access_token(
+            subject=subject,
+            role=user.role,
+            settings=self._settings,
+            scope=user.scope,
+            client_id=client_id,
         )
-        new_refresh = create_refresh_token(
-            subject=str(user.id), role=user.role, settings=self._settings
+        refresh = create_refresh_token(
+            subject=subject,
+            role=user.role,
+            settings=self._settings,
+            scope=user.scope,
+            client_id=client_id,
         )
-        return user, new_access, new_refresh
+        return access, refresh
 
     @staticmethod
     def to_authenticated_user(user: User) -> AuthenticatedUser:
@@ -131,5 +148,7 @@ class AuthService:
             id=str(user.id),
             email=user.email,
             name=user.name,
-            role=user.role,
+            role=UserRole(user.role),
+            scope=UserScope(user.scope),
+            client_id=user.client_id,
         )

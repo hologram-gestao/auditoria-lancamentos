@@ -21,20 +21,19 @@ from app.core.config import Settings, get_settings
 from app.core.crypto_service import load_client_cipher
 from app.core.dependencies import (
     DbSessionDep,
-    ManagerOrAdminDep,
-    require_client_access,
+    SyncOmieAccountsDep,
 )
 from app.core.exceptions import (
-    ClientNotAccessibleError,
     NotFoundError,
     ValidationAppError,
 )
-from app.db.models import Client, ReconciliationSession
+from app.db.models import Client
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache
 from app.modules.clients.omie_factory import build_omie_client
 from app.modules.omie_data.schemas import OmieLancamentoListResponse
 from app.modules.omie_data.service import OmieLancamentoService
 from app.modules.reconciliations.review.repository import ReviewRepository
+from app.modules.reconciliations.tenant_scope import require_session_access
 
 router = APIRouter(prefix="/api/v1/omie", tags=["omie"])
 
@@ -86,7 +85,7 @@ def _parse_ids(raw: str) -> list[int]:
     ),
 )
 async def get_omie_lancamentos(
-    user: ManagerOrAdminDep,
+    user: SyncOmieAccountsDep,
     db: DbSessionDep,
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
@@ -103,18 +102,8 @@ async def get_omie_lancamentos(
             ),
         )
 
-    sess = (
-        await db.execute(
-            select(ReconciliationSession).where(ReconciliationSession.id == session_id)
-        )
-    ).scalar_one_or_none()
-    if sess is None:
-        raise NotFoundError(_SESSION_NOT_FOUND_MSG)
-
-    try:
-        await require_client_access(sess.client_id, user, db)
-    except ClientNotAccessibleError as exc:
-        raise NotFoundError(_SESSION_NOT_FOUND_MSG) from exc
+    # SELECT da sessão já filtrado por tenant + carteira do `system` (S5/R3).
+    sess = await require_session_access(db, user, session_id)
 
     client = (
         await db.execute(select(Client).where(Client.id == sess.client_id))

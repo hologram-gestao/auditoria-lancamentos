@@ -11,10 +11,13 @@
  *   - Modais: criar, editar, desativar (componentes em features/users/)
  *
  * Defesa em profundidade contra acesso de Manager:
- *   - Middleware Next libera todas rotas autenticadas (não decodifica JWT).
- *   - Esta página, sendo client component, redireciona para /clientes se o
- *     `user.role` no Zustand não for admin.
- *   - Backend retorna 403 em todas as rotas /api/v1/users (RBAC).
+ *   - Middleware Next libera todas rotas autenticadas (não decodifica JWT) e
+ *     NÃO é barreira de segurança (bypass por header — CVE-2025-29927).
+ *   - Esta página, sendo client component, degrada com `AccessDenied` quando a
+ *     matriz (`lib/authz`) não libera — gating presentacional. O caminho de
+ *     volta é a casa do papel: usuário DE tenant não tem `/clientes`.
+ *   - Backend retorna 403 em todas as rotas /api/v1/users (RBAC). É ele a
+ *     autoridade.
  */
 
 import { format } from 'date-fns';
@@ -28,7 +31,6 @@ import {
   SquarePen,
   UserPlus,
 } from 'lucide-react';
-import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -36,6 +38,7 @@ import { CreateUserModal } from '@/components/features/users/create-user-modal';
 import { DeactivateConfirm } from '@/components/features/users/deactivate-confirm';
 import { EditUserModal } from '@/components/features/users/edit-user-modal';
 import { UserRoleBadge, UserStatusBadge } from '@/components/features/users/user-badges';
+import { AccessDenied } from '@/components/shared/access-denied';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -50,21 +53,15 @@ import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { useActivateUser, useUsersList } from '@/hooks/use-users';
 import { ApiError } from '@/lib/api/client';
 import type { User } from '@/lib/api/users';
+import { canManageSystemUsers, homePathFor } from '@/lib/authz';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth';
 
 const PAGE_SIZE = 20;
 
 export default function UsersPage() {
-  const router = useRouter();
   const currentUser = useAuthStore((s) => s.user);
-
-  // Defesa em profundidade — manager logado é jogado de volta para /clientes.
-  useEffect(() => {
-    if (currentUser !== null && currentUser.role !== 'admin') {
-      router.replace('/clientes');
-    }
-  }, [currentUser, router]);
+  const canSee = canManageSystemUsers(currentUser);
 
   const [searchInput, setSearchInput] = useState('');
   const debouncedSearch = useDebouncedValue(searchInput, 300);
@@ -79,7 +76,9 @@ export default function UsersPage() {
     () => ({ page, pageSize: PAGE_SIZE, search: debouncedSearch || undefined }),
     [page, debouncedSearch],
   );
-  const { data, isLoading, isFetching, isError, error } = useUsersList(queryParams);
+  const { data, isLoading, isFetching, isError, error } = useUsersList(queryParams, {
+    enabled: canSee,
+  });
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
@@ -98,8 +97,16 @@ export default function UsersPage() {
     }
   }
 
-  if (currentUser === null || currentUser.role !== 'admin') {
-    return null;
+  if (currentUser === null) return null;
+
+  if (!canSee) {
+    return (
+      <AccessDenied
+        message="A gestão de usuários da Hologram é restrita ao administrador do sistema."
+        backHref={homePathFor(currentUser)}
+        backLabel="Voltar para o início"
+      />
+    );
   }
 
   const total = data?.pagination.total ?? 0;
@@ -215,7 +222,9 @@ export default function UsersPage() {
                               disabled={activateMutation.isPending}
                               aria-label={`Reativar ${u.name}`}
                             >
-                              <Power className="h-4 w-4 text-emerald-600" aria-hidden="true" />
+                              {/* Token semântico, não `emerald-600` da paleta crua: cor de marca
+                                muda e o hardcoded não acompanha (regra do design-system). */}
+                            <Power className="text-success h-4 w-4" aria-hidden="true" />
                             </Button>
                           ))}
                       </div>

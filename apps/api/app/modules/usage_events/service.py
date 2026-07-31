@@ -19,9 +19,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from app.core.dependencies import CurrentUser, require_client_access
+from app.core.authz import CurrentUser
+from app.core.dependencies import require_client_access
 from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
+from app.modules.reconciliations.tenant_scope import audit_session_tenant_miss
 from app.modules.usage_events.repository import UsageEventRepository
 from app.modules.usage_events.schemas import UsageEventName
 
@@ -145,8 +147,12 @@ class UsageEventService:
         cliente — o vetor de enumeração que motiva a conversão nos GETs não se
         aplica (o atacante precisaria já conhecer o UUID da sessão).
         """
-        client_id = await self._repo.get_session_client_id(payload.session_id)
+        client_id = await self._repo.get_session_client_id(payload.session_id, user=user)
         if client_id is None:
+            # O SELECT já vem filtrado por tenant (S5/R3): sessão de outro
+            # tenant é indistinguível de inexistente para o cliente. A trilha,
+            # porém, precisa registrar a tentativa cross-tenant (R6).
+            await audit_session_tenant_miss(db, user, payload.session_id)
             raise NotFoundError(_SESSION_NOT_FOUND_MSG)
 
         await require_client_access(client_id, user, db)
