@@ -18,12 +18,14 @@ Guardrails:
     - **Sem FK** (mesma decisão de `access_audit`): log append-only e durável,
       independente do ciclo de vida da sessão que referencia. `session_id` é FK
       *lógica* para `reconciliation_sessions`.
-    - **Idempotência no banco:** UNIQUE parcial `(event, session_id)` onde
-      `session_id IS NOT NULL` + `ON CONFLICT DO NOTHING` no INSERT. Um evento
-      por sessão é exatamente o grão da métrica (o denominador é "conciliações",
-      não "emissões"), e torna o emissor seguro contra retry/duplo-clique/
-      reprocessamento. Trade-off consciente: um `/reprocess` não gera um 2º
-      `conciliacao_concluida` — a leitura D+30 conta sessões, não execuções.
+    - **Idempotência no banco:** UNIQUE parcial `(event, session_id)` +
+      `ON CONFLICT DO NOTHING` no INSERT — mas só para os eventos cujo grão É
+      "no máximo 1 por sessão". Ver `DEDUPED_EVENT_NAMES` abaixo e a ADR-010.
+
+Eventos da Sprint 6 (BACK 06.1), todos de backend:
+    - `qualificacao_emitida`   {session_id, veredito, com_glossario}
+    - `flag_revisado`          {session_id, procedente}
+    - `glossario_editado`      {client_id, n_categorias}  (sem session_id)
 """
 
 from __future__ import annotations
@@ -39,6 +41,38 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 from app.db.models._mixins import UUIDPrimaryKeyMixin
+
+#: Eventos cujo grão é **no máximo 1 por sessão** — só ELES entram na dedup do
+#: índice parcial. É uma **allow-list**, não uma deny-list, de propósito: evento
+#: novo nasce SEM dedup, e o pior caso vira "linha a mais" (visível, corrigível
+#: na leitura) em vez de "linha que sumiu em silêncio" (invisível, e a razão do
+#: outcome sai errada). ADR-010.
+#:
+#: ⚠️ Strings literais, não `UsageEventName.X.value`: `app.modules.usage_events`
+#: importa `app.db.models` no `__init__`, então importar o enum aqui fecharia um
+#: ciclo. O teste `test_deduped_event_names_existem_no_enum` trava o drift.
+#:
+#: Ordem alfabética FIXA: o predicado do índice tem de bater byte-a-byte com o
+#: `index_where` do `ON CONFLICT` (ver `UsageEventRepository`).
+DEDUPED_EVENT_NAMES: tuple[str, ...] = (
+    "autor_navegou_fora",
+    "conciliacao_concluida",
+    "conciliacao_criada",
+    "notificacao_entregue",
+)
+
+
+def deduped_session_index_predicate() -> str:
+    """Predicado do índice parcial `uq_usage_events_event_session`.
+
+    Fonte ÚNICA da expressão: o modelo (aqui), o `ON CONFLICT` do repository e
+    a migration `a1d7f36c9b52` precisam da MESMA string. Se divergirem, o
+    Postgres não infere o índice como árbitro e o INSERT morre com `42P10` —
+    que o fail-soft do service engoliria, gravando NADA (foi exatamente a
+    reprovação de QA da Sprint 4).
+    """
+    joined = ", ".join(f"'{name}'" for name in DEDUPED_EVENT_NAMES)
+    return f"session_id IS NOT NULL AND event IN ({joined})"
 
 
 class UsageEvent(UUIDPrimaryKeyMixin, Base):
@@ -68,14 +102,18 @@ class UsageEvent(UUIDPrimaryKeyMixin, Base):
         # Leitura do D+30: "quantos X no período" — (event, created_at) resolve
         # pelo índice sem varrer a tabela.
         Index("ix_usage_events_event_created", "event", "created_at"),
-        # Idempotência do emissor (ver docstring do módulo). Parcial porque
-        # eventos sem sessão (nenhum hoje) não têm chave natural de dedup.
+        # Idempotência do emissor (ver docstring do módulo). Parcial em DOIS
+        # eixos: `session_id IS NOT NULL` (evento sem sessão não tem chave
+        # natural de dedup) e `event IN (allow-list)` — eventos multi-ocorrência
+        # por sessão (`qualificacao_emitida`, `flag_revisado`) NÃO podem
+        # colapsar, senão N-1 emissões sumiriam e a razão do outcome sairia
+        # errada. ADR-010.
         Index(
             "uq_usage_events_event_session",
             "event",
             "session_id",
             unique=True,
-            postgresql_where=text("session_id IS NOT NULL"),
+            postgresql_where=text(deduped_session_index_predicate()),
         ),
     )
 

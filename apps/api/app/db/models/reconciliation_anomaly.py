@@ -38,6 +38,20 @@ class AnomalyDetectedBy(StrEnum):
     AI = "ai"
 
 
+class AnomalyReviewVerdict(StrEnum):
+    """Julgamento do REVISOR sobre um flag da qualificação (Sprint 6, BACK 06.5).
+
+    **Eixo diferente de `resolved`.** "Resolvida" quer dizer que alguém agiu
+    sobre a anomalia; "procedente/improcedente" quer dizer se ela *devia ter
+    sido levantada*. Um flag improcedente costuma ser fechado sem nenhuma ação
+    no Omie — e é justamente ele o falso positivo que a Sprint 6 quer derrubar.
+    Misturar os dois eixos apagaria a métrica de outcome.
+    """
+
+    PROCEDENTE = "procedente"
+    IMPROCEDENTE = "improcedente"
+
+
 class ReconciliationAnomaly(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "reconciliation_anomalies"
 
@@ -81,6 +95,9 @@ class ReconciliationAnomaly(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("reconciliation_omie_entries.id", ondelete="SET NULL"),
         nullable=True,
     )
+    #: Julgamento do revisor (Sprint 6). NULL = ainda não julgado. Só vale para
+    #: os flags da Camada 1 da qualificação — o servidor recusa os demais tipos.
+    review_verdict: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
     detected_by: Mapped[str] = mapped_column(
         String(20), nullable=False, default=AnomalyDetectedBy.MANUAL.value
     )

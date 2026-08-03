@@ -71,6 +71,10 @@ _EXPECTED_PROP_KEYS: dict[str, set[str]] = {
     UsageEventName.CONCILIACAO_CONCLUIDA.value: {"duracao_s", "status"},
     UsageEventName.AUTOR_NAVEGOU_FORA.value: {"segundos_apos_criar"},
     UsageEventName.NOTIFICACAO_ENTREGUE.value: {"via", "latencia_s"},
+    # Sprint 6 (BACK 06.1) — exercitados em `test_usage_events_sprint6.py`.
+    UsageEventName.QUALIFICACAO_EMITIDA.value: {"veredito", "com_glossario"},
+    UsageEventName.FLAG_REVISADO.value: {"procedente"},
+    UsageEventName.GLOSSARIO_EDITADO.value: {"client_id", "n_categorias"},
 }
 
 

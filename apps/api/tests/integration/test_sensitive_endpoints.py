@@ -128,6 +128,16 @@ _BODIES: dict[str, dict[str, Any]] = {
         "balanceStart": "0.00",
         "files": [],
     },
+    # Sprint 6 — glossário. Body VÁLIDO de propósito: um 400 de validação
+    # passaria no teste sem nunca tocar a autorização (ADR-012).
+    "POST /api/v1/clients/{client_id}/glossary": {
+        "kind": "regra",
+        "name": "IOF nunca e juros",
+    },
+    "PATCH /api/v1/clients/{client_id}/glossary/{entry_id}": {
+        "kind": "regra",
+        "name": "IOF nunca e juros",
+    },
     "POST /api/v1/reconciliations/parse": {
         "clientId": "{client_b}",
         "fileName": "extrato.pdf",

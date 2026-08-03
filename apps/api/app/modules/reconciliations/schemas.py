@@ -403,6 +403,12 @@ class SessionDetailPayload(BaseModel):
     # Default 0 (e não REQUIRED) por higiene Pydantic v2, mas o service sempre
     # popula: sessões migradas têm 1 parte, criadas na Sprint 4 têm N.
     total_files: int = 0
+    # BACK 06.4/06.5 — a qualificação desta sessão considerou o GLOSSÁRIO do
+    # cliente? Vem da coluna escrita por `qualify_session` a partir do bloco
+    # realmente injetado no prompt (não é hard-coded, nem recalculado aqui).
+    # `false` em sessão antiga e em cliente sem glossário — a tela de revisão
+    # simplesmente não mostra o selo, sem regressão.
+    qualification_used_glossary: bool = False
 
 
 class SessionDetailResponse(BaseModel):
