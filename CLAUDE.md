@@ -2,9 +2,21 @@
 
 > **Para futuras conversas com Claude:** este arquivo é o _primer_ obrigatório. Leia-o antes de qualquer ação. Ele é atualizado continuamente conforme decisões são tomadas.
 >
-> **Status do projeto:** 🚀 Sessões **S0–S19 implementadas e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain configurado (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). A conciliação file-driven funciona ponta a ponta (upload → IA → matching → revisão → Excel). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
+> **Status do projeto:** 🚀 **S0–S19 + Sprints 0–5 do agents-hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> **Roadmap atual (PRD 15/06/2026 → FASE 0–5):** o roadmap foi reordenado pelo PRD em [Docs/NextSteps/](Docs/NextSteps/). O plano de execução é [Docs/PLANO_PROXIMOS_PASSOS.md](Docs/PLANO_PROXIMOS_PASSOS.md) (sessões **S20+**): **FASE 0 ✅ CONCLUÍDA (S20)** — Redis/ARQ removido, processamento via `BackgroundTasks` ([BACK 0.1]); os 2 bugs já estavam corrigidos (auth #19, timeout #16). **FASE 1–2** conciliação e lançamento de **fatura de cartão**. **FASE 3** glossário por cliente. **FASE 4** Open Finance (Pluggy). **FASE 5** rotinas automáticas de auditoria (absorve o antigo S20–S27). ✅ **A tolerância de data fixa já está no código** (FASE 1 / BACK 1.6, na branch de integração `feat/fase1-cartao` — ainda não na `main`): o matching usa `DATE_DIVERGENCE_RANGE = 3` fixo — data exata → `conciliado`; 1–3 dias → `conciliado_data_divergente` (+ anomalia `wrong_date`); > 3 → `sem_omie`. Vale **também para conta corrente** → muda comportamento em prod quando a FASE 1 for mergeada na main. Ver §5.2.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro de tenant é vazamento entre clientes — a Sprint 5 fechou 34/34 endpoints sensíveis e essa cobertura não pode regredir.
+>
+> **O que cada sprint do agents-hub entregou** (todas na `main`):
+>
+> | Sprint | Entrega                                                                                                      |
+> | ------ | ------------------------------------------------------------------------------------------------------------ |
+> | **1**  | Conciliação de **fatura de cartão** + conta aplicação/CDB (`account_type`)                                   |
+> | **2**  | Fim da perda silenciosa de dado no parsing (CSV grande, XLSX truncado)                                       |
+> | **3**  | **Cripto por cliente** (DEK+KEK), `access_audit`, alerting fail-closed                                       |
+> | **4**  | Lista de conciliações, **gaveta** de criação, **multi-arquivo**, notificações in-app, `usage_events`         |
+> | **5**  | **Multi-tenancy**: `users.scope`/`client_id`, papéis de cliente, matriz de permissões, isolamento por tenant |
+>
+> **Roadmap (PRD 15/06/2026 → FASE 0–5):** plano em [Docs/PLANO_PROXIMOS_PASSOS.md](Docs/PLANO_PROXIMOS_PASSOS.md). **FASE 0 ✅** (Redis/ARQ removido, `BackgroundTasks`). **FASE 1 ✅ na `main`** — tolerância de data fixa (`DATE_DIVERGENCE_RANGE = 3` em `processing/matcher.py`) e cartão. **FASE 2** lançamento de fatura no Omie (Sprint 7). **FASE 3** glossário por cliente (**Sprint 6 — a próxima**). **FASE 4** Open Finance (Pluggy). **FASE 5** rotinas automáticas de auditoria.
 
 ---
 
@@ -117,6 +129,29 @@
     - **Alerting é fail-closed em staging/prod:** sem canal entregável
       (`ALERT_WEBHOOK_URL`/`ALERT_EMAIL_TO`) o serviço **não sobe**
       (`verify_alert_config` no lifespan). Em dev degrada com warning.
+15. **Autorização por tenant (Sprint 5) — a regra mais fácil de furar sem perceber:**
+    - **O tenant vem SEMPRE da LINHA do usuário**, nunca de `client_id` recebido
+      em URL, query ou body. O JWT carrega `scope`/`client_id`, mas a autoridade
+      é a linha já lida por `get_current_user` (a mesma leitura que checa
+      `active`) — assim revogação vale no request seguinte, sem esperar o token
+      expirar, e sem query nova.
+    - **Existe UMA decisão de acesso: `resolve_client_access`** em
+      [apps/api/app/core/authz.py](apps/api/app/core/authz.py). Rota e camada de
+      dados consultam **ela**. **Proibido** escrever uma segunda implementação da
+      regra — se você está prestes a comparar `role`/`client_id` na mão, pare e
+      use a função.
+    - **Defense-in-depth na camada de dados:** negar na rota é necessário e
+      **não** suficiente. Toda query de coleção passa por `scoped_by_tenant(...)`
+      e todo detalhe por PK carrega `AND client_id = <tenant do usuário>` no
+      próprio `SELECT` — recurso de outro tenant vira **404**, nunca o dado.
+      `tenant_filter_client_id(user)` devolve o tenant a forçar no `WHERE`.
+    - **Negação não vaza o alvo:** 403 (ou 404 onde a conversão anti-enumeração
+      já existe) com corpo **sem nome, razão social ou CNPJ** do tenant alvo, e
+      **1** linha em `access_audit`.
+    - **Endpoint novo que lê dado escopável entra na lista canônica**
+      [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
+      (34 hoje) **com teste negativo cross-tenant**. Essa lista é o denominador
+      da métrica de isolamento — endpoint fora dela é buraco que ninguém mede.
 
 ---
 
@@ -143,10 +178,50 @@
 4. **Datas em claro** (`transaction_date`, `reference_month`) — necessárias para SQL ordering/filtering.
 5. **Nenhum dado identificável do cliente final persiste em claro** — CNPJ, razão social, fornecedores, categorias, nomes de contas são **sempre buscados do Omie em tempo real** e mantidos apenas em cache com TTL.
 6. **Arquivo original nunca persiste** — processado em memória e descartado.
-7. **Trilha de acesso (`access_audit`, LGPD — Sprint 3):** toda visualização,
+7. **Trilha de acesso (`access_audit`, LGPD — Sprint 3 + 5):** toda visualização,
    exportação ou negação de acesso a relatório grava 1 linha com **só IDs**
    (`user_id`, `client_id`, `session_id`, `action ∈ {denied, view, export}`,
-   `rota`, `timestamp`) — **nunca PII** (CNPJ, razão social, nomes).
+   `rota`, `timestamp`) — **nunca PII** (CNPJ, razão social, nomes). A Sprint 5
+   acrescentou **`user_scope`** e **`actor_client_id`**: numa negação
+   cross-tenant dá para saber o escopo e o tenant **do ator**, além do alvo.
+   Navegação dentro do próprio tenant **não** gera linha — a trilha não infla
+   com uso normal.
+8. **Modelo de tenancy (Sprint 5 — `users`):** uma tabela só, sem segundo
+   mecanismo de sessão.
+   - `scope = 'system'` → equipe Hologram; `client_id` **NULL**; escopo é a
+     carteira (`client_assignments`).
+   - `scope = 'client'` → usuário DO cliente; `client_id` **obrigatório** e é o
+     tenant dele.
+   - A integridade é **do banco**, não só da aplicação:
+     `ck_users_scope_client_id`. Fonte única do enum e do CHECK:
+     [apps/api/app/db/models/user.py](apps/api/app/db/models/user.py).
+   - Papéis: `admin` e `manager` (sistema); `client_manager` e `client_operator`
+     (cliente). O papel do payload de criação é **whitelist** — `admin`/`manager`
+     forjados são rejeitados.
+9. **Matriz de permissões (Sprint 5):** declarativa e ÚNICA em
+   `PERMISSION_MATRIX` ([apps/api/app/core/authz.py](apps/api/app/core/authz.py)),
+   consultada por `has_permission`. No front, o espelho é
+   `apps/web/src/lib/authz.ts` — **um** helper, nunca `if (role === ...)` espalhado
+   por componente.
+
+   | Ação                         | client_manager | client_operator | admin | manager       |
+   | ---------------------------- | -------------- | --------------- | ----- | ------------- |
+   | Criar/rodar conciliação      | ✅             | ✅              | ✅    | ✅            |
+   | Revisar / exportar           | ✅             | ✅              | ✅    | ✅            |
+   | Sincronizar contas do Omie   | ✅             | ✅              | ✅    | ✅            |
+   | Gerir usuários do cliente    | ✅             | ❌              | ✅    | ❌            |
+   | Editar dados do cliente (§9) | ❌             | ❌              | ✅    | ❌            |
+   | Ver outro tenant             | ❌             | ❌              | ✅    | ✅ (carteira) |
+
+   **A UI não é barreira de segurança** — o backend é. Mas **mostrar ação que o
+   servidor nega é defeito**: cada ❌ precisa de bloqueio no backend **e** de
+   ação oculta na tela.
+
+10. **Uma conciliação = conta + mês (Sprint 4):** unicidade
+    `UNIQUE(client_id, omie_conta_id, reference_month)` (parcial, ativas —
+    `uq_recon_sessions_account_month`). O hash desceu de nível: cada parte é uma
+    linha em `reconciliation_files` com `UNIQUE(session_id, file_hash)`.
+    Recriar a mesma conta+mês → **409** pedindo para anexar à existente.
 
 ---
 
@@ -299,6 +374,22 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
 
 > **S20+ (pivot — auditoria contínua sobre o Omie):** eixo S20–S27, em planejamento. Não está na tabela acima; ver [Docs/PLANO_S20_AUDITORIA_CONTINUA.md](Docs/PLANO_S20_AUDITORIA_CONTINUA.md).
 
+### Sprints do agents-hub (numeração própria, todas na `main`)
+
+Rodadas pelo orquestrador multi-agente; o escopo de cada uma vive no **Doc do
+ClickUp**, não no repo. `make sprints` lista o estado.
+
+| Sprint | Foco                                       | Deixou no código                                                          |
+| ------ | ------------------------------------------ | ------------------------------------------------------------------------- |
+| **0**  | Estabilização                              | —                                                                         |
+| **1**  | Fatura de cartão + conta aplicação         | `account_type`, `DATE_DIVERGENCE_RANGE`                                   |
+| **2**  | Parsing sem perda silenciosa               | CSV grande, XLSX completo                                                 |
+| **3**  | Cripto por cliente, auditoria, alerta      | `clients.dek_wrapped`, `access_audit`, `core/kms.py`                      |
+| **4**  | Lista, gaveta, multi-arquivo, notificações | `reconciliation_files`, `usage_events`, `notifications`                   |
+| **5**  | Multi-tenancy e papéis de cliente          | `users.scope`/`client_id`, `core/authz.py`, `core/sensitive_endpoints.py` |
+| **6**  | Glossário e classificação por cliente      | **próxima**                                                               |
+| **7**  | Lançamento de faturas no Omie              | pendente                                                                  |
+
 ---
 
 ## 9. Comandos Frequentes
@@ -414,6 +505,8 @@ lembrar dos comandos.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.7 — 03/08/2026. **Sprints 4 e 5 aterrissaram na `main`; o primer estava duas sprints atrasado.** Antes desta revisão o arquivo não continha uma única menção a `tenancy`, `scope`, `client_manager` ou `PERMISSION_MATRIX` — um agent lendo o primer partiria da premissa de que só existem os papéis `admin`/`manager` e escreveria query sem filtro de tenant, reabrindo a classe de vazamento que a Sprint 5 fechou em 34/34 endpoints. **Nova regra §3.15** (autorização por tenant: decisão vem da LINHA, `resolve_client_access` é a função ÚNICA, `scoped_by_tenant` na camada de dados, endpoint novo entra em `sensitive_endpoints.py` com teste negativo). **Novas regras §4.8–§4.10**: modelo de tenancy em `users` com o CHECK `ck_users_scope_client_id`; matriz de permissões declarativa (`core/authz.py` no back, `lib/authz.ts` no front); uma conciliação = conta + mês, com o hash em `reconciliation_files`. **§4.7** ganhou `user_scope`/`actor_client_id` na `access_audit`. Nota de status reescrita com o que cada sprint entregou, **§8** ganhou o mapa das sprints do agents-hub. Corrigidas duas afirmações falsas: a Sprint 3 **está** na `main` (não "aguardando review") e a FASE 1 **está** na `main` (`processing/matcher.py`), não numa branch de integração._
 
 _Versão 1.6 — 22/07/2026. **Sprint 3 (Cripto por cliente, auditoria de acesso e alerta) — na `develop`, PR #38 aguardando review p/ `main`:** §3 e §4 atualizados como lei atual. Cripto migrou para **envelope com DEK por cliente**: cada cliente tem uma DEK própria embrulhada em `clients.dek_wrapped`; a KEK faz wrap/unwrap (**Cloud KMS** em staging/prod via `KEK_KMS_KEY_NAME`, **wrapper local** derivado de `OMIE_ENCRYPTION_KEY`/HKDF em dev/test); AAD liga o ciphertext ao cliente. Nova regra §3.14 com os **landmines** (nunca trocar `KEK_KEY_ID`=`k1`, manter `OMIE_ENCRYPTION_KEY`, não alternar KMS⇄local sobre DB com DEKs, alerting fail-closed em prod/staging). Nova regra §4.7: trilha `access_audit` (LGPD — {denied,view,export}, só IDs). Migrations aditivas (`dek_wrapped`, `access_audit`) reversíveis; endpoint `POST /system/alert-test` admin-only. ⚠️ Deploy exige provisionamento GCP prévio (`scripts/setup-gcp.sh <env>`: KEK no KMS + secrets de alerta + IAM) e backfill das DEKs pós-deploy — ver `scripts/environments-runbook.md`._
 
