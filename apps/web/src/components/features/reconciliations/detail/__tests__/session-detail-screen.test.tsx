@@ -89,6 +89,9 @@ function detail(over: Record<string, unknown> = {}) {
     balance_end_omie: '1500.00',
     balance_difference: '0.00',
     total_files: 3,
+    // Sprint 6 / R4: default do contrato. Sessão antiga e cliente sem
+    // glossário chegam assim — a tela não pode mudar por causa disso.
+    qualification_used_glossary: false,
     ...over,
   };
 }
@@ -167,14 +170,49 @@ describe('Detalhe — totalizadores e resumo', () => {
   });
 });
 
+/**
+ * Sprint 6 / R4 (FRONT 06.7) — selo "considerou o glossário".
+ *
+ * O campo vem do contrato (`qualification_used_glossary`), escrito pelo backend
+ * a partir do bloco REALMENTE injetado no prompt. Os dois casos são testados:
+ * com glossário o selo aparece; sem glossário a tela fica **idêntica** ao
+ * comportamento anterior — que é o critério de "sem regressão".
+ */
+describe('Detalhe — selo do glossário', () => {
+  it('mostra o selo quando o backend informa que a análise considerou o glossário', () => {
+    detailState.data = detail({ qualification_used_glossary: true });
+    renderScreen();
+    expect(screen.getByText('Considerou o glossário do cliente')).toBeVisible();
+  });
+
+  it('NÃO mostra nada quando o cliente não tem glossário (sem espaço morto)', () => {
+    detailState.data = detail({ qualification_used_glossary: false });
+    renderScreen();
+    expect(screen.queryByText(/glossário/i)).toBeNull();
+  });
+
+  it('sessão antiga (campo ausente) também não mostra o selo', () => {
+    const legacy = detail();
+    delete (legacy as Record<string, unknown>).qualification_used_glossary;
+    detailState.data = legacy;
+    renderScreen();
+    expect(screen.queryByText(/glossário/i)).toBeNull();
+    // E o resto da tela continua de pé — nada de crash por campo ausente.
+    expect(screen.getByRole('region', { name: 'Totalizadores da conciliação' })).toBeVisible();
+  });
+
+  it('o selo não tem violações critical/serious do axe-core', async () => {
+    detailState.data = detail({ qualification_used_glossary: true });
+    const { container } = renderScreen();
+    await assertNoA11yViolations(container);
+  });
+});
+
 describe('Detalhe — aba na URL', () => {
   it('lê a aba ativa da querystring', () => {
     currentSearch = 'tab=anomalias';
     renderScreen();
-    expect(screen.getByRole('tab', { name: /Anomalias/ })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
+    expect(screen.getByRole('tab', { name: /Anomalias/ })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('trocar de aba escreve na URL', async () => {

@@ -25,6 +25,12 @@
        sentidos e 5.9:1 sobre `bg-destructive/10` (badge "Erro"). */
     --destructive: 0 73.7% 41.8%;
     --destructive-foreground: 0 0% 98%;
+    /* Variante de FUNDO do destrutivo, simétrica a `success/warning/info`.
+       Existe porque o toast de ERRO flutua sobre a página: `bg-destructive/10`
+       é TRANSLÚCIDO e compõe com o que estiver embaixo (card, tabela, badge) —
+       o mesmo mecanismo que derrubou 3 elementos na ADR-007-FE. Um token opaco
+       tem contraste previsível em qualquer lugar da tela. */
+    --destructive-muted: 0 85.7% 97.3%;
     /* Tokens semânticos de feedback — nunca hardcodar cor em componente.
        `info` é AZUL: âmbar (warning) não pode ser fundo de card/banner
        informativo (design-system). `success` é verde (toast de sucesso).
@@ -73,6 +79,7 @@
        destrutivo passa a ser quase-preto sobre o vermelho. */
     --destructive: 0 80% 60%;
     --destructive-foreground: 0 0% 9%;
+    --destructive-muted: 0 62.8% 10%;
     --success: 142.1 70.6% 45.3%;
     --success-foreground: 144.9 80.4% 10%;
     --success-muted: 144.3 61.2% 12%;

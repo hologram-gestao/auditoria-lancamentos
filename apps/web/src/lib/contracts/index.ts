@@ -126,6 +126,61 @@ export type UnreadCountPayload = Schemas['UnreadCountPayload'];
 export type MarkReadPayload = Schemas['MarkReadPayload'];
 
 // ---------------------------------------------------------------------------
+// Anomalias da revisão (BACK 9.7–9.9 · veredito do revisor na BACK 06.5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Item da lista de anomalias. Redeclarado à mão até a Sprint 6 — o campo
+ * `review_verdict` (BACK 06.5) foi o gatilho para trazer o shape para o
+ * contrato: acrescentá-lo à interface manual repetiria o erro que o CLAUDE.md
+ * proíbe (shape "esperançoso" espelhando endpoint).
+ */
+export type AnomalyItem = Schemas['AnomalyItem'];
+export type AnomalyTypeRef = Schemas['AnomalyTypeRef'];
+export type AnomalyRelatedFileEntry = Schemas['AnomalyRelatedFileEntry'];
+export type AnomalyRelatedOmieEntry = Schemas['AnomalyRelatedOmieEntry'];
+export type AnomalyListResponse = Schemas['AnomalyListResponse'];
+/**
+ * Body do PATCH da anomalia — DOIS eixos independentes e ambos opcionais
+ * (`resolved` = alguém agiu; `review_verdict` = o flag devia ter sido
+ * levantado). Corpo vazio é 422: o servidor exige ao menos um.
+ */
+export type ResolveAnomalyRequest = Schemas['ResolveAnomalyRequest'];
+/** `procedente` | `improcedente` — o julgamento que alimenta a métrica (R4). */
+export type AnomalyReviewVerdict = NonNullable<
+  NonNullable<Schemas['AnomalyItem']['review_verdict']>
+>;
+
+// ---------------------------------------------------------------------------
+// Glossário do tenant (Sprint 6 / R1 · R2 — BACK 06.2 · 06.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Uma entrada do glossário já DECIFRADA, como a API devolve.
+ *
+ * `decryptFailed` chega em **camelCase** (o backend declara o alias no
+ * `Field(..., alias="decryptFailed")`) — o resto do payload é snake_case. Ler o
+ * campo do contrato em vez de redigitá-lo é o que impede o erro clássico de
+ * chutar `decrypt_failed` e receber `undefined` (falsy) em toda linha, o que
+ * esconderia justamente a entrada indecifrável.
+ */
+export type GlossaryEntry = Schemas['GlossaryEntryResponse'];
+/** `categoria` | `fornecedor` | `regra` — enum FECHADO (não é "lenient out"). */
+export type GlossaryEntryKind = Schemas['GlossaryEntryKind'];
+/** `{ data: { entries, version }, pagination }` — duas chaves, sem auto-unwrap. */
+export type GlossaryListResponse = Schemas['GlossaryListResponse'];
+export type GlossaryListPayload = Schemas['GlossaryListPayload'];
+export type CreateGlossaryEntryRequest = Schemas['CreateGlossaryEntryRequest'];
+export type UpdateGlossaryEntryRequest = Schemas['UpdateGlossaryEntryRequest'];
+/** Corpo do DELETE: `{ id, deleted, version }` — a versão NOVA do glossário. */
+export type GlossaryDeletedPayload = Schemas['GlossaryDeletedPayload'];
+
+/** Query params reais de `GET /clients/{client_id}/glossary` (`page`/`pageSize`). */
+export type ListGlossaryQuery = NonNullable<
+  paths['/api/v1/clients/{client_id}/glossary']['get']['parameters']['query']
+>;
+
+// ---------------------------------------------------------------------------
 // Instrumentação de outcome (BACK 04.1)
 // ---------------------------------------------------------------------------
 

@@ -21,6 +21,11 @@
  *     `lib/format.ts`).
  */
 import type {
+  AnomalyItem,
+  AnomalyRelatedFileEntry,
+  AnomalyRelatedOmieEntry,
+  AnomalyReviewVerdict,
+  AnomalyTypeRef,
   AttachFilesPayload,
   ChecksumResult as ChecksumContract,
   CreateReconciliationPayload as CreateReconciliationContract,
@@ -28,6 +33,7 @@ import type {
   ExtractedStatement,
   PaginationMeta,
   ReconciliationFileInput,
+  ResolveAnomalyRequest,
   SessionDetailPayload,
   SessionFileItem,
   SessionFilesPayload,
@@ -504,42 +510,28 @@ export async function patchOmieEntry(
 
 // ---- 9.7 / 9.8 / 9.9 — Anomalies ----
 
+/**
+ * Unions LOCAIS de severidade/origem: existem para `switch`/mapeamento de
+ * rótulo, com fallback. O contrato declara os dois como `string` ("lenient
+ * out"), de propósito — um valor novo no backend não pode derrubar a lista.
+ */
 export type AnomalySeverity = 'critical' | 'moderate' | 'info';
 export type AnomalyDetectedBy = 'ai' | 'manual';
 
-export interface AnomalyTypeRef {
-  id: string;
-  code: string;
-  name: string;
-  /** Lenient: `critical` / `moderate` / `info`. */
-  severity: string;
-}
-
-export interface AnomalyRelatedFileEntry {
-  id: string;
-  transaction_date: string;
-  description: string;
-  amount: string;
-}
-
-export interface AnomalyRelatedOmieEntry {
-  id: string;
-  transaction_date: string;
-  omie_lancamento_id: number;
-}
-
-export interface AnomalyItem {
-  id: string;
-  anomaly_type: AnomalyTypeRef;
-  /** Lenient: `ai` ou `manual`. */
-  detected_by: string;
-  resolved: boolean;
-  context: string | null;
-  resolution_note: string | null;
-  created_at: string;
-  related_file_entry: AnomalyRelatedFileEntry | null;
-  related_omie_entry: AnomalyRelatedOmieEntry | null;
-}
+/**
+ * Shapes vindos do **contrato gerado** (Sprint 6). Até a BACK 06.5 eram
+ * `interface`s redigitadas aqui; o campo novo `review_verdict` foi o gatilho
+ * para corrigir a origem em vez de acrescentar mais um campo à cópia — é
+ * exatamente o "shape esperançoso espelhando endpoint" que o CLAUDE.md proíbe.
+ * Os nomes exportados não mudaram, então nenhum consumidor precisou mexer.
+ */
+export type {
+  AnomalyItem,
+  AnomalyRelatedFileEntry,
+  AnomalyRelatedOmieEntry,
+  AnomalyReviewVerdict,
+  AnomalyTypeRef,
+};
 
 export interface ListAnomaliesParams {
   sessionId: string;
@@ -580,11 +572,17 @@ export async function createAnomaly(
   return apiPost<AnomalyItem>(`/api/v1/reconciliations/${sessionId}/anomalies`, payload);
 }
 
-export interface PatchAnomalyPayload {
-  resolved: boolean;
-  /** Obrigatório com ≥ 10 chars quando `resolved=true`. */
-  resolution_note?: string;
-}
+/**
+ * Body do PATCH da anomalia — do CONTRATO (BACK 06.5).
+ *
+ * `resolved` deixou de ser obrigatório: os dois eixos são independentes e
+ * opcionais, e **omitir um campo significa "não mexa nele"**. Marcar um flag
+ * como improcedente sem resolvê-lo é o caminho comum da Sprint 6; resolver sem
+ * julgar continua valendo. Corpo vazio é 422 — o servidor exige ao menos um.
+ * Enquanto isto era uma `interface` local com `resolved: boolean`, mandar só o
+ * veredito nem compilava.
+ */
+export type PatchAnomalyPayload = ResolveAnomalyRequest;
 
 export async function patchAnomaly(
   sessionId: string,

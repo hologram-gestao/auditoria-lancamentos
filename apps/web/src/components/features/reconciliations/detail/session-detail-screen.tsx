@@ -47,6 +47,7 @@ import type { SessionDetail } from '@/lib/api/reconciliations';
 import { formatReferenceMonth } from '@/lib/format';
 
 import { AnomaliesTab } from '../review/anomalies-tab';
+import { GlossarySeal } from '../review/glossary-seal';
 import { MovementsTab } from '../review/movements-tab';
 import { OmieDivergencesTab } from '../review/omie-divergences-tab';
 import { SummaryTab } from '../review/summary-tab';
@@ -132,7 +133,15 @@ export function SessionDetailScreen({ clientId, sessionId }: SessionDetailScreen
           <h1 className="truncate text-xl font-semibold">
             {accountName} · {referenceLabel}
           </h1>
-          <ReconciliationStatusBadge status={detail.status} />
+          {/* `flex-wrap`: em 390px o selo do glossário não cabe ao lado do badge
+              de status — sem isto ele sairia da viewport (o mesmo defeito que o
+              "Sair" do header teve na S5, ADR-010-FE). */}
+          <div className="flex flex-wrap items-center gap-2">
+            <ReconciliationStatusBadge status={detail.status} />
+            {/* Sprint 6 / R4: só aparece quando a análise realmente usou o
+                glossário. Cliente sem glossário → tela idêntica à de antes. */}
+            <GlossarySeal used={detail.qualification_used_glossary} />
+          </div>
         </div>
         {!isProcessing && !isError && (
           <ExportReportButton sessionId={sessionId} referenceMonthLabel={referenceLabel} />

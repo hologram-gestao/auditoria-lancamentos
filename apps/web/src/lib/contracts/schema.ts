@@ -318,6 +318,42 @@ export interface paths {
         patch: operations["update_client_api_v1_clients__client_id__patch"];
         trace?: never;
     };
+    "/api/v1/clients/{client_id}/glossary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista o glossário do tenant (categorias, fornecedores típicos e regras de auditoria), paginado por `page`/`pageSize` (máx. 100). Visível a todo papel com acesso ao cliente — inclusive o operador, que o usa como referência na revisão. O envelope traz `version`, o mesmo contador que invalida o bloco de contexto da qualificação quando o glossário muda. Entrada cujo texto não decifra vem com `decryptFailed: true` e `[indecifrável]` no campo, nunca vazia. Glossário de outro tenant nunca aparece. */
+        get: operations["list_glossary_entries_api_v1_clients__client_id__glossary_get"];
+        put?: never;
+        /** Cria uma entrada no glossário do tenant. Requer a permissão `manage_glossary` (gerente do cliente ou equipe do sistema) — operador do cliente recebe 403. `kind` aceita apenas categoria/fornecedor/regra; `name` é obrigatório (máx. 120 caracteres), `code` (máx. 40) e `description` (máx. 500) são opcionais; campo desconhecido no corpo é recusado. Passar do limite de 200 entradas ativas devolve 400 GLOSSARY_LIMIT_EXCEEDED — o teto existe para o bloco de contexto da qualificação não crescer sem fim. Salvar incrementa a versão do glossário do cliente. */
+        post: operations["create_glossary_entry_api_v1_clients__client_id__glossary_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/glossary/{entry_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove uma entrada do glossário do tenant (remoção lógica: a linha permanece com `deleted_at` preenchido e some de toda listagem). Requer a permissão `manage_glossary`; operador do cliente recebe 403. Entrada de outro tenant devolve 404. A remoção também incrementa a versão do glossário — é ela que invalida o bloco de contexto da qualificação, e a resposta devolve a versão nova. */
+        delete: operations["delete_glossary_entry_api_v1_clients__client_id__glossary__entry_id__delete"];
+        options?: never;
+        head?: never;
+        /** Substitui os campos de uma entrada do glossário do tenant. Requer a permissão `manage_glossary`; operador do cliente recebe 403. O corpo traz o registro completo (não é patch parcial: o texto é cifrado, então alterar um campo isolado exigiria decifrar o resto). Entrada de outro tenant devolve 404. Salvar incrementa a versão do glossário. */
+        patch: operations["update_glossary_entry_api_v1_clients__client_id__glossary__entry_id__patch"];
+        trace?: never;
+    };
     "/api/v1/reconciliations/check-duplicate": {
         parameters: {
             query?: never;
@@ -614,7 +650,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Resolve / desfaz resolução de anomalia. `resolved=true` exige `resolution_note` com ≥ 10 caracteres (Doc §17.3). Recalcula `anomaly_count` na sessão. */
+        /** Atualiza uma anomalia da sessão em DOIS eixos independentes, ambos opcionais (envie ao menos um; omitir um campo significa não mexer nele). `resolved` marca/desfaz a resolução — `resolved=true` exige `resolution_note` com ≥ 10 caracteres (Doc §17.3) e recalcula o `anomaly_count` da sessão. `review_verdict` (`procedente`|`improcedente`) registra o julgamento do revisor sobre o flag e SÓ é aceito em suspeita/incoerência levantada pela análise de classificação — outros tipos de anomalia devolvem 400 VALIDATION_ERROR. Mudar o veredito emite o evento de outcome uma vez por mudança real; reenviar o mesmo valor não duplica. Anomalia de outra sessão ou de outro tenant devolve 404. */
         patch: operations["resolve_anomaly_api_v1_reconciliations__session_id__anomalies__anomaly_id__patch"];
         trace?: never;
     };
@@ -835,6 +871,8 @@ export interface components {
             detected_by: string;
             /** Resolved */
             resolved: boolean;
+            /** Review Verdict */
+            review_verdict?: ("procedente" | "improcedente") | null;
             /** Context */
             context: string | null;
             /** Resolution Note */
@@ -1448,6 +1486,19 @@ export interface components {
             role: components["schemas"]["ClientUserRole"];
         };
         /**
+         * CreateGlossaryEntryRequest
+         * @description Body de POST /api/v1/clients/{client_id}/glossary.
+         */
+        CreateGlossaryEntryRequest: {
+            kind: components["schemas"]["GlossaryEntryKind"];
+            /** Name */
+            name: string;
+            /** Code */
+            code?: string | null;
+            /** Description */
+            description?: string | null;
+        };
+        /**
          * CreateReconciliationPayload
          * @description Conteúdo do envelope da criação.
          */
@@ -1663,6 +1714,92 @@ export interface components {
         FileEntryListResponse: {
             /** Data */
             data: components["schemas"]["ListedFileEntry"][];
+            pagination: components["schemas"]["PaginationMeta"];
+        };
+        /**
+         * GlossaryDeletedPayload
+         * @description Conteúdo do envelope do DELETE: o que sobrou depois da remoção.
+         */
+        GlossaryDeletedPayload: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Deleted */
+            deleted: boolean;
+            /** Version */
+            version: number;
+        };
+        /**
+         * GlossaryDeletedResponse
+         * @description Body de DELETE /api/v1/clients/{client_id}/glossary/{entry_id}.
+         */
+        GlossaryDeletedResponse: {
+            data: components["schemas"]["GlossaryDeletedPayload"];
+        };
+        /**
+         * GlossaryEntryEnvelope
+         * @description Body de POST/PATCH — `{data: <entrada>}` (§7).
+         */
+        GlossaryEntryEnvelope: {
+            data: components["schemas"]["GlossaryEntryResponse"];
+        };
+        /**
+         * GlossaryEntryKind
+         * @description As três formas do glossário declaradas no PRD (R1).
+         *
+         *     Fonte ÚNICA do vocabulário: o schema de entrada (BACK 06.3) e o renderizador
+         *     do bloco de prompt (BACK 06.4) derivam deste enum, nunca redigitam a string.
+         * @enum {string}
+         */
+        GlossaryEntryKind: "categoria" | "fornecedor" | "regra";
+        /**
+         * GlossaryEntryResponse
+         * @description Uma entrada do glossário, já decifrada, como a API devolve.
+         *
+         *     `decryptFailed=true` significa que o texto não decifrou e o campo veio como
+         *     `[indecifrável]` — a tela mostra o estado em vez de uma célula vazia.
+         */
+        GlossaryEntryResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            kind: components["schemas"]["GlossaryEntryKind"];
+            /** Code */
+            code?: string | null;
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /**
+             * Decryptfailed
+             * @default false
+             */
+            decryptFailed: boolean;
+        };
+        /**
+         * GlossaryListPayload
+         * @description Conteúdo do envelope da listagem — inclui a VERSÃO do glossário.
+         *
+         *     A versão viaja na listagem de propósito: é o mesmo número que invalida o
+         *     bloco de prompt (BACK 06.4), então o front consegue mostrar/alinhar estado
+         *     sem inventar um segundo contador.
+         */
+        GlossaryListPayload: {
+            /** Entries */
+            entries: components["schemas"]["GlossaryEntryResponse"][];
+            /** Version */
+            version: number;
+        };
+        /**
+         * GlossaryListResponse
+         * @description Body de GET /api/v1/clients/{client_id}/glossary.
+         */
+        GlossaryListResponse: {
+            data: components["schemas"]["GlossaryListPayload"];
             pagination: components["schemas"]["PaginationMeta"];
         };
         /** HTTPValidationError */
@@ -2116,15 +2253,27 @@ export interface components {
          * ResolveAnomalyRequest
          * @description Body do PATCH /api/v1/reconciliations/{id}/anomalies/{anomaly_id}.
          *
-         *     Quando `resolved=true`, `resolution_note` precisa ter ≥ 10 chars
-         *     (Doc §17.3). Validação no schema (P2-002) — antes só rodava no service,
-         *     o que deixava o OpenAPI/clients gerados sem a regra.
+         *     **Dois eixos independentes**, e é por isso que a Sprint 6 ESTENDEU este
+         *     endpoint em vez de criar um paralelo (ADR-014):
+         *
+         *     - `resolved` — alguém agiu sobre a anomalia. Quando `true`,
+         *       `resolution_note` precisa ter ≥ 10 chars (Doc §17.3).
+         *     - `review_verdict` — o flag *devia* ter sido levantado? É o dado que
+         *       alimenta a métrica de outcome da Sprint 6, e só vale para flags da
+         *       Camada 1 da qualificação (o servidor recusa os demais tipos).
+         *
+         *     Os dois viraram OPCIONAIS: marcar um flag como improcedente sem resolvê-lo
+         *     é o caminho comum, e resolver sem julgar continua valendo. Omitir um campo
+         *     significa "não mexa nele" — o contrato antigo (`{resolved: bool}`) continua
+         *     válido. Corpo vazio é erro: PATCH que não muda nada é bug do cliente.
          */
         ResolveAnomalyRequest: {
             /** Resolved */
-            resolved: boolean;
+            resolved?: boolean | null;
             /** Resolution Note */
             resolution_note?: string | null;
+            /** Review Verdict */
+            review_verdict?: ("procedente" | "improcedente") | null;
         };
         /** ResolveAnomalyResponse */
         ResolveAnomalyResponse: {
@@ -2190,6 +2339,11 @@ export interface components {
              * @default 0
              */
             total_files: number;
+            /**
+             * Qualification Used Glossary
+             * @default false
+             */
+            qualification_used_glossary: boolean;
         };
         /**
          * SessionDetailResponse
@@ -2399,6 +2553,23 @@ export interface components {
         /** UpdateFileEntryResponse */
         UpdateFileEntryResponse: {
             data: components["schemas"]["ListedFileEntry"];
+        };
+        /**
+         * UpdateGlossaryEntryRequest
+         * @description Body de PATCH /api/v1/clients/{client_id}/glossary/{entry_id}.
+         *
+         *     Substituição COMPLETA dos campos textuais (não patch parcial): o texto é
+         *     cifrado, então "mudar só a descrição" exigiria decifrar o resto para
+         *     recompor — e a gaveta do front já envia o formulário inteiro.
+         */
+        UpdateGlossaryEntryRequest: {
+            kind: components["schemas"]["GlossaryEntryKind"];
+            /** Name */
+            name: string;
+            /** Code */
+            code?: string | null;
+            /** Description */
+            description?: string | null;
         };
         /** UpdateOmieEntryRequest */
         UpdateOmieEntryRequest: {
@@ -3300,6 +3471,151 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClientResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_glossary_entries_api_v1_clients__client_id__glossary_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                pageSize?: number;
+            };
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlossaryListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_glossary_entry_api_v1_clients__client_id__glossary_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateGlossaryEntryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlossaryEntryEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_glossary_entry_api_v1_clients__client_id__glossary__entry_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entry_id: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlossaryDeletedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_glossary_entry_api_v1_clients__client_id__glossary__entry_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entry_id: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateGlossaryEntryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlossaryEntryEnvelope"];
                 };
             };
             /** @description Validation Error */
