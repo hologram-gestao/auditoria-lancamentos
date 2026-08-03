@@ -28,6 +28,14 @@ export type Permission =
   | 'review_export'
   | 'sync_omie_accounts'
   | 'manage_client_users'
+  /**
+   * Sprint 6 (BACK 06.3): manter o GLOSSÁRIO do tenant. Só a ESCRITA pede
+   * permissão — a leitura é de todo papel com acesso ao cliente, porque o
+   * operador usa o glossário como referência na revisão. Não existe permissão
+   * de "ler glossário": inventá-la aqui criaria uma regra que o backend não
+   * tem, e a tela negaria o que o servidor libera.
+   */
+  | 'manage_glossary'
   | 'edit_client'
   | 'view_other_tenant';
 
@@ -41,6 +49,7 @@ export type Permission =
  * | Revisar / exportar            | ✅             | ✅              | ✅    | ✅      |
  * | Sincronizar contas do Omie    | ✅             | ✅              | ✅    | ✅      |
  * | Gerir usuários do cliente     | ✅             | ❌              | ✅    | ❌      |
+ * | Manter o glossário (S6)       | ✅             | ❌              | ✅    | ✅ (carteira) |
  * | Editar dados do cliente (§9)  | ❌             | ❌              | ✅    | ❌      |
  * | Ver outro tenant              | ❌             | ❌              | ✅    | ✅ (carteira) |
  */
@@ -50,17 +59,27 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'review_export',
     'sync_omie_accounts',
     'manage_client_users',
+    'manage_glossary',
     'edit_client',
     'view_other_tenant',
   ],
   // O gerente do sistema enxerga outros tenants apenas dentro da carteira —
   // quem sabe a carteira é o backend (`client_assignments`), ver `canAccessClient`.
-  manager: ['run_reconciliation', 'review_export', 'sync_omie_accounts', 'view_other_tenant'],
+  // Ele MANTÉM o glossário (diferente de `manage_client_users`): é a linha da
+  // matriz do backend, conferida em `app/core/authz.py` antes de espelhar aqui.
+  manager: [
+    'run_reconciliation',
+    'review_export',
+    'sync_omie_accounts',
+    'manage_glossary',
+    'view_other_tenant',
+  ],
   client_manager: [
     'run_reconciliation',
     'review_export',
     'sync_omie_accounts',
     'manage_client_users',
+    'manage_glossary',
   ],
   client_operator: ['run_reconciliation', 'review_export', 'sync_omie_accounts'],
 };

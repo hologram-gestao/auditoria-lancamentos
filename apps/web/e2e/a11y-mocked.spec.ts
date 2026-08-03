@@ -42,6 +42,18 @@
  * `127.0.0.1:3100` → **30 passed** (15 testes × `desktop`/`mobile`) → guard
  * `expected=30 unexpected=0 skipped=0 flaky=0`.
  *
+ * ⚠️ **Sprint 6 (03/08/2026) — cenários acrescentados SEM execução em browser
+ * real.** A FRONT 06.6 acrescentou o bloco "Glossário do cliente" (4 cenários ×
+ * 2 viewports) e a FRONT 06.7 os cenários da revisão. O `next build` e o
+ * servidor standalone sobem no sandbox do agent, mas o **Chromium não**:
+ * `chrome-headless-shell: error while loading shared libraries: libnspr4.so`, e
+ * o `playwright install --with-deps` precisa de apt/root que o sandbox não tem
+ * (o container `mcr.microsoft.com/playwright` também não é opção — não há
+ * `docker` nesta distro WSL). Logo, o número "30 passed" acima é da execução de
+ * 27/07 e **não** cobre os cenários da Sprint 6. Quem tiver browser (o job
+ * `web_a11y` tem) é quem mede: até lá, estes cenários estão escritos e
+ * versionados, mas não verificados em CSS computado.
+ *
  * ────────────────────────────────────────────────────────────────────────────
  * REGRA DO GATE (ADR-008-QA / ADR-009-QA — leia antes de acrescentar cenário):
  *
@@ -242,6 +254,60 @@ const DETAIL = {
   total_files: 3,
 };
 
+/**
+ * Sprint 6 / R4 — estado MUTÁVEL por teste, resetado no `beforeEach` junto do
+ * `sessionUser`. Fica fora do `DETAIL` de propósito: com `false` como default,
+ * todos os cenários anteriores à Sprint 6 continuam medindo exatamente a mesma
+ * tela (o selo não aparece), e só os testes do selo ligam a chave.
+ */
+let sessionUsedGlossary = false;
+
+/**
+ * Uma anomalia da Camada 1 (o único tipo que aceita veredito) e uma
+ * estrutural. `reviewVerdict` é mutável para o PATCH do teste refletir na
+ * lista — é assim que se verifica "a lista reflete a mudança sem reload".
+ */
+let reviewVerdict: string | null = null;
+
+function anomalies() {
+  return [
+    {
+      id: 'aaaa1111-aaaa-4aaa-8aaa-aaaaaaaa1111',
+      anomaly_type: {
+        id: 'tttt1111-tttt-4ttt-8ttt-tttttttt1111',
+        code: 'qualificacao_suspeita',
+        name: 'Classificação suspeita',
+        severity: 'moderate',
+      },
+      detected_by: 'ai',
+      resolved: false,
+      review_verdict: reviewVerdict,
+      context: 'IOF classificado como juros.',
+      resolution_note: null,
+      created_at: '2026-07-01T12:00:00Z',
+      related_file_entry: null,
+      related_omie_entry: null,
+    },
+    {
+      id: 'aaaa2222-aaaa-4aaa-8aaa-aaaaaaaa2222',
+      anomaly_type: {
+        id: 'tttt2222-tttt-4ttt-8ttt-tttttttt2222',
+        code: 'saldo_divergente',
+        name: 'Saldo divergente',
+        severity: 'critical',
+      },
+      detected_by: 'ai',
+      resolved: false,
+      review_verdict: null,
+      context: null,
+      resolution_note: null,
+      created_at: '2026-07-01T11:00:00Z',
+      related_file_entry: null,
+      related_omie_entry: null,
+    },
+  ];
+}
+
 const PAGINATION = { page: 1, pageSize: 20, total: 3, totalPages: 1 };
 
 /**
@@ -308,6 +374,44 @@ const NOTIFICATIONS = [
   },
 ];
 
+/**
+ * Glossário do tenant (Sprint 6 / BACK 06.3). Envelope REAL da rota:
+ * `{ data: { entries, version }, pagination }` — o `data` é um OBJETO com a
+ * versão dentro, não o array. O fallback genérico do fim devolveria
+ * `{data: [], pagination}` e `data.data.entries` seria `undefined`: a listagem
+ * cairia no error boundary e o axe passaria a medir a tela de erro (foi
+ * exatamente o que aconteceu com `/omie/lancamentos` em 27/07). Por isso a rota
+ * é EXPLÍCITA aqui — mantenha-a ao mexer no `fulfillApi`.
+ */
+const GLOSSARY_ENTRIES = [
+  {
+    id: 'ffffffff-ffff-4fff-8fff-000000000001',
+    kind: 'categoria',
+    code: '3.1.02',
+    name: 'Taxas bancárias',
+    description: 'Tarifas do banco. Nunca classificar como juros.',
+    decryptFailed: false,
+  },
+  {
+    id: 'ffffffff-ffff-4fff-8fff-000000000002',
+    kind: 'regra',
+    code: null,
+    name: 'IOF nunca é juros',
+    description: 'IOF vai para despesa financeira própria.',
+    decryptFailed: false,
+  },
+  {
+    id: 'ffffffff-ffff-4fff-8fff-000000000003',
+    kind: 'fornecedor',
+    code: null,
+    // Entrada indecifrável: o backend devolve o placeholder no campo, e a tela
+    // precisa sinalizar o estado por badge (não só pelo texto).
+    name: '[indecifrável]',
+    description: null,
+    decryptFailed: true,
+  },
+];
+
 /** Backend inteiro em memória, resolvido por padrão de URL. */
 async function fulfillApi(route: Route): Promise<void> {
   const url = new URL(route.request().url());
@@ -320,6 +424,22 @@ async function fulfillApi(route: Route): Promise<void> {
     });
 
   if (path === '/api/v1/auth/refresh') return json({ user: sessionUser });
+  // Glossário do tenant (S6/R2) — rota literal ANTES do fallback paginado.
+  if (path === `/api/v1/clients/${CLIENT_ID}/glossary`) {
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: { entries: GLOSSARY_ENTRIES, version: 7 },
+        pagination: {
+          page: 1,
+          pageSize: 20,
+          total: GLOSSARY_ENTRIES.length,
+          totalPages: 1,
+        },
+      }),
+    });
+  }
   // Usuários DO tenant (BACK 05.5). Rota literal antes de qualquer fallback.
   if (path === `/api/v1/clients/${CLIENT_ID}/users`) {
     return json({
@@ -328,7 +448,8 @@ async function fulfillApi(route: Route): Promise<void> {
     });
   }
   if (path === '/api/v1/notifications/unread-count') return json({ unread: 2 });
-  if (path === '/api/v1/notifications') return json({ data: NOTIFICATIONS, pagination: PAGINATION });
+  if (path === '/api/v1/notifications')
+    return json({ data: NOTIFICATIONS, pagination: PAGINATION });
   if (path.endsWith('/read')) return json({ already_read: false, read_at: '2026-07-26T13:00:00Z' });
   if (path === '/api/v1/clients') return json({ data: [CLIENT_DETAIL], pagination: PAGINATION });
   if (path === `/api/v1/clients/${CLIENT_ID}`) return json(CLIENT_DETAIL);
@@ -342,7 +463,24 @@ async function fulfillApi(route: Route): Promise<void> {
   if (path === `/api/v1/clients/${CLIENT_ID}/reconciliations`) {
     return json({ data: SESSIONS, pagination: PAGINATION });
   }
-  if (path === `/api/v1/reconciliations/${SESSION_ID}`) return json(DETAIL);
+  if (path === `/api/v1/reconciliations/${SESSION_ID}`) {
+    return json({ ...DETAIL, qualification_used_glossary: sessionUsedGlossary });
+  }
+  // Anomalias (BACK 9.7) + veredito do revisor (BACK 06.5). Rota literal antes
+  // do fallback: o PATCH grava no estado do módulo para a lista refletir a
+  // mudança no refetch, que é o que o teste precisa observar.
+  if (path === `/api/v1/reconciliations/${SESSION_ID}/anomalies`) {
+    const list = anomalies();
+    return json({
+      data: list,
+      pagination: { page: 1, pageSize: 20, total: list.length, totalPages: 1 },
+    });
+  }
+  if (/\/api\/v1\/reconciliations\/[^/]+\/anomalies\/[^/]+$/.test(path)) {
+    const body = route.request().postDataJSON() as { review_verdict?: string | null } | null;
+    if (body?.review_verdict != null) reviewVerdict = body.review_verdict;
+    return json(anomalies()[0]);
+  }
   if (path === `/api/v1/reconciliations/${SESSION_ID}/files`) {
     return json({
       session_id: SESSION_ID,
@@ -440,6 +578,9 @@ async function measuredContrast(page: Page, selector: string): Promise<number> {
 test.beforeEach(async ({ page, context, baseURL }) => {
   // Volta ao admin: os cenários de papel da S5 trocam este estado de módulo.
   sessionUser = USER;
+  // Sprint 6: sessão SEM glossário e flag não julgado são o estado de partida.
+  sessionUsedGlossary = false;
+  reviewVerdict = null;
   await page.route('**/api/v1/**', fulfillApi);
   // O `src/middleware.ts` decide navegação só pela PRESENÇA do cookie
   // `access_token` (a validação real é do backend). Um valor qualquer basta
@@ -467,7 +608,9 @@ for (const vp of VIEWPORTS) {
 
     test('Detalhe da conciliação (R3)', async ({ page }) => {
       await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}`);
-      await expect(page.getByRole('region', { name: 'Totalizadores da conciliação' })).toBeVisible();
+      await expect(
+        page.getByRole('region', { name: 'Totalizadores da conciliação' }),
+      ).toBeVisible();
       await analyze(page, `detalhe da conciliação (${vp.label})`);
     });
 
@@ -540,7 +683,10 @@ for (const vp of VIEWPORTS) {
       // O rótulo tem que existir como texto visível — badge vazio não é badge.
       await expect(badge).toHaveText(/Processada/);
       const ratio = await measuredContrast(page, 'text=Processada >> nth=0');
-      expect(ratio, `badge "Processada" (${vp.label}): ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
+      expect(
+        ratio,
+        `badge "Processada" (${vp.label}): ${ratio.toFixed(2)}:1`,
+      ).toBeGreaterThanOrEqual(4.5);
     });
   });
 }
@@ -641,6 +787,196 @@ for (const vp of VIEWPORTS) {
 }
 
 /**
+ * Sprint 6 / R4 (FRONT 06.7) — revisão: selo do glossário e veredito do flag.
+ *
+ * Os DOIS casos do selo são medidos (com e sem glossário), porque o critério de
+ * aceite é simétrico: quando o backend informa `true`, a revisão mostra o selo;
+ * quando não, a tela fica **idêntica** ao comportamento anterior à sprint.
+ *
+ * O veredito é medido no browser porque o que interessa é o comportamento
+ * completo: clicar → PATCH → invalidação → a lista refletir o novo estado sem
+ * reload manual. Em jsdom o hook é mockado; aqui o ciclo roda inteiro.
+ */
+for (const vp of VIEWPORTS) {
+  const slugR = vp.label.replace(/\s+/g, '-');
+  test.describe(`Revisão com glossário — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('selo aparece quando a análise considerou o glossário (R4)', async ({ page }) => {
+      sessionUsedGlossary = true;
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}`);
+
+      await expect(page.getByText('Considerou o glossário do cliente')).toBeVisible();
+      // O selo não pode empurrar nada para fora da viewport em 390px.
+      const box = await page.getByText('Considerou o glossário do cliente').boundingBox();
+      expect(box, 'o selo precisa ter caixa visível').not.toBeNull();
+      expect(
+        (box?.x ?? 0) + (box?.width ?? 0),
+        `selo do glossário cortado fora da viewport (${vp.label})`,
+      ).toBeLessThanOrEqual(vp.size.width);
+
+      await expect(page.locator('#__next_error__')).toHaveCount(0);
+      await shot(page, `revisao-selo-glossario-${slugR}`);
+      await analyze(page, `revisão com selo do glossário (${vp.label})`);
+    });
+
+    test('cliente SEM glossário: nada de selo, nada de espaço morto (R4)', async ({ page }) => {
+      sessionUsedGlossary = false;
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}`);
+
+      await expect(
+        page.getByRole('region', { name: 'Totalizadores da conciliação' }),
+      ).toBeVisible();
+      // Escopo no SELO, não em `/glossário/i` solto: o shell do cliente tem o
+      // item de menu "Glossário" (FRONT 06.6), que deve continuar lá.
+      await expect(page.getByText('Considerou o glossário do cliente')).toHaveCount(0);
+      await analyze(page, `revisão sem glossário (${vp.label})`);
+    });
+
+    test('operador marca o flag como improcedente e a lista reflete (R4)', async ({ page }) => {
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}?tab=anomalias`);
+
+      const row = page.getByRole('row', { name: /Classificação suspeita/ });
+      await expect(row).toBeVisible();
+      // Estado de partida VISÍVEL — "não avaliei" precisa ser legível.
+      await expect(row.getByText('Não avaliado')).toBeVisible();
+
+      await page
+        .getByRole('button', { name: 'Marcar "Classificação suspeita" como improcedente' })
+        .click();
+
+      // Sem reload manual: a invalidação do TanStack refaz a lista.
+      await expect(
+        page.getByRole('button', { name: 'Marcar "Classificação suspeita" como improcedente' }),
+      ).toHaveAttribute('aria-pressed', 'true');
+      await expect(row.getByText('Não avaliado')).toHaveCount(0);
+
+      await shot(page, `revisao-veredito-${slugR}`);
+      await analyze(page, `veredito do flag marcado (${vp.label})`);
+    });
+
+    test('a ação do veredito é alcançável por TECLADO (WCAG 2.1.1)', async ({ page }) => {
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}?tab=anomalias`);
+      const alvo = page.getByRole('button', {
+        name: 'Marcar "Classificação suspeita" como procedente',
+      });
+      await expect(alvo).toBeVisible();
+
+      let alcancado = false;
+      for (let i = 0; i < 60 && !alcancado; i++) {
+        await page.keyboard.press('Tab');
+        alcancado = await alvo.evaluate((el) => el === document.activeElement);
+      }
+      expect(alcancado, 'o botão de veredito precisa ser alcançável por Tab').toBe(true);
+
+      await page.keyboard.press('Enter');
+      await expect(alvo).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    test('tipo que o servidor não julga não ganha a ação (R4)', async ({ page }) => {
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}?tab=anomalias`);
+      await expect(page.getByRole('row', { name: /Saldo divergente/ })).toBeVisible();
+      await expect(
+        page.getByRole('button', { name: /Marcar "Saldo divergente" como/ }),
+      ).toHaveCount(0);
+    });
+  });
+}
+
+/**
+ * Sprint 6 / R2 (FRONT 06.6) — tela "Glossário" do cliente, por PAPEL.
+ *
+ * O que só um browser mede aqui: o CSS computado das badges de tipo (tokens
+ * `info`/`warning`/`muted` do tema) e da badge "Indecifrável" (`destructive`),
+ * e a árvore de acessibilidade da gaveta e do `alertdialog` montados de
+ * verdade, em desktop e em 390px.
+ *
+ * A diferença de gating em relação a "Usuários": aqui a ROTA é liberada para
+ * todo papel com acesso ao cliente (o operador lê o glossário como referência)
+ * — o que some para ele são as ações de escrita. Um `AccessDenied` para o
+ * operador seria defeito, não segurança.
+ */
+for (const vp of VIEWPORTS) {
+  const slugG = vp.label.replace(/\s+/g, '-');
+  test.describe(`Glossário do cliente — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('gerente do cliente vê a lista e as ações de escrita (R2)', async ({ page }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/glossario`);
+
+      await expect(page.getByRole('heading', { name: 'Glossário', level: 2 })).toBeVisible();
+      await expect(page.getByRole('row', { name: /Taxas bancárias/ })).toBeVisible();
+      await expect(page.getByText('Regra de auditoria').first()).toBeVisible();
+      await expect(page.getByText('Fornecedor típico').first()).toBeVisible();
+      // Entrada indecifrável não pode virar célula silenciosamente vazia.
+      // `exact: true` NÃO é decoração: sem ele o `getByText` casa substring de
+      // forma case-insensitive e o próprio nome `[indecifrável]` satisfaria a
+      // asserção — o teste passaria com a badge ausente.
+      await expect(page.getByText('Indecifrável', { exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Nova entrada' })).toBeVisible();
+      // Se a página tivesse caído no error boundary, o axe mediria a tela de erro.
+      await expect(page.locator('#__next_error__')).toHaveCount(0);
+      await shot(page, `glossario-gerente-${slugG}`);
+      await analyze(page, `glossário — gerente (${vp.label})`);
+    });
+
+    test('gaveta de criação: três tipos e Cancelar à esquerda (R2)', async ({ page }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/glossario`);
+      await page.getByRole('button', { name: 'Nova entrada' }).first().click();
+
+      const drawer = page.getByRole('dialog');
+      await expect(drawer).toBeVisible();
+      await expect(drawer.getByLabel('Nome', { exact: true })).toBeVisible();
+      await shot(page, `glossario-gaveta-${slugG}`);
+      await analyze(page, `gaveta do glossário (${vp.label})`);
+
+      await drawer.getByRole('combobox', { name: /Tipo/ }).click();
+      const options = page.getByRole('option');
+      await expect(options).toHaveCount(3);
+      await expect(options.nth(0)).toHaveText('Categoria');
+      await expect(options.nth(1)).toHaveText('Fornecedor típico');
+      await expect(options.nth(2)).toHaveText('Regra de auditoria');
+    });
+
+    test('remover passa por alertdialog com foco inicial no Cancelar (R2)', async ({ page }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/glossario`);
+      await page.getByRole('button', { name: 'Remover Taxas bancárias' }).click();
+
+      const confirm = page.getByRole('alertdialog');
+      await expect(confirm).toBeVisible();
+      // `Enter` reflexo não pode apagar entrada do glossário.
+      await expect(confirm.getByRole('button', { name: 'Cancelar' })).toBeFocused();
+      await shot(page, `glossario-confirmacao-${slugG}`);
+      await analyze(page, `confirmação de remoção do glossário (${vp.label})`);
+    });
+
+    test('operador do cliente LÊ, e nenhuma ação de escrita existe (R2/R4)', async ({ page }) => {
+      sessionUser = CLIENT_OPERATOR_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/glossario`);
+
+      // A rota NÃO é negada para ele — o glossário é referência na revisão.
+      await expect(page.getByRole('heading', { name: 'Glossário', level: 2 })).toBeVisible();
+      await expect(page.getByRole('row', { name: /Taxas bancárias/ })).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: 'Você não tem acesso a esta página' }),
+      ).toHaveCount(0);
+
+      // Ações OCULTAS (não desabilitadas) — inclusive a coluna inteira.
+      await expect(page.getByRole('button', { name: 'Nova entrada' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Editar Taxas bancárias' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Remover Taxas bancárias' })).toHaveCount(0);
+      await expect(page.getByRole('columnheader', { name: 'Ações' })).toHaveCount(0);
+
+      await shot(page, `glossario-operador-${slugG}`);
+      await analyze(page, `glossário — operador somente leitura (${vp.label})`);
+    });
+  });
+}
+
+/**
  * Sprint 5 / R4 (FRONT 05.7) — gating de navegação e ações por papel.
  *
  * Cada perfil abre a MESMA rota e a UI mostra só o que a matriz permite. A
@@ -693,6 +1029,9 @@ for (const vp of VIEWPORTS) {
         await expect(clientNav.getByText('Contas Bancárias')).toBeVisible();
         // "Usuários" só para quem administra usuários do tenant.
         await expect(clientNav.getByText('Usuários')).toHaveCount(profile.clientUsers ? 1 : 0);
+        // "Glossário" (S6/R2) aparece para os QUATRO papéis: ler é de todo mundo
+        // com acesso ao cliente; quem pede permissão é a escrita, dentro da tela.
+        await expect(clientNav.getByText('Glossário')).toHaveCount(1);
         // §9 (editar dados do cliente, credenciais Omie) é só do admin.
         await expect(page.getByRole('button', { name: 'Editar cliente' })).toHaveCount(
           profile.editClient ? 1 : 0,

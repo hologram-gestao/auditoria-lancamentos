@@ -21,6 +21,7 @@
  */
 
 import {
+  BookOpen,
   ChevronRight,
   Landmark,
   LayoutDashboard,
@@ -98,12 +99,14 @@ export function ClientShell({ clientId, children }: ClientShellProps) {
   const accountsHref = `${base}/contas`;
   const dashboardHref = `${base}/painel`;
   const usersHref = `${base}/usuarios`;
+  const glossaryHref = `${base}/glossario`;
   // "Conciliações" continua ativo dentro do detalhe de uma conciliação — é a
   // mesma área de navegação, só que um nível abaixo.
   const isAccounts = pathname.startsWith(accountsHref);
   const isDashboard = pathname.startsWith(dashboardHref);
   const isUsers = pathname.startsWith(usersHref);
-  const isReconciliations = !isAccounts && !isDashboard && !isUsers;
+  const isGlossary = pathname.startsWith(glossaryHref);
+  const isReconciliations = !isAccounts && !isDashboard && !isUsers && !isGlossary;
 
   // Matriz do R4 (`lib/authz`), nunca `role === '...'` solto: "Usuários" é do
   // gerente do cliente e do admin do sistema. O gerente do sistema opera a
@@ -184,6 +187,18 @@ export function ClientShell({ clientId, children }: ClientShellProps) {
                 icon={<LayoutDashboard className="h-4 w-4" aria-hidden="true" />}
               >
                 Painel
+              </ClientNavLink>
+            </li>
+            {/* Glossário (S6/R2) NÃO é gated: ler é de todo papel com acesso
+                ao cliente — o operador o usa como referência na revisão. Quem
+                pede permissão é a ESCRITA, dentro da tela. */}
+            <li>
+              <ClientNavLink
+                href={glossaryHref}
+                active={isGlossary}
+                icon={<BookOpen className="h-4 w-4" aria-hidden="true" />}
+              >
+                Glossário
               </ClientNavLink>
             </li>
             {canManageClientUsers && (
