@@ -189,6 +189,40 @@ dados via migration idempotente.
 
 ---
 
+## 2026-08-03 — O gate de a11y nunca tinha medido um TOAST; o primeiro cenário que mediu ficou vermelho [escopo: frontend | a11y]
+**Sintoma:** `e2e/a11y-mocked.spec.ts` (o spec que o job `web_a11y` roda) reprovou 4 testes da Sprint 6 com `serious/color-contrast` em `div[data-title=""]` — o toast de sucesso. Medido pelo axe: `#008a2e` sobre `#ecfdf3` = **4.25:1**, abaixo de 4.5:1. `expected=110 unexpected=4`.
+**Causa-raiz (blameless):** o `<Toaster ... richColors />` (`app/providers.tsx:36`, inalterado desde a S4) usa a paleta própria do Sonner, que não passa no contraste AA. O defeito é antigo; o que não existia era um cenário que **rodasse o axe com um toast na tela** — todos os cenários anteriores analisavam a tela em repouso. Componente de terceiro com paleta própria escapa da auditoria de token por `grep` (não há hex no nosso CSS) E da auditoria por axe (nunca está montado no instante da medição).
+**Correção:** FRONT 06.7 reprovada; correção pedida no `<Toaster>` global (tokens semânticos do tema em `toastOptions.classNames`, ou override das CSS vars do Sonner), não no call site — os mesmos toasts saem da tela de Glossário (FRONT 06.6).
+**Escopo:** vale para todo componente de terceiro com paleta própria e montagem transitória (toast, tooltip, popover de lib externa) — não é específico do Sonner.
+**Encodado em:** `CLAUDE.md` do QA — item novo na checklist de a11y ("estado transitório também é tela"); comentário de reprovação da task `86e2m66r4` com o comando de execução do gate.
+**Status:** ativo
+
+## 2026-08-03 — "Não há docker neste ambiente" virou fato congelado num comentário committed [escopo: qa | harness de teste]
+**Sintoma:** o cabeçalho de `e2e/a11y-mocked.spec.ts` (linhas 45-53, commit `d2e9d86`) declara que os cenários da Sprint 6 foram acrescentados **sem** execução em browser real, justificando que "não há `docker` nesta distro WSL". Neste mesmo dia, `docker ps` responde, a imagem `mcr.microsoft.com/playwright:v1.59.1-noble` está em cache e a suíte rodou inteira — foi ela que achou o defeito de contraste acima.
+**Causa-raiz (blameless):** a capacidade do ambiente **oscila entre runs** (o Docker sumiu da distro WSL em 03/08 de manhã e voltou), mas a constatação foi escrita como propriedade permanente, em arquivo versionado. Declaração de impossibilidade envelhece pior que resultado de teste: o próximo agent lê "não dá" e nem tenta.
+**Correção:** gate executado; a task pede a reescrita do cabeçalho com o número medido e a data.
+**Escopo:** qualquer "não foi possível medir X" — browser, Postgres, credencial externa.
+**Encodado em:** `CLAUDE.md` do QA — a checklist de validação visual passa a exigir `docker ps` **antes** de aceitar uma declaração de impossibilidade do executor, e a declaração precisa vir datada.
+**Status:** ativo
+
+## 2026-08-03 — Teste de rota confere o VALOR do campo, nunca o NOME da chave no fio [escopo: qa | contrato]
+**Sintoma:** removendo `alias="decryptFailed"` de `GlossaryEntryResponse`, os **22 testes de rota da BACK 06.3 continuam verdes** — nenhum deles olha o nome da chave, todos leem `data["entries"][0]["name"]`. Na tela, o front (`entry.decryptFailed`) passaria a ler `undefined`: a badge "Indecifrável" some e a entrada corrompida vira uma linha aparentemente normal com o texto `[indecifrável]` — a "célula silenciosamente vazia" que o CLAUDE.md §4.1 proíbe, sem 500, sem log, sem teste vermelho.
+**Causa-raiz (blameless):** o gate de contrato (regenerar `schema.ts` e exigir `git diff` = 0) protege o TIPO, não o comportamento — a OpenAPI é montada pelo mesmo `by_alias` que a serialização, então os dois regridem **juntos e em silêncio**. Sobra um ponto cego exatamente onde há contrato misto (payload snake_case com um campo camelCase).
+**Correção:** `apps/api/tests/integration/test_glossary_contract_qa.py` (QA) assere as CHAVES literais dos 4 verbos do glossário — `decryptFailed` presente, `decrypt_failed` ausente, envelope de 1 vs. 2 chaves (o `rawFetch` do front só desembrulha quando `data` é a única). Provado não-vacuoso por mutação: com o alias removido, 3 dos meus testes ficam vermelhos e os 22 da 06.3 seguem verdes.
+**Escopo:** todo campo com `alias`/`serialization_alias` consumido pelo front.
+**Encodado em:** `apps/api/tests/integration/test_glossary_contract_qa.py` + `CLAUDE.md` do QA (checklist de contrato: campo com alias exige asserção da chave literal, não só do valor).
+**Status:** ativo
+
+## 2026-08-03 — `analyze()` do axe passa verde contra elemento EFÊMERO mutado: cenário de toast precisa de asserção síncrona [escopo: qa, frontend | a11y]
+**Sintoma:** na correção da FRONT 06.7 (commit `7a7062e`), o cenário novo do toast de **erro** foi mutado de propósito para branco-sobre-quase-branco (`text-destructive-foreground` sobre `bg-destructive-muted`) — e o `analyze()` do axe passou **VERDE**. Só a medição direta do nó (`measuredContrast('[data-sonner-toast] [data-title]')`) reprovou, com **1.048**. Ou seja: o cenário "com toast na tela" que a reprovação anterior exigiu teria nascido vacuoso se dependesse só do axe.
+**Causa-raiz (blameless):** o toast do Sonner tem `duration` de 4 s e o `analyze()` roda depois de uma cadeia de `await expect(...)` — a janela entre "o toast está montado" e "o axe mede" não é determinística. O axe não reclama do que não está no DOM, e o resultado é indistinguível de "medi e estava bom". A lição anterior deste mesmo dia ("estado transitório também é tela") resolvia *montar* o elemento; não resolvia *garantir que ele ainda esteja lá no instante da medição*.
+**Correção:** todo cenário de elemento efêmero leva, ANTES do `analyze()`, uma asserção síncrona sobre o próprio nó — `expect(await measuredContrast(page, SELETOR)).toBeGreaterThanOrEqual(4.5)`. Ela falha por cor ruim **e** por elemento ausente, que são justamente as duas formas de o cenário virar teatro. Provado na re-revisão: com a mutação `richColors`+`classNames` juntos, os dois toasts reprovam com números medidos (sucesso **4.259**, erro **4.347**), e a árvore corrigida dá `118 passed, unexpected=0`.
+**Escopo:** toast, tooltip, popover, snackbar, banner com auto-dismiss — qualquer nó com tempo de vida próprio. Não vale para tela em repouso, onde `analyze()` basta.
+**Encodado em:** `apps/web/e2e/a11y-mocked.spec.ts` (helper `measuredContrast` + os 2 cenários de veredito) + `ADR-017-FE`/`ADR-017-QA` + `CLAUDE.md` do QA — a checklist de a11y passa a exigir, em cenário de elemento efêmero, asserção síncrona no nó além do `analyze()`, e re-revisão de contraste exige o par (árvore corrigida verde, árvore mutada vermelha) com os dois números citados.
+**Status:** ativo
+
+---
+
 ## 2026-07-30 — Gate de integração passou com exit 0 e a suíte de tenant INTEIRA pulada [escopo: qa | harness de teste]
 **Sintoma:** primeira execução da suíte da Sprint 5 no sandbox do QA: `463 passed, 426 skipped`, **exit code 0**. Os 426 skips eram TODA a suíte de integração — incluindo os 34 casos negativos cross-tenant que **são** a entrega da sprint. Lido de relance, parecia gate verde; na prática nenhum teste de isolamento rodou.
 **Causa-raiz (blameless):** o sandbox do agent não alcança Postgres a partir do processo Python — nem o socket do Docker (`PermissionError` no testcontainers) nem TCP local (`Connection refused` em `127.0.0.1:<porta>` publicada, que o `/dev/tcp` do bash alcança normalmente). O `conftest.py` faz `pytest.skip` quando o Docker não responde, que é o comportamento correto para não travar o dev — mas skip não distingue "não dá para medir aqui" de "medido e verde", e o exit code é 0 nos dois casos.
