@@ -42,17 +42,41 @@
  * `127.0.0.1:3100` → **30 passed** (15 testes × `desktop`/`mobile`) → guard
  * `expected=30 unexpected=0 skipped=0 flaky=0`.
  *
- * ⚠️ **Sprint 6 (03/08/2026) — cenários acrescentados SEM execução em browser
- * real.** A FRONT 06.6 acrescentou o bloco "Glossário do cliente" (4 cenários ×
- * 2 viewports) e a FRONT 06.7 os cenários da revisão. O `next build` e o
- * servidor standalone sobem no sandbox do agent, mas o **Chromium não**:
- * `chrome-headless-shell: error while loading shared libraries: libnspr4.so`, e
- * o `playwright install --with-deps` precisa de apt/root que o sandbox não tem
- * (o container `mcr.microsoft.com/playwright` também não é opção — não há
- * `docker` nesta distro WSL). Logo, o número "30 passed" acima é da execução de
- * 27/07 e **não** cobre os cenários da Sprint 6. Quem tiver browser (o job
- * `web_a11y` tem) é quem mede: até lá, estes cenários estão escritos e
- * versionados, mas não verificados em CSS computado.
+ * **Sprint 6 (03/08/2026) — MEDIDO em Chromium real.** A FRONT 06.6 acrescentou
+ * o bloco "Glossário do cliente" e a FRONT 06.7 os cenários da revisão (selo,
+ * veredito, teclado, erro do servidor). O `playwright install --with-deps`
+ * continua indisponível no sandbox (precisa de apt/root) e o Chromium local não
+ * sobe (`libnspr4.so`), mas o **container resolve**: `docker` existe nesta
+ * máquina e a imagem `mcr.microsoft.com/playwright:v1.59.1-noble` está em cache.
+ * É o caminho que o QA usou para reprovar a 1ª entrega desta task, e é o que
+ * vale daqui pra frente — a afirmação anterior ("não há `docker` nesta distro
+ * WSL") estava ERRADA e mandava o próximo agent não medir.
+ *
+ * Execução contra o build standalone com a correção do toast:
+ * **`expected=118 unexpected=0 skipped=0 flaky=0`** (59 testes × `desktop`/`mobile`).
+ *
+ * **Visto vermelho antes (ADR-008-QA), duas mutações:**
+ * - `<Toaster richColors>` de volta → `expected=114 unexpected=4`,
+ *   `serious/color-contrast` em `div[data-title=""]`, `#008a2e` sobre `#ecfdf3`
+ *   = **4.25:1** — o mesmo achado da reprovação do QA.
+ * - par do toast de ERRO trocado para `text-destructive-foreground` (branco
+ *   sobre quase-branco) → os 4 cenários de erro falham com contraste medido
+ *   **1.048**. Essa mutação **passa** pelo `analyze()` sozinho (o toast de erro
+ *   já saiu da tela quando o axe roda), e é por isso que aqueles cenários
+ *   carregam `measuredContrast` além do axe.
+ *
+ * Comando:
+ *
+ * ```bash
+ * INTERNAL_API_URL=http://127.0.0.1:8000 pnpm --filter @auditoria/web build
+ * cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
+ * docker run --rm --network none -v "$PWD:/w" -w /w/apps/web \
+ *   -e E2E_BASE_URL=http://127.0.0.1:3100 -e HOME=/tmp -e CI=1 \
+ *   mcr.microsoft.com/playwright:v1.59.1-noble bash -lc '
+ *     PORT=3100 HOSTNAME=127.0.0.1 NODE_ENV=production \
+ *       node /w/apps/web/.next/standalone/apps/web/server.js & sleep 5
+ *     ./node_modules/.bin/playwright test e2e/a11y-mocked.spec.ts --retries=0'
+ * ```
  *
  * ────────────────────────────────────────────────────────────────────────────
  * REGRA DO GATE (ADR-008-QA / ADR-009-QA — leia antes de acrescentar cenário):
@@ -269,6 +293,15 @@ let sessionUsedGlossary = false;
  */
 let reviewVerdict: string | null = null;
 
+/**
+ * Caminho de FALHA do PATCH do veredito. Existe para o gate medir o toast de
+ * ERRO, não só o de sucesso: os dois usam pares de token diferentes
+ * (`destructive/destructive-muted` × `success/success-muted`) e o de sucesso já
+ * reprovou uma vez — afirmar que o outro passa sem medir é o que a reprovação
+ * anterior proibiu.
+ */
+let patchAnomalyFails = false;
+
 function anomalies() {
   return [
     {
@@ -477,6 +510,21 @@ async function fulfillApi(route: Route): Promise<void> {
     });
   }
   if (/\/api\/v1\/reconciliations\/[^/]+\/anomalies\/[^/]+$/.test(path)) {
+    if (patchAnomalyFails) {
+      // Envelope de erro do §7 da API — é dele que sai o `userMessage` que o
+      // `ApiError` entrega ao `toast.error`.
+      return route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: {
+            code: 'INTERNAL_ERROR',
+            message: 'boom',
+            userMessage: 'Não foi possível registrar o veredito. Tente novamente.',
+          },
+        }),
+      });
+    }
     const body = route.request().postDataJSON() as { review_verdict?: string | null } | null;
     if (body?.review_verdict != null) reviewVerdict = body.review_verdict;
     return json(anomalies()[0]);
@@ -547,6 +595,9 @@ async function analyze(page: Page, label: string): Promise<void> {
  * com fundo opaco) — o axe devolve `incomplete` neste caso e `incomplete` não
  * entra em `violations`. Foi assim que o badge vazio passou por todos os gates.
  */
+/** O título do toast do Sonner — o nó que o axe reprovou em `#008a2e`/`#ecfdf3`. */
+const TOAST_TITLE = '[data-sonner-toast] [data-title]';
+
 async function measuredContrast(page: Page, selector: string): Promise<number> {
   return page.$eval(selector, (el) => {
     const parse = (c: string): [number, number, number, number] => {
@@ -581,6 +632,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   // Sprint 6: sessão SEM glossário e flag não julgado são o estado de partida.
   sessionUsedGlossary = false;
   reviewVerdict = null;
+  patchAnomalyFails = false;
   await page.route('**/api/v1/**', fulfillApi);
   // O `src/middleware.ts` decide navegação só pela PRESENÇA do cookie
   // `access_token` (a validação real é do backend). Um valor qualquer basta
@@ -851,8 +903,50 @@ for (const vp of VIEWPORTS) {
       ).toHaveAttribute('aria-pressed', 'true');
       await expect(row.getByText('Não avaliado')).toHaveCount(0);
 
+      // O toast de SUCESSO precisa estar na tela quando o axe roda — é ele que
+      // reprovou a 1ª entrega (`richColors` do Sonner, 4.25:1 em `[data-title]`).
+      // Sem esta espera, o axe podia medir a tela depois de o toast sumir e o
+      // gate ficaria verde sem ver o defeito.
+      await expect(page.getByText('Flag marcado como improcedente.')).toBeVisible();
+      // ...e MEDIDO, não só "presente": o toast tem `duration` de 4 s e o axe
+      // só reprova o que estiver na tela no instante em que roda. A medição
+      // direta falha se o toast sumiu (o `$eval` não acha o seletor) e falha se
+      // a cor regrediu — as duas maneiras de este cenário virar teatro.
+      expect(await measuredContrast(page, TOAST_TITLE)).toBeGreaterThanOrEqual(4.5);
+
       await shot(page, `revisao-veredito-${slugR}`);
-      await analyze(page, `veredito do flag marcado (${vp.label})`);
+      await analyze(page, `veredito do flag marcado + toast de sucesso (${vp.label})`);
+    });
+
+    test('erro do servidor no veredito: mensagem legível e toast medido (R4)', async ({ page }) => {
+      patchAnomalyFails = true;
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}?tab=anomalias`);
+
+      const alvo = page.getByRole('button', {
+        name: 'Marcar "Classificação suspeita" como procedente',
+      });
+      await expect(alvo).toBeVisible();
+      await alvo.click();
+
+      // `userMessage` do envelope da API, em português — nunca o erro cru.
+      await expect(
+        page.getByText('Não foi possível registrar o veredito. Tente novamente.'),
+      ).toBeVisible();
+      // A falha NÃO pode deixar o botão marcado: o veredito não foi gravado.
+      await expect(alvo).toHaveAttribute('aria-pressed', 'false');
+      await expect(
+        page.getByRole('row', { name: /Classificação suspeita/ }).getByText('Não avaliado'),
+      ).toBeVisible();
+
+      // O par `destructive`/`destructive-muted` do toast de ERRO, que nenhum
+      // cenário exercitava. Aqui a medição direta é a trava PRINCIPAL: com o
+      // toast de erro o `analyze()` sozinho não basta — ele passou verde contra
+      // um par mutado para branco-sobre-quase-branco (o toast já tinha saído da
+      // tela quando o axe rodou). `measuredContrast` deu 1.048 no mesmo build.
+      expect(await measuredContrast(page, TOAST_TITLE)).toBeGreaterThanOrEqual(4.5);
+
+      await shot(page, `revisao-veredito-erro-${slugR}`);
+      await analyze(page, `erro do veredito + toast destrutivo (${vp.label})`);
     });
 
     test('a ação do veredito é alcançável por TECLADO (WCAG 2.1.1)', async ({ page }) => {
