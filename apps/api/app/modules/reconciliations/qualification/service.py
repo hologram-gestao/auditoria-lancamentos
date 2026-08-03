@@ -26,7 +26,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.crypto_service import (
@@ -40,12 +40,14 @@ from app.db.models import (
     AnomalyType,
     ReconciliationAnomaly,
     ReconciliationFileEntry,
+    ReconciliationSession,
 )
 
 if TYPE_CHECKING:
     from app.core.crypto import ClientCipher
 from app.integrations.anthropic.client import AnthropicClient
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache, OmieLancamentoData
+from app.modules.glossary.service import load_glossary_snapshot
 from app.modules.reconciliations.qualification import historical, outliers, semantic
 from app.modules.reconciliations.qualification.schemas import (
     HistoricalResult,
@@ -55,6 +57,8 @@ from app.modules.reconciliations.qualification.schemas import (
     SemanticResult,
     TokenUsage,
 )
+from app.modules.usage_events.repository import UsageEventRepository
+from app.modules.usage_events.service import UsageEventService
 
 log = get_logger(__name__)
 
@@ -98,6 +102,14 @@ async def qualify_session(
         cipher: `ClientCipher` do cliente (DEK) — decifra as descrições dos
             file_entries e cifra o `motivo` em `context_encrypted` (envelope
             corrente + AAD).
+        account_type: tipo normalizado da conta (`checking`/`investment`).
+
+    O glossário do cliente (Sprint 6 / BACK 06.4) é resolvido AQUI — este é o
+    único ponto do fluxo que tem, ao mesmo tempo, a sessão, o `client_id` e o
+    `ClientCipher` do tenant — e desce por ASSINATURA até `_analyze_batch`.
+    `com_glossario` do `qualificacao_emitida` é derivado do bloco REALMENTE
+    injetado, não de um booleano que o caller afirma: um caller enganado (ou um
+    default esquecido) tornaria a métrica de outcome inverificável.
 
     Returns:
         `QualificationReport` com contadores + token usage. Caller loga
@@ -138,10 +150,44 @@ async def qualify_session(
     if not pairs:
         return QualificationReport(skipped_reason="no_pairs_built")
 
+    # 4.1. Glossário do cliente (BACK 06.4): resolvido pelo `client_id` DA
+    #      SESSÃO e decifrado com o cipher DESTE tenant. Falha de leitura não
+    #      derruba a qualificação — o cliente simplesmente fica sem bloco.
+    glossary_block = await _resolve_glossary_block(db, client_id=client_id, cipher=cipher)
+
+    # 4.2. Persiste o sinal na SESSÃO (BACK 06.5): é o que a tela de revisão lê
+    #      para mostrar "o veredito considerou o glossário do cliente", sem
+    #      consultar o sink de métrica. Mesmo valor que vai no evento — uma
+    #      origem só (o bloco realmente montado), nunca duas contas paralelas.
+    await db.execute(
+        update(ReconciliationSession)
+        .where(ReconciliationSession.id == session_id)
+        .values(qualification_used_glossary=glossary_block is not None)
+    )
+
     # 5. Roda as 3 camadas — cada uma independente.
     semantic_results, tokens, calls = await _run_semantic(
-        pairs, anthropic_client=anthropic_client, account_type=account_type
+        pairs,
+        anthropic_client=anthropic_client,
+        account_type=account_type,
+        client_id=client_id,
+        glossary_block=glossary_block,
     )
+
+    # 5.1. Instrumentação de outcome (BACK 06.1): uma linha por veredito REAL
+    #      emitido pela Camada 1 — inclusive os `ok`, que são o denominador
+    #      honesto ("flags emitidas ÷ vereditos"). Pares que a IA omitiu não
+    #      geram evento: o caller os trata como "ok" por omissão, e contá-los
+    #      como veredito inflaria a base com análise que não aconteceu.
+    #      `com_glossario` vem do bloco REALMENTE montado (BACK 06.4).
+    #      Fail-soft: `emit_*` nunca levanta; a qualificação segue.
+    await _emit_qualificacao_events(
+        db,
+        session_id=session_id,
+        semantic_results=semantic_results,
+        com_glossario=glossary_block is not None,
+    )
+
     historical_results = await _run_historical(
         db,
         client_id=client_id,
@@ -249,19 +295,74 @@ async def qualify_session(
 # ----------------------------------------------------------------------
 
 
+async def _resolve_glossary_block(
+    db: AsyncSession,
+    *,
+    client_id: UUID,
+    cipher: ClientCipher,
+) -> str | None:
+    """Lê e renderiza o glossário DESTE tenant. `None` = cliente sem glossário.
+
+    Duas garantias de isolamento, as mesmas da camada de dados (ADR-011):
+    o `client_id` vem da SESSÃO (nunca de payload) e o `cipher` é o do próprio
+    cliente — o AAD amarra cada ciphertext ao par (cliente, linha), então nem
+    por engano o glossário de A é decifrado numa análise de B.
+
+    Falha aqui NÃO derruba a qualificação: sem glossário o pipeline volta a ser
+    exatamente o de antes da Sprint 6.
+    """
+    try:
+        snapshot = await load_glossary_snapshot(db, client_id=client_id, cipher=cipher)
+    except Exception:
+        log.exception("qualification_glossary_load_failed", client_id=str(client_id))
+        return None
+    if snapshot.is_empty:
+        return None
+    return semantic.render_glossary_block(snapshot)
+
+
 async def _run_semantic(
     pairs: list[QualificationPair],
     *,
     anthropic_client: AnthropicClient,
     account_type: str,
+    client_id: UUID,
+    glossary_block: str | None,
 ) -> tuple[list[SemanticResult], TokenUsage, int]:
     try:
         return await semantic.analyze_pairs(
-            pairs, anthropic_client=anthropic_client, account_type=account_type
+            pairs,
+            anthropic_client=anthropic_client,
+            account_type=account_type,
+            client_id=client_id,
+            glossary_block=glossary_block,
         )
     except Exception:
         log.exception("qualification_semantic_failed", pairs=len(pairs))
         return [], TokenUsage(), 0
+
+
+async def _emit_qualificacao_events(
+    db: AsyncSession,
+    *,
+    session_id: UUID,
+    semantic_results: list[SemanticResult],
+    com_glossario: bool,
+) -> None:
+    """Emite `qualificacao_emitida` (1 por veredito) no sink de outcome.
+
+    Instrumentação NUNCA derruba a qualificação: `emit_qualificacao_emitida_many`
+    já é fail-soft e o INSERT roda dentro de um SAVEPOINT no repository, então
+    nem um erro de banco aqui aborta a transação de quem chamou.
+    """
+    if not semantic_results:
+        return
+    service = UsageEventService(UsageEventRepository(db))
+    await service.emit_qualificacao_emitida_many(
+        session_id=session_id,
+        vereditos=[sr.status for sr in semantic_results],
+        com_glossario=com_glossario,
+    )
 
 
 async def _run_historical(

@@ -21,10 +21,19 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from uuid import UUID
 
 from app.core.logging import get_logger
-from app.db.models import SessionAccountType
+from app.db.models import (
+    MAX_CODE_CHARS,
+    MAX_DESCRIPTION_CHARS,
+    MAX_ENTRIES_PER_CLIENT,
+    MAX_NAME_CHARS,
+    GlossaryEntryKind,
+    SessionAccountType,
+)
 from app.integrations.anthropic.client import AnthropicClient
+from app.modules.glossary.schemas import GlossaryEntryPlain, GlossarySnapshot
 from app.modules.reconciliations.qualification.schemas import (
     QualificationPair,
     SemanticResult,
@@ -165,11 +174,128 @@ marque 'ok'.
 """
 
 
+# ----------------------------------------------------------------------
+# Glossário do cliente (Sprint 6 / BACK 06.4)
+#
+# 3º bloco de system, ESTENDENDO o precedente do `_INVESTMENT_RULE` — não é uma
+# montagem de prompt nova. Vai DEPOIS do `_SYSTEM_PROMPT` (que é o prefixo comum
+# a todos os clientes e precisa continuar cacheando entre tenants) e depois do
+# `_INVESTMENT_RULE`, em ordem FIXA.
+#
+# ⚠️ Isto é a QUALIFICAÇÃO. A EXTRAÇÃO (`app/integrations/anthropic/client.py` e
+# `prompts.py`) não é tocada — ela não classifica nada.
+# ----------------------------------------------------------------------
+
+_GLOSSARY_HEADER = """\
+GLOSSÁRIO DESTE CLIENTE — vocabulário contábil mantido pela equipe do próprio \
+cliente. Use-o como CONTEXTO ao julgar coerência: uma classificação que o \
+glossário deste cliente justifica é 'ok', mesmo que pareça incomum fora dele.
+
+O glossário NÃO revoga as regras acima e NÃO é uma instrução para marcar tudo \
+como 'ok' — divergência evidente continua 'incoerente'.
+"""
+
+#: Rótulo de cada seção, na ORDEM FIXA de renderização. É a ordem que o prefixo
+#: precisa manter para cachear: bloco que muda de ordem entre chamadas nunca bate.
+_GLOSSARY_SECTIONS: tuple[tuple[GlossaryEntryKind, str], ...] = (
+    (GlossaryEntryKind.CATEGORIA, "Categorias contábeis (código — nome: quando usar)"),
+    (GlossaryEntryKind.FORNECEDOR, "Fornecedores típicos"),
+    (GlossaryEntryKind.REGRA, "Regras de auditoria do cliente"),
+)
+
+#: Overhead por entrada renderizada: marcador, separadores e quebra de linha.
+_GLOSSARY_ENTRY_OVERHEAD_CHARS = 16
+
+#: Teto do bloco, em caracteres. **Derivado dos MESMOS limites que a BACK 06.3
+#: valida na entrada** — é o que a task pede ("o mesmo que a 06.4 assume como
+#: teto"). Consequência: um glossário DENTRO dos limites documentados nunca é
+#: truncado; o truncamento existe para dado que passou por fora (linha legada,
+#: escrita direta no banco, teto reduzido no futuro).
+GLOSSARY_BLOCK_MAX_CHARS = MAX_ENTRIES_PER_CLIENT * (
+    MAX_CODE_CHARS + MAX_NAME_CHARS + MAX_DESCRIPTION_CHARS + _GLOSSARY_ENTRY_OVERHEAD_CHARS
+)
+
+#: Aviso anexado quando o bloco é truncado. Fica DENTRO do prompt de propósito:
+#: o modelo precisa saber que a lista está incompleta em vez de concluir que
+#: uma categoria ausente não existe.
+_GLOSSARY_TRUNCATED_NOTE = (
+    "\n[glossário truncado por tamanho — a lista acima está incompleta; "
+    "não conclua que um termo ausente não existe]\n"
+)
+
+
+def render_glossary_block(snapshot: GlossarySnapshot) -> str | None:
+    """Renderiza o glossário do cliente como texto de system. `None` se não há nada.
+
+    Propriedades de que o cache depende (e que o teste trava):
+
+    - **Determinística:** mesma entrada → mesma string, byte a byte. A ordem das
+      seções é fixa e a das entradas vem do repository (`kind, created_at, id`).
+    - **Estável por cliente:** nada de timestamp, contador ou id volátil no texto.
+      Duas análises seguidas do mesmo cliente produzem o MESMO prefixo — condição
+      necessária do cache-hit da Anthropic (o cache é keyed pelo conteúdo).
+
+    Entradas cujo texto não decifrou são **omitidas** (com log): injetar
+    `[indecifrável]` como se fosse vocabulário do cliente é pior que omitir.
+    """
+    usable = [e for e in snapshot.entries if not e.decrypt_failed]
+    skipped = len(snapshot.entries) - len(usable)
+    if skipped:
+        log.warning(
+            "qualification_glossary_decrypt_skipped",
+            client_id=str(snapshot.client_id),
+            skipped=skipped,
+        )
+    if not usable:
+        return None
+
+    parts: list[str] = [_GLOSSARY_HEADER]
+    for kind, label in _GLOSSARY_SECTIONS:
+        lines = [_render_entry(e) for e in usable if e.kind is kind]
+        if lines:
+            parts.append(f"\n{label}:\n" + "\n".join(lines) + "\n")
+
+    block = "".join(parts)
+    return _truncate_block(block, client_id=snapshot.client_id, entries=len(usable))
+
+
+def _render_entry(entry: GlossaryEntryPlain) -> str:
+    """Uma linha por entrada. Campos ausentes não deixam separador órfão."""
+    head = f"{entry.code} — {entry.name}" if entry.code else entry.name
+    return f"- {head}: {entry.description}" if entry.description else f"- {head}"
+
+
+def _truncate_block(block: str, *, client_id: UUID, entries: int) -> str:
+    """Corta no teto, de forma DETERMINÍSTICA, e deixa rastro visível.
+
+    Corte no último `\\n` antes do teto (não no meio de uma entrada): metade de
+    uma regra de auditoria é pior que a regra ausente. Determinístico porque
+    depende só do conteúdo — o mesmo glossário sempre trunca no mesmo ponto, e o
+    prefixo continua cacheando.
+    """
+    if len(block) <= GLOSSARY_BLOCK_MAX_CHARS:
+        return block
+    budget = GLOSSARY_BLOCK_MAX_CHARS - len(_GLOSSARY_TRUNCATED_NOTE)
+    cut = block.rfind("\n", 0, budget)
+    kept = block[: cut if cut > 0 else budget]
+    log.warning(
+        "qualification_glossary_truncated",
+        client_id=str(client_id),
+        entries=entries,
+        original_chars=len(block),
+        kept_chars=len(kept),
+        limit_chars=GLOSSARY_BLOCK_MAX_CHARS,
+    )
+    return kept + _GLOSSARY_TRUNCATED_NOTE
+
+
 async def analyze_pairs(
     pairs: list[QualificationPair],
     *,
     anthropic_client: AnthropicClient,
     account_type: str = "checking",
+    client_id: UUID | None = None,
+    glossary_block: str | None = None,
 ) -> tuple[list[SemanticResult], TokenUsage, int]:
     """Roda Camada 1 em lotes de até `SEMANTIC_BATCH_SIZE` pares.
 
@@ -182,6 +308,13 @@ async def analyze_pairs(
         account_type: tipo normalizado da conta da sessão. Quando
             `'investment'` (conta aplicação), injeta a regra de semântica
             de aplicação no prompt (Report #2). Default `'checking'`.
+        client_id: tenant da sessão. Só para telemetria (log do bloco) —
+            **por assinatura**, nunca de estado global. Um contextvar ou
+            variável de módulo guardando cliente aqui seria vazamento entre
+            tenants (invariante do PRD da Sprint 6).
+        glossary_block: bloco de system com o glossário JÁ resolvido e
+            renderizado (`render_glossary_block`). `None` = cliente sem
+            glossário → `system_blocks` idêntico ao de hoje, sem regressão.
 
     Returns:
         Tupla `(results, tokens, calls)`:
@@ -206,7 +339,11 @@ async def analyze_pairs(
     for start in range(0, len(pairs), SEMANTIC_BATCH_SIZE):
         batch = pairs[start : start + SEMANTIC_BATCH_SIZE]
         batch_results, batch_tokens = await _analyze_batch(
-            batch, anthropic_client=anthropic_client, account_type=account_type
+            batch,
+            anthropic_client=anthropic_client,
+            account_type=account_type,
+            client_id=client_id,
+            glossary_block=glossary_block,
         )
         results.extend(batch_results)
         tokens = TokenUsage(
@@ -224,6 +361,8 @@ async def _analyze_batch(
     *,
     anthropic_client: AnthropicClient,
     account_type: str,
+    client_id: UUID | None = None,
+    glossary_block: str | None = None,
 ) -> tuple[list[SemanticResult], TokenUsage]:
     """Chama o Claude para UM lote (≤ 50 pares) via tool use estruturado.
 
@@ -253,10 +392,30 @@ async def _analyze_batch(
             "cache_control": {"type": "ephemeral"},
         }
     ]
-    # Conta aplicação: injeta a regra de semântica invertida como bloco SEPARADO
+    # Ordem FIXA dos blocos condicionais — é ela que mantém o prefixo estável
+    # entre chamadas do mesmo cliente (condição do cache-hit):
+    #   1. _SYSTEM_PROMPT (acima)  — comum a TODOS os clientes, cacheado
+    #   2. _INVESTMENT_RULE        — depende do tipo de conta
+    #   3. glossário do cliente    — depende do tenant
+    #
+    # Conta aplicação: regra de semântica invertida como bloco SEPARADO
     # (mantém o cache do _SYSTEM_PROMPT comum). Report #2.
     if account_type == SessionAccountType.INVESTMENT.value:
         system_blocks.append({"type": "text", "text": _INVESTMENT_RULE})
+
+    # Glossário do cliente (Sprint 6 / BACK 06.4). `cache_control: ephemeral`
+    # marca o fim do prefixo cacheável: análises seguidas do MESMO cliente com o
+    # MESMO glossário reusam tudo até aqui. Editar o glossário muda o conteúdo
+    # deste bloco e o cache antigo naturalmente não bate — e só o daquele
+    # cliente, porque o cache da Anthropic é keyed pelo conteúdo do prefixo.
+    if glossary_block:
+        system_blocks.append(
+            {
+                "type": "text",
+                "text": glossary_block,
+                "cache_control": {"type": "ephemeral"},
+            }
+        )
 
     message = await sdk_client.messages.create(
         model=anthropic_client._model,
@@ -301,6 +460,12 @@ async def _analyze_batch(
         input_tokens=tokens.input_tokens,
         output_tokens=tokens.output_tokens,
         cached_input_tokens=tokens.cached_input_tokens,
+        # Sprint 6: o par (tamanho do bloco, cached_input_tokens) é a medição do
+        # guardrail de custo do PRD — "o glossário não pode encarecer a análise;
+        # o bloco por cliente precisa cachear". Sem `client_id` no log não dá
+        # para separar cache-hit por tenant na leitura D+30.
+        client_id=str(client_id) if client_id is not None else None,
+        glossary_block_chars=len(glossary_block) if glossary_block else 0,
     )
     return parsed, tokens
 

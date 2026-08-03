@@ -208,3 +208,4 @@ ManageClientUsersDep = Annotated[
     CurrentUser, Depends(require_permission(Permission.MANAGE_CLIENT_USERS))
 ]
 EditClientDep = Annotated[CurrentUser, Depends(require_permission(Permission.EDIT_CLIENT))]
+ManageGlossaryDep = Annotated[CurrentUser, Depends(require_permission(Permission.MANAGE_GLOSSARY))]

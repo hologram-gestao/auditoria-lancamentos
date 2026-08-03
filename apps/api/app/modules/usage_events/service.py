@@ -25,14 +25,22 @@ from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
 from app.modules.reconciliations.tenant_scope import audit_session_tenant_miss
 from app.modules.usage_events.repository import UsageEventRepository
-from app.modules.usage_events.schemas import UsageEventName
+from app.modules.usage_events.schemas import (
+    FlagRevisadoProps,
+    GlossarioEditadoProps,
+    QualificacaoEmitidaProps,
+    UsageEventName,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from app.modules.usage_events.schemas import (
         AutorNavegouForaRequest,
         NotificacaoEntregueRequest,
+        QualificationVerdict,
     )
 
 logger = get_logger(__name__)
@@ -122,6 +130,113 @@ class UsageEventService:
             UsageEventName.CONCILIACAO_CONCLUIDA,
             session_id=session_id,
             props={"duracao_s": duracao_s, "status": status},
+        )
+
+    # ------------------------------------------------------------------
+    # Sprint 6 (BACK 06.1) — emissores do experimento de glossário
+    #
+    # Os três montam `props` pelo MODELO PYDANTIC correspondente, nunca por
+    # `dict` solto: `extra="forbid"` + campos só bool/int/enum/UUID passam a
+    # valer na EMISSÃO, não só na borda HTTP. Não existe caminho pelo qual o
+    # `motivo` da IA, a descrição de um lançamento ou uma razão social entre
+    # no sink (CLAUDE.md §3.3 / §4.7).
+    #
+    # Nenhum deles é deduplicado pelo banco (ADR-010): `qualificacao_emitida`
+    # e `flag_revisado` ocorrem N vezes por sessão, e `glossario_editado` nem
+    # tem `session_id`. Cada chamada é uma linha contável.
+    # ------------------------------------------------------------------
+
+    async def emit_qualificacao_emitida(
+        self,
+        *,
+        session_id: UUID,
+        veredito: QualificationVerdict,
+        com_glossario: bool,
+    ) -> bool:
+        """DENOMINADOR da métrica: um veredito da Camada 1 foi emitido.
+
+        `com_glossario` vem do CALLER (nunca hard-coded aqui): hoje o
+        `qualify_session` passa `False` porque o glossário só nasce na BACK
+        06.4 — a partir dela, `True` quando o bloco de system do cliente
+        realmente entrou no prompt.
+        """
+        return (
+            await self.emit_qualificacao_emitida_many(
+                session_id=session_id,
+                vereditos=[veredito],
+                com_glossario=com_glossario,
+            )
+            == 1
+        )
+
+    async def emit_qualificacao_emitida_many(
+        self,
+        *,
+        session_id: UUID,
+        vereditos: Sequence[QualificationVerdict],
+        com_glossario: bool,
+    ) -> int:
+        """Versão em lote do anterior; devolve quantas linhas gravaram.
+
+        Uma qualificação analisa até 50 pares por chamada de IA e emite um
+        veredito por par. Em lote isso é UM `INSERT ... VALUES` em vez de N
+        round-trips dentro da transação do job (guardrail de latência do PRD).
+
+        Fail-soft igual ao `emit`: qualquer erro vira warning e devolve 0 — a
+        transação da qualificação segue viva graças ao SAVEPOINT do repository.
+        """
+        if not vereditos:
+            return 0
+        rows = [
+            (
+                session_id,
+                QualificacaoEmitidaProps(veredito=veredito, com_glossario=com_glossario).model_dump(
+                    mode="json"
+                ),
+            )
+            for veredito in vereditos
+        ]
+        try:
+            return await self._repo.insert_many_ignore_duplicate(
+                event=UsageEventName.QUALIFICACAO_EMITIDA.value,
+                rows=rows,
+            )
+        except Exception:
+            logger.warning(
+                "usage_event_emit_failed",
+                usage_event=UsageEventName.QUALIFICACAO_EMITIDA.value,
+                session_id=str(session_id),
+            )
+            return 0
+
+    async def emit_flag_revisado(self, *, session_id: UUID, procedente: bool) -> bool:
+        """NUMERADOR da métrica: o revisor julgou um flag da qualificação.
+
+        Grão = **uma transição de estado da marcação**, não uma requisição
+        (ADR-010). Quem garante isso é o call site (BACK 06.5): remarcar com o
+        MESMO veredito não chama este emissor, então repetir o PATCH não infla
+        o denominador; mudar de procedente↔improcedente chama de novo, então a
+        mudança não some.
+        """
+        return await self.emit(
+            UsageEventName.FLAG_REVISADO,
+            session_id=session_id,
+            props=FlagRevisadoProps(procedente=procedente).model_dump(mode="json"),
+        )
+
+    async def emit_glossario_editado(self, *, client_id: UUID, n_categorias: int) -> bool:
+        """Suposição S-1: alguém de fato mantém o glossário do cliente.
+
+        Sem `session_id` (edição de glossário não pertence a uma conciliação),
+        logo fora do índice parcial por construção: toda edição é uma linha.
+        `n_categorias` é o total de entradas do tenant DEPOIS da escrita — o
+        call site é a BACK 06.3.
+        """
+        return await self.emit(
+            UsageEventName.GLOSSARIO_EDITADO,
+            props=GlossarioEditadoProps(client_id=client_id, n_categorias=n_categorias).model_dump(
+                mode="json"
+            ),
         )
 
     # ------------------------------------------------------------------

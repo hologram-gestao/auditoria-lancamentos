@@ -26,6 +26,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     DateTime,
     ForeignKey,
     Index,
@@ -182,6 +183,20 @@ class ReconciliationSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     conciliated_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     sem_omie_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     omie_sem_arquivo_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    #: Sprint 6 (BACK 06.4/06.5) — a qualificação desta sessão rodou COM o bloco
+    #: de glossário do cliente no prompt? É o mesmo sinal que vai em
+    #: `qualificacao_emitida.com_glossario`, persistido para a tela de revisão
+    #: poder exibir o selo sem consultar o sink de métrica. Escrito por
+    #: `qualify_session` a partir do bloco REALMENTE injetado — nunca de um
+    #: booleano afirmado por caller. `false` em sessão antiga e em cliente sem
+    #: glossário (nenhuma regressão).
+    qualification_used_glossary: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
+
     anomaly_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # Relationships

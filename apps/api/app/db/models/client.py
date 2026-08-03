@@ -24,7 +24,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, LargeBinary, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -76,6 +76,20 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         DateTime(timezone=True),
         nullable=True,
         default=None,
+    )
+
+    # Sprint 6 (BACK 06.2) — marcador de versão do GLOSSÁRIO deste tenant.
+    # Contador incrementado na MESMA transação de qualquer escrita no glossário
+    # (criação, edição E remoção). É o que permite invalidar o bloco de prompt
+    # cacheado da qualificação (BACK 06.4) quando o conteúdo muda.
+    # Contador, e não `MAX(updated_at)` das entradas: um delete não mexeria no
+    # MAX e o cache ficaria servindo conteúdo que já não existe. Fonte ÚNICA —
+    # quem incrementa é `ClientGlossaryRepository.bump_version`, mais ninguém.
+    glossary_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
     )
 
     # Relationships

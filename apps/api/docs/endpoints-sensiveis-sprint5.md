@@ -15,10 +15,10 @@
 
 | | |
 | --- | --- |
-| Endpoints sensíveis (denominador) | **34** |
-| Com caso negativo cross-tenant verde | **34** |
+| Endpoints sensíveis (denominador) | **38** |
+| Com caso negativo cross-tenant verde | **38** |
 | Pendentes (implementação em outra task) | **0** |
-| Cobertura | **34/34 = 100%** |
+| Cobertura | **38/38 = 100%** |
 
 ## Lista canônica
 
@@ -60,6 +60,10 @@ Legenda de `tipo`: **coleção** = vaza forjando `client_id` na URL/payload · *
 | `PATCH` | `/api/v1/clients/{client_id}/users/{user_id}` | detalhe (PK) | `app/modules/users/client_routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); SELECT do alvo com AND client_id (anti-IDOR) | ✅ verde |
 | `POST` | `/api/v1/clients/{client_id}/users/{user_id}/activate` | detalhe (PK) | `app/modules/users/client_routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); SELECT do alvo com AND client_id (anti-IDOR) | ✅ verde |
 | `POST` | `/api/v1/clients/{client_id}/users/{user_id}/deactivate` | detalhe (PK) | `app/modules/users/client_routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); SELECT do alvo com AND client_id (anti-IDOR) | ✅ verde |
+| `GET` | `/api/v1/clients/{client_id}/glossary` | coleção | `app/modules/glossary/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) | ✅ verde |
+| `POST` | `/api/v1/clients/{client_id}/glossary` | coleção | `app/modules/glossary/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); client_id da entrada fixado pelo servidor | ✅ verde |
+| `PATCH` | `/api/v1/clients/{client_id}/glossary/{entry_id}` | detalhe (PK) | `app/modules/glossary/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); SELECT do alvo com AND client_id (anti-IDOR) | ✅ verde |
+| `DELETE` | `/api/v1/clients/{client_id}/glossary/{entry_id}` | detalhe (PK) | `app/modules/glossary/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); SELECT do alvo com AND client_id (anti-IDOR) | ✅ verde |
 
 ## Rotas `/api/v1` fora do denominador
 

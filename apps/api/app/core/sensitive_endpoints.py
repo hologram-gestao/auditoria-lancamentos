@@ -310,6 +310,35 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         "app/modules/users/client_routes.py",
         f"{_VIA_CLIENT_PATH}; SELECT do alvo com AND client_id (anti-IDOR)",
     ),
+    # ---------------------------------------------------------------- glossário (S6)
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/glossary",
+        ScopeKind.COLLECTION,
+        "app/modules/glossary/routes.py",
+        _VIA_CLIENT_PATH,
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients/{client_id}/glossary",
+        ScopeKind.COLLECTION,
+        "app/modules/glossary/routes.py",
+        f"{_VIA_CLIENT_PATH}; client_id da entrada fixado pelo servidor",
+    ),
+    SensitiveEndpoint(
+        "PATCH",
+        "/api/v1/clients/{client_id}/glossary/{entry_id}",
+        ScopeKind.DETAIL_PK,
+        "app/modules/glossary/routes.py",
+        f"{_VIA_CLIENT_PATH}; SELECT do alvo com AND client_id (anti-IDOR)",
+    ),
+    SensitiveEndpoint(
+        "DELETE",
+        "/api/v1/clients/{client_id}/glossary/{entry_id}",
+        ScopeKind.DETAIL_PK,
+        "app/modules/glossary/routes.py",
+        f"{_VIA_CLIENT_PATH}; SELECT do alvo com AND client_id (anti-IDOR)",
+    ),
 )
 
 #: Endpoints do denominador que AINDA não existem no código. Ficam na lista
@@ -318,7 +347,9 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
 #: os conta como NÃO cobertos. Esvaziar este conjunto é parte do DoD.
 #:
 #: **Vazio desde a BACK 05.5** — os 6 endpoints de usuários do cliente saíram
-#: daqui quando foram implementados; a cobertura fechou em 34/34.
+#: daqui quando foram implementados; a cobertura fechou em 34/34. A Sprint 6
+#: acrescentou as 4 rotas do glossário JÁ implementadas (38/38), então este
+#: conjunto continua vazio.
 PENDING_ENDPOINTS: dict[str, str] = {}
 
 #: Rotas `/api/v1` que **não** são sensíveis a tenant, com o porquê. Existe para
