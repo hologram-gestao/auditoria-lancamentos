@@ -35,6 +35,7 @@ from app.integrations.omie.lancamento_cache import OmieLancamentoCache
 from app.modules.anomaly_types import routes as anomaly_types_routes
 from app.modules.auth import routes as auth_routes
 from app.modules.clients import routes as clients_routes
+from app.modules.glossary import routes as glossary_routes
 from app.modules.notifications import routes as notifications_routes
 from app.modules.omie_data import routes as omie_data_routes
 from app.modules.reconciliations import routes as reconciliations_routes
@@ -253,6 +254,7 @@ def create_app() -> FastAPI:
     app.include_router(users_routes.router)
     app.include_router(client_users_routes.router)
     app.include_router(clients_routes.router)
+    app.include_router(glossary_routes.router)
     app.include_router(reconciliations_routes.router)
     app.include_router(review_routes.router)
     app.include_router(export_routes.router)

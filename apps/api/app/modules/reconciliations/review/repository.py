@@ -57,6 +57,16 @@ class ReviewRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    @property
+    def session(self) -> AsyncSession:
+        """A `AsyncSession` desta request.
+
+        Exposta para o service compor OUTRO repository sobre a MESMA transação
+        (o sink de `usage_events`, Sprint 6) — sem isso o evento cairia numa
+        conexão distinta e deixaria de ser atômico com a marcação.
+        """
+        return self._session
+
     async def flush(self) -> None:
         """Helper público — service não acessa `_session` direto."""
         await self._session.flush()

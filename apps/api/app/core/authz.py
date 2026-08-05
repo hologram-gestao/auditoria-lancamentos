@@ -64,6 +64,9 @@ class Permission(StrEnum):
     REVIEW_EXPORT = "review_export"
     SYNC_OMIE_ACCOUNTS = "sync_omie_accounts"
     MANAGE_CLIENT_USERS = "manage_client_users"
+    # Sprint 6 (BACK 06.3): manter o GLOSSÁRIO do tenant. Leitura não pede
+    # permissão (todo papel com acesso ao tenant lê); escrita pede esta.
+    MANAGE_GLOSSARY = "manage_glossary"
     EDIT_CLIENT = "edit_client"
     VIEW_OTHER_TENANT = "view_other_tenant"
 
@@ -77,6 +80,7 @@ class Permission(StrEnum):
 #: | Revisar / exportar            | ✅             | ✅              | ✅    | ✅      |
 #: | Sincronizar contas do Omie    | ✅             | ✅              | ✅    | ✅      |
 #: | Gerir usuários do cliente     | ✅             | ❌              | ✅    | ❌      |
+#: | Manter o glossário (S6)       | ✅             | ❌              | ✅    | ✅ (carteira) |
 #: | Editar dados do cliente (§9)  | ❌             | ❌              | ✅    | ❌      |
 #: | Ver outro tenant              | ❌             | ❌              | ✅    | ✅ (carteira) |
 PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]] = {
@@ -105,6 +109,13 @@ PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]] = {
         }
     ),
     Permission.MANAGE_CLIENT_USERS: frozenset({UserRole.ADMIN, UserRole.CLIENT_MANAGER}),
+    # Glossário: gerente do cliente + equipe do sistema. O `manager` entra aqui
+    # (diferente de MANAGE_CLIENT_USERS) porque o PRD da Sprint 6 pede "admin, e
+    # manager dentro da carteira" — o "dentro da carteira" é
+    # `resolve_client_access`, não esta linha. O `client_operator` só LÊ.
+    Permission.MANAGE_GLOSSARY: frozenset(
+        {UserRole.ADMIN, UserRole.MANAGER, UserRole.CLIENT_MANAGER}
+    ),
     Permission.EDIT_CLIENT: frozenset({UserRole.ADMIN}),
     # "Ver outro tenant": só a equipe do sistema. O `manager` continua limitado
     # à carteira — isso é `resolve_client_access`, não esta linha da matriz.

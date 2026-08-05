@@ -39,11 +39,16 @@ from app.core.logging import get_logger
 from app.core.search_index import compute_query_hmacs
 from app.db.models import (
     AnomalyDetectedBy,
+    AnomalyReviewVerdict,
     FileEntrySituation,
     ReconciliationAnomaly,
     ReconciliationFileEntry,
     ReconciliationOmieEntry,
     ReconciliationSession,
+)
+from app.modules.reconciliations.qualification.service import (
+    ANOMALY_CODE_QUALIF_INCOERENTE,
+    ANOMALY_CODE_QUALIF_SUSPEITA,
 )
 from app.modules.reconciliations.review.repository import ReviewRepository
 from app.modules.reconciliations.review.schemas import (
@@ -59,6 +64,8 @@ from app.modules.reconciliations.review.schemas import (
     UpdateFileEntryRequest,
     UpdateOmieEntryRequest,
 )
+from app.modules.usage_events.repository import UsageEventRepository
+from app.modules.usage_events.service import UsageEventService
 from app.modules.users.schemas import PaginationMeta
 
 if TYPE_CHECKING:
@@ -70,6 +77,13 @@ if TYPE_CHECKING:
     )
 
 logger = get_logger(__name__)
+
+#: Tipos de anomalia que aceitam veredito do revisor (Sprint 6 / BACK 06.5).
+#: São EXATAMENTE os flags da Camada 1 — os mesmos que o
+#: `qualificacao_emitida` conta como "flag emitida" no denominador da métrica.
+QUALIFICATION_FLAG_CODES: frozenset[str] = frozenset(
+    {ANOMALY_CODE_QUALIF_SUSPEITA, ANOMALY_CODE_QUALIF_INCOERENTE}
+)
 
 # Mínimo de chars para resolution_note quando `resolved=true` (Doc §17.3).
 _RESOLUTION_NOTE_MIN_LENGTH = 10
@@ -107,6 +121,10 @@ class ReviewService:
         # Sessão "ativa" para correlação em logs de decrypt — cada método público
         # popula no início da operação. Service é instanciado por request via
         # FastAPI Depends, então não há contaminação entre requests.
+        # Emissor de outcome (Sprint 6 / BACK 06.1) — mesma sessão SQLAlchemy do
+        # repository, para o evento viver na transação da marcação (fail-soft
+        # com SAVEPOINT: falha de instrumentação não desfaz o julgamento).
+        self._events = UsageEventService(UsageEventRepository(repository.session))
         self._current_session_id: UUID | None = None
         # Contador in-memory de falhas de decrypt — observável por teste e
         # útil em debug local. Métrica externa (Prometheus/OTel) entra em
@@ -716,35 +734,56 @@ class ReviewService:
         anomaly, anomaly_type = pair
         cipher = await self._cipher_for_session_id(session_id, provision=True)
 
-        if body.resolved:
-            note = (body.resolution_note or "").strip()
-            if len(note) < _RESOLUTION_NOTE_MIN_LENGTH:
-                raise ValidationAppError(
-                    "Resolution note exige ao menos 10 caracteres.",
-                    user_message=(
-                        "Para marcar como resolvida, descreva a resolução com "
-                        "ao menos 10 caracteres."
-                    ),
+        # Eixo 1 — "alguém agiu". Omitido = não mexe (o contrato virou PATCH de
+        # verdade na Sprint 6; `{resolved: bool}` continua valendo).
+        if body.resolved is not None:
+            if body.resolved:
+                note = (body.resolution_note or "").strip()
+                if len(note) < _RESOLUTION_NOTE_MIN_LENGTH:
+                    raise ValidationAppError(
+                        "Resolution note exige ao menos 10 caracteres.",
+                        user_message=(
+                            "Para marcar como resolvida, descreva a resolução com "
+                            "ao menos 10 caracteres."
+                        ),
+                    )
+                ct, iv = cipher.encrypt(
+                    note, field_locator(AAD_ANOMALY_RESOLUTION_NOTE, anomaly.id)
                 )
-            ct, iv = cipher.encrypt(note, field_locator(AAD_ANOMALY_RESOLUTION_NOTE, anomaly.id))
-            anomaly.resolution_note_encrypted = ct
-            anomaly.resolution_note_iv = iv
-            anomaly.resolved = True
-        else:
-            # Desfazer resolução — limpa nota.
-            anomaly.resolved = False
-            anomaly.resolution_note_encrypted = None
-            anomaly.resolution_note_iv = None
+                anomaly.resolution_note_encrypted = ct
+                anomaly.resolution_note_iv = iv
+                anomaly.resolved = True
+            else:
+                # Desfazer resolução — limpa nota.
+                anomaly.resolved = False
+                anomaly.resolution_note_encrypted = None
+                anomaly.resolution_note_iv = None
+
+        # Eixo 2 — "o flag procedia?" (Sprint 6 / BACK 06.5).
+        verdict_changed = False
+        if body.review_verdict is not None:
+            self._assert_qualification_flag(anomaly_type)
+            verdict_changed = anomaly.review_verdict != body.review_verdict
+            anomaly.review_verdict = body.review_verdict
 
         await self._repo.flush()
         await self._repo.recompute_anomaly_count(session_id)
         await self._repo.flush()
+
+        # `flag_revisado` só na MUDANÇA de estado (ADR-010): remarcar com o
+        # mesmo veredito não infla o denominador, e a mudança não some.
+        if verdict_changed and body.review_verdict is not None:
+            await self._events.emit_flag_revisado(
+                session_id=session_id,
+                procedente=body.review_verdict == AnomalyReviewVerdict.PROCEDENTE.value,
+            )
 
         logger.info(
             "review_anomaly_resolved",
             session_id=str(session_id),
             anomaly_id=str(anomaly_id),
             resolved=anomaly.resolved,
+            review_verdict=anomaly.review_verdict,
         )
 
         file_entries = (
@@ -764,6 +803,25 @@ class ReviewService:
             file_entries=file_entries,
             omie_entries=omie_entries,
         )
+
+    @staticmethod
+    def _assert_qualification_flag(anomaly_type: object) -> None:
+        """Só flag da Camada 1 aceita veredito do revisor.
+
+        `padrao_quebrado`/`valor_outlier` e as anomalias estruturais ficam de
+        fora **por causa da métrica**: o denominador do outcome é
+        `qualificacao_emitida` com veredito `suspeita`/`incoerente`, e julgar um
+        tipo que não entra no denominador inflaria só o numerador.
+        """
+        code = getattr(anomaly_type, "code", None)
+        if code not in QUALIFICATION_FLAG_CODES:
+            raise ValidationAppError(
+                f"Anomalia de tipo {code!r} não aceita veredito de revisão.",
+                user_message=(
+                    "Só é possível marcar como procedente ou improcedente uma "
+                    "suspeita levantada pela análise de classificação."
+                ),
+            )
 
     # ------------------------------------------------------------------
     # Helpers privados
@@ -901,6 +959,7 @@ class ReviewService:
             ),
             detected_by=anomaly.detected_by,
             resolved=anomaly.resolved,
+            review_verdict=anomaly.review_verdict,
             context=self._decrypt_pair(
                 cipher,
                 anomaly.context_encrypted,

@@ -829,3 +829,760 @@ Verificado: 5 testes verdes contra o código da 05.3, ruff + mypy limpos.
 constraint só cobre um par, o par descoberto vira teste — a combinação
 "impossível pela API hoje" é exatamente a que um backfill ou um `UPDATE` manual
 cria amanhã.
+
+---
+
+# Sprint 6 — Glossário e classificação por cliente
+
+<!-- ===== agent-backend ===== -->
+
+## ADR-010 — Dedup de `usage_events` vira **allow-list por evento** (Sprint 6 / BACK 06.1)
+
+**Data:** 2026-08-03 · **Status:** ativo · **Escopo:** `app/db/models/usage_event.py`,
+`app/modules/usage_events/{schemas,repository,service}.py`,
+`app/modules/reconciliations/qualification/service.py`, migration `a1d7f36c9b52`
+
+**Contexto (a landmine que a task mandou resolver).** A Sprint 4 (ADR-004) pôs a
+idempotência do sink no banco: UNIQUE parcial `uq_usage_events_event_session`
+`(event, session_id) WHERE session_id IS NOT NULL` + `ON CONFLICT DO NOTHING`.
+Isso estava **certo** para os 4 eventos daquela sprint — o grão de todos é "no
+máximo 1 por sessão". Os eventos da Sprint 6 quebram essa premissa:
+`qualificacao_emitida` ocorre **uma vez por veredito** (até 50 por lote de IA) e
+`flag_revisado` **uma vez por flag julgado**. Sem mudar nada, a 2ª emissão em
+diante seria descartada em silêncio pelo `DO NOTHING` — e a razão do outcome
+(`improcedentes ÷ emitidas`) sairia errada sem nenhum sinal.
+
+**Decisão.**
+
+1. **O predicado do índice passa a listar quem aceita dedup**, em vez de dedupar
+   tudo que tem sessão:
+   `WHERE session_id IS NOT NULL AND event IN ('autor_navegou_fora',
+   'conciliacao_concluida', 'conciliacao_criada', 'notificacao_entregue')`.
+   **Allow-list e não deny-list**: evento novo nasce SEM dedup. O pior caso vira
+   "linha a mais" (visível na leitura, corrigível) em vez de "linha que sumiu"
+   (invisível, e a métrica mente). Entrar na allow-list exige migration — é uma
+   decisão consciente, não um default.
+2. **Uma função monta a expressão** (`deduped_session_index_predicate()`), usada
+   pelo `Index` do modelo E pelo `index_where` do `ON CONFLICT` do repository. A
+   migration repete a string como **snapshot congelado** (migration não importa
+   código de app — learning "job de migration sem as secrets do serviço"), e um
+   teste unitário compara as duas. Se divergirem, o Postgres não infere o índice
+   como árbitro e o INSERT morre com `42P10` — que o fail-soft engoliria,
+   gravando NADA (a reprovação de QA da Sprint 4, item 2 da ADR-004).
+3. **Grão de cada evento novo, explícito:**
+   - `qualificacao_emitida` — 1 linha por veredito REAL da Camada 1 (inclusive
+     `ok`, que é a base honesta da razão). Par que a IA **omitiu** não gera
+     evento: o caller o trata como "ok" por omissão, e contá-lo inflaria a base
+     com análise que não aconteceu.
+   - `flag_revisado` — 1 linha por **transição de estado da marcação**, não por
+     requisição. Quem garante isso é o call site (BACK 06.5): remarcar com o
+     MESMO veredito não chama o emissor (não infla o denominador), e mudar de
+     procedente↔improcedente chama (a mudança não some). Os `props` são fechados
+     pelo PRD e não carregam id do flag; a **marcação vigente de cada flag** mora
+     na coluna da anomalia (06.5) e é a fonte para reconciliar a série em caso de
+     flip.
+   - `glossario_editado` — sem `session_id`, logo fora do índice parcial por
+     construção; toda edição é uma linha.
+4. **`session_id` é COLUNA, não chave de `props`.** O PRD escreve
+   `qualificacao_emitida {session_id, veredito, com_glossario}`; a sessão entra
+   pela coluna exatamente como já acontece com `conciliacao_criada` (declarado
+   `{session_id, client_id, n_arquivos, criado_por}`, gravado com a sessão na
+   coluna). Sem isso haveria duas fontes para o mesmo id.
+5. **Emissor monta `props` pelo modelo Pydantic**, nunca por `dict` solto —
+   `extra="forbid"` + só `bool`/`int`/`Literal`/`UUID` passam a valer na
+   **emissão**, não só na borda HTTP. Não existe caminho pelo qual o `motivo` da
+   IA, a descrição de um lançamento ou uma razão social entre no sink.
+6. **Nenhum dos 3 entra em `CLIENT_EMITTED_EVENTS`** — aceitar do browser
+   deixaria forjar numerador E denominador (item 4 da ADR-004).
+7. **`insert_many_ignore_duplicate`**: um `INSERT ... VALUES (…), (…)` para os N
+   vereditos de uma qualificação, num único SAVEPOINT. 50 round-trips dentro da
+   transação do job contrariariam o guardrail "a qualificação não pode ficar mais
+   lenta".
+8. **`com_glossario` vem do caller.** `qualify_session` ganhou o parâmetro com
+   default `False` (o glossário só nasce na BACK 06.4). O emissor não decide o
+   valor — hard-codar ali tornaria o "antes/depois" da métrica inverificável.
+
+**Downgrade.** Reversível, com guarda: o `downgrade` **aborta** com mensagem
+acionável (e a consulta a rodar) se já existir par `(event, session_id)`
+duplicado — recriar o índice antigo apagaria linha de métrica, e escolher qual
+morre é decisão de dado, não de migration.
+
+**Verificação (output real, 03/08/2026).** `ruff check` + `ruff format --check` +
+`mypy app/` limpos; `pytest -q --no-cov` = **927 passed, 5 skipped** (baseline
+antes da task: 889 passed). Round-trip `upgrade head → downgrade -1 → upgrade
+head` executado de verdade contra Postgres 16.2, com as linhas preservadas.
+**Mutação obrigatória:** com o predicado revertido para o da Sprint 4
+(`session_id IS NOT NULL`), 4 testes ficam vermelhos —
+`test_duas_qualificacoes_da_mesma_sessao_geram_duas_linhas`,
+`test_flag_revisado_aceita_duas_marcacoes_na_mesma_sessao`,
+`test_razao_do_outcome_e_calculavel_por_sql` e
+`test_predicado_bate_com_o_snapshot_da_migration`. Os testes de contagem batem no
+`UsageEventRepository` DIRETO (sem o service), senão o fail-soft transformaria um
+`42P10` em "gravou 0" silencioso.
+
+## ADR-010-INFRA — Postgres real sem Docker: binários do wheel `pgserver` (Sprint 6)
+
+**Data:** 2026-08-03 · **Status:** ativo · **Escopo:** ambiente do agent, não o repo
+
+**Contexto.** Neste worktree não há Docker (`docker info` falha) nem Postgres do
+sistema, então `testcontainers` **pula** toda a suíte de integração — e os
+critérios desta sprint (contagem de linhas, round-trip de migration, isolamento
+cross-tenant) só valem contra Postgres de verdade.
+
+**Decisão.** Baixar o wheel `pgserver` (cp312 manylinux x86_64) do PyPI, extrair
+em `$TMPDIR` e rodar os binários direto: é **PostgreSQL 16.2**, a mesma major do
+projeto. **Nenhuma dependência foi adicionada ao `apps/api`** — o wheel vive fora
+da árvore e não entra em `pyproject.toml`/`uv.lock`. A suíte usa o escape hatch
+que já existia no `conftest.py` (`TEST_DATABASE_URL`), sem tocar em fixture.
+
+**Duas pegadinhas do sandbox** (custaram tempo, ficam registradas): o servidor
+não cria socket Unix (`Operation not permitted`) → subir com
+`-c unix_socket_directories= -c listen_addresses=127.0.0.1`; e cada chamada de
+Bash é um namespace de rede próprio → o Postgres tem de subir e os testes rodarem
+**no mesmo comando** (um script que dá `pg_ctl start`, roda a suíte e derruba).
+
+**Consequência.** Toda afirmação de teste desta sprint tem output real. Se o
+harness sumir, o fallback honesto é declarar "não pôde ser medido", não afirmar
+verde (CLAUDE.md §6.10).
+
+## ADR-011 — Glossário por tenant: uma tabela com `kind`, texto CIFRADO, versão no cliente (Sprint 6 / BACK 06.2)
+
+**Data:** 2026-08-03 · **Status:** ativo · **Escopo:**
+`app/db/models/client_glossary_entry.py`, `app/db/models/client.py`,
+`app/core/crypto_service.py`, `app/modules/glossary/`, migration `b3e6a91d4c78`
+
+**Contexto.** Não existia estrutura para o vocabulário contábil do cliente. O PRD
+(R1) pede categorias (código/nome + uso), fornecedores típicos e regras de
+auditoria, **por tenant**, com um marcador que invalide o cache do prompt da
+qualificação quando o conteúdo muda.
+
+**Decisão.**
+
+1. **UMA tabela com discriminador `kind`** (`categoria|fornecedor|regra`), não
+   três quase idênticas. Mesmo formato (`code?` + `name` + `description?`), mesmo
+   dono, mesmo ciclo de vida, mesma cripto — três tabelas triplicariam migration,
+   repositório e caso negativo cross-tenant sem separar nada. `kind` fica em
+   CLARO (enum do sistema, não dado do cliente) e é por ele que a leitura ordena.
+2. **Os três campos textuais são CIFRADOS** com a DEK do cliente (envelope
+   AES-256-GCM, `field_locator(AAD_GLOSSARY_*, <pk>)`, IV novo por operação) —
+   "Moinho Prado Ltda" num `name` em claro é exatamente o que o CLAUDE.md §4.5
+   proíbe. Três AADs novos e congelados em `crypto_service.py`.
+   **Consequência aceita:** ordenação/paginação/busca só por coluna em claro
+   (`kind`, `created_at`, `id`). Não existe índice sobre ciphertext — com IV novo
+   por operação, dois ciphertexts do mesmo texto são diferentes.
+   Falha de decrypt vira `[indecifrável]` + `decrypt_failed=True` + warning
+   `glossary_decrypt_failed` (a mesma trilha oficial de review/export), nunca
+   célula vazia silenciosa. A 06.4 OMITE a entrada marcada do bloco de prompt.
+3. **Versão no TENANT: `clients.glossary_version`**, contador incrementado no
+   PRÓPRIO `UPDATE` (`glossary_version + 1 RETURNING`), na MESMA transação de
+   qualquer escrita — criação, edição **e remoção**. `MAX(updated_at)` das
+   entradas não serve: um delete não mexe no MAX e o cache seguiria servindo
+   conteúdo que já não existe. **Fonte única:** só
+   `ClientGlossaryRepository.bump_version` escreve esse número (learning "valor
+   derivado em 2 lugares diverge"). `+1` no UPDATE, e não `read → +1 → write`,
+   para duas edições concorrentes não perderem incremento.
+4. **Soft delete** (`deleted_at`) — padrão do repo, DELETE físico proibido; toda
+   leitura filtra `IS NULL`.
+5. **Isolamento em duas camadas dentro do SELECT:** `AND client_id = <alvo>`
+   sempre, mais `scoped_by_tenant(...)` quando há `CurrentUser`. Usuário de
+   cliente pedindo o tenant alheio recebe lista vazia / `None` (→ 404), inclusive
+   por PK. O caminho do JOB (qualificação) passa `user=None` porque não há
+   request — e ali o `client_id` vem da SESSÃO, nunca de payload.
+6. **Ordem determinística `(kind, created_at, id)`** na leitura. O `id` desempata
+   linhas do mesmo instante (a fixture de transação única tem `NOW()` constante,
+   e import em lote empata em produção): sem desempate estável, o bloco de prompt
+   da 06.4 mudaria de ordem entre chamadas e o prefixo nunca cachearia.
+7. **Tetos de tamanho moram no modelo** (`MAX_CODE_CHARS=40`,
+   `MAX_NAME_CHARS=120`, `MAX_DESCRIPTION_CHARS=500`,
+   `MAX_ENTRIES_PER_CLIENT=200`). Não são cosméticos: são o teto que impede o
+   bloco de prompt de crescer sem limite (guardrail S-2/R9). A validação da 06.3
+   e o truncamento da 06.4 usam ESTES números, não uma segunda cópia.
+8. **`build_entry` / `apply_entry_edit` são o ÚNICO lugar que cifra o glossário.**
+   O `id` é gerado antes de cifrar porque entra no AAD. A edição **recifra** em
+   vez de comparar ciphertext: com IV novo por operação, "comparar para pular"
+   não funciona.
+
+**Downgrade.** Reversível (dropa tabela + coluna). Como as entradas só existem
+nesta tabela, o rollback DESCARTA o glossário — é perda de feature, não corrupção
+de dado pré-existente, e por isso a migration cria (não altera) a estrutura.
+
+**Verificação (output real, 03/08/2026).** `ruff` + `ruff format --check` +
+`mypy app/` limpos; `pytest -q --no-cov` = **944 passed, 5 skipped** (antes da
+task: 927). 13 testes de integração novos em `test_client_glossary.py` (as três
+formas, nada em claro na tabela, IV novo por operação, ciphertext de A não
+decifra em B, `[indecifrável]`, versão nos 3 casos incluindo delete, isolamento
+por tenant e por PK, soft delete) + 4 de round-trip em `test_migrations.py`.
+`git diff` em `pyproject.toml`/`uv.lock` **vazio** — nenhuma dependência nova.
+
+**Correção de rota em teste existente.** `test_backfill_e_idempotente` descia por
+`-2` e o round-trip da 06.1 por `-1`; com migrations novas por cima, alvo
+relativo aponta para outra revisão e o teste deixa de exercitar o que alega.
+Passaram a referenciar **IDs de revisão** (convenção que o próprio arquivo já
+documentava).
+
+## ADR-012 — CRUD do glossário: permissão nova na matriz, teto de entradas e versão+evento num efeito colateral só (Sprint 6 / BACK 06.3)
+
+**Data:** 2026-08-03 · **Status:** ativo · **Escopo:** `app/core/authz.py`,
+`app/core/dependencies.py`, `app/core/exceptions.py`,
+`app/core/sensitive_endpoints.py`, `app/modules/glossary/{routes,schemas,service}.py`
+
+**Contexto.** O glossário só serve se alguém o mantém (suposição S-1). Faltavam
+os endpoints, com a matriz da Sprint 5: gerente do cliente e equipe do sistema
+escrevem; **operador do cliente só lê** (ele precisa do glossário como
+referência na revisão).
+
+**Decisão.**
+
+1. **UMA permissão nova na `PERMISSION_MATRIX`: `manage_glossary`** =
+   `{admin, manager, client_manager}`. Note a diferença deliberada para
+   `manage_client_users` (`{admin, client_manager}`): o PRD desta sprint diz
+   "admin, **e manager dentro da carteira**". O "dentro da carteira" **não** é
+   uma célula da matriz — é `resolve_client_access`, e há teste com `manager`
+   dentro (201) e fora (403) da carteira.
+   **Leitura não pede permissão**: `CurrentUserDep` + `AccessibleClientDep`
+   bastam. Nenhuma rota compara `role`/`client_id` na mão (`grep` limpo).
+2. **Quatro rotas, sem detalhe por PK.** `GET`/`POST` na coleção,
+   `PATCH`/`DELETE` por `entry_id`. Um `GET /{entry_id}` seria superfície
+   sensível a mais para nada — a gaveta do front usa a linha da listagem.
+3. **PATCH substitui os campos textuais por completo**, não é patch parcial. O
+   texto é cifrado: "mudar só a descrição" exigiria decifrar o resto para
+   recompor o registro, e o formulário do front já envia tudo.
+4. **Teto de entradas com código canônico PRÓPRIO**
+   (`GLOSSARY_LIMIT_EXCEEDED`, 400), não `VALIDATION_ERROR` genérico nem 409: o
+   pedido é válido em forma e nada conflita — acabou a cota. Código próprio
+   porque o front precisa distinguir "campo inválido" de "cota cheia" para
+   orientar o usuário. `MAX_ENTRIES_PER_CLIENT` é a MESMA constante da 06.2 que a
+   06.4 assume como teto do bloco de prompt.
+5. **Validação de tamanho no schema, usando as constantes de `app.db.models`** —
+   não redigitadas. `extra="forbid"` no body (um `client_id` enviado ali nunca
+   decide tenant). `name` só-espaços é recusado: `min_length=1` sozinho aceitaria
+   `"   "` e uma entrada em branco entraria no bloco de prompt como ruído.
+   Erros de campo saem como **400 VALIDATION_ERROR** — o handler global do repo
+   converte o 422 do Pydantic (a task falava em 422; a convenção do repo é 400 e
+   foi mantida para não criar um segundo formato de erro).
+6. **`_after_write` concentra o efeito colateral obrigatório**: bump da versão +
+   `glossario_editado`, chamado pelos TRÊS verbos. Espalhado, o dia em que
+   alguém esquecer no `delete` o cache do prompt serviria glossário removido e a
+   S-1 deixaria de ser medida. Evento é fail-soft (SAVEPOINT): sink fora do ar
+   não impede o usuário de salvar — teste explícito.
+7. **`n_categorias` conta TODAS as entradas ativas do tenant**, não só as de
+   `kind='categoria'`. O nome vem literal do PRD e é anterior à decisão de tabela
+   única (ADR-011); o sinal útil para a S-1 é "quanto glossário existe". Está
+   documentado no HANDOFF para a leitura D+30 não interpretar errado.
+8. **As 4 rotas entraram em `sensitive_endpoints.py`** com `_BODIES` VÁLIDOS no
+   teste parametrizado (um 400 de validação passaria sem tocar a autorização — a
+   armadilha que a própria lista documenta). Denominador **34 → 38, cobertura
+   38/38**; `docs/endpoints-sensiveis-sprint5.md` regenerado pelo script.
+
+**Verificação (output real, 03/08/2026).** `ruff` + `format --check` + `mypy`
+limpos; `pytest -q --no-cov` = **974 passed, 5 skipped** (antes da task: 944).
+22 testes novos em `test_glossary_endpoints.py` + 4 casos cross-tenant
+parametrizados + 4 células novas na matriz.
+
+**O guard da matriz funcionou contra mim.** `test_toda_celula_da_tabela_do_prd_foi_transcrita`
+ficou VERMELHO ao acrescentar `MANAGE_GLOSSARY` sem transcrever as 4 células —
+exatamente o desenho da Sprint 5 (permissão nova sem caso negativo não passa).
+
+## ADR-013 — Glossário na QUALIFICAÇÃO: 3º bloco de system, ordem fixa, teto derivado da 06.3 (Sprint 6 / BACK 06.4)
+
+**Data:** 2026-08-03 · **Status:** ativo · **Escopo:**
+`app/modules/reconciliations/qualification/{semantic,service}.py`
+
+**Contexto.** `_analyze_batch` já montava `system_blocks` = `_SYSTEM_PROMPT`
+(com `cache_control: ephemeral`) + `_INVESTMENT_RULE` condicional "pra não
+invalidar o cache do `_SYSTEM_PROMPT` comum". Esse é o precedente EXATO a
+estender — e a extração (`integrations/anthropic/`) não entra nesta história.
+
+**Decisão.**
+
+1. **3º bloco, ordem FIXA:** `_SYSTEM_PROMPT` → `_INVESTMENT_RULE` (se conta de
+   aplicação) → glossário do cliente. O 1º continua sendo o prefixo comum a
+   TODOS os tenants (não pode ser contaminado por conteúdo de cliente, senão o
+   cache deixa de ser compartilhado). O glossário leva
+   `cache_control: ephemeral`, marcando o fim do prefixo cacheável.
+2. **Threading por assinatura:** `analyze_pairs`/`_analyze_batch` ganharam
+   `client_id` e `glossary_block`. `grep` de `ContextVar`/variável de módulo com
+   cliente/glossário nesse caminho: vazio. O bloco chega **já renderizado** —
+   `semantic.py` não toca banco nem cripto.
+3. **`qualify_session` resolve o glossário** (`_resolve_glossary_block`): é o
+   único ponto do fluxo que tem, ao mesmo tempo, a sessão, o `client_id` e o
+   `ClientCipher` do tenant. Falha de leitura **não** derruba a qualificação —
+   o cliente fica sem bloco e o pipeline volta a ser o de antes da sprint.
+4. **⚠️ Supersede um detalhe da BACK 06.1:** o parâmetro `com_glossario` de
+   `qualify_session` foi REMOVIDO; o valor passa a ser **derivado** de
+   `glossary_block is not None`. Motivo: um booleano afirmado pelo caller pode
+   mentir (default esquecido, caller enganado) e a leitura D+30 compararia
+   "antes x depois" contra uma flag que não corresponde ao prompt que rodou.
+   O emissor continua **recebendo** o valor por parâmetro (a invariante da 06.1:
+   nada hard-coded no emissor). Teste parametrizado cobre os dois cenários.
+5. **Renderização determinística:** seções em ordem fixa
+   (categoria → fornecedor → regra), entradas na ordem do repository
+   (`kind, created_at, id`), **sem** timestamp/versão/id no texto. A versão do
+   glossário invalida o cache pelo CONTEÚDO das entradas — imprimir o número da
+   versão faria qualquer escrita invalidar o prefixo mesmo sem mudar o texto.
+6. **Teto do bloco derivado dos MESMOS limites da 06.3**:
+   `GLOSSARY_BLOCK_MAX_CHARS = MAX_ENTRIES_PER_CLIENT * (MAX_CODE + MAX_NAME +
+   MAX_DESCRIPTION + overhead)` = 135.200 chars. Consequência deliberada: um
+   glossário DENTRO dos limites documentados **nunca** é truncado; o truncamento
+   protege contra dado que passou por fora (linha legada, escrita direta no
+   banco, teto reduzido no futuro). Corte no último `\n` antes do teto (metade de
+   uma regra é pior que a regra ausente) + nota **dentro do prompt** avisando que
+   a lista está incompleta + `log.warning("qualification_glossary_truncated")`.
+7. **Entrada indecifrável é OMITIDA** do bloco (com
+   `qualification_glossary_decrypt_skipped`): injetar `[indecifrável]` como se
+   fosse vocabulário do cliente é pior que omitir. Glossário inteiro
+   indecifrável → sem bloco.
+8. **O bloco diz explicitamente que é CONTEXTO e não revoga as regras.** Sem
+   isso, um glossário generoso vira "marque tudo ok" e a qualificação perde a
+   função — o oposto do outcome (menos falso positivo, não menos detecção).
+
+**Medição (03/08/2026, output real).**
+
+| | chars | tokens (est. ÷4) |
+| --- | --- | --- |
+| `_SYSTEM_PROMPT` | 1.962 | ~490 |
+| glossário realista (12 categorias + 8 fornecedores + 3 regras) | 1.900 | ~475 |
+| pior caso dentro dos limites da 06.3 (200 entradas cheias) | 134.017 | ~33.504 |
+| teto (`GLOSSARY_BLOCK_MAX_CHARS`) | 135.200 | ~33.800 |
+
+**⚠️ `cached_input_tokens` real NÃO foi medido** — não há chave Anthropic válida
+neste ambiente, e afirmar cache-hit sem output real seria alucinação
+(CLAUDE.md §6.10/§6.14). O que foi provado por teste é a **condição necessária**:
+duas análises seguidas do mesmo cliente produzem `system_blocks` byte a byte
+idênticos (o cache da Anthropic é keyed pelo conteúdo do prefixo). A medição
+real fica como pré-requisito de validação em dev.
+
+**Risco de custo registrado.** O pior caso (~33k tokens de bloco) é caro no
+cache-WRITE de cada cliente novo/editado. Com glossário realista o bloco é do
+tamanho do próprio `_SYSTEM_PROMPT` e o guardrail do PRD é folgado. Se a medição
+em dev mostrar custo inaceitável, o botão a girar é `MAX_ENTRIES_PER_CLIENT` /
+`MAX_DESCRIPTION_CHARS` na 06.2 — o teto do bloco os segue automaticamente.
+
+**Verificação.** `ruff` + `format --check` + `mypy` limpos; `pytest -q --no-cov`
+= **1000 passed, 5 skipped** (antes da task: 974). `git diff` em
+`app/integrations/anthropic/client.py` e `prompts.py`: **vazio** — e há teste
+unitário que falha se a palavra "glossar" aparecer nesses arquivos.
+**Mutação:** desligando a injeção (`if False`), **5 testes ficam vermelhos**
+(injeção, ordem com a regra de aplicação, isolamento A×B, edição não afeta o
+outro tenant, ordem das seções).
+
+## ADR-014 — Veredito do revisor: 2º eixo no PATCH que já existia, tipo restrito ao denominador, selo persistido na sessão (Sprint 6 / BACK 06.5)
+
+**Data:** 2026-08-03 · **Status:** ativo · **Escopo:**
+`app/db/models/{reconciliation_anomaly,reconciliation_session}.py`,
+`app/modules/reconciliations/review/{schemas,service,routes,repository}.py`,
+`app/modules/reconciliations/{schemas,service}.py`,
+`app/modules/reconciliations/qualification/service.py`, migration `c5a2f81b6d34`
+
+**Contexto.** O numerador da métrica da sprint é "flag que a revisão marcou como
+improcedente". Não existia esse dado: `reconciliation_anomalies` só tinha
+`resolved` + `resolution_note_encrypted`.
+
+**Decisão.**
+
+1. **`review_verdict` é um EIXO DIFERENTE de `resolved`.** "Resolvida" = alguém
+   agiu; "improcedente" = o flag não devia ter sido levantado. Um flag
+   improcedente costuma ser fechado sem nenhuma ação no Omie — misturar os dois
+   apagaria justamente o falso positivo que a sprint quer medir. Coluna nova
+   `review_verdict` (nullable, `procedente|improcedente`), NULL = não julgado.
+2. **ESTENDEU o `PATCH .../anomalies/{anomaly_id}`** em vez de criar rota
+   paralela. Consequências boas: RBAC/tenant/`_load_session_for_rbac` já estão
+   lá; a rota **já está** na lista canônica de `sensitive_endpoints.py` (nada a
+   registrar, denominador segue 38/38) e já é coberta pelo caso negativo
+   cross-tenant parametrizado. Duas rotas fazendo revisão de anomalia seria a
+   segunda implementação da mesma regra.
+3. **`resolved` virou opcional** (`bool | None`), junto com `review_verdict`:
+   marcar improcedente sem resolver é o caminho comum. Omitir = não mexer.
+   Corpo com os DOIS ausentes é 400 — PATCH que não muda nada é bug do cliente.
+   O contrato antigo (`{resolved, resolution_note}`) continua válido byte a byte.
+4. **Só flags da Camada 1 aceitam veredito** (`qualificacao_suspeita`,
+   `qualificacao_incoerente`) — **não** `padrao_quebrado`/`valor_outlier` nem as
+   estruturais. Razão de MÉTRICA, não de gosto: o denominador é
+   `qualificacao_emitida` com veredito suspeita/incoerente; julgar um tipo que
+   não entra no denominador infla só o numerador. Recusa = 400
+   `VALIDATION_ERROR` com `userMessage` em PT-BR acionável.
+5. **`flag_revisado` só na MUDANÇA de estado** — o grão decidido na ADR-010.
+   Reenviar o mesmo veredito não emite (não infla o denominador); trocar emite
+   (a mudança não some). Fail-soft com SAVEPOINT: sink fora do ar não desfaz o
+   julgamento do usuário.
+6. **O selo do glossário é `reconciliation_sessions.qualification_used_glossary`**
+   (NOT NULL default `false`), escrito por `qualify_session` a partir do bloco
+   REALMENTE injetado (mesma origem do `com_glossario` do evento — uma conta só,
+   nunca duas paralelas). Exposto em `SessionDetailPayload`, que a tela de
+   revisão já carrega. Alternativa descartada: derivar do sink `usage_events` na
+   leitura — seria acoplar UI a tabela de métrica e pagar um agregado por render.
+   Sessão antiga e cliente sem glossário → `false`, sem regressão.
+7. **`ReviewRepository.session` virou propriedade pública** para o service
+   compor o `UsageEventRepository` sobre a MESMA transação; sem isso o evento
+   cairia noutra conexão e deixaria de ser atômico com a marcação.
+
+**Verificação (output real, 03/08/2026).** `ruff` + `format --check` + `mypy`
+limpos; `pytest -q --no-cov` = **1019 passed, 5 skipped** (antes da task: 1000).
+Round-trip real da migration (`TestVereditoDoRevisorRoundTrip`): colunas criadas
+com a nulabilidade certa, `downgrade` remove as duas, `upgrade` recria.
+**Mutação:** emitindo `flag_revisado` sempre (em vez de só na mudança) **e** sem
+a guarda de tipo, **2 testes ficam vermelhos** —
+`test_remarcar_com_o_mesmo_valor_nao_emite_de_novo` e
+`test_anomalia_que_nao_e_da_qualificacao_e_recusada`.
+
+
+<!-- ===== agent-frontend · Sprint 6 ===== -->
+
+---
+
+## ADR-011-FE — Glossário: a ROTA é de leitura para todos; só a ESCRITA pede permissão (Sprint 6 / FRONT 06.6)
+
+**Data:** 2026-08-03 · **Status:** ativo · **Escopo:** `apps/web/src/lib/authz.ts`,
+`components/features/glossary/glossary-screen.tsx`, `features/clients/client-shell.tsx`
+
+**Contexto.** O padrão que a S5 deixou para tela de tenant é "não tem a permissão →
+`AccessDenied` + item de menu oculto" (`ClientUsersScreen`, ADR-008-FE). Copiá-lo aqui
+seria o defeito: o backend da BACK 06.3 põe `ManageGlossaryDep` **só nas escritas** —
+o `GET` exige apenas `AccessibleClientDep`, porque "o operador precisa do glossário
+como referência" (docstring de `modules/glossary/routes.py`, lida antes de decidir).
+Bloquear a rota para o operador negaria na UI o que o servidor libera, que é o mesmo
+tipo de erro do botão que devolve 403 — só invertido, e mais difícil de perceber.
+
+**Decisão.**
+- Permissão nova `manage_glossary` em `PERMISSION_MATRIX`, espelhando linha a linha o
+  `PERMISSION_MATRIX` do backend: `admin`, `manager` **e** `client_manager`. O
+  `manager` do SISTEMA entra aqui (diferente de `manage_client_users`) porque é o que
+  a matriz do backend diz; o "dentro da carteira" é `resolve_client_access`, não esta
+  linha.
+- **Não** existe permissão `view_glossary`. Inventá-la criaria no front uma regra que o
+  backend não tem — e a primeira divergência apareceria como tela negada sem 403.
+- Na tela, `canManage` governa: botão "Nova entrada", a **coluna "Ações" inteira** (não
+  só os botões: cabeçalho de coluna permanentemente vazio é ruído para leitor de tela),
+  o texto do subtítulo, o empty-state (com CTA para quem escreve, sem CTA para quem lê)
+  e a **montagem** da gaveta e do `AlertDialog` — esconder o gatilho e deixar o diálogo
+  montado ainda o deixaria alcançável.
+- O item "Glossário" na nav do cliente aparece para os QUATRO papéis.
+
+**Consequência.** É a primeira tela do produto com dois níveis (ler ≠ escrever) no mesmo
+destino. Quem copiar `ClientUsersScreen` para uma tela nova precisa checar ANTES qual
+dependency o backend pendurou no `GET`: `AccessibleClientDep` sozinho = rota de leitura
+liberada; `Manage*Dep` = rota inteira gated.
+
+## ADR-012-FE — Sem filtro por tipo na lista do glossário: o endpoint não aceita (Sprint 6 / FRONT 06.6)
+
+**Data:** 2026-08-03 · **Status:** ativo · **Escopo:** `components/features/glossary/glossary-screen.tsx`
+
+**Contexto.** A task sugeria "filtro/segmentação por tipo se couber". O contrato
+gerado mostra que `GET /clients/{client_id}/glossary` aceita **só** `page`/`pageSize`
+(`list_glossary_entries_...` em `schema.ts`; conferido também no router).
+
+**Decisão.** Não implementar o filtro. Filtrar no cliente operaria sobre a PÁGINA
+carregada: esconderia entradas das outras páginas e o rodapé continuaria anunciando o
+total do servidor — uma tela que mente sobre quantas entradas existem. A leitura por
+tipo é dada pela coluna "Tipo" com badge (`info`/`warning`/`muted`).
+
+**Consequência.** Quando o backend expuser `kind` como query param, o filtro entra
+aqui e vira estado na URL, como busca/paginação nas outras listas. Enquanto não
+expuser, a ausência é deliberada — não é esquecimento.
+
+## ADR-013-FE — "Cliente tipado" neste repo é o helper POR MÉTODO + tipos do contrato (Sprint 6 / FRONT 06.6)
+
+**Data:** 2026-08-03 · **Status:** ativo · **Escopo:** `apps/web/src/lib/api/*`
+
+**Contexto.** O CLAUDE.md do papel manda usar `apiTyped.METHOD("/path", ...)`, para o
+método errado virar erro de compilação. **`apiTyped` não existe neste repo** (grep
+vazio): o que existe desde a S3 é `apiGet`/`apiPost`/`apiPatch`/`apiDelete` em
+`lib/api/client.ts`, com o shape vindo do contrato gerado no genérico.
+
+**Decisão.** Seguir o padrão existente (`lib/api/glossary.ts` espelha
+`lib/api/client-users.ts`), e não introduzir uma segunda camada de cliente só nesta
+feature — duas convenções de chamada conviveriam no mesmo diretório, que é pior que a
+que já está lá.
+
+**Por que o risco do learning não se aplica.** O learning "método HTTP como string é
+opaco ao compilador" descreve `apiFetch(url, {method: "POST"})`: o método é um campo de
+objeto, e trocar POST↔PATCH não muda tipo nenhum. Aqui o método está no **nome da
+função** — `apiPatch` não é `apiPost`, a troca é visível na revisão e no diff. O que
+continua NÃO travado pelo `tsc` é o par (rota, método): nenhum dos dois desenhos amarra
+o path ao verbo. Fechar isso de verdade é um cliente derivado de `paths[...]` do
+`schema.ts`, refactor transversal a todas as features — fora do escopo desta task, e
+registrado aqui como dívida conhecida.
+
+## ADR-014-FE — Shapes de anomalia migrados do `interface` manual para o contrato (Sprint 6 / FRONT 06.7)
+
+**Data:** 2026-08-03 · **Status:** ativo · **Escopo:** `apps/web/src/lib/api/reconciliations.ts`,
+`apps/web/src/lib/contracts/index.ts`
+
+**Contexto.** `AnomalyItem`, `AnomalyTypeRef`, `AnomalyRelated*` e `PatchAnomalyPayload`
+eram `interface`s redigitadas à mão no módulo de API — exatamente o "shape esperançoso
+espelhando endpoint" que o CLAUDE.md proíbe, sobrevivente desde a S11/S12. A BACK 06.5
+acrescentou `review_verdict` ao item e tornou `resolved` OPCIONAL no request.
+
+**Decisão.** Trocar a origem em vez de acrescentar mais um campo à cópia. Os nomes
+exportados foram mantidos (`export type AnomalyItem = Schemas['AnomalyItem']`), então
+nenhum consumidor mudou — `tsc --noEmit` limpo na primeira execução após a troca, o que
+também prova que a cópia estava fiel até aqui.
+
+**O que isso destravou (não é cosmético).** Com `PatchAnomalyPayload.resolved: boolean`
+obrigatório, mandar **só** o veredito **não compilava** — e o caminho comum da Sprint 6 é
+justamente "marcar improcedente sem resolver". A `interface` manual não estava só
+desatualizada: ela proibia a feature.
+
+**Consequência.** Sobram `interface`s manuais no mesmo arquivo (movimentações, entradas
+Omie, `OmieLancamentoItem`). Não foram tocadas — refactor não pedido, e a Sprint 6 não
+mexe nesses endpoints. Ficam registradas aqui como a próxima dívida do mesmo tipo.
+
+## ADR-015-FE — Selo do glossário é da SESSÃO e mora no cabeçalho, não na linha (Sprint 6 / FRONT 06.7)
+
+**Data:** 2026-08-03 · **Status:** ativo · **Escopo:** `review/glossary-seal.tsx`,
+`detail/session-detail-screen.tsx`
+
+**Contexto.** `qualification_used_glossary` é um booleano do detalhe da SESSÃO, escrito
+por `qualify_session` a partir do bloco realmente injetado no prompt. O lugar óbvio para
+"o veredito considerou o glossário" seria junto do veredito — isto é, na célula de
+qualificação de cada movimentação.
+
+**Decisão.** Um selo só, no cabeçalho da conciliação, ao lado do badge de status.
+Motivo: o dado não varia por linha. Renderizá-lo por linha repetiria a mesma informação
+N vezes numa tabela **virtualizada** (nós extras no DOM, ruído para leitor de tela,
+custo por linha renderizada) sem dizer nada que o topo não diga. O cabeçalho cobre as
+quatro abas de uma vez, e a virtualização da aba Movimentações não foi tocada.
+
+**`false` não ocupa espaço.** Cliente sem glossário e sessão anterior à sprint (default
+`false`) não renderizam nada: sem placeholder, sem "não considerou". A tela fica
+idêntica ao comportamento anterior — que é o critério de "sem regressão", e está coberto
+nos dois lados (jsdom + e2e).
+
+**Detalhe de layout que só apareceu no 390px:** o selo entrou num `flex-wrap` junto do
+badge de status. Sem isso ele sairia da linha — a mesma classe de defeito do botão
+"Sair" cortado na S5 (ADR-010-FE). O e2e assere `x + width <= viewport.width`.
+
+## ADR-016-FE — Veredito do revisor é EIXO PRÓPRIO, com "Não avaliado" visível (Sprint 6 / FRONT 06.7)
+
+**Data:** 2026-08-03 · **Status:** ativo · **Escopo:** `review/anomaly-verdict-control.tsx`,
+`review/anomalies-tab.tsx`
+
+**Contexto.** A aba Anomalias já tinha a coluna "Status" (Pendente/Resolvida). A
+tentação é acrescentar "Improcedente" como um terceiro valor dela.
+
+**Decisão.** Coluna separada ("O flag procedia?"). "Resolvida" = alguém agiu sobre a
+anomalia; "procedente/improcedente" = ela *devia ter sido levantada*. São perguntas
+diferentes, e o backend as separou de propósito (dois campos opcionais no mesmo PATCH,
+com `flag_revisado` emitido só na MUDANÇA de veredito). Fundir os eixos apagaria a
+métrica de outcome da sprint — um flag improcedente costuma ser fechado sem ação
+nenhuma no Omie.
+
+**Três estados, todos visíveis.** "Não avaliado" é um rótulo de verdade, não a ausência
+dos outros dois: sem ele o revisor não distingue "ainda não olhei" de "olhei e achei
+procedente" — e a métrica depende justamente dessa distinção. O estado vai em
+`aria-pressed` **e** em texto; a variante do botão é reforço, nunca o único sinal.
+
+**A ação só existe onde o servidor aceita.** `qualificacao_suspeita` e
+`qualificacao_incoerente` — os mesmos `QUALIFICATION_FLAG_CODES` de `review/service.py`.
+Nos demais tipos a célula mostra travessão. Oferecer o botão e receber 400 seria o
+defeito de UX que a matriz do front existe para evitar; a autoridade continua sendo o
+backend.
+
+**Reenviar o mesmo veredito não dispara request.** É inócuo no servidor (o evento só sai
+na mudança), mas gasta um round-trip e um refetch da lista — e o operador reclica por
+reflexo.
+
+## ADR-017-FE — O toast pinta pelos TOKENS do tema; `richColors` do Sonner saiu por reprovar contraste (Sprint 6 / FRONT 06.7 — retrabalho 1)
+
+**Data:** 2026-08-03 · **Status:** ativo · **Escopo:** `apps/web/src/app/providers.tsx`,
+`src/app/globals.css`, `tailwind.config.ts`, `src/app/__tests__/theme-contrast.test.ts`,
+`e2e/a11y-mocked.spec.ts`
+
+**Contexto.** O QA reprovou a FRONT 06.7 com o gate `web_a11y` VERMELHO:
+`serious/color-contrast` em `div[data-title=""]` — o toast de sucesso do veredito,
+`#008a2e` sobre `#ecfdf3` = **4.25:1**, abaixo do AA de 4.5:1 nos 13px do título. O
+`<Toaster richColors>` (`providers.tsx`, pré-existente desde a S4) usa a paleta própria
+do Sonner, que nunca passou pelo `theme-contrast.test.ts` — os tokens do produto passam,
+mas o toast não os usava. A FRONT 06.7 foi a **primeira** entrega a colocar um toast na
+tela enquanto o axe rodava; o defeito é antigo, o vermelho é deste commit.
+
+**Decisão.**
+1. **`richColors` fora, `toastOptions.classNames` dentro**, com os mesmos pares dos
+   badges (`bg-success-muted`/`text-success` e família). A prop tinha de sair, não
+   bastava acrescentar `classNames`: as regras do Sonner para rich colors são
+   `[data-rich-colors=true][data-sonner-toast][data-type=…]` — especificidade (0,3,0),
+   que ganha de um utilitário do Tailwind (0,1,0). Já a regra base é
+   `:where([data-sonner-toast][data-styled="true"])`, e `:where()` tem especificidade
+   **zero** — por isso a classe vence sem `!important`. Conferido em
+   `node_modules/sonner/dist/styles.css`, não presumido.
+2. **Um par por TIPO, nada de base comum.** O Sonner concatena `classNames.default` **e**
+   `classNames[tipo]` no mesmo `<li>` (conferido em `dist/index.mjs`): pôr fundo/texto nos
+   dois deixaria o vencedor por conta da ordem em que o Tailwind emite os utilitários.
+   O toast neutro fica com o `--normal-bg`/`--normal-text` do Sonner (~18:1).
+3. **Token novo `--destructive-muted`**, simétrico a `success/warning/info`, em vez de
+   reusar `bg-destructive/10` no toast de erro. `/10` é TRANSLÚCIDO e o toast flutua sobre
+   a página: ele comporia com card, tabela ou badge embaixo — o mesmo mecanismo da
+   ADR-007-FE. O par entrou no `theme-contrast.test.ts` (claro e escuro).
+4. **Correção no `<Toaster>`, não no call site.** Quem escolhe é o `toast.success(...)`;
+   quem pinta é o provider. Isso cobre de uma vez os ~20 call sites — inclusive os três da
+   FRONT 06.6 (`glossary-form-drawer.tsx:118,121`, `glossary-delete-confirm.tsx:59`), que
+   o QA apontou como o mesmo objeto.
+
+**O gate sozinho não bastava (achado desta correção).** O agent acrescentou o cenário do
+toast de ERRO e, para provar que ele mede alguma coisa, mutou o par para
+branco-sobre-quase-branco: o `analyze()` do axe passou **verde** — o toast de erro já tinha
+saído da tela (4 s de `duration`) quando o axe rodou. Só a medição direta
+(`measuredContrast`, o mesmo helper do badge da S4) reprovou, com **1.048**. Logo:
+**cenário que depende de elemento efêmero leva asserção síncrona no elemento, não só
+`analyze()` da página** — senão é teatro verde.
+
+**Verificação (container `mcr.microsoft.com/playwright:v1.59.1-noble`, `--retries=0`,
+build standalone).**
+
+| Árvore | Resultado |
+| --- | --- |
+| com a correção | `expected=118 unexpected=0 skipped=0 flaky=0` |
+| mutação 1 — `richColors` de volta | `expected=114 unexpected=4`, `#008a2e`/`#ecfdf3` = 4.25:1 (reproduz o achado do QA) |
+| mutação 2 — par do erro para `text-destructive-foreground` | 4 cenários vermelhos, contraste medido **1.048** |
+
+> **Confirmado pelo QA na re-revisão (03/08, ADR-017-QA):** a árvore corrigida deu
+> `118 passed` no mesmo container, e a mutação `richColors` + `classNames` juntos
+> reprovou os **dois** toasts (sucesso **4.259**, erro **4.347**) — o que também confirma
+> por execução a afirmação de especificidade do item 1 (a prop precisava SAIR; manter
+> `richColors` ao lado de `classNames` deixa o Sonner ganhar).
+
+**Correção de fato registrada no repo:** o cabeçalho de `e2e/a11y-mocked.spec.ts` afirmava
+que não havia `docker` nesta distro WSL e que os cenários da Sprint 6 não tinham sido
+medidos. **`docker` existe e funciona aqui** (`docker ps` responde; a imagem do Playwright
+está em cache) — foi como o QA reprovou e como esta correção foi verificada. Comentário
+committed que declara "não verificado" onde há caminho de verificação faz o próximo agent
+não medir; o aviso foi reescrito com o número real e a data.
+
+<!-- ===== agent-review (QA) · Sprint 6 ===== -->
+
+---
+
+## ADR-013-QA — O gate de a11y só mede o que está montado: estado transitório entra no spec (Sprint 6)
+
+**Data:** 2026-08-03 · **Status:** ativo · **Escopo:** `CLAUDE.md` do QA (checklist), veredito da FRONT 06.7
+
+**Contexto.** Todos os cenários de `e2e/a11y-mocked.spec.ts` até a Sprint 5 analisavam a
+tela **em repouso**. O 1º cenário que chamou `analyze()` com um toast na tela (Sprint 6 /
+FRONT 06.7, "operador marca o flag como improcedente") ficou **vermelho**:
+`serious/color-contrast` em `div[data-title=""]`, `#008a2e` sobre `#ecfdf3` = 4.25:1
+(< 4.5:1). O `<Toaster ... richColors />` está em `app/providers.tsx` desde a S4 — o
+defeito é antigo, o que faltava era medi-lo.
+
+**Decisão.**
+1. **Estado transitório é tela.** A checklist de a11y do QA passa a exigir ao menos um
+   cenário com toast/tooltip/popover **montado** no instante do `analyze()`.
+2. **Componente de terceiro com paleta própria é ponto cego duplo.** Escapa do audit de
+   token por `grep` (não há hex no nosso CSS — a cor vem do CSS da lib) e escapa do axe
+   (nunca está na árvore quando se mede). Os dois gates verdes não implicam AA.
+3. **A correção mora no `<Toaster>` global**, não no call site: os mesmos `toast.success`
+   saem da tela de Glossário (FRONT 06.6, aprovada) e de qualquer feature futura.
+4. **Não se relaxa o `analyze()`** para passar (CLAUDE.md §6.16): o gate está certo, o
+   contraste é que está errado.
+
+**Consequência.** A FRONT 06.7 volta como FAILED com o comando de execução do gate no
+comentário. A FRONT 06.6 foi aprovada: o defeito existe nos toasts dela também, mas
+nenhum cenário os mede e a correção é a MESMA linha — espalhar a reprovação pediria dois
+retrabalhos para uma correção só.
+
+## ADR-014-QA — O gate de contrato protege o TIPO; a CHAVE no fio precisa de asserção própria (Sprint 6)
+
+**Data:** 2026-08-03 · **Status:** ativo · **Escopo:**
+`apps/api/tests/integration/test_glossary_contract_qa.py`, `CLAUDE.md` do QA
+
+**Contexto.** A ADR-011-QA fechou o drift de contrato regenerando `schema.ts` a partir da
+OpenAPI do backend commitado e exigindo `git diff` = 0 (feito de novo nesta sprint: **diff
+0**, `openapi-typescript 7.13.0` sobre `app.openapi()` de `d499a09` vs. `schema.ts` de
+`d2e9d86`). Isso protege o **tipo** — não o comportamento em runtime.
+
+**Problema encontrado.** `GlossaryEntryResponse.decrypt_failed` tem
+`alias="decryptFailed"` e o front lê `entry.decryptFailed`. Removendo o alias, os **22
+testes de rota da BACK 06.3 continuam verdes** (todos leem o VALOR: `data[...]["name"]`)
+e o gate de contrato também, porque a OpenAPI é montada pelo mesmo `by_alias` da
+serialização — **os dois regridem juntos e em silêncio**. Na tela, a badge "Indecifrável"
+sumiria e a entrada corrompida viraria linha aparentemente normal: a célula silenciosa que
+o CLAUDE.md §4.1 proíbe.
+
+**Decisão.** Teste de QA que assere as **chaves literais** dos 4 verbos do glossário:
+`decryptFailed` presente / `decrypt_failed` ausente, o conjunto exato de chaves da entrada,
+e o **número de chaves do envelope** (1 no POST/PATCH/DELETE, 2 na lista — o `rawFetch` do
+front só desembrulha quando `data` é a única). Regra na checklist: **campo com alias exige
+asserção da chave, não só do valor**.
+
+**Verificação (output real, 03/08/2026).** 4 passed. **Mutação:** removendo o alias do
+schema, **3 dos 4 ficam vermelhos** e os 22 da BACK 06.3 seguem verdes — que é exatamente
+o buraco que o teste existe para tapar.
+
+## ADR-015-QA — Isolamento por tenant do glossário: provado por MUTAÇÃO, e a cripto é a 2ª barreira (Sprint 6)
+
+**Data:** 2026-08-03 · **Status:** ativo · **Escopo:** veredito das BACK 06.2/06.3/06.4
+
+**Contexto.** O risco nº 1 da sprint é glossário de um cliente vazar para outro — na
+leitura HTTP e, pior, **dentro do prompt** de qualificação.
+
+**O que foi medido.** Removendo o filtro de tenant de
+`ClientGlossaryRepository._scoped` (`AND client_id = <alvo>` + `scoped_by_tenant`),
+**5 testes ficam vermelhos**: `test_snapshot_de_um_tenant_nunca_traz_entrada_do_outro`,
+`test_usuario_de_cliente_forjando_client_id_nao_le_o_outro_tenant`,
+`test_detalhe_por_pk_de_outro_tenant_devolve_none`,
+`test_admin_le_o_tenant_alvo_e_nada_alem_dele` e
+`test_entrada_de_outro_tenant_por_pk_devolve_404`. Não são vacuosos.
+
+**Achado que vale registrar.** Com a MESMA mutação, os testes de isolamento **do prompt**
+(`TestIsolamentoEntreClientes`) continuam **verdes** — porque a 2ª barreira segura: o AAD
+amarra cada ciphertext ao par (cliente, linha), o cipher de B não decifra a entrada de A,
+a entrada volta `decrypt_failed=True` e `render_glossary_block` a **omite**. Ou seja: uma
+regressão no `WHERE` **não** vaza texto do outro tenant no prompt — vira bloco menor +
+`qualification_glossary_decrypt_skipped` no log.
+**Consequência para o próximo QA:** o teste de isolamento do prompt sozinho **não** prova o
+filtro SQL (dois mecanismos independentes o sustentam). Quem prova o `WHERE` são os 5
+acima — mantenha-os.
+
+## ADR-016-QA — `cached_input_tokens` NÃO foi medido: a condição necessária foi, o cache-hit não (Sprint 6)
+
+**Data:** 2026-08-03 · **Status:** ativo · **Escopo:** veredito da BACK 06.4
+
+**Declaração explícita** (o critério de aceite da task de QA permite o número medido **ou**
+a limitação declarada — e afirmar cache-hit sem output real seria alucinação,
+CLAUDE.md §6.10):
+
+- **Não há chave Anthropic válida neste ambiente**, então `cached_input_tokens > 0` em duas
+  análises consecutivas do mesmo cliente **não foi observado contra a API real**. Fica como
+  pré-requisito de validação em dev, com o `client_id` e o `glossary_block_chars` já no log
+  de `qualification_semantic_batch` para a leitura D+30 separar por tenant.
+- **O que foi provado por execução** é a condição NECESSÁRIA do cache-hit (o cache da
+  Anthropic é keyed pelo conteúdo do prefixo): duas montagens seguidas do mesmo cliente
+  produzem `system_blocks` byte a byte idênticos; a ordem das seções e das entradas é fixa;
+  nem versão nem timestamp entram no texto; editar o glossário de A não muda o bloco de B.
+- **Tamanho medido:** `_SYSTEM_PROMPT` 1.962 chars; glossário realista ~1.900 chars; pior
+  caso dentro dos limites da BACK 06.3 134.017 chars (~33,5k tokens estimados), abaixo do
+  teto `GLOSSARY_BLOCK_MAX_CHARS = 135.200`. Não há teto de tokens de ENTRADA no código
+  (`grep` de `MAX_INPUT`/`TOKEN_LIMIT`: só caps de SAÍDA) — o guardrail de tamanho é o teto
+  de entradas da 06.3 mais o truncamento determinístico da 06.4, e ambos têm teste.
+
+## ADR-017-QA — Correção de contraste se re-verifica com a mutação DUPLA, não só com o verde (Sprint 6 / re-revisão 1)
+
+**Data:** 2026-08-03 · **Status:** ativo · **Escopo:** veredito da FRONT 06.7 (re-revisão),
+`CLAUDE.md` do QA (checklist de a11y)
+
+**Contexto.** A FRONT 06.7 voltou de FAILED com o commit `7a7062e`, trocando o
+`<Toaster richColors>` por `toastOptions.classNames` sobre os tokens do tema, mais um
+cenário novo para o toast de ERRO. Aceitar "agora dá 118 passed" seria o mesmo erro que a
+1ª revisão pegou: número verde não prova que o gate MEDE — prova que ele não reclamou.
+
+**Decisão (o que a re-revisão executou, no container
+`mcr.microsoft.com/playwright:v1.59.1-noble`, build standalone, `--retries=0`).**
+1. **Árvore corrigida:** `118 passed (53.2s)`, `unexpected=0 skipped=0 flaky=0` — o número
+   que o agent declarou, reproduzido de forma independente.
+2. **Mutação `richColors` de volta AO LADO do `classNames`** (não em vez dele — assim o
+   `TOAST_CLASSNAMES` continua referenciado e o `next build` não morre no
+   `no-unused-vars`, e de quebra a mutação testa a afirmação de especificidade da
+   ADR-017-FE): **os dois** pares reprovam — sucesso **4.259:1**, erro **4.347:1**, 4+4
+   cenários vermelhos. Confirma (a) que a prop precisava SAIR, não bastava acrescentar
+   `classNames`; (b) que os dois cenários novos são sensíveis, não decorativos.
+
+**Por que a mutação dupla é o formato certo aqui.** Um `expect(...).toBeGreaterThanOrEqual`
+sobre elemento efêmero falha por DOIS motivos indistinguíveis no output: cor ruim ou
+elemento ausente. Mutar a cor mantendo o elemento na tela separa os dois — o teste que
+sobrevive é o que reprova a COR. Foi assim que a re-revisão descartou a hipótese "o
+cenário do toast de erro só passa porque o `$eval` acha o seletor".
+
+**Consequência para o próximo QA.** Reprovação de contraste re-revisada exige o par
+(árvore corrigida verde, árvore mutada vermelha) com os dois números citados. O comando
+completo está no cabeçalho de `apps/web/e2e/a11y-mocked.spec.ts` — que a partir desta
+sprint é a fonte da verdade de COMO rodar o gate, e está correto (foi ele que a re-revisão
+seguiu, sem adaptação).

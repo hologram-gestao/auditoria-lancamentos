@@ -9,9 +9,21 @@ from app.db.models.access_audit import AccessAudit
 from app.db.models.anomaly_type import AnomalySeverity, AnomalyType
 from app.db.models.client import IV_HEX_LENGTH, Client
 from app.db.models.client_assignment import ClientAssignment
+from app.db.models.client_glossary_entry import (
+    MAX_CODE_CHARS,
+    MAX_DESCRIPTION_CHARS,
+    MAX_ENTRIES_PER_CLIENT,
+    MAX_NAME_CHARS,
+    ClientGlossaryEntry,
+    GlossaryEntryKind,
+)
 from app.db.models.notification import Notification, NotificationType
 from app.db.models.omie_account_cache import OmieAccountCache, OmieAccountType
-from app.db.models.reconciliation_anomaly import AnomalyDetectedBy, ReconciliationAnomaly
+from app.db.models.reconciliation_anomaly import (
+    AnomalyDetectedBy,
+    AnomalyReviewVerdict,
+    ReconciliationAnomaly,
+)
 from app.db.models.reconciliation_file import ReconciliationFile, ReconciliationFileStatus
 from app.db.models.reconciliation_file_entry import (
     FileEntrySituation,
@@ -44,19 +56,26 @@ from app.db.models.user import (
 __all__ = [
     "CLIENT_ROLES",
     "IV_HEX_LENGTH",
+    "MAX_CODE_CHARS",
+    "MAX_DESCRIPTION_CHARS",
+    "MAX_ENTRIES_PER_CLIENT",
+    "MAX_NAME_CHARS",
     "SCOPE_CLIENT_ID_CHECK",
     "SCOPE_CLIENT_ID_CONSTRAINT",
     "SYSTEM_ROLES",
     "AccessAudit",
     "AnomalyDetectedBy",
+    "AnomalyReviewVerdict",
     "AnomalySeverity",
     "AnomalyType",
     "Base",
     "Client",
     "ClientAssignment",
+    "ClientGlossaryEntry",
     "ClientUserRole",
     "FileEntrySituation",
     "FileEntryUserAction",
+    "GlossaryEntryKind",
     "Notification",
     "NotificationType",
     "OmieAccountCache",

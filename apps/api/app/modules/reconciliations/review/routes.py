@@ -372,9 +372,17 @@ async def create_anomaly(
 @router.patch(
     "/anomalies/{anomaly_id}",
     summary=(
-        "Resolve / desfaz resolução de anomalia. `resolved=true` exige "
-        "`resolution_note` com ≥ 10 caracteres (Doc §17.3). Recalcula "
-        "`anomaly_count` na sessão."
+        "Atualiza uma anomalia da sessão em DOIS eixos independentes, ambos "
+        "opcionais (envie ao menos um; omitir um campo significa não mexer "
+        "nele). `resolved` marca/desfaz a resolução — `resolved=true` exige "
+        "`resolution_note` com ≥ 10 caracteres (Doc §17.3) e recalcula o "
+        "`anomaly_count` da sessão. `review_verdict` "
+        "(`procedente`|`improcedente`) registra o julgamento do revisor sobre "
+        "o flag e SÓ é aceito em suspeita/incoerência levantada pela análise "
+        "de classificação — outros tipos de anomalia devolvem 400 "
+        "VALIDATION_ERROR. Mudar o veredito emite o evento de outcome uma vez "
+        "por mudança real; reenviar o mesmo valor não duplica. Anomalia de "
+        "outra sessão ou de outro tenant devolve 404."
     ),
 )
 async def resolve_anomaly(
