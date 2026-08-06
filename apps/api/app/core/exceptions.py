@@ -43,6 +43,10 @@ class ErrorCode(StrEnum):
     # mensagem (S2/R9: a tela nunca mostra linguagem interna).
     RECONCILIATION_TIMEOUT = "RECONCILIATION_TIMEOUT"
     RECONCILIATION_CANCELLED = "RECONCILIATION_CANCELLED"
+    # Sprint 6 (BACK 06.3): teto de entradas do glossário por cliente. Código
+    # PRÓPRIO, e não VALIDATION_ERROR genérico, porque o front precisa
+    # distinguir "campo inválido" de "acabou a cota" para orientar o usuário.
+    GLOSSARY_LIMIT_EXCEEDED = "GLOSSARY_LIMIT_EXCEEDED"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
@@ -144,6 +148,22 @@ class CannotDeactivateSelfError(AppError):
     code = ErrorCode.FORBIDDEN
     status_code = 403
     default_user_message = "Você não pode desativar a si mesmo."
+
+
+class GlossaryLimitExceededError(AppError):
+    """400 — o tenant atingiu o teto de entradas ativas do glossário.
+
+    Não é 409: nada conflita, o pedido é válido em forma. É um limite de
+    negócio, e o teto existe para o bloco de prompt da qualificação (BACK 06.4)
+    não crescer sem fim — guardrail S-2/R9 do PRD da Sprint 6.
+    """
+
+    code = ErrorCode.GLOSSARY_LIMIT_EXCEEDED
+    status_code = 400
+    default_user_message = (
+        "O glossário deste cliente atingiu o limite de entradas. "
+        "Remova alguma antes de adicionar outra."
+    )
 
 
 class ClientNotAccessibleError(ForbiddenError):

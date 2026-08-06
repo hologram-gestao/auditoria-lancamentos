@@ -34,6 +34,11 @@ AAD_FILE_ENTRY_USER_NOTE = ("reconciliation_file_entries", "user_note_encrypted"
 AAD_OMIE_ENTRY_USER_NOTE = ("reconciliation_omie_entries", "user_note_encrypted")
 AAD_ANOMALY_CONTEXT = ("reconciliation_anomalies", "context_encrypted")
 AAD_ANOMALY_RESOLUTION_NOTE = ("reconciliation_anomalies", "resolution_note_encrypted")
+# Sprint 6 (BACK 06.2) — glossário por tenant. Nome de categoria, fornecedor
+# típico e enunciado de regra são dado identificável do cliente final (§4.5).
+AAD_GLOSSARY_CODE = ("client_glossary_entries", "code_encrypted")
+AAD_GLOSSARY_NAME = ("client_glossary_entries", "name_encrypted")
+AAD_GLOSSARY_DESCRIPTION = ("client_glossary_entries", "description_encrypted")
 
 
 def field_locator(pair: tuple[str, str], pk: str | UUID) -> FieldLocator:

@@ -21,6 +21,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.modules.users.schemas import PaginationMeta
 
+#: Enum de ENTRADA do veredito do revisor. `Literal` derivado do StrEnum do
+#: modelo (fonte única — nunca redigitar a string): valor fora dele vira 422 do
+#: Pydantic automaticamente, sem `if/elif` no service.
+AnomalyReviewVerdictLiteral = Literal["procedente", "improcedente"]
+
 # ----------------------------------------------------------------------
 # BACK 9.1 — Listar Movimentações
 # ----------------------------------------------------------------------
@@ -193,6 +198,9 @@ class AnomalyItem(BaseModel):
     anomaly_type: AnomalyTypeRef
     detected_by: str
     resolved: bool
+    # Sprint 6 (BACK 06.5) — julgamento do REVISOR, eixo diferente de `resolved`.
+    # `None` = ainda não julgado. Só existe em flag da Camada 1 da qualificação.
+    review_verdict: AnomalyReviewVerdictLiteral | None = None
     context: str | None
     resolution_note: str | None
     created_at: datetime
@@ -257,16 +265,31 @@ class CreateAnomalyResponse(BaseModel):
 class ResolveAnomalyRequest(BaseModel):
     """Body do PATCH /api/v1/reconciliations/{id}/anomalies/{anomaly_id}.
 
-    Quando `resolved=true`, `resolution_note` precisa ter ≥ 10 chars
-    (Doc §17.3). Validação no schema (P2-002) — antes só rodava no service,
-    o que deixava o OpenAPI/clients gerados sem a regra.
+    **Dois eixos independentes**, e é por isso que a Sprint 6 ESTENDEU este
+    endpoint em vez de criar um paralelo (ADR-014):
+
+    - `resolved` — alguém agiu sobre a anomalia. Quando `true`,
+      `resolution_note` precisa ter ≥ 10 chars (Doc §17.3).
+    - `review_verdict` — o flag *devia* ter sido levantado? É o dado que
+      alimenta a métrica de outcome da Sprint 6, e só vale para flags da
+      Camada 1 da qualificação (o servidor recusa os demais tipos).
+
+    Os dois viraram OPCIONAIS: marcar um flag como improcedente sem resolvê-lo
+    é o caminho comum, e resolver sem julgar continua valendo. Omitir um campo
+    significa "não mexa nele" — o contrato antigo (`{resolved: bool}`) continua
+    válido. Corpo vazio é erro: PATCH que não muda nada é bug do cliente.
     """
 
-    resolved: bool
+    resolved: bool | None = None
     resolution_note: str | None = Field(default=None, max_length=2000)
+    review_verdict: AnomalyReviewVerdictLiteral | None = None
 
     @model_validator(mode="after")
     def _validate_note_when_resolved(self) -> ResolveAnomalyRequest:
+        if self.resolved is None and self.review_verdict is None:
+            raise ValueError(
+                "Envie ao menos um entre `resolved` e `review_verdict` — não há o que atualizar."
+            )
         if self.resolved:
             stripped = (self.resolution_note or "").strip()
             if len(stripped) < 10:

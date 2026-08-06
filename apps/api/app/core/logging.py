@@ -16,6 +16,7 @@ Uso:
 from __future__ import annotations
 
 import logging
+import re
 import sys
 from typing import TYPE_CHECKING, Any, cast
 
@@ -30,10 +31,17 @@ if TYPE_CHECKING:
 # Redação de segredos
 # ----------------------------------------------------------------------
 
-# Substring matching (case-insensitive). Qualquer key que CONTENHA uma destas
-# substrings tem o valor substituído por [REDACTED]. Substring para pegar
-# variações como `omie_app_key_encrypted`, `x-api-key`, `set-cookie`, etc.
-SENSITIVE_SUBSTRINGS: frozenset[str] = frozenset(
+# Termos sensíveis (case-insensitive). Uma key é mascarada quando um destes
+# termos aparece nela como SEGMENTO INTEIRO — delimitado por `_` ou pelas pontas
+# da key. Assim `access_token` e `omie_app_key_encrypted` são pegos, e
+# `input_tokens` (plural, contagem) NÃO é.
+#
+# Por que segmento e não substring: `"token" in "input_tokens"` é verdadeiro, e
+# a versão anterior mascarava toda contagem de token do sistema — inclusive
+# `cached_input_tokens`, que é a instrumentação do guardrail de custo da
+# qualificação. Contagem de token é métrica, não segredo; medida apagada é
+# guardrail que ninguém consegue auditar em produção.
+SENSITIVE_KEY_TERMS: frozenset[str] = frozenset(
     {
         "password",
         "passwd",
@@ -54,6 +62,33 @@ SENSITIVE_SUBSTRINGS: frozenset[str] = frozenset(
 
 REDACTED_VALUE = "[REDACTED]"
 
+#: Fronteira entre palavras em camelCase/PascalCase — `accessToken` precisa
+#: normalizar para `access_token`, senão viraria um segmento único e escaparia.
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+
+#: Separadores que valem como fronteira de segmento: hífen e espaço (cabeçalhos
+#: HTTP como `X-API-KEY` e `set-cookie` chegam assim).
+_SEPARATORS = re.compile(r"[-\s]+")
+
+
+def _normalize_key(key: str) -> str:
+    """Reduz a key a snake_case para o match por segmento.
+
+    `X-API-KEY`, `api key`, `apiKey` e `api_key` convergem todos para `api_key`.
+    """
+    return _SEPARATORS.sub("_", _CAMEL_BOUNDARY.sub("_", key)).lower()
+
+
+def _is_sensitive_key(key: str) -> bool:
+    """True quando a key contém um termo sensível como segmento inteiro.
+
+    O truque do padding: envolver key e termo em `_` transforma "segmento
+    inteiro" em substring simples. `_token_` está em `_access_token_` (segredo)
+    e não está em `_input_tokens_` (métrica).
+    """
+    padded = f"_{_normalize_key(key)}_"
+    return any(f"_{term}_" in padded for term in SENSITIVE_KEY_TERMS)
+
 
 def _redact_sensitive(
     _logger: Any,
@@ -65,10 +100,7 @@ def _redact_sensitive(
     Idempotente — pode rodar múltiplas vezes sem efeito colateral.
     """
     for key in event_dict:
-        # Normaliza separadores (hífen, espaço) para underscore — match consistente
-        # entre keys como `api_key`, `api-key`, `api key`, `X-API-KEY`, etc.
-        key_normalized = key.lower().replace("-", "_").replace(" ", "_")
-        if any(sub in key_normalized for sub in SENSITIVE_SUBSTRINGS):
+        if _is_sensitive_key(key):
             event_dict[key] = REDACTED_VALUE
     return event_dict
 

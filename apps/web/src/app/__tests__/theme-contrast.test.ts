@@ -96,9 +96,12 @@ function over(fg: Rgb, bg: Rgb, alpha: number): Rgb {
  */
 const PAIRS: ReadonlyArray<{ text: string; bg: string; where: string }> = [
   // Badge de status da conciliação (lista + detalhe) — o defeito de origem.
-  { text: 'success', bg: 'success-muted', where: 'badge "Processada"' },
-  { text: 'info', bg: 'info-muted', where: 'badge "Em processamento" / banner informativo' },
-  { text: 'warning', bg: 'warning-muted', where: 'banner de atenção (timeout, checksum)' },
+  // São TAMBÉM os quatro pares do `<Toaster>` (`app/providers.tsx`): o toast
+  // deixou de usar a paleta `richColors` do Sonner, que media 4.25:1 no verde.
+  { text: 'success', bg: 'success-muted', where: 'badge "Processada" · toast de sucesso' },
+  { text: 'info', bg: 'info-muted', where: 'badge "Em processamento" · toast informativo' },
+  { text: 'warning', bg: 'warning-muted', where: 'banner de atenção · toast de atenção' },
+  { text: 'destructive', bg: 'destructive-muted', where: 'toast de erro' },
   // Texto/ícone semântico sobre o fundo da página e do card (ambos brancos no
   // claro, mas o token é a fonte da verdade).
   { text: 'success', bg: 'background', where: 'contadores "conciliados"' },
@@ -111,7 +114,7 @@ const PAIRS: ReadonlyArray<{ text: string; bg: string; where: string }> = [
   // Texto sobre os preenchimentos sólidos.
   { text: 'destructive-foreground', bg: 'destructive', where: 'botão destrutivo, badge do sino' },
   { text: 'primary-foreground', bg: 'primary', where: 'botão primário' },
-  { text: 'success-foreground', bg: 'success', where: 'toast de sucesso' },
+  { text: 'success-foreground', bg: 'success', where: 'preenchimento de sucesso' },
   { text: 'warning-foreground', bg: 'warning', where: 'preenchimento de atenção' },
   { text: 'info-foreground', bg: 'info', where: 'preenchimento informativo' },
 ];

@@ -590,4 +590,5 @@ class ReconciliationService:
             balance_end_omie=session_obj.balance_end_omie,
             balance_difference=session_obj.balance_difference,
             total_files=total_files,
+            qualification_used_glossary=session_obj.qualification_used_glossary,
         )

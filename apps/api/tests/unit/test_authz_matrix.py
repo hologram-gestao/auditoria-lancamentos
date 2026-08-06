@@ -69,6 +69,12 @@ MATRIX_CELLS = [
     (Permission.MANAGE_CLIENT_USERS, UserRole.CLIENT_OPERATOR, False),  # ❌
     (Permission.MANAGE_CLIENT_USERS, UserRole.ADMIN, True),
     (Permission.MANAGE_CLIENT_USERS, UserRole.MANAGER, False),  # ❌
+    # Manter o glossário do tenant (Sprint 6 / BACK 06.3)
+    (Permission.MANAGE_GLOSSARY, UserRole.CLIENT_MANAGER, True),
+    (Permission.MANAGE_GLOSSARY, UserRole.CLIENT_OPERATOR, False),  # ❌ (só LÊ)
+    (Permission.MANAGE_GLOSSARY, UserRole.ADMIN, True),
+    # ✅ pelo papel; a CARTEIRA continua sendo `resolve_client_access`.
+    (Permission.MANAGE_GLOSSARY, UserRole.MANAGER, True),
     # Editar dados do cliente (§9)
     (Permission.EDIT_CLIENT, UserRole.CLIENT_MANAGER, False),  # ❌
     (Permission.EDIT_CLIENT, UserRole.CLIENT_OPERATOR, False),  # ❌
