@@ -193,7 +193,7 @@ class TestRecordCrossTenantDenied:
 
         cross = by_event[EVENT_ACESSO_CROSS_TENANT_NEGADO]
         assert cross["user_scope"] == UserScope.CLIENT.value
-        assert cross["tenant_do_token"] == str(cli_a.id)
+        assert cross["tenant_ator"] == str(cli_a.id)
         assert cross["tenant_alvo"] == str(cli_b.id)
         assert cross["rota"] == "/api/v1/anomalies/{id}"
         # SEM PII: o nome do tenant alvo não aparece em lugar nenhum do evento.

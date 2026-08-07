@@ -103,7 +103,7 @@ class TestEmitAcessoCrossTenantNegado:
         with structlog.testing.capture_logs() as logs:
             emit_acesso_cross_tenant_negado(
                 user_scope="client",
-                tenant_do_token="tenant-A",
+                tenant_ator="tenant-A",
                 tenant_alvo="tenant-B",
                 rota="/api/v1/reconciliations/abc",
             )
@@ -113,12 +113,12 @@ class TestEmitAcessoCrossTenantNegado:
         assert entry["event"] == EVENT_ACESSO_CROSS_TENANT_NEGADO
         assert entry["log_level"] == "warning"
         assert entry["user_scope"] == "client"
-        assert entry["tenant_do_token"] == "tenant-A"
+        assert entry["tenant_ator"] == "tenant-A"
         assert entry["tenant_alvo"] == "tenant-B"
         assert entry["rota"] == "/api/v1/reconciliations/abc"
         assert set(entry) - _STRUCTLOG_INTERNAL_KEYS == {
             "user_scope",
-            "tenant_do_token",
+            "tenant_ator",
             "tenant_alvo",
             "rota",
         }
@@ -128,19 +128,72 @@ class TestEmitAcessoCrossTenantNegado:
         with structlog.testing.capture_logs() as logs:
             emit_acesso_cross_tenant_negado(
                 user_scope="system",
-                tenant_do_token=None,
+                tenant_ator=None,
                 tenant_alvo="tenant-B",
                 rota="/r",
             )
 
-        assert logs[0]["tenant_do_token"] is None
+        assert logs[0]["tenant_ator"] is None
 
     def test_no_pii_in_output(self) -> None:
         with structlog.testing.capture_logs() as logs:
             emit_acesso_cross_tenant_negado(
-                user_scope="client", tenant_do_token="a", tenant_alvo="b", rota="/r"
+                user_scope="client", tenant_ator="a", tenant_alvo="b", rota="/r"
             )
 
         serialized = str(logs[0]).lower()
         for forbidden in ("nome", "razao", "razão", "descr", "email", "cnpj"):
             assert forbidden not in serialized, f"PII '{forbidden}' vazou no evento"
+
+
+class TestEventoSobreviveAoRedactor:
+    """O ponto cego que deixou `tenant_do_token` [REDACTED] em 100% das emissões.
+
+    `structlog.testing.capture_logs()` SUBSTITUI a cadeia de processors inteira,
+    então o redactor nunca roda nos testes acima — eles afirmavam que o campo
+    saía com valor e passavam mesmo enquanto, em produção, ele saía mascarado.
+
+    Os testes desta classe fecham esse buraco: exercitam a cadeia REAL. Se
+    alguém renomear o campo de volta para algo terminado em `_token`, ou
+    afrouxar a regra do redactor, aqui quebra.
+    """
+
+    def test_redactor_nao_mascara_o_tenant_do_ator(self) -> None:
+        """`tenant_ator` é ID, não credencial — precisa chegar ao log com valor."""
+        evento = {
+            "event": EVENT_ACESSO_CROSS_TENANT_NEGADO,
+            "user_scope": "client",
+            "tenant_ator": "tenant-A",
+            "tenant_alvo": "tenant-B",
+            "rota": "/api/v1/clients/tenant-B/glossary",
+        }
+        out = _redact_sensitive(None, "warning", dict(evento))
+        assert out["tenant_ator"] == "tenant-A", (
+            "O tenant do ator saiu mascarado — é a dimensão que a S5/R6 acrescentou "
+            "e sem ela a negação cross-tenant não diz DE ONDE veio a tentativa."
+        )
+        assert out["tenant_alvo"] == "tenant-B"
+        assert out["user_scope"] == "client"
+        assert out["rota"] == evento["rota"]
+
+    def test_as_quatro_propriedades_passam_pelo_redactor(self) -> None:
+        """Nenhuma das 4 do contrato do PRD pode ser engolida pelo redactor."""
+        evento = {
+            "user_scope": "client",
+            "tenant_ator": "A",
+            "tenant_alvo": "B",
+            "rota": "/r",
+        }
+        out = _redact_sensitive(None, "warning", dict(evento))
+        assert out == evento
+
+    def test_credencial_no_mesmo_evento_continua_mascarada(self) -> None:
+        """A contrapartida: liberar o ID do ator não afrouxa a regra de segredo."""
+        out = _redact_sensitive(
+            None,
+            "warning",
+            {"tenant_ator": "A", "access_token": "eyJhbGciOi...", "authorization": "Bearer x"},
+        )
+        assert out["tenant_ator"] == "A"
+        assert out["access_token"] == "[REDACTED]"
+        assert out["authorization"] == "[REDACTED]"

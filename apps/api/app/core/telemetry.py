@@ -82,23 +82,29 @@ def emit_chave_rotacionada(*, clientes_afetados: int, duracao_s: float) -> None:
 def emit_acesso_cross_tenant_negado(
     *,
     user_scope: str,
-    tenant_do_token: str | None,
+    tenant_ator: str | None,
     tenant_alvo: str,
     rota: str,
 ) -> None:
     """Emite `acesso_cross_tenant_negado` — acesso negado a tenant alheio (S5/R6).
 
     Contrato de propriedades fixado pelo PRD da Sprint 5, EXATAMENTE estas quatro:
-    `user_scope`, `tenant_do_token`, `tenant_alvo`, `rota`. A leitura do D+30
+    `user_scope`, `tenant_ator`, `tenant_alvo`, `rota`. A leitura do D+30
     conta ocorrências por este `event`.
 
     Convive com `acesso_negado` (S3) em vez de substituí-lo: o D+30 da Sprint 3
     ainda conta aquele evento, e removê-lo zeraria a métrica anterior. Um é
     "negou acesso a um cliente", o outro acrescenta a dimensão de TENANT DO ATOR.
 
+    O nome do campo é `tenant_ator`, não `tenant_do_token`: o valor é o ID do
+    tenant do ator, não uma credencial. O nome antigo terminava em `_token` e o
+    redactor do logging o mascarava como se fosse segredo — o campo saiu
+    `[REDACTED]` em 100% das emissões desde a Sprint 5, deixando a dimensão que
+    a S5/R6 acrescentou sem chegar ao log. Não renomear de volta.
+
     Args:
         user_scope: escopo do ator (`system`|`client`).
-        tenant_do_token: tenant do ator — `None` para usuário `system`
+        tenant_ator: tenant do ator — `None` para usuário `system`
             (equipe Hologram não pertence a tenant nenhum).
         tenant_alvo: id do cliente/tenant cujo dado foi pedido.
         rota: caminho da request (sem query string).
@@ -108,7 +114,7 @@ def emit_acesso_cross_tenant_negado(
     _log.warning(
         EVENT_ACESSO_CROSS_TENANT_NEGADO,
         user_scope=user_scope,
-        tenant_do_token=tenant_do_token,
+        tenant_ator=tenant_ator,
         tenant_alvo=tenant_alvo,
         rota=rota,
     )
