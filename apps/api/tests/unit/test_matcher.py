@@ -5,9 +5,11 @@ Função pura — sem DB, sem mock. Cobre:
     - Tolerância de data (limite e fora do limite).
     - Tolerância de valor 0.01 BRL (limite e fora).
     - Sinal aritmético: débito não casa crédito.
-    - Desempate: menor |days_diff| → menor |amount_diff| → date asc.
-    - Greedy por linha: 2 file_entries disputando o mesmo Omie — só o
-      primeiro vence.
+    - Desempate: passadas por |days_diff| crescente → menor |amount_diff| →
+      date asc.
+    - Passadas: uma linha distante não rouba o par exato de outra linha.
+    - Greedy dentro da passada: 2 file_entries disputando o mesmo Omie — só o
+      primeiro em (data, id) vence.
     - Lista vazia (matcher tolera os dois lados vazios).
     - `unmatched_omie_indices` preserva ordem original.
 """
@@ -157,7 +159,7 @@ class TestMatcherTieBreaking:
 @pytest.mark.unit
 class TestMatcherGreedyConsumption:
     def test_two_file_entries_compete_for_same_omie_first_wins(self) -> None:
-        """F1 e F2 com mesmo valor/data — só F1 (primeiro na lista) consome."""
+        """F1 e F2 com mesmo valor/data — só F1 (primeiro em (data, id)) consome."""
         files = [
             _file("F1", date(2026, 4, 15), "100.00"),
             _file("F2", date(2026, 4, 15), "100.00"),
@@ -221,6 +223,141 @@ class TestMatcherDaysDiff:
         result = match(files, omie)
         assert result.matches == []
         assert result.days_diff_by_file_id == {}
+
+
+@pytest.mark.unit
+class TestMatcherPassadasPorProximidadeDeData:
+    """O defeito reportado pela Bruna em 04/08/2026 (cliente Romilson Carpintaria).
+
+    O matcher casava percorrendo as linhas do arquivo e deixando cada uma pegar
+    seu melhor candidato livre. Uma linha cuja contraparte real NÃO casa por
+    valor levava o lançamento de outra linha, desde que estivesse dentro dos 3
+    dias; a linha roubada virava `sem_omie` e a IA de qualificação acusava
+    incoerência na primeira, por comparar fornecedores diferentes. UM
+    pareamento errado, DUAS anomalias falsas.
+    """
+
+    def test_cenario_bruna_linha_distante_nao_rouba_par_exato(self) -> None:
+        """Os números do report: dois pagamentos de R$ 2.800 a 3 dias de distância.
+
+        No Omie o pagamento de 07/07 está DIVIDIDO em duas saídas de R$ 1.400 —
+        o matcher é 1-para-1, então essa linha não tem par legítimo. O único
+        candidato de R$ 2.800 é o de 10/07, do outro fornecedor.
+        """
+        files = [
+            _file("07-07-maiane", date(2026, 7, 7), "-2800.00"),
+            _file("10-07-cleidson", date(2026, 7, 10), "-2800.00"),
+        ]
+        omie = [
+            _omie(901, date(2026, 7, 7), "-1400.00"),
+            _omie(902, date(2026, 7, 7), "-1400.00"),
+            _omie(903, date(2026, 7, 10), "-2800.00"),
+        ]
+
+        result = match(files, omie)
+
+        # A linha de 10/07 fica com o SEU lançamento, por data exata.
+        assert result.matches == [("10-07-cleidson", 903)]
+        assert result.days_diff_by_file_id == {"10-07-cleidson": 0}
+        # A de 07/07 fica sem par — anomalia VERDADEIRA (pagamento dividido),
+        # em vez das duas falsas que o algoritmo antigo produzia.
+        assert "07-07-maiane" not in dict(result.matches)
+        # As duas metades de R$ 1.400 sobram para `missing_in_file`.
+        assert result.unmatched_omie_indices == [0, 1]
+
+    def test_par_exato_vence_mesmo_chegando_depois_no_arquivo(self) -> None:
+        """Versão mínima: a passada 0 fecha antes de qualquer passada distante."""
+        files = [
+            _file("A", date(2026, 4, 15), "100.00"),  # 3 dias do único candidato
+            _file("B", date(2026, 4, 18), "100.00"),  # data exata
+        ]
+        omie = [_omie(1, date(2026, 4, 18), "100.00")]
+
+        result = match(files, omie)
+
+        assert result.matches == [("B", 1)]
+        assert result.days_diff_by_file_id == {"B": 0}
+
+    def test_ordem_da_lista_do_arquivo_nao_altera_resultado(self) -> None:
+        """O resultado deixou de depender de o parser entregar o extrato ordenado."""
+        files = [
+            _file("A", date(2026, 4, 15), "100.00"),
+            _file("B", date(2026, 4, 18), "100.00"),
+        ]
+        omie = [_omie(1, date(2026, 4, 18), "100.00")]
+
+        direto = match(files, omie)
+        invertido = match(list(reversed(files)), omie)
+
+        assert direto.matches == invertido.matches
+        assert direto.days_diff_by_file_id == invertido.days_diff_by_file_id
+        assert direto.unmatched_omie_indices == invertido.unmatched_omie_indices
+
+    def test_passada_distante_ainda_casa_o_que_sobrou(self) -> None:
+        """A tolerância de 3 dias continua valendo — só perde para a data exata."""
+        files = [_file("A", date(2026, 4, 15), "100.00")]
+        omie = [_omie(1, date(2026, 4, 18), "100.00")]
+
+        result = match(files, omie)
+
+        assert result.matches == [("A", 1)]
+        assert result.days_diff_by_file_id == {"A": 3}
+
+    def test_empate_na_mesma_passada_resolve_por_data_da_linha(self) -> None:
+        """Duas linhas a 1 dia do mesmo candidato → a de data menor leva."""
+        files = [
+            _file("depois", date(2026, 4, 17), "100.00"),
+            _file("antes", date(2026, 4, 15), "100.00"),
+        ]
+        omie = [_omie(1, date(2026, 4, 16), "100.00")]
+
+        result = match(files, omie)
+
+        assert result.matches == [("antes", 1)]
+
+    def test_empate_total_resolve_por_id(self) -> None:
+        """Mesma data e mesmo valor: sobra o id como critério estável."""
+        files = [
+            _file("F2", date(2026, 4, 15), "100.00"),
+            _file("F1", date(2026, 4, 15), "100.00"),
+        ]
+        omie = [_omie(1, date(2026, 4, 15), "100.00")]
+
+        result = match(files, omie)
+
+        assert result.matches == [("F1", 1)]
+
+    def test_valores_iguais_na_mesma_data_casam_um_para_um(self) -> None:
+        """Duas linhas e dois lançamentos idênticos — ninguém fica sem par."""
+        files = [
+            _file("F1", date(2026, 4, 15), "-2800.00"),
+            _file("F2", date(2026, 4, 15), "-2800.00"),
+        ]
+        omie = [
+            _omie(1, date(2026, 4, 15), "-2800.00"),
+            _omie(2, date(2026, 4, 15), "-2800.00"),
+        ]
+
+        result = match(files, omie)
+
+        assert sorted(result.matches) == [("F1", 1), ("F2", 2)]
+        assert result.unmatched_omie_indices == []
+
+    def test_matches_saem_em_ordem_de_data_do_arquivo_nao_de_passada(self) -> None:
+        """O consumidor não enxerga o detalhe das passadas na ordem da saída."""
+        files = [
+            _file("A", date(2026, 4, 10), "100.00"),  # casa na passada 2
+            _file("B", date(2026, 4, 20), "200.00"),  # casa na passada 0
+        ]
+        omie = [
+            _omie(1, date(2026, 4, 12), "100.00"),
+            _omie(2, date(2026, 4, 20), "200.00"),
+        ]
+
+        result = match(files, omie)
+
+        assert result.matches == [("A", 1), ("B", 2)]
+        assert result.days_diff_by_file_id == {"A": 2, "B": 0}
 
 
 @pytest.mark.unit
