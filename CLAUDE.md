@@ -231,7 +231,19 @@
 2. **Tolerância de data:** **fixa, não parametrizável** (FASE 1) — constante `DATE_DIVERGENCE_RANGE = 3` no matcher. Classificação por `|days_diff|`: `== 0` → `conciliado` (data exata); `1–3` → `conciliado_data_divergente` (+ anomalia `wrong_date`); `> 3` → sem match (linha fica `sem_omie`). Vale para conta corrente **e** cartão. O request não aceita mais `date_tolerance_days` (ignorado se enviado); a coluna homônima é mantida só por histórico e novas sessões gravam 0.
 3. **Período Omie expandido:** `[period_start − DATE_DIVERGENCE_RANGE, period_end + DATE_DIVERGENCE_RANGE]` (3 dias fixos) — vale no processamento (`job.py`), na tela de revisão (`/available-omie-entries`) e no export.
 4. **Um OmieEntry só matcha uma Movement.** Controle via `set(used_ids)` durante o cruzamento.
-5. **Desempate (ordem):** menor `|days_diff|` → menor `|amount_diff|` → primeiro por `date asc`.
+5. **Cruzamento em passadas por proximidade de data.** O matcher percorre
+   `|days_diff|` de `0` até `DATE_DIVERGENCE_RANGE`: fecha **todos** os pares de
+   data exata, depois os de 1 dia, e assim por diante. Dentro de uma passada,
+   as linhas do arquivo decidem em ordem `(transaction_date, id)` e o desempate
+   entre candidatos é menor `|amount_diff|` → `date asc`. **A ordem de leitura
+   do arquivo não afeta mais o resultado.**
+   O motivo é um defeito real: com o laço guloso antigo (uma passada só, cada
+   linha pegando seu melhor candidato livre), uma linha cuja contraparte não
+   casa por valor — tipicamente porque o pagamento está **dividido** em duas
+   parcelas no Omie e o cruzamento é 1-para-1 — levava o lançamento de outra
+   linha dentro dos 3 dias. A linha roubada virava `sem_omie` e a qualificação
+   acusava incoerência na primeira, por comparar fornecedores diferentes: **um
+   pareamento errado gerava duas anomalias falsas.**
 6. **Normalização Omie:** `cNatureza='D'` → valor negativo; `cNatureza='C'` → positivo.
 7. **Status Omie considerados no matching** (canônico no DB, camelCase): `Conciliado`, `Atrasado`, `Previsto`. Ignorar cancelados. **Atenção à nomenclatura mista da Omie:** o canônico vem de `ListarExtrato.cStatus`; já o FILTRO `filtrar_por_status` em `ListarContasPagar/Receber` usa o enum oficial Omie em UPPERCASE (`ATRASADO`, `AVENCER`, etc) — `"PREVISTO"` NÃO é valor válido como filtro, devolve 5xx. Mapping: filtro `AVENCER` → canônico `Previsto`.
 8. **Idempotência:** `UNIQUE(client_id, omie_conta_id, reference_month, file_hash)`. Duplicata = HTTP 409 `DUPLICATE_FILE`.
@@ -508,6 +520,8 @@ lembrar dos comandos.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.9 — 07/08/2026. **O cruzamento deixou de ser guloso na ordem do arquivo (§5.5).** Passa a acontecer em **passadas por `|days_diff|` crescente**: todos os pares de data exata primeiro, depois 1, 2 e 3 dias. Motivo: uma linha cuja contraparte não casa por valor (pagamento **dividido** em duas parcelas no Omie, contra um cruzamento 1-para-1) levava o lançamento de outra linha dentro dos 3 dias; a linha roubada virava `sem_omie` e a qualificação acusava incoerência na primeira — **um pareamento errado, duas anomalias falsas**. Reportado pela Bruna em 04/08/2026 no cliente Romilson Carpintaria. As tolerâncias não mudaram (`AMOUNT_TOLERANCE = 0.01`, `DATE_DIVERGENCE_RANGE = 3`), o cruzamento continua 1-para-1 (§5.4) e continua determinístico, sem heurística e sem IA (§5.9). Efeito colateral desejado: **a ordem de leitura do arquivo não afeta mais o resultado** — as linhas decidem em `(transaction_date, id)`._
 
 _Versão 1.8 — 07/08/2026. **Idioma de commit, branch e PR fixado na §7.** Commit e nome de branch passam a ser escritos em **inglês (EN-US)** — o formato Conventional Commits não muda, só o idioma do texto; título e corpo de **PR continuam em português**. A seção Idioma cobria código, comentários e mensagens ao usuário final, mas era silenciosa sobre os artefatos de git, e o silêncio vinha sendo lido como "tudo em português". Vale a partir desta data, sem reescrever histórico._
 
