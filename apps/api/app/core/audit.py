@@ -102,7 +102,7 @@ async def record_cross_tenant_denied(
     não três chamadas espalhadas por call site:
 
         1. `acesso_cross_tenant_negado` (telemetria S5) com EXATAMENTE as quatro
-           propriedades declaradas: `user_scope`, `tenant_do_token`,
+           propriedades declaradas: `user_scope`, `tenant_ator`,
            `tenant_alvo`, `rota`.
         2. `acesso_negado` (telemetria S3) — mantido para não zerar a métrica da
            sprint anterior, que conta esse `event`.
@@ -118,7 +118,7 @@ async def record_cross_tenant_denied(
     resolved_rota = rota if rota is not None else _current_rota()
     emit_acesso_cross_tenant_negado(
         user_scope=user_scope,
-        tenant_do_token=str(actor_client_id) if actor_client_id else None,
+        tenant_ator=str(actor_client_id) if actor_client_id else None,
         tenant_alvo=str(target_client_id),
         rota=resolved_rota,
     )
