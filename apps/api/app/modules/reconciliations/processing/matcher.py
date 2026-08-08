@@ -9,10 +9,12 @@ CLAUDE.md §5 — regras invioláveis:
        divergente (+ anomalia wrong_date); > 3 → sem match.
     3. Um OmieMovement só pode matchar UMA FileEntry — controle via set de
        índices consumidos.
-    4. Desempate (CLAUDE.md §5.5): menor |days_diff| → menor |amount_diff| →
-       primeiro por `date asc`.
-    5. Guloso por linha de arquivo (não global ótimo) — alinha com a
-       implementação descrita no PLANO §S10 etapa 4.
+    4. Desempate (CLAUDE.md §5.5): a proximidade de data manda primeiro, e manda
+       GLOBALMENTE — o casamento acontece em passadas por |days_diff| crescente
+       (0, 1, ..., DATE_DIVERGENCE_RANGE). Dentro de uma passada, desempata por
+       menor |amount_diff| → `date asc`.
+    5. Guloso dentro de cada passada (não global ótimo) — determinístico e
+       auditável, sem heurística e sem IA (§5.9).
 
 Função pura: sem I/O, sem ORM, sem logging — facilita testar exaustivamente
 matrizes de casos. O caller (`job.py`) é quem aplica o resultado no DB.
@@ -71,7 +73,9 @@ class OmieMovement:
 class MatchResult:
     """Saída do matcher — pares de índices + Omie sobrando + days_diff por par.
 
-    `matches`: pares `(file_entry.id, OmieMovement.omie_id)`. O caller aplica
+    `matches`: pares `(file_entry.id, OmieMovement.omie_id)`, ordenados por
+    `(data da linha do arquivo, id)` — não pela passada em que o par foi
+    fechado, e não pela ordem de leitura do arquivo. O caller aplica
     atualizando `omie_lancamento_id` e a `situation` — que agora depende do
     `days_diff` (ver `days_diff_by_file_id`): exato → `conciliado`, 1-3 dias →
     `conciliado_data_divergente`.
@@ -104,30 +108,41 @@ def match(
 ) -> MatchResult:
     """Cruza arquivo x Omie aplicando as regras invioláveis.
 
-    Algoritmo (guloso por linha do arquivo):
-        Para cada `file_entry` na ordem recebida:
-            1. Filtra `omie_movements` ainda não consumidos onde
-               |amount_diff| ≤ 0.01 E |days_diff| ≤ tolerance_days.
-            2. Ordena candidatos por `(|days_diff|, |amount_diff|, date asc)`.
-            3. Pega o primeiro, marca como consumido (set de índices).
-            4. Se não há candidato → file_entry permanece sem match.
+    Algoritmo (passadas por proximidade de data):
+        Para `dias` de 0 até `tolerance_days`, nesta ordem:
+            Para cada `file_entry` ainda sem par, em ordem `(data, id)`:
+                1. Filtra `omie_movements` ainda não consumidos onde
+                   |amount_diff| ≤ 0.01 E |days_diff| == `dias`.
+                2. Ordena candidatos por `(|amount_diff|, date asc)`.
+                3. Pega o primeiro e marca como consumido.
+        Quem sobrar dos dois lados fica sem par.
 
-    Não é matching ótimo global (Hungarian/etc) por escolha explícita do plano:
-    matching guloso é determinístico, fácil de auditar, e em prática casa com
-    o que o analista esperaria (a primeira linha do arquivo "fica com" o seu
-    candidato mais próximo).
+    Por que passadas, e não um laço só guloso por linha do arquivo: quando cada
+    linha escolhia na sua vez, uma linha cuja contraparte real NÃO casa por
+    valor (caso clássico: o pagamento está dividido em duas parcelas no Omie e
+    o matcher é 1-para-1) levava o lançamento de OUTRA linha, desde que
+    estivesse dentro dos 3 dias. A linha roubada ficava `sem_omie`, e a IA de
+    qualificação acusava incoerência na primeira por comparar fornecedores
+    diferentes — UM pareamento errado gerando DUAS anomalias falsas. Casando
+    primeiro todos os pares de data exata, o par certo é fechado antes de
+    qualquer candidato distante poder disputá-lo.
+
+    Continua determinístico e auditável: não é matching ótimo global
+    (Hungarian/etc) nem heurística — é guloso DENTRO de cada passada, e a
+    ordem de todas as decisões é derivada dos dados, não da ordem de leitura
+    do arquivo.
 
     Args:
-        file_entries: linhas do arquivo, NA ORDEM em que aparecem (ordem
-            afeta o resultado por ser guloso). O caller normalmente passa em
-            ordem cronológica do extrato.
+        file_entries: linhas do arquivo. A ordem da lista NÃO afeta mais o
+            resultado — as linhas são percorridas em `(transaction_date, id)`
+            dentro de cada passada.
         omie_movements: lista combinada de movimentações Omie (extrato +
             títulos). Ordem dentro da lista NÃO afeta o resultado — o desempate
-            é determinístico por (days_diff, amount_diff, date).
-        tolerance_days: range de busca de candidatos (CLAUDE.md §5.2). Default
-            é `DATE_DIVERGENCE_RANGE` (3) — fixo no produto desde a FASE 1. O
-            parâmetro existe só para testar o algoritmo com outros ranges; o
-            sistema sempre usa o default. Aceita qualquer inteiro ≥ 0.
+            é determinístico por (amount_diff, date).
+        tolerance_days: número de passadas além da exata (CLAUDE.md §5.2).
+            Default é `DATE_DIVERGENCE_RANGE` (3) — fixo no produto desde a
+            FASE 1. O parâmetro existe só para testar o algoritmo com outros
+            ranges; o sistema sempre usa o default. Aceita qualquer inteiro ≥ 0.
 
     Returns:
         `MatchResult` com pares (file_id, omie_id), índices Omie sobrando e o
@@ -135,45 +150,53 @@ def match(
         conciliado_data_divergente).
     """
     used_omie_indices: set[int] = set()
+    matched_file_ids: set[str] = set()
     matches: list[tuple[str, int]] = []
     days_diff_by_file_id: dict[str, int] = {}
 
-    for file_entry in file_entries:
-        candidate_indices: list[int] = []
-        for idx, omie in enumerate(omie_movements):
-            if idx in used_omie_indices:
-                continue
-            if not _amount_within_tolerance(file_entry.amount, omie.amount):
-                continue
-            days_diff = abs((file_entry.transaction_date - omie.transaction_date).days)
-            if days_diff > tolerance_days:
-                continue
-            candidate_indices.append(idx)
+    # Ordem de decisão das linhas dentro de cada passada. Derivada dos dados
+    # (data, depois id) em vez da ordem de leitura: o resultado deixa de
+    # depender de o parser ter entregue o extrato cronológico ou não.
+    ordered_entries = sorted(file_entries, key=lambda fe: (fe.transaction_date, fe.id))
 
-        if not candidate_indices:
-            continue
+    for pass_days in range(tolerance_days + 1):
+        for file_entry in ordered_entries:
+            if file_entry.id in matched_file_ids:
+                continue
 
-        # Desempate determinístico CLAUDE.md §5.5:
-        #   1) menor |days_diff|
-        #   2) menor |amount_diff|
-        #   3) primeiro por date asc
-        # `sorted` é estável; `key` retorna tupla ordenável diretamente.
-        def _sort_key(
-            idx: int, _file_entry: FileEntryForMatch = file_entry
-        ) -> tuple[int, Decimal, date]:
-            omie = omie_movements[idx]
-            days_diff = abs((_file_entry.transaction_date - omie.transaction_date).days)
-            amount_diff = abs(_file_entry.amount - omie.amount)
-            return (days_diff, amount_diff, omie.transaction_date)
+            candidate_indices: list[int] = []
+            for idx, omie in enumerate(omie_movements):
+                if idx in used_omie_indices:
+                    continue
+                if abs((file_entry.transaction_date - omie.transaction_date).days) != pass_days:
+                    continue
+                if not _amount_within_tolerance(file_entry.amount, omie.amount):
+                    continue
+                candidate_indices.append(idx)
 
-        candidate_indices.sort(key=_sort_key)
-        chosen = candidate_indices[0]
-        used_omie_indices.add(chosen)
-        chosen_omie = omie_movements[chosen]
-        matches.append((file_entry.id, chosen_omie.omie_id))
-        days_diff_by_file_id[file_entry.id] = abs(
-            (file_entry.transaction_date - chosen_omie.transaction_date).days
-        )
+            if not candidate_indices:
+                continue
+
+            # Desempate DENTRO da passada (CLAUDE.md §5.5): o |days_diff| já é
+            # o mesmo para todos os candidatos aqui, então sobram
+            #   1) menor |amount_diff|
+            #   2) primeiro por date asc
+            def _sort_key(
+                idx: int, _file_entry: FileEntryForMatch = file_entry
+            ) -> tuple[Decimal, date]:
+                omie = omie_movements[idx]
+                return (abs(_file_entry.amount - omie.amount), omie.transaction_date)
+
+            chosen = min(candidate_indices, key=_sort_key)
+            used_omie_indices.add(chosen)
+            matched_file_ids.add(file_entry.id)
+            matches.append((file_entry.id, omie_movements[chosen].omie_id))
+            days_diff_by_file_id[file_entry.id] = pass_days
+
+    # `matches` sai na ordem das linhas do arquivo, não na ordem das passadas —
+    # o consumidor não deve enxergar o detalhe do algoritmo.
+    order_by_file_id = {fe.id: pos for pos, fe in enumerate(ordered_entries)}
+    matches.sort(key=lambda pair: order_by_file_id[pair[0]])
 
     unmatched_omie_indices = [
         idx for idx in range(len(omie_movements)) if idx not in used_omie_indices
