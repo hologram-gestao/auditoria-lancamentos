@@ -22,7 +22,7 @@ from __future__ import annotations
 from datetime import date
 from uuid import UUID
 
-from sqlalchemy import asc, case, desc, func, select
+from sqlalchemy import asc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
@@ -35,20 +35,16 @@ from app.db.models import (
     ReconciliationOmieEntry,
     ReconciliationSession,
 )
+from app.modules.reconciliations.anomaly_ordering import (
+    SEVERITY_ORDER_CASE,
+    anomaly_order_by,
+    join_anomaly_dates,
+)
 from app.modules.reconciliations.totals import refresh_session_counters
 
-# Ordem custom de severidade (critical → moderate → info) usada em queries
-# de listagem de anomalias e tipos. CASE..WHEN é mais direto que adicionar
-# uma coluna `severity_rank`.
-SEVERITY_ORDER_CASE = case(
-    {
-        AnomalySeverity.CRITICAL.value: 1,
-        AnomalySeverity.MODERATE.value: 2,
-        AnomalySeverity.INFO.value: 3,
-    },
-    value=AnomalyType.severity,
-    else_=99,
-)
+# `SEVERITY_ORDER_CASE` vem de `anomaly_ordering` (definição ÚNICA, de onde o
+# export também importa) e segue disponível a partir deste módulo, que é de
+# onde `list_anomaly_type_counts` e os testes já o usavam.
 
 
 class ReviewRepository:
@@ -288,9 +284,12 @@ class ReviewRepository:
     ) -> tuple[list[tuple[ReconciliationAnomaly, AnomalyType]], int]:
         """Lista anomalias com JOIN no AnomalyType + filtros + paginação.
 
-        Ordenação custom: critical → moderate → info, depois `created_at desc`.
+        Ordenação cronológica pela data do lançamento relacionado — a MESMA do
+        export, definida uma vez em `anomaly_ordering`. Ordenar no SQL e não no
+        cliente é obrigatório aqui: a lista é paginada, e ordenar só a página
+        já carregada faria a tela contar uma história e a paginação outra.
         """
-        base_stmt = (
+        base_stmt = join_anomaly_dates(
             select(ReconciliationAnomaly, AnomalyType)
             .join(AnomalyType, ReconciliationAnomaly.anomaly_type_id == AnomalyType.id)
             .where(ReconciliationAnomaly.session_id == session_id)
@@ -321,10 +320,7 @@ class ReviewRepository:
 
         rows = (
             await self._session.execute(
-                base_stmt.order_by(
-                    SEVERITY_ORDER_CASE,
-                    desc(ReconciliationAnomaly.created_at),
-                )
+                base_stmt.order_by(*anomaly_order_by())
                 .offset((page - 1) * page_size)
                 .limit(page_size)
             )

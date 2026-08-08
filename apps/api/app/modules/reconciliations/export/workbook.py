@@ -73,9 +73,6 @@ SHEET_NAME_DIVERGENCIAS = "Divergências Omie"
 SHEET_NAME_SEM_OMIE = "Sem Omie"
 SHEET_NAME_ANOMALIAS = "Anomalias"
 
-# Severity ordering (aba 5)
-_SEVERITY_RANK = {"critical": 0, "moderate": 1, "info": 2}
-
 # Tradução exibida no Excel (aba 2 e 4 mostram raw situation pra rastreio
 # do analista; aba 5 traduz severity e detected_by porque o leitor final
 # é não-técnico).
@@ -496,12 +493,10 @@ _SHEET5_HEADERS = [
 def _build_sheet5_anomalias(ws: Worksheet, rows: Sequence[AnomalyRow]) -> None:
     _write_table_header(ws, _SHEET5_HEADERS)
 
-    ordered = sorted(
-        rows,
-        key=lambda r: (_SEVERITY_RANK.get(r.severity, 99), r.resolved),
-    )
-
-    for offset, row in enumerate(ordered):
+    # Sem reordenar: as linhas já vêm em ordem cronológica do serviço, a MESMA
+    # da tela de revisão (`anomaly_ordering`). Reordenar aqui por severidade era
+    # o que fazia a planilha contar uma história diferente da tela.
+    for offset, row in enumerate(rows):
         excel_row = offset + 2
         ws.cell(
             row=excel_row,
