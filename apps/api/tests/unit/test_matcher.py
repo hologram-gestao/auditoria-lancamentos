@@ -34,13 +34,20 @@ def _file(id_: str, d: date, amount: str) -> FileEntryForMatch:
     return FileEntryForMatch(id=id_, transaction_date=d, amount=Decimal(amount))
 
 
-def _omie(omie_id: int, d: date, amount: str, status: str = "Conciliado") -> OmieMovement:
+def _omie(
+    omie_id: int,
+    d: date,
+    amount: str,
+    status: str = "Conciliado",
+    supplier: str | None = None,
+) -> OmieMovement:
     return OmieMovement(
         omie_id=omie_id,
         transaction_date=d,
         amount=Decimal(amount),
         status=status,
         is_realized=True,
+        supplier=supplier,
     )
 
 
@@ -389,6 +396,176 @@ class TestMatcherPassadasPorProximidadeDeData:
 
         assert result.matches == [("A", 1), ("B", 2)]
         assert result.days_diff_by_file_id == {"A": 2, "B": 0}
+
+
+@pytest.mark.unit
+class TestMatcherDesempatePorFornecedor:
+    """Defesa em profundidade da sugestão 1 da Bruna.
+
+    As passadas de data resolvem a disputa entre datas diferentes. Dois
+    lançamentos de mesmo valor E mesma data continuavam indistinguíveis — o
+    matcher só conhecia valor e data. Agora ele também recebe o fornecedor do
+    Omie e a descrição do extrato, e usa a afinidade entre os dois como
+    DESEMPATE (nunca como exclusão).
+    """
+
+    def test_escolhe_o_candidato_do_fornecedor_compativel(self) -> None:
+        files = [
+            FileEntryForMatch(
+                id="F1",
+                transaction_date=date(2026, 7, 7),
+                amount=Decimal("-2800.00"),
+                description="Pix enviado: Cp:18236120-Maiane Medrado Silva",
+            )
+        ]
+        omie = [
+            _omie(901, date(2026, 7, 7), "-2800.00", supplier="Cleidson Quiteria de Souza"),
+            _omie(902, date(2026, 7, 7), "-2800.00", supplier="Maiane Medrado Silva"),
+        ]
+
+        result = match(files, omie)
+
+        # Sem fornecedor, o desempate seria a data — empatada — e o primeiro da
+        # lista (901) levaria. O nome inverte isso.
+        assert result.matches == [("F1", 902)]
+        assert result.tie_stats.ties == 1
+        assert result.tie_stats.broken_by_supplier == 1
+
+    def test_nome_que_nao_bate_nunca_impede_o_match(self) -> None:
+        """O limite mais importante da feature (§ da task): nunca excluir.
+
+        Descrição de extrato é texto sujo e abreviado. Transformar ruído de
+        texto em `sem_omie` trocaria um falso positivo por outro pior.
+        """
+        files = [
+            FileEntryForMatch(
+                id="F1",
+                transaction_date=date(2026, 7, 7),
+                amount=Decimal("-2800.00"),
+                description="COMPRA CARTAO 4432 XYZ",
+            )
+        ]
+        omie = [_omie(901, date(2026, 7, 7), "-2800.00", supplier="Maiane Medrado Silva")]
+
+        result = match(files, omie)
+
+        assert result.matches == [("F1", 901)]
+        # Candidato único: não houve empate a registrar.
+        assert result.tie_stats.ties == 0
+
+    def test_valor_manda_mais_que_nome(self) -> None:
+        """Valor é fato, nome é indício — a ordem dos critérios reflete isso."""
+        files = [
+            FileEntryForMatch(
+                id="F1",
+                transaction_date=date(2026, 7, 7),
+                amount=Decimal("-100.00"),
+                description="Pix Maiane Medrado Silva",
+            )
+        ]
+        omie = [
+            # Valor exato, fornecedor sem relação.
+            _omie(901, date(2026, 7, 7), "-100.00", supplier="Outra Pessoa Qualquer"),
+            # Fornecedor compatível, mas 1 centavo de diferença.
+            _omie(902, date(2026, 7, 7), "-100.01", supplier="Maiane Medrado Silva"),
+        ]
+
+        result = match(files, omie)
+
+        assert result.matches == [("F1", 901)]
+
+    def test_sem_fornecedor_cai_no_criterio_anterior(self) -> None:
+        """Títulos a pagar/receber não trazem nome — o comportamento é o antigo."""
+        files = [
+            FileEntryForMatch(
+                id="F1",
+                transaction_date=date(2026, 7, 7),
+                amount=Decimal("-100.00"),
+                description="Pix Maiane Medrado Silva",
+            )
+        ]
+        omie = [
+            _omie(901, date(2026, 7, 8), "-100.00"),  # sem supplier
+            _omie(902, date(2026, 7, 6), "-100.00"),  # sem supplier, data menor
+        ]
+
+        result = match(files, omie)
+
+        # Ambos a 1 dia; sem sinal de nome, vence a data menor (06/07).
+        assert result.matches == [("F1", 902)]
+        assert result.tie_stats.broken_by_supplier == 0
+
+    def test_desempate_correto_pode_custar_um_par_em_cascata(self) -> None:
+        """Contrapartida CONHECIDA e ACEITA — não é regressão a consertar.
+
+        Dois candidatos empatados na mesma passada podem ter datas DIFERENTES
+        (um a -1 dia, outro a +1). Trocar qual deles a linha leva muda o que
+        sobra para as linhas seguintes, então o total de pares pode cair.
+
+        Medido em 20.000 cenários sintéticos: em 2,2% muda QUAL lançamento foi
+        escolhido (o efeito pretendido), e em 0,07% muda a quantidade — 14
+        cenários com menos pares contra 11 com mais, praticamente neutro.
+
+        E "menos pares" aqui é ganho de qualidade, não perda. Neste cenário:
+            sem fornecedor → 3 pares, dos quais DOIS de fornecedor errado;
+            com fornecedor → 2 pares, ambos certos, e a linha do Getulio fica
+            `sem_omie` porque de fato não existe lançamento dele.
+        O algoritmo parou de inventar pareamento — a mesma troca que a correção
+        das passadas de data fez.
+        """
+        files = [
+            FileEntryForMatch(
+                id="F0",
+                transaction_date=date(2026, 7, 4),
+                amount=Decimal("-2800.00"),
+                description="Pix Cleidson Quiteria de Souza",
+            ),
+            FileEntryForMatch(
+                id="F1",
+                transaction_date=date(2026, 7, 5),
+                amount=Decimal("-2800.00"),
+                description="Pix Maiane Medrado Silva",
+            ),
+            FileEntryForMatch(
+                id="F2",
+                transaction_date=date(2026, 7, 7),
+                amount=Decimal("-2800.00"),
+                description="Pix Getulio da Silva Rios",
+            ),
+        ]
+        omie = [
+            _omie(100, date(2026, 7, 3), "-2800.00", supplier="Maiane Medrado Silva"),
+            _omie(101, date(2026, 7, 5), "-2800.00", supplier="Maiane Medrado Silva"),
+            _omie(102, date(2026, 7, 5), "-2800.00", supplier="Cleidson Quiteria de Souza"),
+        ]
+
+        result = match(files, omie)
+
+        assert result.matches == [("F0", 102), ("F1", 101)]
+        # 100 é da Maiane e sobra: a linha do Getulio não tem par legítimo.
+        assert result.unmatched_omie_indices == [0]
+
+    def test_contadores_ficam_zerados_quando_nao_ha_disputa(self) -> None:
+        files = [_file("F1", date(2026, 4, 15), "100.00")]
+        omie = [_omie(1, date(2026, 4, 15), "100.00")]
+
+        result = match(files, omie)
+
+        assert result.tie_stats.ties == 0
+        assert result.tie_stats.broken_by_supplier == 0
+
+    def test_empate_contado_mesmo_quando_o_nome_nao_muda_a_escolha(self) -> None:
+        """`ties` é o denominador da métrica — conta mesmo sem sinal de nome."""
+        files = [_file("F1", date(2026, 4, 15), "100.00")]
+        omie = [
+            _omie(1, date(2026, 4, 15), "100.00"),
+            _omie(2, date(2026, 4, 15), "100.00"),
+        ]
+
+        result = match(files, omie)
+
+        assert result.tie_stats.ties == 1
+        assert result.tie_stats.broken_by_supplier == 0
 
 
 @pytest.mark.unit

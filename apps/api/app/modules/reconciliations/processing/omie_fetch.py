@@ -114,6 +114,13 @@ async def fetch_realized(
             amount=item.signed_amount,
             status=item.c_situacao,
             is_realized=True,
+            # Só o extrato traz o nome do cliente/fornecedor. Vai para o matcher
+            # como DESEMPATE (nunca exclusão) e morre em memória — não é
+            # persistido nem logado (§4.5).
+            supplier=item.supplier,
+            # Agrupamento de parcelas do Omie — só a sonda de pagamento
+            # dividido lê isto; não influencia nenhum match (§5).
+            related_launch_id=item.n_cod_lanc_relac,
         )
         for item in raw
     ]

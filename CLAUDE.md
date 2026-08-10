@@ -235,8 +235,16 @@
    `|days_diff|` de `0` até `DATE_DIVERGENCE_RANGE`: fecha **todos** os pares de
    data exata, depois os de 1 dia, e assim por diante. Dentro de uma passada,
    as linhas do arquivo decidem em ordem `(transaction_date, id)` e o desempate
-   entre candidatos é menor `|amount_diff|` → `date asc`. **A ordem de leitura
-   do arquivo não afeta mais o resultado.**
+   entre candidatos é menor `|amount_diff|` → **maior afinidade de fornecedor**
+   → `date asc`. **A ordem de leitura do arquivo não afeta mais o resultado.**
+   A afinidade (`processing/name_affinity.py`) conta quantos tokens
+   significativos do fornecedor Omie aparecem na descrição do extrato — sem
+   limiar, sem fuzzy e **sem IA** (§5.9). É **só desempate, nunca exclusão**:
+   nome que não bate jamais impede um match, porque descrição de extrato é texto
+   sujo e transformá-la em `sem_omie` trocaria um falso positivo por outro pior.
+   Só o extrato traz o nome — títulos de `ListarContasPagar/Receber` devolvem
+   apenas o código do cliente, então para eles a afinidade é sempre 0. Fornecedor
+   e descrição trafegam **em memória** e não são persistidos nem logados (§4.5).
    O motivo é um defeito real: com o laço guloso antigo (uma passada só, cada
    linha pegando seu melhor candidato livre), uma linha cuja contraparte não
    casa por valor — tipicamente porque o pagamento está **dividido** em duas
@@ -520,6 +528,8 @@ lembrar dos comandos.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.10 — 08/08/2026. **O matcher ganhou uma terceira dimensão: fornecedor (§5.5).** Ele conhecia valor e data, e mais nada — era o que sustentava a frase da Bruna de que o sistema cruzou o extrato de um fornecedor com o lançamento de outro "considerando apenas o valor". O dado existia e era descartado na montagem: `LancamentoExtrato.supplier` nunca chegava ao `OmieMovement`, e a descrição do arquivo nunca chegava ao `FileEntryForMatch`. Agora chegam, e a afinidade entre os dois entra como desempate **depois** do valor (valor é fato, nome é indício) e **nunca** como exclusão. A métrica é contagem de tokens em comum — sem limiar arbitrário para justificar quando um cruzamento sair errado — e continua determinística, sem IA (§5.9). Títulos a pagar/receber ficam de fora por limitação do Omie, que devolve só o código do cliente. `MatchResult` passou a carregar `tie_stats` (contadores puros, sem PII) porque o conjunto de candidatos de um cruzamento **não é persistido** e essa pergunta não tem resposta retroativa no banco._
 
 _Versão 1.9 — 07/08/2026. **O cruzamento deixou de ser guloso na ordem do arquivo (§5.5).** Passa a acontecer em **passadas por `|days_diff|` crescente**: todos os pares de data exata primeiro, depois 1, 2 e 3 dias. Motivo: uma linha cuja contraparte não casa por valor (pagamento **dividido** em duas parcelas no Omie, contra um cruzamento 1-para-1) levava o lançamento de outra linha dentro dos 3 dias; a linha roubada virava `sem_omie` e a qualificação acusava incoerência na primeira — **um pareamento errado, duas anomalias falsas**. Reportado pela Bruna em 04/08/2026 no cliente Romilson Carpintaria. As tolerâncias não mudaram (`AMOUNT_TOLERANCE = 0.01`, `DATE_DIVERGENCE_RANGE = 3`), o cruzamento continua 1-para-1 (§5.4) e continua determinístico, sem heurística e sem IA (§5.9). Efeito colateral desejado: **a ordem de leitura do arquivo não afeta mais o resultado** — as linhas decidem em `(transaction_date, id)`._
 
