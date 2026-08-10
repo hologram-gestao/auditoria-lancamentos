@@ -4,8 +4,11 @@
  * Aba 3 — Anomalias (FRONT 9.16, Doc §14.6).
  *
  * Filtros: severity (all/critical/moderate/info) e status (all/pendente/resolvida).
- * Ordenação: vem ordenada do back (critical → moderate → info; depois
- * created_at desc dentro do grupo).
+ * Ordenação: vem ordenada do back, cronológica pela data do lançamento
+ * relacionado (mais antiga primeiro), com as anomalias sem linha relacionada
+ * no fim. É a mesma ordem da aba 5 do Excel e das abas de Movimentações e
+ * Divergências Omie. Não reordenar no cliente: a lista é paginada, e ordenar
+ * a página já carregada faria a tela divergir da paginação.
  *
  * Ações:
  *   - Pendente: "Marcar como resolvida" → `<ResolveAnomalyDialog>` (nota ≥ 10 chars).

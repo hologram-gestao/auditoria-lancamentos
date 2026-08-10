@@ -180,10 +180,12 @@ async def _seed_anomaly(
     recon: ReconciliationSession,
     severity: str = AnomalySeverity.CRITICAL.value,
     resolved: bool = False,
+    type_name: str = "Anomalia Teste Crítica",
+    file_entry: ReconciliationFileEntry | None = None,
 ) -> ReconciliationAnomaly:
     atype = AnomalyType(
         code=f"export-{uuid4().hex[:8]}",
-        name="Anomalia Teste Crítica",
+        name=type_name,
         description="x",
         severity=severity,
         active=True,
@@ -193,6 +195,7 @@ async def _seed_anomaly(
     anomaly = ReconciliationAnomaly(
         session_id=recon.id,
         anomaly_type_id=atype.id,
+        file_entry_id=file_entry.id if file_entry is not None else None,
         detected_by="ai",
         resolved=resolved,
     )
@@ -410,3 +413,68 @@ class TestExportEndpoint:
             assert forbidden not in ascii_part, f"'{forbidden}' encontrado em {ascii_part}"
         # Acento removido
         assert "Sao_Joao" in cd or "Sao Joao" in cd
+
+    async def test_aba_anomalias_sai_na_mesma_ordem_cronologica_da_tela(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Critério de aceite da sugestão 2 da Bruna: tela e relatório iguais.
+
+        Antes existiam TRÊS ordens para a mesma sessão — a tela por severidade,
+        o export carregando por `created_at` e a planilha reordenando por
+        severidade na montagem. Agora a regra é uma só (`anomaly_ordering`), e
+        nem a severidade nem o status de resolvida movem a linha de lugar.
+        """
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        await _seed_account_cache(db_session, client=cli, omie_conta_id=42)
+        sess = await _seed_session(db_session, client=cli, creator=admin)
+
+        fe_20 = await _seed_file_entry(
+            db_session,
+            recon=sess,
+            description="vinte",
+            amount=Decimal("-30.00"),
+            tx_date=date(2026, 4, 20),
+        )
+        fe_05 = await _seed_file_entry(
+            db_session,
+            recon=sess,
+            description="cinco",
+            amount=Decimal("-10.00"),
+            tx_date=date(2026, 4, 5),
+        )
+
+        # Criadas fora de ordem e com severidades que, na regra ANTIGA, teriam
+        # invertido tudo: a crítica sem data iria para o topo e a informativa
+        # de 05/04 para o fim.
+        await _seed_anomaly(
+            db_session,
+            recon=sess,
+            severity=AnomalySeverity.CRITICAL.value,
+            type_name="Sem linha relacionada",
+        )
+        await _seed_anomaly(
+            db_session,
+            recon=sess,
+            severity=AnomalySeverity.MODERATE.value,
+            type_name="Vinte de abril",
+            file_entry=fe_20,
+        )
+        await _seed_anomaly(
+            db_session,
+            recon=sess,
+            severity=AnomalySeverity.INFO.value,
+            type_name="Cinco de abril",
+            file_entry=fe_05,
+            resolved=True,
+        )
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{sess.id}/export")
+        assert resp.status_code == 200, resp.text
+
+        wb = load_workbook(BytesIO(resp.content))
+        ws = wb["Anomalias"]
+        nomes = [ws.cell(row=r, column=2).value for r in (2, 3, 4)]
+
+        assert nomes == ["Cinco de abril", "Vinte de abril", "Sem linha relacionada"]

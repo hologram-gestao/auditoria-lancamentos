@@ -16,7 +16,7 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 import pytest
@@ -857,6 +857,181 @@ class TestAnomalies:
         rows = resp.json()["data"]
         assert all(item["resolved"] is True for item in rows)
         assert len(rows) == 1
+
+
+@pytest.mark.integration
+class TestAnomalyChronologicalOrder:
+    """Sugestão 2 da Bruna (04/08/2026): a lista abre em ordem cronológica.
+
+    A conferência se faz na ordem em que o dinheiro se moveu. A anomalia não tem
+    data própria — ela vem da `file_entry` ou do `omie_entry` vinculado, e as que
+    não têm vínculo nenhum vão para o FIM.
+    """
+
+    @staticmethod
+    def _effective_date(row: dict[str, Any]) -> str | None:
+        """A data que a ordenação usa: a do arquivo, a do Omie, ou nenhuma."""
+        if row["related_file_entry"] is not None:
+            return str(row["related_file_entry"]["transaction_date"])
+        if row["related_omie_entry"] is not None:
+            return str(row["related_omie_entry"]["transaction_date"])
+        return None
+
+    async def _seed_mixed(
+        self,
+        db_session: AsyncSession,
+        *,
+        reconciliation: ReconciliationSession,
+        types: dict[str, AnomalyType],
+    ) -> None:
+        """Cria anomalias FORA de ordem, com as três origens de data."""
+        # 20/07 — via omie_entry.
+        oe = await _seed_omie_entry(
+            db_session,
+            reconciliation=reconciliation,
+            omie_lancamento_id=9001,
+            tx_date=date(2026, 7, 20),
+        )
+        # 05/07 e 12/07 — via file_entry.
+        fe_05 = await _seed_file_entry(
+            db_session,
+            reconciliation=reconciliation,
+            description="cinco de julho",
+            amount=Decimal("-10.00"),
+            tx_date=date(2026, 7, 5),
+        )
+        fe_12 = await _seed_file_entry(
+            db_session,
+            reconciliation=reconciliation,
+            description="doze de julho",
+            amount=Decimal("-20.00"),
+            tx_date=date(2026, 7, 12),
+        )
+        # Inseridas propositalmente na ordem errada: 20, sem-data, 12, 05.
+        db_session.add(
+            ReconciliationAnomaly(
+                session_id=reconciliation.id,
+                anomaly_type_id=types["wrong_account"].id,
+                omie_entry_id=oe.id,
+                detected_by=AnomalyDetectedBy.AI.value,
+                resolved=False,
+            )
+        )
+        db_session.add(
+            ReconciliationAnomaly(
+                session_id=reconciliation.id,
+                anomaly_type_id=types["missing_in_omie"].id,
+                detected_by=AnomalyDetectedBy.AI.value,
+                resolved=False,
+            )
+        )
+        db_session.add(
+            ReconciliationAnomaly(
+                session_id=reconciliation.id,
+                anomaly_type_id=types["wrong_account"].id,
+                file_entry_id=fe_12.id,
+                detected_by=AnomalyDetectedBy.AI.value,
+                resolved=False,
+            )
+        )
+        db_session.add(
+            ReconciliationAnomaly(
+                session_id=reconciliation.id,
+                anomaly_type_id=types["wrong_account"].id,
+                file_entry_id=fe_05.id,
+                detected_by=AnomalyDetectedBy.AI.value,
+                resolved=False,
+            )
+        )
+        await db_session.flush()
+
+    async def test_lista_abre_em_ordem_cronologica_com_sem_data_no_fim(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin)
+        types = await _seed_anomaly_types(db_session)
+        await self._seed_mixed(db_session, reconciliation=sess, types=types)
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.get(f"/api/v1/reconciliations/{sess.id}/anomalies")
+
+        assert resp.status_code == 200
+        rows = resp.json()["data"]
+        assert len(rows) == 4
+        # Inseridas como 20/07, sem-data, 12/07, 05/07 — saem cronológicas, e a
+        # sem-vínculo por ÚLTIMA. Quem abre a tela não pode esbarrar primeiro
+        # justamente na anomalia que não tem contexto.
+        assert [self._effective_date(r) for r in rows] == [
+            "2026-07-05",
+            "2026-07-12",
+            "2026-07-20",
+            None,
+        ]
+
+    async def test_ordem_atravessa_a_paginacao(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """A ordenação roda no SQL — página 2 continua de onde a 1 parou.
+
+        Se alguém mover a ordenação para o cliente, este teste quebra: ordenar
+        só a página carregada faz as duas páginas se sobreporem.
+        """
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin)
+        types = await _seed_anomaly_types(db_session)
+        await self._seed_mixed(db_session, reconciliation=sess, types=types)
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        p1 = await client_with_db.get(
+            f"/api/v1/reconciliations/{sess.id}/anomalies",
+            params={"page": 1, "page_size": 2},
+        )
+        p2 = await client_with_db.get(
+            f"/api/v1/reconciliations/{sess.id}/anomalies",
+            params={"page": 2, "page_size": 2},
+        )
+
+        assert p1.status_code == 200
+        assert p2.status_code == 200
+        rows_p1 = p1.json()["data"]
+        rows_p2 = p2.json()["data"]
+        assert [self._effective_date(r) for r in rows_p1] == ["2026-07-05", "2026-07-12"]
+        assert [self._effective_date(r) for r in rows_p2] == ["2026-07-20", None]
+        # Sem sobreposição e sem buraco: as 4 anomalias, cada uma uma vez.
+        ids_p1 = {r["id"] for r in rows_p1}
+        ids_p2 = {r["id"] for r in rows_p2}
+        assert ids_p1.isdisjoint(ids_p2)
+        assert len(ids_p1 | ids_p2) == 4
+
+    async def test_filtro_de_severidade_combina_com_a_ordem(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin)
+        types = await _seed_anomaly_types(db_session)
+        await self._seed_mixed(db_session, reconciliation=sess, types=types)
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.get(
+            f"/api/v1/reconciliations/{sess.id}/anomalies",
+            params={"severity": AnomalySeverity.MODERATE.value},
+        )
+
+        assert resp.status_code == 200
+        rows = resp.json()["data"]
+        # As 3 `wrong_account` (moderate); a `missing_in_omie` (critical) fora.
+        assert len(rows) == 3
+        assert all(r["anomaly_type"]["severity"] == AnomalySeverity.MODERATE.value for r in rows)
+        # E continuam cronológicas dentro do filtro.
+        assert [self._effective_date(r) for r in rows] == [
+            "2026-07-05",
+            "2026-07-12",
+            "2026-07-20",
+        ]
 
 
 # ----------------------------------------------------------------------
