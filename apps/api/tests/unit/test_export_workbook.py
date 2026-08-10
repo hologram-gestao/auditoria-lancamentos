@@ -533,27 +533,35 @@ class TestSheet5Anomalias:
         wb = load_workbook(buf)
         return wb[SHEET_NAME_ANOMALIAS]
 
-    def test_orders_critical_first(self) -> None:
+    def test_preserva_a_ordem_recebida_sem_reordenar(self) -> None:
+        """A aba 5 escreve na ordem que recebe — quem ordena é o serviço.
+
+        Até 07/08/2026 o workbook reordenava por (severidade, resolvida) na
+        montagem, e era isso que fazia a planilha contar uma história diferente
+        da tela. A ordem canônica agora é cronológica e vive em
+        `anomaly_ordering`, consultada pela tela e pelo export. Se alguém voltar
+        a ordenar aqui, este teste quebra.
+        """
         rows = [
             AnomalyRow(
                 severity="info",
-                type_name="Aviso simples",
-                related_line="—",
+                type_name="1º — informativa",
+                related_line="01/07/2026 · R$ 100,00",
                 detected_by="ai",
-                resolved=False,
-                resolution_note=None,
+                resolved=True,
+                resolution_note="ok",
             ),
             AnomalyRow(
                 severity="critical",
-                type_name="Crítica X",
-                related_line="—",
+                type_name="2º — crítica",
+                related_line="05/07/2026 · R$ 200,00",
                 detected_by="ai",
                 resolved=False,
                 resolution_note=None,
             ),
             AnomalyRow(
                 severity="moderate",
-                type_name="Moderada Y",
+                type_name="3º — moderada",
                 related_line="—",
                 detected_by="manual",
                 resolved=False,
@@ -561,17 +569,25 @@ class TestSheet5Anomalias:
             ),
         ]
         ws = self._build(*rows)
-        # Espera: row 2 = Crítica, row 3 = Moderada, row 4 = Informativa
-        assert ws.cell(row=2, column=2).value == "Crítica X"  # type: ignore[attr-defined]
-        assert ws.cell(row=3, column=2).value == "Moderada Y"  # type: ignore[attr-defined]
-        assert ws.cell(row=4, column=2).value == "Aviso simples"  # type: ignore[attr-defined]
 
-    def test_resolved_pushed_to_end_within_same_severity(self) -> None:
+        # Nem a severidade nem o status de resolvida movem a linha de lugar.
+        assert ws.cell(row=2, column=2).value == "1º — informativa"  # type: ignore[attr-defined]
+        assert ws.cell(row=3, column=2).value == "2º — crítica"  # type: ignore[attr-defined]
+        assert ws.cell(row=4, column=2).value == "3º — moderada"  # type: ignore[attr-defined]
+
+    def test_resolvida_nao_e_mais_empurrada_para_o_fim(self) -> None:
+        """Mudança de comportamento deliberada, junto com a ordem cronológica.
+
+        A planilha empurrava as resolvidas para o fim de cada faixa de
+        severidade. A tela nunca fez isso — ela oferece o filtro de status. Como
+        o critério agora é o mesmo nos dois lugares, a resolvida fica na posição
+        cronológica dela, e quem quiser separar usa o filtro.
+        """
         rows = [
             AnomalyRow(
                 severity="critical",
                 type_name="C1 — RESOLVIDA",
-                related_line="—",
+                related_line="01/07/2026 · R$ 100,00",
                 detected_by="ai",
                 resolved=True,
                 resolution_note="ok",
@@ -579,16 +595,16 @@ class TestSheet5Anomalias:
             AnomalyRow(
                 severity="critical",
                 type_name="C2 — pendente",
-                related_line="—",
+                related_line="02/07/2026 · R$ 200,00",
                 detected_by="ai",
                 resolved=False,
                 resolution_note=None,
             ),
         ]
         ws = self._build(*rows)
-        # Crítica pendente vem antes de crítica resolvida
-        assert ws.cell(row=2, column=2).value == "C2 — pendente"  # type: ignore[attr-defined]
-        assert ws.cell(row=3, column=2).value == "C1 — RESOLVIDA"  # type: ignore[attr-defined]
+
+        assert ws.cell(row=2, column=2).value == "C1 — RESOLVIDA"  # type: ignore[attr-defined]
+        assert ws.cell(row=3, column=2).value == "C2 — pendente"  # type: ignore[attr-defined]
 
     def test_detected_by_translates_to_pt(self) -> None:
         rows = [
@@ -633,6 +649,6 @@ class TestSheet5Anomalias:
             ),
         ]
         ws = self._build(*rows)
-        # Pendentes primeiro dentro da mesma severity
-        assert ws.cell(row=2, column=5).value == "Pendente"  # type: ignore[attr-defined]
-        assert ws.cell(row=3, column=5).value == "Resolvida"  # type: ignore[attr-defined]
+        # Na ordem recebida — o rótulo é o que está sob teste, não a posição.
+        assert ws.cell(row=2, column=5).value == "Resolvida"  # type: ignore[attr-defined]
+        assert ws.cell(row=3, column=5).value == "Pendente"  # type: ignore[attr-defined]

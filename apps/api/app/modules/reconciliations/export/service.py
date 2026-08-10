@@ -51,6 +51,10 @@ from app.db.models import (
     ReconciliationSession,
     SessionAccountType,
 )
+from app.modules.reconciliations.anomaly_ordering import (
+    anomaly_order_by,
+    join_anomaly_dates,
+)
 from app.modules.reconciliations.export.schemas import (
     AnomalyRow,
     ExportPayload,
@@ -294,12 +298,14 @@ class ExportService:
     async def _load_anomalies(
         self, session_id: UUID
     ) -> list[tuple[ReconciliationAnomaly, AnomalyType]]:
-        stmt = (
+        # Ordem cronológica — a MESMA da tela, de `anomaly_ordering`. A aba 5
+        # sai exatamente na sequência em que o analista viu as anomalias na
+        # revisão; a planilha não reordena depois (ver `_build_sheet5_anomalias`).
+        stmt = join_anomaly_dates(
             select(ReconciliationAnomaly, AnomalyType)
             .join(AnomalyType, ReconciliationAnomaly.anomaly_type_id == AnomalyType.id)
             .where(ReconciliationAnomaly.session_id == session_id)
-            .order_by(ReconciliationAnomaly.created_at.asc())
-        )
+        ).order_by(*anomaly_order_by())
         rows = (await self._db.execute(stmt)).all()
         return [(anomaly, atype) for anomaly, atype in rows]
 
