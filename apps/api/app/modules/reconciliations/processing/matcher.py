@@ -26,6 +26,8 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
+from app.modules.reconciliations.processing.name_affinity import supplier_affinity
+
 # Tolerância fixa em centavos. CLAUDE.md §5.1: NÃO é parametrizável.
 AMOUNT_TOLERANCE: Decimal = Decimal("0.01")
 
@@ -47,6 +49,11 @@ class FileEntryForMatch:
     id: str
     transaction_date: date
     amount: Decimal
+    # Descrição JÁ DECIFRADA, usada só como desempate por afinidade de nome
+    # (ver `name_affinity`). Default vazio: o matcher funciona sem ela, e os
+    # testes que não exercitam fornecedor não precisam informá-la.
+    # NUNCA logar nem persistir — dado identificável do cliente final (§4.5).
+    description: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +74,31 @@ class OmieMovement:
     amount: Decimal
     status: str
     is_realized: bool
+    # Razão social/nome fantasia do cliente-fornecedor, quando o Omie informa.
+    # `None` para títulos a pagar/receber: `ListarContasPagar/Receber` devolve
+    # apenas `codigo_cliente_fornecedor` (um ID), e resolver o nome exigiria uma
+    # chamada extra a `ListarClientes` por lançamento. Só o extrato traz o nome.
+    # NUNCA logar nem persistir (§4.5).
+    supplier: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TieStats:
+    """Quantas decisões empataram e quantas o fornecedor desempatou.
+
+    Só números — nome de fornecedor e descrição jamais saem daqui (§3.3, §4.5).
+
+    Attributes:
+        ties: decisões em que mais de um lançamento Omie empatou no melhor
+            `|amount_diff|` dentro da passada. É o denominador.
+        broken_by_supplier: dessas, quantas o fornecedor resolveu escolhendo um
+            candidato DIFERENTE do que a data sozinha escolheria. É o numerador
+            — se ficar em zero depois de rodar em produção, o desempate por
+            fornecedor não está pagando a complexidade que custa.
+    """
+
+    ties: int = 0
+    broken_by_supplier: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,11 +121,17 @@ class MatchResult:
     |dias de diferença| entre a data do arquivo e a do lançamento Omie casado
     (0 ≤ valor ≤ DATE_DIVERGENCE_RANGE). É o que permite o caller separar
     `conciliado` (== 0) de `conciliado_data_divergente` (1-3) sem recalcular.
+
+    `tie_stats`: contadores puros (sem PII) para o caller logar. É a única forma
+    de responder "com que frequência o desempate por fornecedor importa?" —
+    o conjunto de candidatos de um cruzamento NÃO é persistido, então a pergunta
+    não tem resposta retroativa no banco.
     """
 
     matches: list[tuple[str, int]]
     unmatched_omie_indices: list[int]
     days_diff_by_file_id: dict[str, int]
+    tie_stats: TieStats
 
 
 def _amount_within_tolerance(a: Decimal, b: Decimal) -> bool:
@@ -153,6 +191,8 @@ def match(
     matched_file_ids: set[str] = set()
     matches: list[tuple[str, int]] = []
     days_diff_by_file_id: dict[str, int] = {}
+    ties = 0
+    broken_by_supplier = 0
 
     # Ordem de decisão das linhas dentro de cada passada. Derivada dos dados
     # (data, depois id) em vez da ordem de leitura: o resultado deixa de
@@ -180,14 +220,47 @@ def match(
             # Desempate DENTRO da passada (CLAUDE.md §5.5): o |days_diff| já é
             # o mesmo para todos os candidatos aqui, então sobram
             #   1) menor |amount_diff|
-            #   2) primeiro por date asc
+            #   2) MAIOR afinidade de fornecedor com a descrição do extrato
+            #   3) primeiro por date asc
+            # A afinidade entra DEPOIS do valor porque valor é fato e nome é
+            # indício. E entra só como ordenação — nenhum candidato é removido
+            # por nome que não bate (ver `name_affinity`).
             def _sort_key(
                 idx: int, _file_entry: FileEntryForMatch = file_entry
+            ) -> tuple[Decimal, int, date]:
+                omie = omie_movements[idx]
+                affinity = supplier_affinity(omie.supplier, _file_entry.description)
+                return (
+                    abs(_file_entry.amount - omie.amount),
+                    -affinity,  # negativo: mais tokens em comum ordena antes
+                    omie.transaction_date,
+                )
+
+            def _sort_key_sem_fornecedor(
+                idx: int, _file_entry: FileEntryForMatch = file_entry
             ) -> tuple[Decimal, date]:
+                """O critério anterior — serve só para medir se o nome mudou algo."""
                 omie = omie_movements[idx]
                 return (abs(_file_entry.amount - omie.amount), omie.transaction_date)
 
             chosen = min(candidate_indices, key=_sort_key)
+
+            # Instrumentação: um "empate" é mais de um candidato disputando o
+            # melhor |amount_diff|. Sem isto não há como saber se o desempate
+            # por fornecedor importa — o conjunto de candidatos não é persistido.
+            best_amount_diff = min(
+                abs(file_entry.amount - omie_movements[i].amount) for i in candidate_indices
+            )
+            tied = [
+                i
+                for i in candidate_indices
+                if abs(file_entry.amount - omie_movements[i].amount) == best_amount_diff
+            ]
+            if len(tied) > 1:
+                ties += 1
+                if chosen != min(candidate_indices, key=_sort_key_sem_fornecedor):
+                    broken_by_supplier += 1
+
             used_omie_indices.add(chosen)
             matched_file_ids.add(file_entry.id)
             matches.append((file_entry.id, omie_movements[chosen].omie_id))
@@ -205,4 +278,5 @@ def match(
         matches=matches,
         unmatched_omie_indices=unmatched_omie_indices,
         days_diff_by_file_id=days_diff_by_file_id,
+        tie_stats=TieStats(ties=ties, broken_by_supplier=broken_by_supplier),
     )

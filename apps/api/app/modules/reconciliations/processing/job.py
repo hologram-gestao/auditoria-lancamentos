@@ -40,7 +40,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.alerting import Alert, AlertCode, send_alert
 from app.core.config import Settings
-from app.core.crypto_service import provision_client_cipher
+from app.core.crypto_service import (
+    AAD_FILE_ENTRY_DESCRIPTION,
+    field_locator,
+    provision_client_cipher,
+)
 from app.core.exceptions import AppError, ErrorCode
 from app.core.logging import get_logger
 from app.db.models import (
@@ -75,6 +79,7 @@ from app.modules.usage_events.service import UsageEventService
 
 if TYPE_CHECKING:
     from app.core.crypto import ClientCipher
+    from app.db.models import ReconciliationFileEntry
 
 log = get_logger(__name__)
 
@@ -261,14 +266,6 @@ async def _execute_processing(
         # Detach: vamos usar os dados depois fora desta sessão. Cópia explícita
         # do que importa pro matcher antes de fechar.
         client = session_obj.client
-        file_entries_for_matcher = [
-            FileEntryForMatch(
-                id=str(entry.id),
-                transaction_date=entry.transaction_date,
-                amount=entry.amount,
-            )
-            for entry in session_obj.file_entries
-        ]
         # Snapshot pro cálculo de saldos pós-Omie (depois de fechar a sessão).
         # Tuplas em vez do model porque vamos usar fora do contexto async.
         file_entries_for_balance = [
@@ -300,6 +297,20 @@ async def _execute_processing(
             # `client` siga utilizável, detached, nos passos seguintes.
             await db.commit()
             await db.refresh(client)
+
+        # Montado DEPOIS do cipher porque a descrição vai decifrada para o
+        # matcher — ela é o lado do arquivo do desempate por fornecedor
+        # (`name_affinity`). Descrição indecifrável NÃO derruba a linha: entra
+        # vazia e o cruzamento cai no critério de data, como antes.
+        file_entries_for_matcher = [
+            FileEntryForMatch(
+                id=str(entry.id),
+                transaction_date=entry.transaction_date,
+                amount=entry.amount,
+                description=_safe_decrypt_description(cipher, entry),
+            )
+            for entry in session_obj.file_entries
+        ]
 
     # 2. Fetch Omie data — toda a interação com credencial em claro
     #    acontece dentro do `async with` do OmieClient.
@@ -390,6 +401,13 @@ async def _execute_processing(
         matched=len(result.matches),
         divergent=len(divergent_matches),
         unmatched_omie=len(result.unmatched_omie_indices),
+        # Desempate por fornecedor: `ties` é quantas decisões tiveram mais de um
+        # candidato empatado em valor, `tie_broken_by_supplier` quantas dessas o
+        # nome resolveu diferente do que a data resolveria. São CONTADORES — não
+        # sai nome de fornecedor nem descrição (§3.3, §4.5). Não há como medir
+        # isto retroativamente: o conjunto de candidatos não é persistido.
+        ties=result.tie_stats.ties,
+        tie_broken_by_supplier=result.tie_stats.broken_by_supplier,
     )
 
     # 4. Apply tudo em uma única transação: matches + omie_entries + anomalies + counters.
@@ -491,6 +509,28 @@ async def _execute_processing(
         if balances.balance_difference is not None
         else None,
     )
+
+
+def _safe_decrypt_description(cipher: ClientCipher, entry: ReconciliationFileEntry) -> str:
+    """Descrição decifrada para o desempate por fornecedor, ou "" se falhar.
+
+    Degrada em vez de derrubar: a descrição aqui é INDÍCIO, não requisito. Sem
+    ela o cruzamento daquela linha continua acontecendo por valor e data, que é
+    exatamente o comportamento anterior a esta feature. Derrubar o processamento
+    inteiro por um IV corrompido numa linha seria trocar um desempate melhor por
+    uma conciliação que não roda.
+
+    O warning não leva a descrição nem o texto do erro — só o id da linha (§3.3).
+    """
+    try:
+        return cipher.decrypt(
+            entry.description_encrypted,
+            entry.description_iv,
+            field_locator(AAD_FILE_ENTRY_DESCRIPTION, entry.id),
+        )
+    except Exception:
+        log.warning("matcher_description_decrypt_failed", file_entry_id=str(entry.id))
+        return ""
 
 
 async def _load_unmatched_file_entries(
