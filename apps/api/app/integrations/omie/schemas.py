@@ -160,8 +160,12 @@ class LancamentoExtrato(BaseModel):
         default=None,
         alias="nCodLancRelac",
         description=(
-            "ID do lançamento relacionado (parcelamento). Não usado no "
-            "matching atual; persiste no cache pra ser exercitado depois."
+            "ID do lançamento relacionado (parcelamento). NÃO decide match "
+            "(§5) e NÃO é persistido em lugar nenhum — só trafega até o "
+            "matcher para a medição de pagamento dividido, que conta quantas "
+            "linhas fechariam por SOMA de lançamentos. A descrição anterior "
+            "dizia que ele persistia no cache; era falso, e levava a acreditar "
+            "que o dado estava no banco."
         ),
     )
     c_natureza: str = Field(alias="cNatureza", description="'D' (débito) ou 'C' (crédito).")

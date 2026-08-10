@@ -73,6 +73,7 @@ from app.modules.reconciliations.processing.omie_fetch import (
     fetch_pending,
     fetch_realized,
 )
+from app.modules.reconciliations.processing.split_payment_probe import probe_split_payments
 from app.modules.reconciliations.repository import ReconciliationRepository
 from app.modules.usage_events.repository import UsageEventRepository
 from app.modules.usage_events.service import UsageEventService
@@ -408,6 +409,29 @@ async def _execute_processing(
         # isto retroativamente: o conjunto de candidatos não é persistido.
         ties=result.tie_stats.ties,
         tie_broken_by_supplier=result.tie_stats.broken_by_supplier,
+    )
+
+    # Sonda de pagamento dividido (Fatia 1 da 86e2n4r6p) — SÓ CONTA, não altera
+    # nenhum match. Responde "quantas linhas `sem_omie` fechariam se o
+    # cruzamento soubesse somar lançamentos?", que é o número que decide se a
+    # mudança estrutural (§5.4, modelo de dados, tela, relatório) se paga.
+    # Não é medível retroativamente: os lançamentos Omie sem par não guardam
+    # valor no banco e o cache é in-memory.
+    matched_file_ids = {file_id for file_id, _ in result.matches}
+    probe = probe_split_payments(
+        [fe for fe in file_entries_for_matcher if fe.id not in matched_file_ids],
+        [omie_movements[idx] for idx in result.unmatched_omie_indices],
+        tolerance_days=DATE_DIVERGENCE_RANGE,
+    )
+    log.info(
+        "split_payment_probe",
+        session_id=str(session_id),
+        sem_omie=probe.sem_omie,
+        fechariam_por_soma=probe.fechariam_por_soma,
+        com_agrupamento_omie=probe.com_agrupamento_omie,
+        nao_avaliadas=probe.nao_avaliadas,
+        omie_sem_par=probe.omie_sem_par,
+        omie_com_lanc_relac=probe.omie_com_lanc_relac,
     )
 
     # 4. Apply tudo em uma única transação: matches + omie_entries + anomalies + counters.
