@@ -118,6 +118,9 @@ async def fetch_realized(
             # como DESEMPATE (nunca exclusão) e morre em memória — não é
             # persistido nem logado (§4.5).
             supplier=item.supplier,
+            # Agrupamento de parcelas do Omie — só a sonda de pagamento
+            # dividido lê isto; não influencia nenhum match (§5).
+            related_launch_id=item.n_cod_lanc_relac,
         )
         for item in raw
     ]

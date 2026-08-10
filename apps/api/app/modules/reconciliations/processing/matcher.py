@@ -80,6 +80,10 @@ class OmieMovement:
     # chamada extra a `ListarClientes` por lançamento. Só o extrato traz o nome.
     # NUNCA logar nem persistir (§4.5).
     supplier: str | None = None
+    # `nCodLancRelac` do extrato — o id que o Omie usa para agrupar parcelas de
+    # um mesmo lançamento. NÃO decide match (§5): serve só para a sonda de
+    # pagamento dividido medir se o agrupamento vem de graça no response.
+    related_launch_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
