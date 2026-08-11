@@ -281,9 +281,9 @@ class TestExportEndpoint:
         assert summary["B3"].value == "Cliente Export S/A"
         assert summary["B6"].value == "Abril/2026"
 
-        # Aba 2: descrições descriptografadas
+        # Aba 2: descrições descriptografadas (col 3 — a 2 é "Data Omie")
         mov = wb["Movimentação x Lançamento"]
-        descriptions = {mov.cell(row=r, column=2).value for r in (2, 3)}
+        descriptions = {mov.cell(row=r, column=3).value for r in (2, 3)}
         assert descriptions == {"Pagamento Padaria", "Recebimento Cielo"}
 
     async def test_export_writes_access_audit_row(

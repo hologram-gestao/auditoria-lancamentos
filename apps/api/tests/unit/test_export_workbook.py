@@ -7,7 +7,7 @@ sem rede — função pura.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -241,6 +241,7 @@ class TestSheet2Movimentacao:
         ws = self._build()
         expected = [
             "Data",
+            "Data Omie",
             "Descrição",
             "Valor",
             "Saldo",
@@ -326,7 +327,7 @@ class TestSheet2Movimentacao:
             user_note=None,
         )
         ws = self._build(row)
-        amount_cell = ws.cell(row=2, column=3)  # type: ignore[attr-defined]
+        amount_cell = ws.cell(row=2, column=4)  # type: ignore[attr-defined]
         # openpyxl retorna Decimal/float — nunca string
         assert not isinstance(amount_cell.value, str)
         assert amount_cell.value == Decimal("-1234.56") or amount_cell.value == -1234.56
@@ -345,12 +346,12 @@ class TestSheet2Movimentacao:
             user_note=None,
         )
         ws = self._build(row)
-        assert ws.cell(row=2, column=5).value == "—"  # type: ignore[attr-defined]
         assert ws.cell(row=2, column=6).value == "—"  # type: ignore[attr-defined]
+        assert ws.cell(row=2, column=7).value == "—"  # type: ignore[attr-defined]
 
 
 # ======================================================================
-# Aba 2 — cartão (FASE 1 / BACK 1.9): coluna "Data Omie"
+# Aba 2 — coluna "Data Omie" (cartão: FASE 1 / BACK 1.9)
 # ======================================================================
 
 
@@ -366,13 +367,6 @@ class TestSheet2MovimentacaoCartao:
         assert ws.cell(row=1, column=1).value == "Data"  # type: ignore[attr-defined]
         assert ws.cell(row=1, column=2).value == "Data Omie"  # type: ignore[attr-defined]
         assert ws.cell(row=1, column=3).value == "Descrição"  # type: ignore[attr-defined]
-
-    def test_cc_has_no_data_omie_column(self) -> None:
-        # Contraste: CC não ganha a coluna — col 2 segue sendo "Descrição".
-        buf = build_workbook(_payload(is_card=False))
-        wb = load_workbook(buf)
-        ws = wb[SHEET_NAME_MOVIMENTACAO]
-        assert ws.cell(row=1, column=2).value == "Descrição"
 
     def test_divergente_fills_data_omie_orange(self) -> None:
         from datetime import date
@@ -416,6 +410,71 @@ class TestSheet2MovimentacaoCartao:
         ws = self._build_card(row)
         # Conciliado sem divergência → "Data Omie" vazia (mesmo tendo match).
         assert ws.cell(row=2, column=2).value is None  # type: ignore[attr-defined]
+
+
+# ======================================================================
+# Aba 2 — "Data Omie" em CONTA CORRENTE
+# ======================================================================
+# A coluna nasceu só no cartão, mas a FASE 1 passou a aplicar
+# `DATE_DIVERGENCE_RANGE` também à CC (CLAUDE.md §5.2): existem linhas
+# `conciliado_data_divergente` em conta corrente, e o relatório não dizia
+# divergente de QUÊ — a data do Omie ficava só no payload. O buraco não apareceu
+# antes porque a cobertura da coluna existia apenas no caminho de cartão.
+
+
+@pytest.mark.unit
+class TestSheet2MovimentacaoContaCorrente:
+    def _build_cc(self, *rows: FileEntryRow) -> object:
+        buf = build_workbook(_payload(is_card=False, file_entries=list(rows)))
+        wb = load_workbook(buf)
+        return wb[SHEET_NAME_MOVIMENTACAO]
+
+    def _row(self, situation: str, omie_date: date | None) -> FileEntryRow:
+        return FileEntryRow(
+            transaction_date=date(2026, 7, 7),
+            description="Boleto fornecedor",
+            amount=Decimal("-890.00"),
+            balance=None,
+            supplier="Fornecedor Z",
+            category="Despesa",
+            situation=situation,
+            user_note=None,
+            omie_date=omie_date,
+        )
+
+    def test_coluna_existe_mesmo_sem_nenhuma_divergencia(self) -> None:
+        # Layout estável entre meses: a coluna não aparece e some conforme o mês
+        # tenha ou não divergência — quem compara exports lado a lado depende disso.
+        ws = self._build_cc(self._row("conciliado", date(2026, 7, 7)))
+        assert ws.cell(row=1, column=2).value == "Data Omie"  # type: ignore[attr-defined]
+        assert ws.cell(row=1, column=3).value == "Descrição"  # type: ignore[attr-defined]
+
+    def test_linha_divergente_traz_a_data_do_omie_destacada(self) -> None:
+        ws = self._build_cc(self._row("conciliado_data_divergente", date(2026, 7, 10)))
+        cell = ws.cell(row=2, column=2)  # type: ignore[attr-defined]
+        val = cell.value
+        assert (getattr(val, "year", 0), getattr(val, "month", 0), getattr(val, "day", 0)) == (
+            2026,
+            7,
+            10,
+        )
+        # Laranja sobrescreve o verde de conciliado só nessa célula.
+        assert _hex(cell.fill.start_color.rgb) == COLOR_DATA_DIVERGENTE
+
+    def test_conciliado_exato_deixa_a_celula_vazia(self) -> None:
+        ws = self._build_cc(self._row("conciliado", date(2026, 7, 7)))
+        assert ws.cell(row=2, column=2).value is None  # type: ignore[attr-defined]
+
+    def test_sem_omie_deixa_a_celula_vazia(self) -> None:
+        ws = self._build_cc(self._row("sem_omie", None))
+        assert ws.cell(row=2, column=2).value is None  # type: ignore[attr-defined]
+
+    def test_descricao_e_valor_seguem_legiveis_apos_o_deslocamento(self) -> None:
+        # A coluna nova empurra tudo uma casa à direita; este teste falha se
+        # alguém reintroduzir o layout antigo em algum ponto do caminho.
+        ws = self._build_cc(self._row("conciliado", None))
+        assert ws.cell(row=2, column=3).value == "Boleto fornecedor"  # type: ignore[attr-defined]
+        assert ws.cell(row=2, column=4).value == Decimal("-890.00")  # type: ignore[attr-defined]
 
 
 # ======================================================================
