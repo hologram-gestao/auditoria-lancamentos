@@ -533,6 +533,87 @@ class TestSheet5Anomalias:
         wb = load_workbook(buf)
         return wb[SHEET_NAME_ANOMALIAS]
 
+    def test_coluna_detalhe_traz_o_motivo_da_anomalia(self) -> None:
+        """O report da Bruna (04/08/2026): o relatório vinha "pela metade".
+
+        Sem esta coluna, várias linhas do mesmo tipo ficam indistinguíveis entre
+        si no Excel, embora a tela mostre o porquê de cada uma. Era o campo
+        `context`, que o export nunca decifrava.
+        """
+        rows = [
+            AnomalyRow(
+                context="Extrato indica Getulio da Silva Rios mas fornecedor Omie é Renilson",
+                severity="critical",
+                type_name="Qualificação incoerente",
+                related_line="07/07/2026 · Pix Getulio · -R$ 2.800,00",
+                detected_by="ai",
+                resolved=False,
+                resolution_note=None,
+            ),
+            AnomalyRow(
+                context="Data arquivo: 07/07/2026 · Data Omie: 10/07/2026",
+                severity="moderate",
+                type_name="Data divergente",
+                related_line="07/07/2026 · Pix Cleidson · -R$ 1.400,00",
+                detected_by="ai",
+                resolved=False,
+                resolution_note=None,
+            ),
+        ]
+        ws = self._build(*rows)
+
+        assert ws.cell(row=1, column=3).value == "Detalhe"  # type: ignore[attr-defined]
+        assert (  # type: ignore[attr-defined]
+            ws.cell(row=2, column=3).value
+            == "Extrato indica Getulio da Silva Rios mas fornecedor Omie é Renilson"
+        )
+        # Na linha de data divergente, o que sumia era justamente QUAL é a data
+        # do Omie — o dado que torna a anomalia acionável.
+        assert (  # type: ignore[attr-defined]
+            ws.cell(row=3, column=3).value == "Data arquivo: 07/07/2026 · Data Omie: 10/07/2026"
+        )
+
+    def test_anomalia_estrutural_sem_contexto_sai_com_celula_vazia(self) -> None:
+        """Ausência legítima de contexto não é falha — estruturais não têm."""
+        rows = [
+            AnomalyRow(
+                context="",
+                severity="critical",
+                type_name="Movimentação sem lançamento no Omie",
+                related_line="07/07/2026 · Pix Maiane · -R$ 2.800,00",
+                detected_by="ai",
+                resolved=False,
+                resolution_note=None,
+            )
+        ]
+        ws = self._build(*rows)
+
+        # `None` e não `""`: o openpyxl relê célula vazia como None. O que
+        # importa é não haver texto, e sobretudo não haver "[indecifrável]" —
+        # ausência de contexto não é falha de decifragem.
+        assert not ws.cell(row=2, column=3).value  # type: ignore[attr-defined]
+
+    def test_linha_relacionada_traz_a_descricao_da_movimentacao(self) -> None:
+        """A tela sempre mostrou a descrição; o Excel trazia só data e valor."""
+        rows = [
+            AnomalyRow(
+                context="",
+                severity="info",
+                type_name="X",
+                related_line="10/07/2026 · Pix enviado: Cp:18236120-Cleidson · -R$ 2.800,00",
+                detected_by="ai",
+                resolved=False,
+                resolution_note=None,
+            )
+        ]
+        ws = self._build(*rows)
+
+        assert ws.cell(row=1, column=4).value == "Linha relacionada"  # type: ignore[attr-defined]
+        assert (  # type: ignore[attr-defined]
+            ws.cell(row=2, column=4).value
+            == "10/07/2026 · Pix enviado: Cp:18236120-Cleidson · -R$ 2.800,00"
+        )
+
     def test_preserva_a_ordem_recebida_sem_reordenar(self) -> None:
         """A aba 5 escreve na ordem que recebe — quem ordena é o serviço.
 
@@ -544,6 +625,7 @@ class TestSheet5Anomalias:
         """
         rows = [
             AnomalyRow(
+                context="",
                 severity="info",
                 type_name="1º — informativa",
                 related_line="01/07/2026 · R$ 100,00",
@@ -552,6 +634,7 @@ class TestSheet5Anomalias:
                 resolution_note="ok",
             ),
             AnomalyRow(
+                context="",
                 severity="critical",
                 type_name="2º — crítica",
                 related_line="05/07/2026 · R$ 200,00",
@@ -560,6 +643,7 @@ class TestSheet5Anomalias:
                 resolution_note=None,
             ),
             AnomalyRow(
+                context="",
                 severity="moderate",
                 type_name="3º — moderada",
                 related_line="—",
@@ -585,6 +669,7 @@ class TestSheet5Anomalias:
         """
         rows = [
             AnomalyRow(
+                context="",
                 severity="critical",
                 type_name="C1 — RESOLVIDA",
                 related_line="01/07/2026 · R$ 100,00",
@@ -593,6 +678,7 @@ class TestSheet5Anomalias:
                 resolution_note="ok",
             ),
             AnomalyRow(
+                context="",
                 severity="critical",
                 type_name="C2 — pendente",
                 related_line="02/07/2026 · R$ 200,00",
@@ -609,6 +695,7 @@ class TestSheet5Anomalias:
     def test_detected_by_translates_to_pt(self) -> None:
         rows = [
             AnomalyRow(
+                context="",
                 severity="info",
                 type_name="X",
                 related_line="—",
@@ -617,6 +704,7 @@ class TestSheet5Anomalias:
                 resolution_note=None,
             ),
             AnomalyRow(
+                context="",
                 severity="info",
                 type_name="Y",
                 related_line="—",
@@ -626,12 +714,16 @@ class TestSheet5Anomalias:
             ),
         ]
         ws = self._build(*rows)
-        seen = {ws.cell(row=2, column=4).value, ws.cell(row=3, column=4).value}  # type: ignore[attr-defined]
-        assert seen == {"IA", "Manual"}
+        # Coluna 5: a aba ganhou "Detalhe" na 3 e tudo depois dela deslocou.
+        # `ai` agora sai como "Sistema", igual à tela — nem toda detecção
+        # automática usa modelo (as estruturais são código determinístico).
+        seen = {ws.cell(row=2, column=5).value, ws.cell(row=3, column=5).value}  # type: ignore[attr-defined]
+        assert seen == {"Sistema", "Manual"}
 
     def test_status_label_pt(self) -> None:
         rows = [
             AnomalyRow(
+                context="",
                 severity="info",
                 type_name="X",
                 related_line="—",
@@ -640,6 +732,7 @@ class TestSheet5Anomalias:
                 resolution_note="feito",
             ),
             AnomalyRow(
+                context="",
                 severity="info",
                 type_name="Y",
                 related_line="—",
@@ -650,5 +743,5 @@ class TestSheet5Anomalias:
         ]
         ws = self._build(*rows)
         # Na ordem recebida — o rótulo é o que está sob teste, não a posição.
-        assert ws.cell(row=2, column=5).value == "Resolvida"  # type: ignore[attr-defined]
-        assert ws.cell(row=3, column=5).value == "Pendente"  # type: ignore[attr-defined]
+        assert ws.cell(row=2, column=6).value == "Resolvida"  # type: ignore[attr-defined]
+        assert ws.cell(row=3, column=6).value == "Pendente"  # type: ignore[attr-defined]
