@@ -149,7 +149,6 @@ def build_workbook(payload: ExportPayload) -> BytesIO:
     _build_sheet2_movimentacao(
         wb.create_sheet(title=SHEET_NAME_MOVIMENTACAO),
         payload.file_entries,
-        payload.is_card,
     )
     _build_sheet3_divergencias(
         wb.create_sheet(title=SHEET_NAME_DIVERGENCIAS),
@@ -331,7 +330,12 @@ def _resolve_balance_status(balance_difference: Decimal | None) -> str:
 
 
 _SHEET2_HEADER_DATA = ("Data", 14)
-# FASE 1 (BACK 1.9): só no export de cartão, ao lado da "Data" (data do arquivo).
+# Ao lado da "Data" (a do arquivo), em TODO export. Nasceu só no cartão na FASE 1
+# (BACK 1.9), quando divergência de data era assunto de cartão; a mesma FASE 1
+# passou a aplicar `DATE_DIVERGENCE_RANGE` também à conta corrente (CLAUDE.md
+# §5.2), e aí a CC ficou com linhas "Conciliado (data divergente)" sem dizer
+# divergente de QUÊ. A coluna existe sempre — largura estável entre meses vale
+# mais do que economizar uma coluna que fica vazia quando não há divergência.
 _SHEET2_HEADER_DATA_OMIE = ("Data Omie", 14)
 _SHEET2_HEADERS_REST = [
     ("Descrição", 48),
@@ -345,12 +349,8 @@ _SHEET2_HEADERS_REST = [
 ]
 
 
-def _build_sheet2_movimentacao(ws: Worksheet, rows: Sequence[FileEntryRow], is_card: bool) -> None:
-    # Cartão ganha a coluna "Data Omie" logo após "Data"; CC mantém o layout.
-    headers = [_SHEET2_HEADER_DATA]
-    if is_card:
-        headers.append(_SHEET2_HEADER_DATA_OMIE)
-    headers = [*headers, *_SHEET2_HEADERS_REST]
+def _build_sheet2_movimentacao(ws: Worksheet, rows: Sequence[FileEntryRow]) -> None:
+    headers = [_SHEET2_HEADER_DATA, _SHEET2_HEADER_DATA_OMIE, *_SHEET2_HEADERS_REST]
     _write_table_header(ws, headers)
     total_cols = len(headers)
 
@@ -362,14 +362,14 @@ def _build_sheet2_movimentacao(ws: Worksheet, rows: Sequence[FileEntryRow], is_c
             row=excel_row, column=col, value=row.transaction_date
         ).number_format = NUMBER_FORMAT_DATE
         col += 1
-        # Coluna "Data Omie" (só cartão): preenchida só para linhas com data
-        # divergente; conciliado sem divergência (e sem_omie) ficam vazias.
-        if is_card:
-            omie_cell = ws.cell(
-                row=excel_row, column=col, value=row.omie_date if is_divergente else None
-            )
-            omie_cell.number_format = NUMBER_FORMAT_DATE
-            col += 1
+        # "Data Omie": preenchida só nas linhas com data divergente; conciliado
+        # sem divergência (e sem_omie) ficam vazias — a coluna existe para
+        # explicar a divergência, não para repetir a data em toda linha.
+        omie_cell = ws.cell(
+            row=excel_row, column=col, value=row.omie_date if is_divergente else None
+        )
+        omie_cell.number_format = NUMBER_FORMAT_DATE
+        col += 1
         ws.cell(row=excel_row, column=col, value=row.description).alignment = ALIGN_LEFT
         col += 1
         ws.cell(row=excel_row, column=col, value=row.amount).number_format = NUMBER_FORMAT_BRL
@@ -399,7 +399,7 @@ def _build_sheet2_movimentacao(ws: Worksheet, rows: Sequence[FileEntryRow], is_c
                 ws.cell(row=excel_row, column=col_idx).fill = fill
         # Destaque laranja da célula "Data Omie" nas linhas divergentes — após
         # o fill da linha (que é verde de conciliado), pra sobrescrever só ela.
-        if is_card and is_divergente:
+        if is_divergente:
             ws.cell(row=excel_row, column=2).fill = FILL_DATA_DIVERGENTE
 
     ws.freeze_panes = "A2"
