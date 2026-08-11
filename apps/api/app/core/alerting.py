@@ -22,6 +22,13 @@ Fontes de alerta:
     - Ausência de heartbeat do processamento (cron `mark_stuck_sessions_as_error`).
     - Falha de decifragem (`[indecifrável]`) em review/export.
     - Gatilho SINTÉTICO (endpoint admin) para a 03.7 provar a entrega ponta a ponta.
+
+Canal do sintético (separado):
+    O gatilho SINTÉTICO dispara a cada push na `main` (gate do deploy) — ele prova
+    entrega, não denuncia incidente. Com `ALERT_WEBHOOK_URL_SYNTHETIC` configurada
+    ele sai por um webhook PRÓPRIO e NÃO acorda o plantão (nem por e-mail); sem ela,
+    segue no canal de plantão como antes. Essa URL **não** conta como canal
+    entregável para o fail-closed (ver `Settings.has_webhook_alert`).
 """
 
 from __future__ import annotations
@@ -121,10 +128,22 @@ def verify_alert_config(settings: Settings) -> None:
     log.warning("alerting_not_configured_dev", environment=settings.ENVIRONMENT.value)
 
 
-async def _send_webhook(alert: Alert, settings: Settings) -> bool:
-    url = settings.ALERT_WEBHOOK_URL
-    if not url:  # pragma: no cover - guardado pelo caller
-        return False
+def _routes_to_synthetic_channel(alert: Alert, settings: Settings) -> bool:
+    """True quando ESTE alerta deve sair pelo canal separado do sintético.
+
+    Só o `SYNTHETIC` desvia, e só quando há webhook próprio configurado. Sem a
+    setting, tudo segue para o plantão exatamente como antes.
+    """
+    return alert.code is AlertCode.SYNTHETIC and bool(settings.ALERT_WEBHOOK_URL_SYNTHETIC)
+
+
+def _webhook_url_for(alert: Alert, settings: Settings) -> str | None:
+    if _routes_to_synthetic_channel(alert, settings):
+        return settings.ALERT_WEBHOOK_URL_SYNTHETIC
+    return settings.ALERT_WEBHOOK_URL
+
+
+async def _send_webhook(alert: Alert, settings: Settings, url: str) -> bool:
     try:
         async with httpx.AsyncClient(timeout=settings.ALERT_WEBHOOK_TIMEOUT_SECONDS) as client:
             resp = await client.post(url, json=alert.to_webhook_payload())
@@ -168,9 +187,20 @@ async def _send_email(alert: Alert, settings: Settings) -> bool:
 
 async def send_alert(alert: Alert, settings: Settings) -> AlertDeliveryResult:
     """Dispara o alerta a TODOS os canais configurados. Nunca levanta — cada
-    canal é isolado. Retorna o resultado por canal (usado pelo gatilho sintético)."""
-    webhook = await _send_webhook(alert, settings) if settings.has_webhook_alert else None
-    email = await _send_email(alert, settings) if settings.has_email_alert else None
+    canal é isolado. Retorna o resultado por canal (usado pelo gatilho sintético).
+
+    Exceção única: o SINTÉTICO com canal próprio (`ALERT_WEBHOOK_URL_SYNTHETIC`)
+    vai SÓ para lá — sem e-mail de plantão junto, senão o desvio não tira o
+    ruído de onde ele incomoda.
+    """
+    to_synthetic_channel = _routes_to_synthetic_channel(alert, settings)
+    url = _webhook_url_for(alert, settings)
+    webhook = await _send_webhook(alert, settings, url) if url else None
+    email = (
+        await _send_email(alert, settings)
+        if settings.has_email_alert and not to_synthetic_channel
+        else None
+    )
     log.info(
         "alert_dispatched",
         code=alert.code.value,
@@ -178,6 +208,8 @@ async def send_alert(alert: Alert, settings: Settings) -> AlertDeliveryResult:
         client_id=alert.client_id,
         webhook=webhook,
         email=email,
+        # Qual canal recebeu — nunca a URL (segredo).
+        channel="synthetic" if to_synthetic_channel else "oncall",
     )
     return AlertDeliveryResult(webhook=webhook, email=email)
 
