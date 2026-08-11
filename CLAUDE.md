@@ -129,6 +129,15 @@
     - **Alerting é fail-closed em staging/prod:** sem canal entregável
       (`ALERT_WEBHOOK_URL`/`ALERT_EMAIL_TO`) o serviço **não sobe**
       (`verify_alert_config` no lifespan). Em dev degrada com warning.
+    - **O canal do sintético não é canal de plantão.** O alerta
+      `AlertCode.SYNTHETIC` (gate de deploy, dispara a cada push na `main`) sai
+      por `ALERT_WEBHOOK_URL_SYNTHETIC` quando ela existe — e **só** por ela, sem
+      e-mail de plantão junto; vazia, cai no canal de plantão como antes. Essa
+      URL **nunca** entra em `has_webhook_alert`/`has_alert_channel`
+      ([apps/api/app/core/config.py](apps/api/app/core/config.py)): contá-la
+      deixaria subir em prod um serviço cujo único canal é o de teste — alerta
+      real sem para onde ir. Só o sintético desvia; qualquer alerta novo nasce no
+      plantão.
 15. **Autorização por tenant (Sprint 5) — a regra mais fácil de furar sem perceber:**
     - **O tenant vem SEMPRE da LINHA do usuário**, nunca de `client_id` recebido
       em URL, query ou body. O JWT carrega `scope`/`client_id`, mas a autoridade
@@ -528,6 +537,8 @@ lembrar dos comandos.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.11 — 11/08/2026. **O alerta sintético ganhou canal próprio (§3.14).** O gate de deploy dispara `AlertCode.SYNTHETIC` a cada push na `main` — prova de entrega, não incidente — e isso caía no canal de plantão várias vezes por dia. Com `ALERT_WEBHOOK_URL_SYNTHETIC` configurada, o sintético (e só ele) sai por um webhook separado, sem e-mail de plantão junto; sem a setting, nada muda. A parte que não pode ser errada: essa URL **não** conta em `has_webhook_alert`/`has_alert_channel` — canal de teste não substitui canal de plantão, e contá-la faria o fail-closed deixar subir um serviço mudo para alerta real._
 
 _Versão 1.10 — 08/08/2026. **O matcher ganhou uma terceira dimensão: fornecedor (§5.5).** Ele conhecia valor e data, e mais nada — era o que sustentava a frase da Bruna de que o sistema cruzou o extrato de um fornecedor com o lançamento de outro "considerando apenas o valor". O dado existia e era descartado na montagem: `LancamentoExtrato.supplier` nunca chegava ao `OmieMovement`, e a descrição do arquivo nunca chegava ao `FileEntryForMatch`. Agora chegam, e a afinidade entre os dois entra como desempate **depois** do valor (valor é fato, nome é indício) e **nunca** como exclusão. A métrica é contagem de tokens em comum — sem limiar arbitrário para justificar quando um cruzamento sair errado — e continua determinística, sem IA (§5.9). Títulos a pagar/receber ficam de fora por limitação do Omie, que devolve só o código do cliente. `MatchResult` passou a carregar `tie_stats` (contadores puros, sem PII) porque o conjunto de candidatos de um cruzamento **não é persistido** e essa pergunta não tem resposta retroativa no banco._
 

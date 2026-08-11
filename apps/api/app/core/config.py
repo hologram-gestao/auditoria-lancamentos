@@ -192,6 +192,21 @@ class Settings(BaseSettings):
         default=None,
         description="Webhook (ex.: Slack) do canal de plantão. Segredo — nunca logar.",
     )
+    # Canal SEPARADO só para o alerta SINTÉTICO (`AlertCode.SYNTHETIC`), que o gate
+    # de deploy dispara a cada push na `main` (INFRA 03.7). Ele prova entrega, não
+    # denuncia incidente — no canal de plantão vira ruído, e alerta que as pessoas
+    # aprendem a ignorar é alerta que não funciona. Vazia = comportamento anterior
+    # (o sintético continua indo para o canal de plantão).
+    # ⚠️ NÃO entra em `has_webhook_alert`/`has_alert_channel` de propósito: canal de
+    # teste não é canal de plantão entregável, e contá-lo faria o fail-closed
+    # (`verify_alert_config`) deixar subir um serviço sem para onde alertar de verdade.
+    ALERT_WEBHOOK_URL_SYNTHETIC: str | None = Field(
+        default=None,
+        description=(
+            "Webhook do canal SÓ do alerta sintético do deploy. Segredo — nunca logar. "
+            "Não conta como canal de plantão entregável."
+        ),
+    )
     ALERT_EMAIL_TO: str | None = Field(
         default=None,
         description="E-mail COMPARTILHADO de plantão (grupo, não pessoa). Requer ALERT_SMTP_HOST.",
@@ -267,6 +282,8 @@ class Settings(BaseSettings):
 
     @property
     def has_webhook_alert(self) -> bool:
+        """Só o webhook de PLANTÃO conta. O do sintético (`ALERT_WEBHOOK_URL_SYNTHETIC`)
+        é canal de teste e NUNCA entra aqui — ver o comentário na declaração da setting."""
         return bool(self.ALERT_WEBHOOK_URL)
 
     @property
