@@ -82,8 +82,13 @@ _SEVERITY_LABEL = {
     "info": "Informativa",
 }
 
+# "Sistema", não "IA": o valor `ai` marca detecção AUTOMÁTICA em oposição a
+# registro manual, e nem toda detecção automática usa modelo — `missing_in_omie`
+# e `missing_in_file` saem de código determinístico (CLAUDE.md §5.9). Chamar isso
+# de "IA" no relatório seria impreciso. É também o rótulo que a tela já usava; o
+# Excel é que divergia, e comparar os dois gerava ruído.
 _DETECTED_BY_LABEL = {
-    "ai": "IA",
+    "ai": "Sistema",
     "manual": "Manual",
 }
 
@@ -483,7 +488,12 @@ def _build_sheet4_sem_omie(ws: Worksheet, rows: Sequence[SemOmieRow]) -> None:
 _SHEET5_HEADERS = [
     ("Severidade", 16),
     ("Tipo", 36),
-    ("Linha relacionada", 28),
+    # "Detalhe" carrega o motivo da anomalia. Sem ela, várias linhas do mesmo
+    # tipo ("Qualificação incoerente") ficavam indistinguíveis entre si no
+    # relatório, embora a tela mostrasse o porquê de cada uma. Larga porque o
+    # texto da qualificação chega a 200 caracteres.
+    ("Detalhe", 60),
+    ("Linha relacionada", 44),
     ("Detectado por", 16),
     ("Status", 16),
     ("Nota de resolução", 48),
@@ -504,18 +514,19 @@ def _build_sheet5_anomalias(ws: Worksheet, rows: Sequence[AnomalyRow]) -> None:
             value=_SEVERITY_LABEL.get(row.severity, row.severity),
         ).alignment = ALIGN_CENTER
         ws.cell(row=excel_row, column=2, value=row.type_name).alignment = ALIGN_LEFT
-        ws.cell(row=excel_row, column=3, value=row.related_line).alignment = ALIGN_LEFT
+        ws.cell(row=excel_row, column=3, value=row.context).alignment = ALIGN_LEFT
+        ws.cell(row=excel_row, column=4, value=row.related_line).alignment = ALIGN_LEFT
         ws.cell(
             row=excel_row,
-            column=4,
+            column=5,
             value=_DETECTED_BY_LABEL.get(row.detected_by, row.detected_by),
         ).alignment = ALIGN_CENTER
         ws.cell(
             row=excel_row,
-            column=5,
+            column=6,
             value="Resolvida" if row.resolved else "Pendente",
         ).alignment = ALIGN_CENTER
-        ws.cell(row=excel_row, column=6, value=row.resolution_note or "").alignment = ALIGN_LEFT
+        ws.cell(row=excel_row, column=7, value=row.resolution_note or "").alignment = ALIGN_LEFT
 
         # Destaque (somente texto bold) em críticas não resolvidas — não
         # pinta fundo da linha pra não competir com a aba 1 (que usa o
