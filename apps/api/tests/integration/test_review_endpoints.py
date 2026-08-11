@@ -27,6 +27,7 @@ from app.core.config import get_settings
 from app.core.crypto import encrypt
 from app.core.crypto_service import (
     AAD_FILE_ENTRY_USER_NOTE,
+    AAD_OMIE_ENTRY_USER_NOTE,
     field_locator,
     load_client_cipher,
 )
@@ -539,6 +540,153 @@ class TestUpdateFileEntry:
         assert body["omie_lancamento_id"] is None
         assert body["situation"] == "sem_omie"
 
+    # ------------------------------------------------------------------
+    # Apagar anotação (86e2n4peu)
+    # ------------------------------------------------------------------
+    # A resposta HTTP NÃO basta como prova: `user_note: null` no corpo também
+    # é o que sai quando a decifragem falha (`_decrypt_pair` engole o erro).
+    # Por isso todo teste de limpeza confere as COLUNAS no banco.
+
+    async def _note_columns(
+        self, db_session: AsyncSession, entry: ReconciliationFileEntry
+    ) -> tuple[str | None, str | None]:
+        await db_session.refresh(entry)
+        return entry.user_note_encrypted, entry.user_note_iv
+
+    async def test_clear_note_with_null_actually_deletes_it(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """`null` apaga de verdade — era o caso que respondia 200 sem apagar nada."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin)
+        entry = await _seed_file_entry(
+            db_session,
+            reconciliation=sess,
+            description="Lançamento com nota",
+            amount=Decimal("-10.00"),
+        )
+        await _login(client_with_db, ADMIN_EMAIL)
+        url = f"/api/v1/reconciliations/{sess.id}/file-entries/{entry.id}"
+
+        gravou = await client_with_db.patch(url, json={"user_note": "Conferir com o Galhardo"})
+        assert gravou.status_code == 200, gravou.text
+        ct, iv = await self._note_columns(db_session, entry)
+        assert ct is not None
+        assert iv is not None
+
+        apagou = await client_with_db.patch(url, json={"user_note": None})
+        assert apagou.status_code == 200, apagou.text
+        assert apagou.json()["data"]["user_note"] is None
+        assert await self._note_columns(db_session, entry) == (None, None)
+
+        # E some também de quem recarrega a tela depois.
+        relido = await client_with_db.get(f"/api/v1/reconciliations/{sess.id}/file-entries")
+        assert relido.status_code == 200, relido.text
+        assert relido.json()["data"][0]["user_note"] is None
+
+    async def test_clear_note_with_empty_string_still_works(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Contrato antigo (string vazia limpa) continua valendo — nada quebra."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin)
+        entry = await _seed_file_entry(
+            db_session, reconciliation=sess, description="X", amount=Decimal("-1.00")
+        )
+        await _login(client_with_db, ADMIN_EMAIL)
+        url = f"/api/v1/reconciliations/{sess.id}/file-entries/{entry.id}"
+
+        await client_with_db.patch(url, json={"user_note": "nota"})
+        resp = await client_with_db.patch(url, json={"user_note": ""})
+        assert resp.status_code == 200, resp.text
+        assert await self._note_columns(db_session, entry) == (None, None)
+
+    async def test_blank_note_is_treated_as_clear_not_stored(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Só espaços = apagar. Antes ia cifrado para o banco e voltava na tela."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin)
+        entry = await _seed_file_entry(
+            db_session, reconciliation=sess, description="X", amount=Decimal("-1.00")
+        )
+        await _login(client_with_db, ADMIN_EMAIL)
+        url = f"/api/v1/reconciliations/{sess.id}/file-entries/{entry.id}"
+
+        await client_with_db.patch(url, json={"user_note": "nota"})
+        resp = await client_with_db.patch(url, json={"user_note": "   \n  "})
+        assert resp.status_code == 200, resp.text
+        assert await self._note_columns(db_session, entry) == (None, None)
+
+    async def test_omitting_note_preserves_it(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """A outra metade do contrato: PATCH sem a chave NÃO pode apagar a nota."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin)
+        entry = await _seed_file_entry(
+            db_session, reconciliation=sess, description="X", amount=Decimal("-1.00")
+        )
+        await _login(client_with_db, ADMIN_EMAIL)
+        url = f"/api/v1/reconciliations/{sess.id}/file-entries/{entry.id}"
+
+        await client_with_db.patch(url, json={"user_note": "Preservar isto"})
+        resp = await client_with_db.patch(url, json={"user_action": "flag"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["data"]["user_note"] == "Preservar isto"
+
+        await db_session.refresh(entry)
+        await db_session.refresh(cli)
+        cipher = await load_client_cipher(cli, settings=get_settings())
+        assert entry.user_note_encrypted is not None
+        assert entry.user_note_iv is not None
+        assert (
+            cipher.decrypt(
+                entry.user_note_encrypted,
+                entry.user_note_iv,
+                field_locator(AAD_FILE_ENTRY_USER_NOTE, entry.id),
+            )
+            == "Preservar isto"
+        )
+
+    async def test_omitting_omie_id_preserves_the_link(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """A outra metade do tri-estado do vínculo Omie, que a refatoração moveu.
+
+        A derivação de "chave presente" saiu da rota para o service; sem este
+        teste, só o caminho `null` (limpar) estava coberto e a omissão passaria
+        a apagar o vínculo sem nada acusar.
+        """
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin)
+        entry = await _seed_file_entry(
+            db_session,
+            reconciliation=sess,
+            description="Vinculada",
+            amount=Decimal("-1.00"),
+            omie_lancamento_id=70009,
+            situation="conciliado",
+        )
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.patch(
+            f"/api/v1/reconciliations/{sess.id}/file-entries/{entry.id}",
+            json={"user_note": "só anotando"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()["data"]
+        assert body["omie_lancamento_id"] == 70009
+        assert body["situation"] == "conciliado"
+
+        await db_session.refresh(entry)
+        assert entry.omie_lancamento_id == 70009
+
     async def test_counters_recomputed_after_update(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
@@ -660,6 +808,74 @@ class TestUpdateOmieEntry:
         body = resp.json()["data"]
         assert body["user_action"] == "flag"
         assert body["user_note"] == "Pendente conferência"
+
+    async def test_clear_note_with_null_actually_deletes_it(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Mesmo defeito vivia na aba de Divergências Omie — cobre o segundo ponto."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin)
+        entry = await _seed_omie_entry(db_session, reconciliation=sess, omie_lancamento_id=80002)
+        await _login(client_with_db, ADMIN_EMAIL)
+        url = f"/api/v1/reconciliations/{sess.id}/omie-entries/{entry.id}"
+
+        gravou = await client_with_db.patch(url, json={"user_note": "Cobrar o cliente"})
+        assert gravou.status_code == 200, gravou.text
+        await db_session.refresh(entry)
+        assert entry.user_note_encrypted is not None
+
+        apagou = await client_with_db.patch(url, json={"user_note": None})
+        assert apagou.status_code == 200, apagou.text
+        assert apagou.json()["data"]["user_note"] is None
+        await db_session.refresh(entry)
+        assert (entry.user_note_encrypted, entry.user_note_iv) == (None, None)
+
+    async def test_clear_note_with_empty_string_still_works(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Retrocompatibilidade no segundo endpoint — o branch aqui é próprio."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin)
+        entry = await _seed_omie_entry(db_session, reconciliation=sess, omie_lancamento_id=80004)
+        await _login(client_with_db, ADMIN_EMAIL)
+        url = f"/api/v1/reconciliations/{sess.id}/omie-entries/{entry.id}"
+
+        await client_with_db.patch(url, json={"user_note": "nota"})
+        resp = await client_with_db.patch(url, json={"user_note": ""})
+        assert resp.status_code == 200, resp.text
+        await db_session.refresh(entry)
+        assert (entry.user_note_encrypted, entry.user_note_iv) == (None, None)
+
+    async def test_omitting_note_preserves_it(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin)
+        entry = await _seed_omie_entry(db_session, reconciliation=sess, omie_lancamento_id=80003)
+        await _login(client_with_db, ADMIN_EMAIL)
+        url = f"/api/v1/reconciliations/{sess.id}/omie-entries/{entry.id}"
+
+        await client_with_db.patch(url, json={"user_note": "Preservar isto"})
+        resp = await client_with_db.patch(url, json={"user_action": "ignore"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["data"]["user_note"] == "Preservar isto"
+
+        await db_session.refresh(entry)
+        await db_session.refresh(cli)
+        cipher = await load_client_cipher(cli, settings=get_settings())
+        assert entry.user_note_encrypted is not None
+        assert entry.user_note_iv is not None
+        assert (
+            cipher.decrypt(
+                entry.user_note_encrypted,
+                entry.user_note_iv,
+                field_locator(AAD_OMIE_ENTRY_USER_NOTE, entry.id),
+            )
+            == "Preservar isto"
+        )
 
     async def test_does_not_recompute_session_counters(
         self, client_with_db: AsyncClient, db_session: AsyncSession

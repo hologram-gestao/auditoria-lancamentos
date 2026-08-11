@@ -26,6 +26,20 @@ from app.modules.users.schemas import PaginationMeta
 #: Pydantic automaticamente, sem `if/elif` no service.
 AnomalyReviewVerdictLiteral = Literal["procedente", "improcedente"]
 
+
+def field_provided(body: BaseModel, field: str) -> bool:
+    """True se a chave veio NO JSON — mesmo que com valor `null`.
+
+    Num PATCH parcial, "omitido" e "nulo explícito" são pedidos DIFERENTES
+    ("não mexa" vs "apague"), e o Pydantic colapsa os dois em `None`.
+    `model_fields_set` é o que os separa. Este helper existe para que todo
+    campo opcional de PATCH responda a `null` da MESMA forma: ter duas
+    convenções de "limpar" no mesmo endpoint foi o que fez `user_note`
+    ignorar o pedido de apagar e ainda responder 200.
+    """
+    return field in body.model_fields_set
+
+
 # ----------------------------------------------------------------------
 # BACK 9.1 — Listar Movimentações
 # ----------------------------------------------------------------------
@@ -60,9 +74,22 @@ class FileEntryListResponse(BaseModel):
 class UpdateFileEntryRequest(BaseModel):
     """Body do PATCH /file-entries/{entry_id}.
 
-    Todos os campos são opcionais (semântica PATCH parcial). Para "trocar
-    Omie" o front envia `omie_lancamento_id=int`; para "remover vínculo"
-    envia `omie_lancamento_id=null`. Para "não mexer", omite a chave.
+    Todos os campos são opcionais (semântica PATCH parcial). Dois deles têm
+    estado de "limpar" alcançável, e nos dois a convenção é a mesma — ver
+    `field_provided`:
+
+        chave omitida   → não mexe
+        `null`          → limpa
+        valor           → grava
+
+    Valem assim `omie_lancamento_id` (remover vínculo) e `user_note` (apagar
+    anotação); string vazia em `user_note` também limpa, por compatibilidade
+    com o contrato anterior.
+
+    `situation` e `user_action` NÃO têm caminho de limpeza: para eles, `null`
+    e chave omitida significam a mesma coisa (não mexe). Em `situation` isso
+    não é neutro — dentro de uma troca de vínculo Omie, ausência de
+    `situation` é o gatilho da classificação automática.
     """
 
     situation: Literal["sem_omie", "conciliado", "ignorado"] | None = None
@@ -141,6 +168,12 @@ class OmieEntryListResponse(BaseModel):
 
 
 class UpdateOmieEntryRequest(BaseModel):
+    """Body do PATCH /omie-entries/{entry_id}.
+
+    Mesma convenção do `UpdateFileEntryRequest`: `user_note` omitido não
+    mexe, `null` (ou string vazia) limpa, valor grava.
+    """
+
     user_action: Literal["flag", "ignore", "resolved"] | None = None
     user_note: str | None = Field(default=None, max_length=2000)
 
