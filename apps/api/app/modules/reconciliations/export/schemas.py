@@ -107,8 +107,15 @@ class AnomalyRow:
 
     severity: str  # critical | moderate | info
     type_name: str
-    related_line: str  # "DD/MM/YYYY · R$ 1.234,56" ou "—"
-    detected_by: str  # IA | Manual
+    # Motivo da anomalia, decifrado de `reconciliation_anomalies.context_encrypted`.
+    # É o que a tela mostra e o relatório descartava: sem ele, oito linhas
+    # "Qualificação incoerente (IA)" ficam indistinguíveis entre si.
+    # `""` = a anomalia não tem contexto (estruturais não têm).
+    # `"[indecifrável]"` = falha de decifragem, sinalizada em vez de virar
+    # célula vazia em silêncio (CLAUDE.md §4.1).
+    context: str
+    related_line: str  # "DD/MM/YYYY · <descrição> · R$ 1.234,56" ou "—"
+    detected_by: str  # ai | manual (o rótulo humano é decidido no workbook)
     resolved: bool
     resolution_note: str | None
 

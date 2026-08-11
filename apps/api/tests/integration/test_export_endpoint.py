@@ -29,6 +29,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.crypto import encrypt
+from app.core.crypto_service import (
+    AAD_ANOMALY_CONTEXT,
+    field_locator,
+    provision_client_cipher,
+)
 from app.core.security import hash_password
 from app.db.models import (
     AccessAudit,
@@ -478,3 +483,67 @@ class TestExportEndpoint:
         nomes = [ws.cell(row=r, column=2).value for r in (2, 3, 4)]
 
         assert nomes == ["Cinco de abril", "Vinte de abril", "Sem linha relacionada"]
+
+    async def test_aba_anomalias_traz_motivo_e_descricao(
+        self, client_with_db: AsyncSession, db_session: AsyncSession
+    ) -> None:
+        """Report da Bruna (04/08/2026): o relatório vinha "pela metade".
+
+        O motivo da anomalia vive cifrado em `context_encrypted` e a tela o
+        mostra; o export nunca o decifrava. A "Linha relacionada" também perdia
+        a descrição da movimentação. Este teste cobre os dois pela ponta,
+        passando pelo endpoint e pelo envelope cripto real do cliente.
+        """
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        await _seed_account_cache(db_session, client=cli, omie_conta_id=42)
+        sess = await _seed_session(db_session, client=cli, creator=admin)
+        entry = await _seed_file_entry(
+            db_session,
+            recon=sess,
+            description="Pix enviado: Cp:18236120-Cleidson Quiteria de Souza",
+            amount=Decimal("-2800.00"),
+            tx_date=date(2026, 4, 10),
+        )
+
+        motivo = "Extrato indica Getulio da Silva Rios mas fornecedor Omie e Renilson Carneiro"
+        # Provisiona a DEK do cliente: cifrar com AAD exige envelope por
+        # cliente, e o `_seed_client` deste arquivo cria sem DEK (bare legado).
+        cipher = await provision_client_cipher(cli, settings=get_settings())
+        await db_session.flush()
+        anomaly_id = uuid4()
+        ct, iv = cipher.encrypt(motivo, field_locator(AAD_ANOMALY_CONTEXT, anomaly_id))
+        atype = AnomalyType(
+            code=f"export-ctx-{uuid4().hex[:8]}",
+            name="Qualificação incoerente",
+            description="x",
+            severity=AnomalySeverity.CRITICAL.value,
+            active=True,
+        )
+        db_session.add(atype)
+        await db_session.flush()
+        db_session.add(
+            ReconciliationAnomaly(
+                id=anomaly_id,
+                session_id=sess.id,
+                anomaly_type_id=atype.id,
+                file_entry_id=entry.id,
+                detected_by="ai",
+                context_encrypted=ct,
+                context_iv=iv,
+                resolved=False,
+            )
+        )
+        await db_session.flush()
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{sess.id}/export")
+        assert resp.status_code == 200, resp.text
+
+        ws = load_workbook(BytesIO(resp.content))["Anomalias"]
+        assert ws.cell(row=1, column=3).value == "Detalhe"
+        assert ws.cell(row=2, column=3).value == motivo
+        # Linha relacionada com a descrição, não só data e valor.
+        assert "Cleidson Quiteria de Souza" in str(ws.cell(row=2, column=4).value)
+        # E o rótulo alinhado com a tela.
+        assert ws.cell(row=2, column=5).value == "Sistema"

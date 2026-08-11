@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.alerting import Alert, AlertCode, send_alert
 from app.core.crypto_service import (
+    AAD_ANOMALY_CONTEXT,
     AAD_ANOMALY_RESOLUTION_NOTE,
     AAD_FILE_ENTRY_DESCRIPTION,
     AAD_FILE_ENTRY_USER_NOTE,
@@ -595,8 +596,21 @@ class ExportService:
         for anomaly, atype in anomalies:
             related = self._related_line_label(
                 anomaly,
+                cipher,
                 file_entry_map=file_entry_map,
                 omie_entry_map=omie_entry_map,
+            )
+            # `_decrypt_required` (e não `_optional`) de propósito: falha de
+            # decifragem devolve "[indecifrável]" em vez de None, e uma célula
+            # vazia em silêncio é exatamente o que a §4.1 proíbe. Ausência
+            # legítima de contexto (anomalia estrutural) vem como "".
+            context = self._decrypt_required(
+                cipher,
+                anomaly.context_encrypted,
+                anomaly.context_iv,
+                AAD_ANOMALY_CONTEXT,
+                anomaly.id,
+                field="anomaly_context",
             )
             note = self._decrypt_optional(
                 cipher,
@@ -610,6 +624,7 @@ class ExportService:
                 AnomalyRow(
                     severity=atype.severity,
                     type_name=atype.name,
+                    context=context,
                     related_line=related,
                     detected_by=anomaly.detected_by,
                     resolved=anomaly.resolved,
@@ -621,21 +636,37 @@ class ExportService:
     def _related_line_label(
         self,
         anomaly: ReconciliationAnomaly,
+        cipher: ClientCipher,
         *,
         file_entry_map: dict[UUID, ReconciliationFileEntry],
         omie_entry_map: dict[UUID, ReconciliationOmieEntry],
     ) -> str:
         """Texto humano para `Linha relacionada` da aba 5.
 
-        Formato: `DD/MM/YYYY · R$ 1.234,56`. Se a anomaly não tem vínculo
-        com nenhuma linha (caso comum em anomalias estruturais agregadas),
-        devolvemos "—".
+        Formato: `DD/MM/YYYY · <descrição> · R$ 1.234,56` para linha do arquivo,
+        `DD/MM/YYYY · Omie #123` para lançamento Omie, `—` quando a anomalia não
+        tem vínculo (caso das estruturais agregadas).
+
+        Espelha o `buildRelatedLabel` da tela, com uma diferença deliberada: a
+        tela trunca a descrição em 50 caracteres por limitação de layout, e aqui
+        ela sai inteira. Planilha não tem essa restrição, e cortar texto num
+        relatório é a própria classe de problema que esta entrega corrige.
         """
         if anomaly.file_entry_id is not None and (fe := file_entry_map.get(anomaly.file_entry_id)):
-            return _format_date_amount(fe.transaction_date, fe.amount)
+            description = self._decrypt_required(
+                cipher,
+                fe.description_encrypted,
+                fe.description_iv,
+                AAD_FILE_ENTRY_DESCRIPTION,
+                fe.id,
+                field="description",
+            )
+            return _format_date_description_amount(fe.transaction_date, description, fe.amount)
         if anomaly.omie_entry_id is not None and (oe := omie_entry_map.get(anomaly.omie_entry_id)):
-            # omie_entry não tem amount próprio — usamos só a data.
-            return _format_date_only(oe.transaction_date)
+            # omie_entry não tem amount nem descrição próprios no DB — o id do
+            # lançamento é o que permite achá-lo no Omie, e a tela já mostra
+            # esse mesmo `Omie #id`.
+            return f"{_format_date_only(oe.transaction_date)} · Omie #{oe.omie_lancamento_id}"
         return "—"
 
     # ------------------------------------------------------------------
@@ -740,6 +771,17 @@ def _format_reference_month_pt_br(reference_month: date) -> str:
 def _format_date_amount(d: date, amount: Decimal) -> str:
     """`DD/MM/YYYY · R$ 1.234,56` — formato pt-BR sem locale dependency."""
     return f"{d.strftime('%d/%m/%Y')} · {_format_brl(amount)}"
+
+
+def _format_date_description_amount(d: date, description: str, amount: Decimal) -> str:
+    """`DD/MM/YYYY · Pix enviado: Fulano · -R$ 2.800,00`.
+
+    Sem descrição (linha antiga sem texto), degrada para o formato anterior em
+    vez de deixar um separador solto.
+    """
+    if not description:
+        return _format_date_amount(d, amount)
+    return f"{d.strftime('%d/%m/%Y')} · {description} · {_format_brl(amount)}"
 
 
 def _format_date_only(d: date) -> str:
