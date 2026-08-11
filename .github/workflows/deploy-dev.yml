@@ -75,6 +75,12 @@ env:
   # no serviço da API E nos jobs (paridade). Fail-closed no boot se ambos vazios.
   ALERT_WEBHOOK_SECRET: alert-webhook-url-dev
   ALERT_EMAIL_SECRET: alert-email-to-dev
+  # Canal SEPARADO do alerta SINTÉTICO (o gate abaixo dispara um a cada push na
+  # `main`): prova de entrega não é incidente, e no canal de plantão vira ruído
+  # diário. Montado como ALERT_WEBHOOK_URL_SYNTHETIC; vazio/ausente = o sintético
+  # volta ao canal de plantão (fallback no backend). NÃO conta como canal
+  # entregável — o fail-closed continua exigindo ALERT_WEBHOOK_SECRET/EMAIL.
+  ALERT_WEBHOOK_SYNTHETIC_SECRET: alert-webhook-url-synthetic-dev
   # NB: a base da API (vars.API_URL_DEV) é uma variable de ENVIRONMENT — só
   # resolve dentro de um job que declara `environment:`. Por isso ela é setada no
   # env do job `smoke-alert` (abaixo), não aqui no topo (onde não resolveria).
@@ -167,7 +173,7 @@ jobs:
           gcloud run jobs update ${{ env.MIGRATE_JOB }} \
             --image=${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/auditoria-api:dev \
             --update-env-vars=KEK_KMS_KEY_NAME=${{ env.KEK_KMS_KEY_NAME }} \
-            --update-secrets=ALERT_WEBHOOK_URL=${{ env.ALERT_WEBHOOK_SECRET }}:latest,ALERT_EMAIL_TO=${{ env.ALERT_EMAIL_SECRET }}:latest \
+            --update-secrets=ALERT_WEBHOOK_URL=${{ env.ALERT_WEBHOOK_SECRET }}:latest,ALERT_EMAIL_TO=${{ env.ALERT_EMAIL_SECRET }}:latest,ALERT_WEBHOOK_URL_SYNTHETIC=${{ env.ALERT_WEBHOOK_SYNTHETIC_SECRET }}:latest \
             --region=${{ env.REGION }} \
             --project=${{ env.PROJECT_ID }}
 
@@ -179,7 +185,7 @@ jobs:
           gcloud run jobs update ${{ env.CLEANUP_JOB }} \
             --image=${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/auditoria-api:dev \
             --update-env-vars=KEK_KMS_KEY_NAME=${{ env.KEK_KMS_KEY_NAME }} \
-            --update-secrets=ALERT_WEBHOOK_URL=${{ env.ALERT_WEBHOOK_SECRET }}:latest,ALERT_EMAIL_TO=${{ env.ALERT_EMAIL_SECRET }}:latest \
+            --update-secrets=ALERT_WEBHOOK_URL=${{ env.ALERT_WEBHOOK_SECRET }}:latest,ALERT_EMAIL_TO=${{ env.ALERT_EMAIL_SECRET }}:latest,ALERT_WEBHOOK_URL_SYNTHETIC=${{ env.ALERT_WEBHOOK_SYNTHETIC_SECRET }}:latest \
             --region=${{ env.REGION }} \
             --project=${{ env.PROJECT_ID }}
 
@@ -227,7 +233,7 @@ jobs:
             --region=${{ env.REGION }} \
             --project=${{ env.PROJECT_ID }} \
             --update-env-vars=DEPLOYED_AT=$(date -u +%Y%m%dT%H%M%SZ),KEK_KMS_KEY_NAME=${{ env.KEK_KMS_KEY_NAME }} \
-            --update-secrets=ALERT_WEBHOOK_URL=${{ env.ALERT_WEBHOOK_SECRET }}:latest,ALERT_EMAIL_TO=${{ env.ALERT_EMAIL_SECRET }}:latest \
+            --update-secrets=ALERT_WEBHOOK_URL=${{ env.ALERT_WEBHOOK_SECRET }}:latest,ALERT_EMAIL_TO=${{ env.ALERT_EMAIL_SECRET }}:latest,ALERT_WEBHOOK_URL_SYNTHETIC=${{ env.ALERT_WEBHOOK_SYNTHETIC_SECRET }}:latest \
             --quiet
 
   # ------------------------------------------------------------------
