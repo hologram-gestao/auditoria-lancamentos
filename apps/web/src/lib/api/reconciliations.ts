@@ -405,11 +405,17 @@ export async function listFileEntries(params: ListFileEntriesParams): Promise<Fi
 }
 
 /**
- * Payload do PATCH /file-entries/{id}. Pydantic v2 distingue chave omitida
- * de chave com valor `null` via `model_fields_set` — para limpar o vínculo
- * Omie, mande `omie_lancamento_id: null` explicitamente; para "não tocar",
- * omita a chave do payload (faça `delete payload.omie_lancamento_id` ou
- * monte só os campos que mudaram).
+ * Payload do PATCH /file-entries/{id}. O backend distingue chave omitida de
+ * chave com valor `null` via `model_fields_set`, e a regra vale IGUAL para
+ * todo campo que aceita `null`:
+ *
+ *   chave omitida → não mexe
+ *   `null`        → limpa
+ *   valor         → grava
+ *
+ * Vale para `omie_lancamento_id` (remover vínculo) e `user_note` (apagar
+ * anotação). Monte só os campos que mudaram — mandar `user_note: null` num
+ * PATCH que só queria mudar `situation` APAGA a anotação do analista.
  */
 export interface PatchFileEntryPayload {
   situation?: FileEntrySituation;
@@ -492,6 +498,7 @@ export async function listOmieEntries(params: ListOmieEntriesParams): Promise<Om
   );
 }
 
+/** Mesma convenção do {@link PatchFileEntryPayload}: `user_note: null` apaga. */
 export interface PatchOmieEntryPayload {
   user_action?: OmieEntryUserAction;
   user_note?: string | null;

@@ -185,15 +185,13 @@ async def update_file_entry(
     body: UpdateFileEntryRequest,
 ) -> UpdateFileEntryResponse:
     await _load_session_for_rbac(session_id=session_id, user=user, db=db)
-    # `model_fields_set` distingue "chave presente no JSON" de "campo omitido".
-    # Sem isso, `omie_lancamento_id=null` (limpar) e omitido (não tocar) ficam
-    # idênticos pra Pydantic — ambos viram None.
-    omie_lancamento_provided = "omie_lancamento_id" in body.model_fields_set
+    # Quem distingue "chave presente com null" (limpar) de "chave omitida"
+    # (não tocar) é o service, via `field_provided` sobre `model_fields_set`.
+    # A rota não repassa flag: caminho único, impossível de esquecer.
     updated = await service.update_file_entry(
         session_id=session_id,
         entry_id=entry_id,
         body=body,
-        omie_lancamento_provided=omie_lancamento_provided,
     )
     return UpdateFileEntryResponse(data=updated)
 

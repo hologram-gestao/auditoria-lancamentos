@@ -63,6 +63,7 @@ from app.modules.reconciliations.review.schemas import (
     ResolveAnomalyRequest,
     UpdateFileEntryRequest,
     UpdateOmieEntryRequest,
+    field_provided,
 )
 from app.modules.usage_events.repository import UsageEventRepository
 from app.modules.usage_events.service import UsageEventService
@@ -87,6 +88,19 @@ QUALIFICATION_FLAG_CODES: frozenset[str] = frozenset(
 
 # Mínimo de chars para resolution_note quando `resolved=true` (Doc §17.3).
 _RESOLUTION_NOTE_MIN_LENGTH = 10
+
+
+def _note_to_persist(value: str | None) -> str | None:
+    """Texto a gravar na anotação, ou `None` quando o pedido é LIMPAR.
+
+    `null` e string em branco significam a mesma coisa para quem usa — apagar.
+    O texto vai para o banco como veio (o `strip()` só decide se está em
+    branco): recuo e quebra de linha são do autor da nota, não ruído.
+    """
+    if value is None or not value.strip():
+        return None
+    return value
+
 
 # Mensagem (sem PII) do alerta de falha de decifragem (BACK 03.6). Uma troca de
 # chave sem backfill viraria '[indecifrável]' em massa — o alerta liga esse
@@ -270,16 +284,17 @@ class ReviewService:
         session_id: UUID,
         entry_id: UUID,
         body: UpdateFileEntryRequest,
-        omie_lancamento_provided: bool,
     ) -> ListedFileEntry:
         """Aplica PATCH parcial e recalcula contadores.
 
-        Args:
-            omie_lancamento_provided: True se o front EXPLICITAMENTE enviou
-                a chave `omie_lancamento_id` no body (independente do valor —
-                pode ser `null` para limpar). Pydantic não distingue
-                "omitido" de "nulo explícito" — caller passa essa flag.
+        "Chave omitida" e "nulo explícito" são pedidos diferentes e o Pydantic
+        colapsa os dois em `None`; quem os separa é `field_provided` (sobre
+        `model_fields_set`). A flag é derivada AQUI, do próprio body, e não
+        recebida do caller: assim não há como uma rota nova esquecer de
+        calculá-la — foi por não ter isso que `user_note` ignorava o pedido de
+        apagar e ainda respondia 200.
         """
+        omie_lancamento_provided = field_provided(body, "omie_lancamento_id")
         self._current_session_id = session_id
         entry = await self._repo.get_file_entry(session_id=session_id, entry_id=entry_id)
         if entry is None:
@@ -320,16 +335,14 @@ class ReviewService:
         if body.user_action is not None:
             entry.user_action = body.user_action
 
-        # `user_note`: None semanticamente "não tocar" (PATCH parcial).
-        # Para limpar nota, o front envia string vazia.
-        if body.user_note is not None:
-            if body.user_note == "":
+        # `user_note`: omitido não mexe; `null` (ou vazio) limpa; valor grava.
+        if field_provided(body, "user_note"):
+            note = _note_to_persist(body.user_note)
+            if note is None:
                 entry.user_note_encrypted = None
                 entry.user_note_iv = None
             else:
-                ct, iv = cipher.encrypt(
-                    body.user_note, field_locator(AAD_FILE_ENTRY_USER_NOTE, entry.id)
-                )
+                ct, iv = cipher.encrypt(note, field_locator(AAD_FILE_ENTRY_USER_NOTE, entry.id))
                 entry.user_note_encrypted = ct
                 entry.user_note_iv = iv
 
@@ -527,14 +540,14 @@ class ReviewService:
 
         if body.user_action is not None:
             entry.user_action = body.user_action
-        if body.user_note is not None:
-            if body.user_note == "":
+        # Mesma convenção da aba de Movimentações — ver `update_file_entry`.
+        if field_provided(body, "user_note"):
+            note = _note_to_persist(body.user_note)
+            if note is None:
                 entry.user_note_encrypted = None
                 entry.user_note_iv = None
             else:
-                ct, iv = cipher.encrypt(
-                    body.user_note, field_locator(AAD_OMIE_ENTRY_USER_NOTE, entry.id)
-                )
+                ct, iv = cipher.encrypt(note, field_locator(AAD_OMIE_ENTRY_USER_NOTE, entry.id))
                 entry.user_note_encrypted = ct
                 entry.user_note_iv = iv
 
