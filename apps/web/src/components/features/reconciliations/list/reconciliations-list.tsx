@@ -28,6 +28,7 @@ import { useEffect, useMemo } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { PaginationBar } from '@/components/ui/pagination-bar';
+import { ScrollRegion } from '@/components/ui/scroll-region';
 import {
   Select,
   SelectContent,
@@ -223,7 +224,19 @@ export function ReconciliationsList({
         )}
       </div>
 
-      <div className="min-h-0 flex-1 space-y-3" aria-busy={isFetching}>
+      {/* A lista rola DENTRO da própria área (86e2u4nxg). Sem isto o container
+          é `min-h-0 flex-1` — explicitamente autorizado a encolher abaixo da
+          altura do conteúdo — e sem `overflow` os cards eram pintados fora da
+          caixa: a `PaginationBar`, que é opaca (`bg-card`), cobria o que vazou
+          no desktop, e em 390px a barra inteira descia para fora da tela (o
+          shell é `overflow-hidden`, então não havia rolagem que a alcançasse).
+          O padding é o respiro do anel de foco dos cards (`ring-offset-2`), que
+          o recorte da região cortaria pela metade. */}
+      <ScrollRegion
+        label="Lista de conciliações"
+        className="min-h-0 flex-1 space-y-3 p-1"
+        aria-busy={isFetching}
+      >
         {isLoading ? (
           <ListSkeleton />
         ) : isError ? (
@@ -249,7 +262,7 @@ export function ReconciliationsList({
             />
           ))
         )}
-      </div>
+      </ScrollRegion>
 
       {!isError && (
         <PaginationBar

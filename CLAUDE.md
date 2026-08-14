@@ -333,6 +333,7 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
 - **Fetches client-side:** sempre via TanStack Query (`useQuery`, `useMutation`). Nunca `useEffect + fetch`.
 - **Forms:** sempre `react-hook-form + zod`.
 - **Tabelas grandes** (> 100 linhas): sempre virtualizadas.
+- **Conteúdo não-tabular dentro de área de altura fixa** (lista de cards no shell do cliente, etc): sempre dentro de `<ScrollRegion>` (`components/ui/scroll-region.tsx`). `min-h-0 flex-1` **autoriza** o container a encolher abaixo da altura do conteúdo — sem `overflow` o conteúdo é pintado FORA da caixa e o que vier depois (barra de paginação, rodapé) cobre o que vazou. `<Table>` já embrulha sozinho; card solto não. E região rolável **sem** `tabIndex`/`role`/`aria-label` reprova `scrollable-region-focusable` (SERIOUS) no gate `web_a11y` — por isso a decisão mora num componente só, nunca copiada na tela.
 - **Acessibilidade:** shadcn/ui entrega; em componentes custom, revisar `aria-*` e suporte a teclado.
 
 ### API
