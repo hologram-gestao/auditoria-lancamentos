@@ -30,6 +30,7 @@ import { PaginationBar } from '@/components/ui/pagination-bar';
 import {
   Table,
   TableBody,
+  TableCard,
   TableCell,
   TableHead,
   TableHeader,
@@ -163,9 +164,10 @@ export function ClientUsersScreen({ clientId }: { clientId: string }) {
           // `div.overflow-auto` FOCÁVEL (`ui/table.tsx`). Um segundo container
           // rolável por fora fazia a tabela espremer as colunas em 390px em vez
           // de rolar — o e-mail quebrava uma letra por linha e a coluna "Ações"
-          // ficava fora da tela.
-          <div className="rounded-lg border">
-            <Table scrollRegionLabel="Usuários do cliente (rolável horizontalmente)">
+          // ficava fora da tela. Por isso quem ganha a rolagem VERTICAL também é
+          // ele (`fill`), com o `<TableCard>` limitando a altura (86e2uca1d).
+          <TableCard>
+            <Table fill scrollRegionLabel="Usuários do cliente (rolável)">
               <TableHeader>
                 <TableRow>
                   <TableHead className="whitespace-nowrap">Nome</TableHead>
@@ -237,7 +239,7 @@ export function ClientUsersScreen({ clientId }: { clientId: string }) {
                 )}
               </TableBody>
             </Table>
-          </div>
+          </TableCard>
         )}
       </div>
 

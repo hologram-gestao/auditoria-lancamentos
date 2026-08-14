@@ -18,10 +18,18 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  Table,
+  TableBody,
+  TableCard,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { assertNoA11yViolations } from '@/test/a11y';
 
-function renderTable(props?: { scrollRegionLabel?: string }) {
+function renderTable(props?: { scrollRegionLabel?: string; fill?: boolean }) {
   return render(
     <Table {...props}>
       <TableHeader>
@@ -58,5 +66,51 @@ describe('Table', () => {
     const { container } = renderTable();
 
     await assertNoA11yViolations(container);
+  });
+});
+
+/**
+ * Trava do defeito 86e2uca1d.
+ *
+ * jsdom não tem layout — o que se trava aqui é o CONTRATO que produz a rolagem
+ * vertical, não a rolagem em si (essa é medida no browser, em
+ * `e2e/a11y-mocked.spec.ts`). O par importa: sem `<TableCard>` limitando a
+ * altura, o `fill` não tem contra o que encolher; sem `fill`, o card limita a
+ * altura e a tabela é RECORTADA em vez de rolar.
+ */
+describe('Table — fill + TableCard', () => {
+  it('sem `fill`, a região não vira scroller vertical nem gruda o cabeçalho', () => {
+    renderTable();
+
+    const region = screen.getByRole('region', { name: 'Tabela (rolável horizontalmente)' });
+    // É o que garante que os consumidores de altura livre (abas da revisão,
+    // modal de troca, listas globais) não mudam de comportamento.
+    expect(region.className).not.toMatch(/min-h-0/);
+    expect(region.className).not.toMatch(/sticky/);
+  });
+
+  it('com `fill`, a região encolhe até caber e o cabeçalho gruda no topo', () => {
+    renderTable({ fill: true });
+
+    const region = screen.getByRole('region', { name: 'Tabela (rolável horizontalmente)' });
+    expect(region).toHaveClass('overflow-auto', 'min-h-0');
+    expect(region.className).toMatch(/\[&_thead_th\]:sticky/);
+    expect(region.className).toMatch(/\[&_thead_th\]:top-0/);
+    // Cabeçalho grudado precisa de fundo OPACO, senão as linhas passam por trás.
+    expect(region.className).toMatch(/\[&_thead_th\]:bg-background/);
+  });
+
+  it('TableCard limita a altura sem esticar quando há poucas linhas', () => {
+    render(
+      <TableCard data-testid="card">
+        <span>conteúdo</span>
+      </TableCard>,
+    );
+
+    const card = screen.getByTestId('card');
+    // `max-h-full` e NÃO `h-full`: com duas linhas o card abraça o conteúdo em
+    // vez de deixar uma moldura vazia e alta.
+    expect(card).toHaveClass('max-h-full', 'flex', 'flex-col', 'overflow-hidden');
+    expect(card.className).not.toMatch(/(^|\s)h-full(\s|$)/);
   });
 });

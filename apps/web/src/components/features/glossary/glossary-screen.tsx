@@ -37,6 +37,7 @@ import { PaginationBar } from '@/components/ui/pagination-bar';
 import {
   Table,
   TableBody,
+  TableCard,
   TableCell,
   TableHead,
   TableHeader,
@@ -129,9 +130,10 @@ export function GlossaryScreen({ clientId }: { clientId: string }) {
           // Sem `overflow-x-auto` aqui: o próprio `<Table>` já embrulha num
           // `div.overflow-auto` FOCÁVEL (`ui/table.tsx`). Um segundo container
           // rolável por fora espreme as colunas em 390px em vez de rolar
-          // (ADR-007-FE).
-          <div className="rounded-lg border">
-            <Table scrollRegionLabel="Glossário do cliente (rolável horizontalmente)">
+          // (ADR-007-FE) — por isso quem ganha a rolagem VERTICAL também é ele
+          // (`fill`), com o `<TableCard>` limitando a altura (86e2uca1d).
+          <TableCard>
+            <Table fill scrollRegionLabel="Glossário do cliente (rolável)">
               <TableHeader>
                 <TableRow>
                   <TableHead className="whitespace-nowrap">Tipo</TableHead>
@@ -198,7 +200,7 @@ export function GlossaryScreen({ clientId }: { clientId: string }) {
                 )}
               </TableBody>
             </Table>
-          </div>
+          </TableCard>
         )}
       </div>
 
