@@ -1,13 +1,14 @@
 import * as React from 'react';
 
+import { ScrollRegion } from '@/components/ui/scroll-region';
 import { cn } from '@/lib/utils';
 
 /**
  * Rótulo do wrapper rolável. Em viewport estreito (390px) a tabela transborda e
- * o `div.overflow-auto` vira uma região rolável: sem `tabIndex` o conteúdo só é
- * alcançável arrastando, o que reprova `scrollable-region-focusable` (SERIOUS,
- * WCAG 2.1.1/2.1.3). `tabIndex={0}` sozinho satisfaz a regra; `role`/`aria-label`
- * entram porque um div focável sem papel nem nome é anunciado como nada.
+ * o wrapper vira uma região rolável: sem `tabIndex` o conteúdo só é alcançável
+ * arrastando, o que reprova `scrollable-region-focusable` (SERIOUS, WCAG
+ * 2.1.1/2.1.3). Essa decisão mora no `<ScrollRegion>` (`ui/scroll-region.tsx`) —
+ * uma cópia só, usada também pelas listas de cards.
  */
 export interface TableProps extends React.HTMLAttributes<HTMLTableElement> {
   /** Nome acessível da região rolável (use quando houver mais de uma tabela na tela). */
@@ -16,14 +17,9 @@ export interface TableProps extends React.HTMLAttributes<HTMLTableElement> {
 
 const Table = React.forwardRef<HTMLTableElement, TableProps>(
   ({ className, scrollRegionLabel = 'Tabela (rolável horizontalmente)', ...props }, ref) => (
-    <div
-      className="relative w-full overflow-auto"
-      tabIndex={0}
-      role="region"
-      aria-label={scrollRegionLabel}
-    >
+    <ScrollRegion className="relative w-full" label={scrollRegionLabel}>
       <table ref={ref} className={cn('w-full caption-bottom text-sm', className)} {...props} />
-    </div>
+    </ScrollRegion>
   ),
 );
 Table.displayName = 'Table';

@@ -267,6 +267,45 @@ describe('ReconciliationsList — paginação e estados', () => {
   });
 });
 
+describe('ReconciliationsList — área rolável (86e2u4nxg)', () => {
+  /**
+   * jsdom não tem layout, então aqui NÃO se mede sobreposição — quem mede é o
+   * `e2e/a11y-mocked.spec.ts` no browser real (job `web_a11y`). O que esta
+   * trava impede é a causa-raiz voltar num refactor: o container dos cards é
+   * `min-h-0 flex-1`, ou seja, autorizado a encolher abaixo da altura do
+   * conteúdo. Sem `overflow` os cards são pintados FORA da caixa e a barra de
+   * paginação, opaca, cobre o que vazou.
+   */
+  it('os cards vivem numa região rolável, alcançável pelo teclado', () => {
+    renderList();
+
+    const region = screen.getByRole('region', { name: 'Lista de conciliações' });
+    expect(region).toHaveClass('overflow-auto');
+    expect(region).toHaveAttribute('tabindex', '0');
+    expect(region).toContainElement(
+      screen.getByRole('link', { name: /Abrir conciliação de Cartão Itaú/ }),
+    );
+  });
+
+  it('a barra de paginação fica FORA da região rolável (não rola junto)', () => {
+    renderList();
+
+    const region = screen.getByRole('region', { name: 'Lista de conciliações' });
+    const footer = screen.getByRole('navigation', { name: 'Paginação de conciliações' });
+    expect(region).not.toContainElement(footer);
+  });
+
+  it('o estado de carregamento também mora dentro da região', () => {
+    listState.isLoading = true;
+    listState.data = undefined;
+    renderList();
+
+    expect(screen.getByRole('region', { name: 'Lista de conciliações' })).toContainElement(
+      screen.getByLabelText('Carregando conciliações'),
+    );
+  });
+});
+
 describe('ReconciliationsList — acessibilidade', () => {
   it('não tem violações critical/serious do axe-core', async () => {
     const { container } = renderList();
