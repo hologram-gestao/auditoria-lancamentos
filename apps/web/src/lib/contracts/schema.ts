@@ -2536,9 +2536,22 @@ export interface components {
          * UpdateFileEntryRequest
          * @description Body do PATCH /file-entries/{entry_id}.
          *
-         *     Todos os campos são opcionais (semântica PATCH parcial). Para "trocar
-         *     Omie" o front envia `omie_lancamento_id=int`; para "remover vínculo"
-         *     envia `omie_lancamento_id=null`. Para "não mexer", omite a chave.
+         *     Todos os campos são opcionais (semântica PATCH parcial). Dois deles têm
+         *     estado de "limpar" alcançável, e nos dois a convenção é a mesma — ver
+         *     `field_provided`:
+         *
+         *         chave omitida   → não mexe
+         *         `null`          → limpa
+         *         valor           → grava
+         *
+         *     Valem assim `omie_lancamento_id` (remover vínculo) e `user_note` (apagar
+         *     anotação); string vazia em `user_note` também limpa, por compatibilidade
+         *     com o contrato anterior.
+         *
+         *     `situation` e `user_action` NÃO têm caminho de limpeza: para eles, `null`
+         *     e chave omitida significam a mesma coisa (não mexe). Em `situation` isso
+         *     não é neutro — dentro de uma troca de vínculo Omie, ausência de
+         *     `situation` é o gatilho da classificação automática.
          */
         UpdateFileEntryRequest: {
             /** Situation */
@@ -2571,7 +2584,13 @@ export interface components {
             /** Description */
             description?: string | null;
         };
-        /** UpdateOmieEntryRequest */
+        /**
+         * UpdateOmieEntryRequest
+         * @description Body do PATCH /omie-entries/{entry_id}.
+         *
+         *     Mesma convenção do `UpdateFileEntryRequest`: `user_note` omitido não
+         *     mexe, `null` (ou string vazia) limpa, valor grava.
+         */
         UpdateOmieEntryRequest: {
             /** User Action */
             user_action?: ("flag" | "ignore" | "resolved") | null;
@@ -4011,7 +4030,7 @@ export interface operations {
                 type?: "all" | "credit" | "debit";
                 search?: string | null;
                 page?: number;
-                page_size?: number;
+                pageSize?: number;
             };
             header?: never;
             path: {
@@ -4120,7 +4139,7 @@ export interface operations {
         parameters: {
             query?: {
                 page?: number;
-                page_size?: number;
+                pageSize?: number;
             };
             header?: never;
             path: {
@@ -4196,7 +4215,7 @@ export interface operations {
                 resolved?: "all" | "true" | "false";
                 severity?: "all" | "critical" | "moderate" | "info";
                 page?: number;
-                page_size?: number;
+                pageSize?: number;
             };
             header?: never;
             path: {
