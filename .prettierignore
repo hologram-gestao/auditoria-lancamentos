@@ -9,3 +9,8 @@ pnpm-lock.yaml
 __pycache__
 Docs/documentation
 Docs/flow
+
+# Contrato GERADO pelo openapi-typescript (`pnpm gen:types`). Formatá-lo faz o
+# hook de commit reindentar 4700 linhas a cada regeração, e as 3 linhas que
+# mudaram de verdade somem no meio da reescrita.
+apps/web/src/lib/contracts/schema.ts

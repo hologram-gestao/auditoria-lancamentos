@@ -149,7 +149,7 @@ async def list_file_entries(
     type_filter: Annotated[Literal["all", "credit", "debit"], Query(alias="type")] = "all",
     search: Annotated[str | None, Query(max_length=200)] = None,
     page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=50)] = 20,
+    page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
 ) -> FileEntryListResponse:
     await _load_session_for_rbac(session_id=session_id, user=user, db=db)
     rows, pagination = await service.list_file_entries(
@@ -255,7 +255,7 @@ async def list_omie_entries(
     service: ReviewServiceDep,
     session_id: UUID,
     page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=50)] = 20,
+    page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
 ) -> OmieEntryListResponse:
     sess = await _load_session_for_rbac(session_id=session_id, user=user, db=db)
     rows, pagination = await service.list_omie_entries(
@@ -316,7 +316,7 @@ async def list_anomalies(
     resolved: Annotated[Literal["all", "true", "false"], Query()] = "all",
     severity: Annotated[Literal["all", "critical", "moderate", "info"], Query()] = "all",
     page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=50)] = 20,
+    page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
 ) -> AnomalyListResponse:
     await _load_session_for_rbac(session_id=session_id, user=user, db=db)
     resolved_filter: bool | None

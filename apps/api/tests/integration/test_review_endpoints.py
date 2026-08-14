@@ -1203,11 +1203,11 @@ class TestAnomalyChronologicalOrder:
 
         p1 = await client_with_db.get(
             f"/api/v1/reconciliations/{sess.id}/anomalies",
-            params={"page": 1, "page_size": 2},
+            params={"page": 1, "pageSize": 2},
         )
         p2 = await client_with_db.get(
             f"/api/v1/reconciliations/{sess.id}/anomalies",
-            params={"page": 2, "page_size": 2},
+            params={"page": 2, "pageSize": 2},
         )
 
         assert p1.status_code == 200
@@ -1413,6 +1413,100 @@ class TestAvailableOmieEntriesPeriod:
 
 
 @pytest.mark.integration
+class TestPaginacaoDaRevisao:
+    """Contrato de paginação das 3 rotas da revisão (86e2u512z).
+
+    Elas eram as ÚNICAS do sistema a receber o parâmetro como `page_size` e a
+    limitar em 50 — todas as outras usam o alias `pageSize` com teto 100 (§7 do
+    CLAUDE.md). O front sempre mandou `pageSize`, então o tamanho de página
+    escolhido na tela era descartado pelo servidor, que devolvia 20 em silêncio:
+    o seletor "50 por página" das Movimentações não fazia nada, e o rótulo
+    "Mostrando 1-50 de N" mentia.
+
+    Estes testes travam as duas metades: o NOME que entra pela URL e o TETO.
+    """
+
+    async def _sessao_com_linhas(
+        self, db_session: AsyncSession, *, quantas: int
+    ) -> ReconciliationSession:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin)
+        for i in range(quantas):
+            await _seed_file_entry(
+                db_session,
+                reconciliation=sess,
+                description=f"Lançamento {i}",
+                amount=Decimal("10.00"),
+            )
+            await _seed_omie_entry(db_session, reconciliation=sess, omie_lancamento_id=9000 + i)
+        return sess
+
+    async def test_page_size_chega_pelo_alias_camel_case(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """`pageSize` é o nome que o front manda — e o que precisa valer."""
+        sess = await self._sessao_com_linhas(db_session, quantas=5)
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        for rota in ("file-entries", "omie-entries"):
+            resp = await client_with_db.get(
+                f"/api/v1/reconciliations/{sess.id}/{rota}", params={"pageSize": 2}
+            )
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert len(body["data"]) == 2, f"{rota} ignorou pageSize"
+            assert body["pagination"]["pageSize"] == 2
+            assert body["pagination"]["totalPages"] == 3
+
+    async def test_teto_de_100_aceito_e_101_recusado(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """O teto vira 100, igual ao resto do sistema. 101 é 422, não silêncio."""
+        sess = await self._sessao_com_linhas(db_session, quantas=1)
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        ok = await client_with_db.get(
+            f"/api/v1/reconciliations/{sess.id}/file-entries", params={"pageSize": 100}
+        )
+        assert ok.status_code == 200, ok.text
+        assert ok.json()["pagination"]["pageSize"] == 100
+
+        # O handler global converte erro de validação no envelope §7 da API:
+        # 400 + `VALIDATION_ERROR`, nunca o 422 cru do FastAPI.
+        estourado = await client_with_db.get(
+            f"/api/v1/reconciliations/{sess.id}/file-entries", params={"pageSize": 101}
+        )
+        assert estourado.status_code == 400, estourado.text
+        assert estourado.json()["error"]["code"] == "VALIDATION_ERROR"
+
+    async def test_anomalias_tambem_respeitam_o_alias(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin)
+        types = await _seed_anomaly_types(db_session)
+        for _ in range(3):
+            db_session.add(
+                ReconciliationAnomaly(
+                    session_id=sess.id,
+                    anomaly_type_id=types["wrong_account"].id,
+                    detected_by=AnomalyDetectedBy.AI.value,
+                    resolved=False,
+                )
+            )
+        await db_session.flush()
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.get(
+            f"/api/v1/reconciliations/{sess.id}/anomalies", params={"pageSize": 1}
+        )
+        assert resp.status_code == 200, resp.text
+        assert len(resp.json()["data"]) == 1
+        assert resp.json()["pagination"]["totalPages"] == 3
+
+
 class TestReviewBlockedWhenSessionInError:
     """Sessões em error não devem expor os endpoints de revisão — caller
     (front) deve mostrar a tela de erro + botão Reprocessar antes."""

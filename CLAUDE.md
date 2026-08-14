@@ -346,7 +346,7 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
 - **Response de sucesso:** `{ "data": {...} }` ou `{ "data": [...], "pagination": {...} }`.
 - **Response de erro:** `{ "error": { "code", "message", "userMessage" } }`.
 - **Rotas:** `/api/v1/...`.
-- **Paginação:** `?page=1&pageSize=20`, max 100.
+- **Paginação:** `?page=1&pageSize=20`, max 100. No FastAPI, o parâmetro **precisa** de `alias="pageSize"` (`page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20`). Sem o alias o nome que entra pela URL vira `page_size`, o `pageSize` do front é descartado **sem erro** e o servidor devolve o default — o seletor de itens-por-página fica de enfeite. Foi o que aconteceu nas 3 rotas da revisão até 14/08/2026 (86e2u512z).
 - **Códigos canônicos:** ver §9 do PLANO. Usar constants centralizadas, nunca strings mágicas.
 
 ### Commits / Git
