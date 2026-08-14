@@ -257,6 +257,21 @@ const SESSIONS = [
   }),
 ];
 
+/**
+ * Defeito 86e2u4nxg — estado MUTÁVEL, resetado no `beforeEach` como
+ * `sessionUsedGlossary`. Com `true` a lista devolve conciliações demais para
+ * caber na altura da tela, que é a condição do defeito: o container dos cards
+ * encolhe abaixo do conteúdo e, sem rolagem própria, o conteúdo vaza por baixo
+ * da barra de paginação (opaca). Com poucas conciliações nada disso aparece —
+ * é por isso que os cenários anteriores nunca o pegaram.
+ */
+let listOverflows = false;
+
+/** 12 linhas: transborda com folga em 900px de altura e em 390×844. */
+const OVERFLOW_SESSIONS = Array.from({ length: 12 }, (_, i) =>
+  session({ id: `22222222-2222-4222-8222-3000000000${String(i).padStart(2, '0')}` }),
+);
+
 const DETAIL = {
   session_id: SESSION_ID,
   client_id: CLIENT_ID,
@@ -494,7 +509,8 @@ async function fulfillApi(route: Route): Promise<void> {
   }
   if (path === `/api/v1/clients/${CLIENT_ID}/sync-accounts`) return json(CLIENT_DETAIL);
   if (path === `/api/v1/clients/${CLIENT_ID}/reconciliations`) {
-    return json({ data: SESSIONS, pagination: PAGINATION });
+    const list = listOverflows ? OVERFLOW_SESSIONS : SESSIONS;
+    return json({ data: list, pagination: { ...PAGINATION, total: list.length } });
   }
   if (path === `/api/v1/reconciliations/${SESSION_ID}`) {
     return json({ ...DETAIL, qualification_used_glossary: sessionUsedGlossary });
@@ -626,6 +642,36 @@ async function measuredContrast(page: Page, selector: string): Promise<number> {
   });
 }
 
+/**
+ * Cards da Lista de Conciliações que estão POR BAIXO da barra de paginação
+ * (defeito 86e2u4nxg), amostrando 9 pontos do retângulo da barra.
+ *
+ * `elementsFromPoint` é a ferramenta certa aqui porque devolve todos os
+ * elementos daquele ponto, inclusive os cobertos — mas **não** devolve o que um
+ * ancestral com `overflow` recortou. É exatamente a distinção entre "vazou da
+ * caixa e ficou escondido atrás da barra opaca" (defeito) e "foi recortado pela
+ * região rolável" (correto). Comparar `boundingBox` não serviria: depois da
+ * correção o último card continua geometricamente abaixo da barra, só que
+ * recortado.
+ */
+async function cardsAtrasDaBarra(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const barra = document.querySelector('nav[aria-label="Paginação de conciliações"]');
+    if (barra === null) return ['barra de paginação ausente'];
+    const r = barra.getBoundingClientRect();
+    const encontrados = new Set<string>();
+    for (const fx of [0.15, 0.5, 0.85]) {
+      for (const fy of [0.2, 0.5, 0.8]) {
+        for (const el of document.elementsFromPoint(r.left + r.width * fx, r.top + r.height * fy)) {
+          const card = el.closest('article[role="link"]');
+          if (card !== null) encontrados.add(card.getAttribute('aria-label') ?? '?');
+        }
+      }
+    }
+    return [...encontrados];
+  });
+}
+
 test.beforeEach(async ({ page, context, baseURL }) => {
   // Volta ao admin: os cenários de papel da S5 trocam este estado de módulo.
   sessionUser = USER;
@@ -633,6 +679,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   sessionUsedGlossary = false;
   reviewVerdict = null;
   patchAnomalyFails = false;
+  listOverflows = false;
   await page.route('**/api/v1/**', fulfillApi);
   // O `src/middleware.ts` decide navegação só pela PRESENÇA do cookie
   // `access_token` (a validação real é do backend). Um valor qualquer basta
@@ -657,6 +704,88 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByText('Processada').first()).toBeVisible();
       await analyze(page, `lista de conciliações (${vp.label})`);
     });
+
+    /**
+     * Defeito 86e2u4nxg — a barra de paginação era desenhada POR CIMA dos cards.
+     *
+     * A causa não é z-index: o container dos cards é `min-h-0 flex-1`, ou seja,
+     * está explicitamente autorizado a encolher abaixo da altura do conteúdo, e
+     * não tinha `overflow`. O conteúdo vazava da caixa e a `PaginationBar`, que
+     * é opaca (`bg-card`), pintava por cima do que vazou.
+     *
+     * A trava é `elementsFromPoint` dentro do retângulo da barra: ele devolve
+     * TODOS os elementos naquele ponto, inclusive os que estão por baixo — mas
+     * **não** devolve o que um ancestral com `overflow` recortou. É exatamente a
+     * diferença entre "vazou e ficou escondido atrás" (defeito) e "foi recortado
+     * pela região rolável" (correto). Medir só a `boundingBox` do último card
+     * não serviria: depois da correção ele continua geometricamente abaixo da
+     * barra, só que recortado.
+     */
+    test('a barra de paginação NUNCA cobre um card (86e2u4nxg)', async ({ page }) => {
+      listOverflows = true;
+      await page.goto(`/clientes/${CLIENT_ID}`);
+      await expect(page.getByRole('heading', { name: 'Conciliações', level: 2 })).toBeVisible();
+      const bar = page.getByRole('navigation', { name: 'Paginação de conciliações' });
+      await expect(bar).toBeVisible();
+      await shot(page, `lista-conciliacoes-transbordo-${vp.label.replace(/\s+/g, '-')}`);
+
+      // A medição é feita nas DUAS posições possíveis da barra: onde a tela
+      // abre e depois de rolar o `<main>` (o único container rolável do shell)
+      // até o fim. `elementsFromPoint` só enxerga dentro da viewport, então uma
+      // posição só deixaria o cenário vazio — sem medir nada — justamente no
+      // viewport em que a barra não começa visível. Em desktop a barra abre no
+      // lugar e a 2ª medição é redundante; em 390px é o contrário.
+      const cobertos = new Set([...(await cardsAtrasDaBarra(page))]);
+      await page.locator('main').evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+      for (const c of await cardsAtrasDaBarra(page)) cobertos.add(c);
+      expect([...cobertos], `cards escondidos atrás da barra de paginação (${vp.label})`).toEqual(
+        [],
+      );
+
+      // ...e a barra precisa ser ALCANÇÁVEL: em desktop ela fica ancorada no
+      // rodapé; em 390px chega-se a ela rolando o `<main>`.
+      await expect(bar).toBeInViewport();
+
+      await analyze(page, `lista de conciliações com transbordo (${vp.label})`);
+    });
+
+    /**
+     * O contraponto do teste acima: recortar não pode virar "sumiu".
+     *
+     * Só em desktop, de propósito. A partir de `lg` o shell fixa a altura
+     * (`h-dvh` + `lg:flex-row`) e a lista precisa ter rolagem PRÓPRIA, com a
+     * barra ancorada no rodapé. Abaixo de `lg` o mesmo shell vira coluna, a
+     * altura deixa de ser fixa e quem rola é o `<main>` — MEDIDO em 390×844:
+     * `clientHeight` 779 × `scrollHeight` 3327. São dois layouts, não um layout
+     * quebrado. Exigir rolagem interna em 390px travaria um comportamento que a
+     * tela não tem, e obtê-lo exigiria constranger a altura de todas as telas do
+     * cliente — o que empurraria este mesmo defeito para as três telas de tabela.
+     */
+    if (vp.label === 'desktop') {
+      test('a lista rola dentro da própria área, com a barra ancorada (86e2u4nxg)', async ({
+        page,
+      }) => {
+        listOverflows = true;
+        await page.goto(`/clientes/${CLIENT_ID}`);
+        const lista = page.getByRole('region', { name: 'Lista de conciliações' });
+        await expect(lista).toBeVisible();
+
+        // Região rolável PRECISA ser focável, senão o conteúdo só é alcançável
+        // arrastando o mouse — `scrollable-region-focusable` (SERIOUS).
+        expect(await lista.evaluate((el) => el.tabIndex)).toBe(0);
+        expect(
+          await lista.evaluate((el) => el.scrollHeight - el.clientHeight),
+          'a lista precisa ter rolagem própria quando as conciliações não cabem',
+        ).toBeGreaterThan(0);
+
+        const bar = page.getByRole('navigation', { name: 'Paginação de conciliações' });
+        await expect(bar).toBeInViewport();
+        await lista.evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+        // Rolar a lista alcança o último card E não move a barra do rodapé.
+        await expect(page.getByRole('link', { name: /Abrir conciliação/ }).last()).toBeInViewport();
+        await expect(bar).toBeInViewport();
+      });
+    }
 
     test('Detalhe da conciliação (R3)', async ({ page }) => {
       await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}`);
