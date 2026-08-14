@@ -272,6 +272,47 @@ const OVERFLOW_SESSIONS = Array.from({ length: 12 }, (_, i) =>
   session({ id: `22222222-2222-4222-8222-3000000000${String(i).padStart(2, '0')}` }),
 );
 
+/**
+ * Defeito 86e2uca1d — mesmo estado mutável, para as TRÊS telas de tabela.
+ *
+ * O `<Table>` embrulha o conteúdo num wrapper rolável, mas com altura de
+ * CONTEÚDO: ele rola no horizontal e nunca no vertical. Com linhas suficientes,
+ * a tabela vaza do `min-h-0 flex-1` e a barra de paginação (opaca) cobre o que
+ * vazou — exatamente como acontecia na Lista de Conciliações. 20 linhas
+ * transbordam com folga em 1440×900.
+ */
+let tableListsOverflow = false;
+
+const MANY_ACCOUNTS = Array.from({ length: 20 }, (_, i) => ({
+  id: `44444444-4444-4444-8444-4000000000${String(i).padStart(2, '0')}`,
+  omie_conta_id: 100 + i,
+  name: `Conta ${String(i).padStart(2, '0')} do Banco Exemplo`,
+  bank_name: 'Banco Exemplo',
+  account_type: i % 2 === 0 ? 'CC' : 'CR',
+  synced_at: '2026-07-20T12:00:00Z',
+}));
+
+const MANY_CLIENT_USERS = Array.from({ length: 20 }, (_, i) => ({
+  id: `dddddddd-dddd-4ddd-8ddd-d00000000d${String(i).padStart(2, '0')}`,
+  name: `Pessoa ${String(i).padStart(2, '0')}`,
+  email: `pessoa${i}@cliente-exemplo.com.br`,
+  role: i % 2 === 0 ? 'client_operator' : 'client_manager',
+  scope: 'client',
+  client_id: CLIENT_ID,
+  active: i % 3 !== 0,
+  created_at: '2026-07-01T12:00:00Z',
+  updated_at: '2026-07-01T12:00:00Z',
+}));
+
+const MANY_GLOSSARY_ENTRIES = Array.from({ length: 20 }, (_, i) => ({
+  id: `ffffffff-ffff-4fff-8fff-f00000000f${String(i).padStart(2, '0')}`,
+  kind: (['categoria', 'regra', 'fornecedor'] as const)[i % 3],
+  code: i % 3 === 0 ? `3.1.${String(i).padStart(2, '0')}` : null,
+  name: `Entrada ${String(i).padStart(2, '0')} do glossário`,
+  description: `Descrição de uso da entrada ${i}.`,
+  decryptFailed: false,
+}));
+
 const DETAIL = {
   session_id: SESSION_ID,
   client_id: CLIENT_ID,
@@ -474,15 +515,16 @@ async function fulfillApi(route: Route): Promise<void> {
   if (path === '/api/v1/auth/refresh') return json({ user: sessionUser });
   // Glossário do tenant (S6/R2) — rota literal ANTES do fallback paginado.
   if (path === `/api/v1/clients/${CLIENT_ID}/glossary`) {
+    const entries = tableListsOverflow ? MANY_GLOSSARY_ENTRIES : GLOSSARY_ENTRIES;
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        data: { entries: GLOSSARY_ENTRIES, version: 7 },
+        data: { entries, version: 7 },
         pagination: {
           page: 1,
           pageSize: 20,
-          total: GLOSSARY_ENTRIES.length,
+          total: entries.length,
           totalPages: 1,
         },
       }),
@@ -490,9 +532,10 @@ async function fulfillApi(route: Route): Promise<void> {
   }
   // Usuários DO tenant (BACK 05.5). Rota literal antes de qualquer fallback.
   if (path === `/api/v1/clients/${CLIENT_ID}/users`) {
+    const users = tableListsOverflow ? MANY_CLIENT_USERS : CLIENT_USERS;
     return json({
-      data: CLIENT_USERS,
-      pagination: { page: 1, pageSize: 20, total: CLIENT_USERS.length, totalPages: 1 },
+      data: users,
+      pagination: { page: 1, pageSize: 20, total: users.length, totalPages: 1 },
     });
   }
   if (path === '/api/v1/notifications/unread-count') return json({ unread: 2 });
@@ -500,7 +543,11 @@ async function fulfillApi(route: Route): Promise<void> {
     return json({ data: NOTIFICATIONS, pagination: PAGINATION });
   if (path.endsWith('/read')) return json({ already_read: false, read_at: '2026-07-26T13:00:00Z' });
   if (path === '/api/v1/clients') return json({ data: [CLIENT_DETAIL], pagination: PAGINATION });
-  if (path === `/api/v1/clients/${CLIENT_ID}`) return json(CLIENT_DETAIL);
+  if (path === `/api/v1/clients/${CLIENT_ID}`) {
+    // As contas bancárias da tela R6 vêm DAQUI (paginação client-side sobre
+    // `detail.accounts`), não de uma rota própria.
+    return json(tableListsOverflow ? { ...CLIENT_DETAIL, accounts: MANY_ACCOUNTS } : CLIENT_DETAIL);
+  }
   // O tenant alheio RESPONDE 200 de propósito: se o front pedir e renderizar,
   // o vazamento aparece no teste. Um 403 aqui esconderia o defeito atrás do
   // backend, e o que se verifica no front é que ele nem chega a pedir.
@@ -643,33 +690,56 @@ async function measuredContrast(page: Page, selector: string): Promise<number> {
 }
 
 /**
- * Cards da Lista de Conciliações que estão POR BAIXO da barra de paginação
- * (defeito 86e2u4nxg), amostrando 9 pontos do retângulo da barra.
+ * Conteúdo que está POR BAIXO da barra de paginação (defeitos 86e2u4nxg e
+ * 86e2uca1d), amostrando 9 pontos do retângulo da barra.
  *
  * `elementsFromPoint` é a ferramenta certa aqui porque devolve todos os
  * elementos daquele ponto, inclusive os cobertos — mas **não** devolve o que um
  * ancestral com `overflow` recortou. É exatamente a distinção entre "vazou da
  * caixa e ficou escondido atrás da barra opaca" (defeito) e "foi recortado pela
  * região rolável" (correto). Comparar `boundingBox` não serviria: depois da
- * correção o último card continua geometricamente abaixo da barra, só que
- * recortado.
+ * correção a última linha continua geometricamente abaixo da barra, só que
+ * recortada.
+ *
+ * `seletor` é o que conta como "conteúdo" na tela medida: o card da Lista de
+ * Conciliações (`article[role="link"]`) ou a linha de corpo das telas de tabela
+ * (`tbody tr`).
  */
-async function cardsAtrasDaBarra(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
-    const barra = document.querySelector('nav[aria-label="Paginação de conciliações"]');
+async function conteudoAtrasDaBarra(page: Page, seletor: string): Promise<string[]> {
+  return page.evaluate((sel) => {
+    const barra = document.querySelector('nav[aria-label^="Paginação de"]');
     if (barra === null) return ['barra de paginação ausente'];
     const r = barra.getBoundingClientRect();
     const encontrados = new Set<string>();
     for (const fx of [0.15, 0.5, 0.85]) {
       for (const fy of [0.2, 0.5, 0.8]) {
         for (const el of document.elementsFromPoint(r.left + r.width * fx, r.top + r.height * fy)) {
-          const card = el.closest('article[role="link"]');
-          if (card !== null) encontrados.add(card.getAttribute('aria-label') ?? '?');
+          const alvo = el.closest(sel);
+          if (alvo !== null) {
+            encontrados.add(
+              alvo.getAttribute('aria-label') ?? (alvo.textContent ?? '?').trim().slice(0, 50),
+            );
+          }
         }
       }
     }
     return [...encontrados];
-  });
+  }, seletor);
+}
+
+/**
+ * Roda a sonda nas DUAS posições possíveis da barra: onde a tela abre e depois
+ * de rolar o `<main>` (o único container rolável do shell) até o fim.
+ * `elementsFromPoint` só enxerga dentro da viewport, então uma posição só
+ * deixaria o cenário vazio — sem medir nada — justamente no viewport em que a
+ * barra não começa visível. Em desktop a barra abre no lugar e a 2ª medição é
+ * redundante; em 390px é o contrário.
+ */
+async function conteudoCobertoEmQualquerRolagem(page: Page, seletor: string): Promise<string[]> {
+  const achados = new Set(await conteudoAtrasDaBarra(page, seletor));
+  await page.locator('main').evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+  for (const item of await conteudoAtrasDaBarra(page, seletor)) achados.add(item);
+  return [...achados];
 }
 
 test.beforeEach(async ({ page, context, baseURL }) => {
@@ -680,6 +750,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   reviewVerdict = null;
   patchAnomalyFails = false;
   listOverflows = false;
+  tableListsOverflow = false;
   await page.route('**/api/v1/**', fulfillApi);
   // O `src/middleware.ts` decide navegação só pela PRESENÇA do cookie
   // `access_token` (a validação real é do backend). Um valor qualquer basta
@@ -729,18 +800,8 @@ for (const vp of VIEWPORTS) {
       await expect(bar).toBeVisible();
       await shot(page, `lista-conciliacoes-transbordo-${vp.label.replace(/\s+/g, '-')}`);
 
-      // A medição é feita nas DUAS posições possíveis da barra: onde a tela
-      // abre e depois de rolar o `<main>` (o único container rolável do shell)
-      // até o fim. `elementsFromPoint` só enxerga dentro da viewport, então uma
-      // posição só deixaria o cenário vazio — sem medir nada — justamente no
-      // viewport em que a barra não começa visível. Em desktop a barra abre no
-      // lugar e a 2ª medição é redundante; em 390px é o contrário.
-      const cobertos = new Set([...(await cardsAtrasDaBarra(page))]);
-      await page.locator('main').evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
-      for (const c of await cardsAtrasDaBarra(page)) cobertos.add(c);
-      expect([...cobertos], `cards escondidos atrás da barra de paginação (${vp.label})`).toEqual(
-        [],
-      );
+      const cobertos = await conteudoCobertoEmQualquerRolagem(page, 'article[role="link"]');
+      expect(cobertos, `cards escondidos atrás da barra de paginação (${vp.label})`).toEqual([]);
 
       // ...e a barra precisa ser ALCANÇÁVEL: em desktop ela fica ancorada no
       // rodapé; em 390px chega-se a ela rolando o `<main>`.
@@ -869,6 +930,94 @@ for (const vp of VIEWPORTS) {
         `badge "Processada" (${vp.label}): ${ratio.toFixed(2)}:1`,
       ).toBeGreaterThanOrEqual(4.5);
     });
+  });
+}
+
+/**
+ * Defeito 86e2uca1d — as TRÊS telas que combinam `PaginationBar` com `<Table>`.
+ *
+ * A análise da 86e2u4nxg dizia que elas estavam a salvo porque o `<Table>` já
+ * embrulha o conteúdo numa região rolável. Medindo, não: aquele wrapper tem
+ * altura de CONTEÚDO, então rola no horizontal e nunca no vertical. Com 20
+ * linhas em 1440×900, a barra cobria `Conta 18`, `Pessoa 6`/`Pessoa 7` e
+ * `Entrada 7` — o mesmo defeito da lista de cards, por baixo do mesmo mecanismo.
+ *
+ * O gate é o mesmo dos cards, com `tbody tr` no lugar de `article[role="link"]`.
+ */
+const TELAS_COM_TABELA = [
+  {
+    key: 'contas',
+    titulo: 'Contas Bancárias',
+    rota: `/clientes/${CLIENT_ID}/contas`,
+    regiao: 'Contas bancárias (rolável)',
+    usuario: (): Record<string, unknown> => USER,
+  },
+  {
+    key: 'usuarios',
+    titulo: 'Usuários',
+    rota: `/clientes/${CLIENT_ID}/usuarios`,
+    regiao: 'Usuários do cliente (rolável)',
+    usuario: (): Record<string, unknown> => CLIENT_MANAGER_USER,
+  },
+  {
+    key: 'glossario',
+    titulo: 'Glossário',
+    rota: `/clientes/${CLIENT_ID}/glossario`,
+    regiao: 'Glossário do cliente (rolável)',
+    usuario: (): Record<string, unknown> => CLIENT_MANAGER_USER,
+  },
+] as const;
+
+for (const vp of VIEWPORTS) {
+  test.describe(`Telas de tabela com paginação — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    for (const tela of TELAS_COM_TABELA) {
+      test(`${tela.key}: a barra de paginação NUNCA cobre uma linha (86e2uca1d)`, async ({
+        page,
+      }) => {
+        tableListsOverflow = true;
+        sessionUser = tela.usuario();
+        await page.goto(tela.rota);
+        await expect(page.getByRole('heading', { name: tela.titulo, level: 2 })).toBeVisible();
+        await expect(page.getByRole('navigation', { name: /^Paginação de/ })).toBeVisible();
+        await shot(page, `tabela-${tela.key}-transbordo-${vp.label.replace(/\s+/g, '-')}`);
+
+        const cobertas = await conteudoCobertoEmQualquerRolagem(page, 'tbody tr');
+        expect(cobertas, `linhas escondidas atrás da barra (${tela.key}, ${vp.label})`).toEqual([]);
+
+        await expect(page.getByRole('navigation', { name: /^Paginação de/ })).toBeInViewport();
+        await analyze(page, `${tela.key} com transbordo (${vp.label})`);
+      });
+
+      /**
+       * Contraponto: recortar não pode virar "sumiu". Só em desktop, pelo mesmo
+       * motivo da lista de cards — abaixo de `lg` o shell vira coluna, a altura
+       * deixa de ser fixa e quem rola é o `<main>`.
+       */
+      if (vp.label === 'desktop') {
+        test(`${tela.key}: a tabela rola dentro da própria área (86e2uca1d)`, async ({ page }) => {
+          tableListsOverflow = true;
+          sessionUser = tela.usuario();
+          await page.goto(tela.rota);
+          const regiao = page.getByRole('region', { name: tela.regiao });
+          await expect(regiao).toBeVisible();
+
+          expect(await regiao.evaluate((el) => el.tabIndex)).toBe(0);
+          expect(
+            await regiao.evaluate((el) => el.scrollHeight - el.clientHeight),
+            `a tabela de ${tela.key} precisa ter rolagem própria quando as linhas não cabem`,
+          ).toBeGreaterThan(0);
+
+          const bar = page.getByRole('navigation', { name: /^Paginação de/ });
+          await expect(bar).toBeInViewport();
+          await regiao.evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+          await expect(page.getByRole('row').last()).toBeInViewport();
+          // Rolar a tabela não pode arrastar a barra do rodapé junto.
+          await expect(bar).toBeInViewport();
+        });
+      }
+    }
   });
 }
 

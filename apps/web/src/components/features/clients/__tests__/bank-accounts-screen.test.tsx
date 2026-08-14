@@ -82,6 +82,20 @@ beforeEach(() => {
   detailState.isError = false;
 });
 
+describe('BankAccountsScreen — área rolável (86e2uca1d)', () => {
+  it('a tabela é o scroller vertical da área, e a barra fica fora dela', () => {
+    render(<BankAccountsScreen clientId="c1" />);
+
+    // `fill` é o que impede a tabela de vazar por baixo da barra de paginação
+    // (opaca). A medição da sobreposição é do browser (`e2e/a11y-mocked`).
+    const region = screen.getByRole('region', { name: 'Contas bancárias (rolável)' });
+    expect(region).toHaveClass('overflow-auto', 'min-h-0');
+    expect(region).not.toContainElement(
+      screen.getByRole('navigation', { name: 'Paginação de contas bancárias' }),
+    );
+  });
+});
+
 describe('BankAccountsScreen — lista', () => {
   it('mostra nome, banco, tipo e sincronização de cada conta', () => {
     render(<BankAccountsScreen clientId="c1" />);

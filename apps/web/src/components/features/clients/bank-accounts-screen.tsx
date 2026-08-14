@@ -31,6 +31,7 @@ import { PaginationBar } from '@/components/ui/pagination-bar';
 import {
   Table,
   TableBody,
+  TableCard,
   TableCell,
   TableHead,
   TableHeader,
@@ -131,8 +132,8 @@ export function BankAccountsScreen({ clientId }: { clientId: string }) {
             </Button>
           </div>
         ) : (
-          <div className="rounded-lg border">
-            <Table scrollRegionLabel="Contas bancárias (rolável horizontalmente)">
+          <TableCard>
+            <Table fill scrollRegionLabel="Contas bancárias (rolável)">
               <TableHeader>
                 <TableRow>
                   <TableHead>Conta</TableHead>
@@ -156,7 +157,7 @@ export function BankAccountsScreen({ clientId }: { clientId: string }) {
                 ))}
               </TableBody>
             </Table>
-          </div>
+          </TableCard>
         )}
       </div>
 
@@ -180,7 +181,11 @@ export function BankAccountsScreen({ clientId }: { clientId: string }) {
 
 function AccountsSkeleton() {
   return (
-    <div role="status" className="space-y-2 rounded-lg border p-4" aria-label="Carregando contas bancárias">
+    <div
+      role="status"
+      className="space-y-2 rounded-lg border p-4"
+      aria-label="Carregando contas bancárias"
+    >
       {Array.from({ length: 5 }).map((_, i) => (
         <div key={i} className="flex gap-4">
           <div className="bg-muted h-4 flex-1 animate-pulse rounded" />
