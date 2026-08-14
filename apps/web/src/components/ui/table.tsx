@@ -13,16 +13,73 @@ import { cn } from '@/lib/utils';
 export interface TableProps extends React.HTMLAttributes<HTMLTableElement> {
   /** Nome acessível da região rolável (use quando houver mais de uma tabela na tela). */
   scrollRegionLabel?: string;
+  /**
+   * A tabela passa a ser o SCROLLER VERTICAL da área em que vive, em vez de
+   * crescer indefinidamente. Use sempre dentro de `<TableCard>` (defeito
+   * 86e2uca1d): sem uma altura limitada acima, a tabela vaza da caixa e o que
+   * vier depois — tipicamente a `PaginationBar`, que é opaca — cobre o que
+   * vazou.
+   *
+   * Só com `fill` o cabeçalho gruda no topo. É opt-in porque nas tabelas de
+   * altura livre o `sticky` não teria efeito vertical e o fundo opaco do `th`
+   * mudaria a aparência à toa (ex.: a tabela dentro do modal de troca).
+   */
+  fill?: boolean;
 }
 
 const Table = React.forwardRef<HTMLTableElement, TableProps>(
-  ({ className, scrollRegionLabel = 'Tabela (rolável horizontalmente)', ...props }, ref) => (
-    <ScrollRegion className="relative w-full" label={scrollRegionLabel}>
+  (
+    { className, scrollRegionLabel = 'Tabela (rolável horizontalmente)', fill = false, ...props },
+    ref,
+  ) => (
+    <ScrollRegion
+      className={cn(
+        'relative w-full',
+        // `min-h-0`: como item flex do `<TableCard>`, é o que autoriza encolher
+        // até a altura disponível em vez de esticar o card.
+        // O `shadow` desenha a linha do cabeçalho: com `border-collapse:
+        // collapse` (preflight do Tailwind) a borda pertence à TABELA, não à
+        // célula, e não acompanha o `th` grudado — some ao rolar.
+        fill &&
+          '[&_thead_th]:bg-background min-h-0 [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:shadow-[inset_0_-1px_0_hsl(var(--border))]',
+      )}
+      label={scrollRegionLabel}
+    >
       <table ref={ref} className={cn('w-full caption-bottom text-sm', className)} {...props} />
     </ScrollRegion>
   ),
 );
 Table.displayName = 'Table';
+
+/**
+ * Moldura da tabela: o card com borda que a envolve nas telas de lista.
+ *
+ * Existe para que a receita de altura seja UMA, e não uma cópia por tela
+ * (defeito 86e2uca1d, em que as três telas de tabela repetiam
+ * `div.rounded-lg.border` sem limite de altura e deixavam a tabela vazar).
+ *
+ * `max-h-full` em vez de `h-full` de propósito: com poucas linhas o card
+ * continua abraçando o conteúdo — `h-full` deixaria uma moldura vazia e alta
+ * numa tela com duas contas. O `flex flex-col` é o que permite ao
+ * `<Table fill>` encolher até caber; o `overflow-hidden` faz o canto arredondado
+ * recortar a tabela que rola por dentro.
+ *
+ * Depende de o PAI ter altura definida (`min-h-0 flex-1` dentro de uma seção
+ * `flex h-full flex-col`, que é o padrão das telas do shell do cliente). Onde
+ * essa altura não existe — abaixo de `lg`, em que o shell vira coluna — o
+ * `max-h-full` não resolve, o card cresce e quem rola é o `<main>`. É o
+ * comportamento mobile de hoje, preservado de propósito.
+ */
+const TableCard = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => (
+    <div
+      ref={ref}
+      className={cn('flex max-h-full flex-col overflow-hidden rounded-lg border', className)}
+      {...props}
+    />
+  ),
+);
+TableCard.displayName = 'TableCard';
 
 const TableHeader = React.forwardRef<
   HTMLTableSectionElement,
@@ -101,4 +158,14 @@ const TableCaption = React.forwardRef<
 ));
 TableCaption.displayName = 'TableCaption';
 
-export { Table, TableHeader, TableBody, TableFooter, TableHead, TableRow, TableCell, TableCaption };
+export {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCard,
+  TableCell,
+  TableFooter,
+  TableHead,
+  TableHeader,
+  TableRow,
+};

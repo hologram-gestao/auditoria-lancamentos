@@ -33,9 +33,7 @@ vi.mock('next/navigation', () => ({
 }));
 
 const listState = {
-  data: undefined as
-    | { data: ClientUserResponse[]; pagination: Record<string, number> }
-    | undefined,
+  data: undefined as { data: ClientUserResponse[]; pagination: Record<string, number> } | undefined,
   isLoading: false,
   isFetching: false,
   isError: false,
@@ -127,6 +125,18 @@ beforeEach(() => {
   listState.isError = false;
   listState.error = null;
   setList([user()]);
+});
+
+describe('ClientUsersScreen — área rolável (86e2uca1d)', () => {
+  it('a tabela é o scroller vertical da área, e a barra fica fora dela', () => {
+    render(<ClientUsersScreen clientId={CLIENT_ID} />);
+
+    const region = screen.getByRole('region', { name: 'Usuários do cliente (rolável)' });
+    expect(region).toHaveClass('overflow-auto', 'min-h-0');
+    expect(region).not.toContainElement(
+      screen.getByRole('navigation', { name: 'Paginação de usuários' }),
+    );
+  });
 });
 
 describe('ClientUsersScreen — lista', () => {

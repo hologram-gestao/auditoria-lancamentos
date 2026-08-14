@@ -128,6 +128,18 @@ beforeEach(() => {
   setList([entry()]);
 });
 
+describe('GlossaryScreen — área rolável (86e2uca1d)', () => {
+  it('a tabela é o scroller vertical da área, e a barra fica fora dela', () => {
+    render(<GlossaryScreen clientId={CLIENT_ID} />);
+
+    const region = screen.getByRole('region', { name: 'Glossário do cliente (rolável)' });
+    expect(region).toHaveClass('overflow-auto', 'min-h-0');
+    expect(region).not.toContainElement(
+      screen.getByRole('navigation', { name: 'Paginação de entradas' }),
+    );
+  });
+});
+
 describe('GlossaryScreen — lista', () => {
   it('mostra tipo, nome, código e descrição de cada entrada', () => {
     setList([
