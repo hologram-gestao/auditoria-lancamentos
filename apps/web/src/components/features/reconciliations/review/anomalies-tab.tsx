@@ -21,10 +21,10 @@
  * (FRONT 9.16 nota — pode ser implementado em iteração futura).
  */
 
-import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { PaginationBar } from '@/components/ui/pagination-bar';
 import {
   Select,
   SelectContent,
@@ -57,7 +57,8 @@ interface AnomaliesTabProps {
 
 type SeverityFilter = 'all' | 'critical' | 'moderate' | 'info';
 type ResolvedFilter = 'all' | 'true' | 'false';
-const PAGE_SIZE = 20;
+/** As opções vêm da `PaginationBar` (10/20/50/100) — nada de lista paralela. */
+const DEFAULT_PAGE_SIZE = 20;
 /** Severidade · Tipo · Linha · Detectado por · Status · Veredito · Ações. */
 const COLUMN_COUNT = 7;
 
@@ -69,19 +70,20 @@ export function AnomaliesTab({ sessionId }: AnomaliesTabProps) {
   const [severity, setSeverity] = useState<SeverityFilter>('all');
   const [resolved, setResolved] = useState<ResolvedFilter>('all');
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
 
+  // Trocar o tamanho da página também volta para a 1: quem está na página 8 com
+  // 10 por página e escolhe 100 cairia numa página que não existe mais.
   useEffect(() => {
     setPage(1);
-  }, [severity, resolved]);
+  }, [severity, resolved, pageSize]);
 
-  const listQuery = useAnomalies(sessionId, { page, pageSize: PAGE_SIZE, severity, resolved });
+  const listQuery = useAnomalies(sessionId, { page, pageSize, severity, resolved });
   const items = listQuery.data?.data ?? [];
   const pagination = listQuery.data?.pagination;
   const totalPages = pagination?.totalPages ?? 0;
   const total = pagination?.total ?? 0;
-  const fromIndex = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  const toIndex = Math.min(page * PAGE_SIZE, total);
 
   return (
     <div className="space-y-4">
@@ -170,34 +172,16 @@ export function AnomaliesTab({ sessionId }: AnomaliesTabProps) {
         </Table>
       </div>
 
-      <div className="flex flex-col items-center justify-between gap-2 sm:flex-row">
-        <p className="text-muted-foreground text-sm">
-          Mostrando {fromIndex}–{toIndex} de {total}
-        </p>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page <= 1}
-            aria-label="Página anterior"
-          >
-            <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-          </Button>
-          <span className="text-sm">
-            {page} / {Math.max(1, totalPages)}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages}
-            aria-label="Próxima página"
-          >
-            <ChevronRight className="h-4 w-4" aria-hidden="true" />
-          </Button>
-        </div>
-      </div>
+      <PaginationBar
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        totalPages={totalPages}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+        disabled={listQuery.isLoading}
+        itemLabel="anomalias"
+      />
 
       {resolvingId !== null && (
         <ResolveAnomalyDialog

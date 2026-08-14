@@ -20,7 +20,7 @@
  *   - "Registrar anomalia": abre modal com `file_entry_id` pré-preenchido.
  */
 
-import { ChevronLeft, ChevronRight, MoreHorizontal } from 'lucide-react';
+import { MoreHorizontal } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -32,6 +32,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { PaginationBar } from '@/components/ui/pagination-bar';
 import {
   Select,
   SelectContent,
@@ -76,7 +77,7 @@ interface MovementsTabProps {
 type SituationFilter = 'all' | 'conciliado' | 'sem_omie' | 'ignorado';
 type TypeFilter = 'all' | 'credit' | 'debit';
 
-const PAGE_SIZES = [10, 20, 50] as const;
+/** As opções vêm da `PaginationBar` (10/20/50/100) — nada de lista paralela. */
 const DEFAULT_PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE_MS = 300;
 
@@ -86,7 +87,7 @@ export function MovementsTab({ sessionId, isCard }: MovementsTabProps) {
   const [searchInput, setSearchInput] = useState('');
   const debouncedSearch = useDebouncedValue(searchInput, SEARCH_DEBOUNCE_MS);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(DEFAULT_PAGE_SIZE);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   // Reset para página 1 sempre que filtros mudam (paginação ficaria
   // pendurada num resultado vazio se trocássemos só o filtro).
@@ -195,8 +196,6 @@ export function MovementsTab({ sessionId, isCard }: MovementsTabProps) {
   const pagination = listQuery.data?.pagination;
   const totalPages = pagination?.totalPages ?? 0;
   const total = pagination?.total ?? 0;
-  const fromIndex = total === 0 ? 0 : (page - 1) * pageSize + 1;
-  const toIndex = Math.min(page * pageSize, total);
 
   const hasAnyFilter =
     situation !== 'all' || type !== 'all' || debouncedSearch.trim() !== '' || onlySuspect;
@@ -248,27 +247,6 @@ export function MovementsTab({ sessionId, isCard }: MovementsTabProps) {
             placeholder="Filtrar por descrição"
             maxLength={200}
           />
-        </div>
-
-        <div className="space-y-1">
-          <label htmlFor="filter-page-size" className="text-muted-foreground text-xs">
-            Itens por página
-          </label>
-          <Select
-            value={String(pageSize)}
-            onValueChange={(v) => setPageSize(Number(v) as (typeof PAGE_SIZES)[number])}
-          >
-            <SelectTrigger id="filter-page-size" className="w-24">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {PAGE_SIZES.map((n) => (
-                <SelectItem key={n} value={String(n)}>
-                  {n}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         </div>
 
         <div className="flex items-center gap-2 pb-1">
@@ -367,34 +345,16 @@ export function MovementsTab({ sessionId, isCard }: MovementsTabProps) {
         </Table>
       </div>
 
-      <div className="flex flex-col items-center justify-between gap-2 sm:flex-row">
-        <p className="text-muted-foreground text-sm">
-          Mostrando {fromIndex}–{toIndex} de {total}
-        </p>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page <= 1}
-            aria-label="Página anterior"
-          >
-            <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-          </Button>
-          <span className="text-sm">
-            {page} / {Math.max(1, totalPages)}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages}
-            aria-label="Próxima página"
-          >
-            <ChevronRight className="h-4 w-4" aria-hidden="true" />
-          </Button>
-        </div>
-      </div>
+      <PaginationBar
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        totalPages={totalPages}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+        disabled={isLoading}
+        itemLabel="movimentações"
+      />
 
       {trocarFor !== null && (
         <TrocarLancamentoModal
