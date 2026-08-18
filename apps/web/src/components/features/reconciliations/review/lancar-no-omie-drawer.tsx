@@ -276,9 +276,15 @@ export function LancarNoOmieDrawer({
           </div>
         </SheetBody>
 
-        <SheetFooter>
+        {/* `flex-wrap` só AQUI, não no `SheetFooter` compartilhado: esta é a
+            primeira gaveta com TRÊS elementos no rodapé, e o botão primário é
+            largo ("Confirmar e lançar N de M"). Quando nem assim couber numa
+            linha em 390px, ele desce inteiro para a linha de baixo em vez de
+            ser clipado pela borda. */}
+        <SheetFooter className="flex-wrap gap-y-3">
           <Button
             variant="outline"
+            className="shrink-0"
             onClick={() => onOpenChange(false)}
             disabled={postMutation.isPending}
           >
@@ -287,9 +293,14 @@ export function LancarNoOmieDrawer({
                 ambíguos para quem navega por leitor de tela. */}
             {tudoLancado ? 'Concluir' : 'Cancelar'}
           </Button>
-          <div className="flex items-center gap-3">
+          {/* `min-w-0` + `flex-wrap`: botão é `whitespace-nowrap`, então seu
+              min-content é o texto inteiro e ele NÃO encolhe — sem poder ceder
+              largura, o grupo empurrava a ação primária para fora da viewport
+              em 390px. Com a quebra, o texto auxiliar sobe para a linha de cima
+              e o botão continua inteiro, alinhado à direita. */}
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-x-3 gap-y-2">
             {!tudoLancado && semCategoria > 0 && (
-              <span className="text-muted-foreground text-xs">
+              <span className="text-muted-foreground min-w-0 text-xs">
                 {semCategoria === 1
                   ? '1 compra fica de fora (sem categoria)'
                   : `${semCategoria} compras ficam de fora (sem categoria)`}

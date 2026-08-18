@@ -101,7 +101,7 @@
  */
 
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 
 const CLIENT_ID = '11111111-1111-4111-8111-111111111111';
 /**
@@ -771,6 +771,21 @@ async function analyze(page: Page, label: string): Promise<void> {
  * com fundo opaco) — o axe devolve `incomplete` neste caso e `incomplete` não
  * entra em `violations`. Foi assim que o badge vazio passou por todos os gates.
  */
+/**
+ * Espera a animação de entrada do PRÓPRIO elemento terminar.
+ *
+ * `toBeVisible()` resolve assim que o nó entra na árvore — mas a gaveta do
+ * Radix entra deslizando (`translate-x`), e uma `boundingBox()` medida no meio
+ * do trajeto devolve coordenadas fora da viewport que não são defeito nenhum.
+ * Sem `{ subtree: true }` de propósito: um spinner de carregamento lá dentro é
+ * animação infinita e o `finished` dele nunca resolveria.
+ */
+async function aguardarAnimacao(locator: Locator): Promise<void> {
+  await locator.evaluate(async (el) => {
+    await Promise.all(el.getAnimations().map((a) => a.finished));
+  });
+}
+
 /** O título do toast do Sonner — o nó que o axe reprovou em `#008a2e`/`#ecfdf3`. */
 const TOAST_TITLE = '[data-sonner-toast] [data-title]';
 
@@ -1425,12 +1440,28 @@ for (const vp of VIEWPORTS) {
 
       const gaveta = page.getByRole('dialog', { name: 'Lançar no Omie' });
       await expect(gaveta).toBeVisible();
+      await aguardarAnimacao(gaveta);
       // Cancelar à ESQUERDA da ação primária (contrato da gaveta).
       const cancelar = await gaveta.getByRole('button', { name: 'Cancelar' }).boundingBox();
       const primaria = await gaveta.getByRole('button', { name: /Confirmar e lançar/ }).boundingBox();
       expect((cancelar?.x ?? 0), 'Cancelar precisa ficar à esquerda da ação primária').toBeLessThan(
         primaria?.x ?? 0,
       );
+
+      // Nenhum dos dois pode passar da borda da viewport. O axe não mede
+      // transbordo e o jsdom não tem layout: em 390px o rodapé com TRÊS
+      // elementos (Cancelar + texto auxiliar + ação primária) clipava o botão
+      // que grava na contabilidade do cliente. Medido aqui, no estado inicial
+      // da gaveta — que é justamente o que tem compra sem categoria.
+      const larguraViewport = page.viewportSize()?.width ?? 0;
+      expect(
+        (primaria?.x ?? 0) + (primaria?.width ?? 0),
+        'ação primária da gaveta cortada pela borda da viewport',
+      ).toBeLessThanOrEqual(larguraViewport);
+      expect(
+        (cancelar?.x ?? 0) + (cancelar?.width ?? 0),
+        'Cancelar da gaveta cortado pela borda da viewport',
+      ).toBeLessThanOrEqual(larguraViewport);
 
       // Sem categoria, o envio não é oferecido.
       await expect(gaveta.getByRole('button', { name: /Confirmar e lançar 0 de 2/ })).toBeDisabled();
