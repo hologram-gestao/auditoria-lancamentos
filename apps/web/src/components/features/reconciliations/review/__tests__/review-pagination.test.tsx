@@ -60,6 +60,7 @@ vi.mock('@/hooks/use-reconciliations', () => ({
     };
   },
   useAllSessionAnomalies: () => ({ data: [], isLoading: false }),
+  useAllSemOmieEntries: () => ({ data: [], isLoading: false }),
   useOmieLancamentos: () => ({ data: [], isLoading: false }),
   usePatchFileEntry: () => ({ mutateAsync: vi.fn(), isPending: false }),
   usePatchOmieEntry: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -100,7 +101,7 @@ const ABAS = [
   {
     nome: 'Anomalias',
     rotuloBarra: 'Paginação de anomalias',
-    render: () => render(<AnomaliesTab sessionId={SESSION_ID} />),
+    render: () => render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} />),
     params: () => anomaliesParams,
   },
 ] as const;

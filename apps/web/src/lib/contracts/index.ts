@@ -181,6 +181,43 @@ export type ListGlossaryQuery = NonNullable<
 >;
 
 // ---------------------------------------------------------------------------
+// Lançamento no Omie (Sprint 7 / R1 · R2 · R5 — BACK 07.3 · 07.4)
+// ---------------------------------------------------------------------------
+
+/** Par `{codigo, descricao}` do combobox de categoria — `codigo` é o `cCodCateg`. */
+export type OmieCategoriaItem = Schemas['OmieCategoriaItem'];
+/**
+ * `{ data, total }` — DUAS chaves, então o auto-unwrap de `{data}` do
+ * `rawFetch` não dispara e o payload chega inteiro. A lista é COMPLETA (o
+ * backend não pagina: o consumidor é um combobox com busca local).
+ */
+export type OmieCategoriaListResponse = Schemas['OmieCategoriaListResponse'];
+
+/** Uma linha do lote: a compra + a categoria que o operador escolheu. */
+export type OmiePostingLineRequest = Schemas['OmiePostingLineRequest'];
+export type OmiePostingBatchRequest = Schemas['OmiePostingBatchRequest'];
+/** Resumo do lote: linha a linha + os três agregados. */
+export type OmiePostingBatchPayload = Schemas['OmiePostingBatchPayload'];
+export type OmiePostingLineResult = Schemas['OmiePostingLineResult'];
+
+/**
+ * `lancada` | `bloqueada` | `erro` — enum FECHADO no contrato (a UI ramifica
+ * nos três). Derivado do próprio item para o dia em que um quarto aparecer.
+ */
+export type OmiePostingLineStatus = Schemas['OmiePostingLineResult']['status'];
+/**
+ * Motivo CATEGÓRICO do desfecho. O backend o declara fechado justamente para a
+ * tela decidir o que oferecer (reclassificar? conferir no Omie? tentar de
+ * novo?) sem casar a frase em português, que pode mudar.
+ */
+export type OmiePostingLineReason = NonNullable<Schemas['OmiePostingLineResult']['reason']>;
+
+/** Query real de `GET /omie/categorias` (`session_id` obrigatório, `refresh`). */
+export type ListOmieCategoriasQuery = NonNullable<
+  paths['/api/v1/omie/categorias']['get']['parameters']['query']
+>;
+
+// ---------------------------------------------------------------------------
 // Instrumentação de outcome (BACK 04.1)
 // ---------------------------------------------------------------------------
 
