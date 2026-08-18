@@ -1586,3 +1586,808 @@ cenário do toast de erro só passa porque o `$eval` acha o seletor".
 completo está no cabeçalho de `apps/web/e2e/a11y-mocked.spec.ts` — que a partir desta
 sprint é a fonte da verdade de COMO rodar o gate, e está correto (foi ele que a re-revisão
 seguiu, sem adaptação).
+
+
+---
+
+# Sprint 7 — Lançamento de faturas de cartão no Omie
+
+<!-- ===== agent-backend ===== -->
+## ADR-018-BE — A captura de escrita do `IncluirLancCC` é opt-in e cria lançamento REAL (Sprint 7 / BACK 07.1)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:** `scripts/capture_omie_fixtures.py`,
+`tests/fixtures/omie/README.md`, `tests/unit/test_omie_fixtures.py`,
+`app/integrations/omie/schemas.py`
+
+**Conflito de fato, registrado e NÃO resolvido por conta própria.** O DoD do PRD da Sprint 7
+pede "idempotência provada **no sandbox real**". O `CLAUDE.md` §10 diz que **a Omie não tem
+sandbox** (decisão já fechada: testes contra conta real, ex.: Quial). Os dois não podem ser
+verdade ao mesmo tempo. A leitura adotada — e o que a task pode fazer sem inventar — é:
+a captura roda contra **conta real**, e por isso é tratada como operação perigosa.
+
+**Decisão.** A captura de escrita é **opt-in explícito** (`OMIE_CAPTURE_ALLOW_WRITE` em
+`1`/`true`/`yes`; qualquer outro valor, inclusive ausente e vazio, significa NÃO).
+Sem a variável o script avisa e **não faz POST algum** — travado por teste
+(`test_no_write_post_without_opt_in`), não por convenção. Complementos: valor default de
+`R$ 0,01`, `cObs` que identifica a origem, `OMIE_CAPTURE_COD_INT_LANC` obrigatório (é por
+ele que o operador localiza o lançamento) e o README manda **excluir manualmente** o(s)
+lançamento(s) — o ADL não implementa `ExcluirLancCC` (fora do escopo da sprint).
+
+**Por que não bastou "documentar com cuidado".** Diferente de toda a integração até aqui,
+esta chamada **grava dinheiro na contabilidade de um cliente**. Um default permissivo aqui
+não é bug de conveniência, é dano difícil de desfazer — o mesmo motivo pelo qual o
+critério de rollback da sprint é "um único duplicado desliga o recurso".
+
+**O que fica BLOQUEADO até a captura existir.** As BACK 07.2–07.5 podem ser construídas (a
+dedup primária é do ADL e não depende do fornecedor), mas **nenhum lançamento real** pode
+ser feito em dev/prod antes de a fixture existir e o gate ficar verde. Sem fixture, os
+testes de escrita **SKIPAM citando S-1** — nunca passam verde em silêncio.
+
+## ADR-019-BE — Nenhum campo do contrato de escrita é apresentado como fato (Sprint 7 / BACK 07.1)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:** `app/integrations/omie/schemas.py`
+(`IncluirLancCCRequest`, `IncluirLancCCResponse`), `tests/unit/test_omie_fixtures.py`
+
+**Contexto.** É o defeito P11 da Sprint 1 se repetindo de forma idêntica: um contrato
+plausível vindo da doc, implementado contra um mock que repete os mesmos nomes inventados.
+O PRD da Sprint 7 traz a tabela do `IncluirLancCC` — e ele próprio marca o contrato como
+não-verificado (S-1).
+
+**Decisão.** Os DTOs de escrita existem, mas cada suposição está marcada **NÃO-VERIFICADA**
+na docstring, com a origem declarada:
+- **Sinal** (`nValorLanc` absoluto + `cNatureza`): confirmado só no lado de **LEITURA**
+  (`ListarExtrato`, cabeçalho de `omie/schemas.py`). Seguimos a convenção de leitura porque
+  assumir o oposto seria fabricar contra o que o repositório já sabe — mas marcado.
+- **Unicidade de `cCodIntLanc`**: NÃO confirmada. Não é a defesa primária (ver BACK 07.2).
+- **`cTipo`**: `"DIN"` é palpite do PRD; o campo análogo lido é `string3` `PAG`/`ATR`. O
+  campo é opcional e a captura **não o envia** — mandar um valor inventado poderia fazer a
+  Omie recusar a chamada e transformar a captura numa prova falsa ("o contrato está errado")
+  quando o errado seria só este campo.
+- **`nCodLanc` na resposta é obrigatório de propósito**: é o dado que o ADL persiste. Se o
+  nome real for outro, o teste FALHA em vez de gravar `None` calado — que foi exatamente o
+  modo de falha do `ListarExtrato` v1.
+
+**Como o gate fecha o laço.** O script de captura monta o request **a partir do DTO**
+(`model_dump(by_alias=True)`), não de um dict solto; o teste compara as chaves da fixture
+com `IncluirLancCCRequest.omie_param_aliases()`. Renomear campo no DTO sem recapturar uma
+chamada real acusa divergência. E, como um request gravado só mostra o que **mandamos**,
+a captura relê o extrato do dia (`incluir_lanc_cc.readback.json`): é ele que responde se a
+Omie **entendeu** `cNatureza='D'` + valor absoluto como débito — a única evidência possível
+da convenção de sinal.
+
+## ADR-020-BE — Divergência PRD (CA) × código (CR = cartão): vale o código (Sprint 7 / BACK 07.1)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:** todas as tasks da Sprint 7
+
+**Fato.** O PRD da Sprint 7 chama a conta de cartão de **`CA`** ("a conta `CA` já selecionada
+na conciliação", "lançamento na própria conta corrente do cartão, `CA`"). O repositório diz o
+**oposto**, e por incidente corrigido: `OmieAccountType`
+(`app/integrations/omie/schemas.py`) documenta `CA = Conta Aplicação (investimento, não
+cartão!)` e `CR = Cartão de Crédito` — a v1 do enum mapeava `CREDIT_CARD = "CA"` e foi
+corrigida na auditoria M-1 (20/05/2026), justamente porque o front renderizava Conta
+Aplicação como "Cartão".
+
+**Decisão.** Vale o **código**. Elegibilidade do fluxo de lançamento é
+`session.account_type == "credit_card"` (o valor do domínio do ADL), que corresponde ao
+Omie **`CR`**. Nenhuma task da Sprint 7 deve filtrar por `CA`.
+
+**Consequência.** Quem ler o PRD sem este ADR vai escrever o filtro errado e o lançamento
+sairia para contas de investimento — ou, mais provável, para nenhuma conta. Este é o tipo
+de erro que passa em teste (o mock diria o mesmo) e só aparece com dado real.
+
+## ADR-021-BE — Tabela própria para a intenção de lançamento, não colunas na `file_entry` (Sprint 7 / BACK 07.2)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:**
+`app/db/models/reconciliation_omie_posting.py`,
+`alembic/versions/d7c2b9f14a86_s7_reconciliation_omie_postings.py`,
+`app/modules/reconciliations/omie_posting/`
+
+**Alternativa considerada e recusada:** acrescentar `cod_int_lanc`, `posting_status`,
+`attempts`, `error_*` em `reconciliation_file_entries`. Recusada porque a `file_entry`
+carrega o **resultado** da conciliação (situação, lançamento vinculado), enquanto a
+intenção tem ciclo de vida próprio: nasce **antes** do POST, sobrevive a timeout, acumula
+tentativas, guarda o erro do fornecedor e pode terminar em `failed` **sem que a linha mude
+de estado**. Misturar as duas deixaria o caminho de falha — o que mais importa, porque é
+dinheiro na contabilidade do cliente — sem lugar para morar, e obrigaria a `file_entry` a
+crescer 5 colunas que 99% das linhas nunca usam.
+
+**Decisão.** Tabela `reconciliation_omie_postings` com **duas garantias no BANCO**:
+
+- `UNIQUE(file_entry_id)` — uma intenção por linha. É o que torna `register_intent`
+  idempotente **sob concorrência**: a garantia é do banco (`INSERT ... ON CONFLICT DO
+  NOTHING`), não de um "SELECT antes do INSERT", que tem janela de corrida exatamente
+  onde o erro custa dinheiro (duplo-clique, retry, dois workers).
+- `UNIQUE(client_id, cod_int_lanc)` — a chave enviada à Omie não se repete no tenant.
+
+`client_id` é desnormalizado de propósito: toda query filtra por ele (S5/R3) e, sem a
+coluna, o filtro exigiria JOIN com `sessions` em todo acesso — no dia em que alguém
+esquecer o JOIN, o isolamento some sem aviso.
+
+**Convivência com o índice que já existia.** `ix_recon_file_entry_session_omie_unique`
+(`session_id`, `omie_lancamento_id`, parcial) impede duas linhas da mesma sessão de
+apontarem para o mesmo lançamento (§5.4). A confirmação **não o contorna**: checa antes e
+levanta `OmieLancamentoAlreadyLinkedError` (409 tratado) em vez de estourar `IntegrityError`
+cru como 500.
+
+**Verificado contra Postgres 16 real** (`docker exec`, banco descartável): upgrade →
+downgrade → upgrade limpo; as duas UNIQUEs recusam a 2ª intenção da mesma linha e a mesma
+chave em outra linha do tenant; duas linhas distintas com chaves distintas passam; e o
+índice parcial recusa o mesmo `nCodLanc` em duas linhas da sessão.
+
+## ADR-022-BE — `cCodIntLanc` é derivado da IDENTIDADE da linha, com 85 bits (Sprint 7 / BACK 07.2)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:**
+`app/modules/reconciliations/omie_posting/keys.py`
+
+**O modo de falha que a decisão evita não é o duplicado — é o FALTANTE.** Uma chave
+derivada do conteúdo (data + valor + descrição) colapsaria duas compras reais idênticas na
+mesma fatura — dois cafés de R$ 12,00 no mesmo dia e no mesmo estabelecimento — numa chave
+só, e a **segunda nunca seria lançada**. Isso é pior que duplicado: o critério de rollback
+da sprint ("um único duplicado desliga o recurso") vigia o duplicado e **não vigia o
+faltante**, então o erro passaria despercebido.
+
+**Decisão.** `cCodIntLanc = "ADL" + base32(85 bits de blake2s(file_entry_id))` = 20 chars
+exatos, o teto `string20` da Omie. Detalhes com motivo:
+
+- **Digest e não os bytes do UUID:** os dois seriam igualmente únicos (UUIDv4 já é
+  aleatório); o digest evita entregar a PK do ADL a um sistema de terceiros.
+- **Prefixo `ADL` consome 3 dos 20 caracteres de propósito:** o operador vê essa chave na
+  tela do Omie e precisa saber de onde ela veio (é por ela que localiza o lançamento).
+- **85 bits, e a colisão NÃO é tratada como impossível:** com 1 milhão de linhas de um
+  cliente a chance é ~1,3e-14, mas o `UNIQUE(client_id, cod_int_lanc)` existe e converte o
+  caso em `OmiePostingKeyCollisionError` — erro tratado, nunca uma linha silenciosamente
+  não lançada. Truncar um UUID "porque não vai colidir" seria escolher uma taxa sem medir.
+- **Determinística:** no caminho de timeout (07.4) o ADL reconsulta a Omie pela MESMA
+  chave sem depender de ter conseguido gravar algo entre o envio e a falha.
+
+## ADR-023-BE — A mensagem de erro do provedor é PERSISTIDA e NUNCA logada (Sprint 7 / BACK 07.2)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:**
+`reconciliation_omie_postings.error_message`, `omie_posting/repository.py`
+
+**A pergunta que a task manda decidir e registrar:** `faultstring` do Omie é texto livre de
+terceiro. É PII do cliente final?
+
+**Decisão: tratar como se pudesse ser.** A mensagem é **guardada** (o operador precisa
+vê-la inline para agir — sem ela, "erro no Omie" é inacionável) e **nunca é logada**. O
+log do caminho de falha registra apenas o código e os IDs. Motivo: o CLAUDE.md §3.3 proíbe
+logar conteúdo não controlado, e a Omie pode ecoar no `faultstring` o valor que
+enviamos — inclusive o `cObs`, que carrega a **descrição da compra** (§4.5: nenhum dado
+identificável do cliente final persiste em claro fora do que o §4.1 autoriza). Persistir na
+coluna é o mesmo tratamento que a `file_entry` já dá ao dado do lançamento; **logar** é que
+espalharia o texto para Loki/Sentry, fora do alcance da cripto por cliente.
+
+**Consequência para a 07.4/07.5:** a mensagem volta ao usuário na resposta do lote (é
+requisito de R5) e **não** entra em `usage_events` — o evento carrega um código
+categórico, nunca o texto (ver a decisão da 07.5).
+
+## ADR-024-BE — Categorias: cache EM MEMÓRIA e lista completa sem paginação (Sprint 7 / BACK 07.3)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:**
+`app/integrations/omie/categorias_cache.py`, `app/modules/omie_data/`
+
+**Duas decisões, cada uma com uma alternativa recusada.**
+
+**1. Cache in-memory (`cachetools.TTLCache`), NÃO uma tabela como
+`omie_accounts_cache`.** O CLAUDE.md §4.5 nomeia **`categorias`** na lista do que
+"nunca persiste em claro — sempre buscado do Omie em tempo real e mantido apenas em cache
+com TTL". Descrição de categoria é vocabulário contábil do cliente final. Existem dois
+padrões de cache no repo e só um serve: o de contas correntes persiste (decisão anterior,
+para dado que o §4.5 trata à parte), o de lançamentos (`omie/lancamento_cache.py`) é
+TTLCache em processo, criado exatamente para o dado que não pode encostar no disco.
+Seguimos o segundo — sem dependência nova, sem camada nova. TTL 6 h + `refresh=true`
+explícito para quem acabou de criar categoria no Omie (melhor que TTL curto, que faria
+toda tela pagar a latência da Omie).
+
+**2. Lista COMPLETA, sem paginação.** A task pede "a menor solução, e justifique". O
+consumidor é um combobox com busca; paginar significaria uma ida ao servidor por tecla
+digitada — exatamente o gargalo que a suposição S-3 do PRD teme. A lista inteira já vem de
+memória. Envelope `{data, total}`. **Consequência:** o alias `pageSize` (§7 do CLAUDE.md)
+não se aplica aqui porque não há paginação — se um dia houver, o alias é obrigatório.
+
+**3. Tenant vem da SESSÃO, nunca da query.** `GET /api/v1/omie/categorias?session_id=…`
+usa `require_client_for_session`, o mesmo mecanismo do `/omie/lancamentos` já existente:
+o `SELECT` da sessão já sai com o filtro de tenant, então sessão alheia é 404 antes de
+qualquer coisa. A rota está em `app/core/sensitive_endpoints.py` (39 endpoints) e o teste
+parametrizado cross-tenant a cobre automaticamente.
+
+**4. Erro do fornecedor NUNCA vira lista vazia.** A Omie responde HTTP 200 com
+`faultstring`; tratar isso como `[]` faria o operador concluir que o cadastro de categorias
+dele está vazio, quando o que houve foi credencial inválida ou instabilidade. Cada família
+de erro vira mensagem própria, e a falha **não é cacheada** (a tentativa seguinte
+reconsulta).
+
+**5. `conta_inativa` desconhecido = categoria ATIVA.** O nome do campo é NÃO-VERIFICADO
+(veio da doc). Se ele divergir, o filtro simplesmente não remove nada. O contrário —
+default "inativa" — sumiria com o catálogo inteiro do cliente e travaria o lançamento.
+Falhar para o lado de mostrar demais é recuperável.
+
+## ADR-025-BE — O contrato OpenAPI gerado é obrigação do backend, mesmo morando em `apps/web/` (Sprint 7)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:**
+`apps/web/src/lib/contracts/schema.ts`
+
+**Conflito real de regras, resolvido e declarado.** O `CLAUDE.md` do agent backend diz
+"escreve só em `apps/api/`; não toca em frontend". O `CLAUDE.md` do PROJETO (§7) diz
+"regenerar e commitar o contrato (OpenAPI) ao mexer em rota/schema/`response_model`/
+docstring — é a fonte que o frontend consome". O artefato gerado vive em
+`apps/web/src/lib/contracts/schema.ts`.
+
+**Decisão: o backend regenera.** O arquivo não é código de frontend — é a projeção
+mecânica do OpenAPI que o backend produz, e **só o backend consegue gerá-lo** (a geração
+exige a app FastAPI para emitir `openapi.json`). Deixar para o agent de frontend
+significaria ou um arquivo escrito à mão (o pior resultado possível para um contrato) ou a
+sprint travada.
+
+**Como foi gerado, sem subir servidor:** `app.openapi()` dumpado para JSON +
+`npx openapi-typescript@7.4.1 <json> -o <arquivo>` — a mesma versão pinada em
+`apps/web/package.json`, o mesmo resultado do script `gen:types`, sem depender de uma API
+em `localhost:8000`.
+
+**Verificado:** antes de regenerar, o contrato commitado estava sincronizado com a `main`
+(47 paths, nenhum a mais nem a menos além das rotas novas desta sprint) — então o diff é
+**aditivo e mínimo**, sem ruído de outra sprint.
+
+## ADR-026-BE — Lançar usa a permissão `review_export`, sem chave nova (Sprint 7 / BACK 07.4)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:** `app/core/authz.py` (não alterado),
+`app/modules/reconciliations/routes.py`
+
+**Decisão:** o endpoint de lançamento usa `ReviewExportDep` — a permissão
+`Permission.REVIEW_EXPORT` que já governa revisar/exportar. **Nenhuma chave nova** foi
+adicionada à `PERMISSION_MATRIX`.
+
+**Por quê:** lançar é o desfecho da revisão, não uma capacidade separada. Uma chave nova
+nasceria com exatamente as mesmas 4 células preenchidas (`client_manager`,
+`client_operator`, `admin`, `manager`) — uma linha a mais na matriz para manter, sem
+distinguir ninguém de ninguém. A matriz é declarativa e ÚNICA justamente para não crescer
+com sinônimos.
+
+**Quando isso deixa de valer:** se o BPO decidir que lançar exige aprovação de um papel
+superior (algo plausível para escrita em contabilidade), aí sim nasce uma chave nova — e
+ela precisa de célula por papel, bloqueio no backend E ação oculta na tela (§4.9: mostrar
+ação que o servidor nega é defeito). Registrado aqui para que a decisão seja revisada em
+vez de herdada em silêncio.
+
+## ADR-027-BE — Kill-switch de escrita nasce DESLIGADO (Sprint 7 / BACK 07.4)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:** `app/core/config.py`
+
+**Decisão:** `OMIE_POSTING_ENABLED` tem default **`False`** — ao contrário do
+`QUALIFICATION_ENABLED`, que a task cita como padrão e cujo default é `True`.
+
+**Por que divergir do padrão citado:** a qualificação é leitura/análise; ligada por engano,
+gasta token. Esta feature **grava movimento financeiro na contabilidade do cliente**, sobre
+um contrato ainda NÃO-VERIFICADO contra a API real (S-1), e o critério de rollback da
+sprint é "um único lançamento duplicado desliga o recurso". Um default `True` faria a
+feature nascer ligada em todo ambiente que subisse o código — **inclusive antes de a
+fixture da BACK 07.1 existir**. Ligar é decisão explícita, por ambiente.
+
+**Operação:** `--update-env-vars OMIE_POSTING_ENABLED=true` no Cloud Run (que preserva as
+vars manuais), sem deploy. Desligado, a rota devolve **409** com mensagem acionável —
+4xx e não 5xx porque o recurso não falhou, está desligado (§7: erro de negócio é 4xx;
+5xx mentiria "tente de novo" e poluiria o alerting com um estado esperado). 409 e não 403
+porque não é sobre o papel do usuário.
+
+**Teto de lote:** `OMIE_POSTING_MAX_BATCH=50`, validado NO SERVIDOR. O lote vai à Omie em
+**sequência** (`X-Omie-ParallelRateLimit: 1/4` — paralelizar é punido com `1880`/`6`), e
+cada linha carrega ~30s de budget de retry no pior caso; 50 é o que mantém o request
+dentro do timeout do Cloud Run. Acima do teto: **400 VALIDATION_ERROR**, e não 422 como o
+enunciado da task sugere — o handler global do repo mapeia validação para 400 (§9 do
+PLANO), e inventar 422 só nesta rota quebraria o tratamento de erro do front, que é único.
+
+## ADR-028-BE — Commit por linha: a memória do lançamento tem de sobreviver ao lote (Sprint 7 / BACK 07.4)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:**
+`app/modules/reconciliations/omie_posting/service.py`
+
+**Defeito real, encontrado por teste de integração e não por leitura.** O padrão do repo é
+UMA transação por request (`get_db_session` commita no fim, faz rollback em qualquer
+exceção). Para toda rota anterior isso é correto — todas são reversíveis. Esta não é: no
+meio do lote existe um **efeito externo irreversível** (o lançamento no Omie, e
+`ExcluirLancCC` está fora de escopo).
+
+Com uma transação só, qualquer exceção depois de um POST bem-sucedido — outra linha do
+lote, o recálculo de contadores, um erro de rede — daria **rollback na memória de "esta
+linha foi lançada"**. O Omie ficaria com o lançamento, o ADL não saberia, e a próxima
+execução criaria **exatamente o duplicado que a sprint inteira existe para evitar**.
+
+Foi assim que apareceu: `test_line_is_posted_and_reflected_on_the_reconciliation` deu 500
+com `CryptoError: DEK do cliente ausente` ao cifrar a nota de resolução da anomalia — um
+passo cosmético, depois do dinheiro já ter entrado.
+
+**Decisão — duas barreiras de durabilidade por linha:**
+1. **Antes do POST**, commit da intenção + `attempts`. "Eu tentei" vira fato antes de haver
+   efeito externo; é isso que dispara a reconciliação na execução seguinte.
+2. **Depois da confirmação** (e depois de cada desfecho terminal: `failed` por
+   `faultstring`, vínculo em conflito), commit. Cada linha é durável por si.
+
+O lote deixa de ser atômico — **de propósito**: os efeitos externos também não são.
+
+**Decisão complementar — resolver a anomalia é fail-soft.** Cifrar a nota exige a DEK do
+cliente (o `decrypt` ainda lê o legado bare, o `encrypt` não tem esse caminho). Cliente sem
+DEK provisionada derrubaria a request DEPOIS do lançamento. A anomalia passa a ser
+resolvida **sem a nota**, com `omie_posting_resolution_note_encrypt_failed` no log: perder
+a nota é incomparavelmente mais barato que um duplicado, e continuar afirmando "não existe
+no Omie" passou a ser falso.
+
+## ADR-029-BE — Reconciliação pós-timeout tem TRÊS estados, e o terceiro nunca reenvia (Sprint 7 / BACK 07.4)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:**
+`omie_posting/service.py`, `LancamentoExtrato.c_cod_int_lanc`
+
+**O problema.** O `OmieClient` retenta 5xx/timeout com backoff. Se a Omie aceitou o POST
+que expirou, retentar duplica. O PRD manda "reconciliar via `ListarExtrato` pelo
+`cCodIntLanc` e só reenviar se confirmar que não entrou".
+
+**O obstáculo que o PRD não viu:** o `LancamentoExtrato` do repo **não declarava**
+`cCodIntLanc`, e que o `ListarExtrato` devolva esse campo é parte de S-1 — não verificado.
+Implementar "procura pela chave e, se não achar, reenvia" seria transformar uma suposição
+não testada em autorização para gravar dinheiro duas vezes.
+
+**Decisão.** O campo foi declarado como **opcional, default `None`, marcado
+NÃO-VERIFICADO**, e a reconciliação devolve **três** estados:
+- **found** → confirma pelo `nCodLanc` do extrato, sem novo POST (a linha volta como
+  `lancada` com motivo `reconciliada`);
+- **absent** → alguma linha do extrato trouxe `cCodIntLanc`, logo o campo existe, logo a
+  ausência é informação: pode reenviar;
+- **inconclusive** → **nenhuma** linha trouxe o campo. "Não achei" e "não sei olhar" são
+  indistinguíveis → **não reenvia**, bloqueia com
+  `envio_anterior_sem_confirmacao` e manda o operador conferir no Omie.
+
+**Consequência.** Se a Omie não devolver `cCodIntLanc` no extrato, o recurso fica mais
+conservador (uma linha travada exige conferência manual) — e **nunca** duplica. A alternativa
+(casar por data+valor) quebraria exatamente no caso das duas compras idênticas, que é o
+caso que a ADR-022-BE existe para proteger.
+
+## ADR-030-BE — Falha de dependência no lote: per-linha, mas 5xx quando ninguém entrou (Sprint 7 / BACK 07.4)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:** `omie_posting/service.py`
+
+**Tensão real entre duas regras.** O R5 pede resumo **por linha** (200 com o detalhe de
+cada uma). A regra de engenharia diz "falha de dependência/fila/integração = 5xx, nunca
+4xx/200 — 4xx é invisível ao alerting e mente ao usuário".
+
+**Decisão.** Timeout/5xx/auth da Omie: (a) a linha volta como `erro` /
+`omie_indisponivel`; (b) o lote **para** de bater na Omie (as restantes voltam com o mesmo
+motivo — continuar só acionaria o rate limit e prolongaria a punição do `6 - Consumo
+redundante`); (c) se **nenhuma** linha foi lançada, a exceção de dependência é
+**relançada** e a resposta vira 5xx. Se pelo menos uma entrou, é 200 com o resumo — porque
+aí houve resultado de negócio de verdade, e engolir isso num 5xx faria o operador achar que
+nada foi lançado quando algo foi (e ele tentaria de novo).
+
+`faultstring` **não** entra nessa regra: é erro de NEGÓCIO do provedor (categoria
+inexistente, conta errada), falha definitiva daquela linha, e a mensagem verbatim volta ao
+usuário na resposta — nunca no log (ADR-023-BE).
+
+## ADR-031-BE — `faultstring` vira FAMÍLIA no sink; o texto integral fica fora (Sprint 7 / BACK 07.5)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:**
+`app/modules/usage_events/schemas.py`, `app/modules/usage_events/omie_rejection.py`
+
+**O conflito, declarado.** O PRD instrumenta `omie_lancamento_rejeitado {codigo,
+faultstring}`. Mas a whitelist de `props` deste módulo proíbe texto livre (`extra="forbid"`;
+todo campo é `int`, `Literal` ou UUID) — e essa proibição é **a única coisa** que impede PII
+de entrar na tabela de métrica. O `faultstring` é texto do fornecedor, e a Omie **ecoa
+valores que enviamos**, inclusive o `cObs`, que carrega a descrição da compra (§4.5).
+
+**Decisão: nem enfraquecer a whitelist, nem descartar a informação.**
+- O texto integral **não entra no sink**. Ele já volta ao usuário na resposta do lote (é o
+  que o torna acionável) e fica persistido em
+  `reconciliation_omie_postings.error_message` (ADR-023-BE), que é onde é útil e está sob a
+  cripto por cliente.
+- No evento entra `categoria`: um `Literal` FECHADO
+  (`categoria_invalida | conta_invalida | duplicidade | campo_invalido | credencial |
+  indisponibilidade | outro`), derivado por `classify_omie_rejection` — função pura, com
+  teste que injeta razão social e CNPJ na mensagem e prova que **nada** disso sobrevive na
+  saída.
+- `codigo` também é `Literal` (`OMIE_FAULT | OMIE_AUTH_ERROR | OMIE_TIMEOUT`), não `str`.
+
+**Por que a família e não só o código.** O código diz "a Omie recusou"; a família responde
+a pergunta que a leitura D+30 precisa fazer: se 80% das recusas forem `categoria_invalida`,
+o gargalo é o passo de classificação (a suposição S-3), não o lançamento. `outro` crescendo
+é sinal de que falta uma família — **não** um convite a gravar o texto.
+
+**Dedup: nenhum dos dois entra em `DEDUPED_EVENT_NAMES`** (ADR-010 — evento novo nasce sem
+dedup). O mesmo operador manda vários lotes na mesma sessão e **cada lote é um fato**;
+deduplicar por `(event, session_id)` apagaria o 2º lote em silêncio e a métrica ficaria
+menor que a realidade. Entrar na lista exigiria migration + a string batendo byte-a-byte em
+3 lugares — e não há motivo para isso.
+
+**Ambos ficam FORA de `CLIENT_EMITTED_EVENTS`** (que é allow-list, então já nascem
+recusados pelo `POST /api/v1/usage-events`): `omie_lancamento_enviado` carrega numerador
+(`sucesso`) **e** denominador (`linhas`) da métrica da sprint — aceitá-lo do browser
+tornaria o resultado inverificável. Há teste negativo para os dois.
+
+<!-- ===== agent-frontend ===== -->
+
+## ADR-018-FE — Elegibilidade do lançamento é UM espelho declarado do servidor (Sprint 7 / FRONT 07.6)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:**
+`apps/web/src/components/features/reconciliations/review/omie-posting-eligibility.ts`
+
+**Contexto.** Duas telas (Movimentações e Anomalias) precisam decidir se uma linha pode
+ser lançada. A regra existe no backend (`_eligibility_block` +
+`OmiePostingNotEligibleError`), e a tentação era escrever `if (situation === 'sem_omie')`
+em cada aba — que é como a UI passa a oferecer uma ação que o servidor nega.
+
+**Decisão.** Uma função (`getPostingBlock`), consultada pelas duas abas, com:
+
+1. **A mesma ORDEM de precedência do servidor** (ignorada → já lançada → não é
+   `sem_omie`). A ordem não é detalhe: quando duas condições valem, é ela que decide qual
+   motivo o operador lê, e um motivo diferente do que voltaria no resumo do lote faz a
+   tela contradizer o backend. Travado por teste.
+2. **Motivos vindos do CONTRATO** (`Extract<OmiePostingLineReason, ...>`): renomear um
+   motivo no backend para de compilar aqui em vez de virar copy divergente.
+3. **Mensagens VERBATIM do backend.** Duas frases diferentes para o mesmo motivo fariam o
+   operador achar que são coisas distintas.
+
+O único motivo local é `sessao_nao_e_cartao` — no servidor ele não é motivo de LINHA, é
+erro do lote inteiro (400); na tela é o que apaga a coluna em conta corrente.
+
+**Consequência.** A UI continua não sendo barreira (o backend recusa de qualquer forma),
+mas o par "ação oferecida" × "ação aceita" passa a ter uma fonte só.
+
+## ADR-019-FE — "Lançada no Omie" é FATO OBSERVADO no lote, nunca inferido da listagem (Sprint 7 / FRONT 07.6)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:** `review/situation-badge.tsx`,
+`review/movements-tab.tsx`
+
+**Contexto.** A task pede badge de "lançada" na linha. O contrato da linha
+(`ListedFileEntry`) **não tem** campo de "lançada pelo ADL": depois do envio o backend faz
+`situation='conciliado'` + `omie_lancamento_id`, que é exatamente o estado de uma linha
+que o MATCHER conciliou. Não há endpoint de leitura das intenções
+(`reconciliation_omie_postings` só é escrito pelo POST do lote).
+
+**Decisão.** O badge é alimentado pelo **resumo do lote** (`status='lancada'`, ou
+`bloqueada/ja_lancada` com id) e vale enquanto a tela está aberta. Recarregou, a linha
+volta a ser uma `conciliado` como outra qualquer.
+
+**A alternativa recusada.** Inferir "lançada" de `conciliado + omie_lancamento_id`, ou do
+par "anomalia `missing_in_omie` resolvida + id preenchido". Os dois marcam de "lançada"
+linhas que o ADL nunca escreveu (o segundo basta o operador trocar o lançamento e resolver
+a anomalia à mão). Num recurso cujo critério de rollback é "um único duplicado desliga",
+dizer "o ADL escreveu no ERP" quando não escreveu é pior do que não dizer nada.
+
+**O que fica persistente e verdadeiro:** a ação indisponível com o motivo "já está
+vinculada a um lançamento do Omie" — que é o que o `omie_lancamento_id` de fato prova.
+
+**Dívida declarada (para a próxima sprint):** um campo no `ListedFileEntry` (ex.:
+`omie_posting_status`) fecharia o buraco. Está no HANDOFF para o backend.
+
+## ADR-020-FE — Botão de ação bloqueada usa `aria-disabled`; `disabled` real fica para o envio (Sprint 7 / FRONT 07.6)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:** `review/lancar-no-omie-controls.tsx`
+
+**Contexto.** O critério é "ação indisponível **com motivo acessível**
+(`title`/`aria-describedby`)". Botão com `disabled` real **sai da ordem de foco**: quem
+navega por teclado/leitor de tela nunca alcança o elemento e portanto nunca lê o
+`aria-describedby` — o motivo vira decoração para quem enxerga o layout.
+
+**Decisão.** Dois mecanismos, um por natureza de bloqueio:
+
+- **Elegibilidade** (estado persistente da linha): `aria-disabled="true"` +
+  `aria-describedby` apontando para o motivo, `onClick` inerte por guarda explícita
+  (`aria-disabled` não impede o clique) e opacidade/cursor sinalizando visualmente.
+- **Envio em andamento** (transitório): `disabled` de verdade. É ele que garante
+  "duplo-clique não dispara duas requisições" — e o foco volta ao fim do envio, então
+  ninguém fica preso fora da ordem de tabulação.
+
+**Travado por teste:** o bloqueado continua `toBeEnabled()` (isto é, focável) e não chama
+o handler; o `pending` está `toBeDisabled()` e dois cliques resultam em zero chamadas.
+
+## ADR-021-FE — Não existe `AsyncButton` neste repo: o padrão é inline, e não se cria um segundo (Sprint 7 / FRONT 07.6)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:** `apps/web/src/components/**`
+
+**Contexto.** A task manda "reusar o componente async já existente no projeto em vez de
+criar outro". **Ele não existe** (grep vazio por `AsyncButton`): o que existe desde a S14 é
+o PADRÃO `<Button disabled={isPending}>` + `<Loader2 className="animate-spin">`
+(`detail/export-report-button.tsx`, `create-reconciliation-drawer`, ~10 call sites).
+
+**Decisão.** Seguir o padrão existente. Extrair um `AsyncButton` agora criaria a segunda
+convenção que a instrução quer evitar, e o refactor dos ~10 call sites não foi pedido.
+Mesmo raciocínio da ADR-013-FE (`apiTyped` que não existe).
+
+**Dívida declarada:** se um dia o padrão virar componente, o lugar é `ui/`, e a migração é
+transversal — não numa feature só.
+
+## ADR-022-FE — A aba de Anomalias lê a lista real de `sem_omie`; não deduz estado do código da anomalia (Sprint 7 / FRONT 07.6)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:** `review/anomalies-tab.tsx`,
+`hooks/use-reconciliations.ts` (`useAllSemOmieEntries`)
+
+**Contexto.** A ação também vive na aba de Anomalias, mas `AnomalyItem.related_file_entry`
+traz só `{id, data, descrição, valor}` — **sem** `situation` e **sem**
+`omie_lancamento_id`. O atalho seria "anomalia `missing_in_omie` não resolvida ⇒ linha
+lançável". É falso: a anomalia continua aberta depois de o operador **ignorar** a linha, e
+a tela ofereceria lançar o que o backend recusa.
+
+**Decisão.** Buscar as linhas `sem_omie` da sessão pelo endpoint que já existe
+(`file-entries?situation=sem_omie`, paginando internamente como
+`useAllSessionAnomalies` faz) e cruzar por id. Só sessão de CARTÃO paga esses requests
+(`enabled: isCard`), e a key vive sob o prefixo `['review', id, 'file-entries']`, então
+qualquer PATCH ou lançamento já a invalida.
+
+**Armadilha fechada no caminho:** duas anomalias podem apontar para a MESMA linha (valor
+divergente + sem correspondente). O backend recusa o lote inteiro com 422 quando um
+`file_entry_id` se repete, então a deduplicação acontece na montagem do lote, na tela.
+
+## ADR-023-FE — Combobox próprio: o campo de busca mora DENTRO do popover (Sprint 7 / FRONT 07.7)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:** `apps/web/src/components/ui/combobox.tsx`,
+`apps/web/src/components/ui/popover.tsx`
+
+**Contexto.** O `<Select>` do Radix não filtra, e a classificação é sobre ~300 categorias do
+Omie — a task pede busca por digitação, altura máxima com scroll e o padrão **APG de
+combobox**. Não há `cmdk` no projeto e o `npx shadcn add` não alcança `ui.shadcn.com`
+daqui; o `@radix-ui/react-popover` já estava nas dependências (e sem uso).
+
+**Decisão.** Componente próprio em `ui/`, com o arranjo do shadcn: **gatilho é um botão**
+(`aria-haspopup="listbox"` + `aria-expanded`) e o **campo de busca (`role="combobox"`) fica
+DENTRO do popover**, junto da lista.
+
+**Por que não o input fora do popover** (que seria o APG "ao pé da letra"): o popover é
+`modal` — obrigatório, senão o `react-remove-scroll` da gaveta pai engole o `wheel` e a
+lista não rola (learning do design-system) — e `modal` prende o foco no conteúdo. Com o
+input fora, o `FocusScope` do Radix puxaria o foco de volta a cada tecla. Dentro, o padrão
+APG vale inteiro: foco no campo, seleção por `aria-activedescendant`, opções não focáveis,
+`Enter`/setas/`Home`/`End`.
+
+**Dois achados MEDIDOS (não supostos), que valem para qualquer popover futuro:**
+
+1. **O conteúdo do Popover do Radix é `role="dialog"`** — sem `aria-label` reprova
+   `aria-dialog-name` (SERIOUS). O axe acusou na primeira execução da suíte da gaveta; a
+   correção mora no combobox, que passa o próprio rótulo.
+2. **A lista rolável NÃO precisa de `tabIndex`** aqui: o `scrollable-region-focusable`
+   ignora popup de combobox por construção (`_isComboboxPopup` no matcher do axe-core
+   4.12, lido no `node_modules`). É a exceção da regra, e existe justamente porque o
+   teclado chega pelo `aria-activedescendant`.
+
+**Consequência.** `Popover` nasce com `modal` como DEFAULT (não como opção que cada tela
+lembra de ligar) — a decisão fica no componente, como manda o mesmo princípio do
+`ScrollRegion`.
+
+## ADR-024-FE — A gaveta não fecha no lote parcial: ela vira o resumo (Sprint 7 / FRONT 07.7)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:** `review/lancar-no-omie-drawer.tsx`
+
+**Contexto.** O POST devolve **200 mesmo com falha parcial** — o desfecho por linha vem em
+`lines[]`. Fechar a gaveta no sucesso, como fazem as gavetas de cadastro do projeto,
+levaria embora exatamente o que o operador precisa ler.
+
+**Decisão.** Uma gaveta, duas fases: antes do envio ela classifica; depois vira o **resumo
+por linha** (status + motivo, com a mensagem VERBATIM do provedor em `erro_omie`) e o botão
+primário passa a "Tentar novamente N de N". A gaveta só fecha quando **nada** ficou
+pendente — e aí o botão da esquerda é "Concluir", nunca "Fechar" (o `X` do canto já se
+chama Fechar; dois controles com o mesmo nome acessível na mesma gaveta são ambíguos).
+
+**Reexecução sem duplicar:** a linha com `status='lancada'` sai do corpo do request
+seguinte. A dedup do backend já a bloquearia, mas devolveria "bloqueada: já lançada" para
+uma linha que o operador não pediu de novo — resumo poluído por construção nossa.
+
+**Toast por desfecho, não por HTTP:** tudo lançado → `success`; nada lançado → `error`;
+parcial → `warning`. Um `toast.success` num parcial diria "deu tudo certo" com dinheiro
+faltando no ERP. Os três pares são os do `<Toaster>` global (tokens do tema, ADR-017-FE).
+
+## ADR-025-FE — Sem sugestão automática de categoria: a UI não simula o que não existe (Sprint 7 / FRONT 07.7)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:** `review/lancar-no-omie-drawer.tsx`
+
+**Contexto.** O PRD prevê reusar a qualificação (S19) ou o glossário (S6) para sugerir a
+categoria, e a task pede "se houver sugestão automática, indicar a origem e mantê-la
+editável; **se não houver, não simular sugestão**".
+
+**Decisão.** Não há sugestão. Conferido no contrato gerado: nenhum endpoint da sprint
+devolve categoria por linha — `ListedFileEntry` não tem campo de categoria sugerida, e
+`AnomalyItem` (qualificação) carrega texto de contexto, não `cCodCateg`. A gaveta então
+oferece **classificação em lote em 1 clique** como o acelerador real (é o que ataca o risco
+S-3, "tempo por fatura"), e nenhuma linha nasce pré-preenchida.
+
+**O que NÃO foi feito e por quê:** derivar a categoria do texto da qualificação seria
+inventar um palpite e apresentá-lo com a autoridade de uma sugestão do sistema, num campo
+que decide onde o dinheiro entra na contabilidade do cliente. Quando o backend expuser
+sugestão de verdade, o lugar dela é o mesmo combobox, com a origem indicada.
+
+<!-- ===== agent-review (QA) ===== -->
+
+## ADR-014-QA — A prova de "zero duplicado" é a contagem de POSTs, não o número de linhas no banco (Sprint 7 / QA 07.8)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:**
+`apps/api/tests/integration/test_omie_posting_qa_gate.py`
+
+**O que a revisão encontrou.** A suíte do executor prova a dedup pelo **estado do ADL**
+(`_posting_count(...) == 1`) e pelo desfecho da linha (`bloqueada/ja_lancada`). Os dois são
+verdadeiros e nenhum dos dois vê o fio. `UNIQUE(file_entry_id)` garante **uma linha na
+tabela** aconteça o que acontecer com a Omie — então um refactor que passasse a reenviar e
+apenas mantivesse a linha intacta deixaria a suíte inteira verde e criaria o **duplicado no
+ERP do cliente**, que é o único evento que desliga o recurso (critério de rollback do PRD).
+
+**Decisão.** O gate do QA conta as chamadas a `incluir_lanc_cc` com um `monkeypatch` que
+acumula os `cCodIntLanc` enviados, e assere sobre a LISTA: 3 envios da mesma linha → 1 POST;
+reexecução de lote parcial → só a linha pendente vai ao fio; duas compras idênticas → 2
+POSTs com 2 chaves distintas. A asserção que importa é `len(sent)`, não `count(*)`.
+
+**Mutação que sustenta a afirmação.** Desligar `_decide_from_own_state` deixa
+`test_timeout_then_reexecution_reconciles_instead_of_duplicating` e
+`test_inconclusive_reconciliation_never_resends` **vermelhos** — o reenvio simples continua
+verde porque `_eligibility_block` (a linha já virou `conciliado` com `omie_lancamento_id`) é
+uma **segunda** barreira independente. Isso é defense-in-depth de verdade, não redundância:
+as duas precisam cair para haver duplicado.
+
+**Limite declarado.** Concorrência real (duas requisições simultâneas) **não** é testável
+com a fixture `client_with_db`: ela compartilha UMA `AsyncSession` entre as requisições e um
+`asyncio.gather` sobre ela quebra a conexão antes de exercitar o servidor (`InvalidRequestError:
+this session is in 'prepared' state`). A garantia contra o duplo-clique **simultâneo** é o
+`INSERT ... ON CONFLICT DO NOTHING` sobre `uq_recon_omie_postings_file_entry`, provado contra
+Postgres real em `test_omie_postings.py::TestDatabaseEnforcesUniqueness`. Quem for reabrir
+este ponto: o caminho é um teste com duas sessions/engines, não um `gather`.
+
+## ADR-015-QA — Suíte "16 vermelhos" que some no 2º run é banco de teste sujo, não regressão (Sprint 7 / QA 07.8)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:** operação do gate de integração local
+
+**O quase-erro.** A 1ª execução da suíte de integração desta sprint deu **16 failed / 574
+passed**, e os 16 eram todos de arquivos PRÉ-EXISTENTES (`test_clients`, `test_notifications`,
+`test_qualification_*`). A leitura imediata — "as tasks novas poluem estado compartilhado e
+deixam o CI vermelho" — era plausível, e teria reprovado a sprint inteira por um defeito que
+não existe.
+
+**O que provou o contrário.** Um controle equivalente ao `develop` (ignorando os 4 arquivos
+NOVOS + `--deselect` da classe nova em `test_migrations.py`) deu **538 passed**; e a
+**re-execução da suíte completa, sem mudar uma linha de código**, deu **590 passed**. O
+banco `adl_pytest` é reusado entre execuções (`TEST_DATABASE_URL`), e a 1ª rodada do dia
+carregava resíduo de sprints anteriores; ela mesma limpou o estado.
+
+**Regra para o próximo QA.** Falha de integração local **só vira achado depois de
+reproduzir**: rode 2x, e o controle contra a base é `--ignore`/`--deselect` do que a sprint
+ADICIONOU (conferir com `git diff --name-status`: arquivo *modificado* ignorado por inteiro
+falsifica o controle — foi o que quase aconteceu com `test_migrations.py`, que já existia).
+No CI o Postgres é um service container novo a cada run, então este modo de falha é local.
+
+## ADR-016-QA — Contrato regenerado se prova gerando, não comparando arquivos entre worktrees (Sprint 7 / QA 07.8)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:** gate "contrato/tipos regenerados,
+`git diff` = 0"
+
+**Contexto.** `pnpm gen:types` aponta para `http://localhost:8000/openapi.json` e exige a API
+no ar — o que não acontece dentro do sandbox do QA. A tentação é comparar o `schema.ts`
+commitado pelo frontend com a cópia que sobrou no worktree do backend e chamar isso de prova;
+não é: os dois podem estar igualmente desatualizados.
+
+**Como o gate foi fechado de fato.** `app.openapi()` dumpado direto do app do backend
+(sem servidor) → `pnpm exec openapi-typescript` no worktree do frontend → `diff` contra o
+`schema.ts` commitado: **vazio**. É o mesmo pipeline do script, sem a dependência de rede.
+
+**Consequência.** Este é o caminho a usar sempre que o gate de contrato precisar rodar num
+ambiente sem a API no ar.
+
+## ADR-026-FE — Rodapé de gaveta com três elementos quebra em vez de clipar; e o teste que mede isso espera a animação (Sprint 7 / FRONT 07.7, retrabalho)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:** `review/lancar-no-omie-drawer.tsx`,
+`e2e/a11y-mocked.spec.ts`
+
+**Contexto.** O QA reprovou a 07.7 por um defeito **visual** que nenhum gate viu: em 390px o
+botão primário da gaveta — o que grava na contabilidade do cliente — saía cortado na borda
+direita. Causa: `SheetFooter` é `flex … justify-between` **sem `flex-wrap`**, e esta foi a
+primeira gaveta a pôr TRÊS elementos lá (Cancelar + texto auxiliar "N compras ficam de
+fora" + ação primária). Botão é `whitespace-nowrap`, então seu `min-content` é o texto
+inteiro: ele não cede largura, e quem cedia era a viewport. O estado só existe quando há
+compra sem categoria — ou seja, na abertura da gaveta.
+
+**Decisão.**
+
+1. `flex-wrap` **local**, na chamada do `SheetFooter` desta gaveta, e não no componente
+   compartilhado: o `SheetFooter` rege as gavetas de conciliação e do glossário, que têm
+   dois botões e não têm o problema — mudar o componente para consertar uma tela é trocar
+   um defeito medido por um risco não medido em telas que ninguém pediu para tocar.
+2. O grupo da direita ganha `min-w-0 flex-wrap justify-end`: o texto auxiliar sobe para a
+   linha de cima e o botão desce inteiro, alinhado à direita. `shrink-0` no Cancelar para
+   ele não ser espremido no lugar do botão.
+3. O caso fica travado por **medição de caixa contra a viewport** no cenário mobile do
+   `a11y-mocked.spec.ts`, antes do envio (`x + width ≤ viewport.width`, para as duas ações).
+
+**Por que os gates não pegavam (e continuam não pegando sozinhos):** `axe-core` não mede
+transbordo de layout — o `web_a11y` passou 154/154 com o botão cortado — e o teste de
+componente roda em jsdom, que não tem layout. Só a caixa medida no browser reprova isso.
+
+**A armadilha da medição.** A 1ª versão da assertiva reprovou os **quatro** cenários,
+inclusive em 1440px (`1597 > 1440`): `toBeVisible()` resolve quando o nó entra na árvore,
+mas a gaveta do Radix entra **deslizando**, e `boundingBox()` no meio do trajeto devolve
+coordenada fora da tela que não é defeito nenhum. Daí o helper `aguardarAnimacao()`
+(`getAnimations()` do próprio elemento — **sem** `subtree`, senão um spinner de
+carregamento, que é animação infinita, faria o `finished` nunca resolver). Qualquer medida
+geométrica dentro de gaveta/diálogo neste spec precisa passar por ele.
+
+**Prova de que o teste morde (reproduzida pelo QA na re-revisão 1):** revertendo só os
+`className` do rodapé e reconstruindo, o gate fecha **152 passed / 2 failed**, as duas
+falhas com a mensagem `ação primária da gaveta cortada pela borda da viewport`; com o fix,
+**154 passed, 0 critical/serious**.
+
+## ADR-017-QA — Artefato gerado pelo gate é reprovação, mesmo com o defeito de origem corrigido (Sprint 7 / re-revisão 1)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:** revisão de qualquer branch;
+`apps/web/a11y-report.json`
+
+**Contexto.** O commit de retrabalho da FRONT 07.7 (`4daefb4`) corrigiu o transbordo **e**
+trouxe junto `apps/web/a11y-report.json` — 189 KB / 5441 linhas, a saída do reporter JSON do
+próprio `scripts/a11y-gate.sh`, com 6 ocorrências do caminho absoluto do worktree do agent.
+O arquivo não existe em `origin/develop` nem em `origin/main`; entrou nesta task. O CI produz
+o mesmo arquivo e o **sobe como artifact** (`ci.yml:300-304`), nunca como fonte.
+
+**Decisão.** Reprovar, e não aprovar-com-follow-up. O critério é a **irreversibilidade**:
+aprovar significa pushar a branch, e o que entra no histórico da `develop`/`main` não sai
+com `git rm` depois. Um `git rm --cached` + uma linha no `.gitignore` custam um commit ao
+dono da task; limpar histórico custa reescrita de branch compartilhada.
+
+**Causa-raiz que a correção tem de fechar.** O `.gitignore` cobre `playwright-report/` e
+`test-results/` (linhas 93-94) mas **não** o `apps/web/a11y-report.json` que o gate escreve
+na raiz do app — sem a regra, o arquivo volta no próximo `git add -A` de qualquer um.
+
+**Verificação mecânica (o comando que decide o veredito):**
+`git diff --name-only develop..HEAD` — qualquer `.json` de relatório na lista reprova.
+Regra encodada no primer, §7 · Frontend.
+
+## ADR-027-FE — O relatório do gate de a11y é artefato, não fonte (Sprint 7 / FRONT 07.7, retrabalho #2)
+
+**Data:** 2026-08-18 · **Status:** ativo (com ressalva do QA, abaixo) · **Escopo:**
+`.gitignore`, `apps/web/a11y-report.json`
+
+**Contexto.** A 2ª reprovação da 07.7 não foi de UI: `apps/web/a11y-report.json` (189 KB,
+5441 linhas) entrou no commit `4daefb4`. É a saída do reporter JSON do próprio gate
+(`scripts/a11y-gate.sh` → `PLAYWRIGHT_JSON_OUTPUT_NAME="a11y-report.json"`), o mesmo arquivo
+que o `ci.yml` publica **como artifact**. Não existe em `origin/develop` nem em `origin/main`
+— nasceu nesta task, junto com a corrida do gate que provou a ADR-026-FE.
+
+**Por que é defeito e não sujeira inofensiva:** (a) carrega 6 ocorrências do caminho absoluto
+do worktree do agent — dado de máquina local vazando para o histórico; (b) é reescrito a cada
+execução do gate, então todo dev que rodar `scripts/a11y-gate.sh` fica com a árvore suja e
+conflito garantido nesse arquivo; (c) uma vez pushado, remover depois não tira do histórico.
+
+**Decisão.** Duas partes: (1) tirar do índice e do disco (`git rm --cached` + `rm`) — como
+entra e sai na MESMA branch, o par add+delete se anula e `git diff --name-only develop..HEAD`
+volta a listar só código-fonte; (2) fechar a classe no `.gitignore`, junto de
+`playwright-report/`, `test-results/` e `blob-report/`, porque o gate escreve na RAIZ do app,
+fora dos diretórios já ignorados.
+
+**Regra que fica:** artefato produzido por gate/CI nunca é fonte. Rodou gate, confira
+`git status --short` antes de entregar — o de a11y, em particular, escreve DENTRO de
+`apps/web/`, onde o olho espera só código.
+
+**Ressalva do QA na consolidação (re-revisão 2).** A parte (1) está entregue e provada
+(`7f89f3e`, 5441 deleções). A parte (2) **não entra no commit**: o `.gitignore` da raiz está
+fora do `gitPaths` de todos os papéis, então a linha vive apenas no worktree descartável.
+Ver **ADR-018-QA** e a task **`86e2w8xpv`**.
+
+## ADR-018-QA — Prevenção fora do `gitPaths` não é prevenção: aprovar o commit, rastrear a classe (Sprint 7 / re-revisão 2)
+
+**Data:** 2026-08-18 · **Status:** ativo · **Escopo:** vereditos do QA; `.gitignore` da raiz
+e demais arquivos de raiz do monorepo
+
+**Contexto.** A reprovação da re-revisão 1 (ADR-017-QA) pediu duas coisas ao dono da
+FRONT 07.7: remover o artefato do commit **e** acrescentar a linha no `.gitignore`. O
+retrabalho `7f89f3e` fez as duas. Só que `git diff develop..HEAD -- .gitignore` é **vazio**:
+a linha aparece apenas como modificação não-commitada. O `commitOnBranch` do orquestrador só
+faz `git add` nos `gitPaths` do papel (`orchestrate.js:648-712`), e o mapa
+(`.agents-hub/config.env:81-84`) é `apps/api/` · `apps/web/` ·
+`apps/api/tests/ apps/web/e2e/ apps/web/src/` · `docker/ .github/ scripts/ .env.example`.
+O `.gitignore` da raiz não pertence a papel nenhum.
+
+**Decisão.** (a) **Aprovar** a FRONT 07.7: o defeito que bloqueava o push — artefato no
+histórico — está resolvido e verificado. Manter FAILED seria exigir do dono da task algo que
+o pipeline não deixa entregar: rework infinito. (b) Não declarar a classe fechada: a
+prevenção virou a task de infra **`86e2w8xpv`**, com as duas saídas commitáveis
+(`scripts/a11y-gate.sh` escrevendo em `test-results/`, que já é ignorado, **ou**
+`apps/web/.gitignore`, que está no `gitPaths` do frontend). (c) O veredito diz em voz alta
+que a classe segue aberta, em vez de deixar o leitor supor que o `.gitignore` protege.
+
+**Regra que fica (encodada em `.claude/agents/qa.md`).** Antes de escrever "edite o arquivo
+X" numa reprovação — ou "Encodado em: X" numa lição —, confira que X cai no `gitPaths` do
+papel dono: `grep AGENT_PATHS .agents-hub/config.env`. Zona de risco: a raiz do monorepo
+(`.gitignore`, `package.json`, `pnpm-lock.yaml`). Prova depois do rework:
+`git diff <base>..HEAD -- <arquivo>` **não** pode ser vazio.
+
+**Nota de método.** O arquivo `.claude/agents/qa.md` do REPOSITÓRIO é a fonte do prompt do
+papel — o orquestrador o copia para o `CLAUDE.md` do worktree a cada run
+(`orchestrate.js:2325`) e nunca copia de volta. Encodar regra no `CLAUDE.md` do worktree é
+cometer o mesmo erro que esta ADR descreve.

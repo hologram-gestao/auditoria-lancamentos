@@ -15,6 +15,14 @@
 > | **3**  | **Cripto por cliente** (DEK+KEK), `access_audit`, alerting fail-closed                                       |
 > | **4**  | Lista de conciliações, **gaveta** de criação, **multi-arquivo**, notificações in-app, `usage_events`         |
 > | **5**  | **Multi-tenancy**: `users.scope`/`client_id`, papéis de cliente, matriz de permissões, isolamento por tenant |
+> | **6**  | **Glossário por cliente** (tabela cifrada por tenant, `glossary_version`), veredito do revisor |
+> | **7**  | **Escrita no Omie**: lançamento das compras `sem_omie` da fatura de cartão (`IncluirLancCC`) |
+>
+> ⚠️ **O invariante "Omie read-only" acabou na Sprint 7.** O ADL agora **grava movimento
+> financeiro na contabilidade do cliente**. Antes de encostar nesse fluxo, leia **§3.16**:
+> ele nasce **desligado** (`OMIE_POSTING_ENABLED=false`), o contrato do `IncluirLancCC`
+> segue **NÃO-VERIFICADO** contra a API real, e o critério de rollback é **um único
+> lançamento duplicado em produção**.
 >
 > **Roadmap (PRD 15/06/2026 → FASE 0–5):** plano em [Docs/PLANO_PROXIMOS_PASSOS.md](Docs/PLANO_PROXIMOS_PASSOS.md). **FASE 0 ✅** (Redis/ARQ removido, `BackgroundTasks`). **FASE 1 ✅ na `main`** — tolerância de data fixa (`DATE_DIVERGENCE_RANGE = 3` em `processing/matcher.py`) e cartão. **FASE 2** lançamento de fatura no Omie (Sprint 7). **FASE 3** glossário por cliente (**Sprint 6 — a próxima**). **FASE 4** Open Finance (Pluggy). **FASE 5** rotinas automáticas de auditoria.
 
@@ -159,8 +167,38 @@
       **1** linha em `access_audit`.
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (34 hoje) **com teste negativo cross-tenant**. Essa lista é o denominador
+      (**40** hoje) **com teste negativo cross-tenant**. Essa lista é o denominador
       da métrica de isolamento — endpoint fora dela é buraco que ninguém mede.
+16. **Escrita no Omie (Sprint 7) — a única no sistema, e a mais cara de errar:**
+    - **Nasce desligada.** `OMIE_POSTING_ENABLED` tem default **`False`**
+      (diferente de `QUALIFICATION_ENABLED`): ligar é decisão explícita **por
+      ambiente**, via `--update-env-vars` no Cloud Run, sem deploy. Não ligue em
+      nenhum ambiente antes de a fixture real existir (abaixo).
+    - **O contrato do `IncluirLancCC` é NÃO-VERIFICADO** (suposição S-1 do PRD):
+      nomes de campo, a convenção de sinal (`nValorLanc` **absoluto** +
+      `cNatureza` `'D'` compra / `'C'` estorno) e a unicidade de `cCodIntLanc`
+      vieram da doc, **não** de uma resposta real. O gate anti-invenção é
+      `apps/api/tests/unit/test_omie_fixtures.py`: sem a fixture ele **SKIPA
+      citando S-1** — nunca passa verde calado. A captura é opt-in
+      (`OMIE_CAPTURE_ALLOW_WRITE=1`) e **cria lançamento real** (a Omie não tem
+      sandbox, §10) — o lançamento precisa ser excluído à mão depois.
+    - **A dedup primária é do ADL, nunca do fornecedor.** Antes de qualquer POST
+      o serviço registra a INTENÇÃO em `reconciliation_omie_postings` e consulta
+      o **próprio** estado. `cCodIntLanc` é derivado da **identidade da linha**
+      (`file_entry_id`), **nunca do conteúdo**: duas compras idênticas na mesma
+      fatura têm de virar **dois** lançamentos — chave de conteúdo colapsaria as
+      duas e deixaria dinheiro FALTANDO, que o rollback (só vigia duplicado) não
+      pegaria.
+    - **Timeout nunca reenvia às cegas.** Se o POST expira, o ADL reconcilia pelo
+      `cCodIntLanc` no `ListarExtrato` antes de decidir; resultado **inconclusivo
+      ⇒ não reenvia**. `faultstring` (a Omie responde **HTTP 200** em erro) é
+      falha: **nada** é marcado como lançado.
+    - **A mensagem de erro do provedor é persistida e NUNCA logada** — é texto
+      livre de terceiro e a Omie ecoa o `cObs`, que carrega a descrição da compra
+      (§4.5). No `usage_events` entra só uma **categoria fechada**, nunca o texto.
+    - **Só cartão.** Elegibilidade é `session.account_type == 'credit_card'`
+      (o `CR` do Omie). ⚠️ O PRD chama a conta de cartão de `CA` e **está errado**:
+      `CA` é Conta Aplicação. Filtrar por `CA` lança na conta errada.
 
 ---
 
@@ -231,6 +269,16 @@
     `uq_recon_sessions_account_month`). O hash desceu de nível: cada parte é uma
     linha em `reconciliation_files` com `UNIQUE(session_id, file_hash)`.
     Recriar a mesma conta+mês → **409** pedindo para anexar à existente.
+
+11. **Intenção de lançamento no Omie (Sprint 7):** `reconciliation_omie_postings`
+    — tabela própria, **não** colunas em `reconciliation_file_entries`. Ela nasce
+    ANTES do POST, sobrevive a timeout, acumula `attempts` e guarda o erro do
+    fornecedor; a `file_entry` continua carregando só o **resultado**. Duas
+    garantias **no banco** (não na aplicação): `UNIQUE(file_entry_id)` — uma
+    intenção por linha, o que torna o registro idempotente sob concorrência via
+    `ON CONFLICT DO NOTHING` — e `UNIQUE(client_id, cod_int_lanc)`. `client_id` é
+    desnormalizado de propósito: toda query filtra por ele (§3.15) sem depender
+    de um JOIN que alguém pode esquecer.
 
 ---
 
@@ -340,6 +388,29 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   Região rolável **sem** `tabIndex`/`role`/`aria-label` reprova `scrollable-region-focusable` (SERIOUS) no gate `web_a11y` — por isso a decisão mora num componente só, nunca copiada na tela.
 
 - **Acessibilidade:** shadcn/ui entrega; em componentes custom, revisar `aria-*` e suporte a teclado.
+- **Validação visual é ABRIR a imagem — gate verde não substitui.** `axe-core` audita
+  semântica e contraste e **não mede transbordo de layout**; jsdom (vitest) não tem layout;
+  `tsc`/eslint não enxergam render. Toda task de UI termina com screenshot **desktop e
+  390px** aberta e conferida contra: ação primária cortada na borda, elemento pintando fora
+  do card, gaveta cortada, coluna espremida. Na Sprint 7 os três gates ficaram verdes com o
+  botão "Confirmar e lançar" **clipado** no rodapé da gaveta em 390px — o defeito só
+  apareceu na leitura do PNG. Quando um corte for corrigido, **trave-o com medida**
+  (`boundingBox().x + width <= viewportSize().width`), não com inspeção manual. O primeiro
+  desses asserts vive no cenário mobile da gaveta de lançamento em
+  `apps/web/e2e/a11y-mocked.spec.ts` — copie o padrão de lá, inclusive o
+  `aguardarAnimacao()`: a gaveta do Radix entra **deslizando**, e `boundingBox()` medida no
+  meio do trajeto devolve coordenada fora da tela que não é defeito nenhum (mede em 1440px
+  também, e reprova os quatro cenários).
+- **O relatório do gate de a11y é artefato, nunca fonte.** `scripts/a11y-gate.sh` escreve
+  `apps/web/a11y-report.json` (o CI escreve o mesmo arquivo e o sobe como _artifact_,
+  `ci.yml:300-304`). Ele **não entra em commit**: é reescrito a cada execução e carrega
+  caminhos absolutos da máquina de quem rodou. Antes de fechar qualquer task de front,
+  `git diff --name-only develop..HEAD` só pode listar código-fonte.
+  ⚠️ **O `.gitignore` NÃO cobre esse caminho** (ignora `playwright-report/`,
+  `test-results/` e `blob-report/`, e o gate escreve na raiz de `apps/web/`): rodou o gate,
+  confira `git status --short` **à mão** antes de commitar. Fechar a lacuna é a task
+  `86e2w8xpv` (mover a saída para `test-results/` ou criar `apps/web/.gitignore`); até lá a
+  única proteção é a conferência.
 
 ### API
 
@@ -425,8 +496,8 @@ ClickUp**, não no repo. `make sprints` lista o estado.
 | **3**  | Cripto por cliente, auditoria, alerta      | `clients.dek_wrapped`, `access_audit`, `core/kms.py`                      |
 | **4**  | Lista, gaveta, multi-arquivo, notificações | `reconciliation_files`, `usage_events`, `notifications`                   |
 | **5**  | Multi-tenancy e papéis de cliente          | `users.scope`/`client_id`, `core/authz.py`, `core/sensitive_endpoints.py` |
-| **6**  | Glossário e classificação por cliente      | **próxima**                                                               |
-| **7**  | Lançamento de faturas no Omie              | pendente                                                                  |
+| **6**  | Glossário e classificação por cliente      | `client_glossary_entries`, `clients.glossary_version`, `review_verdict`   |
+| **7**  | Lançamento de faturas no Omie              | `reconciliation_omie_postings`, `omie_posting/`, `OMIE_POSTING_ENABLED`   |
 
 ---
 
@@ -477,7 +548,15 @@ Quando o usuário não tiver decidido, **pergunte** antes de presumir:
 **Novos (do PRD FASE 0–5 — detalhe em [Docs/PLANO_PROXIMOS_PASSOS.md](Docs/PLANO_PROXIMOS_PASSOS.md)):**
 
 - [x] ~~**Tolerância de data zero** também para conta corrente~~ → **SIM, aprovado + implementado** (FASE 1 / BACK 1.6): exato → `conciliado`; 1–3 dias → `conciliado_data_divergente` + `wrong_date`; > 3 → `sem_omie`. Vale p/ CC e cartão (`DATE_DIVERGENCE_RANGE=3` fixo). Na branch de integração; muda o comportamento da CC em prod quando a FASE 1 for mergeada. Ver §5.2.
-- [ ] **Quebra do invariante "Omie read-only":** aprovar escrita no Omie (`IncluirContaPagar`) só no fluxo de lançamento de cartão. Endpoint/campos/idempotência a confirmar contra Omie real. _FASE 2 / S24_
+- [x] ~~**Quebra do invariante "Omie read-only"**~~ → **implementado na Sprint 7**, com
+      **`IncluirLancCC`** (lançamento na própria conta do cartão) e **não**
+      `IncluirContaPagar` — este exige fornecedor por título e fica como alternativa
+      documentada, só se o processo contábil do BPO exigir. Ver **§3.16**. ⚠️ **O que
+      continua em aberto:** o contrato ainda **não foi batido contra a API real** (S-1) —
+      falta uma captura com credencial Omie autorizada (`OMIE_CAPTURE_ALLOW_WRITE=1`),
+      incluindo **dois POSTs do mesmo `cCodIntLanc`** para decidir a idempotência do lado
+      do fornecedor. Enquanto isso, `OMIE_POSTING_ENABLED` fica **`false`** em todo
+      ambiente. _FASE 2 / S24_
 - [ ] **Cloud Run `--no-cpu-throttling` + `min-instances ≥ 1`** na API após remover Redis (senão BackgroundTasks congela). Custo aceitável? _FASE 0 / S20_
 - [ ] **Pluggy interna vs Cubos** (proposta Arthur Souza, 16/06) + cobertura de Sicredi/BNB/Cora + primeiro endpoint público (webhook). _FASE 4_
 - [ ] **Campo de departamento/rateio** na response Omie (bloqueia check `sem_departamento`); Slack (app vs webhook) e provedor de email; persona supervisor (role nova vs reuso). _FASE 5_
@@ -543,6 +622,8 @@ lembrar dos comandos.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.12 — 18/08/2026. **O ADL passou a ESCREVER no Omie (Sprint 7) — o invariante "Omie read-only" acabou, e essa é a mudança mais perigosa que este primer já registrou.** Nova regra **§3.16** com o que não pode ser errado: a feature nasce **desligada** (`OMIE_POSTING_ENABLED=false` por default, ao contrário de todo outro flag do projeto); o contrato do `IncluirLancCC` segue **NÃO-VERIFICADO** contra a API real (S-1) e o gate `tests/unit/test_omie_fixtures.py` **SKIPA citando S-1** em vez de passar verde; a **dedup primária é do ADL** (`reconciliation_omie_postings`, §4.11), nunca do fornecedor; `cCodIntLanc` vem da **identidade da linha**, nunca do conteúdo — chave de conteúdo colapsaria duas compras idênticas e deixaria dinheiro **faltando**, que o rollback não vigia; timeout **reconcilia antes de reenviar** e inconclusivo **não reenvia**; `faultstring` nunca é logada. Corrigido o número da lista canônica de endpoints sensíveis (**40**, não 34 — a Sprint 6 e a 7 entraram e o primer não acompanhou). **§8** ganhou o que a Sprint 6 (glossário) e a 7 deixaram no código, e **§10** marca a quebra do invariante como decidida, com a captura da fixture real explicitamente **ainda pendente**._
 
 _Versão 1.11 — 11/08/2026. **O alerta sintético ganhou canal próprio (§3.14).** O gate de deploy dispara `AlertCode.SYNTHETIC` a cada push na `main` — prova de entrega, não incidente — e isso caía no canal de plantão várias vezes por dia. Com `ALERT_WEBHOOK_URL_SYNTHETIC` configurada, o sintético (e só ele) sai por um webhook separado, sem e-mail de plantão junto; sem a setting, nada muda. A parte que não pode ser errada: essa URL **não** conta em `has_webhook_alert`/`has_alert_channel` — canal de teste não substitui canal de plantão, e contá-la faria o fail-closed deixar subir um serviço mudo para alerta real._
 

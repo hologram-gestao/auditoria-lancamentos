@@ -263,3 +263,159 @@ dados via migration idempotente.
 **Correção:** o lockfile entrou em `eb1d713` (verificado: `d2bc76b` → exit 1 com `ERR_PNPM_OUTDATED_LOCKFILE`; `eb1d713` → exit 0, e os 3 comandos do job `web` passam — 189 testes). O spec segue pendente de `git add` (task `86e2gjpbe`, OPEN).
 **Encodado em:** `ADR-009-QA` + `CLAUDE.md` do QA — revisão de CI começa por `git archive <commit> | tar -x` e reproduz o job em container contra ESSA árvore, com mutação contra o commit anterior.
 **Status:** ativo
+
+## L-S7-01 — Gate de a11y verde não é validação visual: axe-core não mede transbordo
+
+**Sintoma.** A FRONT 07.7 chegou ao QA com o gate `web_a11y` **verde em 390px** (154 passed,
+0 `critical`/`serious`) e com testes de componente passando. Abrindo o PNG da mesma execução,
+o botão primário da gaveta ("Confirmar e lançar N de N") estava **cortado na borda direita da
+viewport** em 390px — a ação que grava na contabilidade do cliente.
+
+**Causa-raiz (blameless).** Os três gates que a task rodou são cegos para layout, cada um por
+um motivo legítimo: `axe-core` audita semântica/contraste e **não** mede transbordo;
+`vitest`+jsdom não tem layout; `tsc`/eslint não enxergam render. O `SheetFooter` era
+`flex justify-between` sem `flex-wrap` e nunca tinha tido três elementos dentro — esta foi a
+primeira task a pôr texto auxiliar entre "Cancelar" e a ação primária. Nada no fluxo do agent
+o obrigava a **abrir** a imagem que ele mesmo gerou.
+
+**Correção.** FRONT 07.7 reprovada com o recorte ampliado como evidência, a causa-raiz
+apontada (`sheet.tsx:96` + `lancar-no-omie-drawer.tsx:290`) e o assert de regressão pronto
+(`boundingBox().x + width <= viewportSize().width`). A mesma família na barra de lote virou
+follow-up `86e2w8brr`.
+
+**Escopo.** Toda task de UI, deste projeto em diante — não é específico da gaveta.
+
+**Encodado em.** `CLAUDE.md` versionado do projeto (o primer), **§7 · Frontend**, bullet
+"Validação visual é ABRIR a imagem — gate verde não substitui", editado nesta mesma sprint.
+Ficou no primer, e não no `.md` do papel do QA, de propósito: o `.md` do papel é re-semeado a
+cada run do hub (não é versionado), e a regra vale para quem **escreve** a UI, não só para
+quem revisa. O assert de regressão sugerido está no comentário de reprovação da FRONT 07.7.
+
+**Status.** Fechado.
+
+## L-S7-02 — Falha de integração local só vira achado depois de reproduzir
+
+**Sintoma.** A 1ª execução da suíte de integração da Sprint 7 deu **16 failed / 574 passed**, e
+os 16 eram todos de arquivos **pré-existentes** (`test_clients`, `test_notifications`,
+`test_qualification_*`). Depois, uma execução completa interrompida no meio produziu **59
+failed**. Nenhum dos dois números era real: com o banco recriado, a suíte inteira (comando do
+CI, `pytest -q --no-cov`) deu **1240 passed / 10 skipped**.
+
+**Causa-raiz (blameless).** O banco de teste local (`TEST_DATABASE_URL` → `adl_pytest`) é
+**reusado entre execuções**, ao contrário do CI, onde o Postgres é um service container novo a
+cada run. Resíduo de sprints anteriores — e de uma execução abortada — quebra testes que
+contam linhas. O erro de leitura quase custou uma reprovação da sprint inteira por um defeito
+inexistente.
+
+**Correção.** Antes de tratar vermelho local como achado: (1) recriar o banco
+(`DROP DATABASE … WITH (FORCE)` + `CREATE DATABASE`); (2) rodar de novo; (3) montar o controle
+contra a base com `--ignore`/`--deselect` do que a sprint **adicionou**, conferindo com
+`git diff --name-status` — ignorar por inteiro um arquivo apenas **modificado** falsifica o
+controle (quase aconteceu com `test_migrations.py`).
+
+**Escopo.** Operação do gate de integração local, qualquer sprint.
+
+**Encodado em.** `.claude/memory/decisions.md`, **ADR-015-QA** — versionado no repo, com o
+procedimento e os três números que sustentam a conclusão.
+
+**Status.** Fechado.
+
+## L-S7-03 — A lição do transbordo só fechou quando virou medida no browser (Sprint 7, re-revisão 1)
+
+**Sintoma.** A L-S7-01 fechou a 1ª rodada com a prevenção em **prosa** (regra no primer:
+"abra o PNG") e a assertiva de regressão apenas **sugerida** no comentário de reprovação.
+Prosa não reprova ninguém: o próximo rodapé com três elementos passaria pelos mesmos três
+gates verdes.
+
+**Causa-raiz (blameless).** O campo "Encodado em" da L-S7-01 apontava para uma regra de
+comportamento humano ("abrir a imagem"), não para algo que falha sozinho. Regra que depende
+de alguém lembrar de olhar tem a mesma meia-vida da atenção de quem lê.
+
+**Correção.** O retrabalho da FRONT 07.7 transformou a sugestão em trava executável no
+cenário mobile da gaveta (`x + width ≤ viewport.width` para a ação primária **e** para o
+Cancelar), com o helper `aguardarAnimacao()` para não medir a gaveta do Radix no meio do
+deslize. O QA **reproduziu a mutação**: revertendo só os `className` do rodapé, o gate fecha
+152 passed / **2 failed** com a mensagem `ação primária da gaveta cortada pela borda da
+viewport`; com o fix, 154 passed / 0 `critical`/`serious`. Screenshot de 390px aberta e
+conferida nas duas versões.
+
+**Escopo.** Toda correção de layout neste projeto: o veredito de "corrigido" exige a medida
+que reprova a versão anterior, não a captura da versão nova.
+
+**Encodado em.** `apps/web/e2e/a11y-mocked.spec.ts` (assertiva + `aguardarAnimacao`, no
+commit `4daefb4`), `ADR-026-FE` e o primer §7 · Frontend, que agora manda **copiar o padrão
+de lá** — inclusive a espera da animação, cuja ausência reprova falsamente os quatro
+cenários.
+
+**Status.** Fechado.
+
+## L-S7-04 — O relatório do próprio gate entrou no commit do retrabalho (Sprint 7, re-revisão 1)
+
+**Sintoma.** O commit de rework da FRONT 07.7 (`4daefb4`) trouxe, além das 17 linhas de
+correção, o arquivo `apps/web/a11y-report.json`: 189 KB, 5441 linhas geradas, com 6
+ocorrências do caminho absoluto do worktree do agent. Não existe em `origin/develop` nem em
+`origin/main`.
+
+**Causa-raiz (blameless).** O `.gitignore` ignora `playwright-report/` e `test-results/`,
+mas o `scripts/a11y-gate.sh` escreve o relatório em `apps/web/a11y-report.json` — fora dos
+dois padrões. Quem roda o gate (exatamente o que a reprovação anterior mandou fazer) ganha um
+arquivo novo e não-ignorado na árvore, que qualquer `git add -A` captura. É armadilha do
+repositório, não descuido de um agent: o gate existe desde antes desta sprint e nunca tinha
+sido rodado localmente por quem também commita.
+
+**Correção.** FRONT 07.7 reprovada de novo, com um item só e o comando pronto
+(`git rm --cached` + a linha no `.gitignore`). Critério declarado no veredito: o que entra no
+histórico da `develop`/`main` não sai com um `git rm` depois — por isso é reprovação, e não
+aprovação-com-follow-up.
+
+**Escopo.** Toda revisão de branch deste projeto; a família (artefato gerado dentro de
+`apps/`) é mais ampla que o a11y.
+
+**Encodado em.** Primer, **§7 · Frontend** — bullet "O relatório do gate de a11y é artefato,
+nunca fonte", com o comando que decide (`git diff --name-only develop..HEAD` só pode listar
+código-fonte) — e `ADR-017-QA`. A linha do `.gitignore` é entregável do retrabalho da
+FRONT 07.7 (é ela que impede a reincidência local).
+
+**Status.** parcialmente fechado — o artefato saiu no commit `7f89f3e` (5441 deleções), mas
+a parte "`.gitignore` cobri-lo" **não** sobrevive à sprint. `superseded-by` **L-S7-05**.
+
+## L-S7-05 — A prevenção foi escrita num arquivo que o commit não alcança (Sprint 7, re-revisão 2)
+
+**Sintoma.** O retrabalho `7f89f3e` fez as duas coisas que a reprovação pediu: removeu
+`apps/web/a11y-report.json` do índice e do disco (5441 deleções, `git diff --name-only
+develop..HEAD` volta só com código-fonte) **e** acrescentou a linha
+`apps/web/a11y-report.json` ao `.gitignore` da raiz. A segunda parte, porém, aparece em
+`git status` como modificação **não-commitada** e continuará assim: `git diff develop..HEAD
+-- .gitignore` é **vazio**. A árvore do agent é descartada no fim da sprint — a regra some
+junto, e a próxima pessoa que rodar `scripts/a11y-gate.sh` reintroduz o artefato.
+
+**Causa-raiz (blameless).** O `.gitignore` da **raiz** não está no `gitPaths` de papel
+nenhum: `orchestrate.js:426-465` + `.agents-hub/config.env:81-84` dão `apps/api/` ao
+backend, `apps/web/` ao frontend, `apps/api/tests/ apps/web/e2e/ apps/web/src/` ao QA e
+`docker/ .github/ scripts/ .env.example` à infra. O `commitOnBranch` só faz `git add` nesses
+caminhos; o que fica de fora sai no aviso "ESCRITO mas FORA do gitPaths" e o commit segue
+sem ele (`orchestrate.js:648-712`). O comentário de reprovação mandou editar um arquivo
+**que o dono da task não tinha como entregar** — falha de quem escreveu a instrução (o QA),
+não de quem a executou.
+
+**Escopo.** Todo comentário de reprovação e todo campo "Encodado em" deste hub: antes de
+pedir a edição de um arquivo, conferir se ele cai no `gitPaths` do papel dono da task
+(`.agents-hub/config.env`, chaves `AGENT_PATHS_*`). Raiz do monorepo é a zona de risco:
+`.gitignore`, `package.json` e `pnpm-lock.yaml` não pertencem a ninguém.
+
+**Correção.** FRONT 07.7 **aprovada** (o defeito que bloqueava o push — artefato no
+histórico — está resolvido e provado). A prevenção virou task de infra
+**`86e2w8xpv`**, com as duas saídas commitáveis: `scripts/a11y-gate.sh` escrevendo o
+relatório em `test-results/` (já ignorado, e é caminho de infra), ou um
+`apps/web/.gitignore` (caminho de frontend). O veredito declara em voz alta que a classe
+segue **aberta** até uma das duas entrar — em vez de dar a lição por encerrada porque o
+arquivo saiu deste commit.
+
+**Encodado em.** `qa.md` (Regras genéricas do papel) — regra "não peça o que o `gitPaths`
+não alcança", com o comando que decide antes de escrever a reprovação:
+`grep AGENT_PATHS .agents-hub/config.env`. Rastreamento da causa-raiz na task
+**`86e2w8xpv`** (existe, está OPEN e tem os dois comandos de prova). O primer §7 · Frontend
+já carrega o bullet "O relatório do gate de a11y é artefato, nunca fonte", que é o que
+reprova a reincidência na revisão.
+
+**Status.** ativo
