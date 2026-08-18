@@ -534,6 +534,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reconciliations/{session_id}/omie-postings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Lança no Omie, em lote, as compras `sem_omie` de uma conciliação de CARTÃO. Body = lista de {file_entry_id, cod_categoria}. Devolve o resumo por linha (lançada / bloqueada / erro + motivo) e os agregados. Idempotente por linha: reenviar não duplica. Desligável por `OMIE_POSTING_ENABLED` sem deploy.
+         * @description Lançamento em lote no Omie (Sprint 7 / BACK 07.4).
+         *
+         *     ⚠️ **É a única escrita do ADL no ERP do cliente** — o invariante "Omie
+         *     read-only" (CLAUDE.md §10) termina aqui.
+         *
+         *     **Autorização.** `ReviewExportDep` aplica a permissão `review_export` da
+         *     `PERMISSION_MATRIX` — a MESMA que já governa revisar/exportar, porque
+         *     lançar é o desfecho da revisão e nenhum papel que revisa deixaria de poder
+         *     lançar (uma chave nova nasceria idêntica a esta, ver ADR-026-BE).
+         *     **Tenant.** `require_client_for_session` carrega a sessão com o filtro de
+         *     tenant dentro do próprio `SELECT`: sessão de outro tenant é 404 e nada é
+         *     lançado. Nenhum `client_id` é aceito do body.
+         */
+        post: operations["post_omie_lancamentos_api_v1_reconciliations__session_id__omie_postings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reconciliations/{session_id}/file-entries": {
         parameters: {
             query?: never;
@@ -665,6 +696,31 @@ export interface paths {
         put?: never;
         /** Gera o relatório Excel (5 abas) da sessão e devolve binário com Content-Disposition: attachment. RBAC consistente com /review: manager fora da carteira recebe 404. Recusa com 409 sessões em processing/error (não há dado conciliado pra exportar). */
         post: operations["export_reconciliation_api_v1_reconciliations__session_id__export_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/omie/categorias": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lista as categorias Omie do cliente da sessão (código + descrição), servidas de um cache em memória por cliente com TTL de 6 h. Lista COMPLETA, sem paginação — o consumidor é um combobox com busca local. `refresh=true` ignora o cache.
+         * @description Categorias para classificar as compras antes de lançar (BACK 07.3).
+         *
+         *     O tenant vem da **sessão** — que por sua vez já é carregada com o filtro de
+         *     tenant dentro do próprio `SELECT` (`require_client_for_session`). Nenhum
+         *     `client_id` é aceito da URL ou do body: sessão de outro tenant é 404 e nem
+         *     chega aqui.
+         */
+        get: operations["get_omie_categorias_api_v1_omie_categorias_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1991,6 +2047,35 @@ export interface components {
             pagination: components["schemas"]["PaginationMeta"];
         };
         /**
+         * OmieCategoriaItem
+         * @description Item de GET /api/v1/omie/categorias (Sprint 7 / BACK 07.3).
+         *
+         *     Só o par que o combobox de classificação precisa: `codigo` é o valor que
+         *     vai em `cCodCateg` no lançamento, `descricao` é o que o operador lê.
+         */
+        OmieCategoriaItem: {
+            /** Codigo */
+            codigo: string;
+            /** Descricao */
+            descricao: string;
+        };
+        /**
+         * OmieCategoriaListResponse
+         * @description Lista COMPLETA de categorias ativas do cliente — sem paginação.
+         *
+         *     Escolha deliberada (a menor solução que atende R2): o consumidor é um
+         *     combobox com busca, e a lista inteira já vem de um cache em memória por
+         *     cliente. Paginar significaria uma ida ao servidor por tecla digitada,
+         *     que é exatamente o que a task manda evitar. `total` existe para que a
+         *     tela possa dizer "300 categorias" sem contar o array na mão.
+         */
+        OmieCategoriaListResponse: {
+            /** Data */
+            data: components["schemas"]["OmieCategoriaItem"][];
+            /** Total */
+            total: number;
+        };
+        /**
          * OmieEntryItem
          * @description Item de GET /api/v1/reconciliations/{id}/omie-entries.
          *
@@ -2060,6 +2145,81 @@ export interface components {
         OmieLancamentoListResponse: {
             /** Data */
             data: components["schemas"]["OmieLancamentoItem"][];
+        };
+        /**
+         * OmiePostingBatchPayload
+         * @description Conteúdo do envelope `{data}` — resumo por linha + agregados.
+         */
+        OmiePostingBatchPayload: {
+            /** Lines */
+            lines: components["schemas"]["OmiePostingLineResult"][];
+            /** Lancadas */
+            lancadas: number;
+            /** Bloqueadas */
+            bloqueadas: number;
+            /** Com Erro */
+            com_erro: number;
+        };
+        /**
+         * OmiePostingBatchRequest
+         * @description Body do POST /api/v1/reconciliations/{session_id}/omie-postings.
+         *
+         *     O teto de lote **não** está aqui: ele vive no `Settings`
+         *     (`OMIE_POSTING_MAX_BATCH`) e é validado no service, para poder ser ajustado
+         *     por ambiente sem deploy. `max_length` fixo no schema daria um 422 com um
+         *     número que ninguém consegue mudar.
+         */
+        OmiePostingBatchRequest: {
+            /**
+             * Lines
+             * @description Linhas selecionadas. Duplicatas do mesmo file_entry_id são recusadas.
+             */
+            lines: components["schemas"]["OmiePostingLineRequest"][];
+        };
+        /**
+         * OmiePostingBatchResponse
+         * @description Response do POST /reconciliations/{session_id}/omie-postings.
+         */
+        OmiePostingBatchResponse: {
+            data: components["schemas"]["OmiePostingBatchPayload"];
+        };
+        /**
+         * OmiePostingLineRequest
+         * @description Uma linha da fatura a lançar, com a categoria escolhida pelo operador.
+         */
+        OmiePostingLineRequest: {
+            /**
+             * File Entry Id
+             * Format: uuid
+             */
+            file_entry_id: string;
+            /**
+             * Cod Categoria
+             * @description `cCodCateg` do Omie. Sem ele o lançamento não existe (R2).
+             */
+            cod_categoria: string;
+        };
+        /**
+         * OmiePostingLineResult
+         * @description Desfecho de UMA linha. É o que a tela mostra ao lado dela.
+         */
+        OmiePostingLineResult: {
+            /**
+             * File Entry Id
+             * Format: uuid
+             */
+            file_entry_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "lancada" | "bloqueada" | "erro";
+            /** Reason */
+            reason?: ("linha_inexistente" | "nao_e_sem_omie" | "linha_ignorada" | "ja_lancada" | "envio_anterior_sem_confirmacao" | "chave_em_conflito" | "lancamento_ja_vinculado" | "erro_omie" | "omie_indisponivel" | "reconciliada") | null;
+            /** Message */
+            message?: string | null;
+            /** Omie Lancamento Id */
+            omie_lancamento_id?: number | null;
         };
         /**
          * PaginationMeta
@@ -4023,6 +4183,43 @@ export interface operations {
             };
         };
     };
+    post_omie_lancamentos_api_v1_reconciliations__session_id__omie_postings_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OmiePostingBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OmiePostingBatchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_file_entries_api_v1_reconciliations__session_id__file_entries_get: {
         parameters: {
             query?: {
@@ -4342,6 +4539,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_omie_categorias_api_v1_omie_categorias_get: {
+        parameters: {
+            query: {
+                /** @description UUID da sessão que define o tenant. */
+                session_id: string;
+                /** @description Ignora o cache e rebusca do Omie. */
+                refresh?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OmieCategoriaListResponse"];
                 };
             };
             /** @description Validation Error */

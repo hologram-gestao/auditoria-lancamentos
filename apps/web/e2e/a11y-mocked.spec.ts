@@ -101,7 +101,7 @@
  */
 
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 
 const CLIENT_ID = '11111111-1111-4111-8111-111111111111';
 /**
@@ -343,6 +343,58 @@ const DETAIL = {
 let sessionUsedGlossary = false;
 
 /**
+ * Sprint 7 / R1 — a sessão vira CARTÃO só nos cenários de lançamento.
+ *
+ * Fica fora do `DETAIL` pelo mesmo motivo do selo: com `null`, todos os
+ * cenários anteriores medem exatamente a mesma tela (sem coluna de seleção,
+ * sem ação de lançamento). O valor é o do CONTRATO (`credit_card`), que é o
+ * que o front compara — o `'CR'` do `DETAIL` é o código cru do Omie e nunca
+ * ligou o modo cartão nesta suíte.
+ */
+let sessionAccountType: string | null = null;
+
+/**
+ * Linhas `sem_omie` de uma fatura de cartão: são as únicas lançáveis. A
+ * terceira é IGNORADA de propósito — é ela que prova, no browser, que a ação
+ * fica indisponível (e a caixa de seleção também) sem sumir da tela.
+ */
+const CARD_FILE_ENTRIES = [
+  {
+    id: '99999999-9999-4999-8999-999999999801',
+    transaction_date: '2026-06-03',
+    description: 'Posto Shell 1234',
+    amount: '-150.50',
+    balance: null,
+    situation: 'sem_omie',
+    user_action: null,
+    user_note: null,
+    omie_lancamento_id: null,
+  },
+  {
+    id: '99999999-9999-4999-8999-999999999802',
+    transaction_date: '2026-06-07',
+    description: 'Assinatura de software',
+    amount: '-89.90',
+    balance: null,
+    situation: 'sem_omie',
+    user_action: null,
+    user_note: null,
+    omie_lancamento_id: null,
+  },
+  {
+    id: '99999999-9999-4999-8999-999999999803',
+    transaction_date: '2026-06-09',
+    description: 'Compra ignorada na revisão',
+    amount: '-12.00',
+    balance: null,
+    situation: 'ignorado',
+    user_action: 'ignore',
+    user_note: null,
+    omie_lancamento_id: null,
+  },
+];
+
+/**
  * Uma anomalia da Camada 1 (o único tipo que aceita veredito) e uma
  * estrutural. `reviewVerdict` é mutável para o PATCH do teste refletir na
  * lista — é assim que se verifica "a lista reflete a mudança sem reload".
@@ -501,6 +553,40 @@ const GLOSSARY_ENTRIES = [
   },
 ];
 
+/** Categorias do Omie (BACK 07.3) — a lista COMPLETA que o combobox filtra. */
+const OMIE_CATEGORIAS = [
+  { codigo: '1.01.01', descricao: 'Combustível' },
+  { codigo: '2.02.02', descricao: 'Serviços de software' },
+  { codigo: '3.03.03', descricao: 'Alimentação' },
+];
+
+/**
+ * Resposta do lote (BACK 07.4) — PARCIAL de propósito: uma lançada e uma com
+ * erro do Omie. É o caso que a tela precisa saber contar (resumo por linha +
+ * toast de aviso), e é o único em que o toast NÃO é verde.
+ */
+const POSTING_BATCH_PARTIAL = {
+  lines: [
+    {
+      file_entry_id: '99999999-9999-4999-8999-999999999801',
+      status: 'lancada',
+      reason: null,
+      message: null,
+      omie_lancamento_id: 5001,
+    },
+    {
+      file_entry_id: '99999999-9999-4999-8999-999999999802',
+      status: 'erro',
+      reason: 'erro_omie',
+      message: 'Categoria informada nao existe para o cliente.',
+      omie_lancamento_id: null,
+    },
+  ],
+  lancadas: 1,
+  bloqueadas: 0,
+  com_erro: 1,
+};
+
 /** Backend inteiro em memória, resolvido por padrão de URL. */
 async function fulfillApi(route: Route): Promise<void> {
   const url = new URL(route.request().url());
@@ -560,7 +646,11 @@ async function fulfillApi(route: Route): Promise<void> {
     return json({ data: list, pagination: { ...PAGINATION, total: list.length } });
   }
   if (path === `/api/v1/reconciliations/${SESSION_ID}`) {
-    return json({ ...DETAIL, qualification_used_glossary: sessionUsedGlossary });
+    return json({
+      ...DETAIL,
+      ...(sessionAccountType === null ? {} : { account_type: sessionAccountType }),
+      qualification_used_glossary: sessionUsedGlossary,
+    });
   }
   // Anomalias (BACK 9.7) + veredito do revisor (BACK 06.5). Rota literal antes
   // do fallback: o PATCH grava no estado do módulo para a lista refletir a
@@ -610,10 +700,33 @@ async function fulfillApi(route: Route): Promise<void> {
     return json({ session_id: SESSION_ID, status: 'reviewing', error_code: null });
   }
   if (path === `/api/v1/reconciliations/${SESSION_ID}/file-entries`) {
+    // Em sessão de cartão a tela pede DUAS listas: a paginada da aba e a de
+    // `situation=sem_omie` (que a aba de Anomalias usa para saber quem ainda
+    // pode ser lançada). O filtro é do servidor — aqui ele é aplicado no mock,
+    // senão a lista "sem_omie" traria a linha ignorada e a tela ofereceria
+    // lançar o que o backend recusa.
+    const rows = sessionAccountType === 'credit_card' ? CARD_FILE_ENTRIES : FILE_ENTRIES;
+    const situation = url.searchParams.get('situation');
+    const filtered = situation === null ? rows : rows.filter((r) => r.situation === situation);
     return json({
-      data: FILE_ENTRIES,
-      pagination: { page: 1, pageSize: 20, total: 1, totalPages: 1 },
+      data: filtered,
+      pagination: { page: 1, pageSize: 20, total: filtered.length, totalPages: 1 },
     });
+  }
+  // Sprint 7 (BACK 07.3): envelope `{data, total}` — DUAS chaves, então o front
+  // NÃO desempacota. Rota literal antes de qualquer fallback: o genérico
+  // devolveria `{data:[]}` sem `total` e o combobox abriria vazio.
+  if (path === '/api/v1/omie/categorias') {
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ data: OMIE_CATEGORIAS, total: OMIE_CATEGORIAS.length }),
+    });
+  }
+  // Sprint 7 (BACK 07.4): o lote responde 200 mesmo com falha parcial — quem
+  // conta o desfecho é `lines[]`.
+  if (path === `/api/v1/reconciliations/${SESSION_ID}/omie-postings`) {
+    return json(POSTING_BATCH_PARTIAL);
   }
   if (path === `/api/v1/reconciliations/${SESSION_ID}/available-omie-entries`) {
     return json(OMIE_CANDIDATES);
@@ -658,6 +771,21 @@ async function analyze(page: Page, label: string): Promise<void> {
  * com fundo opaco) — o axe devolve `incomplete` neste caso e `incomplete` não
  * entra em `violations`. Foi assim que o badge vazio passou por todos os gates.
  */
+/**
+ * Espera a animação de entrada do PRÓPRIO elemento terminar.
+ *
+ * `toBeVisible()` resolve assim que o nó entra na árvore — mas a gaveta do
+ * Radix entra deslizando (`translate-x`), e uma `boundingBox()` medida no meio
+ * do trajeto devolve coordenadas fora da viewport que não são defeito nenhum.
+ * Sem `{ subtree: true }` de propósito: um spinner de carregamento lá dentro é
+ * animação infinita e o `finished` dele nunca resolveria.
+ */
+async function aguardarAnimacao(locator: Locator): Promise<void> {
+  await locator.evaluate(async (el) => {
+    await Promise.all(el.getAnimations().map((a) => a.finished));
+  });
+}
+
 /** O título do toast do Sonner — o nó que o axe reprovou em `#008a2e`/`#ecfdf3`. */
 const TOAST_TITLE = '[data-sonner-toast] [data-title]';
 
@@ -747,6 +875,9 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   sessionUser = USER;
   // Sprint 6: sessão SEM glossário e flag não julgado são o estado de partida.
   sessionUsedGlossary = false;
+  // Sprint 7: conta corrente é o estado de partida — só os cenários de
+  // lançamento ligam o cartão.
+  sessionAccountType = null;
   reviewVerdict = null;
   patchAnomalyFails = false;
   listOverflows = false;
@@ -1251,6 +1382,133 @@ for (const vp of VIEWPORTS) {
       await expect(
         page.getByRole('button', { name: /Marcar "Saldo divergente" como/ }),
       ).toHaveCount(0);
+    });
+  });
+}
+
+/**
+ * Sprint 7 / R1 (FRONT 07.6) — lançamento no Omie a partir da revisão.
+ *
+ * O que só o browser mede: a tabela com a coluna de seleção montada (a caixa
+ * nativa e o seu nome acessível), a ação inerte por `aria-disabled` com o
+ * motivo em `aria-describedby` e a barra de lote **presente** no instante do
+ * `analyze()` — estado transitório é tela (ADR-013-QA).
+ *
+ * A simetria é o ponto: a MESMA sessão em conta corrente não pode exibir nada
+ * disso. É o critério "conta corrente não exibe a ação em lugar nenhum", e ele
+ * só vale se for medido nos dois lados.
+ */
+for (const vp of VIEWPORTS) {
+  const slugP = vp.label.replace(/\s+/g, '-');
+  test.describe(`Lançamento no Omie — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('cartão: compra sem_omie oferece a ação e entra no lote (R1)', async ({ page }) => {
+      sessionAccountType = 'credit_card';
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}`);
+
+      const linha = page.getByRole('row', { name: /Posto Shell 1234/ });
+      await expect(linha).toBeVisible();
+      await expect(linha.getByRole('button', { name: /Lançar no Omie/ })).toBeVisible();
+
+      // A linha IGNORADA continua na tela, com a ação inerte e o motivo
+      // acessível — não some sem explicação.
+      const ignorada = page.getByRole('row', { name: /Compra ignorada na revisão/ });
+      const acaoInerte = ignorada.getByRole('button', { name: /Lançar no Omie/ });
+      await expect(acaoInerte).toHaveAttribute('aria-disabled', 'true');
+      await expect(
+        ignorada.getByRole('checkbox', { name: /Selecionar a compra/ }),
+      ).toBeDisabled();
+
+      // Seleciona e mede COM a barra de lote montada.
+      await linha.getByRole('checkbox', { name: /Selecionar a compra/ }).check();
+      await expect(page.getByRole('button', { name: /Lançar 1 compra no Omie/ })).toBeVisible();
+
+      await expect(page.locator('#__next_error__')).toHaveCount(0);
+      await shot(page, `lancamento-selecao-${slugP}`);
+      await analyze(page, `revisão de cartão com lote selecionado (${vp.label})`);
+    });
+
+    test('gaveta: classifica em lote, confirma e lê o resumo parcial (R2/R5)', async ({ page }) => {
+      sessionAccountType = 'credit_card';
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}`);
+
+      await page
+        .getByRole('checkbox', { name: /Selecionar todas as compras desta página/ })
+        .check();
+      await page.getByRole('button', { name: /Lançar 2 compras no Omie/ }).click();
+
+      const gaveta = page.getByRole('dialog', { name: 'Lançar no Omie' });
+      await expect(gaveta).toBeVisible();
+      await aguardarAnimacao(gaveta);
+      // Cancelar à ESQUERDA da ação primária (contrato da gaveta).
+      const cancelar = await gaveta.getByRole('button', { name: 'Cancelar' }).boundingBox();
+      const primaria = await gaveta.getByRole('button', { name: /Confirmar e lançar/ }).boundingBox();
+      expect((cancelar?.x ?? 0), 'Cancelar precisa ficar à esquerda da ação primária').toBeLessThan(
+        primaria?.x ?? 0,
+      );
+
+      // Nenhum dos dois pode passar da borda da viewport. O axe não mede
+      // transbordo e o jsdom não tem layout: em 390px o rodapé com TRÊS
+      // elementos (Cancelar + texto auxiliar + ação primária) clipava o botão
+      // que grava na contabilidade do cliente. Medido aqui, no estado inicial
+      // da gaveta — que é justamente o que tem compra sem categoria.
+      const larguraViewport = page.viewportSize()?.width ?? 0;
+      expect(
+        (primaria?.x ?? 0) + (primaria?.width ?? 0),
+        'ação primária da gaveta cortada pela borda da viewport',
+      ).toBeLessThanOrEqual(larguraViewport);
+      expect(
+        (cancelar?.x ?? 0) + (cancelar?.width ?? 0),
+        'Cancelar da gaveta cortado pela borda da viewport',
+      ).toBeLessThanOrEqual(larguraViewport);
+
+      // Sem categoria, o envio não é oferecido.
+      await expect(gaveta.getByRole('button', { name: /Confirmar e lançar 0 de 2/ })).toBeDisabled();
+
+      // COMBOBOX ABERTO no instante da medição (ADR-013-QA): é o estado que o
+      // axe nunca vê se o cenário medir só a tela em repouso.
+      await gaveta.getByRole('button', { name: /Categoria para todas as compras/ }).click();
+      const lista = page.getByRole('listbox', { name: /Categoria para todas as compras/ });
+      await expect(lista).toBeVisible();
+      await page.getByRole('combobox').fill('combust');
+      await expect(lista.getByRole('option')).toHaveCount(1);
+      await shot(page, `lancamento-combobox-${slugP}`);
+      await analyze(page, `gaveta de lançamento com o combobox aberto (${vp.label})`);
+
+      await lista.getByRole('option', { name: /Combustível/ }).click();
+      await gaveta.getByRole('button', { name: 'Aplicar a 2 compras' }).click();
+      await gaveta.getByRole('button', { name: /Confirmar e lançar 2 de 2/ }).click();
+
+      // Resumo por linha, com a mensagem VERBATIM do provedor na que falhou.
+      await expect(gaveta.getByText('Lançada no Omie')).toBeVisible();
+      await expect(gaveta.getByText(/lançamento nº 5001/)).toBeVisible();
+      await expect(
+        gaveta.getByText(/Categoria informada nao existe para o cliente\./),
+      ).toBeVisible();
+      // A gaveta NÃO fecha no parcial: é dela que o operador reexecuta.
+      await expect(gaveta.getByRole('button', { name: /Tentar novamente 1 de 1/ })).toBeVisible();
+
+      // TOAST montado e MEDIDO — parcial é aviso, e a cor vem dos tokens.
+      await expect(page.getByText('1 de 2 compras lançadas. Veja o motivo das demais.')).toBeVisible();
+      expect(await measuredContrast(page, TOAST_TITLE)).toBeGreaterThanOrEqual(4.5);
+
+      await expect(page.locator('#__next_error__')).toHaveCount(0);
+      await shot(page, `lancamento-resumo-${slugP}`);
+      await analyze(page, `resumo parcial do lote + toast de aviso (${vp.label})`);
+    });
+
+    test('conta corrente: nem seleção nem ação, em nenhuma aba (R1)', async ({ page }) => {
+      // `sessionAccountType` fica no default (o `DETAIL` de conta corrente).
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}`);
+
+      await expect(page.getByRole('row', { name: /Pagamento fornecedor X/ })).toBeVisible();
+      await expect(page.getByRole('button', { name: /Lançar no Omie/ })).toHaveCount(0);
+      await expect(page.getByRole('checkbox', { name: /Selecionar a compra/ })).toHaveCount(0);
+
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}?tab=anomalias`);
+      await expect(page.getByRole('button', { name: /Lançar no Omie/ })).toHaveCount(0);
+      await analyze(page, `revisão de conta corrente sem lançamento (${vp.label})`);
     });
   });
 }

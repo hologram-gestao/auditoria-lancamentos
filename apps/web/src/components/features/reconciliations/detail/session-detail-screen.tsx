@@ -177,7 +177,7 @@ export function SessionDetailScreen({ clientId, sessionId }: SessionDetailScreen
               <OmieDivergencesTab sessionId={sessionId} />
             </TabsContent>
             <TabsContent value="anomalias">
-              <AnomaliesTab sessionId={sessionId} />
+              <AnomaliesTab sessionId={sessionId} isCard={detail.account_type === 'credit_card'} />
             </TabsContent>
             <TabsContent value="resumo">
               {/* Mesma fonte única do topo — por construção os números batem. */}

@@ -18,6 +18,10 @@
  *   - "Anotar" inline: textarea expandido abaixo da linha — state local
  *     `noteFor` segura o entry id editável.
  *   - "Registrar anomalia": abre modal com `file_entry_id` pré-preenchido.
+ *   - **Sprint 7 (FRONT 07.6):** em sessão de CARTÃO, cada linha elegível ganha
+ *     "Lançar no Omie" e uma caixa de seleção para o lote. A elegibilidade é
+ *     `omie-posting-eligibility.ts` (espelho declarado do servidor) e o envio
+ *     nunca sai daqui: abre a gaveta, onde o operador classifica e confirma.
  */
 
 import { MoreHorizontal } from 'lucide-react';
@@ -62,15 +66,22 @@ import type { AnomalyItem, FileEntryItem } from '@/lib/api/reconciliations';
 import { formatBRDate, formatBRL } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
+import { LancarLoteBar, LancarNoOmieButton, PostingCheckbox } from './lancar-no-omie-controls';
+import { LancarNoOmieDrawer } from './lancar-no-omie-drawer';
+import { getPostingBlock, type PostingBlockReason } from './omie-posting-eligibility';
 import { QualificationCell, isQualificationAnomaly } from './qualification-cell';
 import { QualificationOverrideDialog } from './qualification-override-dialog';
 import { RegistrarAnomaliaModal } from './registrar-anomalia-modal';
-import { SituationBadge } from './situation-badge';
+import { LancadaNoOmieBadge, SituationBadge } from './situation-badge';
 import { TrocarLancamentoModal } from './trocar-lancamento-modal';
 
 interface MovementsTabProps {
   sessionId: string;
-  /** FRONT 1.8: cartão → filtro de tipo vira Compras/Estornos. */
+  /**
+   * FRONT 1.8: cartão → filtro de tipo vira Compras/Estornos.
+   * FRONT 07.6: é também o que autoriza a coluna de seleção e a ação de
+   * lançamento — conta corrente/aplicação não lança em lugar nenhum.
+   */
   isCard: boolean;
 }
 
@@ -200,6 +211,55 @@ export function MovementsTab({ sessionId, isCard }: MovementsTabProps) {
   const hasAnyFilter =
     situation !== 'all' || type !== 'all' || debouncedSearch.trim() !== '' || onlySuspect;
 
+  // ---------------------------------------------------------------------
+  // Sprint 7 / FRONT 07.6 — seleção e lançamento no Omie
+  // ---------------------------------------------------------------------
+
+  /** Compras da página que o servidor aceitaria lançar (mesma regra dele). */
+  const eligibleIds = useMemo(
+    () => items.filter((e) => getPostingBlock(e, { isCard }) === null).map((e) => e.id),
+    [items, isCard],
+  );
+
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  /**
+   * Resumo do último lote, por linha. Vive aqui (e não na gaveta) porque é o
+   * que pinta o badge "Lançada no Omie" DEPOIS que a gaveta fecha — e some no
+   * recarregamento da tela, que é o alcance honesto do dado (ver o badge).
+   */
+  const [postedById, setPostedById] = useState<Record<string, number | null>>({});
+  const [launchTargets, setLaunchTargets] = useState<FileEntryItem[] | null>(null);
+
+  // A seleção é da PÁGINA: trocar de página/filtro com ids pendurados faria o
+  // lote enviar compras que o operador não está mais vendo. Podar contra os
+  // elegíveis da página atual resolve os dois casos (saiu da página, ou deixou
+  // de ser elegível porque acabou de ser lançada).
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      const next = prev.filter((id) => eligibleIds.includes(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [eligibleIds]);
+
+  const selectedEntries = useMemo(
+    () => items.filter((e) => selectedIds.includes(e.id)),
+    [items, selectedIds],
+  );
+  const allEligibleSelected = eligibleIds.length > 0 && selectedIds.length === eligibleIds.length;
+
+  function toggleEntry(entryId: string, checked: boolean) {
+    setSelectedIds((prev) =>
+      checked ? [...new Set([...prev, entryId])] : prev.filter((id) => id !== entryId),
+    );
+  }
+
+  function toggleAllInPage(checked: boolean) {
+    setSelectedIds(checked ? eligibleIds : []);
+  }
+
+  /** Colunas fixas + a de seleção, que só existe em cartão. */
+  const columnCount = isCard ? 9 : 8;
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
@@ -262,10 +322,29 @@ export function MovementsTab({ sessionId, isCard }: MovementsTabProps) {
         </div>
       </div>
 
+      {isCard && selectedIds.length > 0 && (
+        <LancarLoteBar
+          selectedCount={selectedIds.length}
+          onLaunch={() => setLaunchTargets(selectedEntries)}
+          onClear={() => setSelectedIds([])}
+        />
+      )}
+
       <div className="rounded-md border">
         <Table scrollRegionLabel="Movimentações (rolável horizontalmente)">
           <TableHeader>
             <TableRow>
+              {isCard && (
+                <TableHead className="w-10">
+                  <PostingCheckbox
+                    checked={allEligibleSelected}
+                    indeterminate={selectedIds.length > 0}
+                    disabled={eligibleIds.length === 0}
+                    label="Selecionar todas as compras desta página que podem ser lançadas no Omie"
+                    onChange={toggleAllInPage}
+                  />
+                </TableHead>
+              )}
               <TableHead className="w-28">Data</TableHead>
               <TableHead>Descrição</TableHead>
               <TableHead className="w-36 text-right">Valor</TableHead>
@@ -277,11 +356,14 @@ export function MovementsTab({ sessionId, isCard }: MovementsTabProps) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {isLoading && <SkeletonRows pageSize={pageSize} />}
+            {isLoading && <SkeletonRows pageSize={pageSize} columnCount={columnCount} />}
 
             {!isLoading && items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={8} className="text-muted-foreground py-10 text-center text-sm">
+                <TableCell
+                  colSpan={columnCount}
+                  className="text-muted-foreground py-10 text-center text-sm"
+                >
                   {hasAnyFilter
                     ? 'Nenhuma movimentação encontrada com os filtros selecionados.'
                     : 'Nenhuma movimentação cadastrada.'}
@@ -307,6 +389,14 @@ export function MovementsTab({ sessionId, isCard }: MovementsTabProps) {
                   <RowFragment
                     key={entry.id}
                     entry={entry}
+                    columnCount={columnCount}
+                    isCard={isCard}
+                    postingBlock={getPostingBlock(entry, { isCard })}
+                    posted={Object.prototype.hasOwnProperty.call(postedById, entry.id)}
+                    postedOmieId={postedById[entry.id] ?? null}
+                    selected={selectedIds.includes(entry.id)}
+                    onSelectedChange={(checked) => toggleEntry(entry.id, checked)}
+                    onLancar={() => setLaunchTargets([entry])}
                     amountNum={amountNum}
                     supplier={omieData?.supplier ?? null}
                     category={omieData?.category ?? null}
@@ -355,6 +445,23 @@ export function MovementsTab({ sessionId, isCard }: MovementsTabProps) {
         disabled={isLoading}
         itemLabel="movimentações"
       />
+
+      {launchTargets !== null && (
+        <LancarNoOmieDrawer
+          sessionId={sessionId}
+          entries={launchTargets}
+          open
+          onOpenChange={(open) => {
+            if (!open) setLaunchTargets(null);
+          }}
+          onPosted={(results) => {
+            // O resumo é do LOTE; guardamos só o par (linha → lançamento) que
+            // pinta o badge, e limpamos da seleção o que saiu das pendências.
+            setPostedById((prev) => ({ ...prev, ...results }));
+            setSelectedIds((prev) => prev.filter((id) => !(id in results)));
+          }}
+        />
+      )}
 
       {trocarFor !== null && (
         <TrocarLancamentoModal
@@ -405,6 +512,17 @@ export function MovementsTab({ sessionId, isCard }: MovementsTabProps) {
 
 interface RowFragmentProps {
   entry: FileEntryItem;
+  /** Colunas da tabela — o `colSpan` da linha de anotação acompanha a seleção. */
+  columnCount: number;
+  isCard: boolean;
+  /** `null` = pode lançar. Caso contrário é o motivo lido pelo leitor de tela. */
+  postingBlock: PostingBlockReason | null;
+  /** Lançada no lote desta visita (fato observado, não inferido da listagem). */
+  posted: boolean;
+  postedOmieId: number | null;
+  selected: boolean;
+  onSelectedChange: (checked: boolean) => void;
+  onLancar: () => void;
   amountNum: number;
   supplier: string | null;
   category: string | null;
@@ -428,6 +546,14 @@ interface RowFragmentProps {
 
 function RowFragment({
   entry,
+  columnCount,
+  isCard,
+  postingBlock,
+  posted,
+  postedOmieId,
+  selected,
+  onSelectedChange,
+  onLancar,
   amountNum,
   supplier,
   category,
@@ -455,6 +581,16 @@ function RowFragment({
   return (
     <>
       <TableRow>
+        {isCard && (
+          <TableCell>
+            <PostingCheckbox
+              checked={selected}
+              disabled={postingBlock !== null}
+              label={`Selecionar a compra de ${formatBRDate(entry.transaction_date)} — ${entry.description}`}
+              onChange={onSelectedChange}
+            />
+          </TableCell>
+        )}
         <TableCell className="text-sm">{formatBRDate(entry.transaction_date)}</TableCell>
         <TableCell className="text-sm">
           <div className="flex flex-col">
@@ -476,45 +612,55 @@ function RowFragment({
           {entry.omie_lancamento_id === null ? '—' : (category ?? '—')}
         </TableCell>
         <TableCell>
-          <SituationBadge situation={entry.situation} title={divergenceTitle} />
+          <div className="flex flex-col items-start gap-1">
+            <SituationBadge situation={entry.situation} title={divergenceTitle} />
+            {posted && <LancadaNoOmieBadge omieLancamentoId={postedOmieId} />}
+          </div>
         </TableCell>
         <TableCell className="text-center">
           <QualificationCell anomalies={qualificationAnomalies} onOpenOverride={onOpenOverride} />
         </TableCell>
         <TableCell>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" aria-label="Abrir ações">
-                <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {entry.situation === 'conciliado' && (
-                <>
-                  <DropdownMenuItem onSelect={onConfirm}>Confirmar</DropdownMenuItem>
-                  <DropdownMenuItem onSelect={onTrocar}>Trocar lançamento</DropdownMenuItem>
-                  <DropdownMenuItem onSelect={onAnotar}>Anotar</DropdownMenuItem>
-                  <DropdownMenuItem onSelect={onIgnorar}>Ignorar</DropdownMenuItem>
-                </>
-              )}
-              {entry.situation === 'sem_omie' && (
-                <>
-                  <DropdownMenuItem onSelect={onFlag}>Marcar para verificação</DropdownMenuItem>
-                  <DropdownMenuItem onSelect={onAnotar}>Anotar</DropdownMenuItem>
-                  <DropdownMenuItem onSelect={onIgnorar}>Ignorar</DropdownMenuItem>
-                </>
-              )}
-              {entry.situation === 'ignorado' && (
-                <DropdownMenuItem onSelect={onRestaurar}>Restaurar</DropdownMenuItem>
-              )}
-              <DropdownMenuItem onSelect={onCreateAnomaly}>Registrar anomalia</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <div className="flex items-center justify-end gap-1">
+            {/* Sprint 7 / R1: a porta do lançamento fica VISÍVEL na linha — a
+                ação que grava na contabilidade do cliente não se esconde
+                dentro de um menu. Em linha inelegível ela continua no lugar,
+                inerte e com o motivo, em vez de sumir sem explicação. */}
+            {isCard && <LancarNoOmieButton block={postingBlock} onClick={onLancar} />}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" aria-label="Abrir ações">
+                  <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {entry.situation === 'conciliado' && (
+                  <>
+                    <DropdownMenuItem onSelect={onConfirm}>Confirmar</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={onTrocar}>Trocar lançamento</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={onAnotar}>Anotar</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={onIgnorar}>Ignorar</DropdownMenuItem>
+                  </>
+                )}
+                {entry.situation === 'sem_omie' && (
+                  <>
+                    <DropdownMenuItem onSelect={onFlag}>Marcar para verificação</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={onAnotar}>Anotar</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={onIgnorar}>Ignorar</DropdownMenuItem>
+                  </>
+                )}
+                {entry.situation === 'ignorado' && (
+                  <DropdownMenuItem onSelect={onRestaurar}>Restaurar</DropdownMenuItem>
+                )}
+                <DropdownMenuItem onSelect={onCreateAnomaly}>Registrar anomalia</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </TableCell>
       </TableRow>
       {isEditingNote && (
         <TableRow>
-          <TableCell colSpan={8} className="bg-muted/30">
+          <TableCell colSpan={columnCount} className="bg-muted/30">
             <div className="space-y-2">
               <Textarea
                 value={noteDraft}
@@ -539,12 +685,12 @@ function RowFragment({
   );
 }
 
-function SkeletonRows({ pageSize }: { pageSize: number }) {
+function SkeletonRows({ pageSize, columnCount }: { pageSize: number; columnCount: number }) {
   return (
     <>
       {Array.from({ length: Math.min(pageSize, 8) }).map((_, i) => (
         <TableRow key={i}>
-          <TableCell colSpan={8}>
+          <TableCell colSpan={columnCount}>
             <div className="bg-muted h-6 animate-pulse rounded" />
           </TableCell>
         </TableRow>
