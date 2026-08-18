@@ -191,6 +191,66 @@ class AnomalyTypeInUseError(ConflictError):
     )
 
 
+class OmiePostingDisabledError(ConflictError):
+    """409 — o kill-switch `OMIE_POSTING_ENABLED` está desligado (S7 BACK 07.4).
+
+    **4xx e não 5xx**, deliberadamente: o recurso não falhou, ele está
+    desligado por decisão de operação (§7 do CLAUDE.md — erro de negócio é 4xx
+    com mensagem acionável; 5xx mentiria "tente de novo" e ainda poluiria o
+    alerting com um estado esperado). **409 e não 403**, porque não é sobre o
+    papel do usuário: o mesmo usuário poderá fazer isso assim que o ambiente
+    for habilitado.
+    """
+
+    default_user_message = (
+        "O lançamento no Omie está desativado neste ambiente. Fale com o suporte."
+    )
+
+
+class OmiePostingNotEligibleError(ValidationAppError):
+    """400 — a conciliação inteira não é elegível para lançamento (S7 BACK 07.4).
+
+    Hoje só sessão de **cartão** (`account_type == 'credit_card'`, que é o `CR`
+    do Omie — ver ADR-020-BE, o PRD diz `CA` e está errado). Conta corrente é
+    recusada com erro de NEGÓCIO, não com 500 nem com um lote vazio silencioso.
+    """
+
+    default_user_message = (
+        "Só é possível lançar no Omie a partir de uma conciliação de cartão de crédito."
+    )
+
+
+class OmiePostingKeyCollisionError(ConflictError):
+    """409 — a chave `cCodIntLanc` derivada colidiu dentro do tenant (S7 BACK 07.2).
+
+    Astronomicamente improvável (85 bits de digest — ver `omie_posting/keys.py`),
+    mas **não** impossível: o `UNIQUE(client_id, cod_int_lanc)` existe justamente
+    para que a colisão vire ERRO, e não uma linha silenciosamente nunca lançada.
+    Se isto aparecer em produção, o encoding da chave é que precisa mudar.
+    """
+
+    default_user_message = (
+        "Não foi possível gerar a chave de lançamento desta linha. "
+        "Informe o suporte para que a conciliação seja verificada."
+    )
+
+
+class OmieLancamentoAlreadyLinkedError(ConflictError):
+    """409 — o `nCodLanc` confirmado já está vinculado a OUTRA linha da sessão.
+
+    Guardado pelo índice parcial `ix_recon_file_entry_session_omie_unique`
+    (`session_id`, `omie_lancamento_id`), que existe desde a S11: um lançamento
+    do Omie só pode fechar UMA linha do arquivo (CLAUDE.md §5.4). O caminho de
+    confirmação do lançamento **convive** com esse índice em vez de contorná-lo
+    — a intenção fica registrada como falha e o operador enxerga o motivo.
+    """
+
+    default_user_message = (
+        "O lançamento devolvido pelo Omie já está vinculado a outra linha desta "
+        "conciliação. Revise a linha antes de lançar de novo."
+    )
+
+
 class IncompleteCredentialsError(ValidationAppError):
     """400 — atualizar credenciais Omie exige App Key E App Secret juntos (S6 §3.4)."""
 

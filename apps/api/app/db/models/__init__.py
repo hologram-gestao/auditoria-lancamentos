@@ -35,6 +35,11 @@ from app.db.models.reconciliation_omie_entry import (
     OmieEntryUserAction,
     ReconciliationOmieEntry,
 )
+from app.db.models.reconciliation_omie_posting import (
+    COD_INT_LANC_MAX_LENGTH,
+    OmiePostingStatus,
+    ReconciliationOmiePosting,
+)
 from app.db.models.reconciliation_session import (
     ReconciliationSession,
     ReconciliationStatus,
@@ -55,6 +60,7 @@ from app.db.models.user import (
 
 __all__ = [
     "CLIENT_ROLES",
+    "COD_INT_LANC_MAX_LENGTH",
     "IV_HEX_LENGTH",
     "MAX_CODE_CHARS",
     "MAX_DESCRIPTION_CHARS",
@@ -82,11 +88,13 @@ __all__ = [
     "OmieAccountType",
     "OmieEntryStatus",
     "OmieEntryUserAction",
+    "OmiePostingStatus",
     "ReconciliationAnomaly",
     "ReconciliationFile",
     "ReconciliationFileEntry",
     "ReconciliationFileStatus",
     "ReconciliationOmieEntry",
+    "ReconciliationOmiePosting",
     "ReconciliationSession",
     "ReconciliationStatus",
     "SessionAccountType",

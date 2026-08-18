@@ -101,6 +101,17 @@ _INSERT_LEGACY_USER = (
 )
 
 
+def _table_exists(url: str, table: str) -> bool:
+    return (
+        _scalar(
+            url,
+            "SELECT count(*) FROM information_schema.tables "
+            f"WHERE table_schema = 'public' AND table_name = '{table}'",
+        )
+        == 1
+    )
+
+
 def _columns(url: str, table: str, *cols: str) -> object:
     placeholders = ", ".join(f"'{c}'" for c in cols)
     return _scalar(
@@ -515,3 +526,77 @@ class TestVereditoDoRevisorRoundTrip:
         command.upgrade(alembic_cfg, "head")
         assert _columns(url, "reconciliation_anomalies", "review_verdict") == 1
         assert _columns(url, "reconciliation_sessions", "qualification_used_glossary") == 1
+
+
+# Revisões da Sprint 7 (BACK 07.2). Por ID, não por "-1": migration nova por
+# cima mudaria o alvo relativo e o teste deixaria de descer a desta sprint.
+PRE_S7_REV = "c5a2f81b6d34"
+S7_OMIE_POSTINGS_REV = "d7c2b9f14a86"
+
+
+class TestOmiePostingsRoundTrip:
+    """A tabela de intenção de lançamento sobe e desce limpo (Sprint 7 / BACK 07.2).
+
+    A migration é puro DDL aditivo — nenhuma tabela anterior é tocada. O que
+    este round-trip prova é que reverter não deixa resto (índices órfãos,
+    constraint pendurada) num ambiente que já tenha subido a sprint.
+    """
+
+    def test_upgrade_downgrade_upgrade(self, alembic_cfg: Config, migrations_db_url: str) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        assert _table_exists(url, "reconciliation_omie_postings")
+
+        command.downgrade(alembic_cfg, PRE_S7_REV)
+        assert not _table_exists(url, "reconciliation_omie_postings")
+        # A tabela que o fluxo REFLETE continua de pé — o rollback é perda de
+        # feature, não corrupção de dado pré-existente.
+        assert _table_exists(url, "reconciliation_file_entries")
+
+        command.upgrade(alembic_cfg, "head")
+        assert _table_exists(url, "reconciliation_omie_postings")
+
+    def test_uniqueness_lives_in_the_database(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        """As duas chaves da dedup primária existem NO BANCO, não só no ORM.
+
+        É o ponto inteiro da BACK 07.2: a proteção contra lançar duas vezes não
+        depende de o Omie impor unicidade sobre `cCodIntLanc` (S-1, não
+        verificado) nem de a aplicação lembrar de checar.
+        """
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+
+        for constraint in (
+            "uq_recon_omie_postings_file_entry",
+            "uq_recon_omie_postings_client_cod_int",
+        ):
+            assert (
+                _scalar(
+                    url,
+                    "SELECT count(*) FROM pg_constraint "
+                    f"WHERE conname = '{constraint}' AND contype = 'u'",
+                )
+                == 1
+            ), f"constraint {constraint} ausente no banco"
+
+    def test_cod_int_lanc_column_respects_omie_string20(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        """`cCodIntLanc` é `string20` na Omie — a coluna não pode ser mais larga.
+
+        Uma coluna maior aceitaria em silêncio uma chave que a Omie recusaria
+        (ou truncaria, o que é pior: duas linhas com a mesma chave truncada).
+        """
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        assert (
+            _scalar(
+                url,
+                "SELECT character_maximum_length FROM information_schema.columns "
+                "WHERE table_name = 'reconciliation_omie_postings' "
+                "AND column_name = 'cod_int_lanc'",
+            )
+            == 20
+        )
