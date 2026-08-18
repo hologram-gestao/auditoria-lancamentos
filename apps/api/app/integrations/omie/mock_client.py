@@ -19,6 +19,7 @@ Não persiste nem loga conteúdo. **Nunca usar em produção.**
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -26,7 +27,10 @@ from typing import TYPE_CHECKING, Any
 from app.core.logging import get_logger
 from app.integrations.omie.client import OmieClient, OmieCredentials
 from app.integrations.omie.schemas import (
+    CategoriaOmie,
     ContaCorrente,
+    IncluirLancCCRequest,
+    IncluirLancCCResponse,
     LancamentoExtrato,
     OmieTituloStatus,
     TituloAPagarReceber,
@@ -261,6 +265,30 @@ _MOCK_CONTAS_RECEBER_ATRASADO: list[TituloAPagarReceber] = [
     ),
 ]
 
+# Plano de contas fictício da Padaria (Sprint 7 / BACK 07.3) — popula o
+# combobox de classificação em dev/demo. Uma inativa de propósito, para que o
+# filtro de `conta_inativa` seja exercitado pelo fluxo real e não só por teste.
+_MOCK_CATEGORIAS: list[CategoriaOmie] = [
+    CategoriaOmie.model_validate(
+        {"codigo": "1.01.01", "descricao": "Vendas de produtos", "conta_inativa": "N"}
+    ),
+    CategoriaOmie.model_validate(
+        {"codigo": "2.01.03", "descricao": "Insumos e matéria-prima", "conta_inativa": "N"}
+    ),
+    CategoriaOmie.model_validate(
+        {"codigo": "2.02.01", "descricao": "Energia elétrica", "conta_inativa": "N"}
+    ),
+    CategoriaOmie.model_validate(
+        {"codigo": "2.02.04", "descricao": "Combustível e deslocamento", "conta_inativa": "N"}
+    ),
+    CategoriaOmie.model_validate(
+        {"codigo": "2.05.02", "descricao": "Despesas com IOF", "conta_inativa": "N"}
+    ),
+    CategoriaOmie.model_validate(
+        {"codigo": "9.99.99", "descricao": "Categoria desativada", "conta_inativa": "S"}
+    ),
+]
+
 
 class MockOmieClient(OmieClient):
     """`OmieClient` que devolve payloads fixos sem tocar a rede.
@@ -315,6 +343,47 @@ class MockOmieClient(OmieClient):
         await asyncio.sleep(_DELAY_LISTAR_CONTAS_SECONDS)
         log.info("omie_mock_call", call="listar_contas_correntes", count=len(_MOCK_CONTAS))
         return list(_MOCK_CONTAS)
+
+    async def incluir_lanc_cc(self, request: IncluirLancCCRequest) -> IncluirLancCCResponse:
+        """Aceita o lançamento e devolve um `nCodLanc` fictício (Sprint 7).
+
+        **Este mock não prova contrato nenhum** (S-1): ele repete os nomes que
+        o `IncluirLancCCRequest` assume. Existe só para o fluxo de dev/demo
+        rodar sem credencial. Quem prova o contrato é a fixture real
+        (`tests/unit/test_omie_fixtures.py`).
+
+        O ID é derivado do `cCodIntLanc` — assim o mesmo lançamento "mockado"
+        devolve sempre o mesmo `nCodLanc`, e dois lançamentos distintos
+        devolvem IDs distintos (o índice parcial da sessão continua sendo
+        exercitado de verdade).
+        """
+        await asyncio.sleep(_DELAY_LISTAR_CONTAS_SECONDS)
+        key = request.c_cod_int_lanc or ""
+        n_cod_lanc = 950_000_000 + (
+            int.from_bytes(hashlib.blake2s(key.encode(), digest_size=4).digest(), "big") % 1_000_000
+        )
+        log.info("omie_mock_call", call="incluir_lanc_cc", n_cod_lanc=n_cod_lanc)
+        return IncluirLancCCResponse.model_validate(
+            {
+                "nCodLanc": n_cod_lanc,
+                "cCodIntLanc": request.c_cod_int_lanc,
+                "cCodStatus": "0",
+                "cDesStatus": "Lancamento incluido com sucesso (MOCK)",
+            }
+        )
+
+    async def listar_categorias(self) -> list[CategoriaOmie]:
+        """Categorias do plano de contas fictício da Padaria (Sprint 7).
+
+        Existe para que o fluxo de classificação/lançamento funcione em
+        dev/demo sem credencial Omie. Os NOMES de campo espelham o
+        `CategoriaOmie` — que é NÃO-VERIFICADO (ver o DTO): este mock **não**
+        prova o contrato, e é por isso que o gate de verdade é a fixture real
+        (`tests/unit/test_omie_fixtures.py`), não este arquivo.
+        """
+        await asyncio.sleep(_DELAY_LISTAR_CONTAS_SECONDS)
+        log.info("omie_mock_call", call="listar_categorias", count=len(_MOCK_CATEGORIAS))
+        return list(_MOCK_CATEGORIAS)
 
     async def listar_extrato(
         self,
