@@ -1,0 +1,6 @@
+# Relatório do gate de a11y (`scripts/a11y-gate.sh` → `apps/web/a11y-report.json`).
+# São ~189 KB de saída de ferramenta que já entraram num commit uma vez e
+# reprovaram uma task. O `.gitignore` da RAIZ não resolve: ele está fora do
+# `gitPaths` de qualquer agent, então o agent que roda o gate não consegue
+# entregar a regra junto com a correção. Aqui, sim — este arquivo é do front.
+a11y-report.json

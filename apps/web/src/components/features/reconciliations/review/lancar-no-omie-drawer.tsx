@@ -236,8 +236,13 @@ export function LancarNoOmieDrawer({
                       <span className="text-muted-foreground w-20 text-sm tabular-nums">
                         {formatBRDate(entry.transaction_date)}
                       </span>
-                      <span className="min-w-[10rem] flex-1 text-sm">{entry.description}</span>
-                      <span className="text-sm tabular-nums">
+                      <span className="min-w-[8rem] flex-1 text-sm">{entry.description}</span>
+                      {/* `ml-auto` + `whitespace-nowrap`: em 390px o valor mais
+                          largo não cabe na mesma linha e, sem isto, cai para a
+                          linha de baixo ALINHADO À ESQUERDA — enquanto o valor
+                          curto da linha vizinha fica à direita. Duas compras do
+                          mesmo lote apareciam alinhadas de formas diferentes. */}
+                      <span className="ml-auto whitespace-nowrap text-sm tabular-nums">
                         {formatBRL(entry.amount, { signed: true })}
                       </span>
                     </div>

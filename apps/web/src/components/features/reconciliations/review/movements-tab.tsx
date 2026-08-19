@@ -602,7 +602,12 @@ function RowFragment({
             )}
           </div>
         </TableCell>
-        <TableCell className={cn('text-right text-sm', amountClass)}>
+        {/* `whitespace-nowrap`: o navegador pode quebrar a linha DEPOIS do
+            hífen, e `-R$ 150,50` numa coluna estreita vira `-` sozinho numa
+            linha e `R$ 150,50` na outra — um débito que se lê como crédito.
+            A Sprint 7 acrescentou duas colunas (seleção + ação) e foi o que
+            espremeu esta a ponto de quebrar. O axe não mede isso (ADR-014-QA). */}
+        <TableCell className={cn('whitespace-nowrap text-right text-sm tabular-nums', amountClass)}>
           {formatBRL(entry.amount, { signed: true })}
         </TableCell>
         <TableCell className="text-muted-foreground text-sm">

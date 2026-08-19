@@ -1416,13 +1416,26 @@ for (const vp of VIEWPORTS) {
       const ignorada = page.getByRole('row', { name: /Compra ignorada na revisão/ });
       const acaoInerte = ignorada.getByRole('button', { name: /Lançar no Omie/ });
       await expect(acaoInerte).toHaveAttribute('aria-disabled', 'true');
-      await expect(
-        ignorada.getByRole('checkbox', { name: /Selecionar a compra/ }),
-      ).toBeDisabled();
+      await expect(ignorada.getByRole('checkbox', { name: /Selecionar a compra/ })).toBeDisabled();
 
       // Seleciona e mede COM a barra de lote montada.
       await linha.getByRole('checkbox', { name: /Selecionar a compra/ }).check();
       await expect(page.getByRole('button', { name: /Lançar 1 compra no Omie/ })).toBeVisible();
+
+      // O VALOR não pode quebrar entre o hífen e o número. O navegador quebra
+      // depois do `-`, e a Sprint 7 estreitou esta coluna ao acrescentar duas
+      // (seleção + ação): `-R$ 150,50` virava `-` numa linha e `R$ 150,50` na
+      // outra — um débito que se lê como crédito. `getClientRects()` sobre o
+      // conteúdo conta LINHAS renderizadas; o axe não vê isto (ADR-014-QA).
+      const linhasDoValor = await linha
+        .locator('td')
+        .filter({ hasText: /R\$\s*150,50/ })
+        .evaluate((el) => {
+          const r = document.createRange();
+          r.selectNodeContents(el);
+          return r.getClientRects().length;
+        });
+      expect(linhasDoValor, 'valor monetário quebrado em mais de uma linha').toBe(1);
 
       await expect(page.locator('#__next_error__')).toHaveCount(0);
       await shot(page, `lancamento-selecao-${slugP}`);
@@ -1443,8 +1456,10 @@ for (const vp of VIEWPORTS) {
       await aguardarAnimacao(gaveta);
       // Cancelar à ESQUERDA da ação primária (contrato da gaveta).
       const cancelar = await gaveta.getByRole('button', { name: 'Cancelar' }).boundingBox();
-      const primaria = await gaveta.getByRole('button', { name: /Confirmar e lançar/ }).boundingBox();
-      expect((cancelar?.x ?? 0), 'Cancelar precisa ficar à esquerda da ação primária').toBeLessThan(
+      const primaria = await gaveta
+        .getByRole('button', { name: /Confirmar e lançar/ })
+        .boundingBox();
+      expect(cancelar?.x ?? 0, 'Cancelar precisa ficar à esquerda da ação primária').toBeLessThan(
         primaria?.x ?? 0,
       );
 
@@ -1463,8 +1478,24 @@ for (const vp of VIEWPORTS) {
         'Cancelar da gaveta cortado pela borda da viewport',
       ).toBeLessThanOrEqual(larguraViewport);
 
+      // Os valores das DUAS compras do lote têm de terminar na mesma borda
+      // direita. Em 390px o valor mais largo caía para a linha de baixo
+      // alinhado à ESQUERDA, enquanto o curto ficava à direita — duas linhas
+      // do mesmo lote alinhadas de formas diferentes. Mede as bordas, não o CSS.
+      const bordas = await gaveta
+        .locator('li span.tabular-nums')
+        .filter({ hasText: /R\$/ })
+        .evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().right)));
+      expect(bordas.length, 'esperava um valor por compra do lote').toBe(2);
+      expect(
+        Math.abs((bordas[0] ?? 0) - (bordas[1] ?? 0)),
+        'valores do lote não terminam na mesma borda direita',
+      ).toBeLessThanOrEqual(1);
+
       // Sem categoria, o envio não é oferecido.
-      await expect(gaveta.getByRole('button', { name: /Confirmar e lançar 0 de 2/ })).toBeDisabled();
+      await expect(
+        gaveta.getByRole('button', { name: /Confirmar e lançar 0 de 2/ }),
+      ).toBeDisabled();
 
       // COMBOBOX ABERTO no instante da medição (ADR-013-QA): é o estado que o
       // axe nunca vê se o cenário medir só a tela em repouso.
@@ -1490,7 +1521,9 @@ for (const vp of VIEWPORTS) {
       await expect(gaveta.getByRole('button', { name: /Tentar novamente 1 de 1/ })).toBeVisible();
 
       // TOAST montado e MEDIDO — parcial é aviso, e a cor vem dos tokens.
-      await expect(page.getByText('1 de 2 compras lançadas. Veja o motivo das demais.')).toBeVisible();
+      await expect(
+        page.getByText('1 de 2 compras lançadas. Veja o motivo das demais.'),
+      ).toBeVisible();
       expect(await measuredContrast(page, TOAST_TITLE)).toBeGreaterThanOrEqual(4.5);
 
       await expect(page.locator('#__next_error__')).toHaveCount(0);
