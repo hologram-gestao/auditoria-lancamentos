@@ -409,6 +409,31 @@ class IncluirLancCCRequest(BaseModel):
     - **Nomes de campo e obrigatoriedade**: vêm da doc, não de uma resposta.
       Quando a fixture existir, o teste compara as chaves realmente aceitas
       pela Omie com o conjunto de aliases deste DTO e FALHA na divergência.
+
+    **Cross-check contra a doc oficial (19/08/2026 — duas leituras
+    independentes de `financas/contacorrentelancamentos/`): a doc descreve o
+    `param` ANINHADO, este DTO emite PLANO.** Estrutura na doc: `cCodIntLanc`
+    no topo; `cabecalho` { `nCodCC`, `dDtLanc`, `nValorLanc` }; `detalhes`
+    { `cCodCateg`, `cTipo`, `cNumDoc`, `nCodCliente`, `nCodProjeto`, `cObs` };
+    `transferencia` e `departamentos` opcionais. Além da forma:
+
+    - **`cNatureza` NÃO existe no contrato de escrita** — na página ele só
+      aparece na estrutura `diversos`, com domínio `P`/`R` (outra coisa). Como
+      a doc não mostra campo de sinal no `cabecalho`, a representação de
+      débito/crédito na escrita é INDETERMINADA (candidatos: `nValorLanc` com
+      sinal, ou a natureza da própria categoria). O readback da captura é o
+      que responde isso.
+    - **`cTipo` não era palpite**: `string5` em `detalhes`, com `DIN` entre os
+      valores válidos (`ADI, BOL, CRT, CHQ, CON, CRE, DRF, DAS, DEB, DIN,
+      DOC, GUIA, PROT, REC, RPA, TED, TRA, 99999`). A página não marca a
+      obrigatoriedade de forma inequívoca (nem a de `cCodCateg`).
+
+    O DTO **não** foi reescrito para o formato aninhado de propósito: seria
+    trocar uma suposição por outra da MESMA fonte que já errou 3x neste
+    repositório (`ListarExtrato` v1, `ListarContasCorrentes`, filtro
+    `PREVISTO` → 5001). Se a doc estiver certa, o 1º POST real falha SEM criar
+    lançamento — a faultstring é evidência de graça, e o script de captura a
+    grava verbatim. Com a fixture na mão, a reescrita é mecânica.
     """
 
     n_cod_cc: int = Field(
@@ -475,7 +500,10 @@ class IncluirLancCCResponse(BaseModel):
 
     ⚠️ **NÃO-VERIFICADO (S-1).** Os nomes abaixo vêm da convenção da Omie
     para os serviços `Incluir*` (eco do código interno + código/descrição de
-    status), **não** de uma resposta real. `n_cod_lanc` é declarado
+    status), **não** de uma resposta real. Cross-check da doc (19/08/2026):
+    os 4 campos batem 1:1 com a `lanccIncluirResponse` documentada — ao
+    contrário do request, aqui doc e DTO concordam; segue valendo a fixture
+    como prova final. `n_cod_lanc` é declarado
     **obrigatório** de propósito: é o dado que o ADL precisa persistir
     (`omie_lancamento_id`, BACK 07.2) e, se o nome real for outro, o teste
     contra a fixture FALHA em vez de gravar `None` em silêncio — que foi

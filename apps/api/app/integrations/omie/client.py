@@ -550,6 +550,10 @@ class OmieClient:
         nomes de campo, a convenção de sinal e a unicidade de `cCodIntLanc`
         vieram da doc, não de uma resposta real; o gate é
         `tests/unit/test_omie_fixtures.py` contra a fixture da BACK 07.1.
+        **Cross-check da doc (19/08/2026): a doc descreve o `param` ANINHADO
+        (`cabecalho`/`detalhes`) e sem `cNatureza` — este método envia plano.
+        Expectativa realista: o 1º POST real é RECUSADO sem criar lançamento,
+        e a captura grava a faultstring como evidência.**
 
         **O que o `call()` faz por baixo e por que importa aqui:** ele retenta
         5xx e timeout com backoff. Retry de uma ESCRITA pode criar duplicata se

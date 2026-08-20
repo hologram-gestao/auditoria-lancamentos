@@ -14,6 +14,7 @@ as chamadas. Um teste que precisasse da Omie real não seria um teste.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -130,6 +131,44 @@ class TestWriteCaptureOptIn:
         )
         # 4 capturas de leitura + 1 readback do extrato após a escrita.
         assert spy_client.calls.count("ListarExtrato") == 2
+
+    @pytest.mark.usefixtures("_clean_capture_env")
+    async def test_first_post_refused_records_fault_and_stops(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """1º POST recusado (desfecho ESPERADO — cross-check 19/08/2026: a doc
+        descreve o `param` aninhado, o DTO emite plano): a faultstring vira
+        fixture verbatim, e nem 2º POST nem readback acontecem — nada foi
+        criado, então não há idempotência a provar nem extrato a reler."""
+
+        class _Refusing(_SpyOmieClient):
+            async def call(self, *, call_name: str, **kwargs: Any) -> dict[str, Any]:
+                if call_name == "IncluirLancCC":
+                    type(self).calls.append(call_name)
+                    raise RuntimeError("Tag [cabecalho] obrigatoria nao informada")
+                return await super().call(call_name=call_name, **kwargs)
+
+        _Refusing.calls = []
+        monkeypatch.setattr(capture, "OmieClient", _Refusing)
+        monkeypatch.setattr(capture, "_FIXTURES_DIR", tmp_path)
+        for key, value in {**_READ_ONLY_ENV, **_WRITE_ENV}.items():
+            monkeypatch.setenv(key, value)
+
+        await capture._main()  # NÃO pode levantar — crashar perderia a evidência
+
+        assert _Refusing.calls.count("IncluirLancCC") == 1, "recusado o 1º, não há o que repetir"
+        assert _Refusing.calls.count("ListarExtrato") == 1, (
+            "sem lançamento criado, o readback do extrato não deve rodar "
+            "(o 1 é a captura de leitura normal)"
+        )
+        recorded = json.loads((tmp_path / "incluir_lanc_cc.response.json").read_text("utf-8"))
+        assert "Tag [cabecalho]" in recorded["_adl_capture_exception_message"], (
+            "a faultstring precisa estar VERBATIM na fixture — ela é a evidência S-1"
+        )
+        assert not (tmp_path / "incluir_lanc_cc_repeat.response.json").exists()
+        assert (tmp_path / "incluir_lanc_cc.request.json").exists(), (
+            "o request enviado é metade da evidência (mostra O QUE foi recusado)"
+        )
 
 
 @pytest.mark.unit

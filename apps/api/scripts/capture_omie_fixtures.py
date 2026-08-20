@@ -214,6 +214,12 @@ async def _capture_incluir_lanc_cc(client: OmieClient) -> None:
     Omie impõe unicidade sobre `cCodIntLanc` (S-1). Por isso o segundo POST é
     parte da captura, e a resposta dele é gravada separadamente — inclusive
     quando é um `faultstring` (que é, aliás, o resultado *desejado*).
+
+    **Recusa do 1º POST também é captura válida** (cross-check da doc,
+    19/08/2026): a doc oficial descreve o `param` aninhado e o DTO emite plano,
+    então a expectativa realista é a Omie recusar. A faultstring é gravada
+    verbatim como `incluir_lanc_cc.response.json` e a captura de escrita para
+    aí — nada foi criado, nada há para repetir nem reler.
     """
     request = _build_incluir_lanc_cc_request()
     param = request.model_dump(by_alias=True, exclude_none=True, mode="json")
@@ -224,12 +230,39 @@ async def _capture_incluir_lanc_cc(client: OmieClient) -> None:
     )
     _write_json("incluir_lanc_cc.request", {"call_name": _LANC_CC_CALL, "param": param})
 
-    first = await client.call(
-        module=_LANC_CC_MODULE,
-        endpoint=_LANC_CC_ENDPOINT,
-        call_name=_LANC_CC_CALL,
-        param=param,
-    )
+    try:
+        first = await client.call(
+            module=_LANC_CC_MODULE,
+            endpoint=_LANC_CC_ENDPOINT,
+            call_name=_LANC_CC_CALL,
+            param=param,
+        )
+    except Exception as exc:  # a recusa é evidência S-1 — gravar, não crashar
+        # Desde o cross-check da doc (19/08/2026) a recusa do 1º POST é o
+        # desfecho MAIS PROVÁVEL: a doc descreve o `param` ANINHADO
+        # (`cabecalho`/`detalhes`) e sem `cNatureza`, e o DTO emite plano —
+        # ver `IncluirLancCCRequest`. A faultstring é exatamente a evidência
+        # que o S-1 pede; crashar aqui a perderia (viraria só traceback).
+        # Sem lançamento criado, o 2º POST não provaria nada e o readback não
+        # teria o que ler — por isso a captura de escrita PARA aqui.
+        _write_json(
+            "incluir_lanc_cc.response",
+            {
+                "_adl_capture_note": (
+                    "1º POST recusado — provável divergência de contrato "
+                    "(doc descreve param aninhado). Texto preservado VERBATIM."
+                ),
+                "_adl_capture_exception_type": type(exc).__name__,
+                "_adl_capture_exception_message": str(exc),
+            },
+        )
+        print(
+            "[capture] ⚠️ 1º POST RECUSADO — faultstring gravada em "
+            "incluir_lanc_cc.response.json (evidência S-1, não é captura perdida).\n"
+            "[capture]   Se a exceção foi TIMEOUT (não faultstring), confira no "
+            "Omie se o lançamento chegou a ser criado antes de re-rodar."
+        )
+        return
     _write_json("incluir_lanc_cc.response", first)
 
     print("[capture] 2º POST com o MESMO cCodIntLanc (prova de idempotência) ...")

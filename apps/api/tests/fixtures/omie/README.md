@@ -95,6 +95,26 @@ Por isso a captura de escrita:
 - exige `OMIE_CAPTURE_COD_INT_LANC` explícito — é por essa chave que você
   localiza o lançamento no Omie para excluir.
 
+## Cross-check da doc oficial (19/08/2026) — leia antes da captura de escrita
+
+Duas leituras independentes de
+`https://app.omie.com.br/api/v1/financas/contacorrentelancamentos/` concordam:
+a doc descreve o `param` do `IncluirLancCC` **aninhado** (`cCodIntLanc` no
+topo; `cabecalho` com `nCodCC`/`dDtLanc`/`nValorLanc`; `detalhes` com
+`cCodCateg`/`cTipo`/`cObs`/...), **sem `cNatureza`** no contrato de escrita —
+e o nosso DTO emite tudo **plano**, com `cNatureza`. A resposta, ao contrário,
+bate 1:1 (`nCodLanc`, `cCodIntLanc`, `cCodStatus`, `cDesStatus`).
+
+Consequência prática: **a recusa do 1º POST é o desfecho esperado, e é captura
+VÁLIDA** — o script grava a `faultstring` verbatim em
+`incluir_lanc_cc.response.json` e para (nada foi criado; sem 2º POST, sem
+readback). Só se a Omie aceitar o formato plano é que a sequência completa
+(idempotência + readback) roda. O DTO não foi reescrito para o formato
+aninhado de propósito: a doc desta API já errou 3x neste repositório, e a
+faultstring real decide melhor que uma segunda suposição. Atenção: se a
+exceção for **timeout** (não faultstring), confira no Omie se o lançamento
+chegou a ser criado antes de re-rodar.
+
 ## Como capturar (operador com credencial autorizada)
 
 ```bash
@@ -114,12 +134,12 @@ O script faz o POST **duas vezes com a mesma chave** e grava as duas respostas.
 Isso é obrigatório: **uma resposta só (1 POST) mostra o contrato, mas não
 demonstra idempotência.** Arquivos gerados:
 
-| Arquivo                             | O que prova                                                     |
-| ----------------------------------- | --------------------------------------------------------------- |
-| `incluir_lanc_cc.request.json`      | as chaves que a Omie **aceitou** (sem `app_key`/`app_secret`)    |
-| `incluir_lanc_cc.response.json`     | o formato da resposta (inclusive o nome real do `nCodLanc`)      |
+| Arquivo                                | O que prova                                                         |
+| -------------------------------------- | ------------------------------------------------------------------- |
+| `incluir_lanc_cc.request.json`         | as chaves que a Omie **aceitou** (sem `app_key`/`app_secret`)       |
+| `incluir_lanc_cc.response.json`        | o formato da resposta (inclusive o nome real do `nCodLanc`)         |
 | `incluir_lanc_cc_repeat.response.json` | se o 2º POST foi **recusado** (unicidade) ou criou outro lançamento |
-| `incluir_lanc_cc.readback.json`     | o extrato do dia — **evidência da convenção de sinal**            |
+| `incluir_lanc_cc.readback.json`        | o extrato do dia — **evidência da convenção de sinal**              |
 
 Sobre o `repeat`: se a Omie recusar (o esperado), ela responde **HTTP 200 com
 `faultstring`** e o `OmieClient` levanta exceção — o script grava a mensagem
