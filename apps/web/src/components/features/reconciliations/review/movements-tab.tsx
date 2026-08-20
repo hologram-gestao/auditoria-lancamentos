@@ -102,9 +102,14 @@ export function MovementsTab({ sessionId, isCard }: MovementsTabProps) {
 
   // Reset para página 1 sempre que filtros mudam (paginação ficaria
   // pendurada num resultado vazio se trocássemos só o filtro).
+  // 86e2n4pf1 — filtro server-side: entra na query e no reset de página,
+  // como os demais. Client-side ele esvaziava a página com o rodapé dizendo
+  // "1-20 de 78".
+  const [onlySuspect, setOnlySuspect] = useState(false);
+
   useEffect(() => {
     setPage(1);
-  }, [situation, type, debouncedSearch, pageSize]);
+  }, [situation, type, debouncedSearch, pageSize, onlySuspect]);
 
   const listQuery = useFileEntries(sessionId, {
     page,
@@ -112,6 +117,7 @@ export function MovementsTab({ sessionId, isCard }: MovementsTabProps) {
     situation,
     type,
     search: debouncedSearch.trim() || undefined,
+    onlySuspect,
   });
 
   // Coleta IDs Omie das linhas conciliadas da página atual.
@@ -144,7 +150,6 @@ export function MovementsTab({ sessionId, isCard }: MovementsTabProps) {
   const [trocarFor, setTrocarFor] = useState<FileEntryItem | null>(null);
   const [anomalyFor, setAnomalyFor] = useState<FileEntryItem | null>(null);
   const [overrideFor, setOverrideFor] = useState<FileEntryItem | null>(null);
-  const [onlySuspect, setOnlySuspect] = useState(false);
 
   // S19 — Lookup `file_entry_id` → anomalias de qualificação pendentes.
   // Usa hook que pagina internamente; key tem prefixo `['review', sid, 'anomalies']`
@@ -197,13 +202,9 @@ export function MovementsTab({ sessionId, isCard }: MovementsTabProps) {
   }
 
   const isLoading = listQuery.isLoading;
-  // O Switch "Apenas qualificação suspeita" filtra client-side; pode esvaziar a
-  // página atual mesmo com `total > 0` no back. Pediríamos um filtro server-side
-  // pra ficar consistente, mas isso exige endpoint novo (fora do escopo S19).
-  const items = useMemo(() => {
-    const raw = listQuery.data?.data ?? [];
-    return onlySuspect ? raw.filter((e) => qualificationByEntry.has(e.id)) : raw;
-  }, [listQuery.data?.data, onlySuspect, qualificationByEntry]);
+  // `useMemo` porque `items` entra como dependência de outros memos adiante —
+  // um novo array por render invalidaria todos eles (react-hooks/exhaustive-deps).
+  const items = useMemo(() => listQuery.data?.data ?? [], [listQuery.data?.data]);
   const pagination = listQuery.data?.pagination;
   const totalPages = pagination?.totalPages ?? 0;
   const total = pagination?.total ?? 0;

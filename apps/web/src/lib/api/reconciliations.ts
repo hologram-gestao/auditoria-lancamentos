@@ -380,6 +380,12 @@ export interface ListFileEntriesParams {
   type?: 'all' | 'credit' | 'debit';
   /** Search aplicado após descrypt no servidor. */
   search?: string;
+  /**
+   * 86e2n4pf1 — só linhas com anomalia de QUALIFICAÇÃO não resolvida (o mesmo
+   * conjunto que exibe o badge da coluna Análise). Server-side: a paginação
+   * conta sob o filtro — antes era client-side e o rodapé mentia.
+   */
+  onlySuspect?: boolean;
 }
 
 export interface FileEntryListResult {
@@ -395,6 +401,7 @@ function buildFileEntriesQuery(params: ListFileEntriesParams): string {
   if (params.type && params.type !== 'all') sp.set('type', params.type);
   const search = params.search?.trim();
   if (search) sp.set('search', search);
+  if (params.onlySuspect) sp.set('onlySuspect', 'true');
   return sp.toString();
 }
 
