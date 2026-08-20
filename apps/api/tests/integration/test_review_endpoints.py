@@ -428,15 +428,25 @@ class TestListFileEntries:
             db_session, reconciliation=sess, description="Sem flag", amount=Decimal("-4.00")
         )
 
-        suspeita = AnomalyType(
-            code="qualificacao_suspeita",
-            name="Categoria suspeita",
-            description="Camada 1",
-            severity=AnomalySeverity.MODERATE.value,
-            active=True,
-        )
-        db_session.add(suspeita)
-        await db_session.flush()
+        # Get-or-create, como o `_seed_anomaly_types` deste arquivo: os testes
+        # de qualificação semeiam o MESMO code e a tabela sobrevive entre
+        # arquivos — inserir às cegas quebra com UniqueViolation na ordem do
+        # CI (foi exatamente o que aconteceu no run 32406669914).
+        suspeita = (
+            await db_session.execute(
+                select(AnomalyType).where(AnomalyType.code == "qualificacao_suspeita")
+            )
+        ).scalar_one_or_none()
+        if suspeita is None:
+            suspeita = AnomalyType(
+                code="qualificacao_suspeita",
+                name="Categoria suspeita",
+                description="Camada 1",
+                severity=AnomalySeverity.MODERATE.value,
+                active=True,
+            )
+            db_session.add(suspeita)
+            await db_session.flush()
         db_session.add_all(
             [
                 ReconciliationAnomaly(
