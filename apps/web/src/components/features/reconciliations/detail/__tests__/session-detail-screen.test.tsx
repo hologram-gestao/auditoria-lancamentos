@@ -79,6 +79,7 @@ function detail(over: Record<string, unknown> = {}) {
     status: 'reviewing',
     total_file_entries: 30,
     conciliated_count: 25,
+    conciliated_divergent_count: 0,
     sem_omie_count: 3,
     omie_sem_arquivo_count: 2,
     anomaly_count: 1,
@@ -132,6 +133,21 @@ describe('Detalhe — totalizadores e resumo', () => {
       expect(card).not.toBeNull();
       expect(within(card as HTMLElement).getByText(value)).toBeVisible();
     }
+  });
+
+  it('card Conciliados explica a soma quando há data divergente (86e2u513b)', () => {
+    detailState.data = detail({ conciliated_count: 120, conciliated_divergent_count: 23 });
+    renderScreen();
+    const totals = screen.getByRole('region', { name: 'Totalizadores da conciliação' });
+    // 120 no card, filtro "Conciliadas (data exata)" mostraria 97 — o
+    // subtexto é o que fecha a conta na frente do analista.
+    expect(within(totals).getByText('inclui 23 com data divergente')).toBeVisible();
+  });
+
+  it('sem divergentes, o card não ganha subtexto (nada de "inclui 0")', () => {
+    renderScreen();
+    const totals = screen.getByRole('region', { name: 'Totalizadores da conciliação' });
+    expect(within(totals).queryByText(/inclui .* divergente/)).not.toBeInTheDocument();
   });
 
   it('exibe o resumo de saldos com status "Conferido" dentro da tolerância', () => {

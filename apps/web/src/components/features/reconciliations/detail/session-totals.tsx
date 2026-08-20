@@ -48,6 +48,14 @@ export function SessionTotals({ detail }: { detail: SessionDetail }) {
           label="Conciliados"
           value={detail.conciliated_count}
           tone="success"
+          // 86e2u513b — o card soma exatas + divergentes, mas o filtro
+          // "Conciliadas (data exata)" mostra só as exatas. Sem este subtexto
+          // a diferença (120 no card, 97 na tabela) não tinha explicação.
+          hint={
+            detail.conciliated_divergent_count > 0
+              ? `inclui ${detail.conciliated_divergent_count} com data divergente`
+              : undefined
+          }
         />
         <StatCard
           icon={AlertCircle}
@@ -87,15 +95,18 @@ interface StatCardProps {
   label: string;
   value: number;
   tone: Tone;
+  /** Subtexto explicativo (ex.: de que o número é composto). */
+  hint?: string;
 }
 
-function StatCard({ icon: Icon, label, value, tone }: StatCardProps) {
+function StatCard({ icon: Icon, label, value, tone, hint }: StatCardProps) {
   return (
     <div className="bg-card flex items-center gap-3 rounded-lg border p-3 shadow-sm">
       <Icon className={cn('h-5 w-5 shrink-0', TONE_CLASSES[tone])} aria-hidden="true" />
       <div className="min-w-0">
-        <p className="text-xl font-semibold leading-tight tabular-nums">{value}</p>
+        <p className="text-xl font-semibold tabular-nums leading-tight">{value}</p>
         <p className="text-muted-foreground truncate text-xs">{label}</p>
+        {hint !== undefined && <p className="text-muted-foreground text-[10px]">{hint}</p>}
       </div>
     </div>
   );
