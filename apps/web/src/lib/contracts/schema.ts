@@ -2495,6 +2495,38 @@ export interface components {
             /** Balance Difference */
             balance_difference?: string | null;
             /**
+             * Credits Total
+             * @default 0
+             */
+            credits_total: string;
+            /**
+             * Debits Total
+             * @default 0
+             */
+            debits_total: string;
+            /** Card Charges Total */
+            card_charges_total?: string | null;
+            /**
+             * Anomalies Critical
+             * @default 0
+             */
+            anomalies_critical: number;
+            /**
+             * Anomalies Moderate
+             * @default 0
+             */
+            anomalies_moderate: number;
+            /**
+             * Anomalies Info
+             * @default 0
+             */
+            anomalies_info: number;
+            /**
+             * Anomalies Resolved
+             * @default 0
+             */
+            anomalies_resolved: number;
+            /**
              * Total Files
              * @default 0
              */

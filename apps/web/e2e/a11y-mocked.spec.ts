@@ -332,6 +332,16 @@ const DETAIL = {
   balance_end_omie: '1500.00',
   balance_difference: '0.00',
   total_files: 3,
+  // 86e2u513f — somas da sessão inteira, computadas no backend. Sem eles o
+  // Resumo renderizaria "R$ NaN" (Number(undefined)) em qualquer cenário que
+  // abra a aba.
+  credits_total: '350.00',
+  debits_total: '1850.00',
+  card_charges_total: '42.90',
+  anomalies_critical: 1,
+  anomalies_moderate: 0,
+  anomalies_info: 0,
+  anomalies_resolved: 0,
 };
 
 /**

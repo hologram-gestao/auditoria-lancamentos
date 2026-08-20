@@ -8,13 +8,19 @@ descrições) e leitura do status para o polling.
 from __future__ import annotations
 
 from datetime import date, datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from pydantic import SecretStr
 from sqlalchemy.exc import IntegrityError
 
-from app.core.crypto_service import AAD_FILE_ENTRY_DESCRIPTION, AAD_FILE_NAME, field_locator
+from app.core.crypto_service import (
+    AAD_FILE_ENTRY_DESCRIPTION,
+    AAD_FILE_NAME,
+    field_locator,
+    load_client_cipher,
+)
 from app.core.exceptions import ConflictError, DuplicateFileError, NotFoundError
 from app.core.logging import get_logger
 from app.core.search_index import compute_search_hmac
@@ -30,6 +36,7 @@ from app.db.models import (
 )
 
 if TYPE_CHECKING:
+    from app.core.config import Settings
     from app.core.crypto import ClientCipher
 from app.modules.reconciliations.repository import ReconciliationRepository
 from app.modules.reconciliations.schemas import (
@@ -74,8 +81,12 @@ def session_account_type_from_omie_tipo(omie_tipo: str | None) -> str:
 class ReconciliationService:
     """Operações de domínio sobre conciliações."""
 
-    def __init__(self, repository: ReconciliationRepository) -> None:
+    def __init__(self, repository: ReconciliationRepository, *, settings: Settings) -> None:
         self._repo = repository
+        # 86e2u513f: o detalhe precisa do envelope cripto (encargos do cartão
+        # são identificados pela DESCRIÇÃO, que é cifrada) — mesma razão do
+        # ReviewService carregar settings.
+        self._settings = settings
 
     # ------------------------------------------------------------------
     # BACK 6.2 — verificação de duplicata
@@ -571,6 +582,19 @@ class ReconciliationService:
             raise NotFoundError(_SESSION_NOT_FOUND_MSG)
         counters = await self._repo.compute_counters(session_id)
         total_files = await self._repo.count_files(session_id)
+        # 86e2u513f — somas e breakdown da sessão INTEIRA, no banco e em
+        # Decimal (o front somava 50 linhas em float e o número mentia).
+        # Sequencial, mesma AsyncSession — nunca gather (ver totals.py).
+        amounts = await self._repo.compute_amounts(session_id)
+        breakdown = await self._repo.compute_anomaly_breakdown(session_id)
+        card_charges: Decimal | None = None
+        if session_obj.account_type == SessionAccountType.CREDIT_CARD.value:
+            client = await self._repo.get_client(session_obj.client_id)
+            if client is not None:
+                # Leitura: DEK só se já existe (linhas bare-legadas usam a
+                # chave global) — mesmo caminho do ReviewService.
+                cipher = await load_client_cipher(client, settings=self._settings)
+                card_charges = await self._repo.compute_card_charges(session_id, cipher)
         return SessionDetailPayload(
             session_id=session_obj.id,
             client_id=session_obj.client_id,
@@ -591,4 +615,11 @@ class ReconciliationService:
             balance_difference=session_obj.balance_difference,
             total_files=total_files,
             qualification_used_glossary=session_obj.qualification_used_glossary,
+            credits_total=amounts.credits_total,
+            debits_total=amounts.debits_total,
+            card_charges_total=card_charges,
+            anomalies_critical=breakdown.critical,
+            anomalies_moderate=breakdown.moderate,
+            anomalies_info=breakdown.info,
+            anomalies_resolved=breakdown.resolved,
         )

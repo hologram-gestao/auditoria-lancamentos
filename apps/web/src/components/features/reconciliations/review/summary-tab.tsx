@@ -8,18 +8,16 @@
  *     Omie, diferença + status Conferido/Divergente). Vem do
  *     `SessionDetail` calculado pelo worker pós-matching
  *     (`processing/balances.py`).
- *   - Indicadores agregados via lista paginada (pageSize=50, 1 página) —
- *     cobre clientes com até 50 movimentações por categoria. Acima disso,
- *     mostra aviso explícito de truncamento.
- *   - Breakdown de anomalias via listagem ampla (`pageSize=50`, sem
- *     filtro). Para sessões com >50 anomalias, breakdown fica truncado.
+ *   - Indicadores (créditos/débitos; no cartão compras/estornos/encargos) e
+ *     breakdown de anomalias: números do BACKEND, computados sobre a sessão
+ *     INTEIRA em Decimal (86e2u513f). Esta aba NÃO soma nada — a soma no
+ *     navegador cobria só as 50 primeiras linhas, em float, e o total exibido
+ *     mentia na maioria dos extratos reais. A regra dos encargos (IOF/juros/
+ *     multa por descrição) mora em `totals.py`, junto da conta.
  *
  * NÃO usa charts. Texto + tabela apenas (briefing §"O que NÃO fazer").
  */
 
-import { useMemo } from 'react';
-
-import { useAnomalies, useFileEntries } from '@/hooks/use-reconciliations';
 import { formatBRL } from '@/lib/format';
 
 interface SummaryCounts {
@@ -37,28 +35,31 @@ interface SummaryBalances {
   difference: string | null;
 }
 
+interface SummaryAmounts {
+  /** Decimal serializado como string — soma da sessão INTEIRA, do backend. */
+  credits: string;
+  debits: string;
+  /** Encargos do cartão (IOF/juros/multa por descrição). `null` fora do cartão. */
+  cardCharges: string | null;
+}
+
+interface SummaryAnomaliesBreakdown {
+  critical: number;
+  moderate: number;
+  info: number;
+  resolved: number;
+}
+
 interface SummaryTabProps {
-  sessionId: string;
   /** FRONT 1.8: cartão → indicadores de fatura (compras/estornos/encargos/saldo). */
   isCard: boolean;
   totalFileEntries: number;
   counts: SummaryCounts;
+  amounts: SummaryAmounts;
+  anomaliesBreakdown: SummaryAnomaliesBreakdown;
   referenceMonthLabel: string;
   /** undefined enquanto o `useSessionDetail` ainda carrega. */
   balances: SummaryBalances | undefined;
-}
-
-const AGGREGATION_LIMIT = 50;
-
-/**
- * Palavras-chave de encargos de fatura de cartão (FRONT 1.8) — identificados
- * pela descrição, conforme a task. Match case-insensitive por substring.
- */
-const CHARGE_KEYWORDS = ['iof', 'juros', 'multa'] as const;
-
-export function isChargeDescription(description: string): boolean {
-  const d = description.toLowerCase();
-  return CHARGE_KEYWORDS.some((kw) => d.includes(kw));
 }
 
 /**
@@ -86,64 +87,21 @@ function resolveBalanceStatus(difference: string | null): {
 }
 
 export function SummaryTab({
-  sessionId,
   isCard,
   totalFileEntries,
   counts,
+  amounts,
+  anomaliesBreakdown,
   referenceMonthLabel,
   balances,
 }: SummaryTabProps) {
-  // Pega uma página de 50 com TODAS as situações pra calcular créditos/débitos
-  // somados localmente. Acima de 50, a soma fica subestimada → mostramos aviso.
-  const creditsQuery = useFileEntries(sessionId, {
-    page: 1,
-    pageSize: AGGREGATION_LIMIT,
-    type: 'credit',
-  });
-  const debitsQuery = useFileEntries(sessionId, {
-    page: 1,
-    pageSize: AGGREGATION_LIMIT,
-    type: 'debit',
-  });
-  const anomaliesQuery = useAnomalies(sessionId, {
-    page: 1,
-    pageSize: AGGREGATION_LIMIT,
-    resolved: 'all',
-  });
-
-  const creditsTotal = useMemo(
-    () => sumAmounts(creditsQuery.data?.data ?? []),
-    [creditsQuery.data],
-  );
-  const debitsTotal = useMemo(
-    () => Math.abs(sumAmounts(debitsQuery.data?.data ?? [])),
-    [debitsQuery.data],
-  );
-  // FRONT 1.8 (cartão): total de encargos (IOF/juros/multa) identificados pela
-  // descrição entre as compras. Mesma janela de 50 das somas acima → herda o
-  // mesmo aviso de truncamento (`debitsTruncated`).
-  const encargosTotal = useMemo(() => {
-    const charges = (debitsQuery.data?.data ?? []).filter((e) =>
-      isChargeDescription(e.description),
-    );
-    return Math.abs(sumAmounts(charges));
-  }, [debitsQuery.data]);
-
-  const creditsTruncated = (creditsQuery.data?.pagination.total ?? 0) > AGGREGATION_LIMIT;
-  const debitsTruncated = (debitsQuery.data?.pagination.total ?? 0) > AGGREGATION_LIMIT;
-  const anomaliesTruncated = (anomaliesQuery.data?.pagination.total ?? 0) > AGGREGATION_LIMIT;
+  const creditsTotal = Number(amounts.credits);
+  const debitsTotal = Number(amounts.debits);
+  const encargosTotal = amounts.cardCharges === null ? 0 : Number(amounts.cardCharges);
 
   const conciliatedPct = totalFileEntries === 0 ? 0 : (counts.conciliated / totalFileEntries) * 100;
 
-  const breakdown = useMemo(() => {
-    const list = anomaliesQuery.data?.data ?? [];
-    return {
-      critical: list.filter((a) => a.anomaly_type.severity === 'critical').length,
-      moderate: list.filter((a) => a.anomaly_type.severity === 'moderate').length,
-      info: list.filter((a) => a.anomaly_type.severity === 'info').length,
-      resolved: list.filter((a) => a.resolved).length,
-    };
-  }, [anomaliesQuery.data]);
+  const breakdown = anomaliesBreakdown;
 
   return (
     <div className="space-y-6">
@@ -205,28 +163,12 @@ export function SummaryTab({
           <Indicator label="Total movimentações" value={String(totalFileEntries)} />
           {isCard ? (
             <>
-              <Indicator
-                label="Total de compras"
-                value={formatBRL(debitsTotal)}
-                hint={
-                  debitsTruncated ? `Soma das primeiras ${AGGREGATION_LIMIT} entradas` : undefined
-                }
-              />
-              <Indicator
-                label="Total de estornos"
-                value={formatBRL(creditsTotal)}
-                hint={
-                  creditsTruncated ? `Soma das primeiras ${AGGREGATION_LIMIT} entradas` : undefined
-                }
-              />
+              <Indicator label="Total de compras" value={formatBRL(debitsTotal)} />
+              <Indicator label="Total de estornos" value={formatBRL(creditsTotal)} />
               <Indicator
                 label="Total de encargos"
                 value={formatBRL(encargosTotal)}
-                hint={
-                  debitsTruncated
-                    ? `IOF/juros/multa nas primeiras ${AGGREGATION_LIMIT} compras`
-                    : 'IOF, juros e multa (por descrição)'
-                }
+                hint="IOF, juros e multa (por descrição)"
               />
               <Indicator
                 label="Saldo da fatura"
@@ -237,20 +179,8 @@ export function SummaryTab({
             </>
           ) : (
             <>
-              <Indicator
-                label="Total créditos"
-                value={formatBRL(creditsTotal)}
-                hint={
-                  creditsTruncated ? `Soma das primeiras ${AGGREGATION_LIMIT} entradas` : undefined
-                }
-              />
-              <Indicator
-                label="Total débitos"
-                value={formatBRL(debitsTotal)}
-                hint={
-                  debitsTruncated ? `Soma das primeiras ${AGGREGATION_LIMIT} entradas` : undefined
-                }
-              />
+              <Indicator label="Total créditos" value={formatBRL(creditsTotal)} />
+              <Indicator label="Total débitos" value={formatBRL(debitsTotal)} />
             </>
           )}
           <Indicator label="Conciliados" value={String(counts.conciliated)} />
@@ -268,13 +198,6 @@ export function SummaryTab({
           <Indicator label="Informativas" value={String(breakdown.info)} />
           <Indicator label="Resolvidas" value={String(breakdown.resolved)} />
         </dl>
-        {anomaliesTruncated && (
-          <p className="text-muted-foreground text-xs">
-            Há mais de {AGGREGATION_LIMIT} anomalias nesta sessão; o breakdown acima considera
-            apenas as {AGGREGATION_LIMIT} primeiras. Use a aba &quot;Anomalias&quot; para a lista
-            completa paginada.
-          </p>
-        )}
       </section>
     </div>
   );
@@ -288,8 +211,4 @@ function Indicator({ label, value, hint }: { label: string; value: string; hint?
       {hint !== undefined && <p className="text-muted-foreground text-[10px]">{hint}</p>}
     </div>
   );
-}
-
-function sumAmounts(entries: { amount: string }[]): number {
-  return entries.reduce((acc, e) => acc + Number(e.amount), 0);
 }
