@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.core.logging import _redact_sensitive
+from app.core.logging import _redact_sensitive, sanitize_validation_errors
 
 
 class TestRedactor:
@@ -149,3 +149,42 @@ class TestRedactor:
 
     def test_empty_event(self) -> None:
         assert _redact_sensitive(None, "info", {}) == {}
+
+
+class TestSanitizeValidationErrors:
+    """Frente 1 de 86e2rtxcm: o log de validação não pode carregar o payload."""
+
+    def test_input_and_ctx_are_dropped(self) -> None:
+        errors = [
+            {
+                "type": "string_too_long",
+                "loc": ("body", "user_note"),
+                "msg": "String should have at most 2000 characters",
+                "input": "SEGREDO-DO-CLIENTE-" + "x" * 2000,
+                "ctx": {"max_length": 2000, "echo": "SEGREDO-DO-CLIENTE"},
+                "url": "https://errors.pydantic.dev/2/v/string_too_long",
+            }
+        ]
+        out = sanitize_validation_errors(errors)
+        assert out == [
+            {
+                "type": "string_too_long",
+                "loc": ("body", "user_note"),
+                "msg": "String should have at most 2000 characters",
+            }
+        ]
+        assert "SEGREDO-DO-CLIENTE" not in str(out)
+
+    def test_allow_list_survives_missing_keys(self) -> None:
+        # Erro sem `msg` (não deveria existir, mas o sanitizador não pode
+        # explodir DENTRO do exception handler — isso mataria a resposta 400).
+        out = sanitize_validation_errors([{"type": "missing", "loc": ("body",)}])
+        assert out == [{"type": "missing", "loc": ("body",)}]
+
+    def test_empty_errors(self) -> None:
+        assert sanitize_validation_errors([]) == []
+
+    def test_does_not_mutate_the_original(self) -> None:
+        errors = [{"type": "t", "loc": ("body",), "msg": "m", "input": "SEGREDO"}]
+        sanitize_validation_errors(errors)
+        assert errors[0]["input"] == "SEGREDO"  # o chamador continua dono do dado

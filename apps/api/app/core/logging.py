@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import re
 import sys
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
 import structlog
@@ -103,6 +104,31 @@ def _redact_sensitive(
         if _is_sensitive_key(key):
             event_dict[key] = REDACTED_VALUE
     return event_dict
+
+
+# ----------------------------------------------------------------------
+# Sanitização de erros de validação (86e2rtxcm)
+# ----------------------------------------------------------------------
+
+#: Chaves de `exc.errors()` (Pydantic v2) que são DIAGNÓSTICO, não dado do
+#: cliente: `loc` diz qual campo falhou, `msg` e `type` dizem por quê. As
+#: demais — `input` (o valor rejeitado, verbatim) e `ctx` (pode ecoá-lo) —
+#: carregam payload e NUNCA podem chegar ao log (§3.3): o valor rejeitado de
+#: um body inválido é senha errada de propósito, anotação acima do limite
+#: (campo CRIPTOGRAFADO no banco, §4.1) ou credencial Omie malformada.
+_VALIDATION_ERROR_SAFE_KEYS: tuple[str, ...] = ("type", "loc", "msg")
+
+
+def sanitize_validation_errors(errors: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Reduz `RequestValidationError.errors()` ao que o suporte usa.
+
+    Allow-list, não deny-list: chave nova que o Pydantic inventar amanhã nasce
+    FORA do log — o oposto de remover `input`/`ctx` e torcer para não surgir
+    uma terceira via de eco do payload.
+    """
+    return [
+        {key: error[key] for key in _VALIDATION_ERROR_SAFE_KEYS if key in error} for error in errors
+    ]
 
 
 # ----------------------------------------------------------------------
