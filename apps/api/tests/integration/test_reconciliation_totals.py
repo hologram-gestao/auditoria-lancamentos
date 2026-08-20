@@ -271,6 +271,10 @@ class TestFonteUnica:
         assert detail.status_code == 200, detail.text
         d = detail.json()["data"]
 
+        # 86e2u513b — o recorte que o card usa para explicar a soma: a sessão
+        # tem exatamente 1 linha conciliado_data_divergente.
+        assert d["conciliated_divergent_count"] == 1
+
         base = f"/api/v1/reconciliations/{sess.id}"
         total_movimentacoes = await _total_of(client_with_db, f"{base}/file-entries")
         conciliados = await _total_of(client_with_db, f"{base}/file-entries?situation=conciliado")

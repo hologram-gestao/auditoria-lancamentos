@@ -85,7 +85,12 @@ interface MovementsTabProps {
   isCard: boolean;
 }
 
-type SituationFilter = 'all' | 'conciliado' | 'sem_omie' | 'ignorado';
+type SituationFilter =
+  | 'all'
+  | 'conciliado'
+  | 'conciliado_data_divergente'
+  | 'sem_omie'
+  | 'ignorado';
 type TypeFilter = 'all' | 'credit' | 'debit';
 
 /** As opções vêm da `PaginationBar` (10/20/50/100) — nada de lista paralela. */
@@ -274,7 +279,13 @@ export function MovementsTab({ sessionId, isCard }: MovementsTabProps) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todas</SelectItem>
-              <SelectItem value="conciliado">Conciliadas</SelectItem>
+              {/* 86e2u513b — "Conciliadas" filtrava só data exata enquanto o
+                  card do topo somava exatas + divergentes (120 no card, 97 na
+                  tabela, sem explicação). Nenhum rótulo pode mentir: o antigo
+                  diz o que sempre fez, e a opção nova usa o MESMO rótulo do
+                  badge laranja — não inventar nome. */}
+              <SelectItem value="conciliado">Conciliadas (data exata)</SelectItem>
+              <SelectItem value="conciliado_data_divergente">Data divergente</SelectItem>
               <SelectItem value="sem_omie">Sem Omie</SelectItem>
               <SelectItem value="ignorado">Ignoradas</SelectItem>
             </SelectContent>

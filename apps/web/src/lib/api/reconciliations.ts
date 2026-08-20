@@ -356,7 +356,13 @@ export async function getSessionDetail(sessionId: string): Promise<SessionDetail
 
 // ---- 9.1 / 9.3 — File entries ----
 
-export type FileEntrySituation = 'conciliado' | 'sem_omie' | 'ignorado';
+export type FileEntrySituation =
+  | 'conciliado'
+  // FASE 1 — casou por valor com data divergente ≤3 dias. O backend aceita o
+  // filtro desde a FASE 1; o front só ganhou a opção na 86e2u513b.
+  | 'conciliado_data_divergente'
+  | 'sem_omie'
+  | 'ignorado';
 export type FileEntryUserAction = 'confirm' | 'flag' | 'ignore';
 
 export interface FileEntryItem {

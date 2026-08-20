@@ -381,6 +381,9 @@ class SessionDetailPayload(BaseModel):
     status: str
     total_file_entries: int
     conciliated_count: int
+    # 86e2u513b — recorte das conciliadas com data divergente. O card usa para
+    # explicar por que "Conciliados" > filtro "Conciliadas (data exata)".
+    conciliated_divergent_count: int = 0
     sem_omie_count: int
     omie_sem_arquivo_count: int
     anomaly_count: int

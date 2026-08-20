@@ -2476,6 +2476,11 @@ export interface components {
             total_file_entries: number;
             /** Conciliated Count */
             conciliated_count: number;
+            /**
+             * Conciliated Divergent Count
+             * @default 0
+             */
+            conciliated_divergent_count: number;
             /** Sem Omie Count */
             sem_omie_count: number;
             /** Omie Sem Arquivo Count */
