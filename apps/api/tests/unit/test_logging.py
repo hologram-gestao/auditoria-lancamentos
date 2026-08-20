@@ -188,3 +188,46 @@ class TestSanitizeValidationErrors:
         errors = [{"type": "t", "loc": ("body",), "msg": "m", "input": "SEGREDO"}]
         sanitize_validation_errors(errors)
         assert errors[0]["input"] == "SEGREDO"  # o chamador continua dono do dado
+
+
+class TestRedactorRecursion:
+    """Frente 2 de 86e2rtxcm: chave sensível aninhada não escapa mais."""
+
+    def test_nested_dict_is_redacted(self) -> None:
+        out = _redact_sensitive(None, "info", {"payload": {"password": "secret123"}})
+        assert out["payload"]["password"] == "[REDACTED]"
+
+    def test_list_of_dicts_is_redacted(self) -> None:
+        event = {"errors": [{"loc": ("body",), "app_secret": "s3cr3t"}]}
+        out = _redact_sensitive(None, "info", event)
+        assert out["errors"][0]["app_secret"] == "[REDACTED]"
+        assert out["errors"][0]["loc"] == ("body",)
+
+    def test_tuple_stays_tuple(self) -> None:
+        # `loc` do Pydantic é tuple; processors downstream não podem receber list.
+        out = _redact_sensitive(None, "info", {"errors": [{"loc": ("body", "field")}]})
+        assert isinstance(out["errors"][0]["loc"], tuple)
+
+    def test_caller_structure_is_not_mutated(self) -> None:
+        nested = {"password": "secret123"}
+        _redact_sensitive(None, "info", {"payload": nested})
+        assert nested["password"] == "secret123"  # cópia, nunca mutação in-place
+
+    def test_depth_cap_fails_closed(self) -> None:
+        deep: dict[str, object] = {"password": "leaf-secret"}
+        for _ in range(12):
+            deep = {"nested": deep}
+        out = _redact_sensitive(None, "info", {"data": deep})
+        assert "leaf-secret" not in str(out)  # além do teto vira [REDACTED] inteiro
+
+    def test_circular_reference_does_not_hang(self) -> None:
+        a: dict[str, object] = {}
+        a["self"] = a
+        out = _redact_sensitive(None, "info", {"data": a})
+        assert "[REDACTED]" in str(out["data"])
+
+    def test_nested_idempotent(self) -> None:
+        event = {"payload": {"password": "x"}}
+        once = _redact_sensitive(None, "info", event)
+        twice = _redact_sensitive(None, "info", dict(once))
+        assert twice["payload"]["password"] == "[REDACTED]"
