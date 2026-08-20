@@ -182,7 +182,6 @@ export function SessionDetailScreen({ clientId, sessionId }: SessionDetailScreen
             <TabsContent value="resumo">
               {/* Mesma fonte única do topo — por construção os números batem. */}
               <SummaryTab
-                sessionId={sessionId}
                 isCard={detail.account_type === 'credit_card'}
                 totalFileEntries={detail.total_file_entries}
                 counts={{
@@ -190,6 +189,17 @@ export function SessionDetailScreen({ clientId, sessionId }: SessionDetailScreen
                   semOmie: detail.sem_omie_count,
                   omieSemArquivo: detail.omie_sem_arquivo_count,
                   anomaly: detail.anomaly_count,
+                }}
+                amounts={{
+                  credits: detail.credits_total,
+                  debits: detail.debits_total,
+                  cardCharges: detail.card_charges_total ?? null,
+                }}
+                anomaliesBreakdown={{
+                  critical: detail.anomalies_critical,
+                  moderate: detail.anomalies_moderate,
+                  info: detail.anomalies_info,
+                  resolved: detail.anomalies_resolved,
                 }}
                 referenceMonthLabel={referenceLabel}
                 balances={{

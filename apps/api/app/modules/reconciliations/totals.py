@@ -28,12 +28,16 @@ Como as colunas só são escritas por esta função, lista e detalhe não diverg
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import func, select, update
 
+from app.core.crypto_service import AAD_FILE_ENTRY_DESCRIPTION, field_locator
+from app.core.logging import get_logger
 from app.db.models import (
+    AnomalyType,
     FileEntrySituation,
     ReconciliationAnomaly,
     ReconciliationFileEntry,
@@ -43,6 +47,10 @@ from app.db.models import (
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.core.crypto import ClientCipher
+
+log = get_logger(__name__)
 
 #: O que conta como "conciliado". `conciliado_data_divergente` ENTRA: o valor
 #: casou com o Omie e a data divergiu ≤ 3 dias (CLAUDE.md §5.2) — a linha está
@@ -145,3 +153,145 @@ async def refresh_session_counters(db: AsyncSession, session_id: UUID) -> Sessio
         )
     )
     return counters
+
+
+# ----------------------------------------------------------------------
+# Somas e breakdown da aba Resumo (86e2u513f)
+# ----------------------------------------------------------------------
+#
+# Antes, o front somava crédito/débito/encargos e o breakdown de anomalias no
+# NAVEGADOR, sobre as 50 primeiras linhas — acima disso o número exibido era
+# menor que o real, e a maioria dos extratos passa de 50. Pior: a soma era em
+# `Number()` (ponto flutuante), que a §3.4 proíbe para dinheiro. A conta agora
+# mora aqui, ao lado dos demais totalizadores, pela mesma razão que este módulo
+# existe: valor derivado calculado em dois lugares diverge.
+
+
+@dataclass(frozen=True, slots=True)
+class SessionAmountTotals:
+    """Somas de valores da sessão inteira (todas as situações, como a tela)."""
+
+    #: Soma das entradas positivas (créditos; no cartão, estornos).
+    credits_total: Decimal
+    #: Soma das negativas em valor ABSOLUTO (débitos; no cartão, compras).
+    debits_total: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class SessionAnomalyBreakdown:
+    """Contagem por severidade + resolvidas, da sessão INTEIRA."""
+
+    critical: int
+    moderate: int
+    info: int
+    resolved: int
+
+
+#: Encargos de fatura de cartão, identificados pela DESCRIÇÃO (FRONT 1.8).
+#: A regra morava no front (`isChargeDescription`) e veio junto com a soma:
+#: match case-insensitive por substring.
+CARD_CHARGE_KEYWORDS: tuple[str, ...] = ("iof", "juros", "multa")
+
+
+def is_charge_description(description: str) -> bool:
+    """True quando a descrição indica encargo (IOF/juros/multa)."""
+    lowered = description.lower()
+    return any(keyword in lowered for keyword in CARD_CHARGE_KEYWORDS)
+
+
+async def compute_session_amounts(db: AsyncSession, session_id: UUID) -> SessionAmountTotals:
+    """Soma créditos e débitos de TODAS as linhas, em Decimal, no banco.
+
+    Uma query só (FILTER do Postgres). Inclui todas as situações — inclusive
+    `ignorado` — porque o total do extrato é o total do extrato: é a mesma
+    janela que o front somava, só que inteira e sem float.
+    """
+    amount = ReconciliationFileEntry.amount
+    row = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(amount).filter(amount > 0), 0),
+                func.coalesce(func.sum(-amount).filter(amount < 0), 0),
+            ).where(ReconciliationFileEntry.session_id == session_id)
+        )
+    ).one()
+    return SessionAmountTotals(
+        credits_total=Decimal(row[0]),
+        debits_total=Decimal(row[1]),
+    )
+
+
+async def compute_anomaly_breakdown(db: AsyncSession, session_id: UUID) -> SessionAnomalyBreakdown:
+    """Breakdown por severidade + resolvidas, da sessão inteira, em uma query."""
+    rows = (
+        await db.execute(
+            select(
+                AnomalyType.severity,
+                ReconciliationAnomaly.resolved,
+                func.count(ReconciliationAnomaly.id),
+            )
+            .join(AnomalyType, ReconciliationAnomaly.anomaly_type_id == AnomalyType.id)
+            .where(ReconciliationAnomaly.session_id == session_id)
+            .group_by(AnomalyType.severity, ReconciliationAnomaly.resolved)
+        )
+    ).all()
+    critical = moderate = info = resolved = 0
+    for severity, is_resolved, count_value in rows:
+        count_int = int(count_value)
+        if severity == "critical":
+            critical += count_int
+        elif severity == "moderate":
+            moderate += count_int
+        elif severity == "info":
+            info += count_int
+        if is_resolved:
+            resolved += count_int
+    return SessionAnomalyBreakdown(
+        critical=critical, moderate=moderate, info=info, resolved=resolved
+    )
+
+
+async def compute_card_charges_total(
+    db: AsyncSession, session_id: UUID, cipher: ClientCipher
+) -> Decimal:
+    """Soma os DÉBITOS cuja descrição indica encargo (cartão).
+
+    A descrição é CIFRADA no banco (§4.1) — SQL não filtra por conteúdo, então
+    esta função descriptografa os débitos da sessão em memória e aplica
+    `is_charge_description`. Custo aceitável porque só roda para sessão de
+    CARTÃO (fatura mensal, volume bounded) e só no detalhe.
+
+    Linha indecifrável é PULADA e contada — mesma política da tela de revisão
+    (`[indecifrável]` + métrica, §4.1): a soma parcial nunca é silenciosa, o
+    warning `summary_decrypt_failed` carrega a contagem.
+    """
+    rows = (
+        await db.execute(
+            select(
+                ReconciliationFileEntry.id,
+                ReconciliationFileEntry.amount,
+                ReconciliationFileEntry.description_encrypted,
+                ReconciliationFileEntry.description_iv,
+            ).where(
+                ReconciliationFileEntry.session_id == session_id,
+                ReconciliationFileEntry.amount < 0,
+            )
+        )
+    ).all()
+    total = Decimal("0")
+    failures = 0
+    for entry_id, amount, ct, iv in rows:
+        if not ct or not iv:
+            continue
+        try:
+            description = cipher.decrypt(
+                ct, iv, field_locator(AAD_FILE_ENTRY_DESCRIPTION, entry_id)
+            )
+        except Exception:
+            failures += 1
+            continue
+        if is_charge_description(description):
+            total += abs(amount)
+    if failures:
+        log.warning("summary_decrypt_failed", field="description", count=failures)
+    return total

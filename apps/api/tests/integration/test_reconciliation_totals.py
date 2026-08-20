@@ -109,6 +109,7 @@ async def _seed_session(
     *,
     client: Client,
     creator: User,
+    account_type: str = "checking",
     omie_conta_id: int = 42,
     reference_month: date = date(2026, 4, 1),
     status_value: str = ReconciliationStatus.REVIEWING.value,
@@ -120,6 +121,7 @@ async def _seed_session(
     sess = ReconciliationSession(
         client_id=client.id,
         created_by=creator.id,
+        account_type=account_type,
         omie_conta_id=omie_conta_id,
         reference_month=reference_month,
         date_tolerance_days=0,
@@ -154,9 +156,10 @@ async def _seed_entry(
     amount: Decimal = Decimal("-10.00"),
     omie_lancamento_id: int | None = None,
     day: int = 5,
+    description: str | None = None,
 ) -> ReconciliationFileEntry:
     hex_key = get_settings().OMIE_ENCRYPTION_KEY.get_secret_value()
-    ct, iv = encrypt(f"Movimento {situation} {day}", hex_key)
+    ct, iv = encrypt(description or f"Movimento {situation} {day}", hex_key)
     entry = ReconciliationFileEntry(
         session_id=sess.id,
         transaction_date=date(2026, 4, day),
@@ -185,14 +188,21 @@ async def _seed_omie_entry(
     await session.flush()
 
 
-async def _seed_anomaly(session: AsyncSession, *, sess: ReconciliationSession, code: str) -> None:
+async def _seed_anomaly(
+    session: AsyncSession,
+    *,
+    sess: ReconciliationSession,
+    code: str,
+    severity: str = AnomalySeverity.CRITICAL.value,
+    resolved: bool = False,
+) -> None:
     atype = await session.scalar(select(AnomalyType).where(AnomalyType.code == code))
     if atype is None:
         atype = AnomalyType(
             code=code,
             name=code.replace("_", " ").title(),
             description="Seed de teste",
-            severity=AnomalySeverity.CRITICAL.value,
+            severity=severity,
             active=True,
         )
         session.add(atype)
@@ -202,7 +212,7 @@ async def _seed_anomaly(session: AsyncSession, *, sess: ReconciliationSession, c
             session_id=sess.id,
             anomaly_type_id=atype.id,
             detected_by="ai",
-            resolved=False,
+            resolved=resolved,
         )
     )
     await session.flush()
@@ -544,3 +554,121 @@ class TestDetalheDaConciliacao:
 
         resp = await client_with_db.get(f"/api/v1/reconciliations/{UUID(int=0)}")
         assert resp.status_code == 404
+
+
+@pytest.mark.integration
+class TestResumoSomasDaSessaoInteira:
+    """86e2u513f — as somas do Resumo cobrem a sessão INTEIRA, no backend.
+
+    Antes o front somava as 50 primeiras linhas em float; acima disso o total
+    exibido era menor que o real — e a maioria dos extratos passa de 50.
+    """
+
+    async def test_somas_cobrem_mais_de_50_linhas(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """60 linhas: os totais batem com a soma REAL, não com as 50 primeiras."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="Resumo Cheio", creator=admin)
+        sess = await _seed_session(db_session, client=cliente, creator=admin)
+        # 40 débitos de -7.37 e 20 créditos de +3.11 → o dia varia só para
+        # espalhar; a soma certa é conhecida por construção.
+        for i in range(40):
+            await _seed_entry(
+                db_session,
+                sess=sess,
+                situation=FileEntrySituation.CONCILIADO.value,
+                amount=Decimal("-7.37"),
+                day=(i % 28) + 1,
+            )
+        for i in range(20):
+            await _seed_entry(
+                db_session,
+                sess=sess,
+                situation=FileEntrySituation.SEM_OMIE.value,
+                amount=Decimal("3.11"),
+                day=(i % 28) + 1,
+            )
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        detail = await client_with_db.get(f"/api/v1/reconciliations/{sess.id}")
+        assert detail.status_code == 200, detail.text
+        data = detail.json()["data"]
+        # Decimal serializa como STRING (§3.4) — comparar como Decimal para
+        # não depender de formatação.
+        assert Decimal(data["credits_total"]) == Decimal("62.20")
+        assert Decimal(data["debits_total"]) == Decimal("294.80")
+        assert data["card_charges_total"] is None  # conta corrente não tem encargos
+
+    async def test_breakdown_de_anomalias_da_sessao_inteira(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="Resumo Anomalias", creator=admin)
+        sess = await _seed_session(db_session, client=cliente, creator=admin)
+        await _seed_anomaly(db_session, sess=sess, code="ta-critical", severity="critical")
+        await _seed_anomaly(
+            db_session, sess=sess, code="ta-critical", severity="critical", resolved=True
+        )
+        await _seed_anomaly(db_session, sess=sess, code="ta-moderate", severity="moderate")
+        await _seed_anomaly(db_session, sess=sess, code="ta-info", severity="info", resolved=True)
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        detail = await client_with_db.get(f"/api/v1/reconciliations/{sess.id}")
+        data = detail.json()["data"]
+        assert data["anomalies_critical"] == 2
+        assert data["anomalies_moderate"] == 1
+        assert data["anomalies_info"] == 1
+        assert data["anomalies_resolved"] == 2
+        # e o total continua batendo com a mesma fonte
+        assert data["anomaly_count"] == 4
+
+    async def test_encargos_do_cartao_por_descricao(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Encargos = débitos com IOF/juros/multa na descrição (cifrada no banco)."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="Resumo Cartao", creator=admin)
+        sess = await _seed_session(
+            db_session, client=cliente, creator=admin, account_type="credit_card"
+        )
+        await _seed_entry(
+            db_session,
+            sess=sess,
+            situation=FileEntrySituation.CONCILIADO.value,
+            amount=Decimal("-12.00"),
+            description="IOF sobre compra internacional",
+            day=1,
+        )
+        await _seed_entry(
+            db_session,
+            sess=sess,
+            situation=FileEntrySituation.SEM_OMIE.value,
+            amount=Decimal("-8.50"),
+            description="JUROS DE MORA",
+            day=2,
+        )
+        await _seed_entry(
+            db_session,
+            sess=sess,
+            situation=FileEntrySituation.CONCILIADO.value,
+            amount=Decimal("-100.00"),
+            description="Posto Shell",
+            day=3,
+        )
+        # Estorno com "juros" na descrição é CRÉDITO — não entra nos encargos.
+        await _seed_entry(
+            db_session,
+            sess=sess,
+            situation=FileEntrySituation.CONCILIADO.value,
+            amount=Decimal("5.00"),
+            description="Estorno juros cobrados indevidamente",
+            day=4,
+        )
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        detail = await client_with_db.get(f"/api/v1/reconciliations/{sess.id}")
+        data = detail.json()["data"]
+        assert Decimal(data["card_charges_total"]) == Decimal("20.50")
+        assert Decimal(data["debits_total"]) == Decimal("120.50")
+        assert Decimal(data["credits_total"]) == Decimal("5.00")
