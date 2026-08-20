@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.core.logging import _redact_sensitive
+from app.core.logging import _redact_sensitive, sanitize_validation_errors
 
 
 class TestRedactor:
@@ -149,3 +149,85 @@ class TestRedactor:
 
     def test_empty_event(self) -> None:
         assert _redact_sensitive(None, "info", {}) == {}
+
+
+class TestSanitizeValidationErrors:
+    """Frente 1 de 86e2rtxcm: o log de validação não pode carregar o payload."""
+
+    def test_input_and_ctx_are_dropped(self) -> None:
+        errors = [
+            {
+                "type": "string_too_long",
+                "loc": ("body", "user_note"),
+                "msg": "String should have at most 2000 characters",
+                "input": "SEGREDO-DO-CLIENTE-" + "x" * 2000,
+                "ctx": {"max_length": 2000, "echo": "SEGREDO-DO-CLIENTE"},
+                "url": "https://errors.pydantic.dev/2/v/string_too_long",
+            }
+        ]
+        out = sanitize_validation_errors(errors)
+        assert out == [
+            {
+                "type": "string_too_long",
+                "loc": ("body", "user_note"),
+                "msg": "String should have at most 2000 characters",
+            }
+        ]
+        assert "SEGREDO-DO-CLIENTE" not in str(out)
+
+    def test_allow_list_survives_missing_keys(self) -> None:
+        # Erro sem `msg` (não deveria existir, mas o sanitizador não pode
+        # explodir DENTRO do exception handler — isso mataria a resposta 400).
+        out = sanitize_validation_errors([{"type": "missing", "loc": ("body",)}])
+        assert out == [{"type": "missing", "loc": ("body",)}]
+
+    def test_empty_errors(self) -> None:
+        assert sanitize_validation_errors([]) == []
+
+    def test_does_not_mutate_the_original(self) -> None:
+        errors = [{"type": "t", "loc": ("body",), "msg": "m", "input": "SEGREDO"}]
+        sanitize_validation_errors(errors)
+        assert errors[0]["input"] == "SEGREDO"  # o chamador continua dono do dado
+
+
+class TestRedactorRecursion:
+    """Frente 2 de 86e2rtxcm: chave sensível aninhada não escapa mais."""
+
+    def test_nested_dict_is_redacted(self) -> None:
+        out = _redact_sensitive(None, "info", {"payload": {"password": "secret123"}})
+        assert out["payload"]["password"] == "[REDACTED]"
+
+    def test_list_of_dicts_is_redacted(self) -> None:
+        event = {"errors": [{"loc": ("body",), "app_secret": "s3cr3t"}]}
+        out = _redact_sensitive(None, "info", event)
+        assert out["errors"][0]["app_secret"] == "[REDACTED]"
+        assert out["errors"][0]["loc"] == ("body",)
+
+    def test_tuple_stays_tuple(self) -> None:
+        # `loc` do Pydantic é tuple; processors downstream não podem receber list.
+        out = _redact_sensitive(None, "info", {"errors": [{"loc": ("body", "field")}]})
+        assert isinstance(out["errors"][0]["loc"], tuple)
+
+    def test_caller_structure_is_not_mutated(self) -> None:
+        nested = {"password": "secret123"}
+        _redact_sensitive(None, "info", {"payload": nested})
+        assert nested["password"] == "secret123"  # cópia, nunca mutação in-place
+
+    def test_depth_cap_fails_closed(self) -> None:
+        deep: dict[str, object] = {"password": "leaf-secret"}
+        for _ in range(12):
+            deep = {"nested": deep}
+        out = _redact_sensitive(None, "info", {"data": deep})
+        assert "leaf-secret" not in str(out)  # além do teto vira [REDACTED] inteiro
+
+    def test_circular_reference_does_not_hang(self) -> None:
+        a: dict[str, object] = {}
+        a["self"] = a
+        out = _redact_sensitive(None, "info", {"data": a})
+        assert "[REDACTED]" in str(out["data"])
+
+    def test_nested_idempotent(self) -> None:
+        event = {"payload": {"password": "x"}}
+        once = _redact_sensitive(None, "info", event)
+        twice = _redact_sensitive(None, "info", dict(once))
+        assert twice["payload"]["password"] == "[REDACTED]"
