@@ -27,7 +27,7 @@ from app.core.alerting import verify_alert_config
 from app.core.config import get_settings
 from app.core.dependencies import DbSessionDep
 from app.core.exceptions import AppError, ErrorCode, RateLimitedError, to_error_response
-from app.core.logging import get_logger, setup_logging
+from app.core.logging import get_logger, sanitize_validation_errors, setup_logging
 from app.core.rate_limit import limiter
 from app.db.session import close_db, init_db
 from app.integrations.anthropic.model_limits import validate_parse_output_config
@@ -177,7 +177,12 @@ def _register_exception_handlers(app: FastAPI) -> None:
     async def _handle_validation_error(
         _request: Request, exc: RequestValidationError
     ) -> JSONResponse:
-        log.info("validation_error", errors=exc.errors())
+        # `exc.errors()` traz `input` (o valor rejeitado, verbatim) e `ctx`
+        # (que pode ecoá-lo) — logá-los grava senha/anotação/credencial em
+        # claro (86e2rtxcm, §3.3). O redactor não alcança: ele decide pela
+        # chave de topo (`errors`), e o segredo está aninhado. Sanitiza ANTES
+        # de logar; `loc`+`msg` continuam dizendo qual campo falhou e por quê.
+        log.info("validation_error", errors=sanitize_validation_errors(exc.errors()))
         return JSONResponse(
             status_code=400,
             content={

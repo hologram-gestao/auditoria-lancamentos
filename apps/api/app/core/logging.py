@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import re
 import sys
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
 import structlog
@@ -90,6 +91,40 @@ def _is_sensitive_key(key: str) -> bool:
     return any(f"_{term}_" in padded for term in SENSITIVE_KEY_TERMS)
 
 
+#: Teto da varredura recursiva. Evento de log legítimo é raso — chegar aqui é
+#: payload patológico (ou referência circular, que sem o teto travaria o
+#: processo). **Fail-closed:** o que estiver além do teto vira [REDACTED]
+#: inteiro — perder debug info é recuperável, vazar segredo não (86e2rtxcm).
+_MAX_REDACTION_DEPTH = 8
+
+
+def _redact_value(value: Any, depth: int) -> Any:
+    """Varre dict/list/tuple aninhados redigindo valores de chaves sensíveis.
+
+    Devolve **cópia** das estruturas que atravessa — nunca muta o objeto do
+    chamador: quem loga `errors=exc.errors()` continua dono da lista original
+    intacta (mutar in-place corromperia dado vivo da aplicação). Escalares
+    voltam por referência, sem custo.
+    """
+    if isinstance(value, Mapping):
+        if depth >= _MAX_REDACTION_DEPTH:
+            return REDACTED_VALUE
+        return {
+            k: (
+                REDACTED_VALUE
+                if isinstance(k, str) and _is_sensitive_key(k)
+                else _redact_value(v, depth + 1)
+            )
+            for k, v in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        if depth >= _MAX_REDACTION_DEPTH:
+            return REDACTED_VALUE
+        items = [_redact_value(v, depth + 1) for v in value]
+        return tuple(items) if isinstance(value, tuple) else items
+    return value
+
+
 def _redact_sensitive(
     _logger: Any,
     _method_name: str,
@@ -97,12 +132,46 @@ def _redact_sensitive(
 ) -> EventDict:
     """Processor structlog: substitui valores de chaves sensíveis por [REDACTED].
 
+    A decisão continua por NOME de chave (`_is_sensitive_key`), mas a varredura
+    é **recursiva** (86e2rtxcm): antes ela olhava só as chaves de topo, e
+    qualquer segredo aninhado — `errors[0]["input"]` do Pydantic, um dict de
+    credenciais dentro de um evento — atravessava ileso. O topo é mutado
+    in-place (convenção structlog: o event_dict é do pipeline); os níveis
+    internos são cópias (ver `_redact_value`).
+
     Idempotente — pode rodar múltiplas vezes sem efeito colateral.
     """
-    for key in event_dict:
+    for key, value in event_dict.items():
         if _is_sensitive_key(key):
             event_dict[key] = REDACTED_VALUE
+        else:
+            event_dict[key] = _redact_value(value, 1)
     return event_dict
+
+
+# ----------------------------------------------------------------------
+# Sanitização de erros de validação (86e2rtxcm)
+# ----------------------------------------------------------------------
+
+#: Chaves de `exc.errors()` (Pydantic v2) que são DIAGNÓSTICO, não dado do
+#: cliente: `loc` diz qual campo falhou, `msg` e `type` dizem por quê. As
+#: demais — `input` (o valor rejeitado, verbatim) e `ctx` (pode ecoá-lo) —
+#: carregam payload e NUNCA podem chegar ao log (§3.3): o valor rejeitado de
+#: um body inválido é senha errada de propósito, anotação acima do limite
+#: (campo CRIPTOGRAFADO no banco, §4.1) ou credencial Omie malformada.
+_VALIDATION_ERROR_SAFE_KEYS: tuple[str, ...] = ("type", "loc", "msg")
+
+
+def sanitize_validation_errors(errors: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Reduz `RequestValidationError.errors()` ao que o suporte usa.
+
+    Allow-list, não deny-list: chave nova que o Pydantic inventar amanhã nasce
+    FORA do log — o oposto de remover `input`/`ctx` e torcer para não surgir
+    uma terceira via de eco do payload.
+    """
+    return [
+        {key: error[key] for key in _VALIDATION_ERROR_SAFE_KEYS if key in error} for error in errors
+    ]
 
 
 # ----------------------------------------------------------------------
