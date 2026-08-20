@@ -40,6 +40,7 @@ from app.modules.reconciliations.anomaly_ordering import (
     anomaly_order_by,
     join_anomaly_dates,
 )
+from app.modules.reconciliations.qualification.service import QUALIFICATION_FLAG_CODES
 from app.modules.reconciliations.totals import refresh_session_counters
 
 # `SEVERITY_ORDER_CASE` vem de `anomaly_ordering` (definição ÚNICA, de onde o
@@ -91,6 +92,7 @@ class ReviewRepository:
         situation: str | None,
         type_filter: str | None,
         search_hmacs: list[str] | None = None,
+        only_suspect: bool = False,
     ) -> list[ReconciliationFileEntry]:
         """Carrega TODAS as linhas da sessão aplicando filtros SQL-safe.
 
@@ -101,6 +103,13 @@ class ReviewRepository:
               `LIKE '% <hmac> %'` ANDado. Linhas com `description_search_hmac
               IS NULL` (sessões pré-migration) saem da contagem porque LIKE
               contra NULL é NULL.
+            - `only_suspect` (86e2n4pf1): EXISTS de anomalia de QUALIFICAÇÃO
+              não resolvida na linha. Espelha o badge da coluna Análise
+              (`qualificationByEntry` no front): o filtro tem de mostrar
+              exatamente as linhas que exibem o badge — filtro e badge
+              discordando é a classe de bug que a task corrige. O veredito da
+              S6 (`review_verdict`) NÃO entra de propósito: ele também não
+              muda o badge; se um dia mudar, muda nos dois juntos.
 
         Resultados ordenados por `transaction_date asc, id asc` para
         paginação estável. Service ainda pagina em Python — manter custo
@@ -110,6 +119,17 @@ class ReviewRepository:
         stmt = select(ReconciliationFileEntry).where(
             ReconciliationFileEntry.session_id == session_id,
         )
+        if only_suspect:
+            stmt = stmt.where(
+                select(ReconciliationAnomaly.id)
+                .join(AnomalyType, ReconciliationAnomaly.anomaly_type_id == AnomalyType.id)
+                .where(
+                    ReconciliationAnomaly.file_entry_id == ReconciliationFileEntry.id,
+                    ReconciliationAnomaly.resolved.is_(False),
+                    AnomalyType.code.in_(QUALIFICATION_FLAG_CODES),
+                )
+                .exists()
+            )
         if situation in {
             FileEntrySituation.CONCILIADO.value,
             # FASE 1: linha que casou por valor com data divergente ≤3 dias.

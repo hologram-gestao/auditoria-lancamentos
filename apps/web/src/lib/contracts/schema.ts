@@ -572,7 +572,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Lista movimentações da sessão com filtros (situation, type, search) e paginação. Descriptografa `description` e `user_note` no servidor antes de retornar. Filtro `search` aplica-se PÓS-decrypt em memória. `situation` aceita `conciliado_data_divergente` (FASE 1) — sem ele a aba não conseguia mostrar as linhas que casaram com data divergente, e a soma dos filtros não fechava com o contador do detalhe. */
+        /** Lista movimentações da sessão com filtros (situation, type, search, onlySuspect) e paginação. Descriptografa `description` e `user_note` no servidor antes de retornar. Filtro `search` aplica-se PÓS-decrypt em memória. `situation` aceita `conciliado_data_divergente` (FASE 1) — sem ele a aba não conseguia mostrar as linhas que casaram com data divergente, e a soma dos filtros não fechava com o contador do detalhe. */
         get: operations["list_file_entries_api_v1_reconciliations__session_id__file_entries_get"];
         put?: never;
         post?: never;
@@ -4258,6 +4258,7 @@ export interface operations {
                 situation?: "all" | "conciliado" | "conciliado_data_divergente" | "sem_omie" | "ignorado";
                 type?: "all" | "credit" | "debit";
                 search?: string | null;
+                onlySuspect?: boolean;
                 page?: number;
                 pageSize?: number;
             };

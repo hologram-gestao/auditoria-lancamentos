@@ -129,7 +129,8 @@ async def _load_session_for_rbac(
 @router.get(
     "/file-entries",
     summary=(
-        "Lista movimentações da sessão com filtros (situation, type, search) "
+        "Lista movimentações da sessão com filtros (situation, type, search, "
+        "onlySuspect) "
         "e paginação. Descriptografa `description` e `user_note` no servidor "
         "antes de retornar. Filtro `search` aplica-se PÓS-decrypt em memória. "
         "`situation` aceita `conciliado_data_divergente` (FASE 1) — sem ele a "
@@ -148,6 +149,10 @@ async def list_file_entries(
     ] = "all",
     type_filter: Annotated[Literal["all", "credit", "debit"], Query(alias="type")] = "all",
     search: Annotated[str | None, Query(max_length=200)] = None,
+    # 86e2n4pf1 — filtro server-side de qualificação suspeita. O alias é
+    # OBRIGATÓRIO (§7): sem ele o `onlySuspect` do front seria descartado em
+    # silêncio e o filtro viraria enfeite — o mesmo furo do pageSize de 14/08.
+    only_suspect: Annotated[bool, Query(alias="onlySuspect")] = False,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
 ) -> FileEntryListResponse:
@@ -157,6 +162,7 @@ async def list_file_entries(
         situation=None if situation == "all" else situation,
         type_filter=None if type_filter == "all" else type_filter,
         search=search,
+        only_suspect=only_suspect,
         page=page,
         page_size=page_size,
     )
