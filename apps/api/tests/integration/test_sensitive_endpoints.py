@@ -154,6 +154,11 @@ _BODIES: dict[str, dict[str, Any]] = {
     "PATCH /api/v1/reconciliations/{session_id}/anomalies/{anomaly_id}": {"resolved": False},
     "PATCH /api/v1/reconciliations/{session_id}/file-entries/{entry_id}": {"user_action": "flag"},
     "PATCH /api/v1/reconciliations/{session_id}/omie-entries/{entry_id}": {"user_action": "flag"},
+    # Sprint 7 — lançamento no Omie. Body VÁLIDO de propósito: um 422 passaria
+    # no teste sem nunca tocar a autorização (mesmo raciocínio do ADR-012).
+    "POST /api/v1/reconciliations/{session_id}/omie-postings": {
+        "lines": [{"file_entry_id": "{entry_id}", "cod_categoria": "1.01.01"}]
+    },
     "POST /api/v1/usage-events": {
         "event": "autor_navegou_fora",
         "session_id": "{session_b}",
@@ -170,6 +175,7 @@ _QUERIES: dict[str, dict[str, str]] = {
         "hash": _hex64("x"),
     },
     "GET /api/v1/omie/lancamentos": {"ids": "1,2", "session_id": "{session_b}"},
+    "GET /api/v1/omie/categorias": {"session_id": "{session_b}"},
 }
 
 
@@ -282,6 +288,23 @@ def _substitute(value: str, ctx: dict[str, str]) -> str:
     return value
 
 
+def _substitute_deep(value: Any, ctx: dict[str, str]) -> Any:
+    """Substitui os tokens em QUALQUER profundidade do body.
+
+    A versão que só olhava o 1º nível deixava `"{entry_id}"` literal dentro de
+    uma lista de objetos (o body do lote de lançamento, Sprint 7) — e o 422 de
+    UUID inválido passaria no teste sem nunca tocar a autorização, que é
+    exatamente o buraco que o ADR-012 mandou fechar.
+    """
+    if isinstance(value, str):
+        return _substitute(value, ctx)
+    if isinstance(value, list):
+        return [_substitute_deep(item, ctx) for item in value]
+    if isinstance(value, dict):
+        return {k: _substitute_deep(v, ctx) for k, v in value.items()}
+    return value
+
+
 COVERED = [e for e in SENSITIVE_ENDPOINTS if e.key not in PENDING_ENDPOINTS]
 
 
@@ -321,7 +344,7 @@ async def test_cross_tenant_por_endpoint(
     raw_body = _BODIES.get(endpoint.key)
     body = None
     if raw_body is not None:
-        body = {k: (_substitute(v, ctx) if isinstance(v, str) else v) for k, v in raw_body.items()}
+        body = _substitute_deep(raw_body, ctx)
 
     resp = await client_with_db.request(endpoint.method, url, params=params or None, json=body)
 

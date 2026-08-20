@@ -28,12 +28,21 @@ from app.core.exceptions import (
     ValidationAppError,
 )
 from app.db.models import Client
+from app.integrations.omie.categorias_cache import OmieCategoriasCache
+from app.integrations.omie.client import OmieClient
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache
 from app.modules.clients.omie_factory import build_omie_client
-from app.modules.omie_data.schemas import OmieLancamentoListResponse
+from app.modules.omie_data.categorias_service import OmieCategoriasService
+from app.modules.omie_data.schemas import (
+    OmieCategoriaListResponse,
+    OmieLancamentoListResponse,
+)
 from app.modules.omie_data.service import OmieLancamentoService
 from app.modules.reconciliations.review.repository import ReviewRepository
-from app.modules.reconciliations.tenant_scope import require_session_access
+from app.modules.reconciliations.tenant_scope import (
+    require_client_for_session,
+    require_session_access,
+)
 
 router = APIRouter(prefix="/api/v1/omie", tags=["omie"])
 
@@ -73,6 +82,53 @@ def _parse_ids(raw: str) -> list[int]:
         seen.add(value)
         out.append(value)
     return out
+
+
+@router.get(
+    "/categorias",
+    summary=(
+        "Lista as categorias Omie do cliente da sessão (código + descrição), "
+        "servidas de um cache em memória por cliente com TTL de 6 h. Lista "
+        "COMPLETA, sem paginação — o consumidor é um combobox com busca local. "
+        "`refresh=true` ignora o cache."
+    ),
+)
+async def get_omie_categorias(
+    user: SyncOmieAccountsDep,
+    db: DbSessionDep,
+    request: Request,
+    settings: Annotated[Settings, Depends(get_settings)],
+    session_id: Annotated[UUID, Query(description="UUID da sessão que define o tenant.")],
+    refresh: Annotated[
+        bool,
+        Query(description="Ignora o cache e rebusca do Omie."),
+    ] = False,
+) -> OmieCategoriaListResponse:
+    """Categorias para classificar as compras antes de lançar (BACK 07.3).
+
+    O tenant vem da **sessão** — que por sua vez já é carregada com o filtro de
+    tenant dentro do próprio `SELECT` (`require_client_for_session`). Nenhum
+    `client_id` é aceito da URL ou do body: sessão de outro tenant é 404 e nem
+    chega aqui.
+    """
+    client = await require_client_for_session(db, user, session_id)
+
+    cache: OmieCategoriasCache = request.app.state.omie_categorias_cache
+    service = OmieCategoriasService(cache)
+
+    async def build_client() -> OmieClient:
+        """Só chamado no MISS — em staging/prod o unwrap da DEK é uma ida ao
+        Cloud KMS, e o ponto do cache é justamente não pagar latência por
+        abertura de combobox."""
+        cipher = await load_client_cipher(client, settings=settings)
+        return build_omie_client(client, settings, cipher)
+
+    items = await service.list_categorias(
+        client_id=client.id,
+        omie_client_factory=build_client,
+        refresh=refresh,
+    )
+    return OmieCategoriaListResponse(data=items, total=len(items))
 
 
 @router.get(

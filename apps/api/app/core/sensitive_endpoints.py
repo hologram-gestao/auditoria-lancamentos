@@ -223,11 +223,28 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         _VIA_CLIENT_PATH,
     ),
     SensitiveEndpoint(
+        "POST",
+        "/api/v1/reconciliations/{session_id}/omie-postings",
+        ScopeKind.DETAIL_PK,
+        "app/modules/reconciliations/routes.py",
+        (
+            f"{_VIA_SESSION}; o Client sai do client_id da sessão já autorizada e "
+            "as linhas são carregadas com AND session_id — nada vem do body"
+        ),
+    ),
+    SensitiveEndpoint(
         "GET",
         "/api/v1/omie/lancamentos",
         ScopeKind.COLLECTION,
         "app/modules/omie_data/routes.py",
         _VIA_SESSION,
+    ),
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/omie/categorias",
+        ScopeKind.COLLECTION,
+        "app/modules/omie_data/routes.py",
+        f"{_VIA_SESSION}; o client_id do cache vem da sessão, nunca da query",
     ),
     # ---------------------------------------------------------------- notificações
     SensitiveEndpoint(

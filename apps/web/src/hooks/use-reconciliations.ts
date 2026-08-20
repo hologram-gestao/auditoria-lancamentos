@@ -350,6 +350,51 @@ export function useFileEntries(
   });
 }
 
+/**
+ * Todas as linhas `sem_omie` da sessão, paginando internamente (Sprint 7 /
+ * FRONT 07.6).
+ *
+ * A aba de Anomalias precisa saber se a linha por trás de uma anomalia
+ * `missing_in_omie` **ainda** pode ser lançada, e o item de anomalia
+ * (`AnomalyRelatedFileEntry`) não carrega `situation` nem `omie_lancamento_id`.
+ * Em vez de inventar o estado a partir do código da anomalia — que ficaria
+ * aberta mesmo depois de o operador ignorar a linha —, lemos a fonte real pelo
+ * endpoint que já existe, filtrado no servidor.
+ *
+ * `enabled` fica com o consumidor: só sessão de CARTÃO paga esse par de
+ * requests, porque só ela tem lançamento.
+ */
+const ALL_ENTRIES_PAGE_SIZE = 100;
+
+export function useAllSemOmieEntries(sessionId: string, options: { enabled?: boolean } = {}) {
+  return useQuery<FileEntryItem[]>({
+    queryKey: ['review', sessionId, 'file-entries', 'all-sem-omie'],
+    queryFn: async () => {
+      const first = await listFileEntries({
+        sessionId,
+        page: 1,
+        pageSize: ALL_ENTRIES_PAGE_SIZE,
+        situation: 'sem_omie',
+      });
+      const totalPages = first.pagination.totalPages;
+      if (totalPages <= 1) return first.data;
+      const remaining = await Promise.all(
+        Array.from({ length: totalPages - 1 }, (_, i) =>
+          listFileEntries({
+            sessionId,
+            page: i + 2,
+            pageSize: ALL_ENTRIES_PAGE_SIZE,
+            situation: 'sem_omie',
+          }),
+        ),
+      );
+      return [first.data, ...remaining.map((r) => r.data)].flat();
+    },
+    enabled: sessionId.length > 0 && (options.enabled ?? true),
+    placeholderData: keepPreviousData,
+  });
+}
+
 interface PatchFileEntryVars {
   entryId: string;
   payload: PatchFileEntryPayload;

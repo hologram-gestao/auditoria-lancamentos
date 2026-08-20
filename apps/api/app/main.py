@@ -31,6 +31,7 @@ from app.core.logging import get_logger, setup_logging
 from app.core.rate_limit import limiter
 from app.db.session import close_db, init_db
 from app.integrations.anthropic.model_limits import validate_parse_output_config
+from app.integrations.omie.categorias_cache import OmieCategoriasCache
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache
 from app.modules.anomaly_types import routes as anomaly_types_routes
 from app.modules.auth import routes as auth_routes
@@ -268,6 +269,10 @@ def create_app() -> FastAPI:
     # Instanciado aqui (não no lifespan) para existir mesmo quando testes
     # substituem `dependency_overrides` sem subir o lifespan.
     app.state.omie_lancamento_cache = OmieLancamentoCache()
+    # Cache L1 de categorias Omie (Sprint 7 / BACK 07.3). In-memory, e não uma
+    # tabela: o §4.5 do CLAUDE.md lista `categorias` entre o que nunca persiste
+    # em claro — só cache com TTL.
+    app.state.omie_categorias_cache = OmieCategoriasCache()
 
     @app.get("/health", tags=["system"])
     async def health() -> dict[str, str]:

@@ -19,9 +19,16 @@
  * "Linha relacionada" mostra date + descrição truncada quando vinculada
  * a file_entry; quando é omie_entry, "Omie #ID Data". Sem deep-link
  * (FRONT 9.16 nota — pode ser implementado em iteração futura).
+ *
+ * **Sprint 7 (FRONT 07.6).** Em sessão de CARTÃO, a anomalia cuja linha do
+ * arquivo ainda está `sem_omie` ganha "Lançar no Omie" e entra na seleção do
+ * lote. A elegibilidade NÃO é deduzida do código da anomalia: `AnomalyItem` não
+ * carrega `situation` nem `omie_lancamento_id`, e uma `missing_in_omie` segue
+ * aberta mesmo depois de o operador ignorar a linha. Quem responde é a lista
+ * real de linhas `sem_omie` (`useAllSemOmieEntries`), cruzada por id.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { PaginationBar } from '@/components/ui/pagination-bar';
@@ -40,19 +47,24 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { useAnomalies } from '@/hooks/use-reconciliations';
-import type { AnomalyItem } from '@/lib/api/reconciliations';
+import { useAllSemOmieEntries, useAnomalies } from '@/hooks/use-reconciliations';
+import type { AnomalyItem, FileEntryItem } from '@/lib/api/reconciliations';
 import { hasPermission } from '@/lib/authz';
 import { formatBRDate, formatBRL } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth';
 
 import { acceptsReviewVerdict, AnomalyVerdictControl } from './anomaly-verdict-control';
+import { LancarLoteBar, LancarNoOmieButton, PostingCheckbox } from './lancar-no-omie-controls';
+import { LancarNoOmieDrawer } from './lancar-no-omie-drawer';
+import { getPostingBlock, type PostingBlockReason } from './omie-posting-eligibility';
 import { ResolveAnomalyDialog } from './resolve-anomaly-dialog';
 import { SeverityBadge } from './severity-badge';
 
 interface AnomaliesTabProps {
   sessionId: string;
+  /** Sessão de cartão — só ela lança no Omie (FRONT 07.6). */
+  isCard: boolean;
 }
 
 type SeverityFilter = 'all' | 'critical' | 'moderate' | 'info';
@@ -60,9 +72,9 @@ type ResolvedFilter = 'all' | 'true' | 'false';
 /** As opções vêm da `PaginationBar` (10/20/50/100) — nada de lista paralela. */
 const DEFAULT_PAGE_SIZE = 20;
 /** Severidade · Tipo · Linha · Detectado por · Status · Veredito · Ações. */
-const COLUMN_COUNT = 7;
+const BASE_COLUMN_COUNT = 7;
 
-export function AnomaliesTab({ sessionId }: AnomaliesTabProps) {
+export function AnomaliesTab({ sessionId, isCard }: AnomaliesTabProps) {
   // Matriz do R4 numa consulta só (`lib/authz`), no topo da aba — cada linha
   // recebe a resposta por prop. Nada de `role === '...'` dentro de célula.
   const currentUser = useAuthStore((s) => s.user);
@@ -80,10 +92,77 @@ export function AnomaliesTab({ sessionId }: AnomaliesTabProps) {
   }, [severity, resolved, pageSize]);
 
   const listQuery = useAnomalies(sessionId, { page, pageSize, severity, resolved });
-  const items = listQuery.data?.data ?? [];
+  // Memoizado porque a elegibilidade do lançamento (abaixo) deriva daqui: um
+  // array novo a cada render recalcularia os `useMemo` sem nada ter mudado.
+  const items = useMemo(() => listQuery.data?.data ?? [], [listQuery.data]);
   const pagination = listQuery.data?.pagination;
   const totalPages = pagination?.totalPages ?? 0;
   const total = pagination?.total ?? 0;
+
+  // ---------------------------------------------------------------------
+  // Sprint 7 / FRONT 07.6 — lançamento a partir da anomalia
+  // ---------------------------------------------------------------------
+
+  const semOmieQuery = useAllSemOmieEntries(sessionId, { enabled: isCard });
+  const semOmieById = useMemo(() => {
+    const map = new Map<string, FileEntryItem>();
+    semOmieQuery.data?.forEach((entry) => map.set(entry.id, entry));
+    return map;
+  }, [semOmieQuery.data]);
+
+  /**
+   * Linha lançável por trás de cada anomalia da página. `null` quando a
+   * anomalia não tem linha de arquivo, quando a linha saiu de `sem_omie` (já
+   * conciliada/ignorada/lançada) ou quando a sessão não é de cartão.
+   */
+  const entryByAnomaly = useMemo(() => {
+    const map = new Map<string, FileEntryItem>();
+    if (!isCard) return map;
+    items.forEach((anomaly) => {
+      const relatedId = anomaly.related_file_entry?.id;
+      if (relatedId === undefined) return;
+      const entry = semOmieById.get(relatedId);
+      if (entry !== undefined) map.set(anomaly.id, entry);
+    });
+    return map;
+  }, [items, semOmieById, isCard]);
+
+  const [selectedAnomalyIds, setSelectedAnomalyIds] = useState<string[]>([]);
+  const [postedEntryIds, setPostedEntryIds] = useState<string[]>([]);
+  const [launchTargets, setLaunchTargets] = useState<FileEntryItem[] | null>(null);
+
+  const selectableAnomalyIds = useMemo(
+    () => items.filter((a) => entryByAnomaly.has(a.id)).map((a) => a.id),
+    [items, entryByAnomaly],
+  );
+
+  // Mesma poda da aba de Movimentações: seleção é da PÁGINA e do que continua
+  // elegível — trocar de filtro/página não pode levar id pendurado para o lote.
+  useEffect(() => {
+    setSelectedAnomalyIds((prev) => {
+      const next = prev.filter((id) => selectableAnomalyIds.includes(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [selectableAnomalyIds]);
+
+  /**
+   * DUAS anomalias podem apontar para a MESMA linha do arquivo (ex.: valor
+   * divergente + sem correspondente). O backend recusa o lote inteiro com 422
+   * quando um `file_entry_id` se repete, então a deduplicação acontece aqui,
+   * na montagem — não no servidor.
+   */
+  const selectedEntries = useMemo(() => {
+    const byEntryId = new Map<string, FileEntryItem>();
+    selectedAnomalyIds.forEach((anomalyId) => {
+      const entry = entryByAnomaly.get(anomalyId);
+      if (entry !== undefined) byEntryId.set(entry.id, entry);
+    });
+    return [...byEntryId.values()];
+  }, [selectedAnomalyIds, entryByAnomaly]);
+
+  const allSelectableSelected =
+    selectableAnomalyIds.length > 0 && selectedAnomalyIds.length === selectableAnomalyIds.length;
+  const columnCount = isCard ? BASE_COLUMN_COUNT + 1 : BASE_COLUMN_COUNT;
 
   return (
     <div className="space-y-4">
@@ -122,10 +201,31 @@ export function AnomaliesTab({ sessionId }: AnomaliesTabProps) {
         </div>
       </div>
 
+      {isCard && selectedAnomalyIds.length > 0 && (
+        <LancarLoteBar
+          selectedCount={selectedEntries.length}
+          onLaunch={() => setLaunchTargets(selectedEntries)}
+          onClear={() => setSelectedAnomalyIds([])}
+        />
+      )}
+
       <div className="rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
+              {isCard && (
+                <TableHead className="w-10">
+                  <PostingCheckbox
+                    checked={allSelectableSelected}
+                    indeterminate={selectedAnomalyIds.length > 0}
+                    disabled={selectableAnomalyIds.length === 0}
+                    label="Selecionar todas as compras desta página que podem ser lançadas no Omie"
+                    onChange={(checked) =>
+                      setSelectedAnomalyIds(checked ? selectableAnomalyIds : [])
+                    }
+                  />
+                </TableHead>
+              )}
               <TableHead className="w-32">Severidade</TableHead>
               <TableHead className="w-48">Tipo</TableHead>
               <TableHead>Linha relacionada</TableHead>
@@ -141,7 +241,7 @@ export function AnomaliesTab({ sessionId }: AnomaliesTabProps) {
               <>
                 {Array.from({ length: 6 }).map((_, i) => (
                   <TableRow key={i}>
-                    <TableCell colSpan={COLUMN_COUNT}>
+                    <TableCell colSpan={columnCount}>
                       <div className="bg-muted h-6 animate-pulse rounded" />
                     </TableCell>
                   </TableRow>
@@ -151,7 +251,7 @@ export function AnomaliesTab({ sessionId }: AnomaliesTabProps) {
             {!listQuery.isLoading && items.length === 0 && (
               <TableRow>
                 <TableCell
-                  colSpan={COLUMN_COUNT}
+                  colSpan={columnCount}
                   className="text-muted-foreground py-10 text-center text-sm"
                 >
                   Nenhuma anomalia registrada.
@@ -159,15 +259,34 @@ export function AnomaliesTab({ sessionId }: AnomaliesTabProps) {
               </TableRow>
             )}
             {!listQuery.isLoading &&
-              items.map((anomaly) => (
-                <AnomalyRow
-                  key={anomaly.id}
-                  sessionId={sessionId}
-                  anomaly={anomaly}
-                  canReview={canReview}
-                  onResolve={() => setResolvingId(anomaly.id)}
-                />
-              ))}
+              items.map((anomaly) => {
+                const entry = entryByAnomaly.get(anomaly.id);
+                return (
+                  <AnomalyRow
+                    key={anomaly.id}
+                    sessionId={sessionId}
+                    anomaly={anomaly}
+                    canReview={canReview}
+                    isCard={isCard}
+                    postingBlock={resolvePostingBlock(anomaly, entry, {
+                      isCard,
+                      posted: postedEntryIds,
+                    })}
+                    selected={selectedAnomalyIds.includes(anomaly.id)}
+                    onSelectedChange={(checked) =>
+                      setSelectedAnomalyIds((prev) =>
+                        checked
+                          ? [...new Set([...prev, anomaly.id])]
+                          : prev.filter((id) => id !== anomaly.id),
+                      )
+                    }
+                    onLancar={() => {
+                      if (entry !== undefined) setLaunchTargets([entry]);
+                    }}
+                    onResolve={() => setResolvingId(anomaly.id)}
+                  />
+                );
+              })}
           </TableBody>
         </Table>
       </div>
@@ -183,6 +302,27 @@ export function AnomaliesTab({ sessionId }: AnomaliesTabProps) {
         itemLabel="anomalias"
       />
 
+      {launchTargets !== null && (
+        <LancarNoOmieDrawer
+          sessionId={sessionId}
+          entries={launchTargets}
+          open
+          onOpenChange={(open) => {
+            if (!open) setLaunchTargets(null);
+          }}
+          onPosted={(results) => {
+            const ids = Object.keys(results);
+            setPostedEntryIds((prev) => [...new Set([...prev, ...ids])]);
+            setSelectedAnomalyIds((prev) =>
+              prev.filter((anomalyId) => {
+                const entry = entryByAnomaly.get(anomalyId);
+                return entry === undefined || !ids.includes(entry.id);
+              }),
+            );
+          }}
+        />
+      )}
+
       {resolvingId !== null && (
         <ResolveAnomalyDialog
           sessionId={sessionId}
@@ -197,18 +337,67 @@ export function AnomaliesTab({ sessionId }: AnomaliesTabProps) {
   );
 }
 
+/**
+ * Motivo do bloqueio da ação numa linha de anomalia.
+ *
+ * A anomalia não conhece o estado da linha — quem conhece é a lista de
+ * `sem_omie`. "Não achei a linha ali" significa que ela deixou de ser lançável
+ * (conciliada, ignorada ou já lançada); `posted` distingue o caso que acabou de
+ * acontecer nesta tela, em que o motivo exato é conhecido.
+ */
+function resolvePostingBlock(
+  anomaly: AnomalyItem,
+  entry: FileEntryItem | undefined,
+  options: { isCard: boolean; posted: string[] },
+): PostingBlockReason | null {
+  if (!options.isCard) return 'sessao_nao_e_cartao';
+  if (entry !== undefined) return getPostingBlock(entry, { isCard: true });
+  const relatedId = anomaly.related_file_entry?.id;
+  if (relatedId !== undefined && options.posted.includes(relatedId)) return 'ja_lancada';
+  return 'nao_e_sem_omie';
+}
+
 interface AnomalyRowProps {
   sessionId: string;
   anomaly: AnomalyItem;
   canReview: boolean;
+  isCard: boolean;
+  postingBlock: PostingBlockReason | null;
+  selected: boolean;
+  onSelectedChange: (checked: boolean) => void;
+  onLancar: () => void;
   onResolve: () => void;
 }
 
-function AnomalyRow({ sessionId, anomaly, canReview, onResolve }: AnomalyRowProps) {
+function AnomalyRow({
+  sessionId,
+  anomaly,
+  canReview,
+  isCard,
+  postingBlock,
+  selected,
+  onSelectedChange,
+  onLancar,
+  onResolve,
+}: AnomalyRowProps) {
   const relatedLabel = buildRelatedLabel(anomaly);
   const detectedByLabel = anomaly.detected_by === 'ai' ? 'Sistema' : 'Manual';
+  /** Sem linha de arquivo não há o que lançar — a coluna fica vazia. */
+  const showPosting = isCard && anomaly.related_file_entry !== null;
   return (
     <TableRow>
+      {isCard && (
+        <TableCell>
+          {showPosting && (
+            <PostingCheckbox
+              checked={selected}
+              disabled={postingBlock !== null}
+              label={`Selecionar a compra relacionada: ${relatedLabel}`}
+              onChange={onSelectedChange}
+            />
+          )}
+        </TableCell>
+      )}
       <TableCell>
         <SeverityBadge severity={anomaly.anomaly_type.severity} />
       </TableCell>
@@ -241,13 +430,16 @@ function AnomalyRow({ sessionId, anomaly, canReview, onResolve }: AnomalyRowProp
         )}
       </TableCell>
       <TableCell className="text-right">
-        {!anomaly.resolved ? (
-          <Button size="sm" variant="outline" onClick={onResolve}>
-            Marcar como resolvida
-          </Button>
-        ) : (
-          <span className="text-muted-foreground text-xs">—</span>
-        )}
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {showPosting && <LancarNoOmieButton block={postingBlock} onClick={onLancar} />}
+          {!anomaly.resolved ? (
+            <Button size="sm" variant="outline" onClick={onResolve}>
+              Marcar como resolvida
+            </Button>
+          ) : (
+            !showPosting && <span className="text-muted-foreground text-xs">—</span>
+          )}
+        </div>
       </TableCell>
     </TableRow>
   );
