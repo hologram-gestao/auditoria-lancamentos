@@ -47,8 +47,7 @@ from app.db.models import (
     ReconciliationSession,
 )
 from app.modules.reconciliations.qualification.service import (
-    ANOMALY_CODE_QUALIF_INCOERENTE,
-    ANOMALY_CODE_QUALIF_SUSPEITA,
+    QUALIFICATION_FLAG_CODES,
 )
 from app.modules.reconciliations.review.repository import ReviewRepository
 from app.modules.reconciliations.review.schemas import (
@@ -79,12 +78,9 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-#: Tipos de anomalia que aceitam veredito do revisor (Sprint 6 / BACK 06.5).
-#: São EXATAMENTE os flags da Camada 1 — os mesmos que o
-#: `qualificacao_emitida` conta como "flag emitida" no denominador da métrica.
-QUALIFICATION_FLAG_CODES: frozenset[str] = frozenset(
-    {ANOMALY_CODE_QUALIF_SUSPEITA, ANOMALY_CODE_QUALIF_INCOERENTE}
-)
+#: Reexport: a definição mudou para `qualification/service.py` (junto das
+#: constantes de origem) porque o review repository também a usa (86e2n4pf1)
+#: e importar daqui criaria ciclo. Importadores existentes seguem válidos.
 
 # Mínimo de chars para resolution_note quando `resolved=true` (Doc §17.3).
 _RESOLUTION_NOTE_MIN_LENGTH = 10
@@ -183,6 +179,7 @@ class ReviewService:
         search: str | None,
         page: int,
         page_size: int,
+        only_suspect: bool = False,
     ) -> tuple[list[ListedFileEntry], PaginationMeta]:
         """Lista entries com filtros + paginação.
 
@@ -228,6 +225,7 @@ class ReviewService:
             situation=situation,
             type_filter=type_filter,
             search_hmacs=search_hmacs,
+            only_suspect=only_suspect,
         )
 
         total = len(rows)

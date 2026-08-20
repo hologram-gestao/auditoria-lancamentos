@@ -400,6 +400,104 @@ class TestListFileEntries:
         assert body["pagination"]["total"] == 1
         assert body["data"][0]["amount"] == "5.00"
 
+    async def test_filter_only_suspect_e_server_side_e_a_paginacao_bate(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """86e2n4pf1 — o filtro espelha o BADGE: qualificação NÃO resolvida.
+
+        4 linhas: com flag pendente (entra), com flag pendente já julgado
+        improcedente (ENTRA — o veredito da S6 não muda o badge, então não
+        muda o filtro), com flag resolvido (sai), sem flag (sai).
+        `pagination.total` tem de refletir o filtro — era a mentira original:
+        tabela vazia com rodapé "1-20 de 78".
+        """
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin)
+
+        e_pendente = await _seed_file_entry(
+            db_session, reconciliation=sess, description="Flag pendente", amount=Decimal("-1.00")
+        )
+        e_improcedente = await _seed_file_entry(
+            db_session, reconciliation=sess, description="Improcedente", amount=Decimal("-2.00")
+        )
+        e_resolvido = await _seed_file_entry(
+            db_session, reconciliation=sess, description="Flag resolvido", amount=Decimal("-3.00")
+        )
+        await _seed_file_entry(
+            db_session, reconciliation=sess, description="Sem flag", amount=Decimal("-4.00")
+        )
+
+        # Get-or-create, como o `_seed_anomaly_types` deste arquivo: os testes
+        # de qualificação semeiam o MESMO code e a tabela sobrevive entre
+        # arquivos — inserir às cegas quebra com UniqueViolation na ordem do
+        # CI (foi exatamente o que aconteceu no run 32406669914).
+        suspeita = (
+            await db_session.execute(
+                select(AnomalyType).where(AnomalyType.code == "qualificacao_suspeita")
+            )
+        ).scalar_one_or_none()
+        if suspeita is None:
+            suspeita = AnomalyType(
+                code="qualificacao_suspeita",
+                name="Categoria suspeita",
+                description="Camada 1",
+                severity=AnomalySeverity.MODERATE.value,
+                active=True,
+            )
+            db_session.add(suspeita)
+            await db_session.flush()
+        db_session.add_all(
+            [
+                ReconciliationAnomaly(
+                    session_id=sess.id,
+                    anomaly_type_id=suspeita.id,
+                    file_entry_id=e_pendente.id,
+                    detected_by="ai",
+                    resolved=False,
+                ),
+                ReconciliationAnomaly(
+                    session_id=sess.id,
+                    anomaly_type_id=suspeita.id,
+                    file_entry_id=e_improcedente.id,
+                    detected_by="ai",
+                    resolved=False,
+                    review_verdict="improcedente",
+                ),
+                ReconciliationAnomaly(
+                    session_id=sess.id,
+                    anomaly_type_id=suspeita.id,
+                    file_entry_id=e_resolvido.id,
+                    detected_by="ai",
+                    resolved=True,
+                ),
+            ]
+        )
+        await db_session.flush()
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        # Ligado: só as 2 com flag pendente — e o TOTAL diz 2, não 4.
+        resp = await client_with_db.get(
+            f"/api/v1/reconciliations/{sess.id}/file-entries",
+            params={"onlySuspect": "true"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["pagination"]["total"] == 2
+        descricoes = {e["description"] for e in body["data"]}
+        assert descricoes == {"Flag pendente", "Improcedente"}
+
+        # Combinado com outro filtro server-side (type=debit continua valendo).
+        resp = await client_with_db.get(
+            f"/api/v1/reconciliations/{sess.id}/file-entries",
+            params={"onlySuspect": "true", "type": "debit"},
+        )
+        assert resp.json()["pagination"]["total"] == 2
+
+        # Desligado: a listagem completa volta.
+        resp = await client_with_db.get(f"/api/v1/reconciliations/{sess.id}/file-entries")
+        assert resp.json()["pagination"]["total"] == 4
+
     async def test_manager_outside_portfolio_returns_404(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:

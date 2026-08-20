@@ -66,6 +66,14 @@ log = get_logger(__name__)
 # mesma sessão (S19).
 ANOMALY_CODE_QUALIF_SUSPEITA = "qualificacao_suspeita"
 ANOMALY_CODE_QUALIF_INCOERENTE = "qualificacao_incoerente"
+
+#: Flags da Camada 1 — os que aceitam veredito do revisor (S6/BACK 06.5) e os
+#: que o filtro "Apenas qualificação suspeita" considera (86e2n4pf1). Morava em
+#: review/service.py; veio para junto das constantes de origem porque o review
+#: REPOSITORY também precisa dele e importar do service criaria ciclo.
+QUALIFICATION_FLAG_CODES: frozenset[str] = frozenset(
+    {ANOMALY_CODE_QUALIF_SUSPEITA, ANOMALY_CODE_QUALIF_INCOERENTE}
+)
 ANOMALY_CODE_PADRAO_QUEBRADO = "padrao_quebrado"
 ANOMALY_CODE_VALOR_OUTLIER = "valor_outlier"
 
