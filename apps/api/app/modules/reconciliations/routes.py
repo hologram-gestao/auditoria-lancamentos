@@ -10,6 +10,8 @@ S10 (BACK 8.1 + 8.6):
 S11.fix (retry de sessão em erro):
     - POST /api/v1/reconciliations/{session_id}/reprocess
     - POST /api/v1/reconciliations/{session_id}/discard  (soft-delete)
+S7 (BACK 07.4 — lançamento no Omie):
+    - POST /api/v1/reconciliations/{session_id}/omie-postings
 S4 (BACK 04.2 — N arquivos por conciliação):
     - POST   /api/v1/reconciliations/{session_id}/files            (anexar partes)
     - GET    /api/v1/reconciliations/{session_id}/files            (listar partes)
@@ -35,6 +37,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from sqlalchemy import select
 
 from app.core.audit import AccessAction, record_access
 from app.core.config import Settings, get_settings
@@ -42,6 +45,7 @@ from app.core.crypto_service import load_client_cipher, provision_client_cipher
 from app.core.dependencies import (
     CurrentUserDep,
     DbSessionDep,
+    ReviewExportDep,
     RunReconciliationDep,
     require_client_access,
 )
@@ -56,6 +60,13 @@ from app.core.exceptions import (
 from app.core.rate_limit import limiter, user_id_key_func
 from app.db.models import Client, ReconciliationStatus
 from app.integrations.anthropic.client import AnthropicClient
+from app.integrations.omie.client import OmieClient
+from app.modules.clients.omie_factory import build_omie_client
+from app.modules.reconciliations.omie_posting.schemas import (
+    OmiePostingBatchRequest,
+    OmiePostingBatchResponse,
+)
+from app.modules.reconciliations.omie_posting.service import OmiePostingService
 from app.modules.reconciliations.parse_service import ParseService
 from app.modules.reconciliations.processing.checksum import compute_checksum
 from app.modules.reconciliations.processing.job import run_reconciliation_processing
@@ -717,3 +728,60 @@ async def get_reconciliation_detail(
 
     payload = await service.get_session_detail(session_id)
     return SessionDetailResponse(data=payload)
+
+
+@router.post(
+    "/{session_id}/omie-postings",
+    status_code=status.HTTP_200_OK,
+    summary=(
+        "Lança no Omie, em lote, as compras `sem_omie` de uma conciliação de "
+        "CARTÃO. Body = lista de {file_entry_id, cod_categoria}. Devolve o "
+        "resumo por linha (lançada / bloqueada / erro + motivo) e os "
+        "agregados. Idempotente por linha: reenviar não duplica. Desligável "
+        "por `OMIE_POSTING_ENABLED` sem deploy."
+    ),
+)
+async def post_omie_lancamentos(
+    user: ReviewExportDep,
+    db: DbSessionDep,
+    settings: Annotated[Settings, Depends(get_settings)],
+    session_id: UUID,
+    body: OmiePostingBatchRequest,
+) -> OmiePostingBatchResponse:
+    """Lançamento em lote no Omie (Sprint 7 / BACK 07.4).
+
+    ⚠️ **É a única escrita do ADL no ERP do cliente** — o invariante "Omie
+    read-only" (CLAUDE.md §10) termina aqui.
+
+    **Autorização.** `ReviewExportDep` aplica a permissão `review_export` da
+    `PERMISSION_MATRIX` — a MESMA que já governa revisar/exportar, porque
+    lançar é o desfecho da revisão e nenhum papel que revisa deixaria de poder
+    lançar (uma chave nova nasceria idêntica a esta, ver ADR-026-BE).
+    **Tenant.** `require_client_for_session` carrega a sessão com o filtro de
+    tenant dentro do próprio `SELECT`: sessão de outro tenant é 404 e nada é
+    lançado. Nenhum `client_id` é aceito do body.
+    """
+    # UMA decisão de acesso: `require_session_access` já carrega a sessão com
+    # o filtro de tenant no próprio SELECT e aplica a carteira do usuário
+    # `system`. O `Client` vem depois, pelo `client_id` da sessão já
+    # autorizada — nunca de um id vindo da requisição.
+    session_obj = await require_session_access(db, user, session_id)
+    client = (
+        await db.execute(select(Client).where(Client.id == session_obj.client_id))
+    ).scalar_one_or_none()
+    if client is None:  # pragma: no cover  -- FK garante a existência
+        raise NotFoundError("Conciliação não encontrada.")
+
+    cipher = await load_client_cipher(client, settings=settings)
+
+    async def build_client() -> OmieClient:
+        return build_omie_client(client, settings, cipher)
+
+    service = OmiePostingService(
+        db,
+        settings,
+        omie_client_factory=build_client,
+        cipher=cipher,
+    )
+    payload = await service.post_batch(session=session_obj, lines=body.lines)
+    return OmiePostingBatchResponse(data=payload)

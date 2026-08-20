@@ -179,6 +179,40 @@ class Settings(BaseSettings):
         description="Ativa análise de qualificação no pipeline de conciliação (S19).",
     )
 
+    # ---------- Lançamento no Omie (Sprint 7 / BACK 07.4) ----------
+    # Kill-switch do ÚNICO caminho de ESCRITA do ADL no ERP do cliente.
+    #
+    # **Default `False`, ao contrário do `QUALIFICATION_ENABLED`** — e a
+    # diferença não é estilo. A qualificação é leitura/análise: ligada por
+    # engano, gasta token. Esta feature GRAVA MOVIMENTO FINANCEIRO na
+    # contabilidade do cliente, sobre um contrato ainda NÃO-VERIFICADO contra a
+    # API real (S-1, ver ADR-019-BE), e o critério de rollback da sprint é "um
+    # único lançamento duplicado desliga o recurso". Um default `True` faria a
+    # feature nascer ligada em todo ambiente que subisse o código, inclusive
+    # antes de a fixture existir. Ligar é decisão explícita, por ambiente.
+    #
+    # Desligar/ligar em produção é `--update-env-vars` no Cloud Run (que
+    # preserva as vars manuais), sem deploy.
+    OMIE_POSTING_ENABLED: bool = Field(
+        default=False,
+        description="Ativa o lançamento de linhas da fatura no Omie (Sprint 7).",
+    )
+    # Teto de linhas por lote, validado NO SERVIDOR.
+    #
+    # O lote é enviado à Omie **em sequência**, nunca em paralelo: a Omie impõe
+    # `X-Omie-ParallelRateLimit: 1/4` por método e pune chamadas concorrentes
+    # com `1880`/`6 - Consumo redundante` (ver `omie/client.py`). Como cada
+    # linha é um POST com budget de retry de ~30s no pior caso, o teto é o que
+    # mantém o request dentro do timeout do Cloud Run. 50 linhas cobrem a
+    # fatura típica; acima disso o operador manda em lotes — e a resposta
+    # sempre diz quantas entraram.
+    OMIE_POSTING_MAX_BATCH: int = Field(
+        default=50,
+        ge=1,
+        le=200,
+        description="Máximo de linhas por lote de lançamento no Omie (Sprint 7).",
+    )
+
     # ---------- Observabilidade ----------
     SENTRY_DSN: str | None = None
     SENTRY_TRACES_SAMPLE_RATE: float = 0.1

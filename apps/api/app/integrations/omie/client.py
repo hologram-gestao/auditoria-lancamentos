@@ -43,7 +43,10 @@ from app.core.exceptions import (
 )
 from app.core.logging import get_logger
 from app.integrations.omie.schemas import (
+    CategoriaOmie,
     ContaCorrente,
+    IncluirLancCCRequest,
+    IncluirLancCCResponse,
     LancamentoExtrato,
     OmieFaultPayload,
     OmieTituloStatus,
@@ -534,6 +537,64 @@ class OmieClient:
             page_size=100,
         ):
             items.append(ContaCorrente.model_validate(raw))
+        return items
+
+    async def incluir_lanc_cc(self, request: IncluirLancCCRequest) -> IncluirLancCCResponse:
+        """Inclui um lançamento na conta corrente do cartão (Sprint 7 / BACK 07.4).
+
+        ⚠️ **É a ÚNICA chamada de ESCRITA do ADL no ERP do cliente** — o
+        invariante "Omie read-only" (CLAUDE.md §10) morre aqui. Trate cada
+        caminho de erro como dinheiro.
+
+        ⚠️ **Contrato NÃO-VERIFICADO (S-1)** — ver `IncluirLancCCRequest`. Os
+        nomes de campo, a convenção de sinal e a unicidade de `cCodIntLanc`
+        vieram da doc, não de uma resposta real; o gate é
+        `tests/unit/test_omie_fixtures.py` contra a fixture da BACK 07.1.
+        **Cross-check da doc (19/08/2026): a doc descreve o `param` ANINHADO
+        (`cabecalho`/`detalhes`) e sem `cNatureza` — este método envia plano.
+        Expectativa realista: o 1º POST real é RECUSADO sem criar lançamento,
+        e a captura grava a faultstring como evidência.**
+
+        **O que o `call()` faz por baixo e por que importa aqui:** ele retenta
+        5xx e timeout com backoff. Retry de uma ESCRITA pode criar duplicata se
+        a Omie tiver aceitado a primeira. É exatamente por isso que a dedup
+        primária vive no ADL (BACK 07.2) e que o caller **nunca** reenvia às
+        cegas depois de um timeout — reconcilia antes.
+
+        Nada do `param` é logado: o `cObs` carrega a descrição da compra (§4.5).
+        """
+        raw = await self.call(
+            module="financas",
+            endpoint="contacorrentelancamentos",
+            call_name="IncluirLancCC",
+            param=request.model_dump(by_alias=True, exclude_none=True, mode="json"),
+        )
+        return IncluirLancCCResponse.model_validate(raw)
+
+    async def listar_categorias(self) -> list[CategoriaOmie]:
+        """Lista TODAS as categorias do cliente, com paginação automática.
+
+        Sprint 7 (BACK 07.3) — popula o combobox de classificação, já que
+        `cCodCateg` é obrigatório no `IncluirLancCC` e **não** vem da fatura.
+
+        Reusa o `_paginate` já existente (mesmo contrato `pagina` /
+        `registros_por_pagina` / `total_de_paginas` dos demais endpoints
+        paginados). ⚠️ A chave do array (`categoria_cadastro`) e os nomes dos
+        campos vêm da doc oficial e **não** de uma resposta real — ver
+        `CategoriaOmie`. O `page_size=50` acompanha o dos títulos: a doc da
+        Omie não declara teto para este endpoint e 50 é o valor que já provou
+        não estourar em produção.
+        """
+        items: list[CategoriaOmie] = []
+        async for raw in self._paginate(
+            module="geral",
+            endpoint="categorias",
+            call_name="ListarCategorias",
+            list_key="categoria_cadastro",
+            page_size=50,
+        ):
+            items.append(CategoriaOmie.model_validate(raw))
+        log.info("omie_categorias_size", item_count=len(items))
         return items
 
     async def listar_extrato(

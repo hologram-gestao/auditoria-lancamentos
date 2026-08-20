@@ -54,6 +54,11 @@ class UsageEventName(StrEnum):
     QUALIFICACAO_EMITIDA = "qualificacao_emitida"
     FLAG_REVISADO = "flag_revisado"
     GLOSSARIO_EDITADO = "glossario_editado"
+    # Sprint 7 (BACK 07.5) — lançamento no Omie. Também de BACKEND: aceitá-los
+    # do browser deixaria o cliente forjar numerador (`sucesso`) E denominador
+    # (`linhas`) da métrica da sprint.
+    OMIE_LANCAMENTO_ENVIADO = "omie_lancamento_enviado"
+    OMIE_LANCAMENTO_REJEITADO = "omie_lancamento_rejeitado"
 
 
 #: Eventos que o `POST /api/v1/usage-events` aceita. Os de backend ficam de fora
@@ -136,6 +141,76 @@ class GlossarioEditadoProps(_StrictProps):
 
     client_id: UUID
     n_categorias: int = Field(ge=0)
+
+
+# ----------------------------------------------------------------------
+# Sprint 7 (BACK 07.5) — props do lançamento no Omie
+#
+# ⚠️ **Conflito resolvido aqui, não contornado.** O PRD declara
+# `omie_lancamento_rejeitado {codigo, faultstring}`. Mas `faultstring` é TEXTO
+# LIVRE vindo do fornecedor, e a whitelist deste módulo proíbe texto livre —
+# essa proibição é a única coisa que impede PII de entrar no sink, e a Omie
+# ecoa no `faultstring` valores que ENVIAMOS, inclusive o `cObs`, que carrega a
+# descrição da compra (§4.5).
+#
+# Solução: o texto integral **não entra no sink** — ele já volta ao usuário na
+# resposta do lote e fica persistido em `reconciliation_omie_postings.
+# error_message` (BACK 07.2 / ADR-023-BE), que é onde ele é útil e está sob a
+# cripto por cliente. No evento entra uma **categoria derivada**, `Literal`
+# fechado, que é o que a leitura D+30 precisa para responder "por que os
+# lançamentos estão sendo recusados?". Ver ADR-031-BE.
+# ----------------------------------------------------------------------
+
+#: Código canônico do erro (`app.core.exceptions.ErrorCode`) que causou a
+#: rejeição. `Literal` fechado — não é `str` livre.
+OmieRejectionCode = Literal[
+    "OMIE_FAULT",
+    "OMIE_AUTH_ERROR",
+    "OMIE_TIMEOUT",
+]
+
+#: **Família** do erro, derivada do `faultstring` sem carregar o texto.
+#: Fechada de propósito: uma família nova exige código novo + teste, o que é
+#: exatamente a revisão que um campo de texto livre não teria.
+OmieRejectionCategory = Literal[
+    "categoria_invalida",
+    "conta_invalida",
+    "duplicidade",
+    "campo_invalido",
+    "credencial",
+    "indisponibilidade",
+    "outro",
+]
+
+
+class OmieLancamentoEnviadoProps(_StrictProps):
+    """`omie_lancamento_enviado` — **numerador e denominador da Sprint 7**.
+
+    Uma linha por LOTE executado (não por linha da fatura): a métrica é
+    "linhas lançadas ÷ linhas que precisam de lançamento", e o operador manda
+    vários lotes na mesma sessão. `session_id` entra pela COLUNA, como já
+    acontece com `conciliacao_criada` e `qualificacao_emitida`.
+
+    `duracao_ms` é **inteiro** (CLAUDE.md §3.4 — nunca float para grandeza
+    medida) e alimenta o guardrail "o tempo de conciliação não pode subir".
+    """
+
+    linhas: int = Field(ge=0)
+    sucesso: int = Field(ge=0)
+    falha: int = Field(ge=0)
+    duracao_ms: int = Field(ge=0)
+
+
+class OmieLancamentoRejeitadoProps(_StrictProps):
+    """`omie_lancamento_rejeitado` — por que a Omie recusou.
+
+    **Sem texto livre.** `codigo` é o `ErrorCode` canônico; `categoria` é a
+    família derivada do `faultstring` por `classify_omie_rejection`. O texto
+    integral do fornecedor NÃO entra aqui (ver o bloco de comentário acima).
+    """
+
+    codigo: OmieRejectionCode
+    categoria: OmieRejectionCategory
 
 
 class _UsageEventRequestBase(BaseModel):

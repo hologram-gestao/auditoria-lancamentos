@@ -24,10 +24,13 @@ from app.core.dependencies import require_client_access
 from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
 from app.modules.reconciliations.tenant_scope import audit_session_tenant_miss
+from app.modules.usage_events.omie_rejection import classify_omie_rejection
 from app.modules.usage_events.repository import UsageEventRepository
 from app.modules.usage_events.schemas import (
     FlagRevisadoProps,
     GlossarioEditadoProps,
+    OmieLancamentoEnviadoProps,
+    OmieLancamentoRejeitadoProps,
     QualificacaoEmitidaProps,
     UsageEventName,
 )
@@ -40,6 +43,7 @@ if TYPE_CHECKING:
     from app.modules.usage_events.schemas import (
         AutorNavegouForaRequest,
         NotificacaoEntregueRequest,
+        OmieRejectionCode,
         QualificationVerdict,
     )
 
@@ -237,6 +241,64 @@ class UsageEventService:
             props=GlossarioEditadoProps(client_id=client_id, n_categorias=n_categorias).model_dump(
                 mode="json"
             ),
+        )
+
+    # ------------------------------------------------------------------
+    # Sprint 7 (BACK 07.5) — emissores do lançamento no Omie
+    #
+    # Ambos montam `props` pelo MODELO Pydantic, nunca por `dict` solto — a
+    # garantia "só int/Literal, `extra=forbid`" vale na EMISSÃO e não só na
+    # borda HTTP. Nenhum dos dois é deduplicado (ADR-010): o mesmo operador
+    # manda vários lotes na mesma sessão e **cada lote é um fato**; deduplicar
+    # por sessão apagaria o 2º lote em silêncio e a métrica ficaria menor que a
+    # realidade — justamente o erro que a allow-list existe para evitar.
+    # ------------------------------------------------------------------
+
+    async def emit_omie_lancamento_enviado(
+        self,
+        *,
+        session_id: UUID,
+        linhas: int,
+        sucesso: int,
+        falha: int,
+        duracao_ms: int,
+    ) -> bool:
+        """NUMERADOR da Sprint 7: um lote de lançamento foi executado.
+
+        Uma linha por LOTE. `duracao_ms` é `int` (§3.4) e alimenta o guardrail
+        "o tempo de conciliação não pode subir".
+        """
+        return await self.emit(
+            UsageEventName.OMIE_LANCAMENTO_ENVIADO,
+            session_id=session_id,
+            props=OmieLancamentoEnviadoProps(
+                linhas=linhas,
+                sucesso=sucesso,
+                falha=falha,
+                duracao_ms=duracao_ms,
+            ).model_dump(mode="json"),
+        )
+
+    async def emit_omie_lancamento_rejeitado(
+        self,
+        *,
+        session_id: UUID,
+        codigo: OmieRejectionCode,
+        fault_message: str | None,
+    ) -> bool:
+        """A Omie recusou uma linha — com a FAMÍLIA do erro, não com o texto.
+
+        `fault_message` entra aqui só para ser **classificado**; o texto
+        integral não vai para o sink (ADR-031-BE). Ele já volta ao usuário na
+        resposta do lote e fica em `reconciliation_omie_postings.error_message`.
+        """
+        return await self.emit(
+            UsageEventName.OMIE_LANCAMENTO_REJEITADO,
+            session_id=session_id,
+            props=OmieLancamentoRejeitadoProps(
+                codigo=codigo,
+                categoria=classify_omie_rejection(fault_message),
+            ).model_dump(mode="json"),
         )
 
     # ------------------------------------------------------------------
