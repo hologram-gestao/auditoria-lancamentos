@@ -399,6 +399,18 @@ class SessionDetailPayload(BaseModel):
     balance_end_file: Decimal | None = None
     balance_end_omie: Decimal | None = None
     balance_difference: Decimal | None = None
+    # 86e2u513f — somas da aba Resumo, computadas no BACKEND sobre a sessão
+    # INTEIRA (antes o front somava as 50 primeiras linhas em float). Decimal
+    # serializa como string no JSON — §3.4. `card_charges_total` só existe em
+    # sessão de cartão (None fora dela); nas demais, sempre populados.
+    credits_total: Decimal = Decimal("0")
+    debits_total: Decimal = Decimal("0")
+    card_charges_total: Decimal | None = None
+    # Breakdown de anomalias da sessão inteira (mesma fonte do anomaly_count).
+    anomalies_critical: int = 0
+    anomalies_moderate: int = 0
+    anomalies_info: int = 0
+    anomalies_resolved: int = 0
     # BACK 04.2 — nº de partes (arquivos) consolidadas nesta conciliação.
     # Default 0 (e não REQUIRED) por higiene Pydantic v2, mas o service sempre
     # popula: sessões migradas têm 1 parte, criadas na Sprint 4 têm N.

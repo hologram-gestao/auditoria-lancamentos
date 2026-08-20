@@ -99,7 +99,7 @@ router = APIRouter(prefix="/api/v1/reconciliations", tags=["reconciliations"])
 
 def _get_reconciliation_service(db: DbSessionDep) -> ReconciliationService:
     """Provider para injeção do service em endpoints."""
-    return ReconciliationService(ReconciliationRepository(db))
+    return ReconciliationService(ReconciliationRepository(db), settings=get_settings())
 
 
 ReconciliationServiceDep = Annotated[ReconciliationService, Depends(_get_reconciliation_service)]

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import delete, func, select, update
@@ -22,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.models import (
+    Client,
     OmieAccountCache,
     ReconciliationAnomaly,
     ReconciliationFile,
@@ -31,7 +33,19 @@ from app.db.models import (
     ReconciliationSession,
     ReconciliationStatus,
 )
-from app.modules.reconciliations.totals import SessionCounters, compute_session_counters
+
+if TYPE_CHECKING:
+    from app.core.crypto import ClientCipher
+
+from app.modules.reconciliations.totals import (
+    SessionAmountTotals,
+    SessionAnomalyBreakdown,
+    SessionCounters,
+    compute_anomaly_breakdown,
+    compute_card_charges_total,
+    compute_session_amounts,
+    compute_session_counters,
+)
 
 
 class ReconciliationRepository:
@@ -268,6 +282,24 @@ class ReconciliationRepository:
         acesso para o service não importar o módulo de regra direto.
         """
         return await compute_session_counters(self._session, session_id)
+
+    async def compute_amounts(self, session_id: UUID) -> SessionAmountTotals:
+        """Somas de crédito/débito da sessão INTEIRA (86e2u513f) — regra em `totals.py`."""
+        return await compute_session_amounts(self._session, session_id)
+
+    async def compute_anomaly_breakdown(self, session_id: UUID) -> SessionAnomalyBreakdown:
+        """Breakdown de anomalias da sessão INTEIRA — regra em `totals.py`."""
+        return await compute_anomaly_breakdown(self._session, session_id)
+
+    async def compute_card_charges(self, session_id: UUID, cipher: ClientCipher) -> Decimal:
+        """Encargos do cartão (descrição cifrada → decrypt em memória) — regra em `totals.py`."""
+        return await compute_card_charges_total(self._session, session_id, cipher)
+
+    async def get_client(self, client_id: UUID) -> Client | None:
+        """Carrega o `Client` (o envelope cripto precisa de `dek_wrapped`)."""
+        return (
+            await self._session.execute(select(Client).where(Client.id == client_id))
+        ).scalar_one_or_none()
 
     async def count_files(self, session_id: UUID) -> int:
         """Nº de partes da sessão (inclui as que falharam na extração)."""
