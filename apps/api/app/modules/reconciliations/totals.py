@@ -70,6 +70,11 @@ class SessionCounters:
 
     total_file_entries: int
     conciliated_count: int
+    #: Recorte de `conciliated_count`: só as `conciliado_data_divergente`
+    #: (86e2u513b). Existe para o card "Conciliados" EXPLICAR a soma — o
+    #: filtro "Conciliadas (data exata)" mostra menos que o card, e a
+    #: diferença é exatamente este número. Derivado, nunca materializado.
+    conciliated_divergent_count: int
     sem_omie_count: int
     omie_sem_arquivo_count: int
     anomaly_count: int
@@ -94,12 +99,15 @@ async def compute_session_counters(db: AsyncSession, session_id: UUID) -> Sessio
 
     total = 0
     conciliated = 0
+    conciliated_divergent = 0
     sem_omie = 0
     for situation_value, count_value in situation_rows:
         count_int = int(count_value)
         total += count_int
         if situation_value in CONCILIATED_SITUATIONS:
             conciliated += count_int
+            if situation_value == FileEntrySituation.CONCILIADO_DATA_DIVERGENTE.value:
+                conciliated_divergent += count_int
         elif situation_value == FileEntrySituation.SEM_OMIE.value:
             sem_omie += count_int
         # `ignorado` entra só no total — não é conciliado nem pendente.
@@ -126,6 +134,7 @@ async def compute_session_counters(db: AsyncSession, session_id: UUID) -> Sessio
     return SessionCounters(
         total_file_entries=total,
         conciliated_count=conciliated,
+        conciliated_divergent_count=conciliated_divergent,
         sem_omie_count=sem_omie,
         omie_sem_arquivo_count=omie_sem_arquivo,
         anomaly_count=anomalies,

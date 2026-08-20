@@ -322,6 +322,9 @@ const DETAIL = {
   status: 'reviewing',
   total_file_entries: 30,
   conciliated_count: 25,
+  // 86e2u513b — o card explica a soma ("inclui N com data divergente");
+  // com >0 o subtexto novo entra nas telas medidas pelo axe.
+  conciliated_divergent_count: 2,
   sem_omie_count: 3,
   omie_sem_arquivo_count: 2,
   anomaly_count: 1,

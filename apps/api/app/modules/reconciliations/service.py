@@ -604,6 +604,7 @@ class ReconciliationService:
             status=session_obj.status,
             total_file_entries=counters.total_file_entries,
             conciliated_count=counters.conciliated_count,
+            conciliated_divergent_count=counters.conciliated_divergent_count,
             sem_omie_count=counters.sem_omie_count,
             omie_sem_arquivo_count=counters.omie_sem_arquivo_count,
             anomaly_count=counters.anomaly_count,
