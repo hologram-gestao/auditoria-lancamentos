@@ -4,27 +4,81 @@
  */
 import { Check, MinusCircle, AlertTriangle, Upload } from 'lucide-react';
 
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 interface SituationBadgeProps {
   situation: string;
-  /** Tooltip nativo — usado p/ `conciliado_data_divergente` mostrar as datas. */
+  /** Explicação das datas (arquivo × Omie) p/ `conciliado_data_divergente`. */
   title?: string;
+}
+
+/**
+ * Dica acessível no padrão da `QualificationCell` — a coluna VIZINHA
+ * (86e2u513j era duas colunas com dois padrões de dica; 86e2u513n alinha).
+ * O `title` nativo não aparecia em toque, não era alcançável por teclado e o
+ * leitor de tela não anunciava — o dado que EXPLICA o badge ficava invisível
+ * para boa parte dos usos.
+ *
+ * `role="img"` + `aria-label`: ARIA proíbe `aria-label` em role genérico (span
+ * cru) — com role de imagem o rótulo vira o nome acessível e carrega a
+ * explicação inteira, tooltip aberto ou não. `tabIndex={0}` dá o alcance por
+ * teclado (o Radix abre a dica no foco).
+ */
+function BadgeComDica({
+  dica,
+  ariaLabel,
+  className,
+  children,
+}: {
+  dica: string;
+  ariaLabel: string;
+  className: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            role="img"
+            tabIndex={0}
+            aria-label={ariaLabel}
+            className={cn(
+              className,
+              'focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-2',
+            )}
+          >
+            {children}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="text-xs leading-snug">
+          {dica}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
 }
 
 export function SituationBadge({ situation, title }: SituationBadgeProps) {
   if (situation === 'conciliado_data_divergente') {
-    return (
-      <span
-        title={title}
-        className={cn(
-          'inline-flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-800',
-          'dark:bg-orange-900/40 dark:text-orange-200',
-        )}
-      >
+    const classes = cn(
+      'inline-flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-800',
+      'dark:bg-orange-900/40 dark:text-orange-200',
+    );
+    const conteudo = (
+      <>
         <AlertTriangle className="h-3 w-3" aria-hidden="true" />
         Data divergente
-      </span>
+      </>
+    );
+    if (title === undefined) {
+      return <span className={classes}>{conteudo}</span>;
+    }
+    return (
+      <BadgeComDica dica={title} ariaLabel={`Data divergente — ${title}`} className={classes}>
+        {conteudo}
+      </BadgeComDica>
     );
   }
   if (situation === 'conciliado') {
@@ -92,17 +146,21 @@ export function SituationBadge({ situation, title }: SituationBadgeProps) {
  * Fechar isso de vez pede um campo no backend (ver HANDOFF).
  */
 export function LancadaNoOmieBadge({ omieLancamentoId }: { omieLancamentoId: number | null }) {
-  return (
-    <span
-      className="bg-success-muted text-success inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
-      title={
-        omieLancamentoId === null
-          ? undefined
-          : `Lançamento Omie nº ${omieLancamentoId} criado pelo ADL nesta sessão.`
-      }
-    >
+  const classes =
+    'bg-success-muted text-success inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium';
+  const conteudo = (
+    <>
       <Upload className="h-3 w-3" aria-hidden="true" />
       Lançada no Omie
-    </span>
+    </>
+  );
+  if (omieLancamentoId === null) {
+    return <span className={classes}>{conteudo}</span>;
+  }
+  const dica = `Lançamento Omie nº ${omieLancamentoId} criado pelo ADL nesta sessão.`;
+  return (
+    <BadgeComDica dica={dica} ariaLabel={`Lançada no Omie — ${dica}`} className={classes}>
+      {conteudo}
+    </BadgeComDica>
   );
 }
