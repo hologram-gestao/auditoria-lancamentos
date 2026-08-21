@@ -26,6 +26,7 @@ import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 import { ReconciliationStatusBadge } from '@/components/features/clients/reconciliation-status-badge';
+import { AuthorLabel } from '@/components/features/reconciliations/author-label';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -44,7 +45,7 @@ import {
 } from '@/hooks/use-reconciliations';
 import { ApiError } from '@/lib/api/client';
 import type { SessionDetail } from '@/lib/api/reconciliations';
-import { formatReferenceMonth } from '@/lib/format';
+import { formatCreatedAt, formatReferenceMonth } from '@/lib/format';
 
 import { AnomaliesTab } from '../review/anomalies-tab';
 import { GlossarySeal } from '../review/glossary-seal';
@@ -136,6 +137,13 @@ export function SessionDetailScreen({ clientId, sessionId }: SessionDetailScreen
           {/* `flex-wrap`: em 390px o selo do glossário não cabe ao lado do badge
               de status — sem isto ele sairia da viewport (o mesmo defeito que o
               "Sair" do header teve na S5, ADR-010-FE). */}
+          {/* 86e2n39f1 — a mesma informação do card da lista, no header. */}
+          {detail.created_by && (
+            <p className="text-muted-foreground text-sm">
+              Conciliado por <AuthorLabel author={detail.created_by} />
+              {detail.created_at ? ` · ${formatCreatedAt(detail.created_at)}` : ''}
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             <ReconciliationStatusBadge status={detail.status} />
             {/* Sprint 6 / R4: só aparece quando a análise realmente usou o

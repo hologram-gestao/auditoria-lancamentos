@@ -15,13 +15,22 @@
  * pessoa consegue abrir em nova aba.
  */
 
-import { AlertCircle, CheckCircle2, Files, Loader2, RefreshCw, Trash2, XCircle } from 'lucide-react';
+import {
+  AlertCircle,
+  CheckCircle2,
+  Files,
+  Loader2,
+  RefreshCw,
+  Trash2,
+  XCircle,
+} from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
 import { ReconciliationStatusBadge } from '@/components/features/clients/reconciliation-status-badge';
+import { AuthorLabel } from '@/components/features/reconciliations/author-label';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -38,7 +47,7 @@ import {
 } from '@/hooks/use-reconciliations';
 import { ApiError } from '@/lib/api/client';
 import type { ReconciliationSessionSummary } from '@/lib/api/clients';
-import { formatReferenceMonth } from '@/lib/format';
+import { formatCreatedAt, formatReferenceMonth } from '@/lib/format';
 
 interface ReconciliationListItemProps {
   clientId: string;
@@ -177,7 +186,15 @@ export function ReconciliationListItem({
       )}
 
       <div className="text-muted-foreground flex flex-wrap items-center justify-between gap-2 text-xs">
-        <span>Criada em {createdAtLabel}</span>
+        {/* 86e2n39f1 — QUEM fez, não só quando. Sem autor (payload antigo em
+            cache), o texto de antes continua valendo. */}
+        {session.created_by ? (
+          <span>
+            Conciliado por <AuthorLabel author={session.created_by} /> · {createdAtLabel}
+          </span>
+        ) : (
+          <span>Criada em {createdAtLabel}</span>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           {isProcessing && (
             <Button
@@ -312,15 +329,4 @@ export function ReconciliationListItem({
       </div>
     </article>
   );
-}
-
-/** `2026-06-12T14:32:00Z` → `12/06/2026 às 14h32` (timezone do navegador). */
-function formatCreatedAt(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  const day = String(date.getDate()).padStart(2, '0');
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  return `${day}/${month}/${date.getFullYear()} às ${hours}h${minutes}`;
 }

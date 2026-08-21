@@ -360,6 +360,20 @@ class SessionStatusResponse(BaseModel):
 # ----------------------------------------------------------------------
 
 
+class SessionAuthor(BaseModel):
+    """Autor da conciliação — objeto ENXUTO, nunca o `User` inteiro (§3.2).
+
+    86e2n39f1. `email` é None quando o autor foi mascarado ("Equipe Hologram"):
+    usuário de tenant não vê nome nem e-mail de funcionário da Hologram — a
+    máscara é do SERVIDOR (`author_for_viewer`), porque payload com o nome real
+    e UI escondendo não é barreira (§4.9). Sem `id` de propósito: nada consome,
+    e id de usuário de outro escopo é superfície de correlação à toa (§3.15).
+    """
+
+    name: str
+    email: str | None = None
+
+
 class SessionDetailPayload(BaseModel):
     """Conteúdo do envelope do GET /reconciliations/{id}.
 
@@ -418,6 +432,11 @@ class SessionDetailPayload(BaseModel):
     # Default 0 (e não REQUIRED) por higiene Pydantic v2, mas o service sempre
     # popula: sessões migradas têm 1 parte, criadas na Sprint 4 têm N.
     total_files: int = 0
+    # 86e2n39f1 — QUEM criou a conciliação (o dado sempre foi gravado em
+    # `created_by`; nunca tinha sido exposto) e QUANDO. None só por robustez —
+    # as colunas são NOT NULL.
+    created_by: SessionAuthor | None = None
+    created_at: datetime | None = None
     # BACK 06.4/06.5 — a qualificação desta sessão considerou o GLOSSÁRIO do
     # cliente? Vem da coluna escrita por `qualify_session` a partir do bloco
     # realmente injetado no prompt (não é hard-coded, nem recalculado aqui).

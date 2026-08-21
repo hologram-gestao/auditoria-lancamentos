@@ -36,6 +36,7 @@ from app.core.authz import tenant_filter_client_id
 from app.core.dependencies import (
     AccessibleClientDep,
     AdminDep,
+    CurrentUserDep,
     DbSessionDep,
     EditClientDep,
     ManagerOrAdminDep,
@@ -224,6 +225,7 @@ async def sync_accounts(
 )
 async def list_client_reconciliations(
     client: AccessibleClientDep,
+    user: CurrentUserDep,
     service: ClientServiceDep,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
@@ -253,6 +255,9 @@ async def list_client_reconciliations(
         omie_conta_id=omie_conta_id,
         month=month,
         status=status,
+        # 86e2n39f1 — a máscara do autor ("Equipe Hologram" p/ cliente vendo
+        # autor system) decide pelo ESCOPO de quem pede, no servidor (§4.9).
+        viewer_scope=user.scope,
     )
     return ReconciliationSessionListResponse(data=rows, pagination=pagination)
 

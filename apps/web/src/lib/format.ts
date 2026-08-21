@@ -167,3 +167,16 @@ export function formatAccountType(type: 'checking' | 'credit_card' | 'investment
       return 'Conta Aplicação';
   }
 }
+
+/** `2026-06-12T14:32:00Z` → `12/06/2026 às 14h32` (timezone do navegador).
+ *  Morava no card da lista; o header da revisão passou a usar também
+ *  (86e2n39f1) — uma cópia só, nunca duas. */
+export function formatCreatedAt(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${day}/${month}/${date.getFullYear()} às ${hours}h${minutes}`;
+}

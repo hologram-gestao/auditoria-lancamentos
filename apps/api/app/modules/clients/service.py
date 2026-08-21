@@ -52,6 +52,7 @@ from app.modules.clients.schemas import (
     ReconciliationSessionSummary,
     TestConnectionResponse,
 )
+from app.modules.reconciliations.service import author_for_viewer
 from app.modules.users.schemas import PaginationMeta
 
 if TYPE_CHECKING:
@@ -351,6 +352,7 @@ class ClientService:
         omie_conta_id: int | None,
         month: str | None,
         status: str | None = None,
+        viewer_scope: str = "system",
     ) -> tuple[list[ReconciliationSessionSummary], PaginationMeta]:
         """Lista paginada das conciliações do cliente (S7 BACK 4.2 + BACK 04.3).
 
@@ -375,7 +377,10 @@ class ClientService:
             month_end=month_end,
             statuses=statuses,
         )
-        responses = [_session_to_summary(session, total_files) for session, total_files in rows]
+        responses = [
+            _session_to_summary(session, total_files, viewer_scope=viewer_scope)
+            for session, total_files in rows
+        ]
         total_pages = (total + page_size - 1) // page_size if page_size else 0
         pagination = PaginationMeta(
             page=page, page_size=page_size, total=total, total_pages=total_pages
@@ -408,14 +413,25 @@ class ClientService:
 def _session_to_summary(
     session: ReconciliationSession,
     total_files: int,
+    *,
+    viewer_scope: str,
 ) -> ReconciliationSessionSummary:
     """Mapeia ORM `ReconciliationSession` → DTO `ReconciliationSessionSummary`.
 
     `total_files` vem da subquery da listagem (não de um acesso a relationship —
-    todos são `lazy="raise"`, e seria N+1 mesmo que não fossem).
+    todos são `lazy="raise"`, e seria N+1 mesmo que não fossem). O AUTOR
+    (86e2n39f1) vem do `selectinload` da própria listagem, já mascarado por
+    escopo — o `model_validate` NUNCA pode serializar o relationship `user`
+    inteiro (§3.2), por isso o campo entra pelo `model_copy`, nunca por
+    atributo homônimo.
     """
     summary = ReconciliationSessionSummary.model_validate(session, from_attributes=True)
-    return summary.model_copy(update={"total_files": total_files})
+    return summary.model_copy(
+        update={
+            "total_files": total_files,
+            "created_by": author_for_viewer(session.user, viewer_scope),
+        }
+    )
 
 
 def _parse_month_range(month: str | None) -> tuple[date | None, date | None]:

@@ -314,6 +314,17 @@ def _build_sheet1_summary(ws: Worksheet, data: SummarySheetData, is_card: bool) 
     footer_cell.font = FONT_FOOTER
     ws.merge_cells(start_row=footer_row, start_column=1, end_row=footer_row, end_column=4)
 
+    # 86e2n39f1 — quem CONCILIOU ≠ quem exportou; o relatório dizia só o
+    # segundo. Linha própria pra não misturar as duas identidades numa frase.
+    if data.conciliado_por is not None:
+        author_cell = ws.cell(
+            row=footer_row + 1, column=1, value=f"Conciliado por {data.conciliado_por}"
+        )
+        author_cell.font = FONT_FOOTER
+        ws.merge_cells(
+            start_row=footer_row + 1, start_column=1, end_row=footer_row + 1, end_column=4
+        )
+
 
 def _resolve_balance_status(balance_difference: Decimal | None) -> str:
     """Aba 1: Conferido se diferença ≤ R$ 0,01, Divergente caso contrário."""
