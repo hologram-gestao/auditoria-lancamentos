@@ -254,7 +254,28 @@ export function AnomaliesTab({ sessionId, isCard }: AnomaliesTabProps) {
                   colSpan={columnCount}
                   className="text-muted-foreground py-10 text-center text-sm"
                 >
-                  Nenhuma anomalia registrada.
+                  {/* 86e2u513j — mesma distinção da aba Movimentações: com
+                      filtro ativo, "Nenhuma anomalia registrada" afirmaria
+                      sobre a conciliação INTEIRA o que só vale para o recorte
+                      — quem filtra por "Críticas" numa sessão só com
+                      moderadas concluiria que está tudo limpo. */}
+                  {severity !== 'all' || resolved !== 'all' ? (
+                    <div className="space-y-2">
+                      <p>Nenhuma anomalia encontrada com os filtros selecionados.</p>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setSeverity('all');
+                          setResolved('all');
+                        }}
+                      >
+                        Limpar filtros
+                      </Button>
+                    </div>
+                  ) : (
+                    'Nenhuma anomalia registrada.'
+                  )}
                 </TableCell>
               </TableRow>
             )}
