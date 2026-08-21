@@ -802,6 +802,17 @@ async function aguardarAnimacao(locator: Locator): Promise<void> {
 /** O título do toast do Sonner — o nó que o axe reprovou em `#008a2e`/`#ecfdf3`. */
 const TOAST_TITLE = '[data-sonner-toast] [data-title]';
 
+/**
+ * O toast do Sonner ENTRA animando (lift + fade). Medir no meio do trajeto
+ * mede cor MESCLADA: no CI o axe pegou `#25894b`/`#eefdf4` = 4.25:1 num par
+ * cujos tokens puros (`success`/`success-muted`) dão 4.75:1 — vermelho flaky
+ * sem defeito nenhum (run 32485181657, PR #89). Mesma lição da gaveta
+ * (`aguardarAnimacao`): visível não é estável; medir só depois da animação.
+ */
+async function aguardarToastEstavel(page: Page): Promise<void> {
+  await aguardarAnimacao(page.locator('[data-sonner-toast]').first());
+}
+
 async function measuredContrast(page: Page, selector: string): Promise<number> {
   return page.$eval(selector, (el) => {
     const parse = (c: string): [number, number, number, number] => {
@@ -1330,6 +1341,7 @@ for (const vp of VIEWPORTS) {
       // Sem esta espera, o axe podia medir a tela depois de o toast sumir e o
       // gate ficaria verde sem ver o defeito.
       await expect(page.getByText('Flag marcado como improcedente.')).toBeVisible();
+      await aguardarToastEstavel(page);
       // ...e MEDIDO, não só "presente": o toast tem `duration` de 4 s e o axe
       // só reprova o que estiver na tela no instante em que roda. A medição
       // direta falha se o toast sumiu (o `$eval` não acha o seletor) e falha se
@@ -1365,6 +1377,7 @@ for (const vp of VIEWPORTS) {
       // toast de erro o `analyze()` sozinho não basta — ele passou verde contra
       // um par mutado para branco-sobre-quase-branco (o toast já tinha saído da
       // tela quando o axe rodou). `measuredContrast` deu 1.048 no mesmo build.
+      await aguardarToastEstavel(page);
       expect(await measuredContrast(page, TOAST_TITLE)).toBeGreaterThanOrEqual(4.5);
 
       await shot(page, `revisao-veredito-erro-${slugR}`);
@@ -1537,6 +1550,7 @@ for (const vp of VIEWPORTS) {
       await expect(
         page.getByText('1 de 2 compras lançadas. Veja o motivo das demais.'),
       ).toBeVisible();
+      await aguardarToastEstavel(page);
       expect(await measuredContrast(page, TOAST_TITLE)).toBeGreaterThanOrEqual(4.5);
 
       await expect(page.locator('#__next_error__')).toHaveCount(0);
