@@ -603,7 +603,9 @@ class TestProviderFault:
         original = MockOmieClient.incluir_lanc_cc
 
         async def selective(self: MockOmieClient, request: object) -> IncluirLancCCResponse:
-            if request.c_cod_categ == "BAD":  # type: ignore[attr-defined]
+            # Formato aninhado (contrato verificado 21/08/2026): a categoria
+            # mora em `detalhes`, não no topo do request.
+            if request.detalhes.c_cod_categ == "BAD":  # type: ignore[attr-defined]
                 raise OmieFaultError("Fault", user_message="Categoria inválida.")
             return await original(self, request)  # type: ignore[arg-type]
 
