@@ -18,6 +18,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from app.db.models import ReconciliationStatus
+from app.modules.reconciliations.schemas import SessionAuthor
 from app.modules.users.schemas import PaginationMeta
 
 
@@ -198,6 +199,15 @@ class ReconciliationSessionSummary(BaseModel):
     # BACK 04.2/04.3 — nº de partes (arquivos) da conciliação. O card da lista
     # mostra "3 arquivos"; vem de subquery na própria query da listagem.
     total_files: int = Field(0, ge=0)
+    # 86e2n39f1 — quem CRIOU a conciliação, já mascarado por escopo do
+    # observador no service. Preenchido SÓ pelo mapper (`model_copy`): o
+    # `validation_alias` impossível impede o `model_validate(from_attributes)`
+    # de ler o atributo ORM homônimo `created_by` — que é o UUID cru da FK e
+    # quebraria a validação (e o relationship `user` inteiro JAMAIS pode
+    # serializar, §3.2). Na serialização o campo sai como `created_by` normal.
+    created_by: SessionAuthor | None = Field(
+        default=None, validation_alias="never_populated_by_orm"
+    )
 
     model_config = {"from_attributes": True}
 

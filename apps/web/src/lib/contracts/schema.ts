@@ -2368,6 +2368,7 @@ export interface components {
              * @default 0
              */
             total_files: number;
+            created_by?: components["schemas"]["SessionAuthor"] | null;
         };
         /**
          * ReconciliationStatementInput
@@ -2438,6 +2439,22 @@ export interface components {
         /** ResolveAnomalyResponse */
         ResolveAnomalyResponse: {
             data: components["schemas"]["AnomalyItem"];
+        };
+        /**
+         * SessionAuthor
+         * @description Autor da conciliação — objeto ENXUTO, nunca o `User` inteiro (§3.2).
+         *
+         *     86e2n39f1. `email` é None quando o autor foi mascarado ("Equipe Hologram"):
+         *     usuário de tenant não vê nome nem e-mail de funcionário da Hologram — a
+         *     máscara é do SERVIDOR (`author_for_viewer`), porque payload com o nome real
+         *     e UI escondendo não é barreira (§4.9). Sem `id` de propósito: nada consome,
+         *     e id de usuário de outro escopo é superfície de correlação à toa (§3.15).
+         */
+        SessionAuthor: {
+            /** Name */
+            name: string;
+            /** Email */
+            email?: string | null;
         };
         /**
          * SessionDetailPayload
@@ -2536,6 +2553,9 @@ export interface components {
              * @default 0
              */
             total_files: number;
+            created_by?: components["schemas"]["SessionAuthor"] | null;
+            /** Created At */
+            created_at?: string | null;
             /**
              * Qualification Used Glossary
              * @default false

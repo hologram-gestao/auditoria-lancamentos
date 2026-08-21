@@ -726,7 +726,7 @@ async def get_reconciliation_detail(
         actor_client_id=user.client_id,
     )
 
-    payload = await service.get_session_detail(session_id)
+    payload = await service.get_session_detail(session_id, viewer_scope=user.scope)
     return SessionDetailResponse(data=payload)
 
 

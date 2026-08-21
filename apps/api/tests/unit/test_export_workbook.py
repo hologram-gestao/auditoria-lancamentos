@@ -224,6 +224,23 @@ class TestSheet1Summary:
         assert "(BRT)" in footer_text
         assert "22/05/2026" in footer_text
 
+    def test_conciliado_por_appears_when_present(self) -> None:
+        """86e2n39f1 — quem CONCILIOU ≠ quem exportou; linha própria na Aba 1."""
+        summary = _summary(conciliado_por="Ana da Hologram (ana@hologram.com.br)")
+        buf = build_workbook(_payload(summary=summary))
+        wb = load_workbook(buf)
+        ws = wb[SHEET_NAME_SUMMARY]
+        textos = [v for row in ws.iter_rows(values_only=True) for v in row if isinstance(v, str)]
+        assert any(t == "Conciliado por Ana da Hologram (ana@hologram.com.br)" for t in textos)
+
+    def test_conciliado_por_absent_for_legacy_payload(self) -> None:
+        """Fixture antiga (None) não ganha linha vazia nem "Conciliado por None"."""
+        buf = build_workbook(_payload())
+        wb = load_workbook(buf)
+        ws = wb[SHEET_NAME_SUMMARY]
+        textos = [v for row in ws.iter_rows(values_only=True) for v in row if isinstance(v, str)]
+        assert not any(t.startswith("Conciliado por") for t in textos)
+
 
 # ======================================================================
 # Aba 2 — Movimentação x Lançamento

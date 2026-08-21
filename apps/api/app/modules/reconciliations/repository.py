@@ -638,7 +638,17 @@ class ReconciliationRepository:
         O detail expõe o mesmo escalar carregado por `get_status_view` —
         as colunas necessárias ao header da Tela de Revisão (reference_month,
         omie_conta_id, contadores, total_file_entries) já estão na
-        `reconciliation_sessions`. Sem eager-load de relationships porque
-        o front busca client/conta via `useClientDetail` separado.
+        `reconciliation_sessions`. Client/conta continuam vindo de
+        `useClientDetail` separado; o AUTOR (86e2n39f1) entra por
+        `selectinload` porque o relationship é `lazy="raise"` — acessar sem
+        eager-load levanta, e um JOIN implícito silencioso seria pior.
         """
-        return await self.get_status_view(session_id)
+        stmt = (
+            select(ReconciliationSession)
+            .options(selectinload(ReconciliationSession.user))
+            .where(
+                ReconciliationSession.id == session_id,
+                ReconciliationSession.deleted_at.is_(None),
+            )
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()

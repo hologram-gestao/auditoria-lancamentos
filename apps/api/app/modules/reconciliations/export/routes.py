@@ -147,6 +147,7 @@ async def export_reconciliation(
             client=client_row,
             omie_client=omie_client,
             current_user_email=current_user.email,
+            current_user_scope=current_user.scope,
         )
     finally:
         await omie_client.aclose()

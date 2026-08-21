@@ -47,6 +47,10 @@ class SummarySheetData:
     anomaly_critical_unresolved: int
     generated_at_brt: datetime
     generated_by_email: str
+    # 86e2n39f1 — quem CRIOU a conciliação (≠ de quem exportou), já mascarado
+    # por escopo do observador ("Equipe Hologram" p/ cliente vendo autor
+    # system). None em fixtures antigas.
+    conciliado_por: str | None = None
     # Qualificação (S19): contadores agregados. `qualif_coerentes` =
     # file_entries conciliados SEM anomalia de qualificação na sessão.
     # Defaults zero pra compatibilidade com fixtures pré-S19.

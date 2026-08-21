@@ -134,6 +134,35 @@ describe('ReconciliationsList — item da lista', () => {
     expect(within(item).getByText('2 Omie sem arquivo')).toBeVisible();
   });
 
+  it('mostra QUEM conciliou, com o e-mail na dica (86e2n39f1)', () => {
+    listState.data = {
+      data: [session({ created_by: { name: 'Ana da Hologram', email: 'ana@hologram.com.br' } })],
+      pagination: { page: 1, pageSize: 20, total: 1, totalPages: 1 },
+    };
+    renderList();
+    expect(screen.getByText(/Conciliado por/)).toBeVisible();
+    expect(
+      screen.getByRole('img', { name: 'Ana da Hologram — ana@hologram.com.br' }),
+    ).toBeVisible();
+  });
+
+  it('autor mascarado ("Equipe Hologram") aparece SEM dica — não há nada a revelar', () => {
+    listState.data = {
+      data: [session({ created_by: { name: 'Equipe Hologram', email: null } })],
+      pagination: { page: 1, pageSize: 20, total: 1, totalPages: 1 },
+    };
+    renderList();
+    expect(screen.getByText(/Conciliado por/)).toBeVisible();
+    expect(screen.getByText('Equipe Hologram')).toBeVisible();
+    expect(screen.queryByRole('img', { name: /Equipe Hologram/ })).not.toBeInTheDocument();
+  });
+
+  it('payload antigo sem autor mantém o "Criada em" de antes', () => {
+    renderList();
+    expect(screen.getByText(/Criada em/)).toBeVisible();
+    expect(screen.queryByText(/Conciliado por/)).not.toBeInTheDocument();
+  });
+
   it('a linha inteira é clicável e leva ao detalhe', async () => {
     const user = userEvent.setup();
     renderList();
