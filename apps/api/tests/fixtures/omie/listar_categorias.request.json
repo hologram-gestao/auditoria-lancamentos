@@ -1,0 +1,7 @@
+{
+  "call_name": "ListarCategorias",
+  "param": {
+    "pagina": 1,
+    "registros_por_pagina": 50
+  }
+}

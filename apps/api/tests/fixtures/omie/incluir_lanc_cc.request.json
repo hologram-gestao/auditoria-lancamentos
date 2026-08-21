@@ -1,0 +1,16 @@
+{
+  "call_name": "IncluirLancCC",
+  "param": {
+    "cCodIntLanc": "ADL-S1-CAP-001",
+    "cabecalho": {
+      "nCodCC": 2625046958,
+      "dDtLanc": "21/08/2026",
+      "nValorLanc": 0.01
+    },
+    "detalhes": {
+      "cCodCateg": "2.01.90",
+      "cObs": "ADL BACK 07.1 - captura de fixture (excluir manualmente)",
+      "cTipo": "DIN"
+    }
+  }
+}

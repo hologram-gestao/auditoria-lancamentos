@@ -1,0 +1,55 @@
+{
+  "nCodCC": 2625046958,
+  "cCodIntCC": "",
+  "nCodAgencia": "",
+  "nCodBanco": "986",
+  "nNumConta": "",
+  "cDescricao": "Banco Inter - Cartão de Crédito",
+  "cCodTipo": "CR",
+  "cDesTipo": "Cartão de Crédito",
+  "cFluxoCaixa": "S",
+  "cResumoExecutivo": "S",
+  "dPeriodoInicial": "21/08/2026",
+  "dPeriodoFinal": "21/08/2026",
+  "nSaldoAnterior": -11371.86,
+  "nSaldoAnteriorPrevisto": -11923.13,
+  "nSaldoAtual": -11371.86,
+  "nSaldoAtualPrevisto": -11923.14,
+  "nSaldoConciliado": -3978.33,
+  "nSaldoProvisorio": -11371.86,
+  "nLimiteCreditoTotal": 0,
+  "nSaldoDisponivel": -11371.86,
+  "listaMovimentos": [
+    {
+      "cDesCliente": "SALDO ANTERIOR",
+      "dDataLancamento": "20/08/2026",
+      "nSaldo": -11371.86,
+      "nSaldoPrev": -11923.13,
+      "nValorDocumento": 0
+    },
+    {
+      "cCodCategoria": "2.01.90",
+      "cDataInclusao": "21/08/2026",
+      "cDesCategoria": "IOF Sobre Ferramentas - CV",
+      "cDesCliente": "",
+      "cHoraInclusao": "16:32:10",
+      "cNatureza": "P",
+      "cObservacoes": "ADL BACK 07.1 - captura de fixture (excluir manualmente)",
+      "cOrigem": "Débito em Conta Corrente",
+      "cTipoDocumento": "Dinheiro",
+      "dDataLancamento": "21/08/2026",
+      "nCodLancRelac": 3090876489,
+      "nCodLancamento": 3090876489,
+      "nSaldo": -11371.86,
+      "nSaldoPrev": -11923.14,
+      "nValorDocumento": -0.01
+    },
+    {
+      "cDesCliente": "SALDO",
+      "dDataLancamento": "21/08/2026",
+      "nSaldo": -11371.86,
+      "nSaldoPrev": -11923.14,
+      "nValorDocumento": 0
+    }
+  ]
+}

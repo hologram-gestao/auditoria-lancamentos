@@ -101,7 +101,9 @@ class OmieLancamentoData:
             amount=item.signed_amount,
             supplier=item.supplier,
             category=item.category,
-            status=item.c_situacao,
+            # Recém-criado vem sem `cSituacao` (evidência 21/08/2026) — `""`
+            # mantém o contrato `str` do DTO sem inventar status.
+            status=item.c_situacao or "",
         )
 
 

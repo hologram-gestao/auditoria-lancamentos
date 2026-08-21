@@ -1,0 +1,9 @@
+{
+  "call_name": "ListarExtrato",
+  "param": {
+    "nCodCC": 2625046958,
+    "cCodIntCC": "",
+    "dPeriodoInicial": "01/07/2026",
+    "dPeriodoFinal": "31/07/2026"
+  }
+}
