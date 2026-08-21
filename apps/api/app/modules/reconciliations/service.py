@@ -33,6 +33,7 @@ from app.db.models import (
     ReconciliationSession,
     ReconciliationStatus,
     SessionAccountType,
+    User,
 )
 
 if TYPE_CHECKING:
@@ -42,6 +43,7 @@ from app.modules.reconciliations.repository import ReconciliationRepository
 from app.modules.reconciliations.schemas import (
     CreateReconciliationRequest,
     ReconciliationFileInput,
+    SessionAuthor,
     SessionDetailPayload,
     SessionFileItem,
     SessionFilesPayload,
@@ -76,6 +78,24 @@ def session_account_type_from_omie_tipo(omie_tipo: str | None) -> str:
     if omie_tipo == OmieAccountType.INVESTMENT.value:  # "CA"
         return SessionAccountType.INVESTMENT.value
     return SessionAccountType.CHECKING.value
+
+
+#: Rótulo que o usuário DO CLIENTE vê quando o autor é da equipe Hologram
+#: (decisão do Pedro, 22/08/2026): não expor pessoa da equipe ao cliente final.
+HOLOGRAM_TEAM_LABEL = "Equipe Hologram"
+
+
+def author_for_viewer(author: User, viewer_scope: str) -> SessionAuthor:
+    """Autor enxuto, MASCARADO por escopo do observador (86e2n39f1).
+
+    Cliente vendo autor `system` → "Equipe Hologram", sem e-mail. Qualquer
+    outra combinação (Hologram vê tudo; cliente vê o próprio colega) → nome e
+    e-mail reais. A decisão mora no servidor: mandar o nome no payload e
+    esconder na UI não seria barreira (§4.9).
+    """
+    if viewer_scope == "client" and author.scope == "system":
+        return SessionAuthor(name=HOLOGRAM_TEAM_LABEL, email=None)
+    return SessionAuthor(name=author.name, email=author.email)
 
 
 class ReconciliationService:
@@ -555,7 +575,9 @@ class ReconciliationService:
     # S11 — GET /reconciliations/{id}  (header da Tela de Revisão)
     # ------------------------------------------------------------------
 
-    async def get_session_detail(self, session_id: UUID) -> SessionDetailPayload:
+    async def get_session_detail(
+        self, session_id: UUID, *, viewer_scope: str
+    ) -> SessionDetailPayload:
         """Detalhe da conciliação: totalizadores + resumo de saldos (BACK 04.3).
 
         Espelha `get_session_status` mas devolve `SessionDetailPayload`,
@@ -616,6 +638,8 @@ class ReconciliationService:
             balance_difference=session_obj.balance_difference,
             total_files=total_files,
             qualification_used_glossary=session_obj.qualification_used_glossary,
+            created_by=author_for_viewer(session_obj.user, viewer_scope),
+            created_at=session_obj.created_at,
             credits_total=amounts.credits_total,
             debits_total=amounts.debits_total,
             card_charges_total=card_charges,

@@ -18,7 +18,7 @@ from uuid import UUID
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
+from sqlalchemy.orm import aliased, selectinload
 
 from app.db.models import (
     Client,
@@ -289,9 +289,16 @@ class ClientRepository:
         # Esconde sessões descartadas (soft-delete). Sessões em error
         # descartadas pela UI não aparecem mais no histórico do cliente,
         # mas continuam no banco pra auditoria.
-        base = select(ReconciliationSession, files_count).where(
-            ReconciliationSession.client_id == client_id,
-            ReconciliationSession.deleted_at.is_(None),
+        base = (
+            select(ReconciliationSession, files_count)
+            # 86e2n39f1 — o card mostra QUEM criou; relationship é
+            # `lazy="raise"`, então o autor entra por selectinload (1 query
+            # extra pra página inteira, nunca N+1).
+            .options(selectinload(ReconciliationSession.user))
+            .where(
+                ReconciliationSession.client_id == client_id,
+                ReconciliationSession.deleted_at.is_(None),
+            )
         )
         count_base = (
             select(func.count(ReconciliationSession.id))

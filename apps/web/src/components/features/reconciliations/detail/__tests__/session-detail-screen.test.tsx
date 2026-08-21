@@ -135,6 +135,23 @@ describe('Detalhe — totalizadores e resumo', () => {
     }
   });
 
+  it('header mostra quem conciliou e quando (86e2n39f1)', () => {
+    detailState.data = detail({
+      created_by: { name: 'Ana da Hologram', email: 'ana@hologram.com.br' },
+      created_at: '2026-06-12T14:32:00Z',
+    });
+    renderScreen();
+    expect(screen.getByText(/Conciliado por/)).toBeVisible();
+    expect(
+      screen.getByRole('img', { name: 'Ana da Hologram — ana@hologram.com.br' }),
+    ).toBeVisible();
+  });
+
+  it('sem autor no payload (cache antigo), o header não inventa linha', () => {
+    renderScreen();
+    expect(screen.queryByText(/Conciliado por/)).not.toBeInTheDocument();
+  });
+
   it('card Conciliados explica a soma quando há data divergente (86e2u513b)', () => {
     detailState.data = detail({ conciliated_count: 120, conciliated_divergent_count: 23 });
     renderScreen();

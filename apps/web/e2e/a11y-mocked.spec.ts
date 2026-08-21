@@ -325,6 +325,10 @@ const DETAIL = {
   // 86e2u513b — o card explica a soma ("inclui N com data divergente");
   // com >0 o subtexto novo entra nas telas medidas pelo axe.
   conciliated_divergent_count: 2,
+  // 86e2n39f1 — o header mostra quem conciliou; com autor no mock a linha
+  // nova (e o tooltip do e-mail) entram nas telas que o axe mede.
+  created_by: { name: 'Ana da Hologram', email: 'ana@hologram.com.br' },
+  created_at: '2026-06-01T12:00:00Z',
   sem_omie_count: 3,
   omie_sem_arquivo_count: 2,
   anomaly_count: 1,
