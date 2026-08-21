@@ -1,17 +1,23 @@
-"""Montagem do `IncluirLancCC` — o sinal e o formato (Sprint 7 / BACK 07.4).
+"""Montagem do `IncluirLancCC` — forma aninhada e valor (Sprint 7 / BACK 07.4).
 
 ⚠️ **O que estes testes provam e o que NÃO provam.** Eles provam que o ADL monta
-o request **conforme o contrato assumido**: compra sai `'D'`, estorno sai `'C'`,
-valor absoluto com 2 casas, data `dd/mm/aaaa`, uma parcela por lançamento. Eles
-**não** provam que o contrato está certo — isso é S-1, e a única prova é a
-fixture real da BACK 07.1 (`tests/unit/test_omie_fixtures.py`), que hoje SKIPA.
+o request **conforme o contrato corroborado**: forma aninhada (`cCodIntLanc` no
+topo + `cabecalho`/`detalhes` — a forma plana foi RECUSADA pela API real em
+21/08/2026), valor absoluto com 2 casas, data `dd/mm/aaaa`, uma parcela por
+lançamento, e **sem campo de sinal** (`cNatureza` não existe na escrita). Eles
+**não** provam os nomes internos nem a direção débito/crédito — isso é S-1, e a
+única prova é a fixture de ACEITE da BACK 07.1
+(`tests/unit/test_omie_fixtures.py`).
 
-Inverter o `cNatureza` reprova aqui. Se a fixture um dia mostrar outro esquema,
-é a montagem que muda — e estes testes junto.
+Enquanto a direção do crédito não for verificada, ESTORNO (valor positivo) é
+bloqueado em `_eligibility_block` — lançá-lo no palpite poderia registrar o
+estorno como uma segunda despesa. Se a fixture um dia mostrar a representação
+do crédito, é o bloqueio que cai — e estes testes junto.
 """
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
@@ -19,10 +25,10 @@ from uuid import uuid4
 
 import pytest
 
+from app.integrations.omie.schemas import IncluirLancCCRequest
 from app.modules.reconciliations.omie_posting.service import (
-    NATUREZA_CREDITO,
-    NATUREZA_DEBITO,
     OmiePostingService,
+    _eligibility_block,
 )
 
 
@@ -63,115 +69,116 @@ def _entry(*, amount: str, day: int = 15) -> SimpleNamespace:
     )
 
 
+def _eligibility_entry(
+    *,
+    amount: str,
+    situation: str = "sem_omie",
+    omie_lancamento_id: int | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=uuid4(),
+        amount=Decimal(amount),
+        situation=situation,
+        omie_lancamento_id=omie_lancamento_id,
+    )
+
+
 def _session(*, omie_conta_id: int = 900_000_003) -> SimpleNamespace:
     return SimpleNamespace(id=uuid4(), client_id=uuid4(), omie_conta_id=omie_conta_id)
 
 
+def _build(service: OmiePostingService, entry: SimpleNamespace) -> IncluirLancCCRequest:
+    return service._build_request(
+        session=_session(),  # type: ignore[arg-type]
+        entry=entry,  # type: ignore[arg-type]
+        cod_categoria="2.01.03",
+        cod_int_lanc="ADLXXXXXXXXXXXXXXXX",
+    )
+
+
 @pytest.mark.unit
-class TestSignConvention:
-    def test_purchase_is_a_debit(self) -> None:
-        """Compra: valor negativo no extrato → `cNatureza='D'`, valor ABSOLUTO."""
-        request = _service()._build_request(
-            session=_session(),  # type: ignore[arg-type]
-            entry=_entry(amount="-12.34"),  # type: ignore[arg-type]
-            cod_categoria="2.01.03",
-            cod_int_lanc="ADLXXXXXXXXXXXXXXXX",
-        )
-        assert request.c_natureza == NATUREZA_DEBITO
-        assert request.n_valor_lanc == Decimal("12.34")
-        assert request.n_valor_lanc > 0
+class TestNestedShape:
+    def test_param_is_nested_cabecalho_detalhes(self) -> None:
+        """A forma plana foi RECUSADA pela API real (5001, 21/08/2026)."""
+        request = _build(_service(), _entry(amount="-12.34"))
+        param = request.model_dump(by_alias=True, exclude_none=True, mode="json")
+        assert set(param) == {"cCodIntLanc", "cabecalho", "detalhes"}
+        assert param["cabecalho"]["nCodCC"] == 900_000_003
+        assert param["detalhes"]["cCodCateg"] == "2.01.03"
+        assert param["cCodIntLanc"] == "ADLXXXXXXXXXXXXXXXX"
 
-    def test_refund_is_a_credit(self) -> None:
-        """Estorno: valor positivo → `cNatureza='C'`. Lançá-lo como débito
-        registraria uma despesa que nunca existiu."""
-        request = _service()._build_request(
-            session=_session(),  # type: ignore[arg-type]
-            entry=_entry(amount="89.90"),  # type: ignore[arg-type]
-            cod_categoria="2.01.03",
-            cod_int_lanc="ADLXXXXXXXXXXXXXXXX",
-        )
-        assert request.c_natureza == NATUREZA_CREDITO
-        assert request.n_valor_lanc == Decimal("89.90")
+    def test_no_sign_field_is_ever_sent(self) -> None:
+        """`cNatureza` não existe no contrato de ESCRITA — a direção é a
+        incógnita que o readback da captura responde (S-1)."""
+        request = _build(_service(), _entry(amount="-50.00"))
+        param = request.model_dump(by_alias=True, exclude_none=True, mode="json")
+        assert "cNatureza" not in json.dumps(param)
 
-    def test_the_number_never_carries_the_sign(self) -> None:
-        """O par (compra, estorno) do mesmo valor difere SÓ no `cNatureza`."""
-        service = _service()
-        compra = service._build_request(
-            session=_session(),  # type: ignore[arg-type]
-            entry=_entry(amount="-50.00"),  # type: ignore[arg-type]
-            cod_categoria="X",
-            cod_int_lanc="ADL1",
-        )
-        estorno = service._build_request(
-            session=_session(),  # type: ignore[arg-type]
-            entry=_entry(amount="50.00"),  # type: ignore[arg-type]
-            cod_categoria="X",
-            cod_int_lanc="ADL1",
-        )
-        assert compra.n_valor_lanc == estorno.n_valor_lanc == Decimal("50.00")
-        assert {compra.c_natureza, estorno.c_natureza} == {"D", "C"}
+    def test_purchase_value_is_absolute(self) -> None:
+        """Compra: valor negativo no extrato → `nValorLanc` ABSOLUTO."""
+        request = _build(_service(), _entry(amount="-12.34"))
+        assert request.cabecalho.n_valor_lanc == Decimal("12.34")
+        assert request.cabecalho.n_valor_lanc > 0
 
 
 @pytest.mark.unit
 class TestRequestShape:
     def test_date_is_brazilian(self) -> None:
-        request = _service()._build_request(
-            session=_session(),  # type: ignore[arg-type]
-            entry=_entry(amount="-10.00", day=3),  # type: ignore[arg-type]
-            cod_categoria="X",
-            cod_int_lanc="ADL1",
-        )
-        assert request.d_dt_lanc == "03/04/2026"
+        request = _build(_service(), _entry(amount="-10.00", day=3))
+        assert request.cabecalho.d_dt_lanc == "03/04/2026"
 
     def test_amount_has_two_decimals(self) -> None:
         """`Decimal`, nunca float (§3.4) — e quantizado em 2 casas."""
-        request = _service()._build_request(
-            session=_session(),  # type: ignore[arg-type]
-            entry=_entry(amount="-1234.5"),  # type: ignore[arg-type]
-            cod_categoria="X",
-            cod_int_lanc="ADL1",
-        )
-        assert isinstance(request.n_valor_lanc, Decimal)
-        assert str(request.n_valor_lanc) == "1234.50"
-
-    def test_account_comes_from_the_session(self) -> None:
-        request = _service()._build_request(
-            session=_session(omie_conta_id=777),  # type: ignore[arg-type]
-            entry=_entry(amount="-10.00"),  # type: ignore[arg-type]
-            cod_categoria="X",
-            cod_int_lanc="ADL1",
-        )
-        assert request.n_cod_cc == 777
+        request = _build(_service(), _entry(amount="-1234.5"))
+        assert isinstance(request.cabecalho.n_valor_lanc, Decimal)
+        assert str(request.cabecalho.n_valor_lanc) == "1234.50"
 
     def test_observation_carries_the_purchase_description(self) -> None:
-        request = _service()._build_request(
-            session=_session(),  # type: ignore[arg-type]
-            entry=_entry(amount="-10.00"),  # type: ignore[arg-type]
-            cod_categoria="X",
-            cod_int_lanc="ADL1",
-        )
-        assert request.c_obs == "COMPRA CAFETERIA DO LARGO"
+        request = _build(_service(), _entry(amount="-10.00"))
+        assert request.detalhes.c_obs == "COMPRA CAFETERIA DO LARGO"
 
-    def test_ctipo_is_never_sent(self) -> None:
-        """`DIN` é palpite (S-1). Um valor inventado faria a Omie recusar a
-        linha inteira por causa de um campo OPCIONAL."""
-        request = _service()._build_request(
-            session=_session(),  # type: ignore[arg-type]
-            entry=_entry(amount="-10.00"),  # type: ignore[arg-type]
-            cod_categoria="X",
-            cod_int_lanc="ADL1",
-        )
-        assert request.c_tipo is None
-        assert "cTipo" not in request.model_dump(by_alias=True, exclude_none=True)
+    def test_ctipo_is_sent_with_the_documented_value(self) -> None:
+        """A doc trata `cTipo` como essencial (a ausência é suspeita do 3102
+        de 21/08/2026); o valor enviado deve ser o MESMO que a fixture de
+        aceite prova."""
+        request = _build(_service(), _entry(amount="-10.00"))
+        param = request.model_dump(by_alias=True, exclude_none=True, mode="json")
+        assert param["detalhes"]["cTipo"] == "DIN"
+
+    def test_valor_is_a_json_number_on_the_wire(self) -> None:
+        """`nValorLanc` vai como NÚMERO JSON (doc: `decimal`, exemplo `123.46`)
+        — a string do Pydantic é suspeita do 3102. Internamente segue Decimal
+        (§3.4); o float existe só na borda de serialização."""
+        request = _build(_service(), _entry(amount="-12.34"))
+        param = request.model_dump(by_alias=True, exclude_none=True, mode="json")
+        assert isinstance(param["cabecalho"]["nValorLanc"], float)
+        assert param["cabecalho"]["nValorLanc"] == 12.34
 
     def test_decrypt_failure_does_not_block_the_posting(self) -> None:
         """`cObs` é opcional no Omie: deixar de lançar por causa de um campo de
         texto seria pior que lançar sem observação."""
-        request = _service(_Cipher(plaintext=None))._build_request(
-            session=_session(),  # type: ignore[arg-type]
-            entry=_entry(amount="-10.00"),  # type: ignore[arg-type]
-            cod_categoria="X",
-            cod_int_lanc="ADL1",
+        request = _build(_service(_Cipher(plaintext=None)), _entry(amount="-10.00"))
+        assert request.detalhes.c_obs is None
+        assert request.cabecalho.n_valor_lanc == Decimal("10.00")
+
+
+@pytest.mark.unit
+class TestEstornoIsBlocked:
+    """Sem representação verificada do crédito, estorno NÃO vira POST."""
+
+    def test_refund_is_blocked_before_any_send(self) -> None:
+        blocked = _eligibility_block(_eligibility_entry(amount="89.90"))  # type: ignore[arg-type]
+        assert blocked is not None
+        assert blocked.status == "bloqueada"
+        assert blocked.reason == "estorno_nao_verificado"
+
+    def test_purchase_is_eligible(self) -> None:
+        assert _eligibility_block(_eligibility_entry(amount="-89.90")) is None  # type: ignore[arg-type]
+
+    def test_ignored_line_wins_over_estorno(self) -> None:
+        """A ordem de precedência decide qual motivo o operador lê."""
+        blocked = _eligibility_block(
+            _eligibility_entry(amount="89.90", situation="ignorado")  # type: ignore[arg-type]
         )
-        assert request.c_obs is None
-        assert request.n_valor_lanc == Decimal("10.00")
+        assert blocked is not None
+        assert blocked.reason == "linha_ignorada"

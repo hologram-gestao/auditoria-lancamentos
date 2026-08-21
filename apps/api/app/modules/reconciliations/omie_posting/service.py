@@ -69,7 +69,11 @@ from app.db.models import (
     ReconciliationOmiePosting,
     SessionAccountType,
 )
-from app.integrations.omie.schemas import IncluirLancCCRequest
+from app.integrations.omie.schemas import (
+    IncluirLancCCRequest,
+    LancCCCabecalho,
+    LancCCDetalhes,
+)
 from app.modules.reconciliations.omie_posting.repository import OmiePostingRepository
 from app.modules.reconciliations.omie_posting.schemas import (
     OmiePostingBatchPayload,
@@ -94,11 +98,22 @@ if TYPE_CHECKING:
 
 log = get_logger(__name__)
 
-#: `cNatureza` — é ele que carrega o sinal; `nValorLanc` vai absoluto.
-#: Convenção confirmada só do lado de LEITURA (`ListarExtrato`); no lado de
-#: escrita segue NÃO-VERIFICADA (S-1 / ADR-019-BE).
-NATUREZA_DEBITO = "D"  # compra
-NATUREZA_CREDITO = "C"  # estorno
+#: Mensagem do bloqueio de ESTORNO (linha com valor positivo). O contrato real
+#: do `IncluirLancCC` não tem campo de sinal (`cNatureza` não existe na
+#: escrita — recusa real de 21/08/2026, ver `IncluirLancCCRequest`), então só
+#: a COMPRA (débito, valor absoluto) tem representação com evidência. Lançar
+#: estorno "no palpite" poderia registrá-lo como uma segunda despesa.
+_ESTORNO_BLOCK_MESSAGE = (
+    "Estornos ainda não podem ser lançados: a representação de crédito no "
+    "Omie ainda não foi verificada. Lance apenas as compras."
+)
+
+#: `cTipo` do lançamento. A doc oficial o trata como essencial (a ausência é
+#: suspeita do `3102` da captura de 21/08/2026) e o exemplo usa `DIN`. `CRT`
+#: (cartão) existe no domínio e pode ser semanticamente melhor para compra de
+#: fatura — trocar só com evidência de aceite; o valor enviado aqui deve ser o
+#: MESMO que a fixture de aceite provou.
+_C_TIPO_DOCUMENTO = "DIN"
 
 #: Nota gravada na anomalia resolvida. Sem PII: só o ID do lançamento Omie.
 #: O mínimo de 10 chars da revisão (Doc §17.3) é respeitado com folga.
@@ -477,26 +492,27 @@ class OmiePostingService:
     ) -> IncluirLancCCRequest:
         """Monta o `IncluirLancCC` de UMA linha. Uma parcela = um lançamento.
 
-        O sinal vai em `cNatureza`, **não** no número: `nValorLanc` é sempre
-        absoluto, com 2 casas. Compra (valor negativo no extrato) → `'D'`;
-        estorno (valor positivo) → `'C'`. Inverter isso lança um estorno como
-        despesa na contabilidade do cliente.
+        Formato ANINHADO (`cCodIntLanc` no topo + `cabecalho`/`detalhes`),
+        corroborado pela recusa real do formato plano em 21/08/2026 — ver
+        `IncluirLancCCRequest`. O contrato de escrita NÃO tem campo de sinal:
+        `nValorLanc` vai sempre **absoluto**, e só COMPRA (valor negativo no
+        extrato) chega aqui — estorno é bloqueado antes, em
+        `_eligibility_block`, até a direção do crédito ser verificada.
         """
         amount = Decimal(entry.amount)
-        natureza = NATUREZA_CREDITO if amount > 0 else NATUREZA_DEBITO
         valor = abs(amount).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         return IncluirLancCCRequest(
-            n_cod_cc=session.omie_conta_id,
-            d_dt_lanc=entry.transaction_date.strftime("%d/%m/%Y"),
-            n_valor_lanc=valor,
-            c_natureza=natureza,
-            c_cod_categ=cod_categoria,
             c_cod_int_lanc=cod_int_lanc,
-            c_obs=self._describe(entry),
-            # `cTipo` NÃO é enviado: `DIN` é palpite não-verificado (S-1). Um
-            # valor inventado faria a Omie recusar a linha inteira por um campo
-            # opcional. Só passa a ser enviado quando a fixture confirmar.
-            c_tipo=None,
+            cabecalho=LancCCCabecalho(
+                n_cod_cc=session.omie_conta_id,
+                d_dt_lanc=entry.transaction_date.strftime("%d/%m/%Y"),
+                n_valor_lanc=valor,
+            ),
+            detalhes=LancCCDetalhes(
+                c_cod_categ=cod_categoria,
+                c_obs=self._describe(entry),
+                c_tipo=_C_TIPO_DOCUMENTO,
+            ),
         )
 
     def _describe(self, entry: ReconciliationFileEntry) -> str | None:
@@ -717,6 +733,11 @@ def _eligibility_block(entry: ReconciliationFileEntry) -> OmiePostingLineResult 
             "nao_e_sem_omie",
             "Só compras sem correspondente no Omie podem ser lançadas.",
         )
+    if Decimal(entry.amount) > 0:
+        # Estorno. O contrato real de escrita não tem `cNatureza` e a
+        # representação do crédito segue não-verificada (S-1) — lançar no
+        # palpite poderia registrar o estorno como uma segunda despesa.
+        return _line_blocked(entry.id, "estorno_nao_verificado", _ESTORNO_BLOCK_MESSAGE)
     return None
 
 

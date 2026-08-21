@@ -14,11 +14,13 @@ Referência: `Docs/documentation/6. Integração com API do Omie-*.md`.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
+from typing import get_args
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 
 class OmieAccountType(StrEnum):
@@ -168,12 +170,27 @@ class LancamentoExtrato(BaseModel):
             "que o dado estava no banco."
         ),
     )
-    c_natureza: str = Field(alias="cNatureza", description="'D' (débito) ou 'C' (crédito).")
+    c_natureza: str = Field(
+        alias="cNatureza",
+        description=(
+            "'D' (débito) ou 'C' (crédito) na doc. ⚠️ Fixture real de conta "
+            "CARTÃO (21/08/2026): vem 'P' (pagamento) / 'R' (recebimento), com "
+            "`nValorDocumento` JÁ SINALIZADO (P negativo, R positivo) — ver "
+            "`signed_amount`, que cobre as duas convenções."
+        ),
+    )
     d_data_lancamento: date = Field(alias="dDataLancamento", description="Data do lançamento.")
     n_valor_documento: Decimal = Field(alias="nValorDocumento", description="Valor absoluto.")
-    c_situacao: str = Field(
+    c_situacao: str | None = Field(
+        default=None,
         alias="cSituacao",
-        description="Status: 'Conciliado', 'Atrasado', 'Previsto' (string40 na doc).",
+        description=(
+            "Status: 'Conciliado', 'Atrasado', 'Previsto' (string40 na doc). "
+            "⚠️ Opcional por evidência real (21/08/2026): lançamento "
+            "recém-criado via `IncluirLancCC` volta no extrato SEM a chave "
+            "`cSituacao` (readback da captura) — exigi-la derrubaria o "
+            "processamento de qualquer extrato relido no dia de uma inclusão."
+        ),
     )
     c_observacoes: str = Field(
         default="",
@@ -204,13 +221,15 @@ class LancamentoExtrato(BaseModel):
         default=None,
         alias="cCodIntLanc",
         description=(
-            "Chave de integração do lançamento. ⚠️ **NÃO-VERIFICADO** que o "
-            "`ListarExtrato` devolva este campo (S-1) — por isso é opcional e "
-            "com default `None`. É o que permite a reconciliação pós-timeout "
-            "da BACK 07.4 ser CONCLUSIVA: se o campo vier populado em alguma "
-            "linha, dá para afirmar se o lançamento entrou; se não vier em "
-            "nenhuma, o resultado é INCONCLUSIVO e o ADL **não reenvia**. "
-            "Ausente ⇒ nunca leva a um lançamento duplicado."
+            "Chave de integração do lançamento. ⚠️ **VERIFICADO em 21/08/2026: "
+            "o `ListarExtrato` NÃO devolve este campo** — nem em linha "
+            "orgânica, nem na recém-criada pela captura (readback). "
+            "Consequência: a reconciliação pós-timeout da BACK 07.4 é sempre "
+            "INCONCLUSIVA por este caminho, e o ADL **não reenvia** (nunca "
+            "duplica). A saída provada pela captura é outra: o `IncluirLancCC` "
+            "é IDEMPOTENTE sobre `cCodIntLanc` (2º POST devolveu o MESMO "
+            "`nCodLanc`, status 0) — mudar o caminho de timeout para reenviar "
+            "é decisão registrada em aberto, não implementada."
         ),
     )
 
@@ -223,7 +242,15 @@ class LancamentoExtrato(BaseModel):
 
     @property
     def signed_amount(self) -> Decimal:
-        """Valor com sinal: débito → negativo, crédito → positivo."""
+        """Valor com sinal: débito → negativo, crédito → positivo.
+
+        Cobre DUAS convenções reais (fixture de 21/08/2026):
+        - Conta corrente (doc): natureza 'D'/'C' com valor ABSOLUTO — o 'D'
+          é invertido aqui.
+        - Cartão (observado): natureza 'P'/'R' com valor JÁ SINALIZADO
+          (P negativo, R positivo) — cai no `return` direto, sem inverter.
+        Inverter qualquer coisa além de 'D' quebraria o cartão.
+        """
         if self.c_natureza == OmieEntryNatureza.DEBITO.value:
             return -self.n_valor_documento
         return self.n_valor_documento
@@ -374,67 +401,25 @@ class CategoriaOmie(BaseModel):
 # IncluirLancCC (ESCRITA — Sprint 7 / BACK 07.1)
 # ----------------------------------------------------------------------
 #
-# ⚠️ **TODO O CONTRATO ABAIXO É NÃO-VERIFICADO CONTRA A API REAL (S-1).**
-# Origem dos nomes: doc oficial da Omie citada no PRD da Sprint 7
-# (https://developer.omie.com.br/service-list/, serviço
-# `financas/contacorrentelancamentos/`) — NÃO uma resposta real. É exatamente
-# a situação do defeito P11 (Sprint 1): um contrato plausível, apresentado
-# como fato, implementado contra um mock que repetia a invenção.
+# ⚠️ **CONTRATO PARCIALMENTE VERIFICADO (S-1 ainda aberta).** A FORMA aninhada
+# (`cCodIntLanc` no topo + `cabecalho`/`detalhes`) deixou de ser suposição em
+# 21/08/2026: o formato PLANO anterior foi enviado à API real e RECUSADO com
+# `5001 - Tag [CCODCATEG] não faz parte da estrutura do tipo complexo
+# [lanccIncluirRequest]` (fixture `incluir_lanc_cc.response.json` da captura),
+# exatamente como a doc oficial (https://developer.omie.com.br/service-list/,
+# serviço `financas/contacorrentelancamentos/`) descrevia. O que SEGUE
+# não-verificado até uma resposta de ACEITE: os nomes internos de `cabecalho`/
+# `detalhes`, a obrigatoriedade de cada campo e a representação do sinal
+# débito/crédito (não há `cNatureza` na escrita — ver o docstring do request).
 #
-# O gate que fecha essa lacuna é `tests/unit/test_omie_fixtures.py`, que roda
+# O gate que fecha a lacuna é `tests/unit/test_omie_fixtures.py`, que roda
 # estes DTOs contra a fixture gravada por `scripts/capture_omie_fixtures.py`
-# (opt-in de escrita). Enquanto a fixture não existir, o teste SKIPA citando
-# S-1 — nunca passa verde em silêncio.
+# (opt-in de escrita). Enquanto a fixture de ACEITE não existir, o teste não
+# passa verde em silêncio.
 
 
-class IncluirLancCCRequest(BaseModel):
-    """Parâmetro do `IncluirLancCC` (`financas/contacorrentelancamentos/`).
-
-    ⚠️ **NÃO-VERIFICADO (S-1)** — os pontos abaixo são suposição documentada,
-    não fato observado. Cada um tem uma origem declarada:
-
-    - **Convenção de sinal** (`nValorLanc` absoluto + `cNatureza` carregando o
-      sinal): verificada apenas no lado de **LEITURA** do mesmo domínio
-      (`ListarExtrato` — ver o cabeçalho deste módulo e `LancamentoExtrato`).
-      **Não** está confirmado que a escrita siga a mesma convenção. Assumir
-      "valor negativo" seria fabricar o oposto do que o repositório já sabe;
-      por isso seguimos a convenção de leitura E marcamos como não-verificada.
-    - **`cCodIntLanc` como chave idempotente imposta pelo Omie**: NÃO
-      confirmado. Não é a defesa primária do ADL — ver BACK 07.2, onde a dedup
-      mora no banco do próprio ADL. Aqui é só defesa adicional.
-    - **`cTipo`**: valor `"DIN"` citado no PRD é **palpite**. O campo análogo
-      do lado de leitura é `string3` com `PAG`/`ATR`
-      (`TituloAPagarReceber.status_titulo`). Por isso o campo é opcional e
-      **só deve ser enviado se a fixture real confirmar um valor válido**.
-    - **Nomes de campo e obrigatoriedade**: vêm da doc, não de uma resposta.
-      Quando a fixture existir, o teste compara as chaves realmente aceitas
-      pela Omie com o conjunto de aliases deste DTO e FALHA na divergência.
-
-    **Cross-check contra a doc oficial (19/08/2026 — duas leituras
-    independentes de `financas/contacorrentelancamentos/`): a doc descreve o
-    `param` ANINHADO, este DTO emite PLANO.** Estrutura na doc: `cCodIntLanc`
-    no topo; `cabecalho` { `nCodCC`, `dDtLanc`, `nValorLanc` }; `detalhes`
-    { `cCodCateg`, `cTipo`, `cNumDoc`, `nCodCliente`, `nCodProjeto`, `cObs` };
-    `transferencia` e `departamentos` opcionais. Além da forma:
-
-    - **`cNatureza` NÃO existe no contrato de escrita** — na página ele só
-      aparece na estrutura `diversos`, com domínio `P`/`R` (outra coisa). Como
-      a doc não mostra campo de sinal no `cabecalho`, a representação de
-      débito/crédito na escrita é INDETERMINADA (candidatos: `nValorLanc` com
-      sinal, ou a natureza da própria categoria). O readback da captura é o
-      que responde isso.
-    - **`cTipo` não era palpite**: `string5` em `detalhes`, com `DIN` entre os
-      valores válidos (`ADI, BOL, CRT, CHQ, CON, CRE, DRF, DAS, DEB, DIN,
-      DOC, GUIA, PROT, REC, RPA, TED, TRA, 99999`). A página não marca a
-      obrigatoriedade de forma inequívoca (nem a de `cCodCateg`).
-
-    O DTO **não** foi reescrito para o formato aninhado de propósito: seria
-    trocar uma suposição por outra da MESMA fonte que já errou 3x neste
-    repositório (`ListarExtrato` v1, `ListarContasCorrentes`, filtro
-    `PREVISTO` → 5001). Se a doc estiver certa, o 1º POST real falha SEM criar
-    lançamento — a faultstring é evidência de graça, e o script de captura a
-    grava verbatim. Com a fixture na mão, a reescrita é mecânica.
-    """
+class LancCCCabecalho(BaseModel):
+    """`cabecalho` do `IncluirLancCC` — conta, data e valor do lançamento."""
 
     n_cod_cc: int = Field(
         alias="nCodCC",
@@ -447,27 +432,40 @@ class IncluirLancCCRequest(BaseModel):
     n_valor_lanc: Decimal = Field(
         alias="nValorLanc",
         description=(
-            "Valor **absoluto** (sempre positivo), 2 casas. ⚠️ NÃO-VERIFICADO "
-            "no lado de escrita — o sinal viaja em `cNatureza` (convenção "
-            "confirmada só na leitura)."
+            "Valor **absoluto** (sempre positivo), 2 casas. ⚠️ Sem `cNatureza` "
+            "na escrita, a direção débito/crédito é INDETERMINADA até o "
+            "readback da captura — ver `IncluirLancCCRequest`."
         ),
     )
-    c_natureza: str = Field(
-        alias="cNatureza",
-        description="'D' (débito/compra) ou 'C' (crédito/estorno). ⚠️ NÃO-VERIFICADO na escrita.",
-    )
+
+    @field_serializer("n_valor_lanc", when_used="json")
+    def _valor_como_numero(self, valor: Decimal) -> float:
+        """No fio, `nValorLanc` é NÚMERO JSON, não string.
+
+        A doc declara `decimal` e o exemplo oficial mostra `123.46` sem aspas;
+        o Pydantic v2 serializa `Decimal` como string em `mode="json"`, e a
+        string é a suspeita nº 1 do `3102` genérico da captura de 21/08/2026.
+        O float existe SÓ nesta borda de serialização (§3.4 continua valendo:
+        o valor interno é `Decimal`); com 2 casas decimais, o repr mais curto
+        do float reproduz o decimal exato.
+        """
+        return float(valor)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class LancCCDetalhes(BaseModel):
+    """`detalhes` do `IncluirLancCC` — classificação e texto livre.
+
+    A doc declara também `cNumDoc`, `nCodCliente` e `nCodProjeto`; não são
+    declarados aqui porque o ADL não os usa — declarar campo que não se envia
+    só aumentaria a superfície de divergência (mesmo racional do
+    `CategoriaOmie`).
+    """
+
     c_cod_categ: str = Field(
         alias="cCodCateg",
-        description="Código da categoria Omie (`string20`) — obrigatório, não vem da fatura.",
-    )
-    c_cod_int_lanc: str | None = Field(
-        default=None,
-        alias="cCodIntLanc",
-        description=(
-            "Chave de integração por LINHA da fatura (`string20`). ⚠️ Que o "
-            "Omie **imponha** unicidade sobre ela é NÃO-VERIFICADO (S-1) — a "
-            "dedup primária é do ADL (BACK 07.2)."
-        ),
+        description="Código da categoria Omie (`string20`) — não vem da fatura.",
     )
     c_obs: str | None = Field(
         default=None,
@@ -478,21 +476,84 @@ class IncluirLancCCRequest(BaseModel):
         default=None,
         alias="cTipo",
         description=(
-            "Tipo do documento. ⚠️ NÃO-VERIFICADO: o valor `'DIN'` citado no "
-            "PRD é palpite. Enviar apenas se a fixture real confirmar."
+            "Tipo do documento (`string5`). A doc o trata como essencial e o "
+            "exemplo oficial envia `DIN`; a ausência dele é a suspeita nº 2 "
+            "do `3102` da captura de 21/08/2026. Enviamos `DIN` até a fixture "
+            "de aceite arbitrar."
         ),
     )
 
     model_config = ConfigDict(populate_by_name=True)
 
+
+class IncluirLancCCRequest(BaseModel):
+    """Parâmetro do `IncluirLancCC` (`financas/contacorrentelancamentos/`).
+
+    Forma ANINHADA conforme a doc oficial, **corroborada pela recusa real do
+    formato plano em 21/08/2026** (ver o cabeçalho da seção): `cCodIntLanc` no
+    topo; `cabecalho` { `nCodCC`, `dDtLanc`, `nValorLanc` }; `detalhes`
+    { `cCodCateg`, `cTipo`, `cNumDoc`, `nCodCliente`, `nCodProjeto`, `cObs` };
+    `transferencia` e `departamentos` opcionais (não usados).
+
+    ⚠️ **O que SEGUE não-verificado (S-1)** até uma captura ACEITA:
+
+    - **Representação do sinal**: `cNatureza` NÃO existe no contrato de
+      escrita (na doc ele só aparece na estrutura `diversos`, domínio `P`/`R`
+      — outra coisa). Candidatos: `nValorLanc` com sinal, ou a natureza da
+      própria categoria. **Enquanto indeterminado, o serviço só monta COMPRA
+      (débito) com valor absoluto e BLOQUEIA estorno** — ver
+      `_eligibility_block` no `omie_posting/service.py`. O readback da captura
+      (extrato relido após o aceite) é o que responde a direção.
+    - ~~`cCodIntLanc` como chave idempotente~~ → **VERIFICADO em 21/08/2026**:
+      o 2º POST do mesmo código devolveu o MESMO `nCodLanc` (status 0), sem
+      criar segundo lançamento. Segue não sendo a defesa primária do ADL —
+      ver BACK 07.2.
+    - **Nomes internos e obrigatoriedade** de `cabecalho`/`detalhes`: o ACEITE
+      de 21/08/2026 (com `nValorLanc` numérico e `cTipo='DIN'`) prova o
+      conjunto enviado; o gate compara a fixture contra
+      `omie_param_aliases()`.
+    """
+
+    c_cod_int_lanc: str | None = Field(
+        default=None,
+        alias="cCodIntLanc",
+        description=(
+            "Chave de integração por LINHA da fatura (`string20`), no TOPO do "
+            "param (fora do `cabecalho`). ✅ VERIFICADO (captura 21/08/2026): "
+            "o Omie é IDEMPOTENTE sobre ela — o 2º POST do mesmo código "
+            "devolveu o MESMO `nCodLanc` com status 0, sem criar segundo "
+            "lançamento. A dedup primária continua sendo do ADL (BACK 07.2)."
+        ),
+    )
+    cabecalho: LancCCCabecalho
+    detalhes: LancCCDetalhes
+
+    model_config = ConfigDict(populate_by_name=True)
+
     @classmethod
     def omie_param_aliases(cls) -> frozenset[str]:
-        """Conjunto de chaves que este DTO envia à Omie (aliases camelCase).
+        """Chaves que este DTO pode enviar à Omie, como caminhos pontilhados.
 
-        Usado pelo gate de fixture: se alguém renomear/adicionar campo sem
-        recapturar uma chamada real, o teste da fixture acusa a divergência.
+        Ex.: `{"cCodIntLanc", "cabecalho", "cabecalho.nCodCC", ...}`. Usado
+        pelo gate de fixture: se alguém renomear/adicionar campo sem recapturar
+        uma chamada real, o teste acusa a divergência. O gate achata o `param`
+        capturado no mesmo formato antes de comparar.
         """
-        return frozenset(field.alias or name for name, field in cls.model_fields.items())
+
+        def walk(model: type[BaseModel], prefix: str) -> Iterator[str]:
+            for name, field in model.model_fields.items():
+                alias = field.alias or name
+                path = f"{prefix}{alias}"
+                yield path
+                candidates = (field.annotation, *get_args(field.annotation))
+                sub = next(
+                    (c for c in candidates if isinstance(c, type) and issubclass(c, BaseModel)),
+                    None,
+                )
+                if sub is not None:
+                    yield from walk(sub, f"{path}.")
+
+        return frozenset(walk(cls, ""))
 
 
 class IncluirLancCCResponse(BaseModel):

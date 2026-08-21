@@ -33,6 +33,9 @@ PostingLineReason = Literal[
     "envio_anterior_sem_confirmacao",
     "chave_em_conflito",
     "lancamento_ja_vinculado",
+    # Estorno (valor positivo): a representação do crédito no contrato real
+    # do IncluirLancCC segue não-verificada (S-1) — bloqueado até lá.
+    "estorno_nao_verificado",
     # --- erros (houve tentativa) ---
     "erro_omie",
     "omie_indisponivel",

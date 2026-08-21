@@ -2215,7 +2215,7 @@ export interface components {
              */
             status: "lancada" | "bloqueada" | "erro";
             /** Reason */
-            reason?: ("linha_inexistente" | "nao_e_sem_omie" | "linha_ignorada" | "ja_lancada" | "envio_anterior_sem_confirmacao" | "chave_em_conflito" | "lancamento_ja_vinculado" | "erro_omie" | "omie_indisponivel" | "reconciliada") | null;
+            reason?: ("linha_inexistente" | "nao_e_sem_omie" | "linha_ignorada" | "ja_lancada" | "envio_anterior_sem_confirmacao" | "chave_em_conflito" | "lancamento_ja_vinculado" | "estorno_nao_verificado" | "erro_omie" | "omie_indisponivel" | "reconciliada") | null;
             /** Message */
             message?: string | null;
             /** Omie Lancamento Id */

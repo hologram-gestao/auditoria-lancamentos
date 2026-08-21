@@ -41,6 +41,7 @@ _ALL_CAPTURE_VARS = (
     *_WRITE_ENV,
     "OMIE_CAPTURE_DATA_LANC",
     "OMIE_CAPTURE_VALOR_LANC",
+    "OMIE_CAPTURE_C_TIPO",
 )
 
 
@@ -185,17 +186,39 @@ class TestIncluirLancCCCaptureRequest:
         # As chaves enviadas são exatamente as declaradas — é o laço que o gate
         # da fixture fecha (nada de dict escrito à mão divergindo do DTO).
         assert set(param) <= IncluirLancCCRequest.omie_param_aliases()
-        assert param["nCodCC"] == 4321
-        assert param["cNatureza"] == "D"
+        # Forma aninhada (a plana foi recusada pela API real em 21/08/2026).
+        assert set(param) == {"cCodIntLanc", "cabecalho", "detalhes"}
+        assert param["cabecalho"]["nCodCC"] == 4321
+        assert param["detalhes"]["cCodCateg"] == "1.01.01"
         assert param["cCodIntLanc"] == "ADL0701CAP1"
+        assert "cNatureza" not in json.dumps(param), (
+            "cNatureza não existe no contrato de ESCRITA — a direção do "
+            "lançamento é a incógnita que o readback responde."
+        )
 
-    def test_ctipo_is_not_sent(self) -> None:
-        """`DIN` é palpite (S-1) — mandar um valor inventado poderia fazer a
-        Omie recusar a chamada e transformar a captura numa prova falsa."""
+    def test_ctipo_defaults_to_din_and_is_overridable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`DIN` é o valor do exemplo oficial; o override por env permite
+        iterar contra a API real sem mudar código."""
         param = capture._build_incluir_lanc_cc_request().model_dump(
             by_alias=True, exclude_none=True, mode="json"
         )
-        assert "cTipo" not in param
+        assert param["detalhes"]["cTipo"] == "DIN"
+
+        monkeypatch.setenv("OMIE_CAPTURE_C_TIPO", "CRT")
+        override = capture._build_incluir_lanc_cc_request().model_dump(
+            by_alias=True, exclude_none=True, mode="json"
+        )
+        assert override["detalhes"]["cTipo"] == "CRT"
+
+    def test_valor_is_a_json_number_on_the_wire(self) -> None:
+        """`nValorLanc` como string era a suspeita nº 1 do 3102 de 21/08/2026
+        — no fio vai NÚMERO, como no exemplo oficial (`123.46`)."""
+        param = capture._build_incluir_lanc_cc_request().model_dump(
+            by_alias=True, exclude_none=True, mode="json"
+        )
+        assert isinstance(param["cabecalho"]["nValorLanc"], float)
 
     def test_cod_int_lanc_over_20_chars_is_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("OMIE_CAPTURE_COD_INT_LANC", "X" * 21)
@@ -212,4 +235,4 @@ class TestIncluirLancCCCaptureRequest:
     ) -> None:
         monkeypatch.delenv("OMIE_CAPTURE_VALOR_LANC", raising=False)
         request = capture._build_incluir_lanc_cc_request()
-        assert str(request.n_valor_lanc) == "0.01"
+        assert str(request.cabecalho.n_valor_lanc) == "0.01"

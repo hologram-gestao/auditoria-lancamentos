@@ -6,10 +6,13 @@ real de cada endpoint para que `tests/unit/test_omie_fixtures.py` rode contra a
 resposta REAL — não contra a documentação. **A Omie não tem sandbox**; exige
 credencial de um cliente autorizado (ex.: Quial) + rede da Omie.
 
-⚠️ **S-1 (ASSUMIDA — NÃO TESTADA / RISCO) — captura de ESCRITA:** o contrato do
-`IncluirLancCC` (nomes de campo, convenção de sinal `nValorLanc` absoluto +
-`cNatureza`, e unicidade de `cCodIntLanc`) é **suposição documentada**, não fato
-observado. A captura de escrita existe para fechar essa lacuna.
+⚠️ **S-1 (AINDA ABERTA) — captura de ESCRITA:** a FORMA aninhada do
+`IncluirLancCC` (`cCodIntLanc` no topo + `cabecalho`/`detalhes`) foi
+corroborada pela RECUSA real do formato plano em 21/08/2026 (`5001 - Tag
+[CCODCATEG]`); nomes internos, obrigatoriedade, a representação do sinal
+(não há `cNatureza` na escrita) e a unicidade de `cCodIntLanc` seguem
+pendentes de uma captura ACEITA. A captura de escrita existe para fechar
+essa lacuna.
 
 **Escrita CRIA MOVIMENTO FINANCEIRO REAL** na contabilidade de um cliente — a
 Omie não tem sandbox (CLAUDE.md §10). Por isso é **opt-in explícito**
@@ -32,6 +35,7 @@ Uso — leitura + ESCRITA (opt-in; cria lançamento real):
     export OMIE_CAPTURE_COD_INT_LANC=...    # chave de integração (<=20 chars)
     export OMIE_CAPTURE_DATA_LANC=01/04/2026        # opcional; default = PERIODO_INICIAL
     export OMIE_CAPTURE_VALOR_LANC=0.01             # opcional; default 0.01
+    export OMIE_CAPTURE_C_TIPO=DIN                  # opcional; default DIN (doc oficial)
     uv run python -m scripts.capture_omie_fixtures
 
 Grava `<endpoint>.request.json` (SEM credenciais) e `<endpoint>.response.json`
@@ -52,7 +56,11 @@ from pydantic import SecretStr
 
 from app.core.config import get_settings
 from app.integrations.omie.client import OmieClient, OmieCredentials
-from app.integrations.omie.schemas import IncluirLancCCRequest
+from app.integrations.omie.schemas import (
+    IncluirLancCCRequest,
+    LancCCCabecalho,
+    LancCCDetalhes,
+)
 
 _FIXTURES_DIR = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "omie"
 
@@ -89,9 +97,13 @@ def _build_captures() -> list[_Capture]:
             "financas",
             "extrato",
             "ListarExtrato",
+            # Mesmo param do caminho de produção (`OmieClient.listar_extrato`).
+            # `cVisualizar` (que a doc sugere) NÃO existe na API real: recusado
+            # em 21/08/2026 com `5001 - Tag [CVISUALIZAR] não faz parte da
+            # estrutura do tipo complexo [eccListarExtratoRequest]`.
             {
                 "nCodCC": conta_id,
-                "cVisualizar": "T",
+                "cCodIntCC": "",
                 "dPeriodoInicial": periodo_ini,
                 "dPeriodoFinal": periodo_fim,
             },
@@ -177,6 +189,12 @@ def _build_incluir_lanc_cc_request() -> IncluirLancCCRequest:
     a fixture gravada carrega exatamente as chaves que o DTO emite, e o teste
     compara as duas. Um dict escrito à mão aqui permitiria que o DTO e a
     chamada real divergissem sem ninguém notar.
+
+    Formato ANINHADO (`cabecalho`/`detalhes`) desde 21/08/2026 — o plano foi
+    recusado pela API real (`5001 - Tag [CCODCATEG]`). Sem `cNatureza` na
+    escrita, a captura envia o valor ABSOLUTO com uma categoria de despesa; a
+    direção com que o lançamento aterrissa (débito/crédito) é conferida pelo
+    readback do extrato (abaixo) — essa é a evidência do sinal.
     """
     cod_int_lanc = _require_env("OMIE_CAPTURE_COD_INT_LANC")
     if len(cod_int_lanc) > 20:
@@ -189,21 +207,20 @@ def _build_incluir_lanc_cc_request() -> IncluirLancCCRequest:
     )
     valor = Decimal(os.environ.get("OMIE_CAPTURE_VALOR_LANC") or _DEFAULT_VALOR_LANC)
     return IncluirLancCCRequest(
-        n_cod_cc=int(_require_env("OMIE_CAPTURE_CONTA_ID")),
-        d_dt_lanc=data_lanc,
-        n_valor_lanc=valor,
-        # 'D' (débito/compra) é o caso principal do fluxo da Sprint 7. O que a
-        # fixture prova é o NOME e a ACEITAÇÃO do campo; o efeito do sinal é
-        # conferido pelo readback do extrato (abaixo).
-        c_natureza="D",
-        c_cod_categ=_require_env("OMIE_CAPTURE_COD_CATEG"),
         c_cod_int_lanc=cod_int_lanc,
-        c_obs="ADL BACK 07.1 - captura de fixture (excluir manualmente)",
-        # cTipo NÃO é enviado: o valor `DIN` do PRD é palpite não-verificado.
-        # Enviar um valor inventado poderia fazer a Omie recusar a chamada e
-        # transformar a captura numa prova falsa ("o contrato está errado")
-        # quando o errado seria só este campo.
-        c_tipo=None,
+        cabecalho=LancCCCabecalho(
+            n_cod_cc=int(_require_env("OMIE_CAPTURE_CONTA_ID")),
+            d_dt_lanc=data_lanc,
+            n_valor_lanc=valor,
+        ),
+        detalhes=LancCCDetalhes(
+            c_cod_categ=_require_env("OMIE_CAPTURE_COD_CATEG"),
+            c_obs="ADL BACK 07.1 - captura de fixture (excluir manualmente)",
+            # `cTipo` passou a ser enviado após o 3102 de 21/08/2026: a doc o
+            # trata como essencial e o exemplo oficial usa `DIN`. Overridável
+            # por env para iterar sem mudar código.
+            c_tipo=os.environ.get("OMIE_CAPTURE_C_TIPO") or "DIN",
+        ),
     )
 
 
@@ -215,9 +232,10 @@ async def _capture_incluir_lanc_cc(client: OmieClient) -> None:
     parte da captura, e a resposta dele é gravada separadamente — inclusive
     quando é um `faultstring` (que é, aliás, o resultado *desejado*).
 
-    **Recusa do 1º POST também é captura válida** (cross-check da doc,
-    19/08/2026): a doc oficial descreve o `param` aninhado e o DTO emite plano,
-    então a expectativa realista é a Omie recusar. A faultstring é gravada
+    **Recusa do 1º POST também é captura válida.** Foi assim que a forma
+    plana caiu em 21/08/2026 (`5001 - Tag [CCODCATEG]`); com o DTO já
+    aninhado, uma nova recusa significa divergência de NOME interno ou de
+    obrigatoriedade — evidência igualmente valiosa. A faultstring é gravada
     verbatim como `incluir_lanc_cc.response.json` e a captura de escrita para
     aí — nada foi criado, nada há para repetir nem reler.
     """
@@ -238,19 +256,18 @@ async def _capture_incluir_lanc_cc(client: OmieClient) -> None:
             param=param,
         )
     except Exception as exc:  # a recusa é evidência S-1 — gravar, não crashar
-        # Desde o cross-check da doc (19/08/2026) a recusa do 1º POST é o
-        # desfecho MAIS PROVÁVEL: a doc descreve o `param` ANINHADO
-        # (`cabecalho`/`detalhes`) e sem `cNatureza`, e o DTO emite plano —
-        # ver `IncluirLancCCRequest`. A faultstring é exatamente a evidência
-        # que o S-1 pede; crashar aqui a perderia (viraria só traceback).
-        # Sem lançamento criado, o 2º POST não provaria nada e o readback não
-        # teria o que ler — por isso a captura de escrita PARA aqui.
+        # A faultstring é exatamente a evidência que o S-1 pede; crashar aqui
+        # a perderia (viraria só traceback). Com o DTO já aninhado (a forma
+        # plana foi recusada em 21/08/2026), uma recusa aqui aponta nome
+        # interno ou obrigatoriedade divergente. Sem lançamento criado, o 2º
+        # POST não provaria nada e o readback não teria o que ler — por isso
+        # a captura de escrita PARA aqui.
         _write_json(
             "incluir_lanc_cc.response",
             {
                 "_adl_capture_note": (
-                    "1º POST recusado — provável divergência de contrato "
-                    "(doc descreve param aninhado). Texto preservado VERBATIM."
+                    "1º POST recusado — divergência de contrato (nome interno "
+                    "ou obrigatoriedade). Texto preservado VERBATIM."
                 ),
                 "_adl_capture_exception_type": type(exc).__name__,
                 "_adl_capture_exception_message": str(exc),
@@ -287,7 +304,7 @@ async def _capture_incluir_lanc_cc(client: OmieClient) -> None:
         }
     _write_json("incluir_lanc_cc_repeat.response", repeat)
 
-    await _capture_lanc_cc_readback(client, data_lanc=request.d_dt_lanc)
+    await _capture_lanc_cc_readback(client, data_lanc=request.cabecalho.d_dt_lanc)
 
 
 async def _capture_lanc_cc_readback(client: OmieClient, *, data_lanc: str) -> None:

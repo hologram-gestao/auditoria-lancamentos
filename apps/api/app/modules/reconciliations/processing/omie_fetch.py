@@ -112,7 +112,10 @@ async def fetch_realized(
             omie_id=item.n_cod_lancamento,
             transaction_date=item.d_data_lancamento,
             amount=item.signed_amount,
-            status=item.c_situacao,
+            # Lançamento recém-criado volta SEM `cSituacao` (evidência real de
+            # 21/08/2026 — readback da captura). `""` = "Omie não informou":
+            # não casa com nenhum status canônico e não dispara regra alguma.
+            status=item.c_situacao or "",
             is_realized=True,
             # Só o extrato traz o nome do cliente/fornecedor. Vai para o matcher
             # como DESEMPATE (nunca exclusão) e morre em memória — não é
