@@ -15,8 +15,8 @@
 > | **3**  | **Cripto por cliente** (DEK+KEK), `access_audit`, alerting fail-closed                                       |
 > | **4**  | Lista de conciliações, **gaveta** de criação, **multi-arquivo**, notificações in-app, `usage_events`         |
 > | **5**  | **Multi-tenancy**: `users.scope`/`client_id`, papéis de cliente, matriz de permissões, isolamento por tenant |
-> | **6**  | **Glossário por cliente** (tabela cifrada por tenant, `glossary_version`), veredito do revisor |
-> | **7**  | **Escrita no Omie**: lançamento das compras `sem_omie` da fatura de cartão (`IncluirLancCC`) |
+> | **6**  | **Glossário por cliente** (tabela cifrada por tenant, `glossary_version`), veredito do revisor               |
+> | **7**  | **Escrita no Omie**: lançamento das compras `sem_omie` da fatura de cartão (`IncluirLancCC`)                 |
 >
 > ⚠️ **O invariante "Omie read-only" acabou na Sprint 7.** O ADL agora **grava movimento
 > financeiro na contabilidade do cliente**. Antes de encostar nesse fluxo, leia **§3.16**:
@@ -169,6 +169,13 @@
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
       (**40** hoje) **com teste negativo cross-tenant**. Essa lista é o denominador
       da métrica de isolamento — endpoint fora dela é buraco que ninguém mede.
+    - **Identidade de usuário em response é ENXUTA e mascarada por escopo**
+      (86e2n39f1): expor QUEM fez algo devolve só `{name, email}` — nunca a
+      linha de `users` (§3.2), nem `id` — e passa por **`author_for_viewer`**
+      (`reconciliations/service.py`), a decisão ÚNICA: usuário de tenant vendo
+      autor `system` recebe **"Equipe Hologram"** sem e-mail. A máscara é do
+      SERVIDOR — payload com o nome real e UI escondendo não é barreira (§4.9).
+      Vale para qualquer endpoint novo que exponha autoria.
 16. **Escrita no Omie (Sprint 7) — a única no sistema, e a mais cara de errar:**
     - **Nasce desligada.** `OMIE_POSTING_ENABLED` tem default **`False`**
       (diferente de `QUALIFICATION_ENABLED`): ligar é decisão explícita **por
@@ -196,6 +203,14 @@
     - **A mensagem de erro do provedor é persistida e NUNCA logada** — é texto
       livre de terceiro e a Omie ecoa o `cObs`, que carrega a descrição da compra
       (§4.5). No `usage_events` entra só uma **categoria fechada**, nunca o texto.
+    - **Cross-check da doc oficial (19/08/2026, registrado nas docstrings):** a
+      doc descreve o `param` do `IncluirLancCC` **ANINHADO** (`cabecalho`/
+      `detalhes`) e **sem `cNatureza`** — o DTO atual emite plano (ver
+      `IncluirLancCCRequest`). O DTO **não** foi reescrito de propósito (a doc
+      desta API já errou 3x no repo); consequência: **a recusa do 1º POST da
+      captura é o desfecho ESPERADO e é evidência S-1 válida** — o script grava
+      a `faultstring` verbatim em vez de crashar. A resposta, ao contrário,
+      bate 1:1 com a doc.
     - **Só cartão.** Elegibilidade é `session.account_type == 'credit_card'`
       (o `CR` do Omie). ⚠️ O PRD chama a conta de cartão de `CA` e **está errado**:
       `CA` é Conta Aplicação. Filtrar por `CA` lança na conta errada.
@@ -400,17 +415,25 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   `apps/web/e2e/a11y-mocked.spec.ts` — copie o padrão de lá, inclusive o
   `aguardarAnimacao()`: a gaveta do Radix entra **deslizando**, e `boundingBox()` medida no
   meio do trajeto devolve coordenada fora da tela que não é defeito nenhum (mede em 1440px
-  também, e reprova os quatro cenários).
+  também, e reprova os quatro cenários). O mesmo vale para COR: o toast do Sonner entra em
+  fade, e o axe medindo no meio do trajeto vê cor MESCLADA — reprovou 4,25:1 num par cujos
+  tokens puros dão 4,75:1 (PR #89, flaky sem defeito). Antes de medir toast,
+  `aguardarToastEstavel()`. **Visível não é estável.**
+
+- **Dica/tooltip NUNCA é `title` nativo** — não aparece em toque, não alcança teclado e o
+  leitor de tela ignora. Use o `<Tooltip>` do design system com `role="img"` +
+  `aria-label` carregando a explicação INTEIRA (anunciada mesmo sem abrir a dica) +
+  `tabIndex={0}` com anel de foco. Padrão em `qualification-cell.tsx`,
+  `situation-badge.tsx` e `author-label.tsx` — copiar de lá, não reinventar.
 - **O relatório do gate de a11y é artefato, nunca fonte.** `scripts/a11y-gate.sh` escreve
   `apps/web/a11y-report.json` (o CI escreve o mesmo arquivo e o sobe como _artifact_,
   `ci.yml:300-304`). Ele **não entra em commit**: é reescrito a cada execução e carrega
   caminhos absolutos da máquina de quem rodou. Antes de fechar qualquer task de front,
   `git diff --name-only develop..HEAD` só pode listar código-fonte.
-  ⚠️ **O `.gitignore` NÃO cobre esse caminho** (ignora `playwright-report/`,
-  `test-results/` e `blob-report/`, e o gate escreve na raiz de `apps/web/`): rodou o gate,
-  confira `git status --short` **à mão** antes de commitar. Fechar a lacuna é a task
-  `86e2w8xpv` (mover a saída para `test-results/` ou criar `apps/web/.gitignore`); até lá a
-  única proteção é a conferência.
+  A lacuna do `.gitignore` foi fechada na validação da Sprint 7 (task `86e2w8xpv`):
+  `apps/web/.gitignore` ignora `a11y-report.json` — o arquivo não entra mais em commit por
+  acidente. A conferência de `git diff --name-only` antes de fechar task de front continua
+  valendo como higiene.
 
 ### API
 
@@ -441,6 +464,12 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   1. `gh run view <run-id> --log-failed` pra ler o erro real (não o "summary" — esse engana).
   2. Reproduzir local com o **mesmo comando do CI** (`uv run pytest -v --cov=app --cov-report=term-missing` no API; coverage muda a quantidade de testes que rodam).
   3. Push do fix **no commit seguinte** — nunca `git push --force` pra "limpar" CI vermelho do histórico.
+- **Teste de integração NOVO roda na ordem do CI antes do push** — o arquivo inteiro +
+  os vizinhos que semeiam os mesmos dados (a ordem é alfabética por arquivo). Seed de
+  tabela compartilhada entre arquivos (ex.: `anomaly_types`) é **get-or-create, nunca
+  insert às cegas**: a tabela sobrevive entre arquivos e o insert cego morre com
+  `UniqueViolation` só no CI (foi o único vermelho da PR #84; os helpers dos arquivos de
+  teste já fazem certo — copiar deles).
 - **Teste flaky** (passa local, falha CI): tratar como bug a ser deflakizado, **não** ignorar. Padrão de root cause comum: timestamp/relógio ms-resolution, ordem de fixture, dependência de rede mockada parcialmente. Documentar a causa no commit do deflake (ex: ver `1185e17`).
 - **Hooks locais** (husky + lint-staged + commitlint) rodam no `git commit`. **Nunca** usar `--no-verify` pra contornar — se o hook falhar, o CI vai falhar igual. Conserta antes.
 - **Quando um job for marcado como `skipped` no CI** (ex: `Web` quando o PR só toca API): isso é esperado pelo `paths-filter`. Mas o status do summary precisa ser verde — se vier vermelho num skip, é bug do workflow, **abrir antes de mergear**.
@@ -622,6 +651,8 @@ lembrar dos comandos.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.13 — 22/08/2026. **O épico "Tela de revisão: confiança no que a tela mostra" (86e2n4tck) fechou 7/7 e deixou três regras novas.** **§3.15** ganhou a regra de identidade em response: autoria exposta é `{name, email}` mascarada por escopo via `author_for_viewer` — usuário de tenant vê "Equipe Hologram" para autor da equipe, e a máscara é do servidor. **§3.16** registra o cross-check da doc do `IncluirLancCC` (19/08): o `param` documentado é ANINHADO e sem `cNatureza` — o DTO plano não foi reescrito de propósito, e a recusa do 1º POST da captura passou a ser desfecho esperado e evidência válida. **§7** ganhou: tooltip nunca é `title` nativo (padrão `role="img"` + `aria-label` + `tabIndex`, três componentes já o usam); "visível não é estável" agora cobre COR (o axe medindo toast em fade reprova tokens que passam — `aguardarToastEstavel`); teste de integração novo roda na ordem do CI com seed get-or-create; e o parágrafo do `a11y-report.json` foi atualizado — a lacuna do `.gitignore` fechou na Sprint 7 (`apps/web/.gitignore`). Somas da aba Resumo, filtros server-side e o rótulo "Conciliadas (data exata)" são entregas do épico registradas nos PRs #79–#93, não regras novas — o que era regra ("fonte única de contadores", §5 intocada) só foi reafirmado._
 
 _Versão 1.12 — 18/08/2026. **O ADL passou a ESCREVER no Omie (Sprint 7) — o invariante "Omie read-only" acabou, e essa é a mudança mais perigosa que este primer já registrou.** Nova regra **§3.16** com o que não pode ser errado: a feature nasce **desligada** (`OMIE_POSTING_ENABLED=false` por default, ao contrário de todo outro flag do projeto); o contrato do `IncluirLancCC` segue **NÃO-VERIFICADO** contra a API real (S-1) e o gate `tests/unit/test_omie_fixtures.py` **SKIPA citando S-1** em vez de passar verde; a **dedup primária é do ADL** (`reconciliation_omie_postings`, §4.11), nunca do fornecedor; `cCodIntLanc` vem da **identidade da linha**, nunca do conteúdo — chave de conteúdo colapsaria duas compras idênticas e deixaria dinheiro **faltando**, que o rollback não vigia; timeout **reconcilia antes de reenviar** e inconclusivo **não reenvia**; `faultstring` nunca é logada. Corrigido o número da lista canônica de endpoints sensíveis (**40**, não 34 — a Sprint 6 e a 7 entraram e o primer não acompanhou). **§8** ganhou o que a Sprint 6 (glossário) e a 7 deixaram no código, e **§10** marca a quebra do invariante como decidida, com a captura da fixture real explicitamente **ainda pendente**._
 
