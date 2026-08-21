@@ -179,38 +179,43 @@
 16. **Escrita no Omie (Sprint 7) — a única no sistema, e a mais cara de errar:**
     - **Nasce desligada.** `OMIE_POSTING_ENABLED` tem default **`False`**
       (diferente de `QUALIFICATION_ENABLED`): ligar é decisão explícita **por
-      ambiente**, via `--update-env-vars` no Cloud Run, sem deploy. Não ligue em
-      nenhum ambiente antes de a fixture real existir (abaixo).
-    - **O contrato do `IncluirLancCC` é NÃO-VERIFICADO** (suposição S-1 do PRD):
-      nomes de campo, a convenção de sinal (`nValorLanc` **absoluto** +
-      `cNatureza` `'D'` compra / `'C'` estorno) e a unicidade de `cCodIntLanc`
-      vieram da doc, **não** de uma resposta real. O gate anti-invenção é
-      `apps/api/tests/unit/test_omie_fixtures.py`: sem a fixture ele **SKIPA
-      citando S-1** — nunca passa verde calado. A captura é opt-in
-      (`OMIE_CAPTURE_ALLOW_WRITE=1`) e **cria lançamento real** (a Omie não tem
-      sandbox, §10) — o lançamento precisa ser excluído à mão depois.
-    - **A dedup primária é do ADL, nunca do fornecedor.** Antes de qualquer POST
-      o serviço registra a INTENÇÃO em `reconciliation_omie_postings` e consulta
-      o **próprio** estado. `cCodIntLanc` é derivado da **identidade da linha**
-      (`file_entry_id`), **nunca do conteúdo**: duas compras idênticas na mesma
-      fatura têm de virar **dois** lançamentos — chave de conteúdo colapsaria as
-      duas e deixaria dinheiro FALTANDO, que o rollback (só vigia duplicado) não
-      pegaria.
-    - **Timeout nunca reenvia às cegas.** Se o POST expira, o ADL reconcilia pelo
-      `cCodIntLanc` no `ListarExtrato` antes de decidir; resultado **inconclusivo
-      ⇒ não reenvia**. `faultstring` (a Omie responde **HTTP 200** em erro) é
-      falha: **nada** é marcado como lançado.
+      ambiente**, via `--update-env-vars` no Cloud Run, sem deploy. Ligar num
+      ambiente exige que ele rode o código do contrato verificado (abaixo) —
+      o payload antigo (plano) é recusado pela Omie.
+    - **O contrato do `IncluirLancCC` foi VERIFICADO contra a API real em
+      21/08/2026** (captura na conta Hologram; fixtures em
+      `apps/api/tests/fixtures/omie/`, anonimizadas). O que a evidência diz:
+      `param` **ANINHADO** (`cCodIntLanc` no topo + `cabecalho{nCodCC, dDtLanc,
+nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
+      **NÚMERO JSON** (string dá `3102`); `cTipo` é obrigatório na prática
+      (enviamos `DIN`); **não existe `cNatureza` na escrita** — valor absoluto
+      com categoria de despesa aterrissa como **débito** (extrato devolve
+      natureza `P` e valor negativo). O formato plano anterior foi recusado com
+      `5001` — evidência preservada no histórico da captura. O gate
+      `apps/api/tests/unit/test_omie_fixtures.py` agora **roda verde contra as
+      fixtures reais** e FALHA se o DTO divergir delas.
+    - **Estorno é BLOQUEADO** (`estorno_nao_verificado`, servidor + UI): sem
+      campo de sinal no contrato, a representação do **crédito** segue
+      não-verificada — lançar estorno no palpite poderia registrá-lo como
+      segunda despesa. Só compra (valor negativo) é elegível.
+    - **A dedup primária é do ADL — e a do fornecedor agora é FATO:** o
+      `IncluirLancCC` é **idempotente sobre `cCodIntLanc`** (2º POST devolve o
+      MESMO `nCodLanc`, status 0, sem criar nada — verificado 21/08/2026).
+      Ainda assim, antes de qualquer POST o serviço registra a INTENÇÃO em
+      `reconciliation_omie_postings` e consulta o **próprio** estado.
+      `cCodIntLanc` é derivado da **identidade da linha** (`file_entry_id`),
+      **nunca do conteúdo**: duas compras idênticas na mesma fatura têm de
+      virar **dois** lançamentos.
+    - **Timeout nunca reenvia às cegas.** ⚠️ Verificado 21/08/2026: o
+      `ListarExtrato` **NÃO devolve `cCodIntLanc`**, então a reconciliação
+      pós-timeout por esse caminho é sempre **inconclusiva ⇒ não reenvia**
+      (linha fica travada com "confira no Omie"). A idempotência provada acima
+      permitiria reenviar com segurança — **mudar isso é decisão em aberto
+      (§10), não implementada**. `faultstring` (a Omie responde **HTTP 200** em
+      erro) é falha: **nada** é marcado como lançado.
     - **A mensagem de erro do provedor é persistida e NUNCA logada** — é texto
       livre de terceiro e a Omie ecoa o `cObs`, que carrega a descrição da compra
       (§4.5). No `usage_events` entra só uma **categoria fechada**, nunca o texto.
-    - **Cross-check da doc oficial (19/08/2026, registrado nas docstrings):** a
-      doc descreve o `param` do `IncluirLancCC` **ANINHADO** (`cabecalho`/
-      `detalhes`) e **sem `cNatureza`** — o DTO atual emite plano (ver
-      `IncluirLancCCRequest`). O DTO **não** foi reescrito de propósito (a doc
-      desta API já errou 3x no repo); consequência: **a recusa do 1º POST da
-      captura é o desfecho ESPERADO e é evidência S-1 válida** — o script grava
-      a `faultstring` verbatim em vez de crashar. A resposta, ao contrário,
-      bate 1:1 com a doc.
     - **Só cartão.** Elegibilidade é `session.account_type == 'credit_card'`
       (o `CR` do Omie). ⚠️ O PRD chama a conta de cartão de `CA` e **está errado**:
       `CA` é Conta Aplicação. Filtrar por `CA` lança na conta errada.
@@ -324,8 +329,8 @@
    linha dentro dos 3 dias. A linha roubada virava `sem_omie` e a qualificação
    acusava incoerência na primeira, por comparar fornecedores diferentes: **um
    pareamento errado gerava duas anomalias falsas.**
-6. **Normalização Omie:** `cNatureza='D'` → valor negativo; `cNatureza='C'` → positivo.
-7. **Status Omie considerados no matching** (canônico no DB, camelCase): `Conciliado`, `Atrasado`, `Previsto`. Ignorar cancelados. **Atenção à nomenclatura mista da Omie:** o canônico vem de `ListarExtrato.cStatus`; já o FILTRO `filtrar_por_status` em `ListarContasPagar/Receber` usa o enum oficial Omie em UPPERCASE (`ATRASADO`, `AVENCER`, etc) — `"PREVISTO"` NÃO é valor válido como filtro, devolve 5xx. Mapping: filtro `AVENCER` → canônico `Previsto`.
+6. **Normalização Omie:** `cNatureza='D'` → valor negativo; `cNatureza='C'` → positivo. ⚠️ **Cartão usa OUTRA convenção (fixture real, 21/08/2026):** extrato de conta `CR` devolve natureza `'P'` (pagamento) / `'R'` (recebimento) com `nValorDocumento` **JÁ SINALIZADO** (P negativo, R positivo). `LancamentoExtrato.signed_amount` cobre as duas por construção — só inverte `'D'`; **inverter qualquer outra natureza quebraria o cartão**.
+7. **Status Omie considerados no matching** (canônico no DB, camelCase): `Conciliado`, `Atrasado`, `Previsto`. Ignorar cancelados. **Atenção à nomenclatura mista da Omie:** o canônico vem de `ListarExtrato.cSituacao`; já o FILTRO `filtrar_por_status` em `ListarContasPagar/Receber` usa o enum oficial Omie em UPPERCASE (`ATRASADO`, `AVENCER`, etc) — `"PREVISTO"` NÃO é valor válido como filtro, devolve 5xx. Mapping: filtro `AVENCER` → canônico `Previsto`. ⚠️ Lançamento **recém-criado** volta no extrato **sem `cSituacao`** (evidência 21/08/2026) — o campo é opcional no schema e vira `""` no `OmieMovement`: não casa com nenhum canônico e não dispara regra.
 8. **Idempotência:** `UNIQUE(client_id, omie_conta_id, reference_month, file_hash)`. Duplicata = HTTP 409 `DUPLICATE_FILE`.
 9. **IA nunca decide match.** IA só extrai do arquivo. Cruzamento é código determinístico.
 
@@ -579,13 +584,16 @@ Quando o usuário não tiver decidido, **pergunte** antes de presumir:
 - [x] ~~**Tolerância de data zero** também para conta corrente~~ → **SIM, aprovado + implementado** (FASE 1 / BACK 1.6): exato → `conciliado`; 1–3 dias → `conciliado_data_divergente` + `wrong_date`; > 3 → `sem_omie`. Vale p/ CC e cartão (`DATE_DIVERGENCE_RANGE=3` fixo). Na branch de integração; muda o comportamento da CC em prod quando a FASE 1 for mergeada. Ver §5.2.
 - [x] ~~**Quebra do invariante "Omie read-only"**~~ → **implementado na Sprint 7**, com
       **`IncluirLancCC`** (lançamento na própria conta do cartão) e **não**
-      `IncluirContaPagar` — este exige fornecedor por título e fica como alternativa
-      documentada, só se o processo contábil do BPO exigir. Ver **§3.16**. ⚠️ **O que
-      continua em aberto:** o contrato ainda **não foi batido contra a API real** (S-1) —
-      falta uma captura com credencial Omie autorizada (`OMIE_CAPTURE_ALLOW_WRITE=1`),
-      incluindo **dois POSTs do mesmo `cCodIntLanc`** para decidir a idempotência do lado
-      do fornecedor. Enquanto isso, `OMIE_POSTING_ENABLED` fica **`false`** em todo
-      ambiente. _FASE 2 / S24_
+      `IncluirContaPagar`. ✅ **A captura S-1 foi feita em 21/08/2026** (conta Hologram,
+      cartão Inter): contrato aninhado verificado, idempotência de `cCodIntLanc`
+      confirmada (2º POST devolve o mesmo `nCodLanc`), fixtures anonimizadas no repo e
+      gate rodando verde. Ver **§3.16**. ⚠️ **O que ficou em aberto:**
+      (a) **representação de ESTORNO** (crédito) na escrita — hoje bloqueado
+      (`estorno_nao_verificado`); precisa de captura própria (categoria de receita?
+      valor com sinal?); (b) **reenvio pós-timeout** — o `ListarExtrato` não devolve
+      `cCodIntLanc`, então a reconciliação atual é sempre inconclusiva; a idempotência
+      provada permitiria reenviar com segurança — decidir com o Pedro; (c) ligar
+      `OMIE_POSTING_ENABLED` em dev **só depois** deste código deployado. _FASE 2 / S24_
 - [ ] **Cloud Run `--no-cpu-throttling` + `min-instances ≥ 1`** na API após remover Redis (senão BackgroundTasks congela). Custo aceitável? _FASE 0 / S20_
 - [ ] **Pluggy interna vs Cubos** (proposta Arthur Souza, 16/06) + cobertura de Sicredi/BNB/Cora + primeiro endpoint público (webhook). _FASE 4_
 - [ ] **Campo de departamento/rateio** na response Omie (bloqueia check `sem_departamento`); Slack (app vs webhook) e provedor de email; persona supervisor (role nova vs reuso). _FASE 5_
@@ -651,6 +659,8 @@ lembrar dos comandos.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.14 — 21/08/2026. **A captura S-1 aconteceu — o contrato de escrita do Omie deixou de ser suposição.** Rodada contra a conta real da Hologram (cartão Inter, três iterações guiadas por faultstring): o formato PLANO foi recusado (`5001`), o aninhado com `nValorLanc` string e sem `cTipo` caiu em `3102`, e o aninhado com **número JSON + `cTipo='DIN'`** foi ACEITO. **§3.16 reescrita como lei atual:** contrato verificado (aninhado, sem `cNatureza` na escrita, valor absoluto → débito), **idempotência de `cCodIntLanc` confirmada** (2º POST devolve o mesmo `nCodLanc`), **estorno bloqueado** (`estorno_nao_verificado`) até a representação do crédito ser capturada, e o caminho pós-timeout registrado como sempre-inconclusivo (o extrato NÃO devolve `cCodIntLanc`) com o reenvio idempotente como decisão em aberto (§10). **§5.6–5.7** ganharam as duas descobertas de leitura: extrato de CARTÃO usa natureza `P`/`R` com valor JÁ sinalizado (`signed_amount` cobre as duas convenções — só inverte `'D'`), e lançamento recém-criado volta **sem `cSituacao`** (campo agora opcional; exigi-lo derrubava o reprocessamento no dia de uma inclusão). Fixtures reais anonimizadas entraram em `apps/api/tests/fixtures/omie/` e o gate `test_omie_fixtures.py` roda verde contra elas — inclusive as 5 leituras, validadas contra resposta real pela primeira vez._
 
 _Versão 1.13 — 22/08/2026. **O épico "Tela de revisão: confiança no que a tela mostra" (86e2n4tck) fechou 7/7 e deixou três regras novas.** **§3.15** ganhou a regra de identidade em response: autoria exposta é `{name, email}` mascarada por escopo via `author_for_viewer` — usuário de tenant vê "Equipe Hologram" para autor da equipe, e a máscara é do servidor. **§3.16** registra o cross-check da doc do `IncluirLancCC` (19/08): o `param` documentado é ANINHADO e sem `cNatureza` — o DTO plano não foi reescrito de propósito, e a recusa do 1º POST da captura passou a ser desfecho esperado e evidência válida. **§7** ganhou: tooltip nunca é `title` nativo (padrão `role="img"` + `aria-label` + `tabIndex`, três componentes já o usam); "visível não é estável" agora cobre COR (o axe medindo toast em fade reprova tokens que passam — `aguardarToastEstavel`); teste de integração novo roda na ordem do CI com seed get-or-create; e o parágrafo do `a11y-report.json` foi atualizado — a lacuna do `.gitignore` fechou na Sprint 7 (`apps/web/.gitignore`). Somas da aba Resumo, filtros server-side e o rótulo "Conciliadas (data exata)" são entregas do épico registradas nos PRs #79–#93, não regras novas — o que era regra ("fonte única de contadores", §5 intocada) só foi reafirmado._
 

@@ -1,0 +1,2465 @@
+{
+  "pagina": 1,
+  "total_de_paginas": 78,
+  "registros": 50,
+  "total_de_registros": 3896,
+  "conta_pagar_cadastro": [
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.04.94",
+          "percentual": 100,
+          "valor": 125
+        }
+      ],
+      "codigo_barras_ficha_compensacao": "",
+      "codigo_categoria": "2.04.94",
+      "codigo_cliente_fornecedor": 2624256082,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2624256084,
+      "codigo_tipo_documento": "DAM",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "01/08/2022",
+      "data_entrada": "01/08/2022",
+      "data_previsao": "02/08/2022",
+      "data_vencimento": "03/08/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "IGE-ADN-Administrativo",
+          "nPerDep": 100,
+          "nValDep": 125
+        }
+      ],
+      "id_conta_corrente": 2617722760,
+      "id_origem": "BARP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "11/09/2022",
+        "dInc": "14/08/2022",
+        "hAlt": "10:29:20",
+        "hInc": "00:22:01",
+        "uAlt": "P000445374",
+        "uInc": "P000445374"
+      },
+      "numero_documento": "",
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 125
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.04.79",
+          "percentual": 100,
+          "valor": 210
+        }
+      ],
+      "codigo_categoria": "2.04.79",
+      "codigo_cliente_fornecedor": 2624256366,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2624256370,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "05/08/2022",
+      "data_entrada": "05/08/2022",
+      "data_previsao": "05/08/2022",
+      "data_vencimento": "05/08/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "IGE-ADN-Administrativo",
+          "nPerDep": 100,
+          "nValDep": 210
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "11/09/2022",
+        "dInc": "14/08/2022",
+        "hAlt": "10:29:34",
+        "hInc": "00:36:05",
+        "uAlt": "P000445374",
+        "uInc": "P000445374"
+      },
+      "numero_documento_fiscal": "205",
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 210,
+      "valor_iss": 4.22
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.08.02",
+          "percentual": 100,
+          "valor": 1000
+        }
+      ],
+      "codigo_categoria": "2.08.02",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2624256614,
+      "codigo_tipo_documento": "99999",
+      "data_emissao": "08/08/2022",
+      "data_entrada": "08/08/2022",
+      "data_previsao": "08/08/2022",
+      "data_vencimento": "08/08/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2789485110",
+          "cDesDep": "DES-LIX-Estornos (saldo zero)",
+          "nPerDep": 100,
+          "nValDep": 1000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "20/08/2022",
+        "dInc": "14/08/2022",
+        "hAlt": "08:45:06",
+        "hInc": "00:49:52",
+        "uAlt": "P000445374",
+        "uInc": "P000445374"
+      },
+      "numero_documento": "",
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 1000
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.04.11",
+          "percentual": 100,
+          "valor": 1636.2
+        }
+      ],
+      "codigo_categoria": "2.04.11",
+      "codigo_cliente_fornecedor": 2625046869,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2625046906,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "18/08/2022",
+      "data_entrada": "18/08/2022",
+      "data_previsao": "22/08/2022",
+      "data_vencimento": "22/08/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "IGE-ADN-Administrativo",
+          "nPerDep": 100,
+          "nValDep": 1636.2
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "23/08/2022",
+        "dInc": "17/08/2022",
+        "hAlt": "10:44:37",
+        "hInc": "21:35:27",
+        "uAlt": "WEBSERVICE",
+        "uInc": "P000445374"
+      },
+      "numero_documento_fiscal": "1421",
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 1636.2,
+      "valor_iss": 67.9
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.07.97",
+          "percentual": 100,
+          "valor": 10000
+        }
+      ],
+      "codigo_categoria": "2.07.97",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2626619753,
+      "codigo_tipo_documento": "ANT",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "30/08/2022",
+      "data_entrada": "30/08/2022",
+      "data_previsao": "01/09/2022",
+      "data_vencimento": "05/09/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787847450",
+          "cDesDep": "CTR-IVI-Investimento Interno",
+          "nPerDep": 100,
+          "nValDep": 10000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "06/09/2023",
+        "dInc": "23/08/2022",
+        "hAlt": "15:22:26",
+        "hInc": "13:22:31",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "numero_parcela": "001/004",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 10000
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.07.97",
+          "percentual": 100,
+          "valor": 10000
+        }
+      ],
+      "codigo_categoria": "2.07.97",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2626619843,
+      "codigo_tipo_documento": "ANT",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "30/09/2022",
+      "data_entrada": "30/09/2022",
+      "data_previsao": "01/10/2022",
+      "data_vencimento": "05/10/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787847450",
+          "cDesDep": "CTR-IVI-Investimento Interno",
+          "nPerDep": 100,
+          "nValDep": 10000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "RPTP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "06/09/2023",
+        "dInc": "23/08/2022",
+        "hAlt": "11:19:24",
+        "hInc": "13:25:07",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "numero_documento": "",
+      "numero_parcela": "002/004",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 10000
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.07.97",
+          "percentual": 100,
+          "valor": 10000
+        }
+      ],
+      "codigo_categoria": "2.07.97",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2626619849,
+      "codigo_tipo_documento": "ANT",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "30/10/2022",
+      "data_entrada": "30/10/2022",
+      "data_previsao": "07/11/2022",
+      "data_vencimento": "05/11/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787847450",
+          "cDesDep": "CTR-IVI-Investimento Interno",
+          "nPerDep": 100,
+          "nValDep": 10000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "RPTP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "06/09/2023",
+        "dInc": "23/08/2022",
+        "hAlt": "11:19:23",
+        "hInc": "13:25:07",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "numero_documento": "",
+      "numero_parcela": "003/004",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 10000
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.07.97",
+          "percentual": 100,
+          "valor": 10000
+        }
+      ],
+      "codigo_categoria": "2.07.97",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2626619855,
+      "codigo_tipo_documento": "ANT",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "30/11/2022",
+      "data_entrada": "30/11/2022",
+      "data_previsao": "05/12/2022",
+      "data_vencimento": "05/12/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787847450",
+          "cDesDep": "CTR-IVI-Investimento Interno",
+          "nPerDep": 100,
+          "nValDep": 10000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "RPTP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "06/09/2023",
+        "dInc": "23/08/2022",
+        "hAlt": "11:19:22",
+        "hInc": "13:25:07",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "numero_documento": "",
+      "numero_parcela": "004/004",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 10000
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.04.78",
+          "percentual": 100,
+          "valor": 291
+        }
+      ],
+      "codigo_categoria": "2.04.78",
+      "codigo_cliente_fornecedor": 2632787214,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2632787236,
+      "codigo_tipo_documento": "INV",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "06/10/2022",
+      "data_entrada": "06/10/2022",
+      "data_previsao": "06/10/2022",
+      "data_vencimento": "06/10/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "IGE-ADN-Administrativo",
+          "nPerDep": 100,
+          "nValDep": 291
+        }
+      ],
+      "id_conta_corrente": 2625046958,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "02/11/2024",
+        "dInc": "11/09/2022",
+        "hAlt": "11:20:55",
+        "hInc": "10:15:27",
+        "uAlt": "P000602706",
+        "uInc": "P000445374"
+      },
+      "numero_documento_fiscal": "03566-2705173",
+      "numero_parcela": "001/002",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 291
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.04.78",
+          "percentual": 100,
+          "valor": 289.9
+        }
+      ],
+      "codigo_categoria": "2.04.78",
+      "codigo_cliente_fornecedor": 2632787214,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2632787289,
+      "codigo_tipo_documento": "INV",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "01/10/2023",
+      "data_entrada": "01/10/2023",
+      "data_previsao": "06/10/2023",
+      "data_vencimento": "06/10/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "IGE-ADN-Administrativo",
+          "nPerDep": 100,
+          "nValDep": 289.9
+        }
+      ],
+      "id_conta_corrente": 2625046958,
+      "id_origem": "RPTP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "11/12/2023",
+        "dInc": "11/09/2022",
+        "hAlt": "11:52:43",
+        "hInc": "10:27:55",
+        "uAlt": "P000602706",
+        "uInc": "P000445374"
+      },
+      "numero_documento_fiscal": "03566-2705173",
+      "numero_parcela": "002/002",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 289.9
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.06.99",
+          "percentual": 100,
+          "valor": 831.54
+        }
+      ],
+      "codigo_categoria": "2.06.99",
+      "codigo_cliente_fornecedor": 2624255418,
+      "codigo_lancamento_integracao": "DAS202208",
+      "codigo_lancamento_omie": 2632942599,
+      "codigo_tipo_documento": "DAS",
+      "data_emissao": "31/08/2022",
+      "data_entrada": "31/08/2022",
+      "data_previsao": "14/09/2022",
+      "data_vencimento": "20/09/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845224",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Academy",
+          "nPerDep": 47.57919,
+          "nValDep": 395.64
+        },
+        {
+          "cCodDep": "2787845449",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Tecnologia",
+          "nPerDep": 50.977704,
+          "nValDep": 423.9
+        },
+        {
+          "cCodDep": "2789515236",
+          "cDesDep": "CTR-DIR-Suporte em Controladoria - PS Tênis",
+          "nPerDep": 1.443106,
+          "nValDep": 12
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "22/10/2022",
+        "dInc": "12/09/2022",
+        "hAlt": "13:37:57",
+        "hInc": "13:45:00",
+        "uAlt": "P000445374",
+        "uInc": "P000304389"
+      },
+      "numero_documento": "",
+      "numero_parcela": "001/001",
+      "status_titulo": "PAGO",
+      "valor_documento": 831.54
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.07.97",
+          "percentual": 100,
+          "valor": 500
+        }
+      ],
+      "codigo_categoria": "2.07.97",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2638192591,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "24/09/2022",
+      "data_entrada": "24/09/2022",
+      "data_previsao": "24/09/2022",
+      "data_vencimento": "24/09/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787847450",
+          "cDesDep": "CTR-IVI-Investimento Interno",
+          "nPerDep": 100,
+          "nValDep": 500
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "06/09/2023",
+        "dInc": "24/09/2022",
+        "hAlt": "15:22:48",
+        "hInc": "14:21:45",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "numero_documento": "",
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 500
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.01.04",
+          "percentual": 100,
+          "valor": 200
+        }
+      ],
+      "codigo_categoria": "2.01.04",
+      "codigo_cliente_fornecedor": 2641629266,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2641629268,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "30/09/2022",
+      "data_entrada": "30/09/2022",
+      "data_previsao": "17/10/2022",
+      "data_vencimento": "03/11/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845224",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Academy",
+          "nPerDep": 100,
+          "nValDep": 200
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "22/10/2022",
+        "dInc": "03/10/2022",
+        "hAlt": "13:46:20",
+        "hInc": "15:45:56",
+        "uAlt": "P000445374",
+        "uInc": "WEBSERVICE"
+      },
+      "numero_documento_fiscal": "6",
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 200
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.06.99",
+          "percentual": 100,
+          "valor": 1347.26
+        }
+      ],
+      "codigo_categoria": "2.06.99",
+      "codigo_cliente_fornecedor": 2624255418,
+      "codigo_lancamento_integracao": "DAS202209",
+      "codigo_lancamento_omie": 2645145170,
+      "codigo_tipo_documento": "DAS",
+      "data_emissao": "30/09/2022",
+      "data_entrada": "30/09/2022",
+      "data_previsao": "14/10/2022",
+      "data_vencimento": "20/10/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845224",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Academy",
+          "nPerDep": 29.366269,
+          "nValDep": 395.64
+        },
+        {
+          "cCodDep": "2787845449",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Tecnologia",
+          "nPerDep": 31.46386,
+          "nValDep": 423.9
+        },
+        {
+          "cCodDep": "2789515236",
+          "cDesDep": "CTR-DIR-Suporte em Controladoria - PS Tênis",
+          "nPerDep": 0.890697,
+          "nValDep": 12
+        },
+        {
+          "cCodDep": "2789517366",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Participações",
+          "nPerDep": 38.279174,
+          "nValDep": 515.72
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "22/10/2022",
+        "dInc": "10/10/2022",
+        "hAlt": "13:45:41",
+        "hInc": "17:32:07",
+        "uAlt": "P000445374",
+        "uInc": "P000304389"
+      },
+      "numero_documento": "",
+      "numero_parcela": "001/001",
+      "status_titulo": "PAGO",
+      "valor_documento": 1347.26
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.01.04",
+          "percentual": 100,
+          "valor": 200
+        }
+      ],
+      "codigo_categoria": "2.01.04",
+      "codigo_cliente_fornecedor": 2641629266,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2648182162,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "14/10/2022",
+      "data_entrada": "14/10/2022",
+      "data_previsao": "18/10/2022",
+      "data_vencimento": "14/11/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845224",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Academy",
+          "nPerDep": 100,
+          "nValDep": 200
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "22/10/2022",
+        "dInc": "17/10/2022",
+        "hAlt": "13:47:34",
+        "hInc": "09:42:54",
+        "uAlt": "P000445374",
+        "uInc": "WEBSERVICE"
+      },
+      "numero_documento_fiscal": "7",
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 200
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.01.99",
+          "percentual": 100,
+          "valor": 1359
+        }
+      ],
+      "codigo_categoria": "2.01.99",
+      "codigo_cliente_fornecedor": 2650977767,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2650977826,
+      "codigo_tipo_documento": "ANT",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "08/11/2022",
+      "data_entrada": "08/11/2022",
+      "data_previsao": "08/11/2022",
+      "data_vencimento": "08/11/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787846363",
+          "cDesDep": "CTR-IDI-Indireto Interno",
+          "nPerDep": 100,
+          "nValDep": 1359
+        }
+      ],
+      "id_conta_corrente": 2662231117,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "27/12/2023",
+        "dInc": "22/10/2022",
+        "hAlt": "21:35:25",
+        "hInc": "08:54:29",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "numero_documento_fiscal": "7727",
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 1359
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.01.04",
+          "percentual": 100,
+          "valor": 200
+        }
+      ],
+      "codigo_categoria": "2.01.04",
+      "codigo_cliente_fornecedor": 2641629266,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2658986455,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "07/11/2022",
+      "data_entrada": "07/11/2022",
+      "data_previsao": "05/12/2022",
+      "data_vencimento": "07/12/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845224",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Academy",
+          "nPerDep": 100,
+          "nValDep": 200
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "04/12/2022",
+        "dInc": "07/11/2022",
+        "hAlt": "17:49:42",
+        "hInc": "18:26:53",
+        "uAlt": "P000445374",
+        "uInc": "WEBSERVICE"
+      },
+      "numero_documento_fiscal": "11",
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 200
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.06.99",
+          "percentual": 100,
+          "valor": 927.41
+        }
+      ],
+      "codigo_categoria": "2.06.99",
+      "codigo_cliente_fornecedor": 2624255418,
+      "codigo_lancamento_integracao": "DAS202210",
+      "codigo_lancamento_omie": 2659935841,
+      "codigo_tipo_documento": "DAS",
+      "data_emissao": "31/10/2022",
+      "data_entrada": "31/10/2022",
+      "data_previsao": "14/11/2022",
+      "data_vencimento": "21/11/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845224",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Academy",
+          "nPerDep": 29.366269,
+          "nValDep": 272.35
+        },
+        {
+          "cCodDep": "2787845449",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Tecnologia",
+          "nPerDep": 31.46386,
+          "nValDep": 291.8
+        },
+        {
+          "cCodDep": "2789515236",
+          "cDesDep": "CTR-DIR-Suporte em Controladoria - PS Tênis",
+          "nPerDep": 0.890697,
+          "nValDep": 8.26
+        },
+        {
+          "cCodDep": "2789517366",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Participações",
+          "nPerDep": 38.279174,
+          "nValDep": 355
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "12/11/2022",
+        "dInc": "11/11/2022",
+        "hAlt": "16:55:01",
+        "hInc": "13:57:01",
+        "uAlt": "P000445374",
+        "uInc": "P000304389"
+      },
+      "numero_documento": "",
+      "numero_parcela": "001/001",
+      "status_titulo": "PAGO",
+      "valor_documento": 927.41
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.01.97",
+          "percentual": 100,
+          "valor": 400
+        }
+      ],
+      "codigo_categoria": "2.01.97",
+      "codigo_cliente_fornecedor": 2661275874,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2661275925,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "31/10/2022",
+      "data_entrada": "31/10/2022",
+      "data_previsao": "14/11/2022",
+      "data_vencimento": "11/12/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845224",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Academy",
+          "nPerDep": 50,
+          "nValDep": 200
+        },
+        {
+          "cCodDep": "2787845449",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Tecnologia",
+          "nPerDep": 50,
+          "nValDep": 200
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "12/11/2022",
+        "dInc": "11/11/2022",
+        "hAlt": "17:00:54",
+        "hInc": "23:45:53",
+        "uAlt": "P000445374",
+        "uInc": "WEBSERVICE"
+      },
+      "numero_documento_fiscal": "1",
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 400
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.04.76",
+          "percentual": 100,
+          "valor": 853.47
+        }
+      ],
+      "chave_nfe": "29221118571767000136550010000000101559078505",
+      "codigo_categoria": "2.04.76",
+      "codigo_cliente_fornecedor": 2626085688,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2662230783,
+      "codigo_tipo_documento": "NFE",
+      "data_emissao": "01/11/2022",
+      "data_entrada": "01/11/2022",
+      "data_previsao": "07/11/2022",
+      "data_vencimento": "10/11/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "IGE-ADN-Administrativo",
+          "nPerDep": 100,
+          "nValDep": 853.47
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "COMP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "12/11/2022",
+        "dInc": "12/11/2022",
+        "hAlt": "17:16:16",
+        "hInc": "17:15:10",
+        "uAlt": "P000445374",
+        "uInc": "P000445374"
+      },
+      "numero_documento": "",
+      "numero_documento_fiscal": "000000010",
+      "numero_parcela": "001/001",
+      "operacao": "21",
+      "status_titulo": "PAGO",
+      "valor_documento": 853.47
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.04.88",
+          "percentual": 100,
+          "valor": 40.06
+        }
+      ],
+      "codigo_categoria": "2.04.88",
+      "codigo_cliente_fornecedor": 2662231813,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2662231865,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "03/11/2022",
+      "data_entrada": "03/11/2022",
+      "data_previsao": "03/11/2022",
+      "data_vencimento": "03/11/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "IGE-ADN-Administrativo",
+          "nPerDep": 100,
+          "nValDep": 40.06
+        }
+      ],
+      "id_conta_corrente": 2662231757,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "12/11/2022",
+        "dInc": "12/11/2022",
+        "hAlt": "17:40:30",
+        "hInc": "17:33:46",
+        "uAlt": "P000445374",
+        "uInc": "P000445374"
+      },
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 40.06
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.04.88",
+          "percentual": 100,
+          "valor": 50.78
+        }
+      ],
+      "codigo_categoria": "2.04.88",
+      "codigo_cliente_fornecedor": 2662231813,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2662231977,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "03/11/2022",
+      "data_entrada": "03/11/2022",
+      "data_previsao": "03/11/2022",
+      "data_vencimento": "03/11/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "IGE-ADN-Administrativo",
+          "nPerDep": 100,
+          "nValDep": 50.78
+        }
+      ],
+      "id_conta_corrente": 2662231757,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "12/11/2022",
+        "dInc": "12/11/2022",
+        "hAlt": "17:39:53",
+        "hInc": "17:37:52",
+        "uAlt": "P000445374",
+        "uInc": "P000445374"
+      },
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 50.78
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.01.97",
+          "percentual": 100,
+          "valor": 2000
+        }
+      ],
+      "codigo_categoria": "2.01.97",
+      "codigo_cliente_fornecedor": 2661275874,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2667693701,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "22/11/2022",
+      "data_entrada": "22/11/2022",
+      "data_previsao": "05/12/2022",
+      "data_vencimento": "22/12/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845224",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Academy",
+          "nPerDep": 50,
+          "nValDep": 1000
+        },
+        {
+          "cCodDep": "2787845449",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Tecnologia",
+          "nPerDep": 50,
+          "nValDep": 1000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "04/12/2022",
+        "dInc": "22/11/2022",
+        "hAlt": "17:46:15",
+        "hInc": "17:46:54",
+        "uAlt": "P000445374",
+        "uInc": "WEBSERVICE"
+      },
+      "numero_documento_fiscal": "2",
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 2000
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.04.88",
+          "percentual": 100,
+          "valor": 30.46
+        }
+      ],
+      "codigo_categoria": "2.04.88",
+      "codigo_cliente_fornecedor": 2662231813,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2676691560,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "10/11/2022",
+      "data_entrada": "10/11/2022",
+      "data_previsao": "10/11/2022",
+      "data_vencimento": "10/11/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "IGE-ADN-Administrativo",
+          "nPerDep": 100,
+          "nValDep": 30.46
+        }
+      ],
+      "id_conta_corrente": 2662231757,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "04/12/2022",
+        "dInc": "04/12/2022",
+        "hAlt": "18:11:24",
+        "hInc": "18:10:46",
+        "uAlt": "P000445374",
+        "uInc": "P000445374"
+      },
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 30.46
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.04.88",
+          "percentual": 100,
+          "valor": 39.95
+        }
+      ],
+      "codigo_categoria": "2.04.88",
+      "codigo_cliente_fornecedor": 2662231813,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2676691686,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "10/11/2022",
+      "data_entrada": "10/11/2022",
+      "data_previsao": "10/11/2022",
+      "data_vencimento": "10/11/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "IGE-ADN-Administrativo",
+          "nPerDep": 100,
+          "nValDep": 39.95
+        }
+      ],
+      "id_conta_corrente": 2662231757,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "04/12/2022",
+        "dInc": "04/12/2022",
+        "hAlt": "18:12:34",
+        "hInc": "18:11:28",
+        "uAlt": "P000445374",
+        "uInc": "P000445374"
+      },
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 39.95
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.06.99",
+          "percentual": 100,
+          "valor": 927.41
+        }
+      ],
+      "codigo_categoria": "2.06.99",
+      "codigo_cliente_fornecedor": 2624255418,
+      "codigo_lancamento_integracao": "DAS202211",
+      "codigo_lancamento_omie": 2678497790,
+      "codigo_tipo_documento": "DAS",
+      "data_emissao": "30/11/2022",
+      "data_entrada": "30/11/2022",
+      "data_previsao": "20/12/2022",
+      "data_vencimento": "20/12/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845224",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Academy",
+          "nPerDep": 52.998135,
+          "nValDep": 491.51
+        },
+        {
+          "cCodDep": "2787845449",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Tecnologia",
+          "nPerDep": 45.707939,
+          "nValDep": 423.9
+        },
+        {
+          "cCodDep": "2789515236",
+          "cDesDep": "CTR-DIR-Suporte em Controladoria - PS Tênis",
+          "nPerDep": 1.293926,
+          "nValDep": 12
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "19/12/2022",
+        "dInc": "07/12/2022",
+        "hAlt": "23:28:03",
+        "hInc": "20:14:24",
+        "uAlt": "P000445374",
+        "uInc": "P000304389"
+      },
+      "numero_documento": "",
+      "numero_parcela": "001/001",
+      "status_titulo": "PAGO",
+      "valor_documento": 927.41
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.01.03",
+          "percentual": 100,
+          "valor": 500
+        }
+      ],
+      "codigo_categoria": "2.01.03",
+      "codigo_cliente_fornecedor": 2641629266,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2683235911,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "07/12/2022",
+      "data_entrada": "07/12/2022",
+      "data_previsao": "07/12/2022",
+      "data_vencimento": "07/12/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845224",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Academy",
+          "nPerDep": 100,
+          "nValDep": 500
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "22/12/2022",
+        "dInc": "10/12/2022",
+        "hAlt": "17:09:24",
+        "hInc": "09:05:53",
+        "uAlt": "P000445374",
+        "uInc": "WEBSERVICE"
+      },
+      "numero_documento_fiscal": "14",
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 500
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.04.75",
+          "percentual": 100,
+          "valor": 457.75
+        }
+      ],
+      "codigo_categoria": "2.04.75",
+      "codigo_cliente_fornecedor": 2624255420,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2692130384,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "06/12/2022",
+      "data_entrada": "06/12/2022",
+      "data_previsao": "20/12/2022",
+      "data_vencimento": "29/12/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "IGE-ADN-Administrativo",
+          "nPerDep": 100,
+          "nValDep": 457.75
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "19/12/2022",
+        "dInc": "19/12/2022",
+        "hAlt": "23:09:59",
+        "hInc": "23:09:13",
+        "uAlt": "P000445374",
+        "uInc": "P000445374"
+      },
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 457.75
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.04.88",
+          "percentual": 100,
+          "valor": 65.96
+        }
+      ],
+      "codigo_categoria": "2.04.88",
+      "codigo_cliente_fornecedor": 2662231813,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2692132018,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "24/11/2022",
+      "data_entrada": "24/11/2022",
+      "data_previsao": "24/11/2022",
+      "data_vencimento": "24/11/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "IGE-ADN-Administrativo",
+          "nPerDep": 100,
+          "nValDep": 65.96
+        }
+      ],
+      "id_conta_corrente": 2662231757,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "19/12/2022",
+        "dInc": "19/12/2022",
+        "hAlt": "23:21:06",
+        "hInc": "23:20:05",
+        "uAlt": "P000445374",
+        "uInc": "P000445374"
+      },
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 65.96
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.04.88",
+          "percentual": 100,
+          "valor": 29.98
+        }
+      ],
+      "codigo_categoria": "2.04.88",
+      "codigo_cliente_fornecedor": 2662231813,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2692132062,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "24/11/2022",
+      "data_entrada": "24/11/2022",
+      "data_previsao": "24/11/2022",
+      "data_vencimento": "24/11/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "IGE-ADN-Administrativo",
+          "nPerDep": 100,
+          "nValDep": 29.98
+        }
+      ],
+      "id_conta_corrente": 2662231757,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "19/12/2022",
+        "dInc": "19/12/2022",
+        "hAlt": "23:21:58",
+        "hInc": "23:21:14",
+        "uAlt": "P000445374",
+        "uInc": "P000445374"
+      },
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 29.98
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.01.04",
+          "percentual": 100,
+          "valor": 200
+        }
+      ],
+      "codigo_categoria": "2.01.04",
+      "codigo_cliente_fornecedor": 2641629266,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2692589165,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "20/12/2022",
+      "data_entrada": "20/12/2022",
+      "data_previsao": "02/01/2023",
+      "data_vencimento": "20/01/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845224",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Academy",
+          "nPerDep": 100,
+          "nValDep": 200
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "02/01/2023",
+        "dInc": "21/12/2022",
+        "hAlt": "22:47:47",
+        "hInc": "01:16:52",
+        "uAlt": "P000445374",
+        "uInc": "WEBSERVICE"
+      },
+      "numero_documento_fiscal": "16",
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 200
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.01.97",
+          "percentual": 100,
+          "valor": 2000
+        }
+      ],
+      "codigo_categoria": "2.01.97",
+      "codigo_cliente_fornecedor": 2661275874,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2692703791,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "21/12/2022",
+      "data_entrada": "21/12/2022",
+      "data_previsao": "02/01/2023",
+      "data_vencimento": "21/01/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845224",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Academy",
+          "nPerDep": 50,
+          "nValDep": 1000
+        },
+        {
+          "cCodDep": "2787845449",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Tecnologia",
+          "nPerDep": 50,
+          "nValDep": 1000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "02/01/2023",
+        "dInc": "21/12/2022",
+        "hAlt": "22:47:04",
+        "hInc": "11:36:54",
+        "uAlt": "P000445374",
+        "uInc": "WEBSERVICE"
+      },
+      "numero_documento_fiscal": "3",
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 2000
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.04.89",
+          "percentual": 100,
+          "valor": 71.98
+        }
+      ],
+      "codigo_categoria": "2.04.89",
+      "codigo_cliente_fornecedor": 2693093156,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2693093277,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "22/12/2022",
+      "data_entrada": "22/12/2022",
+      "data_previsao": "22/12/2022",
+      "data_vencimento": "22/12/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "IGE-ADN-Administrativo",
+          "nPerDep": 100,
+          "nValDep": 71.98
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "22/12/2022",
+        "dInc": "22/12/2022",
+        "hAlt": "17:06:19",
+        "hInc": "17:03:54",
+        "uAlt": "P000445374",
+        "uInc": "P000445374"
+      },
+      "numero_documento": "",
+      "numero_documento_fiscal": "101761",
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 71.98
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.07.97",
+          "percentual": 100,
+          "valor": 10000
+        }
+      ],
+      "codigo_categoria": "2.07.97",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2701622314,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "30/12/2022",
+      "data_entrada": "30/12/2022",
+      "data_previsao": "05/01/2023",
+      "data_vencimento": "05/01/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787847450",
+          "cDesDep": "CTR-IVI-Investimento Interno",
+          "nPerDep": 100,
+          "nValDep": 10000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "06/09/2023",
+        "dInc": "02/01/2023",
+        "hAlt": "15:23:46",
+        "hInc": "22:28:16",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "numero_documento": "",
+      "numero_parcela": "001/012",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 10000
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.07.97",
+          "percentual": 100,
+          "valor": 10000
+        }
+      ],
+      "codigo_categoria": "2.07.97",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2701622334,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "30/01/2023",
+      "data_entrada": "30/01/2023",
+      "data_previsao": "01/02/2023",
+      "data_vencimento": "05/02/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787847450",
+          "cDesDep": "CTR-IVI-Investimento Interno",
+          "nPerDep": 100,
+          "nValDep": 10000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "RPTP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "06/09/2023",
+        "dInc": "02/01/2023",
+        "hAlt": "11:19:21",
+        "hInc": "22:29:54",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "numero_documento": "",
+      "numero_parcela": "002/012",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 10000
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.07.97",
+          "percentual": 100,
+          "valor": 10000
+        }
+      ],
+      "codigo_categoria": "2.07.97",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2701622336,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "28/02/2023",
+      "data_entrada": "28/02/2023",
+      "data_previsao": "02/03/2023",
+      "data_vencimento": "05/03/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787847450",
+          "cDesDep": "CTR-IVI-Investimento Interno",
+          "nPerDep": 100,
+          "nValDep": 10000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "RPTP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "06/09/2023",
+        "dInc": "02/01/2023",
+        "hAlt": "11:19:20",
+        "hInc": "22:29:54",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "numero_documento": "",
+      "numero_parcela": "003/012",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 10000
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.07.97",
+          "percentual": 100,
+          "valor": 10000
+        }
+      ],
+      "codigo_categoria": "2.07.97",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2701622338,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "30/03/2023",
+      "data_entrada": "30/03/2023",
+      "data_previsao": "03/04/2023",
+      "data_vencimento": "05/04/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787847450",
+          "cDesDep": "CTR-IVI-Investimento Interno",
+          "nPerDep": 100,
+          "nValDep": 10000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "RPTP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "06/09/2023",
+        "dInc": "02/01/2023",
+        "hAlt": "11:19:19",
+        "hInc": "22:29:54",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "numero_documento": "",
+      "numero_parcela": "004/012",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 10000
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.07.97",
+          "percentual": 100,
+          "valor": 10000
+        }
+      ],
+      "codigo_categoria": "2.07.97",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2701622340,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "30/04/2023",
+      "data_entrada": "30/04/2023",
+      "data_previsao": "29/05/2023",
+      "data_vencimento": "05/05/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787847450",
+          "cDesDep": "CTR-IVI-Investimento Interno",
+          "nPerDep": 100,
+          "nValDep": 10000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "RPTP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "06/09/2023",
+        "dInc": "02/01/2023",
+        "hAlt": "15:04:22",
+        "hInc": "22:29:54",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "numero_documento": "",
+      "numero_parcela": "005/012",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 10000
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.07.97",
+          "percentual": 100,
+          "valor": 10000
+        }
+      ],
+      "codigo_categoria": "2.07.97",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2701622342,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "31/05/2023",
+      "data_entrada": "31/05/2023",
+      "data_previsao": "07/06/2023",
+      "data_vencimento": "05/06/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787847450",
+          "cDesDep": "CTR-IVI-Investimento Interno",
+          "nPerDep": 100,
+          "nValDep": 10000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "RPTP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "06/09/2023",
+        "dInc": "02/01/2023",
+        "hAlt": "15:05:01",
+        "hInc": "22:29:54",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "numero_documento": "",
+      "numero_parcela": "006/012",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 10000
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.07.97",
+          "percentual": 100,
+          "valor": 10000
+        }
+      ],
+      "codigo_categoria": "2.07.97",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2701622345,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "30/06/2023",
+      "data_entrada": "30/06/2023",
+      "data_previsao": "05/07/2023",
+      "data_vencimento": "05/07/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787847450",
+          "cDesDep": "CTR-IVI-Investimento Interno",
+          "nPerDep": 100,
+          "nValDep": 10000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "RPTP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "06/09/2023",
+        "dInc": "02/01/2023",
+        "hAlt": "11:19:11",
+        "hInc": "22:29:54",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "numero_documento": "",
+      "numero_parcela": "007/012",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 10000
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.07.97",
+          "percentual": 100,
+          "valor": 10000
+        }
+      ],
+      "codigo_categoria": "2.07.97",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2701622348,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "30/07/2023",
+      "data_entrada": "30/07/2023",
+      "data_previsao": "04/08/2023",
+      "data_vencimento": "05/08/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787847450",
+          "cDesDep": "CTR-IVI-Investimento Interno",
+          "nPerDep": 100,
+          "nValDep": 10000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "RPTP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "06/09/2023",
+        "dInc": "02/01/2023",
+        "hAlt": "11:19:09",
+        "hInc": "22:29:54",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "numero_documento": "",
+      "numero_parcela": "008/012",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 10000
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.07.97",
+          "percentual": 100,
+          "valor": 10000
+        }
+      ],
+      "codigo_categoria": "2.07.97",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2701622351,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "30/08/2023",
+      "data_entrada": "30/08/2023",
+      "data_previsao": "05/09/2023",
+      "data_vencimento": "05/09/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787847450",
+          "cDesDep": "CTR-IVI-Investimento Interno",
+          "nPerDep": 100,
+          "nValDep": 10000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "RPTP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "06/09/2023",
+        "dInc": "02/01/2023",
+        "hAlt": "11:19:06",
+        "hInc": "22:29:54",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "numero_documento": "",
+      "numero_parcela": "009/012",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 10000
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.07.97",
+          "percentual": 100,
+          "valor": 6000
+        }
+      ],
+      "codigo_categoria": "2.07.97",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2701622355,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "30/09/2023",
+      "data_entrada": "30/09/2023",
+      "data_previsao": "05/10/2023",
+      "data_vencimento": "05/10/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787847450",
+          "cDesDep": "CTR-IVI-Investimento Interno",
+          "nPerDep": 100,
+          "nValDep": 6000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "RPTP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "18/09/2023",
+        "dInc": "02/01/2023",
+        "hAlt": "18:34:23",
+        "hInc": "22:29:54",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "numero_documento": "",
+      "numero_parcela": "010/012",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 6000
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.07.97",
+          "percentual": 100,
+          "valor": 4000
+        }
+      ],
+      "codigo_categoria": "2.07.97",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2701622357,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "30/10/2023",
+      "data_entrada": "30/10/2023",
+      "data_previsao": "30/11/2023",
+      "data_vencimento": "05/11/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787847450",
+          "cDesDep": "CTR-IVI-Investimento Interno",
+          "nPerDep": 100,
+          "nValDep": 4000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "RPTP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "16/11/2023",
+        "dInc": "02/01/2023",
+        "hAlt": "07:59:53",
+        "hInc": "22:29:54",
+        "uAlt": "P000602706",
+        "uInc": "P000445374"
+      },
+      "numero_documento": "",
+      "numero_parcela": "011/012",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 4000
+    },
+    {
+      "categorias": [
+        {
+          "codigo_categoria": "2.07.97",
+          "percentual": 100,
+          "valor": 4000
+        }
+      ],
+      "codigo_categoria": "2.07.97",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2701622360,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "30/11/2023",
+      "data_entrada": "30/11/2023",
+      "data_previsao": "27/12/2023",
+      "data_vencimento": "05/12/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787847450",
+          "cDesDep": "CTR-IVI-Investimento Interno",
+          "nPerDep": 100,
+          "nValDep": 4000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "RPTP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "27/12/2023",
+        "dInc": "02/01/2023",
+        "hAlt": "10:41:17",
+        "hInc": "22:29:54",
+        "uAlt": "P000602706",
+        "uInc": "P000445374"
+      },
+      "numero_documento": "",
+      "numero_parcela": "012/012",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 4000
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.01.99",
+          "percentual": 100,
+          "valor": 2997
+        }
+      ],
+      "codigo_categoria": "2.01.99",
+      "codigo_cliente_fornecedor": 2701622647,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2701622675,
+      "codigo_tipo_documento": "NFSTM",
+      "data_emissao": "22/12/2022",
+      "data_entrada": "22/12/2022",
+      "data_previsao": "05/12/2022",
+      "data_vencimento": "05/12/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787846363",
+          "cDesDep": "CTR-IDI-Indireto Interno",
+          "nPerDep": 100,
+          "nValDep": 2997
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "28/02/2024",
+        "dInc": "02/01/2023",
+        "hAlt": "00:57:41",
+        "hInc": "22:40:49",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "numero_documento_fiscal": "56",
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 2997
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.04.88",
+          "percentual": 100,
+          "valor": 29.94
+        }
+      ],
+      "codigo_categoria": "2.04.88",
+      "codigo_cliente_fornecedor": 2662231813,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2701622940,
+      "codigo_tipo_documento": "REC",
+      "data_emissao": "22/12/2022",
+      "data_entrada": "22/12/2022",
+      "data_previsao": "22/12/2022",
+      "data_vencimento": "22/12/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "IGE-ADN-Administrativo",
+          "nPerDep": 100,
+          "nValDep": 29.94
+        }
+      ],
+      "id_conta_corrente": 2662231757,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "02/01/2023",
+        "dInc": "02/01/2023",
+        "hAlt": "22:58:22",
+        "hInc": "22:56:53",
+        "uAlt": "P000445374",
+        "uInc": "P000445374"
+      },
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 29.94
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.04.88",
+          "percentual": 100,
+          "valor": 25.24
+        }
+      ],
+      "codigo_categoria": "2.04.88",
+      "codigo_cliente_fornecedor": 2662231813,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2701622991,
+      "codigo_tipo_documento": "REC",
+      "data_emissao": "22/12/2022",
+      "data_entrada": "22/12/2022",
+      "data_previsao": "22/12/2022",
+      "data_vencimento": "22/12/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "IGE-ADN-Administrativo",
+          "nPerDep": 100,
+          "nValDep": 25.24
+        }
+      ],
+      "id_conta_corrente": 2662231757,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "02/01/2023",
+        "dInc": "02/01/2023",
+        "hAlt": "23:01:41",
+        "hInc": "22:58:45",
+        "uAlt": "P000445374",
+        "uInc": "P000445374"
+      },
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 25.24
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.04.89",
+          "percentual": 100,
+          "valor": 28.63
+        }
+      ],
+      "codigo_categoria": "2.04.89",
+      "codigo_cliente_fornecedor": 2707445814,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2707445836,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "07/01/2023",
+      "data_entrada": "07/01/2023",
+      "data_previsao": "07/01/2023",
+      "data_vencimento": "07/01/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "IGE-ADN-Administrativo",
+          "nPerDep": 100,
+          "nValDep": 28.63
+        }
+      ],
+      "id_conta_corrente": 2662231757,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "09/01/2023",
+        "dInc": "09/01/2023",
+        "hAlt": "21:21:01",
+        "hInc": "21:18:09",
+        "uAlt": "P000445374",
+        "uInc": "P000445374"
+      },
+      "numero_documento_fiscal": "79624",
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 28.63
+    },
+    {
+      "baixa_bloqueada": "N",
+      "bloqueado": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.04.89",
+          "percentual": 100,
+          "valor": 469.7
+        }
+      ],
+      "codigo_categoria": "2.04.89",
+      "codigo_cliente_fornecedor": 2707445949,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2707445963,
+      "codigo_tipo_documento": "ANT",
+      "data_emissao": "07/01/2023",
+      "data_entrada": "07/01/2023",
+      "data_previsao": "07/01/2023",
+      "data_vencimento": "07/01/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "IGE-ADN-Administrativo",
+          "nPerDep": 100,
+          "nValDep": 469.7
+        }
+      ],
+      "id_conta_corrente": 2662231757,
+      "id_origem": "MANP",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "09/01/2023",
+        "dInc": "09/01/2023",
+        "hAlt": "21:25:00",
+        "hInc": "21:22:36",
+        "uAlt": "P000445374",
+        "uInc": "P000445374"
+      },
+      "numero_documento_fiscal": "23804",
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 469.7
+    }
+  ]
+}

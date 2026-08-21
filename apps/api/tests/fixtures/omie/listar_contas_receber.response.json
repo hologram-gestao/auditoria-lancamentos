@@ -1,0 +1,3070 @@
+{
+  "pagina": 1,
+  "total_de_paginas": 23,
+  "registros": 50,
+  "total_de_registros": 1109,
+  "conta_receber_cadastro": [
+    {
+      "bloqueado": "N",
+      "bloquear_baixa": "N",
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.03.99",
+          "percentual": 100,
+          "valor": 2000
+        }
+      ],
+      "codigo_categoria": "1.03.99",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2624255905,
+      "codigo_tipo_documento": "99999",
+      "data_emissao": "05/08/2022",
+      "data_previsao": "05/08/2022",
+      "data_registro": "05/08/2022",
+      "data_vencimento": "05/08/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "IGE-ADN-Administrativo",
+          "nPerDep": 100,
+          "nValDep": 2000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "06/09/2023",
+        "dInc": "14/08/2022",
+        "hAlt": "11:58:12",
+        "hInc": "00:15:57",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "numero_parcela": "001/005",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 2000
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.03.99",
+          "percentual": 100,
+          "valor": 2000
+        }
+      ],
+      "codigo_categoria": "1.03.99",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2624255941,
+      "codigo_tipo_documento": "99999",
+      "data_emissao": "05/09/2022",
+      "data_previsao": "05/09/2022",
+      "data_registro": "05/09/2022",
+      "data_vencimento": "05/09/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "IGE-ADN-Administrativo",
+          "nPerDep": 100,
+          "nValDep": 2000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "RPTR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "06/09/2023",
+        "dInc": "14/08/2022",
+        "hAlt": "11:58:12",
+        "hInc": "00:18:47",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "numero_parcela": "002/005",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 2000
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.03.99",
+          "percentual": 100,
+          "valor": 2000
+        }
+      ],
+      "codigo_categoria": "1.03.99",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2624255943,
+      "codigo_tipo_documento": "99999",
+      "data_emissao": "05/10/2022",
+      "data_previsao": "05/10/2022",
+      "data_registro": "05/10/2022",
+      "data_vencimento": "05/10/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "IGE-ADN-Administrativo",
+          "nPerDep": 100,
+          "nValDep": 2000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "RPTR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "06/09/2023",
+        "dInc": "14/08/2022",
+        "hAlt": "11:58:12",
+        "hInc": "00:18:47",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "numero_parcela": "003/005",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 2000
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.03.99",
+          "percentual": 100,
+          "valor": 2000
+        }
+      ],
+      "codigo_categoria": "1.03.99",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2624255945,
+      "codigo_tipo_documento": "99999",
+      "data_emissao": "05/11/2022",
+      "data_previsao": "07/11/2022",
+      "data_registro": "05/11/2022",
+      "data_vencimento": "05/11/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "IGE-ADN-Administrativo",
+          "nPerDep": 100,
+          "nValDep": 2000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "RPTR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "06/09/2023",
+        "dInc": "14/08/2022",
+        "hAlt": "11:58:12",
+        "hInc": "00:18:47",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "numero_parcela": "004/005",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 2000
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.03.99",
+          "percentual": 100,
+          "valor": 2000
+        }
+      ],
+      "codigo_categoria": "1.03.99",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2624255947,
+      "codigo_tipo_documento": "99999",
+      "data_emissao": "05/12/2022",
+      "data_previsao": "05/12/2022",
+      "data_registro": "05/12/2022",
+      "data_vencimento": "05/12/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "IGE-ADN-Administrativo",
+          "nPerDep": 100,
+          "nValDep": 2000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "RPTR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "06/09/2023",
+        "dInc": "14/08/2022",
+        "hAlt": "11:58:11",
+        "hInc": "00:18:47",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "numero_parcela": "005/005",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 2000
+    },
+    {
+      "bloqueado": "N",
+      "bloquear_baixa": "N",
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.04.01",
+          "percentual": 100,
+          "valor": 1000
+        }
+      ],
+      "codigo_categoria": "1.04.01",
+      "codigo_cliente_fornecedor": 2624255890,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2624256562,
+      "codigo_tipo_documento": "99999",
+      "data_emissao": "08/08/2022",
+      "data_previsao": "08/08/2022",
+      "data_registro": "08/08/2022",
+      "data_vencimento": "08/08/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2789485110",
+          "cDesDep": "DES-LIX-Estornos (saldo zero)",
+          "nPerDep": 100,
+          "nValDep": 1000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "20/08/2022",
+        "dInc": "14/08/2022",
+        "hAlt": "08:49:57",
+        "hInc": "00:49:02",
+        "uAlt": "P000445374",
+        "uInc": "P000445374"
+      },
+      "numero_documento": "",
+      "numero_parcela": "001/001",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 1000
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.01",
+          "percentual": 100,
+          "valor": 7065
+        }
+      ],
+      "codigo_categoria": "1.01.01",
+      "codigo_cliente_fornecedor": 2626085688,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2626574968,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "23/08/2022",
+      "data_previsao": "31/08/2022",
+      "data_registro": "23/08/2022",
+      "data_vencimento": "31/08/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845449",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Tecnologia",
+          "nPerDep": 100,
+          "nValDep": 7065
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "23/08/2022",
+        "hAlt": "00:30:11",
+        "hInc": "09:48:18",
+        "uAlt": "P000659813",
+        "uInc": "P000304389"
+      },
+      "nCodOS": 2626107738,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "93",
+      "numero_parcela": "001/001",
+      "numero_pedido": "4",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 7065
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.01",
+          "percentual": 100,
+          "valor": 6594
+        }
+      ],
+      "codigo_categoria": "1.01.01",
+      "codigo_cliente_fornecedor": 2626085691,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2626575546,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "23/08/2022",
+      "data_previsao": "31/08/2022",
+      "data_registro": "23/08/2022",
+      "data_vencimento": "31/08/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845224",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Academy",
+          "nPerDep": 100,
+          "nValDep": 6594
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "23/08/2022",
+        "hAlt": "00:30:56",
+        "hInc": "09:54:20",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2626107432,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "94",
+      "numero_parcela": "001/001",
+      "numero_pedido": "3",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 6594
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.03",
+          "percentual": 100,
+          "valor": 200
+        }
+      ],
+      "codigo_categoria": "1.01.03",
+      "codigo_cliente_fornecedor": 2626226024,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2626575558,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "23/08/2022",
+      "data_previsao": "05/09/2022",
+      "data_registro": "23/08/2022",
+      "data_vencimento": "05/09/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2789515236",
+          "cDesDep": "CTR-DIR-Suporte em Controladoria - PS Tênis",
+          "nPerDep": 100,
+          "nValDep": 200
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "23/08/2022",
+        "hAlt": "00:32:15",
+        "hInc": "09:54:24",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2626225652,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "95",
+      "numero_parcela": "001/001",
+      "numero_pedido": "5",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 200
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.86",
+          "percentual": 100,
+          "valor": 12925.48
+        }
+      ],
+      "codigo_categoria": "1.01.86",
+      "codigo_cliente_fornecedor": 2628815899,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2629377458,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "01/09/2022",
+      "data_previsao": "05/09/2022",
+      "data_registro": "01/09/2022",
+      "data_vencimento": "05/09/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845560",
+          "cDesDep": "CTR-DIR-Diligência e Auditoria - Cubos Particip",
+          "nPerDep": 100,
+          "nValDep": 12925.48
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "01/09/2022",
+        "hAlt": "00:33:03",
+        "hInc": "15:15:31",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2629377191,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "96",
+      "numero_parcela": "001/001",
+      "numero_pedido": "9",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "S",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 12925.48,
+      "valor_iss": 259.8
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.03",
+          "percentual": 100,
+          "valor": 200
+        }
+      ],
+      "codigo_categoria": "1.01.03",
+      "codigo_cliente_fornecedor": 2626226024,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2632776377,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "11/09/2022",
+      "data_previsao": "30/09/2022",
+      "data_registro": "11/09/2022",
+      "data_vencimento": "11/09/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2789515236",
+          "cDesDep": "CTR-DIR-Suporte em Controladoria - PS Tênis",
+          "nPerDep": 100,
+          "nValDep": 200
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "11/09/2022",
+        "hAlt": "00:32:23",
+        "hInc": "09:39:13",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2632776326,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "97",
+      "numero_parcela": "001/001",
+      "numero_pedido": "11",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 200
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.01",
+          "percentual": 100,
+          "valor": 7065
+        }
+      ],
+      "codigo_categoria": "1.01.01",
+      "codigo_cliente_fornecedor": 2626085688,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2632778182,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "11/09/2022",
+      "data_previsao": "30/09/2022",
+      "data_registro": "11/09/2022",
+      "data_vencimento": "30/09/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845449",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Tecnologia",
+          "nPerDep": 100,
+          "nValDep": 7065
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "11/09/2022",
+        "hAlt": "00:30:19",
+        "hInc": "09:49:10",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2632773324,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "98",
+      "numero_parcela": "001/001",
+      "numero_pedido": "10",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 7065
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.01",
+          "percentual": 100,
+          "valor": 6594
+        }
+      ],
+      "codigo_categoria": "1.01.01",
+      "codigo_cliente_fornecedor": 2626085691,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2638692381,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "27/09/2022",
+      "data_previsao": "30/09/2022",
+      "data_registro": "27/09/2022",
+      "data_vencimento": "30/09/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845224",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Academy",
+          "nPerDep": 100,
+          "nValDep": 6594
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "27/09/2022",
+        "hAlt": "00:31:16",
+        "hInc": "09:56:15",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2632776335,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "99",
+      "numero_parcela": "001/001",
+      "numero_pedido": "12",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 6594
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.01",
+          "percentual": 100,
+          "valor": 7065
+        }
+      ],
+      "codigo_categoria": "1.01.01",
+      "codigo_cliente_fornecedor": 2626085688,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2648522849,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "18/10/2022",
+      "data_previsao": "31/10/2022",
+      "data_registro": "18/10/2022",
+      "data_vencimento": "31/10/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845449",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Tecnologia",
+          "nPerDep": 100,
+          "nValDep": 7065
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "18/10/2022",
+        "hAlt": "00:30:28",
+        "hInc": "18:35:24",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2642697156,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "100",
+      "numero_parcela": "001/001",
+      "numero_pedido": "13",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 7065
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.01",
+          "percentual": 100,
+          "valor": 8191.87
+        }
+      ],
+      "codigo_categoria": "1.01.01",
+      "codigo_cliente_fornecedor": 2626085691,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2648522864,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "18/10/2022",
+      "data_previsao": "31/10/2022",
+      "data_registro": "18/10/2022",
+      "data_vencimento": "31/10/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845224",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Academy",
+          "nPerDep": 100,
+          "nValDep": 8191.87
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "18/10/2022",
+        "hAlt": "00:31:25",
+        "hInc": "18:35:27",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2642719173,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "101",
+      "numero_parcela": "001/001",
+      "numero_pedido": "14",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 8191.87
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.03",
+          "percentual": 100,
+          "valor": 200
+        }
+      ],
+      "codigo_categoria": "1.01.03",
+      "codigo_cliente_fornecedor": 2626226024,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2648522882,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "18/10/2022",
+      "data_previsao": "31/10/2022",
+      "data_registro": "18/10/2022",
+      "data_vencimento": "31/10/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2789515236",
+          "cDesDep": "CTR-DIR-Suporte em Controladoria - PS Tênis",
+          "nPerDep": 100,
+          "nValDep": 200
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "18/10/2022",
+        "hAlt": "00:32:38",
+        "hInc": "18:35:30",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2642721060,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "102",
+      "numero_parcela": "001/001",
+      "numero_pedido": "15",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 200
+    },
+    {
+      "bloqueado": "N",
+      "bloquear_baixa": "N",
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.02.98",
+          "percentual": 100,
+          "valor": 0.72
+        }
+      ],
+      "codigo_categoria": "1.02.98",
+      "codigo_cliente_fornecedor": 2641701606,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2658473600,
+      "codigo_tipo_documento": "99999",
+      "data_emissao": "04/11/2022",
+      "data_previsao": "04/11/2022",
+      "data_registro": "04/11/2022",
+      "data_vencimento": "04/11/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858554",
+          "cDesDep": "IGE-REF-Resultado Financeiro",
+          "nPerDep": 100,
+          "nValDep": 0.72
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "27/12/2023",
+        "dInc": "05/11/2022",
+        "hAlt": "21:19:47",
+        "hInc": "13:09:22",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "numero_documento": "",
+      "numero_parcela": "001/001",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 0.72
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.01",
+          "percentual": 100,
+          "valor": 8191.87
+        }
+      ],
+      "codigo_categoria": "1.01.01",
+      "codigo_cliente_fornecedor": 2626085691,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2663616820,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "18/11/2022",
+      "data_previsao": "30/11/2022",
+      "data_registro": "18/11/2022",
+      "data_vencimento": "30/11/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845224",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Academy",
+          "nPerDep": 100,
+          "nValDep": 8191.87
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "18/11/2022",
+        "hAlt": "00:31:38",
+        "hInc": "15:00:38",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2658537294,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "103",
+      "numero_parcela": "001/001",
+      "numero_pedido": "16",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 8191.87
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.01",
+          "percentual": 100,
+          "valor": 7065
+        }
+      ],
+      "codigo_categoria": "1.01.01",
+      "codigo_cliente_fornecedor": 2626085688,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2663618025,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "18/11/2022",
+      "data_previsao": "30/11/2022",
+      "data_registro": "18/11/2022",
+      "data_vencimento": "30/11/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845449",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Tecnologia",
+          "nPerDep": 100,
+          "nValDep": 7065
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "18/11/2022",
+        "hAlt": "00:30:36",
+        "hInc": "15:03:19",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2658537429,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "104",
+      "numero_parcela": "001/001",
+      "numero_pedido": "17",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 7065
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.03",
+          "percentual": 100,
+          "valor": 200
+        }
+      ],
+      "codigo_categoria": "1.01.03",
+      "codigo_cliente_fornecedor": 2626226024,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2663618181,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "18/11/2022",
+      "data_previsao": "05/12/2022",
+      "data_registro": "18/11/2022",
+      "data_vencimento": "05/12/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2789515236",
+          "cDesDep": "CTR-DIR-Suporte em Controladoria - PS Tênis",
+          "nPerDep": 100,
+          "nValDep": 200
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "18/11/2022",
+        "hAlt": "00:32:46",
+        "hInc": "15:03:25",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2658537474,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "105",
+      "numero_parcela": "001/001",
+      "numero_pedido": "18",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 200
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.03",
+          "percentual": 100,
+          "valor": 200
+        }
+      ],
+      "codigo_categoria": "1.01.03",
+      "codigo_cliente_fornecedor": 2626226024,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2679924351,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "09/12/2022",
+      "data_previsao": "05/01/2023",
+      "data_registro": "09/12/2022",
+      "data_vencimento": "05/01/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2789515236",
+          "cDesDep": "CTR-DIR-Suporte em Controladoria - PS Tênis",
+          "nPerDep": 100,
+          "nValDep": 200
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "09/12/2022",
+        "hAlt": "00:32:55",
+        "hInc": "10:17:12",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2679921059,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "106",
+      "numero_parcela": "001/001",
+      "numero_pedido": "21",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 200
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.01",
+          "percentual": 100,
+          "valor": 8191.87
+        }
+      ],
+      "codigo_categoria": "1.01.01",
+      "codigo_cliente_fornecedor": 2626085691,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2679924899,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "09/12/2022",
+      "data_previsao": "30/12/2022",
+      "data_registro": "09/12/2022",
+      "data_vencimento": "30/12/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845224",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Academy",
+          "nPerDep": 100,
+          "nValDep": 8191.87
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "09/12/2022",
+        "hAlt": "00:31:50",
+        "hInc": "10:18:16",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2679920799,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "107",
+      "numero_parcela": "001/001",
+      "numero_pedido": "19",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 8191.87
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.01",
+          "percentual": 100,
+          "valor": 7065
+        }
+      ],
+      "codigo_categoria": "1.01.01",
+      "codigo_cliente_fornecedor": 2626085688,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2679924970,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "09/12/2022",
+      "data_previsao": "30/12/2022",
+      "data_registro": "09/12/2022",
+      "data_vencimento": "30/12/2022",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845449",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Tecnologia",
+          "nPerDep": 100,
+          "nValDep": 7065
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "09/12/2022",
+        "hAlt": "00:30:44",
+        "hInc": "10:18:20",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2679920870,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "108",
+      "numero_parcela": "001/001",
+      "numero_pedido": "20",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 7065
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.01",
+          "percentual": 100,
+          "valor": 8191.87
+        }
+      ],
+      "codigo_categoria": "1.01.01",
+      "codigo_cliente_fornecedor": 2626085691,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2707448940,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "09/01/2023",
+      "data_previsao": "31/01/2023",
+      "data_registro": "09/01/2023",
+      "data_vencimento": "31/01/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845224",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Academy",
+          "nPerDep": 100,
+          "nValDep": 8191.87
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "07/10/2024",
+        "dInc": "09/01/2023",
+        "hAlt": "23:51:01",
+        "hInc": "22:41:10",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2707448699,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "109",
+      "numero_parcela": "001/001",
+      "numero_pedido": "22",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 8191.87
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.01",
+          "percentual": 100,
+          "valor": 7065
+        }
+      ],
+      "codigo_categoria": "1.01.01",
+      "codigo_cliente_fornecedor": 2626085688,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2707448975,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "09/01/2023",
+      "data_previsao": "31/01/2023",
+      "data_registro": "09/01/2023",
+      "data_vencimento": "31/01/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845449",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Tecnologia",
+          "nPerDep": 100,
+          "nValDep": 7065
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "07/10/2024",
+        "dInc": "09/01/2023",
+        "hAlt": "23:51:26",
+        "hInc": "22:42:20",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2707448769,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "110",
+      "numero_parcela": "001/001",
+      "numero_pedido": "23",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 7065
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.03",
+          "percentual": 100,
+          "valor": 200
+        }
+      ],
+      "codigo_categoria": "1.01.03",
+      "codigo_cliente_fornecedor": 2626226024,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2707448987,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "09/01/2023",
+      "data_previsao": "06/02/2023",
+      "data_registro": "09/01/2023",
+      "data_vencimento": "05/02/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2789515236",
+          "cDesDep": "CTR-DIR-Suporte em Controladoria - PS Tênis",
+          "nPerDep": 100,
+          "nValDep": 200
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "09/01/2023",
+        "hAlt": "00:04:36",
+        "hInc": "22:42:24",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2707448793,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "111",
+      "numero_parcela": "001/001",
+      "numero_pedido": "24",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 200
+    },
+    {
+      "bloqueado": "N",
+      "bloquear_baixa": "N",
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.04.01",
+          "percentual": 100,
+          "valor": 71
+        }
+      ],
+      "codigo_categoria": "1.04.01",
+      "codigo_cliente_fornecedor": 2626226024,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2725732866,
+      "codigo_tipo_documento": "NFS",
+      "data_emissao": "22/02/2023",
+      "data_previsao": "22/02/2023",
+      "data_registro": "22/02/2023",
+      "data_vencimento": "22/02/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2789485110",
+          "cDesDep": "DES-LIX-Estornos (saldo zero)",
+          "nPerDep": 100,
+          "nValDep": 71
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "MANR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "28/08/2023",
+        "dInc": "25/02/2023",
+        "hAlt": "14:36:55",
+        "hInc": "12:30:00",
+        "uAlt": "P000445374",
+        "uInc": "P000445374"
+      },
+      "numero_documento": "",
+      "numero_parcela": "001/001",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 71
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.01",
+          "percentual": 100,
+          "valor": 8191.87
+        }
+      ],
+      "codigo_categoria": "1.01.01",
+      "codigo_cliente_fornecedor": 2626085691,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2725733569,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "25/02/2023",
+      "data_previsao": "28/02/2023",
+      "data_registro": "25/02/2023",
+      "data_vencimento": "28/02/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845224",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Academy",
+          "nPerDep": 100,
+          "nValDep": 8191.87
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "07/10/2024",
+        "dInc": "25/02/2023",
+        "hAlt": "23:51:11",
+        "hInc": "12:49:15",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2725733296,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "112",
+      "numero_parcela": "001/001",
+      "numero_pedido": "25",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 8191.87
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.01",
+          "percentual": 100,
+          "valor": 15896.25
+        }
+      ],
+      "codigo_categoria": "1.01.01",
+      "codigo_cliente_fornecedor": 2626085688,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2725733868,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "25/02/2023",
+      "data_previsao": "01/03/2023",
+      "data_registro": "25/02/2023",
+      "data_vencimento": "06/03/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845449",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Tecnologia",
+          "nPerDep": 100,
+          "nValDep": 15896.25
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "07/10/2024",
+        "dInc": "25/02/2023",
+        "hAlt": "23:51:37",
+        "hInc": "12:57:16",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2725733299,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "113",
+      "numero_parcela": "001/001",
+      "numero_pedido": "26",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 15896.25
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.03",
+          "percentual": 100,
+          "valor": 200
+        }
+      ],
+      "codigo_categoria": "1.01.03",
+      "codigo_cliente_fornecedor": 2626226024,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2725734029,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "25/02/2023",
+      "data_previsao": "06/03/2023",
+      "data_registro": "25/02/2023",
+      "data_vencimento": "06/03/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2789515236",
+          "cDesDep": "CTR-DIR-Suporte em Controladoria - PS Tênis",
+          "nPerDep": 100,
+          "nValDep": 200
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "25/02/2023",
+        "hAlt": "00:04:51",
+        "hInc": "12:59:13",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2725733309,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "114",
+      "numero_parcela": "001/001",
+      "numero_pedido": "27",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 200
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.99",
+          "percentual": 100,
+          "valor": 2813
+        }
+      ],
+      "codigo_categoria": "1.01.99",
+      "codigo_cliente_fornecedor": 2731275306,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2731344456,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "09/03/2023",
+      "data_previsao": "09/03/2023",
+      "data_registro": "09/03/2023",
+      "data_vencimento": "20/03/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2789515816",
+          "cDesDep": "TSR-DIR-Mentoria Omie - Prospecta",
+          "nPerDep": 100,
+          "nValDep": 2813
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "09/03/2023",
+        "hAlt": "00:07:18",
+        "hInc": "17:44:08",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2731274859,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "115",
+      "numero_parcela": "001/001",
+      "numero_pedido": "29",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 2813
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.01",
+          "percentual": 100,
+          "valor": 8191.87
+        }
+      ],
+      "codigo_categoria": "1.01.01",
+      "codigo_cliente_fornecedor": 2626085691,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2734801947,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "17/03/2023",
+      "data_previsao": "31/03/2023",
+      "data_registro": "17/03/2023",
+      "data_vencimento": "31/03/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845224",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Academy",
+          "nPerDep": 100,
+          "nValDep": 8191.87
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "07/10/2024",
+        "dInc": "17/03/2023",
+        "hAlt": "23:51:52",
+        "hInc": "19:55:15",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2731356123,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "116",
+      "numero_parcela": "001/001",
+      "numero_pedido": "30",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 8191.87
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.03",
+          "percentual": 100,
+          "valor": 200
+        }
+      ],
+      "codigo_categoria": "1.01.03",
+      "codigo_cliente_fornecedor": 2626226024,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2734802011,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "17/03/2023",
+      "data_previsao": "29/03/2023",
+      "data_registro": "17/03/2023",
+      "data_vencimento": "05/04/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2789515236",
+          "cDesDep": "CTR-DIR-Suporte em Controladoria - PS Tênis",
+          "nPerDep": 100,
+          "nValDep": 200
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "17/03/2023",
+        "hAlt": "00:04:58",
+        "hInc": "19:57:08",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2731356212,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "117",
+      "numero_parcela": "001/001",
+      "numero_pedido": "31",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 200
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "cNumeroContrato": "2023/00001",
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.94",
+          "percentual": 100,
+          "valor": 3750
+        }
+      ],
+      "codigo_categoria": "1.01.94",
+      "codigo_cliente_fornecedor": 2626085691,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2737505357,
+      "codigo_projeto": 2620885567,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "29/03/2023",
+      "data_previsao": "31/03/2023",
+      "data_registro": "29/03/2023",
+      "data_vencimento": "31/03/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787848581",
+          "cDesDep": "DAD-DIR-Data Pilot - Cubos Academy",
+          "nPerDep": 100,
+          "nValDep": 3750
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "07/10/2024",
+        "dInc": "29/03/2023",
+        "hAlt": "23:52:13",
+        "hInc": "20:12:09",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2737504947,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "118",
+      "numero_parcela": "001/001",
+      "numero_pedido": "33",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 3750
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.86",
+          "percentual": 100,
+          "valor": 6410.19
+        }
+      ],
+      "codigo_categoria": "1.01.86",
+      "codigo_cliente_fornecedor": 2628815899,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2739147814,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "03/04/2023",
+      "data_previsao": "10/04/2023",
+      "data_registro": "03/04/2023",
+      "data_vencimento": "05/04/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845560",
+          "cDesDep": "CTR-DIR-Diligência e Auditoria - Cubos Particip",
+          "nPerDep": 100,
+          "nValDep": 6410.19
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "03/04/2023",
+        "hAlt": "00:06:16",
+        "hInc": "15:46:12",
+        "uAlt": "P000659813",
+        "uInc": "P000445374"
+      },
+      "nCodOS": 2725733336,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "119",
+      "numero_parcela": "001/001",
+      "numero_pedido": "28",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "S",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 6410.19,
+      "valor_iss": 128.84
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "cNumeroContrato": "2023/00002",
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.98",
+          "percentual": 100,
+          "valor": 3750
+        }
+      ],
+      "codigo_categoria": "1.01.98",
+      "codigo_cliente_fornecedor": 2739283251,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2741977300,
+      "codigo_projeto": 2739285660,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "13/04/2023",
+      "data_previsao": "27/04/2023",
+      "data_registro": "13/04/2023",
+      "data_vencimento": "27/04/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787840664",
+          "cDesDep": "TSR-DIR-BPO Gerente - GO Consultoria",
+          "nPerDep": 100,
+          "nValDep": 3750
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "13/04/2023",
+        "hAlt": "00:09:50",
+        "hInc": "12:09:06",
+        "uAlt": "P000659813",
+        "uInc": "P000575074"
+      },
+      "nCodOS": 2741977045,
+      "nsu": "[EMP-PPC] Contty",
+      "numero_documento": "",
+      "numero_documento_fiscal": "120",
+      "numero_parcela": "001/001",
+      "numero_pedido": "34",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 3750
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "cNumeroContrato": "2023/00006",
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.98",
+          "percentual": 100,
+          "valor": 3000
+        }
+      ],
+      "codigo_categoria": "1.01.98",
+      "codigo_cliente_fornecedor": 2739283251,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2741977734,
+      "codigo_projeto": 2739285660,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "13/04/2023",
+      "data_previsao": "27/04/2023",
+      "data_registro": "13/04/2023",
+      "data_vencimento": "27/04/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787840664",
+          "cDesDep": "TSR-DIR-BPO Gerente - GO Consultoria",
+          "nPerDep": 100,
+          "nValDep": 3000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "13/04/2023",
+        "hAlt": "00:11:54",
+        "hInc": "12:12:05",
+        "uAlt": "P000659813",
+        "uInc": "P000575074"
+      },
+      "nCodOS": 2741977587,
+      "nsu": "[EMP-PPC] Contty",
+      "numero_documento": "",
+      "numero_documento_fiscal": "121",
+      "numero_parcela": "001/001",
+      "numero_pedido": "35",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 3000
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "cNumeroContrato": "2023/00005",
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.01",
+          "percentual": 100,
+          "valor": 8191.87
+        }
+      ],
+      "codigo_categoria": "1.01.01",
+      "codigo_cliente_fornecedor": 2626085691,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2743594507,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "19/04/2023",
+      "data_previsao": "30/04/2023",
+      "data_registro": "19/04/2023",
+      "data_vencimento": "30/04/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845224",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Academy",
+          "nPerDep": 100,
+          "nValDep": 8191.87
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "07/10/2024",
+        "dInc": "19/04/2023",
+        "hAlt": "23:53:25",
+        "hInc": "16:17:08",
+        "uAlt": "P000659813",
+        "uInc": "P000575074"
+      },
+      "nCodOS": 2743594278,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "122",
+      "numero_parcela": "001/001",
+      "numero_pedido": "36",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 8191.87
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "cNumeroContrato": "2023/00001",
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.94",
+          "percentual": 100,
+          "valor": 3750
+        }
+      ],
+      "codigo_categoria": "1.01.94",
+      "codigo_cliente_fornecedor": 2626085691,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2743596409,
+      "codigo_projeto": 2620885567,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "19/04/2023",
+      "data_previsao": "05/05/2023",
+      "data_registro": "19/04/2023",
+      "data_vencimento": "05/05/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787848581",
+          "cDesDep": "DAD-DIR-Data Pilot - Cubos Academy",
+          "nPerDep": 100,
+          "nValDep": 3750
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "07/10/2024",
+        "dInc": "19/04/2023",
+        "hAlt": "23:53:37",
+        "hInc": "16:24:06",
+        "uAlt": "P000659813",
+        "uInc": "P000575074"
+      },
+      "nCodOS": 2743596209,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "123",
+      "numero_parcela": "001/001",
+      "numero_pedido": "37",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 3750
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "cNumeroContrato": "2023/00004",
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.03",
+          "percentual": 100,
+          "valor": 200
+        }
+      ],
+      "codigo_categoria": "1.01.03",
+      "codigo_cliente_fornecedor": 2626226024,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2743603645,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "19/04/2023",
+      "data_previsao": "05/05/2023",
+      "data_registro": "19/04/2023",
+      "data_vencimento": "05/05/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2789515236",
+          "cDesDep": "CTR-DIR-Suporte em Controladoria - PS Tênis",
+          "nPerDep": 100,
+          "nValDep": 200
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "19/04/2023",
+        "hAlt": "00:05:06",
+        "hInc": "16:31:09",
+        "uAlt": "P000659813",
+        "uInc": "P000575074"
+      },
+      "nCodOS": 2743603486,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "124",
+      "numero_parcela": "001/001",
+      "numero_pedido": "38",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 200
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "cNumeroContrato": "2023/00003",
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.92",
+          "percentual": 100,
+          "valor": 375
+        }
+      ],
+      "codigo_categoria": "1.01.92",
+      "codigo_cliente_fornecedor": 2626085688,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2748811275,
+      "codigo_projeto": 2620885567,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2742081210,
+      "data_emissao": "27/04/2023",
+      "data_previsao": "05/05/2023",
+      "data_registro": "27/04/2023",
+      "data_vencimento": "05/05/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2791768559",
+          "cDesDep": "DAD-DIR-BI Support - Cubos Tecnologia",
+          "nPerDep": 100,
+          "nValDep": 375
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "07/10/2024",
+        "dInc": "27/04/2023",
+        "hAlt": "23:52:29",
+        "hInc": "17:41:05",
+        "uAlt": "P000659813",
+        "uInc": "P000575074"
+      },
+      "nCodOS": 2748810632,
+      "nsu": "[SOC-PPC] Márcio Jorge",
+      "numero_documento": "",
+      "numero_documento_fiscal": "125",
+      "numero_parcela": "001/001",
+      "numero_pedido": "39",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 375
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "cNumeroContrato": "2023/00006",
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.98",
+          "percentual": 100,
+          "valor": 4000
+        }
+      ],
+      "codigo_categoria": "1.01.98",
+      "codigo_cliente_fornecedor": 2739283251,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2751294429,
+      "codigo_projeto": 2739285660,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "08/05/2023",
+      "data_previsao": "09/06/2023",
+      "data_registro": "08/05/2023",
+      "data_vencimento": "09/06/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787840664",
+          "cDesDep": "TSR-DIR-BPO Gerente - GO Consultoria",
+          "nPerDep": 100,
+          "nValDep": 4000
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "08/05/2023",
+        "hAlt": "00:11:29",
+        "hInc": "15:45:10",
+        "uAlt": "P000659813",
+        "uInc": "P000575074"
+      },
+      "nCodOS": 2751288637,
+      "nsu": "[EMP-PPC] Contty",
+      "numero_documento": "",
+      "numero_documento_fiscal": "126",
+      "numero_parcela": "001/001",
+      "numero_pedido": "42",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 4000
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.90",
+          "percentual": 100,
+          "valor": 1424
+        }
+      ],
+      "codigo_categoria": "1.01.90",
+      "codigo_cliente_fornecedor": 2750040274,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2751576485,
+      "codigo_projeto": 2739285660,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "09/05/2023",
+      "data_previsao": "15/05/2023",
+      "data_registro": "09/05/2023",
+      "data_vencimento": "15/05/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787841396",
+          "cDesDep": "TSR-DIR-Implantação Omie - LM",
+          "nPerDep": 100,
+          "nValDep": 1424
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "09/05/2023",
+        "hAlt": "00:12:35",
+        "hInc": "11:05:11",
+        "uAlt": "P000659813",
+        "uInc": "P000575074"
+      },
+      "nCodOS": 2750040293,
+      "nsu": "[EMP-PPC] Prospecta",
+      "numero_documento": "",
+      "numero_documento_fiscal": "127",
+      "numero_parcela": "001/003",
+      "numero_pedido": "40",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 1424
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.90",
+          "percentual": 100,
+          "valor": 1424
+        }
+      ],
+      "codigo_categoria": "1.01.90",
+      "codigo_cliente_fornecedor": 2750040274,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2751576531,
+      "codigo_projeto": 2739285660,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "09/05/2023",
+      "data_previsao": "15/06/2023",
+      "data_registro": "09/05/2023",
+      "data_vencimento": "15/06/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787841396",
+          "cDesDep": "TSR-DIR-Implantação Omie - LM",
+          "nPerDep": 100,
+          "nValDep": 1424
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "09/05/2023",
+        "hAlt": "00:13:00",
+        "hInc": "11:05:11",
+        "uAlt": "P000659813",
+        "uInc": "P000575074"
+      },
+      "nCodOS": 2750040293,
+      "nsu": "[EMP-PPC] Prospecta",
+      "numero_documento": "",
+      "numero_documento_fiscal": "127",
+      "numero_parcela": "002/003",
+      "numero_pedido": "40",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 1424
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.90",
+          "percentual": 100,
+          "valor": 1424
+        }
+      ],
+      "codigo_categoria": "1.01.90",
+      "codigo_cliente_fornecedor": 2750040274,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2751576532,
+      "codigo_projeto": 2739285660,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "09/05/2023",
+      "data_previsao": "17/07/2023",
+      "data_registro": "09/05/2023",
+      "data_vencimento": "15/07/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787841396",
+          "cDesDep": "TSR-DIR-Implantação Omie - LM",
+          "nPerDep": 100,
+          "nValDep": 1424
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "09/05/2023",
+        "hAlt": "00:13:28",
+        "hInc": "11:05:11",
+        "uAlt": "P000659813",
+        "uInc": "P000575074"
+      },
+      "nCodOS": 2750040293,
+      "nsu": "[EMP-PPC] Prospecta",
+      "numero_documento": "",
+      "numero_documento_fiscal": "127",
+      "numero_parcela": "003/003",
+      "numero_pedido": "40",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 1424
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.03",
+          "percentual": 100,
+          "valor": 1875
+        }
+      ],
+      "codigo_categoria": "1.01.03",
+      "codigo_cliente_fornecedor": 2628815899,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2751580484,
+      "codigo_projeto": 2628823303,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2751157054,
+      "data_emissao": "09/05/2023",
+      "data_previsao": "15/05/2023",
+      "data_registro": "09/05/2023",
+      "data_vencimento": "15/05/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2816428037",
+          "cDesDep": "CTR-DIR-Suporte em Controladoria - Cubos Particip",
+          "nPerDep": 100,
+          "nValDep": 1875
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "09/05/2023",
+        "hAlt": "00:06:34",
+        "hInc": "11:17:08",
+        "uAlt": "P000659813",
+        "uInc": "P000471764"
+      },
+      "nCodOS": 2751086063,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "128",
+      "numero_parcela": "001/001",
+      "numero_pedido": "41",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "S",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 1875,
+      "valor_iss": 37.69
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "cNumeroContrato": "2023/00001",
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.94",
+          "percentual": 100,
+          "valor": 3750
+        }
+      ],
+      "codigo_categoria": "1.01.94",
+      "codigo_cliente_fornecedor": 2626085691,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2754838842,
+      "codigo_projeto": 2620885567,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "18/05/2023",
+      "data_previsao": "05/06/2023",
+      "data_registro": "18/05/2023",
+      "data_vencimento": "05/06/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787848581",
+          "cDesDep": "DAD-DIR-Data Pilot - Cubos Academy",
+          "nPerDep": 100,
+          "nValDep": 3750
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "07/10/2024",
+        "dInc": "18/05/2023",
+        "hAlt": "23:53:52",
+        "hInc": "10:18:18",
+        "uAlt": "P000659813",
+        "uInc": "P000575074"
+      },
+      "nCodOS": 2754838263,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "129",
+      "numero_parcela": "001/001",
+      "numero_pedido": "43",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 3750
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "cNumeroContrato": "2023/00005",
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.01",
+          "percentual": 100,
+          "valor": 8191.87
+        }
+      ],
+      "codigo_categoria": "1.01.01",
+      "codigo_cliente_fornecedor": 2626085691,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2754842203,
+      "codigo_projeto": 2620885569,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "18/05/2023",
+      "data_previsao": "31/05/2023",
+      "data_registro": "18/05/2023",
+      "data_vencimento": "31/05/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2787845224",
+          "cDesDep": "CTR-DIR-BPO Controller - Cubos Academy",
+          "nPerDep": 100,
+          "nValDep": 8191.87
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "07/10/2024",
+        "dInc": "18/05/2023",
+        "hAlt": "23:55:46",
+        "hInc": "10:23:09",
+        "uAlt": "P000659813",
+        "uInc": "P000575074"
+      },
+      "nCodOS": 2754839825,
+      "nsu": "[SOC-PPC] Laio Brito",
+      "numero_documento": "",
+      "numero_documento_fiscal": "130",
+      "numero_parcela": "001/001",
+      "numero_pedido": "44",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 8191.87
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.90",
+          "percentual": 100,
+          "valor": 1424
+        }
+      ],
+      "codigo_categoria": "1.01.90",
+      "codigo_cliente_fornecedor": 2756965861,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2757049381,
+      "codigo_projeto": 2739285660,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "24/05/2023",
+      "data_previsao": "26/05/2023",
+      "data_registro": "24/05/2023",
+      "data_vencimento": "26/05/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2789509816",
+          "cDesDep": "TSR-DIR-Implantação Omie - ASCN",
+          "nPerDep": 100,
+          "nValDep": 1424
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "24/05/2023",
+        "hAlt": "00:13:48",
+        "hInc": "08:55:15",
+        "uAlt": "P000659813",
+        "uInc": "P000602706"
+      },
+      "nCodOS": 2756993214,
+      "nsu": "[EMP-PPC] Prospecta",
+      "numero_documento": "",
+      "numero_documento_fiscal": "131",
+      "numero_parcela": "001/003",
+      "numero_pedido": "47",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 1424
+    },
+    {
+      "boleto": {
+        "cGerado": "",
+        "cNumBancario": "",
+        "cNumBoleto": "",
+        "dDtEmBol": "",
+        "nPerJuros": 0,
+        "nPerMulta": 0
+      },
+      "categorias": [
+        {
+          "codigo_categoria": "1.01.90",
+          "percentual": 100,
+          "valor": 1424
+        }
+      ],
+      "codigo_categoria": "1.01.90",
+      "codigo_cliente_fornecedor": 2756965861,
+      "codigo_lancamento_integracao": "",
+      "codigo_lancamento_omie": 2757049382,
+      "codigo_projeto": 2739285660,
+      "codigo_tipo_documento": "NFS",
+      "codigo_vendedor": 2620885579,
+      "data_emissao": "24/05/2023",
+      "data_previsao": "15/06/2023",
+      "data_registro": "24/05/2023",
+      "data_vencimento": "15/06/2023",
+      "distribuicao": [
+        {
+          "cCodDep": "2789509816",
+          "cDesDep": "TSR-DIR-Implantação Omie - ASCN",
+          "nPerDep": 100,
+          "nValDep": 1424
+        }
+      ],
+      "id_conta_corrente": 2620817772,
+      "id_origem": "VENR",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "08/10/2024",
+        "dInc": "24/05/2023",
+        "hAlt": "00:13:54",
+        "hInc": "08:55:15",
+        "uAlt": "P000659813",
+        "uInc": "P000602706"
+      },
+      "nCodOS": 2756993214,
+      "nsu": "[EMP-PPC] Prospecta",
+      "numero_documento": "",
+      "numero_documento_fiscal": "131",
+      "numero_parcela": "002/003",
+      "numero_pedido": "47",
+      "operacao": "01",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "RECEBIDO",
+      "tipo_agrupamento": "I",
+      "valor_documento": 1424
+    }
+  ]
+}

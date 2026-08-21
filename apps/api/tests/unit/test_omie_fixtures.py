@@ -5,10 +5,12 @@ estar errados (já quebrou em prod). Estes testes rodam o schema ATUAL contra a
 RESPOSTA REAL capturada — se divergir, FALHAM (o "teste negativo" que registra a
 divergência). **Mock escrito à mão não conta** (confirmaria a invenção).
 
-⚠️ **S-1 (ASSUMIDA — NÃO TESTADA / RISCO):** o contrato de ESCRITA
-(`IncluirLancCC`) — nomes de campo, convenção de sinal (`nValorLanc` absoluto +
-`cNatureza`) e unicidade de `cCodIntLanc` — é suposição documentada, não fato.
-Os testes de escrita abaixo só ficam verdes contra a fixture real gravada por
+⚠️ **S-1 (AINDA ABERTA):** a FORMA aninhada do contrato de ESCRITA
+(`IncluirLancCC`) foi corroborada pela RECUSA real do formato plano em
+21/08/2026; nomes internos de `cabecalho`/`detalhes`, obrigatoriedade,
+representação do sinal (não há `cNatureza` na escrita) e unicidade de
+`cCodIntLanc` seguem pendentes de uma captura ACEITA. Os testes de escrita
+abaixo só ficam verdes contra a fixture real gravada por
 `scripts/capture_omie_fixtures.py` com `OMIE_CAPTURE_ALLOW_WRITE=1`.
 
 Enquanto não houver fixture real (captura exige credencial Omie autorizada +
@@ -19,6 +21,8 @@ mensagem que aponta o script de captura. NÃO fabricamos fixtures.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -41,9 +45,10 @@ _CAPTURE_HINT = (
 )
 
 _WRITE_CAPTURE_HINT = (
-    "Fixture real de ESCRITA ausente (S-1: o contrato do IncluirLancCC — nomes "
-    "de campo, sinal absoluto+cNatureza e unicidade de cCodIntLanc — segue "
-    "ASSUMIDO, NÃO TESTADO). Rode `OMIE_CAPTURE_ALLOW_WRITE=1 uv run python -m "
+    "Fixture real de ESCRITA ausente (S-1: nomes internos de cabecalho/"
+    "detalhes, obrigatoriedade, representação do sinal e unicidade de "
+    "cCodIntLanc do IncluirLancCC seguem SEM captura ACEITA). Rode "
+    "`OMIE_CAPTURE_ALLOW_WRITE=1 uv run python -m "
     "scripts.capture_omie_fixtures` com credencial Omie autorizada e exclua o "
     "lançamento depois (ver tests/fixtures/omie/README.md)."
 )
@@ -65,6 +70,20 @@ def _load_response(name: str) -> dict[str, Any] | None:
     return _load_json(f"{name}.response")
 
 
+def _flatten_param_keys(param: dict[str, Any], prefix: str = "") -> Iterator[str]:
+    """Achata as chaves de um `param` aninhado em caminhos pontilhados.
+
+    Mesmo formato de `IncluirLancCCRequest.omie_param_aliases()`
+    (`cabecalho`, `cabecalho.nCodCC`, ...) — é o que permite comparar o
+    request capturado com o DTO aninhado chave a chave.
+    """
+    for key, value in param.items():
+        path = f"{prefix}{key}"
+        yield path
+        if isinstance(value, dict):
+            yield from _flatten_param_keys(value, f"{path}.")
+
+
 @pytest.mark.unit
 class TestOmieRealFixtures:
     """Cada teste valida o schema atual contra a resposta real, quando existir."""
@@ -75,8 +94,16 @@ class TestOmieRealFixtures:
             pytest.skip(_CAPTURE_HINT)
         items = resp.get("listaMovimentos")
         assert isinstance(items, list), "envelope de ListarExtrato sem `listaMovimentos`"
+        # O Omie mistura linhas-resumo de saldo ("SALDO ANTERIOR/POSTERIOR")
+        # no array — sem `nCodLancamento`, sem `cNatureza`, sem `cSituacao`.
+        # Não são lançamentos; produção as filtra ANTES do parse
+        # (`omie/client.listar_extrato`, caso Austral 20/05/2026) e a fixture
+        # real da captura de 21/08/2026 confirma que elas existem. O gate
+        # valida o schema das linhas que produção de fato parseia.
+        lancamentos = [raw for raw in items if raw.get("nCodLancamento") is not None]
+        assert lancamentos, "fixture de extrato sem nenhum lançamento de verdade — recapture"
         # Se a resposta real divergir do schema, model_validate LEVANTA → FALHA.
-        for raw in items:
+        for raw in lancamentos:
             LancamentoExtrato.model_validate(raw)
 
     def test_listar_extrato_has_no_pagination(self) -> None:
@@ -171,7 +198,7 @@ class TestIncluirLancCCRealFixture:
         param = req.get("param")
         assert isinstance(param, dict), "fixture de escrita sem `param`"
         declared = IncluirLancCCRequest.omie_param_aliases()
-        unknown = set(param) - declared
+        unknown = set(_flatten_param_keys(param)) - declared
         assert not unknown, (
             "A chamada capturada enviou chaves que o DTO não declara "
             f"({sorted(unknown)}) — o DTO e a chamada real divergiram. "
@@ -182,10 +209,11 @@ class TestIncluirLancCCRealFixture:
         resp = _load_response("incluir_lanc_cc")
         if resp is None:
             pytest.skip(_WRITE_CAPTURE_HINT)
-        assert "faultstring" not in resp, (
-            "A captura de escrita gravou um faultstring — a Omie RECUSOU o "
-            f"request. O contrato assumido está errado: {resp.get('faultstring')!r}. "
-            "Corrija IncluirLancCCRequest antes de qualquer lançamento."
+        refusal = resp.get("faultstring") or resp.get("_adl_capture_exception_message")
+        assert refusal is None, (
+            "A fixture gravada é uma RECUSA da Omie — evidência S-1 válida, "
+            f"mas não é um contrato aceito: {refusal!r}. Corrija "
+            "IncluirLancCCRequest e RECAPTURE antes de qualquer lançamento."
         )
         # Divergência de nome/tipo de campo LEVANTA → FALHA (é o ponto do gate).
         IncluirLancCCResponse.model_validate(resp)
@@ -220,14 +248,22 @@ class TestIncluirLancCCRealFixture:
     def test_readback_confirms_sign_convention(self) -> None:
         """O request só mostra o que MANDAMOS; o extrato mostra o que a Omie ENTENDEU.
 
-        A captura lança um débito (`cNatureza='D'`) com `nValorLanc` absoluto e
-        relê o extrato do dia. Se a convenção de escrita fosse outra (ex.: valor
-        com sinal), o lançamento voltaria como crédito ou com valor negativo —
-        e é isso que este teste recusa.
+        Convenção OBSERVADA (captura de 21/08/2026, conta de CARTÃO):
+        enviamos `nValorLanc` ABSOLUTO com categoria de despesa e o extrato
+        devolveu o lançamento com natureza **'P'** (pagamento — não o 'D' da
+        doc) e `nValorDocumento` **JÁ NEGATIVO**. A invariante que este teste
+        trava é a que importa para dinheiro: valor absoluto enviado →
+        `signed_amount` NEGATIVO (débito) do MESMO montante. Se uma recaptura
+        mostrar outra direção, a montagem da BACK 07.4 (e o bloqueio de
+        estorno) precisam ser revistos com essa evidência.
+
+        A linha recém-criada também volta SEM `cSituacao` — o model_validate
+        abaixo só passa com o campo opcional (evidência da mesma captura).
         """
         readback = _load_json("incluir_lanc_cc.readback")
         created = _load_response("incluir_lanc_cc")
-        if readback is None or created is None:
+        request = _load_json("incluir_lanc_cc.request")
+        if readback is None or created is None or request is None:
             pytest.skip(_WRITE_CAPTURE_HINT)
 
         created_id = IncluirLancCCResponse.model_validate(created).n_cod_lanc
@@ -243,13 +279,15 @@ class TestIncluirLancCCRealFixture:
             "mesmo ID que o extrato usa, o que também é divergência de contrato)."
         )
         entry = matches[0]
-        assert entry.c_natureza == "D", (
-            "S-1 REFUTADA (sinal): enviamos cNatureza='D' com valor absoluto e "
-            f"o Omie registrou cNatureza={entry.c_natureza!r}. A convenção de "
-            "escrita difere da leitura — corrija a montagem da BACK 07.4."
+        sent = Decimal(str(request["param"]["cabecalho"]["nValorLanc"]))
+        assert entry.signed_amount == -sent, (
+            "S-1 REFUTADA (sinal): enviamos valor ABSOLUTO com categoria de "
+            f"despesa e o extrato devolveu signed_amount={entry.signed_amount} "
+            f"(esperado {-sent}, débito). A direção do lançamento difere da "
+            "observada em 21/08/2026 — corrija a montagem da BACK 07.4."
         )
-        assert entry.n_valor_documento > 0, (
-            "S-1 REFUTADA (valor): o extrato devolveu valor não-positivo "
-            f"({entry.n_valor_documento}) para um lançamento enviado com valor "
-            "absoluto."
+        assert entry.c_natureza == "P", (
+            f"Natureza observada mudou: era 'P' (cartão, 21/08/2026), veio "
+            f"{entry.c_natureza!r}. Se for 'D' com valor absoluto, "
+            "`signed_amount` continua correto; registre a nova evidência aqui."
         )

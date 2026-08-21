@@ -111,6 +111,14 @@ describe('Elegibilidade — espelho declarado do servidor', () => {
       'ja_lancada',
     ],
     ['sem_omie de conta corrente', { situation: 'sem_omie' }, false, 'sessao_nao_e_cartao'],
+    [
+      // Estorno (valor positivo): sem representação verificada do crédito no
+      // IncluirLancCC (S-1), o servidor bloqueia — a UI não oferece (§4.9).
+      'estorno sem_omie',
+      { situation: 'sem_omie', amount: '89.90' },
+      true,
+      'estorno_nao_verificado',
+    ],
   ])('%s', (_nome, over, isCard, esperado) => {
     expect(getPostingBlock(entry(over as Partial<FileEntryItem>), { isCard })).toBe(esperado);
   });
@@ -131,7 +139,9 @@ describe('Aba de Movimentações — cartão', () => {
     const acao = launchButtons()[0];
     expect(acao).toBeDefined();
     expect(acao).not.toHaveAttribute('aria-disabled');
-    expect(screen.getByRole('checkbox', { name: /Selecionar a compra de 10\/06\/2026/ })).toBeEnabled();
+    expect(
+      screen.getByRole('checkbox', { name: /Selecionar a compra de 10\/06\/2026/ }),
+    ).toBeEnabled();
   });
 
   it.each([
@@ -174,7 +184,9 @@ describe('Aba de Movimentações — cartão', () => {
     ]);
     render(<MovementsTab sessionId={SESSION_ID} isCard />);
 
-    await ui.click(screen.getByRole('checkbox', { name: /Selecionar todas as compras desta página/ }));
+    await ui.click(
+      screen.getByRole('checkbox', { name: /Selecionar todas as compras desta página/ }),
+    );
 
     expect(screen.getByRole('button', { name: 'Lançar 2 compras no Omie' })).toBeEnabled();
   });
