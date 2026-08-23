@@ -6,13 +6,23 @@
  * Antes, "Contas Bancárias" e "Histórico de Conciliações" eram duas seções
  * empilhadas na mesma página. A reunião de 07/07 pediu que virassem dois
  * DESTINOS distintos, com a Lista de Conciliações promovida a tela principal.
- * Este componente é a moldura comum: breadcrumb + nome do cliente + ações, e a
- * barra lateral com os itens de navegação.
+ * Este componente é a moldura comum: breadcrumb + nome do cliente + ações.
+ *
+ * Navegação (86e2n39h7 — sidebar em camadas): de `md` para cima o menu do
+ * cliente mora no `<aside>` do shell (`SidebarNav`), que o substitui pelo menu
+ * global fora do contexto. Aqui ficam só os CHIPS abaixo de `md`, onde o aside
+ * não existe (`hidden md:block`) — sem eles o mobile ficaria sem navegação de
+ * cliente até a task do drawer (86e2n4pf9). A árvore é uma só
+ * (`features/navigation/nav-items`): item novo entra lá e aparece nos dois.
+ *
+ * O breadcrumb CONTINUA (decisão de 23/08/2026): ele mostra profundidade; o
+ * "Voltar para clientes" do sidebar troca de camada.
  *
  * Layout (design-system):
  *   - o shell externo (`(app)/layout.tsx`) já é `h-dvh` e só o `<main>` rola;
- *   - aqui a coluna de navegação do cliente é `shrink-0` e o conteúdo `min-w-0`,
- *     senão uma tabela larga empurraria a nav para fora da viewport;
+ *   - o conteúdo é `min-h-0 min-w-0 flex-1`: sem `min-w-0` uma tabela larga
+ *     estoura a viewport; sem `min-h-0` (coluna) o item cresce até a altura do
+ *     conteúdo e as regiões roláveis internas param de rolar (ADR-007);
  *   - largura total (sem `max-w-*`): listas usam o espaço todo.
  *
  * Carga do cliente: uma única `useClientDetail` no shell alimenta o cache do
@@ -20,25 +30,18 @@
  * segundo request.
  */
 
-import {
-  BookOpen,
-  ChevronRight,
-  Landmark,
-  LayoutDashboard,
-  ListChecks,
-  SquarePen,
-  UserCog,
-} from 'lucide-react';
+import { ChevronRight, SquarePen } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 
+import { clientNavItems } from '@/components/features/navigation/nav-items';
+import { NavLink } from '@/components/features/navigation/nav-link';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { Button } from '@/components/ui/button';
 import { useClientDetail } from '@/hooks/use-clients';
 import { ApiError } from '@/lib/api/client';
 import { canAccessClient, canSeeSystemArea, hasPermission, homePathFor } from '@/lib/authz';
-import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth';
 
 import { ClientStatusBadge } from './client-status-badge';
@@ -95,23 +98,6 @@ export function ClientShell({ clientId, children }: ClientShellProps) {
   const client = detailQuery.data;
   if (!client || currentUser === null) return null;
 
-  const base = `/clientes/${clientId}`;
-  const accountsHref = `${base}/contas`;
-  const dashboardHref = `${base}/painel`;
-  const usersHref = `${base}/usuarios`;
-  const glossaryHref = `${base}/glossario`;
-  // "Conciliações" continua ativo dentro do detalhe de uma conciliação — é a
-  // mesma área de navegação, só que um nível abaixo.
-  const isAccounts = pathname.startsWith(accountsHref);
-  const isDashboard = pathname.startsWith(dashboardHref);
-  const isUsers = pathname.startsWith(usersHref);
-  const isGlossary = pathname.startsWith(glossaryHref);
-  const isReconciliations = !isAccounts && !isDashboard && !isUsers && !isGlossary;
-
-  // Matriz do R4 (`lib/authz`), nunca `role === '...'` solto: "Usuários" é do
-  // gerente do cliente e do admin do sistema. O gerente do sistema opera a
-  // carteira, mas não administra as pessoas de dentro do tenant.
-  const canManageClientUsers = hasPermission(currentUser, 'manage_client_users');
   // §9 é do admin do sistema. Nenhum papel de cliente edita os dados do próprio
   // cliente (credenciais Omie moram aí) — e o gerente do sistema também não.
   const canEditClient = hasPermission(currentUser, 'edit_client');
@@ -156,94 +142,35 @@ export function ClientShell({ clientId, children }: ClientShellProps) {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-6 lg:flex-row">
-        <nav aria-label="Seções do cliente" className="shrink-0 lg:w-52">
-          {/* `flex-wrap`: em 390px os itens não cabem numa linha só — sem ele o
-              último item era CORTADO fora da viewport (apareceu ao acrescentar
-              "Usuários" e revalidar por screenshot mobile). */}
-          <ul className="flex flex-wrap gap-1 lg:flex-col lg:flex-nowrap">
-            <li>
-              <ClientNavLink
-                href={base}
-                active={isReconciliations}
-                icon={<ListChecks className="h-4 w-4" aria-hidden="true" />}
-              >
-                Conciliações
-              </ClientNavLink>
-            </li>
-            <li>
-              <ClientNavLink
-                href={accountsHref}
-                active={isAccounts}
-                icon={<Landmark className="h-4 w-4" aria-hidden="true" />}
-              >
-                Contas Bancárias
-              </ClientNavLink>
-            </li>
-            <li>
-              <ClientNavLink
-                href={dashboardHref}
-                active={isDashboard}
-                icon={<LayoutDashboard className="h-4 w-4" aria-hidden="true" />}
-              >
-                Painel
-              </ClientNavLink>
-            </li>
-            {/* Glossário (S6/R2) NÃO é gated: ler é de todo papel com acesso
-                ao cliente — o operador o usa como referência na revisão. Quem
-                pede permissão é a ESCRITA, dentro da tela. */}
-            <li>
-              <ClientNavLink
-                href={glossaryHref}
-                active={isGlossary}
-                icon={<BookOpen className="h-4 w-4" aria-hidden="true" />}
-              >
-                Glossário
-              </ClientNavLink>
-            </li>
-            {canManageClientUsers && (
-              <li>
-                <ClientNavLink
-                  href={usersHref}
-                  active={isUsers}
-                  icon={<UserCog className="h-4 w-4" aria-hidden="true" />}
-                >
-                  Usuários
-                </ClientNavLink>
+      <div className="flex min-h-0 flex-1 flex-col gap-6">
+        {/* Chips SÓ abaixo de `md`: de `md` para cima esta árvore está no
+            sidebar em camadas (`SidebarNav`) e aqui seria duplicata. O
+            `aria-label` é o mesmo do sidebar de propósito — só um dos dois
+            entra na árvore de acessibilidade por breakpoint. `flex-wrap`: em
+            390px os itens não cabem numa linha só — sem ele o último item era
+            CORTADO fora da viewport. */}
+        <nav aria-label="Seções do cliente" className="shrink-0 md:hidden">
+          <ul className="flex flex-wrap gap-1">
+            {clientNavItems(currentUser, clientId, pathname).map((item) => (
+              <li key={item.href}>
+                <NavLink href={item.href} active={item.active} icon={item.icon}>
+                  {item.label}
+                </NavLink>
               </li>
-            )}
+            ))}
           </ul>
         </nav>
 
-        <div className="min-w-0 flex-1">{children}</div>
+        {/* `min-h-0` (ADR-007): no layout de LINHA antigo a altura do conteúdo
+            vinha do stretch; em coluna, sem `min-h-0` o item flex cresce até a
+            altura do conteúdo e as regiões internas (TableCard/ScrollRegion)
+            nunca rolam — a barra de paginação voltaria a cobrir linhas
+            (86e2u4nxg/86e2uca1d, pego pelo gate ao virar coluna). */}
+        <div className="min-h-0 min-w-0 flex-1">{children}</div>
       </div>
 
       <EditClientModal open={editOpen} onOpenChange={setEditOpen} client={client} />
     </div>
-  );
-}
-
-interface ClientNavLinkProps {
-  href: string;
-  active: boolean;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}
-
-function ClientNavLink({ href, active, icon, children }: ClientNavLinkProps) {
-  return (
-    <Link
-      href={href}
-      aria-current={active ? 'page' : undefined}
-      className={cn(
-        'flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
-        'focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
-        active ? 'bg-muted text-foreground font-medium' : 'text-muted-foreground hover:bg-muted',
-      )}
-    >
-      {icon}
-      <span>{children}</span>
-    </Link>
   );
 }
 
@@ -257,10 +184,11 @@ function ClientShellSkeleton() {
           <div className="bg-muted h-5 w-16 animate-pulse rounded-full" />
         </div>
       </div>
-      <div className="flex flex-col gap-6 lg:flex-row">
-        <div className="space-y-2 lg:w-52">
-          <div className="bg-muted h-9 w-full animate-pulse rounded-md" />
-          <div className="bg-muted h-9 w-full animate-pulse rounded-md" />
+      <div className="flex flex-col gap-6">
+        {/* Chips de navegação — só abaixo de `md`, como no shell real. */}
+        <div className="flex gap-2 md:hidden">
+          <div className="bg-muted h-9 w-32 animate-pulse rounded-md" />
+          <div className="bg-muted h-9 w-32 animate-pulse rounded-md" />
         </div>
         <div className="flex-1 space-y-3">
           {Array.from({ length: 3 }).map((_, i) => (

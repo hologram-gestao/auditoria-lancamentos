@@ -1,7 +1,8 @@
 'use client';
 
 /**
- * Shell mínimo das rotas autenticadas. Header + sidebar; S6 expandirá.
+ * Shell das rotas autenticadas: header + sidebar em CAMADAS (86e2n39h7 — a
+ * árvore e a troca de camada moram em `features/navigation/`).
  *
  * Bootstrap da sessão:
  *   - Após F5 o store Zustand zera (sem persistência), mas os cookies HttpOnly
@@ -11,50 +12,21 @@
  * Dispensar o cookie é trabalho do backend (logout limpa). O Zustand só reflete.
  */
 
-import { AlertTriangle, ListChecks, LogOut, Settings, Users as UsersIcon } from 'lucide-react';
-import Link from 'next/link';
-import { useRouter, usePathname } from 'next/navigation';
+import { LogOut } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
+import { SidebarNav } from '@/components/features/navigation/sidebar-nav';
 import { NotificationBell } from '@/components/features/notifications/notification-bell';
 import { NavigationOutcomeTracker } from '@/components/features/reconciliations/create/navigation-outcome-tracker';
 import { Button } from '@/components/ui/button';
 import { logout as logoutRequest, refreshSession } from '@/lib/api/auth';
 import { ApiError } from '@/lib/api/client';
-import { canManageSystemUsers, homePathFor, isClientScoped, roleLabel } from '@/lib/authz';
-import { cn } from '@/lib/utils';
+import { roleLabel } from '@/lib/authz';
 import { useAuthStore } from '@/stores/auth';
-
-interface SidebarLinkProps {
-  href: string;
-  pathname: string;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}
-
-function SidebarLink({ href, pathname, icon, children }: SidebarLinkProps) {
-  const active = pathname === href || pathname.startsWith(`${href}/`);
-  return (
-    <Link
-      href={href}
-      className={cn(
-        'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
-        // focus-visible:ring* alinha com o restante da UI (shadcn padrão).
-        // Sem isso, o foco do Tab no sidebar caía no outline default do
-        // navegador (1px preto), inconsistente com o resto da página.
-        'focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
-        active ? 'bg-muted text-foreground font-medium' : 'text-muted-foreground hover:bg-muted',
-      )}
-    >
-      {icon}
-      <span>{children}</span>
-    </Link>
-  );
-}
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const pathname = usePathname();
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
   const clearUser = useAuthStore((s) => s.clearUser);
@@ -169,50 +141,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </header>
       <div className="flex min-h-0 flex-1">
+        {/* Abaixo de `md` o aside não existe — no contexto de cliente os chips
+            do `ClientShell` (mesma árvore, `nav-items`) cobrem a navegação até
+            a task do drawer mobile (86e2n4pf9). */}
         <aside className="bg-card/50 hidden w-56 shrink-0 overflow-y-auto border-r p-4 md:block">
-          <nav className="flex flex-col gap-1">
-            {/* Gating por perfil (R4): usuário DE tenant não tem lista global de
-                clientes — a casa dele é o próprio cliente. Mostrar "Clientes"
-                para ele seria oferecer uma rota que o servidor nega. */}
-            {isClientScoped(user) ? (
-              <SidebarLink
-                href={homePathFor(user)}
-                pathname={pathname}
-                icon={<ListChecks className="h-4 w-4" />}
-              >
-                Conciliações
-              </SidebarLink>
-            ) : (
-              <SidebarLink
-                href="/clientes"
-                pathname={pathname}
-                icon={<UsersIcon className="h-4 w-4" />}
-              >
-                Clientes
-              </SidebarLink>
-            )}
-            {canManageSystemUsers(user) && (
-              <>
-                <div className="text-muted-foreground mt-4 px-3 pb-1 text-xs font-medium uppercase tracking-wide">
-                  Configurações
-                </div>
-                <SidebarLink
-                  href="/configuracoes/usuarios"
-                  pathname={pathname}
-                  icon={<Settings className="h-4 w-4" />}
-                >
-                  Usuários
-                </SidebarLink>
-                <SidebarLink
-                  href="/configuracoes/anomalias"
-                  pathname={pathname}
-                  icon={<AlertTriangle className="h-4 w-4" />}
-                >
-                  Tipos de Anomalia
-                </SidebarLink>
-              </>
-            )}
-          </nav>
+          <SidebarNav user={user} />
         </aside>
         {/* ÚNICO elemento com rolagem — `min-w-0` evita que uma tabela larga
             empurre o shell e reintroduza scroll horizontal na página. */}

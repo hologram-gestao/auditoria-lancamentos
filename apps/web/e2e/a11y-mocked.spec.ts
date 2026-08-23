@@ -1276,6 +1276,59 @@ for (const vp of VIEWPORTS) {
 }
 
 /**
+ * 86e2n39h7 — sidebar em CAMADAS: dentro de `/clientes/{id}/**` o menu do
+ * cliente ocupa o `<aside>` (Voltar + nome do cliente + seções) e o menu
+ * global some; "Voltar" NAVEGA para a lista e restaura o menu principal.
+ * Desktop-only: abaixo de `md` o aside não existe — lá a navegação do cliente
+ * continua sendo os chips do `ClientShell` (cenário mobile logo abaixo).
+ */
+test.describe('Sidebar em camadas (86e2n39h7)', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  test('menu do cliente substitui o global, e Voltar restaura a lista', async ({ page }) => {
+    await page.goto(`/clientes/${CLIENT_ID}`);
+    const clientNav = page.getByRole('navigation', { name: 'Seções do cliente' });
+    await expect(clientNav.getByRole('link', { name: 'Contas Bancárias' })).toBeVisible();
+    await expect(clientNav.getByText('Cliente Exemplo Ltda')).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Navegação principal' })).toHaveCount(0);
+    await analyze(page, 'sidebar contextual do cliente (desktop)');
+    await shot(page, 'sidebar-camadas-cliente-desktop');
+
+    await clientNav.getByRole('link', { name: 'Voltar para clientes' }).click();
+    await expect(page).toHaveURL(/\/clientes$/);
+    const globalNav = page.getByRole('navigation', { name: 'Navegação principal' });
+    await expect(globalNav.getByRole('link', { name: 'Clientes' })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Seções do cliente' })).toHaveCount(0);
+    await shot(page, 'sidebar-camadas-global-desktop');
+  });
+
+  test('usuário de tenant não vê Voltar nem menu global em momento nenhum', async ({ page }) => {
+    sessionUser = CLIENT_OPERATOR_USER;
+    await page.goto(`/clientes/${CLIENT_ID}`);
+    const clientNav = page.getByRole('navigation', { name: 'Seções do cliente' });
+    await expect(clientNav.getByRole('link', { name: 'Conciliações' })).toBeVisible();
+    await expect(clientNav.getByRole('link', { name: 'Voltar para clientes' })).toHaveCount(0);
+    // `exact`: "Clientes" por substring casaria com um eventual Voltar.
+    await expect(page.getByRole('link', { name: 'Clientes', exact: true })).toHaveCount(0);
+    await expect(page.getByText('Configurações')).toHaveCount(0);
+    await analyze(page, 'sidebar contextual — operador do cliente (desktop)');
+  });
+});
+
+test.describe('Sidebar em camadas — mobile 390px (86e2n39h7)', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('abaixo de md os chips do cliente seguem sendo a navegação', async ({ page }) => {
+    await page.goto(`/clientes/${CLIENT_ID}`);
+    const chips = page.getByRole('navigation', { name: 'Seções do cliente' });
+    await expect(chips.getByRole('link', { name: 'Contas Bancárias' })).toBeVisible();
+    // O aside (e com ele o menu global) não renderiza neste viewport.
+    await expect(page.getByRole('navigation', { name: 'Navegação principal' })).toHaveCount(0);
+    await shot(page, 'sidebar-camadas-chips-mobile-390');
+  });
+});
+
+/**
  * Sprint 6 / R4 (FRONT 06.7) — revisão: selo do glossário e veredito do flag.
  *
  * Os DOIS casos do selo são medidos (com e sem glossário), porque o critério de
@@ -1734,14 +1787,17 @@ for (const vp of VIEWPORTS) {
         await expect(page.getByRole('button', { name: 'Criar conciliação' })).toBeVisible();
 
         if (vp.label === 'desktop') {
-          const sidebar = page.getByRole('navigation').first();
-          // Lista GLOBAL de clientes e configurações do sistema: só equipe Hologram.
-          await expect(sidebar.getByRole('link', { name: 'Clientes' })).toHaveCount(
+          // Sidebar em CAMADAS (86e2n39h7): dentro do cliente o menu global
+          // não aparece para NINGUÉM — o caminho de volta à área do sistema é
+          // o "Voltar para clientes", que só a equipe Hologram tem.
+          const sidebar = page.getByRole('navigation', { name: 'Seções do cliente' });
+          await expect(sidebar.getByRole('link', { name: 'Voltar para clientes' })).toHaveCount(
             profile.systemArea ? 1 : 0,
           );
-          await expect(page.getByRole('link', { name: 'Tipos de Anomalia' })).toHaveCount(
-            profile.key === 'admin' ? 1 : 0,
-          );
+          // Itens globais nunca vazam para a camada do cliente (`exact`: sem
+          // ele, "Clientes" casaria por substring com o próprio Voltar).
+          await expect(sidebar.getByRole('link', { name: 'Clientes', exact: true })).toHaveCount(0);
+          await expect(page.getByRole('link', { name: 'Tipos de Anomalia' })).toHaveCount(0);
         }
 
         // O chrome compartilhado (header) precisa caber nos DOIS viewports: em
