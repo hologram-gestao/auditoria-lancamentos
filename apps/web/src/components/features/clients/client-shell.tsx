@@ -8,12 +8,11 @@
  * DESTINOS distintos, com a Lista de Conciliações promovida a tela principal.
  * Este componente é a moldura comum: breadcrumb + nome do cliente + ações.
  *
- * Navegação (86e2n39h7 — sidebar em camadas): de `md` para cima o menu do
- * cliente mora no `<aside>` do shell (`SidebarNav`), que o substitui pelo menu
- * global fora do contexto. Aqui ficam só os CHIPS abaixo de `md`, onde o aside
- * não existe (`hidden md:block`) — sem eles o mobile ficaria sem navegação de
- * cliente até a task do drawer (86e2n4pf9). A árvore é uma só
- * (`features/navigation/nav-items`): item novo entra lá e aparece nos dois.
+ * Navegação (86e2n39h7 + 86e2n4pf9): o menu do cliente NÃO mora mais aqui.
+ * De `md` para cima ele está no `<aside>` do shell (`SidebarNav`, em camadas);
+ * abaixo de `md`, no drawer do hambúrguer (`MobileNavDrawer`) — que renderiza
+ * o mesmo `SidebarNav`. Os chips provisórios que viveram aqui entre as duas
+ * tasks foram removidos. A árvore é uma só (`features/navigation/nav-items`).
  *
  * O breadcrumb CONTINUA (decisão de 23/08/2026): ele mostra profundidade; o
  * "Voltar para clientes" do sidebar troca de camada.
@@ -32,11 +31,8 @@
 
 import { ChevronRight, SquarePen } from 'lucide-react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 
-import { clientNavItems } from '@/components/features/navigation/nav-items';
-import { NavLink } from '@/components/features/navigation/nav-link';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { Button } from '@/components/ui/button';
 import { useClientDetail } from '@/hooks/use-clients';
@@ -54,7 +50,6 @@ interface ClientShellProps {
 
 export function ClientShell({ clientId, children }: ClientShellProps) {
   const currentUser = useAuthStore((s) => s.user);
-  const pathname = usePathname();
   const [editOpen, setEditOpen] = useState(false);
 
   // Gating de tenant (R4/FRONT 05.7) ANTES do fetch: um usuário de cliente que
@@ -142,32 +137,11 @@ export function ClientShell({ clientId, children }: ClientShellProps) {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-6">
-        {/* Chips SÓ abaixo de `md`: de `md` para cima esta árvore está no
-            sidebar em camadas (`SidebarNav`) e aqui seria duplicata. O
-            `aria-label` é o mesmo do sidebar de propósito — só um dos dois
-            entra na árvore de acessibilidade por breakpoint. `flex-wrap`: em
-            390px os itens não cabem numa linha só — sem ele o último item era
-            CORTADO fora da viewport. */}
-        <nav aria-label="Seções do cliente" className="shrink-0 md:hidden">
-          <ul className="flex flex-wrap gap-1">
-            {clientNavItems(currentUser, clientId, pathname).map((item) => (
-              <li key={item.href}>
-                <NavLink href={item.href} active={item.active} icon={item.icon}>
-                  {item.label}
-                </NavLink>
-              </li>
-            ))}
-          </ul>
-        </nav>
-
-        {/* `min-h-0` (ADR-007): no layout de LINHA antigo a altura do conteúdo
-            vinha do stretch; em coluna, sem `min-h-0` o item flex cresce até a
-            altura do conteúdo e as regiões internas (TableCard/ScrollRegion)
-            nunca rolam — a barra de paginação voltaria a cobrir linhas
-            (86e2u4nxg/86e2uca1d, pego pelo gate ao virar coluna). */}
-        <div className="min-h-0 min-w-0 flex-1">{children}</div>
-      </div>
+      {/* `min-h-0` (ADR-007): sem ele o item flex cresce até a altura do
+          conteúdo e as regiões internas (TableCard/ScrollRegion) nunca rolam —
+          a barra de paginação voltaria a cobrir linhas (86e2u4nxg/86e2uca1d,
+          pego pelo gate quando o layout virou coluna). */}
+      <div className="min-h-0 min-w-0 flex-1">{children}</div>
 
       <EditClientModal open={editOpen} onOpenChange={setEditOpen} client={client} />
     </div>
@@ -185,11 +159,6 @@ function ClientShellSkeleton() {
         </div>
       </div>
       <div className="flex flex-col gap-6">
-        {/* Chips de navegação — só abaixo de `md`, como no shell real. */}
-        <div className="flex gap-2 md:hidden">
-          <div className="bg-muted h-9 w-32 animate-pulse rounded-md" />
-          <div className="bg-muted h-9 w-32 animate-pulse rounded-md" />
-        </div>
         <div className="flex-1 space-y-3">
           {Array.from({ length: 3 }).map((_, i) => (
             <div key={i} className="bg-card space-y-3 rounded-lg border p-4 shadow-sm">

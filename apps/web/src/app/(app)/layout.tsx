@@ -16,6 +16,7 @@ import { LogOut } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
+import { MobileNavDrawer } from '@/components/features/navigation/mobile-nav-drawer';
 import { SidebarNav } from '@/components/features/navigation/sidebar-nav';
 import { NotificationBell } from '@/components/features/notifications/notification-bell';
 import { NavigationOutcomeTracker } from '@/components/features/reconciliations/create/navigation-outcome-tracker';
@@ -122,7 +123,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           acionável, e o papel basta para a pessoa saber em que contexto está —
           e o grupo da direita é `shrink-0`, então "Sair" nunca some. */}
       <header className="bg-card flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 sm:px-6">
-        <div className="min-w-0 truncate font-semibold">Auditoria de Lançamentos</div>
+        <div className="flex min-w-0 items-center gap-1 sm:gap-2">
+          {/* Hambúrguer só abaixo de `md`, onde o aside não existe (86e2n4pf9). */}
+          <MobileNavDrawer user={user} />
+          <div className="min-w-0 truncate font-semibold">Auditoria de Lançamentos</div>
+        </div>
         <div className="flex shrink-0 items-center gap-2 sm:gap-4">
           <NotificationBell />
           <span className="text-muted-foreground flex min-w-0 items-center text-sm">
@@ -141,9 +146,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </header>
       <div className="flex min-h-0 flex-1">
-        {/* Abaixo de `md` o aside não existe — no contexto de cliente os chips
-            do `ClientShell` (mesma árvore, `nav-items`) cobrem a navegação até
-            a task do drawer mobile (86e2n4pf9). */}
+        {/* Abaixo de `md` o aside não existe — lá a navegação é o drawer do
+            hambúrguer no header (`MobileNavDrawer`), que renderiza o MESMO
+            `SidebarNav` (86e2n4pf9). */}
         <aside className="bg-card/50 hidden w-56 shrink-0 overflow-y-auto border-r p-4 md:block">
           <SidebarNav user={user} />
         </aside>
