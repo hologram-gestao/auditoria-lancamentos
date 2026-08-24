@@ -1291,6 +1291,8 @@ test.describe('Sidebar em camadas (86e2n39h7)', () => {
     await expect(clientNav.getByRole('link', { name: 'Contas Bancárias' })).toBeVisible();
     await expect(clientNav.getByText('Cliente Exemplo Ltda')).toBeVisible();
     await expect(page.getByRole('navigation', { name: 'Navegação principal' })).toHaveCount(0);
+    // O hambúrguer é exclusivo do mobile (md:hidden) — no desktop não existe.
+    await expect(page.getByRole('button', { name: 'Abrir menu de navegação' })).toHaveCount(0);
     await analyze(page, 'sidebar contextual do cliente (desktop)');
     await shot(page, 'sidebar-camadas-cliente-desktop');
 
@@ -1315,16 +1317,64 @@ test.describe('Sidebar em camadas (86e2n39h7)', () => {
   });
 });
 
-test.describe('Sidebar em camadas — mobile 390px (86e2n39h7)', () => {
+/**
+ * 86e2n4pf9 — menu mobile: abaixo de `md` a navegação é o drawer do hambúrguer,
+ * que renderiza o MESMO `SidebarNav` em camadas do desktop (árvore única). Os
+ * chips provisórios do `ClientShell` morreram nesta task. Foco preso, Esc e
+ * devolução do foco são do Radix — VALIDADOS aqui, não presumidos.
+ */
+test.describe('Menu mobile — drawer (86e2n4pf9)', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('abaixo de md os chips do cliente seguem sendo a navegação', async ({ page }) => {
+  test('hambúrguer abre o drawer em camadas; navegar fecha e devolve o foco', async ({ page }) => {
     await page.goto(`/clientes/${CLIENT_ID}`);
-    const chips = page.getByRole('navigation', { name: 'Seções do cliente' });
-    await expect(chips.getByRole('link', { name: 'Contas Bancárias' })).toBeVisible();
-    // O aside (e com ele o menu global) não renderiza neste viewport.
-    await expect(page.getByRole('navigation', { name: 'Navegação principal' })).toHaveCount(0);
-    await shot(page, 'sidebar-camadas-chips-mobile-390');
+    const trigger = page.getByRole('button', { name: 'Abrir menu de navegação' });
+    await expect(trigger).toBeVisible();
+    await trigger.click();
+
+    const dialog = page.getByRole('dialog', { name: 'Menu' });
+    // A gaveta do Radix entra DESLIZANDO — analisar/medir só após a animação.
+    await aguardarAnimacao(dialog);
+    const clientNav = dialog.getByRole('navigation', { name: 'Seções do cliente' });
+    await expect(clientNav.getByRole('link', { name: 'Contas Bancárias' })).toBeVisible();
+    await expect(clientNav.getByText('Cliente Exemplo Ltda')).toBeVisible();
+    await analyze(page, 'drawer de navegação aberto (390px)');
+    await shot(page, 'drawer-navegacao-cliente-390');
+
+    await clientNav.getByRole('link', { name: 'Contas Bancárias' }).click();
+    await expect(page).toHaveURL(new RegExp(`/clientes/${CLIENT_ID}/contas$`));
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+  });
+
+  test('fora do contexto de cliente o drawer mostra a camada global; Esc fecha', async ({
+    page,
+  }) => {
+    await page.goto('/clientes');
+    await page.getByRole('button', { name: 'Abrir menu de navegação' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Menu' });
+    await aguardarAnimacao(dialog);
+    const nav = dialog.getByRole('navigation', { name: 'Navegação principal' });
+    await expect(nav.getByRole('link', { name: 'Clientes' })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Tipos de Anomalia' })).toBeVisible();
+    await shot(page, 'drawer-navegacao-global-390');
+
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Abrir menu de navegação' })).toBeFocused();
+  });
+
+  test('operador do cliente: drawer sem Voltar e sem itens globais', async ({ page }) => {
+    sessionUser = CLIENT_OPERATOR_USER;
+    await page.goto(`/clientes/${CLIENT_ID}`);
+    await page.getByRole('button', { name: 'Abrir menu de navegação' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Menu' });
+    await aguardarAnimacao(dialog);
+    const nav = dialog.getByRole('navigation', { name: 'Seções do cliente' });
+    await expect(nav.getByRole('link', { name: 'Conciliações' })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Voltar para clientes' })).toHaveCount(0);
+    await expect(dialog.getByRole('link', { name: 'Clientes', exact: true })).toHaveCount(0);
+    await analyze(page, 'drawer — operador do cliente (390px)');
   });
 });
 
@@ -1770,6 +1820,12 @@ for (const vp of VIEWPORTS) {
         await page.goto(`/clientes/${CLIENT_ID}`);
         await expect(page.getByRole('heading', { name: 'Conciliações', level: 2 })).toBeVisible();
 
+        // No mobile a navegação do cliente mora no DRAWER (86e2n4pf9): abrir
+        // para medir — o `getByRole` só enxerga a navegação visível.
+        if (vp.label !== 'desktop') {
+          await page.getByRole('button', { name: 'Abrir menu de navegação' }).click();
+          await aguardarAnimacao(page.getByRole('dialog', { name: 'Menu' }));
+        }
         const clientNav = page.getByRole('navigation', { name: 'Seções do cliente' });
         // Conciliação / contas / painel: liberados para os QUATRO papéis.
         await expect(clientNav.getByText('Conciliações')).toBeVisible();
@@ -1779,6 +1835,12 @@ for (const vp of VIEWPORTS) {
         // "Glossário" (S6/R2) aparece para os QUATRO papéis: ler é de todo mundo
         // com acesso ao cliente; quem pede permissão é a escrita, dentro da tela.
         await expect(clientNav.getByText('Glossário')).toHaveCount(1);
+        // Fechar o drawer antes de medir o resto da página: o modal do Radix
+        // marca o fundo com aria-hidden e o getByRole pararia de enxergá-lo.
+        if (vp.label !== 'desktop') {
+          await page.keyboard.press('Escape');
+          await expect(page.getByRole('dialog')).toHaveCount(0);
+        }
         // §9 (editar dados do cliente, credenciais Omie) é só do admin.
         await expect(page.getByRole('button', { name: 'Editar cliente' })).toHaveCount(
           profile.editClient ? 1 : 0,

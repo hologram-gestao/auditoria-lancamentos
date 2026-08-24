@@ -40,9 +40,15 @@ import { NavLink } from './nav-link';
 
 interface SidebarNavProps {
   user: AuthenticatedUser;
+  /**
+   * Disparado no clique de QUALQUER link do menu (Voltar incluso). O drawer
+   * mobile (86e2n4pf9) usa para fechar imediatamente — inclusive no clique do
+   * item da página atual, onde o pathname não muda.
+   */
+  onNavigate?: () => void;
 }
 
-export function SidebarNav({ user }: SidebarNavProps) {
+export function SidebarNav({ user, onNavigate }: SidebarNavProps) {
   const pathname = usePathname();
   const clientId = clientIdFromPathname(pathname);
   const canAccess = clientId !== null && canAccessClient(user, clientId);
@@ -61,7 +67,13 @@ export function SidebarNav({ user }: SidebarNavProps) {
               </div>
             )}
             {section.items.map((item) => (
-              <NavLink key={item.href} href={item.href} active={item.active} icon={item.icon}>
+              <NavLink
+                key={item.href}
+                href={item.href}
+                active={item.active}
+                icon={item.icon}
+                onClick={onNavigate}
+              >
                 {item.label}
               </NavLink>
             ))}
@@ -84,6 +96,7 @@ export function SidebarNav({ user }: SidebarNavProps) {
           href="/clientes"
           active={false}
           icon={<ArrowLeft className="h-4 w-4" aria-hidden="true" />}
+          onClick={onNavigate}
         >
           Voltar para clientes
         </NavLink>
@@ -101,7 +114,13 @@ export function SidebarNav({ user }: SidebarNavProps) {
         </div>
       )}
       {clientNavItems(user, clientId, pathname).map((item) => (
-        <NavLink key={item.href} href={item.href} active={item.active} icon={item.icon}>
+        <NavLink
+          key={item.href}
+          href={item.href}
+          active={item.active}
+          icon={item.icon}
+          onClick={onNavigate}
+        >
           {item.label}
         </NavLink>
       ))}

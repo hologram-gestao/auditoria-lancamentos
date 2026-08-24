@@ -16,12 +16,15 @@ interface NavLinkProps {
   active: boolean;
   icon: React.ReactNode;
   children: React.ReactNode;
+  /** Quem hospeda o menu num overlay (drawer mobile) fecha no clique. */
+  onClick?: () => void;
 }
 
-export function NavLink({ href, active, icon, children }: NavLinkProps) {
+export function NavLink({ href, active, icon, children, onClick }: NavLinkProps) {
   return (
     <Link
       href={href}
+      onClick={onClick}
       aria-current={active ? 'page' : undefined}
       className={cn(
         'flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
