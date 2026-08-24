@@ -49,6 +49,18 @@ export function clientIdFromPathname(pathname: string): string | null {
   return match?.[1] ?? null;
 }
 
+/**
+ * Extrai o `sessionId` das rotas de conciliação do cliente —
+ * `/clientes/{id}/conciliacao/{sessionId}` e a variante
+ * `/clientes/{id}/conciliacao/processando/{sessionId}`. É o que permite ao
+ * breadcrumb do `ClientShell` acrescentar o nível da sessão derivando 100%
+ * do pathname (86e2u513w), sem estado registrado pela tela filha.
+ */
+export function sessionIdFromPathname(pathname: string): string | null {
+  const match = /^\/clientes\/[^/]+\/conciliacao\/(?:processando\/)?([^/]+)$/.exec(pathname);
+  return match?.[1] ?? null;
+}
+
 /** Camada GLOBAL: lista de clientes (ou a casa do tenant) + Configurações. */
 export function globalNavSections(user: AuthenticatedUser, pathname: string): NavSection[] {
   // Gating por perfil (R4): usuário DE tenant não tem lista global de clientes —
