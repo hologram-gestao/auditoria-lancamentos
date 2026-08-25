@@ -77,12 +77,12 @@ function resolveBalanceStatus(difference: string | null): {
   if (Math.abs(value) <= 0.01) {
     return {
       label: 'Conferido',
-      className: 'text-emerald-700 dark:text-emerald-300',
+      className: 'text-success',
     };
   }
   return {
     label: 'Divergente',
-    className: 'text-red-700 dark:text-red-300 font-semibold',
+    className: 'text-destructive font-semibold',
   };
 }
 

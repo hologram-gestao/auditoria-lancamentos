@@ -12,7 +12,7 @@ export function SeverityBadge({ severity }: SeverityBadgeProps) {
   if (severity === 'critical') {
     return (
       <span
-        className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800 dark:bg-red-900/40 dark:text-red-200"
+        className="bg-destructive-muted text-destructive inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
         aria-label="Severidade crítica"
       >
         <AlertOctagon className="h-3 w-3" aria-hidden="true" />
@@ -23,7 +23,7 @@ export function SeverityBadge({ severity }: SeverityBadgeProps) {
   if (severity === 'moderate') {
     return (
       <span
-        className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200"
+        className="bg-warning-muted text-warning inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
         aria-label="Severidade moderada"
       >
         <AlertTriangle className="h-3 w-3" aria-hidden="true" />
@@ -34,7 +34,7 @@ export function SeverityBadge({ severity }: SeverityBadgeProps) {
   if (severity === 'info') {
     return (
       <span
-        className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800 dark:bg-sky-900/40 dark:text-sky-200"
+        className="bg-info-muted text-info inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
         aria-label="Severidade informativa"
       >
         <Info className="h-3 w-3" aria-hidden="true" />
@@ -43,7 +43,7 @@ export function SeverityBadge({ severity }: SeverityBadgeProps) {
     );
   }
   return (
-    <span className="inline-flex rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+    <span className="bg-muted text-muted-foreground inline-flex rounded-full px-2 py-0.5 text-xs font-medium">
       {severity}
     </span>
   );

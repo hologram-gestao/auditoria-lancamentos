@@ -3,9 +3,9 @@
  *   - Perfil:  admin → azul · manager → cinza
  *   - Status:  ativo → verde · inativo → vermelho
  *
- * As cores são aplicadas via Tailwind direto (não como variantes do shadcn Badge)
- * porque a paleta padrão do shadcn não tem "success"; criar variantes sob medida
- * só pra duas badges seria over-engineering pra MVP.
+ * Pintam por TOKEN semântico (86e2n39hb): o tema tem `success`/`info` e
+ * companhia no globals.css, e é o token que flipa entre claro/escuro — cor
+ * fixa da paleta aqui não recebe a marca da 86e2ukrc9 nem o tema escuro.
  */
 
 import type { UserRoleValue } from '@/lib/api/users';
@@ -21,8 +21,8 @@ export function UserRoleBadge({ role }: { role: UserRoleValue }) {
       className={cn(
         baseBadge,
         isAdmin
-          ? 'bg-blue-50 text-blue-700 ring-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:ring-blue-800'
-          : 'bg-zinc-100 text-zinc-700 ring-zinc-200 dark:bg-zinc-900 dark:text-zinc-300 dark:ring-zinc-700',
+          ? 'bg-info-muted text-info ring-info/30'
+          : 'bg-muted text-muted-foreground ring-border',
       )}
     >
       {isAdmin ? 'Admin' : 'Gerente'}
@@ -36,8 +36,8 @@ export function UserStatusBadge({ active }: { active: boolean }) {
       className={cn(
         baseBadge,
         active
-          ? 'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-800'
-          : 'bg-red-50 text-red-700 ring-red-200 dark:bg-red-950/40 dark:text-red-300 dark:ring-red-800',
+          ? 'bg-success-muted text-success ring-success/30'
+          : 'bg-destructive-muted text-destructive ring-destructive/30',
       )}
     >
       {active ? 'Ativo' : 'Inativo'}

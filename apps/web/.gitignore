@@ -1,6 +1,11 @@
-# Relatório do gate de a11y (`scripts/a11y-gate.sh` → `apps/web/a11y-report.json`).
+# Relatórios do gate de a11y (`scripts/a11y-gate.sh` → `a11y-report-<tema>.json`,
+# um por tema desde a 86e2n39hb; o nome antigo sem sufixo fica coberto também).
 # São ~189 KB de saída de ferramenta que já entraram num commit uma vez e
 # reprovaram uma task. O `.gitignore` da RAIZ não resolve: ele está fora do
 # `gitPaths` de qualquer agent, então o agent que roda o gate não consegue
 # entregar a regra junto com a correção. Aqui, sim — este arquivo é do front.
-a11y-report.json
+a11y-report*.json
+
+# Screenshots de conferência visual do gate (`E2E_SHOTS=1`, uma pasta por
+# tema). Artefato de execução, nunca entra em commit — como o relatório acima.
+a11y-shots/

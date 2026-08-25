@@ -61,11 +61,15 @@ function BadgeComDica({
 }
 
 export function SituationBadge({ situation, title }: SituationBadgeProps) {
+  // 86e2n39hb — badges pintam por TOKEN (par `-muted` + sólido, travado no
+  // theme-contrast.test.ts nos dois temas), nunca pela paleta crua. O laranja
+  // (data divergente) e o âmbar (sem Omie) colapsaram no MESMO `warning` de
+  // propósito: `orange-100` e `amber-100` eram vizinhos quase indistinguíveis
+  // e o distintivo real sempre foi o RÓTULO — dois tokens quentes seriam
+  // estrutura sem função.
   if (situation === 'conciliado_data_divergente') {
-    const classes = cn(
-      'inline-flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-800',
-      'dark:bg-orange-900/40 dark:text-orange-200',
-    );
+    const classes =
+      'bg-warning-muted text-warning inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium';
     const conteudo = (
       <>
         <AlertTriangle className="h-3 w-3" aria-hidden="true" />
@@ -83,12 +87,7 @@ export function SituationBadge({ situation, title }: SituationBadgeProps) {
   }
   if (situation === 'conciliado') {
     return (
-      <span
-        className={cn(
-          'inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800',
-          'dark:bg-emerald-900/40 dark:text-emerald-200',
-        )}
-      >
+      <span className="bg-success-muted text-success inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium">
         <Check className="h-3 w-3" aria-hidden="true" />
         Conciliado
       </span>
@@ -96,12 +95,7 @@ export function SituationBadge({ situation, title }: SituationBadgeProps) {
   }
   if (situation === 'sem_omie') {
     return (
-      <span
-        className={cn(
-          'inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800',
-          'dark:bg-amber-900/40 dark:text-amber-200',
-        )}
-      >
+      <span className="bg-warning-muted text-warning inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium">
         <AlertTriangle className="h-3 w-3" aria-hidden="true" />
         Sem Omie
       </span>
@@ -109,19 +103,14 @@ export function SituationBadge({ situation, title }: SituationBadgeProps) {
   }
   if (situation === 'ignorado') {
     return (
-      <span
-        className={cn(
-          'inline-flex items-center gap-1 rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700',
-          'dark:bg-slate-700 dark:text-slate-200',
-        )}
-      >
+      <span className="bg-muted text-muted-foreground inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium">
         <MinusCircle className="h-3 w-3" aria-hidden="true" />
         Ignorado
       </span>
     );
   }
   return (
-    <span className="inline-flex rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+    <span className="bg-muted text-muted-foreground inline-flex rounded-full px-2 py-0.5 text-xs font-medium">
       {situation}
     </span>
   );

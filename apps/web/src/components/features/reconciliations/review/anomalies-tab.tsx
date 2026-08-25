@@ -429,7 +429,7 @@ function AnomalyRow({
             <span className="text-muted-foreground text-xs">{anomaly.context}</span>
           )}
           {anomaly.resolution_note !== null && anomaly.resolution_note.trim() !== '' && (
-            <span className="mt-0.5 text-xs italic text-emerald-700 dark:text-emerald-300">
+            <span className="text-success mt-0.5 text-xs italic">
               Resolução: {anomaly.resolution_note}
             </span>
           )}
@@ -471,9 +471,7 @@ function StatusPill({ resolved }: { resolved: boolean }) {
     <span
       className={cn(
         'inline-flex rounded-full px-2 py-0.5 text-xs font-medium',
-        resolved
-          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200'
-          : 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-200',
+        resolved ? 'bg-success-muted text-success' : 'bg-warning-muted text-warning',
       )}
     >
       {resolved ? 'Resolvida' : 'Pendente'}

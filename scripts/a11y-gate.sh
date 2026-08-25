@@ -14,8 +14,15 @@
 # deixaria o gate verde sem ter medido nada.
 #
 # Uso:
-#   bash scripts/a11y-gate.sh          # porta 3100
+#   bash scripts/a11y-gate.sh                    # porta 3100, DOIS temas (claro e escuro)
+#   A11Y_THEME=dark bash scripts/a11y-gate.sh    # um tema só (light | dark | both)
 #   A11Y_PORT=3200 bash scripts/a11y-gate.sh
+#
+# Temas (86e2n39hb): a suíte roda uma vez POR TEMA — `E2E_THEME` entra no spec
+# via localStorage antes do primeiro paint. O padrão é `both`: o escuro sem
+# medição foi exatamente o buraco que esta task fechou, e a task da paleta
+# (86e2ukrc9) herda este gate como instrumento. Relatórios separados por tema
+# (`a11y-report-<tema>.json`).
 #
 # Pré-requisito de máquina: as libs de sistema do Chromium. Se o browser baixar
 # mas não subir (`libnspr4.so: cannot open shared object file`), rode uma vez:
@@ -28,7 +35,16 @@ set -euo pipefail
 PORT="${A11Y_PORT:-3100}"
 BASE_URL="http://127.0.0.1:${PORT}"
 SPEC="e2e/a11y-mocked.spec.ts"
-REPORT="a11y-report.json"
+
+case "${A11Y_THEME:-both}" in
+  light) THEMES="light" ;;
+  dark) THEMES="dark" ;;
+  both) THEMES="light dark" ;;
+  *)
+    echo "ERRO: A11Y_THEME deve ser light, dark ou both (recebi '${A11Y_THEME}')." >&2
+    exit 1
+    ;;
+esac
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -87,39 +103,46 @@ fi
 # intermitente (típica de estado de carregamento) é violação, não ruído.
 # `--trace=retain-on-failure` repõe o trace que o config só gerava
 # `on-first-retry`.
-echo "==> axe-core (reprova em critical/serious)"
-set +e
-E2E_BASE_URL="$BASE_URL" PLAYWRIGHT_JSON_OUTPUT_NAME="$REPORT" \
-  pnpm --filter @auditoria/web exec playwright test "$SPEC" \
-    --retries=0 --trace=retain-on-failure --reporter=list,json
-TEST_EXIT=$?
-set -e
+FINAL_EXIT=0
+for THEME in $THEMES; do
+  REPORT="a11y-report-${THEME}.json"
+  echo "==> axe-core · tema ${THEME} (reprova em critical/serious)"
+  set +e
+  E2E_BASE_URL="$BASE_URL" E2E_THEME="$THEME" PLAYWRIGHT_JSON_OUTPUT_NAME="$REPORT" \
+    pnpm --filter @auditoria/web exec playwright test "$SPEC" \
+      --retries=0 --trace=retain-on-failure --reporter=list,json
+  TEST_EXIT=$?
+  set -e
+  if [[ "$TEST_EXIT" -ne 0 ]]; then
+    FINAL_EXIT="$TEST_EXIT"
+  fi
 
-# Rede de segurança contra o modo de falha que motivou este gate: suíte que se
-# auto-pula e devolve "tudo verde" sem ter medido nada.
-node -e '
-  const fs = require("fs");
-  const path = "apps/web/'"$REPORT"'";
-  if (!fs.existsSync(path)) {
-    console.error("ERRO: relatório do Playwright não foi gerado — a suíte não chegou a rodar.");
-    process.exit(1);
-  }
-  const { stats = {} } = JSON.parse(fs.readFileSync(path, "utf8"));
-  console.log(`expected=${stats.expected} unexpected=${stats.unexpected} skipped=${stats.skipped} flaky=${stats.flaky}`);
-  if (!(stats.expected > 0)) {
-    console.error("ERRO: nenhum teste de a11y passou de fato — verde sem medir nada.");
-    process.exit(1);
-  }
-  if (stats.skipped > 0) {
-    console.error(`ERRO: ${stats.skipped} teste(s) de a11y foram pulados — o gate precisa rodar todos.`);
-    process.exit(1);
-  }
-  // Rede do `--retries=0` acima: se o retry voltar (config ou comando), `flaky`
-  // volta a existir e o Playwright sai 0 mesmo com violação medida.
-  if (stats.flaky > 0) {
-    console.error(`ERRO: ${stats.flaky} teste(s) de a11y ficaram FLAKY — violação intermitente conta como violação. Rode sem retry e corrija o spec.`);
-    process.exit(1);
-  }
-'
+  # Rede de segurança contra o modo de falha que motivou este gate: suíte que
+  # se auto-pula e devolve "tudo verde" sem ter medido nada — POR TEMA.
+  node -e '
+    const fs = require("fs");
+    const path = "apps/web/'"$REPORT"'";
+    if (!fs.existsSync(path)) {
+      console.error("ERRO: relatório do Playwright não foi gerado — a suíte não chegou a rodar.");
+      process.exit(1);
+    }
+    const { stats = {} } = JSON.parse(fs.readFileSync(path, "utf8"));
+    console.log(`tema '"$THEME"': expected=${stats.expected} unexpected=${stats.unexpected} skipped=${stats.skipped} flaky=${stats.flaky}`);
+    if (!(stats.expected > 0)) {
+      console.error("ERRO: nenhum teste de a11y passou de fato — verde sem medir nada.");
+      process.exit(1);
+    }
+    if (stats.skipped > 0) {
+      console.error(`ERRO: ${stats.skipped} teste(s) de a11y foram pulados — o gate precisa rodar todos.`);
+      process.exit(1);
+    }
+    // Rede do `--retries=0` acima: se o retry voltar (config ou comando), `flaky`
+    // volta a existir e o Playwright sai 0 mesmo com violação medida.
+    if (stats.flaky > 0) {
+      console.error(`ERRO: ${stats.flaky} teste(s) de a11y ficaram FLAKY — violação intermitente conta como violação. Rode sem retry e corrija o spec.`);
+      process.exit(1);
+    }
+  '
+done
 
-exit "$TEST_EXIT"
+exit "$FINAL_EXIT"

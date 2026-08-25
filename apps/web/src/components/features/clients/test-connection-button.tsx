@@ -46,8 +46,8 @@ export function TestConnectionButton({ state, disabled, onClick }: TestConnectio
       <div
         className={cn(
           ALERT_BASE,
-          'border-emerald-200 bg-emerald-50 text-emerald-800',
-          'dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300',
+          // 86e2n39hb — tokens semânticos: flipam entre os temas sozinhos.
+          'border-success/30 bg-success-muted text-success',
         )}
         aria-live="polite"
       >
@@ -66,7 +66,7 @@ export function TestConnectionButton({ state, disabled, onClick }: TestConnectio
           disabled={disabled}
           className={cn(
             'text-sm font-medium underline-offset-4 hover:underline focus-visible:underline',
-            'text-blue-600 dark:text-blue-400',
+            'text-info',
             'disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline',
             'focus-visible:ring-ring rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
           )}
@@ -76,11 +76,7 @@ export function TestConnectionButton({ state, disabled, onClick }: TestConnectio
       </div>
       {state.kind === 'failure' && (
         <div
-          className={cn(
-            ALERT_BASE,
-            'border-red-200 bg-red-50 text-red-800',
-            'dark:border-red-900 dark:bg-red-950/40 dark:text-red-300',
-          )}
+          className={cn(ALERT_BASE, 'border-destructive/30 bg-destructive-muted text-destructive')}
           aria-live="assertive"
         >
           <X className="mt-0.5 h-4 w-4 flex-none" aria-hidden="true" />
