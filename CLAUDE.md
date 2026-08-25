@@ -433,11 +433,15 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   Pareamento que não pode inverter: sobre o token SÓLIDO usa-se `-foreground`; sobre a
   variante `-muted` o texto é o SÓLIDO — trocar é branco sobre quase-branco (travado em
   `theme-contrast.test.ts`, que roda `:root` E `.dark`).
-- **Temas: claro, escuro e HOLOGRAM** (86e2n39hb + 86e2ukrc9): `next-themes` no layout
-  RAIZ (`app/providers.tsx` — o tema vale no login), padrão `system`, escolha no
-  localStorage, toggle no header (`components/shared/theme-toggle.tsx`). O terceiro
-  tema (`.hologram` no globals.css) tem as superfícies no navy da marca e botão
-  primário branco; `system` resolve só claro/escuro — Hologram é escolha manual. A
+- **Temas: claro, escuro e HOLOGRAM — e o Hologram é o PADRÃO** (86e2n39hb +
+  86e2ukrc9; default decidido pelo Pedro em 25/08/2026): `next-themes` no layout
+  RAIZ (`app/providers.tsx` — o tema vale no login), `defaultTheme="hologram"`,
+  escolha no localStorage, toggle no header (`components/shared/theme-toggle.tsx`).
+  Quem nunca escolheu vê o tema da marca (inclusive no login); quem já escolheu
+  mantém (o next-themes só grava no `setTheme`). O tema da marca (`.hologram` no
+  globals.css) tem as superfícies no navy e botão primário branco; `system` segue
+  no toggle resolvendo só claro/escuro — agora como escolha, não padrão. O default
+  é travado no e2e (sem localStorage → `<html class="hologram">`). A
   logomark (`components/shared/brand-mark.tsx`) pinta o PNG oficial por CSS mask +
   `bg-current`: em `text-primary` sai marinho/índigo/branca conforme o tema, sem
   variante. **O gate de a11y roda EM TODOS OS TEMAS por mecanismo**:
@@ -676,6 +680,8 @@ lembrar dos comandos.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.17 — 25/08/2026. **O tema Hologram virou o PADRÃO do produto** (decisão do Pedro, sem task — registro direto). `defaultTheme="hologram"` no provider raiz: quem nunca escolheu tema vê a marca por padrão, inclusive no login; escolha salva no localStorage é respeitada (o next-themes só grava no `setTheme`), e Claro/Escuro/Seguir o sistema continuam no toggle — `system` virou escolha, não padrão. §7 atualizado; o default ganhou trava própria no e2e (localStorage vazio → `<html class="hologram">`, nas três legs do gate). O ícone pré-hidratação do toggle passou a ser a logomark (o caso comum agora é Hologram)._
 
 _Versão 1.16 — 25/08/2026. **A marca aterrissou (86e2ukrc9): paleta nos tokens, tema HOLOGRAM e a logomark no produto.** O marinho oficial (`#0C0C5A`, amostrado por PIXEL do logomark em `Docs/brand/` — nunca de print, §6.5) entrou em `--primary`/`--ring`/`--accent` dos temas claro/escuro, e nasceu o TERCEIRO tema `.hologram` (superfícies navy da marca, botão primário branco; `system` não o resolve — escolha manual). A logomark vive em `components/shared/brand-mark.tsx` como CSS mask + `bg-current` (um PNG de 5KB, cor por token, sem variante por tema) no header e no login — e abaixo de `sm` a logo É a marca (o título some; com os dois, o truncate esmagava o título para um "A" órfão em 390px, pego por print). §7 atualizado: o gate roda EM TODOS os temas (matrix de 3) e o `theme-contrast.test.ts` asserta os três blocos (54 pares). Turquesa/azul-royal ficaram FORA por falta de referência-fonte — retomar se o guia da marca aparecer._
 

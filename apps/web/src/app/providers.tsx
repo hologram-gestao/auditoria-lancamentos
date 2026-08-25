@@ -8,13 +8,16 @@
  * component. Defaults da Query escolhidos para painéis admin (CRUD com mutations
  * frequentes): staleTime curto, retry conservador.
  *
- * Tema (86e2n39hb, decisões de 25/08/2026): padrão `system`, persistência no
- * localStorage (os dois defaults do next-themes). O provider vive AQUI — layout
- * RAIZ, não no shell autenticado — porque o tema vale também no login (decisão
- * (c) da task). `attribute="class"` casa com o `darkMode: ['class']` do
- * Tailwind; `disableTransitionOnChange` evita o piscar de cores na troca; o
- * script inline do próprio next-themes aplica a classe ANTES da hidratação
- * (sem FOUC — exige o `suppressHydrationWarning` que o `<html>` já tem).
+ * Tema (86e2n39hb + decisão do Pedro em 25/08/2026): padrão **HOLOGRAM** — o
+ * tema da marca é a cara do produto para quem nunca escolheu nada; quem já
+ * escolheu no localStorage mantém a escolha (o next-themes só grava no
+ * setTheme, então o default não sobrescreve ninguém), e Claro/Escuro/Seguir o
+ * sistema continuam no toggle. O provider vive AQUI — layout RAIZ, não no
+ * shell autenticado — porque o tema vale também no login. `attribute="class"`
+ * casa com o `darkMode: ['class']` do Tailwind; `disableTransitionOnChange`
+ * evita o piscar de cores na troca; o script inline do próprio next-themes
+ * aplica a classe ANTES da hidratação (sem FOUC — exige o
+ * `suppressHydrationWarning` que o `<html>` já tem).
  */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -102,11 +105,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <ThemeProvider
       attribute="class"
-      defaultTheme="system"
+      // O tema BASE é o da marca (decisão do Pedro, 25/08/2026). `system`
+      // segue disponível no toggle e resolvendo só claro/escuro — mas agora é
+      // escolha, não padrão. Travado no e2e: sem localStorage, o <html> tem
+      // de sair com a classe `hologram`.
+      defaultTheme="hologram"
       enableSystem
       disableTransitionOnChange
-      // O terceiro tema (86e2ukrc9): o `system` continua resolvendo só
-      // claro/escuro — Hologram é escolha manual no toggle.
       themes={['light', 'dark', 'hologram']}
     >
       <QueryClientProvider client={client}>

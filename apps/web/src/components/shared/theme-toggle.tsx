@@ -1,19 +1,21 @@
 'use client';
 
 /**
- * Seletor de tema do header (86e2n39hb) — Claro / Escuro / Seguir o sistema.
+ * Seletor de tema do header (86e2n39hb) — Claro / Escuro / Hologram / Sistema.
  *
- * Decisões de 25/08/2026: padrão `system`, persistência no localStorage — os
- * dois são o comportamento nativo do next-themes, aqui só se ESCOLHE.
+ * Padrão do app: **Hologram** (decisão do Pedro, 25/08/2026) — o default vive
+ * no `ThemeProvider` (`app/providers.tsx`); aqui só se ESCOLHE, e a escolha
+ * persiste no localStorage (comportamento nativo do next-themes).
  *
  * Radio group de verdade (`DropdownMenuRadioGroup`): o leitor de tela anuncia
- * qual opção está ativa, em vez de três itens soltos. O rótulo do gatilho é
+ * qual opção está ativa, em vez de itens soltos. O rótulo do gatilho é
  * `aria-label` (critério da task: não só ícone).
  *
  * Hidratação: o servidor não sabe o tema (localStorage é do cliente) — antes
- * de `mounted` o ícone é o de tema claro fixo, e só depois da montagem ele
- * reflete o `resolvedTheme`. Renderizar o "real" direto divergiria do HTML do
- * servidor (hydration mismatch clássico do next-themes).
+ * de `mounted` o ícone é a logomark fixa (o caso comum: ninguém escolheu nada
+ * e o tema é o Hologram), e só depois da montagem ele reflete o
+ * `resolvedTheme`. Renderizar o "real" direto divergiria do HTML do servidor
+ * (hydration mismatch clássico do next-themes).
  */
 import { Monitor, Moon, Sun } from 'lucide-react';
 import { useTheme } from 'next-themes';
@@ -37,9 +39,9 @@ export function ThemeToggle() {
   }, []);
 
   const icon =
-    mounted && resolvedTheme === 'hologram' ? (
+    !mounted || resolvedTheme === 'hologram' ? (
       <BrandMark className="h-5 w-5" />
-    ) : mounted && resolvedTheme === 'dark' ? (
+    ) : resolvedTheme === 'dark' ? (
       <Moon className="h-5 w-5" aria-hidden="true" />
     ) : (
       <Sun className="h-5 w-5" aria-hidden="true" />
@@ -58,7 +60,7 @@ export function ThemeToggle() {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuRadioGroup
-          value={mounted ? (theme ?? 'system') : 'system'}
+          value={mounted ? (theme ?? 'hologram') : 'hologram'}
           onValueChange={setTheme}
         >
           <DropdownMenuRadioItem value="light">
