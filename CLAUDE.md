@@ -433,12 +433,18 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   Pareamento que não pode inverter: sobre o token SÓLIDO usa-se `-foreground`; sobre a
   variante `-muted` o texto é o SÓLIDO — trocar é branco sobre quase-branco (travado em
   `theme-contrast.test.ts`, que roda `:root` E `.dark`).
-- **Tema claro/escuro** (86e2n39hb): `next-themes` no layout RAIZ (`app/providers.tsx` —
-  o tema vale no login), padrão `system`, escolha no localStorage, toggle no header
-  (`components/shared/theme-toggle.tsx`). **O gate de a11y roda NOS DOIS TEMAS por
-  mecanismo**: `scripts/a11y-gate.sh` default `both` (`A11Y_THEME=light|dark` para um
-  só) e matrix `theme` no job `web_a11y` do CI — mudança de token/cor só fecha com os
-  dois runs verdes. Dropdown que abre sobre a página usa `modal={false}` (o modo modal
+- **Temas: claro, escuro e HOLOGRAM** (86e2n39hb + 86e2ukrc9): `next-themes` no layout
+  RAIZ (`app/providers.tsx` — o tema vale no login), padrão `system`, escolha no
+  localStorage, toggle no header (`components/shared/theme-toggle.tsx`). O terceiro
+  tema (`.hologram` no globals.css) tem as superfícies no navy da marca e botão
+  primário branco; `system` resolve só claro/escuro — Hologram é escolha manual. A
+  logomark (`components/shared/brand-mark.tsx`) pinta o PNG oficial por CSS mask +
+  `bg-current`: em `text-primary` sai marinho/índigo/branca conforme o tema, sem
+  variante. **O gate de a11y roda EM TODOS OS TEMAS por mecanismo**:
+  `scripts/a11y-gate.sh` default `both` = os três (`A11Y_THEME=light|dark|hologram`
+  para um só) e matrix `theme` no job `web_a11y` do CI — mudança de token/cor só fecha
+  com os três runs verdes, e o `theme-contrast.test.ts` asserta os pares nos três
+  blocos. Dropdown que abre sobre a página usa `modal={false}` (o modo modal
   do Radix marca o fundo com `aria-hidden` mantendo focáveis — `aria-hidden-focus` no
   axe; padrão documentado no sino e no toggle).
 - **O relatório do gate de a11y é artefato, nunca fonte.** `scripts/a11y-gate.sh` escreve
@@ -670,6 +676,8 @@ lembrar dos comandos.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.16 — 25/08/2026. **A marca aterrissou (86e2ukrc9): paleta nos tokens, tema HOLOGRAM e a logomark no produto.** O marinho oficial (`#0C0C5A`, amostrado por PIXEL do logomark em `Docs/brand/` — nunca de print, §6.5) entrou em `--primary`/`--ring`/`--accent` dos temas claro/escuro, e nasceu o TERCEIRO tema `.hologram` (superfícies navy da marca, botão primário branco; `system` não o resolve — escolha manual). A logomark vive em `components/shared/brand-mark.tsx` como CSS mask + `bg-current` (um PNG de 5KB, cor por token, sem variante por tema) no header e no login — e abaixo de `sm` a logo É a marca (o título some; com os dois, o truncate esmagava o título para um "A" órfão em 390px, pego por print). §7 atualizado: o gate roda EM TODOS os temas (matrix de 3) e o `theme-contrast.test.ts` asserta os três blocos (54 pares). Turquesa/azul-royal ficaram FORA por falta de referência-fonte — retomar se o guia da marca aparecer._
 
 _Versão 1.15 — 25/08/2026. **O sistema ganhou tema claro/escuro (86e2n39hb) — e duas regras novas no §7.** O `ThemeProvider` do next-themes subiu no layout RAIZ (tema vale no login; padrão `system`, escolha no localStorage — decisões do Pedro em 25/08), com toggle no header. A varredura matou TODA cor fixa da paleta e TODA variante `dark:` em componente (13 arquivos migrados para os tokens semânticos que o `globals.css` já tinha nos dois temas; âmbar e laranja colapsaram no MESMO `warning` de propósito — eram vizinhos indistinguíveis e o rótulo sempre foi o distintivo). Regra nova: cor em componente é SEMPRE token semântico, com o grep de cor fixa em zero como critério verificável — é o contrato que a task da paleta (86e2ukrc9) herda: ela muda só VALORES no `globals.css`. Segunda regra: **o gate de a11y roda nos dois temas por mecanismo** (`A11Y_THEME` no script, matrix no CI) — o gate pegou de verdade nesta task (`aria-hidden-focus` no menu de tema em modo modal, corrigido com `modal={false}` como no sino). Detalhe de mecanismo: os screenshots do gate saem em `a11y-shots/<tema>/`, FORA de `test-results/` — o Playwright limpa aquele diretório a cada run e o segundo tema apagava a coleção do primeiro._
 
