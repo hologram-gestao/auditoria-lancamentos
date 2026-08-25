@@ -1601,6 +1601,27 @@ for (const vp of VIEWPORTS) {
       // Estado de partida VISÍVEL — "não avaliei" precisa ser legível.
       await expect(row.getByText('Não avaliado')).toBeVisible();
 
+      // 86e2z83x7 — o PAR de veredito tem largura FIXA e IGUAL, travada por
+      // MEDIDA (gate verde não vê alinhamento): empilhado (coluna w-56 nos
+      // dois viewports do gate), cada botão dimensionava pelo próprio rótulo e
+      // as bordas esquerdas desalinhavam. Botões não animam — medir direto.
+      const botaoProcedente = await page
+        .getByRole('button', { name: 'Marcar "Classificação suspeita" como procedente' })
+        .boundingBox();
+      const botaoImprocedente = await page
+        .getByRole('button', { name: 'Marcar "Classificação suspeita" como improcedente' })
+        .boundingBox();
+      expect(botaoProcedente).not.toBeNull();
+      expect(botaoImprocedente).not.toBeNull();
+      expect(
+        Math.abs((botaoProcedente?.width ?? 0) - (botaoImprocedente?.width ?? 0)),
+        'os dois botões do veredito precisam ter a MESMA largura',
+      ).toBeLessThan(1);
+      expect(
+        Math.abs((botaoProcedente?.x ?? 0) - (botaoImprocedente?.x ?? 0)),
+        'empilhados, as bordas esquerdas dos dois botões precisam coincidir',
+      ).toBeLessThan(1);
+
       await page
         .getByRole('button', { name: 'Marcar "Classificação suspeita" como improcedente' })
         .click();
