@@ -47,6 +47,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAllSemOmieEntries, useAnomalies } from '@/hooks/use-reconciliations';
 import type { AnomalyItem, FileEntryItem } from '@/lib/api/reconciliations';
 import { hasPermission } from '@/lib/authz';
@@ -71,7 +72,7 @@ type SeverityFilter = 'all' | 'critical' | 'moderate' | 'info';
 type ResolvedFilter = 'all' | 'true' | 'false';
 /** As opções vêm da `PaginationBar` (10/20/50/100) — nada de lista paralela. */
 const DEFAULT_PAGE_SIZE = 20;
-/** Severidade · Tipo · Linha · Detectado por · Status · Veredito · Ações. */
+/** Severidade · Tipo · Linha · Origem · Status · Veredito · Ações. */
 const BASE_COLUMN_COUNT = 7;
 
 export function AnomaliesTab({ sessionId, isCard }: AnomaliesTabProps) {
@@ -226,11 +227,17 @@ export function AnomaliesTab({ sessionId, isCard }: AnomaliesTabProps) {
                   />
                 </TableHead>
               )}
-              <TableHead className="w-32">Severidade</TableHead>
-              <TableHead className="w-48">Tipo</TableHead>
-              <TableHead>Linha relacionada</TableHead>
-              <TableHead className="w-32">Detectado por</TableHead>
-              <TableHead className="w-28">Status</TableHead>
+              {/* 86e2xmug9 — economia de largura: no auto-layout do browser os
+                  `w-*` são preferência, não lei. Quem manda é o conteúdo: por
+                  isso TIPO (o conteúdo denso — nome + context clampado) é a
+                  ÚNICA coluna sem largura, com `min-w-56` de piso, e a LINHA
+                  RELACIONADA é limitada por um bloco interno `max-w-56` na
+                  célula — cap no `th` sozinho não segura a célula esticada. */}
+              <TableHead className="w-24">Severidade</TableHead>
+              <TableHead className="min-w-48">Tipo</TableHead>
+              <TableHead className="w-56">Linha relacionada</TableHead>
+              <TableHead className="w-24">Origem</TableHead>
+              <TableHead className="w-24">Status</TableHead>
               {/* Sprint 6 / R4: "o flag procedia?" — eixo diferente de Status. */}
               <TableHead className="w-56 text-right">O flag procedia?</TableHead>
               <TableHead className="w-44 text-right">Ações</TableHead>
@@ -426,16 +433,24 @@ function AnomalyRow({
         <div className="flex flex-col">
           <span className="font-medium">{anomaly.anomaly_type.name}</span>
           {anomaly.context !== null && anomaly.context.trim() !== '' && (
-            <span className="text-muted-foreground text-xs">{anomaly.context}</span>
+            <TextoClampado texto={anomaly.context} className="text-muted-foreground text-xs" />
           )}
           {anomaly.resolution_note !== null && anomaly.resolution_note.trim() !== '' && (
-            <span className="text-success mt-0.5 text-xs italic">
-              Resolução: {anomaly.resolution_note}
-            </span>
+            <TextoClampado
+              texto={`Resolução: ${anomaly.resolution_note}`}
+              className="text-success mt-0.5 text-xs italic"
+            />
           )}
         </div>
       </TableCell>
-      <TableCell className="text-muted-foreground text-sm">{relatedLabel}</TableCell>
+      <TableCell className="text-muted-foreground text-sm">
+        {/* O cap REAL da coluna: no auto-layout a célula estica até o conteúdo,
+            então é o bloco interno que limita — o rótulo já sai truncado em
+            50 chars do `buildRelatedLabel`. O `min-w-40` é o piso: sem ele o
+            Tipo flexível espremia esta coluna a ~110px e o rótulo virava uma
+            escada de 6 linhas (pego por print na 86e2xmug9). */}
+        <span className="block min-w-40 max-w-56">{relatedLabel}</span>
+      </TableCell>
       <TableCell className="text-muted-foreground text-sm">{detectedByLabel}</TableCell>
       <TableCell>
         <StatusPill resolved={anomaly.resolved} />
@@ -463,6 +478,41 @@ function AnomalyRow({
         </div>
       </TableCell>
     </TableRow>
+  );
+}
+
+/**
+ * Texto longo da célula Tipo com `line-clamp-2` — é o clamp que devolve o
+ * ritmo vertical à tabela (86e2xmug9: cada `context` de tamanho diferente
+ * fazia uma altura de linha diferente). O conteúdo INTEIRO continua
+ * alcançável pelo padrão do `BadgeComDica` (fix a09a7c3): Tooltip do design
+ * system, `role="img"` (ARIA proíbe `aria-label` em span de role genérico) com
+ * o `aria-label` carregando o texto COMPLETO — anunciado sem tooltip aberto —
+ * e `tabIndex={0}` com anel de foco (o Radix abre a dica no foco). Nunca
+ * `title` nativo: não aparece em toque, não alcança teclado, leitor ignora.
+ */
+function TextoClampado({ texto, className }: { texto: string; className: string }) {
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            role="img"
+            tabIndex={0}
+            aria-label={texto}
+            className={cn(
+              'focus-visible:ring-ring line-clamp-2 rounded focus-visible:outline-none focus-visible:ring-2',
+              className,
+            )}
+          >
+            {texto}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-sm whitespace-pre-line text-xs leading-snug">
+          {texto}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 
