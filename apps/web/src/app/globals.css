@@ -113,6 +113,12 @@
      TODOS os pares de contraste calculados antes de escrever e travados no
      theme-contrast.test.ts (mínimo do bloco: 4.57:1). */
   .hologram {
+    /* Controles NATIVOS do browser (ícone do calendário no input de mês,
+       scrollbars, etc) seguem o `color-scheme`, não os tokens. O next-themes
+       só seta `color-scheme` inline para os temas `light`/`dark` — tema
+       custom fica SEM, e o ícone renderizava escuro sobre o navy (print do
+       Pedro, 25/08). Hologram é um tema de superfícies escuras: declara. */
+    color-scheme: dark;
     --background: 222 60% 9%;
     --foreground: 0 0% 98%;
     --card: 222 55% 11%;
