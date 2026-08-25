@@ -176,49 +176,42 @@
       autor `system` recebe **"Equipe Hologram"** sem e-mail. A máscara é do
       SERVIDOR — payload com o nome real e UI escondendo não é barreira (§4.9).
       Vale para qualquer endpoint novo que exponha autoria.
-16. **Escrita no Omie (Sprint 7) — a única no sistema, e a mais cara de errar:**
-    - **Nasce desligada.** `OMIE_POSTING_ENABLED` tem default **`False`**
-      (diferente de `QUALIFICATION_ENABLED`): ligar é decisão explícita **por
-      ambiente**, via `--update-env-vars` no Cloud Run, sem deploy. Ligar num
-      ambiente exige que ele rode o código do contrato verificado (abaixo) —
-      o payload antigo (plano) é recusado pela Omie.
-    - **O contrato do `IncluirLancCC` foi VERIFICADO contra a API real em
-      21/08/2026** (captura na conta Hologram; fixtures em
-      `apps/api/tests/fixtures/omie/`, anonimizadas). O que a evidência diz:
-      `param` **ANINHADO** (`cCodIntLanc` no topo + `cabecalho{nCodCC, dDtLanc,
+16. **Escrita no Omie (Sprint 7) — a única no sistema, e a mais cara de errar:** - **Nasce desligada.** `OMIE_POSTING_ENABLED` tem default **`False`**
+    (diferente de `QUALIFICATION_ENABLED`): ligar é decisão explícita **por
+    ambiente**, via `--update-env-vars` no Cloud Run, sem deploy. Ligar num
+    ambiente exige que ele rode o código do contrato verificado (abaixo) —
+    o payload antigo (plano) é recusado pela Omie. - **O contrato do `IncluirLancCC` foi VERIFICADO contra a API real em
+    21/08/2026** (captura na conta Hologram; fixtures em
+    `apps/api/tests/fixtures/omie/`, anonimizadas). O que a evidência diz:
+    `param` **ANINHADO** (`cCodIntLanc` no topo + `cabecalho{nCodCC, dDtLanc,
 nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
-      **NÚMERO JSON** (string dá `3102`); `cTipo` é obrigatório na prática
-      (enviamos `DIN`); **não existe `cNatureza` na escrita** — valor absoluto
-      com categoria de despesa aterrissa como **débito** (extrato devolve
-      natureza `P` e valor negativo). O formato plano anterior foi recusado com
-      `5001` — evidência preservada no histórico da captura. O gate
-      `apps/api/tests/unit/test_omie_fixtures.py` agora **roda verde contra as
-      fixtures reais** e FALHA se o DTO divergir delas.
-    - **Estorno é BLOQUEADO** (`estorno_nao_verificado`, servidor + UI): sem
-      campo de sinal no contrato, a representação do **crédito** segue
-      não-verificada — lançar estorno no palpite poderia registrá-lo como
-      segunda despesa. Só compra (valor negativo) é elegível.
-    - **A dedup primária é do ADL — e a do fornecedor agora é FATO:** o
-      `IncluirLancCC` é **idempotente sobre `cCodIntLanc`** (2º POST devolve o
-      MESMO `nCodLanc`, status 0, sem criar nada — verificado 21/08/2026).
-      Ainda assim, antes de qualquer POST o serviço registra a INTENÇÃO em
-      `reconciliation_omie_postings` e consulta o **próprio** estado.
-      `cCodIntLanc` é derivado da **identidade da linha** (`file_entry_id`),
-      **nunca do conteúdo**: duas compras idênticas na mesma fatura têm de
-      virar **dois** lançamentos.
-    - **Timeout nunca reenvia às cegas.** ⚠️ Verificado 21/08/2026: o
-      `ListarExtrato` **NÃO devolve `cCodIntLanc`**, então a reconciliação
-      pós-timeout por esse caminho é sempre **inconclusiva ⇒ não reenvia**
-      (linha fica travada com "confira no Omie"). A idempotência provada acima
-      permitiria reenviar com segurança — **mudar isso é decisão em aberto
-      (§10), não implementada**. `faultstring` (a Omie responde **HTTP 200** em
-      erro) é falha: **nada** é marcado como lançado.
-    - **A mensagem de erro do provedor é persistida e NUNCA logada** — é texto
-      livre de terceiro e a Omie ecoa o `cObs`, que carrega a descrição da compra
-      (§4.5). No `usage_events` entra só uma **categoria fechada**, nunca o texto.
-    - **Só cartão.** Elegibilidade é `session.account_type == 'credit_card'`
-      (o `CR` do Omie). ⚠️ O PRD chama a conta de cartão de `CA` e **está errado**:
-      `CA` é Conta Aplicação. Filtrar por `CA` lança na conta errada.
+    **NÚMERO JSON** (string dá `3102`); `cTipo` é obrigatório na prática
+    (enviamos `DIN`); **não existe `cNatureza` na escrita** — valor absoluto
+    com categoria de despesa aterrissa como **débito** (extrato devolve
+    natureza `P` e valor negativo). O formato plano anterior foi recusado com
+    `5001` — evidência preservada no histórico da captura. O gate
+    `apps/api/tests/unit/test_omie_fixtures.py` agora **roda verde contra as
+    fixtures reais** e FALHA se o DTO divergir delas. - **Estorno é BLOQUEADO** (`estorno_nao_verificado`, servidor + UI): sem
+    campo de sinal no contrato, a representação do **crédito** segue
+    não-verificada — lançar estorno no palpite poderia registrá-lo como
+    segunda despesa. Só compra (valor negativo) é elegível. - **A dedup primária é do ADL — e a do fornecedor agora é FATO:** o
+    `IncluirLancCC` é **idempotente sobre `cCodIntLanc`** (2º POST devolve o
+    MESMO `nCodLanc`, status 0, sem criar nada — verificado 21/08/2026).
+    Ainda assim, antes de qualquer POST o serviço registra a INTENÇÃO em
+    `reconciliation_omie_postings` e consulta o **próprio** estado.
+    `cCodIntLanc` é derivado da **identidade da linha** (`file_entry_id`),
+    **nunca do conteúdo**: duas compras idênticas na mesma fatura têm de
+    virar **dois** lançamentos. - **Timeout nunca reenvia às cegas.** ⚠️ Verificado 21/08/2026: o
+    `ListarExtrato` **NÃO devolve `cCodIntLanc`**, então a reconciliação
+    pós-timeout por esse caminho é sempre **inconclusiva ⇒ não reenvia**
+    (linha fica travada com "confira no Omie"). A idempotência provada acima
+    permitiria reenviar com segurança — **mudar isso é decisão em aberto
+    (§10), não implementada**. `faultstring` (a Omie responde **HTTP 200** em
+    erro) é falha: **nada** é marcado como lançado. - **A mensagem de erro do provedor é persistida e NUNCA logada** — é texto
+    livre de terceiro e a Omie ecoa o `cObs`, que carrega a descrição da compra
+    (§4.5). No `usage_events` entra só uma **categoria fechada**, nunca o texto. - **Só cartão.** Elegibilidade é `session.account_type == 'credit_card'`
+    (o `CR` do Omie). ⚠️ O PRD chama a conta de cartão de `CA` e **está errado**:
+    `CA` é Conta Aplicação. Filtrar por `CA` lança na conta errada.
 
 ---
 
@@ -430,6 +423,24 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   `aria-label` carregando a explicação INTEIRA (anunciada mesmo sem abrir a dica) +
   `tabIndex={0}` com anel de foco. Padrão em `qualification-cell.tsx`,
   `situation-badge.tsx` e `author-label.tsx` — copiar de lá, não reinventar.
+- **Cor em componente é SEMPRE token semântico** (86e2n39hb): `success`/`warning`/`info`/
+  `destructive` (+ `-foreground`/`-muted`) e os neutros (`muted`, `border`, `input`) do
+  `globals.css`. **Proibido** cor fixa da paleta Tailwind (`emerald-100`, `zinc-700`…) e
+  variante `dark:` em componente — o token flipa entre os temas sozinho, e é nele que a
+  paleta da marca (86e2ukrc9) aterrissa; classe fixa é um lugar onde a marca e o tema
+  escuro nunca chegam. Verificável: o grep de cor fixa em `src/components` (padrão na
+  própria task) volta **zero**, ou a exceção está justificada em comentário no arquivo.
+  Pareamento que não pode inverter: sobre o token SÓLIDO usa-se `-foreground`; sobre a
+  variante `-muted` o texto é o SÓLIDO — trocar é branco sobre quase-branco (travado em
+  `theme-contrast.test.ts`, que roda `:root` E `.dark`).
+- **Tema claro/escuro** (86e2n39hb): `next-themes` no layout RAIZ (`app/providers.tsx` —
+  o tema vale no login), padrão `system`, escolha no localStorage, toggle no header
+  (`components/shared/theme-toggle.tsx`). **O gate de a11y roda NOS DOIS TEMAS por
+  mecanismo**: `scripts/a11y-gate.sh` default `both` (`A11Y_THEME=light|dark` para um
+  só) e matrix `theme` no job `web_a11y` do CI — mudança de token/cor só fecha com os
+  dois runs verdes. Dropdown que abre sobre a página usa `modal={false}` (o modo modal
+  do Radix marca o fundo com `aria-hidden` mantendo focáveis — `aria-hidden-focus` no
+  axe; padrão documentado no sino e no toggle).
 - **O relatório do gate de a11y é artefato, nunca fonte.** `scripts/a11y-gate.sh` escreve
   `apps/web/a11y-report.json` (o CI escreve o mesmo arquivo e o sobe como _artifact_,
   `ci.yml:300-304`). Ele **não entra em commit**: é reescrito a cada execução e carrega
@@ -659,6 +670,8 @@ lembrar dos comandos.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.15 — 25/08/2026. **O sistema ganhou tema claro/escuro (86e2n39hb) — e duas regras novas no §7.** O `ThemeProvider` do next-themes subiu no layout RAIZ (tema vale no login; padrão `system`, escolha no localStorage — decisões do Pedro em 25/08), com toggle no header. A varredura matou TODA cor fixa da paleta e TODA variante `dark:` em componente (13 arquivos migrados para os tokens semânticos que o `globals.css` já tinha nos dois temas; âmbar e laranja colapsaram no MESMO `warning` de propósito — eram vizinhos indistinguíveis e o rótulo sempre foi o distintivo). Regra nova: cor em componente é SEMPRE token semântico, com o grep de cor fixa em zero como critério verificável — é o contrato que a task da paleta (86e2ukrc9) herda: ela muda só VALORES no `globals.css`. Segunda regra: **o gate de a11y roda nos dois temas por mecanismo** (`A11Y_THEME` no script, matrix no CI) — o gate pegou de verdade nesta task (`aria-hidden-focus` no menu de tema em modo modal, corrigido com `modal={false}` como no sino). Detalhe de mecanismo: os screenshots do gate saem em `a11y-shots/<tema>/`, FORA de `test-results/` — o Playwright limpa aquele diretório a cada run e o segundo tema apagava a coleção do primeiro._
 
 _Versão 1.14 — 21/08/2026. **A captura S-1 aconteceu — o contrato de escrita do Omie deixou de ser suposição.** Rodada contra a conta real da Hologram (cartão Inter, três iterações guiadas por faultstring): o formato PLANO foi recusado (`5001`), o aninhado com `nValorLanc` string e sem `cTipo` caiu em `3102`, e o aninhado com **número JSON + `cTipo='DIN'`** foi ACEITO. **§3.16 reescrita como lei atual:** contrato verificado (aninhado, sem `cNatureza` na escrita, valor absoluto → débito), **idempotência de `cCodIntLanc` confirmada** (2º POST devolve o mesmo `nCodLanc`), **estorno bloqueado** (`estorno_nao_verificado`) até a representação do crédito ser capturada, e o caminho pós-timeout registrado como sempre-inconclusivo (o extrato NÃO devolve `cCodIntLanc`) com o reenvio idempotente como decisão em aberto (§10). **§5.6–5.7** ganharam as duas descobertas de leitura: extrato de CARTÃO usa natureza `P`/`R` com valor JÁ sinalizado (`signed_amount` cobre as duas convenções — só inverte `'D'`), e lançamento recém-criado volta **sem `cSituacao`** (campo agora opcional; exigi-lo derrubava o reprocessamento no dia de uma inclusão). Fixtures reais anonimizadas entraram em `apps/api/tests/fixtures/omie/` e o gate `test_omie_fixtures.py` roda verde contra elas — inclusive as 5 leituras, validadas contra resposta real pela primeira vez._
 

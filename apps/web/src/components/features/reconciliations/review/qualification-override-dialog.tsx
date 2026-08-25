@@ -134,8 +134,8 @@ export function QualificationOverrideDialog({
               <span
                 className={cn(
                   'font-medium tabular-nums',
-                  Number(entry.amount) > 0 && 'text-emerald-700 dark:text-emerald-300',
-                  Number(entry.amount) < 0 && 'text-red-700 dark:text-red-300',
+                  Number(entry.amount) > 0 && 'text-success',
+                  Number(entry.amount) < 0 && 'text-destructive',
                 )}
               >
                 {formatBRL(entry.amount, { signed: true })}
@@ -156,8 +156,8 @@ export function QualificationOverrideDialog({
                 className={cn(
                   'rounded-md border px-3 py-2 text-sm',
                   a.anomaly_type.code === 'qualificacao_incoerente'
-                    ? 'bg-red-50 dark:bg-red-950/30'
-                    : 'bg-amber-50 dark:bg-amber-950/30',
+                    ? 'bg-destructive-muted'
+                    : 'bg-warning-muted',
                 )}
               >
                 <div className="font-medium">{a.anomaly_type.name}</div>

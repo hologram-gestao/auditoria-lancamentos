@@ -15,12 +15,12 @@ import { cn } from '@/lib/utils';
 const baseBadge =
   'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset';
 
+// 86e2n39hb — tokens semânticos (flipam sozinhos entre os temas); o anel é o
+// próprio token com alpha, mesmo padrão do Toaster (`border-success/30`).
 const severityClasses: Record<string, string> = {
-  critical:
-    'bg-red-50 text-red-700 ring-red-200 dark:bg-red-950/40 dark:text-red-300 dark:ring-red-800',
-  moderate:
-    'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-800',
-  info: 'bg-zinc-100 text-zinc-700 ring-zinc-200 dark:bg-zinc-900 dark:text-zinc-300 dark:ring-zinc-700',
+  critical: 'bg-destructive-muted text-destructive ring-destructive/30',
+  moderate: 'bg-warning-muted text-warning ring-warning/30',
+  info: 'bg-muted text-muted-foreground ring-border',
 };
 
 const severityLabels: Record<string, string> = {
@@ -41,8 +41,8 @@ export function AnomalyTypeStatusBadge({ active }: { active: boolean }) {
       className={cn(
         baseBadge,
         active
-          ? 'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-800'
-          : 'bg-red-50 text-red-700 ring-red-200 dark:bg-red-950/40 dark:text-red-300 dark:ring-red-800',
+          ? 'bg-success-muted text-success ring-success/30'
+          : 'bg-destructive-muted text-destructive ring-destructive/30',
       )}
     >
       {active ? 'Ativo' : 'Inativo'}

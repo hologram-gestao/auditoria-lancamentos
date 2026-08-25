@@ -20,6 +20,7 @@ import { MobileNavDrawer } from '@/components/features/navigation/mobile-nav-dra
 import { SidebarNav } from '@/components/features/navigation/sidebar-nav';
 import { NotificationBell } from '@/components/features/notifications/notification-bell';
 import { NavigationOutcomeTracker } from '@/components/features/reconciliations/create/navigation-outcome-tracker';
+import { ThemeToggle } from '@/components/shared/theme-toggle';
 import { Button } from '@/components/ui/button';
 import { logout as logoutRequest, refreshSession } from '@/lib/api/auth';
 import { ApiError } from '@/lib/api/client';
@@ -129,6 +130,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="min-w-0 truncate font-semibold">Auditoria de Lançamentos</div>
         </div>
         <div className="flex shrink-0 items-center gap-2 sm:gap-4">
+          <ThemeToggle />
           <NotificationBell />
           <span className="text-muted-foreground flex min-w-0 items-center text-sm">
             <span className="hidden max-w-[16rem] truncate sm:inline">{user.email}</span>

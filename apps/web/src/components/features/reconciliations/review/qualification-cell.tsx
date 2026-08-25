@@ -69,7 +69,7 @@ export function QualificationCell({ anomalies, onOpenOverride }: QualificationCe
                 o nome acessível do ícone. */}
             <span
               role="img"
-              className="inline-flex items-center rounded-full bg-emerald-50 p-1 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
+              className="bg-success-muted text-success inline-flex items-center rounded-full p-1"
               aria-label="Qualificação coerente"
             >
               <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
@@ -86,8 +86,8 @@ export function QualificationCell({ anomalies, onOpenOverride }: QualificationCe
   const Icon = severity === 'critical' ? XCircle : AlertTriangle;
   const colorClasses =
     severity === 'critical'
-      ? 'bg-red-50 text-red-700 hover:bg-red-100 dark:bg-red-950/40 dark:text-red-300'
-      : 'bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300';
+      ? 'bg-destructive-muted text-destructive hover:bg-destructive/20'
+      : 'bg-warning-muted text-warning hover:bg-warning/20';
   const ariaLabel = severity === 'critical' ? 'Qualificação incoerente' : 'Qualificação suspeita';
   const tooltipBody = buildTooltipBody(anomalies);
 

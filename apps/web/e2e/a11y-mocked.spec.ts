@@ -103,6 +103,16 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 
+/**
+ * Tema do run (86e2n39hb) — o gate roda esta suíte UMA vez POR TEMA
+ * (`E2E_THEME=light|dark`, aplicado via localStorage antes de qualquer load;
+ * `theme` é a chave padrão do next-themes). Explícito nos dois casos: depender
+ * do `prefers-color-scheme` do Chromium headless seria medir um tema por
+ * acidente. Quem orquestra os dois runs é `scripts/a11y-gate.sh` e o job
+ * `web_a11y` do CI (matrix) — o spec só obedece.
+ */
+const THEME: 'light' | 'dark' = process.env.E2E_THEME === 'dark' ? 'dark' : 'light';
+
 const CLIENT_ID = '11111111-1111-4111-8111-111111111111';
 /**
  * Tenant ALHEIO (FRONT 05.7). O mock responde com um nome distinto de
@@ -190,7 +200,20 @@ const CLIENT_USERS = [
  */
 async function shot(page: Page, name: string): Promise<void> {
   if (process.env.E2E_SHOTS !== '1') return;
-  await page.screenshot({ path: `test-results/screenshots/${name}.png`, fullPage: true });
+  // FORA de `test-results/`: o Playwright limpa aquele diretório no início de
+  // cada run, e o gate roda a suíte uma vez POR TEMA — dentro dele, o run
+  // escuro apagava a coleção do claro. Uma pasta por tema, e as duas ficam.
+  const path = `a11y-shots/${THEME}/${name}.png`;
+  try {
+    await page.screenshot({ path, fullPage: true });
+  } catch {
+    // A captura é AUXILIAR (só roda com E2E_SHOTS=1) — um soluço do protocolo
+    // de screenshot do Chromium não pode reprovar o gate de A11Y. Uma
+    // retentativa; se falhar de novo, avisa e segue medindo.
+    await page.screenshot({ path, fullPage: true }).catch((err: unknown) => {
+      console.warn(`shot ${name} falhou 2x: ${String(err)}`);
+    });
+  }
 }
 
 const ACCOUNTS = [
@@ -777,7 +800,7 @@ async function analyze(page: Page, label: string): Promise<void> {
   const blocking = results.violations.filter((v) => BLOCKING.includes(v.impact ?? ''));
   expect(
     blocking,
-    `${label}: ${blocking
+    `${label} · tema ${THEME}: ${blocking
       .map((v) => `${v.impact}/${v.id} [${v.nodes.map((n) => n.target.join(' ')).join(' | ')}]`)
       .join(', ')}`,
   ).toHaveLength(0);
@@ -899,6 +922,17 @@ async function conteudoCobertoEmQualquerRolagem(page: Page, seletor: string): Pr
 }
 
 test.beforeEach(async ({ page, context, baseURL }) => {
+  // Tema ANTES de qualquer navegação: o script inline do next-themes lê o
+  // localStorage no primeiro paint — registrado aqui, vale para todo goto.
+  // SET-IF-ABSENT de propósito: o script roda em TODO load; incondicional, um
+  // reload desfaria a escolha feita pelo toggle e o critério "sobrevive ao F5"
+  // seria impossível de medir. O contexto nasce limpo a cada teste, então o
+  // primeiro load sempre grava o tema do run.
+  await page.addInitScript((theme) => {
+    if (window.localStorage.getItem('theme') === null) {
+      window.localStorage.setItem('theme', theme);
+    }
+  }, THEME);
   // Volta ao admin: os cenários de papel da S5 trocam este estado de módulo.
   sessionUser = USER;
   // Sprint 6: sessão SEM glossário e flag não julgado são o estado de partida.
@@ -1346,6 +1380,48 @@ test.describe('Sidebar em camadas (86e2n39h7)', () => {
     await expect(page.getByRole('link', { name: 'Clientes', exact: true })).toHaveCount(0);
     await expect(page.getByText('Configurações')).toHaveCount(0);
     await analyze(page, 'sidebar contextual — operador do cliente (desktop)');
+  });
+});
+
+/**
+ * 86e2n39hb — tema claro/escuro: o toggle do header troca o tema NA HORA
+ * (classe no <html>, sem reload) e a escolha sobrevive ao F5 (localStorage).
+ * O run atual parte do tema `THEME`; o teste troca para o OPOSTO — assim o
+ * cenário exercita a troca real nos dois runs do gate, não um caminho só.
+ */
+test.describe('Tema claro/escuro (86e2n39hb)', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  test('toggle troca o tema na hora e a escolha sobrevive ao F5', async ({ page }) => {
+    const alvo = THEME === 'dark' ? 'light' : 'dark';
+    await page.goto('/clientes');
+    await expect(page.locator('html')).toHaveClass(new RegExp(`\\b${THEME}\\b`));
+
+    await page.getByRole('button', { name: 'Alterar tema' }).click();
+    const menu = page.getByRole('menu');
+    await aguardarAnimacao(menu);
+    // A opção ativa é anunciada como marcada (radio group de verdade).
+    await expect(
+      menu.getByRole('menuitemradio', { name: THEME === 'dark' ? 'Escuro' : 'Claro' }),
+    ).toHaveAttribute('aria-checked', 'true');
+    await analyze(page, 'menu de tema aberto');
+
+    await menu.getByRole('menuitemradio', { name: alvo === 'dark' ? 'Escuro' : 'Claro' }).click();
+    await expect(page.locator('html')).toHaveClass(new RegExp(`\\b${alvo}\\b`));
+    await shot(page, 'tema-trocado-desktop');
+
+    // F5: a escolha veio do localStorage, não do init script (set-if-absent).
+    await page.reload();
+    await expect(page.locator('html')).toHaveClass(new RegExp(`\\b${alvo}\\b`));
+    await expect(page.getByRole('heading', { name: 'Clientes' })).toBeVisible();
+  });
+
+  test('o tema vale também na tela de login (decisão c)', async ({ page, context }) => {
+    await context.clearCookies();
+    await page.goto('/login');
+    await expect(page.locator('html')).toHaveClass(new RegExp(`\\b${THEME}\\b`));
+    await analyze(page, 'login com tema aplicado');
+    await shot(page, 'tema-login');
   });
 });
 
