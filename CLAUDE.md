@@ -167,7 +167,7 @@
       **1** linha em `access_audit`.
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**40** hoje) **com teste negativo cross-tenant**. Essa lista é o denominador
+      (**41** hoje) **com teste negativo cross-tenant**. Essa lista é o denominador
       da métrica de isolamento — endpoint fora dela é buraco que ninguém mede.
     - **Identidade de usuário em response é ENXUTA e mascarada por escopo**
       (86e2n39f1): expor QUEM fez algo devolve só `{name, email}` — nunca a

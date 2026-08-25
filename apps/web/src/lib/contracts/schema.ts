@@ -814,6 +814,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/notifications/read-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Marca TODAS as notificações não lidas do usuário autenticado como lidas (86e2u513q — o botão do sino). O UPDATE carrega o mesmo filtro de visibilidade das leituras: tenant/carteira valem também na escrita. **Idempotente**: a 2ª chamada devolve `marked=0`. Rota literal declarada ANTES de `/{notification_id}/read` por convenção do módulo (o FastAPI casa por ordem de declaração). */
+        post: operations["mark_all_notifications_read_api_v1_notifications_read_all_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notifications/{notification_id}/read": {
         parameters: {
             query?: never;
@@ -1942,6 +1959,24 @@ export interface components {
             name: string;
             /** Email */
             email: string;
+        };
+        /**
+         * MarkAllReadPayload
+         * @description Conteúdo do envelope de POST /api/v1/notifications/read-all.
+         *
+         *     `marked` é quantas saíram de não lidas AGORA — 0 na segunda chamada, que é
+         *     o contrato da idempotência (o front pode reenviar sem tratar erro).
+         */
+        MarkAllReadPayload: {
+            /** Marked */
+            marked: number;
+        };
+        /**
+         * MarkAllReadResponse
+         * @description Response de POST /api/v1/notifications/read-all.
+         */
+        MarkAllReadResponse: {
+            data: components["schemas"]["MarkAllReadPayload"];
         };
         /**
          * MarkReadPayload
@@ -4873,6 +4908,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NotificationListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_all_notifications_read_api_v1_notifications_read_all_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarkAllReadResponse"];
                 };
             };
             /** @description Validation Error */

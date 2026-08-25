@@ -8,16 +8,23 @@
  * como os 3 s do polling de uma sessão ativa fariam num poll global de header,
  * que roda em TODAS as telas o tempo inteiro.
  */
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 
 import {
   getUnreadCount,
   listNotifications,
+  markAllNotificationsRead,
   markNotificationRead,
   type ListNotificationsParams,
   type NotificationListResult,
 } from '@/lib/api/notifications';
-import type { MarkReadPayload } from '@/lib/contracts';
+import type { MarkAllReadPayload, MarkReadPayload } from '@/lib/contracts';
 
 const UNREAD_POLL_INTERVAL_MS = 15_000;
 
@@ -62,6 +69,38 @@ export function useNotifications(
     queryFn: () => listNotifications(params),
     enabled: options.enabled ?? true,
     placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * Lista do sino como INFINITE query (86e2u513q): o dropdown abre com a 1ª
+ * página e o "Ver mais" acumula as seguintes — o teto de 10 itens deixou de
+ * ser um teto, sem transformar o sino numa tela. `getNextPageParam` deriva da
+ * paginação do servidor; a chave NÃO reusa a da lista simples (shapes
+ * diferentes no cache).
+ */
+export function useInfiniteNotifications(pageSize: number, options: UseNotificationsOptions = {}) {
+  return useInfiniteQuery<NotificationListResult>({
+    queryKey: [...notificationKeys.all, 'infinite', pageSize] as const,
+    queryFn: ({ pageParam }) => listNotifications({ page: pageParam as number, pageSize }),
+    initialPageParam: 1,
+    getNextPageParam: (last) =>
+      last.pagination.page < last.pagination.totalPages ? last.pagination.page + 1 : undefined,
+    enabled: options.enabled ?? true,
+  });
+}
+
+/**
+ * Marca TODAS como lidas e invalida contador + listas. Idempotência é do
+ * backend (`marked=0` na 2ª chamada) — reenviar não estraga nada.
+ */
+export function useMarkAllNotificationsRead() {
+  const qc = useQueryClient();
+  return useMutation<MarkAllReadPayload, Error, void>({
+    mutationFn: markAllNotificationsRead,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: notificationKeys.all });
+    },
   });
 }
 

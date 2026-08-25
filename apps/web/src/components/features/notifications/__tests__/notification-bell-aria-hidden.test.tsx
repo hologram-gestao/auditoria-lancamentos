@@ -30,27 +30,35 @@ vi.mock('@/lib/api/usage-events', () => ({
 const countState = { data: 1 as number | undefined };
 const listState = {
   data: {
-    data: [
+    pages: [
       {
-        id: 'n1',
-        session_id: 'sess-1',
-        client_id: 'cli-1',
-        tipo: 'processada',
-        omie_conta_id: 42,
-        reference_month: '2026-06-01',
-        error_code: null,
-        read_at: null,
-        created_at: '2026-07-26T12:00:00.000Z',
+        data: [
+          {
+            id: 'n1',
+            session_id: 'sess-1',
+            client_id: 'cli-1',
+            tipo: 'processada',
+            omie_conta_id: 42,
+            reference_month: '2026-06-01',
+            error_code: null,
+            read_at: null,
+            created_at: '2026-07-26T12:00:00.000Z',
+          },
+        ],
       },
     ],
-  } as { data: unknown[] } | undefined,
+  } as { pages: { data: unknown[] }[] } | undefined,
   isLoading: false,
   isError: false,
+  hasNextPage: false,
+  isFetchingNextPage: false,
+  fetchNextPage: vi.fn(),
 };
 
 vi.mock('@/hooks/use-notifications', () => ({
   useUnreadNotificationsCount: () => countState,
-  useNotifications: () => listState,
+  useInfiniteNotifications: () => listState,
+  useMarkAllNotificationsRead: () => ({ mutate: vi.fn(), isPending: false }),
   useMarkNotificationRead: () => ({ mutate: vi.fn() }),
 }));
 

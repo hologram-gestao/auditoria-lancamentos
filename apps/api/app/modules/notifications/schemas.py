@@ -75,3 +75,19 @@ class MarkReadResponse(BaseModel):
     """Response de POST /api/v1/notifications/{id}/read."""
 
     data: MarkReadPayload
+
+
+class MarkAllReadPayload(BaseModel):
+    """Conteúdo do envelope de POST /api/v1/notifications/read-all.
+
+    `marked` é quantas saíram de não lidas AGORA — 0 na segunda chamada, que é
+    o contrato da idempotência (o front pode reenviar sem tratar erro).
+    """
+
+    marked: int
+
+
+class MarkAllReadResponse(BaseModel):
+    """Response de POST /api/v1/notifications/read-all."""
+
+    data: MarkAllReadPayload

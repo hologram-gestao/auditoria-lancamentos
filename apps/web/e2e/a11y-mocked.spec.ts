@@ -538,6 +538,22 @@ const OMIE_CANDIDATES = [
   },
 ];
 
+/**
+ * 86e2u513q — o sino pagina: 23 avisos históricos além dos 2 acima, para o
+ * "Ver mais" ter o que carregar (25 no total, páginas de 10).
+ */
+const MANY_NOTIFICATIONS = Array.from({ length: 23 }, (_, i) => ({
+  id: `88888888-8888-4888-8888-8888888888${String(i).padStart(2, '0')}`,
+  session_id: SESSION_ID,
+  client_id: CLIENT_ID,
+  tipo: 'processada',
+  omie_conta_id: 10,
+  reference_month: '2026-05-01',
+  error_code: null,
+  read_at: '2026-07-01T09:00:00Z',
+  created_at: '2026-06-30T12:00:00Z',
+}));
+
 const NOTIFICATIONS = [
   {
     id: '66666666-6666-4666-8666-666666666666',
@@ -673,8 +689,23 @@ async function fulfillApi(route: Route): Promise<void> {
     });
   }
   if (path === '/api/v1/notifications/unread-count') return json({ unread: 2 });
-  if (path === '/api/v1/notifications')
-    return json({ data: NOTIFICATIONS, pagination: PAGINATION });
+  if (path === '/api/v1/notifications/read-all') return json({ marked: 2 });
+  if (path === '/api/v1/notifications') {
+    // Paginação REAL sobre 25 avisos — o "Ver mais" do sino precisa de mais
+    // de uma página para existir (86e2u513q).
+    const todas = [...NOTIFICATIONS, ...MANY_NOTIFICATIONS];
+    const page = Number(url.searchParams.get('page') ?? '1');
+    const pageSize = Number(url.searchParams.get('pageSize') ?? '20');
+    return json({
+      data: todas.slice((page - 1) * pageSize, page * pageSize),
+      pagination: {
+        page,
+        pageSize,
+        total: todas.length,
+        totalPages: Math.ceil(todas.length / pageSize),
+      },
+    });
+  }
   if (path.endsWith('/read')) return json({ already_read: false, read_at: '2026-07-26T13:00:00Z' });
   if (path === '/api/v1/clients') return json({ data: [CLIENT_DETAIL], pagination: PAGINATION });
   if (path === `/api/v1/clients/${CLIENT_ID}`) {
@@ -1105,8 +1136,27 @@ for (const vp of VIEWPORTS) {
     test('Sino de notificações aberto (R4)', async ({ page }) => {
       await page.goto(`/clientes/${CLIENT_ID}`);
       await page.getByRole('button', { name: /Notificações/ }).click();
-      await expect(page.getByRole('menu')).toBeVisible();
+      const menu = page.getByRole('menu');
+      await expect(menu).toBeVisible();
+
+      // 86e2u513q — os dois controles novos do sino.
+      await expect(menu.getByRole('menuitem', { name: 'Marcar todas como lidas' })).toBeVisible();
+      const verMais = menu.getByRole('menuitem', { name: 'Ver mais' });
+      await expect(verMais).toBeVisible();
       await analyze(page, `sino de notificações (${vp.label})`);
+
+      // "Ver mais" carrega a 2ª página SEM fechar o menu (25 avisos no mock).
+      const antes = await menu.getByRole('menuitem').count();
+      await verMais.click();
+      await expect
+        .poll(async () => menu.getByRole('menuitem').count(), { timeout: 5000 })
+        .toBeGreaterThan(antes);
+      await expect(menu).toBeVisible();
+
+      // "Marcar todas" dispara e o menu continua aberto para a pessoa VER.
+      await menu.getByRole('menuitem', { name: 'Marcar todas como lidas' }).click();
+      await expect(menu).toBeVisible();
+      await shot(page, `sino-marcar-todas-ver-mais-${vp.label.replace(/\s+/g, '-')}`);
     });
 
     /**

@@ -20,6 +20,7 @@ from app.core.logging import get_logger
 from app.db.models import Notification, NotificationType, ReconciliationStatus
 from app.modules.notifications.repository import NotificationRepository
 from app.modules.notifications.schemas import (
+    MarkAllReadPayload,
     MarkReadPayload,
     NotificationItem,
 )
@@ -152,6 +153,19 @@ class NotificationService:
 
         read_at = await self._repo.mark_read(notification_id)
         return MarkReadPayload(id=notification.id, read_at=read_at, already_read=False)
+
+    async def mark_all_read(self, user: CurrentUser) -> MarkAllReadPayload:
+        """Marca todas as não lidas do usuário como lidas (86e2u513q).
+
+        Sem 404 possível: "nada para marcar" é sucesso com `marked=0` — a
+        operação age sobre a coleção visível, não sobre um recurso nomeado.
+        """
+        marked = await self._repo.mark_all_read(
+            user_id=UUID(user.id),
+            is_admin=_is_admin(user),
+            tenant_client_id=tenant_filter_client_id(user),
+        )
+        return MarkAllReadPayload(marked=marked)
 
 
 def _is_admin(user: CurrentUser) -> bool:
