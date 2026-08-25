@@ -186,6 +186,14 @@ function VerdictButton({
       type="button"
       size="sm"
       variant={active ? 'default' : 'outline'}
+      // 86e2z83x7 — largura FIXA e IGUAL nos dois: empilhado (o arranjo comum
+      // desde o `flex-wrap` da 86e2xmug9), cada botão dimensionava pelo próprio
+      // rótulo — "Procedente" saía mais estreito e as bordas esquerdas
+      // desalinhavam. A medida cabe o rótulo maior ("Improcedente" + ícone em
+      // `sm`) com folga; largura fixa nunca pode CORTAR rótulo — se apertar,
+      // sobe a medida, não se trunca o texto. O spinner de pending troca o
+      // ícone sem mudar a largura. Travado por boundingBox no e2e.
+      className="w-36"
       // `aria-pressed` é o que carrega o estado para a tecnologia assistiva —
       // a variante do botão é só o reforço visual.
       aria-pressed={active}
