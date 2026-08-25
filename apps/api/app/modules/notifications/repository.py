@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, func, select, update
+from sqlalchemy import ColumnElement, CursorResult, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import ClientAssignment, Notification
@@ -142,6 +142,34 @@ class NotificationRepository:
             .values(read_at=now)
         )
         return now
+
+    async def mark_all_read(
+        self, *, user_id: UUID, is_admin: bool, tenant_client_id: UUID | None = None
+    ) -> int:
+        """Marca TODAS as não lidas VISÍVEIS como lidas; devolve quantas foram.
+
+        O UPDATE carrega o MESMO `_visibility_filter` das leituras — marcar é
+        uma escrita sobre o que o usuário enxerga, e a regra de tenant/carteira
+        não pode sumir justamente aqui (manager reatribuído não marca o que já
+        não vê). **Idempotente**: `read_at IS NULL` faz a 2ª chamada casar 0
+        linhas, preservando os timestamps das leituras anteriores.
+        """
+        now = datetime.now(UTC)
+        result = await self._session.execute(
+            update(Notification)
+            .where(
+                *self._visibility_filter(
+                    user_id=user_id, is_admin=is_admin, tenant_client_id=tenant_client_id
+                ),
+                Notification.read_at.is_(None),
+            )
+            .values(read_at=now)
+        )
+        # UPDATE devolve CursorResult (com rowcount); o narrow é para o mypy —
+        # o caminho else não existe em runtime.
+        if not isinstance(result, CursorResult):  # pragma: no cover
+            return 0
+        return int(result.rowcount or 0)
 
     async def add(self, notification: Notification) -> None:
         """Insere a notificação. Commit é do caller (padrão do projeto)."""

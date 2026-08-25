@@ -123,6 +123,7 @@ export type SessionStatusPayload = Schemas['SessionStatusPayload'];
 export type NotificationItem = Schemas['NotificationItem'];
 export type NotificationListResponse = Schemas['NotificationListResponse'];
 export type UnreadCountPayload = Schemas['UnreadCountPayload'];
+export type MarkAllReadPayload = Schemas['MarkAllReadPayload'];
 export type MarkReadPayload = Schemas['MarkReadPayload'];
 
 // ---------------------------------------------------------------------------

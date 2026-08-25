@@ -29,16 +29,22 @@ vi.mock('@/lib/api/usage-events', () => ({
 }));
 
 const countState = { data: 0 as number | undefined };
+const markAllMock = vi.fn();
+const fetchNextMock = vi.fn();
 const listState = {
-  data: undefined as { data: unknown[] } | undefined,
+  data: undefined as { pages: { data: unknown[] }[] } | undefined,
   isLoading: false,
   isError: false,
+  hasNextPage: false,
+  isFetchingNextPage: false,
+  fetchNextPage: fetchNextMock,
 };
 
 vi.mock('@/hooks/use-notifications', () => ({
   useUnreadNotificationsCount: () => countState,
-  useNotifications: () => listState,
+  useInfiniteNotifications: () => listState,
   useMarkNotificationRead: () => ({ mutate: markReadMock }),
+  useMarkAllNotificationsRead: () => ({ mutate: markAllMock, isPending: false }),
 }));
 
 import { NotificationBell } from '@/components/features/notifications/notification-bell';
@@ -69,9 +75,11 @@ beforeAll(() => {
 beforeEach(() => {
   vi.clearAllMocks();
   countState.data = 2;
-  listState.data = { data: [notification()] };
+  listState.data = { pages: [{ data: [notification()] }] };
   listState.isLoading = false;
   listState.isError = false;
+  listState.hasNextPage = false;
+  listState.isFetchingNextPage = false;
 });
 
 describe('NotificationBell — contador', () => {
@@ -97,14 +105,16 @@ describe('NotificationBell — lista', () => {
 
     const menu = await screen.findByRole('menu');
     expect(
-      within(menu).getByText('Conciliação de Conta #42 — Junho de 2026 processada. Clique para revisar.'),
+      within(menu).getByText(
+        'Conciliação de Conta #42 — Junho de 2026 processada. Clique para revisar.',
+      ),
     ).toBeVisible();
   });
 
   it('texto de erro traz o CÓDIGO, nunca a linguagem interna', async () => {
     const user = userEvent.setup();
     listState.data = {
-      data: [notification({ tipo: 'erro', error_code: 'RECONCILIATION_TIMEOUT' })],
+      pages: [{ data: [notification({ tipo: 'erro', error_code: 'RECONCILIATION_TIMEOUT' })] }],
     };
     render(<NotificationBell />);
     await user.click(screen.getByRole('button', { name: /Notificações/ }));
@@ -125,7 +135,7 @@ describe('NotificationBell — lista', () => {
 
   it('estado vazio e estado de erro são tratados', async () => {
     const user = userEvent.setup();
-    listState.data = { data: [] };
+    listState.data = { pages: [{ data: [] }] };
     const { unmount } = render(<NotificationBell />);
     await user.click(screen.getByRole('button', { name: /Notificações/ }));
     expect(await screen.findByText('Nenhuma notificação por aqui.')).toBeVisible();
@@ -160,7 +170,7 @@ describe('NotificationBell — instrumentação', () => {
 
   it('não emite para notificação já lida', async () => {
     const user = userEvent.setup();
-    listState.data = { data: [notification({ read_at: new Date().toISOString() })] };
+    listState.data = { pages: [{ data: [notification({ read_at: new Date().toISOString() })] }] };
     render(<NotificationBell />);
     await user.click(screen.getByRole('button', { name: /Notificações/ }));
     await screen.findByRole('menu');
@@ -204,5 +214,50 @@ describe('NotificationBell — acessibilidade', () => {
     await user.click(screen.getByRole('button', { name: /Notificações/ }));
     await screen.findByRole('menu');
     await assertNoA11yViolations(document.body);
+  });
+});
+
+describe('NotificationBell — marcar todas e Ver mais (86e2u513q)', () => {
+  it('"Marcar todas como lidas" aparece com não lidas e dispara a mutação', async () => {
+    const user = userEvent.setup();
+    render(<NotificationBell />);
+    await user.click(screen.getByRole('button', { name: /Notificações/ }));
+
+    const item = await screen.findByRole('menuitem', { name: 'Marcar todas como lidas' });
+    await user.click(item);
+    expect(markAllMock).toHaveBeenCalledTimes(1);
+    // `preventDefault` no onSelect: o menu CONTINUA aberto para a pessoa ver o efeito.
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+  });
+
+  it('sem não lidas, o atalho de marcar todas não aparece', async () => {
+    countState.data = 0;
+    const user = userEvent.setup();
+    render(<NotificationBell />);
+    await user.click(screen.getByRole('button', { name: /Notificações/ }));
+
+    await screen.findByRole('menu');
+    expect(screen.queryByRole('menuitem', { name: 'Marcar todas como lidas' })).toBeNull();
+  });
+
+  it('"Ver mais" aparece quando há próxima página e busca sem fechar o menu', async () => {
+    listState.hasNextPage = true;
+    const user = userEvent.setup();
+    render(<NotificationBell />);
+    await user.click(screen.getByRole('button', { name: /Notificações/ }));
+
+    const verMais = await screen.findByRole('menuitem', { name: 'Ver mais' });
+    await user.click(verMais);
+    expect(fetchNextMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+  });
+
+  it('sem próxima página não há "Ver mais"', async () => {
+    const user = userEvent.setup();
+    render(<NotificationBell />);
+    await user.click(screen.getByRole('button', { name: /Notificações/ }));
+
+    await screen.findByRole('menu');
+    expect(screen.queryByRole('menuitem', { name: 'Ver mais' })).toBeNull();
   });
 });

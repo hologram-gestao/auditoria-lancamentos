@@ -263,6 +263,13 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
     ),
     SensitiveEndpoint(
         "POST",
+        "/api/v1/notifications/read-all",
+        ScopeKind.COLLECTION,
+        "app/modules/notifications/repository.py",
+        "mark_all_read com o mesmo _visibility_filter no UPDATE",
+    ),
+    SensitiveEndpoint(
+        "POST",
         "/api/v1/notifications/{notification_id}/read",
         ScopeKind.DETAIL_PK,
         "app/modules/notifications/repository.py",

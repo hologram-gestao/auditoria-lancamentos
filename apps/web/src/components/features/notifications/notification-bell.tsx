@@ -24,7 +24,7 @@
  * (evento, sessão), então reabrir o sino não duplica nada.
  */
 
-import { Bell, Loader2 } from 'lucide-react';
+import { Bell, CheckCheck, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -38,8 +38,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
+  useInfiniteNotifications,
+  useMarkAllNotificationsRead,
   useMarkNotificationRead,
-  useNotifications,
   useUnreadNotificationsCount,
 } from '@/hooks/use-notifications';
 import type { Notification } from '@/lib/api/notifications';
@@ -53,13 +54,18 @@ export function NotificationBell() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const countQuery = useUnreadNotificationsCount();
-  const listQuery = useNotifications({ page: 1, pageSize: LIST_PAGE_SIZE }, { enabled: open });
+  // 86e2u513q: infinite — "Ver mais" acumula páginas; o teto de 10 acabou.
+  const listQuery = useInfiniteNotifications(LIST_PAGE_SIZE, { enabled: open });
   const markRead = useMarkNotificationRead();
+  const markAll = useMarkAllNotificationsRead();
 
   const unread = countQuery.data ?? 0;
   // `useMemo` mantém a identidade do array estável entre renders — sem isso o
   // efeito de emissão abaixo dispararia a cada render.
-  const items = useMemo(() => listQuery.data?.data ?? [], [listQuery.data]);
+  const items = useMemo(
+    () => listQuery.data?.pages.flatMap((page) => page.data) ?? [],
+    [listQuery.data],
+  );
 
   // Entrega: a pessoa ABRIU o sino e as não lidas estão na tela. Emitir na
   // criação da notificação mediria a máquina; emitir aqui mede o alcance.
@@ -117,48 +123,97 @@ export function NotificationBell() {
         {unread > 0 ? `${unread} notificações não lidas` : 'Nenhuma notificação não lida'}
       </span>
 
-      {/* O scroll fica no PRÓPRIO content: uma `<ul>` aqui dentro seria um
-          `role="list"` dentro de `role="menu"` — filho não permitido
-          (`aria-required-children`, critical). Os itens são `menuitem`. */}
-      <DropdownMenuContent align="end" className="max-h-96 w-80 overflow-y-auto">
+      {/* O SCROLLER é um `role="group"` dedicado (filho VÁLIDO de `menu`; uma
+          `<ul>` seria `role="list"` — filho proibido, `aria-required-children`
+          critical). Regra do design-system: região rolável sem
+          tabIndex/role/aria-label reprova `scrollable-region-focusable`
+          (SERIOUS) — disparou no gate quando a lista passou a rolar de
+          verdade (86e2u513q: 10+ itens). Cabeçalho e "Marcar todas" ficam
+          FORA do scroller, fixos. */}
+      <DropdownMenuContent align="end" className="w-80">
         <DropdownMenuLabel>Notificações</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-
-        {listQuery.isLoading ? (
-          <p className="text-muted-foreground flex items-center gap-2 px-2 py-6 text-sm">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            Carregando…
-          </p>
-        ) : listQuery.isError ? (
-          <p className="text-destructive px-2 py-6 text-sm" role="alert">
-            Não foi possível carregar as notificações.
-          </p>
-        ) : items.length === 0 ? (
-          <p className="text-muted-foreground px-2 py-6 text-center text-sm">
-            Nenhuma notificação por aqui.
-          </p>
-        ) : (
-          items.map((item) => (
-            <DropdownMenuItem
-              key={item.id}
-              onSelect={() => handleOpenItem(item)}
-              className={cn(
-                'cursor-pointer items-start gap-2 py-2',
-                item.read_at == null && 'font-medium',
-              )}
-            >
-              {item.read_at == null && (
-                <span className="bg-info mt-1.5 h-2 w-2 shrink-0 rounded-full" aria-hidden="true" />
-              )}
-              <span className="min-w-0">
-                <span className="block">{notificationText(item)}</span>
-                <span className="text-muted-foreground block text-xs">
-                  {formatNotificationTime(item.created_at)}
-                </span>
-              </span>
-            </DropdownMenuItem>
-          ))
+        {unread > 0 && (
+          <DropdownMenuItem
+            onSelect={(event) => {
+              // `preventDefault` mantém o menu ABERTO: a pessoa VÊ o efeito
+              // (negrito some, badge zera) sem precisar reabrir o sino.
+              event.preventDefault();
+              if (!markAll.isPending) markAll.mutate();
+            }}
+            className="text-muted-foreground cursor-pointer gap-2 text-xs"
+          >
+            {markAll.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            ) : (
+              <CheckCheck className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+            Marcar todas como lidas
+          </DropdownMenuItem>
         )}
+        <DropdownMenuSeparator />
+        <div
+          role="group"
+          aria-label="Lista de notificações (rolável)"
+          tabIndex={0}
+          className="focus-visible:ring-ring max-h-80 overflow-y-auto rounded-sm focus-visible:outline-none focus-visible:ring-2"
+        >
+          {listQuery.isLoading ? (
+            <p className="text-muted-foreground flex items-center gap-2 px-2 py-6 text-sm">
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              Carregando…
+            </p>
+          ) : listQuery.isError ? (
+            <p className="text-destructive px-2 py-6 text-sm" role="alert">
+              Não foi possível carregar as notificações.
+            </p>
+          ) : items.length === 0 ? (
+            <p className="text-muted-foreground px-2 py-6 text-center text-sm">
+              Nenhuma notificação por aqui.
+            </p>
+          ) : (
+            items.map((item) => (
+              <DropdownMenuItem
+                key={item.id}
+                onSelect={() => handleOpenItem(item)}
+                className={cn(
+                  'cursor-pointer items-start gap-2 py-2',
+                  item.read_at == null && 'font-medium',
+                )}
+              >
+                {item.read_at == null && (
+                  <span
+                    className="bg-info mt-1.5 h-2 w-2 shrink-0 rounded-full"
+                    aria-hidden="true"
+                  />
+                )}
+                <span className="min-w-0">
+                  <span className="block">{notificationText(item)}</span>
+                  <span className="text-muted-foreground block text-xs">
+                    {formatNotificationTime(item.created_at)}
+                  </span>
+                </span>
+              </DropdownMenuItem>
+            ))
+          )}
+          {listQuery.hasNextPage && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={(event) => {
+                  // Mantém o menu aberto enquanto carrega a próxima página.
+                  event.preventDefault();
+                  if (!listQuery.isFetchingNextPage) void listQuery.fetchNextPage();
+                }}
+                className="text-muted-foreground cursor-pointer justify-center gap-2 text-xs"
+              >
+                {listQuery.isFetchingNextPage && (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                )}
+                Ver mais
+              </DropdownMenuItem>
+            </>
+          )}
+        </div>
       </DropdownMenuContent>
     </DropdownMenu>
   );

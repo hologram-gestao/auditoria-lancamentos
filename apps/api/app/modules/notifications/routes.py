@@ -2,7 +2,7 @@
 
     - GET  /api/v1/notifications/unread-count   (badge do sino, poll de 15 s)
     - GET  /api/v1/notifications                (lista paginada)
-    - POST /api/v1/notifications/{id}/read      (marca lida — idempotente)
+    - POST /api/v1/notifications/read-all       (marca todas — idempotente)\n    - POST /api/v1/notifications/{id}/read      (marca lida — idempotente)
 
 ⚠️ A rota literal `/unread-count` é declarada ANTES de qualquer rota com path
 param: o FastAPI casa por ordem de declaração, e um `/{notification_id}` acima
@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, Query
 from app.core.dependencies import CurrentUserDep, DbSessionDep
 from app.modules.notifications.repository import NotificationRepository
 from app.modules.notifications.schemas import (
+    MarkAllReadResponse,
     MarkReadResponse,
     NotificationListResponse,
     UnreadCountPayload,
@@ -79,6 +80,25 @@ async def list_notifications(
         user, page=page, page_size=page_size, unread_only=unread_only
     )
     return NotificationListResponse(data=items, pagination=pagination)
+
+
+@router.post(
+    "/read-all",
+    summary=(
+        "Marca TODAS as notificações não lidas do usuário autenticado como "
+        "lidas (86e2u513q — o botão do sino). O UPDATE carrega o mesmo filtro "
+        "de visibilidade das leituras: tenant/carteira valem também na "
+        "escrita. **Idempotente**: a 2ª chamada devolve `marked=0`. Rota "
+        "literal declarada ANTES de `/{notification_id}/read` por convenção "
+        "do módulo (o FastAPI casa por ordem de declaração)."
+    ),
+)
+async def mark_all_notifications_read(
+    user: CurrentUserDep,
+    service: NotificationServiceDep,
+) -> MarkAllReadResponse:
+    payload = await service.mark_all_read(user)
+    return MarkAllReadResponse(data=payload)
 
 
 @router.post(
