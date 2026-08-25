@@ -451,15 +451,18 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   blocos. Dropdown que abre sobre a página usa `modal={false}` (o modo modal
   do Radix marca o fundo com `aria-hidden` mantendo focáveis — `aria-hidden-focus` no
   axe; padrão documentado no sino e no toggle).
-- **O relatório do gate de a11y é artefato, nunca fonte.** `scripts/a11y-gate.sh` escreve
-  `apps/web/a11y-report.json` (o CI escreve o mesmo arquivo e o sobe como _artifact_,
-  `ci.yml:300-304`). Ele **não entra em commit**: é reescrito a cada execução e carrega
-  caminhos absolutos da máquina de quem rodou. Antes de fechar qualquer task de front,
-  `git diff --name-only develop..HEAD` só pode listar código-fonte.
-  A lacuna do `.gitignore` foi fechada na validação da Sprint 7 (task `86e2w8xpv`):
-  `apps/web/.gitignore` ignora `a11y-report.json` — o arquivo não entra mais em commit por
-  acidente. A conferência de `git diff --name-only` antes de fechar task de front continua
-  valendo como higiene.
+- **O relatório do gate de a11y é artefato, nunca fonte.** Desde a 86e2w8xpv,
+  `scripts/a11y-gate.sh` e o CI escrevem
+  `apps/web/test-results/a11y-report-<tema>.json` — **dentro de um diretório que o
+  `.gitignore` da RAIZ já ignora**, fechando a classe do vazamento em qualquer cópia do
+  repo (worktree de agent incluído; o `.gitignore` da raiz está fora do `gitPaths` de
+  todo papel do hub, então regra nova lá não sobrevive a uma sprint). O
+  `apps/web/.gitignore` mantém `a11y-report*.json` como cinto para versões antigas do
+  script. Dois efeitos de morar em `test-results/`: o Playwright limpa o diretório a cada
+  run, então só o relatório do ÚLTIMO tema sobrevive ao gate (o guard lê cada um logo
+  após o próprio run) — e é por isso que os screenshots continuam FORA, em
+  `a11y-shots/<tema>/`. A conferência de `git diff --name-only develop..HEAD` antes de
+  fechar task de front continua valendo como higiene.
 
 ### API
 
@@ -680,6 +683,8 @@ lembrar dos comandos.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.18 — 25/08/2026. **O relatório do gate de a11y mudou de endereço (86e2w8xpv)**: `scripts/a11y-gate.sh` e o `web_a11y` do CI passam a gravar `apps/web/test-results/a11y-report-<tema>.json` — dentro do diretório que o `.gitignore` da RAIZ já ignora, fechando de vez a classe "artefato do gate entra em commit" (a regra na raiz nunca sobreviveria a uma sprint: o arquivo está fora do `gitPaths` de todos os papéis do hub). O `apps/web/.gitignore` vira cinto para script antigo. §7 atualizado com o efeito colateral aceito: o Playwright limpa `test-results/` a cada run — só o relatório do último tema sobrevive ao gate, o guard lê cada um logo após o próprio run, e os screenshots seguem fora (`a11y-shots/<tema>/`)._
 
 _Versão 1.17 — 25/08/2026. **O tema Hologram virou o PADRÃO do produto** (decisão do Pedro, sem task — registro direto). `defaultTheme="hologram"` no provider raiz: quem nunca escolheu tema vê a marca por padrão, inclusive no login; escolha salva no localStorage é respeitada (o next-themes só grava no `setTheme`), e Claro/Escuro/Seguir o sistema continuam no toggle — `system` virou escolha, não padrão. §7 atualizado; o default ganhou trava própria no e2e (localStorage vazio → `<html class="hologram">`, nas três legs do gate). O ícone pré-hidratação do toggle passou a ser a logomark (o caso comum agora é Hologram)._
 

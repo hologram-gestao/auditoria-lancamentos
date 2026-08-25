@@ -266,7 +266,9 @@ jobs:
       # `on-first-retry` — sem ele o artefato de falha viria sem trace.
       - name: Run axe-core a11y suite
         env:
-          PLAYWRIGHT_JSON_OUTPUT_NAME: a11y-report-${{ matrix.theme }}.json
+          # Dentro de test-results/ (86e2w8xpv): diretório já ignorado na RAIZ —
+          # o relatório não tem como voltar a entrar num commit.
+          PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/a11y-report-${{ matrix.theme }}.json
         run: pnpm --filter @auditoria/web exec playwright test "$A11Y_SPEC" --retries=0 --trace=retain-on-failure --reporter=github,json
 
       # Rede de segurança contra o modo de falha que motivou este job: suíte que
@@ -276,7 +278,7 @@ jobs:
         run: |
           node -e '
             const fs = require("fs");
-            const path = "apps/web/a11y-report-${{ matrix.theme }}.json";
+            const path = "apps/web/test-results/a11y-report-${{ matrix.theme }}.json";
             if (!fs.existsSync(path)) {
               console.error("::error::relatório do Playwright não foi gerado — a suíte de a11y não chegou a rodar.");
               process.exit(1);
@@ -306,10 +308,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-a11y-report-${{ matrix.theme }}
+          # O a11y-report-<tema>.json agora vive DENTRO de test-results/
+          # (86e2w8xpv) — o segundo path já o carrega.
           path: |
             apps/web/playwright-report/
             apps/web/test-results/
-            apps/web/a11y-report-${{ matrix.theme }}.json
           retention-days: 7
           if-no-files-found: ignore
 
