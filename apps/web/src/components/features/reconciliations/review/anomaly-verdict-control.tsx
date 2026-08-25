@@ -98,10 +98,19 @@ export function AnomalyVerdictControl({
     return <VerdictState current={current} />;
   }
 
+  // 86e2xmug9 — o estado é LEGENDA do par de botões: abaixo deles, colado à
+  // mesma borda direita, em slot de altura fixa (`min-h-5`) para o pill e o
+  // texto "Não avaliado" ocuparem o mesmo espaço e a linha não pular de altura
+  // conforme o veredito. Solto ACIMA dos botões, o rótulo cinza parecia
+  // flutuar desconectado sobre "Improcedente" (diagnóstico da task).
+  // `aria-live` do `VerdictState` e `aria-pressed` dos botões não mudam.
   return (
-    <div className="flex flex-col items-end gap-1">
-      <VerdictState current={current} />
-      <div className="flex items-center gap-1" aria-busy={isPending}>
+    <div className="inline-flex flex-col items-end gap-1">
+      {/* `flex-wrap`: sem ele o PAR é o min-content da coluna (~260px) e, na
+          sessão de cartão (que soma a coluna de checkbox), a tabela transborda
+          em 1440px cortando as Ações — pego por print na 86e2xmug9. Apertado,
+          os botões empilham à direita em vez de estourar a linha. */}
+      <div className="flex flex-wrap items-center justify-end gap-1" aria-busy={isPending}>
         <VerdictButton
           verdict="procedente"
           active={current === 'procedente'}
@@ -118,6 +127,9 @@ export function AnomalyVerdictControl({
           anomalyName={anomaly.anomaly_type.name}
           onClick={() => void apply('improcedente')}
         />
+      </div>
+      <div className="flex min-h-5 items-center">
+        <VerdictState current={current} />
       </div>
     </div>
   );
