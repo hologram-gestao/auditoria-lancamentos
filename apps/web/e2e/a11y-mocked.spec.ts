@@ -1483,6 +1483,18 @@ test.describe('Tema claro/escuro (86e2n39hb)', () => {
     await analyze(page, 'login com tema aplicado');
     await shot(page, 'tema-login');
   });
+
+  test('sem escolha salva, o tema BASE é o Hologram (decisão de 25/08)', async ({ page }) => {
+    // O init do beforeEach grava o tema do run quando ausente — este teste
+    // registra um init DEPOIS dele (rodam na ordem) que REMOVE a chave, então
+    // o next-themes lê localStorage vazio e cai no `defaultTheme` do provider.
+    // O assert vale nas TRÊS legs do gate de propósito: o default independe
+    // do tema que o run está medindo.
+    await page.addInitScript(() => window.localStorage.removeItem('theme'));
+    await page.goto('/login');
+    await expect(page.locator('html')).toHaveClass(/\bhologram\b/);
+    await shot(page, 'tema-default-hologram');
+  });
 });
 
 /**
