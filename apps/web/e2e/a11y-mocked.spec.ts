@@ -111,7 +111,15 @@ import { expect, test, type Locator, type Page, type Route } from '@playwright/t
  * acidente. Quem orquestra os dois runs é `scripts/a11y-gate.sh` e o job
  * `web_a11y` do CI (matrix) — o spec só obedece.
  */
-const THEME: 'light' | 'dark' = process.env.E2E_THEME === 'dark' ? 'dark' : 'light';
+const THEME: 'light' | 'dark' | 'hologram' =
+  process.env.E2E_THEME === 'dark'
+    ? 'dark'
+    : process.env.E2E_THEME === 'hologram'
+      ? 'hologram'
+      : 'light';
+
+/** Rótulos PT do menu de tema — o teste do toggle cicla light→dark→hologram→light. */
+const THEME_LABELS = { light: 'Claro', dark: 'Escuro', hologram: 'Hologram' } as const;
 
 const CLIENT_ID = '11111111-1111-4111-8111-111111111111';
 /**
@@ -1393,7 +1401,8 @@ test.describe('Tema claro/escuro (86e2n39hb)', () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
   test('toggle troca o tema na hora e a escolha sobrevive ao F5', async ({ page }) => {
-    const alvo = THEME === 'dark' ? 'light' : 'dark';
+    // Ciclo entre os TRÊS temas: cada run do gate exercita uma troca diferente.
+    const alvo = THEME === 'light' ? 'dark' : THEME === 'dark' ? 'hologram' : 'light';
     await page.goto('/clientes');
     await expect(page.locator('html')).toHaveClass(new RegExp(`\\b${THEME}\\b`));
 
@@ -1401,12 +1410,13 @@ test.describe('Tema claro/escuro (86e2n39hb)', () => {
     const menu = page.getByRole('menu');
     await aguardarAnimacao(menu);
     // A opção ativa é anunciada como marcada (radio group de verdade).
-    await expect(
-      menu.getByRole('menuitemradio', { name: THEME === 'dark' ? 'Escuro' : 'Claro' }),
-    ).toHaveAttribute('aria-checked', 'true');
+    await expect(menu.getByRole('menuitemradio', { name: THEME_LABELS[THEME] })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
     await analyze(page, 'menu de tema aberto');
 
-    await menu.getByRole('menuitemradio', { name: alvo === 'dark' ? 'Escuro' : 'Claro' }).click();
+    await menu.getByRole('menuitemradio', { name: THEME_LABELS[alvo] }).click();
     await expect(page.locator('html')).toHaveClass(new RegExp(`\\b${alvo}\\b`));
     await shot(page, 'tema-trocado-desktop');
 

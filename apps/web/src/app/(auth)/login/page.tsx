@@ -17,6 +17,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 
+import { BrandMark } from '@/components/shared/brand-mark';
 import { Button } from '@/components/ui/button';
 import {
   Form,
@@ -76,6 +77,8 @@ export default function LoginPage() {
   return (
     <div className="w-full max-w-md">
       <div className="mb-8 text-center">
+        {/* Logomark por token (86e2ukrc9): a cor acompanha o tema. */}
+        <BrandMark className="text-primary mx-auto mb-4 h-12" />
         <h1 className="text-2xl font-semibold tracking-tight">
           Sistema de Auditoria de Lançamentos
         </h1>

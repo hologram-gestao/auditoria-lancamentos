@@ -20,6 +20,7 @@ import { MobileNavDrawer } from '@/components/features/navigation/mobile-nav-dra
 import { SidebarNav } from '@/components/features/navigation/sidebar-nav';
 import { NotificationBell } from '@/components/features/notifications/notification-bell';
 import { NavigationOutcomeTracker } from '@/components/features/reconciliations/create/navigation-outcome-tracker';
+import { BrandMark } from '@/components/shared/brand-mark';
 import { ThemeToggle } from '@/components/shared/theme-toggle';
 import { Button } from '@/components/ui/button';
 import { logout as logoutRequest, refreshSession } from '@/lib/api/auth';
@@ -127,7 +128,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="flex min-w-0 items-center gap-1 sm:gap-2">
           {/* Hambúrguer só abaixo de `md`, onde o aside não existe (86e2n4pf9). */}
           <MobileNavDrawer user={user} />
-          <div className="min-w-0 truncate font-semibold">Auditoria de Lançamentos</div>
+          {/* Logomark por token (86e2ukrc9): marinho no claro, índigo no
+              escuro, branca no Hologram — `text-primary` decide. Abaixo de
+              `sm` a logo É a marca e o título SOME — com os dois, o truncate
+              esmagava "Auditoria de Lançamentos" para um "A" órfão em 390px
+              (pego no print do gate, não pelo axe). */}
+          <BrandMark className="text-primary h-6 shrink-0" />
+          <div className="hidden min-w-0 truncate font-semibold sm:block">
+            Auditoria de Lançamentos
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-2 sm:gap-4">
           <ThemeToggle />
