@@ -29,7 +29,11 @@ export function NavLink({ href, active, icon, children, onClick }: NavLinkProps)
       className={cn(
         'flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
         'focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
-        active ? 'bg-muted text-foreground font-medium' : 'text-muted-foreground hover:bg-muted',
+        // `accent` (tint do marinho, 86e2ukrc9): item ativo e hover vestem a
+        // marca — par accent-foreground/accent travado no theme-contrast.
+        active
+          ? 'bg-accent text-accent-foreground font-medium'
+          : 'text-muted-foreground hover:bg-accent',
       )}
     >
       {icon}

@@ -75,7 +75,10 @@ function luminance([r, g, b]: Rgb): number {
 }
 
 function contrast(fg: Rgb, bg: Rgb): number {
-  const [lighter, darker] = [luminance(fg), luminance(bg)].sort((a, b) => b - a) as [number, number];
+  const [lighter, darker] = [luminance(fg), luminance(bg)].sort((a, b) => b - a) as [
+    number,
+    number,
+  ];
   return (lighter + 0.05) / (darker + 0.05);
 }
 
@@ -111,6 +114,8 @@ const PAIRS: ReadonlyArray<{ text: string; bg: string; where: string }> = [
   { text: 'destructive', bg: 'card', where: 'erro dentro de card (detalhe, painel de arquivos)' },
   { text: 'muted-foreground', bg: 'background', where: 'texto secundário' },
   { text: 'muted-foreground', bg: 'muted', where: 'aba INATIVA do TabsList' },
+  // Item ativo do menu e hover de dropdown/select — o tint da marca (86e2ukrc9).
+  { text: 'accent-foreground', bg: 'accent', where: 'item ativo do sidebar · hover de menu' },
   // Texto sobre os preenchimentos sólidos.
   { text: 'destructive-foreground', bg: 'destructive', where: 'botão destrutivo, badge do sino' },
   { text: 'primary-foreground', bg: 'primary', where: 'botão primário' },
