@@ -16,6 +16,7 @@
  * vazaria para o aviso.
  */
 import type {
+  MarkAllReadPayload,
   MarkReadPayload,
   NotificationItem,
   NotificationListResponse,
@@ -63,4 +64,12 @@ export async function listNotifications(
  */
 export async function markNotificationRead(notificationId: string): Promise<MarkReadPayload> {
   return apiPost<MarkReadPayload>(`/api/v1/notifications/${notificationId}/read`);
+}
+
+/**
+ * Marca TODAS as não lidas como lidas (86e2u513q — o botão do sino).
+ * **Idempotente**: a 2ª chamada devolve `marked=0`, nunca erro.
+ */
+export async function markAllNotificationsRead(): Promise<MarkAllReadPayload> {
+  return apiPost<MarkAllReadPayload>('/api/v1/notifications/read-all');
 }

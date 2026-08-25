@@ -308,6 +308,7 @@ class TestNotificationEndpoints:
             ("GET", "/api/v1/notifications/unread-count"),
             ("GET", "/api/v1/notifications"),
             ("POST", f"/api/v1/notifications/{uuid4()}/read"),
+            ("POST", "/api/v1/notifications/read-all"),
         ],
     )
     async def test_sem_auth_retorna_401(
@@ -403,6 +404,62 @@ class TestNotificationEndpoints:
         assert second.json()["data"]["read_at"] == first.json()["data"]["read_at"]
         # E não reaparece no contador.
         assert await _unread(client_with_db) == 0
+
+    async def test_marcar_todas_zera_o_contador_e_e_idempotente(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """86e2u513q — o botão "marcar todas como lidas" do sino."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="Austral", creator=admin)
+        for _ in range(3):
+            await _seed_notification(db_session, user=admin, client=cliente)
+        await _login(client_with_db, ADMIN_EMAIL)
+        assert await _unread(client_with_db) == 3
+
+        first = await client_with_db.post("/api/v1/notifications/read-all")
+        assert first.status_code == 200, first.text
+        assert first.json()["data"]["marked"] == 3
+        assert await _unread(client_with_db) == 0
+
+        # Idempotente: nada para marcar é SUCESSO com marked=0, não erro.
+        second = await client_with_db.post("/api/v1/notifications/read-all")
+        assert second.status_code == 200, second.text
+        assert second.json()["data"]["marked"] == 0
+
+    async def test_marcar_todas_nao_toca_notificacao_de_outro_usuario(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """O UPDATE carrega o filtro de visibilidade: só as MINHAS viram lidas."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        outro = await _seed_user(db_session, email=MANAGER_A_EMAIL, role=UserRole.MANAGER)
+        cliente = await _seed_client(db_session, name="Austral", creator=admin, manager=outro)
+        await _seed_notification(db_session, user=admin, client=cliente)
+        do_outro = await _seed_notification(db_session, user=outro, client=cliente)
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.post("/api/v1/notifications/read-all")
+        assert resp.json()["data"]["marked"] == 1
+
+        await db_session.refresh(do_outro)
+        assert do_outro.read_at is None
+
+    async def test_marcar_todas_respeita_carteira_do_manager(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Carteira reatribuída: o manager não marca (nem vê) o aviso órfão."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        mgr_a = await _seed_user(db_session, email=MANAGER_A_EMAIL, role=UserRole.MANAGER)
+        mgr_b = await _seed_user(db_session, email=MANAGER_B_EMAIL, role=UserRole.MANAGER)
+        cliente_do_a = await _seed_client(db_session, name="Austral", creator=admin, manager=mgr_a)
+        orfa = await _seed_notification(db_session, user=mgr_b, client=cliente_do_a)
+        await _login(client_with_db, MANAGER_B_EMAIL)
+
+        resp = await client_with_db.post("/api/v1/notifications/read-all")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["data"]["marked"] == 0
+
+        await db_session.refresh(orfa)
+        assert orfa.read_at is None
 
     async def test_filtro_de_nao_lidas_e_paginacao(
         self, client_with_db: AsyncClient, db_session: AsyncSession
