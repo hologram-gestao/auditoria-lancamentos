@@ -69,11 +69,13 @@ const TOAST_CLASSNAMES = {
  */
 function AppToaster() {
   const { resolvedTheme } = useTheme();
+  // Hologram é um tema de superfícies ESCURAS — para o toast neutro do Sonner
+  // ele conta como dark; os tipados pintam pelos tokens e flipam sozinhos.
   return (
     <Toaster
       position="top-right"
       closeButton
-      theme={resolvedTheme === 'dark' ? 'dark' : 'light'}
+      theme={resolvedTheme === 'light' ? 'light' : 'dark'}
       toastOptions={{ classNames: TOAST_CLASSNAMES }}
     />
   );
@@ -98,7 +100,15 @@ export function Providers({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+    <ThemeProvider
+      attribute="class"
+      defaultTheme="system"
+      enableSystem
+      disableTransitionOnChange
+      // O terceiro tema (86e2ukrc9): o `system` continua resolvendo só
+      // claro/escuro — Hologram é escolha manual no toggle.
+      themes={['light', 'dark', 'hologram']}
+    >
       <QueryClientProvider client={client}>
         {children}
         <AppToaster />
