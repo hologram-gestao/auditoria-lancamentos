@@ -1,9 +1,12 @@
-# Relatórios do gate de a11y (`scripts/a11y-gate.sh` → `a11y-report-<tema>.json`,
-# um por tema desde a 86e2n39hb; o nome antigo sem sufixo fica coberto também).
-# São ~189 KB de saída de ferramenta que já entraram num commit uma vez e
-# reprovaram uma task. O `.gitignore` da RAIZ não resolve: ele está fora do
-# `gitPaths` de qualquer agent, então o agent que roda o gate não consegue
-# entregar a regra junto com a correção. Aqui, sim — este arquivo é do front.
+# Relatórios do gate de a11y. Desde a 86e2w8xpv eles são gravados DENTRO de
+# `test-results/a11y-report-<tema>.json` — diretório já ignorado pelo
+# `.gitignore` da RAIZ, o que fecha a classe do vazamento para qualquer cópia
+# do repo (worktree de agent incluído). A regra abaixo fica como CINTO: cobre
+# quem rodar uma versão antiga do script (que gravava aqui na raiz do app) e o
+# nome antigo sem sufixo de tema. Histórico: ~189 KB de saída de ferramenta já
+# entraram num commit uma vez e reprovaram uma task; o `.gitignore` da raiz
+# está fora do `gitPaths` de qualquer agent do hub — este arquivo, do front,
+# não está.
 a11y-report*.json
 
 # Screenshots de conferência visual do gate (`E2E_SHOTS=1`, uma pasta por

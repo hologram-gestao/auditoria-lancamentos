@@ -21,8 +21,14 @@
 # Temas (86e2n39hb): a suíte roda uma vez POR TEMA — `E2E_THEME` entra no spec
 # via localStorage antes do primeiro paint. O padrão é `both`: o escuro sem
 # medição foi exatamente o buraco que esta task fechou, e a task da paleta
-# (86e2ukrc9) herda este gate como instrumento. Relatórios separados por tema
-# (`a11y-report-<tema>.json`).
+# (86e2ukrc9) herda este gate como instrumento. Relatórios separados por tema,
+# gravados DENTRO de `test-results/` (86e2w8xpv): diretório já ignorado pelo
+# `.gitignore` da RAIZ, então o artefato não tem como voltar a entrar num
+# commit — em nenhuma cópia do repo, worktree de agent incluído. Efeito
+# colateral aceito: o Playwright limpa `test-results/` no início de CADA run,
+# então ao fim do gate só o relatório do ÚLTIMO tema sobrevive — o guard lê
+# cada um logo após o seu run, antes de o tema seguinte apagar (os screenshots
+# ficam em `a11y-shots/<tema>/`, fora, pelo mesmo motivo).
 #
 # Pré-requisito de máquina: as libs de sistema do Chromium. Se o browser baixar
 # mas não subir (`libnspr4.so: cannot open shared object file`), rode uma vez:
@@ -106,7 +112,7 @@ fi
 # `on-first-retry`.
 FINAL_EXIT=0
 for THEME in $THEMES; do
-  REPORT="a11y-report-${THEME}.json"
+  REPORT="test-results/a11y-report-${THEME}.json"
   echo "==> axe-core · tema ${THEME} (reprova em critical/serious)"
   set +e
   E2E_BASE_URL="$BASE_URL" E2E_THEME="$THEME" PLAYWRIGHT_JSON_OUTPUT_NAME="$REPORT" \
