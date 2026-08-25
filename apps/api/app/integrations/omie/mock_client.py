@@ -159,6 +159,9 @@ _MOCK_EXTRATO_ITAU: list[LancamentoExtrato] = [
         }
     ),
     # === 3 órfãos no Omie — vão pra `reconciliation_omie_entries` sem anomalia ===
+    # Estes três carregam fornecedor/categoria (como o Omie real devolve no
+    # extrato) — são o que a aba Divergências enriquece via cache (86e2z895j);
+    # sem os campos, a validação da repopulação só provaria o `amount`.
     LancamentoExtrato.model_validate(
         {
             "nCodLancamento": 70010,
@@ -167,6 +170,9 @@ _MOCK_EXTRATO_ITAU: list[LancamentoExtrato] = [
             "nValorDocumento": Decimal("150.00"),
             "cObservacoes": "ESTORNO PIX",
             "cSituacao": "Conciliado",
+            "cRazCliente": "MAIANE MEDRADO SILVA",
+            "cDesCategoria": "Vendas de produtos",
+            "cCodCategoria": "1.01.01",
         }
     ),
     LancamentoExtrato.model_validate(
@@ -177,6 +183,9 @@ _MOCK_EXTRATO_ITAU: list[LancamentoExtrato] = [
             "nValorDocumento": Decimal("2300.00"),
             "cObservacoes": "TRANSF INTERNA",
             "cSituacao": "Conciliado",
+            "cRazCliente": "BANCO ITAU UNIBANCO S.A.",
+            "cDesCategoria": "Transferência entre contas",
+            "cCodCategoria": "2.09.01",
         }
     ),
     LancamentoExtrato.model_validate(
@@ -187,6 +196,9 @@ _MOCK_EXTRATO_ITAU: list[LancamentoExtrato] = [
             "nValorDocumento": Decimal("187.50"),
             "cObservacoes": "RENDIMENTO CDB",
             "cSituacao": "Conciliado",
+            "cRazCliente": "BANCO ITAU UNIBANCO S.A.",
+            "cDesCategoria": "Rendimentos de aplicação",
+            "cCodCategoria": "1.03.02",
         }
     ),
 ]

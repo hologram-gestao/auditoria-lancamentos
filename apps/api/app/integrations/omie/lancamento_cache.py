@@ -45,6 +45,14 @@ log = get_logger(__name__)
 # TTL: 2h conforme PLAN_IMPLEMENTACAO S11 e Doc §5.3.
 DEFAULT_TTL_SECONDS = 7200
 
+# TTL do cache NEGATIVO (86e2z895j): id pedido que uma repopulação BEM-SUCEDIDA
+# não trouxe — tipicamente título Atrasado/A vencer, que `ListarExtrato` não
+# devolve. Sem ele, um único id irresolúvel faria a aba Divergências chamar o
+# Omie a CADA render, para sempre, pagando a latência do extrato sem ganhar
+# nada. Curto de propósito (15 min ≪ 2h do positivo): quando o lançamento
+# aparecer no extrato, a tela se cura na janela seguinte.
+UNRESOLVED_TTL_SECONDS = 900
+
 # Limite de entries do L1. Estimativa: ~100 clientes x ~100 lançamentos
 # típicos por sessão = ~10k entries; cada entry ocupa ~200 B (DTO + tupla-chave
 # UUID + int), totalizando ~2 MB — headroom confortável e impede crescimento
@@ -124,12 +132,21 @@ class OmieLancamentoCache:
         *,
         ttl_seconds: int = DEFAULT_TTL_SECONDS,
         l1_maxsize: int = DEFAULT_L1_MAXSIZE,
+        unresolved_ttl_seconds: int = UNRESOLVED_TTL_SECONDS,
     ) -> None:
         # L1: chave (client_id, omie_id) → data. TTLCache lida com expiração
         # lazy via time.monotonic e impõe upper bound LRU.
         self._l1: TTLCache[tuple[UUID, int], OmieLancamentoData] = TTLCache(
             maxsize=l1_maxsize,
             ttl=ttl_seconds,
+        )
+        # Cache negativo — só ids; nunca guarda dado, então não conflita com
+        # a regra "nada identificável persiste" (§4.5). Consultado apenas por
+        # quem decide REPOPULAR; o positivo sempre vence (id resolvido não
+        # entra em `missing` e a entrada negativa expira sozinha).
+        self._unresolved: TTLCache[tuple[UUID, int], bool] = TTLCache(
+            maxsize=l1_maxsize,
+            ttl=unresolved_ttl_seconds,
         )
 
     # ------------------------------------------------------------------
@@ -173,6 +190,30 @@ class OmieLancamentoCache:
             misses=len(omie_ids) - len(found),
         )
         return found
+
+    def known_unresolved(self, *, client_id: UUID, omie_ids: list[int]) -> set[int]:
+        """IDs marcados como irresolúveis (dentro do TTL negativo).
+
+        Quem decide repopular subtrai estes do conjunto de misses — evita
+        pagar `ListarExtrato` de novo por um id que a última repopulação
+        bem-sucedida já provou não estar no extrato.
+        """
+        return {oid for oid in omie_ids if (client_id, oid) in self._unresolved}
+
+    def mark_unresolved(self, *, client_id: UUID, omie_ids: list[int]) -> None:
+        """Marca ids que uma repopulação BEM-SUCEDIDA não trouxe.
+
+        NUNCA chamar no caminho de falha do Omie — falha não prova nada, e
+        marcar ali silenciaria o retry natural do próximo render.
+        """
+        for oid in omie_ids:
+            self._unresolved[(client_id, oid)] = True
+        if omie_ids:
+            log.info(
+                "omie_lancamento_cache_unresolved",
+                client_id=str(client_id),
+                count=len(omie_ids),
+            )
 
     # ------------------------------------------------------------------
     # Populate (write path)

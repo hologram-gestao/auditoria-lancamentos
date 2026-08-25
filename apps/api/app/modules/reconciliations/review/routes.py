@@ -32,7 +32,9 @@ from app.core.dependencies import (
     ReviewExportDep,
 )
 from app.core.exceptions import ConflictError, NotFoundError
+from app.core.logging import get_logger
 from app.db.models import Client, ReconciliationSession, ReconciliationStatus
+from app.integrations.omie.client import OmieClient
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache
 from app.modules.clients.omie_factory import build_omie_client
 from app.modules.reconciliations.review.repository import ReviewRepository
@@ -57,6 +59,8 @@ router = APIRouter(
     prefix="/api/v1/reconciliations/{session_id}",
     tags=["reconciliations:review"],
 )
+
+logger = get_logger(__name__)
 
 _SESSION_NOT_FOUND_MSG = "Sessão de conciliação não encontrada."
 
@@ -252,23 +256,50 @@ async def list_available_omie_entries(
     "/omie-entries",
     summary=(
         "Lista divergências Omie (lançamentos persistidos sem correspondente "
-        "no arquivo) enriquecidas com supplier/category/amount via cache L2."
+        "no arquivo) enriquecidas com supplier/category/amount via cache L1 — "
+        "repopulado do extrato quando algum id está sem dado (86e2z895j)."
     ),
 )
 async def list_omie_entries(
     user: ReviewExportDep,
     db: DbSessionDep,
     service: ReviewServiceDep,
+    settings: Annotated[Settings, Depends(get_settings)],
     session_id: UUID,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
 ) -> OmieEntryListResponse:
     sess = await _load_session_for_rbac(session_id=session_id, user=user, db=db)
-    rows, pagination = await service.list_omie_entries(
-        session=sess,
-        page=page,
-        page_size=page_size,
-    )
+    client = (
+        await db.execute(select(Client).where(Client.id == sess.client_id))
+    ).scalar_one_or_none()
+    if client is None:
+        raise NotFoundError(_SESSION_NOT_FOUND_MSG)
+
+    # Fail-soft de ponta a ponta: a aba renderiza com "—" antes desta mudança,
+    # e credencial indecifrável/ausente não pode transformá-la num 500 — o
+    # service só usa o client no MISS, e sem ele degrada para o lookup puro.
+    omie_client: OmieClient | None = None
+    try:
+        cipher = await load_client_cipher(client, settings=settings)
+        omie_client = build_omie_client(client, settings, cipher)
+    except Exception as exc:
+        logger.warning(
+            "omie_entries_client_build_failed",
+            session_id=str(session_id),
+            error=type(exc).__name__,
+        )
+
+    try:
+        rows, pagination = await service.list_omie_entries(
+            session=sess,
+            page=page,
+            page_size=page_size,
+            omie_client=omie_client,
+        )
+    finally:
+        if omie_client is not None:
+            await omie_client.aclose()
     return OmieEntryListResponse(data=rows, pagination=pagination)
 
 
