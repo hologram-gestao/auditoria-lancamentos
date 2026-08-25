@@ -178,7 +178,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        theme: [light, dark]
+        theme: [light, dark, hologram]
 
     env:
       A11Y_SPEC: e2e/a11y-mocked.spec.ts

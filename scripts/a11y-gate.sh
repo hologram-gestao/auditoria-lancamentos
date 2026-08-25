@@ -14,8 +14,8 @@
 # deixaria o gate verde sem ter medido nada.
 #
 # Uso:
-#   bash scripts/a11y-gate.sh                    # porta 3100, DOIS temas (claro e escuro)
-#   A11Y_THEME=dark bash scripts/a11y-gate.sh    # um tema só (light | dark | both)
+#   bash scripts/a11y-gate.sh                    # porta 3100, TODOS os temas (claro, escuro, hologram)
+#   A11Y_THEME=dark bash scripts/a11y-gate.sh    # um tema só (light | dark | hologram | both)
 #   A11Y_PORT=3200 bash scripts/a11y-gate.sh
 #
 # Temas (86e2n39hb): a suíte roda uma vez POR TEMA — `E2E_THEME` entra no spec
@@ -39,9 +39,10 @@ SPEC="e2e/a11y-mocked.spec.ts"
 case "${A11Y_THEME:-both}" in
   light) THEMES="light" ;;
   dark) THEMES="dark" ;;
-  both) THEMES="light dark" ;;
+  hologram) THEMES="hologram" ;;
+  both) THEMES="light dark hologram" ;;
   *)
-    echo "ERRO: A11Y_THEME deve ser light, dark ou both (recebi '${A11Y_THEME}')." >&2
+    echo "ERRO: A11Y_THEME deve ser light, dark, hologram ou both (recebi '${A11Y_THEME}')." >&2
     exit 1
     ;;
 esac

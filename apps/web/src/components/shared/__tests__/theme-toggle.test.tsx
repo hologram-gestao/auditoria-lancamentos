@@ -57,7 +57,12 @@ describe('ThemeToggle', () => {
     await user.click(screen.getByRole('button', { name: 'Alterar tema' }));
 
     const opcoes = await screen.findAllByRole('menuitemradio');
-    expect(opcoes.map((o) => o.textContent)).toEqual(['Claro', 'Escuro', 'Seguir o sistema']);
+    expect(opcoes.map((o) => o.textContent)).toEqual([
+      'Claro',
+      'Escuro',
+      'Hologram',
+      'Seguir o sistema',
+    ]);
     expect(screen.getByRole('menuitemradio', { name: 'Escuro' })).toHaveAttribute(
       'aria-checked',
       'true',

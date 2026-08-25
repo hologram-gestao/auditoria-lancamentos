@@ -31,7 +31,7 @@ const AA_NORMAL_TEXT = 4.5;
 
 type Rgb = [number, number, number];
 
-function parseTokens(selector: ':root' | '.dark'): Record<string, string> {
+function parseTokens(selector: ':root' | '.dark' | '.hologram'): Record<string, string> {
   // O bloco vai do seletor até a primeira `}` — os dois blocos de tema são
   // planos (não há regra aninhada dentro deles).
   const start = CSS.indexOf(`${selector} {`);
@@ -124,22 +124,27 @@ const PAIRS: ReadonlyArray<{ text: string; bg: string; where: string }> = [
   { text: 'info-foreground', bg: 'info', where: 'preenchimento informativo' },
 ];
 
-describe.each(['root', 'dark'] as const)('tokens do tema (%s) — contraste AA', (theme) => {
-  const tokens = parseTokens(theme === 'root' ? ':root' : '.dark');
-  const rgb = (name: string): Rgb => {
-    const value = tokens[name];
-    if (value === undefined) throw new Error(`token \`--${name}\` não existe no tema ${theme}`);
-    return hslToRgb(value);
-  };
+describe.each(['root', 'dark', 'hologram'] as const)(
+  'tokens do tema (%s) — contraste AA',
+  (theme) => {
+    const tokens = parseTokens(
+      theme === 'root' ? ':root' : theme === 'dark' ? '.dark' : '.hologram',
+    );
+    const rgb = (name: string): Rgb => {
+      const value = tokens[name];
+      if (value === undefined) throw new Error(`token \`--${name}\` não existe no tema ${theme}`);
+      return hslToRgb(value);
+    };
 
-  it.each(PAIRS)('$text sobre $bg ($where) passa 4.5:1', ({ text, bg }) => {
-    expect(contrast(rgb(text), rgb(bg))).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
-  });
+    it.each(PAIRS)('$text sobre $bg ($where) passa 4.5:1', ({ text, bg }) => {
+      expect(contrast(rgb(text), rgb(bg))).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
+    });
 
-  // O badge "Erro" não usa um `-muted`: ele pinta 10% do destrutivo sobre o
-  // fundo. Composto à mão porque o Tailwind resolve isso em runtime.
-  it('destructive sobre bg-destructive/10 (badge "Erro") passa 4.5:1', () => {
-    const bg = over(rgb('destructive'), rgb('background'), 0.1);
-    expect(contrast(rgb('destructive'), bg)).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
-  });
-});
+    // O badge "Erro" não usa um `-muted`: ele pinta 10% do destrutivo sobre o
+    // fundo. Composto à mão porque o Tailwind resolve isso em runtime.
+    it('destructive sobre bg-destructive/10 (badge "Erro") passa 4.5:1', () => {
+      const bg = over(rgb('destructive'), rgb('background'), 0.1);
+      expect(contrast(rgb('destructive'), bg)).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
+    });
+  },
+);

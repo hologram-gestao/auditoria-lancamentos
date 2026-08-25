@@ -19,6 +19,7 @@ import { Monitor, Moon, Sun } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { useEffect, useState } from 'react';
 
+import { BrandMark } from '@/components/shared/brand-mark';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -35,17 +36,24 @@ export function ThemeToggle() {
     setMounted(true);
   }, []);
 
-  const Icon = mounted && resolvedTheme === 'dark' ? Moon : Sun;
+  const icon =
+    mounted && resolvedTheme === 'hologram' ? (
+      <BrandMark className="h-5 w-5" />
+    ) : mounted && resolvedTheme === 'dark' ? (
+      <Moon className="h-5 w-5" aria-hidden="true" />
+    ) : (
+      <Sun className="h-5 w-5" aria-hidden="true" />
+    );
 
   return (
     // `modal={false}`, como no sino: o modo modal (default) chama `hideOthers()`
     // e marca a página com `aria-hidden` mantendo elementos focáveis — o axe
-    // reprova com `aria-hidden-focus` (serious). Um menu de 3 itens não precisa
+    // reprova com `aria-hidden-focus` (serious). Um menu pequeno não precisa
     // esconder a página nem travar o scroll.
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon" className="shrink-0" aria-label="Alterar tema">
-          <Icon className="h-5 w-5" aria-hidden="true" />
+          {icon}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
@@ -60,6 +68,10 @@ export function ThemeToggle() {
           <DropdownMenuRadioItem value="dark">
             <Moon className="mr-2 h-4 w-4" aria-hidden="true" />
             Escuro
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="hologram">
+            <BrandMark className="mr-2 h-4 w-4" />
+            Hologram
           </DropdownMenuRadioItem>
           <DropdownMenuRadioItem value="system">
             <Monitor className="mr-2 h-4 w-4" aria-hidden="true" />

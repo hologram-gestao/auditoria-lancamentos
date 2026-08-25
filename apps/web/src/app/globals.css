@@ -104,6 +104,46 @@
     --input: 240 3.7% 15.9%;
     --ring: 240 75% 72%;
   }
+
+  /* Tema HOLOGRAM (86e2ukrc9, 25/08/2026) — as superfícies são o navy da
+     marca, na matiz ~222 amostrada por pixel do banner oficial
+     (`Docs/brand/hologram-banner.jpg`, família #081838/#082048). O botão
+     primário é BRANCO com texto navy — o eco do wordmark branco sobre navy do
+     banner. Terceiro tema selecionável no toggle (não mapeado pelo `system`).
+     TODOS os pares de contraste calculados antes de escrever e travados no
+     theme-contrast.test.ts (mínimo do bloco: 4.57:1). */
+  .hologram {
+    --background: 222 60% 9%;
+    --foreground: 0 0% 98%;
+    --card: 222 55% 11%;
+    --card-foreground: 0 0% 98%;
+    --popover: 222 55% 11%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 222 65% 14%;
+    --secondary: 222 45% 16%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 222 45% 16%;
+    --muted-foreground: 220 20% 72%;
+    --accent: 222 50% 24%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 80% 62%;
+    --destructive-foreground: 0 0% 9%;
+    --destructive-muted: 0 55% 15%;
+    --success: 142 65% 50%;
+    --success-foreground: 145 80% 10%;
+    --success-muted: 144 45% 14%;
+    --warning: 35 92% 62%;
+    --warning-foreground: 21 92% 14%;
+    --warning-muted: 30 60% 14%;
+    --info: 210 95% 68%;
+    --info-foreground: 222 60% 12%;
+    --info-muted: 218 55% 18%;
+    --border: 222 40% 20%;
+    --input: 222 40% 20%;
+    --ring: 0 0% 98%;
+    --radius: 0.5rem;
+  }
 }
 
 @layer base {
