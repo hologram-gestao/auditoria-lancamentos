@@ -35,7 +35,7 @@ export const Switch = React.forwardRef<HTMLButtonElement, SwitchProps>(
         }}
         className={cn(
           'focus-visible:ring-ring inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
-          checked ? 'bg-emerald-600' : 'bg-zinc-300 dark:bg-zinc-700',
+          checked ? 'bg-success' : 'bg-input',
           className,
         )}
         {...rest}

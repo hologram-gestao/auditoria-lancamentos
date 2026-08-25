@@ -10,27 +10,27 @@ export function OmieStatusBadge({ status }: OmieStatusBadgeProps) {
   const lower = status.toLowerCase();
   if (lower === 'atrasado') {
     return (
-      <span className="inline-flex rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800 dark:bg-red-900/40 dark:text-red-200">
+      <span className="bg-destructive-muted text-destructive inline-flex rounded-full px-2 py-0.5 text-xs font-medium">
         Atrasado
       </span>
     );
   }
   if (lower === 'previsto') {
     return (
-      <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+      <span className="bg-warning-muted text-warning inline-flex rounded-full px-2 py-0.5 text-xs font-medium">
         Previsto
       </span>
     );
   }
   if (lower === 'conciliado') {
     return (
-      <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">
+      <span className="bg-success-muted text-success inline-flex rounded-full px-2 py-0.5 text-xs font-medium">
         Conciliado
       </span>
     );
   }
   return (
-    <span className="inline-flex rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+    <span className="bg-muted text-muted-foreground inline-flex rounded-full px-2 py-0.5 text-xs font-medium">
       {status}
     </span>
   );

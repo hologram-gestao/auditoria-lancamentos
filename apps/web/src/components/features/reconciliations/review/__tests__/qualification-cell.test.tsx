@@ -59,7 +59,7 @@ describe('QualificationCell', () => {
     );
     const btn = screen.getByRole('button', { name: 'Qualificação suspeita' });
     expect(btn).toBeInTheDocument();
-    expect(btn.className).toMatch(/text-amber-700/);
+    expect(btn.className).toMatch(/text-warning/);
   });
 
   it('renderiza ícone âmbar (⚠️) para padrao_quebrado e valor_outlier (severity warning)', () => {
@@ -92,7 +92,7 @@ describe('QualificationCell', () => {
     );
     const btn = screen.getByRole('button', { name: 'Qualificação incoerente' });
     expect(btn).toBeInTheDocument();
-    expect(btn.className).toMatch(/text-red-700/);
+    expect(btn.className).toMatch(/text-destructive/);
   });
 
   it('dispara onOpenOverride no clique do ícone warning/critical', () => {

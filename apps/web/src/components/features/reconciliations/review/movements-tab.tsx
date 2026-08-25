@@ -587,8 +587,8 @@ function RowFragment({
 }: RowFragmentProps) {
   const amountClass = cn(
     'tabular-nums',
-    amountNum > 0 && 'text-emerald-700 dark:text-emerald-300',
-    amountNum < 0 && 'text-red-700 dark:text-red-300',
+    amountNum > 0 && 'text-success',
+    amountNum < 0 && 'text-destructive',
   );
   return (
     <>

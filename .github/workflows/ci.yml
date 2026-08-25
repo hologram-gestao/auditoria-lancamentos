@@ -167,15 +167,23 @@ jobs:
   # isso este job aponta para UM arquivo, e não para o `testDir` inteiro: sem
   # aquelas vars ela faria `test.skip` e deixaria o gate verde sem medir nada.
   web_a11y:
-    name: Web (a11y · axe-core)
+    name: Web (a11y · axe-core · ${{ matrix.theme }})
     needs: changes
     if: ${{ needs.changes.outputs.web == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
+    # 86e2n39hb — o gate mede os DOIS temas: um leg por tema, para o escuro
+    # nunca entrar sem cobertura. Espelho do loop de `scripts/a11y-gate.sh`.
+    strategy:
+      fail-fast: false
+      matrix:
+        theme: [light, dark]
+
     env:
       A11Y_SPEC: e2e/a11y-mocked.spec.ts
       E2E_BASE_URL: http://127.0.0.1:3100
+      E2E_THEME: ${{ matrix.theme }}
       # A suíte mocka `**/api/v1/**` no browser; o rewrite do Next nunca é
       # exercido. A var existe só porque o `next build` a resolve estaticamente.
       INTERNAL_API_URL: http://127.0.0.1:8000
@@ -258,7 +266,7 @@ jobs:
       # `on-first-retry` — sem ele o artefato de falha viria sem trace.
       - name: Run axe-core a11y suite
         env:
-          PLAYWRIGHT_JSON_OUTPUT_NAME: a11y-report.json
+          PLAYWRIGHT_JSON_OUTPUT_NAME: a11y-report-${{ matrix.theme }}.json
         run: pnpm --filter @auditoria/web exec playwright test "$A11Y_SPEC" --retries=0 --trace=retain-on-failure --reporter=github,json
 
       # Rede de segurança contra o modo de falha que motivou este job: suíte que
@@ -268,7 +276,7 @@ jobs:
         run: |
           node -e '
             const fs = require("fs");
-            const path = "apps/web/a11y-report.json";
+            const path = "apps/web/a11y-report-${{ matrix.theme }}.json";
             if (!fs.existsSync(path)) {
               console.error("::error::relatório do Playwright não foi gerado — a suíte de a11y não chegou a rodar.");
               process.exit(1);
@@ -297,11 +305,11 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-a11y-report
+          name: playwright-a11y-report-${{ matrix.theme }}
           path: |
             apps/web/playwright-report/
             apps/web/test-results/
-            apps/web/a11y-report.json
+            apps/web/a11y-report-${{ matrix.theme }}.json
           retention-days: 7
           if-no-files-found: ignore
 

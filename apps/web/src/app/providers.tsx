@@ -1,14 +1,24 @@
 'use client';
 
 /**
- * Providers globais do app: TanStack Query + Sonner Toaster.
+ * Providers globais do app: ThemeProvider (next-themes) + TanStack Query +
+ * Sonner Toaster.
  *
  * Mantém-se em client component à parte para o root layout continuar como server
  * component. Defaults da Query escolhidos para painéis admin (CRUD com mutations
  * frequentes): staleTime curto, retry conservador.
+ *
+ * Tema (86e2n39hb, decisões de 25/08/2026): padrão `system`, persistência no
+ * localStorage (os dois defaults do next-themes). O provider vive AQUI — layout
+ * RAIZ, não no shell autenticado — porque o tema vale também no login (decisão
+ * (c) da task). `attribute="class"` casa com o `darkMode: ['class']` do
+ * Tailwind; `disableTransitionOnChange` evita o piscar de cores na troca; o
+ * script inline do próprio next-themes aplica a classe ANTES da hidratação
+ * (sem FOUC — exige o `suppressHydrationWarning` que o `<html>` já tem).
  */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ThemeProvider, useTheme } from 'next-themes';
 import { useState } from 'react';
 import { Toaster } from 'sonner';
 
@@ -51,6 +61,24 @@ const TOAST_CLASSNAMES = {
   info: 'bg-info-muted text-info border-info/30',
 } as const;
 
+/**
+ * O toast TIPADO pinta pelos tokens acima (flipam sozinhos com a classe
+ * `.dark`); o toast NEUTRO usa o `--normal-bg` do próprio Sonner, que só muda
+ * com a prop `theme` — sem ela ele ficaria branco no tema escuro. Componente à
+ * parte porque `useTheme` precisa estar DENTRO do ThemeProvider.
+ */
+function AppToaster() {
+  const { resolvedTheme } = useTheme();
+  return (
+    <Toaster
+      position="top-right"
+      closeButton
+      theme={resolvedTheme === 'dark' ? 'dark' : 'light'}
+      toastOptions={{ classNames: TOAST_CLASSNAMES }}
+    />
+  );
+}
+
 export function Providers({ children }: { children: React.ReactNode }) {
   const [client] = useState(
     () =>
@@ -70,9 +98,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <QueryClientProvider client={client}>
-      {children}
-      <Toaster position="top-right" closeButton toastOptions={{ classNames: TOAST_CLASSNAMES }} />
-    </QueryClientProvider>
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+      <QueryClientProvider client={client}>
+        {children}
+        <AppToaster />
+      </QueryClientProvider>
+    </ThemeProvider>
   );
 }
