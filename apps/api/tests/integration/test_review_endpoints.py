@@ -1445,6 +1445,9 @@ class TestAvailableOmieEntriesPeriod:
         # Período real do statement — extrato "quebrado" (15/04 → 14/05).
         sess.period_start = date(2026, 4, 15)
         sess.period_end = date(2026, 5, 14)
+        # FASE 1: sessões novas gravam 0 na coluna — a expansão tem de vir do
+        # range FIXO (86e2z895j), não dela; 0 aqui trava essa garantia.
+        sess.date_tolerance_days = 0
         await db_session.flush()
 
         cache = AsyncMock()
@@ -1462,7 +1465,7 @@ class TestAvailableOmieEntriesPeriod:
             search=None,
         )
 
-        # Período expandido = period_real +/- tolerance(3 dias).
+        # Período expandido = period_real ± DATE_DIVERGENCE_RANGE (3, fixo).
         # period_start=2026-04-15 - 3 = 2026-04-12
         # period_end=2026-05-14 + 3 = 2026-05-17
         call_kwargs = cache.populate_from_extrato.call_args.kwargs
@@ -1483,6 +1486,9 @@ class TestAvailableOmieEntriesPeriod:
         # Sessão pré-migration — period_start/end ficam None.
         assert sess.period_start is None
         assert sess.period_end is None
+        # Mesmo racional do teste acima: a janela vem do range fixo.
+        sess.date_tolerance_days = 0
+        await db_session.flush()
 
         cache = AsyncMock()
         cache.populate_from_extrato.return_value = {}
@@ -1499,10 +1505,192 @@ class TestAvailableOmieEntriesPeriod:
             search=None,
         )
 
-        # Fallback: [2026-04-01, 2026-04-30] ± tolerance(3) → [2026-03-29, 2026-05-03].
+        # Fallback: [2026-04-01, 2026-04-30] ± range fixo(3) → [2026-03-29, 2026-05-03].
         call_kwargs = cache.populate_from_extrato.call_args.kwargs
         assert call_kwargs["period_start"] == date(2026, 3, 29)
         assert call_kwargs["period_end"] == date(2026, 5, 3)
+
+
+# ----------------------------------------------------------------------
+# Service `list_omie_entries` — repopulação do cache no miss (86e2z895j)
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestOmieEntriesRepopulateOnMiss:
+    """86e2z895j — a aba Divergências Omie repopula o cache L1 no miss.
+
+    O cache é in-memory/por processo com TTL de 2h; o endpoint era
+    lookup-only e, expirado o cache (ou noutra réplica), a aba mostrava "—"
+    em supplier/category/amount para sempre. Unit-style, como
+    `TestAvailableOmieEntriesPeriod`: service direto, cache e OmieClient
+    mockados. O que se trava aqui:
+        - miss + omie_client → UMA repopulação no período expandido FIXO,
+          seguida de novo lookup que enriquece a resposta;
+        - cache quente → Omie não é chamado (custo zero no caminho comum);
+        - sem omie_client (build falhou na rota) → lookup puro, sem erro;
+        - falha do Omie na repopulação → degrada para "—", nunca explode.
+    """
+
+    @staticmethod
+    def _cached_data() -> Any:
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            supplier="Moinho Santa Clara",
+            category="1.01 Insumos",
+            amount=Decimal("-4622.96"),
+        )
+
+    @staticmethod
+    def _cache_mock() -> Any:
+        """AsyncMock com os métodos SÍNCRONOS do cache negativo configurados —
+        um `AsyncMock` cru devolveria coroutine em `known_unresolved` e o
+        `not in` do service estouraria TypeError."""
+        from unittest.mock import AsyncMock, Mock
+
+        cache = AsyncMock()
+        cache.known_unresolved = Mock(return_value=set())
+        cache.mark_unresolved = Mock()
+        return cache
+
+    async def _seed_scene(
+        self, db_session: AsyncSession
+    ) -> tuple[ReconciliationSession, ReconciliationOmieEntry]:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin)
+        sess = await _seed_session(db_session, client=cli, creator=admin)
+        sess.period_start = date(2026, 4, 1)
+        sess.period_end = date(2026, 4, 30)
+        # FASE 1: a coluna zerada NÃO pode encolher a janela da repopulação.
+        sess.date_tolerance_days = 0
+        await db_session.flush()
+        entry = await _seed_omie_entry(db_session, reconciliation=sess, omie_lancamento_id=111)
+        return sess, entry
+
+    def _service(self, db_session: AsyncSession, cache: Any) -> Any:
+        from app.modules.reconciliations.review.repository import ReviewRepository
+        from app.modules.reconciliations.review.service import ReviewService
+
+        return ReviewService(
+            ReviewRepository(db_session),
+            cache=cache,
+            settings=get_settings(),
+        )
+
+    async def test_miss_repopula_no_periodo_fixo_e_enriquece(
+        self, db_session: AsyncSession
+    ) -> None:
+        from unittest.mock import AsyncMock
+
+        sess, _ = await self._seed_scene(db_session)
+        cache = self._cache_mock()
+        # 1º lookup: vazio (TTL expirou). 2º, pós-repopulação: dado presente.
+        cache.get_many.side_effect = [{}, {111: self._cached_data()}]
+        omie_client = AsyncMock()
+
+        items, _ = await self._service(db_session, cache).list_omie_entries(
+            session=sess, page=1, page_size=20, omie_client=omie_client
+        )
+
+        cache.populate_from_extrato.assert_awaited_once()
+        kwargs = cache.populate_from_extrato.await_args.kwargs
+        assert kwargs["omie_client"] is omie_client
+        assert kwargs["omie_conta_id"] == sess.omie_conta_id
+        # Período REAL ± DATE_DIVERGENCE_RANGE (3, fixo) — não a coluna (0).
+        assert kwargs["period_start"] == date(2026, 3, 29)
+        assert kwargs["period_end"] == date(2026, 5, 3)
+        assert cache.get_many.await_count == 2
+
+        assert items[0].supplier == "Moinho Santa Clara"
+        assert items[0].category == "1.01 Insumos"
+        assert items[0].amount == Decimal("-4622.96")
+
+    async def test_cache_quente_nao_chama_omie(self, db_session: AsyncSession) -> None:
+        from unittest.mock import AsyncMock
+
+        sess, _ = await self._seed_scene(db_session)
+        cache = self._cache_mock()
+        cache.get_many.return_value = {111: self._cached_data()}
+        omie_client = AsyncMock()
+
+        items, _ = await self._service(db_session, cache).list_omie_entries(
+            session=sess, page=1, page_size=20, omie_client=omie_client
+        )
+
+        cache.populate_from_extrato.assert_not_awaited()
+        assert cache.get_many.await_count == 1
+        assert items[0].supplier == "Moinho Santa Clara"
+
+    async def test_sem_omie_client_segue_lookup_only(self, db_session: AsyncSession) -> None:
+
+        sess, _ = await self._seed_scene(db_session)
+        cache = self._cache_mock()
+        cache.get_many.return_value = {}
+
+        items, _ = await self._service(db_session, cache).list_omie_entries(
+            session=sess, page=1, page_size=20, omie_client=None
+        )
+
+        cache.populate_from_extrato.assert_not_awaited()
+        assert items[0].supplier is None
+        assert items[0].category is None
+        assert items[0].amount is None
+
+    async def test_falha_do_omie_degrada_sem_erro(self, db_session: AsyncSession) -> None:
+        from unittest.mock import AsyncMock
+
+        sess, _ = await self._seed_scene(db_session)
+        cache = self._cache_mock()
+        cache.get_many.return_value = {}
+        cache.populate_from_extrato.side_effect = RuntimeError("omie indisponível")
+
+        items, _ = await self._service(db_session, cache).list_omie_entries(
+            session=sess, page=1, page_size=20, omie_client=AsyncMock()
+        )
+
+        # Sem re-lookup após a falha e sem exceção — a aba renderiza com "—".
+        assert cache.get_many.await_count == 1
+        assert items[0].supplier is None
+        # Falha NÃO marca irresolúvel: o próximo render tenta de novo.
+        cache.mark_unresolved.assert_not_called()
+        # Data e status continuam vindo do banco, não do cache.
+        assert items[0].omie_lancamento_id == 111
+
+    async def test_id_irresoluvel_nao_reconsulta_omie(self, db_session: AsyncSession) -> None:
+        """Cache negativo: id que a última repopulação não trouxe (título
+        Atrasado/A vencer fora do extrato) não pode custar `ListarExtrato`
+        a cada render da aba."""
+        from unittest.mock import AsyncMock, Mock
+
+        sess, _ = await self._seed_scene(db_session)
+        cache = self._cache_mock()
+        cache.get_many.return_value = {}
+        cache.known_unresolved = Mock(return_value={111})
+
+        items, _ = await self._service(db_session, cache).list_omie_entries(
+            session=sess, page=1, page_size=20, omie_client=AsyncMock()
+        )
+
+        cache.populate_from_extrato.assert_not_awaited()
+        assert items[0].supplier is None
+
+    async def test_repopulacao_sem_resultado_marca_irresoluvel(
+        self, db_session: AsyncSession
+    ) -> None:
+        from unittest.mock import AsyncMock
+
+        sess, _ = await self._seed_scene(db_session)
+        cache = self._cache_mock()
+        # Repopulação roda com sucesso, mas o extrato não traz o id.
+        cache.get_many.side_effect = [{}, {}]
+
+        await self._service(db_session, cache).list_omie_entries(
+            session=sess, page=1, page_size=20, omie_client=AsyncMock()
+        )
+
+        cache.populate_from_extrato.assert_awaited_once()
+        cache.mark_unresolved.assert_called_once_with(client_id=sess.client_id, omie_ids=[111])
 
 
 # ----------------------------------------------------------------------
