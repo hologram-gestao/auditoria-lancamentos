@@ -15,7 +15,11 @@
  * tasks foram removidos. A árvore é uma só (`features/navigation/nav-items`).
  *
  * O breadcrumb CONTINUA (decisão de 23/08/2026): ele mostra profundidade; o
- * "Voltar para clientes" do sidebar troca de camada.
+ * "Voltar para clientes" do sidebar troca de camada. Dentro de uma conciliação
+ * (86e2u513w) a trilha ganha o nível dela — derivado do pathname + cache do
+ * `useSessionDetail`, nunca registrado pela tela filha — e o nome do cliente
+ * vira link: é a volta explícita para a lista. O `aria-current` fica sempre na
+ * página realmente atual.
  *
  * Layout (design-system):
  *   - o shell externo (`(app)/layout.tsx`) já é `h-dvh` e só o `<main>` rola;
@@ -31,11 +35,15 @@
 
 import { ChevronRight, SquarePen } from 'lucide-react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 
+import { sessionIdFromPathname } from '@/components/features/navigation/nav-items';
+import { sessionCrumbLabel } from '@/components/features/reconciliations/session-label';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { Button } from '@/components/ui/button';
 import { useClientDetail } from '@/hooks/use-clients';
+import { useSessionDetail } from '@/hooks/use-reconciliations';
 import { ApiError } from '@/lib/api/client';
 import { canAccessClient, canSeeSystemArea, hasPermission, homePathFor } from '@/lib/authz';
 import { useAuthStore } from '@/stores/auth';
@@ -60,6 +68,13 @@ export function ClientShell({ clientId, children }: ClientShellProps) {
   // e quem nega é o backend — aí sim a tela degrada pela resposta.
   const canAccess = canAccessClient(currentUser, clientId);
   const detailQuery = useClientDetail(clientId, { enabled: canAccess });
+  // Nível da SESSÃO no breadcrumb (86e2u513w): derivado 100% do pathname, como
+  // a camada do sidebar — a tela filha não registra nada. O hook é o MESMO da
+  // tela de detalhe, então o TanStack serve do cache, sem segundo request.
+  // Hooks ANTES dos early returns (rules of hooks); `enabled` barra o vazio.
+  const pathname = usePathname();
+  const sessionId = sessionIdFromPathname(pathname);
+  const sessionQuery = useSessionDetail(sessionId ?? '');
 
   if (currentUser !== null && !canAccess) {
     return (
@@ -99,6 +114,19 @@ export function ClientShell({ clientId, children }: ClientShellProps) {
   // O elo "Clientes" do breadcrumb aponta para a lista GLOBAL. Para usuário de
   // tenant esse destino é negado: o breadcrumb começa no próprio cliente.
   const showClientsCrumb = canSeeSystemArea(currentUser);
+  // Dentro de uma conciliação a trilha ganha o nível dela e o cliente vira
+  // LINK (a volta explícita para a lista). Erro na carga da sessão não some
+  // com o nível: rótulo genérico mantém o caminho de volta visível — quem
+  // explica o erro é a tela filha.
+  const inSession = sessionId !== null;
+  let sessionCrumb: string | undefined;
+  if (inSession) {
+    if (sessionQuery.data !== undefined) {
+      sessionCrumb = sessionCrumbLabel(sessionQuery.data, client.accounts ?? []);
+    } else if (sessionQuery.isError) {
+      sessionCrumb = 'Conciliação';
+    }
+  }
 
   return (
     <div className="flex h-full flex-col gap-6">
@@ -117,9 +145,36 @@ export function ClientShell({ clientId, children }: ClientShellProps) {
                 </li>
               </>
             )}
-            <li className="text-foreground truncate font-medium" aria-current="page">
-              {client.name}
-            </li>
+            {inSession ? (
+              <>
+                <li className="min-w-0">
+                  <Link
+                    href={`/clientes/${clientId}`}
+                    className="hover:text-foreground block truncate hover:underline"
+                  >
+                    {client.name}
+                  </Link>
+                </li>
+                <li aria-hidden="true">
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </li>
+                <li className="text-foreground truncate font-medium" aria-current="page">
+                  {sessionCrumb ?? (
+                    <>
+                      <span
+                        className="bg-muted inline-block h-3 w-28 animate-pulse rounded"
+                        aria-hidden="true"
+                      />
+                      <span className="sr-only">Carregando conciliação…</span>
+                    </>
+                  )}
+                </li>
+              </>
+            ) : (
+              <li className="text-foreground truncate font-medium" aria-current="page">
+                {client.name}
+              </li>
+            )}
           </ol>
         </nav>
 

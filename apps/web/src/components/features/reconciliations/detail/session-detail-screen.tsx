@@ -52,6 +52,7 @@ import { GlossarySeal } from '../review/glossary-seal';
 import { MovementsTab } from '../review/movements-tab';
 import { OmieDivergencesTab } from '../review/omie-divergences-tab';
 import { SummaryTab } from '../review/summary-tab';
+import { accountNameFor } from '../session-label';
 
 import { ExportReportButton } from './export-report-button';
 import { SessionFilesPanel } from './session-files-panel';
@@ -88,12 +89,12 @@ export function SessionDetailScreen({ clientId, sessionId }: SessionDetailScreen
   }
 
   const detail = detailQuery.data;
+  // Fonte única do rótulo (86e2u513w): o breadcrumb do ClientShell deriva o
+  // mesmo nome do mesmo helper — divergir aqui é mostrar duas contas diferentes
+  // na mesma tela.
   const accountName = useMemo(() => {
     if (detail === undefined) return undefined;
-    const account = (clientQuery.data?.accounts ?? []).find(
-      (a) => a.omie_conta_id === detail.omie_conta_id,
-    );
-    return account?.name ?? `Conta #${detail.omie_conta_id}`;
+    return accountNameFor(clientQuery.data?.accounts ?? [], detail.omie_conta_id);
   }, [clientQuery.data, detail]);
 
   if (detailQuery.isLoading) {

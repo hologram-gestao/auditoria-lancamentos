@@ -1012,7 +1012,39 @@ for (const vp of VIEWPORTS) {
       await expect(
         page.getByRole('region', { name: 'Totalizadores da conciliação' }),
       ).toBeVisible();
+
+      // 86e2u513w — a trilha mostra o caminho ATÉ a conciliação: o cliente
+      // vira link (a volta explícita para a lista) e o aria-current fica na
+      // página realmente atual, não no cliente.
+      const trilha = page.getByRole('navigation', { name: 'Breadcrumb' });
+      const clienteCrumb = trilha.getByRole('link', { name: 'Cliente Exemplo Ltda' });
+      await expect(clienteCrumb).toBeVisible();
+      await expect(trilha.locator('[aria-current="page"]')).toHaveText(
+        'Cartão Itaú · Junho de 2026',
+      );
       await analyze(page, `detalhe da conciliação (${vp.label})`);
+      await shot(page, `breadcrumb-detalhe-${vp.label.replace(/\s+/g, '-')}`);
+
+      // O clique no nível do cliente NAVEGA para a lista de conciliações.
+      await clienteCrumb.click();
+      await expect(page).toHaveURL(new RegExp(`/clientes/${CLIENT_ID}$`));
+      await expect(
+        page.getByRole('navigation', { name: 'Breadcrumb' }).getByText('Cliente Exemplo Ltda'),
+      ).toHaveAttribute('aria-current', 'page');
+    });
+
+    test('trilha do detalhe para usuário de tenant: sem elo "Clientes" (86e2u513w)', async ({
+      page,
+    }) => {
+      sessionUser = CLIENT_OPERATOR_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}`);
+      const trilha = page.getByRole('navigation', { name: 'Breadcrumb' });
+      await expect(trilha.locator('[aria-current="page"]')).toHaveText(
+        'Cartão Itaú · Junho de 2026',
+      );
+      // A trilha do tenant começa no próprio cliente — sem rota que o servidor nega.
+      await expect(trilha.getByRole('link', { name: 'Clientes', exact: true })).toHaveCount(0);
+      await expect(trilha.getByRole('link', { name: 'Cliente Exemplo Ltda' })).toBeVisible();
     });
 
     test('Contas Bancárias (R6)', async ({ page }) => {
