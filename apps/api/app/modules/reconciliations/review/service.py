@@ -17,7 +17,7 @@ Princípios:
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -46,6 +46,7 @@ from app.db.models import (
     ReconciliationOmieEntry,
     ReconciliationSession,
 )
+from app.modules.reconciliations.processing.matcher import DATE_DIVERGENCE_RANGE
 from app.modules.reconciliations.qualification.service import (
     QUALIFICATION_FLAG_CODES,
 )
@@ -399,22 +400,14 @@ class ReviewService:
         Popula o cache L2 — chamadas subsequentes a /omie/lancamentos
         reaproveitam.
 
-        Período usado:
-            - Se `session.period_start` E `period_end` estão preenchidos,
-              usa o período REAL do statement (cobre extratos quebrados
-              tipo 15/04→14/05, faturas de cartão e lançamentos nos
-              primeiros dias do mês seguinte).
-            - Fallback `[reference_month, last_day_of_month]` para sessões
-              criadas antes da migration `4a2f9e8b1c3d` — mesma lógica
-              do worker em `processing/omie_fetch.fetch_pending`.
+        Período usado: `_expanded_session_period` — período REAL do statement
+        (fallback mês de referência) expandido pelo range FIXO de 3 dias
+        (§5.3). Antes expandia por `session.date_tolerance_days`, que grava 0
+        desde a FASE 1: sessões novas buscavam a janela SEM a margem que o
+        matcher usou, e lançamentos com data divergente na borda sumiam da
+        lista de troca.
         """
-        if session.period_start is not None and session.period_end is not None:
-            period_start, period_end = session.period_start, session.period_end
-        else:
-            period_start, period_end = _month_bounds(session.reference_month)
-        expanded_start, expanded_end = self._repo.expand_period(
-            period_start, period_end, session.date_tolerance_days
-        )
+        expanded_start, expanded_end = _expanded_session_period(session)
 
         populated = await self._cache.populate_from_extrato(
             client_id=session.client_id,
@@ -464,13 +457,18 @@ class ReviewService:
         session: ReconciliationSession,
         page: int,
         page_size: int,
+        omie_client: OmieClient | None = None,
     ) -> tuple[list[OmieEntryItem], PaginationMeta]:
-        """Lista omie_entries paginados, enriquecidos com cache L2.
+        """Lista omie_entries paginados, enriquecidos com o cache L1.
 
-        Lookup-only — não chama Omie aqui. Cache pode ter expirado ou nunca
-        sido populado (1ª visita à aba): nesses casos, `supplier/category/
-        amount` virão `None` e a UI mostra placeholder. Para forçar
-        repopulação, o front chama /available-omie-entries (que popula).
+        86e2z895j — o cache é in-memory, por processo e com TTL de 2h:
+        depois do TTL (ou noutra réplica do Cloud Run) o lookup vinha vazio
+        e a aba mostrava "—" em supplier/category/amount PARA SEMPRE, porque
+        este método era lookup-only e nada aqui repopulava. Agora, havendo
+        id sem dado E `omie_client`, repopula do extrato no período expandido
+        da sessão (mesmo padrão fail-soft do export, `export/service.py`) e
+        refaz o lookup. Falha do Omie degrada para "—" — a aba nunca cai por
+        causa do enriquecimento.
         """
         self._current_session_id = session.id
         rows, total = await self._repo.list_omie_entries_paginated(
@@ -484,6 +482,49 @@ class ReviewService:
             client_id=session.client_id,
             omie_ids=omie_ids,
         )
+
+        missing = [oid for oid in omie_ids if oid not in cached]
+        # Subtrai os conhecidamente irresolúveis (cache negativo): um título
+        # Atrasado/A vencer que o extrato não devolve NÃO pode custar uma ida
+        # ao Omie por render da aba.
+        unresolved = self._cache.known_unresolved(client_id=session.client_id, omie_ids=missing)
+        attemptable = [oid for oid in missing if oid not in unresolved]
+        if attemptable and omie_client is not None:
+            expanded_start, expanded_end = _expanded_session_period(session)
+            try:
+                await self._cache.populate_from_extrato(
+                    client_id=session.client_id,
+                    omie_client=omie_client,
+                    omie_conta_id=session.omie_conta_id,
+                    period_start=expanded_start,
+                    period_end=expanded_end,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "omie_entries_repopulate_failed",
+                    session_id=str(session.id),
+                    client_id=str(session.client_id),
+                    missing_count=len(missing),
+                    error=type(exc).__name__,
+                )
+            else:
+                cached = await self._cache.get_many(
+                    client_id=session.client_id,
+                    omie_ids=omie_ids,
+                )
+                # Ainda sem dado = fora do extrato do período (ex.: título
+                # Atrasado/A vencer) — fica "—" na UI, entra no cache negativo
+                # (falha do Omie NÃO entra — retry no próximo render) e o log
+                # leva só contadores.
+                still_missing = [oid for oid in omie_ids if oid not in cached]
+                self._cache.mark_unresolved(client_id=session.client_id, omie_ids=still_missing)
+                logger.info(
+                    "omie_entries_repopulated",
+                    session_id=str(session.id),
+                    requested=len(omie_ids),
+                    missing_before=len(missing),
+                    missing_after=len(still_missing),
+                )
 
         cipher = await self._cipher_for_client(session.client_id, provision=False)
         items: list[OmieEntryItem] = []
@@ -997,3 +1038,22 @@ def _month_bounds(reference_month: date) -> tuple[date, date]:
 
     last_day = monthrange(reference_month.year, reference_month.month)[1]
     return reference_month, reference_month.replace(day=last_day)
+
+
+def _expanded_session_period(session: ReconciliationSession) -> tuple[date, date]:
+    """Período Omie da sessão expandido pelo range FIXO (§5.3).
+
+    Período REAL do statement quando persistido (cobre extrato quebrado tipo
+    15/04→14/05); fallback `[reference_month, último dia do mês]` para sessões
+    pré-migration `4a2f9e8b1c3d`. A expansão é SEMPRE `DATE_DIVERGENCE_RANGE`
+    (3 dias fixos, FASE 1) — a coluna `date_tolerance_days` grava 0 nas
+    sessões novas e usá-la ENCOLHERIA a janela (mesma decisão do export).
+    """
+    if session.period_start is not None and session.period_end is not None:
+        period_start, period_end = session.period_start, session.period_end
+    else:
+        period_start, period_end = _month_bounds(session.reference_month)
+    return (
+        period_start - timedelta(days=DATE_DIVERGENCE_RANGE),
+        period_end + timedelta(days=DATE_DIVERGENCE_RANGE),
+    )
