@@ -84,6 +84,11 @@ class OmieMovement:
     # um mesmo lançamento. NÃO decide match (§5): serve só para a sonda de
     # pagamento dividido medir se o agrupamento vem de graça no response.
     related_launch_id: int | None = None
+    # Código contábil da categoria (`cCodCategoria` no extrato,
+    # `codigo_categoria` no título). NÃO decide match: persiste na divergência
+    # (task 86e33bmkb) para a tela resolver a descrição via ListarCategorias —
+    # única fonte de categoria para títulos, que ficam fora do extrato.
+    category_code: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

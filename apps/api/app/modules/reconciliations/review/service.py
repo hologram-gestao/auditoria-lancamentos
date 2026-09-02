@@ -18,6 +18,7 @@ Princípios:
 from __future__ import annotations
 
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -46,6 +47,7 @@ from app.db.models import (
     ReconciliationOmieEntry,
     ReconciliationSession,
 )
+from app.integrations.omie.schemas import unescape_omie_text
 from app.modules.reconciliations.processing.matcher import DATE_DIVERGENCE_RANGE
 from app.modules.reconciliations.qualification.service import (
     QUALIFICATION_FLAG_CODES,
@@ -72,6 +74,7 @@ from app.modules.users.schemas import PaginationMeta
 if TYPE_CHECKING:
     from app.core.config import Settings
     from app.core.crypto import ClientCipher
+    from app.integrations.omie.categorias_cache import OmieCategoriasCache
     from app.integrations.omie.client import OmieClient
     from app.integrations.omie.lancamento_cache import (
         OmieLancamentoCache,
@@ -121,9 +124,15 @@ class ReviewService:
         *,
         cache: OmieLancamentoCache,
         settings: Settings,
+        categorias_cache: OmieCategoriasCache | None = None,
     ) -> None:
         self._repo = repository
         self._cache = cache
+        # Cache de ListarCategorias (singleton do app) — resolve o
+        # `category_code` persistido nas divergências de TÍTULO para a
+        # descrição legível (86e33bmkb). Opcional: sem ele, a tela mostra o
+        # próprio código como fallback.
+        self._categorias_cache = categorias_cache
         self._settings = settings
         # Chave do blind index (S16) — usada só no caminho de search da
         # listagem de file_entries. Mesma separação cripto: vazar uma não
@@ -527,6 +536,22 @@ class ReviewService:
                 )
 
         cipher = await self._cipher_for_client(session.client_id, provision=False)
+        # Linhas sem enriquecimento de extrato (tipicamente TÍTULOS
+        # Atrasado/Previsto, que o ListarExtrato não devolve) caem no snapshot
+        # persistido no processamento (86e33bmkb): `amount` direto da linha e
+        # `category_code` resolvido para descrição via ListarCategorias
+        # (cache TTL — nome nunca persiste, §4.5). Fail-soft: sem resolução,
+        # mostra o próprio código; linha pré-migration segue "—" como antes.
+        snapshot_codes = {
+            row.category_code
+            for row in rows
+            if row.category_code and row.omie_lancamento_id not in cached
+        }
+        category_by_code = await self._resolve_category_descriptions(
+            client_id=session.client_id,
+            codes=snapshot_codes,
+            omie_client=omie_client,
+        )
         items: list[OmieEntryItem] = []
         for row in rows:
             data = cached.get(row.omie_lancamento_id)
@@ -537,15 +562,30 @@ class ReviewService:
                 AAD_OMIE_ENTRY_USER_NOTE,
                 row.id,
             )
+            supplier: str | None
+            category: str | None
+            amount: Decimal | None
+            if data is not None:
+                supplier, category, amount = data.supplier, data.category, data.amount
+            else:
+                # Fornecedor de título não tem fonte na API do Omie (§5.5) —
+                # segue "—" até existir integração com ListarClientes.
+                supplier = None
+                category = (
+                    category_by_code.get(row.category_code, row.category_code)
+                    if row.category_code
+                    else None
+                )
+                amount = row.amount
             items.append(
                 OmieEntryItem(
                     id=row.id,
                     omie_lancamento_id=row.omie_lancamento_id,
                     transaction_date=row.transaction_date,
                     omie_status=row.omie_status,
-                    supplier=data.supplier if data is not None else None,
-                    category=data.category if data is not None else None,
-                    amount=data.amount if data is not None else None,
+                    supplier=supplier,
+                    category=category,
+                    amount=amount,
                     user_action=row.user_action,
                     user_note=user_note,
                 )
@@ -559,6 +599,43 @@ class ReviewService:
             total_pages=total_pages,
         )
         return items, pagination
+
+    async def _resolve_category_descriptions(
+        self,
+        *,
+        client_id: UUID,
+        codes: set[str],
+        omie_client: OmieClient | None,
+    ) -> dict[str, str]:
+        """Código contábil → descrição legível, via ListarCategorias cacheado.
+
+        Fail-soft integral (mesma filosofia do enriquecimento da aba): sem
+        cache fresco E sem `omie_client` — ou com falha do Omie — devolve `{}`
+        e o caller exibe o próprio código. A descrição NUNCA persiste (§4.5):
+        vive só no cache TTL do app (`OmieCategoriasCache`, 6 h).
+        """
+        if not codes or self._categorias_cache is None:
+            return {}
+        categorias = self._categorias_cache.get(client_id)
+        if categorias is None:
+            if omie_client is None:
+                return {}
+            try:
+                categorias = await omie_client.listar_categorias()
+            except Exception as exc:
+                logger.warning(
+                    "omie_entries_categorias_resolve_failed",
+                    client_id=str(client_id),
+                    codes_count=len(codes),
+                    error=type(exc).__name__,
+                )
+                return {}
+            self._categorias_cache.set(client_id, categorias)
+        return {
+            c.codigo: unescape_omie_text(c.descricao)
+            for c in categorias
+            if c.codigo in codes and c.descricao
+        }
 
     # ------------------------------------------------------------------
     # BACK 9.6 — Atualizar omie_entry
@@ -606,14 +683,26 @@ class ReviewService:
         )
         data = cached.get(entry.omie_lancamento_id)
 
+        # Fallback do snapshot (86e33bmkb) — mesma regra da listagem. Esta
+        # rota não constrói OmieClient: a resolução usa só o cache de
+        # categorias já aquecido (miss → o próprio código).
+        snapshot_category: str | None = None
+        if data is None and entry.category_code:
+            resolved = await self._resolve_category_descriptions(
+                client_id=session.client_id,
+                codes={entry.category_code},
+                omie_client=None,
+            )
+            snapshot_category = resolved.get(entry.category_code, entry.category_code)
+
         return OmieEntryItem(
             id=entry.id,
             omie_lancamento_id=entry.omie_lancamento_id,
             transaction_date=entry.transaction_date,
             omie_status=entry.omie_status,
             supplier=data.supplier if data is not None else None,
-            category=data.category if data is not None else None,
-            amount=data.amount if data is not None else None,
+            category=data.category if data is not None else snapshot_category,
+            amount=data.amount if data is not None else entry.amount,
             user_action=entry.user_action,
             user_note=self._decrypt_pair(
                 cipher,

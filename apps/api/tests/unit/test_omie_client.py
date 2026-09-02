@@ -114,6 +114,29 @@ class TestSchemas:
         assert lanc_fb.supplier == "ABC"
         assert lanc_fb.category == "DE"
 
+    def test_lancamento_extrato_properties_unescape_html_entities(self) -> None:
+        """O Omie devolve texto livre com entidades HTML escapadas e o React
+        escapa de novo na renderização — "&gt;" chegava cru na tela. Caso real
+        em dev (02/09/2026, task 86e33bmkb): cDesCliente
+        "Transf. Itaú Unibanco &gt;&gt; Sicoob". As properties de exibição
+        desfazem as entidades; os campos BRUTOS ficam como vieram."""
+        raw = {
+            "nCodLancamento": 100,
+            "cNatureza": "D",
+            "dDataLancamento": "03/08/2026",
+            "nValorDocumento": "2000.00",
+            "cSituacao": "Conciliado",
+            "cDesCliente": "Transf. Ita&uacute; Unibanco &gt;&gt; Sicoob",
+            "cDesCategoria": "Sa&iacute;da de Transfer&ecirc;ncia",
+            "cObservacoes": "Pagamento &amp; encargos",
+        }
+        lanc = LancamentoExtrato.model_validate(raw)
+        assert lanc.supplier == "Transf. Itaú Unibanco >> Sicoob"
+        assert lanc.category == "Saída de Transferência"
+        assert lanc.description == "Pagamento & encargos"
+        # O campo bruto preserva o byte do Omie — só a exibição desescapa.
+        assert lanc.c_des_cliente == "Transf. Ita&uacute; Unibanco &gt;&gt; Sicoob"
+
     def test_signed_amount_credito_positive(self) -> None:
         lanc = LancamentoExtrato.model_validate(
             {

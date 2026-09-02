@@ -34,6 +34,7 @@ from app.core.dependencies import (
 from app.core.exceptions import ConflictError, NotFoundError
 from app.core.logging import get_logger
 from app.db.models import Client, ReconciliationSession, ReconciliationStatus
+from app.integrations.omie.categorias_cache import OmieCategoriasCache
 from app.integrations.omie.client import OmieClient
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache
 from app.modules.clients.omie_factory import build_omie_client
@@ -70,12 +71,14 @@ def _get_review_service(
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> ReviewService:
-    """Provider: injeta cache singleton do app + Settings."""
+    """Provider: injeta os caches singleton do app + Settings."""
     cache: OmieLancamentoCache = request.app.state.omie_lancamento_cache
+    categorias_cache: OmieCategoriasCache = request.app.state.omie_categorias_cache
     return ReviewService(
         ReviewRepository(db),
         cache=cache,
         settings=settings,
+        categorias_cache=categorias_cache,
     )
 
 
