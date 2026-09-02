@@ -29,6 +29,7 @@ NÃO logar:
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from datetime import date
 from decimal import Decimal
@@ -148,6 +149,14 @@ class OmieLancamentoCache:
             maxsize=l1_maxsize,
             ttl=unresolved_ttl_seconds,
         )
+        # Serializa `populate_from_extrato` por cliente: o Omie processa UMA
+        # requisição por método por app_key (colisão = 5xx `8020`/`1880`), e a
+        # Tela de Revisão dispara o enriquecimento por mais de um caminho ao
+        # mesmo tempo (aba Movimentações via /omie/lancamentos + aba
+        # Divergências via /omie-entries) contra este mesmo singleton
+        # (`app.state.omie_lancamento_cache`). Dict simples basta: asyncio é
+        # single-threaded e ~100 clientes x 1 Lock é custo desprezível.
+        self._populate_locks: dict[UUID, asyncio.Lock] = {}
 
     # ------------------------------------------------------------------
     # Lookup (read path)
@@ -244,16 +253,18 @@ class OmieLancamentoCache:
             Dict `{omie_id: data}` de TUDO que veio do extrato — caller
             tipicamente filtra pelos IDs que ele queria.
         """
-        raw = await omie_client.listar_extrato(
-            n_cod_cc=omie_conta_id,
-            data_inicial=period_start,
-            data_final=period_end,
-        )
-        result: dict[int, OmieLancamentoData] = {}
-        for item in raw:
-            data = OmieLancamentoData.from_lancamento(item)
-            result[data.omie_id] = data
-            self._l1_put(client_id, data.omie_id, data)
+        lock = self._populate_locks.setdefault(client_id, asyncio.Lock())
+        async with lock:
+            raw = await omie_client.listar_extrato(
+                n_cod_cc=omie_conta_id,
+                data_inicial=period_start,
+                data_final=period_end,
+            )
+            result: dict[int, OmieLancamentoData] = {}
+            for item in raw:
+                data = OmieLancamentoData.from_lancamento(item)
+                result[data.omie_id] = data
+                self._l1_put(client_id, data.omie_id, data)
 
         log.info(
             "omie_lancamento_cache_populated",

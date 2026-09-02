@@ -393,6 +393,38 @@ class TestCallRetry:
         assert route.call_count == 2
 
     @respx.mock
+    async def test_5xx_8020_extrato_variant_does_retry(self, client: OmieClient) -> None:
+        """`8020` e o codigo que o ListarExtrato usa para a MESMA condicao do
+        `1880` (texto identico: "ja existe uma requisicao desse metodo sendo
+        executada... tentar novamente"). Sem ele na lista retryable, a colisao
+        entre os enriquecimentos concorrentes da Tela de Revisao virava
+        OmieFaultError permanente e a aba Divergencias rendia "—" sem retry.
+        Caso real em dev, 02/09/2026 (task 86e33bmkb)."""
+        responses = [
+            httpx.Response(
+                500,
+                headers={
+                    "OmieAPI-Error": (
+                        "8020 - Ja existe uma requisicao desse metodo sendo "
+                        "executada e voce pode tentar novamente em alguns instantes. (1)"
+                    )
+                },
+                json={"err": "rate-limit"},
+            ),
+            httpx.Response(200, json={"listaMovimentos": []}),
+        ]
+        route = respx.post(_omie_url("financas", "extrato")).mock(side_effect=responses)
+        result = await client.call(
+            module="financas",
+            endpoint="extrato",
+            call_name="ListarExtrato",
+            param={"nCodCC": 1},
+        )
+        # Sucesso depois do retry — 2 requests (1 falha 8020, 1 ok).
+        assert result == {"listaMovimentos": []}
+        assert route.call_count == 2
+
+    @respx.mock
     async def test_5xx_redundant_code_uses_directed_sleep(
         self, client: OmieClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
