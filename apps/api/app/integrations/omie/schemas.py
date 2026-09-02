@@ -14,6 +14,7 @@ Referência: `Docs/documentation/6. Integração com API do Omie-*.md`.
 
 from __future__ import annotations
 
+import html
 from collections.abc import Iterator
 from datetime import date, datetime
 from decimal import Decimal
@@ -21,6 +22,19 @@ from enum import StrEnum
 from typing import get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+
+
+def unescape_omie_text(value: str) -> str:
+    """Desfaz entidades HTML que o Omie devolve em campos de texto livre.
+
+    Caso real (dev, 02/09/2026, task 86e33bmkb): `cDesCliente` veio
+    "Transf. Itaú Unibanco &gt;&gt; Sicoob" e a UI exibiu o `&gt;` cru —
+    React escapa na renderização, então a entidade nunca vira `>` sozinha.
+    Aplicado nas properties de exibição (description/supplier/category),
+    nunca nos campos brutos: quem compara/mapeia códigos continua vendo o
+    byte que o Omie mandou.
+    """
+    return html.unescape(value)
 
 
 class OmieAccountType(StrEnum):
@@ -257,18 +271,24 @@ class LancamentoExtrato(BaseModel):
 
     @property
     def description(self) -> str:
-        """Texto humano do lançamento — usa `cObservacoes`."""
-        return self.c_observacoes or ""
+        """Texto humano do lançamento — usa `cObservacoes` (entidades HTML desfeitas)."""
+        return unescape_omie_text(self.c_observacoes) if self.c_observacoes else ""
 
     @property
     def supplier(self) -> str | None:
-        """Cliente/fornecedor: razão social preferida, fallback nome fantasia."""
-        return self.c_raz_cliente or self.c_des_cliente
+        """Cliente/fornecedor: razão social preferida, fallback nome fantasia.
+
+        Entidades HTML desfeitas — o Omie devolve `&gt;` e afins em texto livre.
+        """
+        raw = self.c_raz_cliente or self.c_des_cliente
+        return unescape_omie_text(raw) if raw else None
 
     @property
     def category(self) -> str | None:
-        """Categoria: descrição preferida, fallback código."""
-        return self.c_des_categoria or self.c_cod_categoria
+        """Categoria: descrição preferida (entidades HTML desfeitas), fallback código."""
+        if self.c_des_categoria:
+            return unescape_omie_text(self.c_des_categoria)
+        return self.c_cod_categoria
 
 
 # ----------------------------------------------------------------------

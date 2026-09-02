@@ -564,8 +564,12 @@ class ExportService:
                 OmieDivergenceRow(
                     transaction_date=entry.transaction_date,
                     supplier=data.supplier if data is not None else None,
-                    category=data.category if data is not None else None,
-                    amount=data.amount if data is not None else None,
+                    # Snapshot do processamento (86e33bmkb) como fallback para
+                    # linhas fora do extrato (títulos Atrasado/Previsto):
+                    # categoria cai no CÓDIGO persistido (o export não resolve
+                    # descrição via ListarCategorias) e o valor vem da linha.
+                    category=data.category if data is not None else entry.category_code,
+                    amount=data.amount if data is not None else entry.amount,
                     omie_status=entry.omie_status,
                     user_note=note,
                 )
