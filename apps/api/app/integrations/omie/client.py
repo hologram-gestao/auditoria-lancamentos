@@ -99,11 +99,18 @@ _AUTH_FAULT_CODES: tuple[str, ...] = (
 #     bater nisso.
 #   - `6`: "Consumo redundante detectado. Aguarde N segundos para tentar
 #     novamente (REDUNDANT)." → mesma família, com janela maior.
+#   - `8020`: mesmo texto do `1880` ("já existe uma requisição desse
+#     método sendo executada... tentar novamente") — é o código que o
+#     `ListarExtrato` usa para a mesma condição. Sem ele aqui, a colisão
+#     entre os enriquecimentos concorrentes da Tela de Revisão virava
+#     `OmieFaultError` permanente e a aba Divergências rendia "—" sem
+#     nenhuma retentativa (dev, 02/09/2026, task 86e33bmkb).
 # Visto no Austral em 20/05/2026 ao processar mês com várias chamadas
 # de ListarContasPagar/Receber em sequência.
 _RETRYABLE_OMIE_API_ERROR_PREFIXES: tuple[str, ...] = (
     "1880",
     "6 -",
+    "8020",
 )
 
 # Regex pra extrair o tempo de cooldown do código `6` do Omie:
