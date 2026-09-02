@@ -8,6 +8,7 @@ Não sobe Postgres. Sem Redis desde a FASE 0: o cache é L1-only (in-process).
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 from decimal import Decimal
 from uuid import uuid4
@@ -109,6 +110,61 @@ async def test_populate_caches_in_l1_and_subsequent_lookup_hits_only_l1() -> Non
 
     # populate só rodou uma vez (na inicialização)
     assert omie_client.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_populate_serializes_concurrent_calls_for_same_client() -> None:
+    """Dois `populate_from_extrato` simultâneos do MESMO cliente não podem
+    chegar ao Omie em paralelo: o Omie processa UMA requisição por método por
+    app_key e a segunda leva 5xx `8020`/`1880`. Era exatamente a colisão entre
+    as abas Movimentações e Divergências da Tela de Revisão (dev, 02/09/2026,
+    task 86e33bmkb) — o lock por cliente serializa."""
+
+    class _ConcurrencyProbeClient:
+        def __init__(self) -> None:
+            self.in_flight = 0
+            self.max_in_flight = 0
+
+        async def listar_extrato(
+            self,
+            *,
+            n_cod_cc: int,
+            data_inicial: date,
+            data_final: date,
+        ) -> list[LancamentoExtrato]:
+            self.in_flight += 1
+            self.max_in_flight = max(self.max_in_flight, self.in_flight)
+            # Cede o loop no meio da "chamada" — sem o lock, a 2ª entra aqui
+            # junto e `max_in_flight` vira 2.
+            await asyncio.sleep(0.01)
+            self.in_flight -= 1
+            return [_make_lancamento(omie_id=n_cod_cc)]
+
+    client_id = uuid4()
+    probe = _ConcurrencyProbeClient()
+    cache = OmieLancamentoCache()
+
+    results = await asyncio.gather(
+        cache.populate_from_extrato(
+            client_id=client_id,
+            omie_client=probe,  # type: ignore[arg-type]
+            omie_conta_id=7001,
+            period_start=date(2026, 4, 1),
+            period_end=date(2026, 4, 30),
+        ),
+        cache.populate_from_extrato(
+            client_id=client_id,
+            omie_client=probe,  # type: ignore[arg-type]
+            omie_conta_id=7002,
+            period_start=date(2026, 3, 1),
+            period_end=date(2026, 3, 31),
+        ),
+    )
+
+    assert probe.max_in_flight == 1, "chamadas do mesmo cliente chegaram ao Omie em paralelo"
+    # As duas populações completam normalmente (o lock só serializa, não pula).
+    assert set(results[0]) == {7001}
+    assert set(results[1]) == {7002}
 
 
 @pytest.mark.asyncio
