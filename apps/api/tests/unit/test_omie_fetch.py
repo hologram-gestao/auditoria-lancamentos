@@ -68,6 +68,7 @@ async def test_fetch_realized_carries_category_code() -> None:
                 "cSituacao": "Conciliado",
                 "cCodCategoria": "2.04.78",
                 "cDesCategoria": "Ferramentas - DFA",
+                "nCodCliente": 3057934498,
             }
         )
     ]
@@ -83,6 +84,7 @@ async def test_fetch_realized_carries_category_code() -> None:
 
     assert len(movements) == 1
     assert movements[0].category_code == "2.04.78"
+    assert movements[0].supplier_code == 3057934498
 
 
 @pytest.mark.asyncio
@@ -109,6 +111,7 @@ async def test_fetch_pending_carries_category_code_and_signs(
                 "data_vencimento": "06/07/2026",
                 "valor_documento": Decimal("300.00"),
                 "codigo_categoria": "2.01.96",
+                "codigo_cliente_fornecedor": 100001,
             }
         )
     ]
@@ -119,6 +122,7 @@ async def test_fetch_pending_carries_category_code_and_signs(
                 "data_vencimento": "08/07/2026",
                 "valor_documento": Decimal("120.00"),
                 "codigo_categoria": "1.01.02",
+                "codigo_cliente_fornecedor": 200002,
             }
         )
     ]
@@ -133,5 +137,7 @@ async def test_fetch_pending_carries_category_code_and_signs(
     by_id = {m.omie_id: m for m in movements}
     assert by_id[601].amount == Decimal("-300.00")
     assert by_id[601].category_code == "2.01.96"
+    assert by_id[601].supplier_code == 100001
     assert by_id[602].amount == Decimal("120.00")
     assert by_id[602].category_code == "1.01.02"
+    assert by_id[602].supplier_code == 200002

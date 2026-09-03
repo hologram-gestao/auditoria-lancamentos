@@ -28,6 +28,7 @@ from app.core.logging import get_logger
 from app.integrations.omie.client import OmieClient, OmieCredentials
 from app.integrations.omie.schemas import (
     CategoriaOmie,
+    ClienteOmie,
     ContaCorrente,
     IncluirLancCCRequest,
     IncluirLancCCResponse,
@@ -350,6 +351,17 @@ class MockOmieClient(OmieClient):
         await asyncio.sleep(_DELAY_LISTAR_CLIENTES_SECONDS)
         log.info("omie_mock_call", call="listar_clientes_minimal")
         return {"pagina": 1, "registros": 0, "total_de_registros": 0}
+
+    async def consultar_cliente(self, *, codigo_cliente_omie: int) -> ClienteOmie:
+        """Nome fake determinístico por código — os títulos do mock carregam
+        `codigo_cliente_fornecedor` (100001…), então a resolução de fornecedor
+        da aba Divergências (86e33bmkb) roda de ponta a ponta no demo."""
+        log.info("omie_mock_call", call="consultar_cliente", codigo=codigo_cliente_omie)
+        return ClienteOmie(
+            codigo_cliente_omie=codigo_cliente_omie,
+            razao_social=f"FORNECEDOR DEMO {codigo_cliente_omie}",
+            nome_fantasia=None,
+        )
 
     async def listar_contas_correntes(self) -> list[ContaCorrente]:
         await asyncio.sleep(_DELAY_LISTAR_CONTAS_SECONDS)

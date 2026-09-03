@@ -416,6 +416,24 @@ class TestCallRetry:
         assert route.call_count == 2
 
     @respx.mock
+    async def test_consultar_cliente_parses_names(self, client: OmieClient) -> None:
+        """`ConsultarCliente` devolve o cadastro direto (sem envelope de lista);
+        `display_name` prefere razão social e desfaz entidades HTML (86e33bmkb)."""
+        respx.post(_omie_url("geral", "clientes")).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "codigo_cliente_omie": 100001,
+                    "razao_social": "MOINHO PRADO S.A. &amp; CIA",
+                    "nome_fantasia": "Moinho Prado",
+                },
+            )
+        )
+        cliente = await client.consultar_cliente(codigo_cliente_omie=100001)
+        assert cliente.codigo_cliente_omie == 100001
+        assert cliente.display_name == "MOINHO PRADO S.A. & CIA"
+
+    @respx.mock
     async def test_5xx_8020_extrato_variant_does_retry(self, client: OmieClient) -> None:
         """`8020` e o codigo que o ListarExtrato usa para a MESMA condicao do
         `1880` (texto identico: "ja existe uma requisicao desse metodo sendo

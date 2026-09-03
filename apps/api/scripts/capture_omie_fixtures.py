@@ -138,6 +138,22 @@ def _build_captures() -> list[_Capture]:
             "ListarCategorias",
             {"pagina": 1, "registros_por_pagina": 50},
         ),
+        # 86e33bmkb — resolução de fornecedor de título. Os campos do
+        # `ClienteOmie` vieram da doc oficial; capturar quando houver um
+        # código real disponível (OPCIONAL: só entra com a env setada).
+        *(
+            [
+                (
+                    "consultar_cliente",
+                    "geral",
+                    "clientes",
+                    "ConsultarCliente",
+                    {"codigo_cliente_omie": int(cliente_codigo)},
+                )
+            ]
+            if (cliente_codigo := os.environ.get("OMIE_CAPTURE_CLIENTE_CODIGO"))
+            else []
+        ),
     ]
 
 

@@ -44,6 +44,7 @@ from app.core.exceptions import (
 from app.core.logging import get_logger
 from app.integrations.omie.schemas import (
     CategoriaOmie,
+    ClienteOmie,
     ContaCorrente,
     IncluirLancCCRequest,
     IncluirLancCCResponse,
@@ -525,6 +526,26 @@ class OmieClient:
             call_name="ListarClientes",
             param={"pagina": 1, "registros_por_pagina": 1},
         )
+
+    async def consultar_cliente(self, *, codigo_cliente_omie: int) -> ClienteOmie:
+        """Consulta UM cliente/fornecedor pelo `codigo_cliente_omie`.
+
+        Uso (86e33bmkb): resolver o nome legível do fornecedor de uma
+        divergência de TÍTULO — `ListarContasPagar/Receber` devolve só o
+        código (§5.5). O response é o cadastro direto (sem envelope de
+        lista), conforme a doc oficial de `geral/clientes`.
+
+        Raises:
+            OmieFaultError: código inexistente/excluído (o Omie responde
+                faultstring) — caller trata como irresolúvel, nunca 500.
+        """
+        resp = await self.call(
+            module="geral",
+            endpoint="clientes",
+            call_name="ConsultarCliente",
+            param={"codigo_cliente_omie": codigo_cliente_omie},
+        )
+        return ClienteOmie.model_validate(resp)
 
     async def listar_contas_correntes(self) -> list[ContaCorrente]:
         """Lista TODAS as contas do cliente, com paginação automática.

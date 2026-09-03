@@ -89,6 +89,11 @@ class OmieMovement:
     # (task 86e33bmkb) para a tela resolver a descrição via ListarCategorias —
     # única fonte de categoria para títulos, que ficam fora do extrato.
     category_code: str | None = None
+    # ID do cliente/fornecedor no cadastro Omie (`nCodCliente` no extrato,
+    # `codigo_cliente_fornecedor` no título). NÃO decide match: persiste na
+    # divergência para a tela resolver o NOME via ConsultarCliente cacheado —
+    # única fonte de fornecedor para títulos (§5.5).
+    supplier_code: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
