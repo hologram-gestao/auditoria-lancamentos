@@ -35,7 +35,7 @@ from app.core.crypto_service import (
     load_client_cipher,
     provision_client_cipher,
 )
-from app.core.exceptions import NotFoundError, ValidationAppError
+from app.core.exceptions import NotFoundError, OmieFaultError, ValidationAppError
 from app.core.logging import get_logger
 from app.core.search_index import compute_query_hmacs
 from app.db.models import (
@@ -76,6 +76,7 @@ if TYPE_CHECKING:
     from app.core.crypto import ClientCipher
     from app.integrations.omie.categorias_cache import OmieCategoriasCache
     from app.integrations.omie.client import OmieClient
+    from app.integrations.omie.clientes_cache import OmieClientesCache
     from app.integrations.omie.lancamento_cache import (
         OmieLancamentoCache,
     )
@@ -125,14 +126,17 @@ class ReviewService:
         cache: OmieLancamentoCache,
         settings: Settings,
         categorias_cache: OmieCategoriasCache | None = None,
+        clientes_cache: OmieClientesCache | None = None,
     ) -> None:
         self._repo = repository
         self._cache = cache
-        # Cache de ListarCategorias (singleton do app) — resolve o
-        # `category_code` persistido nas divergências de TÍTULO para a
-        # descrição legível (86e33bmkb). Opcional: sem ele, a tela mostra o
-        # próprio código como fallback.
+        # Caches singleton do app (86e33bmkb) — resolvem os CÓDIGOS
+        # persistidos nas divergências de TÍTULO para texto legível:
+        # `category_code` → descrição via ListarCategorias; `supplier_code` →
+        # razão social via ConsultarCliente. Opcionais: sem eles, a tela
+        # mostra o código (categoria) ou "—" (fornecedor).
         self._categorias_cache = categorias_cache
+        self._clientes_cache = clientes_cache
         self._settings = settings
         # Chave do blind index (S16) — usada só no caminho de search da
         # listagem de file_entries. Mesma separação cripto: vazar uma não
@@ -552,6 +556,16 @@ class ReviewService:
             codes=snapshot_codes,
             omie_client=omie_client,
         )
+        supplier_codes = {
+            row.supplier_code
+            for row in rows
+            if row.supplier_code and row.omie_lancamento_id not in cached
+        }
+        supplier_by_code = await self._resolve_supplier_names(
+            client_id=session.client_id,
+            codes=supplier_codes,
+            omie_client=omie_client,
+        )
         items: list[OmieEntryItem] = []
         for row in rows:
             data = cached.get(row.omie_lancamento_id)
@@ -568,9 +582,9 @@ class ReviewService:
             if data is not None:
                 supplier, category, amount = data.supplier, data.category, data.amount
             else:
-                # Fornecedor de título não tem fonte na API do Omie (§5.5) —
-                # segue "—" até existir integração com ListarClientes.
-                supplier = None
+                # Título: nome resolvido do `supplier_code` via ConsultarCliente
+                # cacheado; código sem cadastro (ou linha pré-migration) segue "—".
+                supplier = supplier_by_code.get(row.supplier_code) if row.supplier_code else None
                 category = (
                     category_by_code.get(row.category_code, row.category_code)
                     if row.category_code
@@ -637,6 +651,61 @@ class ReviewService:
             if c.codigo in codes and c.descricao
         }
 
+    async def _resolve_supplier_names(
+        self,
+        *,
+        client_id: UUID,
+        codes: set[int],
+        omie_client: OmieClient | None,
+    ) -> dict[int, str]:
+        """`supplier_code` → nome de exibição, via ConsultarCliente cacheado.
+
+        Consulta por código (não a lista inteira): o cadastro de clientes pode
+        ter milhares de entradas — N consultas pontuais cacheadas (TTL 6 h)
+        custam menos que paginar tudo por render. Sequencial de propósito: o
+        Omie processa 1 requisição por método por app_key.
+
+        Fail-soft nos dois modos de falha, com tratamentos DIFERENTES:
+        - fault (o Omie respondeu e recusou — código excluído/inexistente) →
+          cache negativo 15 min, não repete a consulta a cada render;
+        - falha de transporte (timeout/5xx) → nada é marcado, retry no próximo
+          render. Nome NUNCA é logado (PII) nem persistido (§4.5).
+        """
+        if not codes or self._clientes_cache is None:
+            return {}
+        resolved: dict[int, str] = {}
+        to_consult: list[int] = []
+        for code in codes:
+            name = self._clientes_cache.get_name(client_id=client_id, codigo=code)
+            if name is not None:
+                resolved[code] = name
+            elif not self._clientes_cache.known_unresolved(client_id=client_id, codigo=code):
+                to_consult.append(code)
+        if omie_client is None:
+            return resolved
+        for code in to_consult:
+            try:
+                cliente = await omie_client.consultar_cliente(codigo_cliente_omie=code)
+            except OmieFaultError:
+                self._clientes_cache.mark_unresolved(client_id=client_id, codigo=code)
+                continue
+            except Exception as exc:
+                logger.warning(
+                    "omie_entries_supplier_resolve_failed",
+                    client_id=str(client_id),
+                    codigo=code,
+                    error=type(exc).__name__,
+                )
+                continue
+            name = cliente.display_name
+            if name:
+                self._clientes_cache.set_name(client_id=client_id, codigo=code, name=name)
+                resolved[code] = name
+            else:
+                # Cadastro existe mas sem razão social/fantasia — irresolúvel.
+                self._clientes_cache.mark_unresolved(client_id=client_id, codigo=code)
+        return resolved
+
     # ------------------------------------------------------------------
     # BACK 9.6 — Atualizar omie_entry
     # ------------------------------------------------------------------
@@ -684,9 +753,10 @@ class ReviewService:
         data = cached.get(entry.omie_lancamento_id)
 
         # Fallback do snapshot (86e33bmkb) — mesma regra da listagem. Esta
-        # rota não constrói OmieClient: a resolução usa só o cache de
-        # categorias já aquecido (miss → o próprio código).
+        # rota não constrói OmieClient: a resolução usa só os caches já
+        # aquecidos (miss → o código na categoria, "—" no fornecedor).
         snapshot_category: str | None = None
+        snapshot_supplier: str | None = None
         if data is None and entry.category_code:
             resolved = await self._resolve_category_descriptions(
                 client_id=session.client_id,
@@ -694,13 +764,20 @@ class ReviewService:
                 omie_client=None,
             )
             snapshot_category = resolved.get(entry.category_code, entry.category_code)
+        if data is None and entry.supplier_code:
+            resolved_suppliers = await self._resolve_supplier_names(
+                client_id=session.client_id,
+                codes={entry.supplier_code},
+                omie_client=None,
+            )
+            snapshot_supplier = resolved_suppliers.get(entry.supplier_code)
 
         return OmieEntryItem(
             id=entry.id,
             omie_lancamento_id=entry.omie_lancamento_id,
             transaction_date=entry.transaction_date,
             omie_status=entry.omie_status,
-            supplier=data.supplier if data is not None else None,
+            supplier=data.supplier if data is not None else snapshot_supplier,
             category=data.category if data is not None else snapshot_category,
             amount=data.amount if data is not None else entry.amount,
             user_action=entry.user_action,

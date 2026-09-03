@@ -146,3 +146,128 @@ def test_counter_starts_at_zero(_run: int) -> None:
     service = _make_service()
     assert service._decrypt_failure_count == 0
     assert service._current_session_id is None
+
+
+# ----------------------------------------------------------------------
+# _resolve_supplier_names (86e33bmkb) — supplier_code → nome via ConsultarCliente
+# ----------------------------------------------------------------------
+
+
+def _service_with_clientes_cache() -> ReviewService:
+    from app.integrations.omie.clientes_cache import OmieClientesCache
+
+    settings = MagicMock()
+    settings.SEARCH_BLIND_INDEX_KEY.get_secret_value.return_value = _FAKE_HEX_KEY
+    return ReviewService(
+        MagicMock(),
+        cache=MagicMock(),
+        settings=settings,
+        clientes_cache=OmieClientesCache(),
+    )
+
+
+class _StubClientesOmie:
+    """Só `consultar_cliente`; devolve nomes fixos ou levanta por código."""
+
+    def __init__(self, *, names: dict[int, str], fault_codes: set[int] | None = None) -> None:
+        self._names = names
+        self._fault_codes = fault_codes or set()
+        self.calls: list[int] = []
+
+    async def consultar_cliente(self, *, codigo_cliente_omie: int) -> object:
+        from app.core.exceptions import OmieFaultError
+        from app.integrations.omie.schemas import ClienteOmie
+
+        self.calls.append(codigo_cliente_omie)
+        if codigo_cliente_omie in self._fault_codes:
+            raise OmieFaultError("cliente inexistente")
+        return ClienteOmie(
+            codigo_cliente_omie=codigo_cliente_omie,
+            razao_social=self._names[codigo_cliente_omie],
+            nome_fantasia=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_resolve_supplier_names_consults_and_caches() -> None:
+    service = _service_with_clientes_cache()
+    client_id = uuid4()
+    omie = _StubClientesOmie(names={100001: "MOINHO PRADO S.A."})
+
+    resolved = await service._resolve_supplier_names(
+        client_id=client_id,
+        codes={100001},
+        omie_client=omie,  # type: ignore[arg-type]
+    )
+    assert resolved == {100001: "MOINHO PRADO S.A."}
+
+    # Segunda resolução: sai do cache, sem nova ida ao Omie.
+    resolved_again = await service._resolve_supplier_names(
+        client_id=client_id,
+        codes={100001},
+        omie_client=omie,  # type: ignore[arg-type]
+    )
+    assert resolved_again == {100001: "MOINHO PRADO S.A."}
+    assert omie.calls == [100001]
+
+
+@pytest.mark.asyncio
+async def test_resolve_supplier_names_fault_marks_negative() -> None:
+    """Fault (código excluído) entra no cache negativo: a consulta NÃO repete
+    a cada render. Falha de transporte (RuntimeError) NÃO marca — retry."""
+    service = _service_with_clientes_cache()
+    client_id = uuid4()
+    omie = _StubClientesOmie(names={}, fault_codes={999})
+
+    first = await service._resolve_supplier_names(
+        client_id=client_id,
+        codes={999},
+        omie_client=omie,  # type: ignore[arg-type]
+    )
+    second = await service._resolve_supplier_names(
+        client_id=client_id,
+        codes={999},
+        omie_client=omie,  # type: ignore[arg-type]
+    )
+    assert first == {}
+    assert second == {}
+    assert omie.calls == [999]  # uma única consulta — negativo segurou a 2ª
+
+
+@pytest.mark.asyncio
+async def test_resolve_supplier_names_transport_error_retries() -> None:
+    class _Boom:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def consultar_cliente(self, *, codigo_cliente_omie: int) -> object:
+            self.calls += 1
+            raise RuntimeError("omie fora do ar")
+
+    service = _service_with_clientes_cache()
+    client_id = uuid4()
+    omie = _Boom()
+
+    for _ in range(2):
+        resolved = await service._resolve_supplier_names(
+            client_id=client_id,
+            codes={100001},
+            omie_client=omie,  # type: ignore[arg-type]
+        )
+        assert resolved == {}
+    # Transporte não marca negativo: as DUAS renders consultaram.
+    assert omie.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_resolve_supplier_names_without_client_uses_cache_only() -> None:
+    service = _service_with_clientes_cache()
+    client_id = uuid4()
+    service._clientes_cache.set_name(  # type: ignore[union-attr]
+        client_id=client_id, codigo=42, name="JÁ AQUECIDO"
+    )
+
+    resolved = await service._resolve_supplier_names(
+        client_id=client_id, codes={42, 43}, omie_client=None
+    )
+    assert resolved == {42: "JÁ AQUECIDO"}

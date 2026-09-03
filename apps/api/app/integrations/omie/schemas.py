@@ -231,6 +231,17 @@ class LancamentoExtrato(BaseModel):
         alias="cDesCliente",
         description="Nome fantasia do cliente/fornecedor.",
     )
+    n_cod_cliente: int | None = Field(
+        default=None,
+        alias="nCodCliente",
+        description=(
+            "ID do cliente/fornecedor no cadastro do Omie — mesmo espaço de "
+            "códigos do `codigo_cliente_fornecedor` dos títulos. Presente na "
+            "fixture real de 21/08/2026 (linhas 'Conta Paga'); ausente em "
+            "transferências. Persiste na divergência (`supplier_code`) para a "
+            "resolução de nome via `ConsultarCliente` (86e33bmkb)."
+        ),
+    )
     c_cod_int_lanc: str | None = Field(
         default=None,
         alias="cCodIntLanc",
@@ -415,6 +426,48 @@ class CategoriaOmie(BaseModel):
         demais é recuperável; sumir com as categorias trava o lançamento.
         """
         return (self.conta_inativa or "N").strip().upper() != "S"
+
+
+# ----------------------------------------------------------------------
+# ConsultarCliente (geral/clientes)
+# ----------------------------------------------------------------------
+
+
+class ClienteOmie(BaseModel):
+    """Cadastro de cliente/fornecedor retornado por `ConsultarCliente`.
+
+    Uso (86e33bmkb): resolver `supplier_code` (o `codigo_cliente_fornecedor`
+    dos títulos / `nCodCliente` do extrato) para o nome legível na aba
+    Divergências — o endpoint de títulos devolve só o código (§5.5).
+
+    Contrato: o REQUEST da família `geral/clientes` já roda em produção
+    (`ListarClientes` valida credenciais desde a S6); os campos de RESPONSE
+    abaixo vêm da doc oficial
+    (https://app.omie.com.br/api/v1/geral/clientes/ — `ConsultarCliente`,
+    verificada em 03/09/2026) e ainda NÃO têm fixture real — mesma situação
+    em que `CategoriaOmie` nasceu. O `capture_omie_fixtures.py` captura este
+    endpoint quando `OMIE_CAPTURE_CLIENTE_CODIGO` estiver setada; consumo é
+    fail-soft (campo divergente ⇒ nome não resolve ⇒ "—", nunca 500).
+
+    Só os campos que a resolução precisa — declarar mais aumentaria a
+    superfície de divergência sem ganho (mesma decisão do `CategoriaOmie`).
+    """
+
+    codigo_cliente_omie: int = Field(description="ID do cliente/fornecedor no Omie.")
+    razao_social: str | None = Field(default=None, description="Razão social.")
+    nome_fantasia: str | None = Field(default=None, description="Nome fantasia.")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @property
+    def display_name(self) -> str | None:
+        """Nome de exibição: razão social preferida, fallback nome fantasia.
+
+        Mesma escolha das properties do `LancamentoExtrato`, com o mesmo
+        unescape — o Omie devolve entidades HTML em texto livre.
+        """
+        raw = self.razao_social or self.nome_fantasia
+        return unescape_omie_text(raw) if raw else None
 
 
 # ----------------------------------------------------------------------

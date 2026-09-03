@@ -64,10 +64,13 @@ class ReconciliationOmieEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     transaction_date: Mapped[date] = mapped_column(SQLDate, nullable=False)
     omie_status: Mapped[str] = mapped_column(String(30), nullable=False)
 
-    # Snapshot do processamento (migration a3f8c21d9b47). Nullable: linhas
-    # anteriores à migration ficam NULL e a tela usa só o cache/extrato.
+    # Snapshot do processamento (migrations a3f8c21d9b47 + b7d4e91c2a53).
+    # Nullable: linhas anteriores às migrations ficam NULL e a tela usa só o
+    # cache/extrato. `supplier_code` é o codigo_cliente_omie do cadastro —
+    # código, não nome; o NOME resolve em runtime via ConsultarCliente (§4.5).
     amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     category_code: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    supplier_code: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     user_action: Mapped[str | None] = mapped_column(String(20), nullable=True)
     user_note_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
