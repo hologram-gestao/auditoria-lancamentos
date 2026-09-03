@@ -450,11 +450,13 @@ async def _execute_processing(
                 omie_lancamento_id=mov.omie_id,
                 transaction_date=mov.transaction_date,
                 omie_status=mov.status,
-                # Snapshot (86e33bmkb): valor com sinal em claro (§4.3) e o
-                # CÓDIGO da categoria — única fonte de Valor/Categoria para
-                # títulos Atrasado/Previsto, que ficam fora do ListarExtrato.
+                # Snapshot (86e33bmkb): valor com sinal em claro (§4.3) e os
+                # CÓDIGOS de categoria e fornecedor — única fonte de
+                # Valor/Categoria/Fornecedor para títulos Atrasado/Previsto,
+                # que ficam fora do ListarExtrato. Nome resolve em runtime.
                 amount=mov.amount,
                 category_code=mov.category_code,
+                supplier_code=mov.supplier_code,
             )
             for mov in unmatched_omie
         ]

@@ -32,6 +32,7 @@ from app.core.rate_limit import limiter
 from app.db.session import close_db, init_db
 from app.integrations.anthropic.model_limits import validate_parse_output_config
 from app.integrations.omie.categorias_cache import OmieCategoriasCache
+from app.integrations.omie.clientes_cache import OmieClientesCache
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache
 from app.modules.anomaly_types import routes as anomaly_types_routes
 from app.modules.auth import routes as auth_routes
@@ -278,6 +279,10 @@ def create_app() -> FastAPI:
     # tabela: o §4.5 do CLAUDE.md lista `categorias` entre o que nunca persiste
     # em claro — só cache com TTL.
     app.state.omie_categorias_cache = OmieCategoriasCache()
+    # Cache L1 de nomes de cliente/fornecedor (86e33bmkb) — resolve o
+    # `supplier_code` das divergências de título via ConsultarCliente. Nome é
+    # PII do cliente final: só cache TTL, nunca tabela (§4.5).
+    app.state.omie_clientes_cache = OmieClientesCache()
 
     @app.get("/health", tags=["system"])
     async def health() -> dict[str, str]:

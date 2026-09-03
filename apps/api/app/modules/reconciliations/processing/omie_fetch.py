@@ -124,8 +124,11 @@ async def fetch_realized(
             # Agrupamento de parcelas do Omie — só a sonda de pagamento
             # dividido lê isto; não influencia nenhum match (§5).
             related_launch_id=item.n_cod_lanc_relac,
-            # Código contábil — vira snapshot na divergência (86e33bmkb).
+            # Códigos contábeis/cadastrais — viram snapshot na divergência
+            # (86e33bmkb): categoria resolve via ListarCategorias, fornecedor
+            # via ConsultarCliente.
             category_code=item.c_cod_categoria,
+            supplier_code=item.n_cod_cliente,
         )
         for item in raw
     ]
@@ -193,6 +196,7 @@ async def fetch_pending(
                     status=canonical_status,
                     is_realized=False,
                     category_code=t.codigo_categoria,
+                    supplier_code=t.codigo_cliente_fornecedor,
                 )
                 for t in pagar
             )
@@ -212,6 +216,7 @@ async def fetch_pending(
                     status=canonical_status,
                     is_realized=False,
                     category_code=t.codigo_categoria,
+                    supplier_code=t.codigo_cliente_fornecedor,
                 )
                 for t in receber
             )
