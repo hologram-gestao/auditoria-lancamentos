@@ -1773,6 +1773,31 @@ for (const vp of VIEWPORTS) {
 
       await expect(page.locator('#__next_error__')).toHaveCount(0);
       await shot(page, `lancamento-selecao-${slugP}`);
+
+      // Os botões do lote não podem pintar FORA da barra que os contém. Os dois
+      // são `whitespace-nowrap`; em 390px a soma deles passava da largura útil
+      // da barra e o primário saía ~17px pela borda direita do card. O axe não
+      // mede transbordo (86e2w8brr — mesma família do rodapé da gaveta). Mede
+      // a borda de cada botão contra a borda da PRÓPRIA barra, não só a viewport.
+      const barra = page.getByText(/^1 compra selecionada$/).locator('..');
+      const caixaBarra = await barra.boundingBox();
+      expect(caixaBarra, 'barra de lote sem caixa').not.toBeNull();
+      const bordaBarra = (caixaBarra?.x ?? 0) + (caixaBarra?.width ?? 0);
+      const caixaLancar = await page
+        .getByRole('button', { name: /Lançar 1 compra no Omie/ })
+        .boundingBox();
+      const caixaLimpar = await page.getByRole('button', { name: 'Limpar seleção' }).boundingBox();
+      expect(
+        (caixaLancar?.x ?? 0) + (caixaLancar?.width ?? 0),
+        'botão "Lançar no Omie" pintando fora da barra de lote',
+      ).toBeLessThanOrEqual(bordaBarra + 0.5);
+      expect(
+        (caixaLimpar?.x ?? 0) + (caixaLimpar?.width ?? 0),
+        '"Limpar seleção" pintando fora da barra de lote',
+      ).toBeLessThanOrEqual(bordaBarra + 0.5);
+      expect(bordaBarra, 'barra de lote cortada pela borda da viewport').toBeLessThanOrEqual(
+        page.viewportSize()?.width ?? 0,
+      );
       await analyze(page, `revisão de cartão com lote selecionado (${vp.label})`);
     });
 
