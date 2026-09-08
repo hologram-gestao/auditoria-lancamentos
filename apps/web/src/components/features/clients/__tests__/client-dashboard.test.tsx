@@ -33,6 +33,8 @@ const latestState = {
 };
 
 vi.mock('@/hooks/use-clients', () => ({
+  // O ClientShell/lista agora renderiza o coração de favorito (86e34jd5a).
+  useSetFavorite: () => ({ mutate: vi.fn(), isPending: false }),
   useClientDetail: () => detailState,
   // A 1ª chamada é a do mês (tem `month`), a 2ª é a da última conciliação.
   useReconciliationsList: (_id: string, params: { month?: string }) =>

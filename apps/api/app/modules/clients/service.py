@@ -78,6 +78,7 @@ def _row_to_response(row: ClientRow) -> ClientResponse:
         updated_at=row.client.updated_at,
         responsible_manager=manager,
         reconciliation_count=row.reconciliation_count,
+        is_favorite=row.is_favorite,
     )
 
 
@@ -107,6 +108,7 @@ class ClientService:
         search: str | None,
         manager_id_filter: UUID | None,
         tenant_client_id: UUID | None = None,
+        viewer_user_id: UUID | None = None,
     ) -> tuple[list[ClientResponse], PaginationMeta]:
         """Lista clientes com filtro RBAC.
 
@@ -119,6 +121,7 @@ class ClientService:
             search=search,
             manager_id=manager_id_filter,
             tenant_client_id=tenant_client_id,
+            viewer_user_id=viewer_user_id,
         )
         total_pages = (total + page_size - 1) // page_size if page_size else 0
         responses = [_row_to_response(r) for r in rows]
@@ -127,14 +130,20 @@ class ClientService:
         )
         return responses, pagination
 
-    async def get_client_detail(self, client_id: UUID) -> ClientResponse:
+    async def get_client_detail(
+        self, client_id: UUID, *, viewer_user_id: UUID | None = None
+    ) -> ClientResponse:
         """Retorna ClientResponse já preenchido com manager + count.
+
+        `viewer_user_id` resolve `is_favorite` (86e34jd5a): toda response que o
+        front guarda em cache precisa refletir o favorito de quem pede, senão
+        um PATCH ou um sync devolveria o coração apagado.
 
         404 se cliente não existe — caller tipicamente já passou por
         `require_client_access` (que retorna 403/404 antes), mas mantemos o
         guard aqui para reuso fora desse contexto.
         """
-        row = await self._repo.get_detail(client_id)
+        row = await self._repo.get_detail(client_id, viewer_user_id=viewer_user_id)
         if row is None:
             raise NotFoundError("Cliente não encontrado.")
         return _row_to_response(row)
@@ -184,7 +193,7 @@ class ClientService:
         )
         await self._repo.add_assignment(assignment)
 
-        return await self.get_client_detail(client.id)
+        return await self.get_client_detail(client.id, viewer_user_id=current_user_id)
 
     # ------------------------------ UPDATE ----------------------------
 
@@ -196,6 +205,7 @@ class ClientService:
         active: bool | None,
         omie_app_key: str | None,
         omie_app_secret: str | None,
+        viewer_user_id: UUID | None = None,
     ) -> ClientResponse:
         """Atualiza campos parciais do cliente (PATCH).
 
@@ -230,7 +240,7 @@ class ClientService:
             )
 
         await self._repo.add_client(client)
-        return await self.get_client_detail(client.id)
+        return await self.get_client_detail(client.id, viewer_user_id=viewer_user_id)
 
     # ------------------------------ ASSIGN ----------------------------
 
@@ -278,7 +288,7 @@ class ClientService:
             assignment.assigned_at = datetime.now(UTC)
             await self._repo.add_assignment(assignment)
 
-        return await self.get_client_detail(client_id)
+        return await self.get_client_detail(client_id, viewer_user_id=current_admin_id)
 
     # ------------------------------ TEST CONNECTION -------------------
 
@@ -328,7 +338,9 @@ class ClientService:
 
     # ------------------------------ S7: detalhe + cache L1 ------------
 
-    async def get_client_detail_with_accounts(self, client: Client) -> ClientDetailResponse:
+    async def get_client_detail_with_accounts(
+        self, client: Client, *, viewer_user_id: UUID | None = None
+    ) -> ClientDetailResponse:
         """Detalhe completo: Client + manager + count + contas do cache (Endpoint A).
 
         TTL de 24 h decidido dentro do `OmieAccountsCacheService`. Se o cache
@@ -336,12 +348,35 @@ class ClientService:
         handler global retorna 502 — alinhado ao padrão do test-connection.
         """
         rows, synced_at = await self._accounts_cache.get_or_sync(client)
-        return await self._build_detail_response(client.id, rows, synced_at)
+        return await self._build_detail_response(
+            client.id, rows, synced_at, viewer_user_id=viewer_user_id
+        )
 
-    async def force_sync_accounts(self, client: Client) -> ClientDetailResponse:
+    async def force_sync_accounts(
+        self, client: Client, *, viewer_user_id: UUID | None = None
+    ) -> ClientDetailResponse:
         """Endpoint B: força sync ignorando TTL e retorna o detalhe completo."""
         rows, synced_at = await self._accounts_cache.force_sync(client)
-        return await self._build_detail_response(client.id, rows, synced_at)
+        return await self._build_detail_response(
+            client.id, rows, synced_at, viewer_user_id=viewer_user_id
+        )
+
+    # ------------------------------ FAVORITOS (86e34jd5a) -------------
+
+    async def set_favorite(
+        self, client: Client, *, user_id: UUID, favorite: bool
+    ) -> ClientResponse:
+        """Marca/desmarca o cliente como favorito DE `user_id` e devolve o cliente.
+
+        Preferência por usuário: não altera o cliente nem passa pela matriz de
+        edição — quem enxerga o cliente (`resolve_client_access`, já aplicado
+        pela rota) pode favoritá-lo. Idempotente nos dois sentidos.
+        """
+        if favorite:
+            await self._repo.add_favorite(user_id=user_id, client_id=client.id)
+        else:
+            await self._repo.remove_favorite(user_id=user_id, client_id=client.id)
+        return await self.get_client_detail(client.id, viewer_user_id=user_id)
 
     async def list_reconciliations(
         self,
@@ -394,9 +429,11 @@ class ClientService:
         client_id: UUID,
         rows: Sequence[OmieAccountCache],
         synced_at: datetime | None,
+        *,
+        viewer_user_id: UUID | None = None,
     ) -> ClientDetailResponse:
         """Compõe `ClientDetailResponse` a partir de Client + manager + cache."""
-        base = await self.get_client_detail(client_id)
+        base = await self.get_client_detail(client_id, viewer_user_id=viewer_user_id)
         accounts = [BankAccountResponse.model_validate(r) for r in rows]
         return ClientDetailResponse(
             **base.model_dump(),

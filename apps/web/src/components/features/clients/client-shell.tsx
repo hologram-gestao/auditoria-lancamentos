@@ -50,6 +50,7 @@ import { useAuthStore } from '@/stores/auth';
 
 import { ClientStatusBadge } from './client-status-badge';
 import { EditClientModal } from './edit-client-modal';
+import { FavoriteToggle } from './favorite-toggle';
 
 interface ClientShellProps {
   clientId: string;
@@ -182,6 +183,11 @@ export function ClientShell({ clientId, children }: ClientShellProps) {
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-semibold">{client.name}</h1>
             <ClientStatusBadge active={client.active} />
+            <FavoriteToggle
+              clientId={client.id}
+              clientName={client.name}
+              isFavorite={client.is_favorite}
+            />
           </div>
           {canEditClient && (
             <Button variant="outline" onClick={() => setEditOpen(true)}>

@@ -253,6 +253,15 @@ export async function apiDelete<T>(path: string, options: FetchOptions = {}): Pr
 }
 
 /**
+ * PUT sem corpo — para recursos idempotentes de "marcar" (ex.: favorito de
+ * cliente, 86e34jd5a), onde o par PUT/DELETE é o contrato e o estado alvo
+ * está na própria URL. Com corpo, use `apiPatch`/`apiPost`.
+ */
+export async function apiPut<T>(path: string, options: FetchOptions = {}): Promise<T> {
+  return rawFetch<T>(path, { method: 'PUT' }, options);
+}
+
+/**
  * Resposta binária com filename extraído do header (Content-Disposition).
  *
  * Usada por downloads de relatório (S14 Excel) onde o caller precisa do

@@ -15,6 +15,10 @@
  * dados de outro manager) — esta tela apenas oculta visualmente a coluna
  * para reduzir poluição visual.
  *
+ * Favoritos (86e34jd5a): coração na primeira coluna, POR USUÁRIO. O backend já
+ * devolve os favoritos de quem pede no topo — a tela não reordena nada, e o
+ * favorito da página 3 sobe para a 1 porque a ordem é do SELECT.
+ *
  * Click handler na linha leva pra /clientes/{id} (detalhe — S7). Os botões
  * de ação dentro da linha usam stopPropagation pra não disparar a navegação.
  */
@@ -28,6 +32,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ClientStatusBadge } from '@/components/features/clients/client-status-badge';
 import { CreateClientModal } from '@/components/features/clients/create-client-modal';
 import { EditClientModal } from '@/components/features/clients/edit-client-modal';
+import { FavoriteToggle } from '@/components/features/clients/favorite-toggle';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -99,7 +104,7 @@ export default function ClientesPage() {
   const total = data?.pagination.total ?? 0;
   const rows = data?.data ?? [];
   const totalPages = data?.pagination.totalPages ?? 0;
-  const colCount = isAdmin ? 6 : 5;
+  const colCount = isAdmin ? 7 : 6;
   const hasSearch = debouncedSearch.length > 0;
 
   return (
@@ -135,6 +140,9 @@ export default function ClientesPage() {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-10">
+                <span className="sr-only">Favorito</span>
+              </TableHead>
               <TableHead>Nome</TableHead>
               {isAdmin && <TableHead>Gerente Responsável</TableHead>}
               <TableHead>Status</TableHead>
@@ -175,6 +183,13 @@ export default function ClientesPage() {
                   className={cn('cursor-pointer', !c.active && 'opacity-60')}
                   onClick={() => router.push(`/clientes/${c.id}`)}
                 >
+                  <TableCell className="w-10 pr-0">
+                    <FavoriteToggle
+                      clientId={c.id}
+                      clientName={c.name}
+                      isFavorite={c.is_favorite}
+                    />
+                  </TableCell>
                   <TableCell className="font-medium">{c.name}</TableCell>
                   {isAdmin && (
                     <TableCell className="text-muted-foreground">
