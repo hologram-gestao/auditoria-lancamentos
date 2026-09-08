@@ -136,7 +136,12 @@ export function LancarLoteBar({
       <span role="status" className="text-sm">
         {selectedCount} {plural}
       </span>
-      <div className="flex items-center gap-2">
+      {/* `min-w-0` + `flex-wrap` também AQUI, não só no container de fora:
+          os dois botões são `whitespace-nowrap`, então este grupo tem largura
+          mínima fixa (soma dos dois + gap). Em 390px ela passa da largura útil
+          do card e, sem poder quebrar nem encolher, o botão primário pintava
+          fora da borda — mesmo defeito do rodapé da gaveta (FRONT 07.7). */}
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         <Button variant="ghost" size="sm" onClick={onClear} disabled={pending}>
           Limpar seleção
         </Button>
