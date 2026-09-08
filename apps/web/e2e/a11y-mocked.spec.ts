@@ -148,6 +148,8 @@ const USER = {
 
 /** Usuário da sessão corrente — trocado por teste nos cenários de papel (S5). */
 let sessionUser: Record<string, unknown> = USER;
+/** Favorito do cliente na sessão corrente (86e34jd5a) — o PUT/DELETE mockado alterna. */
+let favorited = false;
 
 const CLIENT_MANAGER_USER = {
   id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -253,6 +255,7 @@ const CLIENT_DETAIL = {
   updated_at: '2026-07-20T12:00:00Z',
   responsible_manager: null,
   reconciliation_count: 3,
+  is_favorite: false,
   accounts: ACCOUNTS,
   accounts_synced_at: '2026-07-20T12:00:00Z',
 };
@@ -707,7 +710,14 @@ async function fulfillApi(route: Route): Promise<void> {
     });
   }
   if (path.endsWith('/read')) return json({ already_read: false, read_at: '2026-07-26T13:00:00Z' });
-  if (path === '/api/v1/clients') return json({ data: [CLIENT_DETAIL], pagination: PAGINATION });
+  // Favorito (86e34jd5a): PUT marca, DELETE desmarca; a lista reflete o estado.
+  if (path === `/api/v1/clients/${CLIENT_ID}/favorite`) {
+    favorited = route.request().method() === 'PUT';
+    return json({ ...CLIENT_DETAIL, is_favorite: favorited });
+  }
+  if (path === '/api/v1/clients') {
+    return json({ data: [{ ...CLIENT_DETAIL, is_favorite: favorited }], pagination: PAGINATION });
+  }
   if (path === `/api/v1/clients/${CLIENT_ID}`) {
     // As contas bancárias da tela R6 vêm DAQUI (paginação client-side sobre
     // `detail.accounts`), não de uma rota própria.
@@ -974,6 +984,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   }, THEME);
   // Volta ao admin: os cenários de papel da S5 trocam este estado de módulo.
   sessionUser = USER;
+  favorited = false;
   // Sprint 6: sessão SEM glossário e flag não julgado são o estado de partida.
   sessionUsedGlossary = false;
   // Sprint 7: conta corrente é o estado de partida — só os cenários de
@@ -2136,6 +2147,35 @@ for (const vp of VIEWPORTS) {
       await expect(page.locator('#__next_error__')).toHaveCount(0);
       await shot(page, `deeplink-outro-tenant-${slug}`);
       await analyze(page, `deep link cross-tenant negado (${vp.label})`);
+    });
+
+    /**
+     * 86e34jd5a — coração de favorito na lista. Botão de alternância de verdade
+     * (`aria-pressed`) cujo nome carrega o cliente e a ação; o clique NÃO navega
+     * para o detalhe (a linha inteira é clicável). O PUT mockado devolve o
+     * cliente favoritado e a lista recarrega com ele — medido nos dois
+     * viewports, com o axe rodando antes e depois de marcar.
+     */
+    test('lista de clientes: coração de favorito alterna sem navegar (86e34jd5a)', async ({
+      page,
+    }) => {
+      await page.goto('/clientes');
+      await expect(page.getByRole('heading', { name: 'Clientes', level: 1 })).toBeVisible();
+
+      const favoritar = page.getByRole('button', { name: 'Favoritar Cliente Exemplo Ltda' });
+      await expect(favoritar).toHaveAttribute('aria-pressed', 'false');
+      await shot(page, `clientes-favorito-${slug}`);
+      await analyze(page, `lista de clientes com favorito (${vp.label})`);
+
+      await favoritar.click();
+      const remover = page.getByRole('button', {
+        name: 'Remover Cliente Exemplo Ltda dos favoritos',
+      });
+      await expect(remover).toHaveAttribute('aria-pressed', 'true');
+      // Favoritar não é navegar: a URL continua na lista.
+      await expect(page).toHaveURL(/\/clientes$/);
+      await shot(page, `clientes-favorito-marcado-${slug}`);
+      await analyze(page, `lista de clientes com favorito marcado (${vp.label})`);
     });
 
     test('usuário de tenant não para na lista global — vai para a casa dele', async ({ page }) => {

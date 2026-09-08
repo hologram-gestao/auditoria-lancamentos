@@ -16,11 +16,13 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import {
   assignClient,
   createClient,
+  favoriteClient,
   getClientDetail,
   listClients,
   listReconciliations,
   syncClientAccounts,
   testConnection,
+  unfavoriteClient,
   updateClient,
   type AssignClientPayload,
   type Client,
@@ -37,6 +39,8 @@ import {
 
 export const clientsKeys = {
   all: ['clients'] as const,
+  /** Prefixo de TODAS as páginas/filtros da listagem — para invalidar. */
+  lists: ['clients', 'list'] as const,
   list: (params: ListClientsParams) => ['clients', 'list', params] as const,
   detail: (id: string) => ['clients', 'detail', id] as const,
   /** Prefixo de TODAS as páginas/filtros da lista de um cliente — use este
@@ -87,6 +91,26 @@ export function useAssignClient(id: string) {
     mutationFn: (payload) => assignClient(id, payload),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: clientsKeys.all });
+    },
+  });
+}
+
+/**
+ * Favoritar / desfavoritar (86e34jd5a). `true` marca, `false` desmarca.
+ *
+ * Invalida só a LISTAGEM (o favorito muda a ordem) e corrige o `is_favorite`
+ * do detalhe em cache pelo que o servidor devolveu — sem refetch do detalhe,
+ * que passaria pelo cache de contas do Omie à toa.
+ */
+export function useSetFavorite(id: string) {
+  const qc = useQueryClient();
+  return useMutation<Client, Error, boolean>({
+    mutationFn: (favorite) => (favorite ? favoriteClient(id) : unfavoriteClient(id)),
+    onSuccess: (updated) => {
+      qc.setQueryData<ClientDetail>(clientsKeys.detail(id), (old) =>
+        old ? { ...old, is_favorite: updated.is_favorite } : old,
+      );
+      void qc.invalidateQueries({ queryKey: clientsKeys.lists });
     },
   });
 }

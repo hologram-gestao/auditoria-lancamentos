@@ -222,6 +222,21 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         "app/modules/clients/routes.py",
         _VIA_CLIENT_PATH,
     ),
+    # ---------------------------------------------------------------- favoritos (86e34jd5a)
+    SensitiveEndpoint(
+        "PUT",
+        "/api/v1/clients/{client_id}/favorite",
+        ScopeKind.DETAIL_PK,
+        "app/modules/clients/routes.py",
+        _VIA_CLIENT_PATH,
+    ),
+    SensitiveEndpoint(
+        "DELETE",
+        "/api/v1/clients/{client_id}/favorite",
+        ScopeKind.DETAIL_PK,
+        "app/modules/clients/routes.py",
+        _VIA_CLIENT_PATH,
+    ),
     SensitiveEndpoint(
         "POST",
         "/api/v1/reconciliations/{session_id}/omie-postings",

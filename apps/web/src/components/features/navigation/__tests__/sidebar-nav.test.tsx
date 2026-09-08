@@ -25,6 +25,8 @@ const detailState = {
 };
 
 vi.mock('@/hooks/use-clients', () => ({
+  // O ClientShell/lista agora renderiza o coração de favorito (86e34jd5a).
+  useSetFavorite: () => ({ mutate: vi.fn(), isPending: false }),
   useClientDetail: () => detailState,
 }));
 

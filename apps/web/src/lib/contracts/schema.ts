@@ -283,6 +283,24 @@ export interface paths {
         patch: operations["sync_accounts_api_v1_clients__client_id__sync_accounts_patch"];
         trace?: never;
     };
+    "/api/v1/clients/{client_id}/favorite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Marca o cliente como favorito do usuário autenticado (idempotente). */
+        put: operations["favorite_client_api_v1_clients__client_id__favorite_put"];
+        post?: never;
+        /** Desmarca o favorito do usuário autenticado (idempotente). */
+        delete: operations["unfavorite_client_api_v1_clients__client_id__favorite_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clients/{client_id}/reconciliations": {
         parameters: {
             query?: never;
@@ -623,7 +641,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Lista divergências Omie (lançamentos persistidos sem correspondente no arquivo) enriquecidas com supplier/category/amount via cache L2. */
+        /** Lista divergências Omie (lançamentos persistidos sem correspondente no arquivo) enriquecidas com supplier/category/amount via cache L1 — repopulado do extrato quando algum id está sem dado (86e2z895j). */
         get: operations["list_omie_entries_api_v1_reconciliations__session_id__omie_entries_get"];
         put?: never;
         post?: never;
@@ -1387,6 +1405,12 @@ export interface components {
              * @default 0
              */
             reconciliation_count: number;
+            /**
+             * Is Favorite
+             * @description Cliente favoritado pelo usuário autenticado (preferência por usuário).
+             * @default false
+             */
+            is_favorite: boolean;
             /** Accounts */
             accounts?: components["schemas"]["BankAccountResponse"][];
             /** Accounts Synced At */
@@ -1431,6 +1455,12 @@ export interface components {
              * @default 0
              */
             reconciliation_count: number;
+            /**
+             * Is Favorite
+             * @description Cliente favoritado pelo usuário autenticado (preferência por usuário).
+             * @default false
+             */
+            is_favorite: boolean;
         };
         /**
          * ClientUserListResponse
@@ -3631,6 +3661,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClientDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    favorite_client_api_v1_clients__client_id__favorite_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unfavorite_client_api_v1_clients__client_id__favorite_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientResponse"];
                 };
             };
             /** @description Validation Error */
