@@ -26,11 +26,14 @@ from app.db.models import (
     Client,
     ClientAssignment,
     ClientCategory,
+    Notification,
     OmieAccountCache,
     ReconciliationFile,
     ReconciliationSession,
+    ReconciliationStatus,
     User,
     UserClientFavorite,
+    UserScope,
 )
 
 
@@ -287,6 +290,61 @@ class ClientRepository:
             )
         )
         await self._session.flush()
+
+    # ------------------------------ EXCLUSÃO (86e34jd1d) --------------
+
+    async def count_sessions(self, client_id: UUID, *, processing_only: bool = False) -> int:
+        """Conciliações do cliente (inclui as soft-deleted: vão junto na exclusão)."""
+        stmt = select(func.count(ReconciliationSession.id)).where(
+            ReconciliationSession.client_id == client_id
+        )
+        if processing_only:
+            stmt = stmt.where(
+                ReconciliationSession.status == ReconciliationStatus.PROCESSING.value,
+                ReconciliationSession.deleted_at.is_(None),
+            )
+        return int((await self._session.execute(stmt)).scalar_one())
+
+    async def count_tenant_users(self, client_id: UUID) -> int:
+        stmt = select(func.count(User.id)).where(
+            User.client_id == client_id, User.scope == UserScope.CLIENT.value
+        )
+        return int((await self._session.execute(stmt)).scalar_one())
+
+    async def delete_client_cascade(self, client: Client) -> None:
+        """Exclusão DEFINITIVA, na ordem que o grafo de FKs exige (86e34jd1d).
+
+        Tudo numa transação (a do request). A ordem não é estética:
+            1. conciliações do cliente — cascateiam arquivos, linhas, divergências,
+               anomalias e postings, e SOLTAM o `created_by` (RESTRICT) que
+               travaria a remoção dos usuários do tenant;
+            2. usuários DO tenant (`scope='client'`) — a FK `users.client_id` é
+               RESTRICT e travaria o passo 4; levam os próprios favoritos;
+            3. notificações do cliente — sem FK (só IDs), mas são item de UI de
+               um recurso que deixa de existir;
+            4. a linha de `clients` — cascateia atribuições, glossário, cache de
+               contas Omie e favoritos; a DEK morre com ela e tudo que ela
+               cifrava vira indecifrável por construção (§4.1).
+
+        `access_audit` e `usage_events` FICAM: são trilhas só de IDs (§4.7) e
+        sobrevivem ao cliente de propósito.
+
+        Core `DELETE`, não `session.delete(client)`: os relationships do model
+        são `lazy="raise"` e o cascade do ORM tentaria carregá-los.
+        """
+        s = self._session
+        await s.execute(
+            delete(ReconciliationSession).where(ReconciliationSession.client_id == client.id)
+        )
+        await s.execute(
+            delete(User).where(User.client_id == client.id, User.scope == UserScope.CLIENT.value)
+        )
+        await s.execute(delete(Notification).where(Notification.client_id == client.id))
+        await s.execute(delete(Client).where(Client.id == client.id))
+        await s.flush()
+        # A instância carregada pelo guard da rota não pode ficar viva na sessão
+        # apontando para uma linha que já não existe.
+        s.expunge(client)
 
     # ------------------------------ WRITE -----------------------------
 
