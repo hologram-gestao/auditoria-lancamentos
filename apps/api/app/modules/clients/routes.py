@@ -12,6 +12,10 @@ S7 (BACK 4.1-4.2):
     - PATCH /api/v1/clients/{id}/sync-accounts       força sync ignorando TTL
     - GET   /api/v1/clients/{id}/reconciliations     histórico paginado
 
+86e34jd5a (favoritos, por usuário):
+    - PUT    /api/v1/clients/{id}/favorite            marca favorito de quem pede
+    - DELETE /api/v1/clients/{id}/favorite            desmarca
+
 RBAC dispatch:
     - `require_admin` — assign.
     - `require_manager_or_admin` — list, create, test-connection.
@@ -97,6 +101,8 @@ async def list_clients(
         # S5/R3: se algum dia esta rota for aberta a papéis de cliente, a query
         # já sai restrita ao tenant da LINHA — o guard não é a única defesa.
         tenant_client_id=tenant_filter_client_id(user),
+        # Favoritos de QUEM pede no topo (86e34jd5a) — id vem da linha do usuário.
+        viewer_user_id=UUID(user.id),
     )
     return ClientListResponse(data=rows, pagination=pagination)
 
@@ -200,8 +206,44 @@ async def sync_accounts(
 ) -> ClientDetailResponse:
     # `user` aciona o guard da matriz (§4: gerente e operador do cliente PODEM
     # sincronizar contas); o tenant já foi validado pelo `AccessibleClientDep`.
-    del user
-    return await service.force_sync_accounts(client)
+    # O id vai junto para a response voltar com o `is_favorite` de quem pede —
+    # o front grava esta response no cache do detalhe (86e34jd5a).
+    return await service.force_sync_accounts(client, viewer_user_id=UUID(user.id))
+
+
+# ----------------------------------------------------------------------
+# PUT/DELETE /{id}/favorite — favorito POR USUÁRIO (86e34jd5a)
+# ----------------------------------------------------------------------
+#
+# Preferência de quem opera, não edição do cliente: não passa pela matriz de
+# `EDIT_CLIENT`. O que decide é o acesso ao tenant — `AccessibleClientDep`
+# (resolve_client_access): quem enxerga o cliente pode favoritá-lo; cliente de
+# outro tenant/carteira leva 403 + linha em `access_audit`, como nas demais
+# rotas por PK. O `user_id` vem da LINHA do usuário autenticado (§3.15).
+
+
+@router.put(
+    "/{client_id}/favorite",
+    summary="Marca o cliente como favorito do usuário autenticado (idempotente).",
+)
+async def favorite_client(
+    user: CurrentUserDep,
+    client: AccessibleClientDep,
+    service: ClientServiceDep,
+) -> ClientResponse:
+    return await service.set_favorite(client, user_id=UUID(user.id), favorite=True)
+
+
+@router.delete(
+    "/{client_id}/favorite",
+    summary="Desmarca o favorito do usuário autenticado (idempotente).",
+)
+async def unfavorite_client(
+    user: CurrentUserDep,
+    client: AccessibleClientDep,
+    service: ClientServiceDep,
+) -> ClientResponse:
+    return await service.set_favorite(client, user_id=UUID(user.id), favorite=False)
 
 
 # ----------------------------------------------------------------------
@@ -273,9 +315,10 @@ async def list_client_reconciliations(
 )
 async def get_client(
     client: AccessibleClientDep,
+    user: CurrentUserDep,
     service: ClientServiceDep,
 ) -> ClientDetailResponse:
-    return await service.get_client_detail_with_accounts(client)
+    return await service.get_client_detail_with_accounts(client, viewer_user_id=UUID(user.id))
 
 
 # ----------------------------------------------------------------------
@@ -296,7 +339,6 @@ async def update_client(
     # Matriz §4 — "Editar dados do cliente": SÓ admin. Papéis de cliente e
     # manager de sistema recebem 403 aqui (mudança de comportamento para o
     # manager, declarada no PRD).
-    del user
     # `client` já vem carregado e validado pelo `require_client_access` —
     # se o caller não tem acesso, a dependency lança 403 antes daqui.
     return await service.update_client(
@@ -305,4 +347,5 @@ async def update_client(
         active=payload.active,
         omie_app_key=payload.omie_app_key,
         omie_app_secret=payload.omie_app_secret,
+        viewer_user_id=UUID(user.id),
     )

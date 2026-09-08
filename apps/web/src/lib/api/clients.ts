@@ -25,7 +25,7 @@ import type {
   ReconciliationStatusFilter,
 } from '@/lib/contracts';
 
-import { apiGet, apiPatch, apiPost } from './client';
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from './client';
 
 export type ManagerSummary = ManagerSummaryContract;
 export type Client = ClientResponse;
@@ -76,6 +76,20 @@ function buildQuery(params: ListClientsParams): string {
 
 export async function listClients(params: ListClientsParams = {}): Promise<ClientListResponse> {
   return apiGet<ClientListResponse>(`/api/v1/clients?${buildQuery(params)}`);
+}
+
+/**
+ * Favorito é POR USUÁRIO (86e34jd5a): `PUT` marca e `DELETE` desmarca, os dois
+ * idempotentes, e a resposta é o cliente já com `is_favorite` de quem pediu.
+ * Nenhum dos dois passa pela matriz de edição — quem enxerga o cliente pode
+ * favoritá-lo; o backend nega (403) o que estiver fora do tenant/carteira.
+ */
+export async function favoriteClient(id: string): Promise<Client> {
+  return apiPut<Client>(`/api/v1/clients/${id}/favorite`);
+}
+
+export async function unfavoriteClient(id: string): Promise<Client> {
+  return apiDelete<Client>(`/api/v1/clients/${id}/favorite`);
 }
 
 export async function createClient(payload: CreateClientPayload): Promise<Client> {

@@ -34,6 +34,8 @@ const detailState = {
 };
 
 vi.mock('@/hooks/use-clients', () => ({
+  // O ClientShell/lista agora renderiza o coração de favorito (86e34jd5a).
+  useSetFavorite: () => ({ mutate: vi.fn(), isPending: false }),
   useClientDetail: () => ({
     data: {
       accounts: [{ id: 'a1', omie_conta_id: 10, name: 'Cartão Itaú', bank_name: 'Itaú' }],

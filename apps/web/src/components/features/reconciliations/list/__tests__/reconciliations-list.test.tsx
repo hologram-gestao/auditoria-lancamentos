@@ -43,6 +43,8 @@ const listState = {
 let lastQueryParams: ReconciliationsListParams | undefined;
 
 vi.mock('@/hooks/use-clients', () => ({
+  // O ClientShell/lista agora renderiza o coração de favorito (86e34jd5a).
+  useSetFavorite: () => ({ mutate: vi.fn(), isPending: false }),
   useReconciliationsList: (_id: string, params: ReconciliationsListParams) => {
     lastQueryParams = params;
     return listState;

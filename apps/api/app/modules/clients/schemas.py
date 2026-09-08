@@ -104,6 +104,12 @@ class ClientResponse(BaseModel):
     updated_at: datetime
     responsible_manager: ManagerSummary | None = None
     reconciliation_count: int = Field(0, ge=0)
+    # 86e34jd5a — favorito é POR USUÁRIO: reflete quem pede, nunca o cliente em
+    # si. `False` quando o viewer é desconhecido (response sem usuário no contexto).
+    is_favorite: bool = Field(
+        False,
+        description="Cliente favoritado pelo usuário autenticado (preferência por usuário).",
+    )
 
     model_config = {"from_attributes": True}
 

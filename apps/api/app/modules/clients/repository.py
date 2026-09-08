@@ -13,20 +13,23 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import UTC, date, datetime
-from typing import NamedTuple
+from typing import Any, NamedTuple
 from uuid import UUID
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, false, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
 from app.db.models import (
+    UQ_USER_CLIENT_FAVORITE,
     Client,
     ClientAssignment,
     OmieAccountCache,
     ReconciliationFile,
     ReconciliationSession,
     User,
+    UserClientFavorite,
 )
 
 
@@ -41,6 +44,36 @@ class ClientRow(NamedTuple):
     client: Client
     manager: User | None
     reconciliation_count: int
+    #: Favorito de QUEM pede (86e34jd5a). `False` quando não há viewer.
+    is_favorite: bool = False
+
+
+class _FavoriteJoin(NamedTuple):
+    """Outer join com `user_client_favorites` restrito ao viewer (86e34jd5a).
+
+    `table` é um alias para o join não colidir com nada; `is_favorite` é a
+    expressão booleana selecionável (`id IS NOT NULL`). Sem viewer, o `ON`
+    é `false`: nenhuma linha casa e `is_favorite` sai `False` para todas —
+    mesma forma do SELECT, sem `if` espalhado nos dois lugares que o usam.
+    """
+
+    table: Any
+    on_clause: Any
+    is_favorite: Any
+
+
+def _favorite_join_for(viewer_user_id: UUID | None) -> _FavoriteJoin:
+    fav = aliased(UserClientFavorite)
+    on_clause = (
+        and_(fav.client_id == Client.id, fav.user_id == viewer_user_id)
+        if viewer_user_id is not None
+        else false()
+    )
+    return _FavoriteJoin(
+        table=fav,
+        on_clause=on_clause,
+        is_favorite=fav.id.is_not(None).label("is_favorite"),
+    )
 
 
 class ClientRepository:
@@ -59,6 +92,7 @@ class ClientRepository:
         search: str | None = None,
         manager_id: UUID | None = None,
         tenant_client_id: UUID | None = None,
+        viewer_user_id: UUID | None = None,
     ) -> tuple[Sequence[ClientRow], int]:
         """Lista paginada de clientes com manager + count de conciliações.
 
@@ -70,11 +104,15 @@ class ClientRepository:
             tenant_client_id: se não-None, restringe ao tenant do usuário
                 (`scope='client'`). Tem PRECEDÊNCIA sobre `manager_id` — um
                 usuário de cliente não tem carteira, tem tenant.
+            viewer_user_id: quem pede. Decide `is_favorite` por linha e põe os
+                favoritos DESSE usuário no topo (86e34jd5a). Vem da linha do
+                usuário autenticado, nunca de URL/payload (§3.15).
 
         Returns:
             Tupla `(rows, total_count)`. Total é a contagem ANTES da paginação.
         """
         manager = aliased(User)
+        favorite = _favorite_join_for(viewer_user_id)
 
         # Subquery escalar: conta de sessões ATIVAS por cliente (descarte
         # de erros não infla o contador). Correlate evita o SQLAlchemy
@@ -90,9 +128,10 @@ class ClientRepository:
         )
 
         base = (
-            select(Client, manager, recon_count_sq.label("recon_count"))
+            select(Client, manager, recon_count_sq.label("recon_count"), favorite.is_favorite)
             .outerjoin(ClientAssignment, ClientAssignment.client_id == Client.id)
             .outerjoin(manager, manager.id == ClientAssignment.user_id)
+            .outerjoin(favorite.table, favorite.on_clause)
         )
         count_base = select(func.count(Client.id.distinct())).select_from(Client)
 
@@ -114,22 +153,39 @@ class ClientRepository:
             base = base.where(func.lower(Client.name).like(term))
             count_base = count_base.where(func.lower(Client.name).like(term))
 
-        # Ordem estável: created_at desc, id desc (desempate determinístico)
-        base = base.order_by(Client.created_at.desc(), Client.id.desc())
+        # Favoritos de quem pede primeiro (86e34jd5a); depois a ordem estável de
+        # sempre: created_at desc, id desc (desempate determinístico). O favorito
+        # da página 3 sobe para a página 1 porque a ordenação é do SELECT, não
+        # da página já cortada.
+        base = base.order_by(
+            favorite.is_favorite.desc(), Client.created_at.desc(), Client.id.desc()
+        )
         offset = (page - 1) * page_size
         base = base.offset(offset).limit(page_size)
 
         total = (await self._session.execute(count_base)).scalar_one()
         result = await self._session.execute(base)
         rows = [
-            ClientRow(client=row[0], manager=row[1], reconciliation_count=int(row[2] or 0))
+            ClientRow(
+                client=row[0],
+                manager=row[1],
+                reconciliation_count=int(row[2] or 0),
+                is_favorite=bool(row[3]),
+            )
             for row in result.all()
         ]
         return rows, int(total)
 
-    async def get_detail(self, client_id: UUID) -> ClientRow | None:
-        """Carrega 1 cliente com manager + count — usado em endpoints de retorno."""
+    async def get_detail(
+        self, client_id: UUID, *, viewer_user_id: UUID | None = None
+    ) -> ClientRow | None:
+        """Carrega 1 cliente com manager + count — usado em endpoints de retorno.
+
+        `viewer_user_id` resolve `is_favorite` para quem pede (86e34jd5a); sem
+        viewer a linha sai com `False`.
+        """
         manager = aliased(User)
+        favorite = _favorite_join_for(viewer_user_id)
         recon_count_sq = (
             select(func.count(ReconciliationSession.id))
             .where(
@@ -140,15 +196,21 @@ class ClientRepository:
             .scalar_subquery()
         )
         stmt = (
-            select(Client, manager, recon_count_sq.label("recon_count"))
+            select(Client, manager, recon_count_sq.label("recon_count"), favorite.is_favorite)
             .outerjoin(ClientAssignment, ClientAssignment.client_id == Client.id)
             .outerjoin(manager, manager.id == ClientAssignment.user_id)
+            .outerjoin(favorite.table, favorite.on_clause)
             .where(Client.id == client_id)
         )
         row = (await self._session.execute(stmt)).first()
         if row is None:
             return None
-        return ClientRow(client=row[0], manager=row[1], reconciliation_count=int(row[2] or 0))
+        return ClientRow(
+            client=row[0],
+            manager=row[1],
+            reconciliation_count=int(row[2] or 0),
+            is_favorite=bool(row[3]),
+        )
 
     async def get_by_id(self, client_id: UUID) -> Client | None:
         """Retorna o `Client` cru, sem joins — usado para writes (PATCH, assign)."""
@@ -166,6 +228,33 @@ class ClientRepository:
         """Lookup rápido de user — usado para validar manager-alvo do assign."""
         result = await self._session.execute(select(User).where(User.id == user_id))
         return result.scalar_one_or_none()
+
+    # ------------------------------ FAVORITOS (86e34jd5a) -------------
+
+    async def add_favorite(self, *, user_id: UUID, client_id: UUID) -> None:
+        """Marca o cliente como favorito do usuário. Idempotente.
+
+        `ON CONFLICT DO NOTHING` na UNIQUE `(user_id, client_id)`: dois cliques
+        (ou duas abas) não viram erro nem linha duplicada — a garantia é do
+        banco, não da aplicação.
+        """
+        stmt = (
+            pg_insert(UserClientFavorite)
+            .values(user_id=user_id, client_id=client_id)
+            .on_conflict_do_nothing(constraint=UQ_USER_CLIENT_FAVORITE)
+        )
+        await self._session.execute(stmt)
+        await self._session.flush()
+
+    async def remove_favorite(self, *, user_id: UUID, client_id: UUID) -> None:
+        """Desfaz o favorito. Idempotente: não existir já é o estado final."""
+        await self._session.execute(
+            delete(UserClientFavorite).where(
+                UserClientFavorite.user_id == user_id,
+                UserClientFavorite.client_id == client_id,
+            )
+        )
+        await self._session.flush()
 
     # ------------------------------ WRITE -----------------------------
 

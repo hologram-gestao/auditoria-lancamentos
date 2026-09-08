@@ -57,6 +57,7 @@ from app.db.models.user import (
     UserRole,
     UserScope,
 )
+from app.db.models.user_client_favorite import UQ_USER_CLIENT_FAVORITE, UserClientFavorite
 
 __all__ = [
     "CLIENT_ROLES",
@@ -69,6 +70,7 @@ __all__ = [
     "SCOPE_CLIENT_ID_CHECK",
     "SCOPE_CLIENT_ID_CONSTRAINT",
     "SYSTEM_ROLES",
+    "UQ_USER_CLIENT_FAVORITE",
     "AccessAudit",
     "AnomalyDetectedBy",
     "AnomalyReviewVerdict",
@@ -101,6 +103,7 @@ __all__ = [
     "SystemUserRole",
     "UsageEvent",
     "User",
+    "UserClientFavorite",
     "UserRole",
     "UserScope",
 ]
