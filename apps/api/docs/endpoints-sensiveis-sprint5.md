@@ -14,10 +14,10 @@
 
 |                                         |                  |
 | --------------------------------------- | ---------------- |
-| Endpoints sensíveis (denominador)       | **43**           |
-| Com caso negativo cross-tenant verde    | **43**           |
+| Endpoints sensíveis (denominador)       | **44**           |
+| Com caso negativo cross-tenant verde    | **44**           |
 | Pendentes (implementação em outra task) | **0**            |
-| Cobertura                               | **43/43 = 100%** |
+| Cobertura                               | **44/44 = 100%** |
 
 ## Lista canônica
 
@@ -47,6 +47,7 @@ Legenda de `tipo`: **coleção** = vaza forjando `client_id` na URL/payload · *
 | `GET`    | `/api/v1/reconciliations/{session_id}/available-omie-entries`  | coleção      | `app/modules/reconciliations/review/routes.py` | require_session_access: SELECT da sessão já com AND client_id = <tenant da linha> (scoped_by_tenant) + resolve_client_access; 404 uniforme                                                                                                                     | ✅ verde |
 | `GET`    | `/api/v1/clients/{client_id}`                                  | detalhe (PK) | `app/modules/clients/routes.py`                | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha)                                                                                                                                  | ✅ verde |
 | `PATCH`  | `/api/v1/clients/{client_id}/sync-accounts`                    | detalhe (PK) | `app/modules/clients/routes.py`                | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha)                                                                                                                                  | ✅ verde |
+| `DELETE` | `/api/v1/clients/{client_id}`                                  | detalhe (PK) | `app/modules/clients/routes.py`                | EditClientDep (admin pela matriz) + AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha)                                                                                              | ✅ verde |
 | `PUT`    | `/api/v1/clients/{client_id}/favorite`                         | detalhe (PK) | `app/modules/clients/routes.py`                | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha)                                                                                                                                  | ✅ verde |
 | `DELETE` | `/api/v1/clients/{client_id}/favorite`                         | detalhe (PK) | `app/modules/clients/routes.py`                | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha)                                                                                                                                  | ✅ verde |
 | `POST`   | `/api/v1/reconciliations/{session_id}/omie-postings`           | detalhe (PK) | `app/modules/reconciliations/routes.py`        | require_session_access: SELECT da sessão já com AND client_id = <tenant da linha> (scoped_by_tenant) + resolve_client_access; 404 uniforme; o Client sai do client_id da sessão já autorizada e as linhas são carregadas com AND session_id — nada vem do body | ✅ verde |

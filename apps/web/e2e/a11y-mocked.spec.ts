@@ -747,6 +747,10 @@ async function fulfillApi(route: Route): Promise<void> {
   if (path === '/api/v1/clients') {
     return json({ data: [{ ...CLIENT_DETAIL, is_favorite: favorited }], pagination: PAGINATION });
   }
+  // Exclusão definitiva (86e34jd1d): 204 sem corpo; o front volta para a lista.
+  if (path === `/api/v1/clients/${CLIENT_ID}` && route.request().method() === 'DELETE') {
+    return route.fulfill({ status: 204 });
+  }
   if (path === `/api/v1/clients/${CLIENT_ID}`) {
     // As contas bancárias da tela R6 vêm DAQUI (paginação client-side sobre
     // `detail.accounts`), não de uma rota própria.
@@ -2112,6 +2116,10 @@ for (const vp of VIEWPORTS) {
         await expect(page.getByRole('button', { name: 'Editar cliente' })).toHaveCount(
           profile.editClient ? 1 : 0,
         );
+        // Excluir (86e34jd1d) é a mesma célula da matriz: só admin.
+        await expect(page.getByRole('button', { name: 'Excluir cliente' })).toHaveCount(
+          profile.editClient ? 1 : 0,
+        );
         // Criar conciliação vale para todo papel (matriz: ✅ nas 4 colunas).
         await expect(page.getByRole('button', { name: 'Criar conciliação' })).toBeVisible();
 
@@ -2280,6 +2288,37 @@ for (const vp of VIEWPORTS) {
       ).toBeVisible();
       await expect(page.locator('#__next_error__')).toHaveCount(0);
       await analyze(page, `deep link em categorias negado (${vp.label})`);
+    });
+
+    /**
+     * 86e34jd1d — exclusão definitiva: `alertdialog` com confirmação DIGITADA. A
+     * ação primária nasce desabilitada, libera quando o nome bate, e o sucesso
+     * (204 mockado) volta para a lista. Medido em desktop e 390px com o diálogo
+     * montado; a ação não pode passar da borda da viewport.
+     */
+    test('excluir cliente: alertdialog com confirmação digitada (86e34jd1d)', async ({ page }) => {
+      await page.goto(`/clientes/${CLIENT_ID}`);
+      await page.getByRole('button', { name: 'Excluir cliente' }).click();
+      const confirm = page.getByRole('alertdialog', { name: 'Excluir cliente' });
+      await expect(confirm).toBeVisible();
+      await aguardarAnimacao(confirm);
+      const acao = confirm.getByRole('button', { name: 'Excluir definitivamente' });
+      await expect(acao).toBeDisabled();
+      await shot(page, `excluir-cliente-${slug}`);
+      await analyze(page, `confirmação de exclusão do cliente (${vp.label})`);
+      const caixa = await acao.boundingBox();
+      expect(
+        (caixa?.x ?? 0) + (caixa?.width ?? 0),
+        'ação de excluir cortada pela borda da viewport',
+      ).toBeLessThanOrEqual(vp.size.width);
+
+      await confirm
+        .getByLabel('Digite o nome do cliente para confirmar')
+        .fill('Cliente Exemplo Ltda');
+      await expect(acao).toBeEnabled();
+      await acao.click();
+      await page.waitForURL(/\/clientes$/);
+      await expect(page.getByRole('heading', { name: 'Clientes', level: 1 })).toBeVisible();
     });
 
     test('usuário de tenant não para na lista global — vai para a casa dele', async ({ page }) => {

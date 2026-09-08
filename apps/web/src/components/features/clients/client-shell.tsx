@@ -33,7 +33,7 @@
  * segundo request.
  */
 
-import { ChevronRight, SquarePen } from 'lucide-react';
+import { ChevronRight, SquarePen, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
@@ -50,6 +50,7 @@ import { canAccessClient, canSeeSystemArea, hasPermission, homePathFor } from '@
 import { useAuthStore } from '@/stores/auth';
 
 import { ClientStatusBadge } from './client-status-badge';
+import { DeleteClientDialog } from './delete-client-dialog';
 import { EditClientModal } from './edit-client-modal';
 import { FavoriteToggle } from './favorite-toggle';
 
@@ -61,6 +62,7 @@ interface ClientShellProps {
 export function ClientShell({ clientId, children }: ClientShellProps) {
   const currentUser = useAuthStore((s) => s.user);
   const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   // Gating de tenant (R4/FRONT 05.7) ANTES do fetch: um usuário de cliente que
   // abre o deep link de OUTRO tenant não deve nem disparar o request — o
@@ -194,10 +196,22 @@ export function ClientShell({ clientId, children }: ClientShellProps) {
             />
           </div>
           {canEditClient && (
-            <Button variant="outline" onClick={() => setEditOpen(true)}>
-              <SquarePen className="h-4 w-4" aria-hidden="true" />
-              Editar cliente
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" onClick={() => setEditOpen(true)}>
+                <SquarePen className="h-4 w-4" aria-hidden="true" />
+                Editar cliente
+              </Button>
+              {/* Exclusão definitiva (86e34jd1d): mesma célula da matriz que editar
+                  (§9 — admin do sistema); o backend nega o resto com 403. */}
+              <Button
+                variant="outline"
+                className="text-destructive hover:text-destructive"
+                onClick={() => setDeleteOpen(true)}
+              >
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
+                Excluir cliente
+              </Button>
+            </div>
           )}
         </div>
       </header>
@@ -209,6 +223,9 @@ export function ClientShell({ clientId, children }: ClientShellProps) {
       <div className="min-h-0 min-w-0 flex-1">{children}</div>
 
       <EditClientModal open={editOpen} onOpenChange={setEditOpen} client={client} />
+      {canEditClient && (
+        <DeleteClientDialog open={deleteOpen} onOpenChange={setDeleteOpen} client={client} />
+      )}
     </div>
   );
 }

@@ -34,6 +34,8 @@ const detailState = {
 };
 
 vi.mock('@/hooks/use-clients', () => ({
+  // O ClientShell agora monta o diálogo de exclusão (86e34jd1d).
+  useDeleteClient: () => ({ mutateAsync: vi.fn(), isPending: false, reset: vi.fn() }),
   // O ClientShell/lista agora renderiza o coração de favorito (86e34jd5a).
   useSetFavorite: () => ({ mutate: vi.fn(), isPending: false }),
   useClientDetail: () => ({

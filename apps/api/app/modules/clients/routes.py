@@ -6,6 +6,7 @@ S6 (BACK 3.1-3.5):
     - POST  /api/v1/clients/test-connection          (admin + manager)
     - PATCH /api/v1/clients/{id}/assign              (admin only)
     - PATCH /api/v1/clients/{id}                     (admin OR manager-da-carteira)
+    - DELETE /api/v1/clients/{id}                    exclusão definitiva (admin-only) — 86e34jd1d
 
 S7 (BACK 4.1-4.2):
     - GET   /api/v1/clients/{id}                     detalhe + cache L1
@@ -62,13 +63,19 @@ from app.modules.clients.schemas import (
     UpdateClientRequest,
 )
 from app.modules.clients.service import ClientService
+from app.modules.usage_events.repository import UsageEventRepository
+from app.modules.usage_events.service import UsageEventService
 
 router = APIRouter(prefix="/api/v1/clients", tags=["clients"])
 
 
 def _get_client_service(db: DbSessionDep, settings: SettingsDep) -> ClientService:
     """Provider para injeção do service em endpoints."""
-    return ClientService(ClientRepository(db), settings)
+    return ClientService(
+        ClientRepository(db),
+        settings,
+        usage_events=UsageEventService(UsageEventRepository(db)),
+    )
 
 
 ClientServiceDep = Annotated[ClientService, Depends(_get_client_service)]
@@ -357,3 +364,31 @@ async def update_client(
         category_id=payload.category_id,
         category_set="category_id" in payload.model_fields_set,
     )
+
+
+# ----------------------------------------------------------------------
+# DELETE /{id} — exclusão DEFINITIVA (86e34jd1d)
+# ----------------------------------------------------------------------
+#
+# Admin pela matriz (`EDIT_CLIENT` — mesma célula de "editar dados do
+# cliente", §4.9) E tenant pelo `AccessibleClientDep`: entra na lista canônica
+# de endpoints sensíveis como DETAIL_PK. 409 com conciliação em processamento.
+
+
+@router.delete(
+    "/{client_id}",
+    status_code=204,
+    summary=(
+        "Exclui o cliente DEFINITIVAMENTE (admin-only): conciliações, usuários do "
+        "cliente, glossário, credenciais e favoritos vão junto; trilhas de auditoria "
+        "e eventos de uso ficam (só IDs). 409 se houver conciliação em processamento."
+    ),
+)
+async def delete_client(
+    user: EditClientDep,
+    client: AccessibleClientDep,
+    service: ClientServiceDep,
+) -> Response:
+    del user
+    await service.delete_client(client)
+    return Response(status_code=204)

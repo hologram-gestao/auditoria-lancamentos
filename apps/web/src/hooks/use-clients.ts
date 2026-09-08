@@ -16,6 +16,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import {
   assignClient,
   createClient,
+  deleteClient,
   favoriteClient,
   getClientDetail,
   listClients,
@@ -111,6 +112,21 @@ export function useSetFavorite(id: string) {
         old ? { ...old, is_favorite: updated.is_favorite } : old,
       );
       void qc.invalidateQueries({ queryKey: clientsKeys.lists });
+    },
+  });
+}
+
+/**
+ * Exclusão definitiva (86e34jd1d). No sucesso o detalhe sai do cache (a rota
+ * passa a devolver 404) e as listagens recarregam.
+ */
+export function useDeleteClient(id: string) {
+  const qc = useQueryClient();
+  return useMutation<void, Error, void>({
+    mutationFn: () => deleteClient(id),
+    onSuccess: () => {
+      qc.removeQueries({ queryKey: clientsKeys.detail(id) });
+      void qc.invalidateQueries({ queryKey: clientsKeys.all });
     },
   });
 }

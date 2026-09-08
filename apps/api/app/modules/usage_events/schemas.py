@@ -59,6 +59,10 @@ class UsageEventName(StrEnum):
     # (`linhas`) da métrica da sprint.
     OMIE_LANCAMENTO_ENVIADO = "omie_lancamento_enviado"
     OMIE_LANCAMENTO_REJEITADO = "omie_lancamento_rejeitado"
+    # 86e34jd1d — exclusão definitiva de cliente. De BACKEND (o fato é do
+    # servidor); sem `session_id`, fora da dedup por construção: cada exclusão
+    # é uma linha.
+    CLIENTE_EXCLUIDO = "cliente_excluido"
 
 
 #: Eventos que o `POST /api/v1/usage-events` aceita. Os de backend ficam de fora
@@ -129,6 +133,17 @@ class FlagRevisadoProps(_StrictProps):
     """
 
     procedente: bool
+
+
+class ClienteExcluidoProps(_StrictProps):
+    """`cliente_excluido` (86e34jd1d) — o que foi levado junto, em contagens.
+
+    Só IDs e inteiros: nome do cliente é dado identificável e NÃO entra (§4.7).
+    """
+
+    client_id: UUID
+    n_conciliacoes: int = Field(ge=0)
+    n_usuarios: int = Field(ge=0)
 
 
 class GlossarioEditadoProps(_StrictProps):

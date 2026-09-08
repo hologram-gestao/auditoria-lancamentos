@@ -31,6 +31,7 @@ from app.core.crypto_service import (
     provision_client_cipher,
 )
 from app.core.exceptions import (
+    ClientHasProcessingSessionError,
     IncompleteCredentialsError,
     InvalidClientCategoryError,
     InvalidManagerError,
@@ -55,6 +56,7 @@ from app.modules.clients.schemas import (
     TestConnectionResponse,
 )
 from app.modules.reconciliations.service import author_for_viewer
+from app.modules.usage_events.service import UsageEventService
 from app.modules.users.schemas import PaginationMeta
 
 if TYPE_CHECKING:
@@ -100,9 +102,13 @@ class ClientService:
         settings: Settings,
         *,
         accounts_cache: OmieAccountsCacheService | None = None,
+        usage_events: UsageEventService | None = None,
     ) -> None:
         self._repo = repository
         self._settings = settings
+        # Sink de métrica da exclusão (86e34jd1d). Opcional: sem ele, o fato
+        # não é medido, mas a exclusão acontece — instrumentação nunca bloqueia.
+        self._usage_events = usage_events
         # Cache L1 — instanciado on-demand quando não passado pelo caller.
         # Em testes é injetado com `OmieClient` mockado via respx.
         self._accounts_cache = accounts_cache or OmieAccountsCacheService(repository, settings)
@@ -389,6 +395,32 @@ class ClientService:
         return await self._build_detail_response(
             client.id, rows, synced_at, viewer_user_id=viewer_user_id
         )
+
+    # ------------------------------ EXCLUSÃO (86e34jd1d) --------------
+
+    async def delete_client(self, client: Client) -> None:
+        """Exclusão DEFINITIVA do cliente e de tudo que pende dele.
+
+        Decisão do Galhardo (04/09/2026): quando o cliente sai da carteira, some
+        da plataforma; se voltar, integra de novo. O backup do que foi tratado
+        fica no Drive do cliente — fora da ADL.
+
+        Guarda: 409 se houver conciliação EM PROCESSAMENTO — o job roda fora do
+        request e morreria no meio. Quem decide o acesso é a rota (admin pela
+        matriz + tenant pelo `AccessibleClientDep`); aqui só a regra.
+        """
+        if await self._repo.count_sessions(client.id, processing_only=True) > 0:
+            raise ClientHasProcessingSessionError(
+                f"Cliente {client.id} tem conciliação em processamento; exclusão recusada."
+            )
+        n_sessions = await self._repo.count_sessions(client.id)
+        n_users = await self._repo.count_tenant_users(client.id)
+        client_id = client.id
+        await self._repo.delete_client_cascade(client)
+        if self._usage_events is not None:
+            await self._usage_events.emit_cliente_excluido(
+                client_id=client_id, n_conciliacoes=n_sessions, n_usuarios=n_users
+            )
 
     # ------------------------------ FAVORITOS (86e34jd5a) -------------
 

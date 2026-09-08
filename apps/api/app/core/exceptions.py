@@ -215,6 +215,19 @@ class InvalidClientCategoryError(ValidationAppError):
     default_user_message = "A categoria selecionada não existe."
 
 
+class ClientHasProcessingSessionError(ConflictError):
+    """409 — exclusão de cliente com conciliação EM PROCESSAMENTO (86e34jd1d).
+
+    O job roda em `BackgroundTasks` fora do request: apagar as linhas debaixo
+    dele deixaria o processamento morrer no meio. Espera terminar (ou o cron
+    `mark_stuck_sessions_as_error`) e tenta de novo.
+    """
+
+    default_user_message = (
+        "Este cliente tem uma conciliação em processamento. Aguarde terminar e tente novamente."
+    )
+
+
 class OmiePostingDisabledError(ConflictError):
     """409 — o kill-switch `OMIE_POSTING_ENABLED` está desligado (S7 BACK 07.4).
 

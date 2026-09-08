@@ -13,6 +13,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 let currentPathname = '/clientes/c1';
 
 vi.mock('next/navigation', () => ({
+  // O diálogo de exclusão do shell (86e34jd1d) chama `useRouter` ao montar.
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
   usePathname: () => currentPathname,
 }));
 
@@ -32,6 +34,8 @@ const sessionState = {
 };
 
 vi.mock('@/hooks/use-clients', () => ({
+  // O ClientShell agora monta o diálogo de exclusão (86e34jd1d).
+  useDeleteClient: () => ({ mutateAsync: vi.fn(), isPending: false, reset: vi.fn() }),
   // O ClientShell/lista agora renderiza o coração de favorito (86e34jd5a).
   useSetFavorite: () => ({ mutate: vi.fn(), isPending: false }),
   useClientDetail: () => clientState,

@@ -27,6 +27,7 @@ from app.modules.reconciliations.tenant_scope import audit_session_tenant_miss
 from app.modules.usage_events.omie_rejection import classify_omie_rejection
 from app.modules.usage_events.repository import UsageEventRepository
 from app.modules.usage_events.schemas import (
+    ClienteExcluidoProps,
     FlagRevisadoProps,
     GlossarioEditadoProps,
     OmieLancamentoEnviadoProps,
@@ -241,6 +242,21 @@ class UsageEventService:
             props=GlossarioEditadoProps(client_id=client_id, n_categorias=n_categorias).model_dump(
                 mode="json"
             ),
+        )
+
+    async def emit_cliente_excluido(
+        self, *, client_id: UUID, n_conciliacoes: int, n_usuarios: int
+    ) -> bool:
+        """86e34jd1d — exclusão definitiva de cliente, com o que foi junto.
+
+        Sem `session_id` (o alvo é o cliente inteiro), logo fora do índice
+        parcial de dedup por construção. Só IDs e contagens — nunca o nome.
+        """
+        return await self.emit(
+            UsageEventName.CLIENTE_EXCLUIDO,
+            props=ClienteExcluidoProps(
+                client_id=client_id, n_conciliacoes=n_conciliacoes, n_usuarios=n_usuarios
+            ).model_dump(mode="json"),
         )
 
     # ------------------------------------------------------------------

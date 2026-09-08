@@ -100,6 +100,15 @@ export async function unfavoriteClient(id: string): Promise<Client> {
   return apiDelete<Client>(`/api/v1/clients/${id}/favorite`);
 }
 
+/**
+ * Exclusão DEFINITIVA (86e34jd1d): 204 sem corpo. Admin-only no backend; 409
+ * (`CONFLICT`) quando há conciliação em processamento — o `userMessage` já vem
+ * pronto para o toast.
+ */
+export async function deleteClient(id: string): Promise<void> {
+  await apiDelete<void>(`/api/v1/clients/${id}`);
+}
+
 export async function createClient(payload: CreateClientPayload): Promise<Client> {
   return apiPost<Client>('/api/v1/clients', payload);
 }
