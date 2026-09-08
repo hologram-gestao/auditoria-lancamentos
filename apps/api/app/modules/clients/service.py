@@ -32,6 +32,7 @@ from app.core.crypto_service import (
 )
 from app.core.exceptions import (
     IncompleteCredentialsError,
+    InvalidClientCategoryError,
     InvalidManagerError,
     NotFoundError,
     OmieAuthError,
@@ -46,6 +47,7 @@ from app.modules.clients.repository import ClientRepository, ClientRow
 from app.modules.clients.schemas import (
     UI_STATUS_TO_DB,
     BankAccountResponse,
+    ClientCategorySummary,
     ClientDetailResponse,
     ClientResponse,
     ManagerSummary,
@@ -79,6 +81,13 @@ def _row_to_response(row: ClientRow) -> ClientResponse:
         responsible_manager=manager,
         reconciliation_count=row.reconciliation_count,
         is_favorite=row.is_favorite,
+        category=(
+            ClientCategorySummary(
+                id=row.category.id, name=row.category.name, tone=row.category.tone
+            )
+            if row.category is not None
+            else None
+        ),
     )
 
 
@@ -109,6 +118,7 @@ class ClientService:
         manager_id_filter: UUID | None,
         tenant_client_id: UUID | None = None,
         viewer_user_id: UUID | None = None,
+        category_id: UUID | None = None,
     ) -> tuple[list[ClientResponse], PaginationMeta]:
         """Lista clientes com filtro RBAC.
 
@@ -122,6 +132,7 @@ class ClientService:
             manager_id=manager_id_filter,
             tenant_client_id=tenant_client_id,
             viewer_user_id=viewer_user_id,
+            category_id=category_id,
         )
         total_pages = (total + page_size - 1) // page_size if page_size else 0
         responses = [_row_to_response(r) for r in rows]
@@ -157,6 +168,7 @@ class ClientService:
         omie_app_key: str,
         omie_app_secret: str,
         current_user_id: UUID,
+        category_id: UUID | None = None,
     ) -> ClientResponse:
         """Cria cliente com credenciais criptografadas + auto-assign do criador.
 
@@ -166,6 +178,7 @@ class ClientService:
         gerado ANTES para compor o AAD (o default `uuid4` só valeria no flush).
         Cada credencial usa IV próprio; o texto plano só vive em memória local.
         """
+        await self._assert_category_exists(category_id)
         client_id = uuid4()
         cipher, dek_wrapped = await new_client_dek(client_id, settings=self._settings)
         ct_key, iv_key = cipher.encrypt(omie_app_key, field_locator(AAD_CLIENT_APP_KEY, client_id))
@@ -183,6 +196,7 @@ class ClientService:
             omie_app_secret_iv=iv_secret,
             active=True,
             created_by=current_user_id,
+            category_id=category_id,
         )
         await self._repo.add_client(client)
 
@@ -206,8 +220,13 @@ class ClientService:
         omie_app_key: str | None,
         omie_app_secret: str | None,
         viewer_user_id: UUID | None = None,
+        category_id: UUID | None = None,
+        category_set: bool = False,
     ) -> ClientResponse:
         """Atualiza campos parciais do cliente (PATCH).
+
+        `category_set` distingue "omitido" (mantém) de `null` explícito (limpa) —
+        86e34jd8m; UUID troca depois de validar que existe no catálogo.
 
         Para credenciais: precisa enviar AMBOS os campos juntos. Caso só um
         venha preenchido, retorna 400 `IncompleteCredentialsError`. Quando
@@ -217,6 +236,9 @@ class ClientService:
             client.name = name
         if active is not None:
             client.active = active
+        if category_set:
+            await self._assert_category_exists(category_id)
+            client.category_id = category_id
 
         # Pares possíveis: ambos None (ignora), ambos preenchidos (recriptografa),
         # apenas um → 400 (evita silenciosamente manter credenciais inconsistentes).
@@ -241,6 +263,13 @@ class ClientService:
 
         await self._repo.add_client(client)
         return await self.get_client_detail(client.id, viewer_user_id=viewer_user_id)
+
+    async def _assert_category_exists(self, category_id: UUID | None) -> None:
+        """400 se o `category_id` não está no catálogo (86e34jd8m). `None` passa."""
+        if category_id is None:
+            return
+        if await self._repo.get_category_by_id(category_id) is None:
+            raise InvalidClientCategoryError(f"Categoria inexistente: {category_id}")
 
     # ------------------------------ ASSIGN ----------------------------
 

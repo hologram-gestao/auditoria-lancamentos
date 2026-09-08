@@ -32,6 +32,9 @@ class CreateClientRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=200, description="Nome interno na Hologram.")
     omie_app_key: str = Field(..., min_length=1, max_length=200)
     omie_app_secret: str = Field(..., min_length=1, max_length=200)
+    category_id: UUID | None = Field(
+        None, description="Categoria do catálogo (86e34jd8m). Ausente ou null = sem categoria."
+    )
 
 
 class UpdateClientRequest(BaseModel):
@@ -46,6 +49,11 @@ class UpdateClientRequest(BaseModel):
     active: bool | None = None
     omie_app_key: str | None = Field(None, min_length=1, max_length=200)
     omie_app_secret: str | None = Field(None, min_length=1, max_length=200)
+    # Tri-estado (86e34jd8m): OMITIDO mantém; `null` explícito limpa; UUID troca.
+    # A rota distingue omitido de null via `model_fields_set`.
+    category_id: UUID | None = Field(
+        None, description="Omitir mantém a categoria; `null` limpa; UUID troca."
+    )
 
 
 class TestConnectionRequest(BaseModel):
@@ -94,6 +102,14 @@ class ManagerSummary(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ClientCategorySummary(BaseModel):
+    """Categoria do cliente como aparece na lista e no detalhe (86e34jd8m)."""
+
+    id: UUID
+    name: str
+    tone: str
+
+
 class ClientResponse(BaseModel):
     """Representação pública de um Client. NUNCA inclui campos `*_encrypted`/`*_iv`."""
 
@@ -110,6 +126,8 @@ class ClientResponse(BaseModel):
         False,
         description="Cliente favoritado pelo usuário autenticado (preferência por usuário).",
     )
+    # 86e34jd8m — categoria (nicho/segmento) do catálogo; `null` = sem categoria.
+    category: ClientCategorySummary | None = None
 
     model_config = {"from_attributes": True}
 

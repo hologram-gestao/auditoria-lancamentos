@@ -15,6 +15,7 @@ import {
   LayoutDashboard,
   ListChecks,
   Settings,
+  Tags,
   UserCog,
   Users as UsersIcon,
 } from 'lucide-react';
@@ -101,6 +102,12 @@ export function globalNavSections(user: AuthenticatedUser, pathname: string): Na
           label: 'Tipos de Anomalia',
           icon: <AlertTriangle className="h-4 w-4" aria-hidden="true" />,
           active: isPathActive(pathname, '/configuracoes/anomalias'),
+        },
+        {
+          href: '/configuracoes/categorias',
+          label: 'Categorias de Cliente',
+          icon: <Tags className="h-4 w-4" aria-hidden="true" />,
+          active: isPathActive(pathname, '/configuracoes/categorias'),
         },
       ],
     });

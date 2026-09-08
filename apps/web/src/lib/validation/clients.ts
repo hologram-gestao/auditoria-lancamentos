@@ -23,6 +23,8 @@ export const createClientSchema = z.object({
   name: z.string().min(1, 'Informe o nome do cliente.').max(200, 'Nome muito longo (máx. 200).'),
   omie_app_key: omieKeyField,
   omie_app_secret: omieSecretField,
+  // 86e34jd8m — id do catálogo ou a sentinela 'none' (o Select não aceita '').
+  category_id: z.string().optional(),
 });
 
 export type CreateClientFormValues = z.infer<typeof createClientSchema>;
@@ -41,6 +43,8 @@ export const updateClientSchema = z
       .optional()
       .default(''),
     manager_id: z.string().uuid().optional(),
+    // 86e34jd8m — id do catálogo ou a sentinela 'none'.
+    category_id: z.string().optional(),
   })
   .superRefine((vals, ctx) => {
     const keyFilled = (vals.omie_app_key ?? '').length > 0;

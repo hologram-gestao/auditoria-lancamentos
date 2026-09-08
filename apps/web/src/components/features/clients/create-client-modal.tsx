@@ -40,6 +40,14 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { useClientCategories } from '@/hooks/use-client-categories';
 import { useCreateClient, useTestConnection } from '@/hooks/use-clients';
 import { ApiError } from '@/lib/api/client';
 import { createClientSchema, type CreateClientFormValues } from '@/lib/validation/clients';
@@ -64,10 +72,13 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
 
   const createMutation = useCreateClient();
   const testMutation = useTestConnection();
+  // Catálogo de categorias (86e34jd8m) — só busca com o modal aberto.
+  const categoriesQuery = useClientCategories({ enabled: open });
+  const categories = categoriesQuery.data ?? [];
 
   const form = useForm<CreateClientFormValues>({
     resolver: zodResolver(createClientSchema),
-    defaultValues: { name: '', omie_app_key: '', omie_app_secret: '' },
+    defaultValues: { name: '', omie_app_key: '', omie_app_secret: '', category_id: 'none' },
     mode: 'onSubmit',
   });
 
@@ -129,7 +140,14 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
       return;
     }
     try {
-      await createMutation.mutateAsync(values);
+      const categoryId =
+        values.category_id && values.category_id !== 'none' ? values.category_id : undefined;
+      await createMutation.mutateAsync({
+        name: values.name,
+        omie_app_key: values.omie_app_key,
+        omie_app_secret: values.omie_app_secret,
+        ...(categoryId ? { category_id: categoryId } : {}),
+      });
       toast.success('Cliente criado.');
       onOpenChange(false);
     } catch (err) {
@@ -226,6 +244,36 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
             />
 
             <TestConnectionButton state={testState} disabled={!canTest} onClick={handleTest} />
+
+            <FormField
+              control={form.control}
+              name="category_id"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Categoria (opcional)</FormLabel>
+                  <Select
+                    value={field.value ?? 'none'}
+                    onValueChange={field.onChange}
+                    disabled={inputsDisabled || categoriesQuery.isLoading}
+                  >
+                    <FormControl>
+                      <SelectTrigger aria-label="Categoria do cliente">
+                        <SelectValue placeholder="Sem categoria" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="none">Sem categoria</SelectItem>
+                      {categories.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
 
             <DialogFooter className="gap-2 sm:gap-2">
               <Button
