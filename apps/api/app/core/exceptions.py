@@ -191,6 +191,30 @@ class AnomalyTypeInUseError(ConflictError):
     )
 
 
+class ClientCategoryNameAlreadyExistsError(ConflictError):
+    """409 — já existe categoria de cliente com este nome, sem distinção de caixa (86e34jd8m)."""
+
+    default_user_message = "Já existe uma categoria com este nome."
+
+
+class ClientCategoryInUseError(ConflictError):
+    """409 — DELETE em categoria com clientes vinculados (FK RESTRICT no banco).
+
+    O admin realoca os clientes antes; nunca um "sem categoria" em lote e em
+    silêncio.
+    """
+
+    default_user_message = (
+        "Esta categoria está em uso por clientes — mova-os para outra antes de excluir."
+    )
+
+
+class InvalidClientCategoryError(ValidationAppError):
+    """400 — `category_id` enviado no cliente não existe no catálogo (86e34jd8m)."""
+
+    default_user_message = "A categoria selecionada não existe."
+
+
 class OmiePostingDisabledError(ConflictError):
     """409 — o kill-switch `OMIE_POSTING_ENABLED` está desligado (S7 BACK 07.4).
 

@@ -9,6 +9,12 @@ from app.db.models.access_audit import AccessAudit
 from app.db.models.anomaly_type import AnomalySeverity, AnomalyType
 from app.db.models.client import IV_HEX_LENGTH, Client
 from app.db.models.client_assignment import ClientAssignment
+from app.db.models.client_category import (
+    MAX_CATEGORY_NAME_CHARS,
+    UQ_CLIENT_CATEGORY_NAME,
+    ClientCategory,
+    ClientCategoryTone,
+)
 from app.db.models.client_glossary_entry import (
     MAX_CODE_CHARS,
     MAX_DESCRIPTION_CHARS,
@@ -63,6 +69,7 @@ __all__ = [
     "CLIENT_ROLES",
     "COD_INT_LANC_MAX_LENGTH",
     "IV_HEX_LENGTH",
+    "MAX_CATEGORY_NAME_CHARS",
     "MAX_CODE_CHARS",
     "MAX_DESCRIPTION_CHARS",
     "MAX_ENTRIES_PER_CLIENT",
@@ -70,6 +77,7 @@ __all__ = [
     "SCOPE_CLIENT_ID_CHECK",
     "SCOPE_CLIENT_ID_CONSTRAINT",
     "SYSTEM_ROLES",
+    "UQ_CLIENT_CATEGORY_NAME",
     "UQ_USER_CLIENT_FAVORITE",
     "AccessAudit",
     "AnomalyDetectedBy",
@@ -79,6 +87,8 @@ __all__ = [
     "Base",
     "Client",
     "ClientAssignment",
+    "ClientCategory",
+    "ClientCategoryTone",
     "ClientGlossaryEntry",
     "ClientUserRole",
     "FileEntrySituation",

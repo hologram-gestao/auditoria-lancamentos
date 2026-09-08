@@ -15,6 +15,7 @@
  */
 import type {
   BankAccountResponse,
+  ClientCategorySummary as ClientCategorySummaryContract,
   ClientDetailResponse,
   ClientListResponse as ClientListContract,
   ClientResponse,
@@ -28,6 +29,7 @@ import type {
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from './client';
 
 export type ManagerSummary = ManagerSummaryContract;
+export type ClientCategorySummary = ClientCategorySummaryContract;
 export type Client = ClientResponse;
 export type Pagination = PaginationMeta;
 export type ClientListResponse = ClientListContract;
@@ -36,12 +38,15 @@ export interface ListClientsParams {
   page?: number;
   pageSize?: number;
   search?: string;
+  /** Filtro server-side pela categoria do catálogo (86e34jd8m). */
+  categoryId?: string;
 }
 
 export interface CreateClientPayload {
   name: string;
   omie_app_key: string;
   omie_app_secret: string;
+  category_id?: string | null;
 }
 
 export interface UpdateClientPayload {
@@ -49,6 +54,8 @@ export interface UpdateClientPayload {
   active?: boolean;
   omie_app_key?: string;
   omie_app_secret?: string;
+  /** Tri-estado no backend: omitido mantém, `null` limpa, UUID troca. */
+  category_id?: string | null;
 }
 
 export interface TestConnectionPayload {
@@ -71,6 +78,7 @@ function buildQuery(params: ListClientsParams): string {
   sp.set('pageSize', String(params.pageSize ?? 20));
   const search = params.search?.trim();
   if (search) sp.set('search', search);
+  if (params.categoryId) sp.set('category_id', params.categoryId);
   return sp.toString();
 }
 

@@ -80,6 +80,18 @@ export type ClientDetailResponse = Schemas['ClientDetailResponse'];
 export type ClientListResponse = Schemas['ClientListResponse'];
 export type BankAccountResponse = Schemas['BankAccountResponse'];
 export type ManagerSummary = Schemas['ManagerSummary'];
+/** Categoria do cliente como sai na lista/detalhe (86e34jd8m); `null` = sem categoria. */
+export type ClientCategorySummary = Schemas['ClientCategorySummary'];
+
+// ---------------------------------------------------------------------------
+// Catálogo de categorias de cliente (86e34jd8m)
+// ---------------------------------------------------------------------------
+
+export type ClientCategoryItem = Schemas['ClientCategoryItem'];
+export type ClientCategoryListResponse = Schemas['ClientCategoryListResponse'];
+export type ClientCategoryCreate = Schemas['ClientCategoryCreate'];
+export type ClientCategoryUpdate = Schemas['ClientCategoryUpdate'];
+export type ClientCategoryTone = Schemas['ClientCategoryTone'];
 
 // ---------------------------------------------------------------------------
 // Lista de conciliações do cliente (BACK 04.3)

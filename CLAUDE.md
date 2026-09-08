@@ -450,7 +450,10 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   com os três runs verdes, e o `theme-contrast.test.ts` asserta os pares nos três
   blocos. Dropdown que abre sobre a página usa `modal={false}` (o modo modal
   do Radix marca o fundo com `aria-hidden` mantendo focáveis — `aria-hidden-focus` no
-  axe; padrão documentado no sino e no toggle).
+  axe; padrão documentado no sino e no toggle). O **`Select` do Radix não tem
+  `modal={false}`** — aberto, ele reprova `aria-hidden-focus` em qualquer tela: no e2e,
+  exercite o estado aberto (opções visíveis e clicáveis) e rode o `analyze()` com o Select
+  FECHADO, antes e depois (86e34jd8m).
 - **O relatório do gate de a11y é artefato, nunca fonte.** Desde a 86e2w8xpv,
   `scripts/a11y-gate.sh` e o CI escrevem
   `apps/web/test-results/a11y-report-<tema>.json` — **dentro de um diretório que o
