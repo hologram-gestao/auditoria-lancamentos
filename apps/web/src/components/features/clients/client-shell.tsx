@@ -38,6 +38,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 
+import { CategoryBadge } from '@/components/features/client-categories/category-badge';
 import { sessionIdFromPathname } from '@/components/features/navigation/nav-items';
 import { sessionCrumbLabel } from '@/components/features/reconciliations/session-label';
 import { AccessDenied } from '@/components/shared/access-denied';
@@ -183,6 +184,9 @@ export function ClientShell({ clientId, children }: ClientShellProps) {
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-semibold">{client.name}</h1>
             <ClientStatusBadge active={client.active} />
+            {client.category && (
+              <CategoryBadge name={client.category.name} tone={client.category.tone} />
+            )}
             <FavoriteToggle
               clientId={client.id}
               clientName={client.name}

@@ -25,6 +25,7 @@ from app.db.models import (
     UQ_USER_CLIENT_FAVORITE,
     Client,
     ClientAssignment,
+    ClientCategory,
     OmieAccountCache,
     ReconciliationFile,
     ReconciliationSession,
@@ -46,6 +47,8 @@ class ClientRow(NamedTuple):
     reconciliation_count: int
     #: Favorito de QUEM pede (86e34jd5a). `False` quando não há viewer.
     is_favorite: bool = False
+    #: Categoria do catálogo (86e34jd8m); `None` = sem categoria.
+    category: ClientCategory | None = None
 
 
 class _FavoriteJoin(NamedTuple):
@@ -93,6 +96,7 @@ class ClientRepository:
         manager_id: UUID | None = None,
         tenant_client_id: UUID | None = None,
         viewer_user_id: UUID | None = None,
+        category_id: UUID | None = None,
     ) -> tuple[Sequence[ClientRow], int]:
         """Lista paginada de clientes com manager + count de conciliações.
 
@@ -128,10 +132,17 @@ class ClientRepository:
         )
 
         base = (
-            select(Client, manager, recon_count_sq.label("recon_count"), favorite.is_favorite)
+            select(
+                Client,
+                manager,
+                recon_count_sq.label("recon_count"),
+                favorite.is_favorite,
+                ClientCategory,
+            )
             .outerjoin(ClientAssignment, ClientAssignment.client_id == Client.id)
             .outerjoin(manager, manager.id == ClientAssignment.user_id)
             .outerjoin(favorite.table, favorite.on_clause)
+            .outerjoin(ClientCategory, ClientCategory.id == Client.category_id)
         )
         count_base = select(func.count(Client.id.distinct())).select_from(Client)
 
@@ -153,6 +164,11 @@ class ClientRepository:
             base = base.where(func.lower(Client.name).like(term))
             count_base = count_base.where(func.lower(Client.name).like(term))
 
+        if category_id is not None:
+            # Filtro server-side (86e34jd8m): a paginação continua contando certo.
+            base = base.where(Client.category_id == category_id)
+            count_base = count_base.where(Client.category_id == category_id)
+
         # Favoritos de quem pede primeiro (86e34jd5a); depois a ordem estável de
         # sempre: created_at desc, id desc (desempate determinístico). O favorito
         # da página 3 sobe para a página 1 porque a ordenação é do SELECT, não
@@ -171,6 +187,7 @@ class ClientRepository:
                 manager=row[1],
                 reconciliation_count=int(row[2] or 0),
                 is_favorite=bool(row[3]),
+                category=row[4],
             )
             for row in result.all()
         ]
@@ -196,10 +213,17 @@ class ClientRepository:
             .scalar_subquery()
         )
         stmt = (
-            select(Client, manager, recon_count_sq.label("recon_count"), favorite.is_favorite)
+            select(
+                Client,
+                manager,
+                recon_count_sq.label("recon_count"),
+                favorite.is_favorite,
+                ClientCategory,
+            )
             .outerjoin(ClientAssignment, ClientAssignment.client_id == Client.id)
             .outerjoin(manager, manager.id == ClientAssignment.user_id)
             .outerjoin(favorite.table, favorite.on_clause)
+            .outerjoin(ClientCategory, ClientCategory.id == Client.category_id)
             .where(Client.id == client_id)
         )
         row = (await self._session.execute(stmt)).first()
@@ -210,6 +234,7 @@ class ClientRepository:
             manager=row[1],
             reconciliation_count=int(row[2] or 0),
             is_favorite=bool(row[3]),
+            category=row[4],
         )
 
     async def get_by_id(self, client_id: UUID) -> Client | None:
@@ -221,6 +246,13 @@ class ClientRepository:
         """Retorna o assignment único do cliente (UNIQUE em `client_id`)."""
         result = await self._session.execute(
             select(ClientAssignment).where(ClientAssignment.client_id == client_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_category_by_id(self, category_id: UUID) -> ClientCategory | None:
+        """Existência da categoria ao criar/editar cliente (86e34jd8m)."""
+        result = await self._session.execute(
+            select(ClientCategory).where(ClientCategory.id == category_id)
         )
         return result.scalar_one_or_none()
 

@@ -798,6 +798,42 @@ export interface paths {
         patch: operations["update_anomaly_type_api_v1_anomaly_types__type_id__patch"];
         trace?: never;
     };
+    "/api/v1/client-categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista o catálogo de categorias de cliente com a contagem de clientes por categoria. */
+        get: operations["list_client_categories_api_v1_client_categories_get"];
+        put?: never;
+        /** Cria categoria (admin-only). Nome único sem distinção de caixa. */
+        post: operations["create_client_category_api_v1_client_categories_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/client-categories/{category_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Exclui categoria (admin-only). 409 se houver clientes vinculados. */
+        delete: operations["delete_client_category_api_v1_client_categories__category_id__delete"];
+        options?: never;
+        head?: never;
+        /** Atualiza nome e/ou tom (admin-only). */
+        patch: operations["update_client_category_api_v1_client_categories__category_id__patch"];
+        trace?: never;
+    };
     "/api/v1/notifications/unread-count": {
         parameters: {
             query?: never;
@@ -1372,6 +1408,75 @@ export interface components {
             reason?: string | null;
         };
         /**
+         * ClientCategoryCreate
+         * @description Body de POST /api/v1/client-categories — admin-only.
+         */
+        ClientCategoryCreate: {
+            /** Name */
+            name: string;
+            /** @default neutral */
+            tone: components["schemas"]["ClientCategoryTone"];
+        };
+        /**
+         * ClientCategoryItem
+         * @description Item do catálogo — listagem e respostas de mutação.
+         */
+        ClientCategoryItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Tone */
+            tone: string;
+            /**
+             * Clients Count
+             * @description Clientes vinculados hoje.
+             * @default 0
+             */
+            clients_count: number;
+        };
+        /**
+         * ClientCategoryListResponse
+         * @description Envelope single-key: o `apiGet` do front desempacota para `ClientCategoryItem[]`.
+         */
+        ClientCategoryListResponse: {
+            /** Data */
+            data: components["schemas"]["ClientCategoryItem"][];
+        };
+        /**
+         * ClientCategorySummary
+         * @description Categoria do cliente como aparece na lista e no detalhe (86e34jd8m).
+         */
+        ClientCategorySummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Tone */
+            tone: string;
+        };
+        /**
+         * ClientCategoryTone
+         * @description Tom do chip — mapeado para tokens do tema no front, nunca cor fixa.
+         * @enum {string}
+         */
+        ClientCategoryTone: "neutral" | "primary" | "info" | "success" | "warning";
+        /**
+         * ClientCategoryUpdate
+         * @description Body de PATCH /api/v1/client-categories/{id} — parcial, admin-only.
+         */
+        ClientCategoryUpdate: {
+            /** Name */
+            name?: string | null;
+            tone?: components["schemas"]["ClientCategoryTone"] | null;
+        };
+        /**
          * ClientDetailResponse
          * @description Body de GET /api/v1/clients/{id} — detalhe + contas do cache L1.
          *
@@ -1411,6 +1516,7 @@ export interface components {
              * @default false
              */
             is_favorite: boolean;
+            category?: components["schemas"]["ClientCategorySummary"] | null;
             /** Accounts */
             accounts?: components["schemas"]["BankAccountResponse"][];
             /** Accounts Synced At */
@@ -1461,6 +1567,7 @@ export interface components {
              * @default false
              */
             is_favorite: boolean;
+            category?: components["schemas"]["ClientCategorySummary"] | null;
         };
         /**
          * ClientUserListResponse
@@ -1557,6 +1664,11 @@ export interface components {
             omie_app_key: string;
             /** Omie App Secret */
             omie_app_secret: string;
+            /**
+             * Category Id
+             * @description Categoria do catálogo (86e34jd8m). Ausente ou null = sem categoria.
+             */
+            category_id?: string | null;
         };
         /**
          * CreateClientUserRequest
@@ -2802,6 +2914,11 @@ export interface components {
             omie_app_key?: string | null;
             /** Omie App Secret */
             omie_app_secret?: string | null;
+            /**
+             * Category Id
+             * @description Omitir mantém a categoria; `null` limpa; UUID troca.
+             */
+            category_id?: string | null;
         };
         /**
          * UpdateClientUserRequest
@@ -3505,6 +3622,8 @@ export interface operations {
                 page?: number;
                 pageSize?: number;
                 search?: string | null;
+                /** @description Filtra pela categoria do catálogo (86e34jd8m). */
+                category_id?: string | null;
             };
             header?: never;
             path?: never;
@@ -4938,6 +5057,140 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AnomalyTypeItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_client_categories_api_v1_client_categories_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientCategoryListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_client_category_api_v1_client_categories_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClientCategoryCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientCategoryItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_client_category_api_v1_client_categories__category_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                category_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_client_category_api_v1_client_categories__category_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                category_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClientCategoryUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientCategoryItem"];
                 };
             };
             /** @description Validation Error */

@@ -245,6 +245,17 @@ const ACCOUNTS = [
   },
 ];
 
+/** Catálogo de categorias de cliente (86e34jd8m). A primeira está EM USO. */
+const CATEGORY_FINTECH = {
+  id: 'cccccccc-0000-4000-8000-000000000001',
+  name: 'Fintech',
+  tone: 'info',
+};
+const CLIENT_CATEGORIES = [
+  { ...CATEGORY_FINTECH, clients_count: 1 },
+  { id: 'cccccccc-0000-4000-8000-000000000002', name: 'Varejo', tone: 'success', clients_count: 0 },
+];
+
 const CLIENT_DETAIL = {
   id: CLIENT_ID,
   // Fixture fictícia de propósito: nome de cliente real não entra em arquivo
@@ -256,6 +267,7 @@ const CLIENT_DETAIL = {
   responsible_manager: null,
   reconciliation_count: 3,
   is_favorite: false,
+  category: CATEGORY_FINTECH,
   accounts: ACCOUNTS,
   accounts_synced_at: '2026-07-20T12:00:00Z',
 };
@@ -710,6 +722,23 @@ async function fulfillApi(route: Route): Promise<void> {
     });
   }
   if (path.endsWith('/read')) return json({ already_read: false, read_at: '2026-07-26T13:00:00Z' });
+  // Catálogo de categorias (86e34jd8m): leitura devolve o catálogo; escrita
+  // ecoa um item (a tela só precisa do 2xx para fechar o diálogo).
+  if (path === '/api/v1/client-categories') {
+    if (route.request().method() === 'POST') {
+      return json({
+        id: 'cccccccc-0000-4000-8000-000000000003',
+        name: 'Saúde',
+        tone: 'neutral',
+        clients_count: 0,
+      });
+    }
+    return json(CLIENT_CATEGORIES);
+  }
+  if (path.startsWith('/api/v1/client-categories/')) {
+    if (route.request().method() === 'DELETE') return route.fulfill({ status: 204 });
+    return json(CLIENT_CATEGORIES[1]);
+  }
   // Favorito (86e34jd5a): PUT marca, DELETE desmarca; a lista reflete o estado.
   if (path === `/api/v1/clients/${CLIENT_ID}/favorite`) {
     favorited = route.request().method() === 'PUT';
@@ -1548,6 +1577,7 @@ test.describe('Menu mobile — drawer (86e2n4pf9)', () => {
     const nav = dialog.getByRole('navigation', { name: 'Navegação principal' });
     await expect(nav.getByRole('link', { name: 'Clientes' })).toBeVisible();
     await expect(nav.getByRole('link', { name: 'Tipos de Anomalia' })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Categorias de Cliente' })).toBeVisible();
     await shot(page, 'drawer-navegacao-global-390');
 
     await page.keyboard.press('Escape');
@@ -2097,6 +2127,7 @@ for (const vp of VIEWPORTS) {
           // ele, "Clientes" casaria por substring com o próprio Voltar).
           await expect(sidebar.getByRole('link', { name: 'Clientes', exact: true })).toHaveCount(0);
           await expect(page.getByRole('link', { name: 'Tipos de Anomalia' })).toHaveCount(0);
+          await expect(page.getByRole('link', { name: 'Categorias de Cliente' })).toHaveCount(0);
         }
 
         // O chrome compartilhado (header) precisa caber nos DOIS viewports: em
@@ -2176,6 +2207,79 @@ for (const vp of VIEWPORTS) {
       await expect(page).toHaveURL(/\/clientes$/);
       await shot(page, `clientes-favorito-marcado-${slug}`);
       await analyze(page, `lista de clientes com favorito marcado (${vp.label})`);
+    });
+
+    /**
+     * 86e34jd8m — catálogo de categorias de cliente: tela de configurações com
+     * a tabela, o diálogo de criação e a exclusão BLOQUEADA da categoria em uso
+     * (o botão nem é oferecido); e a lista de clientes com o chip e o filtro
+     * server-side. Medido em desktop e 390px, com o axe em cada estado.
+     */
+    test('configurações: catálogo de categorias de cliente (86e34jd8m)', async ({ page }) => {
+      await page.goto('/configuracoes/categorias');
+      await expect(
+        page.getByRole('heading', { name: 'Categorias de Cliente', level: 1 }),
+      ).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Editar Fintech' })).toBeVisible();
+      await shot(page, `categorias-${slug}`);
+      await analyze(page, `catálogo de categorias (${vp.label})`);
+
+      await page.getByRole('button', { name: 'Nova categoria' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Nova categoria' });
+      await expect(dialog).toBeVisible();
+      await aguardarAnimacao(dialog);
+      await shot(page, `categorias-nova-${slug}`);
+      await analyze(page, `diálogo de nova categoria (${vp.label})`);
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+
+      // Categoria EM USO: o diálogo explica e não oferece a exclusão.
+      await page.getByRole('button', { name: 'Excluir Fintech' }).click();
+      const confirm = page.getByRole('dialog', { name: 'Excluir categoria' });
+      await expect(confirm).toBeVisible();
+      await aguardarAnimacao(confirm);
+      await expect(confirm.getByRole('button', { name: 'Excluir' })).toBeDisabled();
+      await analyze(page, `exclusão bloqueada de categoria em uso (${vp.label})`);
+    });
+
+    test('lista de clientes: chip e filtro de categoria (86e34jd8m)', async ({ page }) => {
+      await page.goto('/clientes');
+      await expect(page.getByRole('heading', { name: 'Clientes', level: 1 })).toBeVisible();
+      const linha = page.getByRole('row', { name: /Cliente Exemplo Ltda/ });
+      await expect(linha.getByText('Fintech')).toBeVisible();
+
+      await analyze(page, `lista de clientes com chip de categoria (${vp.label})`);
+
+      const filtro = page.getByRole('combobox', { name: 'Filtrar por categoria' });
+      await expect(filtro).toBeVisible();
+      await filtro.click();
+      // O Select do Radix é MODAL por construção (não tem `modal={false}` como o
+      // DropdownMenu): aberto, esconde o resto da página com `aria-hidden` e o
+      // axe reprova `aria-hidden-focus` em QUALQUER Select da aplicação — foi o
+      // que este cenário pegou na 1ª execução. O estado aberto é exercitado (as
+      // opções existem e respondem ao clique) e o axe mede a tela ANTES e
+      // DEPOIS, com o Select fechado — o mesmo tratamento dos filtros
+      // Situação/Tipo da revisão e do seletor de itens por página.
+      const opcoes = page.getByRole('listbox');
+      await expect(opcoes).toBeVisible();
+      await expect(opcoes.getByRole('option', { name: 'Todas as categorias' })).toBeVisible();
+      await opcoes.getByRole('option', { name: 'Fintech' }).click();
+      await expect(page.getByRole('listbox')).toHaveCount(0);
+      await expect(linha).toBeVisible();
+      await shot(page, `clientes-categoria-${slug}`);
+      await analyze(page, `lista de clientes filtrada por categoria (${vp.label})`);
+    });
+
+    test('deep link em categorias de cliente degrada em português (86e34jd8m)', async ({
+      page,
+    }) => {
+      sessionUser = CLIENT_OPERATOR_USER;
+      await page.goto('/configuracoes/categorias');
+      await expect(
+        page.getByRole('heading', { name: 'Você não tem acesso a este recurso' }),
+      ).toBeVisible();
+      await expect(page.locator('#__next_error__')).toHaveCount(0);
+      await analyze(page, `deep link em categorias negado (${vp.label})`);
     });
 
     test('usuário de tenant não para na lista global — vai para a casa dele', async ({ page }) => {

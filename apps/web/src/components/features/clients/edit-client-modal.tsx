@@ -51,6 +51,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useClientCategories } from '@/hooks/use-client-categories';
 import { useAssignClient, useTestConnection, useUpdateClient } from '@/hooks/use-clients';
 import { useUsersList } from '@/hooks/use-users';
 import { ApiError } from '@/lib/api/client';
@@ -89,6 +90,9 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
   const updateMutation = useUpdateClient(client?.id ?? '');
   const assignMutation = useAssignClient(client?.id ?? '');
   const testMutation = useTestConnection();
+  // Catálogo de categorias (86e34jd8m) — só busca com o modal aberto.
+  const categoriesQuery = useClientCategories({ enabled: open });
+  const categories = categoriesQuery.data ?? [];
 
   // Lista de gerentes só importa para admin. `pageSize=100` cobre
   // o tamanho esperado do time interno da Hologram (MVP) — se passar disso,
@@ -107,6 +111,7 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
       omie_app_key: '',
       omie_app_secret: '',
       manager_id: undefined,
+      category_id: 'none',
     },
     mode: 'onSubmit',
   });
@@ -123,6 +128,7 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
         omie_app_key: '',
         omie_app_secret: '',
         manager_id: client.responsible_manager?.id,
+        category_id: client.category?.id ?? 'none',
       });
       setShowKey(false);
       setShowSecret(false);
@@ -184,6 +190,8 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
     const updatePayload: UpdateClientPayload = {
       name: values.name,
       active: values.active === 'active',
+      // Sempre enviado: 'none' vira `null` (limpa), uuid troca — tri-estado do backend.
+      category_id: values.category_id && values.category_id !== 'none' ? values.category_id : null,
     };
     if (credsBothFilled) {
       updatePayload.omie_app_key = (values.omie_app_key ?? '').trim();
@@ -314,6 +322,36 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
                     <SelectContent>
                       <SelectItem value="active">Ativo</SelectItem>
                       <SelectItem value="inactive">Inativo</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="category_id"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Categoria</FormLabel>
+                  <Select
+                    value={field.value ?? 'none'}
+                    onValueChange={field.onChange}
+                    disabled={inputsDisabled || categoriesQuery.isLoading}
+                  >
+                    <FormControl>
+                      <SelectTrigger aria-label="Categoria do cliente">
+                        <SelectValue placeholder="Sem categoria" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="none">Sem categoria</SelectItem>
+                      {categories.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <FormMessage />

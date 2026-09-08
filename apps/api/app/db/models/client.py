@@ -33,6 +33,7 @@ from app.db.models._mixins import TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from app.db.models.client_assignment import ClientAssignment
+    from app.db.models.client_category import ClientCategory
     from app.db.models.omie_account_cache import OmieAccountCache
     from app.db.models.reconciliation_session import ReconciliationSession
     from app.db.models.user import User
@@ -92,8 +93,20 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         server_default=text("0"),
     )
 
+    # 86e34jd8m — categoria (nicho/segmento), UMA por cliente. Nullable: cliente
+    # sem categoria é o estado inicial de todos os existentes. RESTRICT: apagar
+    # categoria em uso é 409 no catálogo, nunca um "sem categoria" silencioso.
+    category_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("client_categories.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+        default=None,
+    )
+
     # Relationships
     creator: Mapped[User] = relationship("User", foreign_keys=[created_by], lazy="raise")
+    category: Mapped[ClientCategory | None] = relationship("ClientCategory", lazy="raise")
     assignments: Mapped[list[ClientAssignment]] = relationship(
         "ClientAssignment",
         back_populates="client",

@@ -89,6 +89,9 @@ async def list_clients(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
     search: Annotated[str | None, Query(min_length=1, max_length=200)] = None,
+    category_id: Annotated[
+        UUID | None, Query(description="Filtra pela categoria do catálogo (86e34jd8m).")
+    ] = None,
 ) -> ClientListResponse:
     # Admin: filtro None (vê tudo). Manager: filtra pelo próprio user_id no
     # client_assignments — clientes de outros managers retornam 0 rows.
@@ -103,6 +106,7 @@ async def list_clients(
         tenant_client_id=tenant_filter_client_id(user),
         # Favoritos de QUEM pede no topo (86e34jd5a) — id vem da linha do usuário.
         viewer_user_id=UUID(user.id),
+        category_id=category_id,
     )
     return ClientListResponse(data=rows, pagination=pagination)
 
@@ -127,6 +131,7 @@ async def create_client(
         omie_app_key=payload.omie_app_key,
         omie_app_secret=payload.omie_app_secret,
         current_user_id=UUID(user.id),
+        category_id=payload.category_id,
     )
 
 
@@ -348,4 +353,7 @@ async def update_client(
         omie_app_key=payload.omie_app_key,
         omie_app_secret=payload.omie_app_secret,
         viewer_user_id=UUID(user.id),
+        # Tri-estado (86e34jd8m): só mexe na categoria se o campo veio no body.
+        category_id=payload.category_id,
+        category_set="category_id" in payload.model_fields_set,
     )

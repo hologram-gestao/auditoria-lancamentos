@@ -15,6 +15,9 @@
  * dados de outro manager) — esta tela apenas oculta visualmente a coluna
  * para reduzir poluição visual.
  *
+ * Categorias (86e34jd8m): chip por linha e filtro SERVER-SIDE (`category_id`) —
+ * nunca no navegador sobre a página parcial (mesma lição das somas do Resumo).
+ *
  * Favoritos (86e34jd5a): coração na primeira coluna, POR USUÁRIO. O backend já
  * devolve os favoritos de quem pede no topo — a tela não reordena nada, e o
  * favorito da página 3 sobe para a 1 porque a ordem é do SELECT.
@@ -29,6 +32,7 @@ import { ChevronLeft, ChevronRight, Eye, Plus, Search, SquarePen } from 'lucide-
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
+import { CategoryBadge } from '@/components/features/client-categories/category-badge';
 import { ClientStatusBadge } from '@/components/features/clients/client-status-badge';
 import { CreateClientModal } from '@/components/features/clients/create-client-modal';
 import { EditClientModal } from '@/components/features/clients/edit-client-modal';
@@ -50,6 +54,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { useClientCategories } from '@/hooks/use-client-categories';
 import { useClientsList } from '@/hooks/use-clients';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { ApiError } from '@/lib/api/client';
@@ -80,15 +85,24 @@ export default function ClientesPage() {
   const [pageSize, setPageSize] = useState<PageSize>(20);
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<Client | null>(null);
+  // 'all' = sem filtro (o Select do Radix não aceita '' como valor).
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const categoriesQuery = useClientCategories({ enabled: !clientScoped });
+  const categories = categoriesQuery.data ?? [];
 
-  // Reseta a paginação quando a busca ou o pageSize mudam.
+  // Reseta a paginação quando a busca, o filtro ou o pageSize mudam.
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, pageSize]);
+  }, [debouncedSearch, pageSize, categoryFilter]);
 
   const queryParams = useMemo(
-    () => ({ page, pageSize, search: debouncedSearch || undefined }),
-    [page, pageSize, debouncedSearch],
+    () => ({
+      page,
+      pageSize,
+      search: debouncedSearch || undefined,
+      categoryId: categoryFilter === 'all' ? undefined : categoryFilter,
+    }),
+    [page, pageSize, debouncedSearch, categoryFilter],
   );
   const { data, isLoading, isFetching, isError, error } = useClientsList(queryParams);
 
@@ -104,8 +118,9 @@ export default function ClientesPage() {
   const total = data?.pagination.total ?? 0;
   const rows = data?.data ?? [];
   const totalPages = data?.pagination.totalPages ?? 0;
-  const colCount = isAdmin ? 7 : 6;
+  const colCount = isAdmin ? 8 : 7;
   const hasSearch = debouncedSearch.length > 0;
+  const hasCategoryFilter = categoryFilter !== 'all';
 
   return (
     <div className="space-y-6">
@@ -117,18 +132,34 @@ export default function ClientesPage() {
       </div>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative max-w-sm flex-1">
-          <Search
-            className="text-muted-foreground absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
-            aria-hidden="true"
-          />
-          <Input
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Buscar por nome..."
-            className="pl-9"
-            aria-label="Buscar clientes"
-          />
+        <div className="flex flex-1 flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="relative max-w-sm flex-1">
+            <Search
+              className="text-muted-foreground absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
+              aria-hidden="true"
+            />
+            <Input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Buscar por nome..."
+              className="pl-9"
+              aria-label="Buscar clientes"
+            />
+          </div>
+          {/* Filtro por categoria (86e34jd8m) — server-side, via `category_id`. */}
+          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <SelectTrigger className="w-full sm:w-56" aria-label="Filtrar por categoria">
+              <SelectValue placeholder="Todas as categorias" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas as categorias</SelectItem>
+              {categories.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <Button onClick={() => setCreateOpen(true)}>
           <Plus className="h-4 w-4" aria-hidden="true" />
@@ -144,6 +175,7 @@ export default function ClientesPage() {
                 <span className="sr-only">Favorito</span>
               </TableHead>
               <TableHead>Nome</TableHead>
+              <TableHead>Categoria</TableHead>
               {isAdmin && <TableHead>Gerente Responsável</TableHead>}
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Conciliações</TableHead>
@@ -173,7 +205,9 @@ export default function ClientesPage() {
                 >
                   {hasSearch
                     ? `Nenhum cliente encontrado para "${debouncedSearch}".`
-                    : "Nenhum cliente cadastrado. Crie o primeiro cliente clicando em 'Novo Cliente'."}
+                    : hasCategoryFilter
+                      ? 'Nenhum cliente nesta categoria.'
+                      : "Nenhum cliente cadastrado. Crie o primeiro cliente clicando em 'Novo Cliente'."}
                 </TableCell>
               </TableRow>
             ) : (
@@ -191,6 +225,13 @@ export default function ClientesPage() {
                     />
                   </TableCell>
                   <TableCell className="font-medium">{c.name}</TableCell>
+                  <TableCell>
+                    {c.category ? (
+                      <CategoryBadge name={c.category.name} tone={c.category.tone} />
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
                   {isAdmin && (
                     <TableCell className="text-muted-foreground">
                       {c.responsible_manager?.name ?? '—'}

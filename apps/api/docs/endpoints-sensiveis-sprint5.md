@@ -73,27 +73,31 @@ Legenda de `tipo`: **coleção** = vaza forjando `client_id` na URL/payload · *
 
 Não carregam dado escopável a um cliente. Registradas explicitamente para que o teste de completude possa afirmar "toda rota está classificada" — rota nova cai fora das duas listas e o CI falha, em vez de passar por omissão.
 
-| Rota                                       | Por que não é sensível a tenant                                  |
-| ------------------------------------------ | ---------------------------------------------------------------- |
-| `DELETE /api/v1/anomaly-types/{type_id}`   | configuração global; admin-only                                  |
-| `GET /api/v1/anomaly-types`                | configuração global; sem dado de cliente                         |
-| `GET /api/v1/clients`                      | listagem da equipe Hologram; staff-only (papel de cliente = 403) |
-| `GET /api/v1/users`                        | usuários do SISTEMA; admin-only                                  |
-| `GET /api/v1/users/{user_id}`              | usuários do SISTEMA; admin-only                                  |
-| `PATCH /api/v1/anomaly-types/{type_id}`    | configuração global; admin-only                                  |
-| `PATCH /api/v1/clients/{client_id}`        | edita o cliente; admin-only pela matriz (EDIT_CLIENT)            |
-| `PATCH /api/v1/clients/{client_id}/assign` | reatribui carteira; admin-only                                   |
-| `PATCH /api/v1/users/{user_id}`            | usuários do SISTEMA; admin-only                                  |
-| `POST /api/v1/anomaly-types`               | configuração global; admin-only                                  |
-| `POST /api/v1/auth/login`                  | autenticação — ainda não há usuário                              |
-| `POST /api/v1/auth/logout`                 | autenticação — apenas limpa cookies                              |
-| `POST /api/v1/auth/refresh`                | autenticação — opera sobre o próprio token                       |
-| `POST /api/v1/clients`                     | cria cliente; staff-only                                         |
-| `POST /api/v1/clients/test-connection`     | valida credenciais enviadas no body; nada persistido             |
-| `POST /api/v1/system/alert-test`           | diagnóstico de alerting; admin-only                              |
-| `POST /api/v1/users`                       | usuários do SISTEMA; admin-only                                  |
-| `POST /api/v1/users/{user_id}/activate`    | usuários do SISTEMA; admin-only                                  |
-| `POST /api/v1/users/{user_id}/deactivate`  | usuários do SISTEMA; admin-only                                  |
+| Rota                                             | Por que não é sensível a tenant                                  |
+| ------------------------------------------------ | ---------------------------------------------------------------- |
+| `DELETE /api/v1/anomaly-types/{type_id}`         | configuração global; admin-only                                  |
+| `DELETE /api/v1/client-categories/{category_id}` | catálogo global; admin-only                                      |
+| `GET /api/v1/anomaly-types`                      | configuração global; sem dado de cliente                         |
+| `GET /api/v1/client-categories`                  | catálogo global de categorias de cliente; staff-only             |
+| `GET /api/v1/clients`                            | listagem da equipe Hologram; staff-only (papel de cliente = 403) |
+| `GET /api/v1/users`                              | usuários do SISTEMA; admin-only                                  |
+| `GET /api/v1/users/{user_id}`                    | usuários do SISTEMA; admin-only                                  |
+| `PATCH /api/v1/anomaly-types/{type_id}`          | configuração global; admin-only                                  |
+| `PATCH /api/v1/client-categories/{category_id}`  | catálogo global; admin-only                                      |
+| `PATCH /api/v1/clients/{client_id}`              | edita o cliente; admin-only pela matriz (EDIT_CLIENT)            |
+| `PATCH /api/v1/clients/{client_id}/assign`       | reatribui carteira; admin-only                                   |
+| `PATCH /api/v1/users/{user_id}`                  | usuários do SISTEMA; admin-only                                  |
+| `POST /api/v1/anomaly-types`                     | configuração global; admin-only                                  |
+| `POST /api/v1/auth/login`                        | autenticação — ainda não há usuário                              |
+| `POST /api/v1/auth/logout`                       | autenticação — apenas limpa cookies                              |
+| `POST /api/v1/auth/refresh`                      | autenticação — opera sobre o próprio token                       |
+| `POST /api/v1/client-categories`                 | catálogo global; admin-only                                      |
+| `POST /api/v1/clients`                           | cria cliente; staff-only                                         |
+| `POST /api/v1/clients/test-connection`           | valida credenciais enviadas no body; nada persistido             |
+| `POST /api/v1/system/alert-test`                 | diagnóstico de alerting; admin-only                              |
+| `POST /api/v1/users`                             | usuários do SISTEMA; admin-only                                  |
+| `POST /api/v1/users/{user_id}/activate`          | usuários do SISTEMA; admin-only                                  |
+| `POST /api/v1/users/{user_id}/deactivate`        | usuários do SISTEMA; admin-only                                  |
 
 ## Como a cobertura é medida
 
