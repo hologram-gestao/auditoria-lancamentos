@@ -71,6 +71,9 @@ uv run --extra dev pytest -v --cov=app --cov-report=term-missing
 - **`--cov` muda o que roda.** O comando rápido do §9 (`pytest -q --no-cov`) NÃO é o
   do CI. Para reproduzir falha de CI, use o comando com `--cov` acima — coverage
   altera a coleta e já escondeu diferença de resultado.
+- **A suíte completa demora ~10 min.** Medido em 09/09/2026: 1332 testes (unit +
+  integração via testcontainers) em 9m41s. Dimensione o timeout de acordo — só a
+  parte unit (`tests/unit -q --no-cov`) leva ~47s.
 - **3 falhas ambientais conhecidas ≠ regressão.** Estes 3 quebram SOMENTE quando o
   `apps/api/.env` local define canal de alerta (leem o `Settings` real; no CI não há
   `.env` e passam):
