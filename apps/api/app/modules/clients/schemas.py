@@ -128,6 +128,8 @@ class ClientResponse(BaseModel):
     )
     # 86e34jd8m — categoria (nicho/segmento) do catálogo; `null` = sem categoria.
     category: ClientCategorySummary | None = None
+    # 86e36pm1z — cliente ENCERRADO (terminal): histórico só-leitura, escrita 409.
+    closed_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

@@ -51,6 +51,12 @@ const createMock = vi.fn();
 const updateMock = vi.fn();
 const deleteMock = vi.fn();
 
+// A tela consulta o detalhe do cliente para saber se está ENCERRADO
+// (86e36pm1z) — `undefined` = aberto, o canManage segue valendo.
+vi.mock('@/hooks/use-clients', () => ({
+  useClientDetail: () => ({ data: undefined }),
+}));
+
 vi.mock('@/hooks/use-glossary', () => ({
   useGlossaryList: (_clientId: string, params: ListGlossaryParams) => {
     lastQueryParams = params;

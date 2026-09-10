@@ -36,7 +36,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useReconciliationsList } from '@/hooks/use-clients';
+import { useClientDetail, useReconciliationsList } from '@/hooks/use-clients';
 import { readEnum, readPositiveInt, useUrlState } from '@/hooks/use-url-state';
 import { ApiError } from '@/lib/api/client';
 import {
@@ -103,6 +103,11 @@ export function ReconciliationsList({
     clientId,
     queryParams,
   );
+  // 86e36pm1z — cliente encerrado não cria conciliação (o servidor nega com
+  // 409): o botão some (§4.9) e o histórico fica só-leitura. Servido do cache
+  // do shell — sem request extra.
+  const clientDetail = useClientDetail(clientId);
+  const isClosed = clientDetail.data?.closed_at != null;
 
   const accountLookup = useMemo(() => {
     const map = new Map<number, string>();
@@ -139,10 +144,12 @@ export function ReconciliationsList({
         <h2 id="reconciliations-heading" className="text-lg font-semibold">
           Conciliações
         </h2>
-        <Button type="button" onClick={onCreateClick}>
-          <Plus className="h-4 w-4" aria-hidden="true" />
-          Criar conciliação
-        </Button>
+        {!isClosed && (
+          <Button type="button" onClick={onCreateClick}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Criar conciliação
+          </Button>
+        )}
       </div>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:gap-4">
@@ -249,7 +256,7 @@ export function ReconciliationsList({
             onRetry={() => void refetch()}
           />
         ) : sessions.length === 0 ? (
-          <EmptyState hasFilters={hasFilters} onCreateClick={onCreateClick} />
+          <EmptyState hasFilters={hasFilters} canCreate={!isClosed} onCreateClick={onCreateClick} />
         ) : (
           sessions.map((session) => (
             <ReconciliationListItem
@@ -307,15 +314,24 @@ function ListSkeleton() {
 
 function EmptyState({
   hasFilters,
+  canCreate,
   onCreateClick,
 }: {
   hasFilters: boolean;
+  canCreate: boolean;
   onCreateClick: () => void;
 }) {
   if (hasFilters) {
     return (
       <div className="text-muted-foreground rounded-lg border border-dashed p-8 text-center text-sm">
         Nenhuma conciliação encontrada com esses filtros.
+      </div>
+    );
+  }
+  if (!canCreate) {
+    return (
+      <div className="text-muted-foreground rounded-lg border border-dashed p-8 text-center text-sm">
+        Nenhuma conciliação neste cliente.
       </div>
     );
   }

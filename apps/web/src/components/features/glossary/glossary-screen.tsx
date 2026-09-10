@@ -43,6 +43,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { useClientDetail } from '@/hooks/use-clients';
 import { useGlossaryList } from '@/hooks/use-glossary';
 import { readPositiveInt, useUrlState } from '@/hooks/use-url-state';
 import { ApiError } from '@/lib/api/client';
@@ -60,7 +61,11 @@ const DEFAULT_PAGE_SIZE = 20;
 
 export function GlossaryScreen({ clientId }: { clientId: string }) {
   const currentUser = useAuthStore((s) => s.user);
-  const canManage = hasPermission(currentUser, 'manage_glossary');
+  // 86e36pm1z — glossário de cliente encerrado foi purgado e a escrita é
+  // negada (409) pelo servidor: a tela vira só-leitura (§4.9).
+  const clientDetail = useClientDetail(clientId);
+  const canManage =
+    hasPermission(currentUser, 'manage_glossary') && clientDetail.data?.closed_at == null;
 
   const url = useUrlState();
   const page = readPositiveInt(url.get(PARAM.page), 1);

@@ -751,6 +751,16 @@ async function fulfillApi(route: Route): Promise<void> {
   if (path === `/api/v1/clients/${CLIENT_ID}` && route.request().method() === 'DELETE') {
     return route.fulfill({ status: 204 });
   }
+  // Encerramento com retenção (86e36pm1z): 204 sem corpo; o diálogo fecha e o
+  // cliente segue existindo (o refetch devolve o mock de sempre).
+  if (path === `/api/v1/clients/${CLIENT_ID}/close` && route.request().method() === 'POST') {
+    return route.fulfill({ status: 204 });
+  }
+  // Encerramento com retenção (86e36pm1z): 204 sem corpo; o diálogo fecha e o
+  // cliente segue existindo (o refetch devolve o mock de sempre).
+  if (path === `/api/v1/clients/${CLIENT_ID}/close` && route.request().method() === 'POST') {
+    return route.fulfill({ status: 204 });
+  }
   if (path === `/api/v1/clients/${CLIENT_ID}`) {
     // As contas bancárias da tela R6 vêm DAQUI (paginação client-side sobre
     // `detail.accounts`), não de uma rota própria.
@@ -2319,6 +2329,36 @@ for (const vp of VIEWPORTS) {
       await acao.click();
       await page.waitForURL(/\/clientes$/);
       await expect(page.getByRole('heading', { name: 'Clientes', level: 1 })).toBeVisible();
+    });
+
+    /**
+     * 86e36pm1z — encerramento com retenção: mesmo ritual da exclusão
+     * (`alertdialog` + confirmação DIGITADA), mas o sucesso NÃO navega — o
+     * cliente continua existindo, só-leitura. Medido nos dois viewports com o
+     * diálogo montado; a ação não pode passar da borda da viewport.
+     */
+    test('encerrar cliente: alertdialog com confirmação digitada (86e36pm1z)', async ({ page }) => {
+      await page.goto(`/clientes/${CLIENT_ID}`);
+      await page.getByRole('button', { name: 'Encerrar cliente' }).click();
+      const confirm = page.getByRole('alertdialog', { name: 'Encerrar cliente' });
+      await expect(confirm).toBeVisible();
+      await aguardarAnimacao(confirm);
+      const acao = confirm.getByRole('button', { name: 'Encerrar cliente' });
+      await expect(acao).toBeDisabled();
+      await shot(page, `encerrar-cliente-${slug}`);
+      await analyze(page, `confirmação de encerramento do cliente (${vp.label})`);
+      const caixa = await acao.boundingBox();
+      expect(
+        (caixa?.x ?? 0) + (caixa?.width ?? 0),
+        'ação de encerrar cortada pela borda da viewport',
+      ).toBeLessThanOrEqual(vp.size.width);
+
+      await confirm
+        .getByLabel('Digite o nome do cliente para confirmar')
+        .fill('Cliente Exemplo Ltda');
+      await expect(acao).toBeEnabled();
+      await acao.click();
+      await expect(confirm).toBeHidden();
     });
 
     test('usuário de tenant não para na lista global — vai para a casa dele', async ({ page }) => {

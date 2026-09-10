@@ -329,11 +329,29 @@ export interface paths {
         get: operations["get_client_api_v1_clients__client_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** Exclui o cliente DEFINITIVAMENTE (admin-only): conciliações, usuários do cliente, glossário, credenciais e favoritos vão junto; trilhas de auditoria e eventos de uso ficam (só IDs). 409 se houver conciliação em processamento. */
+        delete: operations["delete_client_api_v1_clients__client_id__delete"];
         options?: never;
         head?: never;
         /** Atualiza nome, status ou credenciais. Manager: apenas clientes da carteira. */
         patch: operations["update_client_api_v1_clients__client_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** ENCERRA o cliente com retenção (admin-only, terminal): anonimiza nome e usuários do tenant, remove credenciais Omie e destrói a chave de criptografia (conteúdo cifrado vira irrecuperável); conciliações, valores e trilhas FICAM, só-leitura. 409 se houver conciliação em processamento ou se o cliente já estiver encerrado. */
+        post: operations["close_client_api_v1_clients__client_id__close_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/clients/{client_id}/glossary": {
@@ -1517,6 +1535,8 @@ export interface components {
              */
             is_favorite: boolean;
             category?: components["schemas"]["ClientCategorySummary"] | null;
+            /** Closed At */
+            closed_at?: string | null;
             /** Accounts */
             accounts?: components["schemas"]["BankAccountResponse"][];
             /** Accounts Synced At */
@@ -1568,6 +1588,8 @@ export interface components {
              */
             is_favorite: boolean;
             category?: components["schemas"]["ClientCategorySummary"] | null;
+            /** Closed At */
+            closed_at?: string | null;
         };
         /**
          * ClientUserListResponse
@@ -3933,6 +3955,37 @@ export interface operations {
             };
         };
     };
+    delete_client_api_v1_clients__client_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     update_client_api_v1_clients__client_id__patch: {
         parameters: {
             query?: never;
@@ -3958,6 +4011,37 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ClientResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    close_client_api_v1_clients__client_id__close_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

@@ -293,6 +293,26 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
     desnormalizado de propósito: toda query filtra por ele (§3.15) sem depender
     de um JOIN que alguém pode esquecer.
 
+12. **Dois modos de saída de cliente (86e34jd1d + 86e36pm1z) — e nunca um terceiro
+    improvisado:**
+    - **Exclusão DEFINITIVA** (`DELETE /clients/{id}`): apaga tudo que pende do
+      cliente; só `access_audit` e `usage_events` ficam (trilhas de IDs, §4.7).
+    - **Encerramento com RETENÇÃO** (`POST /clients/{id}/close`, direção do
+      Lucas 09/09/2026): apaga quem o cliente É e mantém o que ACONTECEU. Nome →
+      rótulo anônimo; credenciais Omie → vazias; **`dek_wrapped` → NULL =
+      crypto-shredding** (§4.1: todo o conteúdo cifrado do tenant morre de uma
+      vez); usuários do tenant **anonimizados + desativados** (as sessões retidas
+      têm `created_by` RESTRICT — não podem ser apagados); glossário, cache de
+      contas, notificações e favoritos removidos; conciliações, valores, datas,
+      categoria e carteira FICAM, só-leitura.
+    - **Encerrado é TERMINAL**: cliente que volta é cadastro novo. Toda escrita
+      em cliente encerrado é 409 (`ClientClosedError`) — a trava de rota é
+      `OpenClientDep` (`core/dependencies.py`), e o check protege inclusive o
+      **provisionamento lazy de DEK** (`crypto_service.ensure`): sem ele, uma
+      escrita re-embrulharia DEK nova num tenant morto. Leitura continua com
+      `AccessibleClientDep`. A exclusão total segue disponível para encerrado
+      (LGPD — o titular pode exigir apagamento completo).
+
 ---
 
 ## 5. Regras Invioláveis de Domínio (Matching)
@@ -686,6 +706,8 @@ lembrar dos comandos.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.21 — 10/09/2026. **Nasceu o segundo modo de saída de cliente: ENCERRAMENTO com retenção (86e36pm1z) — nova regra §4.12.** Direção do Lucas (09/09): a exclusão total perdia "informação valiosa"; o encerramento apaga a identificação e os sensíveis e mantém o operacional. Mecânica: `clients.closed_at` (migration `c9e4a7b2d5f8`), nome → "Cliente encerrado #hex8", credenciais Omie vazias, **`dek_wrapped` → NULL (crypto-shredding — o provisionamento lazy de DEK é o landmine: o guard bloqueia escrita ANTES do `ensure`)**, usuários do tenant anonimizados + desativados (FK RESTRICT das sessões impede apagar), glossário/cache/notificações/favoritos purgados; conciliações, carteira e trilhas ficam. Trava única de rota: `OpenClientDep` em TODA escrita de cliente (update, sync, usuários, glossário, conciliação nova, posting); leitura segue `AccessibleClientDep` — e o detalhe de encerrado NÃO fala com o Omie (o miss do cache tentava decifrar credencial vazia e dava 500, pego por teste). Lista canônica: **45** endpoints (a rota `close` entrou como DETAIL_PK). Terminal: cliente que volta é cadastro novo; exclusão total continua valendo para encerrado (LGPD). Evento `cliente_encerrado` (sem dedup, como todo evento novo)._
 
 _Versão 1.20 — 03/09/2026. **A coluna Fornecedor das divergências de título deixou de ser "—" estrutural (86e33bmkb, fecho do épico).** `reconciliation_omie_entries` ganhou `supplier_code` (migration `b7d4e91c2a53` — código numérico do cadastro, em claro, mesma classe do `category_code`), preenchido pelo job a partir de `nCodCliente` (extrato) / `codigo_cliente_fornecedor` (títulos). O NOME resolve em runtime: novo `OmieClient.consultar_cliente` (`ConsultarCliente` de `geral/clientes` — request da família já rodava em prod na validação de credencial; campos de response da doc oficial, captura opcional via `OMIE_CAPTURE_CLIENTE_CODIGO`) + `clientes_cache` (TTL 6 h + negativo 15 min p/ fault, chave por tenant), consumido fail-soft pela listagem/PATCH da revisão. Fault do Omie (código excluído) marca negativo; falha de transporte nunca marca. §4.5 atualizada: o delta "código não é nome" agora cobre os três campos do snapshot. Export segue mostrando só o código (sem resolução de nome — decisão de escopo). Linhas pré-migration continuam "—" (sem backfill, mesmo racional das colunas irmãs)._
 

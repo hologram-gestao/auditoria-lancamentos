@@ -63,6 +63,7 @@ class UsageEventName(StrEnum):
     # servidor); sem `session_id`, fora da dedup por construção: cada exclusão
     # é uma linha.
     CLIENTE_EXCLUIDO = "cliente_excluido"
+    CLIENTE_ENCERRADO = "cliente_encerrado"
 
 
 #: Eventos que o `POST /api/v1/usage-events` aceita. Os de backend ficam de fora
@@ -139,6 +140,20 @@ class ClienteExcluidoProps(_StrictProps):
     """`cliente_excluido` (86e34jd1d) — o que foi levado junto, em contagens.
 
     Só IDs e inteiros: nome do cliente é dado identificável e NÃO entra (§4.7).
+    """
+
+    client_id: UUID
+    n_conciliacoes: int = Field(ge=0)
+    n_usuarios: int = Field(ge=0)
+
+
+class ClienteEncerradoProps(_StrictProps):
+    """`cliente_encerrado` (86e36pm1z) — encerramento com retenção.
+
+    Contrapartida do `cliente_excluido`: aqui as conciliações FICAM e os
+    usuários são anonimizados (não apagados). Mesmas contagens, só IDs e
+    inteiros — nome do cliente é identificável e não entra (§4.7). Evento novo
+    nasce SEM dedup (allow-list — entrar nela exige migration).
     """
 
     client_id: UUID

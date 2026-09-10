@@ -50,6 +50,7 @@ from app.core.dependencies import (
     require_client_access,
 )
 from app.core.exceptions import (
+    ClientClosedError,
     ClientNotAccessibleError,
     ConflictError,
     DuplicateFileError,
@@ -350,6 +351,12 @@ async def create_reconciliation(
         # Mesma decisão dos outros endpoints (CLAUDE.md §3.11): manager fora
         # da carteira recebe 404, não 403.
         raise NotFoundError(_CLIENT_NOT_FOUND_MSG) from exc
+
+    # 86e36pm1z — cliente ENCERRADO não recebe conciliação nova. O check vem
+    # ANTES do `provision_client_cipher` abaixo: sem ele, o provisionamento
+    # lazy re-embrulharia uma DEK nova num tenant cujo conteúdo já morreu.
+    if client.closed_at is not None:
+        raise ClientClosedError(f"Cliente {client.id} está encerrado; conciliação nova recusada.")
 
     # Provisiona a DEK do cliente (gera+embrulha se legado) e cifra as descrições
     # dos file_entries no envelope corrente + AAD. O `client` está anexado a `db`,
@@ -771,6 +778,11 @@ async def post_omie_lancamentos(
     ).scalar_one_or_none()
     if client is None:  # pragma: no cover  -- FK garante a existência
         raise NotFoundError("Conciliação não encontrada.")
+
+    # 86e36pm1z — encerrado não lança no Omie: as credenciais foram removidas
+    # no encerramento; 409 claro em vez de falha de decifragem mais adiante.
+    if client.closed_at is not None:
+        raise ClientClosedError(f"Cliente {client.id} está encerrado; lançamento no Omie recusado.")
 
     cipher = await load_client_cipher(client, settings=settings)
 
