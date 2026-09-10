@@ -37,6 +37,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useClientUsersList } from '@/hooks/use-client-users';
+import { useClientDetail } from '@/hooks/use-clients';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { readPositiveInt, useUrlState } from '@/hooks/use-url-state';
 import { ApiError } from '@/lib/api/client';
@@ -56,6 +57,11 @@ const COLUMN_COUNT = 5;
 export function ClientUsersScreen({ clientId }: { clientId: string }) {
   const currentUser = useAuthStore((s) => s.user);
   const canManage = hasPermission(currentUser, 'manage_client_users');
+  // 86e36pm1z — cliente encerrado: usuários anonimizados e escrita negada (409)
+  // pelo servidor; as ações de escrita somem (§4.9), a lista segue visível.
+  const clientDetail = useClientDetail(clientId);
+  const isClosed = clientDetail.data?.closed_at != null;
+  const canWrite = canManage && !isClosed;
 
   const url = useUrlState();
   const searchParam = url.get(PARAM.search) ?? '';
@@ -129,10 +135,12 @@ export function ClientUsersScreen({ clientId }: { clientId: string }) {
             Pessoas deste cliente que acessam o sistema. Elas enxergam apenas este cliente.
           </p>
         </div>
-        <Button type="button" onClick={openCreate}>
-          <Plus className="h-4 w-4" aria-hidden="true" />
-          Novo usuário
-        </Button>
+        {canWrite && (
+          <Button type="button" onClick={openCreate}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Novo usuário
+          </Button>
+        )}
       </div>
 
       <div className="relative max-w-sm">
@@ -183,7 +191,11 @@ export function ClientUsersScreen({ clientId }: { clientId: string }) {
                 ) : rows.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={COLUMN_COUNT} className="py-12">
-                      <EmptyState hasSearch={hasSearch} onCreateClick={openCreate} />
+                      <EmptyState
+                        hasSearch={hasSearch}
+                        canCreate={canWrite}
+                        onCreateClick={openCreate}
+                      />
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -206,17 +218,19 @@ export function ClientUsersScreen({ clientId }: { clientId: string }) {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => openEdit(user)}
-                            aria-label={`Editar ${user.name}`}
-                          >
-                            <SquarePen className="h-4 w-4" aria-hidden="true" />
-                          </Button>
+                          {canWrite && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => openEdit(user)}
+                              aria-label={`Editar ${user.name}`}
+                            >
+                              <SquarePen className="h-4 w-4" aria-hidden="true" />
+                            </Button>
+                          )}
                           {/* Ninguém se desativa (o backend devolve 403); a
                               ação some para não oferecer o que será negado. */}
-                          {user.id !== currentUser.id && (
+                          {canWrite && user.id !== currentUser.id && (
                             <Button
                               variant="ghost"
                               size="icon"
@@ -298,9 +312,11 @@ function TableSkeletonRows() {
 
 function EmptyState({
   hasSearch,
+  canCreate,
   onCreateClick,
 }: {
   hasSearch: boolean;
+  canCreate: boolean;
   onCreateClick: () => void;
 }) {
   if (hasSearch) {
@@ -308,6 +324,13 @@ function EmptyState({
       <div className="space-y-1 text-center">
         <p className="text-sm font-medium">Nenhum usuário encontrado</p>
         <p className="text-muted-foreground text-sm">Tente outro nome ou e-mail.</p>
+      </div>
+    );
+  }
+  if (!canCreate) {
+    return (
+      <div className="space-y-1 text-center">
+        <p className="text-sm font-medium">Nenhum usuário neste cliente</p>
       </div>
     );
   }

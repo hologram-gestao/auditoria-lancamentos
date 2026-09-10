@@ -27,6 +27,7 @@ from app.modules.reconciliations.tenant_scope import audit_session_tenant_miss
 from app.modules.usage_events.omie_rejection import classify_omie_rejection
 from app.modules.usage_events.repository import UsageEventRepository
 from app.modules.usage_events.schemas import (
+    ClienteEncerradoProps,
     ClienteExcluidoProps,
     FlagRevisadoProps,
     GlossarioEditadoProps,
@@ -255,6 +256,22 @@ class UsageEventService:
         return await self.emit(
             UsageEventName.CLIENTE_EXCLUIDO,
             props=ClienteExcluidoProps(
+                client_id=client_id, n_conciliacoes=n_conciliacoes, n_usuarios=n_usuarios
+            ).model_dump(mode="json"),
+        )
+
+    async def emit_cliente_encerrado(
+        self, *, client_id: UUID, n_conciliacoes: int, n_usuarios: int
+    ) -> bool:
+        """86e36pm1z — encerramento com retenção (irmão do `cliente_excluido`).
+
+        Aqui as conciliações FICAM (a contagem diz o que foi retido) e os
+        usuários foram anonimizados, não apagados. Sem `session_id` — fora do
+        índice parcial de dedup por construção; evento novo nasce SEM dedup.
+        """
+        return await self.emit(
+            UsageEventName.CLIENTE_ENCERRADO,
+            props=ClienteEncerradoProps(
                 client_id=client_id, n_conciliacoes=n_conciliacoes, n_usuarios=n_usuarios
             ).model_dump(mode="json"),
         )

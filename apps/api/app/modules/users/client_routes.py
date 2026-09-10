@@ -37,6 +37,7 @@ from app.core.dependencies import (
     AccessibleClientDep,
     DbSessionDep,
     ManageClientUsersDep,
+    OpenClientDep,
 )
 from app.modules.users.repository import UserRepository
 from app.modules.users.schemas import (
@@ -97,7 +98,9 @@ async def list_client_users(
 async def create_client_user(
     payload: CreateClientUserRequest,
     actor: ManageClientUsersDep,
-    client: AccessibleClientDep,
+    # 86e36pm1z — tenant encerrado não ganha usuário novo (os existentes foram
+    # anonimizados e desativados no encerramento).
+    client: OpenClientDep,
     service: UserServiceDep,
 ) -> ClientUserResponse:
     del actor
@@ -141,7 +144,7 @@ async def update_client_user(
     user_id: UUID,
     payload: UpdateClientUserRequest,
     actor: ManageClientUsersDep,
-    client: AccessibleClientDep,
+    client: OpenClientDep,
     service: UserServiceDep,
 ) -> ClientUserResponse:
     del actor
@@ -165,7 +168,7 @@ async def update_client_user(
 async def deactivate_client_user(
     user_id: UUID,
     actor: ManageClientUsersDep,
-    client: AccessibleClientDep,
+    client: OpenClientDep,
     service: UserServiceDep,
 ) -> ClientUserResponse:
     user = await service.set_client_user_active(
@@ -184,7 +187,9 @@ async def deactivate_client_user(
 async def activate_client_user(
     user_id: UUID,
     actor: ManageClientUsersDep,
-    client: AccessibleClientDep,
+    # 86e36pm1z — reativar usuário de tenant encerrado ressuscitaria uma conta
+    # anonimizada; recusado.
+    client: OpenClientDep,
     service: UserServiceDep,
 ) -> ClientUserResponse:
     user = await service.set_client_user_active(

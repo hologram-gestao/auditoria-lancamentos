@@ -33,7 +33,7 @@
  * segundo request.
  */
 
-import { ChevronRight, SquarePen, Trash2 } from 'lucide-react';
+import { Archive, ChevronRight, SquarePen, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
@@ -50,6 +50,7 @@ import { canAccessClient, canSeeSystemArea, hasPermission, homePathFor } from '@
 import { useAuthStore } from '@/stores/auth';
 
 import { ClientStatusBadge } from './client-status-badge';
+import { CloseClientDialog } from './close-client-dialog';
 import { DeleteClientDialog } from './delete-client-dialog';
 import { EditClientModal } from './edit-client-modal';
 import { FavoriteToggle } from './favorite-toggle';
@@ -62,6 +63,7 @@ interface ClientShellProps {
 export function ClientShell({ clientId, children }: ClientShellProps) {
   const currentUser = useAuthStore((s) => s.user);
   const [editOpen, setEditOpen] = useState(false);
+  const [closeOpen, setCloseOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   // Gating de tenant (R4/FRONT 05.7) ANTES do fetch: um usuário de cliente que
@@ -115,6 +117,9 @@ export function ClientShell({ clientId, children }: ClientShellProps) {
   // §9 é do admin do sistema. Nenhum papel de cliente edita os dados do próprio
   // cliente (credenciais Omie moram aí) — e o gerente do sistema também não.
   const canEditClient = hasPermission(currentUser, 'edit_client');
+  // 86e36pm1z — encerrado é só-leitura: o servidor nega toda escrita com 409,
+  // então as ações de editar/encerrar somem (§4.9). Excluir CONTINUA (LGPD).
+  const isClosed = client.closed_at != null;
   // O elo "Clientes" do breadcrumb aponta para a lista GLOBAL. Para usuário de
   // tenant esse destino é negado: o breadcrumb começa no próprio cliente.
   const showClientsCrumb = canSeeSystemArea(currentUser);
@@ -185,7 +190,7 @@ export function ClientShell({ clientId, children }: ClientShellProps) {
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-semibold">{client.name}</h1>
-            <ClientStatusBadge active={client.active} />
+            <ClientStatusBadge active={client.active} closedAt={client.closed_at} />
             {client.category && (
               <CategoryBadge name={client.category.name} tone={client.category.tone} />
             )}
@@ -197,12 +202,23 @@ export function ClientShell({ clientId, children }: ClientShellProps) {
           </div>
           {canEditClient && (
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" onClick={() => setEditOpen(true)}>
-                <SquarePen className="h-4 w-4" aria-hidden="true" />
-                Editar cliente
-              </Button>
+              {!isClosed && (
+                <Button variant="outline" onClick={() => setEditOpen(true)}>
+                  <SquarePen className="h-4 w-4" aria-hidden="true" />
+                  Editar cliente
+                </Button>
+              )}
+              {/* Encerramento com retenção (86e36pm1z): anonimiza e vira
+                  só-leitura; some quando já encerrado (o servidor daria 409). */}
+              {!isClosed && (
+                <Button variant="outline" onClick={() => setCloseOpen(true)}>
+                  <Archive className="h-4 w-4" aria-hidden="true" />
+                  Encerrar cliente
+                </Button>
+              )}
               {/* Exclusão definitiva (86e34jd1d): mesma célula da matriz que editar
-                  (§9 — admin do sistema); o backend nega o resto com 403. */}
+                  (§9 — admin do sistema); o backend nega o resto com 403.
+                  Disponível TAMBÉM para encerrado (LGPD — apagamento completo). */}
               <Button
                 variant="outline"
                 className="text-destructive hover:text-destructive"
@@ -223,6 +239,9 @@ export function ClientShell({ clientId, children }: ClientShellProps) {
       <div className="min-h-0 min-w-0 flex-1">{children}</div>
 
       <EditClientModal open={editOpen} onOpenChange={setEditOpen} client={client} />
+      {canEditClient && !isClosed && (
+        <CloseClientDialog open={closeOpen} onOpenChange={setCloseOpen} client={client} />
+      )}
       {canEditClient && (
         <DeleteClientDialog open={deleteOpen} onOpenChange={setDeleteOpen} client={client} />
       )}

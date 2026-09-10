@@ -31,6 +31,7 @@ from app.core.crypto_service import (
     provision_client_cipher,
 )
 from app.core.exceptions import (
+    ClientClosedError,
     ClientHasProcessingSessionError,
     IncompleteCredentialsError,
     InvalidClientCategoryError,
@@ -83,6 +84,8 @@ def _row_to_response(row: ClientRow) -> ClientResponse:
         responsible_manager=manager,
         reconciliation_count=row.reconciliation_count,
         is_favorite=row.is_favorite,
+        # 86e36pm1z — encerrado: o front esconde ações e mostra o selo.
+        closed_at=row.client.closed_at,
         category=(
             ClientCategorySummary(
                 id=row.category.id, name=row.category.name, tone=row.category.tone
@@ -382,6 +385,14 @@ class ClientService:
         miss falhar (Omie indisponível), `AccountsSyncError` propaga e o
         handler global retorna 502 — alinhado ao padrão do test-connection.
         """
+        if client.closed_at is not None:
+            # 86e36pm1z — encerrado NÃO fala com o Omie: as credenciais foram
+            # destruídas e o cache purgado. O detalhe volta sem contas, só com
+            # o histórico retido (sem isso, o miss do cache tentaria decifrar
+            # credencial vazia e viraria 500).
+            return await self._build_detail_response(
+                client.id, [], None, viewer_user_id=viewer_user_id
+            )
         rows, synced_at = await self._accounts_cache.get_or_sync(client)
         return await self._build_detail_response(
             client.id, rows, synced_at, viewer_user_id=viewer_user_id
@@ -420,6 +431,52 @@ class ClientService:
         if self._usage_events is not None:
             await self._usage_events.emit_cliente_excluido(
                 client_id=client_id, n_conciliacoes=n_sessions, n_usuarios=n_users
+            )
+
+    # --------------------- ENCERRAMENTO (86e36pm1z) --------------------
+
+    async def close_client(self, client: Client) -> None:
+        """Encerramento com RETENÇÃO — o irmão da exclusão (decisão 09/09/2026).
+
+        Apaga quem o cliente É e mantém o que ACONTECEU:
+            - nome → rótulo anônimo; credenciais Omie → vazias;
+            - `dek_wrapped` → NULL: crypto-shredding (§4.1) — todo o conteúdo
+              cifrado do tenant (descrições, notas, contexto de anomalias) vira
+              irrecuperável de uma vez, sem varrer tabela por tabela;
+            - usuários do tenant anonimizados + desativados (FK impede apagar);
+            - glossário/cache/notificações/favoritos removidos;
+            - conciliações, valores, datas, categoria, carteira, `usage_events`
+              e `access_audit` FICAM — a retenção é o propósito.
+
+        Terminal: cliente que voltar é cadastro NOVO. Mesmo guard de 409 da
+        exclusão para conciliação em processamento; encerrar duas vezes é 409.
+        A exclusão total continua disponível para cliente encerrado (LGPD).
+        """
+        if client.closed_at is not None:
+            raise ClientClosedError(f"Cliente {client.id} já está encerrado.")
+        if await self._repo.count_sessions(client.id, processing_only=True) > 0:
+            raise ClientHasProcessingSessionError(
+                f"Cliente {client.id} tem conciliação em processamento; encerramento recusado."
+            )
+        n_sessions = await self._repo.count_sessions(client.id)
+        n_users = await self._repo.count_tenant_users(client.id)
+
+        # Scrub da identidade + crypto-shredding. A instância está anexada à
+        # sessão do request: o UPDATE sai no commit, junto com o resto — atômico.
+        client.name = f"Cliente encerrado #{client.id.hex[:8]}"
+        client.omie_app_key_encrypted = ""
+        client.omie_app_key_iv = ""
+        client.omie_app_secret_encrypted = ""
+        client.omie_app_secret_iv = ""
+        client.dek_wrapped = None
+        client.active = False
+        client.closed_at = datetime.now(UTC)
+
+        await self._repo.anonymize_tenant_users(client.id)
+        await self._repo.close_client_purge(client.id)
+        if self._usage_events is not None:
+            await self._usage_events.emit_cliente_encerrado(
+                client_id=client.id, n_conciliacoes=n_sessions, n_usuarios=n_users
             )
 
     # ------------------------------ FAVORITOS (86e34jd5a) -------------

@@ -37,6 +37,7 @@ from app.core.authz import (
 )
 from app.core.config import Settings, get_settings
 from app.core.exceptions import (
+    ClientClosedError,
     ClientNotAccessibleError,
     ForbiddenError,
     NotFoundError,
@@ -175,6 +176,26 @@ async def require_client_access(
 
 
 AccessibleClientDep = Annotated[Client, Depends(require_client_access)]
+
+
+async def require_open_client(client: AccessibleClientDep) -> Client:
+    """Guard de ESCRITA: além do acesso ao tenant, o cliente precisa estar ABERTO.
+
+    Cliente ENCERRADO (86e36pm1z — `clients.closed_at` preenchido) é só-leitura:
+    a DEK foi destruída e as credenciais Omie removidas, então toda escrita é
+    recusada com 409 ANTES de tocar em qualquer coisa — inclusive o
+    provisionamento lazy de DEK (`crypto_service`), que re-embrulharia uma DEK
+    nova num tenant cujo conteúdo já morreu. Rotas de LEITURA continuam com
+    `AccessibleClientDep`: o histórico operacional fica disponível.
+    """
+    if client.closed_at is not None:
+        raise ClientClosedError(
+            f"Cliente {client.id} está encerrado desde {client.closed_at.isoformat()}."
+        )
+    return client
+
+
+OpenClientDep = Annotated[Client, Depends(require_open_client)]
 
 
 def require_permission(permission: Permission) -> Callable[[CurrentUser], CurrentUser]:
