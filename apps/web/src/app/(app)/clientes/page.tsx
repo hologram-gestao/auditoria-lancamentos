@@ -238,7 +238,7 @@ export default function ClientesPage() {
                     </TableCell>
                   )}
                   <TableCell>
-                    <ClientStatusBadge active={c.active} />
+                    <ClientStatusBadge active={c.active} closedAt={c.closed_at} />
                   </TableCell>
                   <TableCell className="text-muted-foreground text-right tabular-nums">
                     {c.reconciliation_count}

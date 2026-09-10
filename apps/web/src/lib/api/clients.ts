@@ -109,6 +109,15 @@ export async function deleteClient(id: string): Promise<void> {
   await apiDelete<void>(`/api/v1/clients/${id}`);
 }
 
+/**
+ * Encerramento com RETENÇÃO (86e36pm1z): 204 sem corpo. Terminal e admin-only;
+ * anonimiza a identidade e mantém o histórico só-leitura. 409 (`CONFLICT`) com
+ * conciliação em processamento ou se o cliente já estiver encerrado.
+ */
+export async function closeClient(id: string): Promise<void> {
+  await apiPost<void>(`/api/v1/clients/${id}/close`, undefined);
+}
+
 export async function createClient(payload: CreateClientPayload): Promise<Client> {
   return apiPost<Client>('/api/v1/clients', payload);
 }

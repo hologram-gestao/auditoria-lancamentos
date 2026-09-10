@@ -62,6 +62,15 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     dek_wrapped: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, default=None)
 
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # 86e36pm1z — encerramento com retenção: NULL = cliente aberto. Preenchido,
+    # marca o cliente como ENCERRADO (terminal): nome anonimizado, credenciais
+    # removidas e `dek_wrapped` destruída (crypto-shredding, §4.1) — o histórico
+    # operacional (valores, datas, status) fica. Escrita em cliente encerrado é
+    # recusada com 409 (`ClientClosedError`) — inclusive o provisionamento lazy
+    # de DEK, que ressuscitaria a cifra de um tenant morto.
+    closed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
     created_by: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("users.id", ondelete="RESTRICT"),

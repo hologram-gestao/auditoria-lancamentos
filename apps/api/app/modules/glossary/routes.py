@@ -35,6 +35,7 @@ from app.core.dependencies import (
     CurrentUserDep,
     DbSessionDep,
     ManageGlossaryDep,
+    OpenClientDep,
     SettingsDep,
 )
 from app.modules.glossary.schemas import (
@@ -118,7 +119,8 @@ async def list_glossary_entries(
 async def create_glossary_entry(
     payload: CreateGlossaryEntryRequest,
     actor: ManageGlossaryDep,
-    client: AccessibleClientDep,
+    # 86e36pm1z — glossário é cifrado com a DEK do tenant: encerrado não escreve.
+    client: OpenClientDep,
     service: GlossaryServiceDep,
 ) -> GlossaryEntryEnvelope:
     # `actor` aciona o guard da matriz; `client` já veio validado contra o tenant.
@@ -147,7 +149,7 @@ async def update_glossary_entry(
     entry_id: UUID,
     payload: UpdateGlossaryEntryRequest,
     actor: ManageGlossaryDep,
-    client: AccessibleClientDep,
+    client: OpenClientDep,
     service: GlossaryServiceDep,
 ) -> GlossaryEntryEnvelope:
     entry = await service.update_entry(
@@ -176,7 +178,7 @@ async def update_glossary_entry(
 async def delete_glossary_entry(
     entry_id: UUID,
     actor: ManageGlossaryDep,
-    client: AccessibleClientDep,
+    client: OpenClientDep,
     service: GlossaryServiceDep,
 ) -> GlossaryDeletedResponse:
     version = await service.delete_entry(client=client, user=actor, entry_id=entry_id)

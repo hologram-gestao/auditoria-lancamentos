@@ -16,7 +16,7 @@ from datetime import UTC, date, datetime
 from typing import Any, NamedTuple
 from uuid import UUID
 
-from sqlalchemy import and_, delete, false, func, select
+from sqlalchemy import String, and_, cast, delete, false, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
@@ -26,6 +26,7 @@ from app.db.models import (
     Client,
     ClientAssignment,
     ClientCategory,
+    ClientGlossaryEntry,
     Notification,
     OmieAccountCache,
     ReconciliationFile,
@@ -345,6 +346,47 @@ class ClientRepository:
         # A instância carregada pelo guard da rota não pode ficar viva na sessão
         # apontando para uma linha que já não existe.
         s.expunge(client)
+
+    # --------------------- ENCERRAMENTO (86e36pm1z) --------------------
+
+    async def close_client_purge(self, client_id: UUID) -> None:
+        """Encerramento: remove o que NÃO tem valor operacional retido.
+
+        Glossário (cifrado — já morreu com a DEK; linha de ciphertext morto não
+        serve para nada), cache de contas Omie (nomes de contas do cliente, TTL),
+        notificações (UI de um recurso que não opera mais) e favoritos (o
+        cliente sai do dia a dia). `client_assignments` FICA de propósito
+        (decisão 09/09): o manager da carteira continua vendo o histórico.
+        Conciliações, postings, `usage_events` e `access_audit` ficam — são a
+        retenção que motivou o encerramento.
+        """
+        s = self._session
+        await s.execute(
+            delete(ClientGlossaryEntry).where(ClientGlossaryEntry.client_id == client_id)
+        )
+        await s.execute(delete(OmieAccountCache).where(OmieAccountCache.client_id == client_id))
+        await s.execute(delete(Notification).where(Notification.client_id == client_id))
+        await s.execute(delete(UserClientFavorite).where(UserClientFavorite.client_id == client_id))
+
+    async def anonymize_tenant_users(self, client_id: UUID) -> None:
+        """Anonimiza + desativa os usuários DO tenant (não pode apagar).
+
+        As sessões RETIDAS carregam `created_by` (RESTRICT) apontando para estes
+        usuários — apagar violaria a FK. Então: `active=False` (lockout no
+        request seguinte, §3.12), nome genérico e e-mail tombstone ÚNICO por
+        linha (o e-mail é UNIQUE global — o sufixo com o próprio id garante a
+        unicidade sem identificar ninguém). `password_hash` fica: inofensivo com
+        a conta inativa, e trocá-lo por lixo criaria um caso novo no login.
+        """
+        await self._session.execute(
+            update(User)
+            .where(User.client_id == client_id, User.scope == UserScope.CLIENT.value)
+            .values(
+                active=False,
+                name="Usuário removido",
+                email=func.concat("encerrado+", cast(User.id, String), "@anonimizado.invalid"),
+            )
+        )
 
     # ------------------------------ WRITE -----------------------------
 

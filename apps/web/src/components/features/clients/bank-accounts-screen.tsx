@@ -77,6 +77,9 @@ export function BankAccountsScreen({ clientId }: { clientId: string }) {
   }
 
   const isSyncing = syncMutation.isPending;
+  // 86e36pm1z — encerrado não tem credenciais Omie: o servidor nega o sync
+  // com 409 e o botão some (§4.9). O cache exibido foi purgado (lista vazia).
+  const isClosed = detailQuery.data?.closed_at != null;
 
   return (
     <section aria-labelledby="accounts-heading" className="flex h-full flex-col gap-4">
@@ -89,14 +92,16 @@ export function BankAccountsScreen({ clientId }: { clientId: string }) {
             {formatSyncedAt(detailQuery.data?.accounts_synced_at)}
           </p>
         </div>
-        <Button type="button" onClick={() => void handleSync()} disabled={isSyncing}>
-          {isSyncing ? (
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-          ) : (
-            <RefreshCw className="h-4 w-4" aria-hidden="true" />
-          )}
-          {isSyncing ? 'Extraindo…' : 'Extrair contas do Omie'}
-        </Button>
+        {!isClosed && (
+          <Button type="button" onClick={() => void handleSync()} disabled={isSyncing}>
+            {isSyncing ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+            )}
+            {isSyncing ? 'Extraindo…' : 'Extrair contas do Omie'}
+          </Button>
+        )}
       </div>
 
       <div className="min-h-0 flex-1" aria-busy={detailQuery.isFetching}>

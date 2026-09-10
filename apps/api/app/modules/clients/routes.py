@@ -45,6 +45,7 @@ from app.core.dependencies import (
     DbSessionDep,
     EditClientDep,
     ManagerOrAdminDep,
+    OpenClientDep,
     SettingsDep,
     SyncOmieAccountsDep,
 )
@@ -213,7 +214,9 @@ async def sync_accounts(
     request: Request,
     response: Response,
     user: SyncOmieAccountsDep,
-    client: AccessibleClientDep,
+    # 86e36pm1z — sync chama o Omie com as credenciais do cliente: encerrado
+    # não tem credenciais (409 antes de tentar decifrar o que não existe).
+    client: OpenClientDep,
     service: ClientServiceDep,
 ) -> ClientDetailResponse:
     # `user` aciona o guard da matriz (§4: gerente e operador do cliente PODEM
@@ -345,7 +348,8 @@ async def get_client(
 async def update_client(
     payload: UpdateClientRequest,
     user: EditClientDep,
-    client: AccessibleClientDep,
+    # 86e36pm1z — encerrado é terminal: nem nome nem credenciais são editáveis.
+    client: OpenClientDep,
     service: ClientServiceDep,
 ) -> ClientResponse:
     # Matriz §4 — "Editar dados do cliente": SÓ admin. Papéis de cliente e
@@ -391,4 +395,38 @@ async def delete_client(
 ) -> Response:
     del user
     await service.delete_client(client)
+    return Response(status_code=204)
+
+
+# ----------------------------------------------------------------------
+# POST /{id}/close — encerramento com RETENÇÃO (86e36pm1z)
+# ----------------------------------------------------------------------
+#
+# O irmão da exclusão, decidido pelo Lucas/Pedro (09/09/2026): apaga quem o
+# cliente É (nome anonimizado, credenciais removidas, DEK destruída —
+# crypto-shredding §4.1, usuários do tenant anonimizados) e MANTÉM o que
+# aconteceu (conciliações, valores, datas, eventos de uso). Terminal: cliente
+# que volta é cadastro novo. Admin pela matriz (`EDIT_CLIENT`) + tenant pelo
+# `AccessibleClientDep`; DETAIL_PK na lista canônica. A exclusão total continua
+# existindo (LGPD — o titular pode exigir apagamento completo).
+
+
+@router.post(
+    "/{client_id}/close",
+    status_code=204,
+    summary=(
+        "ENCERRA o cliente com retenção (admin-only, terminal): anonimiza nome e "
+        "usuários do tenant, remove credenciais Omie e destrói a chave de "
+        "criptografia (conteúdo cifrado vira irrecuperável); conciliações, valores "
+        "e trilhas FICAM, só-leitura. 409 se houver conciliação em processamento "
+        "ou se o cliente já estiver encerrado."
+    ),
+)
+async def close_client(
+    user: EditClientDep,
+    client: AccessibleClientDep,
+    service: ClientServiceDep,
+) -> Response:
+    del user
+    await service.close_client(client)
     return Response(status_code=204)

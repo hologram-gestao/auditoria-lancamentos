@@ -228,6 +228,26 @@ class ClientHasProcessingSessionError(ConflictError):
     )
 
 
+class ClientClosedError(ConflictError):
+    """409 — operação de ESCRITA em cliente ENCERRADO (86e36pm1z).
+
+    Encerramento é terminal (decisão do Pedro, 09/09/2026): a DEK foi destruída
+    (crypto-shredding, §4.1) e as credenciais Omie removidas — não existe caminho
+    de escrita válido. O histórico operacional continua legível; quem precisar
+    operar o cliente de novo cadastra um cliente NOVO.
+
+    ⚠️ Este guard também protege o provisionamento lazy de DEK
+    (`crypto_service.ensure`): sem ele, uma escrita re-embrulharia uma DEK nova
+    num cliente cujo conteúdo antigo já morreu — ressuscitando a capacidade de
+    cifrar sem ressuscitar o dado.
+    """
+
+    default_user_message = (
+        "Este cliente foi encerrado. O histórico fica disponível para consulta, "
+        "mas não é possível criar ou alterar nada nele."
+    )
+
+
 class OmiePostingDisabledError(ConflictError):
     """409 — o kill-switch `OMIE_POSTING_ENABLED` está desligado (S7 BACK 07.4).
 

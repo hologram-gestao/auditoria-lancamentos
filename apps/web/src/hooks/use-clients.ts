@@ -16,6 +16,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import {
   assignClient,
   createClient,
+  closeClient,
   deleteClient,
   favoriteClient,
   getClientDetail,
@@ -126,6 +127,21 @@ export function useDeleteClient(id: string) {
     mutationFn: () => deleteClient(id),
     onSuccess: () => {
       qc.removeQueries({ queryKey: clientsKeys.detail(id) });
+      void qc.invalidateQueries({ queryKey: clientsKeys.all });
+    },
+  });
+}
+
+/**
+ * Encerramento com retenção (86e36pm1z). Diferente da exclusão, o cliente
+ * CONTINUA existindo (anonimizado, só-leitura): o detalhe é refetchado — o
+ * nome, o selo "Encerrado" e o sumiço das ações vêm do servidor.
+ */
+export function useCloseClient(id: string) {
+  const qc = useQueryClient();
+  return useMutation<void, Error, void>({
+    mutationFn: () => closeClient(id),
+    onSuccess: () => {
       void qc.invalidateQueries({ queryKey: clientsKeys.all });
     },
   });

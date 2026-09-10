@@ -47,6 +47,12 @@ const createMock = vi.fn();
 const updateMock = vi.fn();
 const setActiveMock = vi.fn();
 
+// A tela consulta o detalhe do cliente para saber se está ENCERRADO
+// (86e36pm1z) — `undefined` = aberto, as ações de escrita aparecem.
+vi.mock('@/hooks/use-clients', () => ({
+  useClientDetail: () => ({ data: undefined }),
+}));
+
 vi.mock('@/hooks/use-client-users', () => ({
   useClientUsersList: (_clientId: string, params: ListClientUsersParams) => {
     lastQueryParams = params;

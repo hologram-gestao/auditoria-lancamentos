@@ -230,6 +230,13 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         "app/modules/clients/routes.py",
         "EditClientDep (admin pela matriz) + " + _VIA_CLIENT_PATH,
     ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients/{client_id}/close",
+        ScopeKind.DETAIL_PK,
+        "app/modules/clients/routes.py",
+        "EditClientDep (admin pela matriz) + " + _VIA_CLIENT_PATH,
+    ),
     # ---------------------------------------------------------------- favoritos (86e34jd5a)
     SensitiveEndpoint(
         "PUT",
