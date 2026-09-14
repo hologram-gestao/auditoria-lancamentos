@@ -228,11 +228,18 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    lido com a `OMIE_ENCRYPTION_KEY`. Falha de decrypt **levanta erro** no
    caminho de credencial (nunca retorna texto); na tela de revisão/Excel vira
    `[indecifrável]` + métrica `decrypt_failed` (não célula silenciosamente
-   vazia sem sinal). Campos:
+   vazia sem sinal).
+   **A fonte ÚNICA da lista são as constantes de AAD declaradas em
+   [apps/api/app/core/crypto_service.py](apps/api/app/core/crypto_service.py)** (11
+   hoje) — campo cifrado novo entra lá E aqui, na mesma entrega. Os pares
+   (tabela, coluna) do AAD são **congelados**: renomear um invalida a decifragem de
+   tudo que já foi gravado com ele. Campos:
    - `clients.omie_app_key_encrypted`, `omie_app_secret_encrypted`
+   - `reconciliation_files.filename_encrypted`
    - `reconciliation_file_entries.description_encrypted`, `user_note_encrypted`
    - `reconciliation_omie_entries.user_note_encrypted`
    - `reconciliation_anomalies.context_encrypted`, `resolution_note_encrypted`
+   - `client_glossary_entries.code_encrypted`, `name_encrypted`, `description_encrypted`
 2. **IV novo a cada operação** (12 bytes aleatórios). Nunca reutilize.
 3. **Valores monetários em claro** (campos `amount`, `balance`) — são números sem identificação, sem valor isolado.
 4. **Datas em claro** (`transaction_date`, `reference_month`) — necessárias para SQL ordering/filtering.
@@ -706,6 +713,8 @@ lembrar dos comandos.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.22 — 14/09/2026. **A lista de campos cifrados da §4.1 estava DESATUALIZADA em 4 campos, e agora aponta para a fonte executável.** A varredura da skill `crypto-field` (86e2ufkvr) comparou o primer com o código: o `crypto_service.py` declara **11** constantes de AAD e os modelos têm **11** colunas cifradas, enquanto a §4.1 listava **7**. Faltavam a do nome de arquivo em `reconciliation_files` (Sprint 4) e as três do glossário em `client_glossary_entries` (Sprint 6): cifradas no código desde que nasceram, ausentes do primer desde então. A correção não é só somar as quatro. A §4.1 passa a declarar que **a fonte única é o bloco de constantes de AAD do `crypto_service.py`**, e que os pares (tabela, coluna) são congelados, porque renomear um invalida a decifragem do que já foi gravado. Assim a próxima dessincronização tem um lugar verificável para ser pega: a contagem dessas constantes contra a lista daqui._
 
 _Versão 1.21 — 10/09/2026. **Nasceu o segundo modo de saída de cliente: ENCERRAMENTO com retenção (86e36pm1z) — nova regra §4.12.** Direção do Lucas (09/09): a exclusão total perdia "informação valiosa"; o encerramento apaga a identificação e os sensíveis e mantém o operacional. Mecânica: `clients.closed_at` (migration `c9e4a7b2d5f8`), nome → "Cliente encerrado #hex8", credenciais Omie vazias, **`dek_wrapped` → NULL (crypto-shredding — o provisionamento lazy de DEK é o landmine: o guard bloqueia escrita ANTES do `ensure`)**, usuários do tenant anonimizados + desativados (FK RESTRICT das sessões impede apagar), glossário/cache/notificações/favoritos purgados; conciliações, carteira e trilhas ficam. Trava única de rota: `OpenClientDep` em TODA escrita de cliente (update, sync, usuários, glossário, conciliação nova, posting); leitura segue `AccessibleClientDep` — e o detalhe de encerrado NÃO fala com o Omie (o miss do cache tentava decifrar credencial vazia e dava 500, pego por teste). Lista canônica: **45** endpoints (a rota `close` entrou como DETAIL_PK). Terminal: cliente que volta é cadastro novo; exclusão total continua valendo para encerrado (LGPD). Evento `cliente_encerrado` (sem dedup, como todo evento novo)._
 
