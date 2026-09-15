@@ -30,8 +30,10 @@ Cenários cobertos (≥ 15):
         - Apenas omie_app_key sem secret → 400 IncompleteCredentials.
         - Ambos juntos → recriptografa, IVs novos diferentes dos anteriores.
 
-    PATCH /clients/{id}/assign:
-        - Admin reatribui — listagem do manager antigo perde o cliente.
+    PATCH /clients/{id}/assign (86e390kz8 — define o RESPONSÁVEL):
+        - Admin define outro responsável — o anterior CONTINUA vendo o cliente
+          (carteira compartilhada; a remoção de acesso é ação própria, em
+          test_client_managers.py).
         - Manager → 403.
         - User-alvo não-manager → 400.
         - User-alvo inativo → 400.
@@ -130,6 +132,7 @@ async def _seed_client(
             client_id=client.id,
             user_id=manager.id,
             assigned_by=creator.id,
+            is_primary=True,
         )
         session.add(assignment)
         await session.flush()
@@ -563,9 +566,15 @@ class TestUpdateClient:
 
 
 class TestAssignClient:
-    async def test_admin_reassigns_and_old_manager_loses_access(
+    async def test_admin_sets_responsible_and_previous_manager_keeps_access(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
+        """O caso da Bruna (14/09/2026): trocar o responsável NÃO tira o acesso de ninguém.
+
+        Antes, `/assign` sobrescrevia o `user_id` da linha única e o gerente
+        anterior sumia da carteira em silêncio. Agora ele continua como
+        colaborador; remover acesso é ação separada e explícita.
+        """
         admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
         mgr_a = await _seed_user(db_session, email=MANAGER_A_EMAIL, role=UserRole.MANAGER)
         mgr_b = await _seed_user(db_session, email=MANAGER_B_EMAIL, role=UserRole.MANAGER)
@@ -578,20 +587,19 @@ class TestAssignClient:
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["responsible_manager"]["id"] == str(mgr_b.id)
+        assert resp.json()["manager_count"] == 2
 
-        # Manager A não vê mais este cliente
+        # Manager A CONTINUA vendo o cliente — agora como colaborador.
         await client_with_db.post("/api/v1/auth/logout")
         await _login_as(client_with_db, MANAGER_A_EMAIL)
         list_resp = await client_with_db.get("/api/v1/clients")
-        names = {c["name"] for c in list_resp.json()["data"]}
-        assert "Reassign Me" not in names
+        rows = {c["name"]: c for c in list_resp.json()["data"]}
+        assert "Reassign Me" in rows
+        # E a lista mostra o RESPONSÁVEL (B), não quem está olhando.
+        assert rows["Reassign Me"]["responsible_manager"]["id"] == str(mgr_b.id)
 
-        # E recebe 403 ao tentar editar
-        patch_resp = await client_with_db.patch(
-            f"/api/v1/clients/{target.id}",
-            json={"name": "Tentando"},
-        )
-        assert patch_resp.status_code == 403
+        detail = await client_with_db.get(f"/api/v1/clients/{target.id}/reconciliations")
+        assert detail.status_code == 200, detail.text
 
     async def test_manager_assigning_returns_403(
         self, client_with_db: AsyncClient, db_session: AsyncSession

@@ -81,7 +81,11 @@ async def _seed_client(session: AsyncSession, *, creator: User, manager: User, n
     )
     session.add(cli)
     await session.flush()
-    session.add(ClientAssignment(client_id=cli.id, user_id=manager.id, assigned_by=creator.id))
+    session.add(
+        ClientAssignment(
+            client_id=cli.id, user_id=manager.id, assigned_by=creator.id, is_primary=True
+        )
+    )
     await session.flush()
     return cli
 

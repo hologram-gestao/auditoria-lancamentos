@@ -112,7 +112,7 @@
 8. **Nunca** confie em validação client-side. Revalide tudo no servidor (extensão, tamanho, magic bytes, hash, RBAC).
 9. **Nunca** retorne "senha incorreta" ou "email não existe" separadamente no login — resposta genérica "E-mail ou senha incorretos".
 10. **Nunca** faça upload de arquivo para disco. Processar em memória e descartar.
-11. **Nunca** permita que manager veja cliente de outro manager. Sempre validar `client_assignments`.
+11. **Nunca** permita que manager veja cliente fora da própria carteira. Sempre validar `client_assignments` — **qualquer** linha `(client_id, user_id)` concede acesso, responsável ou colaborador (§4.13).
 12. **Nunca** confie em token JWT sem revalidar `users.active = true` no DB (middleware) — usuário desativado perde acesso instantaneamente.
 13. **Nunca leia, edite ou cite o conteúdo de arquivos `.env`, `.env.local`,
     `.env.production`, `.env.*` ou qualquer outro arquivo que contenha
@@ -167,7 +167,7 @@
       **1** linha em `access_audit`.
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**44** hoje) **com teste negativo cross-tenant**. Essa lista é o denominador
+      (**49** hoje) **com teste negativo cross-tenant**. Essa lista é o denominador
       da métrica de isolamento — endpoint fora dela é buraco que ninguém mede.
     - **Identidade de usuário em response é ENXUTA e mascarada por escopo**
       (86e2n39f1): expor QUEM fez algo devolve só `{name, email}` — nunca a
@@ -319,6 +319,26 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
       escrita re-embrulharia DEK nova num tenant morto. Leitura continua com
       `AccessibleClientDep`. A exclusão total segue disponível para encerrado
       (LGPD — o titular pode exigir apagamento completo).
+
+13. **Carteira compartilhada (86e390kku, 15/09/2026): N gerentes com ACESSO, UM
+    responsável.** `client_assignments` deixou de ser 1:1. Cada linha é uma
+    pessoa com acesso ao cliente; `is_primary` marca o **responsável** (o nome da
+    coluna "Gerente responsável" da lista, a quem se cobra). Duas garantias **no
+    banco**: `UNIQUE(client_id, user_id)` — a mesma pessoa não entra duas vezes
+    (sem ela, `resolve_client_access` estoura `MultipleResultsFound`) — e o índice
+    único **parcial** `uq_client_assignments_primary` (`client_id WHERE
+is_primary`) — um responsável por cliente; o predicado é COPIADO na migration
+    (`6bb85e6b7d72`) e `tests/unit/test_client_assignment_schema.py` prova que as
+    duas fontes batem. Regras de negócio: **definir o responsável
+    (`PATCH /clients/{id}/assign`) não remove ninguém** — o anterior vira
+    colaborador; **remover o responsável sem definir outro é 409** (cliente nunca
+    fica órfão); só `manager` ativo entra (admin já alcança tudo pela matriz);
+    gerir a carteira é `EDIT_CLIENT` (admin). Na listagem, o join de EXIBIÇÃO é só
+    do responsável e o filtro da CARTEIRA é `EXISTS` sobre todas as linhas — são
+    duas perguntas diferentes, e reusar o join no filtro faria o colaborador sumir
+    da própria lista. Linha nova em `client_assignments` marca `is_primary`
+    **explicitamente** (default FALSE nos dois lados): quem cria o cliente é o
+    responsável; colaborador entra por `POST /clients/{id}/managers`.
 
 ---
 
@@ -617,6 +637,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.24 — 15/09/2026. **A carteira deixou de ser exclusiva: N gerentes com acesso, UM responsável (épico 86e390kku, task 86e390kz8) — nova regra §4.13.** Origem: ao tornar o Murilo gerente do cliente Hologram, a Bruna perdeu o acesso na hora, sem aviso — não era bug de operação, era o modelo (`UNIQUE(client_id)` + "reatribuir" sobrescrevendo o `user_id`). Agora `client_assignments` tem `is_primary`, `UNIQUE(client_id, user_id)` e o índice único parcial do responsável (migration `6bb85e6b7d72`, backfill "todo gerente existente vira responsável", downgrade que ABORTA se houver colaborador). Três rotas novas (`GET/POST /clients/{id}/managers`, `DELETE .../managers/{user_id}`) e `PATCH /assign` re-semantizada para "definir responsável, sem remover ninguém"; as quatro entraram na lista canônica como DETAIL_PK (**49**, não 45 — e `/assign` saiu de `NON_TENANT_ENDPOINTS`). Duas armadilhas fora do escopo original da task ficaram registradas em código: o `get_assignment(client_id)` do repositório também usava `scalar_one_or_none` (substituído por leitores por par e por responsável), e o join de exibição da lista era o MESMO usado no filtro da carteira (separados: join só do responsável, filtro por `EXISTS`). §3.11 reescrito para "fora da própria carteira"._
 
 _Versão 1.23 — 15/09/2026. **O primer devolveu ao dono o que era procedimento (86e2ufky2, fecho do épico de skills).** Com as nove skills na `main`, quatro blocos que descreviam COMO fazer viraram ponteiro para quem agora os detalha: a §7 Frontend inteira e o bloco de CI/CD verde (skills `front-gate` e `gate`), a §9 de comandos (`gate`, com `migration` e `sprint-preflight` ao lado) e o roteiro de fechamento da §12 (`entrega`). A §5 perdeu a narrativa do cruzamento e a nomenclatura do Omie (skills `matcher` e `omie`) mas **manteve as leis numéricas** — 0,01 BRL, os 3 dias fixos, o período expandido, o 1-para-1, a idempotência e o "IA nunca decide match" — porque são violáveis por quem nunca abre o matcher, escrevendo um endpoint ou uma tela. Resultado: **759 para 665 linhas, 77.748 para 68.959 bytes**, 11% a menos em toda sessão. **§3 e §4 estão byte a byte idênticas**, e a §6 só ganhou dois ponteiros: são invariantes e conduta, que precisam valer sem gatilho nenhum. Duas decisões do Pedro no caminho: o rodapé de versões fica no arquivo (é 26% dele, mas serve de contexto recente) e a §6 não é condensada. Antes de cortar, quatro regras órfãs foram para as skills que passaram a hospedá-las — `noUncheckedIndexedAccess` e server component por padrão na `front-gate`; teste flaky, hooks locais com a proibição do `--no-verify` e os comandos de banco na `gate` — porque mover regra antes de existir destino é perder a regra._
 

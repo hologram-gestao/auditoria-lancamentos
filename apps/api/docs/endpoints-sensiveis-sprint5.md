@@ -14,10 +14,10 @@
 
 |                                         |                  |
 | --------------------------------------- | ---------------- |
-| Endpoints sensíveis (denominador)       | **45**           |
-| Com caso negativo cross-tenant verde    | **45**           |
+| Endpoints sensíveis (denominador)       | **49**           |
+| Com caso negativo cross-tenant verde    | **49**           |
 | Pendentes (implementação em outra task) | **0**            |
-| Cobertura                               | **45/45 = 100%** |
+| Cobertura                               | **49/49 = 100%** |
 
 ## Lista canônica
 
@@ -51,6 +51,10 @@ Legenda de `tipo`: **coleção** = vaza forjando `client_id` na URL/payload · *
 | `POST`   | `/api/v1/clients/{client_id}/close`                            | detalhe (PK) | `app/modules/clients/routes.py`                | EditClientDep (admin pela matriz) + AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha)                                                                                              | ✅ verde |
 | `PUT`    | `/api/v1/clients/{client_id}/favorite`                         | detalhe (PK) | `app/modules/clients/routes.py`                | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha)                                                                                                                                  | ✅ verde |
 | `DELETE` | `/api/v1/clients/{client_id}/favorite`                         | detalhe (PK) | `app/modules/clients/routes.py`                | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha)                                                                                                                                  | ✅ verde |
+| `GET`    | `/api/v1/clients/{client_id}/managers`                         | detalhe (PK) | `app/modules/clients/routes.py`                | EditClientDep (admin pela matriz) + AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha)                                                                                              | ✅ verde |
+| `POST`   | `/api/v1/clients/{client_id}/managers`                         | detalhe (PK) | `app/modules/clients/routes.py`                | EditClientDep (admin pela matriz) + OpenClientDep (encerrado = 409) + AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha)                                                            | ✅ verde |
+| `DELETE` | `/api/v1/clients/{client_id}/managers/{user_id}`               | detalhe (PK) | `app/modules/clients/routes.py`                | EditClientDep (admin pela matriz) + OpenClientDep (encerrado = 409) + AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha)                                                            | ✅ verde |
+| `PATCH`  | `/api/v1/clients/{client_id}/assign`                           | detalhe (PK) | `app/modules/clients/routes.py`                | EditClientDep (admin pela matriz) + OpenClientDep (encerrado = 409) + AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha)                                                            | ✅ verde |
 | `POST`   | `/api/v1/reconciliations/{session_id}/omie-postings`           | detalhe (PK) | `app/modules/reconciliations/routes.py`        | require_session_access: SELECT da sessão já com AND client_id = <tenant da linha> (scoped_by_tenant) + resolve_client_access; 404 uniforme; o Client sai do client_id da sessão já autorizada e as linhas são carregadas com AND session_id — nada vem do body | ✅ verde |
 | `GET`    | `/api/v1/omie/lancamentos`                                     | coleção      | `app/modules/omie_data/routes.py`              | require_session_access: SELECT da sessão já com AND client_id = <tenant da linha> (scoped_by_tenant) + resolve_client_access; 404 uniforme                                                                                                                     | ✅ verde |
 | `GET`    | `/api/v1/omie/categorias`                                      | coleção      | `app/modules/omie_data/routes.py`              | require_session_access: SELECT da sessão já com AND client_id = <tenant da linha> (scoped_by_tenant) + resolve_client_access; 404 uniforme; o client_id do cache vem da sessão, nunca da query                                                                 | ✅ verde |
@@ -87,7 +91,6 @@ Não carregam dado escopável a um cliente. Registradas explicitamente para que 
 | `PATCH /api/v1/anomaly-types/{type_id}`          | configuração global; admin-only                                  |
 | `PATCH /api/v1/client-categories/{category_id}`  | catálogo global; admin-only                                      |
 | `PATCH /api/v1/clients/{client_id}`              | edita o cliente; admin-only pela matriz (EDIT_CLIENT)            |
-| `PATCH /api/v1/clients/{client_id}/assign`       | reatribui carteira; admin-only                                   |
 | `PATCH /api/v1/users/{user_id}`                  | usuários do SISTEMA; admin-only                                  |
 | `POST /api/v1/anomaly-types`                     | configuração global; admin-only                                  |
 | `POST /api/v1/auth/login`                        | autenticação — ainda não há usuário                              |

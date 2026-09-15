@@ -169,6 +169,7 @@ async def assign_to_first_manager(session: AsyncSession, client: Client, admin: 
             client_id=client.id,
             user_id=manager.id,
             assigned_by=admin.id,
+            is_primary=True,
         )
     )
     await session.flush()

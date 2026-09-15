@@ -600,3 +600,150 @@ class TestOmiePostingsRoundTrip:
             )
             == 20
         )
+
+
+# ----------------------------------------------------------------------
+# Carteira compartilhada (86e390kz8) — N gerentes com acesso, UM responsável
+# ----------------------------------------------------------------------
+
+PRE_SHARED_PORTFOLIO_REV = "c9e4a7b2d5f8"
+SHARED_PORTFOLIO_REV = "6bb85e6b7d72"
+
+# Linha "legada": como a base real está ANTES desta migration (sem `is_primary`).
+_INSERT_ASSIGNMENT_LEGACY = (
+    "INSERT INTO client_assignments (id, client_id, user_id, assigned_by, assigned_at) "
+    "VALUES (gen_random_uuid(), :cid, :uid, :uid, now())"
+)
+_INSERT_ASSIGNMENT = (
+    "INSERT INTO client_assignments "
+    "(id, client_id, user_id, assigned_by, assigned_at, is_primary) "
+    "VALUES (gen_random_uuid(), :cid, :uid, :uid, now(), :primary)"
+)
+_INDEXDEF_BY_NAME = "SELECT indexdef FROM pg_indexes WHERE indexname = :name"
+
+
+def _seed_manager_row(url: str) -> str:
+    user_id = str(uuid4())
+    _execute(
+        url,
+        "INSERT INTO users (id, name, email, password_hash, role, active, scope, "
+        "created_at, updated_at) VALUES (:uid, 'Gerente', :email, 'x', 'manager', true, "
+        "'system', now(), now())",
+        uid=user_id,
+        email=f"gerente-{user_id}@hologram.com.br",
+    )
+    return user_id
+
+
+class TestCarteiraCompartilhadaRoundTrip:
+    """A tabela deixa de ser 1:1 sem perder quem já estava nela."""
+
+    def test_backfill_marca_o_gerente_existente_como_responsavel(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, PRE_SHARED_PORTFOLIO_REV)
+        client_id = _seed_client_row(url)
+        manager_id = _seed_manager_row(url)
+        _execute(url, _INSERT_ASSIGNMENT_LEGACY, cid=client_id, uid=manager_id)
+
+        command.upgrade(alembic_cfg, "head")
+
+        # Quem já estava vira o RESPONSÁVEL — não um colaborador sem responsável.
+        assert _scalar(url, "SELECT count(*) FROM client_assignments WHERE is_primary") == 1
+        # As garantias existem NO BANCO.
+        assert (
+            _scalar(
+                url,
+                "SELECT count(*) FROM pg_constraint "
+                "WHERE conname = 'uq_client_assignments_client_user' AND contype = 'u'",
+            )
+            == 1
+        )
+        partial = str(_scalar(url, _INDEXDEF_BY_NAME, name="uq_client_assignments_primary"))
+        assert "UNIQUE" in partial
+        assert partial.endswith("WHERE is_primary")
+        # O índice antigo continua existindo (para o filtro da carteira), mas não é mais único.
+        plain = str(_scalar(url, _INDEXDEF_BY_NAME, name="ix_client_assignments_client_id"))
+        assert "UNIQUE" not in plain
+
+    def test_banco_aceita_dois_gerentes_e_recusa_dois_responsaveis(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        """Contra o schema das MIGRATIONS (não o do `create_all`)."""
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        responsible = _seed_manager_row(url)
+        collaborator = _seed_manager_row(url)
+        intruder = _seed_manager_row(url)
+
+        _execute(url, _INSERT_ASSIGNMENT, cid=client_id, uid=responsible, primary=True)
+        _execute(url, _INSERT_ASSIGNMENT, cid=client_id, uid=collaborator, primary=False)
+        assert _scalar(url, "SELECT count(*) FROM client_assignments") == 2
+
+        # Segundo responsável: o índice parcial recusa.
+        with pytest.raises(sa.exc.IntegrityError):
+            _execute(url, _INSERT_ASSIGNMENT, cid=client_id, uid=intruder, primary=True)
+        # A mesma pessoa duas vezes: a UNIQUE do par recusa.
+        with pytest.raises(sa.exc.IntegrityError):
+            _execute(url, _INSERT_ASSIGNMENT, cid=client_id, uid=collaborator, primary=False)
+        assert _scalar(url, "SELECT count(*) FROM client_assignments") == 2
+
+    def test_upgrade_downgrade_upgrade_sem_colaboradores(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        manager_id = _seed_manager_row(url)
+        _execute(url, _INSERT_ASSIGNMENT, cid=client_id, uid=manager_id, primary=True)
+
+        command.downgrade(alembic_cfg, PRE_SHARED_PORTFOLIO_REV)
+        assert _columns(url, "client_assignments", "is_primary") == 0
+        # A forma antiga volta inteira: UNIQUE(client_id) e a linha preservada.
+        old = str(_scalar(url, _INDEXDEF_BY_NAME, name="ix_client_assignments_client_id"))
+        assert "UNIQUE" in old
+        assert _scalar(url, _INDEXDEF_BY_NAME, name="uq_client_assignments_primary") is None
+        assert _scalar(url, "SELECT count(*) FROM client_assignments") == 1
+
+        command.upgrade(alembic_cfg, "head")
+        assert _scalar(url, "SELECT count(*) FROM client_assignments WHERE is_primary") == 1
+
+    def test_downgrade_aborta_com_mensagem_acionavel_se_houver_colaborador(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        """Recriar o UNIQUE(client_id) sobre dois gerentes apagaria o acesso de alguém.
+
+        Escolher quem perde o acesso é decisão de dado, não de migration — então
+        ela ABORTA, diz quantas linhas sobram e qual consulta rodar.
+        """
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        responsible = _seed_manager_row(url)
+        collaborator = _seed_manager_row(url)
+        _execute(url, _INSERT_ASSIGNMENT, cid=client_id, uid=responsible, primary=True)
+        _execute(url, _INSERT_ASSIGNMENT, cid=client_id, uid=collaborator, primary=False)
+
+        with pytest.raises(sa.exc.DBAPIError) as exc:
+            command.downgrade(alembic_cfg, PRE_SHARED_PORTFOLIO_REV)
+
+        assert "Downgrade bloqueado" in str(exc.value)
+        # Nada foi apagado e o schema novo continua de pé.
+        assert _scalar(url, "SELECT count(*) FROM client_assignments") == 2
+        assert _columns(url, "client_assignments", "is_primary") == 1
+
+    def test_backfill_e_idempotente(self, alembic_cfg: Config, migrations_db_url: str) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        manager_id = _seed_manager_row(url)
+        _execute(url, _INSERT_ASSIGNMENT, cid=client_id, uid=manager_id, primary=True)
+
+        for _ in range(2):
+            command.downgrade(alembic_cfg, PRE_SHARED_PORTFOLIO_REV)
+            command.upgrade(alembic_cfg, "head")
+
+        assert _scalar(url, "SELECT count(*) FROM client_assignments") == 1
+        assert _scalar(url, "SELECT count(*) FROM client_assignments WHERE is_primary") == 1

@@ -88,7 +88,9 @@ async def _seed_client(
     await session.flush()
     if manager is not None:
         session.add(
-            ClientAssignment(client_id=client.id, user_id=manager.id, assigned_by=creator.id)
+            ClientAssignment(
+                client_id=client.id, user_id=manager.id, assigned_by=creator.id, is_primary=True
+            )
         )
         await session.flush()
     return client

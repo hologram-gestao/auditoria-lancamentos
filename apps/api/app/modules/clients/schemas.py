@@ -8,6 +8,9 @@ Princípios:
     - Update é PATCH (parcial): apenas campos enviados são alterados.
     - `responsible_manager` opcional — em teoria todo cliente tem assignment,
       mas a tela de listagem nunca deve quebrar se o registro estiver órfão.
+    - Carteira compartilhada (86e390kz8): `responsible_manager` é UM (o que
+      responde pelo cliente); `manager_count` diz quantos têm ACESSO; a lista
+      completa sai em `GET /clients/{id}/managers` (`ClientManagerResponse`).
 """
 
 from __future__ import annotations
@@ -78,10 +81,22 @@ class TestConnectionResponse(BaseModel):
 
 
 class AssignClientRequest(BaseModel):
-    """Body de POST /api/v1/clients/{id}/assign — admin reatribui o cliente."""
+    """Body de PATCH /api/v1/clients/{id}/assign — define o RESPONSÁVEL (86e390kz8).
+
+    Não remove o acesso de ninguém: quem era responsável continua vendo o
+    cliente como colaborador. Se o alvo ainda não tinha acesso, passa a ter.
+    """
 
     user_id: UUID = Field(
-        ..., description="ID do novo gerente responsável (deve ser manager ativo)."
+        ..., description="ID do gerente que passa a responder pelo cliente (manager ativo)."
+    )
+
+
+class AddClientManagerRequest(BaseModel):
+    """Body de POST /api/v1/clients/{id}/managers — concede ACESSO a um gerente."""
+
+    user_id: UUID = Field(
+        ..., description="ID do gerente (manager ativo) que passa a ver o cliente."
     )
 
 
@@ -100,6 +115,27 @@ class ManagerSummary(BaseModel):
     email: str
 
     model_config = {"from_attributes": True}
+
+
+class ClientManagerResponse(BaseModel):
+    """Uma pessoa com acesso ao cliente (86e390kz8).
+
+    Identidade ENXUTA (§3.15): só `{id, name, email}` do usuário, nunca a linha
+    de `users`. `is_responsible` marca o único responsável; `assigned_at` é
+    quando o acesso foi concedido.
+    """
+
+    id: UUID
+    name: str
+    email: str
+    is_responsible: bool
+    assigned_at: datetime
+
+
+class ClientManagerListResponse(BaseModel):
+    """Body de GET/POST/DELETE em /api/v1/clients/{id}/managers — a lista inteira."""
+
+    data: list[ClientManagerResponse]
 
 
 class ClientCategorySummary(BaseModel):
@@ -130,6 +166,11 @@ class ClientResponse(BaseModel):
     category: ClientCategorySummary | None = None
     # 86e36pm1z — cliente ENCERRADO (terminal): histórico só-leitura, escrita 409.
     closed_at: datetime | None = None
+    # 86e390kz8 — quantas pessoas têm ACESSO (responsável incluído). A lista
+    # mostra "Fulana +N" sem carregar os nomes de todo mundo em cada linha.
+    manager_count: int = Field(
+        0, ge=0, description="Pessoas com acesso ao cliente, responsável incluído."
+    )
 
     model_config = {"from_attributes": True}
 

@@ -759,6 +759,7 @@ class TestAuthorization:
                 client_id=scenario.client.id,
                 user_id=manager.id,
                 assigned_by=scenario.admin.id,
+                is_primary=True,
             )
         )
         entry = await _seed_entry(db_session, sess=scenario.session)

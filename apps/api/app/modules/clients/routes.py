@@ -4,7 +4,7 @@ S6 (BACK 3.1-3.5):
     - GET   /api/v1/clients                          (admin + manager)
     - POST  /api/v1/clients                          (admin + manager)
     - POST  /api/v1/clients/test-connection          (admin + manager)
-    - PATCH /api/v1/clients/{id}/assign              (admin only)
+    - PATCH /api/v1/clients/{id}/assign              define o RESPONSÁVEL (admin only)
     - PATCH /api/v1/clients/{id}                     (admin OR manager-da-carteira)
     - DELETE /api/v1/clients/{id}                    exclusão definitiva (admin-only) — 86e34jd1d
 
@@ -17,8 +17,13 @@ S7 (BACK 4.1-4.2):
     - PUT    /api/v1/clients/{id}/favorite            marca favorito de quem pede
     - DELETE /api/v1/clients/{id}/favorite            desmarca
 
+86e390kz8 (carteira compartilhada — N gerentes com acesso, UM responsável):
+    - GET    /api/v1/clients/{id}/managers            quem tem acesso (admin-only)
+    - POST   /api/v1/clients/{id}/managers            concede acesso a um gerente
+    - DELETE /api/v1/clients/{id}/managers/{user_id}  remove o acesso (não o responsável)
+
 RBAC dispatch:
-    - `require_admin` — assign.
+    - `EditClientDep` (admin pela matriz) + tenant — assign, managers.
     - `require_manager_or_admin` — list, create, test-connection.
     - `require_client_access(client_id)` — detalhe, sync-accounts,
       reconciliations, patch (já carrega o Client).
@@ -40,7 +45,6 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from app.core.authz import tenant_filter_client_id
 from app.core.dependencies import (
     AccessibleClientDep,
-    AdminDep,
     CurrentUserDep,
     DbSessionDep,
     EditClientDep,
@@ -53,9 +57,11 @@ from app.core.rate_limit import limiter, user_id_key_func
 from app.db.models import UserRole
 from app.modules.clients.repository import ClientRepository
 from app.modules.clients.schemas import (
+    AddClientManagerRequest,
     AssignClientRequest,
     ClientDetailResponse,
     ClientListResponse,
+    ClientManagerListResponse,
     ClientResponse,
     CreateClientRequest,
     ReconciliationSessionListResponse,
@@ -172,24 +178,84 @@ async def test_connection(
 
 
 # ----------------------------------------------------------------------
-# PATCH /{id}/assign — admin reatribui cliente
+# Carteira compartilhada (86e390kz8): quem tem ACESSO e quem RESPONDE
 # ----------------------------------------------------------------------
+#
+# Admin pela matriz (`EDIT_CLIENT` — a mesma célula de "editar dados do
+# cliente", §4.9) + tenant pelo `AccessibleClientDep` (leitura) ou
+# `OpenClientDep` (escrita: cliente ENCERRADO é 409). As quatro rotas entram
+# na lista canônica como DETAIL_PK. Ordem: vêm ANTES de `GET /{id}` e
+# `PATCH /{id}` — path estático depois do UUID.
+
+
+@router.get(
+    "/{client_id}/managers",
+    summary="Quem tem acesso ao cliente: responsável + colaboradores (admin-only).",
+)
+async def list_client_managers(
+    user: EditClientDep,
+    client: AccessibleClientDep,
+    service: ClientServiceDep,
+) -> ClientManagerListResponse:
+    del user
+    return ClientManagerListResponse(data=await service.list_client_managers(client.id))
+
+
+@router.post(
+    "/{client_id}/managers",
+    status_code=201,
+    summary=(
+        "Concede ACESSO ao cliente a um gerente ativo (admin-only). Ninguém é removido. "
+        "409 se o gerente já tem acesso; 400 se não é gerente ativo."
+    ),
+)
+async def add_client_manager(
+    payload: AddClientManagerRequest,
+    user: EditClientDep,
+    client: OpenClientDep,
+    service: ClientServiceDep,
+) -> ClientManagerListResponse:
+    managers = await service.add_client_manager(
+        client, user_id=payload.user_id, current_admin_id=UUID(user.id)
+    )
+    return ClientManagerListResponse(data=managers)
+
+
+@router.delete(
+    "/{client_id}/managers/{user_id}",
+    summary=(
+        "Remove o ACESSO de um gerente ao cliente (admin-only). 409 se ele é o "
+        "responsável — defina outro responsável antes; 404 se não tinha acesso."
+    ),
+)
+async def remove_client_manager(
+    user_id: UUID,
+    user: EditClientDep,
+    client: OpenClientDep,
+    service: ClientServiceDep,
+) -> ClientManagerListResponse:
+    del user
+    return ClientManagerListResponse(
+        data=await service.remove_client_manager(client, user_id=user_id)
+    )
 
 
 @router.patch(
     "/{client_id}/assign",
-    summary="Reatribui cliente a outro gerente (admin-only).",
+    summary=(
+        "Define o gerente RESPONSÁVEL pelo cliente (admin-only). Não remove o acesso de "
+        "ninguém: o responsável anterior continua como colaborador; se o alvo ainda não "
+        "tinha acesso, passa a ter."
+    ),
 )
 async def assign_client(
-    client_id: UUID,
     payload: AssignClientRequest,
-    admin: AdminDep,
+    user: EditClientDep,
+    client: OpenClientDep,
     service: ClientServiceDep,
 ) -> ClientResponse:
-    return await service.assign_client(
-        client_id,
-        new_user_id=payload.user_id,
-        current_admin_id=UUID(admin.id),
+    return await service.set_responsible_manager(
+        client, user_id=payload.user_id, current_admin_id=UUID(user.id)
     )
 
 

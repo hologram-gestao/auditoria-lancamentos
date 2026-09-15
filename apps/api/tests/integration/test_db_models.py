@@ -131,6 +131,7 @@ class TestClientAndAssignments:
             client_id=client.id,
             user_id=manager.id,
             assigned_by=admin.id,
+            is_primary=True,
         )
         db_session.add(assignment)
         await db_session.flush()
@@ -140,19 +141,72 @@ class TestClientAndAssignments:
         )
         assert loaded is not None
         assert loaded.client_id == client.id
+        assert loaded.is_primary is True
 
-    async def test_one_assignment_per_client(self, db_session: AsyncSession) -> None:
-        """Constraint UNIQUE em client_id — 1 cliente -> 1 manager."""
+    async def test_one_responsible_per_client(self, db_session: AsyncSession) -> None:
+        """Índice único PARCIAL `uq_client_assignments_primary` — 1 responsável por cliente."""
         admin = await _make_user(db_session, email="a2@test.com")
         m1 = User(name="M1", email="m1@test.com", password_hash=BCRYPT_FIXTURE, role="manager")
         m2 = User(name="M2", email="m2@test.com", password_hash=BCRYPT_FIXTURE, role="manager")
         db_session.add_all([m1, m2])
         await db_session.flush()
         client = await _make_client(db_session, created_by=admin.id)
-        db_session.add(ClientAssignment(client_id=client.id, user_id=m1.id, assigned_by=admin.id))
+        db_session.add(
+            ClientAssignment(
+                client_id=client.id, user_id=m1.id, assigned_by=admin.id, is_primary=True
+            )
+        )
         await db_session.flush()
-        # Tenta atribuir o mesmo client a outro manager
+        # Segundo RESPONSÁVEL no mesmo cliente: o banco recusa.
+        db_session.add(
+            ClientAssignment(
+                client_id=client.id, user_id=m2.id, assigned_by=admin.id, is_primary=True
+            )
+        )
+        with pytest.raises(IntegrityError):
+            await db_session.flush()
+
+    async def test_two_managers_share_a_client(self, db_session: AsyncSession) -> None:
+        """Carteira compartilhada (86e390kz8): responsável + colaborador convivem."""
+        admin = await _make_user(db_session, email="a3@test.com")
+        m1 = User(name="M1", email="m1b@test.com", password_hash=BCRYPT_FIXTURE, role="manager")
+        m2 = User(name="M2", email="m2b@test.com", password_hash=BCRYPT_FIXTURE, role="manager")
+        db_session.add_all([m1, m2])
+        await db_session.flush()
+        client = await _make_client(db_session, created_by=admin.id)
+        db_session.add(
+            ClientAssignment(
+                client_id=client.id, user_id=m1.id, assigned_by=admin.id, is_primary=True
+            )
+        )
         db_session.add(ClientAssignment(client_id=client.id, user_id=m2.id, assigned_by=admin.id))
+        await db_session.flush()
+
+        rows = (
+            await db_session.execute(
+                select(ClientAssignment).where(ClientAssignment.client_id == client.id)
+            )
+        ).scalars()
+        assert {(r.user_id, r.is_primary) for r in rows} == {(m1.id, True), (m2.id, False)}
+
+    async def test_same_manager_twice_is_rejected(self, db_session: AsyncSession) -> None:
+        """UNIQUE `(client_id, user_id)` — a mesma pessoa não entra duas vezes.
+
+        Sem ela, `resolve_client_access` (que usa `scalar_one_or_none` sobre o
+        par) estouraria com `MultipleResultsFound` em produção.
+        """
+        admin = await _make_user(db_session, email="a4@test.com")
+        m1 = User(name="M1", email="m1c@test.com", password_hash=BCRYPT_FIXTURE, role="manager")
+        db_session.add(m1)
+        await db_session.flush()
+        client = await _make_client(db_session, created_by=admin.id)
+        db_session.add(
+            ClientAssignment(
+                client_id=client.id, user_id=m1.id, assigned_by=admin.id, is_primary=True
+            )
+        )
+        await db_session.flush()
+        db_session.add(ClientAssignment(client_id=client.id, user_id=m1.id, assigned_by=admin.id))
         with pytest.raises(IntegrityError):
             await db_session.flush()
 

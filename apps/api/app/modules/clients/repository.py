@@ -16,12 +16,24 @@ from datetime import UTC, date, datetime
 from typing import Any, NamedTuple
 from uuid import UUID
 
-from sqlalchemy import String, and_, cast, delete, false, func, select, update
+from sqlalchemy import (
+    ColumnElement,
+    ScalarSelect,
+    String,
+    and_,
+    cast,
+    delete,
+    false,
+    func,
+    select,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
 from app.db.models import (
+    UQ_CLIENT_ASSIGNMENT_CLIENT_USER,
     UQ_USER_CLIENT_FAVORITE,
     Client,
     ClientAssignment,
@@ -53,6 +65,8 @@ class ClientRow(NamedTuple):
     is_favorite: bool = False
     #: Categoria do catálogo (86e34jd8m); `None` = sem categoria.
     category: ClientCategory | None = None
+    #: Quantas pessoas têm acesso ao cliente, responsável incluído (86e390kz8).
+    manager_count: int = 0
 
 
 class _FavoriteJoin(NamedTuple):
@@ -83,6 +97,46 @@ def _favorite_join_for(viewer_user_id: UUID | None) -> _FavoriteJoin:
     )
 
 
+def _responsible_join_clause() -> ColumnElement[bool]:
+    """`ON` do join de EXIBIÇÃO: só a linha do RESPONSÁVEL (86e390kz8).
+
+    Com N gerentes por cliente, um join sem essa restrição devolveria o mesmo
+    cliente N vezes — total certo (o count não passa pelo join), linhas
+    repetidas, paginação furada. O índice parcial garante no máximo uma linha
+    com `is_primary`, então o join continua 1:1 por construção.
+    """
+    return and_(ClientAssignment.client_id == Client.id, ClientAssignment.is_primary.is_(True))
+
+
+def _portfolio_exists(manager_id: UUID) -> ColumnElement[bool]:
+    """`EXISTS` sobre TODAS as linhas do cliente: o filtro da CARTEIRA.
+
+    Separado do join de exibição de propósito — são duas perguntas diferentes.
+    Se o filtro reusasse o join restrito ao responsável, o colaborador
+    (`is_primary = false`) deixaria de ver na lista um cliente que ele acessa.
+    É a mesma decisão de `resolve_client_access` projetada em `WHERE`: qualquer
+    linha `(client_id, user_id)` concede acesso.
+    """
+    portfolio = aliased(ClientAssignment)
+    return (
+        select(portfolio.id)
+        .where(portfolio.client_id == Client.id, portfolio.user_id == manager_id)
+        .correlate(Client)
+        .exists()
+    )
+
+
+def _manager_count_subquery() -> ScalarSelect[int]:
+    """Subquery escalar: quantas pessoas têm acesso ao cliente (responsável incluído)."""
+    access = aliased(ClientAssignment)
+    return (
+        select(func.count(access.id))
+        .where(access.client_id == Client.id)
+        .correlate(Client)
+        .scalar_subquery()
+    )
+
+
 class ClientRepository:
     """Operações de leitura/escrita sobre `clients` e `client_assignments`."""
 
@@ -107,8 +161,9 @@ class ClientRepository:
         Args:
             page/page_size: paginação 1-based.
             search: ILIKE em `clients.name` (case-insensitive).
-            manager_id: se não-None, filtra por `client_assignments.user_id`
-                (RBAC do manager). Para admin, passar `None`.
+            manager_id: se não-None, filtra pela CARTEIRA — `EXISTS` em
+                `client_assignments` por `(client_id, user_id)`, responsável ou
+                colaborador (86e390kz8). Para admin, passar `None`.
             tenant_client_id: se não-None, restringe ao tenant do usuário
                 (`scope='client'`). Tem PRECEDÊNCIA sobre `manager_id` — um
                 usuário de cliente não tem carteira, tem tenant.
@@ -142,13 +197,16 @@ class ClientRepository:
                 recon_count_sq.label("recon_count"),
                 favorite.is_favorite,
                 ClientCategory,
+                _manager_count_subquery().label("manager_count"),
             )
-            .outerjoin(ClientAssignment, ClientAssignment.client_id == Client.id)
+            # Só o RESPONSÁVEL entra no join de exibição (86e390kz8) — o join
+            # continua 1:1 e o cliente sai uma vez, com N gerentes ou com um.
+            .outerjoin(ClientAssignment, _responsible_join_clause())
             .outerjoin(manager, manager.id == ClientAssignment.user_id)
             .outerjoin(favorite.table, favorite.on_clause)
             .outerjoin(ClientCategory, ClientCategory.id == Client.category_id)
         )
-        count_base = select(func.count(Client.id.distinct())).select_from(Client)
+        count_base = select(func.count(Client.id)).select_from(Client)
 
         if tenant_client_id is not None:
             # S5/R3: usuário de cliente enxerga só o PRÓPRIO tenant — filtro na
@@ -156,12 +214,13 @@ class ClientRepository:
             base = base.where(Client.id == tenant_client_id)
             count_base = count_base.where(Client.id == tenant_client_id)
         elif manager_id is not None:
-            # Para manager: filtra clientes da carteira via assignment direto.
-            # `outerjoin` acima já está montado, mas o WHERE força inner-equivalent.
-            base = base.where(ClientAssignment.user_id == manager_id)
-            count_base = count_base.join(
-                ClientAssignment, ClientAssignment.client_id == Client.id
-            ).where(ClientAssignment.user_id == manager_id)
+            # Para manager: a CARTEIRA é qualquer linha dele no cliente —
+            # responsável OU colaborador. Filtro por EXISTS, independente do join
+            # de exibição (que é só do responsável): sem essa separação o
+            # colaborador sumiria da própria lista.
+            in_portfolio = _portfolio_exists(manager_id)
+            base = base.where(in_portfolio)
+            count_base = count_base.where(in_portfolio)
 
         if search:
             term = f"%{search.strip().lower()}%"
@@ -192,6 +251,7 @@ class ClientRepository:
                 reconciliation_count=int(row[2] or 0),
                 is_favorite=bool(row[3]),
                 category=row[4],
+                manager_count=int(row[5] or 0),
             )
             for row in result.all()
         ]
@@ -223,8 +283,9 @@ class ClientRepository:
                 recon_count_sq.label("recon_count"),
                 favorite.is_favorite,
                 ClientCategory,
+                _manager_count_subquery().label("manager_count"),
             )
-            .outerjoin(ClientAssignment, ClientAssignment.client_id == Client.id)
+            .outerjoin(ClientAssignment, _responsible_join_clause())
             .outerjoin(manager, manager.id == ClientAssignment.user_id)
             .outerjoin(favorite.table, favorite.on_clause)
             .outerjoin(ClientCategory, ClientCategory.id == Client.category_id)
@@ -239,6 +300,7 @@ class ClientRepository:
             reconciliation_count=int(row[2] or 0),
             is_favorite=bool(row[3]),
             category=row[4],
+            manager_count=int(row[5] or 0),
         )
 
     async def get_by_id(self, client_id: UUID) -> Client | None:
@@ -246,12 +308,45 @@ class ClientRepository:
         result = await self._session.execute(select(Client).where(Client.id == client_id))
         return result.scalar_one_or_none()
 
-    async def get_assignment(self, client_id: UUID) -> ClientAssignment | None:
-        """Retorna o assignment único do cliente (UNIQUE em `client_id`)."""
+    async def get_primary_assignment(self, client_id: UUID) -> ClientAssignment | None:
+        """Linha do RESPONSÁVEL (no máximo uma — índice parcial `is_primary`)."""
         result = await self._session.execute(
-            select(ClientAssignment).where(ClientAssignment.client_id == client_id)
+            select(ClientAssignment).where(
+                ClientAssignment.client_id == client_id,
+                ClientAssignment.is_primary.is_(True),
+            )
         )
         return result.scalar_one_or_none()
+
+    async def get_assignment_for_user(
+        self, client_id: UUID, user_id: UUID
+    ) -> ClientAssignment | None:
+        """Vínculo de UMA pessoa com o cliente (no máximo um — UNIQUE do par).
+
+        Substitui o antigo `get_assignment(client_id)`, que filtrava só por
+        cliente com `scalar_one_or_none()` e estouraria `MultipleResultsFound`
+        na primeira carteira com dois gerentes.
+        """
+        result = await self._session.execute(
+            select(ClientAssignment).where(
+                ClientAssignment.client_id == client_id,
+                ClientAssignment.user_id == user_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_assignments_with_users(
+        self, client_id: UUID
+    ) -> Sequence[tuple[ClientAssignment, User]]:
+        """Todos com acesso ao cliente: responsável primeiro, depois por nome."""
+        stmt = (
+            select(ClientAssignment, User)
+            .join(User, User.id == ClientAssignment.user_id)
+            .where(ClientAssignment.client_id == client_id)
+            .order_by(ClientAssignment.is_primary.desc(), User.name.asc(), User.id.asc())
+        )
+        result = await self._session.execute(stmt)
+        return [(row[0], row[1]) for row in result.all()]
 
     async def get_category_by_id(self, category_id: UUID) -> ClientCategory | None:
         """Existência da categoria ao criar/editar cliente (86e34jd8m)."""
@@ -405,6 +500,71 @@ class ClientRepository:
         self._session.add(assignment)
         await self._session.flush()
         await self._session.refresh(assignment)
+
+    # --------------------- CARTEIRA COMPARTILHADA (86e390kz8) ----------
+
+    async def add_assignment_if_absent(
+        self, *, client_id: UUID, user_id: UUID, assigned_by: UUID
+    ) -> bool:
+        """Concede acesso (colaborador). `False` se a pessoa JÁ tinha.
+
+        `ON CONFLICT DO NOTHING` na UNIQUE `(client_id, user_id)`: dois cliques
+        (ou duas abas) não viram erro nem linha duplicada — a garantia é do
+        banco. O `RETURNING` só devolve id quando inseriu de fato, e é isso que
+        distingue "adicionei" de "já estava".
+        """
+        stmt = (
+            pg_insert(ClientAssignment)
+            .values(
+                client_id=client_id,
+                user_id=user_id,
+                assigned_by=assigned_by,
+                is_primary=False,
+            )
+            .on_conflict_do_nothing(constraint=UQ_CLIENT_ASSIGNMENT_CLIENT_USER)
+            .returning(ClientAssignment.id)
+        )
+        inserted_id = (await self._session.execute(stmt)).scalar_one_or_none()
+        await self._session.flush()
+        return inserted_id is not None
+
+    async def set_primary_assignment(self, *, client_id: UUID, user_id: UUID) -> None:
+        """Torna `user_id` (que JÁ tem acesso) o responsável; ninguém é removido.
+
+        Rebaixa o responsável atual ANTES de promover, e na mesma transação: o
+        índice único parcial é checado por statement, então promover primeiro
+        deixaria dois `is_primary` por um instante e estouraria. Não mexe em
+        `assigned_by`/`assigned_at` — a linha continua dizendo quem concedeu o
+        ACESSO e quando; a promoção é outro evento.
+        """
+        s = self._session
+        await s.execute(
+            update(ClientAssignment)
+            .where(
+                ClientAssignment.client_id == client_id,
+                ClientAssignment.is_primary.is_(True),
+            )
+            .values(is_primary=False)
+        )
+        await s.execute(
+            update(ClientAssignment)
+            .where(
+                ClientAssignment.client_id == client_id,
+                ClientAssignment.user_id == user_id,
+            )
+            .values(is_primary=True)
+        )
+        await s.flush()
+
+    async def delete_assignment(self, *, client_id: UUID, user_id: UUID) -> None:
+        """Remove o acesso de UMA pessoa. Core `DELETE` — relationships são `lazy="raise"`."""
+        await self._session.execute(
+            delete(ClientAssignment).where(
+                ClientAssignment.client_id == client_id,
+                ClientAssignment.user_id == user_id,
+            )
+        )
+        await self._session.flush()
 
     # ------------------------- S7: cache L1 ---------------------------
 

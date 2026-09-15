@@ -167,7 +167,11 @@ async def _seed_world(db: AsyncSession, *, processing: bool = False) -> _World:
     w.manager = await _seed_user(db, email=MANAGER_EMAIL, role=UserRole.MANAGER)
     w.cli_a = await _seed_client(db, name="Cliente Fechável A", creator=w.admin)
     w.cli_b = await _seed_client(db, name="Cliente Aberto B", creator=w.admin)
-    db.add(ClientAssignment(client_id=w.cli_a.id, user_id=w.manager.id, assigned_by=w.admin.id))
+    db.add(
+        ClientAssignment(
+            client_id=w.cli_a.id, user_id=w.manager.id, assigned_by=w.admin.id, is_primary=True
+        )
+    )
     tenant_manager = await _seed_user(
         db,
         email=TENANT_MANAGER_EMAIL,

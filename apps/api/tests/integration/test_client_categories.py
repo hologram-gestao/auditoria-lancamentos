@@ -81,7 +81,11 @@ async def _seed_client(
     )
     session.add(client)
     await session.flush()
-    session.add(ClientAssignment(client_id=client.id, user_id=creator.id, assigned_by=creator.id))
+    session.add(
+        ClientAssignment(
+            client_id=client.id, user_id=creator.id, assigned_by=creator.id, is_primary=True
+        )
+    )
     await session.flush()
     return client
 
