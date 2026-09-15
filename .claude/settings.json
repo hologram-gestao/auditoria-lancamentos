@@ -1,0 +1,149 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(**)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(node *)",
+      "Bash(python3 *)",
+      "Bash(pip *)",
+      "Bash(npm *)",
+      "Bash(npx *)",
+      "Bash(ruff *)",
+      "Bash(make *)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(curl * | bash)",
+      "Bash(wget * | bash)",
+      "Bash(git push *)",
+      "Write(.env)",
+      "Write(*.pem)",
+      "Write(*.key)",
+      "Read(.env)",
+      "Read(**/.env)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/id_rsa)",
+      "Read(//~/.ssh/**)",
+      "Read(//~/.aws/**)",
+      "Read(//~/.config/gh/**)",
+      "Read(//~/.claude/.credentials.json)",
+      "Bash(cat *.env*)",
+      "Bash(cat .env*)",
+      "Bash(head *.env*)",
+      "Bash(tail *.env*)",
+      "Bash(less *.env*)",
+      "Bash(more *.env*)",
+      "Bash(grep * .env*)",
+      "Bash(grep * *.env*)",
+      "Bash(strings *.env*)",
+      "Bash(xxd *.env*)",
+      "Bash(od *.env*)",
+      "Read(.env.local*)",
+      "Read(**/.env.local*)",
+      "Read(.env.production*)",
+      "Read(**/.env.production*)",
+      "Read(.env.prod*)",
+      "Read(**/.env.prod*)",
+      "Read(.env.development*)",
+      "Read(**/.env.development*)",
+      "Read(.env.dev*)",
+      "Read(**/.env.dev*)",
+      "Read(.env.staging*)",
+      "Read(**/.env.staging*)",
+      "Read(.env.stage*)",
+      "Read(**/.env.stage*)",
+      "Read(.env.test*)",
+      "Read(**/.env.test*)",
+      "Read(.env.secret*)",
+      "Read(**/.env.secret*)",
+      "Read(.env.secrets*)",
+      "Read(**/.env.secrets*)",
+      "Read(.env.private*)",
+      "Read(**/.env.private*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/post-write.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/scope-guard.sh",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/no-commit-artifacts.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/no-commit-secrets.sh",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/learning-reminder.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/subagent-stop.sh",
+            "async": true,
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/session-start.sh",
+            "async": true,
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
