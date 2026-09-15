@@ -83,6 +83,13 @@ uv run --extra dev pytest -v --cov=app --cov-report=term-missing
 
   Exatamente estes 3 e nada além: qualquer OUTRA falha em `test_alerting.py` é
   regressão real — a lista não é desculpa para ignorar o arquivo.
+
+- **Teste flaky é BUG a deflakizar, nunca a ignorar.** Passou local e falhou no CI (ou
+  alternou entre runs) significa que o teste depende de algo que não controla. Causas que
+  já apareceram aqui: timestamp com resolução de milissegundo, ordem de fixture, e rede
+  mockada pela metade. Rode o arquivo isolado algumas vezes para confirmar, ache a causa e
+  documente-a no commit do conserto — marcar como esperado esconde a falha até ela voltar
+  em produção.
 - **Sem Docker e sem `TEST_DATABASE_URL`**, a suíte de integração falha na subida do
   container — isso não é regressão de código, é o gate parcial do passo 0. Rode ao
   menos `uv run --extra dev pytest tests/unit -q --no-cov` e reporte como PARCIAL.
@@ -121,6 +128,35 @@ do portão.
 ```bash
 gh run view <run-id> --log-failed
 ```
+
+## 4.1 O commit tem portão próprio: os hooks locais
+
+`husky` + `lint-staged` + `commitlint` rodam no `git commit`. **`--no-verify` é
+proibido**: o hook que falha local é a mesma verificação que vai falhar no CI, então
+contorná-lo só adia o vermelho. Conserte e commite de novo.
+
+Dois detalhes que confundem:
+
+- O `lint-staged` roda `prettier --write` nos arquivos em stage. Em markdown, isso
+  **reescreve** `_` e `*` fora de crase (`AAD_*` vira `AAD__`, `crypto_service` vira
+  `crypto*service`). Identificador com underscore vai entre crases, sempre.
+- Arquivo novo em `.claude/` precisa de `git add -f` (o `.gitignore` da raiz ignora o
+  diretório inteiro). O `lint-staged` imprime um `[FAILED]` cosmético ao re-adicionar
+  esses caminhos — o commit passa. Confirme com `git log -1 --oneline`.
+
+## 4.2 Comandos vizinhos (dev local)
+
+Nenhum deles é parte do gate, mas a suíte de integração precisa do banco de pé:
+
+```bash
+pnpm infra:up     # docker compose: postgres (sem Redis desde a FASE 0)
+pnpm db:migrate   # alembic upgrade head
+pnpm db:seed      # python -m scripts.seed_dev
+pnpm dev:api      # uvicorn com reload
+pnpm dev:web      # Next dev
+```
+
+Migration nova tem roteiro próprio: skill `migration`.
 
 ## 5. Como reportar o resultado
 

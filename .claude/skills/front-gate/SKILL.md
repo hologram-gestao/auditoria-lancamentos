@@ -175,6 +175,16 @@ viewportSize().width` (padrão em `spec:1638-1643` e `:1838-1853`). Antes de med
   marca o fundo com `aria-hidden` mantendo focáveis (`aria-hidden-focus`). O `Select`
   do Radix não tem `modal={false}`: no e2e, exercite-o aberto e rode `analyze()`
   (`spec:888`) com ele FECHADO (86e34jd8m).
+- **TypeScript strict, com `noUncheckedIndexedAccess`** (`apps/web/tsconfig.json`): indexar
+  array ou dicionário devolve `T | undefined`, então acesso por índice pede verificação
+  antes do uso. É o que impede um `.map()` sobre resultado de API vir a explodir em runtime.
+  O gate que prova é o `pnpm type-check:web` da skill `gate`.
+- **Server component por padrão; `"use client"` só quando precisa** de estado, efeito,
+  evento ou hook de browser. Componente que só renderiza dado não leva a diretiva — ela
+  empurra o componente e toda a sua árvore para o bundle do cliente.
+  ```bash
+  grep -rln '"use client"' apps/web/src/components | wc -l   # cresce só quando há interação nova
+  ```
 - **Fetch client-side só via TanStack Query**: hooks em `hooks/use-*.ts` (11 arquivos),
   fetchers em `lib/api/*.ts`. Nunca `useEffect + fetch`.
   ```bash
