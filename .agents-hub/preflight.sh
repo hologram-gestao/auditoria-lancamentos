@@ -8,8 +8,13 @@
 set -uo pipefail
 fail() { echo "$1"; exit 1; }
 
+# ── Dependência dos hooks do .claude/ ────────────────────────────────────────
+# Os hooks leem o payload JSON via `_json.sh`, que usa python3 (e NÃO jq: jq não está
+# instalado nesta máquina, e a versão anterior dos hooks falhava ABERTA em silêncio por
+# causa disso — `jq ... 2>/dev/null` devolvia vazio e o hook fazia `exit 0`).
+command -v python3 >/dev/null || fail "python3 ausente — os hooks do .claude/ dependem dele (ver .claude/hooks/_json.sh)."
+
 # Exemplos (ative os que fizerem sentido):
-# command -v jq >/dev/null || fail "jq ausente — instale jq (os hooks usam)."
 # gcloud auth print-access-token >/dev/null 2>&1 || fail "cloud CLI não logado."
 # [ -x api/.venv/bin/python ] || fail "venv do backend ausente."
 # [ -d web/node_modules ] || fail "node_modules do frontend ausente."
