@@ -167,7 +167,9 @@
       **1** linha em `access_audit`.
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**44** hoje) **com teste negativo cross-tenant**. Essa lista é o denominador
+      (**45** hoje — o arquivo é a fonte, confira com
+      `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
+      **com teste negativo cross-tenant**. Essa lista é o denominador
       da métrica de isolamento — endpoint fora dela é buraco que ninguém mede.
     - **Identidade de usuário em response é ENXUTA e mascarada por escopo**
       (86e2n39f1): expor QUEM fez algo devolve só `{name, email}` — nunca a
@@ -617,6 +619,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.24 — 15/09/2026. **O QA do épico de skills achou a §3.15 desatualizada em 1 endpoint, e a contagem agora vem com o comando que a confere.** A lista canônica tem **45** entradas desde a rota `close` (Sprint 6, 86e36pm1z); a §3.15 ainda dizia 44, enquanto o rodapé da v1.21 já dizia 45 — o primer se contradizia havia cinco dias. A correção não é só o número: a §3.15 passa a citar o `grep` que responde a pergunta no arquivo, do mesmo jeito que a §4.1 passou a apontar para as constantes de AAD na v1.22. Número solto envelhece calado; número com comando ao lado é conferível em dez segundos. O resto da varredura passou: **152 âncoras de arquivo e linha e 413 identificadores** das nove skills conferidos contra o código, com **um** caminho errado (dois componentes de revisão sem o segmento `reconciliations/`, corrigidos na `front-gate`). Nenhuma outra seção mudou._
 
 _Versão 1.23 — 15/09/2026. **O primer devolveu ao dono o que era procedimento (86e2ufky2, fecho do épico de skills).** Com as nove skills na `main`, quatro blocos que descreviam COMO fazer viraram ponteiro para quem agora os detalha: a §7 Frontend inteira e o bloco de CI/CD verde (skills `front-gate` e `gate`), a §9 de comandos (`gate`, com `migration` e `sprint-preflight` ao lado) e o roteiro de fechamento da §12 (`entrega`). A §5 perdeu a narrativa do cruzamento e a nomenclatura do Omie (skills `matcher` e `omie`) mas **manteve as leis numéricas** — 0,01 BRL, os 3 dias fixos, o período expandido, o 1-para-1, a idempotência e o "IA nunca decide match" — porque são violáveis por quem nunca abre o matcher, escrevendo um endpoint ou uma tela. Resultado: **759 para 665 linhas, 77.748 para 68.959 bytes**, 11% a menos em toda sessão. **§3 e §4 estão byte a byte idênticas**, e a §6 só ganhou dois ponteiros: são invariantes e conduta, que precisam valer sem gatilho nenhum. Duas decisões do Pedro no caminho: o rodapé de versões fica no arquivo (é 26% dele, mas serve de contexto recente) e a §6 não é condensada. Antes de cortar, quatro regras órfãs foram para as skills que passaram a hospedá-las — `noUncheckedIndexedAccess` e server component por padrão na `front-gate`; teste flaky, hooks locais com a proibição do `--no-verify` e os comandos de banco na `gate` — porque mover regra antes de existir destino é perder a regra._
 

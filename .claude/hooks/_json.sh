@@ -10,8 +10,9 @@
 # inerte exatamente por isso. Um bloqueio que não bloqueia é pior que nenhum: dá a
 # sensação de proteção sem a proteção.
 #
-# `python3` é a escolha em vez de `jq` por estar garantido (o backend é Python 3.12 e
-# o binário mora em /usr/bin), enquanto `jq` é dependência externa que ninguém instala.
+# `python3` é a escolha em vez de `jq` por já existir no sistema (`/usr/bin/python3`,
+# independente do 3.12 que o backend usa no venv), enquanto `jq` é dependência externa
+# que ninguém instala. O `.agents-hub/preflight.sh` checa esse binário antes do run.
 #
 # Uso:  source "$(dirname "${BASH_SOURCE[0]}")/_json.sh"
 #       CMD=$(json_get "$INPUT" tool_input.command)
