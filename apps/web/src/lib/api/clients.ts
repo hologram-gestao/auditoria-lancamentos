@@ -14,8 +14,10 @@
  *     `feedback_pydantic` — strict in / lenient out).
  */
 import type {
+  AddClientManagerRequest,
   BankAccountResponse,
   ClientCategorySummary as ClientCategorySummaryContract,
+  ClientManagerResponse,
   ClientDetailResponse,
   ClientListResponse as ClientListContract,
   ClientResponse,
@@ -68,9 +70,15 @@ export interface TestConnectionResult {
   message: string;
 }
 
-export interface AssignClientPayload {
-  user_id: string;
-}
+/**
+ * Body de `PATCH /clients/{id}/assign` — define o RESPONSÁVEL (86e390m4c).
+ * Não remove o acesso de ninguém: o responsável anterior vira colaborador.
+ */
+export type AssignClientPayload = AddClientManagerRequest;
+
+/** Uma pessoa com acesso ao cliente (contrato: `ClientManagerResponse`). */
+export type ClientManager = ClientManagerResponse;
+export type AddClientManagerPayload = AddClientManagerRequest;
 
 function buildQuery(params: ListClientsParams): string {
   const sp = new URLSearchParams();
@@ -132,8 +140,41 @@ export async function updateClient(id: string, payload: UpdateClientPayload): Pr
   return apiPatch<Client>(`/api/v1/clients/${id}`, payload);
 }
 
+/**
+ * Define o gerente RESPONSÁVEL (86e390m4c). Admin-only; 400 se o alvo não é
+ * gerente ativo; 409 em cliente encerrado. Quem era responsável CONTINUA com
+ * acesso — para tirar alguém, `removeClientManager`.
+ */
 export async function assignClient(id: string, payload: AssignClientPayload): Promise<Client> {
   return apiPatch<Client>(`/api/v1/clients/${id}/assign`, payload);
+}
+
+// ---------------------------------------------------------------------------
+// Carteira compartilhada (86e390m4c) — quem tem ACESSO ao cliente
+// ---------------------------------------------------------------------------
+//
+// Os três respondem `{ data: ClientManager[] }` (envelope de UMA chave, que o
+// `client.ts` desempacota): a lista inteira, já na ordem da tela — responsável
+// primeiro, depois por nome.
+
+export async function listClientManagers(id: string): Promise<ClientManager[]> {
+  return apiGet<ClientManager[]>(`/api/v1/clients/${id}/managers`);
+}
+
+/** Concede acesso a um gerente ativo. 409 (`CONFLICT`) se ele já tem acesso. */
+export async function addClientManager(
+  id: string,
+  payload: AddClientManagerPayload,
+): Promise<ClientManager[]> {
+  return apiPost<ClientManager[]>(`/api/v1/clients/${id}/managers`, payload);
+}
+
+/**
+ * Remove o acesso de um gerente. 409 (`CONFLICT`) se ele é o responsável — a
+ * tela nem oferece a ação nesse caso (§4.9); 404 se não tinha acesso.
+ */
+export async function removeClientManager(id: string, userId: string): Promise<ClientManager[]> {
+  return apiDelete<ClientManager[]>(`/api/v1/clients/${id}/managers/${userId}`);
 }
 
 // ---------------------------------------------------------------------------

@@ -14,21 +14,26 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
+  addClientManager,
   assignClient,
   createClient,
   closeClient,
   deleteClient,
   favoriteClient,
   getClientDetail,
+  listClientManagers,
   listClients,
   listReconciliations,
+  removeClientManager,
   syncClientAccounts,
   testConnection,
   unfavoriteClient,
   updateClient,
+  type AddClientManagerPayload,
   type AssignClientPayload,
   type Client,
   type ClientDetail,
+  type ClientManager,
   type ClientListResponse,
   type CreateClientPayload,
   type ListClientsParams,
@@ -45,6 +50,8 @@ export const clientsKeys = {
   lists: ['clients', 'list'] as const,
   list: (params: ListClientsParams) => ['clients', 'list', params] as const,
   detail: (id: string) => ['clients', 'detail', id] as const,
+  /** Quem tem acesso ao cliente (86e390m4c) — responsável + colaboradores. */
+  managers: (id: string) => ['clients', 'managers', id] as const,
   /** Prefixo de TODAS as páginas/filtros da lista de um cliente — use este
    *  para invalidar (o `queryKey` completo inclui os `params` e nunca casaria
    *  com um `invalidateQueries` de outra combinação de filtros). */
@@ -87,12 +94,55 @@ export function useUpdateClient(id: string) {
   });
 }
 
+/**
+ * Define o RESPONSÁVEL (86e390m4c). Invalida a raiz: a lista muda o nome da
+ * coluna e a seção de gerentes troca o selo — ninguém é removido.
+ */
 export function useAssignClient(id: string) {
   const qc = useQueryClient();
   return useMutation<Client, Error, AssignClientPayload>({
     mutationFn: (payload) => assignClient(id, payload),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: clientsKeys.all });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Carteira compartilhada (86e390m4c)
+// ---------------------------------------------------------------------------
+
+export function useClientManagers(id: string, opts: { enabled?: boolean } = {}) {
+  return useQuery<ClientManager[]>({
+    queryKey: clientsKeys.managers(id),
+    queryFn: () => listClientManagers(id),
+    enabled: id.length > 0 && (opts.enabled ?? true),
+  });
+}
+
+/**
+ * Adicionar/remover acesso: o servidor devolve a lista inteira, que entra
+ * direto no cache da seção (sem refetch); a LISTAGEM é invalidada porque o
+ * `manager_count` de cada linha muda ("Fulana +1").
+ */
+export function useAddClientManager(id: string) {
+  const qc = useQueryClient();
+  return useMutation<ClientManager[], Error, AddClientManagerPayload>({
+    mutationFn: (payload) => addClientManager(id, payload),
+    onSuccess: (managers) => {
+      qc.setQueryData(clientsKeys.managers(id), managers);
+      void qc.invalidateQueries({ queryKey: clientsKeys.lists });
+    },
+  });
+}
+
+export function useRemoveClientManager(id: string) {
+  const qc = useQueryClient();
+  return useMutation<ClientManager[], Error, string>({
+    mutationFn: (userId) => removeClientManager(id, userId),
+    onSuccess: (managers) => {
+      qc.setQueryData(clientsKeys.managers(id), managers);
+      void qc.invalidateQueries({ queryKey: clientsKeys.lists });
     },
   });
 }

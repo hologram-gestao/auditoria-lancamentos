@@ -22,6 +22,10 @@
  * devolve os favoritos de quem pede no topo — a tela não reordena nada, e o
  * favorito da página 3 sobe para a 1 porque a ordem é do SELECT.
  *
+ * Carteira compartilhada (86e390m4c): a coluna "Gerente Responsável" continua
+ * mostrando UM nome (o responsável); um "+N" discreto ao lado sinaliza que há
+ * mais gente com acesso, sem carregar nomes em cada linha.
+ *
  * Click handler na linha leva pra /clientes/{id} (detalhe — S7). Os botões
  * de ação dentro da linha usam stopPropagation pra não disparar a navegação.
  */
@@ -37,6 +41,7 @@ import { ClientStatusBadge } from '@/components/features/clients/client-status-b
 import { CreateClientModal } from '@/components/features/clients/create-client-modal';
 import { EditClientModal } from '@/components/features/clients/edit-client-modal';
 import { FavoriteToggle } from '@/components/features/clients/favorite-toggle';
+import { ManagerAccessHint } from '@/components/features/clients/manager-access-hint';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -233,8 +238,9 @@ export default function ClientesPage() {
                     )}
                   </TableCell>
                   {isAdmin && (
-                    <TableCell className="text-muted-foreground">
+                    <TableCell className="text-muted-foreground whitespace-nowrap">
                       {c.responsible_manager?.name ?? '—'}
+                      <ManagerAccessHint managerCount={c.manager_count} />
                     </TableCell>
                   )}
                   <TableCell>
