@@ -324,35 +324,31 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
 
 ## 5. Regras Invioláveis de Domínio (Matching)
 
+> **Como o cruzamento decide** (passadas por proximidade de data, desempate por valor →
+> afinidade de fornecedor → data, o caso real que originou a regra, e o protocolo para
+> mudar o motor sem regredir): skill **`matcher`**. **Nomenclatura e sinal do Omie**
+> (natureza `D`/`C` na conta corrente contra `P`/`R` no cartão, `cSituacao` canônico
+> contra o filtro em UPPERCASE, o `"PREVISTO"` que não existe como filtro): skill
+> **`omie`**.
+
 1. **Tolerância de valor:** `|a − b| ≤ 0.01 BRL`. Hard-coded, não parametrizável.
-2. **Tolerância de data:** **fixa, não parametrizável** (FASE 1) — constante `DATE_DIVERGENCE_RANGE = 3` no matcher. Classificação por `|days_diff|`: `== 0` → `conciliado` (data exata); `1–3` → `conciliado_data_divergente` (+ anomalia `wrong_date`); `> 3` → sem match (linha fica `sem_omie`). Vale para conta corrente **e** cartão. O request não aceita mais `date_tolerance_days` (ignorado se enviado); a coluna homônima é mantida só por histórico e novas sessões gravam 0.
-3. **Período Omie expandido:** `[period_start − DATE_DIVERGENCE_RANGE, period_end + DATE_DIVERGENCE_RANGE]` (3 dias fixos) — vale no processamento (`job.py`), na tela de revisão (`/available-omie-entries`) e no export.
-4. **Um OmieEntry só matcha uma Movement.** Controle via `set(used_ids)` durante o cruzamento.
-5. **Cruzamento em passadas por proximidade de data.** O matcher percorre
-   `|days_diff|` de `0` até `DATE_DIVERGENCE_RANGE`: fecha **todos** os pares de
-   data exata, depois os de 1 dia, e assim por diante. Dentro de uma passada,
-   as linhas do arquivo decidem em ordem `(transaction_date, id)` e o desempate
-   entre candidatos é menor `|amount_diff|` → **maior afinidade de fornecedor**
-   → `date asc`. **A ordem de leitura do arquivo não afeta mais o resultado.**
-   A afinidade (`processing/name_affinity.py`) conta quantos tokens
-   significativos do fornecedor Omie aparecem na descrição do extrato — sem
-   limiar, sem fuzzy e **sem IA** (§5.9). É **só desempate, nunca exclusão**:
-   nome que não bate jamais impede um match, porque descrição de extrato é texto
-   sujo e transformá-la em `sem_omie` trocaria um falso positivo por outro pior.
-   Só o extrato traz o nome — títulos de `ListarContasPagar/Receber` devolvem
-   apenas o código do cliente, então para eles a afinidade é sempre 0. Fornecedor
-   e descrição trafegam **em memória** e não são persistidos nem logados (§4.5).
-   O motivo é um defeito real: com o laço guloso antigo (uma passada só, cada
-   linha pegando seu melhor candidato livre), uma linha cuja contraparte não
-   casa por valor — tipicamente porque o pagamento está **dividido** em duas
-   parcelas no Omie e o cruzamento é 1-para-1 — levava o lançamento de outra
-   linha dentro dos 3 dias. A linha roubada virava `sem_omie` e a qualificação
-   acusava incoerência na primeira, por comparar fornecedores diferentes: **um
-   pareamento errado gerava duas anomalias falsas.**
-6. **Normalização Omie:** `cNatureza='D'` → valor negativo; `cNatureza='C'` → positivo. ⚠️ **Cartão usa OUTRA convenção (fixture real, 21/08/2026):** extrato de conta `CR` devolve natureza `'P'` (pagamento) / `'R'` (recebimento) com `nValorDocumento` **JÁ SINALIZADO** (P negativo, R positivo). `LancamentoExtrato.signed_amount` cobre as duas por construção — só inverte `'D'`; **inverter qualquer outra natureza quebraria o cartão**.
-7. **Status Omie considerados no matching** (canônico no DB, camelCase): `Conciliado`, `Atrasado`, `Previsto`. Ignorar cancelados. **Atenção à nomenclatura mista da Omie:** o canônico vem de `ListarExtrato.cSituacao`; já o FILTRO `filtrar_por_status` em `ListarContasPagar/Receber` usa o enum oficial Omie em UPPERCASE (`ATRASADO`, `AVENCER`, etc) — `"PREVISTO"` NÃO é valor válido como filtro, devolve 5xx. Mapping: filtro `AVENCER` → canônico `Previsto`. ⚠️ Lançamento **recém-criado** volta no extrato **sem `cSituacao`** (evidência 21/08/2026) — o campo é opcional no schema e vira `""` no `OmieMovement`: não casa com nenhum canônico e não dispara regra.
-8. **Idempotência:** `UNIQUE(client_id, omie_conta_id, reference_month, file_hash)`. Duplicata = HTTP 409 `DUPLICATE_FILE`.
-9. **IA nunca decide match.** IA só extrai do arquivo. Cruzamento é código determinístico.
+2. **Tolerância de data:** **fixa, não parametrizável** — `DATE_DIVERGENCE_RANGE = 3` no
+   matcher. Classificação por `|days_diff|`: `== 0` → `conciliado`; `1–3` →
+   `conciliado_data_divergente` (+ anomalia `wrong_date`); `> 3` → sem match
+   (`sem_omie`). Vale para conta corrente **e** cartão. O request não aceita mais
+   `date_tolerance_days`; a coluna homônima é histórico e novas sessões gravam 0.
+3. **Período Omie expandido** em `DATE_DIVERGENCE_RANGE` nas duas pontas — e isso vale em
+   **cinco pontos de chamada, quatro consumidores**: processamento, cache da
+   qualificação, tela de revisão, export e detalhe de lançamento. Mudar num só cria
+   divergência silenciosa entre o que o matcher viu e o que a tela mostra.
+4. **Um OmieEntry só matcha uma Movement** — cruzamento 1-para-1, garantido no banco pelo
+   índice parcial `ix_recon_file_entry_session_omie_unique`.
+5. **Idempotência:** `UNIQUE(client_id, omie_conta_id, reference_month, file_hash)`.
+   Duplicata = HTTP 409 `DUPLICATE_FILE`.
+6. **IA nunca decide match.** A IA só extrai do arquivo; o cruzamento é código
+   determinístico, sem heurística e sem modelo.
+7. **Fornecedor e descrição trafegam em memória** durante o cruzamento — não são
+   persistidos nem logados (§4.5).
 
 ---
 
@@ -374,12 +370,12 @@ _**Verificar ANTES de afirmar:**_
 5. **Nunca cite identificador (função, classe, endpoint, env var, biblioteca, comando, flag, arquivo, módulo, hash, ticket) sem ter confirmado que existe.** Read/Grep/Glob/`gh`/`git` provam a existência. Se não pode verificar agora, escreva "(a confirmar)" explícito — não chute.
 6. **Nunca invente assinatura de função** (parâmetros, tipos, defaults, retorno). Leia o arquivo onde está declarada antes de chamar/sugerir.
 7. **Nunca invente comportamento de biblioteca de terceiros.** Confirme na documentação oficial atualizada — APIs mudam, conhecimento de treinamento envelhece.
-8. **Omie API é especialmente perigoso.** Sempre validar contra response real, **nunca** contra `Docs/documentation/6` ou doc interna — já temos histórico de campos divergentes ([[feedback_omie_validate_response_not_internal_doc]]).
+8. **Omie API é especialmente perigoso.** Sempre validar contra response real, **nunca** contra `Docs/documentation/6` ou doc interna — já temos histórico de campos divergentes ([[feedback_omie_validate_response_not_internal_doc]]). ↳ skill `omie`.
 9. **Conhecimento de treinamento NÃO é fonte da verdade.** Para qualquer fato técnico (versão de lib, sintaxe de framework, comportamento de SDK), verifique no projeto ou na doc oficial **antes** de afirmar.
 
 _**Verificar ANTES de declarar pronto:**_
 
-10. **Nunca diga "está funcionando" sem ter rodado.** Testes locais (`uv run pytest`, `pnpm test`) ou comando do CI. Cite o output real, não "deve passar".
+10. **Nunca diga "está funcionando" sem ter rodado.** Testes locais ou o comando do CI — cite o output real, nunca "deve passar". ↳ skill `gate`.
 11. **Nunca invente número de testes, IDs de commit, status de CI, conteúdo de log, ou tamanho de diff.** Se vai citar, mostre o output real (`gh run view`, `git log`, output do pytest, `git diff --stat`).
 12. **Nunca afirme que um arquivo foi criado/modificado sem ter executado a tool com sucesso.** Tool falhou, foi negada, ou nem foi chamada = tarefa não feita. Não relate como entregue.
 13. **Verifique commit hashes via `git log` antes de citar.** Hashes mudam após rebase/amend — não confie em memória da própria conversa.
@@ -416,83 +412,19 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
 
 ### Frontend
 
-- **TypeScript strict** + `noUncheckedIndexedAccess: true`.
-- **Server components por padrão**; `"use client"` apenas quando necessário.
-- **Fetches client-side:** sempre via TanStack Query (`useQuery`, `useMutation`). Nunca `useEffect + fetch`.
-- **Forms:** sempre `react-hook-form + zod`.
-- **Tabelas grandes** (> 100 linhas): sempre virtualizadas.
-- **Conteúdo dentro de área de altura fixa** (as telas do shell do cliente, `min-h-0 flex-1` numa seção `flex h-full flex-col`): `min-h-0 flex-1` **autoriza** o container a encolher abaixo da altura do conteúdo — sem `overflow` o conteúdo é pintado FORA da caixa e o que vier depois (barra de paginação, rodapé) cobre o que vazou. Duas receitas, uma por tipo de conteúdo:
-  - **card / conteúdo não-tabular** → `<ScrollRegion>` (`components/ui/scroll-region.tsx`);
-  - **tabela** → `<TableCard>` + `<Table fill>` (`components/ui/table.tsx`). O wrapper que o `<Table>` já cria rola só no HORIZONTAL (altura de conteúdo); `fill` é o que o torna o scroller vertical e gruda o cabeçalho, e `TableCard` é quem limita a altura. Nunca pôr `overflow` no container de fora: dois containers roláveis aninhados espremem as colunas em 390px em vez de rolar (ADR-007-FE).
+> **O roteiro de UI inteiro vive na skill `front-gate`**: área rolável (`<ScrollRegion>`
+> para card, `<TableCard>` + `<Table fill>` para tabela), autorização na tela por
+> `lib/authz.ts`, cor só por token semântico, os três temas, tooltip que nunca é `title`
+> nativo, e como rodar o gate de a11y de verdade. O que segue vale mesmo sem abrir a skill:
 
-  Região rolável **sem** `tabIndex`/`role`/`aria-label` reprova `scrollable-region-focusable` (SERIOUS) no gate `web_a11y` — por isso a decisão mora num componente só, nunca copiada na tela.
-
-- **Acessibilidade:** shadcn/ui entrega; em componentes custom, revisar `aria-*` e suporte a teclado.
-- **Validação visual é ABRIR a imagem — gate verde não substitui.** `axe-core` audita
-  semântica e contraste e **não mede transbordo de layout**; jsdom (vitest) não tem layout;
-  `tsc`/eslint não enxergam render. Toda task de UI termina com screenshot **desktop e
-  390px** aberta e conferida contra: ação primária cortada na borda, elemento pintando fora
-  do card, gaveta cortada, coluna espremida. Na Sprint 7 os três gates ficaram verdes com o
-  botão "Confirmar e lançar" **clipado** no rodapé da gaveta em 390px — o defeito só
-  apareceu na leitura do PNG. Quando um corte for corrigido, **trave-o com medida**
-  (`boundingBox().x + width <= viewportSize().width`), não com inspeção manual. O primeiro
-  desses asserts vive no cenário mobile da gaveta de lançamento em
-  `apps/web/e2e/a11y-mocked.spec.ts` — copie o padrão de lá, inclusive o
-  `aguardarAnimacao()`: a gaveta do Radix entra **deslizando**, e `boundingBox()` medida no
-  meio do trajeto devolve coordenada fora da tela que não é defeito nenhum (mede em 1440px
-  também, e reprova os quatro cenários). O mesmo vale para COR: o toast do Sonner entra em
-  fade, e o axe medindo no meio do trajeto vê cor MESCLADA — reprovou 4,25:1 num par cujos
-  tokens puros dão 4,75:1 (PR #89, flaky sem defeito). Antes de medir toast,
-  `aguardarToastEstavel()`. **Visível não é estável.**
-
-- **Dica/tooltip NUNCA é `title` nativo** — não aparece em toque, não alcança teclado e o
-  leitor de tela ignora. Use o `<Tooltip>` do design system com `role="img"` +
-  `aria-label` carregando a explicação INTEIRA (anunciada mesmo sem abrir a dica) +
-  `tabIndex={0}` com anel de foco. Padrão em `qualification-cell.tsx`,
-  `situation-badge.tsx` e `author-label.tsx` — copiar de lá, não reinventar.
-- **Cor em componente é SEMPRE token semântico** (86e2n39hb): `success`/`warning`/`info`/
-  `destructive` (+ `-foreground`/`-muted`) e os neutros (`muted`, `border`, `input`) do
-  `globals.css`. **Proibido** cor fixa da paleta Tailwind (`emerald-100`, `zinc-700`…) e
-  variante `dark:` em componente — o token flipa entre os temas sozinho, e é nele que a
-  paleta da marca (86e2ukrc9) aterrissa; classe fixa é um lugar onde a marca e o tema
-  escuro nunca chegam. Verificável: o grep de cor fixa em `src/components` (padrão na
-  própria task) volta **zero**, ou a exceção está justificada em comentário no arquivo.
-  Pareamento que não pode inverter: sobre o token SÓLIDO usa-se `-foreground`; sobre a
-  variante `-muted` o texto é o SÓLIDO — trocar é branco sobre quase-branco (travado em
-  `theme-contrast.test.ts`, que roda `:root` E `.dark`).
-- **Temas: claro, escuro e HOLOGRAM — e o Hologram é o PADRÃO** (86e2n39hb +
-  86e2ukrc9; default decidido pelo Pedro em 25/08/2026): `next-themes` no layout
-  RAIZ (`app/providers.tsx` — o tema vale no login), `defaultTheme="hologram"`,
-  escolha no localStorage, toggle no header (`components/shared/theme-toggle.tsx`).
-  Quem nunca escolheu vê o tema da marca (inclusive no login); quem já escolheu
-  mantém (o next-themes só grava no `setTheme`). O tema da marca (`.hologram` no
-  globals.css) tem as superfícies no navy e botão primário branco; `system` segue
-  no toggle resolvendo só claro/escuro — agora como escolha, não padrão. O default
-  é travado no e2e (sem localStorage → `<html class="hologram">`). A
-  logomark (`components/shared/brand-mark.tsx`) pinta o PNG oficial por CSS mask +
-  `bg-current`: em `text-primary` sai marinho/índigo/branca conforme o tema, sem
-  variante. **O gate de a11y roda EM TODOS OS TEMAS por mecanismo**:
-  `scripts/a11y-gate.sh` default `both` = os três (`A11Y_THEME=light|dark|hologram`
-  para um só) e matrix `theme` no job `web_a11y` do CI — mudança de token/cor só fecha
-  com os três runs verdes, e o `theme-contrast.test.ts` asserta os pares nos três
-  blocos. Dropdown que abre sobre a página usa `modal={false}` (o modo modal
-  do Radix marca o fundo com `aria-hidden` mantendo focáveis — `aria-hidden-focus` no
-  axe; padrão documentado no sino e no toggle). O **`Select` do Radix não tem
-  `modal={false}`** — aberto, ele reprova `aria-hidden-focus` em qualquer tela: no e2e,
-  exercite o estado aberto (opções visíveis e clicáveis) e rode o `analyze()` com o Select
-  FECHADO, antes e depois (86e34jd8m).
-- **O relatório do gate de a11y é artefato, nunca fonte.** Desde a 86e2w8xpv,
-  `scripts/a11y-gate.sh` e o CI escrevem
-  `apps/web/test-results/a11y-report-<tema>.json` — **dentro de um diretório que o
-  `.gitignore` da RAIZ já ignora**, fechando a classe do vazamento em qualquer cópia do
-  repo (worktree de agent incluído; o `.gitignore` da raiz está fora do `gitPaths` de
-  todo papel do hub, então regra nova lá não sobrevive a uma sprint). O
-  `apps/web/.gitignore` mantém `a11y-report*.json` como cinto para versões antigas do
-  script. Dois efeitos de morar em `test-results/`: o Playwright limpa o diretório a cada
-  run, então só o relatório do ÚLTIMO tema sobrevive ao gate (o guard lê cada um logo
-  após o próprio run) — e é por isso que os screenshots continuam FORA, em
-  `a11y-shots/<tema>/`. A conferência de `git diff --name-only develop..HEAD` antes de
-  fechar task de front continua valendo como higiene.
+- **TypeScript strict** + `noUncheckedIndexedAccess`. **Server components por padrão**;
+  `"use client"` só quando há estado, efeito ou evento.
+- **Fetch client-side sempre via TanStack Query**, nunca `useEffect + fetch`. **Forms
+  sempre `react-hook-form + zod`.** Tabela acima de 100 linhas é virtualizada.
+- **A UI não é barreira de segurança** (§4.9) — mas mostrar ação que o servidor nega é
+  defeito: cada ❌ da matriz precisa de bloqueio no backend **e** de ação oculta na tela.
+- **Gate de a11y verde NÃO prova layout.** O axe mede semântica e contraste, não
+  transbordo: toda task de UI termina com o screenshot desktop e 390px aberto e conferido.
 
 ### API
 
@@ -511,27 +443,17 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
 
 ### CI/CD verde (GitHub Actions)
 
-- **`main` precisa terminar com CI verde sempre.** A esteira (`.github/workflows/ci.yml`) é o portão de qualidade — `ruff check` + `ruff format --check` + `mypy` + `pytest` + `pip-audit` no `apps/api`; `lint` + `type-check` + `test` + `npm audit` no `apps/web`. Os 4 do API rodam mesmo em PR/push tocando só web (e vice-versa) — não dá pra esconder regressão atrás de filtro de paths.
-- **Antes de cada push para `main`**, rodar localmente o mesmo conjunto que o CI roda:
+> **Os comandos, como ler o resultado e o que fazer quando o CI falha estão na skill
+> `gate`** — inclusive as falhas que são do ambiente e não do código, o teste flaky e os
+> hooks locais do commit.
 
-  ```bash
-  cd apps/api && uv run ruff check . && uv run ruff format --check . && uv run mypy app/ && uv run pytest -q --no-cov
-  pnpm --filter @auditoria/web lint && pnpm --filter @auditoria/web type-check && pnpm --filter @auditoria/web test
-  ```
-
-- **Se o CI falhar:**
-  1. `gh run view <run-id> --log-failed` pra ler o erro real (não o "summary" — esse engana).
-  2. Reproduzir local com o **mesmo comando do CI** (`uv run pytest -v --cov=app --cov-report=term-missing` no API; coverage muda a quantidade de testes que rodam).
-  3. Push do fix **no commit seguinte** — nunca `git push --force` pra "limpar" CI vermelho do histórico.
-- **Teste de integração NOVO roda na ordem do CI antes do push** — o arquivo inteiro +
-  os vizinhos que semeiam os mesmos dados (a ordem é alfabética por arquivo). Seed de
-  tabela compartilhada entre arquivos (ex.: `anomaly_types`) é **get-or-create, nunca
-  insert às cegas**: a tabela sobrevive entre arquivos e o insert cego morre com
-  `UniqueViolation` só no CI (foi o único vermelho da PR #84; os helpers dos arquivos de
-  teste já fazem certo — copiar deles).
-- **Teste flaky** (passa local, falha CI): tratar como bug a ser deflakizado, **não** ignorar. Padrão de root cause comum: timestamp/relógio ms-resolution, ordem de fixture, dependência de rede mockada parcialmente. Documentar a causa no commit do deflake (ex: ver `1185e17`).
-- **Hooks locais** (husky + lint-staged + commitlint) rodam no `git commit`. **Nunca** usar `--no-verify` pra contornar — se o hook falhar, o CI vai falhar igual. Conserta antes.
-- **Quando um job for marcado como `skipped` no CI** (ex: `Web` quando o PR só toca API): isso é esperado pelo `paths-filter`. Mas o status do summary precisa ser verde — se vier vermelho num skip, é bug do workflow, **abrir antes de mergear**.
+- **`main` precisa terminar com CI verde sempre.** A esteira (`.github/workflows/ci.yml`)
+  roda os dois lados mesmo quando o PR toca um só — não dá para esconder regressão atrás
+  de filtro de path.
+- **Rode o gate local ANTES de cada push** e cite o output real: "deve passar" não fecha
+  task (§6.10).
+- **Nunca** `git push --force` em `main`, **nunca** `--no-verify`, **nunca** mudar
+  assertion para o teste passar (§6.16).
 
 ### Idioma
 
@@ -591,23 +513,12 @@ ClickUp**, não no repo. `make sprints` lista o estado.
 
 ## 9. Comandos Frequentes
 
-Preferir os **scripts pnpm da raiz** (ver `package.json`); `make` não funciona no ambiente.
+> **Os comandos do portão de qualidade e os do dev local (`infra:up`, `db:migrate`,
+> `db:seed`, `dev:api`, `dev:web`) estão na skill `gate`.** Migration tem roteiro
+> próprio na skill `migration`; sprint do agents-hub, na `sprint-preflight`.
 
-```bash
-# Dev local (scripts pnpm da raiz)
-pnpm infra:up        # docker compose: postgres (sem Redis desde a FASE 0)
-pnpm dev:api         # uvicorn app.main:app --reload (processa conciliação via BackgroundTasks)
-pnpm dev:web         # Next.js dev
-
-# DB
-pnpm db:migrate      # alembic upgrade head
-pnpm db:seed         # python -m scripts.seed_dev
-cd apps/api && uv run alembic revision --autogenerate -m "descrição"
-
-# Lint / type / test (mesmo conjunto do CI — ver §7)
-cd apps/api && uv run ruff check . && uv run ruff format --check . && uv run mypy app/ && uv run pytest -q --no-cov
-pnpm --filter @auditoria/web lint && pnpm --filter @auditoria/web type-check && pnpm --filter @auditoria/web test
-```
+Preferir os **scripts pnpm da raiz** (ver `package.json`). Há um `Makefile`, mas os
+targets do hub vêm de um `GNUmakefile` local e não-rastreado — ver `sprint-preflight`.
 
 ---
 
@@ -668,25 +579,18 @@ Quando o usuário não tiver decidido, **pergunte** antes de presumir:
 
 ## 12. Comunicação ao Final de Tarefa
 
-Toda vez que Claude termina uma tarefa solicitada pelo usuário, a resposta final
-**DEVE** conter duas partes nesta ordem:
+Toda vez que Claude termina uma tarefa, a resposta final **DEVE** ter duas partes, nesta
+ordem: **(1) resumo executivo** — o que mudou, com arquivos, tamanho do diff, hash do
+commit e status do gate, sempre com números reais; **(2) passo a passo de teste** — como
+o usuário valida à mão, com comandos exatos, o estado esperado em cada passo, o caminho
+feliz **e** pelo menos um caminho de erro. O que não pôde ser testado é dito
+explicitamente, com o motivo.
 
-1. **Resumo executivo** — bullets curtos de "o que mudou" (arquivos novos /
-   modificados, tamanho do diff, hash do commit, status do CI).
-2. **Passo a passo de teste** — instruções detalhadas para o usuário validar
-   a entrega manualmente:
-   - Comandos exatos (assumir **Windows + Git Bash**, `uv` em
-     `~/.local/bin`, `pnpm` via corepack — ver `MEMORY.md`).
-   - Estado esperado em cada passo: o que deve aparecer na tela, o que deve
-     sair no log, o que deve voltar do endpoint.
-   - Caminhos felizes **e** pelo menos um caminho de erro relevante
-     (validação Zod, RBAC, conflito 409, falha de Omie etc).
-   - Se algo não pode ser testado agora (ex: sem credenciais Omie sandbox),
-     explicitar a limitação e dizer o que será coberto quando o pré-requisito
-     chegar.
+> **O roteiro completo de fechamento** (branch, commit local em Conventional Commits,
+> nada publicado, e os comandos de push e PR entregues prontos) está na skill
+> **`entrega`**.
 
-Evite "você já sabe" — o usuário pode voltar à entrega depois de dias e não
-lembrar dos comandos.
+Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 
 ---
 
@@ -713,6 +617,8 @@ lembrar dos comandos.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.23 — 15/09/2026. **O primer devolveu ao dono o que era procedimento (86e2ufky2, fecho do épico de skills).** Com as nove skills na `main`, quatro blocos que descreviam COMO fazer viraram ponteiro para quem agora os detalha: a §7 Frontend inteira e o bloco de CI/CD verde (skills `front-gate` e `gate`), a §9 de comandos (`gate`, com `migration` e `sprint-preflight` ao lado) e o roteiro de fechamento da §12 (`entrega`). A §5 perdeu a narrativa do cruzamento e a nomenclatura do Omie (skills `matcher` e `omie`) mas **manteve as leis numéricas** — 0,01 BRL, os 3 dias fixos, o período expandido, o 1-para-1, a idempotência e o "IA nunca decide match" — porque são violáveis por quem nunca abre o matcher, escrevendo um endpoint ou uma tela. Resultado: **759 para 665 linhas, 77.748 para 68.959 bytes**, 11% a menos em toda sessão. **§3 e §4 estão byte a byte idênticas**, e a §6 só ganhou dois ponteiros: são invariantes e conduta, que precisam valer sem gatilho nenhum. Duas decisões do Pedro no caminho: o rodapé de versões fica no arquivo (é 26% dele, mas serve de contexto recente) e a §6 não é condensada. Antes de cortar, quatro regras órfãs foram para as skills que passaram a hospedá-las — `noUncheckedIndexedAccess` e server component por padrão na `front-gate`; teste flaky, hooks locais com a proibição do `--no-verify` e os comandos de banco na `gate` — porque mover regra antes de existir destino é perder a regra._
 
 _Versão 1.22 — 14/09/2026. **A lista de campos cifrados da §4.1 estava DESATUALIZADA em 4 campos, e agora aponta para a fonte executável.** A varredura da skill `crypto-field` (86e2ufkvr) comparou o primer com o código: o `crypto_service.py` declara **11** constantes de AAD e os modelos têm **11** colunas cifradas, enquanto a §4.1 listava **7**. Faltavam a do nome de arquivo em `reconciliation_files` (Sprint 4) e as três do glossário em `client_glossary_entries` (Sprint 6): cifradas no código desde que nasceram, ausentes do primer desde então. A correção não é só somar as quatro. A §4.1 passa a declarar que **a fonte única é o bloco de constantes de AAD do `crypto_service.py`**, e que os pares (tabela, coluna) são congelados, porque renomear um invalida a decifragem do que já foi gravado. Assim a próxima dessincronização tem um lugar verificável para ser pega: a contagem dessas constantes contra a lista daqui._
 
