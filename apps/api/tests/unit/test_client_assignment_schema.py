@@ -63,22 +63,25 @@ class TestModeloEMigrationBatem:
         )
         assert [c.name for c in unique.columns] == ["client_id", "user_id"]
 
-    def test_client_id_nao_e_mais_unico_sozinho(self) -> None:
-        """A carteira deixou de ser 1:1 — o índice simples em `client_id` não é único."""
+    def test_client_id_nao_tem_mais_indice_proprio(self) -> None:
+        """A carteira deixou de ser 1:1, e a UNIQUE do par cobre a busca por cliente."""
         table = ClientAssignment.__table__
         assert table.c.client_id.unique is not True
-        plain = [
+        assert table.c.client_id.index is not True
+        so_client_id = [
             i
             for i in table.indexes
             if [c.name for c in i.columns] == ["client_id"]
             and i.name != UQ_CLIENT_ASSIGNMENT_PRIMARY
         ]
-        assert all(not i.unique for i in plain)
+        assert so_client_id == []
 
-    def test_responsavel_nao_e_default(self) -> None:
-        """Default FALSE nos dois lados: virar responsável é decisão explícita."""
+    def test_defaults_do_responsavel_sao_diferentes_de_proposito(self) -> None:
+        """ORM: FALSE (o código marca explicitamente). Banco: TRUE (linha sem o campo
+        é a forma antiga da tabela — pré-migration e API antiga na janela de deploy)."""
         column = ClientAssignment.__table__.c.is_primary
         assert column.nullable is False
         assert column.default is not None
         assert column.default.arg is False
         assert column.server_default is not None
+        assert str(column.server_default.arg).lower() == "true"

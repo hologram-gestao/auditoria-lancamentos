@@ -48,7 +48,7 @@ from app.core.exceptions import (
     OmieServerError,
     OmieTimeoutError,
 )
-from app.db.models import Client, ClientAssignment, OmieAccountCache, User, UserRole
+from app.db.models import Client, ClientAssignment, OmieAccountCache, User
 from app.integrations.omie.client import OmieClient, OmieCredentials
 from app.modules.clients.accounts_cache import OmieAccountsCacheService
 from app.modules.clients.repository import ClientRepository, ClientRow
@@ -217,15 +217,19 @@ class ClientService:
         )
         await self._repo.add_client(client)
 
-        # Quem cria é o RESPONSÁVEL (86e390kz8) — um por cliente, marcado
-        # explicitamente; colaboradores entram depois por `add_client_manager`.
-        assignment = ClientAssignment(
-            client_id=client.id,
-            user_id=current_user_id,
-            assigned_by=current_user_id,
-            is_primary=True,
-        )
-        await self._repo.add_assignment(assignment)
+        # Carteira (86e390kz8): só GERENTE entra. Quem cria sendo manager vira
+        # o RESPONSÁVEL. Admin já alcança tudo pela matriz e não entra na
+        # carteira — nem como responsável provisório: o cliente nasce sem
+        # responsável e o primeiro gerente adicionado assume (`add_client_manager`),
+        # ou o admin define pelo `/assign`.
+        if await self._repo.is_active_manager(current_user_id):
+            assignment = ClientAssignment(
+                client_id=client.id,
+                user_id=current_user_id,
+                assigned_by=current_user_id,
+                is_primary=True,
+            )
+            await self._repo.add_assignment(assignment)
 
         return await self.get_client_detail(client.id, viewer_user_id=current_user_id)
 
@@ -311,7 +315,8 @@ class ClientService:
 
         400 se o alvo não é manager ativo; 409 se já tem acesso — a dedup é do
         banco (`ON CONFLICT DO NOTHING` na UNIQUE do par), então duas requisições
-        simultâneas produzem uma linha e um 409, nunca duas linhas.
+        simultâneas produzem uma linha e um 409, nunca duas linhas. Cliente SEM
+        responsável (criado por admin): o primeiro gerente que entra assume.
         """
         await self._assert_active_manager(user_id)
         inserted = await self._repo.add_assignment_if_absent(
@@ -321,6 +326,8 @@ class ClientService:
             raise ManagerAlreadyAssignedError(
                 f"User {user_id} já tem acesso ao cliente {client.id}."
             )
+        if not await self._repo.has_responsible(client.id):
+            await self._repo.set_primary_assignment(client_id=client.id, user_id=user_id)
         return await self.list_client_managers(client.id)
 
     async def remove_client_manager(
@@ -330,17 +337,23 @@ class ClientService:
 
         404 se a pessoa não tem acesso; 409 se é o RESPONSÁVEL — cliente nunca
         fica órfão: define-se outro responsável antes (`set_responsible_manager`,
-        que não remove ninguém) e só então o antigo pode sair.
+        que não remove ninguém) e só então o antigo pode sair. A condição "não
+        é o responsável" está no próprio DELETE (`delete_assignment_if_collaborator`):
+        o 409/404 é decidido pelo estado ATUAL, depois da escrita condicional.
         """
-        assignment = await self._repo.get_assignment_for_user(client.id, user_id)
-        if assignment is None:
-            raise ManagerNotAssignedError(f"User {user_id} não tem acesso ao cliente {client.id}.")
-        if assignment.is_primary:
+        removed = await self._repo.delete_assignment_if_collaborator(
+            client_id=client.id, user_id=user_id
+        )
+        if not removed:
+            assignment = await self._repo.get_assignment_for_user(client.id, user_id)
+            if assignment is None:
+                raise ManagerNotAssignedError(
+                    f"User {user_id} não tem acesso ao cliente {client.id}."
+                )
             raise CannotRemoveResponsibleManagerError(
                 f"User {user_id} é o responsável pelo cliente {client.id}; "
                 "defina outro responsável antes de remover."
             )
-        await self._repo.delete_assignment(client_id=client.id, user_id=user_id)
         return await self.list_client_managers(client.id)
 
     async def set_responsible_manager(
@@ -351,26 +364,30 @@ class ClientService:
         Se o alvo ainda não tinha acesso, passa a ter (como colaborador) e é
         promovido na sequência; se já era o responsável, é no-op. O responsável
         anterior continua na carteira como colaborador — o oposto do antigo
-        "reatribuir", que o apagava.
+        "reatribuir", que o apagava. Idempotente de ponta a ponta, sem lookup:
+        quem já tem acesso não é inserido de novo (ON CONFLICT DO NOTHING) e
+        promover quem já é o responsável rebaixa e promove a mesma linha.
         """
         await self._assert_active_manager(user_id)
-        current = await self._repo.get_assignment_for_user(client.id, user_id)
-        if current is None:
-            await self._repo.add_assignment_if_absent(
-                client_id=client.id, user_id=user_id, assigned_by=current_admin_id
+        await self._repo.add_assignment_if_absent(
+            client_id=client.id, user_id=user_id, assigned_by=current_admin_id
+        )
+        if not await self._repo.set_primary_assignment(client_id=client.id, user_id=user_id):
+            # O alvo perdeu o acesso entre a inserção e a promoção (DELETE
+            # concorrente). Levantar desfaz o rebaixamento no rollback do request.
+            raise ManagerNotAssignedError(
+                f"User {user_id} perdeu o acesso ao cliente {client.id} durante a operação."
             )
-        elif current.is_primary:
-            return await self.get_client_detail(client.id, viewer_user_id=current_admin_id)
-        await self._repo.set_primary_assignment(client_id=client.id, user_id=user_id)
         return await self.get_client_detail(client.id, viewer_user_id=current_admin_id)
 
     async def _assert_active_manager(self, user_id: UUID) -> None:
         """400 se o alvo não existe, está inativo ou não é `manager` (S6 §3.5).
 
-        Admin não entra na carteira: já alcança todos os clientes pela matriz.
+        Admin não entra na carteira — nem por aqui, nem na criação do cliente:
+        já alcança todos os clientes pela matriz, e contá-lo em `manager_count`
+        mentiria sobre quem opera a carteira.
         """
-        user = await self._repo.get_user_by_id(user_id)
-        if user is None or not user.active or user.role != UserRole.MANAGER.value:
+        if not await self._repo.is_active_manager(user_id):
             raise InvalidManagerError(f"User {user_id} não é manager ativo (recusado).")
 
     # ------------------------------ TEST CONNECTION -------------------
@@ -611,11 +628,17 @@ class ClientService:
 
 
 def _assignment_to_response(assignment: ClientAssignment, user: User) -> ClientManagerResponse:
-    """Mapeia (vínculo, usuário) → DTO enxuto — só `{id, name, email}` do usuário (§3.15)."""
+    """Mapeia (vínculo, usuário) → DTO de gestão: `ManagerSummary` + `active` + carteira.
+
+    Nunca a linha de `users` (§3.2): o `id` entra porque é o alvo do
+    `DELETE .../managers/{user_id}`, e `active` porque um responsável desativado
+    precisa ser visível para o admin passar o bastão.
+    """
     return ClientManagerResponse(
         id=user.id,
         name=user.name,
         email=user.email,
+        active=user.active,
         is_responsible=assignment.is_primary,
         assigned_at=assignment.assigned_at,
     )

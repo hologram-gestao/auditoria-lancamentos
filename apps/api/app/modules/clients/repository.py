@@ -18,7 +18,9 @@ from uuid import UUID
 
 from sqlalchemy import (
     ColumnElement,
+    Row,
     ScalarSelect,
+    Select,
     String,
     and_,
     cast,
@@ -32,6 +34,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
+from app.core.authz import portfolio_filter
 from app.db.models import (
     UQ_CLIENT_ASSIGNMENT_CLIENT_USER,
     UQ_USER_CLIENT_FAVORITE,
@@ -46,6 +49,7 @@ from app.db.models import (
     ReconciliationStatus,
     User,
     UserClientFavorite,
+    UserRole,
     UserScope,
 )
 
@@ -108,24 +112,6 @@ def _responsible_join_clause() -> ColumnElement[bool]:
     return and_(ClientAssignment.client_id == Client.id, ClientAssignment.is_primary.is_(True))
 
 
-def _portfolio_exists(manager_id: UUID) -> ColumnElement[bool]:
-    """`EXISTS` sobre TODAS as linhas do cliente: o filtro da CARTEIRA.
-
-    Separado do join de exibição de propósito — são duas perguntas diferentes.
-    Se o filtro reusasse o join restrito ao responsável, o colaborador
-    (`is_primary = false`) deixaria de ver na lista um cliente que ele acessa.
-    É a mesma decisão de `resolve_client_access` projetada em `WHERE`: qualquer
-    linha `(client_id, user_id)` concede acesso.
-    """
-    portfolio = aliased(ClientAssignment)
-    return (
-        select(portfolio.id)
-        .where(portfolio.client_id == Client.id, portfolio.user_id == manager_id)
-        .correlate(Client)
-        .exists()
-    )
-
-
 def _manager_count_subquery() -> ScalarSelect[int]:
     """Subquery escalar: quantas pessoas têm acesso ao cliente (responsável incluído)."""
     access = aliased(ClientAssignment)
@@ -134,6 +120,64 @@ def _manager_count_subquery() -> ScalarSelect[int]:
         .where(access.client_id == Client.id)
         .correlate(Client)
         .scalar_subquery()
+    )
+
+
+class _ClientRowQuery(NamedTuple):
+    """O SELECT de uma linha de cliente + a expressão de favorito para o ORDER BY."""
+
+    stmt: Select[Any]
+    is_favorite: Any
+
+
+def _client_row_query(viewer_user_id: UUID | None) -> _ClientRowQuery:
+    """SELECT base de UMA linha: cliente + responsável + contagens + favorito + categoria.
+
+    Lista e detalhe partem DAQUI — coluna nova entra uma vez e aparece nos dois,
+    na mesma posição (o mapeamento em `_to_client_row` é posicional). O join de
+    exibição é só do RESPONSÁVEL (`_responsible_join_clause`): com N gerentes o
+    join continua 1:1 e o cliente sai uma vez.
+    """
+    manager = aliased(User)
+    favorite = _favorite_join_for(viewer_user_id)
+    # Subquery escalar: conta de sessões ATIVAS por cliente (descarte de erros
+    # não infla o contador). Correlate evita o SQLAlchemy referenciar `clients`
+    # da query externa duas vezes.
+    recon_count_sq = (
+        select(func.count(ReconciliationSession.id))
+        .where(
+            ReconciliationSession.client_id == Client.id,
+            ReconciliationSession.deleted_at.is_(None),
+        )
+        .correlate(Client)
+        .scalar_subquery()
+    )
+    stmt = (
+        select(
+            Client,
+            manager,
+            recon_count_sq.label("recon_count"),
+            favorite.is_favorite,
+            ClientCategory,
+            _manager_count_subquery().label("manager_count"),
+        )
+        .outerjoin(ClientAssignment, _responsible_join_clause())
+        .outerjoin(manager, manager.id == ClientAssignment.user_id)
+        .outerjoin(favorite.table, favorite.on_clause)
+        .outerjoin(ClientCategory, ClientCategory.id == Client.category_id)
+    )
+    return _ClientRowQuery(stmt=stmt, is_favorite=favorite.is_favorite)
+
+
+def _to_client_row(row: Row[Any]) -> ClientRow:
+    """Mapeia a linha do SELECT de `_client_row_query` — na ordem das colunas de lá."""
+    return ClientRow(
+        client=row[0],
+        manager=row[1],
+        reconciliation_count=int(row[2] or 0),
+        is_favorite=bool(row[3]),
+        category=row[4],
+        manager_count=int(row[5] or 0),
     )
 
 
@@ -174,38 +218,8 @@ class ClientRepository:
         Returns:
             Tupla `(rows, total_count)`. Total é a contagem ANTES da paginação.
         """
-        manager = aliased(User)
-        favorite = _favorite_join_for(viewer_user_id)
-
-        # Subquery escalar: conta de sessões ATIVAS por cliente (descarte
-        # de erros não infla o contador). Correlate evita o SQLAlchemy
-        # referenciar `clients` da query externa duas vezes.
-        recon_count_sq = (
-            select(func.count(ReconciliationSession.id))
-            .where(
-                ReconciliationSession.client_id == Client.id,
-                ReconciliationSession.deleted_at.is_(None),
-            )
-            .correlate(Client)
-            .scalar_subquery()
-        )
-
-        base = (
-            select(
-                Client,
-                manager,
-                recon_count_sq.label("recon_count"),
-                favorite.is_favorite,
-                ClientCategory,
-                _manager_count_subquery().label("manager_count"),
-            )
-            # Só o RESPONSÁVEL entra no join de exibição (86e390kz8) — o join
-            # continua 1:1 e o cliente sai uma vez, com N gerentes ou com um.
-            .outerjoin(ClientAssignment, _responsible_join_clause())
-            .outerjoin(manager, manager.id == ClientAssignment.user_id)
-            .outerjoin(favorite.table, favorite.on_clause)
-            .outerjoin(ClientCategory, ClientCategory.id == Client.category_id)
-        )
+        query = _client_row_query(viewer_user_id)
+        base = query.stmt
         count_base = select(func.count(Client.id)).select_from(Client)
 
         if tenant_client_id is not None:
@@ -218,7 +232,7 @@ class ClientRepository:
             # responsável OU colaborador. Filtro por EXISTS, independente do join
             # de exibição (que é só do responsável): sem essa separação o
             # colaborador sumiria da própria lista.
-            in_portfolio = _portfolio_exists(manager_id)
+            in_portfolio = portfolio_filter(manager_id, Client.id)
             base = base.where(in_portfolio)
             count_base = count_base.where(in_portfolio)
 
@@ -236,25 +250,13 @@ class ClientRepository:
         # sempre: created_at desc, id desc (desempate determinístico). O favorito
         # da página 3 sobe para a página 1 porque a ordenação é do SELECT, não
         # da página já cortada.
-        base = base.order_by(
-            favorite.is_favorite.desc(), Client.created_at.desc(), Client.id.desc()
-        )
+        base = base.order_by(query.is_favorite.desc(), Client.created_at.desc(), Client.id.desc())
         offset = (page - 1) * page_size
         base = base.offset(offset).limit(page_size)
 
         total = (await self._session.execute(count_base)).scalar_one()
         result = await self._session.execute(base)
-        rows = [
-            ClientRow(
-                client=row[0],
-                manager=row[1],
-                reconciliation_count=int(row[2] or 0),
-                is_favorite=bool(row[3]),
-                category=row[4],
-                manager_count=int(row[5] or 0),
-            )
-            for row in result.all()
-        ]
+        rows = [_to_client_row(row) for row in result.all()]
         return rows, int(total)
 
     async def get_detail(
@@ -265,58 +267,24 @@ class ClientRepository:
         `viewer_user_id` resolve `is_favorite` para quem pede (86e34jd5a); sem
         viewer a linha sai com `False`.
         """
-        manager = aliased(User)
-        favorite = _favorite_join_for(viewer_user_id)
-        recon_count_sq = (
-            select(func.count(ReconciliationSession.id))
-            .where(
-                ReconciliationSession.client_id == Client.id,
-                ReconciliationSession.deleted_at.is_(None),
-            )
-            .correlate(Client)
-            .scalar_subquery()
-        )
-        stmt = (
-            select(
-                Client,
-                manager,
-                recon_count_sq.label("recon_count"),
-                favorite.is_favorite,
-                ClientCategory,
-                _manager_count_subquery().label("manager_count"),
-            )
-            .outerjoin(ClientAssignment, _responsible_join_clause())
-            .outerjoin(manager, manager.id == ClientAssignment.user_id)
-            .outerjoin(favorite.table, favorite.on_clause)
-            .outerjoin(ClientCategory, ClientCategory.id == Client.category_id)
-            .where(Client.id == client_id)
-        )
+        stmt = _client_row_query(viewer_user_id).stmt.where(Client.id == client_id)
         row = (await self._session.execute(stmt)).first()
-        if row is None:
-            return None
-        return ClientRow(
-            client=row[0],
-            manager=row[1],
-            reconciliation_count=int(row[2] or 0),
-            is_favorite=bool(row[3]),
-            category=row[4],
-            manager_count=int(row[5] or 0),
-        )
+        return None if row is None else _to_client_row(row)
 
     async def get_by_id(self, client_id: UUID) -> Client | None:
         """Retorna o `Client` cru, sem joins — usado para writes (PATCH, assign)."""
         result = await self._session.execute(select(Client).where(Client.id == client_id))
         return result.scalar_one_or_none()
 
-    async def get_primary_assignment(self, client_id: UUID) -> ClientAssignment | None:
-        """Linha do RESPONSÁVEL (no máximo uma — índice parcial `is_primary`)."""
+    async def has_responsible(self, client_id: UUID) -> bool:
+        """O cliente tem responsável? (cliente criado por admin nasce sem — §4.13)."""
         result = await self._session.execute(
-            select(ClientAssignment).where(
+            select(ClientAssignment.id).where(
                 ClientAssignment.client_id == client_id,
                 ClientAssignment.is_primary.is_(True),
             )
         )
-        return result.scalar_one_or_none()
+        return result.scalar_one_or_none() is not None
 
     async def get_assignment_for_user(
         self, client_id: UUID, user_id: UUID
@@ -355,10 +323,20 @@ class ClientRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_user_by_id(self, user_id: UUID) -> User | None:
-        """Lookup rápido de user — usado para validar manager-alvo do assign."""
-        result = await self._session.execute(select(User).where(User.id == user_id))
-        return result.scalar_one_or_none()
+    async def is_active_manager(self, user_id: UUID) -> bool:
+        """Alvo válido de carteira: existe, ativo e `manager` — decidido no banco.
+
+        Só `id` no SELECT: não hidrata a linha inteira de `users` (com hash de
+        senha) para responder um booleano.
+        """
+        result = await self._session.execute(
+            select(User.id).where(
+                User.id == user_id,
+                User.active.is_(True),
+                User.role == UserRole.MANAGER.value,
+            )
+        )
+        return result.scalar_one_or_none() is not None
 
     # ------------------------------ FAVORITOS (86e34jd5a) -------------
 
@@ -528,16 +506,29 @@ class ClientRepository:
         await self._session.flush()
         return inserted_id is not None
 
-    async def set_primary_assignment(self, *, client_id: UUID, user_id: UUID) -> None:
+    async def set_primary_assignment(self, *, client_id: UUID, user_id: UUID) -> bool:
         """Torna `user_id` (que JÁ tem acesso) o responsável; ninguém é removido.
 
-        Rebaixa o responsável atual ANTES de promover, e na mesma transação: o
-        índice único parcial é checado por statement, então promover primeiro
-        deixaria dois `is_primary` por um instante e estouraria. Não mexe em
-        `assigned_by`/`assigned_at` — a linha continua dizendo quem concedeu o
+        Três statements, na mesma transação e nesta ordem:
+            1. `SELECT ... FOR UPDATE` das linhas do cliente — serializa dois
+               `/assign` concorrentes (sem isso o segundo estouraria o índice
+               parcial `uq_client_assignments_primary` e viraria 500);
+            2. rebaixa o responsável atual (`is_primary = false`) — o índice
+               parcial é checado por statement, então rebaixar vem ANTES;
+            3. promove o alvo com `RETURNING`. Devolve `False` quando nenhuma
+               linha foi promovida: o alvo perdeu o acesso entre a leitura e a
+               escrita (DELETE concorrente). O service levanta, e o rollback do
+               request desfaz o rebaixamento — sem isso o cliente ficaria sem
+               responsável com um 200.
+        Não mexe em `assigned_by`/`assigned_at` — a linha diz quem concedeu o
         ACESSO e quando; a promoção é outro evento.
         """
         s = self._session
+        await s.execute(
+            select(ClientAssignment.id)
+            .where(ClientAssignment.client_id == client_id)
+            .with_for_update()
+        )
         await s.execute(
             update(ClientAssignment)
             .where(
@@ -546,25 +537,41 @@ class ClientRepository:
             )
             .values(is_primary=False)
         )
-        await s.execute(
-            update(ClientAssignment)
-            .where(
-                ClientAssignment.client_id == client_id,
-                ClientAssignment.user_id == user_id,
+        promoted = (
+            await s.execute(
+                update(ClientAssignment)
+                .where(
+                    ClientAssignment.client_id == client_id,
+                    ClientAssignment.user_id == user_id,
+                )
+                .values(is_primary=True)
+                .returning(ClientAssignment.id)
             )
-            .values(is_primary=True)
-        )
+        ).scalar_one_or_none()
         await s.flush()
+        return promoted is not None
 
-    async def delete_assignment(self, *, client_id: UUID, user_id: UUID) -> None:
-        """Remove o acesso de UMA pessoa. Core `DELETE` — relationships são `lazy="raise"`."""
-        await self._session.execute(
-            delete(ClientAssignment).where(
-                ClientAssignment.client_id == client_id,
-                ClientAssignment.user_id == user_id,
+    async def delete_assignment_if_collaborator(self, *, client_id: UUID, user_id: UUID) -> bool:
+        """Remove o acesso de UMA pessoa — só se ela NÃO for a responsável.
+
+        A condição `is_primary = false` vai no próprio `DELETE`, não numa leitura
+        anterior: um `/assign` concorrente que promova a pessoa entre a tela e o
+        clique é recusado (zero linhas → `False`), não apagado. Core `DELETE` —
+        relationships são `lazy="raise"`.
+        """
+        deleted = (
+            await self._session.execute(
+                delete(ClientAssignment)
+                .where(
+                    ClientAssignment.client_id == client_id,
+                    ClientAssignment.user_id == user_id,
+                    ClientAssignment.is_primary.is_(False),
+                )
+                .returning(ClientAssignment.id)
             )
-        )
+        ).scalar_one_or_none()
         await self._session.flush()
+        return deleted is not None
 
     # ------------------------- S7: cache L1 ---------------------------
 

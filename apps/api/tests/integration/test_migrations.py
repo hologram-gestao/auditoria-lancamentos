@@ -663,9 +663,21 @@ class TestCarteiraCompartilhadaRoundTrip:
         partial = str(_scalar(url, _INDEXDEF_BY_NAME, name="uq_client_assignments_primary"))
         assert "UNIQUE" in partial
         assert partial.endswith("WHERE is_primary")
-        # O índice antigo continua existindo (para o filtro da carteira), mas não é mais único.
-        plain = str(_scalar(url, _INDEXDEF_BY_NAME, name="ix_client_assignments_client_id"))
-        assert "UNIQUE" not in plain
+        # O índice antigo SAI de vez: a UNIQUE (client_id, user_id) cobre a busca
+        # por client_id pelo prefixo — um terceiro btree seria só custo de escrita.
+        assert _scalar(url, _INDEXDEF_BY_NAME, name="ix_client_assignments_client_id") is None
+        # O default do BANCO é true: linha inserida sem o campo (API antiga na
+        # janela de deploy) nasce responsável, não órfã.
+        legacy_client = _seed_client_row(url)
+        _execute(url, _INSERT_ASSIGNMENT_LEGACY, cid=legacy_client, uid=_seed_manager_row(url))
+        assert (
+            _scalar(
+                url,
+                "SELECT is_primary FROM client_assignments WHERE client_id = :cid",
+                cid=legacy_client,
+            )
+            is True
+        )
 
     def test_banco_aceita_dois_gerentes_e_recusa_dois_responsaveis(
         self, alembic_cfg: Config, migrations_db_url: str
@@ -716,7 +728,9 @@ class TestCarteiraCompartilhadaRoundTrip:
         """Recriar o UNIQUE(client_id) sobre dois gerentes apagaria o acesso de alguém.
 
         Escolher quem perde o acesso é decisão de dado, não de migration — então
-        ela ABORTA, diz quantas linhas sobram e qual consulta rodar.
+        ela ABORTA, diz quantos clientes têm mais de um gerente e qual consulta
+        rodar. O critério é "mais de uma linha por cliente" (o que o índice antigo
+        exige), não "existe colaborador": ver o teste seguinte.
         """
         url = migrations_db_url
         command.upgrade(alembic_cfg, "head")
@@ -733,6 +747,22 @@ class TestCarteiraCompartilhadaRoundTrip:
         # Nada foi apagado e o schema novo continua de pé.
         assert _scalar(url, "SELECT count(*) FROM client_assignments") == 2
         assert _columns(url, "client_assignments", "is_primary") == 1
+
+    def test_downgrade_aceita_cliente_com_uma_linha_so_mesmo_colaborador(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        """Uma linha por cliente cabe no UNIQUE antigo, seja ela responsável ou não."""
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        _execute(url, _INSERT_ASSIGNMENT, cid=client_id, uid=_seed_manager_row(url), primary=False)
+
+        command.downgrade(alembic_cfg, PRE_SHARED_PORTFOLIO_REV)
+        assert _scalar(url, "SELECT count(*) FROM client_assignments") == 1
+
+        command.upgrade(alembic_cfg, "head")
+        # De volta ao schema novo, a linha única vira responsável (default do banco).
+        assert _scalar(url, "SELECT count(*) FROM client_assignments WHERE is_primary") == 1
 
     def test_backfill_e_idempotente(self, alembic_cfg: Config, migrations_db_url: str) -> None:
         url = migrations_db_url

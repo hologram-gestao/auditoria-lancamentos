@@ -44,6 +44,9 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 PLAIN_PASSWORD = "Senh@Carteira#2026"
+# bcrypt (custo 12) uma vez por módulo, não por usuário semeado — o sal não
+# precisa variar entre fixtures, e o arquivo semeia dezenas delas.
+_PASSWORD_HASH = hash_password(PLAIN_PASSWORD)
 ADMIN_EMAIL = "carteira-admin@hologram.com.br"
 RESPONSIBLE_EMAIL = "responsavel@hologram.com.br"
 COLLABORATOR_EMAIL = "colaborador@hologram.com.br"
@@ -68,7 +71,7 @@ async def _seed_user(
     user = User(
         name=name,
         email=email.lower(),
-        password_hash=hash_password(PLAIN_PASSWORD),
+        password_hash=_PASSWORD_HASH,
         role=role.value,
         active=active,
         scope=scope.value,
@@ -214,9 +217,27 @@ class TestListManagers:
             ("Beto", False),
         ]
         assert data[0]["id"] == str(responsible.id)
-        # Identidade ENXUTA (§3.15): só o que a tela precisa, nunca a linha de users.
-        assert set(data[0]) == {"id", "name", "email", "is_responsible", "assigned_at"}
+        # Só o que a tela precisa (ManagerSummary + active + carteira), nunca a
+        # linha de users — nada de hash, papel ou escopo.
+        assert set(data[0]) == {"id", "name", "email", "active", "is_responsible", "assigned_at"}
         assert "password_hash" not in resp.text
+        assert all(m["active"] is True for m in data)
+
+    async def test_responsavel_desativado_aparece_com_active_false(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Sem o flag o admin não veria o beco: o servidor recusa promover inativo
+        e recusa remover o responsável — o `active` é o que mostra a saída."""
+        admin, responsible, _, client = await _seed_shared_client(db_session)
+        responsible.active = False
+        await db_session.flush()
+        await _login_as(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.get(_managers_url(client.id))
+        assert resp.status_code == 200, resp.text
+        flags = {m["id"]: m["active"] for m in resp.json()["data"]}
+        assert flags[str(responsible.id)] is False
+        del admin
 
     async def test_system_manager_gets_403_even_when_in_portfolio(
         self, client_with_db: AsyncClient, db_session: AsyncSession
@@ -264,6 +285,98 @@ class TestListManagers:
         resp = await client_with_db.get(_managers_url(client.id))
         assert resp.status_code == 200, resp.text
         assert len(resp.json()["data"]) == 2
+
+
+# ----------------------------------------------------------------------
+# Criação: quem entra na carteira (§4.13)
+# ----------------------------------------------------------------------
+
+
+class TestCreationAndPortfolio:
+    async def test_admin_created_client_has_no_responsible_until_first_manager(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Admin não entra na carteira (já alcança tudo pela matriz): o cliente
+        nasce sem responsável e o PRIMEIRO gerente adicionado assume."""
+        await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        manager = await _seed_user(db_session, email=RESPONSIBLE_EMAIL, role=UserRole.MANAGER)
+        await _login_as(client_with_db, ADMIN_EMAIL)
+
+        created = await client_with_db.post(
+            "/api/v1/clients",
+            json={"name": "Criado pelo admin", "omie_app_key": "k", "omie_app_secret": "s"},
+        )
+        assert created.status_code == 201, created.text
+        assert created.json()["responsible_manager"] is None
+        assert created.json()["manager_count"] == 0
+        client_id = created.json()["id"]
+        assert (await client_with_db.get(f"/api/v1/clients/{client_id}/managers")).json()[
+            "data"
+        ] == []
+
+        added = await client_with_db.post(
+            f"/api/v1/clients/{client_id}/managers", json={"user_id": str(manager.id)}
+        )
+        assert added.status_code == 201, added.text
+        assert [(m["id"], m["is_responsible"]) for m in added.json()["data"]] == [
+            (str(manager.id), True)
+        ]
+        listing = await client_with_db.get("/api/v1/clients")
+        row = next(c for c in listing.json()["data"] if c["id"] == client_id)
+        assert row["responsible_manager"]["id"] == str(manager.id)
+        assert row["manager_count"] == 1
+
+    async def test_second_manager_added_stays_collaborator(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        _, responsible, _, client = await _seed_shared_client(db_session)
+        third = await _seed_user(db_session, email=OUTSIDER_EMAIL, role=UserRole.MANAGER)
+        await _login_as(client_with_db, ADMIN_EMAIL)
+
+        added = await client_with_db.post(_managers_url(client.id), json={"user_id": str(third.id)})
+        assert added.status_code == 201, added.text
+        flags = {m["id"]: m["is_responsible"] for m in added.json()["data"]}
+        assert flags[str(responsible.id)] is True
+        assert flags[str(third.id)] is False
+
+
+# ----------------------------------------------------------------------
+# Escritas condicionais do repositório (o que protege contra a corrida)
+# ----------------------------------------------------------------------
+
+
+class TestConditionalWrites:
+    async def test_promote_returns_false_when_target_has_no_access(
+        self, db_session: AsyncSession
+    ) -> None:
+        """Promover quem perdeu o acesso no meio do caminho NÃO pode virar 200 com
+        cliente órfão: o repositório devolve False e o service levanta (rollback)."""
+        from app.modules.clients.repository import ClientRepository
+
+        _, _, _, client = await _seed_shared_client(db_session)
+        repo = ClientRepository(db_session)
+        assert await repo.set_primary_assignment(client_id=client.id, user_id=uuid4()) is False
+
+    async def test_delete_is_conditional_on_not_being_responsible(
+        self, db_session: AsyncSession
+    ) -> None:
+        from app.modules.clients.repository import ClientRepository
+
+        _, responsible, collaborator, client = await _seed_shared_client(db_session)
+        repo = ClientRepository(db_session)
+        assert (
+            await repo.delete_assignment_if_collaborator(
+                client_id=client.id, user_id=responsible.id
+            )
+            is False
+        )
+        assert (
+            await repo.delete_assignment_if_collaborator(
+                client_id=client.id, user_id=collaborator.id
+            )
+            is True
+        )
+        assert await repo.has_responsible(client.id) is True
 
 
 # ----------------------------------------------------------------------

@@ -33,7 +33,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, UniqueConstraint, false, func, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, UniqueConstraint, func, text, true
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -75,11 +75,12 @@ class ClientAssignment(UUIDPrimaryKeyMixin, Base):
         ),
     )
 
+    #: Sem índice próprio: a UNIQUE `(client_id, user_id)` já serve toda busca
+    #: por `client_id` pelo prefixo — um terceiro btree seria só custo de escrita.
     client_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("clients.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     user_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -87,12 +88,15 @@ class ClientAssignment(UUIDPrimaryKeyMixin, Base):
         nullable=False,
         index=True,
     )
-    #: Responsável pelo cliente (um só, garantido pelo índice parcial). Default
-    #: FALSE nos dois lados (ORM e servidor) de propósito: quem cria o vínculo do
-    #: responsável marca explicitamente — um default `True` faria qualquer
-    #: inserção distraída tentar virar segundo responsável e estourar no índice.
+    #: Responsável pelo cliente (um só, garantido pelo índice parcial). Os dois
+    #: defaults são DIFERENTES de propósito: no ORM é FALSE — o código marca o
+    #: responsável explicitamente e uma inserção distraída vira colaborador, não
+    #: segundo responsável; no BANCO é TRUE — linha gravada sem o campo é a forma
+    #: ANTIGA da tabela (1 linha = o gerente do cliente), e é assim que as linhas
+    #: pré-migration e as que a API antiga criar na janela de deploy (migration
+    #: roda antes da revisão nova) nascem como responsáveis, sem backfill.
     is_primary: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default=false()
+        Boolean, nullable=False, default=False, server_default=true()
     )
     assigned_by: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),

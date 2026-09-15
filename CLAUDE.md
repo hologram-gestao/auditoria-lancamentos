@@ -337,8 +337,15 @@ is_primary`) — um responsável por cliente; o predicado é COPIADO na migratio
     do responsável e o filtro da CARTEIRA é `EXISTS` sobre todas as linhas — são
     duas perguntas diferentes, e reusar o join no filtro faria o colaborador sumir
     da própria lista. Linha nova em `client_assignments` marca `is_primary`
-    **explicitamente** (default FALSE nos dois lados): quem cria o cliente é o
-    responsável; colaborador entra por `POST /clients/{id}/managers`.
+    **explicitamente** (default FALSE no ORM); o default do BANCO é TRUE de
+    propósito — linha gravada sem o campo é a forma antiga da tabela (1 linha =
+    o gerente), e é assim que as linhas pré-migration e as que a API antiga
+    criar na janela de deploy nascem responsáveis. **Gerente** que cria o cliente
+    é o responsável; **admin não entra na carteira** (nem na criação — já alcança
+    tudo pela matriz): o cliente nasce sem responsável e o primeiro gerente
+    adicionado assume. As escritas são condicionais no próprio SQL (promover com
+    `RETURNING` sob `FOR UPDATE`; remover só `WHERE is_primary = false`) — o
+    409/404 é decidido pelo estado atual, não por uma leitura anterior.
 
 ---
 

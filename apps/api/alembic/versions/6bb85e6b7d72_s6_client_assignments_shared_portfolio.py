@@ -6,22 +6,33 @@ tabela era 1:1 pelo índice único `ix_client_assignments_client_id`, e
 silêncio (incidente da Bruna no cliente Hologram, 14/09/2026).
 
 O que muda em `client_assignments`:
-    - coluna `is_primary` (boolean, NOT NULL, default false) — marca o responsável;
-    - **backfill**: toda linha existente vira responsável. É seguro porque, no
-      momento do UPDATE, o índice único antigo ainda garante uma linha por
-      cliente — não há como o backfill produzir dois responsáveis. Convergente
-      (`WHERE NOT is_primary`): rodar de novo não muda nada;
-    - o índice único em `client_id` vira índice comum (mesmo nome, sem unique);
+    - coluna `is_primary` (boolean, NOT NULL, **DEFAULT true no banco**) — marca
+      o responsável. O default TRUE é o backfill: a coluna nasce como "fast
+      default" do Postgres (catálogo, sem reescrever linha), e toda linha
+      existente — uma por cliente, garantido pelo índice único antigo que ainda
+      está de pé — lê `true`. O mesmo default cobre a janela de deploy: a API
+      ANTIGA (que roda sobre este schema até o `deploy-api`) insere sem o campo
+      e a linha nasce responsável, não órfã. O ORM grava o campo explicitamente
+      (default `False` no modelo) — o default do banco só fala por quem não fala;
+    - o índice único em `client_id` SAI e não volta como índice comum: a UNIQUE
+      `(client_id, user_id)` serve toda busca por `client_id` pelo prefixo;
     - UNIQUE `(client_id, user_id)` — a mesma pessoa não entra duas vezes;
     - índice único PARCIAL `uq_client_assignments_primary` (`client_id` WHERE
       `is_primary`) — um responsável por cliente. O autogenerate NÃO enxerga o
       predicado: escrito à mão, e `_PRIMARY_PREDICATE` é comparado com o modelo
       por teste unitário.
 
+Semântica de `assigned_by`/`assigned_at` em linha pré-migration: o código antigo
+sobrescrevia os dois a cada reatribuição, então em linha antiga eles dizem quem
+fez a ÚLTIMA reatribuição e quando — não quem concedeu o acesso original. Sem
+backfill possível (a informação original não existe); linhas novas seguem a
+semântica nova ("acesso concedido por/em").
+
 Downgrade: recriar o UNIQUE(client_id) só cabe se cada cliente tiver UMA linha.
-Se houver colaboradores (linhas não-responsáveis), a migration ABORTA com a
-consulta que mostra quem seria apagado — decidir quem perde acesso é decisão
-de dado, não de migration. Sem colaboradores, desce limpo.
+Se algum cliente tiver mais de uma (responsável + colaboradores), a migration
+ABORTA com a consulta que mostra quem seria apagado — decidir quem perde acesso
+é decisão de dado, não de migration. Um cliente com uma linha só desce limpo,
+seja ela responsável ou não.
 
 Revision ID: 6bb85e6b7d72
 Revises: c9e4a7b2d5f8
@@ -48,39 +59,43 @@ _PRIMARY_PREDICATE = "is_primary"
 
 # Guarda do downgrade: sem isto, o `CREATE UNIQUE INDEX (client_id)` estouraria
 # com "could not create unique index" e uma mensagem que não diz o que fazer.
-_ABORT_IF_COLLABORATORS = """
+# O critério é o que o índice antigo exige — UMA linha por cliente — e não
+# "existe colaborador": um cliente cuja única linha é um colaborador cabe.
+_ABORT_IF_SHARED = """
 DO $$
 DECLARE
-    extra_count integer;
+    shared_count integer;
 BEGIN
-    SELECT count(*) INTO extra_count
-    FROM client_assignments
-    WHERE NOT is_primary;
+    SELECT count(*) INTO shared_count
+    FROM (
+        SELECT client_id
+        FROM client_assignments
+        GROUP BY client_id
+        HAVING count(*) > 1
+    ) d;
 
-    IF extra_count > 0 THEN
+    IF shared_count > 0 THEN
         RAISE EXCEPTION
-            'Downgrade bloqueado: % linha(s) de client_assignments sao de '
-            'colaboradores (is_primary = false). A forma antiga da tabela so '
-            'cabe UM gerente por cliente. Remova os acessos extras antes '
-            '(SELECT client_id, user_id FROM client_assignments WHERE NOT '
-            'is_primary) — tirar acesso de alguem e decisao de dado.',
-            extra_count;
+            'Downgrade bloqueado: % cliente(s) com mais de um gerente em '
+            'client_assignments. A forma antiga da tabela so cabe UM gerente '
+            'por cliente. Remova os acessos extras antes (SELECT client_id, '
+            'user_id, is_primary FROM client_assignments WHERE client_id IN '
+            '(SELECT client_id FROM client_assignments GROUP BY client_id '
+            'HAVING count(*) > 1)) — tirar acesso de alguem e decisao de dado.',
+            shared_count;
     END IF;
 END $$;
 """
 
 
 def upgrade() -> None:
+    # DEFAULT true = backfill por catálogo: cada linha existente (uma por
+    # cliente, pelo índice único que ainda está de pé) passa a ler `true`.
     op.add_column(
         _TABLE,
-        sa.Column("is_primary", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("is_primary", sa.Boolean(), nullable=False, server_default=sa.true()),
     )
-    # Backfill ANTES de soltar o UNIQUE(client_id): com ele ainda de pé, cada
-    # cliente tem no máximo uma linha, logo no máximo um responsável.
-    op.execute(sa.text("UPDATE client_assignments SET is_primary = true WHERE NOT is_primary"))
-
     op.drop_index(_IX_CLIENT, table_name=_TABLE)
-    op.create_index(_IX_CLIENT, _TABLE, ["client_id"], unique=False)
     op.create_unique_constraint(_UQ_CLIENT_USER, _TABLE, ["client_id", "user_id"])
     op.create_index(
         _UQ_PRIMARY,
@@ -92,9 +107,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute(sa.text(_ABORT_IF_COLLABORATORS))
+    op.execute(sa.text(_ABORT_IF_SHARED))
     op.drop_index(_UQ_PRIMARY, table_name=_TABLE)
     op.drop_constraint(_UQ_CLIENT_USER, _TABLE, type_="unique")
-    op.drop_index(_IX_CLIENT, table_name=_TABLE)
     op.create_index(_IX_CLIENT, _TABLE, ["client_id"], unique=True)
     op.drop_column(_TABLE, "is_primary")
