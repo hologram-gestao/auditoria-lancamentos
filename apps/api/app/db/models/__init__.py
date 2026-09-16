@@ -8,7 +8,12 @@ from app.db.base import Base
 from app.db.models.access_audit import AccessAudit
 from app.db.models.anomaly_type import AnomalySeverity, AnomalyType
 from app.db.models.client import IV_HEX_LENGTH, Client
-from app.db.models.client_assignment import ClientAssignment
+from app.db.models.client_assignment import (
+    UQ_CLIENT_ASSIGNMENT_CLIENT_USER,
+    UQ_CLIENT_ASSIGNMENT_PRIMARY,
+    ClientAssignment,
+    primary_assignment_index_predicate,
+)
 from app.db.models.client_category import (
     MAX_CATEGORY_NAME_CHARS,
     UQ_CLIENT_CATEGORY_NAME,
@@ -77,6 +82,8 @@ __all__ = [
     "SCOPE_CLIENT_ID_CHECK",
     "SCOPE_CLIENT_ID_CONSTRAINT",
     "SYSTEM_ROLES",
+    "UQ_CLIENT_ASSIGNMENT_CLIENT_USER",
+    "UQ_CLIENT_ASSIGNMENT_PRIMARY",
     "UQ_CLIENT_CATEGORY_NAME",
     "UQ_USER_CLIENT_FAVORITE",
     "AccessAudit",
@@ -116,4 +123,5 @@ __all__ = [
     "UserClientFavorite",
     "UserRole",
     "UserScope",
+    "primary_assignment_index_predicate",
 ]

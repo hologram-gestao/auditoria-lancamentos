@@ -27,7 +27,8 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from pydantic import BaseModel
-from sqlalchemy import Select, select
+from sqlalchemy import ColumnElement, Select, select
+from sqlalchemy.orm import aliased
 
 from app.db.models import ClientAssignment, UserRole, UserScope
 
@@ -207,3 +208,23 @@ def scoped_by_tenant(
     if tenant is None:
         return stmt
     return stmt.where(tenant_column == tenant)
+
+
+def portfolio_filter(
+    user_id: UUID,
+    client_id_column: InstrumentedAttribute[UUID] | InstrumentedAttribute[UUID | None],
+) -> ColumnElement[bool]:
+    """`EXISTS` de CARTEIRA para coleções que o manager vê pela carteira (§4.13).
+
+    É a regra 3 de `resolve_client_access` projetada em `WHERE` — a lista de
+    clientes e as notificações consultam ESTA função, não uma cópia local do
+    `EXISTS`. Qualquer linha `client_assignments(client_id, user_id)` concede:
+    responsável ou colaborador. Se a regra da carteira mudar (revogação com data,
+    concessão por organização), muda aqui e as coleções seguem juntas.
+    """
+    portfolio = aliased(ClientAssignment)
+    return (
+        select(portfolio.id)
+        .where(portfolio.client_id == client_id_column, portfolio.user_id == user_id)
+        .exists()
+    )

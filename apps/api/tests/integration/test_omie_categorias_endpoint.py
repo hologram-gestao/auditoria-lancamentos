@@ -130,7 +130,11 @@ async def tenants(db_session: AsyncSession) -> Tenants:
         scope=UserScope.CLIENT,
         client_id=client_a.id,
     )
-    db_session.add(ClientAssignment(client_id=client_a.id, user_id=admin.id, assigned_by=admin.id))
+    db_session.add(
+        ClientAssignment(
+            client_id=client_a.id, user_id=admin.id, assigned_by=admin.id, is_primary=True
+        )
+    )
     session_a = await _seed_session(db_session, client=client_a, creator=admin)
     session_b = await _seed_session(db_session, client=client_b, creator=admin)
     return Tenants(admin, client_a, client_b, session_a, session_b, operator_a)

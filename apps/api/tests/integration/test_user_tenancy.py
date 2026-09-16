@@ -238,7 +238,11 @@ class TestRegressaoUsuarioSystem:
             db_session, email="mgr-reg@hologram.com.br", role=UserRole.MANAGER
         )
         cli = await _seed_client(db_session, creator=admin, name="Austral REG")
-        db_session.add(ClientAssignment(client_id=cli.id, user_id=manager.id, assigned_by=admin.id))
+        db_session.add(
+            ClientAssignment(
+                client_id=cli.id, user_id=manager.id, assigned_by=admin.id, is_primary=True
+            )
+        )
         await db_session.flush()
 
         login = await client_with_db.post(

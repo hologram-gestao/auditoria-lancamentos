@@ -322,6 +322,37 @@ class InvalidManagerError(ValidationAppError):
     default_user_message = "O usuário selecionado não é um gerente ativo."
 
 
+class ManagerAlreadyAssignedError(ConflictError):
+    """409 — adicionar gerente que JÁ tem acesso ao cliente (86e390kz8).
+
+    A garantia é do banco (`uq_client_assignments_client_user`, via `ON CONFLICT
+    DO NOTHING`): dois cliques ou duas abas não viram linha duplicada — e a
+    resposta diz que não havia nada a fazer, em vez de fingir que adicionou.
+    """
+
+    default_user_message = "Este gerente já tem acesso a este cliente."
+
+
+class ManagerNotAssignedError(NotFoundError):
+    """404 — remover acesso de alguém que não tem acesso ao cliente (86e390kz8)."""
+
+    default_user_message = "Este gerente não tem acesso a este cliente."
+
+
+class CannotRemoveResponsibleManagerError(ConflictError):
+    """409 — tentativa de remover o RESPONSÁVEL sem antes definir outro (86e390kz8).
+
+    Cliente nunca fica órfão: o responsável é quem aparece na lista e a quem se
+    cobra. Para tirá-lo, primeiro se define outro responsável (`/assign`), o que
+    NÃO remove o acesso de ninguém; só então o antigo pode ser removido.
+    """
+
+    default_user_message = (
+        "Este gerente é o responsável pelo cliente. Defina outro responsável antes de "
+        "remover o acesso dele."
+    )
+
+
 class DuplicateFileError(AppError):
     """409 — violação de idempotência (mesmo arquivo, conta e mês)."""
 
