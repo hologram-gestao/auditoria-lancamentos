@@ -68,6 +68,9 @@ class AlertCode(StrEnum):
     SESSION_ERROR = "session_error"
     HEARTBEAT_MISSING = "heartbeat_missing"
     DECRYPT_FAILED = "decrypt_failed"
+    # Conta da Anthropic sem crédito (86e39yzxc): parsing e qualificação param
+    # até alguém recarregar. Plantão, nunca o canal do sintético.
+    ANTHROPIC_CREDIT = "anthropic_credit"
     SYNTHETIC = "synthetic"
 
 

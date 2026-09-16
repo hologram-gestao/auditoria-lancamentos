@@ -119,6 +119,7 @@ def _get_anthropic_client(
         model=settings.ANTHROPIC_MODEL_DEFAULT,
         timeout=settings.ANTHROPIC_TIMEOUT_SECONDS,
         max_output_tokens=settings.ADL_PARSE_MAX_OUTPUT_TOKENS,
+        alert_settings=settings,
     )
 
 
@@ -134,6 +135,9 @@ def _get_parse_service(
         anthropic,
         mock_enabled=settings.MOCK_PARSE,
         mock_delay_seconds=settings.MOCK_PARSE_DELAY_SECONDS,
+        chunk_rows=settings.ADL_PARSE_CHUNK_ROWS,
+        chunk_min_rows=settings.ADL_PARSE_CHUNK_MIN_ROWS,
+        chunk_concurrency=settings.ADL_PARSE_CHUNK_CONCURRENCY,
     )
 
 

@@ -36,6 +36,7 @@ class ErrorCode(StrEnum):
     OMIE_SYNC_FAILED = "OMIE_SYNC_FAILED"
     ANTHROPIC_AUTH_ERROR = "ANTHROPIC_AUTH_ERROR"
     ANTHROPIC_TIMEOUT = "ANTHROPIC_TIMEOUT"
+    ANTHROPIC_CREDIT_EXHAUSTED = "ANTHROPIC_CREDIT_EXHAUSTED"
     PARSE_ERROR = "PARSE_ERROR"
     # Desfechos do processamento em background (Sprint 4). Não viram resposta
     # HTTP — são gravados em `reconciliation_sessions.error_code` e viajam na
@@ -441,11 +442,37 @@ class AnthropicAuthError(AppError):
 
 
 class AnthropicTimeoutError(AppError):
-    """504 — Anthropic API não respondeu dentro do timeout configurado (150 s)."""
+    """504 — Anthropic API não respondeu dentro do timeout configurado (150 s).
+
+    Também é o desfecho de 5xx/429 persistentes após o retry. A mensagem orienta
+    a dividir o período (86e39yzwu): quando a causa é o tamanho do arquivo,
+    "tente novamente" induzia retry inútil — o tempo de uma chamada cresce com o
+    número de linhas, e o mesmo arquivo estoura o teto de novo.
+    """
 
     code = ErrorCode.ANTHROPIC_TIMEOUT
     status_code = 504
-    default_user_message = "O processamento demorou mais que o esperado. Tente novamente."
+    default_user_message = (
+        "O processamento demorou mais que o esperado. Se o arquivo tiver muitas "
+        "linhas, exporte um período menor (por exemplo, duas quinzenas) e adicione "
+        "as partes na mesma conciliação; se não, tente novamente em instantes."
+    )
+
+
+class AnthropicCreditError(AppError):
+    """502 — a conta da Anthropic está sem crédito (HTTP 400 "credit balance").
+
+    Sem esta classe o 400 caía na regra genérica de 4xx e virava 422 "arquivo
+    inválido" (86e39yzxc): quem usa achava que o arquivo estava errado, e ninguém
+    da Hologram era avisado. O alerta de plantão sai no `AnthropicClient`.
+    """
+
+    code = ErrorCode.ANTHROPIC_CREDIT_EXHAUSTED
+    status_code = 502
+    default_user_message = (
+        "O serviço de extração está sem crédito. A equipe Hologram já foi avisada; "
+        "tente mais tarde."
+    )
 
 
 class AnthropicParseError(ParseError):

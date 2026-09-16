@@ -101,10 +101,26 @@ inventado, nada filtrado.\
 """
 
 
-def build_user_prompt(document_kind: str) -> str:
+# Bloco de um arquivo dividido para processamento (86e39xvxm). O cabeçalho se
+# repete em todo bloco; sem esta nota o modelo poderia tentar "completar" o
+# período declarado no preâmbulo com linhas que estão em outros blocos.
+PART_NOTE_TEMPLATE = """ \
+Este é o bloco {index} de {total} do MESMO documento, dividido só para \
+processamento: o cabeçalho se repete em todos os blocos. Extraia apenas as \
+movimentações listadas neste bloco, sem completar com linhas de outros blocos.\
+"""
+
+
+def build_user_prompt(document_kind: str, *, part: tuple[int, int] | None = None) -> str:
     """Renderiza o prompt do usuário com o tipo de documento.
 
     Args:
         document_kind: ex. "extrato bancário em PDF", "fatura de cartão CSV".
+        part: `(índice 1-based, total)` quando o conteúdo é um bloco de um
+            arquivo dividido; `None` para o arquivo inteiro.
     """
-    return USER_PROMPT_TEMPLATE.format(document_kind=document_kind)
+    prompt = USER_PROMPT_TEMPLATE.format(document_kind=document_kind)
+    if part is not None:
+        index, total = part
+        prompt += PART_NOTE_TEMPLATE.format(index=index, total=total)
+    return prompt

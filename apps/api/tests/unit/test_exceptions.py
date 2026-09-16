@@ -5,6 +5,8 @@ from __future__ import annotations
 import pytest
 
 from app.core.exceptions import (
+    AnthropicCreditError,
+    AnthropicTimeoutError,
     AppError,
     DuplicateFileError,
     ErrorCode,
@@ -117,3 +119,23 @@ class TestErrorCodeEnum:
         """Convenção: nome do enum == valor (facilita debug)."""
         for code in ErrorCode:
             assert code.value == code.name
+
+
+class TestParsingErrorMessages:
+    """86e39yzwu / 86e39yzxc — mensagens que orientam a ação certa."""
+
+    def test_timeout_orienta_a_dividir_o_periodo(self) -> None:
+        exc = AnthropicTimeoutError("Timeout na chamada à Anthropic.")
+
+        assert exc.code is ErrorCode.ANTHROPIC_TIMEOUT
+        assert exc.status_code == 504
+        assert "período menor" in exc.user_message
+        assert "mesma conciliação" in exc.user_message
+
+    def test_credito_esgotado_tem_codigo_proprio_e_avisa_que_a_equipe_foi_acionada(self) -> None:
+        exc = AnthropicCreditError("Anthropic recusou por crédito insuficiente (HTTP 400).")
+
+        assert exc.code is ErrorCode.ANTHROPIC_CREDIT_EXHAUSTED
+        assert exc.status_code == 502
+        assert "sem crédito" in exc.user_message
+        assert "Hologram" in exc.user_message
