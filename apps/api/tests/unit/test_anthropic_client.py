@@ -28,8 +28,10 @@ from anthropic import (
 )
 from pydantic import SecretStr, ValidationError
 
+from app.core.alerting import AlertCode
 from app.core.exceptions import (
     AnthropicAuthError,
+    AnthropicCreditError,
     AnthropicParseError,
     AnthropicTimeoutError,
 )
@@ -602,3 +604,96 @@ class TestPartNoteInUserPrompt:
 
         blocks = fake.messages.calls[0]["messages"][0]["content"]
         assert "bloco" not in blocks[-1]["text"]
+
+
+# ----------------------------------------------------------------------
+# 86e39yzxc — crédito esgotado e 429
+# ----------------------------------------------------------------------
+
+
+def _credit_error() -> APIStatusError:
+    return APIStatusError(
+        message="Your credit balance is too low to access the Anthropic API.",
+        response=httpx.Response(400, request=_FAKE_REQUEST),
+        body={"error": {"type": "invalid_request_error"}},
+    )
+
+
+class TestCreditExhaustedAndRateLimit:
+    async def test_400_de_credito_vira_erro_proprio_e_alerta_uma_vez(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import app.integrations.anthropic.client as client_module
+
+        sent: list[Any] = []
+
+        async def _fake_send_alert(alert: Any, settings: Any) -> Any:
+            sent.append(alert)
+            return None
+
+        monkeypatch.setattr(client_module, "send_alert", _fake_send_alert)
+        monkeypatch.setattr(client_module, "_credit_alert_last_at", None)
+        fake = _FakeAnthropic(side_effect=[_credit_error(), _credit_error()])
+        client = AnthropicClient(
+            api_key=SecretStr("sk-ant-fake"),
+            model="claude-test",
+            timeout=10.0,
+            anthropic_client=fake,
+            alert_settings=object(),  # type: ignore[arg-type]
+        )
+
+        for _ in range(2):
+            with pytest.raises(AnthropicCreditError) as exc_info:
+                await client.extract_movements(
+                    content=b"%PDF-", mime_type="application/pdf", document_kind="x"
+                )
+            assert "sem crédito" in exc_info.value.user_message
+
+        # Duas falhas, UM alerta (dedup por processo) — e no plantão.
+        assert len(sent) == 1
+        assert sent[0].code is AlertCode.ANTHROPIC_CREDIT
+        assert len(fake.messages.calls) == 2  # sem retry: crédito não é transitório
+
+    async def test_sem_settings_de_alerta_o_erro_sobe_sem_alertar(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import app.integrations.anthropic.client as client_module
+
+        async def _boom(alert: Any, settings: Any) -> Any:
+            raise AssertionError("não deveria alertar")
+
+        monkeypatch.setattr(client_module, "send_alert", _boom)
+        client = _make_client(_FakeAnthropic(side_effect=_credit_error()))
+
+        with pytest.raises(AnthropicCreditError):
+            await client.extract_movements(
+                content=b"%PDF-", mime_type="application/pdf", document_kind="x"
+            )
+
+    async def test_400_de_outro_tipo_continua_parse_error(self) -> None:
+        client = _make_client(_FakeAnthropic(side_effect=_api_status_error(400)))
+
+        with pytest.raises(AnthropicParseError):
+            await client.extract_movements(
+                content=b"%PDF-", mime_type="application/pdf", document_kind="x"
+            )
+
+    async def test_429_depois_200_faz_retry(self) -> None:
+        fake = _FakeAnthropic(side_effect=[_api_status_error(429), _ok_message()])
+        client = _make_client(fake)
+
+        stmt = await client.extract_movements(
+            content=b"%PDF-", mime_type="application/pdf", document_kind="x"
+        )
+
+        assert stmt.bank_name == "Sicredi"
+        assert len(fake.messages.calls) == 2
+
+    async def test_429_persistente_vira_timeout(self) -> None:
+        fake = _FakeAnthropic(side_effect=[_api_status_error(429), _api_status_error(429)])
+        client = _make_client(fake)
+
+        with pytest.raises(AnthropicTimeoutError):
+            await client.extract_movements(
+                content=b"%PDF-", mime_type="application/pdf", document_kind="x"
+            )

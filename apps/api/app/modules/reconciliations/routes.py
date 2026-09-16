@@ -119,6 +119,7 @@ def _get_anthropic_client(
         model=settings.ANTHROPIC_MODEL_DEFAULT,
         timeout=settings.ANTHROPIC_TIMEOUT_SECONDS,
         max_output_tokens=settings.ADL_PARSE_MAX_OUTPUT_TOKENS,
+        alert_settings=settings,
     )
 
 
