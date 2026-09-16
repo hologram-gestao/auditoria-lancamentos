@@ -84,6 +84,15 @@ export type ManagerSummary = Schemas['ManagerSummary'];
 export type ClientCategorySummary = Schemas['ClientCategorySummary'];
 
 // ---------------------------------------------------------------------------
+// Carteira compartilhada — quem tem ACESSO ao cliente (86e390m4c)
+// ---------------------------------------------------------------------------
+
+/** Uma pessoa com acesso ao cliente; `is_responsible` marca o único responsável. */
+export type ClientManagerResponse = Schemas['ClientManagerResponse'];
+export type ClientManagerListResponse = Schemas['ClientManagerListResponse'];
+export type AddClientManagerRequest = Schemas['AddClientManagerRequest'];
+
+// ---------------------------------------------------------------------------
 // Catálogo de categorias de cliente (86e34jd8m)
 // ---------------------------------------------------------------------------
 
