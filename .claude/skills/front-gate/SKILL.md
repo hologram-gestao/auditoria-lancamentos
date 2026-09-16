@@ -197,9 +197,9 @@ viewportSize().width` (padrão em `spec:1638-1643` e `:1838-1853`). Antes de med
   spinner, reabilita em sucesso OU erro.
 - **Tooltip NUNCA é `title` nativo** (não aparece no toque, não alcança teclado, leitor
   ignora): `components/ui/tooltip.tsx` com `role="img"` + `aria-label` com a explicação
-  INTEIRA + `tabIndex={0}` — copie de `review/situation-badge.tsx`,
-  `review/qualification-cell.tsx`, `reconciliations/author-label.tsx`. Hoje restam 5
-  `title` nativos legados (texto truncado em `file-input-field.tsx:106`,
+  INTEIRA + `tabIndex={0}` — copie de `reconciliations/review/situation-badge.tsx`,
+  `reconciliations/review/qualification-cell.tsx`, `reconciliations/author-label.tsx`.
+  Hoje restam 5 `title` nativos legados (texto truncado em `file-input-field.tsx:106`,
   `upload-item-row.tsx:52`, `anomaly-types-table.tsx:109`; badge em
   `glossary-badges.tsx:47`; input em `anomaly-type-edit-dialog.tsx:132`) — não crie
   o 6º; migrar é task própria. (`category-badge.tsx:43` passa `title={undefined}` de
