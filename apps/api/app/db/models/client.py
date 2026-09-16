@@ -30,11 +30,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.db.models._mixins import TimestampMixin, UUIDPrimaryKeyMixin
+from app.db.models.organization import organization_id_server_default
 
 if TYPE_CHECKING:
     from app.db.models.client_assignment import ClientAssignment
     from app.db.models.client_category import ClientCategory
     from app.db.models.omie_account_cache import OmieAccountCache
+    from app.db.models.organization import Organization
     from app.db.models.reconciliation_session import ReconciliationSession
     from app.db.models.user import User
 
@@ -113,9 +115,25 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         default=None,
     )
 
+    # Camada de organizações (86e36ec7p): a organização DONA do cliente — é por
+    # ela que `resolve_client_access` decide se um admin/manager de org alcança
+    # este cliente. NOT NULL, com `server_default` = Hologram: linha gravada sem
+    # o campo é a forma ANTIGA da tabela (API antiga na janela de deploy, testes
+    # que constroem `Client(...)` sem org). Sem `default` no ORM de propósito:
+    # o service passa a org da LINHA do ator (nunca do payload). RESTRICT: uma
+    # organização com clientes não some.
+    organization_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+        server_default=text(organization_id_server_default()),
+    )
+
     # Relationships
     creator: Mapped[User] = relationship("User", foreign_keys=[created_by], lazy="raise")
     category: Mapped[ClientCategory | None] = relationship("ClientCategory", lazy="raise")
+    organization: Mapped[Organization] = relationship("Organization", lazy="raise")
     assignments: Mapped[list[ClientAssignment]] = relationship(
         "ClientAssignment",
         back_populates="client",

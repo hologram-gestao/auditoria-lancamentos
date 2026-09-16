@@ -18,15 +18,16 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, null, select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
 from app.core.crypto import encrypt
 from app.core.security import hash_password
 from app.db.models import (
-    SCOPE_CLIENT_ID_CHECK,
-    SCOPE_CLIENT_ID_CONSTRAINT,
+    HOLOGRAM_ORGANIZATION_ID,
+    SCOPE_CONSISTENCY_CHECK,
+    SCOPE_CONSISTENCY_CONSTRAINT,
     Client,
     ClientAssignment,
     User,
@@ -134,7 +135,7 @@ class TestCheckConstraint:
                 scope=UserScope.CLIENT,
                 client_id=None,
             )
-        assert SCOPE_CLIENT_ID_CONSTRAINT in str(exc.value)
+        assert SCOPE_CONSISTENCY_CONSTRAINT in str(exc.value)
         await db_session.rollback()
 
     async def test_system_com_client_id_e_rejeitado(self, db_session: AsyncSession) -> None:
@@ -149,7 +150,7 @@ class TestCheckConstraint:
                 scope=UserScope.SYSTEM,
                 client_id=cli.id,
             )
-        assert SCOPE_CLIENT_ID_CONSTRAINT in str(exc.value)
+        assert SCOPE_CONSISTENCY_CONSTRAINT in str(exc.value)
         await db_session.rollback()
 
     async def test_update_que_quebra_o_invariante_e_rejeitado(
@@ -195,7 +196,7 @@ class TestCheckConstraint:
                     "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint "
                     "WHERE conname = :name"
                 ),
-                {"name": SCOPE_CLIENT_ID_CONSTRAINT},
+                {"name": SCOPE_CONSISTENCY_CONSTRAINT},
             )
         ).scalar_one()
         # O Postgres reescreve o predicado com parênteses/casts próprios
@@ -203,10 +204,72 @@ class TestCheckConstraint:
         normalized = " ".join(
             str(definition).replace("::text", "").replace("(", " ").replace(")", " ").split()
         )
-        for fragment in ("scope = 'client'", "client_id IS NOT NULL", "client_id IS NULL"):
+        for fragment in (
+            "scope = 'platform'",
+            "scope = 'system'",
+            "scope = 'client'",
+            "organization_id IS NULL",
+            "organization_id IS NOT NULL",
+            "client_id IS NOT NULL",
+            "client_id IS NULL",
+        ):
             assert fragment in normalized, f"{fragment!r} ausente de {normalized!r}"
-        # E o predicado declarado no modelo menciona os mesmos três fragmentos.
-        assert "client_id IS NOT NULL" in SCOPE_CLIENT_ID_CHECK
+        # E o predicado declarado no modelo menciona os mesmos fragmentos.
+        assert "organization_id IS NOT NULL" in SCOPE_CONSISTENCY_CHECK
+        assert "client_id IS NOT NULL" in SCOPE_CONSISTENCY_CHECK
+
+    async def test_system_sem_organizacao_e_rejeitado(self, db_session: AsyncSession) -> None:
+        """Camada de organizações (86e36ec7p): staff sem org não existe.
+
+        `null()` e não `None`: no INSERT o SQLAlchemy OMITE um atributo `None`
+        quando a coluna tem `server_default` (o default do banco fala por ele);
+        só `null()` grava NULL de verdade — e aí o CHECK recusa.
+        """
+        db_session.add(
+            User(
+                name="Sem Org",
+                email="sem-org@hologram.com.br",
+                password_hash=hash_password(PLAIN_PASSWORD),
+                role=UserRole.MANAGER.value,
+                active=True,
+                scope=UserScope.SYSTEM.value,
+                organization_id=null(),
+            )
+        )
+        with pytest.raises(IntegrityError) as exc:
+            await db_session.flush()
+        assert SCOPE_CONSISTENCY_CONSTRAINT in str(exc.value)
+        await db_session.rollback()
+
+    async def test_papel_de_cliente_com_escopo_de_sistema_e_rejeitado(
+        self, db_session: AsyncSession
+    ) -> None:
+        """O CHECK cruza também o PAPEL — não só as whitelists do Pydantic."""
+        with pytest.raises(IntegrityError) as exc:
+            await _seed_user(
+                db_session,
+                email="papel-errado@hologram.com.br",
+                role=UserRole.CLIENT_MANAGER,
+                scope=UserScope.SYSTEM,
+            )
+        assert SCOPE_CONSISTENCY_CONSTRAINT in str(exc.value)
+        await db_session.rollback()
+
+    async def test_usuario_de_cliente_nasce_na_organizacao_do_cliente(
+        self, db_session: AsyncSession
+    ) -> None:
+        admin = await _seed_user(db_session, email="adm-org@hologram.com.br", role=UserRole.ADMIN)
+        cli = await _seed_client(db_session, creator=admin, name="Austral ORG")
+        user = await _seed_user(
+            db_session,
+            email="op-org@austral.com.br",
+            role=UserRole.CLIENT_OPERATOR,
+            scope=UserScope.CLIENT,
+            client_id=cli.id,
+        )
+        await db_session.refresh(user, ["organization_id"])
+        await db_session.refresh(cli, ["organization_id"])
+        assert user.organization_id == cli.organization_id == HOLOGRAM_ORGANIZATION_ID
 
 
 class TestForeignKey:

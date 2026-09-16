@@ -6,9 +6,12 @@ que motivou o pedido (lucratividade por segmento). Uma categoria por cliente
 (`clients.category_id`, nullable — cliente sem categoria é o estado inicial de
 todos os existentes).
 
-Escopo: hoje o catálogo é global (uma organização só). Quando a camada de
-organizações (86e32fp4b) chegar, esta tabela ganha `organization_id` — por
-isso nasce como tabela própria, e não como enum no código.
+Escopo: POR ORGANIZAÇÃO (decisão D3 da camada de organizações, 86e36ec7p):
+cada BPO categoriza os próprios clientes sem enxergar as categorias dos
+outros. A unicidade do nome é `(organization_id, name)`; `server_default` =
+Hologram pelo mesmo motivo das colunas irmãs em `clients`/`users` (linha sem o
+campo é a forma antiga da tabela). O service continua comparando o nome sem
+caixa — dentro da organização.
 
 A cor é um TOM semântico (`ClientCategoryTone`), nunca um hex: o front mapeia o
 tom para tokens do tema (§7 — cor em componente é sempre token, e o tema da
@@ -21,18 +24,23 @@ claro, na mesma classe do `clients.name` (§4.5).
 from __future__ import annotations
 
 from enum import StrEnum
+from uuid import UUID
 
-from sqlalchemy import String, UniqueConstraint, text
+from sqlalchemy import ForeignKey, String, UniqueConstraint, text
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 from app.db.models._mixins import TimestampMixin, UUIDPrimaryKeyMixin
+from app.db.models.organization import organization_id_server_default
 
 #: Tamanho máximo do nome — chip na lista, precisa caber numa linha.
 MAX_CATEGORY_NAME_CHARS = 60
 
-#: Nome da UNIQUE de `name` (case-sensitive no banco; o service compara sem caixa).
-UQ_CLIENT_CATEGORY_NAME = "uq_client_categories_name"
+#: Nome da UNIQUE `(organization_id, name)` — case-sensitive no banco; o service
+#: compara sem caixa, dentro da organização. Substituiu `uq_client_categories_name`
+#: (global) na migration `3e8f1a6c9d24`.
+UQ_CLIENT_CATEGORY_ORGANIZATION_NAME = "uq_client_categories_organization_id_name"
 
 
 class ClientCategoryTone(StrEnum):
@@ -47,8 +55,18 @@ class ClientCategoryTone(StrEnum):
 
 class ClientCategory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "client_categories"
-    __table_args__ = (UniqueConstraint("name", name=UQ_CLIENT_CATEGORY_NAME),)
+    __table_args__ = (
+        UniqueConstraint("organization_id", "name", name=UQ_CLIENT_CATEGORY_ORGANIZATION_NAME),
+    )
 
+    #: Sem índice próprio: a UNIQUE `(organization_id, name)` serve toda busca por
+    #: organização pelo prefixo (mesmo racional de `client_assignments`).
+    organization_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="RESTRICT"),
+        nullable=False,
+        server_default=text(organization_id_server_default()),
+    )
     name: Mapped[str] = mapped_column(String(MAX_CATEGORY_NAME_CHARS), nullable=False)
     tone: Mapped[str] = mapped_column(
         String(20),
