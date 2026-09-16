@@ -146,25 +146,39 @@
       deixaria subir em prod um serviço cujo único canal é o de teste — alerta
       real sem para onde ir. Só o sintético desvia; qualquer alerta novo nasce no
       plantão.
-15. **Autorização por tenant (Sprint 5) — a regra mais fácil de furar sem perceber:**
-    - **O tenant vem SEMPRE da LINHA do usuário**, nunca de `client_id` recebido
-      em URL, query ou body. O JWT carrega `scope`/`client_id`, mas a autoridade
-      é a linha já lida por `get_current_user` (a mesma leitura que checa
-      `active`) — assim revogação vale no request seguinte, sem esperar o token
-      expirar, e sem query nova.
+15. **Autorização por tenant e por organização (Sprint 5 + épico 86e36ec0q) — a
+    regra mais fácil de furar sem perceber:**
+    - **O tenant e a organização vêm SEMPRE da LINHA do usuário**, nunca de
+      `client_id`/`organization_id` recebidos em URL, query ou body. O JWT carrega
+      `scope`/`client_id`/`organization_id`, mas a autoridade é a linha já lida
+      por `get_current_user` (a mesma leitura que checa `active` e a organização
+      ativa) — assim revogação e suspensão de organização valem no request
+      seguinte, sem esperar o token expirar, e sem query nova.
     - **Existe UMA decisão de acesso: `resolve_client_access`** em
-      [apps/api/app/core/authz.py](apps/api/app/core/authz.py). Rota e camada de
-      dados consultam **ela**. **Proibido** escrever uma segunda implementação da
-      regra — se você está prestes a comparar `role`/`client_id` na mão, pare e
-      use a função.
+      [apps/api/app/core/authz.py](apps/api/app/core/authz.py), nesta ordem:
+      usuário de cliente só o próprio tenant; **plataforma bem formada libera
+      tudo** (D1 revisada pelo Lucas, 09/09); staff de organização só alcança
+      cliente **da própria organização** — `admin` a org inteira, `manager` a
+      carteira dentro dela. Esquecer a organização no ramo do admin é vazamento
+      entre BPOs. Rota e camada de dados consultam **ela**. **Proibido** escrever
+      uma segunda implementação — se você está prestes a comparar `role`/`scope`
+      na mão, pare: os antigos `require_admin`/`require_manager_or_admin` não
+      existem mais; use os guards da matriz ou `StaffDep`.
     - **Defense-in-depth na camada de dados:** negar na rota é necessário e
-      **não** suficiente. Toda query de coleção passa por `scoped_by_tenant(...)`
-      e todo detalhe por PK carrega `AND client_id = <tenant do usuário>` no
-      próprio `SELECT` — recurso de outro tenant vira **404**, nunca o dado.
-      `tenant_filter_client_id(user)` devolve o tenant a forçar no `WHERE`.
+      **não** suficiente. Coleção endereçada por `client_id` (clientes,
+      notificações, sessões) passa por `scoped_by_reach(...)`/`reach_filter(...)`
+      — a MESMA decisão projetada em `WHERE` (plataforma tudo, admin a org,
+      manager a carteira, cliente o tenant); tabela com coluna de org (`users`,
+      `client_categories`, `clients`) por `scoped_by_organization(...)` — já
+      aplicado em `users` (listagem e alvo por PK são só staff da org do
+      observador); em `client_categories` chega na task 86e36ecqz; e todo
+      detalhe por PK carrega `AND client_id = <tenant do usuário>` no próprio
+      `SELECT` (`scoped_by_tenant`) — recurso de outro tenant vira **404**, nunca
+      o dado. `tenant_filter_client_id(user)` devolve o tenant a forçar no `WHERE`.
     - **Negação não vaza o alvo:** 403 (ou 404 onde a conversão anti-enumeração
       já existe) com corpo **sem nome, razão social ou CNPJ** do tenant alvo, e
-      **1** linha em `access_audit`.
+      **1** linha em `access_audit` com `user_scope`, `actor_client_id` e
+      `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
       (**49** hoje — o arquivo é a fonte, confira com
@@ -265,8 +279,11 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    quem não fala** — código de criação passa a org da LINHA do ator, nunca do payload.
    - `scope = 'platform'` → administração geral da ADL (`platform_admin`);
      `organization_id` e `client_id` **NULL**. Vê e faz tudo (D1 revisada pelo
-     Lucas, 09/09). Os membros de enum e a regra de acesso chegam com a task de
-     authz core (86e36ecar); até lá o banco aceita a forma e nada a produz.
+     Lucas, 09/09). Nasce **só por script** (`promote_platform_admin.py`, task
+     86e36ecqz; em dev, `seed_dev.py`), nunca por endpoint: `platform_admin` não
+     entra em nenhuma whitelist de API. Via ORM, o INSERT exige
+     `organization_id=null()` (o `None` é omitido e o banco preencheria a Hologram;
+     o CHECK recusa, então o erro é barulhento).
    - `scope = 'system'` → staff de UMA organização; `organization_id`
      **obrigatório**, `client_id` **NULL**; escopo é a carteira (`client_assignments`).
    - `scope = 'client'` → usuário DO cliente; `client_id` **obrigatório** e é o
@@ -276,23 +293,38 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
      Fonte única do enum e do CHECK:
      [apps/api/app/db/models/user.py](apps/api/app/db/models/user.py); a migration
      copia e `tests/unit/test_organization_schema.py` compara as duas.
-   - Papéis: `admin` e `manager` (sistema); `client_manager` e `client_operator`
-     (cliente). O papel do payload de criação é **whitelist** — `admin`/`manager`
-     forjados são rejeitados.
-9. **Matriz de permissões (Sprint 5):** declarativa e ÚNICA em
-   `PERMISSION_MATRIX` ([apps/api/app/core/authz.py](apps/api/app/core/authz.py)),
-   consultada por `has_permission`. No front, o espelho é
-   `apps/web/src/lib/authz.ts` — **um** helper, nunca `if (role === ...)` espalhado
-   por componente.
+   - Papéis: `platform_admin` (plataforma); `admin` e `manager` (organização);
+     `client_manager` e `client_operator` (cliente). O papel do payload de
+     criação é **whitelist** por API — `admin`/`manager` forjados num usuário de
+     cliente são rejeitados, e `platform_admin` não existe em whitelist nenhuma.
+9. **Matriz de permissões (Sprint 5 + camada de organizações):** declarativa e
+   ÚNICA em `PERMISSION_MATRIX`
+   ([apps/api/app/core/authz.py](apps/api/app/core/authz.py)), consultada por
+   `has_permission`; 13 permissões x 5 papéis, transcrita célula a célula em
+   `tests/unit/test_authz_matrix.py`, com um teste que trava **a plataforma em
+   toda linha**. No front, o espelho é `apps/web/src/lib/authz.ts` — **um**
+   helper, nunca `if (role === ...)` espalhado por componente.
 
-   | Ação                         | client_manager | client_operator | admin | manager       |
-   | ---------------------------- | -------------- | --------------- | ----- | ------------- |
-   | Criar/rodar conciliação      | ✅             | ✅              | ✅    | ✅            |
-   | Revisar / exportar           | ✅             | ✅              | ✅    | ✅            |
-   | Sincronizar contas do Omie   | ✅             | ✅              | ✅    | ✅            |
-   | Gerir usuários do cliente    | ✅             | ❌              | ✅    | ❌            |
-   | Editar dados do cliente (§9) | ❌             | ❌              | ✅    | ❌            |
-   | Ver outro tenant             | ❌             | ❌              | ✅    | ✅ (carteira) |
+   | Ação                            | platform_admin | admin (org)      | manager (org)           | client_manager | client_operator |
+   | ------------------------------- | -------------- | ---------------- | ----------------------- | -------------- | --------------- |
+   | Criar/rodar conciliação         | ✅             | ✅               | ✅                      | ✅             | ✅              |
+   | Revisar / exportar              | ✅             | ✅               | ✅                      | ✅             | ✅              |
+   | Sincronizar contas do Omie      | ✅             | ✅               | ✅                      | ✅             | ✅              |
+   | Manter o glossário              | ✅             | ✅               | ✅ (carteira)           | ✅             | ❌              |
+   | Gerir usuários do cliente       | ✅             | ✅               | ❌ (D2, task 86e36ecjp) | ✅             | ❌              |
+   | Criar cliente                   | ✅             | ✅               | ✅ (vira responsável)   | ❌             | ❌              |
+   | Editar/excluir/encerrar cliente | ✅             | ✅               | ❌                      | ❌             | ❌              |
+   | Ver outro tenant                | ✅             | ✅ (própria org) | ✅ (carteira)           | ❌             | ❌              |
+   | Gerir usuários da org           | ✅             | ✅ (própria org) | ❌                      | ❌             | ❌              |
+   | Categorias de cliente (escrita) | ✅             | ✅ (própria org) | ❌                      | ❌             | ❌              |
+   | Tipos de anomalia (escrita)     | ✅             | ✅ (\*)          | ❌                      | ❌             | ❌              |
+   | Gerir organizações              | ✅             | ❌               | ❌                      | ❌             | ❌              |
+   | Teste de alerta                 | ✅             | ✅               | ❌                      | ❌             | ❌              |
+
+   "(carteira)" e "(própria org)" **não** são células: são `resolve_client_access`
+   e os filtros de coleção. (\*) D3 final é só plataforma; o admin sai da célula
+   quando a tela de tipos de anomalia virar só-plataforma (onda 2, task
+   86e36ed1d) — tirar antes deixaria a tela atual com botões que o servidor nega.
 
    **A UI não é barreira de segurança** — o backend é. Mas **mostrar ação que o
    servidor nega é defeito**: cada ❌ precisa de bloqueio no backend **e** de
@@ -658,6 +690,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.28 — 16/09/2026. **O authz core da camada de organizações entrou (task 86e36ecar, onda 1 do épico 86e36ec0q) — a linha mais perigosa da sprint.** `UserScope.PLATFORM`/`UserRole.PLATFORM_ADMIN` existem; `resolve_client_access` tem uma ordem nova (cliente → plataforma bem formada libera → staff só alcança cliente **da própria organização**, admin a org inteira e manager a carteira dentro dela); nasceram `reach_filter`/`scoped_by_reach` (a decisão projetada em `WHERE` para coleções por `client_id`) e `scoped_by_organization`; a matriz virou 13 x 5 com a plataforma em toda linha e um teste que trava isso. As **4 cópias** da regra "admin vê tudo" fora do `authz.py` (notificações, tipos de anomalia, lista de clientes, criação de conciliação) e os guards por string `require_admin`/`require_manager_or_admin` **deixaram de existir**: toda rota usa guard da matriz ou `StaffDep`. `get_current_user` e o login leem a organização junto com o usuário e recusam organização suspensa; o JWT e o corpo do login/refresh carregam `organization_id`/`organization_name`; `access_audit` grava `actor_organization_id` (a telemetria mantém as 4 props da S5). Num mundo de uma organização só, **nada muda de visível**. §3.15 e §4.9 reescritas como lei atual._
 
 _Versão 1.27 — 16/09/2026. **A fundação de dados da camada de organizações entrou (task 86e36ec7p, onda 1 do épico 86e36ec0q).** Tabela `organizations` com a Hologram de id fixo, `organization_id` em `clients` (NOT NULL), `users` (nullable: a plataforma não tem org) e `client_categories` (UNIQUE passou a `(organization_id, name)`), `access_audit.actor_organization_id`, e o CHECK de `users` virou ternário e cruza o papel (`ck_users_scope_consistency` no lugar de `ck_users_scope_client_id`). O backfill "tudo é Hologram" é por catálogo (`server_default`, como o `is_primary` da carteira), a migration pré-checa o CHECK em plpgsql antes de trocá-lo e o downgrade aborta se houver segunda organização ou usuário de plataforma. **Nenhum comportamento de API muda** nesta task: é o canary da migration antes do authz core. §4.8 reescrita como lei atual; o resto da camada (regra de acesso, matriz 13 × 5, rotas, telas) chega nas tasks seguintes e atualiza §3.15 e §4.9 então. Plano: `Docs/PLANO_ORGANIZACOES.md`._
 

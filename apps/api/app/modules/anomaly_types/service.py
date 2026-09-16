@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from app.core.authz import CurrentUser, Permission, has_permission
 from app.core.exceptions import (
     AnomalyTypeCodeAlreadyExistsError,
     AnomalyTypeInUseError,
@@ -37,29 +38,29 @@ class AnomalyTypeService:
     # ------------------------------ READ ------------------------------
 
     @staticmethod
-    def _effective_include_inactive(*, role: str, requested: bool) -> bool:
-        """Manager nunca enxerga inativos, mesmo passando `?include_inactive=true`.
+    def _effective_include_inactive(*, user: CurrentUser, requested: bool) -> bool:
+        """Só quem pode EDITAR o catálogo enxerga inativos, mesmo passando
+        `?include_inactive=true` (a matriz decide — `MANAGE_ANOMALY_TYPES`).
 
-        Mantemos `True` apenas se o caller for admin — silently ignorado para
-        manager, sem 403, porque o GET é compartilhado com a tela de revisão e
-        404/403 espúrios atrapalhariam o fluxo principal.
+        Silently ignorado para os demais, sem 403, porque o GET é compartilhado
+        com a tela de revisão e 404/403 espúrios atrapalhariam o fluxo principal.
         """
-        return requested and role == "admin"
+        return requested and has_permission(user, Permission.MANAGE_ANOMALY_TYPES)
 
-    async def list_all(self, *, role: str, include_inactive: bool) -> list[AnomalyType]:
+    async def list_all(self, *, user: CurrentUser, include_inactive: bool) -> list[AnomalyType]:
         """Lista sem paginação (contrato legado da tela de revisão)."""
-        effective = self._effective_include_inactive(role=role, requested=include_inactive)
+        effective = self._effective_include_inactive(user=user, requested=include_inactive)
         return await self._repo.list_all(include_inactive=effective)
 
     async def list_paginated(
         self,
         *,
-        role: str,
+        user: CurrentUser,
         include_inactive: bool,
         page: int,
         page_size: int,
     ) -> tuple[list[AnomalyType], PaginationMeta]:
-        effective = self._effective_include_inactive(role=role, requested=include_inactive)
+        effective = self._effective_include_inactive(user=user, requested=include_inactive)
         rows, total = await self._repo.list_paginated(
             page=page, page_size=page_size, include_inactive=effective
         )

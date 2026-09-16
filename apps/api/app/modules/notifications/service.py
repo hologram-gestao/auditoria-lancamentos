@@ -14,7 +14,6 @@ from datetime import date
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from app.core.authz import tenant_filter_client_id
 from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
 from app.db.models import Notification, NotificationType, ReconciliationStatus
@@ -101,11 +100,7 @@ class NotificationService:
 
     async def unread_count(self, user: CurrentUser) -> int:
         """Contagem de não lidas do usuário autenticado."""
-        return await self._repo.count_unread(
-            user_id=UUID(user.id),
-            is_admin=_is_admin(user),
-            tenant_client_id=tenant_filter_client_id(user),
-        )
+        return await self._repo.count_unread(user)
 
     async def list_notifications(
         self,
@@ -116,11 +111,10 @@ class NotificationService:
         unread_only: bool,
     ) -> tuple[list[NotificationItem], PaginationMeta]:
         """Lista paginada do sino."""
+        # O alcance (tenant, carteira ou organização) entra no SELECT, pelo
+        # `reach_filter` do authz — a decisão única, não uma cópia local.
         rows, total = await self._repo.list_paginated(
-            user_id=UUID(user.id),
-            is_admin=_is_admin(user),
-            # S5/R3: usuário de cliente filtra pelo próprio tenant, no SELECT.
-            tenant_client_id=tenant_filter_client_id(user),
+            user,
             page=page,
             page_size=page_size,
             unread_only=unread_only,
@@ -137,12 +131,7 @@ class NotificationService:
         Os dois casos devolvem a MESMA resposta de propósito: distinguir
         "não existe" de "não é sua" permitiria enumerar notificações alheias.
         """
-        notification = await self._repo.get_for_user(
-            notification_id=notification_id,
-            user_id=UUID(user.id),
-            is_admin=_is_admin(user),
-            tenant_client_id=tenant_filter_client_id(user),
-        )
+        notification = await self._repo.get_for_user(notification_id=notification_id, user=user)
         if notification is None:
             raise NotFoundError("Notificação não encontrada.")
 
@@ -160,13 +149,5 @@ class NotificationService:
         Sem 404 possível: "nada para marcar" é sucesso com `marked=0` — a
         operação age sobre a coleção visível, não sobre um recurso nomeado.
         """
-        marked = await self._repo.mark_all_read(
-            user_id=UUID(user.id),
-            is_admin=_is_admin(user),
-            tenant_client_id=tenant_filter_client_id(user),
-        )
+        marked = await self._repo.mark_all_read(user)
         return MarkAllReadPayload(marked=marked)
-
-
-def _is_admin(user: CurrentUser) -> bool:
-    return user.role == "admin"

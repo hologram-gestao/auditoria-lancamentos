@@ -28,7 +28,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from sqlalchemy import select  # noqa: E402  (sys.path setado acima é pré-requisito)
+from sqlalchemy import null, select  # noqa: E402  (sys.path setado acima é pré-requisito)
 from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 
 # psycopg async não suporta ProactorEventLoop (default Windows)
@@ -45,6 +45,7 @@ from app.db.models import (  # noqa: E402
     Organization,
     User,
     UserRole,
+    UserScope,
 )
 from app.db.session import close_db, get_session_factory, init_db  # noqa: E402
 
@@ -53,6 +54,13 @@ DEFAULT_ADMIN_NAME = "Admin Dev"
 # Placeholder de DEV LOCAL apenas — não é segredo. Deploys definem SEED_ADMIN_PASSWORD
 # (ver scripts/environments-runbook.md); o seed nunca roda automaticamente em CI/cloud.
 DEFAULT_ADMIN_PASSWORD = "dev-only-change-me"  # noqa: S105
+
+# Plataforma de DEV LOCAL (camada de organizações). As pessoas reais são
+# PROMOVIDAS por script (`promote_platform_admin.py`, task 86e36ecqz), nunca
+# semeadas.
+DEFAULT_PLATFORM_EMAIL = "platform@hologram.com.br"
+DEFAULT_PLATFORM_NAME = "Plataforma Dev"
+DEFAULT_PLATFORM_PASSWORD = "dev-only-change-me"  # noqa: S105
 
 # Seed canônico (Doc §0 §anomaly_types §seed inicial)
 ANOMALY_TYPES_SEED: list[dict[str, Any]] = [
@@ -223,6 +231,38 @@ async def seed_admin(session: AsyncSession) -> None:
     )
 
 
+async def seed_platform_admin(session: AsyncSession) -> None:
+    """Cria 1 `platform_admin` de dev se ainda não existir (get-or-create por e-mail).
+
+    `organization_id=null()` e não `None`: com `server_default` o ORM omitiria o
+    campo e o banco preencheria a Hologram — e o CHECK recusa plataforma com
+    organização. Só dev: em cloud a plataforma nasce por promoção.
+    """
+    email = os.getenv("SEED_PLATFORM_EMAIL", DEFAULT_PLATFORM_EMAIL).lower()
+    name = os.getenv("SEED_PLATFORM_NAME", DEFAULT_PLATFORM_NAME)
+    password = os.getenv("SEED_PLATFORM_PASSWORD", DEFAULT_PLATFORM_PASSWORD)
+
+    existing = await session.scalar(select(User).where(User.email == email))
+    if existing is not None:
+        print(f"[seed] plataforma já existe: {email}")
+        return
+
+    session.add(
+        User(
+            name=name,
+            email=email,
+            password_hash=hash_password(password),
+            role=UserRole.PLATFORM_ADMIN.value,
+            scope=UserScope.PLATFORM.value,
+            organization_id=null(),
+            client_id=None,
+            active=True,
+        )
+    )
+    await session.flush()
+    print(f"[seed] plataforma criada: {email}  (senha: SEED_PLATFORM_PASSWORD ou default de dev)")
+
+
 async def seed_anomaly_types(session: AsyncSession) -> None:
     """Insere/atualiza catálogo canônico de tipos de anomalia.
 
@@ -260,6 +300,7 @@ async def main() -> None:
         async with session_factory() as session, session.begin():
             await seed_organization(session)
             await seed_admin(session)
+            await seed_platform_admin(session)
             await seed_anomaly_types(session)
     finally:
         await close_db()

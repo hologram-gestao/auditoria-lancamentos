@@ -164,7 +164,7 @@ class TestMatrizDePermissoes:
     def test_permissao_nova_esta_na_matriz_declarativa(self) -> None:
         """A decisão vem de `PERMISSION_MATRIX`, não de `if role ==` na rota."""
         assert PERMISSION_MATRIX[Permission.MANAGE_GLOSSARY] == frozenset(
-            {UserRole.ADMIN, UserRole.MANAGER, UserRole.CLIENT_MANAGER}
+            {UserRole.PLATFORM_ADMIN, UserRole.ADMIN, UserRole.MANAGER, UserRole.CLIENT_MANAGER}
         )
         assert UserRole.CLIENT_OPERATOR not in PERMISSION_MATRIX[Permission.MANAGE_GLOSSARY]
 

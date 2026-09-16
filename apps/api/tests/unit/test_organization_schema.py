@@ -17,6 +17,7 @@ from sqlalchemy import CheckConstraint, UniqueConstraint
 from app.db.models import (
     HOLOGRAM_ORGANIZATION_ID,
     HOLOGRAM_ORGANIZATION_NAME,
+    PLATFORM_ROLES,
     SCOPE_CONSISTENCY_CHECK,
     SCOPE_CONSISTENCY_CONSTRAINT,
     UQ_CLIENT_CATEGORY_ORGANIZATION_NAME,
@@ -28,6 +29,7 @@ from app.db.models import (
     Organization,
     SystemUserRole,
     User,
+    UserRole,
     UserScope,
     organization_id_server_default,
 )
@@ -78,13 +80,17 @@ class TestModeloEMigrationBatem:
 class TestModeloDeclaraAsGarantias:
     def test_check_cruza_os_papeis_dos_enums(self) -> None:
         """Os literais do CHECK são os valores dos enums — mudar um sem o outro é drift."""
-        for role in (*SystemUserRole, *ClientUserRole):
+        for role in (*PLATFORM_ROLES, *SystemUserRole, *ClientUserRole):
             assert f"'{role.value}'" in SCOPE_CONSISTENCY_CHECK
+        assert {r.value for r in UserRole} == {
+            r.value for r in (*PLATFORM_ROLES, *SystemUserRole, *ClientUserRole)
+        }
         for scope in UserScope:
             assert f"scope = '{scope.value}'" in SCOPE_CONSISTENCY_CHECK
-        # A forma de plataforma já é aceita pelo banco; os membros de enum
-        # chegam com o authz core (86e36ecar), que troca estes literais.
-        assert "scope = 'platform' AND role = 'platform_admin'" in SCOPE_CONSISTENCY_CHECK
+        assert (
+            f"scope = '{UserScope.PLATFORM.value}' AND role = '{UserRole.PLATFORM_ADMIN.value}'"
+            in SCOPE_CONSISTENCY_CHECK
+        )
 
     def test_users_declara_o_check_ternario(self) -> None:
         """A NAMING_CONVENTION do `Base` já expande o rótulo para o nome final no metadata."""

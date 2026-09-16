@@ -35,9 +35,12 @@ class AuthenticatedUser(BaseModel):
 
     Sprint 5 (R2): `role`/`scope` são os enums do backend (contrato é fonte
     única — o front faz o gating de UI a partir daqui, sem redigitar união de
-    strings) e `client_id` diz a que tenant o usuário pertence (`None` para a
-    equipe Hologram). Nenhum deles é a fonte da decisão de acesso: o servidor
-    decide pela linha (`app.core.authz`).
+    strings) e `client_id` diz a que tenant o usuário pertence (`None` fora do
+    escopo de cliente). Camada de organizações: `organization_id`/
+    `organization_name` dizem em que organização a pessoa está — `None` para a
+    plataforma; é o que o header usa para mostrar "em que chapéu" ela está.
+    Nenhum deles é a fonte da decisão de acesso: o servidor decide pela linha
+    (`app.core.authz`).
     """
 
     id: str  # UUID em string (evita parsing client-side)
@@ -46,6 +49,8 @@ class AuthenticatedUser(BaseModel):
     role: UserRole
     scope: UserScope
     client_id: UUID | None = None
+    organization_id: UUID | None = None
+    organization_name: str | None = None
 
 
 class LoginResponse(BaseModel):

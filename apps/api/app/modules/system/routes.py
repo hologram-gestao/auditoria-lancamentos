@@ -1,6 +1,8 @@
 """Rotas de sistema/operação (Sprint 3, BACK 03.6).
 
-`POST /api/v1/system/alert-test` — gatilho SINTÉTICO de alerta. Admin-only.
+`POST /api/v1/system/alert-test` — gatilho SINTÉTICO de alerta. Permissão
+`RUN_ALERT_TEST` da matriz (plataforma e admin da organização — o smoke do
+deploy loga como o admin de monitoração).
 Dispara um alerta proposital ao(s) canal(is) configurado(s) para PROVAR a
 entrega ponta a ponta (consumido pela 03.7). Sem PII — só o código sintético.
 """
@@ -10,7 +12,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.core.alerting import SYNTHETIC_ALERT_MESSAGE, Alert, AlertCode, send_alert
-from app.core.dependencies import AdminDep, SettingsDep
+from app.core.dependencies import RunAlertTestDep, SettingsDep
 from app.modules.system.schemas import SyntheticAlertResponse, SyntheticAlertResult
 
 router = APIRouter(prefix="/api/v1/system", tags=["system"])
@@ -20,13 +22,13 @@ router = APIRouter(prefix="/api/v1/system", tags=["system"])
     "/alert-test",
     summary=(
         "Dispara um alerta SINTÉTICO ao(s) canal(is) de plantão configurado(s) "
-        "(webhook e/ou e-mail) para provar a entrega ponta a ponta. Admin-only. "
+        "(webhook e/ou e-mail) para provar a entrega ponta a ponta. Plataforma ou admin. "
         "Retorna o resultado por canal (True=entregue, False=falhou, "
         "None=não configurado). Sem PII."
     ),
 )
 async def trigger_synthetic_alert(
-    _admin: AdminDep,
+    _actor: RunAlertTestDep,
     settings: SettingsDep,
 ) -> SyntheticAlertResponse:
     result = await send_alert(

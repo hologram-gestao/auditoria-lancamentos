@@ -52,8 +52,11 @@ class TokenPayload(BaseModel):
     jti: str  # token id único (UUID) — usado para revogação futura
     iat: int  # issued at (epoch)
     exp: int  # expira em (epoch)
-    scope: str = DEFAULT_TOKEN_SCOPE  # "system" | "client"
-    client_id: str | None = None  # tenant do usuário; None quando scope="system"
+    scope: str = DEFAULT_TOKEN_SCOPE  # "platform" | "system" | "client"
+    client_id: str | None = None  # tenant do usuário; None fora de scope="client"
+    # Camada de organizações: mesma estratégia de compatibilidade — token emitido
+    # antes do deploy não traz o claim e não vira 401. A decisão é da linha.
+    organization_id: str | None = None
 
 
 # ----------------------------------------------------------------------
@@ -110,6 +113,7 @@ def _create_token(
     secret: str,
     scope: str = DEFAULT_TOKEN_SCOPE,
     client_id: str | None = None,
+    organization_id: str | None = None,
 ) -> str:
     """Helper interno — emite JWT assinado com claims padronizados."""
     now = datetime.now(UTC)
@@ -125,6 +129,7 @@ def _create_token(
         # `app.core.authz`.
         "scope": scope,
         "client_id": client_id,
+        "organization_id": organization_id,
     }
     return jwt.encode(payload, secret, algorithm=JWT_ALGORITHM)
 
@@ -136,6 +141,7 @@ def create_access_token(
     settings: Settings,
     scope: str = DEFAULT_TOKEN_SCOPE,
     client_id: str | None = None,
+    organization_id: str | None = None,
 ) -> str:
     """Emite access token (validade `JWT_ACCESS_EXPIRE_MINUTES`, padrão 60)."""
     return _create_token(
@@ -146,6 +152,7 @@ def create_access_token(
         secret=settings.JWT_SECRET.get_secret_value(),
         scope=scope,
         client_id=client_id,
+        organization_id=organization_id,
     )
 
 
@@ -156,6 +163,7 @@ def create_refresh_token(
     settings: Settings,
     scope: str = DEFAULT_TOKEN_SCOPE,
     client_id: str | None = None,
+    organization_id: str | None = None,
 ) -> str:
     """Emite refresh token (validade `JWT_REFRESH_EXPIRE_DAYS`, padrão 7)."""
     return _create_token(
@@ -166,6 +174,7 @@ def create_refresh_token(
         secret=settings.JWT_SECRET.get_secret_value(),
         scope=scope,
         client_id=client_id,
+        organization_id=organization_id,
     )
 
 

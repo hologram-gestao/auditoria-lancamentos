@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from app.core.authz import CurrentUser
 from app.core.exceptions import (
     CannotDeactivateSelfError,
     EmailAlreadyExistsError,
@@ -35,19 +36,24 @@ class UserService:
     async def list_users(
         self,
         *,
+        viewer: CurrentUser,
         page: int,
         page_size: int,
         search: str | None = None,
     ) -> tuple[list[User], PaginationMeta]:
-        """Retorna (usuários da página, metadados de paginação)."""
-        rows, total = await self._repo.list_paginated(page=page, page_size=page_size, search=search)
+        """Staff da organização do observador (plataforma: de todas) — nunca
+        usuários de cliente nem a própria plataforma (86e36ecar)."""
+        rows, total = await self._repo.list_paginated(
+            page=page, page_size=page_size, search=search, staff_viewer=viewer
+        )
         total_pages = (total + page_size - 1) // page_size if page_size else 0
         return list(rows), PaginationMeta(
             page=page, page_size=page_size, total=total, total_pages=total_pages
         )
 
-    async def get_user(self, user_id: UUID) -> User:
-        user = await self._repo.get_by_id(user_id)
+    async def get_user(self, user_id: UUID, *, viewer: CurrentUser) -> User:
+        """Staff alvo dentro do alcance do observador — 404 fora dele (anti-IDOR)."""
+        user = await self._repo.get_staff_by_id(user_id, viewer=viewer)
         if user is None:
             raise NotFoundError("Usuário não encontrado.")
         return user
@@ -57,12 +63,19 @@ class UserService:
     async def create_user(
         self,
         *,
+        viewer: CurrentUser,
         name: str,
         email: str,
         password: str,
         role: UserRole,
     ) -> User:
-        """Cria usuário ativo com senha hasheada. Email único — 409 se duplicado."""
+        """Cria staff ativo com senha hasheada, NA ORGANIZAÇÃO do observador.
+
+        Email único — 409 se duplicado. A organização vem da LINHA do ator
+        (§3.15); a plataforma (sem org) ainda cai no default do banco (Hologram)
+        — a escolha explícita da organização pela plataforma chega na task
+        86e36ecqz.
+        """
         normalized_email = email.lower()
         existing = await self._repo.get_by_email(normalized_email)
         if existing is not None:
@@ -77,6 +90,8 @@ class UserService:
             role=role.value,
             active=True,
         )
+        if viewer.organization_id is not None:
+            user.organization_id = viewer.organization_id
         await self._repo.add(user)
         return user
 
@@ -86,7 +101,7 @@ class UserService:
         self,
         user_id: UUID,
         *,
-        current_user_id: UUID,
+        viewer: CurrentUser,
         name: str | None = None,
         email: str | None = None,
         role: UserRole | None = None,
@@ -94,8 +109,10 @@ class UserService:
         """Atualiza campos parcialmente. Bloqueios:
         - Admin NÃO pode rebaixar a si mesmo para manager (Doc §8.4).
         - E-mail só pode mudar se não conflitar com outro usuário.
+        - Alvo fora do alcance (outra org, plataforma, usuário de cliente) → 404.
         """
-        user = await self.get_user(user_id)
+        current_user_id = UUID(viewer.id)
+        user = await self.get_user(user_id, viewer=viewer)
 
         if email is not None:
             normalized_email = email.lower()
@@ -135,17 +152,18 @@ class UserService:
         user_id: UUID,
         *,
         active: bool,
-        current_user_id: UUID,
+        viewer: CurrentUser,
     ) -> User:
         """Soft activation/deactivation. Bloqueios:
         - Admin NÃO pode desativar a si mesmo (Doc §8.2 + §8.5).
+        - Alvo fora do alcance (outra org, plataforma, usuário de cliente) → 404.
         """
-        if not active and user_id == current_user_id:
+        if not active and user_id == UUID(viewer.id):
             raise CannotDeactivateSelfError(
                 f"User {user_id} tentou desativar a si mesmo.",
             )
 
-        user = await self.get_user(user_id)
+        user = await self.get_user(user_id, viewer=viewer)
         user.active = active
         await self._repo.add(user)
         return user

@@ -12,9 +12,10 @@ Camada de organizações (épico 86e36ec0q, task 86e36ec7p): a linha ganha
 client_id):
     - `scope='platform'` → administração geral da ADL (`platform_admin`);
       `organization_id` e `client_id` NULOS. Vê e faz tudo em qualquer
-      organização (decisão D1 revisada, 09/09/2026). Os membros de enum
-      `UserScope.PLATFORM`/`UserRole.PLATFORM_ADMIN` chegam com o authz core
-      (task 86e36ecar); até lá o banco já aceita a forma, e nada a produz.
+      organização (decisão D1 revisada, 09/09/2026): é o acesso de suporte.
+      Nasce só por script (`scripts/promote_platform_admin.py`, task
+      86e36ecqz — a confirmar), nunca por endpoint: `platform_admin` não entra
+      em nenhuma whitelist de API.
     - `scope='system'` → staff de UMA organização (`admin`/`manager`);
       `organization_id` obrigatório, `client_id` nulo.
     - `scope='client'` → usuário DO cliente; `organization_id` é a org do
@@ -55,15 +56,19 @@ from app.db.models.organization import organization_id_server_default
 class UserRole(StrEnum):
     """Perfis de usuário — fonte ÚNICA (proibida string mágica em service/rota).
 
-    Papéis de SISTEMA (equipe Hologram, `scope='system'`):
-        - ADMIN: acesso total.
-        - MANAGER: acesso pela carteira (`client_assignments`).
+    Papel de PLATAFORMA (`scope='platform'`, camada de organizações):
+        - PLATFORM_ADMIN: vê e faz tudo em qualquer organização (suporte).
+
+    Papéis de ORGANIZAÇÃO (`scope='system'` = staff de UM BPO):
+        - ADMIN: acesso total aos clientes da própria organização.
+        - MANAGER: acesso pela carteira (`client_assignments`), intra-org.
 
     Papéis de CLIENTE (`scope='client'`, Sprint 5 / R1+R4):
         - CLIENT_MANAGER: opera o próprio tenant + gere os usuários dele.
         - CLIENT_OPERATOR: opera o próprio tenant, sem gerir usuários.
     """
 
+    PLATFORM_ADMIN = "platform_admin"
     ADMIN = "admin"
     MANAGER = "manager"
     CLIENT_MANAGER = "client_manager"
@@ -71,8 +76,14 @@ class UserRole(StrEnum):
 
 
 class UserScope(StrEnum):
-    """Escopo de tenancy do usuário — fonte ÚNICA (Sprint 5 / R1)."""
+    """Escopo de tenancy do usuário — fonte ÚNICA (Sprint 5 / R1 + organizações).
 
+    A ordem dos ramos em `app.core.authz.resolve_client_access` segue esta
+    hierarquia: cliente (só o próprio tenant), plataforma (tudo), organização
+    (a própria org, pela carteira no caso do manager).
+    """
+
+    PLATFORM = "platform"
     SYSTEM = "system"
     CLIENT = "client"
 
@@ -100,10 +111,13 @@ class ClientUserRole(StrEnum):
     CLIENT_OPERATOR = UserRole.CLIENT_OPERATOR.value
 
 
-#: Papéis da equipe Hologram (`scope='system'`). Derivado — sem lista paralela.
+#: Papéis do staff de uma organização (`scope='system'`). Derivado — sem lista paralela.
 SYSTEM_ROLES: frozenset[UserRole] = frozenset(UserRole(r.value) for r in SystemUserRole)
 #: Papéis que só existem dentro de um tenant (`scope='client'`).
 CLIENT_ROLES: frozenset[UserRole] = frozenset(UserRole(r.value) for r in ClientUserRole)
+#: Papel da plataforma (`scope='platform'`). Sem whitelist de API de propósito:
+#: só o script de promoção o atribui.
+PLATFORM_ROLES: frozenset[UserRole] = frozenset({UserRole.PLATFORM_ADMIN})
 
 #: Label da CHECK constraint. A `NAMING_CONVENTION` do `Base` (app/db/base.py)
 #: expande `ck` para `ck_%(table_name)s_%(constraint_name)s` — passar o nome já
@@ -116,9 +130,8 @@ SCOPE_CONSISTENCY_CONSTRAINT = f"ck_users_{SCOPE_CONSISTENCY_CK_LABEL}"
 #: com escopo de cliente, é recusado pelo Postgres, não só pelas whitelists do
 #: Pydantic. Fonte única: modelo (create_all nos testes); a migration
 #: `3e8f1a6c9d24` COPIA a string e `tests/unit/test_organization_schema.py`
-#: compara as duas. Os literais 'platform'/'platform_admin' viram membros de
-#: `UserScope`/`UserRole` na task de authz core (86e36ecar); os demais são os
-#: valores dos enums abaixo, conferidos pelo mesmo teste.
+#: compara as duas — e confere que cada literal é o valor de um membro de
+#: `UserScope`/`UserRole` (renomear um enum sem tocar aqui é drift).
 SCOPE_CONSISTENCY_CHECK = (
     "(scope = 'platform' AND role = 'platform_admin' "
     "AND organization_id IS NULL AND client_id IS NULL) "

@@ -19,7 +19,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response
 
-from app.core.dependencies import AdminDep, CurrentUserDep, DbSessionDep
+from app.core.dependencies import CurrentUserDep, DbSessionDep, ManageAnomalyTypesDep
 from app.modules.anomaly_types.repository import AnomalyTypeRepository
 from app.modules.anomaly_types.schemas import (
     AnomalyTypeCreate,
@@ -56,13 +56,13 @@ async def list_anomaly_types(
     include_inactive: Annotated[bool, Query(alias="include_inactive")] = False,
 ) -> AnomalyTypeListResponse | AnomalyTypeListPaginatedResponse:
     if page is None:
-        rows = await service.list_all(role=user.role, include_inactive=include_inactive)
+        rows = await service.list_all(user=user, include_inactive=include_inactive)
         return AnomalyTypeListResponse(
             data=[AnomalyTypeItem.model_validate(t) for t in rows],
         )
 
     rows, pagination = await service.list_paginated(
-        role=user.role,
+        user=user,
         include_inactive=include_inactive,
         page=page,
         page_size=page_size,
@@ -76,11 +76,11 @@ async def list_anomaly_types(
 @router.post(
     "",
     status_code=201,
-    summary="Criar tipo custom (admin-only). Code é validado snake_case e único.",
+    summary="Criar tipo custom (quem gere o catálogo). Code é validado snake_case e único.",
 )
 async def create_anomaly_type(
     payload: AnomalyTypeCreate,
-    _admin: AdminDep,
+    _actor: ManageAnomalyTypesDep,
     service: AnomalyTypeServiceDep,
 ) -> AnomalyTypeItem:
     anomaly_type = await service.create_anomaly_type(
@@ -95,12 +95,12 @@ async def create_anomaly_type(
 
 @router.patch(
     "/{type_id}",
-    summary="Atualizar tipo (admin-only). `code` é imutável.",
+    summary="Atualizar tipo (quem gere o catálogo). `code` é imutável.",
 )
 async def update_anomaly_type(
     type_id: UUID,
     payload: AnomalyTypeUpdate,
-    _admin: AdminDep,
+    _actor: ManageAnomalyTypesDep,
     service: AnomalyTypeServiceDep,
 ) -> AnomalyTypeItem:
     anomaly_type = await service.update_anomaly_type(
@@ -117,13 +117,13 @@ async def update_anomaly_type(
     "/{type_id}",
     status_code=204,
     summary=(
-        "Excluir tipo (admin-only). 409 se houver anomalias referenciando — "
+        "Excluir tipo (quem gere o catálogo). 409 se houver anomalias referenciando — "
         "nesse caso, oriente a desativar via PATCH."
     ),
 )
 async def delete_anomaly_type(
     type_id: UUID,
-    _admin: AdminDep,
+    _actor: ManageAnomalyTypesDep,
     service: AnomalyTypeServiceDep,
 ) -> Response:
     await service.delete_anomaly_type(type_id)

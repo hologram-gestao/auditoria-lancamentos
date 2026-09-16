@@ -130,9 +130,9 @@ async def login(
     NOTA: `request: Request` PRECISA ser o primeiro parâmetro para o slowapi
     extrair o cliente — não mude essa ordem.
     """
-    user, access, refresh = await auth.login(email=payload.email, password=payload.password)
+    ctx, access, refresh = await auth.login(email=payload.email, password=payload.password)
     _set_auth_cookies(response, access_token=access, refresh_token=refresh, settings=settings)
-    return LoginResponse(user=AuthService.to_authenticated_user(user))
+    return LoginResponse(user=AuthService.to_authenticated_user(ctx))
 
 
 @router.post(
@@ -155,11 +155,11 @@ async def refresh(
     if not refresh_cookie:
         raise UnauthorizedError("Cookie de refresh ausente.")
 
-    user, new_access, new_refresh = await auth.refresh(refresh_token=refresh_cookie)
+    ctx, new_access, new_refresh = await auth.refresh(refresh_token=refresh_cookie)
     _set_auth_cookies(
         response, access_token=new_access, refresh_token=new_refresh, settings=settings
     )
-    return RefreshResponse(user=AuthService.to_authenticated_user(user))
+    return RefreshResponse(user=AuthService.to_authenticated_user(ctx))
 
 
 @router.post(
