@@ -112,7 +112,7 @@
 8. **Nunca** confie em validação client-side. Revalide tudo no servidor (extensão, tamanho, magic bytes, hash, RBAC).
 9. **Nunca** retorne "senha incorreta" ou "email não existe" separadamente no login — resposta genérica "E-mail ou senha incorretos".
 10. **Nunca** faça upload de arquivo para disco. Processar em memória e descartar.
-11. **Nunca** permita que manager veja cliente de outro manager. Sempre validar `client_assignments`.
+11. **Nunca** permita que manager veja cliente fora da própria carteira. Sempre validar `client_assignments` — **qualquer** linha `(client_id, user_id)` concede acesso, responsável ou colaborador (§4.13).
 12. **Nunca** confie em token JWT sem revalidar `users.active = true` no DB (middleware) — usuário desativado perde acesso instantaneamente.
 13. **Nunca leia, edite ou cite o conteúdo de arquivos `.env`, `.env.local`,
     `.env.production`, `.env.*` ou qualquer outro arquivo que contenha
@@ -167,7 +167,7 @@
       **1** linha em `access_audit`.
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**45** hoje — o arquivo é a fonte, confira com
+      (**49** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant**. Essa lista é o denominador
       da métrica de isolamento — endpoint fora dela é buraco que ninguém mede.
@@ -321,6 +321,33 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
       escrita re-embrulharia DEK nova num tenant morto. Leitura continua com
       `AccessibleClientDep`. A exclusão total segue disponível para encerrado
       (LGPD — o titular pode exigir apagamento completo).
+
+13. **Carteira compartilhada (86e390kku, 15/09/2026): N gerentes com ACESSO, UM
+    responsável.** `client_assignments` deixou de ser 1:1. Cada linha é uma
+    pessoa com acesso ao cliente; `is_primary` marca o **responsável** (o nome da
+    coluna "Gerente responsável" da lista, a quem se cobra). Duas garantias **no
+    banco**: `UNIQUE(client_id, user_id)` — a mesma pessoa não entra duas vezes
+    (sem ela, `resolve_client_access` estoura `MultipleResultsFound`) — e o índice
+    único **parcial** `uq_client_assignments_primary` (`client_id WHERE
+is_primary`) — um responsável por cliente; o predicado é COPIADO na migration
+    (`6bb85e6b7d72`) e `tests/unit/test_client_assignment_schema.py` prova que as
+    duas fontes batem. Regras de negócio: **definir o responsável
+    (`PATCH /clients/{id}/assign`) não remove ninguém** — o anterior vira
+    colaborador; **remover o responsável sem definir outro é 409** (cliente nunca
+    fica órfão); só `manager` ativo entra (admin já alcança tudo pela matriz);
+    gerir a carteira é `EDIT_CLIENT` (admin). Na listagem, o join de EXIBIÇÃO é só
+    do responsável e o filtro da CARTEIRA é `EXISTS` sobre todas as linhas — são
+    duas perguntas diferentes, e reusar o join no filtro faria o colaborador sumir
+    da própria lista. Linha nova em `client_assignments` marca `is_primary`
+    **explicitamente** (default FALSE no ORM); o default do BANCO é TRUE de
+    propósito — linha gravada sem o campo é a forma antiga da tabela (1 linha =
+    o gerente), e é assim que as linhas pré-migration e as que a API antiga
+    criar na janela de deploy nascem responsáveis. **Gerente** que cria o cliente
+    é o responsável; **admin não entra na carteira** (nem na criação — já alcança
+    tudo pela matriz): o cliente nasce sem responsável e o primeiro gerente
+    adicionado assume. As escritas são condicionais no próprio SQL (promover com
+    `RETURNING` sob `FOR UPDATE`; remover só `WHERE is_primary = false`) — o
+    409/404 é decidido pelo estado atual, não por uma leitura anterior.
 
 ---
 
@@ -619,6 +646,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.25 — 15/09/2026. **A carteira deixou de ser exclusiva: N gerentes com acesso, UM responsável (épico 86e390kku, task 86e390kz8) — nova regra §4.13.** Origem: ao tornar o Murilo gerente do cliente Hologram, a Bruna perdeu o acesso na hora, sem aviso — não era bug de operação, era o modelo (`UNIQUE(client_id)` + "reatribuir" sobrescrevendo o `user_id`). Agora `client_assignments` tem `is_primary`, `UNIQUE(client_id, user_id)` e o índice único parcial do responsável (migration `6bb85e6b7d72`, backfill "todo gerente existente vira responsável", downgrade que ABORTA se houver colaborador). Três rotas novas (`GET/POST /clients/{id}/managers`, `DELETE .../managers/{user_id}`) e `PATCH /assign` re-semantizada para "definir responsável, sem remover ninguém"; as quatro entraram na lista canônica como DETAIL_PK (**49**, não 45 — e `/assign` saiu de `NON_TENANT_ENDPOINTS`). Duas armadilhas fora do escopo original da task ficaram registradas em código: o `get_assignment(client_id)` do repositório também usava `scalar_one_or_none` (substituído por leitores por par e por responsável), e o join de exibição da lista era o MESMO usado no filtro da carteira (separados: join só do responsável, filtro por `EXISTS`). §3.11 reescrito para "fora da própria carteira"._
 
 _Versão 1.24 — 15/09/2026. **O QA do épico de skills achou a §3.15 desatualizada em 1 endpoint, e a contagem agora vem com o comando que a confere.** A lista canônica tem **45** entradas desde a rota `close` (Sprint 6, 86e36pm1z); a §3.15 ainda dizia 44, enquanto o rodapé da v1.21 já dizia 45 — o primer se contradizia havia cinco dias. A correção não é só o número: a §3.15 passa a citar o `grep` que responde a pergunta no arquivo, do mesmo jeito que a §4.1 passou a apontar para as constantes de AAD na v1.22. Número solto envelhece calado; número com comando ao lado é conferível em dez segundos. O resto da varredura passou: **152 âncoras de arquivo e linha e 413 identificadores** das nove skills conferidos contra o código, com **um** caminho errado (dois componentes de revisão sem o segmento `reconciliations/`, corrigidos na `front-gate`). Nenhuma outra seção mudou._
 

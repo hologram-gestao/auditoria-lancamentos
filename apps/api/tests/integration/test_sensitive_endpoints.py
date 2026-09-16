@@ -94,8 +94,8 @@ class TestListaCanonicaBateComOCodigo:
     def test_rota_com_parametro_de_tenant_e_sempre_sensivel(self) -> None:
         """`{client_id}`/`{session_id}` na URL implica endpoint escopável.
 
-        Exceções são explícitas (edição/atribuição de cliente são admin-only e
-        estão em NON_TENANT_ENDPOINTS com o motivo).
+        Exceções são explícitas (edição de cliente é admin-only e está em
+        NON_TENANT_ENDPOINTS com o motivo).
         """
         sensiveis = {e.key for e in SENSITIVE_ENDPOINTS}
         suspeitas = [
@@ -164,6 +164,10 @@ _BODIES: dict[str, dict[str, Any]] = {
         "session_id": "{session_b}",
         "props": {"segundos_apos_criar": 10},
     },
+    # 86e390kz8 — carteira compartilhada. UUID válido de propósito: um 422 de
+    # validação passaria sem nunca tocar a autorização.
+    "POST /api/v1/clients/{client_id}/managers": {"user_id": "{user_id}"},
+    "PATCH /api/v1/clients/{client_id}/assign": {"user_id": "{user_id}"},
 }
 
 #: Query string mínima por endpoint.

@@ -149,6 +149,7 @@ async def _seed_client(
                 client_id=client.id,
                 user_id=manager.id,
                 assigned_by=creator.id,
+                is_primary=True,
             )
         )
         await session.flush()

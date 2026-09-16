@@ -239,7 +239,9 @@ class TestMatrizDePermissoes:
             db_session, email="mgr-carteira@hologram.com.br", role=UserRole.MANAGER
         )
         db_session.add(
-            ClientAssignment(client_id=cli_a.id, user_id=manager.id, assigned_by=admin.id)
+            ClientAssignment(
+                client_id=cli_a.id, user_id=manager.id, assigned_by=admin.id, is_primary=True
+            )
         )
         await db_session.flush()
         await _login(client_with_db, "mgr-carteira@hologram.com.br")

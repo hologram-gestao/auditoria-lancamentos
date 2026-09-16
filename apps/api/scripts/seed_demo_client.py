@@ -158,17 +158,22 @@ async def assign_to_first_manager(session: AsyncSession, client: Client, admin: 
     if manager is None:
         return None
 
+    # Carteira compartilhada (86e390kz8): o que importa é haver RESPONSÁVEL —
+    # colaboradores não contam, e a lista mostra o responsável, não o 1º gerente.
     existing = await session.scalar(
-        select(ClientAssignment).where(ClientAssignment.client_id == client.id)
+        select(ClientAssignment).where(
+            ClientAssignment.client_id == client.id, ClientAssignment.is_primary.is_(True)
+        )
     )
     if existing is not None:
-        return manager.name  # já tem assignment; mantém
+        return manager.name  # já tem responsável; mantém
 
     session.add(
         ClientAssignment(
             client_id=client.id,
             user_id=manager.id,
             assigned_by=admin.id,
+            is_primary=True,
         )
     )
     await session.flush()

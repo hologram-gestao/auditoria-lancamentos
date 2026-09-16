@@ -14,7 +14,8 @@ from uuid import UUID
 from sqlalchemy import ColumnElement, CursorResult, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import ClientAssignment, Notification
+from app.core.authz import portfolio_filter
+from app.db.models import Notification
 
 
 class NotificationRepository:
@@ -46,14 +47,7 @@ class NotificationRepository:
         if tenant_client_id is not None:
             conditions.append(Notification.client_id == tenant_client_id)
         elif not is_admin:
-            conditions.append(
-                select(ClientAssignment.id)
-                .where(
-                    ClientAssignment.client_id == Notification.client_id,
-                    ClientAssignment.user_id == user_id,
-                )
-                .exists()
-            )
+            conditions.append(portfolio_filter(user_id, Notification.client_id))
         return conditions
 
     async def count_unread(

@@ -252,6 +252,35 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         "app/modules/clients/routes.py",
         _VIA_CLIENT_PATH,
     ),
+    # ---------------------------------------------------------------- carteira (86e390kz8)
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/managers",
+        ScopeKind.DETAIL_PK,
+        "app/modules/clients/routes.py",
+        "EditClientDep (admin pela matriz) + " + _VIA_CLIENT_PATH,
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients/{client_id}/managers",
+        ScopeKind.DETAIL_PK,
+        "app/modules/clients/routes.py",
+        "EditClientDep (admin pela matriz) + OpenClientDep (encerrado = 409) + " + _VIA_CLIENT_PATH,
+    ),
+    SensitiveEndpoint(
+        "DELETE",
+        "/api/v1/clients/{client_id}/managers/{user_id}",
+        ScopeKind.DETAIL_PK,
+        "app/modules/clients/routes.py",
+        "EditClientDep (admin pela matriz) + OpenClientDep (encerrado = 409) + " + _VIA_CLIENT_PATH,
+    ),
+    SensitiveEndpoint(
+        "PATCH",
+        "/api/v1/clients/{client_id}/assign",
+        ScopeKind.DETAIL_PK,
+        "app/modules/clients/routes.py",
+        "EditClientDep (admin pela matriz) + OpenClientDep (encerrado = 409) + " + _VIA_CLIENT_PATH,
+    ),
     SensitiveEndpoint(
         "POST",
         "/api/v1/reconciliations/{session_id}/omie-postings",
@@ -426,7 +455,6 @@ NON_TENANT_ENDPOINTS: dict[str, str] = {
     "POST /api/v1/clients": "cria cliente; staff-only",
     "POST /api/v1/clients/test-connection": "valida credenciais enviadas no body; nada persistido",
     "PATCH /api/v1/clients/{client_id}": "edita o cliente; admin-only pela matriz (EDIT_CLIENT)",
-    "PATCH /api/v1/clients/{client_id}/assign": "reatribui carteira; admin-only",
     "GET /api/v1/users": "usuários do SISTEMA; admin-only",
     "POST /api/v1/users": "usuários do SISTEMA; admin-only",
     "GET /api/v1/users/{user_id}": "usuários do SISTEMA; admin-only",
