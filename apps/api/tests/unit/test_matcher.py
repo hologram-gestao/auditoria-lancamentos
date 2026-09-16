@@ -567,6 +567,96 @@ class TestMatcherDesempatePorFornecedor:
         assert result.tie_stats.ties == 1
         assert result.tie_stats.broken_by_supplier == 0
 
+    def test_linha_sem_sinal_nao_rouba_o_par_de_quem_tem_evidencia(self) -> None:
+        """Report da Bruna (15/09/2026): dois PIX de mesmo valor e mesmo dia.
+
+        A linha "WS IT" não compartilha token com fornecedor nenhum ("WS" e "IT"
+        têm 2 letras; o cadastro Omie traz o nome da pessoa), então tem afinidade
+        zero com os DOIS lançamentos. A linha da Fabiana tem afinidade 2 com o
+        lançamento certo. Quando a linha sem sinal decidia PRIMEIRO (ordem de
+        id — UUID, aleatório), ela levava o lançamento da Fabiana pela ordem da
+        lista, a Fabiana ficava com a sobra, e a IA acusava incoerência nas
+        duas: um pareamento errado, duas anomalias falsas — cara ou coroa por
+        sessão.
+
+        Dentro da passada, o par com mais evidência fecha primeiro. O resultado
+        não depende de qual linha vem antes na ordem (data, id).
+        """
+        d = date(2026, 8, 5)
+        omie = [
+            _omie(1, d, "-247.80", supplier="Fabiana Rodrigues"),
+            _omie(2, d, "-247.80", supplier="Walace Vinicius da Silva"),
+        ]
+        for ws_id, fab_id in (("F0", "F1"), ("F1", "F0")):
+            files = [
+                FileEntryForMatch(
+                    id=ws_id,
+                    transaction_date=d,
+                    amount=Decimal("-247.80"),
+                    description="PIX ENVIADO WS IT SOLUTIONS",
+                ),
+                FileEntryForMatch(
+                    id=fab_id,
+                    transaction_date=d,
+                    amount=Decimal("-247.80"),
+                    description="PIX ENVIADO 29.151.736 FABIANA RODRIGUES DE MENEZES",
+                ),
+            ]
+
+            result = match(files, omie)
+
+            assert dict(result.matches) == {fab_id: 1, ws_id: 2}, (
+                f"ordem ws={ws_id}, fab={fab_id}: {result.matches}"
+            )
+            assert result.days_diff_by_file_id == {fab_id: 0, ws_id: 0}
+
+    def test_roubo_evitado_pelo_fornecedor_e_contado(self) -> None:
+        """`steals_prevented_by_supplier`: o sinal de produção desta correção.
+
+        Conta os pares fechados por evidência que uma linha ANTERIOR na ordem
+        (data, id), sem sinal ou com menos, teria levado decidindo primeiro. É
+        a única forma de saber, em produção, se a ordem por evidência muda
+        alguma coisa — o conjunto de candidatos não é persistido.
+        """
+        d = date(2026, 8, 5)
+        omie = [
+            _omie(1, d, "-247.80", supplier="Fabiana Rodrigues"),
+            _omie(2, d, "-247.80", supplier="Walace Vinicius da Silva"),
+        ]
+
+        def _files(ws_id: str, fab_id: str) -> list[FileEntryForMatch]:
+            return [
+                FileEntryForMatch(
+                    id=ws_id,
+                    transaction_date=d,
+                    amount=Decimal("-247.80"),
+                    description="PIX ENVIADO WS IT SOLUTIONS",
+                ),
+                FileEntryForMatch(
+                    id=fab_id,
+                    transaction_date=d,
+                    amount=Decimal("-247.80"),
+                    description="PIX ENVIADO FABIANA RODRIGUES",
+                ),
+            ]
+
+        # Linha sem sinal vem ANTES: decidindo primeiro, levaria o lançamento
+        # da Fabiana (primeiro da lista). A evidência impediu — conta 1.
+        first = match(_files("F0", "F1"), omie)
+        assert first.tie_stats.steals_prevented_by_supplier == 1
+        # A Fabiana já fecha em empate (dois candidatos de mesmo valor); o nome
+        # não mudou a escolha DELA (o primeiro da lista já era o certo).
+        assert first.tie_stats.ties == 1
+        assert first.tie_stats.broken_by_supplier == 0
+
+        # Linha da Fabiana vem ANTES: a ordem antiga já acertava — nada evitado.
+        second = match(_files("F1", "F0"), omie)
+        assert second.tie_stats.steals_prevented_by_supplier == 0
+        # Os ids estão trocados entre as duas chamadas; o que tem de ser igual
+        # é quem casou com quem: a Fabiana (F0 aqui) com o 1, a WS IT com o 2.
+        assert dict(first.matches) == {"F1": 1, "F0": 2}
+        assert dict(second.matches) == {"F0": 1, "F1": 2}
+
 
 @pytest.mark.unit
 class TestMatcherUnmatchedOrder:

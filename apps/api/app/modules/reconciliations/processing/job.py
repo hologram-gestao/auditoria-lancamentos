@@ -409,6 +409,10 @@ async def _execute_processing(
         # isto retroativamente: o conjunto de candidatos não é persistido.
         ties=result.tie_stats.ties,
         tie_broken_by_supplier=result.tie_stats.broken_by_supplier,
+        # Pares que uma linha anterior sem (ou com menos) evidência teria levado
+        # decidindo na vez dela — o sinal da ordem por evidência dentro da
+        # passada (report da Bruna, 15/09/2026). Também só contador.
+        steals_prevented_by_supplier=result.tie_stats.steals_prevented_by_supplier,
     )
 
     # Sonda de pagamento dividido (Fatia 1 da 86e2n4r6p) — SÓ CONTA, não altera

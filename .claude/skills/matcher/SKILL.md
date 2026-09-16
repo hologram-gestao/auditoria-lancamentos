@@ -14,22 +14,22 @@ description: >
 # /matcher — mexer no motor de conciliação sem regredir
 
 O cruzamento é a função pura `match()` em
-`apps/api/app/modules/reconciliations/processing/matcher.py:156` — sem I/O, sem ORM,
+`apps/api/app/modules/reconciliations/processing/matcher.py:223` — sem I/O, sem ORM,
 sem log. O incidente que moldou as regras: Bruna, 04/08/2026, cliente Romilson
 Carpintaria — o laço guloso antigo deixava uma linha sem contraparte legítima
 (pagamento dividido em duas parcelas no Omie) roubar o lançamento de outra linha, e
 **um pareamento errado gerava duas anomalias falsas**. Esta skill transforma a §5 em
 invariantes verificáveis e num protocolo de mudança. Números de linha conferidos em
-10/09/2026 — se um grep não bater, o código andou: releia o arquivo.
+16/09/2026 — se um grep não bater, o código andou: releia o arquivo.
 
 ## Mapa do módulo (quem decide o quê)
 
 | Arquivo (`processing/`)      | Decide                                                                                                                                                                                                    |
 | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `matcher.py`                 | `match()`; `AMOUNT_TOLERANCE` (`:32`), `DATE_DIVERGENCE_RANGE` (`:38`); DTOs `FileEntryForMatch` (`:42`), `OmieMovement` (`:60`), `TieStats` (`:100`), `MatchResult` (`:119`)                             |
+| `matcher.py`                 | `match()`; `AMOUNT_TOLERANCE` (`:34`), `DATE_DIVERGENCE_RANGE` (`:40`); DTOs `FileEntryForMatch` (`:44`), `OmieMovement` (`:62`), `TieStats` (`:102`), `MatchResult` (`:128`); `_Candidate` (`:166`, a evidência de um par) |
 | `name_affinity.py`           | `supplier_affinity` (`:79`) — desempate por fornecedor, nunca exclusão                                                                                                                                    |
 | `omie_fetch.py`              | `fetch_realized` (`:68`, expande o período), `fetch_pending` (`:137`, 4 chamadas), `deduplicate_by_id` (`:227`), sinal dos títulos (`:195`, `:215`)                                                       |
-| `job.py`                     | Orquestra: decifra descrição (`:306-314`), busca (`:327-338`), `match` (`:371`), classifica por `days_diff` (`:378-396`), loga `reconciliation_matched` (`:398-412`), sonda (`:420-435`), aplica (`:444`) |
+| `job.py`                     | Orquestra: decifra descrição (`:306-314`), busca (`:327-338`), `match` (`:371`), classifica por `days_diff` (`:378-396`), loga `reconciliation_matched` (`:399-416`), sonda (`:424-439`), aplica (`:448`) |
 | `anomalies.py`               | `create_structural_anomalies` (`:150`): `missing_in_omie`, `missing_in_file` (só `Atrasado`, `:212`), `wrong_date` (`:227`)                                                                               |
 | `split_payment_probe.py`     | `probe_split_payments` (`:79`) — SÓ conta, não altera match                                                                                                                                               |
 | `balances.py`, `checksum.py` | Saldos e checksum do parser — fora do cruzamento                                                                                                                                                          |
@@ -43,7 +43,7 @@ ls apps/api/app/modules/reconciliations/processing/
 ### 1. Valor: `|a − b| ≤ 0.01`, hard-coded, com sinal
 
 `AMOUNT_TOLERANCE = Decimal("0.01")` (`matcher.py:32`), aplicada em
-`_amount_within_tolerance` (`:151`). O sinal faz parte do valor: débito (negativo)
+`_amount_within_tolerance` (`:160`). O sinal faz parte do valor: débito (negativo)
 nunca casa crédito (positivo) — `test_opposite_sign_does_not_match`
 (`tests/unit/test_matcher.py:98`). O sinal do lado Omie é normalizado ANTES, no
 `omie_fetch` (extrato via `signed_amount`; título a pagar `-abs`, a receber `+abs`).
@@ -54,13 +54,13 @@ grep -n "AMOUNT_TOLERANCE\|def _amount_within_tolerance" apps/api/app/modules/re
 
 ### 2. Data: `DATE_DIVERGENCE_RANGE = 3`, fixa, e quem classifica é o caller
 
-`DATE_DIVERGENCE_RANGE: int = 3` (`matcher.py:38`). O matcher casa até o range e
+`DATE_DIVERGENCE_RANGE: int = 3` (`matcher.py:40`). O matcher casa até o range e
 devolve `days_diff_by_file_id`; `job.py:385-388` classifica: `0` → `conciliado`,
 `1–3` → `conciliado_data_divergente` (+ anomalia `wrong_date`), `> 3` → sem par
 (`sem_omie`). Vale para conta corrente E cartão
 (`test_card_session_same_engine_with_parcelas`,
 `tests/integration/test_reconciliation_job.py:532`). O parâmetro `tolerance_days` de
-`match()` (`:159`) existe SÓ para testar o algoritmo (`:194-197`); o request ignora
+`match()` (`:226`) existe SÓ para testar o algoritmo (`:276-279`); o request ignora
 `date_tolerance_days` (`app/modules/reconciliations/schemas.py:227-229`) e a coluna
 grava 0 (`app/modules/reconciliations/service.py:320`).
 
@@ -92,8 +92,8 @@ grep -rn "timedelta(days=DATE_DIVERGENCE_RANGE)\|expand_period(\|fetch_realized(
 
 ### 4. Um lançamento Omie casa com UMA linha (1-para-1)
 
-`used_omie_indices` (`matcher.py:204`, filtro `:223`, consumo `:278`) e
-`matched_file_ids` (`:205`). Antes do matcher, `deduplicate_by_id`
+`used_omie_indices` (`matcher.py:286`, filtro `:307`, consumo `:370`) e
+`matched_file_ids` (`:287`). Antes do matcher, `deduplicate_by_id`
 (`omie_fetch.py:227`) remove o mesmo `omie_id` vindo do extrato E do título. No
 banco, o índice parcial `ix_recon_file_entry_session_omie_unique`
 (`app/db/models/reconciliation_file_entry.py:70`) impede dois vínculos ao mesmo
@@ -107,31 +107,43 @@ grep -n "ix_recon_file_entry_session_omie_unique" apps/api/app/db/models/reconci
 
 ### 5. Passadas por proximidade de data — e a ordem do arquivo não importa
 
-`for pass_days in range(tolerance_days + 1)` (`matcher.py:216`): fecha TODOS os pares
-de data exata, depois os de 1 dia, e assim por diante. Dentro da passada as linhas
-decidem em `(transaction_date, id)` (`ordered_entries`, `:214`) — não na ordem de
-leitura. A saída sai ordenada por linha do arquivo, não por passada (`:283-286`).
-Travas: classe `TestMatcherPassadasPorProximidadeDeData` (`test_matcher.py:236`),
-com o cenário da Bruna (`:247`) e a independência da ordem (`:288`).
+`for pass_days in range(tolerance_days + 1)` (`matcher.py:300`): fecha TODOS os pares
+de data exata, depois os de 1 dia, e assim por diante. DENTRO da passada, desde
+16/09/2026, quem decide não é a linha: a passada monta todos os pares possíveis
+(`candidates_by_line`, `:301-320`) e fecha do mais forte para o mais fraco
+(`pairs = sorted`, `:327`). A ordem `(transaction_date, id)` das linhas
+(`ordered_entries`, `:298`) virou só o penúltimo desempate, entre pares de evidência
+igual — a ordem de leitura do arquivo continua não importando, e agora a ordem dos ids
+(UUID) também não. A saída sai ordenada por linha do arquivo, não por passada nem por
+evidência (`:375-378`). Travas: classe `TestMatcherPassadasPorProximidadeDeData`
+(`test_matcher.py:236`), com o cenário da Bruna (`:247`) e a independência da ordem
+(`:288`); e `test_linha_sem_sinal_nao_rouba_o_par_de_quem_tem_evidencia` (`:571`), o
+caso de 15/09 nas duas ordens de id.
 
 ```bash
-grep -n "for pass_days in range\|ordered_entries = sorted" apps/api/app/modules/reconciliations/processing/matcher.py
+grep -n "for pass_days in range\|ordered_entries = sorted\|pairs = sorted" apps/api/app/modules/reconciliations/processing/matcher.py
 ```
 
 ### 6. Desempate: menor `|amount_diff|` → maior afinidade → `date asc` — nunca exclusão
 
-`_sort_key` (`matcher.py:242-251`): `(abs(amount_diff), -affinity, date)`. A
-afinidade (`name_affinity.py:79`) conta tokens significativos do fornecedor Omie
-presentes na descrição do extrato — sem limiar, sem fuzzy, stopwords (`:36`) e
-mínimo de 3 caracteres (`:60`). Entra DEPOIS do valor porque valor é fato e nome é
-indício, e só ORDENA: `test_nome_que_nao_bate_nunca_impede_o_match`
+`_Candidate.evidence_key` (`matcher.py:178`): `(abs(amount_diff), -affinity, date,
+posição na lista)`. É a chave de UMA linha entre os candidatos dela E, seguida da ordem
+`(data, id)` da linha, a chave dos PARES da passada (invariante 5): o par mais forte
+fecha primeiro, e para cada linha o par escolhido continua sendo o melhor candidato
+livre DELA no momento em que fecha. A afinidade (`name_affinity.py:79`) conta tokens
+significativos do fornecedor Omie presentes na descrição do extrato — sem limiar, sem
+fuzzy, stopwords (`:36`) e mínimo de 3 caracteres (`:60`). Entra DEPOIS do valor porque
+valor é fato e nome é indício, e só ORDENA: `test_nome_que_nao_bate_nunca_impede_o_match`
 (`test_matcher.py:434`) e `test_valor_manda_mais_que_nome` (`:456`). Título a
-pagar/receber não traz nome (`OmieMovement.supplier=None`, `matcher.py:82`) → afinidade
-0 → cai no critério de data. `TieStats` (`:262-276`) conta empates e quantos o nome
-resolveu — é a ÚNICA medida disponível, porque o conjunto de candidatos não persiste.
+pagar/receber não traz nome (`OmieMovement.supplier=None`, `matcher.py:84`) → afinidade
+0 → cai no critério de data. `TieStats` (`:342-368`) conta empates, quantos o nome
+resolveu na escolha da linha (`broken_by_supplier`) e quantos roubos a ordem por
+evidência evitou (`steals_prevented_by_supplier`, `_earlier_line_would_take`, `:194`;
+`test_roubo_evitado_pelo_fornecedor_e_contado`, `:614`) — é a ÚNICA medida disponível,
+porque o conjunto de candidatos não persiste.
 
 ```bash
-grep -n "def _sort_key\|-affinity\|ties += 1\|broken_by_supplier += 1" apps/api/app/modules/reconciliations/processing/matcher.py
+grep -n "def evidence_key\|-self.affinity\|ties += 1\|broken_by_supplier += 1\|steals_prevented_by_supplier += 1" apps/api/app/modules/reconciliations/processing/matcher.py
 grep -n "Só desempate, nunca exclusão" apps/api/app/modules/reconciliations/processing/name_affinity.py
 ```
 
@@ -153,10 +165,10 @@ grep -n "match_pairs: list\|update(" apps/api/app/modules/reconciliations/qualif
 ### 8. Fornecedor e descrição trafegam em memória — nunca log, nunca banco
 
 A descrição vai decifrada para o matcher (`_safe_decrypt_description`,
-`job.py:545-564`; falha → `""` e a linha cai no critério de data, sem derrubar o
+`job.py:549-568`; falha → `""` e a linha cai no critério de data, sem derrubar o
 processamento). `FileEntryForMatch.description` (`matcher.py:56`) e
-`OmieMovement.supplier` (`:82`) morrem no processo. O único log do caminho leva só o
-`file_entry_id` (`job.py:563`); `reconciliation_matched` loga contadores (`:398-412`).
+`OmieMovement.supplier` (`:84`) morrem no processo. O único log do caminho leva só o
+`file_entry_id` (`job.py:567`); `reconciliation_matched` loga contadores (`:398-412`).
 
 ```bash
 grep -rn "log\.\(info\|warning\|debug\)(" apps/api/app/modules/reconciliations/processing/ --include=*.py | grep -i "description=\|supplier=" ; echo "esperado: nada (exit 1)"
@@ -170,7 +182,7 @@ grep -rn "log\.\(info\|warning\|debug\)(" apps/api/app/modules/reconciliations/p
 cd apps/api && uv run --extra dev pytest tests/unit/test_matcher.py tests/unit/test_name_affinity.py tests/unit/test_split_payment_probe.py -q --no-cov
 ```
 
-Registrado em 10/09/2026: **54 passed em 0,25 s** (36 + 9 + 9). Guardas de integração
+Registrado em 16/09/2026: **56 passed em 0,28 s** (38 + 9 + 9). Guardas de integração
 que também travam o motor (exigem Docker — ver skill `gate`):
 `test_exact_divergent_and_unmatched_in_one_session`
 (`tests/integration/test_reconciliation_job.py:385`) e
@@ -234,28 +246,39 @@ for fe in (f for f in files if f.id not in matched_files):
   (`test_matcher.py:353`);
 - desempate por fornecedor: **0,07 %** de cenários com contagem diferente (14 a
   menos, 11 a mais), 2,2 % com escolha diferente —
-  `test_desempate_correto_pode_custar_um_par_em_cascata` (`:498`).
+  `test_desempate_correto_pode_custar_um_par_em_cascata` (`:498`);
+- pares por evidência dentro da passada (16/09/2026): **32 pares a mais e 0 de data
+  exata a menos** em 20 mil cenários, **684 pares com a PESSOA errada a menos** (4.554 →
+  3.870), 391 cenários corrigidos contra 4 introduzidos (evidência fraca vencendo linha
+  sem sinal — antes era sorteio de UUID) —
+  `test_linha_sem_sinal_nao_rouba_o_par_de_quem_tem_evidencia` (`:571`) e
+  `test_roubo_evitado_pelo_fornecedor_e_contado` (`:614`).
 
-**O que esses números NÃO são:** referência para uma mudança nova. O harness dos 20
-mil cenários **não está versionado** (só os docstrings o citam — grep abaixo), e a
-contrapartida **nunca foi medida em dado real**: a validação da Bruna em 14/08 foi de
-operador (Romilson conciliou certo), não comparação antes/depois. Replay a partir do
-banco é impossível — o conjunto de candidatos não persiste, e
-`reconciliation_omie_entries.amount` (desde 02/09) cobre só os sem par. Mudança nova
-= script próprio de medição (versionado ou anexado ao PR) + leitura dos logs abaixo.
+**O que esses números NÃO são:** referência para uma mudança nova. Os harnesses dos
+dois primeiros precedentes **não estão versionados** (só os docstrings os citam); o do
+terceiro está: `apps/api/scripts/measure_matcher_evidence_order.py` carrega o
+algoritmo linha a linha embutido como referência e um gerador sintético com verdade
+conhecida — é a linha de base da PRÓXIMA mudança (estenda o gerador; não afrouxe os
+critérios). A contrapartida **nunca foi medida em dado real**: a validação da Bruna em
+14/08 foi de operador (Romilson conciliou certo), não comparação antes/depois. Replay a
+partir do banco é impossível — o conjunto de candidatos não persiste, e
+`reconciliation_omie_entries.amount` (desde 02/09) cobre só os sem par. Mudança nova =
+medição com esse script (ou um irmão, versionado) + leitura dos logs abaixo.
 
 ```bash
-grep -rn "20.000\|20 mil" apps/api/tests apps/api/scripts --include=*.py   # só docstrings: não há harness no repo
+cd apps/api && uv run --extra dev python -m scripts.measure_matcher_evidence_order   # ~10 s; imprime a tabela antes/depois
 ```
 
 ### Passo 4 — os sinais de produção (sem PII)
 
 Três eventos estruturados, todos contadores, medem o motor daqui para a frente:
 
-- `reconciliation_omie_fetched` (`job.py:361`): `realized`, `pending`, `deduped`;
-- `reconciliation_matched` (`:398`): `total_file`, `matched`, `divergent`,
-  `unmatched_omie`, `ties`, `tie_broken_by_supplier`;
-- `split_payment_probe` (`:426`): `sem_omie`, `fechariam_por_soma`,
+- `reconciliation_omie_fetched` (`job.py:362`): `realized`, `pending`, `deduped`;
+- `reconciliation_matched` (`:399`): `total_file`, `matched`, `divergent`,
+  `unmatched_omie`, `ties`, `tie_broken_by_supplier`, `steals_prevented_by_supplier`
+  (pares que uma linha anterior sem evidência teria levado — o sinal da ordem por
+  evidência; zero em produção = a mudança não está mudando nada);
+- `split_payment_probe` (`:431`): `sem_omie`, `fechariam_por_soma`,
   `com_agrupamento_omie`, `nao_avaliadas`, `omie_sem_par`, `omie_com_lanc_relac`.
 
 ```bash
@@ -275,7 +298,7 @@ Rode a skill `gate` (a suíte de integração exige Docker) e feche com a skill
   quebrar a invariante 4.
 - **Matching ótimo global (Hungarian).** Fecharia mais pares E o caso da Bruna;
   rejeitado por auditabilidade. Reabrir só com medição em dado real mostrando perda.
-- **Status Omie não filtra o match** (`OmieMovement.status`, `matcher.py:66-69`).
+- **Status Omie não filtra o match** (`OmieMovement.status`, `matcher.py:68-77`).
   `Atrasado` vira `missing_in_file`; `Previsto` fica sem anomalia
   (`anomalies.py:212`; `test_previsto_omie_entry_persisted_but_not_anomaly`,
   `test_reconciliation_job.py:776`).

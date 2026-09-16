@@ -11,8 +11,10 @@ CLAUDE.md §5 — regras invioláveis:
        índices consumidos.
     4. Desempate (CLAUDE.md §5.5): a proximidade de data manda primeiro, e manda
        GLOBALMENTE — o casamento acontece em passadas por |days_diff| crescente
-       (0, 1, ..., DATE_DIVERGENCE_RANGE). Dentro de uma passada, desempata por
-       menor |amount_diff| → `date asc`.
+       (0, 1, ..., DATE_DIVERGENCE_RANGE). Dentro de uma passada, os PARES
+       fecham em ordem de evidência: menor |amount_diff| → maior afinidade de
+       fornecedor → `date asc` → ordem `(data, id)` da linha. Quem decide
+       primeiro é o par mais forte, não a primeira linha.
     5. Guloso dentro de cada passada (não global ótimo) — determinístico e
        auditável, sem heurística e sem IA (§5.9).
 
@@ -109,10 +111,17 @@ class TieStats:
             candidato DIFERENTE do que a data sozinha escolheria. É o numerador
             — se ficar em zero depois de rodar em produção, o desempate por
             fornecedor não está pagando a complexidade que custa.
+        steals_prevented_by_supplier: pares fechados por evidência que uma linha
+            ANTERIOR na ordem `(data, id)`, ainda sem par e decidindo na vez
+            dela, teria levado (report da Bruna, 15/09/2026: a linha sem sinal
+            de nome vinha antes e levava o lançamento de quem tinha). É o sinal
+            de produção da ordem por evidência dentro da passada — se ficar em
+            zero, a mudança não está mudando resultado nenhum.
     """
 
     ties: int = 0
     broken_by_supplier: int = 0
+    steals_prevented_by_supplier: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,6 +162,64 @@ def _amount_within_tolerance(a: Decimal, b: Decimal) -> bool:
     return abs(a - b) <= AMOUNT_TOLERANCE
 
 
+@dataclass(frozen=True, slots=True)
+class _Candidate:
+    """Um lançamento Omie elegível para uma linha, dentro de uma passada.
+
+    Guarda a evidência do par já calculada — `supplier_affinity` é a única conta
+    não-trivial do matcher e não precisa ser refeita a cada ordenação.
+    """
+
+    amount_diff: Decimal
+    affinity: int
+    omie_date: date
+    omie_index: int
+
+    def evidence_key(self) -> tuple[Decimal, int, date, int]:
+        """Critério de uma linha entre os candidatos DELA (CLAUDE.md §5.5).
+
+        Menor |amount_diff| → MAIOR afinidade (negativa: mais tokens em comum
+        ordena antes) → `date asc` → posição na lista Omie. A afinidade entra
+        DEPOIS do valor porque valor é fato e nome é indício. E entra só como
+        ordenação — nenhum candidato é removido por nome que não bate (ver
+        `name_affinity`).
+        """
+        return (self.amount_diff, -self.affinity, self.omie_date, self.omie_index)
+
+    def blind_key(self) -> tuple[Decimal, date, int]:
+        """O critério anterior ao fornecedor — serve só para medir se o nome mudou algo."""
+        return (self.amount_diff, self.omie_date, self.omie_index)
+
+
+def _earlier_line_would_take(
+    omie_index: int,
+    *,
+    position: int,
+    ordered_entries: list[FileEntryForMatch],
+    matched_file_ids: set[str],
+    candidates_by_line: dict[int, list[_Candidate]],
+    used_omie_indices: set[int],
+) -> bool:
+    """Alguma linha ANTERIOR, ainda sem par, levaria este lançamento na vez dela?
+
+    É a pergunta que o algoritmo antigo (linha a linha) respondia com "sim" em
+    silêncio: a linha anterior escolhia entre os candidatos dela pelo critério
+    de linha e consumia o lançamento antes de a linha com evidência chegar.
+    Serve só para o contador `steals_prevented_by_supplier` — não decide nada.
+    """
+    for earlier in range(position):
+        if ordered_entries[earlier].id in matched_file_ids:
+            continue
+        free = [
+            candidate
+            for candidate in candidates_by_line.get(earlier, [])
+            if candidate.omie_index not in used_omie_indices
+        ]
+        if free and min(free, key=_Candidate.evidence_key).omie_index == omie_index:
+            return True
+    return False
+
+
 def match(
     file_entries: list[FileEntryForMatch],
     omie_movements: list[OmieMovement],
@@ -160,13 +227,14 @@ def match(
 ) -> MatchResult:
     """Cruza arquivo x Omie aplicando as regras invioláveis.
 
-    Algoritmo (passadas por proximidade de data):
+    Algoritmo (passadas por proximidade de data, pares por evidência):
         Para `dias` de 0 até `tolerance_days`, nesta ordem:
-            Para cada `file_entry` ainda sem par, em ordem `(data, id)`:
-                1. Filtra `omie_movements` ainda não consumidos onde
-                   |amount_diff| ≤ 0.01 E |days_diff| == `dias`.
-                2. Ordena candidatos por `(|amount_diff|, date asc)`.
-                3. Pega o primeiro e marca como consumido.
+            1. Monta todos os pares (linha ainda sem par, lançamento ainda não
+               consumido) com |days_diff| == `dias` E |amount_diff| ≤ 0.01.
+            2. Ordena os pares por `(|amount_diff|, -afinidade de fornecedor,
+               data do lançamento, ordem (data, id) da linha, posição na lista)`.
+            3. Percorre nessa ordem e fecha cada par cujos dois lados ainda
+               estão livres.
         Quem sobrar dos dois lados fica sem par.
 
     Por que passadas, e não um laço só guloso por linha do arquivo: quando cada
@@ -179,27 +247,41 @@ def match(
     primeiro todos os pares de data exata, o par certo é fechado antes de
     qualquer candidato distante poder disputá-lo.
 
+    Por que pares por evidência DENTRO da passada, e não linha a linha: o
+    mesmo roubo acontecia com data e valor iguais. Report da Bruna (15/09/2026):
+    dois PIX de mesmo valor no mesmo dia; a descrição de um trazia só uma sigla
+    de 2 letras (a afinidade descarta tokens curtos, e o cadastro Omie traz o
+    nome da pessoa), então essa linha não compartilhava token com fornecedor
+    NENHUM; a outra compartilhava dois com o lançamento dela. Decidindo linha a
+    linha em ordem `(data, id)` — id é UUID, aleatório — a linha sem sinal vinha
+    antes metade das vezes, levava o lançamento da outra pela ordem da lista, e
+    a outra ficava com a sobra: cara ou coroa por sessão, um pareamento errado e
+    duas anomalias falsas. Ordenando os PARES da passada pela evidência, o par
+    com nome fecha antes de a linha sem sinal escolher, e a linha sem sinal fica
+    com o que sobra — o certo. Para cada linha, o par escolhido continua sendo o
+    melhor candidato livre DELA no momento em que fecha; o que muda é só QUEM
+    decide primeiro.
+
     Continua determinístico e auditável: não é matching ótimo global
     (Hungarian/etc) nem heurística — é guloso DENTRO de cada passada, e a
     ordem de todas as decisões é derivada dos dados, não da ordem de leitura
     do arquivo.
 
     Args:
-        file_entries: linhas do arquivo. A ordem da lista NÃO afeta mais o
-            resultado — as linhas são percorridas em `(transaction_date, id)`
-            dentro de cada passada.
+        file_entries: linhas do arquivo. A ordem da lista NÃO afeta o
+            resultado — as linhas entram na ordem `(transaction_date, id)`.
         omie_movements: lista combinada de movimentações Omie (extrato +
-            títulos). Ordem dentro da lista NÃO afeta o resultado — o desempate
-            é determinístico por (amount_diff, date).
+            títulos). A posição na lista só desempata pares idênticos em valor,
+            afinidade, data e linha (candidatos indistinguíveis).
         tolerance_days: número de passadas além da exata (CLAUDE.md §5.2).
             Default é `DATE_DIVERGENCE_RANGE` (3) — fixo no produto desde a
             FASE 1. O parâmetro existe só para testar o algoritmo com outros
             ranges; o sistema sempre usa o default. Aceita qualquer inteiro ≥ 0.
 
     Returns:
-        `MatchResult` com pares (file_id, omie_id), índices Omie sobrando e o
+        `MatchResult` com pares (file_id, omie_id), índices Omie sobrando, o
         `days_diff_by_file_id` (para o caller classificar conciliado x
-        conciliado_data_divergente).
+        conciliado_data_divergente) e os contadores de `TieStats`.
     """
     used_omie_indices: set[int] = set()
     matched_file_ids: set[str] = set()
@@ -207,18 +289,20 @@ def match(
     days_diff_by_file_id: dict[str, int] = {}
     ties = 0
     broken_by_supplier = 0
+    steals_prevented_by_supplier = 0
 
-    # Ordem de decisão das linhas dentro de cada passada. Derivada dos dados
-    # (data, depois id) em vez da ordem de leitura: o resultado deixa de
-    # depender de o parser ter entregue o extrato cronológico ou não.
+    # Ordem das linhas. Derivada dos dados (data, depois id) em vez da ordem de
+    # leitura: o resultado deixa de depender de o parser ter entregue o extrato
+    # cronológico ou não. Dentro da passada ela é só o PENÚLTIMO critério — o
+    # par mais forte fecha primeiro, venha de que linha vier.
     ordered_entries = sorted(file_entries, key=lambda fe: (fe.transaction_date, fe.id))
 
     for pass_days in range(tolerance_days + 1):
-        for file_entry in ordered_entries:
+        # 1) Todos os pares possíveis da passada, cada um com a sua evidência.
+        candidates_by_line: dict[int, list[_Candidate]] = {}
+        for position, file_entry in enumerate(ordered_entries):
             if file_entry.id in matched_file_ids:
                 continue
-
-            candidate_indices: list[int] = []
             for idx, omie in enumerate(omie_movements):
                 if idx in used_omie_indices:
                     continue
@@ -226,62 +310,70 @@ def match(
                     continue
                 if not _amount_within_tolerance(file_entry.amount, omie.amount):
                     continue
-                candidate_indices.append(idx)
-
-            if not candidate_indices:
-                continue
-
-            # Desempate DENTRO da passada (CLAUDE.md §5.5): o |days_diff| já é
-            # o mesmo para todos os candidatos aqui, então sobram
-            #   1) menor |amount_diff|
-            #   2) MAIOR afinidade de fornecedor com a descrição do extrato
-            #   3) primeiro por date asc
-            # A afinidade entra DEPOIS do valor porque valor é fato e nome é
-            # indício. E entra só como ordenação — nenhum candidato é removido
-            # por nome que não bate (ver `name_affinity`).
-            def _sort_key(
-                idx: int, _file_entry: FileEntryForMatch = file_entry
-            ) -> tuple[Decimal, int, date]:
-                omie = omie_movements[idx]
-                affinity = supplier_affinity(omie.supplier, _file_entry.description)
-                return (
-                    abs(_file_entry.amount - omie.amount),
-                    -affinity,  # negativo: mais tokens em comum ordena antes
-                    omie.transaction_date,
+                candidates_by_line.setdefault(position, []).append(
+                    _Candidate(
+                        amount_diff=abs(file_entry.amount - omie.amount),
+                        affinity=supplier_affinity(omie.supplier, file_entry.description),
+                        omie_date=omie.transaction_date,
+                        omie_index=idx,
+                    )
                 )
 
-            def _sort_key_sem_fornecedor(
-                idx: int, _file_entry: FileEntryForMatch = file_entry
-            ) -> tuple[Decimal, date]:
-                """O critério anterior — serve só para medir se o nome mudou algo."""
-                omie = omie_movements[idx]
-                return (abs(_file_entry.amount - omie.amount), omie.transaction_date)
+        # 2) O par com mais evidência fecha primeiro. A chave é a da linha
+        #    (`evidence_key`, sem a posição na lista) seguida da ordem da linha
+        #    e só então da posição na lista Omie: entre pares indistinguíveis,
+        #    a linha anterior decide, e escolhe o primeiro da lista — o mesmo
+        #    desempate que já valia linha a linha.
+        pairs = sorted(
+            (
+                (candidate.evidence_key()[:3], position, candidate.omie_index, candidate)
+                for position, candidates in candidates_by_line.items()
+                for candidate in candidates
+            ),
+            key=lambda pair: pair[:3],
+        )
 
-            chosen = min(candidate_indices, key=_sort_key)
+        # 3) Fecha na ordem, pulando o que já foi consumido.
+        for _evidence, position, _omie_index, candidate in pairs:
+            file_entry = ordered_entries[position]
+            if file_entry.id in matched_file_ids or candidate.omie_index in used_omie_indices:
+                continue
 
-            # Instrumentação: um "empate" é mais de um candidato disputando o
-            # melhor |amount_diff|. Sem isto não há como saber se o desempate
-            # por fornecedor importa — o conjunto de candidatos não é persistido.
-            best_amount_diff = min(
-                abs(file_entry.amount - omie_movements[i].amount) for i in candidate_indices
-            )
-            tied = [
-                i
-                for i in candidate_indices
-                if abs(file_entry.amount - omie_movements[i].amount) == best_amount_diff
+            # Instrumentação — a MESMA definição de antes, avaliada no momento em
+            # que a linha fecha: um "empate" é mais de um candidato livre desta
+            # linha disputando o melhor |amount_diff|, e "o nome desempatou" é
+            # o escolhido ser diferente do que valor + data escolheriam.
+            free = [
+                other
+                for other in candidates_by_line[position]
+                if other.omie_index not in used_omie_indices
             ]
-            if len(tied) > 1:
+            best_amount_diff = min(other.amount_diff for other in free)
+            if sum(1 for other in free if other.amount_diff == best_amount_diff) > 1:
                 ties += 1
-                if chosen != min(candidate_indices, key=_sort_key_sem_fornecedor):
+                if min(free, key=_Candidate.blind_key).omie_index != candidate.omie_index:
                     broken_by_supplier += 1
 
-            used_omie_indices.add(chosen)
+            # O sinal desta correção: sem evidência, uma linha anterior teria
+            # levado este lançamento. Só faz sentido quando o par TEM evidência
+            # — sem afinidade, o par anterior ordenaria antes deste.
+            if candidate.affinity > 0 and _earlier_line_would_take(
+                candidate.omie_index,
+                position=position,
+                ordered_entries=ordered_entries,
+                matched_file_ids=matched_file_ids,
+                candidates_by_line=candidates_by_line,
+                used_omie_indices=used_omie_indices,
+            ):
+                steals_prevented_by_supplier += 1
+
+            used_omie_indices.add(candidate.omie_index)
             matched_file_ids.add(file_entry.id)
-            matches.append((file_entry.id, omie_movements[chosen].omie_id))
+            matches.append((file_entry.id, omie_movements[candidate.omie_index].omie_id))
             days_diff_by_file_id[file_entry.id] = pass_days
 
-    # `matches` sai na ordem das linhas do arquivo, não na ordem das passadas —
-    # o consumidor não deve enxergar o detalhe do algoritmo.
+    # `matches` sai na ordem das linhas do arquivo, não na ordem das passadas nem
+    # da evidência — o consumidor não deve enxergar o detalhe do algoritmo.
     order_by_file_id = {fe.id: pos for pos, fe in enumerate(ordered_entries)}
     matches.sort(key=lambda pair: order_by_file_id[pair[0]])
 
@@ -292,5 +384,9 @@ def match(
         matches=matches,
         unmatched_omie_indices=unmatched_omie_indices,
         days_diff_by_file_id=days_diff_by_file_id,
-        tie_stats=TieStats(ties=ties, broken_by_supplier=broken_by_supplier),
+        tie_stats=TieStats(
+            ties=ties,
+            broken_by_supplier=broken_by_supplier,
+            steals_prevented_by_supplier=steals_prevented_by_supplier,
+        ),
     )
