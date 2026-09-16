@@ -155,6 +155,7 @@ class AnthropicClient:
         mime_type: str,
         document_kind: str,
         model: str | None = None,
+        part: tuple[int, int] | None = None,
     ) -> ExtractedStatement:
         """Extrai `ExtractedStatement` chamando a Anthropic via tool use.
 
@@ -168,6 +169,8 @@ class AnthropicClient:
                 `"extrato bancário em PDF"`, `"fatura de cartão CSV"`.
             model: override opcional do modelo. `None` usa o default do
                 construtor (ex. `claude-sonnet-4-5`).
+            part: `(índice, total)` quando `content` é um bloco de um arquivo
+                dividido (`parse_chunking`); entra como nota no user prompt.
 
         Returns:
             `ExtractedStatement` validado.
@@ -179,7 +182,7 @@ class AnthropicClient:
                 não passa na validação Pydantic.
         """
         client = self._get_client()
-        user_content = self._build_user_content(content, mime_type, document_kind)
+        user_content = self._build_user_content(content, mime_type, document_kind, part)
         system_blocks = self._build_system_blocks()
         chosen_model = model or self._model
 
@@ -278,6 +281,7 @@ class AnthropicClient:
         content: bytes,
         mime_type: str,
         document_kind: str,
+        part: tuple[int, int] | None = None,
     ) -> list[dict[str, Any]]:
         """Constrói a lista de blocos de conteúdo do `user` message.
 
@@ -306,7 +310,7 @@ class AnthropicClient:
             text = self._decode_text(content)
             blocks.append({"type": "text", "text": text})
 
-        blocks.append({"type": "text", "text": build_user_prompt(document_kind)})
+        blocks.append({"type": "text", "text": build_user_prompt(document_kind, part=part)})
         return blocks
 
     @staticmethod

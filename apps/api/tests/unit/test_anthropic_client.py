@@ -563,3 +563,42 @@ class TestMissingApiKey:
                 mime_type="application/pdf",
                 document_kind="x",
             )
+
+
+@pytest.mark.unit
+class TestPartNoteInUserPrompt:
+    """86e39xvxm — bloco de arquivo dividido leva a nota no user prompt."""
+
+    async def test_part_appends_block_note(self) -> None:
+        fake = _FakeAnthropic(
+            side_effect=_Message(
+                [_ToolUseBlock(name=EXTRACT_MOVEMENTS_TOOL_NAME, payload=_valid_payload())]
+            )
+        )
+        client = _make_client(fake)
+
+        await client.extract_movements(
+            content=b"a;b\n1;2\n",
+            mime_type="text/csv",
+            document_kind="extrato/fatura em CSV",
+            part=(2, 4),
+        )
+
+        blocks = fake.messages.calls[0]["messages"][0]["content"]
+        assert "bloco 2 de 4" in blocks[-1]["text"]
+        assert "sem completar com linhas de outros blocos" in blocks[-1]["text"]
+
+    async def test_without_part_the_prompt_is_unchanged(self) -> None:
+        fake = _FakeAnthropic(
+            side_effect=_Message(
+                [_ToolUseBlock(name=EXTRACT_MOVEMENTS_TOOL_NAME, payload=_valid_payload())]
+            )
+        )
+        client = _make_client(fake)
+
+        await client.extract_movements(
+            content=b"a;b\n1;2\n", mime_type="text/csv", document_kind="extrato/fatura em CSV"
+        )
+
+        blocks = fake.messages.calls[0]["messages"][0]["content"]
+        assert "bloco" not in blocks[-1]["text"]

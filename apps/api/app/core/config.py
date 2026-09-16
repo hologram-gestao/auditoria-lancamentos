@@ -136,6 +136,17 @@ class Settings(BaseSettings):
     # valor acima do que a Anthropic aceita derruba o serviço no boot, em vez de
     # virar HTTP 400 no meio de uma conciliação.
     ADL_PARSE_MAX_OUTPUT_TOKENS: int = 32_768
+    # 86e39xvxm — extração em blocos para CSV/XLSX. O tempo de UMA chamada cresce
+    # com o número de linhas (143 linhas ~ 75 s; o teto de 150 s comporta ~290),
+    # então o texto tabular é dividido em blocos extraídos em paralelo. PDF não
+    # é dividido. Ponto de partida: 100 linhas por bloco (~50 s), 4 chamadas
+    # simultâneas (rate limit da conta), e arquivo com até 150 linhas segue
+    # inteiro numa chamada só. Tempo de parede ~ ceil(blocos / paralelismo) x
+    # tempo de um bloco — calibrar pelos eventos `parse_chunked` /
+    # `anthropic_extract_ok` (duration_ms, transaction_count).
+    ADL_PARSE_CHUNK_ROWS: int = Field(default=100, ge=20, le=500)
+    ADL_PARSE_CHUNK_MIN_ROWS: int = Field(default=150, ge=20, le=1000)
+    ADL_PARSE_CHUNK_CONCURRENCY: int = Field(default=4, ge=1, le=16)
 
     # MOCK exclusivo de demo/gravação: quando True, `ParseService` retorna um
     # payload fixo (extrato fictício da Padaria Pão Quente) sem chamar a
