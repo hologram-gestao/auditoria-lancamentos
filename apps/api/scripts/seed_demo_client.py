@@ -45,6 +45,7 @@ if sys.platform == "win32":
 from app.core.config import get_settings  # noqa: E402
 from app.core.crypto import encrypt  # noqa: E402
 from app.db.models import (  # noqa: E402
+    HOLOGRAM_ORGANIZATION_ID,
     Client,
     ClientAssignment,
     OmieAccountCache,
@@ -80,9 +81,19 @@ DEMO_ACCOUNTS: list[dict[str, object]] = [
 
 
 async def get_admin(session: AsyncSession) -> User:
-    """Localiza um admin para usar como `created_by` do cliente fictício."""
+    """Localiza um admin DA HOLOGRAM para usar como `created_by` do cliente fictício.
+
+    Com N organizações (86e36ec7p), "o primeiro admin ativo" poderia ser de outro
+    BPO — e o cliente demo nasceria lá em silêncio.
+    """
     admin = await session.scalar(
-        select(User).where(User.role == UserRole.ADMIN.value, User.active.is_(True)).limit(1)
+        select(User)
+        .where(
+            User.role == UserRole.ADMIN.value,
+            User.active.is_(True),
+            User.organization_id == HOLOGRAM_ORGANIZATION_ID,
+        )
+        .limit(1)
     )
     if admin is None:
         raise RuntimeError(
@@ -110,6 +121,8 @@ async def upsert_demo_client(session: AsyncSession, admin: User) -> tuple[Client
         omie_app_secret_iv=secret_iv,
         active=True,
         created_by=admin.id,
+        # A org de quem cria, explícita — nunca o default do banco.
+        organization_id=admin.organization_id,
     )
     session.add(client)
     await session.flush()
@@ -152,8 +165,15 @@ async def mark_synced(session: AsyncSession, client: Client) -> None:
 
 async def assign_to_first_manager(session: AsyncSession, client: Client, admin: User) -> str | None:
     """Cria assignment com o primeiro manager ativo, se houver. Retorna o nome (ou None)."""
+    # Carteira é intra-org: só gerente da MESMA organização do cliente.
     manager = await session.scalar(
-        select(User).where(User.role == UserRole.MANAGER.value, User.active.is_(True)).limit(1)
+        select(User)
+        .where(
+            User.role == UserRole.MANAGER.value,
+            User.active.is_(True),
+            User.organization_id == client.organization_id,
+        )
+        .limit(1)
     )
     if manager is None:
         return None

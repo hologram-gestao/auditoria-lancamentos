@@ -1,7 +1,8 @@
-"""Seeds para desenvolvimento — popula admin inicial + catálogo de anomalias.
+"""Seeds para desenvolvimento — organização Hologram + admin inicial + catálogo de anomalias.
 
 Idempotente: pode ser rodado múltiplas vezes sem duplicar dados (usa upsert
-por chave única — `email` para users, `code` para anomaly_types).
+por chave única — `id` fixo para a organização, `email` para users, `code`
+para anomaly_types).
 
 Uso:
     cd apps/api
@@ -37,8 +38,11 @@ if sys.platform == "win32":
 from app.core.config import get_settings  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
 from app.db.models import (  # noqa: E402
+    HOLOGRAM_ORGANIZATION_ID,
+    HOLOGRAM_ORGANIZATION_NAME,
     AnomalySeverity,
     AnomalyType,
+    Organization,
     User,
     UserRole,
 )
@@ -175,8 +179,25 @@ ANOMALY_TYPES_SEED: list[dict[str, Any]] = [
 ]
 
 
+async def seed_organization(session: AsyncSession) -> None:
+    """Garante a organização Hologram (86e36ec7p) — pelo id FIXO que a migration usa.
+
+    Num banco migrado ela já existe (a migration a insere); num banco criado
+    por `create_all` é este seed que a cria. Idempotente por `id`.
+    """
+    existing = await session.get(Organization, HOLOGRAM_ORGANIZATION_ID)
+    if existing is not None:
+        print(f"[seed] organização já existe: {existing.name}")
+        return
+    session.add(
+        Organization(id=HOLOGRAM_ORGANIZATION_ID, name=HOLOGRAM_ORGANIZATION_NAME, active=True)
+    )
+    await session.flush()
+    print(f"[seed] organização criada: {HOLOGRAM_ORGANIZATION_NAME}")
+
+
 async def seed_admin(session: AsyncSession) -> None:
-    """Cria 1 admin inicial se ainda não existir."""
+    """Cria 1 admin inicial (da organização Hologram) se ainda não existir."""
     email = os.getenv("SEED_ADMIN_EMAIL", DEFAULT_ADMIN_EMAIL).lower()
     name = os.getenv("SEED_ADMIN_NAME", DEFAULT_ADMIN_NAME)
     password = os.getenv("SEED_ADMIN_PASSWORD", DEFAULT_ADMIN_PASSWORD)
@@ -192,6 +213,8 @@ async def seed_admin(session: AsyncSession) -> None:
         password_hash=hash_password(password),
         role=UserRole.ADMIN.value,
         active=True,
+        # Explícito, e não pelo default do banco: o seed é código de criação.
+        organization_id=HOLOGRAM_ORGANIZATION_ID,
     )
     session.add(admin)
     await session.flush()
@@ -235,6 +258,7 @@ async def main() -> None:
     try:
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
+            await seed_organization(session)
             await seed_admin(session)
             await seed_anomaly_types(session)
     finally:

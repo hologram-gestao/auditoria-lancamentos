@@ -16,7 +16,7 @@ from app.db.models.client_assignment import (
 )
 from app.db.models.client_category import (
     MAX_CATEGORY_NAME_CHARS,
-    UQ_CLIENT_CATEGORY_NAME,
+    UQ_CLIENT_CATEGORY_ORGANIZATION_NAME,
     ClientCategory,
     ClientCategoryTone,
 )
@@ -30,6 +30,14 @@ from app.db.models.client_glossary_entry import (
 )
 from app.db.models.notification import Notification, NotificationType
 from app.db.models.omie_account_cache import OmieAccountCache, OmieAccountType
+from app.db.models.organization import (
+    HOLOGRAM_ORGANIZATION_ID,
+    HOLOGRAM_ORGANIZATION_NAME,
+    MAX_ORGANIZATION_NAME_CHARS,
+    UQ_ORGANIZATION_NAME,
+    Organization,
+    organization_id_server_default,
+)
 from app.db.models.reconciliation_anomaly import (
     AnomalyDetectedBy,
     AnomalyReviewVerdict,
@@ -59,8 +67,8 @@ from app.db.models.reconciliation_session import (
 from app.db.models.usage_event import UsageEvent
 from app.db.models.user import (
     CLIENT_ROLES,
-    SCOPE_CLIENT_ID_CHECK,
-    SCOPE_CLIENT_ID_CONSTRAINT,
+    SCOPE_CONSISTENCY_CHECK,
+    SCOPE_CONSISTENCY_CONSTRAINT,
     SYSTEM_ROLES,
     ClientUserRole,
     SystemUserRole,
@@ -73,18 +81,22 @@ from app.db.models.user_client_favorite import UQ_USER_CLIENT_FAVORITE, UserClie
 __all__ = [
     "CLIENT_ROLES",
     "COD_INT_LANC_MAX_LENGTH",
+    "HOLOGRAM_ORGANIZATION_ID",
+    "HOLOGRAM_ORGANIZATION_NAME",
     "IV_HEX_LENGTH",
     "MAX_CATEGORY_NAME_CHARS",
     "MAX_CODE_CHARS",
     "MAX_DESCRIPTION_CHARS",
     "MAX_ENTRIES_PER_CLIENT",
     "MAX_NAME_CHARS",
-    "SCOPE_CLIENT_ID_CHECK",
-    "SCOPE_CLIENT_ID_CONSTRAINT",
+    "MAX_ORGANIZATION_NAME_CHARS",
+    "SCOPE_CONSISTENCY_CHECK",
+    "SCOPE_CONSISTENCY_CONSTRAINT",
     "SYSTEM_ROLES",
     "UQ_CLIENT_ASSIGNMENT_CLIENT_USER",
     "UQ_CLIENT_ASSIGNMENT_PRIMARY",
-    "UQ_CLIENT_CATEGORY_NAME",
+    "UQ_CLIENT_CATEGORY_ORGANIZATION_NAME",
+    "UQ_ORGANIZATION_NAME",
     "UQ_USER_CLIENT_FAVORITE",
     "AccessAudit",
     "AnomalyDetectedBy",
@@ -108,6 +120,7 @@ __all__ = [
     "OmieEntryStatus",
     "OmieEntryUserAction",
     "OmiePostingStatus",
+    "Organization",
     "ReconciliationAnomaly",
     "ReconciliationFile",
     "ReconciliationFileEntry",
@@ -123,5 +136,6 @@ __all__ = [
     "UserClientFavorite",
     "UserRole",
     "UserScope",
+    "organization_id_server_default",
     "primary_assignment_index_predicate",
 ]

@@ -1,6 +1,6 @@
 """`scope` vence `role` na decisão de tenant (Sprint 5 / QA 05.8).
 
-**Por que este arquivo existe.** A CHECK do banco (`ck_users_scope_client_id`,
+**Por que este arquivo existe.** A CHECK do banco (`ck_users_scope_consistency`,
 BACK 05.1) cruza `scope` com `client_id`, mas **não** cruza `scope` com `role`:
 a linha `scope='client'` + `role='admin'` é representável no Postgres.
 

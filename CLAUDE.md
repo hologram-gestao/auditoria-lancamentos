@@ -255,15 +255,27 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    cross-tenant dá para saber o escopo e o tenant **do ator**, além do alvo.
    Navegação dentro do próprio tenant **não** gera linha — a trilha não infla
    com uso normal.
-8. **Modelo de tenancy (Sprint 5 — `users`):** uma tabela só, sem segundo
-   mecanismo de sessão.
-   - `scope = 'system'` → equipe Hologram; `client_id` **NULL**; escopo é a
-     carteira (`client_assignments`).
+8. **Modelo de tenancy (`users` — Sprint 5 + camada de organizações, épico
+   86e36ec0q):** uma tabela só, sem segundo mecanismo de sessão. Toda linha de
+   `clients`, `users` (staff e cliente) e `client_categories` pertence a uma
+   **organização** (`organizations`, migration `3e8f1a6c9d24`). A primeira é a
+   **Hologram**, com id fixo (`HOLOGRAM_ORGANIZATION_ID`) que é o `server_default`
+   das três colunas `organization_id`: linha gravada sem o campo é a forma antiga da
+   tabela (API antiga na janela de deploy, testes). **O default do banco só fala por
+   quem não fala** — código de criação passa a org da LINHA do ator, nunca do payload.
+   - `scope = 'platform'` → administração geral da ADL (`platform_admin`);
+     `organization_id` e `client_id` **NULL**. Vê e faz tudo (D1 revisada pelo
+     Lucas, 09/09). Os membros de enum e a regra de acesso chegam com a task de
+     authz core (86e36ecar); até lá o banco aceita a forma e nada a produz.
+   - `scope = 'system'` → staff de UMA organização; `organization_id`
+     **obrigatório**, `client_id` **NULL**; escopo é a carteira (`client_assignments`).
    - `scope = 'client'` → usuário DO cliente; `client_id` **obrigatório** e é o
-     tenant dele.
+     tenant dele; `organization_id` é a org do cliente, **desnormalizada**.
    - A integridade é **do banco**, não só da aplicação:
-     `ck_users_scope_client_id`. Fonte única do enum e do CHECK:
-     [apps/api/app/db/models/user.py](apps/api/app/db/models/user.py).
+     `ck_users_scope_consistency` cruza scope × role × organization_id × client_id.
+     Fonte única do enum e do CHECK:
+     [apps/api/app/db/models/user.py](apps/api/app/db/models/user.py); a migration
+     copia e `tests/unit/test_organization_schema.py` compara as duas.
    - Papéis: `admin` e `manager` (sistema); `client_manager` e `client_operator`
      (cliente). O papel do payload de criação é **whitelist** — `admin`/`manager`
      forjados são rejeitados.
@@ -646,6 +658,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.27 — 16/09/2026. **A fundação de dados da camada de organizações entrou (task 86e36ec7p, onda 1 do épico 86e36ec0q).** Tabela `organizations` com a Hologram de id fixo, `organization_id` em `clients` (NOT NULL), `users` (nullable: a plataforma não tem org) e `client_categories` (UNIQUE passou a `(organization_id, name)`), `access_audit.actor_organization_id`, e o CHECK de `users` virou ternário e cruza o papel (`ck_users_scope_consistency` no lugar de `ck_users_scope_client_id`). O backfill "tudo é Hologram" é por catálogo (`server_default`, como o `is_primary` da carteira), a migration pré-checa o CHECK em plpgsql antes de trocá-lo e o downgrade aborta se houver segunda organização ou usuário de plataforma. **Nenhum comportamento de API muda** nesta task: é o canary da migration antes do authz core. §4.8 reescrita como lei atual; o resto da camada (regra de acesso, matriz 13 × 5, rotas, telas) chega nas tasks seguintes e atualiza §3.15 e §4.9 então. Plano: `Docs/PLANO_ORGANIZACOES.md`._
 
 _Versão 1.26 — 16/09/2026. **Dentro da passada de data, os PARES fecham em ordem de evidência, não linha a linha (task 86e39p1wv, report da Bruna de 15/09).** O caso: dois PIX de mesmo valor no mesmo dia; a descrição de um trazia só uma sigla de 2 letras (a afinidade descarta tokens curtos, e o cadastro Omie traz o nome da pessoa), então essa linha tinha afinidade zero com os DOIS lançamentos, enquanto a outra tinha dois tokens em comum com o dela. O `match()` decidia linha a linha em ordem `(data, id)`, e id é UUID: quando a linha sem sinal vinha antes, levava o lançamento da outra pela ordem da lista, e a IA acusava incoerência nas duas. Cara ou coroa por sessão, e por isso "às vezes funcionava". Agora cada passada monta todos os pares possíveis e fecha do mais forte para o mais fraco (`|Δvalor|`, afinidade, data, ordem da linha, posição na lista). **As leis da §5 não mudaram**: 0,01, 3 dias fixos, 1-para-1, passadas por data, sem IA, nome nunca exclui; para cada linha o par continua sendo o melhor candidato livre DELA no momento em que fecha, muda só QUEM decide primeiro. Medido em 20 mil cenários sintéticos (`apps/api/scripts/measure_matcher_evidence_order.py`, versionado, com o algoritmo antigo embutido como referência): pares de data exata idênticos, 32 pares a mais, 684 pares com a PESSOA errada a menos (4.554 para 3.870), 391 cenários corrigidos contra 4 introduzidos (evidência fraca vencendo linha sem sinal — antes era sorteio de UUID). `TieStats` ganhou `steals_prevented_by_supplier`, logado em `reconciliation_matched`: é o sinal de produção desta correção, porque o conjunto de candidatos não persiste. Skill `matcher` atualizada (invariantes 5 e 6, números de linha)._
 

@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -41,7 +42,12 @@ if sys.platform == "win32":
 
 from app.core.config import get_settings
 from app.core.rate_limit import limiter as _rate_limiter
-from app.db.models import Base
+from app.db.models import (
+    HOLOGRAM_ORGANIZATION_ID,
+    HOLOGRAM_ORGANIZATION_NAME,
+    Base,
+    Organization,
+)
 from app.db.session import get_db_session
 from app.main import app as fastapi_app
 
@@ -150,6 +156,15 @@ async def db_engine(db_url: str) -> AsyncIterator[AsyncEngine]:
     engine = create_async_engine(db_url, echo=False, pool_pre_ping=True)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Camada de organizações (86e36ec7p): a Hologram existe ANTES de qualquer
+        # linha, como no banco real (a migration a insere). É o alvo do
+        # `server_default` das colunas `organization_id` — sem ela, todo
+        # `User(...)`/`Client(...)` construído sem org quebraria na FK.
+        await conn.execute(
+            pg_insert(Organization.__table__)
+            .values(id=HOLOGRAM_ORGANIZATION_ID, name=HOLOGRAM_ORGANIZATION_NAME, active=True)
+            .on_conflict_do_nothing()
+        )
     try:
         yield engine
     finally:
