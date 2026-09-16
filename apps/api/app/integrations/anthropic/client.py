@@ -6,8 +6,12 @@ Princípios (CLAUDE.md §3 + Doc §12):
     - **NUNCA logar** prompt, resposta da IA ou chave. Logs trazem somente
       `model`, `duration_ms`, `bytes_in`, `transaction_count`, `attempt`.
     - **Timeout total = `ANTHROPIC_TIMEOUT_SECONDS`** (padrão 150 s).
-    - **1 retry** em 5xx / timeout / connection error (checklist do BACK 7.1).
+    - **1 retry** em 5xx / 429 / connection error (checklist do BACK 7.1; o 429
+      entrou com a extração em blocos paralelos, que o torna mais provável).
     - Após esgotar retries, mapeia para `AnthropicTimeoutError`.
+    - **HTTP 400 por crédito esgotado** vira `AnthropicCreditError` e dispara o
+      alerta de plantão `AlertCode.ANTHROPIC_CREDIT` (deduplicado por processo):
+      antes caía no 4xx genérico e virava "arquivo inválido" (86e39yzxc).
 
 Estilo espelha `OmieClient`: tenacity para retry com backoff exponencial,
 exceção tipada por classe de erro, redactor do `app.core.logging` faz a
@@ -19,7 +23,7 @@ from __future__ import annotations
 
 import base64
 import time
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from anthropic import (
     APIConnectionError,
@@ -38,8 +42,10 @@ from tenacity import (
     wait_exponential,
 )
 
+from app.core.alerting import Alert, AlertCode, send_alert
 from app.core.exceptions import (
     AnthropicAuthError,
+    AnthropicCreditError,
     AnthropicParseError,
     AnthropicTimeoutError,
 )
@@ -51,7 +57,20 @@ from app.integrations.anthropic.tools import (
     EXTRACT_MOVEMENTS_TOOL_NAME,
 )
 
+if TYPE_CHECKING:
+    from app.core.config import Settings
+
 log = get_logger(__name__)
+
+# Crédito esgotado: a Anthropic responde 400 `invalid_request_error` com este
+# texto (comportamento observado — não há tipo de erro dedicado na documentação
+# de erros). Casamos pelo texto porque é o único sinal disponível.
+_CREDIT_EXHAUSTED_MARKER = "credit balance"
+
+# Um alerta a cada janela, por processo: com blocos em paralelo, N chamadas
+# falham de uma vez pelo MESMO motivo, e o plantão não precisa de N mensagens.
+_CREDIT_ALERT_INTERVAL_SECONDS = 15 * 60
+_credit_alert_last_at: float | None = None
 
 # Teto de tokens de saída — a soma de TODOS os transactions extraídos deve caber
 # aqui, senão o `tool_use` é truncado e a extração falha (Report #3: extrato de
@@ -69,7 +88,13 @@ _MAX_OUTPUT_TOKENS = 32768
 
 
 class _RetryableAnthropicError(Exception):
-    """Erro transitório (5xx ou conexão) — sinaliza para Tenacity reagendar."""
+    """Erro transitório (5xx, 429 ou conexão) — sinaliza para Tenacity reagendar."""
+
+
+def _is_credit_exhausted(exc: APIStatusError) -> bool:
+    """400 cujo texto acusa saldo insuficiente na conta da Anthropic."""
+    text = f"{exc.message} {exc.body}".lower()
+    return exc.status_code == 400 and _CREDIT_EXHAUSTED_MARKER in text
 
 
 class _MessageCreateLike(Protocol):
@@ -102,12 +127,16 @@ class AnthropicClient:
         timeout: float,
         max_output_tokens: int = _MAX_OUTPUT_TOKENS,
         anthropic_client: _AsyncAnthropicLike | None = None,
+        alert_settings: Settings | None = None,
     ) -> None:
         self._api_key = api_key
         self._model = model
         self._timeout = timeout
         self._max_output_tokens = max_output_tokens
         self._injected_client: _AsyncAnthropicLike | None = anthropic_client
+        # Só para o alerta de crédito esgotado. `None` (testes, scripts) = sem
+        # alerta; o erro tipado sobe do mesmo jeito.
+        self._alert_settings = alert_settings
 
     # ------------------------------------------------------------------
     # Lazy SDK client
@@ -155,6 +184,7 @@ class AnthropicClient:
         mime_type: str,
         document_kind: str,
         model: str | None = None,
+        part: tuple[int, int] | None = None,
     ) -> ExtractedStatement:
         """Extrai `ExtractedStatement` chamando a Anthropic via tool use.
 
@@ -168,6 +198,8 @@ class AnthropicClient:
                 `"extrato bancário em PDF"`, `"fatura de cartão CSV"`.
             model: override opcional do modelo. `None` usa o default do
                 construtor (ex. `claude-sonnet-4-5`).
+            part: `(índice, total)` quando `content` é um bloco de um arquivo
+                dividido (`parse_chunking`); entra como nota no user prompt.
 
         Returns:
             `ExtractedStatement` validado.
@@ -179,7 +211,7 @@ class AnthropicClient:
                 não passa na validação Pydantic.
         """
         client = self._get_client()
-        user_content = self._build_user_content(content, mime_type, document_kind)
+        user_content = self._build_user_content(content, mime_type, document_kind, part)
         system_blocks = self._build_system_blocks()
         chosen_model = model or self._model
 
@@ -278,6 +310,7 @@ class AnthropicClient:
         content: bytes,
         mime_type: str,
         document_kind: str,
+        part: tuple[int, int] | None = None,
     ) -> list[dict[str, Any]]:
         """Constrói a lista de blocos de conteúdo do `user` message.
 
@@ -306,7 +339,7 @@ class AnthropicClient:
             text = self._decode_text(content)
             blocks.append({"type": "text", "text": text})
 
-        blocks.append({"type": "text", "text": build_user_prompt(document_kind)})
+        blocks.append({"type": "text", "text": build_user_prompt(document_kind, part=part)})
         return blocks
 
     @staticmethod
@@ -380,14 +413,44 @@ class AnthropicClient:
                 attempt=attempt_number,
                 status=status,
             )
-            if 500 <= status < 600:
+            if status == 429 or 500 <= status < 600:
                 raise _RetryableAnthropicError(f"HTTP {status}") from exc
+            if _is_credit_exhausted(exc):
+                # Só o código sai no log — nunca o texto da Anthropic (texto
+                # livre de terceiro; o log não é lugar para ele).
+                log.warning("anthropic_call_credit_exhausted", model=model, attempt=attempt_number)
+                await self._alert_credit_exhausted()
+                raise AnthropicCreditError(
+                    "Anthropic recusou por crédito insuficiente (HTTP 400).",
+                ) from exc
             # 4xx que não auth — request mal formado / model_not_found / etc.
             # Tratamos como parse error porque normalmente é problema do payload
             # (ex: arquivo grande demais → 413). Mensagem genérica ao usuário.
             raise AnthropicParseError(
                 f"Anthropic retornou {status}.",
             ) from exc
+
+    async def _alert_credit_exhausted(self) -> None:
+        """Alerta de plantão, uma vez por janela e por processo. Nunca levanta."""
+        # Estado de módulo de propósito: a dedup é por PROCESSO, não por instância
+        # (o app cria um client por request).
+        global _credit_alert_last_at
+        if self._alert_settings is None:
+            return
+        now = time.monotonic()
+        if (
+            _credit_alert_last_at is not None
+            and now - _credit_alert_last_at < _CREDIT_ALERT_INTERVAL_SECONDS
+        ):
+            return
+        _credit_alert_last_at = now
+        await send_alert(
+            Alert(
+                code=AlertCode.ANTHROPIC_CREDIT,
+                message="Conta da Anthropic sem crédito: parsing e qualificação param até recarregar.",
+            ),
+            self._alert_settings,
+        )
 
     # ------------------------------------------------------------------
     # Extração e validação do tool_use

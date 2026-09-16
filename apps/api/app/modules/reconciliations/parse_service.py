@@ -16,26 +16,29 @@ Pipeline para cada formato suportado:
     CSV   → decode utf-8   →   AnthropicClient (text block).
     XLSX  → openpyxl       →   render TSV   →   AnthropicClient (text block).
     XLS   → não suportado nesta versão (xlrd não está nas deps).
+
+Arquivo grande em TEXTO (CSV/XLSX) é dividido em blocos extraídos em paralelo
+e juntados (`parse_chunking`, 86e39xvxm): o tempo de uma chamada cresce com o
+número de linhas e estourava o teto de forma determinística. PDF vai inteiro.
 """
 
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING
 
 import openpyxl
 
-from app.core.exceptions import ValidationAppError
+from app.core.exceptions import AppError, ValidationAppError
 from app.core.logging import get_logger
+from app.integrations.anthropic.client import AnthropicClient
 from app.integrations.anthropic.schemas import ExtractedStatement, ExtractedTransaction
+from app.modules.reconciliations.parse_chunking import merge_statements, plan_blocks
 from app.utils.magic_bytes import FileType, validate_upload_type
-
-if TYPE_CHECKING:
-    from app.integrations.anthropic.client import AnthropicClient
 
 log = get_logger(__name__)
 
@@ -74,8 +77,18 @@ class ParseService:
         *,
         mock_enabled: bool = False,
         mock_delay_seconds: float = 0.0,
+        chunk_rows: int = 100,
+        chunk_min_rows: int = 150,
+        chunk_concurrency: int = 4,
     ) -> None:
         self._anthropic = anthropic_client
+        # Extração em blocos (86e39xvxm). Fonte dos valores: `Settings`
+        # (`ADL_PARSE_CHUNK_*`); os defaults aqui só servem a testes e scripts.
+        # Um arquivo com menos linhas que um bloco inteiro não deve ser dividido
+        # — o limiar nunca fica abaixo do tamanho do bloco.
+        self._chunk_rows = chunk_rows
+        self._chunk_min_rows = max(chunk_min_rows, chunk_rows)
+        self._chunk_concurrency = chunk_concurrency
         # MOCK EXCLUSIVO DE DEMO — ver `Settings.MOCK_PARSE`. Quando ativo,
         # `parse_statement` ignora o `AnthropicClient` e devolve o payload
         # fictício da Padaria. As validações de tamanho/extensão/magic bytes
@@ -143,11 +156,91 @@ class ParseService:
                 await asyncio.sleep(self._mock_delay_seconds)
             return _MOCK_PADARIA_STATEMENT.model_copy(deep=True)
 
+        if detected in (FileType.CSV, FileType.XLSX):
+            plan = plan_blocks(
+                AnthropicClient._decode_text(content),
+                chunk_rows=self._chunk_rows,
+                min_rows=self._chunk_min_rows,
+            )
+            if plan.is_split:
+                return await self._extract_in_blocks(
+                    plan.blocks,
+                    mime_type=mime_type,
+                    document_kind=document_kind,
+                    bytes_in=len(file_bytes),
+                    data_records=plan.data_records,
+                )
+
         return await self._anthropic.extract_movements(
             content=content,
             mime_type=mime_type,
             document_kind=document_kind,
         )
+
+    async def _extract_in_blocks(
+        self,
+        blocks: list[str],
+        *,
+        mime_type: str,
+        document_kind: str,
+        bytes_in: int,
+        data_records: int,
+    ) -> ExtractedStatement:
+        """Uma chamada por bloco, em paralelo limitado, e a junção na ordem.
+
+        Semáforo limita as chamadas simultâneas (rate limit da conta Anthropic).
+        `TaskGroup`: a primeira falha cancela os blocos ainda pendentes — não se
+        gasta crédito extraindo o resto de um arquivo que já não vai fechar — e
+        o erro tipado do bloco (timeout, parse, auth) sobe como se fosse do
+        arquivo inteiro. O sinal `failed` fecha a janela entre a falha e o
+        cancelamento: o bloco que acorda no semáforo nesse instante NÃO chama a
+        API (sem ele, uma requisição a mais já teria saído). Nada de conteúdo em
+        log: só contadores (§3.3, §4.5).
+        """
+        started = time.monotonic()
+        total = len(blocks)
+        semaphore = asyncio.Semaphore(self._chunk_concurrency)
+        failed = asyncio.Event()
+
+        async def _extract_one(index: int, block: str) -> ExtractedStatement:
+            async with semaphore:
+                if failed.is_set():
+                    raise asyncio.CancelledError
+                try:
+                    return await self._anthropic.extract_movements(
+                        content=block.encode("utf-8"),
+                        mime_type=mime_type,
+                        document_kind=document_kind,
+                        part=(index + 1, total),
+                    )
+                except BaseException:
+                    failed.set()
+                    raise
+
+        try:
+            async with asyncio.TaskGroup() as group:
+                tasks = [
+                    group.create_task(_extract_one(i, block)) for i, block in enumerate(blocks)
+                ]
+        except ExceptionGroup as failures:
+            # O TaskGroup embrulha; devolvemos o PRIMEIRO erro de domínio como o
+            # caller já espera (o handler global conhece `AppError`, não grupos).
+            first = next((exc for exc in failures.exceptions if isinstance(exc, AppError)), None)
+            if first is None:
+                raise
+            raise first from None
+
+        statement = merge_statements([task.result() for task in tasks])
+        log.info(
+            "parse_chunked",
+            blocks=total,
+            rows=data_records,
+            concurrency=self._chunk_concurrency,
+            bytes_in=bytes_in,
+            transaction_count=len(statement.transactions),
+            duration_ms=round((time.monotonic() - started) * 1000),
+        )
+        return statement
 
     # ------------------------------------------------------------------
     # Validações
