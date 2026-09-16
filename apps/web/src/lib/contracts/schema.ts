@@ -249,6 +249,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clients/{client_id}/managers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Quem tem acesso ao cliente: responsável + colaboradores (admin-only). */
+        get: operations["list_client_managers_api_v1_clients__client_id__managers_get"];
+        put?: never;
+        /** Concede ACESSO ao cliente a um gerente ativo (admin-only). Ninguém é removido. 409 se o gerente já tem acesso; 400 se não é gerente ativo. */
+        post: operations["add_client_manager_api_v1_clients__client_id__managers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/managers/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove o ACESSO de um gerente ao cliente (admin-only). 409 se ele é o responsável — defina outro responsável antes; 404 se não tinha acesso. */
+        delete: operations["remove_client_manager_api_v1_clients__client_id__managers__user_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clients/{client_id}/assign": {
         parameters: {
             query?: never;
@@ -262,7 +297,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Reatribui cliente a outro gerente (admin-only). */
+        /** Define o gerente RESPONSÁVEL pelo cliente (admin-only). Não remove o acesso de ninguém: o responsável anterior continua como colaborador; se o alvo ainda não tinha acesso, passa a ter. */
         patch: operations["assign_client_api_v1_clients__client_id__assign_patch"];
         trace?: never;
     };
@@ -1002,6 +1037,18 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AddClientManagerRequest
+         * @description Body de POST /api/v1/clients/{id}/managers — concede ACESSO a um gerente.
+         */
+        AddClientManagerRequest: {
+            /**
+             * User Id
+             * Format: uuid
+             * @description ID do gerente (manager ativo).
+             */
+            user_id: string;
+        };
+        /**
          * AnomalyItem
          * @description Item de GET /api/v1/reconciliations/{id}/anomalies.
          */
@@ -1191,13 +1238,16 @@ export interface components {
         };
         /**
          * AssignClientRequest
-         * @description Body de POST /api/v1/clients/{id}/assign — admin reatribui o cliente.
+         * @description Body de PATCH /api/v1/clients/{id}/assign — define o RESPONSÁVEL.
+         *
+         *     Não remove o acesso de ninguém: quem era responsável continua vendo o
+         *     cliente como colaborador. Se o alvo ainda não tinha acesso, passa a ter.
          */
         AssignClientRequest: {
             /**
              * User Id
              * Format: uuid
-             * @description ID do novo gerente responsável (deve ser manager ativo).
+             * @description ID do gerente (manager ativo).
              */
             user_id: string;
         };
@@ -1537,6 +1587,12 @@ export interface components {
             category?: components["schemas"]["ClientCategorySummary"] | null;
             /** Closed At */
             closed_at?: string | null;
+            /**
+             * Manager Count
+             * @description Pessoas com acesso ao cliente, responsável incluído.
+             * @default 0
+             */
+            manager_count: number;
             /** Accounts */
             accounts?: components["schemas"]["BankAccountResponse"][];
             /** Accounts Synced At */
@@ -1550,6 +1606,46 @@ export interface components {
             /** Data */
             data: components["schemas"]["ClientResponse"][];
             pagination: components["schemas"]["PaginationMeta"];
+        };
+        /**
+         * ClientManagerListResponse
+         * @description Body de GET/POST/DELETE em /api/v1/clients/{id}/managers — a lista inteira.
+         */
+        ClientManagerListResponse: {
+            /** Data */
+            data: components["schemas"]["ClientManagerResponse"][];
+        };
+        /**
+         * ClientManagerResponse
+         * @description Uma pessoa com acesso ao cliente (86e390kz8).
+         *
+         *     A identidade é a de `ManagerSummary` — herdada, não redeclarada, para mudar
+         *     num lugar só. Nunca a linha de `users` (§3.2): o `id` entra porque é o alvo
+         *     do `DELETE .../managers/{user_id}`; `active` porque um responsável DESATIVADO
+         *     precisa ficar visível para o admin passar o bastão (o servidor recusa
+         *     promover inativo e recusa remover o responsável — sem o flag o admin não
+         *     veria o beco). `is_responsible` marca o único responsável; `assigned_at` é
+         *     quando o acesso foi concedido.
+         */
+        ClientManagerResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Email */
+            email: string;
+            /** Active */
+            active: boolean;
+            /** Is Responsible */
+            is_responsible: boolean;
+            /**
+             * Assigned At
+             * Format: date-time
+             */
+            assigned_at: string;
         };
         /**
          * ClientResponse
@@ -1590,6 +1686,12 @@ export interface components {
             category?: components["schemas"]["ClientCategorySummary"] | null;
             /** Closed At */
             closed_at?: string | null;
+            /**
+             * Manager Count
+             * @description Pessoas com acesso ao cliente, responsável incluído.
+             * @default 0
+             */
+            manager_count: number;
         };
         /**
          * ClientUserListResponse
@@ -3732,6 +3834,110 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TestConnectionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_client_managers_api_v1_clients__client_id__managers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientManagerListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_client_manager_api_v1_clients__client_id__managers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddClientManagerRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientManagerListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_client_manager_api_v1_clients__client_id__managers__user_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientManagerListResponse"];
                 };
             };
             /** @description Validation Error */

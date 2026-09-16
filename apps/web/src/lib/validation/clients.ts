@@ -42,7 +42,8 @@ export const updateClientSchema = z
       .max(200, 'App Secret muito longo (máx. 200).')
       .optional()
       .default(''),
-    manager_id: z.string().uuid().optional(),
+    // A carteira (responsável e colaboradores) NÃO é campo do formulário desde a
+    // 86e390m4c: é gerida na seção "Gerentes com acesso", ação a ação.
     // 86e34jd8m — id do catálogo ou a sentinela 'none'.
     category_id: z.string().optional(),
   })

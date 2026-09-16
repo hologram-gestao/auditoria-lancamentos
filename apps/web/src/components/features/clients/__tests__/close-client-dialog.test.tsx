@@ -37,6 +37,7 @@ const client: Client = {
   responsible_manager: null,
   reconciliation_count: 3,
   is_favorite: false,
+  manager_count: 1,
   category: null,
 };
 

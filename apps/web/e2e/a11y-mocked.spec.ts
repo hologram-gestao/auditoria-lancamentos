@@ -178,6 +178,52 @@ const SYSTEM_MANAGER_USER = {
   client_id: null,
 };
 
+/**
+ * Carteira compartilhada (86e390m4c): gerentes do SISTEMA devolvidos por
+ * `/api/v1/users` (o "Adicionar" da seção escolhe daqui) e o estado da carteira
+ * do cliente, que as rotas mockadas de `/managers` e `/assign` alteram.
+ */
+const COLLABORATOR_MANAGER_USER = {
+  id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+  email: 'colaborador@hologram.com.br',
+  name: 'Gerente Colaborador',
+  role: 'manager',
+  scope: 'system',
+  client_id: null,
+};
+const SPARE_MANAGER_USER = {
+  id: '12121212-1212-4121-8121-121212121212',
+  email: 'disponivel@hologram.com.br',
+  name: 'Gerente Disponível',
+  role: 'manager',
+  scope: 'system',
+  client_id: null,
+};
+const SYSTEM_MANAGERS = [SYSTEM_MANAGER_USER, COLLABORATOR_MANAGER_USER, SPARE_MANAGER_USER].map(
+  (u) => ({
+    ...u,
+    active: true,
+    created_at: '2026-06-01T12:00:00Z',
+    updated_at: '2026-06-01T12:00:00Z',
+  }),
+);
+type ManagerFixture = { id: string; name: string; email: string };
+function managerEntry(user: ManagerFixture, isResponsible: boolean) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    active: true,
+    is_responsible: isResponsible,
+    assigned_at: '2026-07-01T12:00:00Z',
+  };
+}
+function carteiraInicial() {
+  return [managerEntry(SYSTEM_MANAGER_USER, true), managerEntry(COLLABORATOR_MANAGER_USER, false)];
+}
+/** Quem tem acesso ao cliente na sessão corrente — as rotas mockadas mudam isto. */
+let clientManagers = carteiraInicial();
+
 /** Usuários DO tenant, devolvidos por `/clients/{id}/users` (BACK 05.5). */
 const CLIENT_USERS = [
   {
@@ -264,7 +310,13 @@ const CLIENT_DETAIL = {
   active: true,
   created_at: '2026-05-01T12:00:00Z',
   updated_at: '2026-07-20T12:00:00Z',
-  responsible_manager: null,
+  // Carteira compartilhada (86e390m4c): responsável + 1 colaborador → "+1" na lista.
+  responsible_manager: {
+    id: SYSTEM_MANAGER_USER.id,
+    name: SYSTEM_MANAGER_USER.name,
+    email: SYSTEM_MANAGER_USER.email,
+  },
+  manager_count: 2,
   reconciliation_count: 3,
   is_favorite: false,
   category: CATEGORY_FINTECH,
@@ -739,6 +791,46 @@ async function fulfillApi(route: Route): Promise<void> {
     if (route.request().method() === 'DELETE') return route.fulfill({ status: 204 });
     return json(CLIENT_CATEGORIES[1]);
   }
+  // Carteira compartilhada (86e390m4c): gerentes do sistema para o "Adicionar",
+  // e a carteira do cliente com estado em memória — cada ação devolve a lista
+  // inteira, como o backend, e o `assign` só troca o selo (ninguém sai).
+  if (path === '/api/v1/users') {
+    return json({
+      data: SYSTEM_MANAGERS,
+      pagination: { page: 1, pageSize: 100, total: SYSTEM_MANAGERS.length, totalPages: 1 },
+    });
+  }
+  if (path === `/api/v1/clients/${CLIENT_ID}/managers`) {
+    if (route.request().method() === 'POST') {
+      const body = route.request().postDataJSON() as { user_id: string };
+      const user = SYSTEM_MANAGERS.find((u) => u.id === body.user_id);
+      if (user && !clientManagers.some((m) => m.id === user.id)) {
+        clientManagers = [...clientManagers, managerEntry(user, false)];
+      }
+      return route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: clientManagers }),
+      });
+    }
+    return json(clientManagers);
+  }
+  const removerAcesso = path.match(new RegExp(`^/api/v1/clients/${CLIENT_ID}/managers/([^/]+)$`));
+  if (removerAcesso && route.request().method() === 'DELETE') {
+    const alvo = removerAcesso[1];
+    clientManagers = clientManagers.filter((m) => m.id !== alvo);
+    return json(clientManagers);
+  }
+  if (path === `/api/v1/clients/${CLIENT_ID}/assign`) {
+    const body = route.request().postDataJSON() as { user_id: string };
+    clientManagers = clientManagers.map((m) => ({ ...m, is_responsible: m.id === body.user_id }));
+    const novo = clientManagers.find((m) => m.is_responsible);
+    return json({
+      ...CLIENT_DETAIL,
+      responsible_manager: novo ? { id: novo.id, name: novo.name, email: novo.email } : null,
+      manager_count: clientManagers.length,
+    });
+  }
   // Favorito (86e34jd5a): PUT marca, DELETE desmarca; a lista reflete o estado.
   if (path === `/api/v1/clients/${CLIENT_ID}/favorite`) {
     favorited = route.request().method() === 'PUT';
@@ -1028,6 +1120,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   // Volta ao admin: os cenários de papel da S5 trocam este estado de módulo.
   sessionUser = USER;
   favorited = false;
+  clientManagers = carteiraInicial();
   // Sprint 6: sessão SEM glossário e flag não julgado são o estado de partida.
   sessionUsedGlossary = false;
   // Sprint 7: conta corrente é o estado de partida — só os cenários de
@@ -2359,6 +2452,107 @@ for (const vp of VIEWPORTS) {
       await expect(acao).toBeEnabled();
       await acao.click();
       await expect(confirm).toBeHidden();
+    });
+
+    /**
+     * 86e390m4c — carteira compartilhada no modal de edição: a seção "Gerentes
+     * com acesso" lista responsável e colaboradores; remover pede confirmação
+     * NOMEANDO quem deixa de ver o cliente; trocar o responsável diz que ninguém
+     * perde o acesso; o responsável não tem "Remover" (o servidor negaria —
+     * §4.9). O modal ganhou uma lista dentro: o rodapé com "Salvar" precisa
+     * continuar DENTRO da viewport em 390px — medido, não olhado.
+     */
+    test('editar cliente: gerentes com acesso, aviso ao remover e troca de responsável (86e390m4c)', async ({
+      page,
+    }) => {
+      await page.goto('/clientes');
+      // "+1" discreto ao lado do responsável, com a explicação inteira no nome acessível.
+      await expect(
+        page.getByRole('img', { name: 'Mais 1 gerente com acesso a este cliente' }),
+      ).toBeVisible();
+      await page.getByRole('button', { name: 'Editar Cliente Exemplo Ltda' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Editar Cliente' });
+      await expect(dialog).toBeVisible();
+      await aguardarAnimacao(dialog);
+      const lista = dialog.getByRole('region', { name: 'Gerentes com acesso ao cliente' });
+      await expect(lista.getByText('Gerente Hologram')).toBeVisible();
+      await expect(lista.getByText('Responsável', { exact: true })).toBeVisible();
+      // O responsável NÃO tem ação de remover; o colaborador tem.
+      await expect(
+        lista.getByRole('button', { name: 'Remover acesso de Gerente Hologram' }),
+      ).toHaveCount(0);
+      const remover = lista.getByRole('button', { name: 'Remover acesso de Gerente Colaborador' });
+      await expect(remover).toBeVisible();
+      await shot(page, `editar-cliente-gerentes-${slug}`);
+      await analyze(page, `modal de edição com gerentes (${vp.label})`);
+
+      // Rodapé dentro da viewport — o defeito que o axe não mede.
+      const salvar = dialog.getByRole('button', { name: 'Salvar' });
+      const caixaSalvar = await salvar.boundingBox();
+      expect(caixaSalvar, 'o botão Salvar precisa ter caixa visível').not.toBeNull();
+      expect(
+        (caixaSalvar?.x ?? 0) + (caixaSalvar?.width ?? 0),
+        'Salvar cortado pela borda direita da viewport',
+      ).toBeLessThanOrEqual(vp.size.width);
+      expect(
+        (caixaSalvar?.y ?? 0) + (caixaSalvar?.height ?? 0),
+        'Salvar empurrado para fora da viewport pela lista de gerentes',
+      ).toBeLessThanOrEqual(vp.size.height);
+      const caixaRemover = await remover.boundingBox();
+      expect(
+        (caixaRemover?.x ?? 0) + (caixaRemover?.width ?? 0),
+        'ação de remover cortada pela borda da viewport',
+      ).toBeLessThanOrEqual(vp.size.width);
+
+      // Remover: a confirmação NOMEIA quem perde o acesso.
+      await remover.click();
+      const confirmRemover = page.getByRole('alertdialog', { name: 'Remover acesso' });
+      await expect(confirmRemover).toBeVisible();
+      await aguardarAnimacao(confirmRemover);
+      await expect(confirmRemover).toContainText(
+        'Gerente Colaborador deixa de ver o cliente Cliente Exemplo Ltda',
+      );
+      await shot(page, `editar-cliente-remover-acesso-${slug}`);
+      await analyze(page, `confirmação de remoção de acesso (${vp.label})`);
+      const acaoRemover = confirmRemover.getByRole('button', { name: 'Remover acesso' });
+      const caixaAcao = await acaoRemover.boundingBox();
+      expect(
+        (caixaAcao?.x ?? 0) + (caixaAcao?.width ?? 0),
+        'ação de remover acesso cortada pela borda da viewport',
+      ).toBeLessThanOrEqual(vp.size.width);
+      await acaoRemover.click();
+      await expect(confirmRemover).toBeHidden();
+      await expect(lista.getByText('Gerente Colaborador')).toHaveCount(0);
+
+      // Adicionar de volta pelo Select: aberto é exercitado, o axe mede com ele
+      // FECHADO (o Select do Radix é modal por construção — 86e34jd8m).
+      await dialog.getByRole('combobox', { name: 'Adicionar gerente' }).click();
+      const opcoes = page.getByRole('listbox');
+      await expect(opcoes).toBeVisible();
+      await opcoes.getByRole('option', { name: 'Gerente Colaborador' }).click();
+      await expect(page.getByRole('listbox')).toHaveCount(0);
+      await dialog.getByRole('button', { name: 'Adicionar' }).click();
+      await expect(lista.getByText('Gerente Colaborador')).toBeVisible();
+
+      // Tornar responsável: ninguém perde o acesso — e a tela diz isso.
+      await lista.getByRole('button', { name: 'Tornar responsável' }).click();
+      const confirmPromover = page.getByRole('alertdialog', { name: 'Tornar responsável' });
+      await expect(confirmPromover).toBeVisible();
+      await aguardarAnimacao(confirmPromover);
+      await expect(confirmPromover).toContainText('Ninguém perde o acesso');
+      await expect(confirmPromover).toContainText('Gerente Hologram');
+      await shot(page, `editar-cliente-tornar-responsavel-${slug}`);
+      await analyze(page, `confirmação de troca de responsável (${vp.label})`);
+      await confirmPromover.getByRole('button', { name: 'Confirmar' }).click();
+      await expect(confirmPromover).toBeHidden();
+      // O selo trocou de linha; o antigo responsável CONTINUA na lista, agora com ações.
+      await expect(
+        lista.getByRole('button', { name: 'Remover acesso de Gerente Hologram' }),
+      ).toBeVisible();
+      await expect(
+        lista.getByRole('button', { name: 'Remover acesso de Gerente Colaborador' }),
+      ).toHaveCount(0);
+      await analyze(page, `modal de edição após trocar o responsável (${vp.label})`);
     });
 
     test('usuário de tenant não para na lista global — vai para a casa dele', async ({ page }) => {

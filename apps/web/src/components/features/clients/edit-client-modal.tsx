@@ -8,21 +8,25 @@
  *   - App Key e App Secret sempre VAZIOS com placeholder `••••••••`. Se o
  *     usuário deixar vazio, as credenciais existentes são mantidas. Se
  *     preencher, o "Testar conexão" é obrigatório antes de salvar.
- *   - Admin vê e pode trocar o gerente responsável; o `assign` chama um
- *     endpoint SEPARADO (`PATCH /clients/{id}/assign`). Reatribuição e
- *     atualização de campos rolam em paralelo (Promise.all).
- *   - Manager (não-admin) não vê a seção de gerente; só nome/status/credenciais.
+ *   - Admin vê a seção "Gerentes com acesso" (86e390m4c —
+ *     `client-managers-section.tsx`): quem tem acesso, quem é o responsável,
+ *     adicionar, remover (com aviso nomeando quem perde o acesso) e tornar
+ *     responsável (sem remover ninguém). As ações da carteira são IMEDIATAS,
+ *     cada uma com a própria confirmação — o "Salvar" só grava os campos.
+ *   - Manager (não-admin) não vê a seção; só nome/status/credenciais.
+ *   - O corpo do formulário rola dentro do modal (`ScrollRegion`), com header e
+ *     rodapé fixos: em 390px a seção de gerentes empurraria o "Salvar" para fora
+ *     da viewport — o defeito que o gate de a11y NÃO mede (CLAUDE.md §7).
  *
  * Erros tratados:
  *   - PATCH /clients/{id} com `IncompleteCredentialsError` (400) → toast.
  *     A validação Zod já bloqueia a maioria dos casos client-side.
- *   - `FORBIDDEN` em assign (manager inválido) → toast.
  *   - Demais erros → toast destrutivo com `userMessage`.
  */
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { toast } from 'sonner';
 
@@ -44,6 +48,7 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { ScrollRegion } from '@/components/ui/scroll-region';
 import {
   Select,
   SelectContent,
@@ -52,14 +57,14 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useClientCategories } from '@/hooks/use-client-categories';
-import { useAssignClient, useTestConnection, useUpdateClient } from '@/hooks/use-clients';
-import { useUsersList } from '@/hooks/use-users';
+import { useTestConnection, useUpdateClient } from '@/hooks/use-clients';
 import { ApiError } from '@/lib/api/client';
 import type { Client, UpdateClientPayload } from '@/lib/api/clients';
 import { hasPermission } from '@/lib/authz';
 import { updateClientSchema, type UpdateClientFormValues } from '@/lib/validation/clients';
 import { useAuthStore } from '@/stores/auth';
 
+import { ClientManagersSection } from './client-managers-section';
 import { PasswordInput } from './password-input';
 import { TestConnectionButton, type TestConnectionState } from './test-connection-button';
 
@@ -77,7 +82,6 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
   // "não-admin" por acidente em vez de por regra.
   const currentUser = useAuthStore((s) => s.user);
   const isAdmin = hasPermission(currentUser, 'edit_client');
-  const currentUserId = currentUser?.id;
 
   const [showKey, setShowKey] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
@@ -88,20 +92,10 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
   const lastTestedRef = useRef<{ key: string; secret: string } | null>(null);
 
   const updateMutation = useUpdateClient(client?.id ?? '');
-  const assignMutation = useAssignClient(client?.id ?? '');
   const testMutation = useTestConnection();
   // Catálogo de categorias (86e34jd8m) — só busca com o modal aberto.
   const categoriesQuery = useClientCategories({ enabled: open });
   const categories = categoriesQuery.data ?? [];
-
-  // Lista de gerentes só importa para admin. `pageSize=100` cobre
-  // o tamanho esperado do time interno da Hologram (MVP) — se passar disso,
-  // S15+ adicionará filtro server-side.
-  const usersQuery = useUsersList({ page: 1, pageSize: 100 }, { enabled: open && isAdmin });
-  const managers = useMemo(
-    () => (usersQuery.data?.data ?? []).filter((u) => u.active && u.role === 'manager'),
-    [usersQuery.data],
-  );
 
   const form = useForm<UpdateClientFormValues>({
     resolver: zodResolver(updateClientSchema),
@@ -110,7 +104,6 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
       active: 'active',
       omie_app_key: '',
       omie_app_secret: '',
-      manager_id: undefined,
       category_id: 'none',
     },
     mode: 'onSubmit',
@@ -127,7 +120,6 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
         active: client.active ? 'active' : 'inactive',
         omie_app_key: '',
         omie_app_secret: '',
-        manager_id: client.responsible_manager?.id,
         category_id: client.category?.id ?? 'none',
       });
       setShowKey(false);
@@ -135,7 +127,6 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
       setTestState({ kind: 'idle' });
       lastTestedRef.current = null;
       updateMutation.reset();
-      assignMutation.reset();
       testMutation.reset();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -198,16 +189,8 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
       updatePayload.omie_app_secret = (values.omie_app_secret ?? '').trim();
     }
 
-    const ops: Promise<unknown>[] = [updateMutation.mutateAsync(updatePayload)];
-
-    // Reatribuição é admin-only e só chamada se o gerente realmente mudou.
-    const previousManagerId = client.responsible_manager?.id;
-    if (isAdmin && values.manager_id && values.manager_id !== previousManagerId) {
-      ops.push(assignMutation.mutateAsync({ user_id: values.manager_id }));
-    }
-
     try {
-      await Promise.all(ops);
+      await updateMutation.mutateAsync(updatePayload);
       toast.success('Cliente atualizado.');
       onOpenChange(false);
     } catch (err) {
@@ -217,7 +200,7 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
     }
   }
 
-  const isSubmitting = updateMutation.isPending || assignMutation.isPending;
+  const isSubmitting = updateMutation.isPending;
   const isTesting = testState.kind === 'testing';
   const inputsDisabled = isSubmitting || isTesting;
 
@@ -235,7 +218,9 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      {/* `flex` vence o `grid` do componente-base via twMerge: header e rodapé
+          fixos, o miolo rola (`ScrollRegion`) quando o modal passa da viewport. */}
+      <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Editar Cliente</DialogTitle>
           <DialogDescription>
@@ -244,174 +229,130 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
         </DialogHeader>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4" noValidate>
-            <FormField
-              control={form.control}
-              name="name"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Nome do cliente</FormLabel>
-                  <FormControl>
-                    <Input autoComplete="off" autoFocus disabled={inputsDisabled} {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="omie_app_key"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>App Key Omie</FormLabel>
-                  <FormControl>
-                    <PasswordInput
-                      visible={showKey}
-                      onToggle={() => setShowKey((v) => !v)}
-                      disabled={inputsDisabled}
-                      autoComplete="off"
-                      placeholder="••••••••"
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="omie_app_secret"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>App Secret Omie</FormLabel>
-                  <FormControl>
-                    <PasswordInput
-                      visible={showSecret}
-                      onToggle={() => setShowSecret((v) => !v)}
-                      disabled={inputsDisabled}
-                      autoComplete="off"
-                      placeholder="••••••••"
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <TestConnectionButton state={testState} disabled={!canTest} onClick={handleTest} />
-
-            <FormField
-              control={form.control}
-              name="active"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Status</FormLabel>
-                  <Select
-                    value={field.value}
-                    onValueChange={field.onChange}
-                    disabled={inputsDisabled}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="active">Ativo</SelectItem>
-                      <SelectItem value="inactive">Inativo</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="category_id"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Categoria</FormLabel>
-                  <Select
-                    value={field.value ?? 'none'}
-                    onValueChange={field.onChange}
-                    disabled={inputsDisabled || categoriesQuery.isLoading}
-                  >
-                    <FormControl>
-                      <SelectTrigger aria-label="Categoria do cliente">
-                        <SelectValue placeholder="Sem categoria" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="none">Sem categoria</SelectItem>
-                      {categories.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {c.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            {isAdmin && (
+          <form
+            onSubmit={form.handleSubmit(onSubmit)}
+            className="flex min-h-0 flex-1 flex-col gap-4"
+            noValidate
+          >
+            <ScrollRegion label="Dados do cliente" className="-mx-1 min-h-0 flex-1 space-y-4 px-1">
               <FormField
                 control={form.control}
-                name="manager_id"
-                render={({ field }) => {
-                  // Quem está como responsável hoje no DB (vem do client passado via prop).
-                  // Pode ser admin (auto-assign na criação) ou inativo — nesses casos o id
-                  // não casa com nenhum item do select e o trigger renderizaria vazio. A
-                  // linha abaixo torna explícito quem é o atual.
-                  const current = client?.responsible_manager;
-                  const isSelf = current?.id === currentUserId;
-                  const notInSelect =
-                    current !== null &&
-                    current !== undefined &&
-                    !managers.some((m) => m.id === current.id);
-                  return (
-                    <FormItem>
-                      <FormLabel>Gerente Responsável</FormLabel>
-                      {current && (
-                        <p className="text-muted-foreground text-xs">
-                          Responsável atual: {current.name}
-                          {isSelf ? ' (você)' : ''}
-                          {notInSelect ? ' — não-gerente, atribua um manager abaixo' : ''}
-                        </p>
-                      )}
-                      <Select
-                        value={field.value ?? ''}
-                        onValueChange={field.onChange}
-                        disabled={inputsDisabled || usersQuery.isLoading}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue
-                              placeholder={
-                                usersQuery.isLoading ? 'Carregando...' : 'Selecione um gerente'
-                              }
-                            />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {managers.map((m) => (
-                            <SelectItem key={m.id} value={m.id}>
-                              {m.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  );
-                }}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Nome do cliente</FormLabel>
+                    <FormControl>
+                      <Input autoComplete="off" autoFocus disabled={inputsDisabled} {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
-            )}
+
+              <FormField
+                control={form.control}
+                name="omie_app_key"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>App Key Omie</FormLabel>
+                    <FormControl>
+                      <PasswordInput
+                        visible={showKey}
+                        onToggle={() => setShowKey((v) => !v)}
+                        disabled={inputsDisabled}
+                        autoComplete="off"
+                        placeholder="••••••••"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="omie_app_secret"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>App Secret Omie</FormLabel>
+                    <FormControl>
+                      <PasswordInput
+                        visible={showSecret}
+                        onToggle={() => setShowSecret((v) => !v)}
+                        disabled={inputsDisabled}
+                        autoComplete="off"
+                        placeholder="••••••••"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <TestConnectionButton state={testState} disabled={!canTest} onClick={handleTest} />
+
+              <FormField
+                control={form.control}
+                name="active"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Status</FormLabel>
+                    <Select
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      disabled={inputsDisabled}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="active">Ativo</SelectItem>
+                        <SelectItem value="inactive">Inativo</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="category_id"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Categoria</FormLabel>
+                    <Select
+                      value={field.value ?? 'none'}
+                      onValueChange={field.onChange}
+                      disabled={inputsDisabled || categoriesQuery.isLoading}
+                    >
+                      <FormControl>
+                        <SelectTrigger aria-label="Categoria do cliente">
+                          <SelectValue placeholder="Sem categoria" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="none">Sem categoria</SelectItem>
+                        {categories.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {isAdmin && client && (
+                <ClientManagersSection client={client} disabled={inputsDisabled} />
+              )}
+            </ScrollRegion>
 
             <DialogFooter className="gap-2 sm:gap-2">
               <Button
