@@ -152,6 +152,7 @@ class TestRecordCrossTenantDenied:
             user_id=operador.id,
             user_scope=operador.scope,
             actor_client_id=operador.client_id,
+            actor_organization_id=operador.organization_id,
             target_client_id=cli_b.id,
             rota="/api/v1/reconciliations/{id}",
         )
@@ -187,6 +188,7 @@ class TestRecordCrossTenantDenied:
                 user_id=operador.id,
                 user_scope=operador.scope,
                 actor_client_id=operador.client_id,
+                actor_organization_id=operador.organization_id,
                 target_client_id=cli_b.id,
                 rota="/api/v1/anomalies/{id}",
             )
@@ -212,6 +214,7 @@ class TestRecordCrossTenantDenied:
             user_id=admin.id,
             user_scope=admin.scope,
             actor_client_id=admin.client_id,
+            actor_organization_id=admin.organization_id,
             target_client_id=cli_b.id,
             rota="/r",
         )

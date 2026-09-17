@@ -26,7 +26,7 @@ from app.core.security import (
     verify_password,
 )
 from app.db.models import UserRole, UserScope
-from app.modules.auth.repository import AuthRepository
+from app.modules.auth.repository import AuthContext, AuthRepository
 from app.modules.auth.schemas import AuthenticatedUser
 
 if TYPE_CHECKING:
@@ -34,9 +34,13 @@ if TYPE_CHECKING:
     from app.db.models import User
 
 
-# Mensagem genérica obrigatória — vale para credenciais inválidas E usuário desativado.
-# Não revelar qual dos dois (Doc §7.1 + CLAUDE.md §3.9).
+# Mensagem genérica obrigatória — vale para credenciais inválidas, usuário
+# desativado E organização suspensa. Não revelar qual (Doc §7.1 + CLAUDE.md §3.9).
 GENERIC_LOGIN_ERROR = "E-mail ou senha incorretos."
+# O `message` do `AppError` TAMBÉM vai no corpo da resposta (`to_error_response`),
+# então o motivo real fica só em `metadata` (logs/Sentry) — quatro rejeições,
+# um corpo só, indistinguíveis para quem enumera e-mails.
+LOGIN_REJECTED = "Login rejeitado."
 
 
 @lru_cache(maxsize=1)
@@ -58,12 +62,13 @@ class AuthService:
         self._repo = repository
         self._settings = settings
 
-    async def login(self, *, email: str, password: str) -> tuple[User, str, str]:
-        """Valida credenciais e retorna (user, access_token, refresh_token).
+    async def login(self, *, email: str, password: str) -> tuple[AuthContext, str, str]:
+        """Valida credenciais e retorna (contexto do usuário, access_token, refresh_token).
 
         Erros:
             - `UnauthorizedError` (401, código UNAUTHORIZED) com mensagem genérica
-              em todos os casos: email inexistente, senha errada, usuário inativo.
+              em todos os casos: email inexistente, senha errada, usuário inativo,
+              organização suspensa (camada de organizações).
 
         Timing constante (P0-003): mesmo quando o email não existe no DB,
         consumimos um `verify_password` contra um hash dummy pré-computado.
@@ -71,35 +76,48 @@ class AuthService:
         ausência do bcrypt (~150-200ms cost=12). Combinado ao rate limit
         do `/login` (5/5min/IP), barra enumeração prática.
         """
-        user = await self._repo.get_by_email(email)
-        if user is None:
+        ctx = await self._repo.get_auth_context_by_email(email)
+        if ctx is None:
             # Consome bcrypt mesmo sem user — equaliza tempo.
             verify_password(password, _dummy_bcrypt_hash())
             raise UnauthorizedError(
-                "Login rejeitado: usuário não encontrado.",
+                LOGIN_REJECTED,
                 user_message=GENERIC_LOGIN_ERROR,
+                metadata={"reason": "user_not_found"},
             )
+        user = ctx.user
 
         if not verify_password(password, user.password_hash):
             raise UnauthorizedError(
-                "Login rejeitado: senha inválida.",
+                LOGIN_REJECTED,
                 user_message=GENERIC_LOGIN_ERROR,
+                metadata={"reason": "invalid_password", "user_id": str(user.id)},
             )
 
         if not user.active:
-            # MESMA mensagem — não vazar que conta existe mas está desativada.
+            # MESMO corpo — não vazar que a conta existe mas está desativada.
             raise UnauthorizedError(
-                f"Login rejeitado: usuário {user.id} está inativo.",
+                LOGIN_REJECTED,
                 user_message=GENERIC_LOGIN_ERROR,
+                metadata={"reason": "user_inactive", "user_id": str(user.id)},
             )
 
-        return user, *self._issue_tokens(user)
+        if ctx.organization_active is False:
+            # Organização suspensa pela plataforma: MESMO corpo.
+            raise UnauthorizedError(
+                LOGIN_REJECTED,
+                user_message=GENERIC_LOGIN_ERROR,
+                metadata={"reason": "organization_inactive", "user_id": str(user.id)},
+            )
 
-    async def refresh(self, *, refresh_token: str) -> tuple[User, str, str]:
+        return ctx, *self._issue_tokens(user)
+
+    async def refresh(self, *, refresh_token: str) -> tuple[AuthContext, str, str]:
         """Valida refresh token e emite novo par (access, refresh).
 
         Erros:
-            - `UnauthorizedError` se token inválido / expirado / tipo errado / user inativo.
+            - `UnauthorizedError` se token inválido / expirado / tipo errado / user
+              inativo / organização suspensa.
         """
         payload = decode_token(refresh_token, self._settings, expected_type=TOKEN_TYPE_REFRESH)
 
@@ -108,29 +126,32 @@ class AuthService:
         except ValueError as exc:
             raise UnauthorizedError("Refresh token com sub inválido.") from exc
 
-        user = await self._repo.get_by_id(user_id)
-        if user is None or not user.active:
-            # User foi deletado/desativado depois do refresh ser emitido — bloqueia.
+        ctx = await self._repo.get_auth_context_by_id(user_id)
+        if ctx is None or not ctx.user.active or ctx.organization_active is False:
+            # User foi deletado/desativado (ou a organização suspensa) depois do
+            # refresh ser emitido — bloqueia.
             raise UnauthorizedError("Sessão expirada. Faça login novamente.")
 
-        # Reemite a partir da LINHA atual: se o admin mudou o tenant/escopo desde
-        # o login, o par novo já sai com o valor corrente (Sprint 5 / R2).
-        return user, *self._issue_tokens(user)
+        # Reemite a partir da LINHA atual: se o admin mudou o tenant/escopo/org
+        # desde o login, o par novo já sai com o valor corrente (Sprint 5 / R2).
+        return ctx, *self._issue_tokens(ctx.user)
 
     def _issue_tokens(self, user: User) -> tuple[str, str]:
-        """Par (access, refresh) com `scope`/`client_id` do usuário (S5 / R2).
+        """Par (access, refresh) com `scope`/`client_id`/`organization_id` (S5 / R2).
 
         Ponto ÚNICO de emissão: login e refresh passam por aqui, senão um dos
         dois esqueceria os claims novos.
         """
         subject = str(user.id)
         client_id = str(user.client_id) if user.client_id else None
+        organization_id = str(user.organization_id) if user.organization_id else None
         access = create_access_token(
             subject=subject,
             role=user.role,
             settings=self._settings,
             scope=user.scope,
             client_id=client_id,
+            organization_id=organization_id,
         )
         refresh = create_refresh_token(
             subject=subject,
@@ -138,12 +159,14 @@ class AuthService:
             settings=self._settings,
             scope=user.scope,
             client_id=client_id,
+            organization_id=organization_id,
         )
         return access, refresh
 
     @staticmethod
-    def to_authenticated_user(user: User) -> AuthenticatedUser:
-        """Mapeia o modelo ORM para o schema seguro (sem senha, sem timestamps)."""
+    def to_authenticated_user(ctx: AuthContext) -> AuthenticatedUser:
+        """Mapeia o contexto ORM para o schema seguro (sem senha, sem timestamps)."""
+        user = ctx.user
         return AuthenticatedUser(
             id=str(user.id),
             email=user.email,
@@ -151,4 +174,6 @@ class AuthService:
             role=UserRole(user.role),
             scope=UserScope(user.scope),
             client_id=user.client_id,
+            organization_id=user.organization_id,
+            organization_name=ctx.organization_name,
         )

@@ -76,6 +76,7 @@ async def audit_session_tenant_miss(db: AsyncSession, user: CurrentUser, session
         user_id=UUID(user.id),
         user_scope=user.scope,
         actor_client_id=user.client_id,
+        actor_organization_id=user.organization_id,
         target_client_id=target_client_id,
     )
 

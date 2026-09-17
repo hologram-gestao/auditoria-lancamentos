@@ -12,7 +12,8 @@ from uuid import UUID
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import User
+from app.core.authz import CurrentUser, scoped_by_organization
+from app.db.models import User, UserScope
 
 
 class UserRepository:
@@ -30,13 +31,19 @@ class UserRepository:
         page_size: int,
         search: str | None = None,
         client_id: UUID | None = None,
+        staff_viewer: CurrentUser | None = None,
     ) -> tuple[Sequence[User], int]:
         """Lista paginada com busca opcional em `name` ou `email` (ILIKE).
 
         Args:
             client_id: quando informado, restringe ao TENANT (Sprint 5 / R5) —
                 a listagem de usuários do cliente nunca mostra usuário de outro
-                tenant nem da equipe Hologram (que tem `client_id IS NULL`).
+                tenant nem staff (que tem `client_id IS NULL`).
+            staff_viewer: quando informado, é a listagem de STAFF: só linhas
+                `scope='system'` (nem plataforma, nem usuário de cliente) e só
+                da organização do observador (`scoped_by_organization`; a
+                plataforma vê todas). Um dos dois filtros é obrigatório — a
+                listagem "de todo mundo" não existe.
 
         Returns:
             Tupla `(rows, total_count)`. Total é a contagem ANTES da paginação,
@@ -48,6 +55,20 @@ class UserRepository:
         if client_id is not None:
             base = base.where(User.client_id == client_id)
             count_base = count_base.where(User.client_id == client_id)
+        elif staff_viewer is not None:
+            base = scoped_by_organization(
+                base.where(User.scope == UserScope.SYSTEM.value),
+                User.organization_id,
+                staff_viewer,
+            )
+            count_base = scoped_by_organization(
+                count_base.where(User.scope == UserScope.SYSTEM.value),
+                User.organization_id,
+                staff_viewer,
+            )
+        else:  # pragma: no cover — contrato: nunca listar "todo mundo"
+            msg = "list_paginated exige client_id ou staff_viewer"
+            raise ValueError(msg)
 
         if search:
             term = f"%{search.strip().lower()}%"
@@ -66,6 +87,20 @@ class UserRepository:
 
     async def get_by_id(self, user_id: UUID) -> User | None:
         result = await self._session.execute(select(User).where(User.id == user_id))
+        return result.scalar_one_or_none()
+
+    async def get_staff_by_id(self, user_id: UUID, *, viewer: CurrentUser) -> User | None:
+        """Usuário de STAFF alvo, **da organização do observador** — anti-IDOR.
+
+        O `scope='system'` e a organização moram no SELECT: um `user_id` de
+        plataforma, de usuário de cliente ou de staff de OUTRA organização não
+        retorna linha (404), em vez de ser desativado/rebaixado por um admin de
+        organização. A plataforma alcança o staff de qualquer organização.
+        """
+        stmt = select(User).where(User.id == user_id, User.scope == UserScope.SYSTEM.value)
+        result = await self._session.execute(
+            scoped_by_organization(stmt, User.organization_id, viewer)
+        )
         return result.scalar_one_or_none()
 
     async def get_by_id_in_tenant(self, user_id: UUID, *, client_id: UUID) -> User | None:

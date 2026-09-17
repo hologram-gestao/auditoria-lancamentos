@@ -34,6 +34,7 @@ from app.db.models import (
     ReconciliationStatus,
     SessionAccountType,
     User,
+    UserScope,
 )
 
 if TYPE_CHECKING:
@@ -88,12 +89,13 @@ HOLOGRAM_TEAM_LABEL = "Equipe Hologram"
 def author_for_viewer(author: User, viewer_scope: str) -> SessionAuthor:
     """Autor enxuto, MASCARADO por escopo do observador (86e2n39f1).
 
-    Cliente vendo autor `system` → "Equipe Hologram", sem e-mail. Qualquer
-    outra combinação (Hologram vê tudo; cliente vê o próprio colega) → nome e
-    e-mail reais. A decisão mora no servidor: mandar o nome no payload e
-    esconder na UI não seria barreira (§4.9).
+    Cliente vendo autor de staff (organização OU plataforma) → "Equipe
+    Hologram", sem e-mail. Qualquer outra combinação (staff vê tudo; cliente vê
+    o próprio colega) → nome e e-mail reais. A decisão mora no servidor: mandar
+    o nome no payload e esconder na UI não seria barreira (§4.9). O rótulo por
+    organização ("Equipe {org do cliente}") chega na task 86e36ecqz.
     """
-    if viewer_scope == "client" and author.scope == "system":
+    if viewer_scope == UserScope.CLIENT.value and author.scope != UserScope.CLIENT.value:
         return SessionAuthor(name=HOLOGRAM_TEAM_LABEL, email=None)
     return SessionAuthor(name=author.name, email=author.email)
 

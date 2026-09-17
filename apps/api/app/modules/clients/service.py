@@ -26,6 +26,7 @@ from uuid import UUID, uuid4
 import httpx
 from pydantic import SecretStr
 
+from app.core.authz import CurrentUser
 from app.core.crypto_service import (
     AAD_CLIENT_APP_KEY,
     AAD_CLIENT_APP_SECRET,
@@ -129,26 +130,22 @@ class ClientService:
     async def list_clients(
         self,
         *,
+        user: CurrentUser,
         page: int,
         page_size: int,
         search: str | None,
-        manager_id_filter: UUID | None,
-        tenant_client_id: UUID | None = None,
-        viewer_user_id: UUID | None = None,
         category_id: UUID | None = None,
     ) -> tuple[list[ClientResponse], PaginationMeta]:
-        """Lista clientes com filtro RBAC.
+        """Lista clientes dentro do ALCANCE do usuário (`authz.reach_filter`).
 
-        `manager_id_filter` é controlado pela route conforme o role do caller:
-        admin → `None` (vê tudo); manager → `UUID(current_user.id)`.
+        O repositório põe a decisão única no SELECT; aqui só se repassa a LINHA
+        do usuário — favoritos e alcance derivam dela, nunca da rota.
         """
         rows, total = await self._repo.list_paginated(
+            user=user,
             page=page,
             page_size=page_size,
             search=search,
-            manager_id=manager_id_filter,
-            tenant_client_id=tenant_client_id,
-            viewer_user_id=viewer_user_id,
             category_id=category_id,
         )
         total_pages = (total + page_size - 1) // page_size if page_size else 0
@@ -185,9 +182,17 @@ class ClientService:
         omie_app_key: str,
         omie_app_secret: str,
         current_user_id: UUID,
+        organization_id: UUID | None,
         category_id: UUID | None = None,
     ) -> ClientResponse:
         """Cria cliente com credenciais criptografadas + auto-assign do criador.
+
+        `organization_id` é a org da LINHA do ator (§3.15): o cliente nasce onde
+        quem o cria está — sem isso, um admin de outra organização criaria um
+        cliente na Hologram (o default do banco) e perderia o alcance a ele no
+        request seguinte. `None` só para a plataforma, que ainda cai no default
+        do banco; a escolha explícita da organização pela plataforma chega na
+        task 86e36ecjp.
 
         Sprint 3: cada cliente nasce com uma DEK própria (gerada e embrulhada
         pela KEK do KMS). As credenciais são cifradas no envelope versionado
@@ -215,6 +220,8 @@ class ClientService:
             created_by=current_user_id,
             category_id=category_id,
         )
+        if organization_id is not None:
+            client.organization_id = organization_id
         await self._repo.add_client(client)
 
         # Carteira (86e390kz8): só GERENTE entra. Quem cria sendo manager vira

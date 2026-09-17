@@ -14,7 +14,7 @@ from uuid import UUID
 from sqlalchemy import ColumnElement, CursorResult, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.authz import portfolio_filter
+from app.core.authz import CurrentUser, reach_filter
 from app.db.models import Notification
 
 
@@ -25,42 +25,34 @@ class NotificationRepository:
         self._session = session
 
     @staticmethod
-    def _visibility_filter(
-        *, user_id: UUID, is_admin: bool, tenant_client_id: UUID | None = None
-    ) -> list[ColumnElement[bool]]:
+    def _visibility_filter(user: CurrentUser) -> list[ColumnElement[bool]]:
         """Condições de visibilidade — o RBAC da leitura, em SQL.
 
-        Três camadas:
+        Duas camadas:
 
         1. `user_id = eu` — notificação é pessoal; ninguém lê a do outro.
-        2. **tenant** (S5/R3) — usuário de cliente só vê notificação do próprio
-           `client_id`. Redundante com (1) hoje, e de propósito: se um dia uma
-           notificação for criada para outro usuário do mesmo tenant, ou (1) for
-           afrouxado, o filtro de tenant continua de pé.
-        3. cliente na carteira — se a carteira for reatribuída, as
-           notificações antigas daquele cliente **param de aparecer** para o
-           manager anterior. Sem isso, a linha antiga continuaria vazando
-           conta+mês de um cliente que já não é dele. Admin não tem essa
-           restrição (acessa qualquer cliente, CLAUDE.md §3.11).
+        2. **alcance** (`authz.reach_filter`, a MESMA decisão de
+           `resolve_client_access` projetada em `WHERE`): usuário de cliente só
+           vê notificação do próprio tenant; manager só de cliente da carteira
+           — se a carteira for reatribuída, as notificações antigas daquele
+           cliente **param de aparecer**; admin só de cliente da própria
+           organização; plataforma sem restrição. Redundante com (1) hoje, e de
+           propósito: se um dia uma notificação for criada para outro usuário,
+           ou (1) for afrouxado, o alcance continua de pé.
         """
-        conditions: list[ColumnElement[bool]] = [Notification.user_id == user_id]
-        if tenant_client_id is not None:
-            conditions.append(Notification.client_id == tenant_client_id)
-        elif not is_admin:
-            conditions.append(portfolio_filter(user_id, Notification.client_id))
+        conditions: list[ColumnElement[bool]] = [Notification.user_id == UUID(user.id)]
+        reach = reach_filter(user, Notification.client_id)
+        if reach is not None:
+            conditions.append(reach)
         return conditions
 
-    async def count_unread(
-        self, *, user_id: UUID, is_admin: bool, tenant_client_id: UUID | None = None
-    ) -> int:
+    async def count_unread(self, user: CurrentUser) -> int:
         """Contagem de não lidas. Barata: cai no índice PARCIAL
         `ix_notifications_user_unread`, que só indexa `read_at IS NULL` — não
         cresce com o histórico já lido, e é chamada a cada 15 s por usuário."""
         total: int | None = await self._session.scalar(
             select(func.count(Notification.id)).where(
-                *self._visibility_filter(
-                    user_id=user_id, is_admin=is_admin, tenant_client_id=tenant_client_id
-                ),
+                *self._visibility_filter(user),
                 Notification.read_at.is_(None),
             )
         )
@@ -68,10 +60,8 @@ class NotificationRepository:
 
     async def list_paginated(
         self,
+        user: CurrentUser,
         *,
-        user_id: UUID,
-        is_admin: bool,
-        tenant_client_id: UUID | None = None,
         page: int,
         page_size: int,
         unread_only: bool = False,
@@ -81,9 +71,7 @@ class NotificationRepository:
         `total` é contado com os MESMOS filtros da página (senão o rodapé mente
         quando `unread_only` está ligado).
         """
-        conditions = self._visibility_filter(
-            user_id=user_id, is_admin=is_admin, tenant_client_id=tenant_client_id
-        )
+        conditions = self._visibility_filter(user)
         if unread_only:
             conditions.append(Notification.read_at.is_(None))
 
@@ -107,9 +95,7 @@ class NotificationRepository:
         self,
         *,
         notification_id: UUID,
-        user_id: UUID,
-        is_admin: bool,
-        tenant_client_id: UUID | None = None,
+        user: CurrentUser,
     ) -> Notification | None:
         """Uma notificação visível para este usuário, ou `None`.
 
@@ -119,9 +105,7 @@ class NotificationRepository:
         row: Notification | None = await self._session.scalar(
             select(Notification).where(
                 Notification.id == notification_id,
-                *self._visibility_filter(
-                    user_id=user_id, is_admin=is_admin, tenant_client_id=tenant_client_id
-                ),
+                *self._visibility_filter(user),
             )
         )
         return row
@@ -137,9 +121,7 @@ class NotificationRepository:
         )
         return now
 
-    async def mark_all_read(
-        self, *, user_id: UUID, is_admin: bool, tenant_client_id: UUID | None = None
-    ) -> int:
+    async def mark_all_read(self, user: CurrentUser) -> int:
         """Marca TODAS as não lidas VISÍVEIS como lidas; devolve quantas foram.
 
         O UPDATE carrega o MESMO `_visibility_filter` das leituras — marcar é
@@ -152,9 +134,7 @@ class NotificationRepository:
         result = await self._session.execute(
             update(Notification)
             .where(
-                *self._visibility_filter(
-                    user_id=user_id, is_admin=is_admin, tenant_client_id=tenant_client_id
-                ),
+                *self._visibility_filter(user),
                 Notification.read_at.is_(None),
             )
             .values(read_at=now)

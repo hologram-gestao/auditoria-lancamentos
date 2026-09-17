@@ -67,6 +67,7 @@ from app.db.models.reconciliation_session import (
 from app.db.models.usage_event import UsageEvent
 from app.db.models.user import (
     CLIENT_ROLES,
+    PLATFORM_ROLES,
     SCOPE_CONSISTENCY_CHECK,
     SCOPE_CONSISTENCY_CONSTRAINT,
     SYSTEM_ROLES,
@@ -90,6 +91,7 @@ __all__ = [
     "MAX_ENTRIES_PER_CLIENT",
     "MAX_NAME_CHARS",
     "MAX_ORGANIZATION_NAME_CHARS",
+    "PLATFORM_ROLES",
     "SCOPE_CONSISTENCY_CHECK",
     "SCOPE_CONSISTENCY_CONSTRAINT",
     "SYSTEM_ROLES",

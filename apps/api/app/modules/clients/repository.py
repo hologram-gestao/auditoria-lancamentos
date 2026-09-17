@@ -34,7 +34,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
-from app.core.authz import portfolio_filter
+from app.core.authz import CurrentUser, reach_filter
 from app.db.models import (
     UQ_CLIENT_ASSIGNMENT_CLIENT_USER,
     UQ_USER_CLIENT_FAVORITE,
@@ -192,49 +192,39 @@ class ClientRepository:
     async def list_paginated(
         self,
         *,
+        user: CurrentUser,
         page: int,
         page_size: int,
         search: str | None = None,
-        manager_id: UUID | None = None,
-        tenant_client_id: UUID | None = None,
-        viewer_user_id: UUID | None = None,
         category_id: UUID | None = None,
     ) -> tuple[Sequence[ClientRow], int]:
         """Lista paginada de clientes com manager + count de conciliações.
 
         Args:
+            user: quem pede — a LINHA do usuário autenticado, nunca URL/payload
+                (§3.15). Dela derivam o ALCANCE (`authz.reach_filter`: plataforma
+                tudo; admin a própria organização; manager a carteira, por
+                `EXISTS` em `client_assignments`, responsável ou colaborador —
+                86e390kz8; cliente o próprio tenant) e os favoritos
+                (`is_favorite` por linha, os DESSE usuário no topo — 86e34jd5a).
             page/page_size: paginação 1-based.
             search: ILIKE em `clients.name` (case-insensitive).
-            manager_id: se não-None, filtra pela CARTEIRA — `EXISTS` em
-                `client_assignments` por `(client_id, user_id)`, responsável ou
-                colaborador (86e390kz8). Para admin, passar `None`.
-            tenant_client_id: se não-None, restringe ao tenant do usuário
-                (`scope='client'`). Tem PRECEDÊNCIA sobre `manager_id` — um
-                usuário de cliente não tem carteira, tem tenant.
-            viewer_user_id: quem pede. Decide `is_favorite` por linha e põe os
-                favoritos DESSE usuário no topo (86e34jd5a). Vem da linha do
-                usuário autenticado, nunca de URL/payload (§3.15).
 
         Returns:
             Tupla `(rows, total_count)`. Total é a contagem ANTES da paginação.
         """
-        query = _client_row_query(viewer_user_id)
+        query = _client_row_query(UUID(user.id))
         base = query.stmt
         count_base = select(func.count(Client.id)).select_from(Client)
 
-        if tenant_client_id is not None:
-            # S5/R3: usuário de cliente enxerga só o PRÓPRIO tenant — filtro na
-            # query, derivado da LINHA do usuário (nunca de URL/payload).
-            base = base.where(Client.id == tenant_client_id)
-            count_base = count_base.where(Client.id == tenant_client_id)
-        elif manager_id is not None:
-            # Para manager: a CARTEIRA é qualquer linha dele no cliente —
-            # responsável OU colaborador. Filtro por EXISTS, independente do join
-            # de exibição (que é só do responsável): sem essa separação o
-            # colaborador sumiria da própria lista.
-            in_portfolio = portfolio_filter(manager_id, Client.id)
-            base = base.where(in_portfolio)
-            count_base = count_base.where(in_portfolio)
+        # O alcance entra na página E no count (senão o rodapé mente). É a
+        # decisão única do authz projetada em WHERE — independente do join de
+        # exibição (que é só do responsável): sem essa separação o colaborador
+        # sumiria da própria lista.
+        reach = reach_filter(user, Client.id)
+        if reach is not None:
+            base = base.where(reach)
+            count_base = count_base.where(reach)
 
         if search:
             term = f"%{search.strip().lower()}%"

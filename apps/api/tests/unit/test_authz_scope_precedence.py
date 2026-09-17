@@ -1,20 +1,18 @@
-"""`scope` vence `role` na decisão de tenant (Sprint 5 / QA 05.8).
+"""`scope` vence `role` na decisão de tenant (Sprint 5 / QA 05.8 + organizações).
 
-**Por que este arquivo existe.** A CHECK do banco (`ck_users_scope_consistency`,
-BACK 05.1) cruza `scope` com `client_id`, mas **não** cruza `scope` com `role`:
-a linha `scope='client'` + `role='admin'` é representável no Postgres.
+**Por que este arquivo existe.** Desde a camada de organizações a CHECK do banco
+(`ck_users_scope_consistency`) cruza `scope` com `role`, então a linha
+`scope='client'` + `role='admin'` já não é representável no Postgres. O código
+**continua não confiando nela** (negado por padrão): um `UPDATE` manual num banco
+sem a constraint, um backfill de correção ou um caminho futuro produziriam essa
+linha — e, quando ela existir, a **ordem dos ramos** em `resolve_client_access`
+é a única coisa entre ela e o acesso a todos os tenants.
 
-Nenhum endpoint a produz hoje — `SystemUserRole` fecha o request de usuários do
-sistema e `ClientUserRole` o de usuários do cliente (BACK 05.1/05.5). Mas um
-`UPDATE` manual, um backfill de correção ou um caminho de código futuro
-produziriam essa linha; e, quando ela existir, a **ordem dos ramos** em
-`resolve_client_access` é a única coisa entre ela e o acesso a todos os tenants.
-
-A ordem correta (escopo primeiro, papel depois) já está no código da 05.3. Estes
-testes a **travam**: inverter os ramos passa a quebrar aqui, em vez de virar
-vazamento cross-tenant silencioso — que é exatamente a falha que a métrica da
-sprint (34/34 endpoints) não pegaria, porque nenhum usuário de fixture tem essa
-combinação.
+A ordem correta (cliente primeiro, plataforma bem formada depois, papel por
+último) está no código. Estes testes a **travam**: inverter os ramos passa a
+quebrar aqui, em vez de virar vazamento cross-tenant silencioso — que é
+exatamente a falha que a métrica da sprint não pegaria, porque nenhum usuário de
+fixture tem essa combinação.
 
 Separado de `test_authz_matrix.py` (BACK 05.3) de propósito: arquivo do QA, sem
 sobreposição com o arquivo do executor.
@@ -38,13 +36,16 @@ pytestmark = pytest.mark.unit
 TENANT_A = uuid4()
 TENANT_B = uuid4()
 
-#: Papéis da equipe Hologram — os que, se combinados com `scope='client'`,
-#: escalariam para "vê todo mundo" caso o `role` fosse consultado antes do
-#: `scope`. `admin` cai no ramo "libera tudo"; `manager`, no da carteira.
-SYSTEM_ROLES_QUE_ESCALARIAM = (UserRole.ADMIN, UserRole.MANAGER)
+#: Papéis de staff — os que, se combinados com `scope='client'`, escalariam
+#: para "vê todo mundo" caso o `role` fosse consultado antes do `scope`.
+#: `platform_admin` e `admin` cairiam no ramo "libera"; `manager`, no da carteira.
+SYSTEM_ROLES_QUE_ESCALARIAM = (UserRole.PLATFORM_ADMIN, UserRole.ADMIN, UserRole.MANAGER)
+ORG_A = uuid4()
 
 
-def _user(role: UserRole, *, scope: UserScope, client_id: object) -> CurrentUser:
+def _user(
+    role: UserRole, *, scope: UserScope, client_id: object, organization_id: object = ORG_A
+) -> CurrentUser:
     return CurrentUser(
         id=str(uuid4()),
         email="qa-precedencia@example.com",
@@ -52,6 +53,7 @@ def _user(role: UserRole, *, scope: UserScope, client_id: object) -> CurrentUser
         role=role.value,
         scope=scope.value,
         client_id=client_id,
+        organization_id=organization_id,
     )
 
 
@@ -88,3 +90,41 @@ def test_filtro_da_camada_de_dados_tambem_ignora_o_papel(role: UserRole) -> None
     user = _user(role, scope=UserScope.CLIENT, client_id=TENANT_A)
 
     assert tenant_filter_client_id(user) == TENANT_A
+
+
+class TestPlataforma:
+    """A plataforma alcança tudo — mas só a linha BEM FORMADA (sem org, sem tenant)."""
+
+    async def test_plataforma_bem_formada_alcanca_qualquer_tenant_sem_consultar_o_banco(
+        self,
+    ) -> None:
+        user = _user(
+            UserRole.PLATFORM_ADMIN,
+            scope=UserScope.PLATFORM,
+            client_id=None,
+            organization_id=None,
+        )
+        # `db=None` é seguro: o ramo da plataforma retorna ANTES de tocar o banco.
+        assert await resolve_client_access(None, user, TENANT_A) is True  # type: ignore[arg-type]
+        assert await resolve_client_access(None, user, TENANT_B) is True  # type: ignore[arg-type]
+        assert tenant_filter_client_id(user) is None
+
+    @pytest.mark.parametrize(
+        ("client_id", "organization_id"),
+        [(None, ORG_A), (TENANT_A, None), (TENANT_A, ORG_A)],
+        ids=["com-org", "com-tenant", "com-os-dois"],
+    )
+    async def test_plataforma_corrompida_nao_ganha_o_alcance_total(
+        self, client_id: object, organization_id: object
+    ) -> None:
+        """`scope='platform'` com org ou tenant preenchidos é linha corrompida (a
+        CHECK a recusa); o código não a promove a superusuário — nega, em todos
+        os casos, sem consultar o banco."""
+        user = _user(
+            UserRole.PLATFORM_ADMIN,
+            scope=UserScope.PLATFORM,
+            client_id=client_id,
+            organization_id=organization_id,
+        )
+        assert user.is_platform is False
+        assert await resolve_client_access(None, user, TENANT_B) is False  # type: ignore[arg-type]
