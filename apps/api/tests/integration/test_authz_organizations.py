@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import null, select
+from sqlalchemy import func, null, select
 
 from app.core.authz import resolve_client_access
 from app.core.config import get_settings
@@ -470,28 +470,160 @@ class TestUsuariosDeStaff:
         assert created.organization_id == world["org_b"].id
 
 
-class TestClienteCriadoNaOrganizacaoDoAtor:
-    async def test_cliente_criado_por_admin_de_b_nasce_em_b_e_continua_ao_alcance(
+def _new_client_body(**extra: object) -> dict[str, object]:
+    return {
+        "name": f"Cliente novo {uuid4().hex[:6]}",
+        "omie_app_key": "FAKE_DEMO_OMIE_APP_KEY_DO_NOT_USE",
+        "omie_app_secret": "FAKE_DEMO_OMIE_APP_SECRET_DO_NOT_USE",
+        **extra,
+    }
+
+
+async def _created_client(db_session: AsyncSession, resp: Any) -> Client:
+    created = await db_session.get(Client, UUID(resp.json()["id"]))
+    assert created is not None
+    await db_session.refresh(created, ["organization_id"])
+    return created
+
+
+class TestCriacaoDeClientePorOrganizacao:
+    """Onde o cliente nasce vem da LINHA do ator; só a plataforma escolhe (86e36ecjp)."""
+
+    async def test_admin_cria_na_propria_organizacao_e_continua_ao_alcance(
         self, client_with_db: AsyncClient, db_session: AsyncSession, world: dict[str, Any]
     ) -> None:
         """Sem o carimbo, o cliente cairia no default do banco (Hologram) e o
         próprio criador perderia o alcance a ele no request seguinte."""
         await _login(client_with_db, world["admin_b"].email)
-        resp = await client_with_db.post(
-            "/api/v1/clients",
-            json={
-                "name": f"Cliente novo de B {uuid4().hex[:6]}",
-                "omie_app_key": "FAKE_DEMO_OMIE_APP_KEY_DO_NOT_USE",
-                "omie_app_secret": "FAKE_DEMO_OMIE_APP_SECRET_DO_NOT_USE",
-            },
-        )
+        resp = await client_with_db.post("/api/v1/clients", json=_new_client_body())
         assert resp.status_code == 201, resp.text
-        created = await db_session.get(Client, UUID(resp.json()["id"]))
-        assert created is not None
-        await db_session.refresh(created, ["organization_id"])
-        assert created.organization_id == world["org_b"].id
+        assert (await _created_client(db_session, resp)).organization_id == world["org_b"].id
+        # Admin não entra na carteira: nasce sem responsável.
+        assert resp.json()["responsible_manager"] is None
         listed = await client_with_db.get("/api/v1/clients", params={"pageSize": 50})
         assert resp.json()["id"] in {row["id"] for row in listed.json()["data"]}
+
+    async def test_admin_pode_repetir_a_propria_organizacao_no_payload(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: dict[str, Any]
+    ) -> None:
+        await _login(client_with_db, world["admin_a"].email)
+        resp = await client_with_db.post(
+            "/api/v1/clients", json=_new_client_body(organization_id=str(world["org_a"].id))
+        )
+        assert resp.status_code == 201, resp.text
+        assert (await _created_client(db_session, resp)).organization_id == world["org_a"].id
+
+    async def test_admin_nao_cria_em_outra_organizacao(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: dict[str, Any]
+    ) -> None:
+        """`organization_id` alheio no payload é 403 — nunca ignorado em silêncio."""
+        await _login(client_with_db, world["admin_a"].email)
+        before = await db_session.scalar(
+            select(func.count(Client.id)).where(Client.organization_id == world["org_b"].id)
+        )
+        resp = await client_with_db.post(
+            "/api/v1/clients", json=_new_client_body(organization_id=str(world["org_b"].id))
+        )
+        assert resp.status_code == 403, resp.text
+        assert SECRET_CLIENT_B not in resp.text
+        after = await db_session.scalar(
+            select(func.count(Client.id)).where(Client.organization_id == world["org_b"].id)
+        )
+        assert after == before
+
+    async def test_gerente_cria_na_propria_organizacao_e_vira_o_responsavel(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: dict[str, Any]
+    ) -> None:
+        await _login(client_with_db, world["manager_a"].email)
+        resp = await client_with_db.post("/api/v1/clients", json=_new_client_body())
+        assert resp.status_code == 201, resp.text
+        assert (await _created_client(db_session, resp)).organization_id == world["org_a"].id
+        assert resp.json()["responsible_manager"]["email"] == world["manager_a"].email
+
+    async def test_plataforma_escolhe_a_organizacao(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: dict[str, Any]
+    ) -> None:
+        await _login(client_with_db, world["platform"].email)
+        resp = await client_with_db.post(
+            "/api/v1/clients", json=_new_client_body(organization_id=str(world["org_b"].id))
+        )
+        assert resp.status_code == 201, resp.text
+        assert (await _created_client(db_session, resp)).organization_id == world["org_b"].id
+        # A plataforma não entra na carteira.
+        assert resp.json()["responsible_manager"] is None
+
+    async def test_plataforma_sem_organizacao_e_400(
+        self, client_with_db: AsyncClient, world: dict[str, Any]
+    ) -> None:
+        await _login(client_with_db, world["platform"].email)
+        resp = await client_with_db.post("/api/v1/clients", json=_new_client_body())
+        assert resp.status_code == 400, resp.text
+
+    async def test_plataforma_com_organizacao_inexistente_e_404(
+        self, client_with_db: AsyncClient, world: dict[str, Any]
+    ) -> None:
+        await _login(client_with_db, world["platform"].email)
+        resp = await client_with_db.post(
+            "/api/v1/clients", json=_new_client_body(organization_id=str(uuid4()))
+        )
+        assert resp.status_code == 404, resp.text
+
+    async def test_plataforma_nao_cria_em_organizacao_suspensa(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: dict[str, Any]
+    ) -> None:
+        world["org_b"].active = False
+        await db_session.flush()
+        await _login(client_with_db, world["platform"].email)
+        resp = await client_with_db.post(
+            "/api/v1/clients", json=_new_client_body(organization_id=str(world["org_b"].id))
+        )
+        assert resp.status_code == 409, resp.text
+
+
+class TestCarteiraIntraOrg:
+    """Gerente e cliente na MESMA organização — a validação mora num lugar só
+    (`is_active_manager`), consumido por adicionar gerente, definir responsável
+    e criar cliente."""
+
+    async def test_admin_nao_adiciona_gerente_de_outra_organizacao(
+        self, client_with_db: AsyncClient, world: dict[str, Any]
+    ) -> None:
+        """400, o MESMO código de "não é gerente": distinguir diria que o id existe
+        e é gerente em algum lugar (anti-enumeração)."""
+        await _login(client_with_db, world["admin_b"].email)
+        resp = await client_with_db.post(
+            f"/api/v1/clients/{world['client_b'].id}/managers",
+            json={"user_id": str(world["manager_a"].id)},
+        )
+        assert resp.status_code == 400, resp.text
+        assert world["manager_a"].email not in resp.text
+
+    async def test_admin_nao_define_responsavel_de_outra_organizacao(
+        self, client_with_db: AsyncClient, world: dict[str, Any]
+    ) -> None:
+        await _login(client_with_db, world["admin_b"].email)
+        resp = await client_with_db.patch(
+            f"/api/v1/clients/{world['client_b'].id}/assign",
+            json={"user_id": str(world["manager_a"].id)},
+        )
+        assert resp.status_code == 400, resp.text
+
+    async def test_gerente_da_mesma_organizacao_entra_normalmente(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: dict[str, Any]
+    ) -> None:
+        extra = await _seed_user(
+            db_session,
+            email=f"gerente-b2-{uuid4().hex[:6]}@b.com.br",
+            role=UserRole.MANAGER,
+            organization=world["org_b"],
+        )
+        await _login(client_with_db, world["admin_b"].email)
+        resp = await client_with_db.post(
+            f"/api/v1/clients/{world['client_b'].id}/managers",
+            json={"user_id": str(extra.id)},
+        )
+        assert resp.status_code in {200, 201}, resp.text
+        assert extra.email in {row["email"] for row in resp.json()["data"]}
 
 
 class TestSessao:

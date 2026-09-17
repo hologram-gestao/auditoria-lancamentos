@@ -305,21 +305,21 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    toda linha**. No front, o espelho é `apps/web/src/lib/authz.ts` — **um**
    helper, nunca `if (role === ...)` espalhado por componente.
 
-   | Ação                            | platform_admin | admin (org)      | manager (org)           | client_manager | client_operator |
-   | ------------------------------- | -------------- | ---------------- | ----------------------- | -------------- | --------------- |
-   | Criar/rodar conciliação         | ✅             | ✅               | ✅                      | ✅             | ✅              |
-   | Revisar / exportar              | ✅             | ✅               | ✅                      | ✅             | ✅              |
-   | Sincronizar contas do Omie      | ✅             | ✅               | ✅                      | ✅             | ✅              |
-   | Manter o glossário              | ✅             | ✅               | ✅ (carteira)           | ✅             | ❌              |
-   | Gerir usuários do cliente       | ✅             | ✅               | ❌ (D2, task 86e36ecjp) | ✅             | ❌              |
-   | Criar cliente                   | ✅             | ✅               | ✅ (vira responsável)   | ❌             | ❌              |
-   | Editar/excluir/encerrar cliente | ✅             | ✅               | ❌                      | ❌             | ❌              |
-   | Ver outro tenant                | ✅             | ✅ (própria org) | ✅ (carteira)           | ❌             | ❌              |
-   | Gerir usuários da org           | ✅             | ✅ (própria org) | ❌                      | ❌             | ❌              |
-   | Categorias de cliente (escrita) | ✅             | ✅ (própria org) | ❌                      | ❌             | ❌              |
-   | Tipos de anomalia (escrita)     | ✅             | ✅ (\*)          | ❌                      | ❌             | ❌              |
-   | Gerir organizações              | ✅             | ❌               | ❌                      | ❌             | ❌              |
-   | Teste de alerta                 | ✅             | ✅               | ❌                      | ❌             | ❌              |
+   | Ação                            | platform_admin | admin (org)      | manager (org)         | client_manager | client_operator |
+   | ------------------------------- | -------------- | ---------------- | --------------------- | -------------- | --------------- |
+   | Criar/rodar conciliação         | ✅             | ✅               | ✅                    | ✅             | ✅              |
+   | Revisar / exportar              | ✅             | ✅               | ✅                    | ✅             | ✅              |
+   | Sincronizar contas do Omie      | ✅             | ✅               | ✅                    | ✅             | ✅              |
+   | Manter o glossário              | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
+   | Gerir usuários do cliente       | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
+   | Criar cliente                   | ✅             | ✅               | ✅ (vira responsável) | ❌             | ❌              |
+   | Editar/excluir/encerrar cliente | ✅             | ✅               | ❌                    | ❌             | ❌              |
+   | Ver outro tenant                | ✅             | ✅ (própria org) | ✅ (carteira)         | ❌             | ❌              |
+   | Gerir usuários da org           | ✅             | ✅ (própria org) | ❌                    | ❌             | ❌              |
+   | Categorias de cliente (escrita) | ✅             | ✅ (própria org) | ❌                    | ❌             | ❌              |
+   | Tipos de anomalia (escrita)     | ✅             | ✅ (\*)          | ❌                    | ❌             | ❌              |
+   | Gerir organizações              | ✅             | ❌               | ❌                    | ❌             | ❌              |
+   | Teste de alerta                 | ✅             | ✅               | ❌                    | ❌             | ❌              |
 
    "(carteira)" e "(própria org)" **não** são células: são `resolve_client_access`
    e os filtros de coleção. (\*) D3 final é só plataforma; o admin sai da célula
@@ -392,6 +392,13 @@ is_primary`) — um responsável por cliente; o predicado é COPIADO na migratio
     adicionado assume. As escritas são condicionais no próprio SQL (promover com
     `RETURNING` sob `FOR UPDATE`; remover só `WHERE is_primary = false`) — o
     409/404 é decidido pelo estado atual, não por uma leitura anterior.
+    **A carteira é intra-org** (86e36ecjp): `is_active_manager` exige gerente ativo
+    **da mesma organização do cliente**, e é a única validação consumida por criar
+    cliente, adicionar gerente e definir responsável — gerente de outra organização
+    recebe o MESMO 400 de "não é gerente" (anti-enumeração). Onde o cliente nasce
+    vem da LINHA do ator: staff cria na própria organização (`organization_id`
+    alheio no payload é 403, nunca ignorado); só a plataforma escolhe, e a escolha é
+    obrigatória e validada (existe, ativa).
 
 ---
 
@@ -690,6 +697,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.29 — 16/09/2026. **D2 entrou (task 86e36ecjp, onda 1 do épico 86e36ec0q): o `manager` gere os usuários dos clientes da carteira, e a carteira virou intra-org.** A célula `manage_client_users` ganhou o `manager` (o alcance segue sendo `resolve_client_access`, então fora da carteira continua negado); `is_active_manager` exige gerente da mesma organização do cliente e é a única validação de criar cliente, adicionar gerente e definir responsável (400 único, anti-enumeração); `POST /clients` decide a organização pela LINHA do ator — staff na própria (payload divergente é 403), plataforma escolhe (obrigatório; 404 inexistente, 409 suspensa) — e o criador gerente vira responsável só se for da org do cliente. §4.9 e §4.13 atualizadas. ⚠️ Efeito visível para os managers da Hologram no deploy da onda 1: as seis rotas de usuários do cliente passam a responder para quem tem o cliente na carteira; a aba na tela chega na onda 2._
 
 _Versão 1.28 — 16/09/2026. **O authz core da camada de organizações entrou (task 86e36ecar, onda 1 do épico 86e36ec0q) — a linha mais perigosa da sprint.** `UserScope.PLATFORM`/`UserRole.PLATFORM_ADMIN` existem; `resolve_client_access` tem uma ordem nova (cliente → plataforma bem formada libera → staff só alcança cliente **da própria organização**, admin a org inteira e manager a carteira dentro dela); nasceram `reach_filter`/`scoped_by_reach` (a decisão projetada em `WHERE` para coleções por `client_id`) e `scoped_by_organization`; a matriz virou 13 x 5 com a plataforma em toda linha e um teste que trava isso. As **4 cópias** da regra "admin vê tudo" fora do `authz.py` (notificações, tipos de anomalia, lista de clientes, criação de conciliação) e os guards por string `require_admin`/`require_manager_or_admin` **deixaram de existir**: toda rota usa guard da matriz ou `StaffDep`. `get_current_user` e o login leem a organização junto com o usuário e recusam organização suspensa; o JWT e o corpo do login/refresh carregam `organization_id`/`organization_name`; `access_audit` grava `actor_organization_id` (a telemetria mantém as 4 props da S5). Num mundo de uma organização só, **nada muda de visível**. §3.15 e §4.9 reescritas como lei atual._
 

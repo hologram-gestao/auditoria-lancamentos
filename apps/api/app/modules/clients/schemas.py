@@ -38,6 +38,16 @@ class CreateClientRequest(BaseModel):
     category_id: UUID | None = Field(
         None, description="Categoria do catálogo (86e34jd8m). Ausente ou null = sem categoria."
     )
+    # Camada de organizações (86e36ecjp): a plataforma ESCOLHE onde o cliente
+    # nasce (obrigatório para ela). Para o staff de organização, ou é omitido
+    # (a org da LINHA do ator) ou é a própria org — outro valor é 403.
+    organization_id: UUID | None = Field(
+        None,
+        description=(
+            "Organização dona do cliente. Obrigatória para a plataforma; para o staff "
+            "de organização, omitir (usa a própria) ou repetir a própria."
+        ),
+    )
 
 
 class UpdateClientRequest(BaseModel):

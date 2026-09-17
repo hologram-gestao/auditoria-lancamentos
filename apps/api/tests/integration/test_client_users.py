@@ -256,13 +256,40 @@ class TestAutenticacaoEPapel:
             resp = await chamada
             assert resp.status_code == 403, resp.text
 
-    async def test_manager_do_sistema_recebe_403(
+    async def test_gerente_da_carteira_gere_os_usuarios_do_cliente(
         self, client_with_db: AsyncClient, cenario: dict[str, Any]
     ) -> None:
-        """Célula ❌ da matriz: gerente do SISTEMA não gere usuários do cliente."""
+        """D2 (86e36ecjp): o gerente de organização gere os usuários dos clientes DA
+        CARTEIRA — as seis rotas passam para quem tem o cliente na carteira."""
         await _login(client_with_db, "cu-mgr@hologram.com.br")
-        resp = await client_with_db.get(_base(cenario))
-        assert resp.status_code == 403, resp.text
+        base = _base(cenario)
+        alvo = cenario["operador_a"].id
+
+        assert (await client_with_db.get(base)).status_code == 200
+        created = await client_with_db.post(
+            base,
+            json={
+                "name": "Criado pelo gerente",
+                "email": "criado-pelo-gerente@austral.com.br",
+                "password": NOVA_SENHA_VALIDA,
+                "role": UserRole.CLIENT_OPERATOR.value,
+            },
+        )
+        assert created.status_code == 201, created.text
+        assert (await client_with_db.get(f"{base}/{alvo}")).status_code == 200
+        assert (await client_with_db.patch(f"{base}/{alvo}", json={"name": "Y"})).status_code == 200
+        assert (await client_with_db.post(f"{base}/{alvo}/deactivate")).status_code == 200
+        assert (await client_with_db.post(f"{base}/{alvo}/activate")).status_code == 200
+
+    async def test_gerente_fora_da_carteira_continua_sem_acesso(
+        self, client_with_db: AsyncClient, cenario: dict[str, Any]
+    ) -> None:
+        """A célula libera a AÇÃO; o alcance segue sendo a carteira
+        (`resolve_client_access`): cliente fora dela → negado, sem vazar o nome."""
+        await _login(client_with_db, "cu-mgr@hologram.com.br")
+        resp = await client_with_db.get(_base(cenario, "cli_b"))
+        assert resp.status_code in {403, 404}, resp.text
+        assert SECRET_NAME_B not in resp.text
 
 
 class TestIDOR:
