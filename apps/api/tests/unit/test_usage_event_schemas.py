@@ -229,6 +229,8 @@ class TestEventosDaSprint6:
             UsageEventName.QUALIFICACAO_EMITIDA,
             UsageEventName.FLAG_REVISADO,
             UsageEventName.GLOSSARIO_EDITADO,
+            UsageEventName.ORGANIZACAO_CRIADA,
+            UsageEventName.ORGANIZACAO_DESATIVADA,
         ],
         ids=lambda e: e.value,
     )
@@ -252,6 +254,8 @@ class TestAllowListDeDedup:
             UsageEventName.QUALIFICACAO_EMITIDA,
             UsageEventName.FLAG_REVISADO,
             UsageEventName.GLOSSARIO_EDITADO,
+            UsageEventName.ORGANIZACAO_CRIADA,
+            UsageEventName.ORGANIZACAO_DESATIVADA,
         ],
         ids=lambda e: e.value,
     )

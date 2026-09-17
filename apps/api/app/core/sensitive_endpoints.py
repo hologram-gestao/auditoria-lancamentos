@@ -4,10 +4,12 @@
 negativo cross-tenant testado e passando ÷ total"). Sem esta lista, "100%" é um
 número sobre um conjunto arbitrário e inverificável.
 
-Endpoint sensível = rota que **lê ou muta dado escopável a um cliente/tenant**,
-tanto por coleção quanto por PK do recurso. Rotas de autenticação, de
-configuração global (tipos de anomalia) e de administração do sistema (usuários
-da equipe Hologram, alert-test) **não** entram: não carregam dado de cliente.
+Endpoint sensível = rota que **lê ou muta dado escopável a um cliente/tenant OU
+a uma organização** (camada de organizações, 86e36ecnp: cross-org é o
+cross-tenant uma camada acima), tanto por coleção quanto por PK do recurso.
+Rotas de autenticação, de configuração global (tipos de anomalia), de
+administração da plataforma (`/organizations`, só `platform_admin`) e o
+alert-test **não** entram: não carregam dado de cliente nem de organização.
 
 Cada entrada aponta para o path REAL e o módulo que o implementa — verificados
 contra `app.routes` por `tests/integration/test_sensitive_endpoints.py`, que
@@ -53,6 +55,11 @@ class SensitiveEndpoint:
 
 
 #: Mecanismos recorrentes — nomeados para não repetir a frase em 20 linhas.
+_VIA_STAFF_ORG = (
+    "ManageOrgUsersDep + get_staff_by_id/scoped_by_organization: AND scope='system' AND "
+    "organization_id = <org do observador> no próprio SELECT (plataforma: todas); "
+    "plataforma, usuário de cliente e staff de outra org = 404"
+)
 _VIA_SESSION = (
     "require_session_access: SELECT da sessão já com AND client_id = <tenant da "
     "linha> (scoped_by_tenant) + resolve_client_access; 404 uniforme"
@@ -63,6 +70,100 @@ _VIA_CLIENT_PATH = (
 )
 
 SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
+    # --------------------------------------- organizações (86e36ecnp): alcance por org
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients",
+        ScopeKind.COLLECTION,
+        "app/modules/clients/routes.py",
+        "StaffDep + reach_filter no SELECT (plataforma tudo; admin a própria org; "
+        "manager a carteira dentro dela; cliente = 403)",
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients",
+        ScopeKind.COLLECTION,
+        "app/modules/clients/routes.py",
+        "CreateClientDep; a org do cliente novo vem da LINHA do ator (staff só a "
+        "própria: divergente = 403; plataforma escolhe, validada)",
+    ),
+    SensitiveEndpoint(
+        "PATCH",
+        "/api/v1/clients/{client_id}",
+        ScopeKind.DETAIL_PK,
+        "app/modules/clients/routes.py",
+        _VIA_CLIENT_PATH + " + EditClientDep",
+    ),
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/users",
+        ScopeKind.COLLECTION,
+        "app/modules/users/routes.py",
+        _VIA_STAFF_ORG,
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/users",
+        ScopeKind.COLLECTION,
+        "app/modules/users/routes.py",
+        "ManageOrgUsersDep; a org do staff novo é carimbada da LINHA do ator",
+    ),
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/users/{user_id}",
+        ScopeKind.DETAIL_PK,
+        "app/modules/users/routes.py",
+        _VIA_STAFF_ORG,
+    ),
+    SensitiveEndpoint(
+        "PATCH",
+        "/api/v1/users/{user_id}",
+        ScopeKind.DETAIL_PK,
+        "app/modules/users/routes.py",
+        _VIA_STAFF_ORG,
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/users/{user_id}/activate",
+        ScopeKind.DETAIL_PK,
+        "app/modules/users/routes.py",
+        _VIA_STAFF_ORG,
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/users/{user_id}/deactivate",
+        ScopeKind.DETAIL_PK,
+        "app/modules/users/routes.py",
+        _VIA_STAFF_ORG,
+    ),
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/client-categories",
+        ScopeKind.COLLECTION,
+        "app/modules/client_categories/routes.py",
+        "PENDENTE (86e36ecqz): catálogo por organização, filtro ainda não aplicado",
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/client-categories",
+        ScopeKind.COLLECTION,
+        "app/modules/client_categories/routes.py",
+        "PENDENTE (86e36ecqz): a org da categoria nova ainda cai no default",
+    ),
+    SensitiveEndpoint(
+        "PATCH",
+        "/api/v1/client-categories/{category_id}",
+        ScopeKind.DETAIL_PK,
+        "app/modules/client_categories/routes.py",
+        "PENDENTE (86e36ecqz): alvo por PK sem AND organization_id",
+    ),
+    SensitiveEndpoint(
+        "DELETE",
+        "/api/v1/client-categories/{category_id}",
+        ScopeKind.DETAIL_PK,
+        "app/modules/client_categories/routes.py",
+        "PENDENTE (86e36ecqz): alvo por PK sem AND organization_id",
+    ),
     # ---------------------------------------------------------------- conciliações
     SensitiveEndpoint(
         "GET",
@@ -429,11 +530,16 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
 #: base no meio do caminho), mas o teste de existência os pula e o de cobertura
 #: os conta como NÃO cobertos. Esvaziar este conjunto é parte do DoD.
 #:
-#: **Vazio desde a BACK 05.5** — os 6 endpoints de usuários do cliente saíram
-#: daqui quando foram implementados; a cobertura fechou em 34/34. A Sprint 6
-#: acrescentou as 4 rotas do glossário JÁ implementadas (38/38), então este
-#: conjunto continua vazio.
-PENDING_ENDPOINTS: dict[str, str] = {}
+#: Ficou vazio da BACK 05.5 até a camada de organizações. Em 86e36ecnp as 4
+#: rotas de `client-categories` entraram no denominador (o catálogo é por
+#: organização desde a migration `3e8f1a6c9d24`) ANTES do filtro chegar
+#: (86e36ecqz) — o denominador fecha na abertura, e a cobertura conta o buraco.
+PENDING_ENDPOINTS: dict[str, str] = {
+    "GET /api/v1/client-categories": "org-scoping do catálogo chega em 86e36ecqz",
+    "POST /api/v1/client-categories": "org-scoping do catálogo chega em 86e36ecqz",
+    "PATCH /api/v1/client-categories/{category_id}": "org-scoping do catálogo chega em 86e36ecqz",
+    "DELETE /api/v1/client-categories/{category_id}": "org-scoping do catálogo chega em 86e36ecqz",
+}
 
 #: Rotas `/api/v1` que **não** são sensíveis a tenant, com o porquê. Existe para
 #: que o teste de completude possa afirmar "toda rota está classificada" — uma
@@ -443,23 +549,14 @@ NON_TENANT_ENDPOINTS: dict[str, str] = {
     "POST /api/v1/auth/login": "autenticação — ainda não há usuário",
     "POST /api/v1/auth/refresh": "autenticação — opera sobre o próprio token",
     "POST /api/v1/auth/logout": "autenticação — apenas limpa cookies",
-    "GET /api/v1/anomaly-types": "configuração global; sem dado de cliente",
-    "POST /api/v1/anomaly-types": "configuração global; admin-only",
-    "PATCH /api/v1/anomaly-types/{type_id}": "configuração global; admin-only",
-    "DELETE /api/v1/anomaly-types/{type_id}": "configuração global; admin-only",
-    "GET /api/v1/client-categories": "catálogo global de categorias de cliente; staff-only",
-    "POST /api/v1/client-categories": "catálogo global; admin-only",
-    "PATCH /api/v1/client-categories/{category_id}": "catálogo global; admin-only",
-    "DELETE /api/v1/client-categories/{category_id}": "catálogo global; admin-only",
-    "GET /api/v1/clients": "listagem da equipe Hologram; staff-only (papel de cliente = 403)",
-    "POST /api/v1/clients": "cria cliente; staff-only",
+    "GET /api/v1/anomaly-types": "taxonomia global do produto; sem dado de cliente nem de org",
+    "POST /api/v1/anomaly-types": "taxonomia global; escrita pela matriz (MANAGE_ANOMALY_TYPES)",
+    "PATCH /api/v1/anomaly-types/{type_id}": "taxonomia global; escrita pela matriz",
+    "DELETE /api/v1/anomaly-types/{type_id}": "taxonomia global; escrita pela matriz",
     "POST /api/v1/clients/test-connection": "valida credenciais enviadas no body; nada persistido",
-    "PATCH /api/v1/clients/{client_id}": "edita o cliente; admin-only pela matriz (EDIT_CLIENT)",
-    "GET /api/v1/users": "usuários do SISTEMA; admin-only",
-    "POST /api/v1/users": "usuários do SISTEMA; admin-only",
-    "GET /api/v1/users/{user_id}": "usuários do SISTEMA; admin-only",
-    "PATCH /api/v1/users/{user_id}": "usuários do SISTEMA; admin-only",
-    "POST /api/v1/users/{user_id}/activate": "usuários do SISTEMA; admin-only",
-    "POST /api/v1/users/{user_id}/deactivate": "usuários do SISTEMA; admin-only",
-    "POST /api/v1/system/alert-test": "diagnóstico de alerting; admin-only",
+    "POST /api/v1/system/alert-test": "diagnóstico de alerting; plataforma ou admin (RUN_ALERT_TEST)",
+    "GET /api/v1/organizations": "administração da plataforma (ManagePlatformDep); sem dado de cliente",
+    "POST /api/v1/organizations": "administração da plataforma (ManagePlatformDep)",
+    "GET /api/v1/organizations/{organization_id}": "administração da plataforma (ManagePlatformDep)",
+    "PATCH /api/v1/organizations/{organization_id}": "administração da plataforma (ManagePlatformDep)",
 }

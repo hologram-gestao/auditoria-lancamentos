@@ -181,10 +181,19 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**49** hoje — o arquivo é a fonte, confira com
+      (**62** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
-      **com teste negativo cross-tenant**. Essa lista é o denominador
-      da métrica de isolamento — endpoint fora dela é buraco que ninguém mede.
+      **com teste negativo cross-tenant E cross-org**: a bateria
+      (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
+      três atacantes — operador de outro tenant, admin e gerente de outra
+      organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
+      ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
+      `/users`, `/clients` e `/client-categories` são sensíveis a organização
+      (as 4 rotas do catálogo estão em `PENDING_ENDPOINTS` até a 86e36ecqz). Só
+      auth, tipos de anomalia, `test-connection`, `alert-test` e as 4 rotas de
+      `/organizations` (plataforma, sem dado de cliente) ficam fora, com motivo.
+      Essa lista é o denominador da métrica de isolamento — endpoint fora dela é
+      buraco que ninguém mede.
     - **Identidade de usuário em response é ENXUTA e mascarada por escopo**
       (86e2n39f1): expor QUEM fez algo devolve só `{name, email}` — nunca a
       linha de `users` (§3.2), nem `id` — e passa por **`author_for_viewer`**
@@ -697,6 +706,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.30 — 17/09/2026. **Nasceu o módulo de organizações e a bateria cross-org (task 86e36ecnp, onda 1 do épico 86e36ec0q).** `GET/POST /api/v1/organizations` e `GET/PATCH /api/v1/organizations/{id}` (só `platform_admin`; nome único sem caixa; `active=false` suspende: o staff da organização recebe 401 no request seguinte, o login é recusado com a mensagem genérica e a plataforma não cria cliente nela; reativar desfaz), com os eventos `organizacao_criada` e `organizacao_desativada` (só IDs e contagens, sem dedup). A lista canônica passou de **49 para 62**: `/users` (6), `/clients` GET/POST e `PATCH /clients/{id}` (3) e `/client-categories` (4, em `PENDING_ENDPOINTS` até a 86e36ecqz) saíram de "não-sensível" — eram "admin-only global", e admin agora é de UMA organização. A bateria ganhou a dimensão de ORGANIZAÇÃO: cada endpoint é disparado por três atacantes (operador de outro tenant, admin e gerente de outra organização), e a asserção passou a cobrir também o nome de um staff da Hologram. §3.15 atualizada com a contagem, o comando e o critério de "escopável"._
 
 _Versão 1.29 — 16/09/2026. **D2 entrou (task 86e36ecjp, onda 1 do épico 86e36ec0q): o `manager` gere os usuários dos clientes da carteira, e a carteira virou intra-org.** A célula `manage_client_users` ganhou o `manager` (o alcance segue sendo `resolve_client_access`, então fora da carteira continua negado); `is_active_manager` exige gerente da mesma organização do cliente e é a única validação de criar cliente, adicionar gerente e definir responsável (400 único, anti-enumeração); `POST /clients` decide a organização pela LINHA do ator — staff na própria (payload divergente é 403), plataforma escolhe (obrigatório; 404 inexistente, 409 suspensa) — e o criador gerente vira responsável só se for da org do cliente. §4.9 e §4.13 atualizadas. ⚠️ Efeito visível para os managers da Hologram no deploy da onda 1: as seis rotas de usuários do cliente passam a responder para quem tem o cliente na carteira; a aba na tela chega na onda 2._
 

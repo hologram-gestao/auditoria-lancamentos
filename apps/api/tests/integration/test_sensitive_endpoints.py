@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import null
 
 from app.core.config import get_settings
 from app.core.crypto import encrypt
@@ -35,6 +36,7 @@ from app.db.models import (
     Client,
     Notification,
     NotificationType,
+    Organization,
     ReconciliationFile,
     ReconciliationFileStatus,
     ReconciliationSession,
@@ -52,6 +54,9 @@ pytestmark = pytest.mark.integration
 
 PLAIN_PASSWORD = "Senh@ListaCanonica#1"
 SECRET_NAME_B = "Fulana Participacoes LTDA"
+#: Nome de um STAFF da Hologram: não pode aparecer para o admin de outra organização
+#: (camada de organizações, 86e36ecnp — a lista de usuários passou a ser sensível).
+SECRET_STAFF_A = "Ciclano Staff Sigiloso"
 
 
 def _hex64(seed: str) -> str:
@@ -168,6 +173,23 @@ _BODIES: dict[str, dict[str, Any]] = {
     # validação passaria sem nunca tocar a autorização.
     "POST /api/v1/clients/{client_id}/managers": {"user_id": "{user_id}"},
     "PATCH /api/v1/clients/{client_id}/assign": {"user_id": "{user_id}"},
+    # 86e36ecnp — rotas que viraram sensíveis a ORGANIZAÇÃO. Bodies válidos de
+    # propósito (mesmo raciocínio do ADR-012).
+    "POST /api/v1/clients": {
+        "name": "Cliente da bateria",
+        "omie_app_key": "FAKE_DEMO_OMIE_APP_KEY_DO_NOT_USE",
+        "omie_app_secret": "FAKE_DEMO_OMIE_APP_SECRET_DO_NOT_USE",
+    },
+    "PATCH /api/v1/clients/{client_id}": {"name": "Renomeado pela bateria"},
+    "POST /api/v1/users": {
+        "name": "Staff da bateria",
+        "email": "bateria-{uuid}@lista.com.br",
+        "password": "Senh@Bateria#1234",
+        "role": "manager",
+    },
+    "PATCH /api/v1/users/{user_id}": {"name": "Sequestrado pela bateria"},
+    "POST /api/v1/client-categories": {"name": "Categoria da bateria"},
+    "PATCH /api/v1/client-categories/{category_id}": {"name": "Renomeada pela bateria"},
 }
 
 #: Query string mínima por endpoint.
@@ -190,14 +212,24 @@ async def _seed_user(
     role: UserRole,
     scope: UserScope = UserScope.SYSTEM,
     client_id: object = None,
+    name: str = "Lista",
+    organization: Organization | None = None,
 ) -> User:
+    extra: dict[str, object] = {}
+    if scope is UserScope.PLATFORM:
+        # `null()`, não `None`: com `server_default` o ORM omitiria o campo e o
+        # banco preencheria a Hologram — e a plataforma não tem organização.
+        extra["organization_id"] = null()
+    elif organization is not None:
+        extra["organization_id"] = organization.id
     user = User(
-        name="Lista",
+        name=name,
         email=email.lower(),
         password_hash=hash_password(PLAIN_PASSWORD),
         role=role.value,
         active=True,
         scope=scope.value,
+        **extra,
         client_id=client_id,
     )
     session.add(user)
@@ -225,8 +257,36 @@ async def _seed_client(session: AsyncSession, *, creator: User, name: str) -> Cl
 
 @pytest.fixture
 async def tenants(db_session: AsyncSession) -> dict[str, Any]:
-    """Tenant A (o atacante) e tenant B (o alvo), com recursos reais em B."""
-    admin = await _seed_user(db_session, email="lista-admin@hologram.com.br", role=UserRole.ADMIN)
+    """Tenant A (o atacante) e tenant B (o alvo), com recursos reais em B.
+
+    Camada de organizações (86e36ecnp): os dois tenants são da Hologram; nasce
+    uma organização B com admin e gerente próprios — o segundo e o terceiro
+    atacantes, uma camada acima — e a plataforma, que alcança tudo.
+    """
+    admin = await _seed_user(
+        db_session,
+        email="lista-admin@hologram.com.br",
+        role=UserRole.ADMIN,
+        name=SECRET_STAFF_A,
+    )
+    org_b = Organization(name=f"Escritorio B {uuid4().hex[:6]}")
+    db_session.add(org_b)
+    await db_session.flush()
+    admin_b = await _seed_user(
+        db_session, email="admin-b@escritorio-b.com.br", role=UserRole.ADMIN, organization=org_b
+    )
+    manager_b = await _seed_user(
+        db_session,
+        email="gerente-b@escritorio-b.com.br",
+        role=UserRole.MANAGER,
+        organization=org_b,
+    )
+    platform = await _seed_user(
+        db_session,
+        email="plataforma-lista@hologram.com.br",
+        role=UserRole.PLATFORM_ADMIN,
+        scope=UserScope.PLATFORM,
+    )
     cli_a = await _seed_client(db_session, creator=admin, name="Austral Lista")
     cli_b = await _seed_client(db_session, creator=admin, name=SECRET_NAME_B)
     operador_a = await _seed_user(
@@ -277,6 +337,10 @@ async def tenants(db_session: AsyncSession) -> dict[str, Any]:
 
     return {
         "admin": admin,
+        "org_b": org_b,
+        "admin_b": admin_b,
+        "manager_b": manager_b,
+        "platform": platform,
         "cli_a": cli_a,
         "cli_b": cli_b,
         "operador_a": operador_a,
@@ -284,6 +348,16 @@ async def tenants(db_session: AsyncSession) -> dict[str, Any]:
         "file_b": file_b,
         "notif_b": notif_b,
     }
+
+
+#: Os atacantes da bateria: o operador do tenant A (cross-tenant, Sprint 5) e o
+#: admin e o gerente da organização B (cross-org, 86e36ecnp). Os três miram os
+#: recursos da Hologram: nenhum pode chegar neles, nem ler o nome de ninguém.
+ATTACKERS = {
+    "operador_a": "op-lista@austral.com.br",
+    "admin_b": "admin-b@escritorio-b.com.br",
+    "manager_b": "gerente-b@escritorio-b.com.br",
+}
 
 
 def _substitute(value: str, ctx: dict[str, str]) -> str:
@@ -312,21 +386,24 @@ def _substitute_deep(value: Any, ctx: dict[str, str]) -> Any:
 COVERED = [e for e in SENSITIVE_ENDPOINTS if e.key not in PENDING_ENDPOINTS]
 
 
+@pytest.mark.parametrize("attacker", sorted(ATTACKERS))
 @pytest.mark.parametrize("endpoint", COVERED, ids=lambda e: e.key)
 async def test_cross_tenant_por_endpoint(
     endpoint: Any,
+    attacker: str,
     client_with_db: AsyncClient,
     tenants: dict[str, Any],
 ) -> None:
-    """Operador do tenant A dispara o endpoint contra recursos do tenant B.
+    """Cada atacante dispara o endpoint contra recursos da Hologram (tenant B).
 
-    Critério: **nunca** 2xx, e o corpo **nunca** contém dado de B. Notificações
-    e coleções globais respondem 200 com conteúdo vazio de B — por isso a
-    asserção é "sem dado de B", não "status de erro", para essas.
+    Critério: **nunca** 2xx num recurso por PK, e o corpo **nunca** contém dado
+    de B nem o nome do staff da Hologram. Notificações e coleções globais
+    respondem 200 com conteúdo SEM nada de B (ou 403 para quem não é staff) —
+    por isso a asserção é "sem dado de B", não "status de erro", para essas.
     """
     login = await client_with_db.post(
         "/api/v1/auth/login",
-        json={"email": "op-lista@austral.com.br", "password": PLAIN_PASSWORD},
+        json={"email": ATTACKERS[attacker], "password": PLAIN_PASSWORD},
     )
     assert login.status_code == 200, login.text
 
@@ -352,8 +429,9 @@ async def test_cross_tenant_por_endpoint(
 
     resp = await client_with_db.request(endpoint.method, url, params=params or None, json=body)
 
-    # Nunca vaza dado do tenant alvo — a asserção que vale para TODOS.
+    # Nunca vaza dado do tenant alvo nem do staff alheio — a asserção que vale para TODOS.
     assert SECRET_NAME_B not in resp.text, f"{endpoint.key} vazou dado do tenant B"
+    assert SECRET_STAFF_A not in resp.text, f"{endpoint.key} vazou staff da Hologram"
 
     if endpoint.kind is ScopeKind.COLLECTION and "{" not in endpoint.path:
         # Coleções globais (notificações) respondem 200 com a lista vazia de B.
@@ -390,13 +468,18 @@ async def test_notificacoes_do_outro_tenant_nao_aparecem(
     assert SECRET_NAME_B not in leitura.text
 
 
-async def test_admin_continua_alcancando_os_dois_tenants(
-    client_with_db: AsyncClient, tenants: dict[str, Any]
+@pytest.mark.parametrize(
+    "email",
+    ["lista-admin@hologram.com.br", "plataforma-lista@hologram.com.br"],
+    ids=["admin-da-propria-org", "plataforma"],
+)
+async def test_staff_com_alcance_continua_chegando_nos_dois_tenants(
+    client_with_db: AsyncClient, tenants: dict[str, Any], email: str
 ) -> None:
-    """Regressão: o filtro novo é no-op para `system` (nada quebrou para a equipe)."""
+    """Regressão: o admin da PRÓPRIA organização e a plataforma alcançam os dois
+    tenants da Hologram — o isolamento cross-org não fechou o que devia abrir."""
     login = await client_with_db.post(
-        "/api/v1/auth/login",
-        json={"email": "lista-admin@hologram.com.br", "password": PLAIN_PASSWORD},
+        "/api/v1/auth/login", json={"email": email, "password": PLAIN_PASSWORD}
     )
     assert login.status_code == 200
 
@@ -406,3 +489,29 @@ async def test_admin_continua_alcancando_os_dois_tenants(
 
     detalhe = await client_with_db.get(f"/api/v1/reconciliations/{tenants['sess_b'].id}")
     assert detalhe.status_code == 200, detalhe.text
+
+    usuarios = await client_with_db.get("/api/v1/users", params={"pageSize": 100})
+    assert usuarios.status_code == 200, usuarios.text
+    assert SECRET_STAFF_A in usuarios.text
+
+
+async def test_admin_de_outra_organizacao_nao_ve_clientes_nem_staff_da_hologram(
+    client_with_db: AsyncClient, tenants: dict[str, Any]
+) -> None:
+    """As coleções globais respondem 200 — mas SEM nada da Hologram dentro."""
+    login = await client_with_db.post(
+        "/api/v1/auth/login",
+        json={"email": "admin-b@escritorio-b.com.br", "password": PLAIN_PASSWORD},
+    )
+    assert login.status_code == 200
+
+    clientes = await client_with_db.get("/api/v1/clients", params={"pageSize": 100})
+    assert clientes.status_code == 200, clientes.text
+    assert clientes.json()["data"] == []
+    assert clientes.json()["pagination"]["total"] == 0
+
+    usuarios = await client_with_db.get("/api/v1/users", params={"pageSize": 100})
+    assert usuarios.status_code == 200, usuarios.text
+    emails = {row["email"] for row in usuarios.json()["data"]}
+    assert emails == {"admin-b@escritorio-b.com.br", "gerente-b@escritorio-b.com.br"}
+    assert SECRET_STAFF_A not in usuarios.text
