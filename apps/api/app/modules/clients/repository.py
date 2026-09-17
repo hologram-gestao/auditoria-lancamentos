@@ -44,6 +44,7 @@ from app.db.models import (
     ClientGlossaryEntry,
     Notification,
     OmieAccountCache,
+    Organization,
     ReconciliationFile,
     ReconciliationSession,
     ReconciliationStatus,
@@ -313,20 +314,27 @@ class ClientRepository:
         )
         return result.scalar_one_or_none()
 
-    async def is_active_manager(self, user_id: UUID) -> bool:
-        """Alvo válido de carteira: existe, ativo e `manager` — decidido no banco.
+    async def is_active_manager(self, user_id: UUID, *, organization_id: UUID) -> bool:
+        """Alvo válido de carteira: existe, ativo, `manager` E DA MESMA ORGANIZAÇÃO
+        do cliente — decidido no banco (86e36ecjp: a carteira é intra-org).
 
         Só `id` no SELECT: não hidrata a linha inteira de `users` (com hash de
-        senha) para responder um booleano.
+        senha) para responder um booleano. Gerente de outra organização é
+        indistinguível de "não é gerente" de propósito (anti-enumeração).
         """
         result = await self._session.execute(
             select(User.id).where(
                 User.id == user_id,
                 User.active.is_(True),
                 User.role == UserRole.MANAGER.value,
+                User.organization_id == organization_id,
             )
         )
         return result.scalar_one_or_none() is not None
+
+    async def get_organization(self, organization_id: UUID) -> Organization | None:
+        """Organização pela PK — para a plataforma escolher onde o cliente nasce."""
+        return await self._session.get(Organization, organization_id)
 
     # ------------------------------ FAVORITOS (86e34jd5a) -------------
 

@@ -48,6 +48,10 @@ from app.core.exceptions import (
     OmieFaultError,
     OmieServerError,
     OmieTimeoutError,
+    OrganizationInactiveError,
+    OrganizationMismatchError,
+    OrganizationNotFoundError,
+    ValidationAppError,
 )
 from app.db.models import Client, ClientAssignment, OmieAccountCache, User
 from app.integrations.omie.client import OmieClient, OmieCredentials
@@ -181,18 +185,19 @@ class ClientService:
         name: str,
         omie_app_key: str,
         omie_app_secret: str,
-        current_user_id: UUID,
-        organization_id: UUID | None,
+        actor: CurrentUser,
+        requested_organization_id: UUID | None,
         category_id: UUID | None = None,
     ) -> ClientResponse:
         """Cria cliente com credenciais criptografadas + auto-assign do criador.
 
-        `organization_id` é a org da LINHA do ator (§3.15): o cliente nasce onde
-        quem o cria está — sem isso, um admin de outra organização criaria um
-        cliente na Hologram (o default do banco) e perderia o alcance a ele no
-        request seguinte. `None` só para a plataforma, que ainda cai no default
-        do banco; a escolha explícita da organização pela plataforma chega na
-        task 86e36ecjp.
+        A organização do cliente é decidida por `_resolve_organization_for_creation`
+        (§3.15): staff de organização cria na PRÓPRIA org (a da LINHA; um
+        `organization_id` diferente no payload é 403, nunca ignorado); a
+        plataforma escolhe, e a escolha é obrigatória e validada (org existe e
+        está ativa). Sem isso, um admin de outra organização criaria um cliente
+        na Hologram (o default do banco) e perderia o alcance a ele no request
+        seguinte.
 
         Sprint 3: cada cliente nasce com uma DEK própria (gerada e embrulhada
         pela KEK do KMS). As credenciais são cifradas no envelope versionado
@@ -201,6 +206,10 @@ class ClientService:
         Cada credencial usa IV próprio; o texto plano só vive em memória local.
         """
         await self._assert_category_exists(category_id)
+        organization_id = await self._resolve_organization_for_creation(
+            actor, requested_organization_id
+        )
+        current_user_id = UUID(actor.id)
         client_id = uuid4()
         cipher, dek_wrapped = await new_client_dek(client_id, settings=self._settings)
         ct_key, iv_key = cipher.encrypt(omie_app_key, field_locator(AAD_CLIENT_APP_KEY, client_id))
@@ -219,17 +228,17 @@ class ClientService:
             active=True,
             created_by=current_user_id,
             category_id=category_id,
+            organization_id=organization_id,
         )
-        if organization_id is not None:
-            client.organization_id = organization_id
         await self._repo.add_client(client)
 
         # Carteira (86e390kz8): só GERENTE entra. Quem cria sendo manager vira
-        # o RESPONSÁVEL. Admin já alcança tudo pela matriz e não entra na
-        # carteira — nem como responsável provisório: o cliente nasce sem
-        # responsável e o primeiro gerente adicionado assume (`add_client_manager`),
-        # ou o admin define pelo `/assign`.
-        if await self._repo.is_active_manager(current_user_id):
+        # o RESPONSÁVEL. Admin e plataforma já alcançam tudo pela matriz e não
+        # entram na carteira — nem como responsável provisório: o cliente nasce
+        # sem responsável e o primeiro gerente adicionado assume
+        # (`add_client_manager`), ou o admin define pelo `/assign`. A carteira é
+        # intra-org (86e36ecjp): o criador só entra se for gerente DA org do cliente.
+        if await self._repo.is_active_manager(current_user_id, organization_id=organization_id):
             assignment = ClientAssignment(
                 client_id=client.id,
                 user_id=current_user_id,
@@ -239,6 +248,42 @@ class ClientService:
             await self._repo.add_assignment(assignment)
 
         return await self.get_client_detail(client.id, viewer_user_id=current_user_id)
+
+    async def _resolve_organization_for_creation(
+        self, actor: CurrentUser, requested: UUID | None
+    ) -> UUID:
+        """Em que organização o cliente nasce — a decisão vem da LINHA do ator.
+
+        - Plataforma: escolhe. Obrigatório (400 se omitido), e a org tem de
+          existir (404) e estar ativa (409).
+        - Staff de organização: a própria. `requested` ausente ou igual à
+          própria passa; diferente é 403 (`OrganizationMismatchError`) — nunca
+          ignorado em silêncio.
+        - Staff sem organização (linha corrompida): 403.
+        """
+        if actor.is_platform:
+            if requested is None:
+                raise ValidationAppError(
+                    "organization_id é obrigatório quando a plataforma cria um cliente.",
+                    user_message="Escolha a organização em que o cliente será criado.",
+                )
+            organization = await self._repo.get_organization(requested)
+            if organization is None:
+                raise OrganizationNotFoundError(f"Organização inexistente: {requested}")
+            if not organization.active:
+                raise OrganizationInactiveError(f"Organização {requested} está suspensa.")
+            return organization.id
+
+        if actor.organization_id is None:
+            raise OrganizationMismatchError(
+                f"Usuário {actor.id} (scope={actor.scope}) sem organização tentou criar cliente."
+            )
+        if requested is not None and requested != actor.organization_id:
+            raise OrganizationMismatchError(
+                f"Usuário {actor.id} da organização {actor.organization_id} tentou criar "
+                f"cliente na organização {requested}."
+            )
+        return actor.organization_id
 
     # ------------------------------ UPDATE ----------------------------
 
@@ -325,7 +370,7 @@ class ClientService:
         simultâneas produzem uma linha e um 409, nunca duas linhas. Cliente SEM
         responsável (criado por admin): o primeiro gerente que entra assume.
         """
-        await self._assert_active_manager(user_id)
+        await self._assert_active_manager(user_id, organization_id=client.organization_id)
         inserted = await self._repo.add_assignment_if_absent(
             client_id=client.id, user_id=user_id, assigned_by=current_admin_id
         )
@@ -375,7 +420,7 @@ class ClientService:
         quem já tem acesso não é inserido de novo (ON CONFLICT DO NOTHING) e
         promover quem já é o responsável rebaixa e promove a mesma linha.
         """
-        await self._assert_active_manager(user_id)
+        await self._assert_active_manager(user_id, organization_id=client.organization_id)
         await self._repo.add_assignment_if_absent(
             client_id=client.id, user_id=user_id, assigned_by=current_admin_id
         )
@@ -387,15 +432,21 @@ class ClientService:
             )
         return await self.get_client_detail(client.id, viewer_user_id=current_admin_id)
 
-    async def _assert_active_manager(self, user_id: UUID) -> None:
-        """400 se o alvo não existe, está inativo ou não é `manager` (S6 §3.5).
+    async def _assert_active_manager(self, user_id: UUID, *, organization_id: UUID) -> None:
+        """400 se o alvo não existe, está inativo, não é `manager` OU é de outra
+        organização (S6 §3.5 + 86e36ecjp: a carteira é intra-org).
 
-        Admin não entra na carteira — nem por aqui, nem na criação do cliente:
-        já alcança todos os clientes pela matriz, e contá-lo em `manager_count`
-        mentiria sobre quem opera a carteira.
+        Um só código para os quatro casos, de propósito: distinguir "gerente de
+        outra organização" diria a um admin que aquele id existe e é gerente em
+        algum lugar (anti-enumeração, §3.15). Admin e plataforma não entram na
+        carteira — nem por aqui, nem na criação do cliente: já alcançam os
+        clientes pela matriz, e contá-los em `manager_count` mentiria sobre quem
+        opera a carteira.
         """
-        if not await self._repo.is_active_manager(user_id):
-            raise InvalidManagerError(f"User {user_id} não é manager ativo (recusado).")
+        if not await self._repo.is_active_manager(user_id, organization_id=organization_id):
+            raise InvalidManagerError(
+                f"User {user_id} não é manager ativo da organização {organization_id} (recusado)."
+            )
 
     # ------------------------------ TEST CONNECTION -------------------
 

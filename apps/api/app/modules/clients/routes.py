@@ -138,9 +138,10 @@ async def create_client(
         name=payload.name,
         omie_app_key=payload.omie_app_key,
         omie_app_secret=payload.omie_app_secret,
-        current_user_id=UUID(user.id),
-        # A org de quem cria, da LINHA — nunca do payload.
-        organization_id=user.organization_id,
+        actor=user,
+        # Só a plataforma escolhe; para o staff, o service confere contra a
+        # LINHA do ator e recusa divergência (§3.15).
+        requested_organization_id=payload.organization_id,
         category_id=payload.category_id,
     )
 

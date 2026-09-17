@@ -150,7 +150,7 @@ _PLATFORM_ONLY: frozenset[UserRole] = frozenset({UserRole.PLATFORM_ADMIN})
 #: | Revisar / exportar            | ✅             | ✅          | ✅             | ✅             | ✅              |
 #: | Sincronizar contas do Omie    | ✅             | ✅          | ✅             | ✅             | ✅              |
 #: | Manter o glossário (S6)       | ✅             | ✅          | ✅ (carteira)  | ✅             | ❌              |
-#: | Gerir usuários do cliente     | ✅             | ✅          | ❌ (D2: task 3)| ✅             | ❌              |
+#: | Gerir usuários do cliente     | ✅             | ✅          | ✅ (carteira)  | ✅             | ❌              |
 #: | Criar cliente                 | ✅             | ✅          | ✅ (vira resp.)| ❌             | ❌              |
 #: | Editar dados do cliente (§9)  | ✅             | ✅          | ❌             | ❌             | ❌              |
 #: | Ver outro tenant              | ✅             | ✅ (org)    | ✅ (carteira)  | ❌             | ❌              |
@@ -168,9 +168,11 @@ PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]] = {
     Permission.RUN_RECONCILIATION: _EVERYONE,
     Permission.REVIEW_EXPORT: _EVERYONE,
     Permission.SYNC_OMIE_ACCOUNTS: _EVERYONE,
-    # D2 (task 86e36ecjp) acrescenta o `manager` aqui, dentro da carteira.
+    # D2 (86e36ecjp): o `manager` gere os usuários dos clientes DA CARTEIRA — o
+    # "da carteira" é `resolve_client_access` (AccessibleClientDep nas rotas),
+    # não esta linha.
     Permission.MANAGE_CLIENT_USERS: frozenset(
-        {UserRole.PLATFORM_ADMIN, UserRole.ADMIN, UserRole.CLIENT_MANAGER}
+        {UserRole.PLATFORM_ADMIN, UserRole.ADMIN, UserRole.MANAGER, UserRole.CLIENT_MANAGER}
     ),
     # Glossário: gerente do cliente + staff. O `manager` entra aqui
     # (diferente de MANAGE_CLIENT_USERS) porque o PRD da Sprint 6 pede "admin, e

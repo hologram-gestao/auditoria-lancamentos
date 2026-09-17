@@ -84,8 +84,8 @@ _TABLE: dict[Permission, tuple[bool, bool, bool, bool, bool]] = {
     Permission.RUN_RECONCILIATION: (True, True, True, True, True),
     Permission.REVIEW_EXPORT: (True, True, True, True, True),
     Permission.SYNC_OMIE_ACCOUNTS: (True, True, True, True, True),
-    # O `manager` entra pela carteira na task D2 (86e36ecjp) — hoje ❌.
-    Permission.MANAGE_CLIENT_USERS: (True, True, False, True, False),
+    # D2 (86e36ecjp): o `manager` gere usuários dos clientes DA CARTEIRA.
+    Permission.MANAGE_CLIENT_USERS: (True, True, True, True, False),
     # `client_operator` só LÊ; o "dentro da carteira" do manager é `resolve_client_access`.
     Permission.MANAGE_GLOSSARY: (True, True, True, True, False),
     Permission.CREATE_CLIENT: (True, True, True, False, False),
