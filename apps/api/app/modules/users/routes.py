@@ -11,8 +11,12 @@ Toda rota exige a permissão `MANAGE_ORG_USERS` da matriz (plataforma e admin da
 organização); manager autenticado recebe 403. A listagem e o alvo por PK são
 SÓ staff (`scope='system'`) da organização do observador — plataforma e
 usuários de cliente nunca aparecem nem são alcançados por aqui (anti-IDOR); a
-criação carimba a organização do ator. A escolha de organização pela
-plataforma (`?organizationId=`, `organization_id` no body) chega na task 86e36ecqz.
+criação carimba a organização do ator. A plataforma escolhe a organização
+(`?organizationId=` na lista, `organization_id` no body da criação —
+obrigatório para ela); para o admin, o mesmo parâmetro só pode ser a própria
+org (outro valor é 403, nunca ignorado). `?role=` alimenta o seletor de
+gerentes do front. `platform_admin` não entra em whitelist nenhuma: forjá-lo
+no body é erro de validação.
 """
 
 from __future__ import annotations
@@ -23,8 +27,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 
 from app.core.dependencies import DbSessionDep, ManageOrgUsersDep
-from app.db.models import UserRole
-from app.modules.users.repository import UserRepository
+from app.db.models import SystemUserRole, UserRole
+from app.modules.users.repository import StaffRow, UserRepository
 from app.modules.users.schemas import (
     CreateUserRequest,
     UpdateUserRequest,
@@ -43,9 +47,13 @@ def _get_user_service(db: DbSessionDep) -> UserService:
 UserServiceDep = Annotated[UserService, Depends(_get_user_service)]
 
 
+def _to_response(row: StaffRow) -> UserResponse:
+    return UserResponse.from_staff(row.user, organization_name=row.organization_name)
+
+
 @router.get(
     "",
-    summary="Listar usuários (paginado, busca por nome ou e-mail).",
+    summary="Listar staff (paginado, busca por nome ou e-mail; filtros de organização e papel).",
 )
 async def list_users(
     admin: ManageOrgUsersDep,
@@ -53,14 +61,26 @@ async def list_users(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
     search: Annotated[str | None, Query(min_length=1, max_length=200)] = None,
+    organization_id: Annotated[
+        UUID | None,
+        Query(
+            alias="organizationId",
+            description="Plataforma: restringe a uma organização. Admin: só a própria.",
+        ),
+    ] = None,
+    role: Annotated[
+        SystemUserRole | None, Query(description="Filtra pelo papel (admin ou manager).")
+    ] = None,
 ) -> UserListResponse:
     rows, pagination = await service.list_users(
-        viewer=admin, page=page, page_size=page_size, search=search
+        viewer=admin,
+        page=page,
+        page_size=page_size,
+        search=search,
+        requested_organization_id=organization_id,
+        role=UserRole(role) if role is not None else None,
     )
-    return UserListResponse(
-        data=[UserResponse.model_validate(u) for u in rows],
-        pagination=pagination,
-    )
+    return UserListResponse(data=[_to_response(r) for r in rows], pagination=pagination)
 
 
 @router.post(
@@ -73,7 +93,7 @@ async def create_user(
     admin: ManageOrgUsersDep,
     service: UserServiceDep,
 ) -> UserResponse:
-    user = await service.create_user(
+    row = await service.create_user(
         viewer=admin,
         name=payload.name,
         email=payload.email,
@@ -81,8 +101,11 @@ async def create_user(
         # `SystemUserRole` é a whitelist do REQUEST (admin/manager); o service
         # trabalha com o enum completo. Conversão explícita, sem string mágica.
         role=UserRole(payload.role),
+        # Só a plataforma escolhe; para o admin, o service confere contra a
+        # LINHA do ator e recusa divergência (§3.15).
+        requested_organization_id=payload.organization_id,
     )
-    return UserResponse.model_validate(user)
+    return _to_response(row)
 
 
 @router.get(
@@ -94,8 +117,7 @@ async def get_user(
     admin: ManageOrgUsersDep,
     service: UserServiceDep,
 ) -> UserResponse:
-    user = await service.get_user(user_id, viewer=admin)
-    return UserResponse.model_validate(user)
+    return _to_response(await service.get_user(user_id, viewer=admin))
 
 
 @router.patch(
@@ -108,14 +130,14 @@ async def update_user(
     admin: ManageOrgUsersDep,
     service: UserServiceDep,
 ) -> UserResponse:
-    user = await service.update_user(
+    row = await service.update_user(
         user_id,
         viewer=admin,
         name=payload.name,
         email=payload.email,
         role=UserRole(payload.role) if payload.role is not None else None,
     )
-    return UserResponse.model_validate(user)
+    return _to_response(row)
 
 
 @router.post(
@@ -127,8 +149,7 @@ async def deactivate_user(
     admin: ManageOrgUsersDep,
     service: UserServiceDep,
 ) -> UserResponse:
-    user = await service.set_user_active(user_id, active=False, viewer=admin)
-    return UserResponse.model_validate(user)
+    return _to_response(await service.set_user_active(user_id, active=False, viewer=admin))
 
 
 @router.post(
@@ -140,5 +161,4 @@ async def activate_user(
     admin: ManageOrgUsersDep,
     service: UserServiceDep,
 ) -> UserResponse:
-    user = await service.set_user_active(user_id, active=True, viewer=admin)
-    return UserResponse.model_validate(user)
+    return _to_response(await service.set_user_active(user_id, active=True, viewer=admin))

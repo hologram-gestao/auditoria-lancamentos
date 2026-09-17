@@ -13,6 +13,7 @@ Princípios:
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -25,9 +26,12 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 # exclusivamente pela API de usuários DO CLIENTE, com a whitelist simétrica.
 from app.db.models import ClientUserRole, SystemUserRole
 
+if TYPE_CHECKING:
+    from app.db.models import User
+
 
 class CreateUserRequest(BaseModel):
-    """Body de POST /api/v1/users — admin cria novo usuário."""
+    """Body de POST /api/v1/users — cria staff da organização."""
 
     name: str = Field(..., min_length=1, max_length=150, description="Nome completo.")
     email: EmailStr = Field(..., description="E-mail único de login.")
@@ -38,6 +42,16 @@ class CreateUserRequest(BaseModel):
         description="Senha inicial em texto plano (bcrypt cost ≥12).",
     )
     role: SystemUserRole = Field(..., description="Perfil: admin ou manager.")
+    # Camada de organizações (86e36ecqz): a plataforma ESCOLHE onde o staff
+    # nasce (obrigatório para ela). Para o admin de organização, ou é omitido
+    # (a org da LINHA do ator) ou é a própria org — outro valor é 403.
+    organization_id: UUID | None = Field(
+        None,
+        description=(
+            "Organização do novo usuário. Obrigatória para a plataforma; para o admin "
+            "de organização, omitir (usa a própria) ou repetir a própria."
+        ),
+    )
 
 
 class UpdateUserRequest(BaseModel):
@@ -62,11 +76,36 @@ class UserResponse(BaseModel):
     name: str
     email: str
     role: str  # value do StrEnum
+    scope: str  # sempre "system" aqui: a listagem é só de staff (86e36ecqz)
     active: bool
     created_at: datetime
     updated_at: datetime
+    # Camada de organizações (86e36ecqz): a coluna "Organização" da visão da
+    # plataforma. Para o admin de organização é sempre a própria.
+    organization_id: UUID | None = None
+    organization_name: str | None = None
 
-    model_config = {"from_attributes": True}
+    @classmethod
+    def from_staff(cls, user: User, *, organization_name: str | None) -> UserResponse:
+        """Monta a response a partir da LINHA + o nome da org lido no mesmo SELECT.
+
+        Explícito (e não `model_validate(user)`): o nome da organização não é
+        atributo do `User` (não há relationship `User.organization`; o nome vem
+        por join no repositório), e nada aqui pode cair num acesso preguiçoso
+        dentro da serialização.
+        """
+        return cls(
+            id=user.id,
+            name=user.name,
+            email=user.email,
+            role=user.role,
+            scope=user.scope,
+            active=user.active,
+            created_at=user.created_at,
+            updated_at=user.updated_at,
+            organization_id=user.organization_id,
+            organization_name=organization_name,
+        )
 
 
 class PaginationMeta(BaseModel):

@@ -160,12 +160,25 @@ class ClientCategorySummary(BaseModel):
     tone: str
 
 
+class OrganizationSummary(BaseModel):
+    """Organização dona do cliente, como aparece na lista e no detalhe (86e36ecqz).
+
+    É a coluna "Organização" da visão da plataforma; para o staff de organização
+    é sempre a própria. Nome de BPO, não dado do cliente final (§4.5).
+    """
+
+    id: UUID
+    name: str
+
+
 class ClientResponse(BaseModel):
     """Representação pública de um Client. NUNCA inclui campos `*_encrypted`/`*_iv`."""
 
     id: UUID
     name: str
     active: bool
+    # 86e36ecqz — a organização dona. Sempre presente (coluna NOT NULL).
+    organization: OrganizationSummary
     created_at: datetime
     updated_at: datetime
     responsible_manager: ManagerSummary | None = None

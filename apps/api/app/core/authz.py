@@ -45,11 +45,21 @@ from pydantic import BaseModel
 from sqlalchemy import ColumnElement, Select, and_, false, select
 from sqlalchemy.orm import aliased
 
+from app.core.exceptions import (
+    OrganizationInactiveError,
+    OrganizationMismatchError,
+    OrganizationNotFoundError,
+    ValidationAppError,
+)
 from app.db.models import Client, ClientAssignment, UserRole, UserScope
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.orm import InstrumentedAttribute
+
+    from app.db.models import Organization
 
 
 class CurrentUser(BaseModel):
@@ -71,6 +81,11 @@ class CurrentUser(BaseModel):
     #: o CHECK do banco exige valor — `None` aqui é linha corrompida, e todo
     #: filtro abaixo a trata como "não alcança nada" (negado por padrão).
     organization_id: UUID | None = None
+    #: Nome da organização, lido na MESMA query de `get_current_user` (outer join).
+    #: Serve ao rótulo de autoria "Equipe {org}" (86e36ecqz): para o usuário de
+    #: cliente, a org da linha É a org do cliente (desnormalizada, §4.8). `None`
+    #: para a plataforma.
+    organization_name: str | None = None
 
     @property
     def is_client_scoped(self) -> bool:
@@ -216,6 +231,82 @@ def tenant_filter_client_id(user: CurrentUser) -> UUID | None:
     implementação; é a mesma decisão projetada em `WHERE`.
     """
     return user.client_id if user.is_client_scoped else None
+
+
+def resolve_organization_filter(actor: CurrentUser, requested: UUID | None) -> UUID | None:
+    """Que organização um `?organizationId=` pode restringir — decisão ÚNICA das
+    listagens de staff (usuários, clientes, categorias; 86e36ecqz).
+
+    - Plataforma: o pedido vale (ou `None` = todas).
+    - Staff de organização: só a própria. Ausente ou igual → `None` (o filtro de
+      dados — `scoped_by_organization`/`reach_filter` — já restringe à org da
+      LINHA); diferente → 403 `OrganizationMismatchError`, nunca ignorado em
+      silêncio (ignorar faria a tela acreditar que filtrou).
+    - Usuário de cliente com o parâmetro: 403 (não há organização a escolher).
+      Hoje inalcançável pelas rotas (todas são `StaffDep`/guard da matriz);
+      fica pelo "negado por padrão" — a decisão não depende do guard.
+    """
+    if actor.is_platform:
+        return requested
+    if requested is None:
+        return None
+    if actor.is_client_scoped or requested != actor.organization_id:
+        raise OrganizationMismatchError(
+            f"Usuário {actor.id} (scope={actor.scope}, org={actor.organization_id}) pediu "
+            f"a organização {requested}."
+        )
+    return None
+
+
+async def resolve_organization_for_creation(
+    actor: CurrentUser,
+    requested: UUID | None,
+    *,
+    get_organization: Callable[[UUID], Awaitable[Organization | None]],
+    subject: str,
+) -> UUID:
+    """Em que organização um recurso NASCE — a decisão vem da LINHA do ator.
+
+    Consumida por `POST /clients`, `POST /users` e `POST /client-categories`:
+    o `organization_id` do payload só é aceito da plataforma.
+
+    - Plataforma: escolhe. Obrigatório (400 se omitido), e a organização tem de
+      existir (404) e estar ativa (409).
+    - Staff de organização: a própria. `requested` ausente ou igual à própria
+      passa; diferente é 403 (`OrganizationMismatchError`) — nunca ignorado.
+    - Sem organização na linha (corrompida) ou usuário de cliente: 403.
+
+    `get_organization` é o leitor do repositório de quem chama — a decisão não
+    abre sessão própria. `subject` é o recurso COM artigo, para a mensagem
+    concordar ("o cliente", "o usuário", "a categoria").
+    """
+    if actor.is_platform:
+        if requested is None:
+            raise ValidationAppError(
+                f"organization_id é obrigatório quando a plataforma cria {subject}.",
+                user_message=f"Escolha a organização de destino para {subject}.",
+            )
+        organization = await get_organization(requested)
+        if organization is None:
+            raise OrganizationNotFoundError(f"Organização inexistente: {requested}")
+        if not organization.active:
+            raise OrganizationInactiveError(f"Organização {requested} está suspensa.")
+        return organization.id
+
+    # Só staff bem formado cria na própria org. Plataforma MALFORMADA (scope
+    # `platform` carregando org ou tenant) cai aqui, como em `is_platform`,
+    # `scoped_by_organization` e `reach_filter`: negada, nunca tratada como staff.
+    if actor.scope != UserScope.SYSTEM.value or actor.organization_id is None:
+        raise OrganizationMismatchError(
+            f"Usuário {actor.id} (scope={actor.scope}, org={actor.organization_id}) "
+            f"não pode criar {subject}."
+        )
+    if requested is not None and requested != actor.organization_id:
+        raise OrganizationMismatchError(
+            f"Usuário {actor.id} da organização {actor.organization_id} tentou criar "
+            f"{subject} na organização {requested}."
+        )
+    return actor.organization_id
 
 
 def organization_client_filter(

@@ -26,7 +26,11 @@ from uuid import UUID, uuid4
 import httpx
 from pydantic import SecretStr
 
-from app.core.authz import CurrentUser
+from app.core.authz import (
+    CurrentUser,
+    resolve_organization_filter,
+    resolve_organization_for_creation,
+)
 from app.core.crypto_service import (
     AAD_CLIENT_APP_KEY,
     AAD_CLIENT_APP_SECRET,
@@ -48,10 +52,6 @@ from app.core.exceptions import (
     OmieFaultError,
     OmieServerError,
     OmieTimeoutError,
-    OrganizationInactiveError,
-    OrganizationMismatchError,
-    OrganizationNotFoundError,
-    ValidationAppError,
 )
 from app.db.models import Client, ClientAssignment, OmieAccountCache, User
 from app.integrations.omie.client import OmieClient, OmieCredentials
@@ -65,6 +65,7 @@ from app.modules.clients.schemas import (
     ClientManagerResponse,
     ClientResponse,
     ManagerSummary,
+    OrganizationSummary,
     ReconciliationSessionSummary,
     TestConnectionResponse,
 )
@@ -91,6 +92,7 @@ def _row_to_response(row: ClientRow) -> ClientResponse:
         id=row.client.id,
         name=row.client.name,
         active=row.client.active,
+        organization=OrganizationSummary(id=row.organization.id, name=row.organization.name),
         created_at=row.client.created_at,
         updated_at=row.client.updated_at,
         responsible_manager=manager,
@@ -139,18 +141,23 @@ class ClientService:
         page_size: int,
         search: str | None,
         category_id: UUID | None = None,
+        requested_organization_id: UUID | None = None,
     ) -> tuple[list[ClientResponse], PaginationMeta]:
         """Lista clientes dentro do ALCANCE do usuário (`authz.reach_filter`).
 
         O repositório põe a decisão única no SELECT; aqui só se repassa a LINHA
-        do usuário — favoritos e alcance derivam dela, nunca da rota.
+        do usuário — favoritos e alcance derivam dela, nunca da rota. O
+        `?organizationId=` passa por `resolve_organization_filter`: vale para a
+        plataforma; para o staff, ou é a própria (no-op) ou é 403 (86e36ecqz).
         """
+        organization_id = resolve_organization_filter(user, requested_organization_id)
         rows, total = await self._repo.list_paginated(
             user=user,
             page=page,
             page_size=page_size,
             search=search,
             category_id=category_id,
+            organization_id=organization_id,
         )
         total_pages = (total + page_size - 1) // page_size if page_size else 0
         responses = [_row_to_response(r) for r in rows]
@@ -205,10 +212,13 @@ class ClientService:
         gerado ANTES para compor o AAD (o default `uuid4` só valeria no flush).
         Cada credencial usa IV próprio; o texto plano só vive em memória local.
         """
-        await self._assert_category_exists(category_id)
-        organization_id = await self._resolve_organization_for_creation(
-            actor, requested_organization_id
+        organization_id = await resolve_organization_for_creation(
+            actor,
+            requested_organization_id,
+            get_organization=self._repo.get_organization,
+            subject="o cliente",
         )
+        await self._assert_category_exists(category_id, organization_id=organization_id)
         current_user_id = UUID(actor.id)
         client_id = uuid4()
         cipher, dek_wrapped = await new_client_dek(client_id, settings=self._settings)
@@ -249,42 +259,6 @@ class ClientService:
 
         return await self.get_client_detail(client.id, viewer_user_id=current_user_id)
 
-    async def _resolve_organization_for_creation(
-        self, actor: CurrentUser, requested: UUID | None
-    ) -> UUID:
-        """Em que organização o cliente nasce — a decisão vem da LINHA do ator.
-
-        - Plataforma: escolhe. Obrigatório (400 se omitido), e a org tem de
-          existir (404) e estar ativa (409).
-        - Staff de organização: a própria. `requested` ausente ou igual à
-          própria passa; diferente é 403 (`OrganizationMismatchError`) — nunca
-          ignorado em silêncio.
-        - Staff sem organização (linha corrompida): 403.
-        """
-        if actor.is_platform:
-            if requested is None:
-                raise ValidationAppError(
-                    "organization_id é obrigatório quando a plataforma cria um cliente.",
-                    user_message="Escolha a organização em que o cliente será criado.",
-                )
-            organization = await self._repo.get_organization(requested)
-            if organization is None:
-                raise OrganizationNotFoundError(f"Organização inexistente: {requested}")
-            if not organization.active:
-                raise OrganizationInactiveError(f"Organização {requested} está suspensa.")
-            return organization.id
-
-        if actor.organization_id is None:
-            raise OrganizationMismatchError(
-                f"Usuário {actor.id} (scope={actor.scope}) sem organização tentou criar cliente."
-            )
-        if requested is not None and requested != actor.organization_id:
-            raise OrganizationMismatchError(
-                f"Usuário {actor.id} da organização {actor.organization_id} tentou criar "
-                f"cliente na organização {requested}."
-            )
-        return actor.organization_id
-
     # ------------------------------ UPDATE ----------------------------
 
     async def update_client(
@@ -313,7 +287,7 @@ class ClientService:
         if active is not None:
             client.active = active
         if category_set:
-            await self._assert_category_exists(category_id)
+            await self._assert_category_exists(category_id, organization_id=client.organization_id)
             client.category_id = category_id
 
         # Pares possíveis: ambos None (ignora), ambos preenchidos (recriptografa),
@@ -340,12 +314,21 @@ class ClientService:
         await self._repo.add_client(client)
         return await self.get_client_detail(client.id, viewer_user_id=viewer_user_id)
 
-    async def _assert_category_exists(self, category_id: UUID | None) -> None:
-        """400 se o `category_id` não está no catálogo (86e34jd8m). `None` passa."""
+    async def _assert_category_exists(
+        self, category_id: UUID | None, *, organization_id: UUID
+    ) -> None:
+        """400 se o `category_id` não está no catálogo DA ORGANIZAÇÃO do cliente
+        (86e34jd8m + 86e36ecqz). `None` passa. Categoria de outra organização
+        recebe o MESMO 400 de inexistente — sem oráculo entre BPOs."""
         if category_id is None:
             return
-        if await self._repo.get_category_by_id(category_id) is None:
-            raise InvalidClientCategoryError(f"Categoria inexistente: {category_id}")
+        if (
+            await self._repo.get_category_by_id(category_id, organization_id=organization_id)
+            is None
+        ):
+            raise InvalidClientCategoryError(
+                f"Categoria inexistente na organização {organization_id}: {category_id}"
+            )
 
     # --------------------- CARTEIRA COMPARTILHADA (86e390kz8) ----------
     #
@@ -625,7 +608,7 @@ class ClientService:
         omie_conta_id: int | None,
         month: str | None,
         status: str | None = None,
-        viewer_scope: str = "system",
+        viewer: CurrentUser,
     ) -> tuple[list[ReconciliationSessionSummary], PaginationMeta]:
         """Lista paginada das conciliações do cliente (S7 BACK 4.2 + BACK 04.3).
 
@@ -651,7 +634,7 @@ class ClientService:
             statuses=statuses,
         )
         responses = [
-            _session_to_summary(session, total_files, viewer_scope=viewer_scope)
+            _session_to_summary(session, total_files, viewer=viewer)
             for session, total_files in rows
         ]
         total_pages = (total + page_size - 1) // page_size if page_size else 0
@@ -706,7 +689,7 @@ def _session_to_summary(
     session: ReconciliationSession,
     total_files: int,
     *,
-    viewer_scope: str,
+    viewer: CurrentUser,
 ) -> ReconciliationSessionSummary:
     """Mapeia ORM `ReconciliationSession` → DTO `ReconciliationSessionSummary`.
 
@@ -721,7 +704,7 @@ def _session_to_summary(
     return summary.model_copy(
         update={
             "total_files": total_files,
-            "created_by": author_for_viewer(session.user, viewer_scope),
+            "created_by": author_for_viewer(session.user, viewer),
         }
     )
 

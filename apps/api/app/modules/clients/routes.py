@@ -105,6 +105,13 @@ async def list_clients(
     category_id: Annotated[
         UUID | None, Query(description="Filtra pela categoria do catálogo (86e34jd8m).")
     ] = None,
+    organization_id: Annotated[
+        UUID | None,
+        Query(
+            alias="organizationId",
+            description="Plataforma: restringe a uma organização. Staff: só a própria.",
+        ),
+    ] = None,
 ) -> ClientListResponse:
     # O alcance (plataforma: tudo; admin: a própria organização; manager: a
     # carteira; cliente: o próprio tenant) entra no SELECT pelo `reach_filter`
@@ -115,6 +122,7 @@ async def list_clients(
         page_size=page_size,
         search=search,
         category_id=category_id,
+        requested_organization_id=organization_id,
     )
     return ClientListResponse(data=rows, pagination=pagination)
 
@@ -375,9 +383,9 @@ async def list_client_reconciliations(
         omie_conta_id=omie_conta_id,
         month=month,
         status=status,
-        # 86e2n39f1 — a máscara do autor ("Equipe Hologram" p/ cliente vendo
-        # autor system) decide pelo ESCOPO de quem pede, no servidor (§4.9).
-        viewer_scope=user.scope,
+        # 86e2n39f1 — a máscara do autor ("Equipe {org}" p/ cliente vendo autor
+        # de staff) decide pela LINHA de quem pede, no servidor (§4.9).
+        viewer=user,
     )
     return ReconciliationSessionListResponse(data=rows, pagination=pagination)
 

@@ -25,6 +25,7 @@ from app.core.exceptions import ConflictError, DuplicateFileError, NotFoundError
 from app.core.logging import get_logger
 from app.core.search_index import compute_search_hmac
 from app.db.models import (
+    HOLOGRAM_ORGANIZATION_NAME,
     FileEntrySituation,
     OmieAccountType,
     ReconciliationFile,
@@ -38,6 +39,7 @@ from app.db.models import (
 )
 
 if TYPE_CHECKING:
+    from app.core.authz import CurrentUser
     from app.core.config import Settings
     from app.core.crypto import ClientCipher
 from app.modules.reconciliations.repository import ReconciliationRepository
@@ -81,22 +83,46 @@ def session_account_type_from_omie_tipo(omie_tipo: str | None) -> str:
     return SessionAccountType.CHECKING.value
 
 
-#: Rótulo que o usuário DO CLIENTE vê quando o autor é da equipe Hologram
-#: (decisão do Pedro, 22/08/2026): não expor pessoa da equipe ao cliente final.
-HOLOGRAM_TEAM_LABEL = "Equipe Hologram"
+#: Prefixo do rótulo que o usuário DO CLIENTE vê quando o autor é da equipe que
+#: o atende (decisão do Pedro, 22/08/2026): não expor pessoa da equipe ao
+#: cliente final. Com organizações (86e36ecqz) o rótulo é "Equipe {org do
+#: cliente}" — a Hologram chama-se "Hologram", então continua "Equipe Hologram".
+TEAM_LABEL_PREFIX = "Equipe"
 
 
-def author_for_viewer(author: User, viewer_scope: str) -> SessionAuthor:
-    """Autor enxuto, MASCARADO por escopo do observador (86e2n39f1).
+def team_label(organization_name: str | None) -> str:
+    """Rótulo da equipe para o usuário de cliente: "Equipe {org}".
 
-    Cliente vendo autor de staff (organização OU plataforma) → "Equipe
-    Hologram", sem e-mail. Qualquer outra combinação (staff vê tudo; cliente vê
-    o próprio colega) → nome e e-mail reais. A decisão mora no servidor: mandar
-    o nome no payload e esconder na UI não seria barreira (§4.9). O rótulo por
-    organização ("Equipe {org do cliente}") chega na task 86e36ecqz.
+    Sem nome (linha sem organização — o CHECK do banco não deixa acontecer para
+    um usuário de cliente, mas a função não pode devolver "Equipe None") cai no
+    prefixo sozinho: continua sem expor pessoa nenhuma.
     """
-    if viewer_scope == UserScope.CLIENT.value and author.scope != UserScope.CLIENT.value:
-        return SessionAuthor(name=HOLOGRAM_TEAM_LABEL, email=None)
+    if not organization_name:
+        return TEAM_LABEL_PREFIX
+    return f"{TEAM_LABEL_PREFIX} {organization_name}"
+
+
+#: O rótulo da Hologram — o que todo cliente de hoje vê. Constante de teste:
+#: em runtime o nome vem de `organizations.name` (renomear a Hologram muda o
+#: rótulo junto; o front não compara o literal, só o exibe).
+HOLOGRAM_TEAM_LABEL = team_label(HOLOGRAM_ORGANIZATION_NAME)
+
+
+def author_for_viewer(author: User, viewer: CurrentUser) -> SessionAuthor:
+    """Autor enxuto, MASCARADO por escopo do observador (86e2n39f1 + 86e36ecqz).
+
+    Cliente vendo autor de staff (organização OU plataforma) → "Equipe {org do
+    cliente}", sem e-mail — a org vem da LINHA do observador (`CurrentUser.
+    organization_name`, desnormalizada da org do cliente, §4.8), então o
+    cliente da Prospecta lê "Equipe Prospecta" e o da Hologram "Equipe
+    Hologram", sem query extra. Qualquer outra combinação (staff vê tudo;
+    cliente vê o próprio colega) → nome e e-mail reais. A decisão mora no
+    servidor: mandar o nome no payload e esconder na UI não seria barreira
+    (§4.9). Recebe o `CurrentUser` inteiro de propósito: não há como chamar
+    esquecendo a organização.
+    """
+    if viewer.is_client_scoped and author.scope != UserScope.CLIENT.value:
+        return SessionAuthor(name=team_label(viewer.organization_name), email=None)
     return SessionAuthor(name=author.name, email=author.email)
 
 
@@ -578,7 +604,7 @@ class ReconciliationService:
     # ------------------------------------------------------------------
 
     async def get_session_detail(
-        self, session_id: UUID, *, viewer_scope: str
+        self, session_id: UUID, *, viewer: CurrentUser
     ) -> SessionDetailPayload:
         """Detalhe da conciliação: totalizadores + resumo de saldos (BACK 04.3).
 
@@ -640,7 +666,7 @@ class ReconciliationService:
             balance_difference=session_obj.balance_difference,
             total_files=total_files,
             qualification_used_glossary=session_obj.qualification_used_glossary,
-            created_by=author_for_viewer(session_obj.user, viewer_scope),
+            created_by=author_for_viewer(session_obj.user, viewer),
             created_at=session_obj.created_at,
             credits_total=amounts.credits_total,
             debits_total=amounts.debits_total,

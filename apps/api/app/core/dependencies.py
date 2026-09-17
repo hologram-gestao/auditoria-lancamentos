@@ -110,6 +110,7 @@ async def get_current_user(
         scope=user.scope,
         client_id=user.client_id,
         organization_id=user.organization_id,
+        organization_name=ctx.organization_name,
     )
 
 

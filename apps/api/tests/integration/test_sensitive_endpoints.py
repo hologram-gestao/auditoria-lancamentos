@@ -34,6 +34,7 @@ from app.core.sensitive_endpoints import (
 )
 from app.db.models import (
     Client,
+    ClientCategory,
     Notification,
     NotificationType,
     Organization,
@@ -57,6 +58,9 @@ SECRET_NAME_B = "Fulana Participacoes LTDA"
 #: Nome de um STAFF da Hologram: não pode aparecer para o admin de outra organização
 #: (camada de organizações, 86e36ecnp — a lista de usuários passou a ser sensível).
 SECRET_STAFF_A = "Ciclano Staff Sigiloso"
+#: Nome de uma categoria do catálogo da Hologram (86e36ecqz): o catálogo é por
+#: organização, e o admin/gerente de outra organização não pode lê-lo.
+SECRET_CATEGORY_A = "Categoria Sigilosa da Hologram"
 
 
 def _hex64(seed: str) -> str:
@@ -289,6 +293,10 @@ async def tenants(db_session: AsyncSession) -> dict[str, Any]:
     )
     cli_a = await _seed_client(db_session, creator=admin, name="Austral Lista")
     cli_b = await _seed_client(db_session, creator=admin, name=SECRET_NAME_B)
+    # Categoria da Hologram (org pelo `server_default`): alvo do catálogo por org.
+    cat_a = ClientCategory(name=SECRET_CATEGORY_A, tone="neutral")
+    db_session.add(cat_a)
+    await db_session.flush()
     operador_a = await _seed_user(
         db_session,
         email="op-lista@austral.com.br",
@@ -343,6 +351,7 @@ async def tenants(db_session: AsyncSession) -> dict[str, Any]:
         "platform": platform,
         "cli_a": cli_a,
         "cli_b": cli_b,
+        "cat_a": cat_a,
         "operador_a": operador_a,
         "sess_b": sess_b,
         "file_b": file_b,
@@ -417,6 +426,7 @@ async def test_cross_tenant_por_endpoint(
         "anomaly_id": str(uuid4()),
         "entry_id": str(uuid4()),
         "user_id": str(tenants["admin"].id),
+        "category_id": str(tenants["cat_a"].id),
         "uuid": str(uuid4()),
     }
 
@@ -432,6 +442,7 @@ async def test_cross_tenant_por_endpoint(
     # Nunca vaza dado do tenant alvo nem do staff alheio — a asserção que vale para TODOS.
     assert SECRET_NAME_B not in resp.text, f"{endpoint.key} vazou dado do tenant B"
     assert SECRET_STAFF_A not in resp.text, f"{endpoint.key} vazou staff da Hologram"
+    assert SECRET_CATEGORY_A not in resp.text, f"{endpoint.key} vazou o catálogo da Hologram"
 
     if endpoint.kind is ScopeKind.COLLECTION and "{" not in endpoint.path:
         # Coleções globais (notificações) respondem 200 com a lista vazia de B.
@@ -494,6 +505,10 @@ async def test_staff_com_alcance_continua_chegando_nos_dois_tenants(
     assert usuarios.status_code == 200, usuarios.text
     assert SECRET_STAFF_A in usuarios.text
 
+    categorias = await client_with_db.get("/api/v1/client-categories")
+    assert categorias.status_code == 200, categorias.text
+    assert SECRET_CATEGORY_A in categorias.text
+
 
 async def test_admin_de_outra_organizacao_nao_ve_clientes_nem_staff_da_hologram(
     client_with_db: AsyncClient, tenants: dict[str, Any]
@@ -515,3 +530,7 @@ async def test_admin_de_outra_organizacao_nao_ve_clientes_nem_staff_da_hologram(
     emails = {row["email"] for row in usuarios.json()["data"]}
     assert emails == {"admin-b@escritorio-b.com.br", "gerente-b@escritorio-b.com.br"}
     assert SECRET_STAFF_A not in usuarios.text
+
+    categorias = await client_with_db.get("/api/v1/client-categories")
+    assert categorias.status_code == 200, categorias.text
+    assert categorias.json()["data"] == []
