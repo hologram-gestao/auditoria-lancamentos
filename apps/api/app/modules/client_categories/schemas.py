@@ -25,6 +25,10 @@ class ClientCategoryItem(BaseModel):
     name: str
     tone: str
     clients_count: int = Field(0, ge=0, description="Clientes vinculados hoje.")
+    # 86e36ecqz — a organização dona: a coluna "Organização" da visão da
+    # plataforma; para o staff de organização é sempre a própria.
+    organization_id: UUID
+    organization_name: str
 
 
 class ClientCategoryListResponse(BaseModel):
@@ -41,10 +45,19 @@ def _clean_name(value: str) -> str:
 
 
 class ClientCategoryCreate(BaseModel):
-    """Body de POST /api/v1/client-categories — admin-only."""
+    """Body de POST /api/v1/client-categories — quem gere o catálogo."""
 
     name: str = Field(..., min_length=1, max_length=MAX_CATEGORY_NAME_CHARS)
     tone: ClientCategoryTone = ClientCategoryTone.NEUTRAL
+    # 86e36ecqz — a plataforma ESCOLHE a organização (obrigatório para ela); o
+    # admin de organização omite (a da LINHA) ou repete a própria — outro é 403.
+    organization_id: UUID | None = Field(
+        None,
+        description=(
+            "Organização dona da categoria. Obrigatória para a plataforma; para o admin "
+            "de organização, omitir (usa a própria) ou repetir a própria."
+        ),
+    )
 
     @field_validator("name")
     @classmethod

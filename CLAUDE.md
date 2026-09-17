@@ -169,12 +169,23 @@
       notificações, sessões) passa por `scoped_by_reach(...)`/`reach_filter(...)`
       — a MESMA decisão projetada em `WHERE` (plataforma tudo, admin a org,
       manager a carteira, cliente o tenant); tabela com coluna de org (`users`,
-      `client_categories`, `clients`) por `scoped_by_organization(...)` — já
-      aplicado em `users` (listagem e alvo por PK são só staff da org do
-      observador); em `client_categories` chega na task 86e36ecqz; e todo
-      detalhe por PK carrega `AND client_id = <tenant do usuário>` no próprio
-      `SELECT` (`scoped_by_tenant`) — recurso de outro tenant vira **404**, nunca
-      o dado. `tenant_filter_client_id(user)` devolve o tenant a forçar no `WHERE`.
+      `client_categories`, `clients`) por `scoped_by_organization(...)` —
+      aplicado em `users` e `client_categories` (listagem e alvo por PK são só
+      linhas da org do observador; plataforma, todas); a sessão por PK sai do
+      `SELECT` já restrita ao alcance (`load_session_scoped` usa
+      `scoped_by_reach`: o admin de outra organização nem carrega a linha, e o
+      miss vira 404 com linha na trilha); e todo detalhe por PK de tenant
+      carrega `AND client_id = <tenant do usuário>` no próprio `SELECT`
+      (`scoped_by_tenant`) — recurso de outro tenant vira **404**, nunca o
+      dado. `tenant_filter_client_id(user)` devolve o tenant a forçar no `WHERE`.
+    - **Onde um recurso NOVO nasce e o que um `?organizationId=` pode filtrar
+      têm decisão única** (86e36ecqz), em `authz.py`:
+      `resolve_organization_for_creation` (plataforma escolhe — obrigatório, a
+      org existe e está ativa; staff cria na própria, `organization_id`
+      divergente no payload é 403, nunca ignorado) e
+      `resolve_organization_filter` (plataforma filtra o que quiser; staff só a
+      própria, outra é 403; usuário de cliente não escolhe). `/users`, `/clients`
+      e `/client-categories` consultam as duas — uma terceira cópia é proibida.
     - **Negação não vaza o alvo:** 403 (ou 404 onde a conversão anti-enumeração
       já existe) com corpo **sem nome, razão social ou CNPJ** do tenant alvo, e
       **1** linha em `access_audit` com `user_scope`, `actor_client_id` e
@@ -189,7 +200,7 @@
       organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
-      (as 4 rotas do catálogo estão em `PENDING_ENDPOINTS` até a 86e36ecqz). Só
+      (`PENDING_ENDPOINTS` está vazio: cobertura 62/62). Só
       auth, tipos de anomalia, `test-connection`, `alert-test` e as 4 rotas de
       `/organizations` (plataforma, sem dado de cliente) ficam fora, com motivo.
       Essa lista é o denominador da métrica de isolamento — endpoint fora dela é
@@ -198,9 +209,14 @@
       (86e2n39f1): expor QUEM fez algo devolve só `{name, email}` — nunca a
       linha de `users` (§3.2), nem `id` — e passa por **`author_for_viewer`**
       (`reconciliations/service.py`), a decisão ÚNICA: usuário de tenant vendo
-      autor `system` recebe **"Equipe Hologram"** sem e-mail. A máscara é do
-      SERVIDOR — payload com o nome real e UI escondendo não é barreira (§4.9).
-      Vale para qualquer endpoint novo que exponha autoria.
+      autor de staff (organização ou plataforma) recebe **"Equipe {org do
+      cliente}"** sem e-mail — a org vem da LINHA do observador
+      (`CurrentUser.organization_name`, desnormalizada da org do cliente), então
+      o cliente da Hologram segue lendo "Equipe Hologram". `author_for_viewer`
+      recebe o `CurrentUser` inteiro de propósito: não dá para chamá-la
+      esquecendo a organização. A máscara é do SERVIDOR — payload com o nome
+      real e UI escondendo não é barreira (§4.9). Vale para qualquer endpoint
+      novo que exponha autoria.
 16. **Escrita no Omie (Sprint 7) — a única no sistema, e a mais cara de errar:** - **Nasce desligada.** `OMIE_POSTING_ENABLED` tem default **`False`**
     (diferente de `QUALIFICATION_ENABLED`): ligar é decisão explícita **por
     ambiente**, via `--update-env-vars` no Cloud Run, sem deploy. Ligar num
@@ -288,8 +304,10 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    quem não fala** — código de criação passa a org da LINHA do ator, nunca do payload.
    - `scope = 'platform'` → administração geral da ADL (`platform_admin`);
      `organization_id` e `client_id` **NULL**. Vê e faz tudo (D1 revisada pelo
-     Lucas, 09/09). Nasce **só por script** (`promote_platform_admin.py`, task
-     86e36ecqz; em dev, `seed_dev.py`), nunca por endpoint: `platform_admin` não
+     Lucas, 09/09). Nasce **só por script**
+     (`scripts/promote_platform_admin.py --email …`: idempotente, recusa usuário
+     de cliente, zera organização e tenant na MESMA transação; em dev,
+     `seed_dev.py`), nunca por endpoint: `platform_admin` não
      entra em nenhuma whitelist de API. Via ORM, o INSERT exige
      `organization_id=null()` (o `None` é omitido e o banco preencheria a Hologram;
      o CHECK recusa, então o erro é barulhento).
@@ -706,6 +724,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.31 — 17/09/2026. **As rotas existentes ficaram org-aware e a onda 1 fechou (task 86e36ecqz, última do back do épico 86e36ec0q).** `GET /users` ganhou `?organizationId=` e `?role=` e passou a dizer a organização de cada staff (`scope`, `organization_id`, `organization_name`); `POST /users` aceita `organization_id` só da plataforma (obrigatório para ela; o admin cria na própria e payload divergente é 403); `GET /clients` aceita `?organizationId=` e cada cliente traz `organization {id, name}`; a categoria de um cliente é validada no catálogo DA org dele (outra org = o mesmo 400 de inexistente); o catálogo de categorias virou por organização de ponta a ponta (leitura pela org da LINHA, plataforma todas, escrita na org do ator, alvo por PK alheio = 404, unicidade por org) e as 4 rotas saíram de `PENDING_ENDPOINTS` — cobertura 62/62. Duas decisões novas e únicas em `authz.py`: `resolve_organization_for_creation` e `resolve_organization_filter`. O rótulo de autoria virou "Equipe {org do cliente}" (a org vem de `CurrentUser.organization_name`; a Hologram segue "Equipe Hologram"). A sessão por PK sai do `SELECT` restrita ao ALCANCE (`scoped_by_reach`): o admin/gerente de outra organização nem carrega a linha, e `audit_session_tenant_miss` pergunta a `resolve_client_access` e grava a negação. Nasceu `scripts/promote_platform_admin.py` (por e-mail, idempotente, recusa tenant, `--dry-run`) — o único caminho para `platform_admin`. §3.15 e §4.8 atualizadas. **Em dev nada muda de visível** enquanto só a Hologram existir; a promoção dos cinco só depois da onda 2._
 
 _Versão 1.30 — 17/09/2026. **Nasceu o módulo de organizações e a bateria cross-org (task 86e36ecnp, onda 1 do épico 86e36ec0q).** `GET/POST /api/v1/organizations` e `GET/PATCH /api/v1/organizations/{id}` (só `platform_admin`; nome único sem caixa; `active=false` suspende: o staff da organização recebe 401 no request seguinte, o login é recusado com a mensagem genérica e a plataforma não cria cliente nela; reativar desfaz), com os eventos `organizacao_criada` e `organizacao_desativada` (só IDs e contagens, sem dedup). A lista canônica passou de **49 para 62**: `/users` (6), `/clients` GET/POST e `PATCH /clients/{id}` (3) e `/client-categories` (4, em `PENDING_ENDPOINTS` até a 86e36ecqz) saíram de "não-sensível" — eram "admin-only global", e admin agora é de UMA organização. A bateria ganhou a dimensão de ORGANIZAÇÃO: cada endpoint é disparado por três atacantes (operador de outro tenant, admin e gerente de outra organização), e a asserção passou a cobrir também o nome de um staff da Hologram. §3.15 atualizada com a contagem, o comando e o critério de "escopável"._
 

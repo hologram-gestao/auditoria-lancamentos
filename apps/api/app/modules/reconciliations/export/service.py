@@ -76,6 +76,7 @@ from app.modules.reconciliations.qualification.service import (
 from app.modules.reconciliations.service import author_for_viewer
 
 if TYPE_CHECKING:
+    from app.core.authz import CurrentUser
     from app.core.config import Settings
     from app.core.crypto import ClientCipher
     from app.integrations.omie.client import OmieClient
@@ -139,7 +140,7 @@ class ExportService:
         client: Client,
         omie_client: OmieClient | None,
         current_user_email: str,
-        current_user_scope: str = "system",
+        viewer: CurrentUser,
     ) -> ExportPayload:
         """Monta o `ExportPayload` (DTO consumido pelo `workbook.build_workbook`).
 
@@ -185,9 +186,7 @@ class ExportService:
             status_by_entry=qualif_status_by_entry,
         )
 
-        conciliado_por = await self._resolve_author_display(
-            session.created_by, viewer_scope=current_user_scope
-        )
+        conciliado_por = await self._resolve_author_display(session.created_by, viewer=viewer)
         summary = self._build_summary(
             client=client,
             session=session,
@@ -281,19 +280,19 @@ class ExportService:
             return ("—", f"Conta {omie_conta_id}")
         return (row.bank_name, row.name)
 
-    async def _resolve_author_display(self, created_by: UUID, *, viewer_scope: str) -> str | None:
+    async def _resolve_author_display(self, created_by: UUID, *, viewer: CurrentUser) -> str | None:
         """Autor da conciliação para a Aba 1 (86e2n39f1), mascarado por escopo.
 
         Vai pelo FK (`created_by`), não pelo relationship `lazy="raise"` — a
         sessão chega do router sem eager-load. Nome + e-mail quando visível
         ("nome na tela, e-mail no relatório" — decisão do Pedro, 22/08/2026);
-        "Equipe Hologram" sem e-mail quando o observador é do cliente e o autor
-        é da equipe. None se o autor sumiu do banco (defensivo).
+        "Equipe {org do cliente}" sem e-mail quando o observador é do cliente e
+        o autor é da equipe. None se o autor sumiu do banco (defensivo).
         """
         author = await self._db.get(User, created_by)
         if author is None:
             return None
-        info = author_for_viewer(author, viewer_scope)
+        info = author_for_viewer(author, viewer)
         return info.name if info.email is None else f"{info.name} ({info.email})"
 
     async def _load_file_entries(self, session_id: UUID) -> list[ReconciliationFileEntry]:

@@ -66,6 +66,9 @@ class ClientRow(NamedTuple):
     client: Client
     manager: User | None
     reconciliation_count: int
+    #: Organização dona (86e36ecqz): coluna NOT NULL + join interno, então
+    #: sempre presente — sem `None`, sem `assert` na serialização.
+    organization: Organization
     #: Favorito de QUEM pede (86e34jd5a). `False` quando não há viewer.
     is_favorite: bool = False
     #: Categoria do catálogo (86e34jd8m); `None` = sem categoria.
@@ -161,11 +164,14 @@ def _client_row_query(viewer_user_id: UUID | None) -> _ClientRowQuery:
             favorite.is_favorite,
             ClientCategory,
             _manager_count_subquery().label("manager_count"),
+            Organization,
         )
         .outerjoin(ClientAssignment, _responsible_join_clause())
         .outerjoin(manager, manager.id == ClientAssignment.user_id)
         .outerjoin(favorite.table, favorite.on_clause)
         .outerjoin(ClientCategory, ClientCategory.id == Client.category_id)
+        # Interno: todo cliente tem organização (NOT NULL, 86e36ec7p).
+        .join(Organization, Organization.id == Client.organization_id)
     )
     return _ClientRowQuery(stmt=stmt, is_favorite=favorite.is_favorite)
 
@@ -179,6 +185,7 @@ def _to_client_row(row: Row[Any]) -> ClientRow:
         is_favorite=bool(row[3]),
         category=row[4],
         manager_count=int(row[5] or 0),
+        organization=row[6],
     )
 
 
@@ -198,6 +205,7 @@ class ClientRepository:
         page_size: int,
         search: str | None = None,
         category_id: UUID | None = None,
+        organization_id: UUID | None = None,
     ) -> tuple[Sequence[ClientRow], int]:
         """Lista paginada de clientes com manager + count de conciliações.
 
@@ -210,6 +218,8 @@ class ClientRepository:
                 (`is_favorite` por linha, os DESSE usuário no topo — 86e34jd5a).
             page/page_size: paginação 1-based.
             search: ILIKE em `clients.name` (case-insensitive).
+            organization_id: filtro OPCIONAL da plataforma (86e36ecqz), já
+                decidido por `resolve_organization_filter` no service.
 
         Returns:
             Tupla `(rows, total_count)`. Total é a contagem ANTES da paginação.
@@ -236,6 +246,10 @@ class ClientRepository:
             # Filtro server-side (86e34jd8m): a paginação continua contando certo.
             base = base.where(Client.category_id == category_id)
             count_base = count_base.where(Client.category_id == category_id)
+
+        if organization_id is not None:
+            base = base.where(Client.organization_id == organization_id)
+            count_base = count_base.where(Client.organization_id == organization_id)
 
         # Favoritos de quem pede primeiro (86e34jd5a); depois a ordem estável de
         # sempre: created_at desc, id desc (desempate determinístico). O favorito
@@ -307,10 +321,20 @@ class ClientRepository:
         result = await self._session.execute(stmt)
         return [(row[0], row[1]) for row in result.all()]
 
-    async def get_category_by_id(self, category_id: UUID) -> ClientCategory | None:
-        """Existência da categoria ao criar/editar cliente (86e34jd8m)."""
+    async def get_category_by_id(
+        self, category_id: UUID, *, organization_id: UUID
+    ) -> ClientCategory | None:
+        """Categoria do catálogo DA ORGANIZAÇÃO do cliente (86e34jd8m + 86e36ecqz).
+
+        O `AND organization_id` mora no SELECT: categoria de outra organização
+        "não existe" para este cliente — mesmo 400 de categoria inexistente,
+        sem oráculo de enumeração entre BPOs.
+        """
         result = await self._session.execute(
-            select(ClientCategory).where(ClientCategory.id == category_id)
+            select(ClientCategory).where(
+                ClientCategory.id == category_id,
+                ClientCategory.organization_id == organization_id,
+            )
         )
         return result.scalar_one_or_none()
 

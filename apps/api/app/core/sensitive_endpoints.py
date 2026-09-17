@@ -60,6 +60,12 @@ _VIA_STAFF_ORG = (
     "organization_id = <org do observador> no próprio SELECT (plataforma: todas); "
     "plataforma, usuário de cliente e staff de outra org = 404"
 )
+_VIA_CATEGORY_ORG = (
+    "StaffDep/ManageClientCategoriesDep + scoped_by_organization no SELECT do catálogo "
+    "(AND organization_id = <org do observador>; plataforma: todas); alvo por PK de outra "
+    "organização = 404; a categoria nova nasce na org da LINHA do ator "
+    "(resolve_organization_for_creation)"
+)
 _VIA_SESSION = (
     "require_session_access: SELECT da sessão já com AND client_id = <tenant da "
     "linha> (scoped_by_tenant) + resolve_client_access; 404 uniforme"
@@ -141,28 +147,28 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         "/api/v1/client-categories",
         ScopeKind.COLLECTION,
         "app/modules/client_categories/routes.py",
-        "PENDENTE (86e36ecqz): catálogo por organização, filtro ainda não aplicado",
+        _VIA_CATEGORY_ORG,
     ),
     SensitiveEndpoint(
         "POST",
         "/api/v1/client-categories",
         ScopeKind.COLLECTION,
         "app/modules/client_categories/routes.py",
-        "PENDENTE (86e36ecqz): a org da categoria nova ainda cai no default",
+        _VIA_CATEGORY_ORG,
     ),
     SensitiveEndpoint(
         "PATCH",
         "/api/v1/client-categories/{category_id}",
         ScopeKind.DETAIL_PK,
         "app/modules/client_categories/routes.py",
-        "PENDENTE (86e36ecqz): alvo por PK sem AND organization_id",
+        _VIA_CATEGORY_ORG,
     ),
     SensitiveEndpoint(
         "DELETE",
         "/api/v1/client-categories/{category_id}",
         ScopeKind.DETAIL_PK,
         "app/modules/client_categories/routes.py",
-        "PENDENTE (86e36ecqz): alvo por PK sem AND organization_id",
+        _VIA_CATEGORY_ORG,
     ),
     # ---------------------------------------------------------------- conciliações
     SensitiveEndpoint(
@@ -525,21 +531,16 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
     ),
 )
 
-#: Endpoints do denominador que AINDA não existem no código. Ficam na lista
-#: porque o denominador é fechado na abertura da sprint (senão a métrica muda de
-#: base no meio do caminho), mas o teste de existência os pula e o de cobertura
-#: os conta como NÃO cobertos. Esvaziar este conjunto é parte do DoD.
+#: Endpoints do denominador que AINDA não têm o mecanismo no código. Ficam na
+#: lista porque o denominador é fechado na abertura da sprint (senão a métrica
+#: muda de base no meio do caminho), mas o teste de existência os pula e o de
+#: cobertura os conta como NÃO cobertos. Esvaziar este conjunto é parte do DoD.
 #:
-#: Ficou vazio da BACK 05.5 até a camada de organizações. Em 86e36ecnp as 4
-#: rotas de `client-categories` entraram no denominador (o catálogo é por
-#: organização desde a migration `3e8f1a6c9d24`) ANTES do filtro chegar
-#: (86e36ecqz) — o denominador fecha na abertura, e a cobertura conta o buraco.
-PENDING_ENDPOINTS: dict[str, str] = {
-    "GET /api/v1/client-categories": "org-scoping do catálogo chega em 86e36ecqz",
-    "POST /api/v1/client-categories": "org-scoping do catálogo chega em 86e36ecqz",
-    "PATCH /api/v1/client-categories/{category_id}": "org-scoping do catálogo chega em 86e36ecqz",
-    "DELETE /api/v1/client-categories/{category_id}": "org-scoping do catálogo chega em 86e36ecqz",
-}
+#: Vazio desde a BACK 05.5, salvo uma janela: em 86e36ecnp as 4 rotas de
+#: `client-categories` entraram no denominador (o catálogo é por organização
+#: desde a migration `3e8f1a6c9d24`) antes do filtro chegar, e 86e36ecqz o
+#: esvaziou de novo — a cobertura contou o buraco enquanto ele existiu.
+PENDING_ENDPOINTS: dict[str, str] = {}
 
 #: Rotas `/api/v1` que **não** são sensíveis a tenant, com o porquê. Existe para
 #: que o teste de completude possa afirmar "toda rota está classificada" — uma
