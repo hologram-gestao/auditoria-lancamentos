@@ -323,6 +323,12 @@ class OrganizationNotFoundError(NotFoundError):
     default_user_message = "Organização não encontrada."
 
 
+class OrganizationNameAlreadyExistsError(ConflictError):
+    """409 — já existe organização com este nome, sem distinção de caixa."""
+
+    default_user_message = "Já existe uma organização com este nome."
+
+
 class OrganizationInactiveError(ConflictError):
     """409 — organização suspensa: não recebe cliente nem usuário novo."""
 

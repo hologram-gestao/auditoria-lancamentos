@@ -41,6 +41,7 @@ from app.modules.clients import routes as clients_routes
 from app.modules.glossary import routes as glossary_routes
 from app.modules.notifications import routes as notifications_routes
 from app.modules.omie_data import routes as omie_data_routes
+from app.modules.organizations import routes as organizations_routes
 from app.modules.reconciliations import routes as reconciliations_routes
 from app.modules.reconciliations.export import routes as export_routes
 from app.modules.reconciliations.review import routes as review_routes
@@ -272,6 +273,7 @@ def create_app() -> FastAPI:
     app.include_router(notifications_routes.router)
     app.include_router(usage_events_routes.router)
     app.include_router(system_routes.router)
+    app.include_router(organizations_routes.router)
 
     # Cache L1 de lançamentos Omie (S11) — singleton in-memory por processo.
     # Instanciado aqui (não no lifespan) para existir mesmo quando testes
