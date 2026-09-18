@@ -346,7 +346,10 @@ async def create_reconciliation(
     settings: Annotated[Settings, Depends(get_settings)],
     payload: CreateReconciliationRequest,
 ) -> CreateReconciliationResponse:
-    if user.role not in {"admin", "manager"}:
+    # Só staff (plataforma ou organização) cria conciliação por este caminho; o
+    # predicado é o de `authz` — nada de comparar papel na mão. 404, não 403:
+    # mesma conversão anti-enumeração do resto da rota.
+    if not user.is_staff:
         raise NotFoundError(_CLIENT_NOT_FOUND_MSG)
 
     try:
@@ -735,9 +738,10 @@ async def get_reconciliation_detail(
         # Escopo/tenant do ATOR (S5/R6) — a trilha diz de ONDE partiu a leitura.
         user_scope=user.scope,
         actor_client_id=user.client_id,
+        actor_organization_id=user.organization_id,
     )
 
-    payload = await service.get_session_detail(session_id, viewer_scope=user.scope)
+    payload = await service.get_session_detail(session_id, viewer=user)
     return SessionDetailResponse(data=payload)
 
 

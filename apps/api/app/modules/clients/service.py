@@ -26,6 +26,11 @@ from uuid import UUID, uuid4
 import httpx
 from pydantic import SecretStr
 
+from app.core.authz import (
+    CurrentUser,
+    resolve_organization_filter,
+    resolve_organization_for_creation,
+)
 from app.core.crypto_service import (
     AAD_CLIENT_APP_KEY,
     AAD_CLIENT_APP_SECRET,
@@ -60,6 +65,7 @@ from app.modules.clients.schemas import (
     ClientManagerResponse,
     ClientResponse,
     ManagerSummary,
+    OrganizationSummary,
     ReconciliationSessionSummary,
     TestConnectionResponse,
 )
@@ -86,6 +92,7 @@ def _row_to_response(row: ClientRow) -> ClientResponse:
         id=row.client.id,
         name=row.client.name,
         active=row.client.active,
+        organization=OrganizationSummary(id=row.organization.id, name=row.organization.name),
         created_at=row.client.created_at,
         updated_at=row.client.updated_at,
         responsible_manager=manager,
@@ -129,27 +136,28 @@ class ClientService:
     async def list_clients(
         self,
         *,
+        user: CurrentUser,
         page: int,
         page_size: int,
         search: str | None,
-        manager_id_filter: UUID | None,
-        tenant_client_id: UUID | None = None,
-        viewer_user_id: UUID | None = None,
         category_id: UUID | None = None,
+        requested_organization_id: UUID | None = None,
     ) -> tuple[list[ClientResponse], PaginationMeta]:
-        """Lista clientes com filtro RBAC.
+        """Lista clientes dentro do ALCANCE do usuário (`authz.reach_filter`).
 
-        `manager_id_filter` é controlado pela route conforme o role do caller:
-        admin → `None` (vê tudo); manager → `UUID(current_user.id)`.
+        O repositório põe a decisão única no SELECT; aqui só se repassa a LINHA
+        do usuário — favoritos e alcance derivam dela, nunca da rota. O
+        `?organizationId=` passa por `resolve_organization_filter`: vale para a
+        plataforma; para o staff, ou é a própria (no-op) ou é 403 (86e36ecqz).
         """
+        organization_id = resolve_organization_filter(user, requested_organization_id)
         rows, total = await self._repo.list_paginated(
+            user=user,
             page=page,
             page_size=page_size,
             search=search,
-            manager_id=manager_id_filter,
-            tenant_client_id=tenant_client_id,
-            viewer_user_id=viewer_user_id,
             category_id=category_id,
+            organization_id=organization_id,
         )
         total_pages = (total + page_size - 1) // page_size if page_size else 0
         responses = [_row_to_response(r) for r in rows]
@@ -184,10 +192,19 @@ class ClientService:
         name: str,
         omie_app_key: str,
         omie_app_secret: str,
-        current_user_id: UUID,
+        actor: CurrentUser,
+        requested_organization_id: UUID | None,
         category_id: UUID | None = None,
     ) -> ClientResponse:
         """Cria cliente com credenciais criptografadas + auto-assign do criador.
+
+        A organização do cliente é decidida por `_resolve_organization_for_creation`
+        (§3.15): staff de organização cria na PRÓPRIA org (a da LINHA; um
+        `organization_id` diferente no payload é 403, nunca ignorado); a
+        plataforma escolhe, e a escolha é obrigatória e validada (org existe e
+        está ativa). Sem isso, um admin de outra organização criaria um cliente
+        na Hologram (o default do banco) e perderia o alcance a ele no request
+        seguinte.
 
         Sprint 3: cada cliente nasce com uma DEK própria (gerada e embrulhada
         pela KEK do KMS). As credenciais são cifradas no envelope versionado
@@ -195,7 +212,14 @@ class ClientService:
         gerado ANTES para compor o AAD (o default `uuid4` só valeria no flush).
         Cada credencial usa IV próprio; o texto plano só vive em memória local.
         """
-        await self._assert_category_exists(category_id)
+        organization_id = await resolve_organization_for_creation(
+            actor,
+            requested_organization_id,
+            get_organization=self._repo.get_organization,
+            subject="o cliente",
+        )
+        await self._assert_category_exists(category_id, organization_id=organization_id)
+        current_user_id = UUID(actor.id)
         client_id = uuid4()
         cipher, dek_wrapped = await new_client_dek(client_id, settings=self._settings)
         ct_key, iv_key = cipher.encrypt(omie_app_key, field_locator(AAD_CLIENT_APP_KEY, client_id))
@@ -214,15 +238,17 @@ class ClientService:
             active=True,
             created_by=current_user_id,
             category_id=category_id,
+            organization_id=organization_id,
         )
         await self._repo.add_client(client)
 
         # Carteira (86e390kz8): só GERENTE entra. Quem cria sendo manager vira
-        # o RESPONSÁVEL. Admin já alcança tudo pela matriz e não entra na
-        # carteira — nem como responsável provisório: o cliente nasce sem
-        # responsável e o primeiro gerente adicionado assume (`add_client_manager`),
-        # ou o admin define pelo `/assign`.
-        if await self._repo.is_active_manager(current_user_id):
+        # o RESPONSÁVEL. Admin e plataforma já alcançam tudo pela matriz e não
+        # entram na carteira — nem como responsável provisório: o cliente nasce
+        # sem responsável e o primeiro gerente adicionado assume
+        # (`add_client_manager`), ou o admin define pelo `/assign`. A carteira é
+        # intra-org (86e36ecjp): o criador só entra se for gerente DA org do cliente.
+        if await self._repo.is_active_manager(current_user_id, organization_id=organization_id):
             assignment = ClientAssignment(
                 client_id=client.id,
                 user_id=current_user_id,
@@ -261,7 +287,7 @@ class ClientService:
         if active is not None:
             client.active = active
         if category_set:
-            await self._assert_category_exists(category_id)
+            await self._assert_category_exists(category_id, organization_id=client.organization_id)
             client.category_id = category_id
 
         # Pares possíveis: ambos None (ignora), ambos preenchidos (recriptografa),
@@ -288,12 +314,21 @@ class ClientService:
         await self._repo.add_client(client)
         return await self.get_client_detail(client.id, viewer_user_id=viewer_user_id)
 
-    async def _assert_category_exists(self, category_id: UUID | None) -> None:
-        """400 se o `category_id` não está no catálogo (86e34jd8m). `None` passa."""
+    async def _assert_category_exists(
+        self, category_id: UUID | None, *, organization_id: UUID
+    ) -> None:
+        """400 se o `category_id` não está no catálogo DA ORGANIZAÇÃO do cliente
+        (86e34jd8m + 86e36ecqz). `None` passa. Categoria de outra organização
+        recebe o MESMO 400 de inexistente — sem oráculo entre BPOs."""
         if category_id is None:
             return
-        if await self._repo.get_category_by_id(category_id) is None:
-            raise InvalidClientCategoryError(f"Categoria inexistente: {category_id}")
+        if (
+            await self._repo.get_category_by_id(category_id, organization_id=organization_id)
+            is None
+        ):
+            raise InvalidClientCategoryError(
+                f"Categoria inexistente na organização {organization_id}: {category_id}"
+            )
 
     # --------------------- CARTEIRA COMPARTILHADA (86e390kz8) ----------
     #
@@ -318,7 +353,7 @@ class ClientService:
         simultâneas produzem uma linha e um 409, nunca duas linhas. Cliente SEM
         responsável (criado por admin): o primeiro gerente que entra assume.
         """
-        await self._assert_active_manager(user_id)
+        await self._assert_active_manager(user_id, organization_id=client.organization_id)
         inserted = await self._repo.add_assignment_if_absent(
             client_id=client.id, user_id=user_id, assigned_by=current_admin_id
         )
@@ -368,7 +403,7 @@ class ClientService:
         quem já tem acesso não é inserido de novo (ON CONFLICT DO NOTHING) e
         promover quem já é o responsável rebaixa e promove a mesma linha.
         """
-        await self._assert_active_manager(user_id)
+        await self._assert_active_manager(user_id, organization_id=client.organization_id)
         await self._repo.add_assignment_if_absent(
             client_id=client.id, user_id=user_id, assigned_by=current_admin_id
         )
@@ -380,15 +415,21 @@ class ClientService:
             )
         return await self.get_client_detail(client.id, viewer_user_id=current_admin_id)
 
-    async def _assert_active_manager(self, user_id: UUID) -> None:
-        """400 se o alvo não existe, está inativo ou não é `manager` (S6 §3.5).
+    async def _assert_active_manager(self, user_id: UUID, *, organization_id: UUID) -> None:
+        """400 se o alvo não existe, está inativo, não é `manager` OU é de outra
+        organização (S6 §3.5 + 86e36ecjp: a carteira é intra-org).
 
-        Admin não entra na carteira — nem por aqui, nem na criação do cliente:
-        já alcança todos os clientes pela matriz, e contá-lo em `manager_count`
-        mentiria sobre quem opera a carteira.
+        Um só código para os quatro casos, de propósito: distinguir "gerente de
+        outra organização" diria a um admin que aquele id existe e é gerente em
+        algum lugar (anti-enumeração, §3.15). Admin e plataforma não entram na
+        carteira — nem por aqui, nem na criação do cliente: já alcançam os
+        clientes pela matriz, e contá-los em `manager_count` mentiria sobre quem
+        opera a carteira.
         """
-        if not await self._repo.is_active_manager(user_id):
-            raise InvalidManagerError(f"User {user_id} não é manager ativo (recusado).")
+        if not await self._repo.is_active_manager(user_id, organization_id=organization_id):
+            raise InvalidManagerError(
+                f"User {user_id} não é manager ativo da organização {organization_id} (recusado)."
+            )
 
     # ------------------------------ TEST CONNECTION -------------------
 
@@ -567,7 +608,7 @@ class ClientService:
         omie_conta_id: int | None,
         month: str | None,
         status: str | None = None,
-        viewer_scope: str = "system",
+        viewer: CurrentUser,
     ) -> tuple[list[ReconciliationSessionSummary], PaginationMeta]:
         """Lista paginada das conciliações do cliente (S7 BACK 4.2 + BACK 04.3).
 
@@ -593,7 +634,7 @@ class ClientService:
             statuses=statuses,
         )
         responses = [
-            _session_to_summary(session, total_files, viewer_scope=viewer_scope)
+            _session_to_summary(session, total_files, viewer=viewer)
             for session, total_files in rows
         ]
         total_pages = (total + page_size - 1) // page_size if page_size else 0
@@ -648,7 +689,7 @@ def _session_to_summary(
     session: ReconciliationSession,
     total_files: int,
     *,
-    viewer_scope: str,
+    viewer: CurrentUser,
 ) -> ReconciliationSessionSummary:
     """Mapeia ORM `ReconciliationSession` → DTO `ReconciliationSessionSummary`.
 
@@ -663,7 +704,7 @@ def _session_to_summary(
     return summary.model_copy(
         update={
             "total_files": total_files,
-            "created_by": author_for_viewer(session.user, viewer_scope),
+            "created_by": author_for_viewer(session.user, viewer),
         }
     )
 

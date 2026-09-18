@@ -146,38 +146,77 @@
       deixaria subir em prod um serviço cujo único canal é o de teste — alerta
       real sem para onde ir. Só o sintético desvia; qualquer alerta novo nasce no
       plantão.
-15. **Autorização por tenant (Sprint 5) — a regra mais fácil de furar sem perceber:**
-    - **O tenant vem SEMPRE da LINHA do usuário**, nunca de `client_id` recebido
-      em URL, query ou body. O JWT carrega `scope`/`client_id`, mas a autoridade
-      é a linha já lida por `get_current_user` (a mesma leitura que checa
-      `active`) — assim revogação vale no request seguinte, sem esperar o token
-      expirar, e sem query nova.
+15. **Autorização por tenant e por organização (Sprint 5 + épico 86e36ec0q) — a
+    regra mais fácil de furar sem perceber:**
+    - **O tenant e a organização vêm SEMPRE da LINHA do usuário**, nunca de
+      `client_id`/`organization_id` recebidos em URL, query ou body. O JWT carrega
+      `scope`/`client_id`/`organization_id`, mas a autoridade é a linha já lida
+      por `get_current_user` (a mesma leitura que checa `active` e a organização
+      ativa) — assim revogação e suspensão de organização valem no request
+      seguinte, sem esperar o token expirar, e sem query nova.
     - **Existe UMA decisão de acesso: `resolve_client_access`** em
-      [apps/api/app/core/authz.py](apps/api/app/core/authz.py). Rota e camada de
-      dados consultam **ela**. **Proibido** escrever uma segunda implementação da
-      regra — se você está prestes a comparar `role`/`client_id` na mão, pare e
-      use a função.
+      [apps/api/app/core/authz.py](apps/api/app/core/authz.py), nesta ordem:
+      usuário de cliente só o próprio tenant; **plataforma bem formada libera
+      tudo** (D1 revisada pelo Lucas, 09/09); staff de organização só alcança
+      cliente **da própria organização** — `admin` a org inteira, `manager` a
+      carteira dentro dela. Esquecer a organização no ramo do admin é vazamento
+      entre BPOs. Rota e camada de dados consultam **ela**. **Proibido** escrever
+      uma segunda implementação — se você está prestes a comparar `role`/`scope`
+      na mão, pare: os antigos `require_admin`/`require_manager_or_admin` não
+      existem mais; use os guards da matriz ou `StaffDep`.
     - **Defense-in-depth na camada de dados:** negar na rota é necessário e
-      **não** suficiente. Toda query de coleção passa por `scoped_by_tenant(...)`
-      e todo detalhe por PK carrega `AND client_id = <tenant do usuário>` no
-      próprio `SELECT` — recurso de outro tenant vira **404**, nunca o dado.
-      `tenant_filter_client_id(user)` devolve o tenant a forçar no `WHERE`.
+      **não** suficiente. Coleção endereçada por `client_id` (clientes,
+      notificações, sessões) passa por `scoped_by_reach(...)`/`reach_filter(...)`
+      — a MESMA decisão projetada em `WHERE` (plataforma tudo, admin a org,
+      manager a carteira, cliente o tenant); tabela com coluna de org (`users`,
+      `client_categories`, `clients`) por `scoped_by_organization(...)` —
+      aplicado em `users` e `client_categories` (listagem e alvo por PK são só
+      linhas da org do observador; plataforma, todas); a sessão por PK sai do
+      `SELECT` já restrita ao alcance (`load_session_scoped` usa
+      `scoped_by_reach`: o admin de outra organização nem carrega a linha, e o
+      miss vira 404 com linha na trilha); e todo detalhe por PK de tenant
+      carrega `AND client_id = <tenant do usuário>` no próprio `SELECT`
+      (`scoped_by_tenant`) — recurso de outro tenant vira **404**, nunca o
+      dado. `tenant_filter_client_id(user)` devolve o tenant a forçar no `WHERE`.
+    - **Onde um recurso NOVO nasce e o que um `?organizationId=` pode filtrar
+      têm decisão única** (86e36ecqz), em `authz.py`:
+      `resolve_organization_for_creation` (plataforma escolhe — obrigatório, a
+      org existe e está ativa; staff cria na própria, `organization_id`
+      divergente no payload é 403, nunca ignorado) e
+      `resolve_organization_filter` (plataforma filtra o que quiser; staff só a
+      própria, outra é 403; usuário de cliente não escolhe). `/users`, `/clients`
+      e `/client-categories` consultam as duas — uma terceira cópia é proibida.
     - **Negação não vaza o alvo:** 403 (ou 404 onde a conversão anti-enumeração
       já existe) com corpo **sem nome, razão social ou CNPJ** do tenant alvo, e
-      **1** linha em `access_audit`.
+      **1** linha em `access_audit` com `user_scope`, `actor_client_id` e
+      `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**49** hoje — o arquivo é a fonte, confira com
+      (**62** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
-      **com teste negativo cross-tenant**. Essa lista é o denominador
-      da métrica de isolamento — endpoint fora dela é buraco que ninguém mede.
+      **com teste negativo cross-tenant E cross-org**: a bateria
+      (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
+      três atacantes — operador de outro tenant, admin e gerente de outra
+      organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
+      ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
+      `/users`, `/clients` e `/client-categories` são sensíveis a organização
+      (`PENDING_ENDPOINTS` está vazio: cobertura 62/62). Só
+      auth, tipos de anomalia, `test-connection`, `alert-test` e as 4 rotas de
+      `/organizations` (plataforma, sem dado de cliente) ficam fora, com motivo.
+      Essa lista é o denominador da métrica de isolamento — endpoint fora dela é
+      buraco que ninguém mede.
     - **Identidade de usuário em response é ENXUTA e mascarada por escopo**
       (86e2n39f1): expor QUEM fez algo devolve só `{name, email}` — nunca a
       linha de `users` (§3.2), nem `id` — e passa por **`author_for_viewer`**
       (`reconciliations/service.py`), a decisão ÚNICA: usuário de tenant vendo
-      autor `system` recebe **"Equipe Hologram"** sem e-mail. A máscara é do
-      SERVIDOR — payload com o nome real e UI escondendo não é barreira (§4.9).
-      Vale para qualquer endpoint novo que exponha autoria.
+      autor de staff (organização ou plataforma) recebe **"Equipe {org do
+      cliente}"** sem e-mail — a org vem da LINHA do observador
+      (`CurrentUser.organization_name`, desnormalizada da org do cliente), então
+      o cliente da Hologram segue lendo "Equipe Hologram". `author_for_viewer`
+      recebe o `CurrentUser` inteiro de propósito: não dá para chamá-la
+      esquecendo a organização. A máscara é do SERVIDOR — payload com o nome
+      real e UI escondendo não é barreira (§4.9). Vale para qualquer endpoint
+      novo que exponha autoria.
 16. **Escrita no Omie (Sprint 7) — a única no sistema, e a mais cara de errar:** - **Nasce desligada.** `OMIE_POSTING_ENABLED` tem default **`False`**
     (diferente de `QUALIFICATION_ENABLED`): ligar é decisão explícita **por
     ambiente**, via `--update-env-vars` no Cloud Run, sem deploy. Ligar num
@@ -255,32 +294,64 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    cross-tenant dá para saber o escopo e o tenant **do ator**, além do alvo.
    Navegação dentro do próprio tenant **não** gera linha — a trilha não infla
    com uso normal.
-8. **Modelo de tenancy (Sprint 5 — `users`):** uma tabela só, sem segundo
-   mecanismo de sessão.
-   - `scope = 'system'` → equipe Hologram; `client_id` **NULL**; escopo é a
-     carteira (`client_assignments`).
+8. **Modelo de tenancy (`users` — Sprint 5 + camada de organizações, épico
+   86e36ec0q):** uma tabela só, sem segundo mecanismo de sessão. Toda linha de
+   `clients`, `users` (staff e cliente) e `client_categories` pertence a uma
+   **organização** (`organizations`, migration `3e8f1a6c9d24`). A primeira é a
+   **Hologram**, com id fixo (`HOLOGRAM_ORGANIZATION_ID`) que é o `server_default`
+   das três colunas `organization_id`: linha gravada sem o campo é a forma antiga da
+   tabela (API antiga na janela de deploy, testes). **O default do banco só fala por
+   quem não fala** — código de criação passa a org da LINHA do ator, nunca do payload.
+   - `scope = 'platform'` → administração geral da ADL (`platform_admin`);
+     `organization_id` e `client_id` **NULL**. Vê e faz tudo (D1 revisada pelo
+     Lucas, 09/09). Nasce **só por script**
+     (`scripts/promote_platform_admin.py --email …`: idempotente, recusa usuário
+     de cliente, zera organização e tenant na MESMA transação; em dev,
+     `seed_dev.py`), nunca por endpoint: `platform_admin` não
+     entra em nenhuma whitelist de API. Via ORM, o INSERT exige
+     `organization_id=null()` (o `None` é omitido e o banco preencheria a Hologram;
+     o CHECK recusa, então o erro é barulhento).
+   - `scope = 'system'` → staff de UMA organização; `organization_id`
+     **obrigatório**, `client_id` **NULL**; escopo é a carteira (`client_assignments`).
    - `scope = 'client'` → usuário DO cliente; `client_id` **obrigatório** e é o
-     tenant dele.
+     tenant dele; `organization_id` é a org do cliente, **desnormalizada**.
    - A integridade é **do banco**, não só da aplicação:
-     `ck_users_scope_client_id`. Fonte única do enum e do CHECK:
-     [apps/api/app/db/models/user.py](apps/api/app/db/models/user.py).
-   - Papéis: `admin` e `manager` (sistema); `client_manager` e `client_operator`
-     (cliente). O papel do payload de criação é **whitelist** — `admin`/`manager`
-     forjados são rejeitados.
-9. **Matriz de permissões (Sprint 5):** declarativa e ÚNICA em
-   `PERMISSION_MATRIX` ([apps/api/app/core/authz.py](apps/api/app/core/authz.py)),
-   consultada por `has_permission`. No front, o espelho é
-   `apps/web/src/lib/authz.ts` — **um** helper, nunca `if (role === ...)` espalhado
-   por componente.
+     `ck_users_scope_consistency` cruza scope × role × organization_id × client_id.
+     Fonte única do enum e do CHECK:
+     [apps/api/app/db/models/user.py](apps/api/app/db/models/user.py); a migration
+     copia e `tests/unit/test_organization_schema.py` compara as duas.
+   - Papéis: `platform_admin` (plataforma); `admin` e `manager` (organização);
+     `client_manager` e `client_operator` (cliente). O papel do payload de
+     criação é **whitelist** por API — `admin`/`manager` forjados num usuário de
+     cliente são rejeitados, e `platform_admin` não existe em whitelist nenhuma.
+9. **Matriz de permissões (Sprint 5 + camada de organizações):** declarativa e
+   ÚNICA em `PERMISSION_MATRIX`
+   ([apps/api/app/core/authz.py](apps/api/app/core/authz.py)), consultada por
+   `has_permission`; 13 permissões x 5 papéis, transcrita célula a célula em
+   `tests/unit/test_authz_matrix.py`, com um teste que trava **a plataforma em
+   toda linha**. No front, o espelho é `apps/web/src/lib/authz.ts` — **um**
+   helper, nunca `if (role === ...)` espalhado por componente.
 
-   | Ação                         | client_manager | client_operator | admin | manager       |
-   | ---------------------------- | -------------- | --------------- | ----- | ------------- |
-   | Criar/rodar conciliação      | ✅             | ✅              | ✅    | ✅            |
-   | Revisar / exportar           | ✅             | ✅              | ✅    | ✅            |
-   | Sincronizar contas do Omie   | ✅             | ✅              | ✅    | ✅            |
-   | Gerir usuários do cliente    | ✅             | ❌              | ✅    | ❌            |
-   | Editar dados do cliente (§9) | ❌             | ❌              | ✅    | ❌            |
-   | Ver outro tenant             | ❌             | ❌              | ✅    | ✅ (carteira) |
+   | Ação                            | platform_admin | admin (org)      | manager (org)         | client_manager | client_operator |
+   | ------------------------------- | -------------- | ---------------- | --------------------- | -------------- | --------------- |
+   | Criar/rodar conciliação         | ✅             | ✅               | ✅                    | ✅             | ✅              |
+   | Revisar / exportar              | ✅             | ✅               | ✅                    | ✅             | ✅              |
+   | Sincronizar contas do Omie      | ✅             | ✅               | ✅                    | ✅             | ✅              |
+   | Manter o glossário              | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
+   | Gerir usuários do cliente       | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
+   | Criar cliente                   | ✅             | ✅               | ✅ (vira responsável) | ❌             | ❌              |
+   | Editar/excluir/encerrar cliente | ✅             | ✅               | ❌                    | ❌             | ❌              |
+   | Ver outro tenant                | ✅             | ✅ (própria org) | ✅ (carteira)         | ❌             | ❌              |
+   | Gerir usuários da org           | ✅             | ✅ (própria org) | ❌                    | ❌             | ❌              |
+   | Categorias de cliente (escrita) | ✅             | ✅ (própria org) | ❌                    | ❌             | ❌              |
+   | Tipos de anomalia (escrita)     | ✅             | ✅ (\*)          | ❌                    | ❌             | ❌              |
+   | Gerir organizações              | ✅             | ❌               | ❌                    | ❌             | ❌              |
+   | Teste de alerta                 | ✅             | ✅               | ❌                    | ❌             | ❌              |
+
+   "(carteira)" e "(própria org)" **não** são células: são `resolve_client_access`
+   e os filtros de coleção. (\*) D3 final é só plataforma; o admin sai da célula
+   quando a tela de tipos de anomalia virar só-plataforma (onda 2, task
+   86e36ed1d) — tirar antes deixaria a tela atual com botões que o servidor nega.
 
    **A UI não é barreira de segurança** — o backend é. Mas **mostrar ação que o
    servidor nega é defeito**: cada ❌ precisa de bloqueio no backend **e** de
@@ -348,6 +419,13 @@ is_primary`) — um responsável por cliente; o predicado é COPIADO na migratio
     adicionado assume. As escritas são condicionais no próprio SQL (promover com
     `RETURNING` sob `FOR UPDATE`; remover só `WHERE is_primary = false`) — o
     409/404 é decidido pelo estado atual, não por uma leitura anterior.
+    **A carteira é intra-org** (86e36ecjp): `is_active_manager` exige gerente ativo
+    **da mesma organização do cliente**, e é a única validação consumida por criar
+    cliente, adicionar gerente e definir responsável — gerente de outra organização
+    recebe o MESMO 400 de "não é gerente" (anti-enumeração). Onde o cliente nasce
+    vem da LINHA do ator: staff cria na própria organização (`organization_id`
+    alheio no payload é 403, nunca ignorado); só a plataforma escolhe, e a escolha é
+    obrigatória e validada (existe, ativa).
 
 ---
 
@@ -646,6 +724,16 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.31 — 17/09/2026. **As rotas existentes ficaram org-aware e a onda 1 fechou (task 86e36ecqz, última do back do épico 86e36ec0q).** `GET /users` ganhou `?organizationId=` e `?role=` e passou a dizer a organização de cada staff (`scope`, `organization_id`, `organization_name`); `POST /users` aceita `organization_id` só da plataforma (obrigatório para ela; o admin cria na própria e payload divergente é 403); `GET /clients` aceita `?organizationId=` e cada cliente traz `organization {id, name}`; a categoria de um cliente é validada no catálogo DA org dele (outra org = o mesmo 400 de inexistente); o catálogo de categorias virou por organização de ponta a ponta (leitura pela org da LINHA, plataforma todas, escrita na org do ator, alvo por PK alheio = 404, unicidade por org) e as 4 rotas saíram de `PENDING_ENDPOINTS` — cobertura 62/62. Duas decisões novas e únicas em `authz.py`: `resolve_organization_for_creation` e `resolve_organization_filter`. O rótulo de autoria virou "Equipe {org do cliente}" (a org vem de `CurrentUser.organization_name`; a Hologram segue "Equipe Hologram"). A sessão por PK sai do `SELECT` restrita ao ALCANCE (`scoped_by_reach`): o admin/gerente de outra organização nem carrega a linha, e `audit_session_tenant_miss` pergunta a `resolve_client_access` e grava a negação. Nasceu `scripts/promote_platform_admin.py` (por e-mail, idempotente, recusa tenant, `--dry-run`) — o único caminho para `platform_admin`. §3.15 e §4.8 atualizadas. **Em dev nada muda de visível** enquanto só a Hologram existir; a promoção dos cinco só depois da onda 2._
+
+_Versão 1.30 — 17/09/2026. **Nasceu o módulo de organizações e a bateria cross-org (task 86e36ecnp, onda 1 do épico 86e36ec0q).** `GET/POST /api/v1/organizations` e `GET/PATCH /api/v1/organizations/{id}` (só `platform_admin`; nome único sem caixa; `active=false` suspende: o staff da organização recebe 401 no request seguinte, o login é recusado com a mensagem genérica e a plataforma não cria cliente nela; reativar desfaz), com os eventos `organizacao_criada` e `organizacao_desativada` (só IDs e contagens, sem dedup). A lista canônica passou de **49 para 62**: `/users` (6), `/clients` GET/POST e `PATCH /clients/{id}` (3) e `/client-categories` (4, em `PENDING_ENDPOINTS` até a 86e36ecqz) saíram de "não-sensível" — eram "admin-only global", e admin agora é de UMA organização. A bateria ganhou a dimensão de ORGANIZAÇÃO: cada endpoint é disparado por três atacantes (operador de outro tenant, admin e gerente de outra organização), e a asserção passou a cobrir também o nome de um staff da Hologram. §3.15 atualizada com a contagem, o comando e o critério de "escopável"._
+
+_Versão 1.29 — 16/09/2026. **D2 entrou (task 86e36ecjp, onda 1 do épico 86e36ec0q): o `manager` gere os usuários dos clientes da carteira, e a carteira virou intra-org.** A célula `manage_client_users` ganhou o `manager` (o alcance segue sendo `resolve_client_access`, então fora da carteira continua negado); `is_active_manager` exige gerente da mesma organização do cliente e é a única validação de criar cliente, adicionar gerente e definir responsável (400 único, anti-enumeração); `POST /clients` decide a organização pela LINHA do ator — staff na própria (payload divergente é 403), plataforma escolhe (obrigatório; 404 inexistente, 409 suspensa) — e o criador gerente vira responsável só se for da org do cliente. §4.9 e §4.13 atualizadas. ⚠️ Efeito visível para os managers da Hologram no deploy da onda 1: as seis rotas de usuários do cliente passam a responder para quem tem o cliente na carteira; a aba na tela chega na onda 2._
+
+_Versão 1.28 — 16/09/2026. **O authz core da camada de organizações entrou (task 86e36ecar, onda 1 do épico 86e36ec0q) — a linha mais perigosa da sprint.** `UserScope.PLATFORM`/`UserRole.PLATFORM_ADMIN` existem; `resolve_client_access` tem uma ordem nova (cliente → plataforma bem formada libera → staff só alcança cliente **da própria organização**, admin a org inteira e manager a carteira dentro dela); nasceram `reach_filter`/`scoped_by_reach` (a decisão projetada em `WHERE` para coleções por `client_id`) e `scoped_by_organization`; a matriz virou 13 x 5 com a plataforma em toda linha e um teste que trava isso. As **4 cópias** da regra "admin vê tudo" fora do `authz.py` (notificações, tipos de anomalia, lista de clientes, criação de conciliação) e os guards por string `require_admin`/`require_manager_or_admin` **deixaram de existir**: toda rota usa guard da matriz ou `StaffDep`. `get_current_user` e o login leem a organização junto com o usuário e recusam organização suspensa; o JWT e o corpo do login/refresh carregam `organization_id`/`organization_name`; `access_audit` grava `actor_organization_id` (a telemetria mantém as 4 props da S5). Num mundo de uma organização só, **nada muda de visível**. §3.15 e §4.9 reescritas como lei atual._
+
+_Versão 1.27 — 16/09/2026. **A fundação de dados da camada de organizações entrou (task 86e36ec7p, onda 1 do épico 86e36ec0q).** Tabela `organizations` com a Hologram de id fixo, `organization_id` em `clients` (NOT NULL), `users` (nullable: a plataforma não tem org) e `client_categories` (UNIQUE passou a `(organization_id, name)`), `access_audit.actor_organization_id`, e o CHECK de `users` virou ternário e cruza o papel (`ck_users_scope_consistency` no lugar de `ck_users_scope_client_id`). O backfill "tudo é Hologram" é por catálogo (`server_default`, como o `is_primary` da carteira), a migration pré-checa o CHECK em plpgsql antes de trocá-lo e o downgrade aborta se houver segunda organização ou usuário de plataforma. **Nenhum comportamento de API muda** nesta task: é o canary da migration antes do authz core. §4.8 reescrita como lei atual; o resto da camada (regra de acesso, matriz 13 × 5, rotas, telas) chega nas tasks seguintes e atualiza §3.15 e §4.9 então. Plano: `Docs/PLANO_ORGANIZACOES.md`._
 
 _Versão 1.26 — 16/09/2026. **Dentro da passada de data, os PARES fecham em ordem de evidência, não linha a linha (task 86e39p1wv, report da Bruna de 15/09).** O caso: dois PIX de mesmo valor no mesmo dia; a descrição de um trazia só uma sigla de 2 letras (a afinidade descarta tokens curtos, e o cadastro Omie traz o nome da pessoa), então essa linha tinha afinidade zero com os DOIS lançamentos, enquanto a outra tinha dois tokens em comum com o dela. O `match()` decidia linha a linha em ordem `(data, id)`, e id é UUID: quando a linha sem sinal vinha antes, levava o lançamento da outra pela ordem da lista, e a IA acusava incoerência nas duas. Cara ou coroa por sessão, e por isso "às vezes funcionava". Agora cada passada monta todos os pares possíveis e fecha do mais forte para o mais fraco (`|Δvalor|`, afinidade, data, ordem da linha, posição na lista). **As leis da §5 não mudaram**: 0,01, 3 dias fixos, 1-para-1, passadas por data, sem IA, nome nunca exclui; para cada linha o par continua sendo o melhor candidato livre DELA no momento em que fecha, muda só QUEM decide primeiro. Medido em 20 mil cenários sintéticos (`apps/api/scripts/measure_matcher_evidence_order.py`, versionado, com o algoritmo antigo embutido como referência): pares de data exata idênticos, 32 pares a mais, 684 pares com a PESSOA errada a menos (4.554 para 3.870), 391 cenários corrigidos contra 4 introduzidos (evidência fraca vencendo linha sem sinal — antes era sorteio de UUID). `TieStats` ganhou `steals_prevented_by_supplier`, logado em `reconciliation_matched`: é o sinal de produção desta correção, porque o conjunto de candidatos não persiste. Skill `matcher` atualizada (invariantes 5 e 6, números de linha)._
 

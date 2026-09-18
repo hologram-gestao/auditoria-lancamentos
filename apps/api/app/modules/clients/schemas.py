@@ -38,6 +38,16 @@ class CreateClientRequest(BaseModel):
     category_id: UUID | None = Field(
         None, description="Categoria do catálogo (86e34jd8m). Ausente ou null = sem categoria."
     )
+    # Camada de organizações (86e36ecjp): a plataforma ESCOLHE onde o cliente
+    # nasce (obrigatório para ela). Para o staff de organização, ou é omitido
+    # (a org da LINHA do ator) ou é a própria org — outro valor é 403.
+    organization_id: UUID | None = Field(
+        None,
+        description=(
+            "Organização dona do cliente. Obrigatória para a plataforma; para o staff "
+            "de organização, omitir (usa a própria) ou repetir a própria."
+        ),
+    )
 
 
 class UpdateClientRequest(BaseModel):
@@ -150,12 +160,25 @@ class ClientCategorySummary(BaseModel):
     tone: str
 
 
+class OrganizationSummary(BaseModel):
+    """Organização dona do cliente, como aparece na lista e no detalhe (86e36ecqz).
+
+    É a coluna "Organização" da visão da plataforma; para o staff de organização
+    é sempre a própria. Nome de BPO, não dado do cliente final (§4.5).
+    """
+
+    id: UUID
+    name: str
+
+
 class ClientResponse(BaseModel):
     """Representação pública de um Client. NUNCA inclui campos `*_encrypted`/`*_iv`."""
 
     id: UUID
     name: str
     active: bool
+    # 86e36ecqz — a organização dona. Sempre presente (coluna NOT NULL).
+    organization: OrganizationSummary
     created_at: datetime
     updated_at: datetime
     responsible_manager: ManagerSummary | None = None

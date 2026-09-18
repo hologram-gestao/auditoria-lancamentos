@@ -24,7 +24,7 @@ S7 (BACK 4.1-4.2):
 
 RBAC dispatch:
     - `EditClientDep` (admin pela matriz) + tenant — assign, managers.
-    - `require_manager_or_admin` — list, create, test-connection.
+    - `StaffDep` — list, test-connection; `CreateClientDep` — create.
     - `require_client_access(client_id)` — detalhe, sync-accounts,
       reconciliations, patch (já carrega o Client).
 
@@ -42,19 +42,18 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 
-from app.core.authz import tenant_filter_client_id
 from app.core.dependencies import (
     AccessibleClientDep,
+    CreateClientDep,
     CurrentUserDep,
     DbSessionDep,
     EditClientDep,
-    ManagerOrAdminDep,
     OpenClientDep,
     SettingsDep,
+    StaffDep,
     SyncOmieAccountsDep,
 )
 from app.core.rate_limit import limiter, user_id_key_func
-from app.db.models import UserRole
 from app.modules.clients.repository import ClientRepository
 from app.modules.clients.schemas import (
     AddClientManagerRequest,
@@ -98,7 +97,7 @@ ClientServiceDep = Annotated[ClientService, Depends(_get_client_service)]
     summary="Listar clientes (paginado, busca por nome). Manager vê só carteira.",
 )
 async def list_clients(
-    user: ManagerOrAdminDep,
+    user: StaffDep,
     service: ClientServiceDep,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
@@ -106,21 +105,24 @@ async def list_clients(
     category_id: Annotated[
         UUID | None, Query(description="Filtra pela categoria do catálogo (86e34jd8m).")
     ] = None,
+    organization_id: Annotated[
+        UUID | None,
+        Query(
+            alias="organizationId",
+            description="Plataforma: restringe a uma organização. Staff: só a própria.",
+        ),
+    ] = None,
 ) -> ClientListResponse:
-    # Admin: filtro None (vê tudo). Manager: filtra pelo próprio user_id no
-    # client_assignments — clientes de outros managers retornam 0 rows.
-    manager_filter = None if user.role == UserRole.ADMIN.value else UUID(user.id)
+    # O alcance (plataforma: tudo; admin: a própria organização; manager: a
+    # carteira; cliente: o próprio tenant) entra no SELECT pelo `reach_filter`
+    # do authz — a decisão única, derivada da LINHA do usuário, nunca da rota.
     rows, pagination = await service.list_clients(
+        user=user,
         page=page,
         page_size=page_size,
         search=search,
-        manager_id_filter=manager_filter,
-        # S5/R3: se algum dia esta rota for aberta a papéis de cliente, a query
-        # já sai restrita ao tenant da LINHA — o guard não é a única defesa.
-        tenant_client_id=tenant_filter_client_id(user),
-        # Favoritos de QUEM pede no topo (86e34jd5a) — id vem da linha do usuário.
-        viewer_user_id=UUID(user.id),
         category_id=category_id,
+        requested_organization_id=organization_id,
     )
     return ClientListResponse(data=rows, pagination=pagination)
 
@@ -137,14 +139,17 @@ async def list_clients(
 )
 async def create_client(
     payload: CreateClientRequest,
-    user: ManagerOrAdminDep,
+    user: CreateClientDep,
     service: ClientServiceDep,
 ) -> ClientResponse:
     return await service.create_client(
         name=payload.name,
         omie_app_key=payload.omie_app_key,
         omie_app_secret=payload.omie_app_secret,
-        current_user_id=UUID(user.id),
+        actor=user,
+        # Só a plataforma escolhe; para o staff, o service confere contra a
+        # LINHA do ator e recusa divergência (§3.15).
+        requested_organization_id=payload.organization_id,
         category_id=payload.category_id,
     )
 
@@ -166,7 +171,7 @@ async def test_connection(
     request: Request,
     response: Response,
     payload: TestConnectionRequest,
-    user: ManagerOrAdminDep,
+    user: StaffDep,
     service: ClientServiceDep,
 ) -> TestConnectionResponse:
     # `user` existe apenas para acionar o RBAC dependency; não é usado no body.
@@ -378,9 +383,9 @@ async def list_client_reconciliations(
         omie_conta_id=omie_conta_id,
         month=month,
         status=status,
-        # 86e2n39f1 — a máscara do autor ("Equipe Hologram" p/ cliente vendo
-        # autor system) decide pelo ESCOPO de quem pede, no servidor (§4.9).
-        viewer_scope=user.scope,
+        # 86e2n39f1 — a máscara do autor ("Equipe {org}" p/ cliente vendo autor
+        # de staff) decide pela LINHA de quem pede, no servidor (§4.9).
+        viewer=user,
     )
     return ReconciliationSessionListResponse(data=rows, pagination=pagination)
 

@@ -27,7 +27,15 @@ Guardrails (CONTEXT.md — ## Outcome):
       gera registro (senão a tabela vira gargalo de escrita e a auditoria, inútil).
     - **Sem FK**: log append-only e durável, independente do ciclo de vida das
       linhas que referencia (apagar um cliente não apaga sua trilha de auditoria).
-      Vale também para `actor_client_id` (Sprint 5).
+      Vale também para `actor_client_id` (Sprint 5) e `actor_organization_id`.
+
+Camada de organizações (86e36ec7p): `actor_organization_id` — a organização do
+ATOR, nula para a plataforma. Numa negação cross-org (admin da org B pedindo
+cliente da org A) a linha diz de que organização veio a tentativa; a org ALVO
+já é derivável de `client_id` → `clients.organization_id`. Sem backfill: as
+linhas anteriores são todas de atores da Hologram, e nulo lê-se "anterior à
+camada de organizações", não "plataforma" — quem precisar distinguir cruza com
+`user_scope`.
 """
 
 from __future__ import annotations
@@ -63,6 +71,11 @@ class AccessAudit(UUIDPrimaryKeyMixin, Base):
     # Tenant do ATOR. NULO para `user_scope='system'` (a equipe Hologram não
     # pertence a tenant nenhum). Cross-tenant = client + actor_client_id != client_id.
     actor_client_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), nullable=True, default=None
+    )
+    # Organização do ATOR (86e36ec7p). NULO para a plataforma e para as linhas
+    # anteriores à camada de organizações. Sem FK, como as colunas irmãs.
+    actor_organization_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), nullable=True, default=None
     )
     session_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)

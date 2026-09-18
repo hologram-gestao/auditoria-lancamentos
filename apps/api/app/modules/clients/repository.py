@@ -34,7 +34,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
-from app.core.authz import portfolio_filter
+from app.core.authz import CurrentUser, reach_filter
 from app.db.models import (
     UQ_CLIENT_ASSIGNMENT_CLIENT_USER,
     UQ_USER_CLIENT_FAVORITE,
@@ -44,6 +44,7 @@ from app.db.models import (
     ClientGlossaryEntry,
     Notification,
     OmieAccountCache,
+    Organization,
     ReconciliationFile,
     ReconciliationSession,
     ReconciliationStatus,
@@ -65,6 +66,9 @@ class ClientRow(NamedTuple):
     client: Client
     manager: User | None
     reconciliation_count: int
+    #: Organização dona (86e36ecqz): coluna NOT NULL + join interno, então
+    #: sempre presente — sem `None`, sem `assert` na serialização.
+    organization: Organization
     #: Favorito de QUEM pede (86e34jd5a). `False` quando não há viewer.
     is_favorite: bool = False
     #: Categoria do catálogo (86e34jd8m); `None` = sem categoria.
@@ -160,11 +164,14 @@ def _client_row_query(viewer_user_id: UUID | None) -> _ClientRowQuery:
             favorite.is_favorite,
             ClientCategory,
             _manager_count_subquery().label("manager_count"),
+            Organization,
         )
         .outerjoin(ClientAssignment, _responsible_join_clause())
         .outerjoin(manager, manager.id == ClientAssignment.user_id)
         .outerjoin(favorite.table, favorite.on_clause)
         .outerjoin(ClientCategory, ClientCategory.id == Client.category_id)
+        # Interno: todo cliente tem organização (NOT NULL, 86e36ec7p).
+        .join(Organization, Organization.id == Client.organization_id)
     )
     return _ClientRowQuery(stmt=stmt, is_favorite=favorite.is_favorite)
 
@@ -178,6 +185,7 @@ def _to_client_row(row: Row[Any]) -> ClientRow:
         is_favorite=bool(row[3]),
         category=row[4],
         manager_count=int(row[5] or 0),
+        organization=row[6],
     )
 
 
@@ -192,49 +200,42 @@ class ClientRepository:
     async def list_paginated(
         self,
         *,
+        user: CurrentUser,
         page: int,
         page_size: int,
         search: str | None = None,
-        manager_id: UUID | None = None,
-        tenant_client_id: UUID | None = None,
-        viewer_user_id: UUID | None = None,
         category_id: UUID | None = None,
+        organization_id: UUID | None = None,
     ) -> tuple[Sequence[ClientRow], int]:
         """Lista paginada de clientes com manager + count de conciliações.
 
         Args:
+            user: quem pede — a LINHA do usuário autenticado, nunca URL/payload
+                (§3.15). Dela derivam o ALCANCE (`authz.reach_filter`: plataforma
+                tudo; admin a própria organização; manager a carteira, por
+                `EXISTS` em `client_assignments`, responsável ou colaborador —
+                86e390kz8; cliente o próprio tenant) e os favoritos
+                (`is_favorite` por linha, os DESSE usuário no topo — 86e34jd5a).
             page/page_size: paginação 1-based.
             search: ILIKE em `clients.name` (case-insensitive).
-            manager_id: se não-None, filtra pela CARTEIRA — `EXISTS` em
-                `client_assignments` por `(client_id, user_id)`, responsável ou
-                colaborador (86e390kz8). Para admin, passar `None`.
-            tenant_client_id: se não-None, restringe ao tenant do usuário
-                (`scope='client'`). Tem PRECEDÊNCIA sobre `manager_id` — um
-                usuário de cliente não tem carteira, tem tenant.
-            viewer_user_id: quem pede. Decide `is_favorite` por linha e põe os
-                favoritos DESSE usuário no topo (86e34jd5a). Vem da linha do
-                usuário autenticado, nunca de URL/payload (§3.15).
+            organization_id: filtro OPCIONAL da plataforma (86e36ecqz), já
+                decidido por `resolve_organization_filter` no service.
 
         Returns:
             Tupla `(rows, total_count)`. Total é a contagem ANTES da paginação.
         """
-        query = _client_row_query(viewer_user_id)
+        query = _client_row_query(UUID(user.id))
         base = query.stmt
         count_base = select(func.count(Client.id)).select_from(Client)
 
-        if tenant_client_id is not None:
-            # S5/R3: usuário de cliente enxerga só o PRÓPRIO tenant — filtro na
-            # query, derivado da LINHA do usuário (nunca de URL/payload).
-            base = base.where(Client.id == tenant_client_id)
-            count_base = count_base.where(Client.id == tenant_client_id)
-        elif manager_id is not None:
-            # Para manager: a CARTEIRA é qualquer linha dele no cliente —
-            # responsável OU colaborador. Filtro por EXISTS, independente do join
-            # de exibição (que é só do responsável): sem essa separação o
-            # colaborador sumiria da própria lista.
-            in_portfolio = portfolio_filter(manager_id, Client.id)
-            base = base.where(in_portfolio)
-            count_base = count_base.where(in_portfolio)
+        # O alcance entra na página E no count (senão o rodapé mente). É a
+        # decisão única do authz projetada em WHERE — independente do join de
+        # exibição (que é só do responsável): sem essa separação o colaborador
+        # sumiria da própria lista.
+        reach = reach_filter(user, Client.id)
+        if reach is not None:
+            base = base.where(reach)
+            count_base = count_base.where(reach)
 
         if search:
             term = f"%{search.strip().lower()}%"
@@ -245,6 +246,10 @@ class ClientRepository:
             # Filtro server-side (86e34jd8m): a paginação continua contando certo.
             base = base.where(Client.category_id == category_id)
             count_base = count_base.where(Client.category_id == category_id)
+
+        if organization_id is not None:
+            base = base.where(Client.organization_id == organization_id)
+            count_base = count_base.where(Client.organization_id == organization_id)
 
         # Favoritos de quem pede primeiro (86e34jd5a); depois a ordem estável de
         # sempre: created_at desc, id desc (desempate determinístico). O favorito
@@ -316,27 +321,44 @@ class ClientRepository:
         result = await self._session.execute(stmt)
         return [(row[0], row[1]) for row in result.all()]
 
-    async def get_category_by_id(self, category_id: UUID) -> ClientCategory | None:
-        """Existência da categoria ao criar/editar cliente (86e34jd8m)."""
+    async def get_category_by_id(
+        self, category_id: UUID, *, organization_id: UUID
+    ) -> ClientCategory | None:
+        """Categoria do catálogo DA ORGANIZAÇÃO do cliente (86e34jd8m + 86e36ecqz).
+
+        O `AND organization_id` mora no SELECT: categoria de outra organização
+        "não existe" para este cliente — mesmo 400 de categoria inexistente,
+        sem oráculo de enumeração entre BPOs.
+        """
         result = await self._session.execute(
-            select(ClientCategory).where(ClientCategory.id == category_id)
+            select(ClientCategory).where(
+                ClientCategory.id == category_id,
+                ClientCategory.organization_id == organization_id,
+            )
         )
         return result.scalar_one_or_none()
 
-    async def is_active_manager(self, user_id: UUID) -> bool:
-        """Alvo válido de carteira: existe, ativo e `manager` — decidido no banco.
+    async def is_active_manager(self, user_id: UUID, *, organization_id: UUID) -> bool:
+        """Alvo válido de carteira: existe, ativo, `manager` E DA MESMA ORGANIZAÇÃO
+        do cliente — decidido no banco (86e36ecjp: a carteira é intra-org).
 
         Só `id` no SELECT: não hidrata a linha inteira de `users` (com hash de
-        senha) para responder um booleano.
+        senha) para responder um booleano. Gerente de outra organização é
+        indistinguível de "não é gerente" de propósito (anti-enumeração).
         """
         result = await self._session.execute(
             select(User.id).where(
                 User.id == user_id,
                 User.active.is_(True),
                 User.role == UserRole.MANAGER.value,
+                User.organization_id == organization_id,
             )
         )
         return result.scalar_one_or_none() is not None
+
+    async def get_organization(self, organization_id: UUID) -> Organization | None:
+        """Organização pela PK — para a plataforma escolher onde o cliente nasce."""
+        return await self._session.get(Organization, organization_id)
 
     # ------------------------------ FAVORITOS (86e34jd5a) -------------
 

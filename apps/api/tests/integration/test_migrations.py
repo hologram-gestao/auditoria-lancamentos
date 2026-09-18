@@ -157,14 +157,28 @@ class TestMigrationRoundTrip:
     def test_check_constraint_existe_apos_upgrade(
         self, alembic_cfg: Config, migrations_db_url: str
     ) -> None:
-        """A integridade scope/client_id é do BANCO, não só da aplicação."""
-        url = migrations_db_url
-        command.upgrade(alembic_cfg, "head")
+        """A integridade scope/client_id é do BANCO, não só da aplicação.
 
+        Na revisão da S5 a constraint é `ck_users_scope_client_id`; a camada de
+        organizações (`3e8f1a6c9d24`) a substitui pelo ternário
+        `ck_users_scope_consistency`, que continua recusando `scope='client'`
+        sem `client_id` — o INSERT abaixo prova a garantia na HEAD.
+        """
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, S5_AUDIT_ACTOR_REV)
         assert (
             _scalar(
                 url,
                 "SELECT count(*) FROM pg_constraint WHERE conname = 'ck_users_scope_client_id'",
+            )
+            == 1
+        )
+
+        command.upgrade(alembic_cfg, "head")
+        assert (
+            _scalar(
+                url,
+                "SELECT count(*) FROM pg_constraint WHERE conname = 'ck_users_scope_consistency'",
             )
             == 1
         )
@@ -777,3 +791,228 @@ class TestCarteiraCompartilhadaRoundTrip:
 
         assert _scalar(url, "SELECT count(*) FROM client_assignments") == 1
         assert _scalar(url, "SELECT count(*) FROM client_assignments WHERE is_primary") == 1
+
+
+# ----------------------------------------------------------------------
+# Camada de organizações (86e36ec7p) — tudo que existe passa a ser da Hologram
+# ----------------------------------------------------------------------
+
+PRE_ORGANIZATIONS_REV = "6bb85e6b7d72"
+ORGANIZATIONS_REV = "3e8f1a6c9d24"
+HOLOGRAM_ID = "0706eeb5-9718-4d03-bcda-ef615789e6ac"
+
+# Linhas "legadas": como a base real está ANTES desta migration (sem org).
+_INSERT_CATEGORY_LEGACY = (
+    "INSERT INTO client_categories (id, name, tone, created_at, updated_at) "
+    "VALUES (gen_random_uuid(), :name, 'neutral', now(), now())"
+)
+_INSERT_USER_WITH_ORG = (
+    "INSERT INTO users (id, name, email, password_hash, role, active, scope, client_id, "
+    "organization_id, created_at, updated_at) VALUES (gen_random_uuid(), 'U', :email, 'x', "
+    ":role, true, :scope, CAST(:cid AS uuid), CAST(:oid AS uuid), now(), now())"
+)
+_INSERT_ORGANIZATION = (
+    "INSERT INTO organizations (id, name, active, created_at, updated_at) "
+    "VALUES (gen_random_uuid(), :name, true, now(), now())"
+)
+_CONSTRAINT_COUNT = "SELECT count(*) FROM pg_constraint WHERE conname = :name"
+_ROWS_OUTSIDE_HOLOGRAM = (
+    "SELECT (SELECT count(*) FROM clients WHERE organization_id <> CAST(:h AS uuid)) "
+    "+ (SELECT count(*) FROM users WHERE organization_id IS DISTINCT FROM CAST(:h AS uuid)) "
+    "+ (SELECT count(*) FROM client_categories WHERE organization_id <> CAST(:h AS uuid))"
+)
+
+
+def _seed_client_user_row(url: str, client_id: str) -> str:
+    """Usuário DO cliente, na forma anterior à migration (sem organization_id)."""
+    user_id = str(uuid4())
+    _execute(
+        url,
+        "INSERT INTO users (id, name, email, password_hash, role, active, scope, client_id, "
+        "created_at, updated_at) VALUES (:uid, 'Operador', :email, 'x', 'client_operator', "
+        "true, 'client', :cid, now(), now())",
+        uid=user_id,
+        email=f"op-{user_id}@cliente.com.br",
+        cid=client_id,
+    )
+    return user_id
+
+
+def _seed_legacy_world(url: str) -> None:
+    """Um admin, um cliente, um usuário do cliente e uma categoria — sem org nenhuma."""
+    client_id = _seed_client_row(url)
+    _seed_client_user_row(url, client_id)
+    _execute(url, _INSERT_CATEGORY_LEGACY, name=f"Fintech {uuid4().hex[:6]}")
+
+
+class TestOrganizacoesRoundTrip:
+    """A fundação de dados da camada de organizações sobe, desce e sobe sem perder nada."""
+
+    def test_backfill_leva_tudo_para_a_hologram(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, PRE_ORGANIZATIONS_REV)
+        _seed_legacy_world(url)
+
+        command.upgrade(alembic_cfg, "head")
+
+        assert _scalar(url, "SELECT count(*) FROM organizations") == 1
+        assert str(_scalar(url, "SELECT id FROM organizations")) == HOLOGRAM_ID
+        assert _scalar(url, "SELECT name FROM organizations") == "Hologram"
+        assert _scalar(url, "SELECT active FROM organizations") is True
+        # Todo mundo é da Hologram — inclusive o usuário do cliente, pela org do cliente.
+        assert _scalar(url, "SELECT count(*) FROM users") == 2
+        assert _scalar(url, _ROWS_OUTSIDE_HOLOGRAM, h=HOLOGRAM_ID) == 0
+        # As garantias novas existem NO BANCO, e as antigas saíram.
+        assert _scalar(url, _CONSTRAINT_COUNT, name="ck_users_scope_consistency") == 1
+        assert _scalar(url, _CONSTRAINT_COUNT, name="ck_users_scope_client_id") == 0
+        assert (
+            _scalar(url, _CONSTRAINT_COUNT, name="uq_client_categories_organization_id_name") == 1
+        )
+        assert _scalar(url, _CONSTRAINT_COUNT, name="uq_client_categories_name") == 0
+        assert _columns(url, "access_audit", "actor_organization_id") == 1
+
+    def test_default_do_banco_cobre_a_janela_de_deploy(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        """A API ANTIGA (que roda sobre este schema até o deploy-api) insere sem o campo."""
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+
+        _seed_legacy_world(url)
+
+        assert _scalar(url, "SELECT count(*) FROM users") == 2
+        assert _scalar(url, _ROWS_OUTSIDE_HOLOGRAM, h=HOLOGRAM_ID) == 0
+
+    def test_check_ternario_e_do_banco(self, alembic_cfg: Config, migrations_db_url: str) -> None:
+        """Contra o schema das MIGRATIONS (não o do `create_all`)."""
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+
+        # A forma de plataforma já cabe (quem a produz é a task de authz core).
+        _execute(
+            url,
+            _INSERT_USER_WITH_ORG,
+            email="plataforma@hologram.com.br",
+            role="platform_admin",
+            scope="platform",
+            cid=None,
+            oid=None,
+        )
+        rejected = (
+            # plataforma com organização
+            {"role": "platform_admin", "scope": "platform", "cid": None, "oid": HOLOGRAM_ID},
+            # staff com papel de cliente
+            {"role": "client_manager", "scope": "system", "cid": None, "oid": HOLOGRAM_ID},
+            # staff sem organização (NULL explícito vence o default)
+            {"role": "manager", "scope": "system", "cid": None, "oid": None},
+            # usuário de cliente com papel de staff
+            {"role": "admin", "scope": "client", "cid": client_id, "oid": HOLOGRAM_ID},
+        )
+        for n, row in enumerate(rejected):
+            with pytest.raises(sa.exc.IntegrityError):
+                _execute(url, _INSERT_USER_WITH_ORG, email=f"rejeitado-{n}@x.com.br", **row)
+
+    def test_upgrade_downgrade_upgrade_preserva_as_linhas(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        _seed_legacy_world(url)
+
+        command.downgrade(alembic_cfg, PRE_ORGANIZATIONS_REV)
+        assert not _table_exists(url, "organizations")
+        assert _columns(url, "clients", "organization_id") == 0
+        assert _columns(url, "users", "organization_id") == 0
+        assert _columns(url, "client_categories", "organization_id") == 0
+        assert _columns(url, "access_audit", "actor_organization_id") == 0
+        # O CHECK e a UNIQUE antigos voltam tal qual eram.
+        assert _scalar(url, _CONSTRAINT_COUNT, name="ck_users_scope_client_id") == 1
+        assert _scalar(url, _CONSTRAINT_COUNT, name="ck_users_scope_consistency") == 0
+        assert _scalar(url, _CONSTRAINT_COUNT, name="uq_client_categories_name") == 1
+        # Nenhuma linha se perde — só as colunas somem.
+        assert _scalar(url, "SELECT count(*) FROM users") == 2
+        assert _scalar(url, "SELECT count(*) FROM clients") == 1
+        assert _scalar(url, "SELECT count(*) FROM client_categories") == 1
+
+        command.upgrade(alembic_cfg, "head")
+        assert _scalar(url, "SELECT count(*) FROM organizations") == 1
+        assert _scalar(url, _ROWS_OUTSIDE_HOLOGRAM, h=HOLOGRAM_ID) == 0
+
+    def test_backfill_e_idempotente(self, alembic_cfg: Config, migrations_db_url: str) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        _seed_legacy_world(url)
+
+        for _ in range(2):
+            command.downgrade(alembic_cfg, PRE_ORGANIZATIONS_REV)
+            command.upgrade(alembic_cfg, "head")
+
+        assert _scalar(url, "SELECT count(*) FROM organizations") == 1
+        assert _scalar(url, "SELECT count(*) FROM users") == 2
+        assert _scalar(url, "SELECT count(*) FROM client_categories") == 1
+        assert _scalar(url, _ROWS_OUTSIDE_HOLOGRAM, h=HOLOGRAM_ID) == 0
+
+    def test_downgrade_aborta_com_mensagem_acionavel_se_houver_segunda_organizacao(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        """A forma antiga do schema só cabe UMA organização — apagar uma é decisão de dado."""
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        _execute(url, _INSERT_ORGANIZATION, name="Prospecta")
+
+        with pytest.raises(sa.exc.DBAPIError) as exc:
+            command.downgrade(alembic_cfg, PRE_ORGANIZATIONS_REV)
+
+        assert "Downgrade bloqueado" in str(exc.value)
+        # Nada foi apagado e o schema novo continua de pé.
+        assert _scalar(url, "SELECT count(*) FROM organizations") == 2
+        assert _columns(url, "clients", "organization_id") == 1
+
+    def test_downgrade_aborta_se_houver_usuario_de_plataforma(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        _execute(
+            url,
+            _INSERT_USER_WITH_ORG,
+            email="plataforma@hologram.com.br",
+            role="platform_admin",
+            scope="platform",
+            cid=None,
+            oid=None,
+        )
+
+        with pytest.raises(sa.exc.DBAPIError) as exc:
+            command.downgrade(alembic_cfg, PRE_ORGANIZATIONS_REV)
+
+        assert "Downgrade bloqueado" in str(exc.value)
+        assert _scalar(url, "SELECT count(*) FROM users WHERE scope = 'platform'") == 1
+
+    def test_upgrade_aborta_com_mensagem_acionavel_se_houver_linha_inconsistente(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        """Uma linha que o CHECK antigo aceitava mas o ternário não (papel de staff com
+        escopo de cliente) para a migration ANTES do `ADD CONSTRAINT`, com a consulta
+        que a encontra — e nada fica meio aplicado."""
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, PRE_ORGANIZATIONS_REV)
+        client_id = _seed_client_row(url)
+        _execute(
+            url,
+            "INSERT INTO users (id, name, email, password_hash, role, active, scope, "
+            "client_id, created_at, updated_at) VALUES (gen_random_uuid(), 'Errado', "
+            "'papel-errado@cliente.com.br', 'x', 'admin', true, 'client', :cid, now(), now())",
+            cid=client_id,
+        )
+
+        with pytest.raises(sa.exc.DBAPIError) as exc:
+            command.upgrade(alembic_cfg, "head")
+
+        assert "Upgrade bloqueado" in str(exc.value)
+        assert _scalar(url, "SELECT version_num FROM alembic_version") == PRE_ORGANIZATIONS_REV
+        assert not _table_exists(url, "organizations")
+        assert _columns(url, "clients", "organization_id") == 0

@@ -137,6 +137,7 @@ async def export_reconciliation(
         # Escopo/tenant do ATOR (S5/R6) — a trilha diz de ONDE partiu a exportação.
         user_scope=current_user.scope,
         actor_client_id=current_user.client_id,
+        actor_organization_id=current_user.organization_id,
     )
 
     cipher = await load_client_cipher(client_row, settings=settings)
@@ -147,7 +148,7 @@ async def export_reconciliation(
             client=client_row,
             omie_client=omie_client,
             current_user_email=current_user.email,
-            current_user_scope=current_user.scope,
+            viewer=current_user,
         )
     finally:
         await omie_client.aclose()

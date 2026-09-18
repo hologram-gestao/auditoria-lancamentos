@@ -33,6 +33,8 @@ from app.modules.usage_events.schemas import (
     GlossarioEditadoProps,
     OmieLancamentoEnviadoProps,
     OmieLancamentoRejeitadoProps,
+    OrganizacaoCriadaProps,
+    OrganizacaoDesativadaProps,
     QualificacaoEmitidaProps,
     UsageEventName,
 )
@@ -273,6 +275,24 @@ class UsageEventService:
             UsageEventName.CLIENTE_ENCERRADO,
             props=ClienteEncerradoProps(
                 client_id=client_id, n_conciliacoes=n_conciliacoes, n_usuarios=n_usuarios
+            ).model_dump(mode="json"),
+        )
+
+    async def emit_organizacao_criada(self, *, organization_id: UUID) -> bool:
+        """86e36ecnp — a plataforma cadastrou uma organização. Sem `session_id`."""
+        return await self.emit(
+            UsageEventName.ORGANIZACAO_CRIADA,
+            props=OrganizacaoCriadaProps(organization_id=organization_id).model_dump(mode="json"),
+        )
+
+    async def emit_organizacao_desativada(
+        self, *, organization_id: UUID, n_usuarios: int, n_clientes: int
+    ) -> bool:
+        """86e36ecnp — suspensão de organização, com o que ficou preso (contagens)."""
+        return await self.emit(
+            UsageEventName.ORGANIZACAO_DESATIVADA,
+            props=OrganizacaoDesativadaProps(
+                organization_id=organization_id, n_usuarios=n_usuarios, n_clientes=n_clientes
             ).model_dump(mode="json"),
         )
 

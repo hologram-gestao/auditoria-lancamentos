@@ -3,19 +3,21 @@
 Use sempre via `Depends(...)` em rotas. **Proibido** acessar `session` global,
 `Settings()` direto ou JWT manualmente fora destas funções.
 
-Hoje (S3):
+Hoje:
     - `get_settings` (em `app.core.config`)
     - `DbSessionDep` — sessão SQLAlchemy async com rollback automático
-    - `get_current_user` — extrai JWT do cookie + valida `users.active = true` no DB
-    - `require_admin` / `require_manager_or_admin` — RBAC por role
+    - `get_current_user` — extrai JWT do cookie + valida `users.active = true`
+      e organização ativa no DB
+    - guards por PERMISSÃO da matriz (`*Dep` abaixo) e `StaffDep` (plataforma ou
+      staff de organização — leituras de staff)
+    - `require_client_access(client_id)` — guard de tenant/organização/carteira
 
-Em S6 (clientes):
-    - `require_client_access(client_id)` — guard de tenant/carteira
-
-Sprint 5 (R2 + R4): a REGRA de acesso mora em `app.core.authz`
-(`resolve_client_access` + `PERMISSION_MATRIX`). Aqui ficam só os **guards**
-FastAPI que a consultam e o efeito colateral de negar (403 + trilha). Proibida
-segunda implementação da regra fora do `authz`.
+Sprint 5 (R2 + R4) + camada de organizações: a REGRA de acesso mora em
+`app.core.authz` (`resolve_client_access` + `PERMISSION_MATRIX`). Aqui ficam só
+os **guards** FastAPI que a consultam e o efeito colateral de negar (403 +
+trilha). Proibida segunda implementação da regra fora do `authz` — os antigos
+`require_admin`/`require_manager_or_admin` (comparação de string) saíram de
+propósito: `platform_admin` não pode casar com um literal por acidente.
 """
 
 from __future__ import annotations
@@ -72,9 +74,13 @@ async def get_current_user(
         3. **`users.active = true` no DB** — query a cada request (CLAUDE.md §3.12).
            Usuário desativado pelo Admin perde acesso instantaneamente, mesmo com
            JWT vivo até a expiração natural.
+        4. **Organização ativa** (camada de organizações): a MESMA query traz
+           `organizations.active`; suspender a organização derruba os usuários
+           dela no request seguinte. A plataforma não tem organização.
 
     Erros possíveis:
-        - 401 `UNAUTHORIZED`: cookie ausente, JWT inválido, user inativo/inexistente.
+        - 401 `UNAUTHORIZED`: cookie ausente, JWT inválido, user inativo/inexistente,
+          organização suspensa.
         - 401 `TOKEN_EXPIRED`: assinatura ok mas `exp` no passado
           (frontend deve tentar `/api/v1/auth/refresh`).
     """
@@ -88,10 +94,13 @@ async def get_current_user(
     except ValueError as exc:
         raise UnauthorizedError("Sub do token inválido.") from exc
 
-    user = await AuthRepository(db).get_by_id(user_id)
-    if user is None or not user.active:
+    ctx = await AuthRepository(db).get_auth_context_by_id(user_id)
+    if ctx is None or not ctx.user.active or ctx.organization_active is False:
+        # Mensagem única para os três casos: não vazar se a conta existe, está
+        # desativada, ou se a organização inteira foi suspensa.
         raise UnauthorizedError("Sessão expirou ou usuário inativo.")
 
+    user = ctx.user
     return CurrentUser(
         id=str(user.id),
         email=user.email,
@@ -100,28 +109,26 @@ async def get_current_user(
         # Da LINHA, não do token — ver docstring de `CurrentUser`.
         scope=user.scope,
         client_id=user.client_id,
+        organization_id=user.organization_id,
+        organization_name=ctx.organization_name,
     )
 
 
 CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
 
 
-def require_admin(user: CurrentUserDep) -> CurrentUser:
-    """RBAC: garante perfil admin. Caso contrário, 403."""
-    if user.role != "admin":
-        raise ForbiddenError("Esta operação requer perfil administrador.")
-    return user
+def require_staff(user: CurrentUserDep) -> CurrentUser:
+    """Plataforma ou staff de organização — recusa usuário de cliente com 403.
 
-
-def require_manager_or_admin(user: CurrentUserDep) -> CurrentUser:
-    """RBAC: aceita admin OU manager."""
-    if user.role not in {"admin", "manager"}:
+    Guard de LEITURA de staff (lista de clientes, catálogos, testar credenciais).
+    Não decide alcance: isso é `resolve_client_access`/`reach_filter` na query.
+    """
+    if not user.is_staff:
         raise ForbiddenError("Acesso negado.")
     return user
 
 
-AdminDep = Annotated[CurrentUser, Depends(require_admin)]
-ManagerOrAdminDep = Annotated[CurrentUser, Depends(require_manager_or_admin)]
+StaffDep = Annotated[CurrentUser, Depends(require_staff)]
 
 
 async def deny_client_access(db: AsyncSession, user: CurrentUser, client_id: UUID) -> None:
@@ -139,6 +146,7 @@ async def deny_client_access(db: AsyncSession, user: CurrentUser, client_id: UUI
         user_id=UUID(user.id),
         user_scope=user.scope,
         actor_client_id=user.client_id,
+        actor_organization_id=user.organization_id,
         target_client_id=client_id,
     )
     # Mensagem sem NENHUM dado do tenant alvo (nada de nome/razão social/CNPJ) —
@@ -157,9 +165,12 @@ async def require_client_access(
     """Guard de tenant. Delega a decisão a `authz.resolve_client_access`.
 
     - `scope='client'` → só o próprio tenant.
-    - `scope='system'` → regra atual (admin tudo, manager pela carteira).
+    - plataforma → tudo.
+    - `scope='system'` → cliente da própria organização (admin) ou da carteira
+      dentro dela (manager).
 
-    Retorna o `Client` carregado para evitar uma 2ª query no service. Erros:
+    Retorna o `Client` carregado para evitar uma 2ª query no service — e passa a
+    organização dele à decisão, que assim não repete o SELECT. Erros:
         - 404 NOT_FOUND: cliente inexistente.
         - 403 FORBIDDEN: fora do escopo (a rota de leitura converte para 404).
 
@@ -170,7 +181,9 @@ async def require_client_access(
     if client is None:
         raise NotFoundError("Cliente não encontrado.")
 
-    if not await resolve_client_access(db, user, client_id):
+    if not await resolve_client_access(
+        db, user, client_id, target_organization_id=client.organization_id
+    ):
         await deny_client_access(db, user, client_id)
     return client
 
@@ -230,3 +243,14 @@ ManageClientUsersDep = Annotated[
 ]
 EditClientDep = Annotated[CurrentUser, Depends(require_permission(Permission.EDIT_CLIENT))]
 ManageGlossaryDep = Annotated[CurrentUser, Depends(require_permission(Permission.MANAGE_GLOSSARY))]
+# --- Camada de organizações (86e36ecar) -------------------------------------
+CreateClientDep = Annotated[CurrentUser, Depends(require_permission(Permission.CREATE_CLIENT))]
+ManageOrgUsersDep = Annotated[CurrentUser, Depends(require_permission(Permission.MANAGE_ORG_USERS))]
+ManageClientCategoriesDep = Annotated[
+    CurrentUser, Depends(require_permission(Permission.MANAGE_CLIENT_CATEGORIES))
+]
+ManageAnomalyTypesDep = Annotated[
+    CurrentUser, Depends(require_permission(Permission.MANAGE_ANOMALY_TYPES))
+]
+ManagePlatformDep = Annotated[CurrentUser, Depends(require_permission(Permission.MANAGE_PLATFORM))]
+RunAlertTestDep = Annotated[CurrentUser, Depends(require_permission(Permission.RUN_ALERT_TEST))]

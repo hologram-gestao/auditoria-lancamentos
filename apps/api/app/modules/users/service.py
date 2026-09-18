@@ -12,6 +12,11 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from app.core.authz import (
+    CurrentUser,
+    resolve_organization_filter,
+    resolve_organization_for_creation,
+)
 from app.core.exceptions import (
     CannotDeactivateSelfError,
     EmailAlreadyExistsError,
@@ -20,7 +25,7 @@ from app.core.exceptions import (
 )
 from app.core.security import hash_password
 from app.db.models import ClientUserRole, User, UserRole, UserScope
-from app.modules.users.repository import UserRepository
+from app.modules.users.repository import StaffRow, UserRepository
 from app.modules.users.schemas import PaginationMeta
 
 
@@ -35,34 +40,69 @@ class UserService:
     async def list_users(
         self,
         *,
+        viewer: CurrentUser,
         page: int,
         page_size: int,
         search: str | None = None,
-    ) -> tuple[list[User], PaginationMeta]:
-        """Retorna (usuários da página, metadados de paginação)."""
-        rows, total = await self._repo.list_paginated(page=page, page_size=page_size, search=search)
+        requested_organization_id: UUID | None = None,
+        role: UserRole | None = None,
+    ) -> tuple[list[StaffRow], PaginationMeta]:
+        """Staff da organização do observador (plataforma: de todas) — nunca
+        usuários de cliente nem a própria plataforma (86e36ecar).
+
+        `requested_organization_id` (`?organizationId=`) passa por
+        `resolve_organization_filter`: vale para a plataforma; para o admin, ou
+        é a própria (no-op) ou é 403 — nunca ignorado em silêncio (86e36ecqz).
+        """
+        organization_id = resolve_organization_filter(viewer, requested_organization_id)
+        rows, total = await self._repo.list_staff_paginated(
+            viewer=viewer,
+            page=page,
+            page_size=page_size,
+            search=search,
+            organization_id=organization_id,
+            role=role.value if role is not None else None,
+        )
         total_pages = (total + page_size - 1) // page_size if page_size else 0
-        return list(rows), PaginationMeta(
+        return rows, PaginationMeta(
             page=page, page_size=page_size, total=total, total_pages=total_pages
         )
 
-    async def get_user(self, user_id: UUID) -> User:
-        user = await self._repo.get_by_id(user_id)
-        if user is None:
+    async def get_user(self, user_id: UUID, *, viewer: CurrentUser) -> StaffRow:
+        """Staff alvo dentro do alcance do observador — 404 fora dele (anti-IDOR)."""
+        row = await self._repo.get_staff_by_id(user_id, viewer=viewer)
+        if row is None:
             raise NotFoundError("Usuário não encontrado.")
-        return user
+        return row
 
     # ------------------------------ CREATE ----------------------------
 
     async def create_user(
         self,
         *,
+        viewer: CurrentUser,
         name: str,
         email: str,
         password: str,
         role: UserRole,
-    ) -> User:
-        """Cria usuário ativo com senha hasheada. Email único — 409 se duplicado."""
+        requested_organization_id: UUID | None = None,
+    ) -> StaffRow:
+        """Cria staff ativo com senha hasheada, na organização decidida pela LINHA.
+
+        Email único — 409 se duplicado. A organização vem de
+        `resolve_organization_for_creation` (§3.15): o admin cria na própria
+        (um `organization_id` diferente no payload é 403, nunca ignorado); a
+        plataforma escolhe, e a escolha é obrigatória e validada (existe e está
+        ativa). `role` já chega restrito a `admin`/`manager` pelo schema —
+        `platform_admin` não entra em whitelist de API nenhuma (nasce só por
+        `scripts/promote_platform_admin.py`).
+        """
+        organization_id = await resolve_organization_for_creation(
+            viewer,
+            requested_organization_id,
+            get_organization=self._repo.get_organization,
+            subject="o usuário",
+        )
         normalized_email = email.lower()
         existing = await self._repo.get_by_email(normalized_email)
         if existing is not None:
@@ -76,9 +116,17 @@ class UserService:
             password_hash=hash_password(password),
             role=role.value,
             active=True,
+            organization_id=organization_id,
         )
         await self._repo.add(user)
-        return user
+        # Nome da org sem query nova: o admin cria na própria (já no `CurrentUser`);
+        # a plataforma acabou de validar a organização escolhida.
+        if viewer.is_platform:
+            organization = await self._repo.get_organization(organization_id)
+            organization_name = organization.name if organization is not None else None
+        else:
+            organization_name = viewer.organization_name
+        return StaffRow(user=user, organization_name=organization_name)
 
     # ------------------------------ UPDATE ----------------------------
 
@@ -86,16 +134,19 @@ class UserService:
         self,
         user_id: UUID,
         *,
-        current_user_id: UUID,
+        viewer: CurrentUser,
         name: str | None = None,
         email: str | None = None,
         role: UserRole | None = None,
-    ) -> User:
+    ) -> StaffRow:
         """Atualiza campos parcialmente. Bloqueios:
         - Admin NÃO pode rebaixar a si mesmo para manager (Doc §8.4).
         - E-mail só pode mudar se não conflitar com outro usuário.
+        - Alvo fora do alcance (outra org, plataforma, usuário de cliente) → 404.
         """
-        user = await self.get_user(user_id)
+        current_user_id = UUID(viewer.id)
+        row = await self.get_user(user_id, viewer=viewer)
+        user = row.user
 
         if email is not None:
             normalized_email = email.lower()
@@ -126,7 +177,7 @@ class UserService:
         # SQLAlchemy detecta mudanças automaticamente — flush para persistir
         # antes de retornar (atualiza updated_at via onupdate).
         await self._repo.add(user)
-        return user
+        return StaffRow(user=user, organization_name=row.organization_name)
 
     # ------------------------------ ACTIVATE / DEACTIVATE -------------
 
@@ -135,20 +186,21 @@ class UserService:
         user_id: UUID,
         *,
         active: bool,
-        current_user_id: UUID,
-    ) -> User:
+        viewer: CurrentUser,
+    ) -> StaffRow:
         """Soft activation/deactivation. Bloqueios:
         - Admin NÃO pode desativar a si mesmo (Doc §8.2 + §8.5).
+        - Alvo fora do alcance (outra org, plataforma, usuário de cliente) → 404.
         """
-        if not active and user_id == current_user_id:
+        if not active and user_id == UUID(viewer.id):
             raise CannotDeactivateSelfError(
                 f"User {user_id} tentou desativar a si mesmo.",
             )
 
-        user = await self.get_user(user_id)
-        user.active = active
-        await self._repo.add(user)
-        return user
+        row = await self.get_user(user_id, viewer=viewer)
+        row.user.active = active
+        await self._repo.add(row.user)
+        return row
 
     # ------------------------------------------------------------------
     # Usuários DO CLIENTE (tenant) — Sprint 5 / R5

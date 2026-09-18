@@ -317,6 +317,36 @@ class IncompleteCredentialsError(ValidationAppError):
     )
 
 
+class OrganizationNotFoundError(NotFoundError):
+    """404 — organização inexistente (camada de organizações)."""
+
+    default_user_message = "Organização não encontrada."
+
+
+class OrganizationNameAlreadyExistsError(ConflictError):
+    """409 — já existe organização com este nome, sem distinção de caixa."""
+
+    default_user_message = "Já existe uma organização com este nome."
+
+
+class OrganizationInactiveError(ConflictError):
+    """409 — organização suspensa: não recebe cliente nem usuário novo."""
+
+    default_user_message = "Esta organização está suspensa."
+
+
+class OrganizationMismatchError(ForbiddenError):
+    """403 — staff de organização tentou agir em nome de OUTRA organização.
+
+    O tenant e a organização vêm da LINHA do ator (§3.15). Um `organization_id`
+    no payload só é aceito da plataforma; para o staff, ou é omitido, ou é a
+    própria organização — qualquer outro valor é recusado, nunca ignorado em
+    silêncio (ignorar faria o ator acreditar que criou onde pediu).
+    """
+
+    default_user_message = "Você só pode agir na sua própria organização."
+
+
 class InvalidManagerError(ValidationAppError):
     """400 — assign para usuário inexistente, inativo ou não-manager (S6 §3.5)."""
 

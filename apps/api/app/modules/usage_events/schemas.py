@@ -64,6 +64,11 @@ class UsageEventName(StrEnum):
     # é uma linha.
     CLIENTE_EXCLUIDO = "cliente_excluido"
     CLIENTE_ENCERRADO = "cliente_encerrado"
+    # Camada de organizações (86e36ecnp) — administração da plataforma. De
+    # BACKEND; sem `session_id`, fora da dedup por construção: cada cadastro e
+    # cada suspensão é uma linha. Só IDs e contagens — nunca o nome do BPO.
+    ORGANIZACAO_CRIADA = "organizacao_criada"
+    ORGANIZACAO_DESATIVADA = "organizacao_desativada"
 
 
 #: Eventos que o `POST /api/v1/usage-events` aceita. Os de backend ficam de fora
@@ -159,6 +164,24 @@ class ClienteEncerradoProps(_StrictProps):
     client_id: UUID
     n_conciliacoes: int = Field(ge=0)
     n_usuarios: int = Field(ge=0)
+
+
+class OrganizacaoCriadaProps(_StrictProps):
+    """`organizacao_criada` (86e36ecnp) — a plataforma cadastrou um BPO. Só o id."""
+
+    organization_id: UUID
+
+
+class OrganizacaoDesativadaProps(_StrictProps):
+    """`organizacao_desativada` (86e36ecnp) — suspensão, com o que ficou preso.
+
+    `n_usuarios` é o staff que passa a receber 401; `n_clientes` os clientes que
+    ficam sem operação. Só IDs e inteiros (§4.7).
+    """
+
+    organization_id: UUID
+    n_usuarios: int = Field(ge=0)
+    n_clientes: int = Field(ge=0)
 
 
 class GlossarioEditadoProps(_StrictProps):

@@ -11,6 +11,13 @@ Sprint 5 (R6): toda linha carrega o ESCOPO e o TENANT DO ATOR
 (`user_scope`/`actor_client_id`), além do tenant alvo (`client_id`), e o caminho
 de negação cross-tenant passou a ter uma função única —
 `record_cross_tenant_denied` — que emite os eventos e grava a linha juntos.
+
+Camada de organizações (86e36ecar): a linha carrega também a ORGANIZAÇÃO DO
+ATOR (`actor_organization_id`, nula para a plataforma). Numa negação cross-org
+dá para saber de que BPO veio a tentativa. Obrigatória nos dois caminhos, como
+`user_scope`: com default, um call site novo gravaria nulo em silêncio e a
+trilha leria "plataforma". A telemetria (`acesso_cross_tenant_negado`) NÃO muda:
+o contrato de 4 propriedades da S5 é o que a leitura do D+30 conta.
 """
 
 from __future__ import annotations
@@ -50,6 +57,7 @@ async def record_access(
     action: AccessAction,
     user_scope: str,
     actor_client_id: UUID | None,
+    actor_organization_id: UUID | None,
     session_id: UUID | None = None,
     rota: str | None = None,
     commit: bool = False,
@@ -58,10 +66,12 @@ async def record_access(
 
     Args:
         client_id: tenant ALVO (o cliente cujo dado foi acessado).
-        user_scope: escopo do ATOR (`system`|`client`). **Obrigatório de
-            propósito**: com default, um call site novo gravaria `system`
+        user_scope: escopo do ATOR (`platform`|`system`|`client`). **Obrigatório
+            de propósito**: com default, um call site novo gravaria `system`
             silenciosamente e a trilha mentiria sobre quem agiu.
-        actor_client_id: tenant do ATOR — `None` para escopo `system`.
+        actor_client_id: tenant do ATOR — `None` fora do escopo `client`.
+        actor_organization_id: organização do ATOR — `None` só para a plataforma.
+            Obrigatório pelo mesmo motivo de `user_scope`.
         commit: `True` para o caminho `denied`, onde a request termina em erro
             (404) e o `get_db_session` daria ROLLBACK — sem o commit aqui, a
             linha de auditoria se perderia. No ponto do denied, a única escrita
@@ -76,6 +86,7 @@ async def record_access(
             client_id=client_id,
             user_scope=user_scope,
             actor_client_id=actor_client_id,
+            actor_organization_id=actor_organization_id,
             session_id=session_id,
             action=action.value,
             rota=rota if rota is not None else _current_rota(),
@@ -93,6 +104,7 @@ async def record_cross_tenant_denied(
     user_id: UUID,
     user_scope: str,
     actor_client_id: UUID | None,
+    actor_organization_id: UUID | None,
     target_client_id: UUID,
     rota: str | None = None,
 ) -> None:
@@ -134,6 +146,7 @@ async def record_cross_tenant_denied(
         action=AccessAction.DENIED,
         user_scope=user_scope,
         actor_client_id=actor_client_id,
+        actor_organization_id=actor_organization_id,
         rota=resolved_rota,
         commit=True,
     )
