@@ -35,7 +35,7 @@ import { useAnomalyTypesList } from '@/hooks/use-anomaly-types';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import type { AnomalyType } from '@/lib/api/anomaly-types';
 import { ApiError } from '@/lib/api/client';
-import { canManageSystemUsers, homePathFor } from '@/lib/authz';
+import { hasPermission, homePathFor } from '@/lib/authz';
 import { useAuthStore } from '@/stores/auth';
 
 const PAGE_SIZE = 100;
@@ -52,7 +52,10 @@ export default function AnomalyTypesPage() {
   // Matriz do R4 via `lib/authz` (Sprint 5): configurações do SISTEMA são do
   // admin. Antes isto era um `router.replace('/clientes')` silencioso — que,
   // para um usuário DE tenant, mandaria para outra rota que ele também não vê.
-  const canSee = canManageSystemUsers(currentUser);
+  // Guard com a permissão DESTA tela (86e36ecwa): quando a 86e36ed1d tirar o
+  // admin de `manage_anomaly_types`, o item do menu e a rota somem JUNTOS — com
+  // o guard de outra permissão, o deep link renderizaria a tela de escrita.
+  const canSee = hasPermission(currentUser, 'manage_anomaly_types');
 
   const [searchInput, setSearchInput] = useState('');
   const debouncedSearch = useDebouncedValue(searchInput, 300);

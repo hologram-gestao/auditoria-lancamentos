@@ -4,7 +4,22 @@
  */
 import { z } from 'zod';
 
-export const userRoleSchema = z.enum(['admin', 'manager']);
+import type { SystemUserRole } from '@/lib/contracts';
+
+/**
+ * A whitelist de papel do CONTRATO, virada em tupla para o `z.enum` — a lista
+ * não é redigitada (86e36ecwa). O `Record<SystemUserRole, true>` é a trava de
+ * exaustividade: papel novo na whitelist do backend quebra a compilação aqui
+ * até alguém decidir o rótulo e a posição dele no formulário.
+ */
+const SYSTEM_USER_ROLE_SET: Record<SystemUserRole, true> = { admin: true, manager: true };
+
+export const SYSTEM_USER_ROLES = Object.keys(SYSTEM_USER_ROLE_SET) as [
+  SystemUserRole,
+  ...SystemUserRole[],
+];
+
+export const userRoleSchema = z.enum(SYSTEM_USER_ROLES);
 
 export const createUserSchema = z.object({
   name: z.string().min(1, 'Informe o nome.').max(150, 'Nome muito longo (máx. 150).'),

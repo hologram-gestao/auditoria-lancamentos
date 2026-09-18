@@ -56,6 +56,18 @@ const SYSTEM_MANAGER: AuthenticatedUser = {
   role: 'manager',
 };
 
+/** A plataforma (86e36ecwa): sem organização e sem tenant, vê tudo. */
+const PLATFORM: AuthenticatedUser = {
+  id: 'u-plat',
+  email: 'plataforma@hologram.com.br',
+  name: 'Plataforma',
+  role: 'platform_admin',
+  scope: 'platform',
+  client_id: null,
+  organization_id: null,
+  organization_name: null,
+};
+
 const CLIENT_MANAGER: AuthenticatedUser = {
   id: 'u-cm',
   email: 'gerente@cliente.com.br',
@@ -108,10 +120,28 @@ describe('SidebarNav — camada global', () => {
       'href',
       '/configuracoes/anomalias',
     );
+    // Organizações é da PLATAFORMA: o admin da organização não vê o item
+    // (`manage_platform` tem ✅ numa coluna só da matriz).
+    expect(within(nav).queryByRole('link', { name: 'Organizações' })).not.toBeInTheDocument();
     await assertNoA11yViolations(container);
   });
 
-  it('gerente do sistema não vê Configurações (admin-only)', () => {
+  it('plataforma vê Organizações junto com as demais configurações', async () => {
+    const { container } = render(<SidebarNav user={PLATFORM} />);
+
+    const nav = screen.getByRole('navigation', { name: 'Navegação principal' });
+    expect(within(nav).getByRole('link', { name: 'Organizações' })).toHaveAttribute(
+      'href',
+      '/configuracoes/organizacoes',
+    );
+    // E continua vendo o resto: a plataforma está em toda linha da matriz.
+    expect(within(nav).getByRole('link', { name: 'Usuários' })).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: 'Categorias de Cliente' })).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: 'Clientes' })).toBeInTheDocument();
+    await assertNoA11yViolations(container);
+  });
+
+  it('gerente da organização não vê Configurações (nenhum item da seção)', () => {
     render(<SidebarNav user={SYSTEM_MANAGER} />);
 
     const nav = screen.getByRole('navigation', { name: 'Navegação principal' });
@@ -161,13 +191,19 @@ describe('SidebarNav — camada do cliente', () => {
     await assertNoA11yViolations(container);
   });
 
-  it('gerente do sistema opera a carteira mas não vê Usuários do tenant', () => {
+  it('gerente da organização opera a carteira E gere os usuários do tenant (D2)', () => {
+    // Mudou na 86e36ecjp (já na main): a célula `manage_client_users` ganhou o
+    // gerente. O "da carteira" não é decidido aqui — é o backend que nega o
+    // cliente fora dela; o menu só não esconde o que o servidor libera.
     currentPathname = '/clientes/c1';
     render(<SidebarNav user={SYSTEM_MANAGER} />);
 
     const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
     expect(within(nav).getByRole('link', { name: 'Voltar para clientes' })).toBeInTheDocument();
-    expect(within(nav).queryByRole('link', { name: 'Usuários' })).not.toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: 'Usuários' })).toHaveAttribute(
+      'href',
+      '/clientes/c1/usuarios',
+    );
   });
 
   it('gerente do cliente: sem Voltar (não há camada acima), com Usuários', () => {

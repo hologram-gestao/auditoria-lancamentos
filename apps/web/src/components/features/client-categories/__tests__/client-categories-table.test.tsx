@@ -17,6 +17,9 @@ function row(over: Partial<ClientCategoryItem> = {}): ClientCategoryItem {
     name: 'Fintech',
     tone: 'info',
     clients_count: 3,
+    // Toda categoria pertence a uma organização desde a 86e36ecqz.
+    organization_id: '0706eeb5-9718-4d03-bcda-ef615789e6ac',
+    organization_name: 'Hologram',
     ...over,
   };
 }

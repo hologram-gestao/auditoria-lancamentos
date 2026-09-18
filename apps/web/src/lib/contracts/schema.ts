@@ -81,7 +81,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Listar usuários (paginado, busca por nome ou e-mail). */
+        /** Listar staff (paginado, busca por nome ou e-mail; filtros de organização e papel). */
         get: operations["list_users_api_v1_users_get"];
         put?: never;
         /** Criar usuário com senha inicial. Email deve ser único. */
@@ -825,7 +825,7 @@ export interface paths {
         /** Lista tipos de anomalia. Sem `?page` retorna envelope legado `{data:[...]}`. Com `?page` retorna paginado `{data, pagination}`. Manager nunca vê inativos (silently filtered). */
         get: operations["list_anomaly_types_api_v1_anomaly_types_get"];
         put?: never;
-        /** Criar tipo custom (admin-only). Code é validado snake_case e único. */
+        /** Criar tipo custom (quem gere o catálogo). Code é validado snake_case e único. */
         post: operations["create_anomaly_type_api_v1_anomaly_types_post"];
         delete?: never;
         options?: never;
@@ -843,11 +843,11 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Excluir tipo (admin-only). 409 se houver anomalias referenciando — nesse caso, oriente a desativar via PATCH. */
+        /** Excluir tipo (quem gere o catálogo). 409 se houver anomalias referenciando — nesse caso, oriente a desativar via PATCH. */
         delete: operations["delete_anomaly_type_api_v1_anomaly_types__type_id__delete"];
         options?: never;
         head?: never;
-        /** Atualizar tipo (admin-only). `code` é imutável. */
+        /** Atualizar tipo (quem gere o catálogo). `code` é imutável. */
         patch: operations["update_anomaly_type_api_v1_anomaly_types__type_id__patch"];
         trace?: never;
     };
@@ -861,7 +861,7 @@ export interface paths {
         /** Lista o catálogo de categorias de cliente com a contagem de clientes por categoria. */
         get: operations["list_client_categories_api_v1_client_categories_get"];
         put?: never;
-        /** Cria categoria (admin-only). Nome único sem distinção de caixa. */
+        /** Cria categoria na organização do ator (a plataforma escolhe). Nome único sem distinção de caixa dentro da organização. */
         post: operations["create_client_category_api_v1_client_categories_post"];
         delete?: never;
         options?: never;
@@ -879,11 +879,11 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Exclui categoria (admin-only). 409 se houver clientes vinculados. */
+        /** Exclui categoria (quem gere o catálogo). 409 se houver clientes vinculados; 404 fora da própria organização. */
         delete: operations["delete_client_category_api_v1_client_categories__category_id__delete"];
         options?: never;
         head?: never;
-        /** Atualiza nome e/ou tom (admin-only). */
+        /** Atualiza nome e/ou tom (quem gere o catálogo). 404 fora da própria organização. */
         patch: operations["update_client_category_api_v1_client_categories__category_id__patch"];
         trace?: never;
     };
@@ -981,12 +981,48 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Dispara um alerta SINTÉTICO ao(s) canal(is) de plantão configurado(s) (webhook e/ou e-mail) para provar a entrega ponta a ponta. Admin-only. Retorna o resultado por canal (True=entregue, False=falhou, None=não configurado). Sem PII. */
+        /** Dispara um alerta SINTÉTICO ao(s) canal(is) de plantão configurado(s) (webhook e/ou e-mail) para provar a entrega ponta a ponta. Plataforma ou admin. Retorna o resultado por canal (True=entregue, False=falhou, None=não configurado). Sem PII. */
         post: operations["trigger_synthetic_alert_api_v1_system_alert_test_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista organizações (paginado, busca por nome) com contagem de clientes e staff. */
+        get: operations["list_organizations_api_v1_organizations_get"];
+        put?: never;
+        /** Cria organização (só plataforma). Nome único sem distinção de caixa. */
+        post: operations["create_organization_api_v1_organizations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{organization_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Detalhe da organização (só plataforma). */
+        get: operations["get_organization_api_v1_organizations__organization_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Renomeia e/ou suspende a organização (só plataforma). `active=false` derruba os usuários dela no request seguinte e bloqueia cliente novo; `true` reativa. */
+        patch: operations["update_organization_api_v1_organizations__organization_id__patch"];
         trace?: never;
     };
     "/health": {
@@ -1300,9 +1336,12 @@ export interface components {
          *
          *     Sprint 5 (R2): `role`/`scope` são os enums do backend (contrato é fonte
          *     única — o front faz o gating de UI a partir daqui, sem redigitar união de
-         *     strings) e `client_id` diz a que tenant o usuário pertence (`None` para a
-         *     equipe Hologram). Nenhum deles é a fonte da decisão de acesso: o servidor
-         *     decide pela linha (`app.core.authz`).
+         *     strings) e `client_id` diz a que tenant o usuário pertence (`None` fora do
+         *     escopo de cliente). Camada de organizações: `organization_id`/
+         *     `organization_name` dizem em que organização a pessoa está — `None` para a
+         *     plataforma; é o que o header usa para mostrar "em que chapéu" ela está.
+         *     Nenhum deles é a fonte da decisão de acesso: o servidor decide pela linha
+         *     (`app.core.authz`).
          */
         AuthenticatedUser: {
             /** Id */
@@ -1315,6 +1354,10 @@ export interface components {
             scope: components["schemas"]["UserScope"];
             /** Client Id */
             client_id?: string | null;
+            /** Organization Id */
+            organization_id?: string | null;
+            /** Organization Name */
+            organization_name?: string | null;
         };
         /**
          * AutorNavegouForaProps
@@ -1477,13 +1520,18 @@ export interface components {
         };
         /**
          * ClientCategoryCreate
-         * @description Body de POST /api/v1/client-categories — admin-only.
+         * @description Body de POST /api/v1/client-categories — quem gere o catálogo.
          */
         ClientCategoryCreate: {
             /** Name */
             name: string;
             /** @default neutral */
             tone: components["schemas"]["ClientCategoryTone"];
+            /**
+             * Organization Id
+             * @description Organização dona da categoria. Obrigatória para a plataforma; para o admin de organização, omitir (usa a própria) ou repetir a própria.
+             */
+            organization_id?: string | null;
         };
         /**
          * ClientCategoryItem
@@ -1505,6 +1553,13 @@ export interface components {
              * @default 0
              */
             clients_count: number;
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
+            /** Organization Name */
+            organization_name: string;
         };
         /**
          * ClientCategoryListResponse
@@ -1562,6 +1617,7 @@ export interface components {
             name: string;
             /** Active */
             active: boolean;
+            organization: components["schemas"]["OrganizationSummary"];
             /**
              * Created At
              * Format: date-time
@@ -1661,6 +1717,7 @@ export interface components {
             name: string;
             /** Active */
             active: boolean;
+            organization: components["schemas"]["OrganizationSummary"];
             /**
              * Created At
              * Format: date-time
@@ -1793,6 +1850,11 @@ export interface components {
              * @description Categoria do catálogo (86e34jd8m). Ausente ou null = sem categoria.
              */
             category_id?: string | null;
+            /**
+             * Organization Id
+             * @description Organização dona do cliente. Obrigatória para a plataforma; para o staff de organização, omitir (usa a própria) ou repetir a própria.
+             */
+            organization_id?: string | null;
         };
         /**
          * CreateClientUserRequest
@@ -1916,7 +1978,7 @@ export interface components {
         };
         /**
          * CreateUserRequest
-         * @description Body de POST /api/v1/users — admin cria novo usuário.
+         * @description Body de POST /api/v1/users — cria staff da organização.
          */
         CreateUserRequest: {
             /**
@@ -1937,6 +1999,11 @@ export interface components {
             password: string;
             /** @description Perfil: admin ou manager. */
             role: components["schemas"]["SystemUserRole"];
+            /**
+             * Organization Id
+             * @description Organização do novo usuário. Obrigatória para a plataforma; para o admin de organização, omitir (usa a própria) ou repetir a própria.
+             */
+            organization_id?: string | null;
         };
         /**
          * DuplicateCheckPayload
@@ -2521,6 +2588,89 @@ export interface components {
             message?: string | null;
             /** Omie Lancamento Id */
             omie_lancamento_id?: number | null;
+        };
+        /**
+         * OrganizationCreate
+         * @description Body de POST /api/v1/organizations — só plataforma.
+         */
+        OrganizationCreate: {
+            /** Name */
+            name: string;
+        };
+        /**
+         * OrganizationItem
+         * @description Uma organização — listagem, detalhe e respostas de mutação.
+         */
+        OrganizationItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Active */
+            active: boolean;
+            /**
+             * Clients Count
+             * @description Clientes que pertencem à organização.
+             * @default 0
+             */
+            clients_count: number;
+            /**
+             * Users Count
+             * @description Staff (admin/manager) da organização.
+             * @default 0
+             */
+            users_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * OrganizationListResponse
+         * @description Body de GET /api/v1/organizations — lista paginada.
+         */
+        OrganizationListResponse: {
+            /** Data */
+            data: components["schemas"]["OrganizationItem"][];
+            pagination: components["schemas"]["PaginationMeta"];
+        };
+        /**
+         * OrganizationSummary
+         * @description Organização dona do cliente, como aparece na lista e no detalhe (86e36ecqz).
+         *
+         *     É a coluna "Organização" da visão da plataforma; para o staff de organização
+         *     é sempre a própria. Nome de BPO, não dado do cliente final (§4.5).
+         */
+        OrganizationSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+        };
+        /**
+         * OrganizationUpdate
+         * @description Body de PATCH /api/v1/organizations/{id} — parcial, só plataforma.
+         *
+         *     `active=false` SUSPENDE a organização: os usuários dela recebem 401 no
+         *     request seguinte (`get_current_user` lê a organização junto com a linha).
+         */
+        OrganizationUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Active */
+            active?: boolean | null;
         };
         /**
          * PaginationMeta
@@ -3192,6 +3342,8 @@ export interface components {
             email: string;
             /** Role */
             role: string;
+            /** Scope */
+            scope: string;
             /** Active */
             active: boolean;
             /**
@@ -3204,27 +3356,38 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /** Organization Id */
+            organization_id?: string | null;
+            /** Organization Name */
+            organization_name?: string | null;
         };
         /**
          * UserRole
          * @description Perfis de usuário — fonte ÚNICA (proibida string mágica em service/rota).
          *
-         *     Papéis de SISTEMA (equipe Hologram, `scope='system'`):
-         *         - ADMIN: acesso total.
-         *         - MANAGER: acesso pela carteira (`client_assignments`).
+         *     Papel de PLATAFORMA (`scope='platform'`, camada de organizações):
+         *         - PLATFORM_ADMIN: vê e faz tudo em qualquer organização (suporte).
+         *
+         *     Papéis de ORGANIZAÇÃO (`scope='system'` = staff de UM BPO):
+         *         - ADMIN: acesso total aos clientes da própria organização.
+         *         - MANAGER: acesso pela carteira (`client_assignments`), intra-org.
          *
          *     Papéis de CLIENTE (`scope='client'`, Sprint 5 / R1+R4):
          *         - CLIENT_MANAGER: opera o próprio tenant + gere os usuários dele.
          *         - CLIENT_OPERATOR: opera o próprio tenant, sem gerir usuários.
          * @enum {string}
          */
-        UserRole: "admin" | "manager" | "client_manager" | "client_operator";
+        UserRole: "platform_admin" | "admin" | "manager" | "client_manager" | "client_operator";
         /**
          * UserScope
-         * @description Escopo de tenancy do usuário — fonte ÚNICA (Sprint 5 / R1).
+         * @description Escopo de tenancy do usuário — fonte ÚNICA (Sprint 5 / R1 + organizações).
+         *
+         *     A ordem dos ramos em `app.core.authz.resolve_client_access` segue esta
+         *     hierarquia: cliente (só o próprio tenant), plataforma (tudo), organização
+         *     (a própria org, pela carteira no caso do manager).
          * @enum {string}
          */
-        UserScope: "system" | "client";
+        UserScope: "platform" | "system" | "client";
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -3326,6 +3489,10 @@ export interface operations {
                 page?: number;
                 pageSize?: number;
                 search?: string | null;
+                /** @description Plataforma: restringe a uma organização. Admin: só a própria. */
+                organizationId?: string | null;
+                /** @description Filtra pelo papel (admin ou manager). */
+                role?: components["schemas"]["SystemUserRole"] | null;
             };
             header?: never;
             path?: never;
@@ -3748,6 +3915,8 @@ export interface operations {
                 search?: string | null;
                 /** @description Filtra pela categoria do catálogo (86e34jd8m). */
                 category_id?: string | null;
+                /** @description Plataforma: restringe a uma organização. Staff: só a própria. */
+                organizationId?: string | null;
             };
             header?: never;
             path?: never;
@@ -5362,7 +5531,10 @@ export interface operations {
     };
     list_client_categories_api_v1_client_categories_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Plataforma: restringe a uma organização. Staff: só a própria. */
+                organizationId?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: {
@@ -5677,6 +5849,146 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SyntheticAlertResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_organizations_api_v1_organizations_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                pageSize?: number;
+                search?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_organization_api_v1_organizations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_organization_api_v1_organizations__organization_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organization_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_organization_api_v1_organizations__organization_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organization_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationItem"];
                 };
             };
             /** @description Validation Error */
