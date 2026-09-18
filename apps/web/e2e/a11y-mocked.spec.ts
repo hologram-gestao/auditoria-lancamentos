@@ -2642,10 +2642,19 @@ for (const vp of VIEWPORTS) {
       await expect(confirm).toContainText('5 usuários perdem');
       await expect(confirm).toContainText('12 clientes');
       await shot(page, `organizacoes-suspender-${slug}`);
+
+      // HOVER EXPLÍCITO na ação destrutiva antes de medir (86e36ed1d). O estado
+      // de hover tem par de cor PRÓPRIO, e o axe só o vê se o ponteiro estiver
+      // sobre o botão na hora do scan. Isto já aconteceu por ACIDENTE: o clique
+      // anterior deixava o ponteiro numa coordenada que, em 390px, calhava de
+      // cair sobre o botão do diálogo — e o CI reprovou com 3,95:1 no escuro
+      // enquanto a mesma suíte passava aqui, porque poucos pixels de layout
+      // decidiam se o hover valia. Medir de propósito tira a sorte do caminho.
+      const suspender = confirm.getByRole('button', { name: 'Suspender' });
+      await suspender.hover();
       await analyze(page, `confirmação de suspensão de organização (${vp.label})`);
 
       // A ação primária precisa caber na viewport — em 390px é onde corta.
-      const suspender = confirm.getByRole('button', { name: 'Suspender' });
       const box = await suspender.boundingBox();
       expect(box, 'o botão Suspender precisa ter caixa visível').not.toBeNull();
       expect(

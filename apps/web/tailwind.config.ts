@@ -31,6 +31,7 @@ const config: Config = {
           DEFAULT: 'hsl(var(--destructive))',
           foreground: 'hsl(var(--destructive-foreground))',
           muted: 'hsl(var(--destructive-muted))',
+          hover: 'hsl(var(--destructive-hover))',
         },
         // Feedback semântico — a UI usa SÓ estes tokens (proibido `bg-blue-50`,
         // `text-emerald-600`, hex etc). `muted` é a variante de FUNDO de
