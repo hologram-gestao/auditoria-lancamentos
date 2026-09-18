@@ -31,6 +31,13 @@
        sentidos e 5.9:1 sobre `bg-destructive/10` (badge "Erro"). */
     --destructive: 0 73.7% 41.8%;
     --destructive-foreground: 0 0% 98%;
+    /* Hover SÓLIDO, não `bg-destructive/90`: a composição com alfa mistura o
+       vermelho com a superfície, e o par resultante não é um token — nenhum
+       teste consegue travá-lo. No escuro isso reprovava de verdade (3,95:1
+       contra o mínimo de 4,5), porque escurecer o fundo aproximava-o do texto
+       quase preto do tema. No claro o hover ESCURECE, convenção da superfície
+       clara. */
+    --destructive-hover: 0 73.7% 36%;
     /* Variante de FUNDO do destrutivo, simétrica a `success/warning/info`.
        Existe porque o toast de ERRO flutua sobre a página: `bg-destructive/10`
        é TRANSLÚCIDO e compõe com o que estiver embaixo (card, tabela, badge) —
@@ -90,6 +97,9 @@
        destrutivo passa a ser quase-preto sobre o vermelho. */
     --destructive: 0 80% 60%;
     --destructive-foreground: 0 0% 9%;
+    /* No escuro o hover CLAREIA: é a convenção, e é o que devolve contraste
+       contra o texto quase preto. 5,63:1. */
+    --destructive-hover: 0 80% 66%;
     --destructive-muted: 0 62.8% 10%;
     --success: 142.1 70.6% 45.3%;
     --success-foreground: 144.9 80.4% 10%;
@@ -135,6 +145,8 @@
     --accent-foreground: 0 0% 98%;
     --destructive: 0 80% 62%;
     --destructive-foreground: 0 0% 9%;
+    /* Mesma direção do escuro. 6,00:1. */
+    --destructive-hover: 0 80% 68%;
     --destructive-muted: 0 55% 15%;
     --success: 142 65% 50%;
     --success-foreground: 145 80% 10%;

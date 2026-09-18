@@ -180,9 +180,20 @@ viewportSize().width` (padrão em `spec:2147-2165` e `:2190-2205`). Antes de med
 
 - **Cor só por token semântico** (`success`/`warning`/`info`/`destructive` + `-foreground`/
   `-muted`, neutros `muted`/`border`/`input`), definidos nos três blocos de
-  `app/globals.css` (`:root` `:6`, `.dark` `:69`, `.hologram` `:115`). Nada de
+  `app/globals.css` (`:root` `:6`, `.dark` `:76`, `.hologram` `:125`). Nada de
   `emerald-100`/`zinc-700` nem `dark:` em componente. Pareamento que não inverte:
   sobre o SÓLIDO usa-se `-foreground`; sobre `-muted` o texto é o SÓLIDO.
+- **Estado de HOVER é um par próprio, e sólido** (86e36ed1d). `hover:bg-destructive/90`
+  parece inofensivo e não é: a composição com **alfa** mistura o token com a superfície,
+  e o par resultante não é um token — `theme-contrast.test.ts` não consegue travá-lo. Nos
+  temas escuros, onde o rótulo do botão destrutivo é quase preto, escurecer o fundo
+  derrubava para **3,95:1** (badge destrutivo: reprovava nos TRÊS temas). O hover agora
+  é `--destructive-hover`, sólido, com par travado. **Hover novo = token novo + linha em
+  `PAIRS`**, nunca uma barra de opacidade.
+- **O axe só vê o hover se o ponteiro estiver lá.** Este defeito escapou de três rodadas
+  do gate local e só apareceu no CI porque o `.click()` anterior deixava o ponteiro numa
+  coordenada que, em 390px, calhava de cair sobre o botão do diálogo. Antes de `analyze`
+  numa tela com ação destrutiva, `await botao.hover()` de propósito.
   ```bash
   grep -rnE "\b(text|bg|border|ring|from|to|via)-(slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-[0-9]{2,3}\b|\bdark:" apps/web/src/components --include=*.tsx   # esperado: 0
   ```

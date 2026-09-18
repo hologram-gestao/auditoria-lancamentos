@@ -13,7 +13,11 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default: 'bg-primary text-primary-foreground hover:bg-primary/90',
-        destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive/90',
+        // Hover por TOKEN SÓLIDO, não `bg-destructive/90` (86e36ed1d): a
+        // composição com alfa mistura o vermelho com a superfície e o par
+        // resultante não é um token, então nenhum teste o trava. No escuro
+        // reprovava de verdade: 3,95:1 contra o mínimo de 4,5.
+        destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive-hover',
         outline: 'border border-input bg-background hover:bg-accent hover:text-accent-foreground',
         secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
         ghost: 'hover:bg-accent hover:text-accent-foreground',
