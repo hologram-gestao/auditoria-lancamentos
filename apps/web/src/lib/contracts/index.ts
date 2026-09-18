@@ -62,6 +62,12 @@ export type ClientUserRole = Schemas['ClientUserRole'];
  * papel que o servidor recusa com 422.
  */
 export type SystemUserRole = Schemas['SystemUserRole'];
+/**
+ * Um staff de organização como a API o devolve — inclui `scope`,
+ * `organization_id` e `organization_name` desde a 86e36ecqz. O `lib/api/users`
+ * estreita só o `role` (o OpenAPI o expõe como `string`).
+ */
+export type UserResponse = Schemas['UserResponse'];
 
 // ---------------------------------------------------------------------------
 // Organizações — camada multi-BPO (épico 86e36ec0q)

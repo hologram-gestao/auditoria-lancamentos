@@ -13,7 +13,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   canAccessClient,
-  canCreateWithoutOrganizationPicker,
   canManageSystemUsers,
   canSeeSystemArea,
   hasPermission,
@@ -166,13 +165,13 @@ const MATRIX: ReadonlyArray<{
     clientManager: false,
     clientOperator: false,
   },
-  // (*) D3 final é só plataforma; o admin sai desta célula quando a tela de
-  // tipos de anomalia virar só-plataforma (86e36ed1d). Tirar antes deixaria a
-  // tela atual com botões que o servidor nega.
+  // D3 final (86e36ed1d): taxonomia GLOBAL, escrita só da plataforma. O admin
+  // saiu da célula na MESMA entrega em que a tela virou só-plataforma — tirar
+  // antes teria deixado a tela com botões que o servidor nega.
   {
     permission: 'manage_anomaly_types',
     platform: true,
-    admin: true,
+    admin: false,
     manager: false,
     clientManager: false,
     clientOperator: false,
@@ -326,25 +325,6 @@ describe('a plataforma bem formada — espelho de `is_platform` (backend)', () =
     expect(isStaff(comOrg)).toBe(false);
     expect(canAccessClient(comOrg, TENANT_B)).toBe(false);
     expect(canSeeSystemArea(comTenant)).toBe(false);
-  });
-});
-
-describe('canCreateWithoutOrganizationPicker — ação sem seletor de organização', () => {
-  it('esconde da PLATAFORMA o que o servidor recusaria por falta de organização', () => {
-    // O backend exige `organization_id` da plataforma; enquanto o formulário
-    // não o envia (86e36ed1d), o botão seria 400 garantido.
-    expect(hasPermission(platform, 'create_client')).toBe(true);
-    expect(canCreateWithoutOrganizationPicker(platform, 'create_client')).toBe(false);
-    expect(canCreateWithoutOrganizationPicker(platform, 'manage_org_users')).toBe(false);
-    expect(canCreateWithoutOrganizationPicker(platform, 'manage_client_categories')).toBe(false);
-  });
-
-  it('não muda nada para quem já tem organização na linha', () => {
-    expect(canCreateWithoutOrganizationPicker(admin, 'create_client')).toBe(true);
-    expect(canCreateWithoutOrganizationPicker(manager, 'create_client')).toBe(true);
-    // E continua negando quem a matriz nega.
-    expect(canCreateWithoutOrganizationPicker(manager, 'manage_org_users')).toBe(false);
-    expect(canCreateWithoutOrganizationPicker(clientManager, 'create_client')).toBe(false);
   });
 });
 

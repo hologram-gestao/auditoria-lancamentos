@@ -171,14 +171,9 @@ _PLATFORM_ONLY: frozenset[UserRole] = frozenset({UserRole.PLATFORM_ADMIN})
 #: | Ver outro tenant              | ✅             | ✅ (org)    | ✅ (carteira)  | ❌             | ❌              |
 #: | Gerir usuários da org         | ✅             | ✅ (org)    | ❌             | ❌             | ❌              |
 #: | Categorias de cliente (esc.)  | ✅             | ✅ (org)    | ❌             | ❌             | ❌              |
-#: | Tipos de anomalia (escrita)   | ✅             | ✅ (*)      | ❌             | ❌             | ❌              |
+#: | Tipos de anomalia (escrita)   | ✅             | ❌          | ❌             | ❌             | ❌              |
 #: | Gerir organizações            | ✅             | ❌          | ❌             | ❌             | ❌              |
 #: | Teste de alerta               | ✅             | ✅          | ❌             | ❌             | ❌              |
-#:
-#: (*) D3 final é "só plataforma". O admin fica na célula até a tela de tipos
-#: de anomalia virar só-plataforma (onda 2, task 86e36ed1d) — tirar antes
-#: deixaria a tela atual mostrando botões que o servidor nega (§4.9), e a
-#: segunda organização, que é o que a D3 protege, só nasce na onda 3.
 PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]] = {
     Permission.RUN_RECONCILIATION: _EVERYONE,
     Permission.REVIEW_EXPORT: _EVERYONE,
@@ -204,7 +199,13 @@ PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]] = {
     Permission.CREATE_CLIENT: _STAFF,
     Permission.MANAGE_ORG_USERS: _ADMINS,
     Permission.MANAGE_CLIENT_CATEGORIES: _ADMINS,
-    Permission.MANAGE_ANOMALY_TYPES: _ADMINS,
+    # D3 final (86e36ed1d): a taxonomia de anomalias é GLOBAL do produto — uma
+    # tabela só, compartilhada por todas as organizações. Enquanto só existia a
+    # Hologram, "admin escreve" e "plataforma escreve" eram a mesma coisa; com a
+    # segunda organização, o admin de uma editaria o catálogo que a outra usa.
+    # Por isso a escrita é só da plataforma, e a tela virou só-plataforma na
+    # MESMA entrega (§4.9: ❌ na matriz = bloqueio no backend E ação oculta).
+    Permission.MANAGE_ANOMALY_TYPES: _PLATFORM_ONLY,
     Permission.MANAGE_PLATFORM: _PLATFORM_ONLY,
     Permission.RUN_ALERT_TEST: _ADMINS,
 }

@@ -32,7 +32,14 @@ vi.mock('@/hooks/use-clients', () => ({
 }));
 
 const usersQuery = { data: undefined as { data: User[] } | undefined, isLoading: false };
-vi.mock('@/hooks/use-users', () => ({ useUsersList: () => usersQuery }));
+/** Último `params` que a seção mandou ao hook — prova o filtro server-side. */
+let lastUsersParams: Record<string, unknown> | undefined;
+vi.mock('@/hooks/use-users', () => ({
+  useUsersList: (params: Record<string, unknown>) => {
+    lastUsersParams = params;
+    return usersQuery;
+  },
+}));
 
 const authState = { user: null as AuthenticatedUser | null };
 vi.mock('@/stores/auth', () => ({
@@ -67,11 +74,13 @@ const ADMIN: AuthenticatedUser = {
   client_id: null,
 };
 
+const HOLOGRAM_ORG = { id: '0706eeb5-9718-4d03-bcda-ef615789e6ac', name: 'Hologram' };
+
 const client: Client = {
   id: 'c1',
   name: 'Cliente Exemplo Ltda',
   active: true,
-  organization: { id: '0706eeb5-9718-4d03-bcda-ef615789e6ac', name: 'Hologram' },
+  organization: HOLOGRAM_ORG,
   created_at: '2026-05-01T12:00:00Z',
   updated_at: '2026-07-20T12:00:00Z',
   responsible_manager: { id: 'u1', name: 'Bruna R.', email: 'bruna@hologram.com.br' },
@@ -87,6 +96,9 @@ function user(id: string, name: string, over: Partial<User> = {}): User {
     name,
     email: `${id}@hologram.com.br`,
     role: 'manager',
+    scope: 'system',
+    organization_id: HOLOGRAM_ORG.id,
+    organization_name: HOLOGRAM_ORG.name,
     active: true,
     created_at: '2026-06-01T12:00:00Z',
     updated_at: '2026-06-01T12:00:00Z',
@@ -130,9 +142,9 @@ beforeEach(() => {
       user('u2', 'Murilo C.'),
       user('u3', 'Gerente Disponível'),
       user('u4', 'Gerente Inativo', { active: false }),
-      user('u5', 'Outro Admin', { role: 'admin' }),
     ],
   };
+  lastUsersParams = undefined;
   usersQuery.isLoading = false;
   authState.user = ADMIN;
   addMutation.mutateAsync.mockReset().mockResolvedValue([]);
@@ -206,6 +218,19 @@ describe('ClientManagersSection', () => {
     expect(removeMutation.mutateAsync).not.toHaveBeenCalled();
   });
 
+  it('pede ao SERVIDOR só gerentes da organização DO CLIENTE (86e36ed1d)', () => {
+    // Com N organizações, filtrar `role === 'manager'` no navegador ofereceria
+    // gerente de OUTRA organização — e o backend recusaria com o mesmo 400 de
+    // "não é gerente" (`is_active_manager` é intra-org, mensagem única contra
+    // enumeração). Quem responde quem é candidato é o servidor.
+    render(<ClientManagersSection client={client} />);
+
+    expect(lastUsersParams).toMatchObject({
+      role: 'manager',
+      organizationId: HOLOGRAM_ORG.id,
+    });
+  });
+
   it('adicionar: só oferece gerente ATIVO que ainda não tem acesso', async () => {
     const ui = userEvent.setup();
     render(<ClientManagersSection client={client} />);
@@ -215,7 +240,8 @@ describe('ClientManagersSection', () => {
 
     await ui.click(screen.getByRole('combobox', { name: 'Adicionar gerente' }));
     const options = await screen.findAllByRole('option');
-    // Fora: os dois que já têm acesso, o inativo e o admin (o backend daria 400).
+    // Fora: os dois que já têm acesso e o inativo (o backend daria 400). O papel
+    // e a organização já vieram filtrados do servidor.
     expect(options.map((o) => o.textContent)).toEqual(['Gerente Disponível']);
     await ui.click(options[0]!);
 

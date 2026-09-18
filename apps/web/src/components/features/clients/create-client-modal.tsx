@@ -18,10 +18,15 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { toast } from 'sonner';
 
+import {
+  OrganizationLoadError,
+  organizationOptionLabel,
+  useOrganizationOptions,
+} from '@/components/features/organizations/organization-select';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -50,7 +55,9 @@ import {
 import { useClientCategories } from '@/hooks/use-client-categories';
 import { useCreateClient, useTestConnection } from '@/hooks/use-clients';
 import { ApiError } from '@/lib/api/client';
-import { createClientSchema, type CreateClientFormValues } from '@/lib/validation/clients';
+import { isPlatformScoped } from '@/lib/authz';
+import { makeCreateClientSchema, type CreateClientFormValues } from '@/lib/validation/clients';
+import { useAuthStore } from '@/stores/auth';
 
 import { PasswordInput } from './password-input';
 import { TestConnectionButton, type TestConnectionState } from './test-connection-button';
@@ -74,16 +81,59 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
   const testMutation = useTestConnection();
   // Catálogo de categorias (86e34jd8m) — só busca com o modal aberto.
   const categoriesQuery = useClientCategories({ enabled: open });
-  const categories = categoriesQuery.data ?? [];
+
+  // Onde o cliente NASCE (86e36ed1d): a plataforma escolhe e é obrigada a
+  // escolher; o staff nem vê o campo, porque o backend usa a organização da
+  // LINHA dele e recusa payload divergente com 403.
+  const currentUser = useAuthStore((s) => s.user);
+  const isPlatform = isPlatformScoped(currentUser);
+  const {
+    organizations,
+    isLoading: organizationsLoading,
+    isError: organizationsError,
+  } = useOrganizationOptions({
+    enabled: isPlatform && open,
+    activeOnly: true,
+  });
+  const schema = useMemo(
+    () => makeCreateClientSchema({ requireOrganization: isPlatform }),
+    [isPlatform],
+  );
 
   const form = useForm<CreateClientFormValues>({
-    resolver: zodResolver(createClientSchema),
-    defaultValues: { name: '', omie_app_key: '', omie_app_secret: '', category_id: 'none' },
+    resolver: zodResolver(schema),
+    defaultValues: {
+      name: '',
+      omie_app_key: '',
+      omie_app_secret: '',
+      category_id: 'none',
+      organization_id: '',
+    },
     mode: 'onSubmit',
   });
 
   const watchedKey = useWatch({ control: form.control, name: 'omie_app_key' });
   const watchedSecret = useWatch({ control: form.control, name: 'omie_app_secret' });
+  const watchedOrganization = useWatch({ control: form.control, name: 'organization_id' });
+
+  // O catálogo é POR organização (86e36ecqz) e a plataforma recebe o de TODAS.
+  // A categoria precisa ser DA organização de destino: `_assert_category_exists`
+  // valida no catálogo dela e devolve 400 se for de outra. Oferecer a lista
+  // inteira seria mostrar opção que o servidor recusa (§4.9) — e, com duas
+  // organizações tendo "Varejo", duas opções idênticas e indistinguíveis.
+  const visibleCategories = useMemo(() => {
+    const all = categoriesQuery.data ?? [];
+    return isPlatform ? all.filter((c) => c.organization_id === watchedOrganization) : all;
+  }, [categoriesQuery.data, isPlatform, watchedOrganization]);
+
+  // Trocar a organização invalida a categoria escolhida: limpar no MESMO
+  // momento, senão o POST sai com um par que o backend recusa.
+  useEffect(() => {
+    if (!isPlatform) return;
+    form.setValue('category_id', 'none');
+    // `form` é estável; reagir só à troca de organização.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedOrganization, isPlatform]);
 
   // Reset completo quando o modal fecha — não vaza credenciais entre aberturas.
   useEffect(() => {
@@ -147,6 +197,9 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
         omie_app_key: values.omie_app_key,
         omie_app_secret: values.omie_app_secret,
         ...(categoryId ? { category_id: categoryId } : {}),
+        // Só a plataforma manda o campo: o staff omitindo é o que faz o
+        // backend usar a organização da própria linha.
+        ...(values.organization_id ? { organization_id: values.organization_id } : {}),
       });
       toast.success('Cliente criado.');
       onOpenChange(false);
@@ -194,7 +247,7 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
                       autoComplete="off"
                       autoFocus
                       disabled={inputsDisabled}
-                      placeholder="Como a Hologram se refere ao cliente"
+                      placeholder="Como a sua organização se refere ao cliente"
                       {...field}
                     />
                   </FormControl>
@@ -245,6 +298,40 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
 
             <TestConnectionButton state={testState} disabled={!canTest} onClick={handleTest} />
 
+            {/* Só a plataforma escolhe onde o cliente nasce (86e36ed1d). O staff
+                não vê o campo: a organização dele vem da LINHA, no servidor. */}
+            {isPlatform && (
+              <FormField
+                control={form.control}
+                name="organization_id"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Organização</FormLabel>
+                    <Select
+                      value={field.value ?? ''}
+                      onValueChange={field.onChange}
+                      disabled={inputsDisabled || organizationsLoading}
+                    >
+                      <FormControl>
+                        <SelectTrigger aria-label="Organização do cliente">
+                          <SelectValue placeholder="Selecione a organização" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {organizations.map((o) => (
+                          <SelectItem key={o.id} value={o.id}>
+                            {organizationOptionLabel(o)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {organizationsError && <OrganizationLoadError />}
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
+
             <FormField
               control={form.control}
               name="category_id"
@@ -254,7 +341,13 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
                   <Select
                     value={field.value ?? 'none'}
                     onValueChange={field.onChange}
-                    disabled={inputsDisabled || categoriesQuery.isLoading}
+                    disabled={
+                      inputsDisabled ||
+                      categoriesQuery.isLoading ||
+                      // A plataforma escolhe a organização ANTES: sem ela não há
+                      // catálogo de onde escolher.
+                      (isPlatform && !watchedOrganization)
+                    }
                   >
                     <FormControl>
                       <SelectTrigger aria-label="Categoria do cliente">
@@ -263,7 +356,7 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
                     </FormControl>
                     <SelectContent>
                       <SelectItem value="none">Sem categoria</SelectItem>
-                      {categories.map((c) => (
+                      {visibleCategories.map((c) => (
                         <SelectItem key={c.id} value={c.id}>
                           {c.name}
                         </SelectItem>

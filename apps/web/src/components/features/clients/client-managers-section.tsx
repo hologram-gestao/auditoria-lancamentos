@@ -72,9 +72,22 @@ export function ClientManagersSection({ client, disabled = false }: ClientManage
   const currentUserId = useAuthStore((s) => s.user?.id);
   const headingId = useId();
   const managersQuery = useClientManagers(client.id);
-  // Lista de gerentes do sistema para o "Adicionar". `pageSize=100` cobre o
-  // time interno da Hologram; passando disso, entra filtro server-side.
-  const usersQuery = useUsersList({ page: 1, pageSize: 100 });
+  // Candidatos a entrar na carteira: gerentes DA ORGANIZAÇÃO DO CLIENTE
+  // (86e36ed1d). Antes o filtro era `role === 'manager'` no navegador sobre a
+  // primeira página de `/users` — com uma organização só isso coincidia com a
+  // resposta certa; com N, ofereceria gerente de outra organização, e o backend
+  // recusa com o MESMO 400 de "não é gerente" (`is_active_manager` é intra-org,
+  // e a mensagem é única de propósito, contra enumeração). Perguntar ao
+  // servidor pelo papel E pela organização é o que faz a lista oferecer só
+  // quem o servidor aceitaria. O `pageSize=100` continua sendo o teto da rota e
+  // cobre o time de uma organização; passando disso, o 101º gerente ativo some
+  // do seletor em silêncio e o campo precisa virar busca server-side.
+  const usersQuery = useUsersList({
+    page: 1,
+    pageSize: 100,
+    role: 'manager',
+    organizationId: client.organization.id,
+  });
   const addMutation = useAddClientManager(client.id);
   const removeMutation = useRemoveClientManager(client.id);
   const assignMutation = useAssignClient(client.id);
@@ -85,13 +98,12 @@ export function ClientManagersSection({ client, disabled = false }: ClientManage
 
   const managers = useMemo(() => managersQuery.data ?? [], [managersQuery.data]);
   const responsible = managers.find((m) => m.is_responsible) ?? null;
-  // Filtro de DADOS, não gating de ação: só gerente ativo pode entrar na
-  // carteira (o backend devolve 400 para admin/inativo), e quem já está fora.
+  // O papel e a organização já vieram filtrados do servidor; aqui sobra o que
+  // ele não tem como saber: quem já está na carteira. O `active` continua local
+  // porque a rota não filtra por ele (o backend devolve 400 para inativo).
   const candidates = useMemo(() => {
     const assigned = new Set(managers.map((m) => m.id));
-    return (usersQuery.data?.data ?? []).filter(
-      (u) => u.active && u.role === 'manager' && !assigned.has(u.id),
-    );
+    return (usersQuery.data?.data ?? []).filter((u) => u.active && !assigned.has(u.id));
   }, [managers, usersQuery.data]);
 
   const busy =

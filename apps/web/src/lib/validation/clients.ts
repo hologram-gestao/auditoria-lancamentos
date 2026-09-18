@@ -9,6 +9,8 @@
  */
 import { z } from 'zod';
 
+import { organizationTargetField } from './organizations';
+
 const omieKeyField = z
   .string()
   .min(1, 'Informe a App Key Omie.')
@@ -19,15 +21,23 @@ const omieSecretField = z
   .min(1, 'Informe a App Secret Omie.')
   .max(200, 'App Secret muito longo (máx. 200).');
 
-export const createClientSchema = z.object({
-  name: z.string().min(1, 'Informe o nome do cliente.').max(200, 'Nome muito longo (máx. 200).'),
-  omie_app_key: omieKeyField,
-  omie_app_secret: omieSecretField,
-  // 86e34jd8m — id do catálogo ou a sentinela 'none' (o Select não aceita '').
-  category_id: z.string().optional(),
-});
+/**
+ * Fábrica em vez de constante porque um campo depende de QUEM está criando
+ * (86e36ed1d): a plataforma precisa escolher a organização de destino, o staff
+ * não vê o campo. O resto do formulário é idêntico nos dois casos.
+ */
+export function makeCreateClientSchema({ requireOrganization = false } = {}) {
+  return z.object({
+    name: z.string().min(1, 'Informe o nome do cliente.').max(200, 'Nome muito longo (máx. 200).'),
+    omie_app_key: omieKeyField,
+    omie_app_secret: omieSecretField,
+    // 86e34jd8m — id do catálogo ou a sentinela 'none' (o Select não aceita '').
+    category_id: z.string().optional(),
+    organization_id: organizationTargetField(requireOrganization),
+  });
+}
 
-export type CreateClientFormValues = z.infer<typeof createClientSchema>;
+export type CreateClientFormValues = z.infer<ReturnType<typeof makeCreateClientSchema>>;
 
 export const updateClientSchema = z
   .object({
