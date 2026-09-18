@@ -42,6 +42,10 @@ import { CreateClientModal } from '@/components/features/clients/create-client-m
 import { EditClientModal } from '@/components/features/clients/edit-client-modal';
 import { FavoriteToggle } from '@/components/features/clients/favorite-toggle';
 import { ManagerAccessHint } from '@/components/features/clients/manager-access-hint';
+import {
+  ALL_ORGANIZATIONS,
+  OrganizationFilterSelect,
+} from '@/components/features/organizations/organization-select';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -64,12 +68,7 @@ import { useClientsList } from '@/hooks/use-clients';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { ApiError } from '@/lib/api/client';
 import type { Client } from '@/lib/api/clients';
-import {
-  canCreateWithoutOrganizationPicker,
-  hasPermission,
-  homePathFor,
-  isClientScoped,
-} from '@/lib/authz';
+import { hasPermission, homePathFor, isClientScoped, isPlatformScoped } from '@/lib/authz';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth';
 
@@ -97,13 +96,27 @@ export default function ClientesPage() {
   const [editing, setEditing] = useState<Client | null>(null);
   // 'all' = sem filtro (o Select do Radix não aceita '' como valor).
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  // Filtro por organização (86e36ed1d) — só a plataforma o vê; para o staff o
+  // backend já restringe a lista à organização da LINHA dele.
+  const [organizationFilter, setOrganizationFilter] = useState<string>(ALL_ORGANIZATIONS);
   const categoriesQuery = useClientCategories({ enabled: !clientScoped });
-  const categories = categoriesQuery.data ?? [];
 
-  // Reseta a paginação quando a busca, o filtro ou o pageSize mudam.
+  // O catálogo é POR organização (86e36ecqz), e a plataforma recebe o de TODAS.
+  // Sem recortar, ela poderia escolher "Varejo da Hologram" com a organização
+  // Prospecta filtrada e receber uma lista vazia — um par impossível, com a
+  // mensagem culpando a categoria. Recorte de EXIBIÇÃO sobre dado que já veio
+  // inteiro, não filtro de isolamento: quem decide o que ela alcança é o
+  // servidor.
+  const visibleCategories = useMemo(() => {
+    const all = categoriesQuery.data ?? [];
+    if (!isPlatformScoped(currentUser) || organizationFilter === ALL_ORGANIZATIONS) return all;
+    return all.filter((c) => c.organization_id === organizationFilter);
+  }, [categoriesQuery.data, currentUser, organizationFilter]);
+
+  // Reseta a paginação quando a busca, os filtros ou o pageSize mudam.
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, pageSize, categoryFilter]);
+  }, [debouncedSearch, pageSize, categoryFilter, organizationFilter]);
 
   const queryParams = useMemo(
     () => ({
@@ -111,8 +124,9 @@ export default function ClientesPage() {
       pageSize,
       search: debouncedSearch || undefined,
       categoryId: categoryFilter === 'all' ? undefined : categoryFilter,
+      organizationId: organizationFilter === ALL_ORGANIZATIONS ? undefined : organizationFilter,
     }),
-    [page, pageSize, debouncedSearch, categoryFilter],
+    [page, pageSize, debouncedSearch, categoryFilter, organizationFilter],
   );
   const { data, isLoading, isFetching, isError, error } = useClientsList(queryParams);
 
@@ -125,19 +139,27 @@ export default function ClientesPage() {
 
   // "Gerente responsável" e criar/editar cliente são §9 — admin do sistema.
   const isAdmin = hasPermission(currentUser, 'edit_client');
+  // A coluna/filtro de organização é da PLATAFORMA: para o staff toda linha da
+  // lista é da mesma organização, e a coluna só repetiria o mesmo nome.
+  const isPlatform = isPlatformScoped(currentUser);
   const total = data?.pagination.total ?? 0;
   const rows = data?.data ?? [];
   const totalPages = data?.pagination.totalPages ?? 0;
-  const colCount = isAdmin ? 8 : 7;
+  const colCount = 7 + (isAdmin ? 1 : 0) + (isPlatform ? 1 : 0);
   const hasSearch = debouncedSearch.length > 0;
   const hasCategoryFilter = categoryFilter !== 'all';
+  const hasOrganizationFilter = organizationFilter !== ALL_ORGANIZATIONS;
 
   return (
     <div className="space-y-6">
       <div className="space-y-1">
         <h1 className="text-2xl font-semibold">Clientes</h1>
         <p className="text-muted-foreground text-sm">
-          {isAdmin ? 'Gerencie todos os clientes BPO da Hologram.' : 'Clientes da sua carteira.'}
+          {isPlatform
+            ? 'Todos os clientes, de todas as organizações.'
+            : isAdmin
+              ? 'Gerencie todos os clientes BPO da sua organização.'
+              : 'Clientes da sua carteira.'}
         </p>
       </div>
 
@@ -163,19 +185,36 @@ export default function ClientesPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todas as categorias</SelectItem>
-              {categories.map((c) => (
+              {visibleCategories.map((c) => (
                 <SelectItem key={c.id} value={c.id}>
-                  {c.name}
+                  {/* Sem organização escolhida, a plataforma vê duas "Varejo"
+                      de donos diferentes — o nome sozinho não distingue. */}
+                  {isPlatform && organizationFilter === ALL_ORGANIZATIONS
+                    ? `${c.name} · ${c.organization_name}`
+                    : c.name}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+          {/* Filtro por organização (86e36ed1d) — server-side, via
+              `?organizationId=`. Só a plataforma: o staff que mandasse outra
+              organização receberia 403 (`resolve_organization_filter`). */}
+          {isPlatform && (
+            <OrganizationFilterSelect
+              value={organizationFilter}
+              onValueChange={(value) => {
+                setOrganizationFilter(value);
+                // No MESMO handler (lição da 86e36ecwa com o pageSize): a
+                // categoria escolhida pode ser de outra organização, e o par
+                // devolveria lista vazia acusando a categoria.
+                setCategoryFilter('all');
+              }}
+              ariaLabel="Filtrar por organização"
+              className="w-full sm:w-56"
+            />
+          )}
         </div>
-        {/* A plataforma só ganha o botão quando o formulário tiver o seletor de
-            organização (86e36ed1d): hoje o POST dela volta 400 pedindo a
-            organização de destino, e oferecer a ação seria mostrar o que o
-            servidor nega (§4.9). */}
-        {canCreateWithoutOrganizationPicker(currentUser, 'create_client') && (
+        {hasPermission(currentUser, 'create_client') && (
           <Button onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4" aria-hidden="true" />
             Novo Cliente
@@ -191,6 +230,7 @@ export default function ClientesPage() {
                 <span className="sr-only">Favorito</span>
               </TableHead>
               <TableHead>Nome</TableHead>
+              {isPlatform && <TableHead>Organização</TableHead>}
               <TableHead>Categoria</TableHead>
               {isAdmin && <TableHead>Gerente Responsável</TableHead>}
               <TableHead>Status</TableHead>
@@ -223,7 +263,9 @@ export default function ClientesPage() {
                     ? `Nenhum cliente encontrado para "${debouncedSearch}".`
                     : hasCategoryFilter
                       ? 'Nenhum cliente nesta categoria.'
-                      : "Nenhum cliente cadastrado. Crie o primeiro cliente clicando em 'Novo Cliente'."}
+                      : hasOrganizationFilter
+                        ? 'Nenhum cliente nesta organização.'
+                        : "Nenhum cliente cadastrado. Crie o primeiro cliente clicando em 'Novo Cliente'."}
                 </TableCell>
               </TableRow>
             ) : (
@@ -241,6 +283,11 @@ export default function ClientesPage() {
                     />
                   </TableCell>
                   <TableCell className="font-medium">{c.name}</TableCell>
+                  {isPlatform && (
+                    <TableCell className="text-muted-foreground whitespace-nowrap">
+                      {c.organization.name}
+                    </TableCell>
+                  )}
                   <TableCell>
                     {c.category ? (
                       <CategoryBadge name={c.category.name} tone={c.category.tone} />

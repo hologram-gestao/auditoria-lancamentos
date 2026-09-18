@@ -73,7 +73,7 @@ export type Permission =
  * | Ver outro tenant              | ✅             | ✅ (própria org) | ✅ (carteira) | ❌ | ❌         |
  * | Gerir usuários da org         | ✅             | ✅    | ❌      | ❌             | ❌              |
  * | Categorias de cliente         | ✅             | ✅    | ❌      | ❌             | ❌              |
- * | Tipos de anomalia             | ✅             | ✅    | ❌      | ❌             | ❌              |
+ * | Tipos de anomalia             | ✅             | ❌    | ❌      | ❌             | ❌              |
  * | Gerir organizações            | ✅             | ❌    | ❌      | ❌             | ❌              |
  * | Teste de alerta               | ✅             | ✅    | ❌      | ❌             | ❌              |
  *
@@ -98,6 +98,9 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'manage_platform',
     'run_alert_test',
   ],
+  // D3 final (86e36ed1d): `manage_anomaly_types` saiu daqui. A taxonomia de
+  // anomalias é uma tabela GLOBAL do produto — o admin de uma organização
+  // editaria o catálogo que as outras usam. Espelha `_PLATFORM_ONLY` no backend.
   admin: [
     'run_reconciliation',
     'review_export',
@@ -109,7 +112,6 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'create_client',
     'manage_org_users',
     'manage_client_categories',
-    'manage_anomaly_types',
     'run_alert_test',
   ],
   // O gerente da organização enxerga outros tenants apenas dentro da carteira —
@@ -257,26 +259,6 @@ export const USER_ROLE_LABELS: Record<UserRole, string> = {
 export function roleLabel(user: MaybeUser): string {
   if (!user) return '';
   return (USER_ROLE_LABELS as Record<string, string | undefined>)[user.role] ?? user.role;
-}
-
-/**
- * Ação de CRIAÇÃO cujo formulário ainda NÃO tem seletor de organização.
- *
- * O backend exige `organization_id` quando quem cria é a plataforma
- * (`resolve_organization_for_creation`): sem o seletor, o POST volta 400
- * ("Escolha a organização de destino...") **sempre**. Oferecer o botão seria o
- * defeito que a §4.9 nomeia — mostrar ação que o servidor nega.
- *
- * Existe com prazo: some quando a 86e36ed1d entregar o seletor nos formulários
- * de cliente, usuário e categoria, e as telas voltam a chamar `hasPermission`
- * direto. Está aqui, e não espalhado em três telas, para que apagá-la seja uma
- * busca só.
- */
-export function canCreateWithoutOrganizationPicker(
-  user: MaybeUser,
-  permission: Permission,
-): boolean {
-  return hasPermission(user, permission) && !isPlatformScoped(user);
 }
 
 /**

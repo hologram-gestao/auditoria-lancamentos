@@ -335,8 +335,8 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    fontes divergindo é o que esse teste existe para pegar. A seção
    **Configurações** do menu é montada item a item pela matriz
    (`nav-items.tsx`), não por um "quem vê Configurações" único: o admin da
-   organização vê três itens, a plataforma vê quatro (Organizações é dela), o
-   gerente não vê a seção.
+   organização vê DOIS itens (Usuários e Categorias), a plataforma vê quatro
+   (Organizações e Tipos de Anomalia são dela), o gerente não vê a seção.
 
    | Ação                            | platform_admin | admin (org)      | manager (org)         | client_manager | client_operator |
    | ------------------------------- | -------------- | ---------------- | --------------------- | -------------- | --------------- |
@@ -350,14 +350,17 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    | Ver outro tenant                | ✅             | ✅ (própria org) | ✅ (carteira)         | ❌             | ❌              |
    | Gerir usuários da org           | ✅             | ✅ (própria org) | ❌                    | ❌             | ❌              |
    | Categorias de cliente (escrita) | ✅             | ✅ (própria org) | ❌                    | ❌             | ❌              |
-   | Tipos de anomalia (escrita)     | ✅             | ✅ (\*)          | ❌                    | ❌             | ❌              |
+   | Tipos de anomalia (escrita)     | ✅             | ❌               | ❌                    | ❌             | ❌              |
    | Gerir organizações              | ✅             | ❌               | ❌                    | ❌             | ❌              |
    | Teste de alerta                 | ✅             | ✅               | ❌                    | ❌             | ❌              |
 
    "(carteira)" e "(própria org)" **não** são células: são `resolve_client_access`
-   e os filtros de coleção. (\*) D3 final é só plataforma; o admin sai da célula
-   quando a tela de tipos de anomalia virar só-plataforma (onda 2, task
-   86e36ed1d) — tirar antes deixaria a tela atual com botões que o servidor nega.
+   e os filtros de coleção. **Tipos de anomalia é a única linha só-plataforma
+   além de "Gerir organizações"**: a taxonomia é uma tabela GLOBAL do produto, e
+   o admin de uma organização editaria o vocabulário que as outras usam (D3
+   final, 86e36ed1d). Ele continua LENDO o catálogo onde ele importa — a tela de
+   revisão —, só não escreve; e `?include_inactive=true` passou a ser silencioso
+   para ele, como já era para o gerente.
 
    **A UI não é barreira de segurança** — o backend é. Mas **mostrar ação que o
    servidor nega é defeito**: cada ❌ precisa de bloqueio no backend **e** de
@@ -730,6 +733,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.33 — 18/09/2026. **As telas existentes ficaram cientes de organização e a onda 2 fechou (task 86e36ed1d, última do front do épico 86e36ec0q).** A mudança que não é de front: `MANAGE_ANOMALY_TYPES` passou de `_ADMINS` para `_PLATFORM_ONLY` — a taxonomia de anomalias é uma tabela GLOBAL do produto, e o admin de UMA organização editaria o vocabulário que as outras usam (D3 final). A célula e a tela mudaram na MESMA entrega, porque item de menu e rota consultam a mesma permissão: tirar a célula antes teria deixado botões que o servidor nega, e depois teria deixado a tela sem dono. `?include_inactive=true` virou silencioso para o admin, como já era para o gerente. No front, a plataforma ganhou **coluna + filtro de Organização** nas listas de clientes, usuários e categorias (server-side, via `?organizationId=` — a decisão é `resolve_organization_filter`) e **seletor de organização de destino** nos três formulários de criação, com uma fábrica de schema só (`organizationTargetField`) espelhando `resolve_organization_for_creation`: obrigatório para a plataforma, ausente para o staff. Criar e filtrar são assimétricos de propósito — a organização SUSPENSA aparece no filtro (os clientes dela existem) e não no seletor de criação (o backend responderia 409). O helper datado `canCreateWithoutOrganizationPicker` foi APAGADO com os três usos: as telas voltaram a perguntar só à matriz, e quem recuperou os botões de criar foi a PLATAFORMA (o gerente nunca os perdeu — o helper só excluía escopo de plataforma). Dois defeitos latentes caíram junto: o badge de papel era um ternário `isAdmin ? 'Admin' : 'Gerente'` (o `else` rotularia qualquer papel novo como gerente) e virou `Record` exaustivo sobre a whitelist do contrato; e a seção "Gerentes com acesso" filtrava `role === 'manager'` no navegador sobre a primeira página de `/users` — com N organizações ofereceria gerente de outra org, que o backend recusa com o MESMO 400 de "não é gerente" (anti-enumeração), então passou a perguntar `?role=manager&organizationId=<org do cliente>`. Copy neutra em 6 strings de tela de DADO; login, header, tema e logomark não mudaram (D4). §4.9 atualizada: a linha de tipos de anomalia perdeu o "(\*)" e o admin perdeu a célula._
 
 _Versão 1.32 — 18/09/2026. **O front aprendeu a camada de organizações (task 86e36ecwa, onda 2 do épico 86e36ec0q).** O contrato foi regenerado e o `Record<UserRole, …>` de `lib/authz.ts` quebrou a compilação até a matriz ganhar a coluna `platform_admin` — a armadilha desejada. O espelho do front virou 13 × 5, com `isStaff`, `canAccessClient` liberando a plataforma, `canManageSystemUsers` consultando `manage_org_users` e `organizationLabel` ("Plataforma" ou o nome da organização, que o header agora mostra ao lado do papel). Nasceu `/configuracoes/organizacoes` (só `manage_platform`): lista paginada com as duas contagens, criar, renomear e suspender/reativar, com a consequência dita ANTES de confirmar. A seção Configurações do menu passou a ser montada item a item pela matriz. ⚠️ **Três testes que gravavam a regra ANTIGA foram corrigidos**, não a regra: a D2 (86e36ecjp, na `main` desde 17/09) deu ao gerente da organização a célula `manage_client_users`, então "Usuários" dentro do cliente passa a aparecer para ele — o espelho do front seguia dizendo que não. §4.9 atualizada; âncoras da skill `front-gate` recolhidas._
 

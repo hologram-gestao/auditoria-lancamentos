@@ -13,10 +13,15 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2 } from 'lucide-react';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 
+import {
+  OrganizationLoadError,
+  organizationOptionLabel,
+  useOrganizationOptions,
+} from '@/components/features/organizations/organization-select';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -45,7 +50,13 @@ import {
 } from '@/components/ui/select';
 import { useCreateUser } from '@/hooks/use-users';
 import { ApiError } from '@/lib/api/client';
-import { createUserSchema, type CreateUserFormValues } from '@/lib/validation/users';
+import { isPlatformScoped, USER_ROLE_LABELS } from '@/lib/authz';
+import {
+  makeCreateUserSchema,
+  SYSTEM_USER_ROLES,
+  type CreateUserFormValues,
+} from '@/lib/validation/users';
+import { useAuthStore } from '@/stores/auth';
 
 interface CreateUserModalProps {
   open: boolean;
@@ -55,9 +66,26 @@ interface CreateUserModalProps {
 export function CreateUserModal({ open, onOpenChange }: CreateUserModalProps) {
   const createMutation = useCreateUser();
 
+  // Onde o usuário NASCE (86e36ed1d): a plataforma escolhe (e é obrigada a);
+  // o admin de organização não vê o campo — o backend usa a organização da
+  // LINHA dele e recusa payload divergente com 403.
+  const isPlatform = isPlatformScoped(useAuthStore((s) => s.user));
+  const {
+    organizations,
+    isLoading: organizationsLoading,
+    isError: organizationsError,
+  } = useOrganizationOptions({
+    enabled: isPlatform && open,
+    activeOnly: true,
+  });
+  const schema = useMemo(
+    () => makeCreateUserSchema({ requireOrganization: isPlatform }),
+    [isPlatform],
+  );
+
   const form = useForm<CreateUserFormValues>({
-    resolver: zodResolver(createUserSchema),
-    defaultValues: { name: '', email: '', password: '', role: 'manager' },
+    resolver: zodResolver(schema),
+    defaultValues: { name: '', email: '', password: '', role: 'manager', organization_id: '' },
     mode: 'onSubmit',
   });
 
@@ -72,7 +100,13 @@ export function CreateUserModal({ open, onOpenChange }: CreateUserModalProps) {
 
   async function onSubmit(values: CreateUserFormValues) {
     try {
-      await createMutation.mutateAsync(values);
+      const { organization_id: organizationId, ...rest } = values;
+      await createMutation.mutateAsync({
+        ...rest,
+        // Só a plataforma manda o campo: o admin omitindo é o que faz o
+        // backend usar a organização da própria linha.
+        ...(organizationId ? { organization_id: organizationId } : {}),
+      });
       toast.success('Usuário criado com sucesso.');
       onOpenChange(false);
     } catch (err) {
@@ -134,6 +168,39 @@ export function CreateUserModal({ open, onOpenChange }: CreateUserModalProps) {
               )}
             />
 
+            {/* Só a plataforma escolhe onde o usuário nasce (86e36ed1d). */}
+            {isPlatform && (
+              <FormField
+                control={form.control}
+                name="organization_id"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Organização</FormLabel>
+                    <Select
+                      value={field.value ?? ''}
+                      onValueChange={field.onChange}
+                      disabled={isSubmitting || organizationsLoading}
+                    >
+                      <FormControl>
+                        <SelectTrigger aria-label="Organização do usuário">
+                          <SelectValue placeholder="Selecione a organização" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {organizations.map((o) => (
+                          <SelectItem key={o.id} value={o.id}>
+                            {organizationOptionLabel(o)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {organizationsError && <OrganizationLoadError />}
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
+
             <FormField
               control={form.control}
               name="role"
@@ -150,9 +217,15 @@ export function CreateUserModal({ open, onOpenChange }: CreateUserModalProps) {
                         <SelectValue placeholder="Selecione o perfil" />
                       </SelectTrigger>
                     </FormControl>
+                    {/* Opções da whitelist do CONTRATO (86e36ed1d), não dois
+                        `<SelectItem>` digitados: papel novo aceito pela API
+                        aparece aqui sozinho, e um que saia da whitelist some. */}
                     <SelectContent>
-                      <SelectItem value="manager">Gerente</SelectItem>
-                      <SelectItem value="admin">Admin</SelectItem>
+                      {SYSTEM_USER_ROLES.map((role) => (
+                        <SelectItem key={role} value={role}>
+                          {USER_ROLE_LABELS[role]}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <FormMessage />

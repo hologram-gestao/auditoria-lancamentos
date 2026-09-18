@@ -93,8 +93,9 @@ _TABLE: dict[Permission, tuple[bool, bool, bool, bool, bool]] = {
     Permission.VIEW_OTHER_TENANT: (True, True, True, False, False),  # admin: org; manager: carteira
     Permission.MANAGE_ORG_USERS: (True, True, False, False, False),
     Permission.MANAGE_CLIENT_CATEGORIES: (True, True, False, False, False),
-    # D3 final é só plataforma; o admin sai da célula com a tela (onda 2).
-    Permission.MANAGE_ANOMALY_TYPES: (True, True, False, False, False),
+    # D3 final (86e36ed1d): taxonomia GLOBAL, escrita só da plataforma — o admin
+    # de uma organização editaria o catálogo que as outras usam.
+    Permission.MANAGE_ANOMALY_TYPES: (True, False, False, False, False),
     Permission.MANAGE_PLATFORM: (True, False, False, False, False),
     Permission.RUN_ALERT_TEST: (True, True, False, False, False),
 }

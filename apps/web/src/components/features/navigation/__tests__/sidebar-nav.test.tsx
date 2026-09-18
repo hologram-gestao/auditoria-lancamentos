@@ -116,13 +116,17 @@ describe('SidebarNav — camada global', () => {
       'href',
       '/configuracoes/usuarios',
     );
-    expect(within(nav).getByRole('link', { name: 'Tipos de Anomalia' })).toHaveAttribute(
+    expect(within(nav).getByRole('link', { name: 'Categorias de Cliente' })).toHaveAttribute(
       'href',
-      '/configuracoes/anomalias',
+      '/configuracoes/categorias',
     );
     // Organizações é da PLATAFORMA: o admin da organização não vê o item
     // (`manage_platform` tem ✅ numa coluna só da matriz).
     expect(within(nav).queryByRole('link', { name: 'Organizações' })).not.toBeInTheDocument();
+    // Tipos de Anomalia saiu do menu do admin na D3 final (86e36ed1d): a
+    // taxonomia é global do produto e só a plataforma a edita. O item e a rota
+    // somem JUNTOS — os dois consultam `manage_anomaly_types`.
+    expect(within(nav).queryByRole('link', { name: 'Tipos de Anomalia' })).not.toBeInTheDocument();
     await assertNoA11yViolations(container);
   });
 
@@ -137,6 +141,7 @@ describe('SidebarNav — camada global', () => {
     // E continua vendo o resto: a plataforma está em toda linha da matriz.
     expect(within(nav).getByRole('link', { name: 'Usuários' })).toBeInTheDocument();
     expect(within(nav).getByRole('link', { name: 'Categorias de Cliente' })).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: 'Tipos de Anomalia' })).toBeInTheDocument();
     expect(within(nav).getByRole('link', { name: 'Clientes' })).toBeInTheDocument();
     await assertNoA11yViolations(container);
   });

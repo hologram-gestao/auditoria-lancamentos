@@ -53,28 +53,39 @@ autoridade é o backend, pela linha do usuário a cada request. O que o helper e
 defeito de mostrar botão que devolve 403 (CLAUDE.md §4.9: cada ❌ da matriz = bloqueio no
 backend E ação oculta na tela).
 
-- `hasPermission(user, permission)` (`:150`) — ação por papel; `isStaff` (`:175`, plataforma
-  OU organização); `canAccessClient` (`:188`); `canSeeSystemArea` (`:202`);
-  `canManageSystemUsers` (`:213`, hoje é `hasPermission('manage_org_users')`);
-  `homePathFor` (`:225`); `roleLabel` (`:242`, nunca o enum cru na tela);
-  `organizationLabel` (`:256`, "Plataforma" ou o nome da organização, para o header).
+- `hasPermission(user, permission)` (`:155`) — ação por papel; `isPlatformScoped` (`:180`,
+  a checagem ESTRITA que espelha o `is_platform` do backend); `isStaff` (`:192`, plataforma
+  OU organização); `canAccessClient` (`:205`); `canSeeSystemArea` (`:219`);
+  `canManageSystemUsers` (`:230`, hoje é `hasPermission('manage_org_users')`);
+  `homePathFor` (`:242`); `USER_ROLE_LABELS` (`:250`) e `roleLabel` (`:259`, nunca o enum
+  cru na tela); `organizationLabel` (`:273`, "Plataforma" ou o nome da organização).
 - Copie de: `components/features/navigation/nav-items.tsx:97` (Configurações item a item
   pela matriz) e `:201`, `client-users/client-users-screen.tsx:59`,
   `clients/client-shell.tsx:119,125`, `glossary/glossary-screen.tsx:68`. Deep link negado
   degrada para `components/shared/access-denied.tsx` (mensagem + caminho de volta), nunca
   tela branca.
-- `role ===` fora do helper só para RÓTULO/badge ou filtro de dados — hoje 6 ocorrências
-  conhecidas (`users/user-badges.tsx:18`, `client-users/client-user-badges.tsx:25`,
-  `client-users/client-user-form-drawer.tsx:290`, o filtro de candidatos em
-  `clients/client-managers-section.tsx:93` — que vira `?role=&organizationId=` na
-  86e36ed1d — e a trava de auto-rebaixamento em `users/edit-user-modal.tsx:99,162`).
+- `role ===` fora do helper só para RÓTULO/badge ou filtro de dados — hoje **4**
+  ocorrências conhecidas (`client-users/client-user-badges.tsx:25`,
+  `client-users/client-user-form-drawer.tsx:290` e a trava de auto-rebaixamento em
+  `users/edit-user-modal.tsx:99,162`). Duas sumiram na 86e36ed1d, e por motivos
+  diferentes que vale conhecer: o badge de papel de `users/user-badges.tsx` era um
+  ternário `isAdmin ? 'Admin' : 'Gerente'` — com mais de dois papéis possíveis o `else`
+  deixa de ser "gerente" e vira "qualquer outro, rotulado errado" —, então virou um
+  `Record<UserRoleValue, …>` exaustivo com o rótulo vindo de `USER_ROLE_LABELS`; e o
+  filtro de candidatos de `clients/client-managers-section.tsx` recortava
+  `role === 'manager'` no NAVEGADOR sobre a primeira página de `/users`, o que com N
+  organizações ofereceria gerente de outra org, então virou
+  `?role=manager&organizationId=<org do cliente>` no servidor. **Ternário sobre papel é
+  a forma disfarçada desta regra**: se o `else` precisa saber qual papel é, use um
+  `Record` exaustivo.
   Ocorrência nova que MOSTRA/ESCONDE uma ação é defeito.
-- Travas no browser: "operador do cliente não vê a tela nem o item de menu" (`spec:1604`)
-  e "gerente da ORGANIZAÇÃO gere os usuários do tenant da carteira" (`:1622` — a D2
-  inverteu este caso em 86e36ecjp; o negativo desta tela é o operador).
+- Travas no browser: "operador do cliente não vê a tela nem o item de menu" (`spec:1710`)
+  e "gerente da ORGANIZAÇÃO gere os usuários do tenant da carteira" (`:1728` — a D2
+  inverteu este caso em 86e36ecjp; o negativo desta tela é o operador). A dimensão de
+  ORGANIZAÇÃO (coluna, filtro e seletor de criação) é medida a partir de `:2673`.
 
 ```bash
-grep -rn "role ===" apps/web/src --include=*.tsx --include=*.ts | grep -v "lib/authz.ts\|__tests__" | grep -v ":\s*\(\*\|//\)"   # esperado: as 6 acima, nenhuma nova
+grep -rn "role ===" apps/web/src --include=*.tsx --include=*.ts | grep -v "lib/authz.ts\|__tests__" | grep -v ":\s*\(\*\|//\)"   # esperado: as 4 acima, nenhuma nova
 grep -rn "hasPermission(\|canAccessClient(\|canSeeSystemArea(" apps/web/src/components/features/<sua-pasta>/   # a sua tela consulta o helper
 ```
 
@@ -84,13 +95,13 @@ grep -rn "hasPermission(\|canAccessClient(\|canSeeSystemArea(" apps/web/src/comp
 `.github/workflows/ci.yml` (matrix `theme: [light, dark, hologram]`): build standalone
 do Next → servidor de produção em `127.0.0.1:3100` (`A11Y_PORT` muda) →
 `e2e/a11y-mocked.spec.ts` com a API interceptada no browser (`page.route('**/api/v1/**')`,
-`spec:1040`) → `--retries=0` → guard por tema (`expected > 0`, `skipped = 0`,
+`spec:1329`) → `--retries=0` → guard por tema (`expected > 0`, `skipped = 0`,
 `flaky = 0`; `a11y-gate.sh:129-152`). NÃO precisa de Postgres, seed, API nem credencial.
 Roda em DOIS viewports (`playwright.config.ts:36-39`: desktop e Pixel 5 — o
 `scrollable-region-focusable` só existia em 390px). Relatório em
 `apps/web/test-results/a11y-report-<tema>.json` (diretório ignorado na raiz,
 `.gitignore:94`); screenshots só com `E2E_SHOTS=1`, em `apps/web/a11y-shots/<tema>/`
-(`spec:211-216`, ignorado em `apps/web/.gitignore:14`).
+(`spec:330-347`, ignorado em `apps/web/.gitignore:14`).
 
 **Não confunda** com a suíte irmã `e2e/a11y.spec.ts` (ambiente completo): sem
 `E2E_PASSWORD`/`E2E_CLIENT_ID` ela faz `test.skip` (`:40`) e deixaria o gate verde sem
@@ -154,9 +165,9 @@ registry): `198 passed` por tema — claro em 2,7 min, escuro em 2,3 min, Hologr
   fora do card, gaveta cortada, coluna espremida, valor monetário quebrado após o hífen
   (`-R$ 150,50` lido como crédito → `whitespace-nowrap`).
 - Corte corrigido é travado com MEDIDA, não com olho: `boundingBox().x + width <=
-viewportSize().width` (padrão em `spec:1638-1643` e `:1838-1853`). Antes de medir,
-  `aguardarAnimacao()` (`:915`) — a gaveta do Radix entra deslizando; e antes de medir
-  toast, `aguardarToastEstavel()` (`:931`) — o Sonner entra em fade e o axe mede cor
+viewportSize().width` (padrão em `spec:2147-2165` e `:2190-2205`). Antes de medir,
+  `aguardarAnimacao()` (`:1203`) — a gaveta do Radix entra deslizando; e antes de medir
+  toast, `aguardarToastEstavel()` (`:1219`) — o Sonner entra em fade e o axe mede cor
   mesclada (4,25:1 num par que dá 4,75:1). **Visível não é estável.**
 - `formatBRL` usa espaço NÃO-quebrável: locator com espaço normal nunca casa (use
   `/R\$\s*150,50/`).
@@ -181,7 +192,12 @@ viewportSize().width` (padrão em `spec:1638-1643` e `:1838-1853`). Antes de med
   `modal={false}` (`theme-toggle.tsx:55`, mesmo padrão do sino) — o modo modal do Radix
   marca o fundo com `aria-hidden` mantendo focáveis (`aria-hidden-focus`). O `Select`
   do Radix não tem `modal={false}`: no e2e, exercite-o aberto e rode `analyze()`
-  (`spec:888`) com ele FECHADO (86e34jd8m).
+  (`spec:1176`) com ele FECHADO (86e34jd8m). E `getByRole(..., { name })` do Playwright
+  casa por **SUBSTRING**: numa tabela, o nome acessível de uma célula de ações inclui os
+  `aria-label` dos botões dela, então `{ name: 'Prospecta' }` casou com 4 células e
+  quebrou o strict mode (86e36ed1d) — em célula de tabela, use `exact: true`. O
+  `getByRole` do Testing Library NÃO se comporta assim, e foi por isso que o vitest
+  passou e o browser reprovou.
 - **TypeScript strict, com `noUncheckedIndexedAccess`** (`apps/web/tsconfig.json`): indexar
   array ou dicionário devolve `T | undefined`, então acesso por índice pede verificação
   antes do uso. É o que impede um `.map()` sobre resultado de API vir a explodir em runtime.

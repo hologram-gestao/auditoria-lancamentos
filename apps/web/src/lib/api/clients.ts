@@ -42,6 +42,12 @@ export interface ListClientsParams {
   search?: string;
   /** Filtro server-side pela categoria do catálogo (86e34jd8m). */
   categoryId?: string;
+  /**
+   * Filtro por organização (86e36ed1d). Só a plataforma escolhe: o staff que
+   * mandar uma organização diferente da própria recebe 403
+   * (`resolve_organization_filter`), nunca uma lista silenciosamente errada.
+   */
+  organizationId?: string;
 }
 
 export interface CreateClientPayload {
@@ -49,6 +55,12 @@ export interface CreateClientPayload {
   omie_app_key: string;
   omie_app_secret: string;
   category_id?: string | null;
+  /**
+   * Organização de destino (86e36ed1d): **obrigatória** quando quem cria é a
+   * plataforma, ausente para o staff (o backend usa a organização da LINHA
+   * dele; valor divergente é 403).
+   */
+  organization_id?: string;
 }
 
 export interface UpdateClientPayload {
@@ -87,6 +99,7 @@ function buildQuery(params: ListClientsParams): string {
   const search = params.search?.trim();
   if (search) sp.set('search', search);
   if (params.categoryId) sp.set('category_id', params.categoryId);
+  if (params.organizationId) sp.set('organizationId', params.organizationId);
   return sp.toString();
 }
 

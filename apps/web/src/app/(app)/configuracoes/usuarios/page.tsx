@@ -34,6 +34,10 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
+import {
+  ALL_ORGANIZATIONS,
+  OrganizationFilterSelect,
+} from '@/components/features/organizations/organization-select';
 import { CreateUserModal } from '@/components/features/users/create-user-modal';
 import { DeactivateConfirm } from '@/components/features/users/deactivate-confirm';
 import { EditUserModal } from '@/components/features/users/edit-user-modal';
@@ -53,7 +57,7 @@ import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { useActivateUser, useUsersList } from '@/hooks/use-users';
 import { ApiError } from '@/lib/api/client';
 import type { User } from '@/lib/api/users';
-import { canCreateWithoutOrganizationPicker, canManageSystemUsers, homePathFor } from '@/lib/authz';
+import { canManageSystemUsers, homePathFor, isPlatformScoped } from '@/lib/authz';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth';
 
@@ -63,18 +67,28 @@ export default function UsersPage() {
   const currentUser = useAuthStore((s) => s.user);
   const canSee = canManageSystemUsers(currentUser);
 
+  // A coluna/filtro de organização é da PLATAFORMA: para o admin toda linha da
+  // lista é da própria organização, e a coluna só repetiria o mesmo nome.
+  const isPlatform = isPlatformScoped(currentUser);
+
   const [searchInput, setSearchInput] = useState('');
   const debouncedSearch = useDebouncedValue(searchInput, 300);
   const [page, setPage] = useState(1);
+  const [organizationFilter, setOrganizationFilter] = useState<string>(ALL_ORGANIZATIONS);
 
-  // Reseta a paginação quando a busca muda (UX padrão).
+  // Reseta a paginação quando a busca ou o filtro mudam (UX padrão).
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch]);
+  }, [debouncedSearch, organizationFilter]);
 
   const queryParams = useMemo(
-    () => ({ page, pageSize: PAGE_SIZE, search: debouncedSearch || undefined }),
-    [page, debouncedSearch],
+    () => ({
+      page,
+      pageSize: PAGE_SIZE,
+      search: debouncedSearch || undefined,
+      organizationId: organizationFilter === ALL_ORGANIZATIONS ? undefined : organizationFilter,
+    }),
+    [page, debouncedSearch, organizationFilter],
   );
   const { data, isLoading, isFetching, isError, error } = useUsersList(queryParams, {
     enabled: canSee,
@@ -102,7 +116,7 @@ export default function UsersPage() {
   if (!canSee) {
     return (
       <AccessDenied
-        message="A gestão de usuários da Hologram é restrita ao administrador do sistema."
+        message="A gestão de usuários da organização é restrita ao administrador."
         backHref={homePathFor(currentUser)}
         backLabel="Voltar para o início"
       />
@@ -112,6 +126,7 @@ export default function UsersPage() {
   const total = data?.pagination.total ?? 0;
   const rows = data?.data ?? [];
   const totalPages = data?.pagination.totalPages ?? 0;
+  const colCount = isPlatform ? 7 : 6;
   const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const rangeEnd = Math.min(page * PAGE_SIZE, total);
 
@@ -121,32 +136,50 @@ export default function UsersPage() {
         <p className="text-muted-foreground text-sm">Configurações &gt; Usuários</p>
         <h1 className="text-2xl font-semibold">Usuários</h1>
         <p className="text-muted-foreground text-sm">
-          Crie, edite, ative e desative usuários internos da Hologram.
+          {isPlatform
+            ? 'Crie, edite, ative e desative o staff de qualquer organização.'
+            : 'Crie, edite, ative e desative os usuários internos da sua organização.'}
         </p>
       </div>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative max-w-sm flex-1">
-          <Search
-            className="text-muted-foreground absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
-            aria-hidden="true"
-          />
-          <Input
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Buscar por nome ou e-mail..."
-            className="pl-9"
-            aria-label="Buscar usuários"
-          />
+        {/* Busca e filtros num grupo só, e a ação primária do outro lado do
+            `justify-between` — mesmo arranjo da lista de clientes. Soltos como
+            irmãos diretos, os três dividiriam o espaço livre e o filtro
+            flutuaria no meio da barra, descolado da busca. */}
+        <div className="flex flex-1 flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="relative max-w-sm flex-1">
+            <Search
+              className="text-muted-foreground absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
+              aria-hidden="true"
+            />
+            <Input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Buscar por nome ou e-mail..."
+              className="pl-9"
+              aria-label="Buscar usuários"
+            />
+          </div>
+          {/* Filtro por organização (86e36ed1d) — server-side, via
+              `?organizationId=`. Só a plataforma: o admin que mandasse outra
+              receberia 403 (`resolve_organization_filter`). */}
+          {isPlatform && (
+            <OrganizationFilterSelect
+              value={organizationFilter}
+              onValueChange={setOrganizationFilter}
+              ariaLabel="Filtrar por organização"
+              className="w-full sm:w-56"
+            />
+          )}
         </div>
-        {/* Idem "Novo Cliente": sem o seletor de organização (86e36ed1d) o POST
-            da plataforma volta 400. Ela LÊ a lista; criar chega na próxima task. */}
-        {canCreateWithoutOrganizationPicker(currentUser, 'manage_org_users') && (
-          <Button onClick={() => setCreateOpen(true)}>
-            <UserPlus className="h-4 w-4" aria-hidden="true" />
-            Novo Usuário
-          </Button>
-        )}
+        {/* Sem guarda própria: a tela inteira já é `manage_org_users` (o
+            `AccessDenied` acima), e quem chega aqui pode criar — a plataforma
+            escolhendo a organização no formulário, o admin na própria. */}
+        <Button onClick={() => setCreateOpen(true)}>
+          <UserPlus className="h-4 w-4" aria-hidden="true" />
+          Novo Usuário
+        </Button>
       </div>
 
       <div className="rounded-lg border">
@@ -155,6 +188,7 @@ export default function UsersPage() {
             <TableRow>
               <TableHead>Nome</TableHead>
               <TableHead>E-mail</TableHead>
+              {isPlatform && <TableHead>Organização</TableHead>}
               <TableHead>Perfil</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Cadastrado em</TableHead>
@@ -164,13 +198,19 @@ export default function UsersPage() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-muted-foreground py-10 text-center text-sm">
+                <TableCell
+                  colSpan={colCount}
+                  className="text-muted-foreground py-10 text-center text-sm"
+                >
                   Carregando usuários...
                 </TableCell>
               </TableRow>
             ) : isError ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-destructive py-10 text-center text-sm">
+                <TableCell
+                  colSpan={colCount}
+                  className="text-destructive py-10 text-center text-sm"
+                >
                   {error instanceof ApiError
                     ? error.userMessage
                     : 'Não foi possível carregar a lista.'}
@@ -178,7 +218,10 @@ export default function UsersPage() {
               </TableRow>
             ) : rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-muted-foreground py-10 text-center text-sm">
+                <TableCell
+                  colSpan={colCount}
+                  className="text-muted-foreground py-10 text-center text-sm"
+                >
                   Nenhum usuário encontrado.
                 </TableCell>
               </TableRow>
@@ -189,6 +232,11 @@ export default function UsersPage() {
                   <TableRow key={u.id} className={cn(!u.active && 'opacity-60')}>
                     <TableCell className="font-medium">{u.name}</TableCell>
                     <TableCell className="text-muted-foreground">{u.email}</TableCell>
+                    {isPlatform && (
+                      <TableCell className="text-muted-foreground whitespace-nowrap">
+                        {u.organization_name ?? '—'}
+                      </TableCell>
+                    )}
                     <TableCell>
                       <UserRoleBadge role={u.role} />
                     </TableCell>
