@@ -7,9 +7,17 @@
  *   - 409 com `code = CONFLICT` na criação/edição com email duplicado;
  *     `userMessage` já vem em PT-BR ("Este e-mail já está em uso.").
  */
+import type { SystemUserRole } from '@/lib/contracts';
+
 import { apiGet, apiPatch, apiPost } from './client';
 
-export type UserRoleValue = 'admin' | 'manager';
+/**
+ * Papel aceito nesta API — vem do CONTRATO (`SystemUserRole`), não redigitado
+ * (86e36ecwa). `platform_admin` não está no union de propósito: ele nasce só
+ * por script no backend e nenhum endpoint o aceita; oferecê-lo num formulário
+ * daria 422. Se o backend mudar a whitelist, o `tsc` acusa aqui.
+ */
+export type UserRoleValue = SystemUserRole;
 
 export interface User {
   id: string;

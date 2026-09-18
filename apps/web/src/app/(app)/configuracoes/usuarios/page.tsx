@@ -53,7 +53,7 @@ import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { useActivateUser, useUsersList } from '@/hooks/use-users';
 import { ApiError } from '@/lib/api/client';
 import type { User } from '@/lib/api/users';
-import { canManageSystemUsers, homePathFor } from '@/lib/authz';
+import { canCreateWithoutOrganizationPicker, canManageSystemUsers, homePathFor } from '@/lib/authz';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth';
 
@@ -139,10 +139,14 @@ export default function UsersPage() {
             aria-label="Buscar usuários"
           />
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <UserPlus className="h-4 w-4" aria-hidden="true" />
-          Novo Usuário
-        </Button>
+        {/* Idem "Novo Cliente": sem o seletor de organização (86e36ed1d) o POST
+            da plataforma volta 400. Ela LÊ a lista; criar chega na próxima task. */}
+        {canCreateWithoutOrganizationPicker(currentUser, 'manage_org_users') && (
+          <Button onClick={() => setCreateOpen(true)}>
+            <UserPlus className="h-4 w-4" aria-hidden="true" />
+            Novo Usuário
+          </Button>
+        )}
       </div>
 
       <div className="rounded-lg border">
@@ -224,7 +228,7 @@ export default function UsersPage() {
                             >
                               {/* Token semântico, não `emerald-600` da paleta crua: cor de marca
                                 muda e o hardcoded não acompanha (regra do design-system). */}
-                            <Power className="text-success h-4 w-4" aria-hidden="true" />
+                              <Power className="text-success h-4 w-4" aria-hidden="true" />
                             </Button>
                           ))}
                       </div>

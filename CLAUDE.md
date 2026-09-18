@@ -330,7 +330,13 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    `has_permission`; 13 permissões x 5 papéis, transcrita célula a célula em
    `tests/unit/test_authz_matrix.py`, com um teste que trava **a plataforma em
    toda linha**. No front, o espelho é `apps/web/src/lib/authz.ts` — **um**
-   helper, nunca `if (role === ...)` espalhado por componente.
+   helper, nunca `if (role === ...)` espalhado por componente — com a mesma
+   tabela transcrita em `src/lib/__tests__/authz.test.ts` (86e36ecwa): as duas
+   fontes divergindo é o que esse teste existe para pegar. A seção
+   **Configurações** do menu é montada item a item pela matriz
+   (`nav-items.tsx`), não por um "quem vê Configurações" único: o admin da
+   organização vê três itens, a plataforma vê quatro (Organizações é dela), o
+   gerente não vê a seção.
 
    | Ação                            | platform_admin | admin (org)      | manager (org)         | client_manager | client_operator |
    | ------------------------------- | -------------- | ---------------- | --------------------- | -------------- | --------------- |
@@ -724,6 +730,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.32 — 18/09/2026. **O front aprendeu a camada de organizações (task 86e36ecwa, onda 2 do épico 86e36ec0q).** O contrato foi regenerado e o `Record<UserRole, …>` de `lib/authz.ts` quebrou a compilação até a matriz ganhar a coluna `platform_admin` — a armadilha desejada. O espelho do front virou 13 × 5, com `isStaff`, `canAccessClient` liberando a plataforma, `canManageSystemUsers` consultando `manage_org_users` e `organizationLabel` ("Plataforma" ou o nome da organização, que o header agora mostra ao lado do papel). Nasceu `/configuracoes/organizacoes` (só `manage_platform`): lista paginada com as duas contagens, criar, renomear e suspender/reativar, com a consequência dita ANTES de confirmar. A seção Configurações do menu passou a ser montada item a item pela matriz. ⚠️ **Três testes que gravavam a regra ANTIGA foram corrigidos**, não a regra: a D2 (86e36ecjp, na `main` desde 17/09) deu ao gerente da organização a célula `manage_client_users`, então "Usuários" dentro do cliente passa a aparecer para ele — o espelho do front seguia dizendo que não. §4.9 atualizada; âncoras da skill `front-gate` recolhidas._
 
 _Versão 1.31 — 17/09/2026. **As rotas existentes ficaram org-aware e a onda 1 fechou (task 86e36ecqz, última do back do épico 86e36ec0q).** `GET /users` ganhou `?organizationId=` e `?role=` e passou a dizer a organização de cada staff (`scope`, `organization_id`, `organization_name`); `POST /users` aceita `organization_id` só da plataforma (obrigatório para ela; o admin cria na própria e payload divergente é 403); `GET /clients` aceita `?organizationId=` e cada cliente traz `organization {id, name}`; a categoria de um cliente é validada no catálogo DA org dele (outra org = o mesmo 400 de inexistente); o catálogo de categorias virou por organização de ponta a ponta (leitura pela org da LINHA, plataforma todas, escrita na org do ator, alvo por PK alheio = 404, unicidade por org) e as 4 rotas saíram de `PENDING_ENDPOINTS` — cobertura 62/62. Duas decisões novas e únicas em `authz.py`: `resolve_organization_for_creation` e `resolve_organization_filter`. O rótulo de autoria virou "Equipe {org do cliente}" (a org vem de `CurrentUser.organization_name`; a Hologram segue "Equipe Hologram"). A sessão por PK sai do `SELECT` restrita ao ALCANCE (`scoped_by_reach`): o admin/gerente de outra organização nem carrega a linha, e `audit_session_tenant_miss` pergunta a `resolve_client_access` e grava a negação. Nasceu `scripts/promote_platform_admin.py` (por e-mail, idempotente, recusa tenant, `--dry-run`) — o único caminho para `platform_admin`. §3.15 e §4.8 atualizadas. **Em dev nada muda de visível** enquanto só a Hologram existir; a promoção dos cinco só depois da onda 2._
 

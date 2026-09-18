@@ -46,25 +46,32 @@ grep -rn "overflow-auto\|overflow-y-auto" apps/web/src/components apps/web/src/a
 ## 2. Autorização na tela: `lib/authz.ts`, nunca `role ===` para esconder ação
 
 O espelho da `PERMISSION_MATRIX` do backend é `lib/authz.ts` (`PERMISSION_MATRIX`,
-`:56`, indexada por papel: papel novo no contrato quebra a compilação até alguém decidir
-o que ele vê). **Isto não é segurança** (`:9-13`) — a autoridade é o backend, pela linha
-do usuário a cada request. O que o helper evita é o defeito de mostrar botão que devolve
-403 (CLAUDE.md §4.9: cada ❌ da matriz = bloqueio no backend E ação oculta na tela).
+`:83`, **13 permissões × 5 papéis** desde a camada de organizações; indexada por papel:
+papel novo no contrato quebra a compilação até alguém decidir o que ele vê — foi assim
+que `platform_admin` entrou em 86e36ecwa). **Isto não é segurança** (`:12-16`) — a
+autoridade é o backend, pela linha do usuário a cada request. O que o helper evita é o
+defeito de mostrar botão que devolve 403 (CLAUDE.md §4.9: cada ❌ da matriz = bloqueio no
+backend E ação oculta na tela).
 
-- `hasPermission(user, permission)` (`:95`) — ação por papel; `canAccessClient` (`:120`);
-  `canSeeSystemArea` (`:133`); `canManageSystemUsers` (`:138`); `homePathFor` (`:149`);
-  `roleLabel` (`:165`, nunca o enum cru na tela).
-- Copie de: `components/features/navigation/nav-items.tsx:170`,
-  `client-users/client-users-screen.tsx:59`, `clients/client-shell.tsx:75,119,125`,
-  `glossary/glossary-screen.tsx:68`. Deep link negado degrada para
-  `components/shared/access-denied.tsx` (mensagem + caminho de volta), nunca tela branca.
+- `hasPermission(user, permission)` (`:150`) — ação por papel; `isStaff` (`:175`, plataforma
+  OU organização); `canAccessClient` (`:188`); `canSeeSystemArea` (`:202`);
+  `canManageSystemUsers` (`:213`, hoje é `hasPermission('manage_org_users')`);
+  `homePathFor` (`:225`); `roleLabel` (`:242`, nunca o enum cru na tela);
+  `organizationLabel` (`:256`, "Plataforma" ou o nome da organização, para o header).
+- Copie de: `components/features/navigation/nav-items.tsx:97` (Configurações item a item
+  pela matriz) e `:201`, `client-users/client-users-screen.tsx:59`,
+  `clients/client-shell.tsx:119,125`, `glossary/glossary-screen.tsx:68`. Deep link negado
+  degrada para `components/shared/access-denied.tsx` (mensagem + caminho de volta), nunca
+  tela branca.
 - `role ===` fora do helper só para RÓTULO/badge ou filtro de dados — hoje 6 ocorrências
   conhecidas (`users/user-badges.tsx:18`, `client-users/client-user-badges.tsx:25`,
-  `client-users/client-user-form-drawer.tsx:290`, `clients/edit-client-modal.tsx:102` e a
-  trava de auto-rebaixamento em `users/edit-user-modal.tsx:99,162`). Ocorrência nova que
-  MOSTRA/ESCONDE uma ação é defeito.
-- Travas no browser: "operador do cliente não vê a tela nem o item de menu" (`spec:1421`)
-  e "gerente do SISTEMA opera a carteira mas não gere usuários do tenant" (`:1439`).
+  `client-users/client-user-form-drawer.tsx:290`, o filtro de candidatos em
+  `clients/client-managers-section.tsx:93` — que vira `?role=&organizationId=` na
+  86e36ed1d — e a trava de auto-rebaixamento em `users/edit-user-modal.tsx:99,162`).
+  Ocorrência nova que MOSTRA/ESCONDE uma ação é defeito.
+- Travas no browser: "operador do cliente não vê a tela nem o item de menu" (`spec:1604`)
+  e "gerente da ORGANIZAÇÃO gere os usuários do tenant da carteira" (`:1622` — a D2
+  inverteu este caso em 86e36ecjp; o negativo desta tela é o operador).
 
 ```bash
 grep -rn "role ===" apps/web/src --include=*.tsx --include=*.ts | grep -v "lib/authz.ts\|__tests__" | grep -v ":\s*\(\*\|//\)"   # esperado: as 6 acima, nenhuma nova

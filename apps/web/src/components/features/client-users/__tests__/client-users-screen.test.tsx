@@ -235,10 +235,24 @@ describe('ClientUsersScreen — gating por papel', () => {
     );
   });
 
-  it('gerente do SISTEMA (carteira) também não administra usuários do tenant', () => {
+  it('gerente da ORGANIZAÇÃO administra os usuários do tenant da carteira (D2)', () => {
+    // 86e36ecjp (já na main): a célula `manage_client_users` ganhou o gerente.
+    // Quem decide se ESTE cliente é da carteira dele é o backend — a tela não
+    // pode esconder uma ação que o servidor libera.
     authState.user = actor({ id: 'mgr', role: 'manager', scope: 'system', client_id: null });
     render(<ClientUsersScreen clientId={CLIENT_ID} />);
-    expect(screen.queryByRole('button', { name: 'Novo usuário' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Novo usuário' })).toBeInTheDocument();
+  });
+
+  it('plataforma administra os usuários de qualquer tenant', () => {
+    authState.user = actor({
+      id: 'plat',
+      role: 'platform_admin',
+      scope: 'platform',
+      client_id: null,
+    });
+    render(<ClientUsersScreen clientId={CLIENT_ID} />);
+    expect(screen.getByRole('button', { name: 'Novo usuário' })).toBeInTheDocument();
   });
 
   it('admin do sistema administra os usuários do tenant', () => {

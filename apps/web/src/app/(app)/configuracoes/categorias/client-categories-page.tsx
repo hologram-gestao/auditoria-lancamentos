@@ -9,8 +9,8 @@
  * lê — o filtro da lista de clientes e o formulário do cliente consomem o
  * mesmo catálogo.
  *
- * Gating presentacional via `lib/authz` (`canManageSystemUsers`, como as demais
- * configurações do sistema); a barreira real é o 403 do backend.
+ * Gating presentacional via `lib/authz` (`manage_client_categories` — a
+ * permissão DESTA tela); a barreira real é o 403 do backend.
  */
 
 import { Plus } from 'lucide-react';
@@ -24,12 +24,14 @@ import { Button } from '@/components/ui/button';
 import { useClientCategories } from '@/hooks/use-client-categories';
 import { ApiError } from '@/lib/api/client';
 import type { ClientCategoryItem } from '@/lib/api/client-categories';
-import { canManageSystemUsers, homePathFor } from '@/lib/authz';
+import { canCreateWithoutOrganizationPicker, hasPermission, homePathFor } from '@/lib/authz';
 import { useAuthStore } from '@/stores/auth';
 
 export default function ClientCategoriesPage() {
   const currentUser = useAuthStore((s) => s.user);
-  const canSee = canManageSystemUsers(currentUser);
+  // Guard com a permissão DESTA tela (86e36ecwa): usar a de usuários deixaria
+  // o menu e a rota discordarem no dia em que a matriz mudar uma e não a outra.
+  const canSee = hasPermission(currentUser, 'manage_client_categories');
 
   const { data, isLoading, isError, error } = useClientCategories({ enabled: canSee });
 
@@ -65,15 +67,19 @@ export default function ClientCategoriesPage() {
       </div>
 
       <div className="flex justify-end">
-        <Button
-          onClick={() => {
-            setEditing(null);
-            setDialogOpen(true);
-          }}
-        >
-          <Plus className="h-4 w-4" aria-hidden="true" />
-          Nova categoria
-        </Button>
+        {/* Sem o seletor de organização (86e36ed1d), a criação pela plataforma
+            volta 400 — o catálogo é POR organização. Ela lê o de todas. */}
+        {canCreateWithoutOrganizationPicker(currentUser, 'manage_client_categories') && (
+          <Button
+            onClick={() => {
+              setEditing(null);
+              setDialogOpen(true);
+            }}
+          >
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Nova categoria
+          </Button>
+        )}
       </div>
 
       <ClientCategoriesTable

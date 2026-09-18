@@ -53,6 +53,31 @@ export type UserRole = Schemas['UserRole'];
 export type UserScope = Schemas['UserScope'];
 /** Whitelist de papel aceita na API de usuários DO CLIENTE. */
 export type ClientUserRole = Schemas['ClientUserRole'];
+/**
+ * Whitelist de papel aceita na API de usuários DO SISTEMA (`admin` | `manager`).
+ *
+ * `platform_admin` NÃO está aqui de propósito: ele nasce só por script
+ * (`scripts/promote_platform_admin.py`) e não entra em whitelist de API
+ * nenhuma. Redigitar a união no formulário criaria a chance de oferecer um
+ * papel que o servidor recusa com 422.
+ */
+export type SystemUserRole = Schemas['SystemUserRole'];
+
+// ---------------------------------------------------------------------------
+// Organizações — camada multi-BPO (épico 86e36ec0q)
+// ---------------------------------------------------------------------------
+
+/** Uma organização na listagem/detalhe da plataforma (com as duas contagens). */
+export type OrganizationItem = Schemas['OrganizationItem'];
+export type OrganizationListResponse = Schemas['OrganizationListResponse'];
+export type OrganizationCreate = Schemas['OrganizationCreate'];
+export type OrganizationUpdate = Schemas['OrganizationUpdate'];
+/** A organização dona do cliente, como aparece na lista e no detalhe. */
+export type OrganizationSummary = Schemas['OrganizationSummary'];
+/** Query real de `GET /organizations` (`page`, `pageSize`, `search`). */
+export type ListOrganizationsQuery = NonNullable<
+  paths['/api/v1/organizations']['get']['parameters']['query']
+>;
 
 // ---------------------------------------------------------------------------
 // Usuários DO CLIENTE — tenant (BACK 05.5 / R5)

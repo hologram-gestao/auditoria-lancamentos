@@ -25,7 +25,7 @@ import { ThemeToggle } from '@/components/shared/theme-toggle';
 import { Button } from '@/components/ui/button';
 import { logout as logoutRequest, refreshSession } from '@/lib/api/auth';
 import { ApiError } from '@/lib/api/client';
-import { roleLabel } from '@/lib/authz';
+import { organizationLabel, roleLabel } from '@/lib/authz';
 import { useAuthStore } from '@/stores/auth';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -113,6 +113,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     );
   }
 
+  // "Plataforma" ou o nome da organização — decisão única em `lib/authz`.
+  const organizationName = organizationLabel(user);
+
   return (
     // Shell FIXO: a viewport inteira (`h-dvh`) é dividida entre header e a
     // faixa de conteúdo; `overflow-hidden` garante que a página nunca rola —
@@ -122,8 +125,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Em 390px este header transbordava e o botão "Sair" ficava CORTADO fora
           da viewport (visto no screenshot mobile de todos os perfis). O título
           encolhe (`min-w-0` + `truncate`), o e-mail some abaixo de `sm` — não é
-          acionável, e o papel basta para a pessoa saber em que contexto está —
-          e o grupo da direita é `shrink-0`, então "Sair" nunca some. */}
+          acionável, e o papel basta para a pessoa saber em que contexto está.
+          ⚠️ O grupo da direita era `shrink-0` e isso reabriu o defeito com o
+          papel de PLATAFORMA (86e36ecwa): "Administrador da plataforma" é o
+          rótulo mais longo da matriz, o grupo não podia encolher, transbordava
+          para a esquerda e o botão de tema passava a cobrir o hambúrguer —
+          cliques no menu eram interceptados (pego pelo gate em 390px, nos três
+          temas). Agora o grupo é `min-w-0`: quem absorve o aperto é o texto do
+          papel (`truncate`), e os botões seguem no tamanho do conteúdo, então
+          "Sair" continua sem sumir. */}
       <header className="bg-card flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 sm:px-6">
         <div className="flex min-w-0 items-center gap-1 sm:gap-2">
           {/* Hambúrguer só abaixo de `md`, onde o aside não existe (86e2n4pf9). */}
@@ -138,7 +148,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             Auditoria de Lançamentos
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2 sm:gap-4">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-4">
           <ThemeToggle />
           <NotificationBell />
           <span className="text-muted-foreground flex min-w-0 items-center text-sm">
@@ -149,6 +159,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             {/* Rótulo PT-BR da matriz, nunca o enum cru: com os papéis da S5 o
                 `capitalize` do valor exibia "Client_manager". */}
             <span className="truncate">{roleLabel(user)}</span>
+            {/* Em que CHAPÉU a pessoa está (86e36ecwa): com N organizações,
+                "Administrador" não distingue quem administra a Hologram de quem
+                administra outro escritório. A plataforma mostra "Plataforma".
+                Só a partir de `lg`: o grupo da direita é `shrink-0` (para o
+                "Sair" nunca sumir), então um elemento a mais aqui EMPURRA o
+                botão para fora numa viewport estreita — e o shell é
+                `overflow-hidden`, ou seja, cortaria em vez de rolar. O gate
+                mede o "Sair" em 1440 e 390; a faixa do meio não é medida, e é
+                exatamente onde isso apertaria. */}
+            {organizationName !== null && (
+              <>
+                <span className="hidden px-2 lg:inline" aria-hidden="true">
+                  ·
+                </span>
+                <span className="hidden max-w-[12rem] truncate lg:inline">{organizationName}</span>
+              </>
+            )}
           </span>
           <Button variant="outline" size="sm" onClick={handleLogout}>
             <LogOut className="h-4 w-4" aria-hidden="true" />

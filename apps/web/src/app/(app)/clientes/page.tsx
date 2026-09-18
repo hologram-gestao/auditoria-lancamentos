@@ -64,7 +64,12 @@ import { useClientsList } from '@/hooks/use-clients';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { ApiError } from '@/lib/api/client';
 import type { Client } from '@/lib/api/clients';
-import { hasPermission, homePathFor, isClientScoped } from '@/lib/authz';
+import {
+  canCreateWithoutOrganizationPicker,
+  hasPermission,
+  homePathFor,
+  isClientScoped,
+} from '@/lib/authz';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth';
 
@@ -166,10 +171,16 @@ export default function ClientesPage() {
             </SelectContent>
           </Select>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="h-4 w-4" aria-hidden="true" />
-          Novo Cliente
-        </Button>
+        {/* A plataforma só ganha o botão quando o formulário tiver o seletor de
+            organização (86e36ed1d): hoje o POST dela volta 400 pedindo a
+            organização de destino, e oferecer a ação seria mostrar o que o
+            servidor nega (§4.9). */}
+        {canCreateWithoutOrganizationPicker(currentUser, 'create_client') && (
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Novo Cliente
+          </Button>
+        )}
       </div>
 
       <div className="rounded-lg border">
