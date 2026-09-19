@@ -94,13 +94,13 @@ Não carregam dado escopável a um cliente. Registradas explicitamente para que 
 
 | Rota                                            | Por que não é sensível a tenant                                      |
 | ----------------------------------------------- | -------------------------------------------------------------------- |
-| `DELETE /api/v1/anomaly-types/{type_id}`        | taxonomia global; escrita pela matriz                                |
+| `DELETE /api/v1/anomaly-types/{type_id}`        | taxonomia global; escrita só da plataforma                           |
 | `GET /api/v1/anomaly-types`                     | taxonomia global do produto; sem dado de cliente nem de org          |
 | `GET /api/v1/organizations`                     | administração da plataforma (ManagePlatformDep); sem dado de cliente |
 | `GET /api/v1/organizations/{organization_id}`   | administração da plataforma (ManagePlatformDep)                      |
-| `PATCH /api/v1/anomaly-types/{type_id}`         | taxonomia global; escrita pela matriz                                |
+| `PATCH /api/v1/anomaly-types/{type_id}`         | taxonomia global; escrita só da plataforma                           |
 | `PATCH /api/v1/organizations/{organization_id}` | administração da plataforma (ManagePlatformDep)                      |
-| `POST /api/v1/anomaly-types`                    | taxonomia global; escrita pela matriz (MANAGE_ANOMALY_TYPES)         |
+| `POST /api/v1/anomaly-types`                    | taxonomia global; escrita só da plataforma (MANAGE_ANOMALY_TYPES)    |
 | `POST /api/v1/auth/login`                       | autenticação — ainda não há usuário                                  |
 | `POST /api/v1/auth/logout`                      | autenticação — apenas limpa cookies                                  |
 | `POST /api/v1/auth/refresh`                     | autenticação — opera sobre o próprio token                           |
