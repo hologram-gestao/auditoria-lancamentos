@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 **S0–S19 + Sprints 0–5 do agents-hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro de tenant é vazamento entre clientes — a Sprint 5 fechou 34/34 endpoints sensíveis e essa cobertura não pode regredir.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **62/62** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
 > **O que cada sprint do agents-hub entregou** (todas na `main`):
 >
@@ -36,7 +36,7 @@
 
 1. Analista faz upload de extrato/fatura → 2. IA (Claude) extrai movimentações → 3. Humano valida amostra → 4. Sistema busca lançamentos Omie e faz matching determinístico → 5. Humano revisa → 6. Relatório Excel gerado.
 
-**Não é multi-tenant de BPOs** — é uso interno da Hologram. Multi-cliente = múltiplos clientes finais da Hologram.
+**É multi-organização desde o épico 86e36ec0q** (até 09/2026 não era): a plataforma hospeda **organizações** (BPOs e escritórios de contabilidade), cada uma com os próprios clientes finais, staff e catálogo de categorias. A Hologram é a **primeira** organização, não a dona do sistema. "Multi-cliente" segue significando múltiplos clientes finais **de uma organização**. Ver §4.8.
 
 **Fontes da verdade:**
 
@@ -625,6 +625,14 @@ ClickUp**, não no repo. `make sprints` lista o estado.
 | **6**  | Glossário e classificação por cliente      | `client_glossary_entries`, `clients.glossary_version`, `review_verdict`   |
 | **7**  | Lançamento de faturas no Omie              | `reconciliation_omie_postings`, `omie_posting/`, `OMIE_POSTING_ENABLED`   |
 
+**A camada de organizações NÃO foi uma sprint do hub.** Veio do épico ClickUp
+`86e36ec0q` (16–18/09/2026, 8 tasks em três ondas, plano em
+[Docs/PLANO_ORGANIZACOES.md](Docs/PLANO_ORGANIZACOES.md)) e deixou: tabela
+`organizations`, `organization_id` em `clients`/`users`/`client_categories`,
+`UserScope.PLATFORM`/`UserRole.PLATFORM_ADMIN`, `reach_filter`/`scoped_by_reach`,
+`resolve_organization_for_creation`/`resolve_organization_filter`,
+`modules/organizations/` e `scripts/promote_platform_admin.py`.
+
 ---
 
 ## 9. Comandos Frequentes
@@ -733,6 +741,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.35 — 18/09/2026. **A varredura de QA do épico de organizações (86e36ed4b) achou o primer afirmando o CONTRÁRIO do código, em dois lugares.** A §1 dizia "**Não é multi-tenant de BPOs** — é uso interno da Hologram": era verdade até 09/2026 e deixou de ser na PRIMEIRA migration do épico. A plataforma hospeda organizações, e a Hologram é a primeira delas, não a dona do sistema — um agent lendo só a §1 escreveria endpoint sem dimensão de organização, que é vazamento entre BPOs. A nota ⚠️ do topo dizia que "a Sprint 5 fechou **34/34** endpoints sensíveis": número de agosto, enquanto a §3.15 já dizia 62/62 desde a task 4 do épico — o arquivo se contradizia havia duas semanas. As duas frases agora dizem a lei atual, e a contagem vem com o `grep` ao lado, como já acontece na §3.15 e na §4.1. A §8 ganhou o registro de que a camada de organizações **não** foi sprint do hub, com o que ela deixou no código. E `apps/api/docs/endpoints-sensiveis-sprint5.md` foi regenerado: estava uma task atrasado, com as três linhas de `anomaly-types` ainda dizendo "escrita pela matriz" depois que a escrita virou só-plataforma na 86e36ed1d._
 
 _Versão 1.34 — 18/09/2026. **O primeiro CI da onda 2 reprovou e achou um defeito de contraste que estava na `main` havia semanas.** O `develop → main` derrubou os jobs `web_a11y` do escuro e do Hologram: o botão destrutivo do diálogo "Suspender organização" media **3,95:1** (mínimo 4,5). A causa não é da task 7 nem da 6: `hover:bg-destructive/90` compõe o vermelho com a superfície por **alfa**, e nos temas escuros, onde o rótulo do destrutivo é quase preto (`0 0% 9%`), escurecer o fundo aproxima os dois. Medindo todos os hovers com alfa contra os tokens reais, o **badge** destrutivo reprovava nos TRÊS temas (4,49 / 3,31 / 3,53); linha de tabela e demais variantes passam com folga. Correção: nasceu `--destructive-hover`, **sólido**, nos três blocos (escurece no claro, clareia no escuro e no Hologram — 7,68 / 5,63 / 6,00), e botão e badge passaram a usá-lo. **A regra nova vale para todo hover:** cor mesclada não é token e nenhum teste a trava, então estado de hover pede token próprio e linha em `PAIRS` do `theme-contrast.test.ts` (que foi de 54 para 57 asserções). **Por que passou três vezes no gate local e só o CI pegou:** o axe só enxerga o `:hover` se o ponteiro estiver sobre o elemento no instante do scan, e o `.click()` anterior deixava o ponteiro numa coordenada que, em 390px, calhava de cair sobre o botão — poucos pixels de layout decidiam. O e2e passou a fazer `hover()` **explícito** antes do `analyze`; com o alfa de volta, ele reprova nas quatro combinações de viewport e projeto, e não em uma só. §7 e a skill `front-gate` atualizadas._
 
