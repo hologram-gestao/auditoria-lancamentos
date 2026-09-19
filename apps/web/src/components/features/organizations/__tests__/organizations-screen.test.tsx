@@ -12,6 +12,8 @@
  *   - criar: 409 vira erro INLINE no campo (não toast redundante);
  *   - suspender: confirmação que mostra a consequência com os números da
  *     própria linha, e manda `active: false`; reativar manda `true`;
+ *   - a seção só-leitura dos `platform_admin` — a ÚNICA do produto que os
+ *     mostra — com os estados de carga, erro e vazio;
  *   - axe-core sem violações `critical`/`serious`.
  *
  * Os componentes Radix REAIS são usados (nada de stub de `ui/dialog`): é o
@@ -34,6 +36,12 @@ let lastQueryParams: Record<string, unknown> | undefined;
 const createMock = vi.fn();
 const updateMock = vi.fn();
 
+const platformAdminsState = {
+  data: undefined as PlatformAdminItem[] | undefined,
+  isLoading: false,
+  isError: false,
+};
+
 vi.mock('@/hooks/use-organizations', () => ({
   useOrganizationsList: (params: Record<string, unknown>) => {
     lastQueryParams = params;
@@ -41,6 +49,7 @@ vi.mock('@/hooks/use-organizations', () => ({
   },
   useCreateOrganization: () => ({ mutateAsync: createMock, isPending: false, reset: vi.fn() }),
   useUpdateOrganization: () => ({ mutateAsync: updateMock, isPending: false, reset: vi.fn() }),
+  usePlatformAdminsList: () => platformAdminsState,
 }));
 
 const authState = { user: null as AuthenticatedUser | null };
@@ -62,7 +71,7 @@ vi.mock('sonner', () => ({ toast: { success: toastSuccess, error: toastError } }
 // deste módulo; importar antes as avaliaria na TDZ).
 import OrganizationsPage from '@/app/(app)/configuracoes/organizacoes/organizations-page';
 import { ApiError } from '@/lib/api/client';
-import type { OrganizationItem } from '@/lib/api/organizations';
+import type { OrganizationItem, PlatformAdminItem } from '@/lib/api/organizations';
 import type { AuthenticatedUser } from '@/lib/contracts';
 import { assertNoA11yViolations } from '@/test/a11y';
 
@@ -123,11 +132,28 @@ beforeAll(() => {
   }
 });
 
+function platformAdmin(over: Partial<PlatformAdminItem> = {}): PlatformAdminItem {
+  return {
+    id: 'pa-1',
+    name: 'Pedro H.',
+    email: 'pedro@hologramgestao.com',
+    active: true,
+    created_at: '2026-09-18T12:00:00Z',
+    ...over,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   authState.user = PLATFORM;
   lastQueryParams = undefined;
   setList([org(), org({ id: 'org-2', name: 'Prospecta', clients_count: 0, users_count: 1 })]);
+  platformAdminsState.data = [
+    platformAdmin(),
+    platformAdmin({ id: 'pa-2', name: 'Laio S.', email: 'laio@hologramgestao.com', active: false }),
+  ];
+  platformAdminsState.isLoading = false;
+  platformAdminsState.isError = false;
 });
 
 describe('OrganizationsPage — gating (a tela de coluna única da matriz)', () => {
@@ -332,5 +358,77 @@ describe('OrganizationsPage — suspender e reativar', () => {
     const dialog = await screen.findByRole('dialog');
     expect(dialog).toHaveTextContent('1 usuário perde');
     expect(dialog).toHaveTextContent('1 cliente');
+  });
+});
+
+describe('Administradores da plataforma — a única lista que os mostra', () => {
+  // A região rolável tem nome PRÓPRIO, diferente do `<h2>` da seção: dois
+  // landmarks aninhados com o mesmo nome confundem o leitor de tela e tornam
+  // ambíguo qualquer locator por papel e nome (este teste reprovou com
+  // "Found multiple elements" até o componente desencontrar os dois).
+  function secao() {
+    return screen.getByRole('region', { name: 'Lista de administradores da plataforma' });
+  }
+
+  it('lista nome e e-mail, e marca quem está desativado', () => {
+    render(<OrganizationsPage />);
+
+    const regiao = secao();
+    expect(within(regiao).getByText('Pedro H.')).toBeVisible();
+    expect(within(regiao).getByText('pedro@hologramgestao.com')).toBeVisible();
+    expect(within(regiao).getByText('Laio S.')).toBeVisible();
+    // Desativar não tira o escopo: a conta continua alcançando tudo se for
+    // reativada, então esconder a linha seria pior do que marcá-la.
+    expect(within(regiao).getByText('Inativo')).toBeVisible();
+    expect(within(regiao).getByText('Ativo')).toBeVisible();
+  });
+
+  it('é SÓ-LEITURA: nenhuma ação dentro da seção', () => {
+    // É a razão de a lista morar aqui e não como filtro da tela de Usuários:
+    // `PATCH /users/{id}` responde 404 para linha de plataforma, e promover ou
+    // despromover é só pelo script. Botão aqui seria ação que o servidor nega.
+    render(<OrganizationsPage />);
+    expect(within(secao()).queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it('diz que a entrada e a saída são pelo script, não por esta tela', () => {
+    render(<OrganizationsPage />);
+    const cabecalho = screen.getByRole('heading', { name: 'Administradores da plataforma' });
+    expect(cabecalho.parentElement).toHaveTextContent(/script de promoção/i);
+  });
+
+  it('carregando: não finge lista vazia', () => {
+    platformAdminsState.data = undefined;
+    platformAdminsState.isLoading = true;
+    render(<OrganizationsPage />);
+
+    expect(within(secao()).getByText('Carregando...')).toBeVisible();
+    expect(within(secao()).queryByRole('listitem')).not.toBeInTheDocument();
+  });
+
+  it('erro: diz que falhou, em vez de parecer que não há ninguém', () => {
+    platformAdminsState.data = undefined;
+    platformAdminsState.isError = true;
+    render(<OrganizationsPage />);
+
+    expect(
+      screen.getByText('Não foi possível carregar os administradores da plataforma.'),
+    ).toBeVisible();
+  });
+
+  it('vazio: estado próprio, distinto do erro', () => {
+    platformAdminsState.data = [];
+    render(<OrganizationsPage />);
+
+    expect(screen.getByText('Nenhum administrador da plataforma cadastrado.')).toBeVisible();
+  });
+
+  it('admin da organização não alcança a seção (a tela inteira é negada)', () => {
+    authState.user = ORG_ADMIN;
+    render(<OrganizationsPage />);
+
+    expect(
+      screen.queryByRole('heading', { name: 'Administradores da plataforma' }),
+    ).not.toBeInTheDocument();
   });
 });

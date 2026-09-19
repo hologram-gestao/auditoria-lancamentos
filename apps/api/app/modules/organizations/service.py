@@ -16,7 +16,7 @@ from uuid import UUID
 from app.core.exceptions import OrganizationNameAlreadyExistsError, OrganizationNotFoundError
 from app.db.models import Organization
 from app.modules.organizations.repository import OrganizationRepository, OrganizationRow
-from app.modules.organizations.schemas import OrganizationItem
+from app.modules.organizations.schemas import OrganizationItem, PlatformAdminItem
 from app.modules.usage_events.service import UsageEventService
 from app.modules.users.schemas import PaginationMeta
 
@@ -51,6 +51,22 @@ class OrganizationService:
         return [_to_item(row) for row in rows], PaginationMeta(
             page=page, page_size=page_size, total=total, total_pages=total_pages
         )
+
+    async def list_platform_admins(self) -> list[PlatformAdminItem]:
+        """Quem administra a PLATAFORMA — não é uma organização, e por isso não
+        aparece em contagem nenhuma da lista acima (`users_count` conta só
+        `scope='system'` da própria org).
+        """
+        return [
+            PlatformAdminItem(
+                id=user.id,
+                name=user.name,
+                email=user.email,
+                active=user.active,
+                created_at=user.created_at,
+            )
+            for user in await self._repo.list_platform_admins()
+        ]
 
     async def get_organization(self, organization_id: UUID) -> OrganizationItem:
         row = await self._repo.get_row(organization_id)

@@ -12,6 +12,11 @@
  * O que a tela decide: criar organização, renomear e SUSPENDER/reativar. Não
  * há exclusão — organização com clientes e usuários não some (FK RESTRICT no
  * banco); suspender é o caminho, e ele é reversível.
+ *
+ * Abaixo da tabela mora a única lista de `platform_admin` do produto
+ * (`PlatformAdminsSection`), só-leitura: nem o `GET /users` nem o `users_count`
+ * das organizações os mostram, então sem ela nem a plataforma sabe quem são os
+ * pares dela.
  */
 
 import { Plus, Search } from 'lucide-react';
@@ -20,6 +25,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { OrganizationDialog } from '@/components/features/organizations/organization-dialog';
 import { OrganizationStatusConfirm } from '@/components/features/organizations/organization-status-confirm';
 import { OrganizationsTable } from '@/components/features/organizations/organizations-table';
+import { PlatformAdminsSection } from '@/components/features/organizations/platform-admins-section';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -83,9 +89,17 @@ export default function OrganizationsPage() {
     error instanceof ApiError ? error.userMessage : 'Não foi possível carregar as organizações.';
 
   return (
-    // `h-full` + `min-h-0` na área da tabela: a tabela rola dentro dela e a
-    // barra de paginação fica no rodapé, sem cobrir a última linha.
-    <div className="flex h-full flex-col gap-6">
+    // De `md` para cima: `h-full` + `min-h-0` na área da tabela — ela rola
+    // dentro da própria área e a barra de paginação fica no rodapé, sem cobrir
+    // a última linha.
+    //
+    // ABAIXO de `md`, nada disso: altura natural, e quem rola é o `<main>`.
+    // Com a seção de administradores embaixo, a disputa por altura em 390px
+    // espremia a tabela para UMA linha (medido no print: a organização suspensa
+    // saía da área visível, e o `toBeVisible` do Playwright não pega isso —
+    // fora da área de rolagem ainda é "visível"). Encher a viewport só vale
+    // enquanto a tela couber nela.
+    <div className="flex flex-col gap-6 md:h-full">
       <div className="space-y-1">
         <p className="text-muted-foreground text-sm">Configurações &gt; Organizações</p>
         <h1 className="text-2xl font-semibold">Organizações</h1>
@@ -120,7 +134,7 @@ export default function OrganizationsPage() {
         </Button>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex flex-col md:min-h-0 md:flex-1">
         <OrganizationsTable
           rows={rows}
           isLoading={isLoading}
@@ -149,6 +163,10 @@ export default function OrganizationsPage() {
           itemLabel="organizações"
         />
       </div>
+
+      {/* Abaixo da tabela, e com altura limitada: a área da tabela é `flex-1` e
+          uma seção que crescesse com o conteúdo comeria o espaço dela. */}
+      <PlatformAdminsSection />
 
       {/* O alvo NÃO é limpo ao fechar: enquanto o diálogo sai de cena, o
           conteúdo continua sendo o que a pessoa acabou de confirmar. Abrir para

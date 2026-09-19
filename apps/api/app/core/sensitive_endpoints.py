@@ -558,6 +558,7 @@ NON_TENANT_ENDPOINTS: dict[str, str] = {
     "POST /api/v1/system/alert-test": "diagnóstico de alerting; plataforma ou admin (RUN_ALERT_TEST)",
     "GET /api/v1/organizations": "administração da plataforma (ManagePlatformDep); sem dado de cliente",
     "POST /api/v1/organizations": "administração da plataforma (ManagePlatformDep)",
+    "GET /api/v1/organizations/platform-admins": "administração da plataforma (ManagePlatformDep); só quem tem scope=platform, sem organização nem cliente",
     "GET /api/v1/organizations/{organization_id}": "administração da plataforma (ManagePlatformDep)",
     "PATCH /api/v1/organizations/{organization_id}": "administração da plataforma (ManagePlatformDep)",
 }

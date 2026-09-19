@@ -12,17 +12,29 @@ import { clientsKeys } from '@/hooks/use-clients';
 import {
   createOrganization,
   listOrganizations,
+  listPlatformAdmins,
   updateOrganization,
   type CreateOrganizationPayload,
   type ListOrganizationsParams,
   type OrganizationItem,
   type OrganizationListResponse,
+  type PlatformAdminItem,
   type UpdateOrganizationPayload,
 } from '@/lib/api/organizations';
 
 export const organizationsKeys = {
   all: ['organizations'] as const,
   list: (params: ListOrganizationsParams) => ['organizations', 'list', params] as const,
+};
+
+/**
+ * Raiz PRÓPRIA, fora de `['organizations']` de propósito: criar, renomear ou
+ * suspender uma organização não muda quem é plataforma (quem muda isso é o
+ * script de promoção, fora do app). Pendurar esta chave na raiz das
+ * organizações faria toda mutação disparar um GET que não pode ter mudado.
+ */
+export const platformAdminsKeys = {
+  all: ['platform-admins'] as const,
 };
 
 export function useOrganizationsList(
@@ -59,5 +71,13 @@ export function useUpdateOrganization(id: string) {
   return useMutation<OrganizationItem, Error, UpdateOrganizationPayload>({
     mutationFn: (payload) => updateOrganization(id, payload),
     onSuccess: invalidate,
+  });
+}
+
+export function usePlatformAdminsList(options: { enabled?: boolean } = {}) {
+  return useQuery<PlatformAdminItem[]>({
+    queryKey: platformAdminsKeys.all,
+    queryFn: listPlatformAdmins,
+    enabled: options.enabled ?? true,
   });
 }

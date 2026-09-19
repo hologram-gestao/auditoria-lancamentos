@@ -413,6 +413,29 @@ const ORGANIZATIONS = [
   },
 ];
 
+/**
+ * Administradores da PLATAFORMA — a lista que nenhuma outra tela mostra
+ * (`GET /users` filtra `scope='system'`; `users_count` conta só staff da org).
+ * Um INATIVO de propósito: desativar não tira o escopo, então a linha continua
+ * aparecendo, marcada.
+ */
+const PLATFORM_ADMINS = [
+  {
+    id: 'aaaaaaaa-1111-4000-8000-000000000001',
+    name: 'Pedro H.',
+    email: 'pedro@hologramgestao.com',
+    active: true,
+    created_at: '2026-09-18T12:00:00Z',
+  },
+  {
+    id: 'aaaaaaaa-1111-4000-8000-000000000002',
+    name: 'Laio S.',
+    email: 'laio@hologramgestao.com',
+    active: false,
+    created_at: '2026-09-18T12:00:00Z',
+  },
+];
+
 const CLIENT_DETAIL = {
   id: CLIENT_ID,
   // Fixture fictícia de propósito: nome de cliente real não entra em arquivo
@@ -921,6 +944,17 @@ async function fulfillApi(route: Route): Promise<void> {
       data: ORGANIZATIONS,
       pagination: { page: 1, pageSize: 20, total: ORGANIZATIONS.length, totalPages: 1 },
     });
+  }
+  // ⚠️ ANTES do `startsWith('/api/v1/organizations/')` abaixo: o catch-all do
+  // DETALHE casaria com este path e devolveria uma organização no lugar da
+  // lista. É a mesma armadilha de ordem que a rota tem no FastAPI.
+  if (path === '/api/v1/organizations/platform-admins') {
+    // `json()` JÁ envelopa em `{ data }`. Passar `{ data: [...] }` aqui produz
+    // `{ data: { data: [...] } }`; o `apiGet` desembrulha UMA vez, o componente
+    // recebe objeto onde espera array, e o `.map` derruba a página inteira com
+    // "Application error". O vitest não pega: lá o mock é do HOOK, e o caminho
+    // do `apiGet` nunca roda. Só o gate em browser passa por ele.
+    return json(PLATFORM_ADMINS);
   }
   if (path.startsWith('/api/v1/organizations/')) {
     // Resolve pelo ID do path: ecoar sempre a primeira faria um "reativar
@@ -2622,6 +2656,55 @@ for (const vp of VIEWPORTS) {
       const linha = page.getByRole('row', { name: /Hologram/ });
       await expect(linha.getByText('Ativa')).toBeVisible();
       await expect(page.getByText('Suspensa')).toBeVisible();
+
+      // A segunda organização precisa caber na área rolável da TABELA, não só
+      // existir. `toBeVisible` não distingue as duas coisas: linha empurrada
+      // para fora do scroller interno continua "visível" para o Playwright, e
+      // foi assim que a seção de administradores espremeu a tabela para UMA
+      // linha em 390px sem reprovar nada — só o print mostrou.
+      const cortada = await page
+        .getByRole('row', { name: /Prospecta/ })
+        .evaluate((row: Element) => {
+          const caixa = row.getBoundingClientRect();
+          let pai = row.parentElement;
+          while (pai) {
+            const overflowY = getComputedStyle(pai).overflowY;
+            if (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'hidden') {
+              // 1px de folga para arredondamento de subpixel.
+              return caixa.bottom > pai.getBoundingClientRect().bottom + 1;
+            }
+            pai = pai.parentElement;
+          }
+          return false;
+        });
+      expect(cortada, 'a 2ª organização não pode ficar fora da área rolável da tabela').toBe(false);
+
+      // A ÚNICA lista de `platform_admin` do produto. O nome da região é o
+      // longo de propósito: `getByRole` do Playwright casa por SUBSTRING, e
+      // pedir "Administradores da plataforma" casaria também com a `<section>`
+      // homônima em volta (strict mode reprovaria com 2 elementos).
+      const plataforma = page.getByRole('region', {
+        name: 'Lista de administradores da plataforma',
+      });
+      await expect(plataforma.getByText('Pedro H.')).toBeVisible();
+      await expect(plataforma.getByText('pedro@hologramgestao.com')).toBeVisible();
+      // Desativado continua na lista, marcado: o escopo não sai com o `active`.
+      await expect(plataforma.getByText('Inativo')).toBeVisible();
+      // SÓ-LEITURA: promover e despromover é pelo script, e `PATCH /users/{id}`
+      // de uma linha de plataforma é 404 — botão aqui seria ação que o
+      // servidor nega (§4.9).
+      await expect(plataforma.getByRole('button')).toHaveCount(0);
+
+      // Em 390px é onde o e-mail longo empurraria o selo para fora do card.
+      const selo = plataforma.getByText('Inativo');
+      const seloBox = await selo.boundingBox();
+      const vpSize = page.viewportSize();
+      expect(seloBox, 'o selo do administrador inativo precisa ter caixa visível').not.toBeNull();
+      expect(
+        seloBox!.x + seloBox!.width,
+        'o selo não pode passar da borda da viewport',
+      ).toBeLessThanOrEqual(vpSize!.width);
+
       await shot(page, `organizacoes-${slug}`);
       await analyze(page, `área da plataforma: organizações (${vp.label})`);
 
