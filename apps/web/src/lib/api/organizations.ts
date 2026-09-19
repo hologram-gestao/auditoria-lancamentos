@@ -21,11 +21,12 @@ import type {
   OrganizationItem,
   OrganizationListResponse,
   OrganizationUpdate,
+  PlatformAdminItem,
 } from '@/lib/contracts';
 
 import { apiGet, apiPatch, apiPost } from './client';
 
-export type { OrganizationItem, OrganizationListResponse };
+export type { OrganizationItem, OrganizationListResponse, PlatformAdminItem };
 export type CreateOrganizationPayload = OrganizationCreate;
 export type UpdateOrganizationPayload = OrganizationUpdate;
 
@@ -58,4 +59,19 @@ export async function updateOrganization(
   payload: UpdateOrganizationPayload,
 ): Promise<OrganizationItem> {
   return apiPatch<OrganizationItem>(`/api/v1/organizations/${id}`, payload);
+}
+
+/**
+ * Quem administra a plataforma. Lista CURTA e sem paginação: a plataforma é um
+ * punhado de pessoas e não há fluxo que a faça crescer sozinha — entrar e sair
+ * é só pelo script `promote_platform_admin.py` (decisão Q3), nunca por API.
+ *
+ * ⚠️ Devolve o ARRAY, não o envelope: o `apiGet` desempacota `{ data }` quando
+ * `data` é a chave ÚNICA da resposta (`client.ts`), e esta rota não é paginada.
+ * Anotar `PlatformAdminListResponse` aqui compilaria — `apiGet<T>` é genérico e
+ * acredita no que lhe dizem — e só quebraria no browser, no primeiro `.data` de
+ * um array.
+ */
+export async function listPlatformAdmins(): Promise<PlatformAdminItem[]> {
+  return apiGet<PlatformAdminItem[]>('/api/v1/organizations/platform-admins');
 }

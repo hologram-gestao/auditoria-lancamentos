@@ -1,9 +1,10 @@
 """Rotas de organizações (BPOs/escritórios) — camada de organizações (86e36ecnp).
 
-    - GET    /api/v1/organizations              lista paginada com contagens
-    - POST   /api/v1/organizations              cria
-    - GET    /api/v1/organizations/{id}         detalhe
-    - PATCH  /api/v1/organizations/{id}         renomeia; `active=false` suspende
+    - GET    /api/v1/organizations                  lista paginada com contagens
+    - POST   /api/v1/organizations                  cria
+    - GET    /api/v1/organizations/platform-admins  quem administra a plataforma
+    - GET    /api/v1/organizations/{id}             detalhe
+    - PATCH  /api/v1/organizations/{id}             renomeia; `active=false` suspende
 
 Todas exigem `MANAGE_PLATFORM` (só `platform_admin`, D1 revisada). Não carregam
 dado de cliente final: entram em `NON_TENANT_ENDPOINTS`, com o motivo. Um admin
@@ -24,6 +25,7 @@ from app.modules.organizations.schemas import (
     OrganizationItem,
     OrganizationListResponse,
     OrganizationUpdate,
+    PlatformAdminListResponse,
 )
 from app.modules.organizations.service import OrganizationService
 from app.modules.usage_events.repository import UsageEventRepository
@@ -70,6 +72,31 @@ async def create_organization(
     service: OrganizationServiceDep,
 ) -> OrganizationItem:
     return await service.create_organization(name=payload.name)
+
+
+# ⚠️ ANTES de `/{organization_id}`: o FastAPI casa as rotas na ORDEM em que são
+# declaradas. Se a rota com parâmetro viesse primeiro, "platform-admins" seria
+# lido como UUID e a resposta seria 422, não a lista.
+@router.get(
+    "/platform-admins",
+    summary="Quem administra a plataforma (só plataforma). Lista curta, sem paginação.",
+)
+async def list_platform_admins(
+    _actor: ManagePlatformDep,
+    service: OrganizationServiceDep,
+) -> PlatformAdminListResponse:
+    """Os `platform_admin` do sistema.
+
+    Existe porque NENHUMA outra tela os mostra: `GET /users` filtra
+    `scope='system'` no próprio SELECT (anti-IDOR da 86e36ecar) e o
+    `users_count` de cada organização conta só o staff dela — usuário de
+    plataforma tem `organization_id` NULL e fica fora de todo total. Sem isto,
+    nem a própria plataforma sabe quem são os pares dela.
+
+    Só-leitura de propósito: entrar e sair da plataforma é pelo script
+    (`promote_platform_admin.py`, decisão Q3), nunca por API.
+    """
+    return PlatformAdminListResponse(data=await service.list_platform_admins())
 
 
 @router.get(

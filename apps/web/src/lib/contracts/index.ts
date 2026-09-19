@@ -84,6 +84,12 @@ export type OrganizationSummary = Schemas['OrganizationSummary'];
 export type ListOrganizationsQuery = NonNullable<
   paths['/api/v1/organizations']['get']['parameters']['query']
 >;
+/**
+ * Quem administra a PLATAFORMA. Não é staff de organização nenhuma: `GET
+ * /users` filtra `scope='system'` e nunca devolve estas pessoas.
+ */
+export type PlatformAdminItem = Schemas['PlatformAdminItem'];
+export type PlatformAdminListResponse = Schemas['PlatformAdminListResponse'];
 
 // ---------------------------------------------------------------------------
 // Usuários DO CLIENTE — tenant (BACK 05.5 / R5)

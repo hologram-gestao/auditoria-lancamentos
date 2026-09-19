@@ -1007,6 +1007,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/platform-admins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Quem administra a plataforma (só plataforma). Lista curta, sem paginação.
+         * @description Os `platform_admin` do sistema.
+         *
+         *     Existe porque NENHUMA outra tela os mostra: `GET /users` filtra
+         *     `scope='system'` no próprio SELECT (anti-IDOR da 86e36ecar) e o
+         *     `users_count` de cada organização conta só o staff dela — usuário de
+         *     plataforma tem `organization_id` NULL e fica fora de todo total. Sem isto,
+         *     nem a própria plataforma sabe quem são os pares dela.
+         *
+         *     Só-leitura de propósito: entrar e sair da plataforma é pelo script
+         *     (`promote_platform_admin.py`, decisão Q3), nunca por API.
+         */
+        get: operations["list_platform_admins_api_v1_organizations_platform_admins_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{organization_id}": {
         parameters: {
             query?: never;
@@ -2706,6 +2735,45 @@ export interface components {
             checksum: components["schemas"]["ChecksumResult"];
             /** File Hash */
             file_hash: string;
+        };
+        /**
+         * PlatformAdminItem
+         * @description Um administrador da plataforma — quem alcança TODAS as organizações.
+         *
+         *     Enxuto de propósito: `role` é sempre `platform_admin` e organização é
+         *     sempre nenhuma, então repeti-los em cada linha seria ruído. Nada de hash,
+         *     tenant ou credencial (§3.2).
+         */
+        PlatformAdminItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Email */
+            email: string;
+            /** Active */
+            active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * PlatformAdminListResponse
+         * @description Body de GET /api/v1/organizations/platform-admins.
+         *
+         *     NÃO é paginado: a plataforma é um punhado de pessoas, que entram e saem só
+         *     pelo script de promoção (`scripts/promote_platform_admin.py`, decisão Q3) —
+         *     não há fluxo que a faça crescer sozinha. Se um dia crescer, vira lista
+         *     paginada como a de organizações.
+         */
+        PlatformAdminListResponse: {
+            /** Data */
+            data: components["schemas"]["PlatformAdminItem"][];
         };
         /**
          * ReconciliationFileInput
@@ -5919,6 +5987,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OrganizationItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_platform_admins_api_v1_organizations_platform_admins_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformAdminListResponse"];
                 };
             };
             /** @description Validation Error */

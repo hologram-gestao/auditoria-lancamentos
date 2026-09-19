@@ -92,21 +92,22 @@ Legenda de `tipo`: **coleção** = vaza forjando `client_id` na URL/payload · *
 
 Não carregam dado escopável a um cliente. Registradas explicitamente para que o teste de completude possa afirmar "toda rota está classificada" — rota nova cai fora das duas listas e o CI falha, em vez de passar por omissão.
 
-| Rota                                            | Por que não é sensível a tenant                                      |
-| ----------------------------------------------- | -------------------------------------------------------------------- |
-| `DELETE /api/v1/anomaly-types/{type_id}`        | taxonomia global; escrita só da plataforma                           |
-| `GET /api/v1/anomaly-types`                     | taxonomia global do produto; sem dado de cliente nem de org          |
-| `GET /api/v1/organizations`                     | administração da plataforma (ManagePlatformDep); sem dado de cliente |
-| `GET /api/v1/organizations/{organization_id}`   | administração da plataforma (ManagePlatformDep)                      |
-| `PATCH /api/v1/anomaly-types/{type_id}`         | taxonomia global; escrita só da plataforma                           |
-| `PATCH /api/v1/organizations/{organization_id}` | administração da plataforma (ManagePlatformDep)                      |
-| `POST /api/v1/anomaly-types`                    | taxonomia global; escrita só da plataforma (MANAGE_ANOMALY_TYPES)    |
-| `POST /api/v1/auth/login`                       | autenticação — ainda não há usuário                                  |
-| `POST /api/v1/auth/logout`                      | autenticação — apenas limpa cookies                                  |
-| `POST /api/v1/auth/refresh`                     | autenticação — opera sobre o próprio token                           |
-| `POST /api/v1/clients/test-connection`          | valida credenciais enviadas no body; nada persistido                 |
-| `POST /api/v1/organizations`                    | administração da plataforma (ManagePlatformDep)                      |
-| `POST /api/v1/system/alert-test`                | diagnóstico de alerting; plataforma ou admin (RUN_ALERT_TEST)        |
+| Rota                                            | Por que não é sensível a tenant                                                                          |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `DELETE /api/v1/anomaly-types/{type_id}`        | taxonomia global; escrita só da plataforma                                                               |
+| `GET /api/v1/anomaly-types`                     | taxonomia global do produto; sem dado de cliente nem de org                                              |
+| `GET /api/v1/organizations`                     | administração da plataforma (ManagePlatformDep); sem dado de cliente                                     |
+| `GET /api/v1/organizations/platform-admins`     | administração da plataforma (ManagePlatformDep); só quem tem scope=platform, sem organização nem cliente |
+| `GET /api/v1/organizations/{organization_id}`   | administração da plataforma (ManagePlatformDep)                                                          |
+| `PATCH /api/v1/anomaly-types/{type_id}`         | taxonomia global; escrita só da plataforma                                                               |
+| `PATCH /api/v1/organizations/{organization_id}` | administração da plataforma (ManagePlatformDep)                                                          |
+| `POST /api/v1/anomaly-types`                    | taxonomia global; escrita só da plataforma (MANAGE_ANOMALY_TYPES)                                        |
+| `POST /api/v1/auth/login`                       | autenticação — ainda não há usuário                                                                      |
+| `POST /api/v1/auth/logout`                      | autenticação — apenas limpa cookies                                                                      |
+| `POST /api/v1/auth/refresh`                     | autenticação — opera sobre o próprio token                                                               |
+| `POST /api/v1/clients/test-connection`          | valida credenciais enviadas no body; nada persistido                                                     |
+| `POST /api/v1/organizations`                    | administração da plataforma (ManagePlatformDep)                                                          |
+| `POST /api/v1/system/alert-test`                | diagnóstico de alerting; plataforma ou admin (RUN_ALERT_TEST)                                            |
 
 ## Como a cobertura é medida
 

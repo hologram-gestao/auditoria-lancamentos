@@ -29,6 +29,13 @@ componente, nunca copiada na tela:
 - **Card / conteúdo não-tabular** → `components/ui/scroll-region.tsx` (`:30-41`):
   `overflow-auto` + `tabIndex={0}` + `role="region"` + `aria-label` — a prop `label`
   é obrigatória (`:27`). A ALTURA vem de quem chama (`min-h-0 flex-1` num flex column).
+  ⚠️ Dentro de uma `<section aria-labelledby>`, o `label` precisa ser DIFERENTE do
+  `<h2>`: a section nomeada já é um landmark, e dois aninhados com o mesmo nome são
+  confusos no leitor de tela e ambíguos para `getByRole('region', { name })` — o teste
+  reprova com "Found multiple elements". Desencontre como fazem
+  `client-managers-section` ("Gerentes com acesso" × "Gerentes com acesso ao cliente") e
+  `platform-admins-section` ("Administradores da plataforma" × "Lista de administradores
+  da plataforma").
 - **Tabela** → `<TableCard>` (`components/ui/table.tsx:73-82`, `flex max-h-full
 flex-col overflow-hidden`) + `<Table fill>` (`:27`, `:43`). Nunca `overflow` no
   container de fora: dois scrollers aninhados espremem as colunas em 390px em vez de
@@ -137,15 +144,27 @@ docker run --rm --ipc=host -u "$(id -u):$(id -g)" -v "$PWD":"$PWD" -w "$PWD" -e 
   -e E2E_BASE_URL=http://127.0.0.1:3100 mcr.microsoft.com/playwright:v1.59.1-noble bash -c '
   PORT=3100 HOSTNAME=127.0.0.1 NODE_ENV=production node apps/web/.next/standalone/apps/web/server.js >/tmp/web.log 2>&1 &
   for _ in $(seq 1 60); do curl -sf -o /dev/null http://127.0.0.1:3100/login && break; sleep 1; done
-  cd apps/web && for THEME in light dark hologram; do
+  cd apps/web
+  FINAL_EXIT=0
+  for THEME in light dark hologram; do
     E2E_THEME=$THEME PLAYWRIGHT_JSON_OUTPUT_NAME=test-results/a11y-report-$THEME.json \
       node node_modules/@playwright/test/cli.js test e2e/a11y-mocked.spec.ts --retries=0 --trace=retain-on-failure --reporter=list,json | tail -3
-    node -e "const s=JSON.parse(require(\"fs\").readFileSync(\"test-results/a11y-report-$THEME.json\",\"utf8\")).stats;console.log(\"$THEME\",s);process.exit(s.expected>0&&!s.skipped&&!s.flaky?0:1)"
-  done'
+    node -e "const s=JSON.parse(require(\"fs\").readFileSync(\"test-results/a11y-report-$THEME.json\",\"utf8\")).stats;console.log(\"GUARD $THEME\",JSON.stringify(s));process.exit(s.expected>0&&!s.skipped&&!s.flaky&&!s.unexpected?0:1)" || FINAL_EXIT=1
+  done
+  echo "FINAL_EXIT=$FINAL_EXIT"'
 ```
 
 Confira o `pwd` antes (o `cd` vaza entre comandos): `$PWD` errado constrói em
 `apps/web/apps/web`. Um tema só: rode o loop com `THEME=hologram`.
+
+⚠️ **O `!s.unexpected` e o `FINAL_EXIT` não são enfeite, e a receita antiga não
+os tinha.** Aqui o `| tail -3` descarta o exit code do Playwright (o da
+pipeline é o do `tail`), então o guard é o ÚNICO sinal — e o guard do
+`a11y-gate.sh`, que não precisa olhar `unexpected` porque o script captura
+`TEST_EXIT` sem pipe, vira uma rede furada quando copiado para cá. Pior: a
+linha `N passed` do reporter de lista **continua aparecendo com falha na
+suíte**. Em 18/09/2026 uma rodada imprimiu `230 passed` nos três temas com
+`unexpected: 4` no JSON. Leia o JSON, nunca a última linha do reporter.
 
 **Medido em 10/09/2026 por esse caminho** (não-root, imagem em cache, sem rede além do
 registry): `198 passed` por tema — claro em 2,7 min, escuro em 2,3 min, Hologram em
@@ -171,6 +190,28 @@ viewportSize().width` (padrão em `spec:2147-2165` e `:2190-2205`). Antes de med
   mesclada (4,25:1 num par que dá 4,75:1). **Visível não é estável.**
 - `formatBRL` usa espaço NÃO-quebrável: locator com espaço normal nunca casa (use
   `/R\$\s*150,50/`).
+- **`toBeVisible` NÃO prova que o elemento está dentro da área rolável.** Linha empurrada
+  para fora do scroller interno de um `TableCard` continua "visível" para o Playwright —
+  não tem `display:none` nem caixa zerada. Em 18/09/2026 uma seção nova abaixo da tabela
+  disputou altura com o `flex-1` e espremeu a lista para UMA linha em 390px, com o gate
+  verde e o `toBeVisible` da 2ª linha passando; quem pegou foi comparar o PNG com o da
+  entrega anterior. Quando a altura importa, meça: suba do elemento até o primeiro
+  ancestral com `overflowY` em `auto|scroll|hidden` e compare
+  `getBoundingClientRect().bottom` dos dois (padrão em `e2e/a11y-mocked.spec.ts`, cenário
+  de Organizações). Encher a viewport (`h-full` + `flex-1`) só vale enquanto a tela
+  couber nela: abaixo de `md`, altura natural e quem rola é o `<main>`.
+- **O `json()` do `a11y-mocked.spec.ts` JÁ envelopa em `{ data }`.** Devolver
+  `json({ data: [...] })` produz `{ data: { data: [...] } }`; o `apiGet` desembrulha uma
+  vez (ele só desembrulha quando `data` é a chave ÚNICA), o componente recebe objeto onde
+  espera array e o `.map` derruba a página com "Application error". Resposta PAGINADA é a
+  exceção: ali `json({ data, pagination })` está certo, porque o payload real é o par.
+  Nem o vitest nem o `tsc` pegam isto — lá o mock é do HOOK e o `apiGet<T>` é genérico,
+  acredita no tipo declarado. Só o gate em browser passa pelo caminho real.
+- **Página com "Application error" aparece como locator não encontrado.** A mensagem do
+  Playwright é `element(s) not found`, e a tentação é mexer no locator. Leia o
+  `test-results/<caso>/error-context.md`: ele traz o snapshot da árvore, e um
+  `heading "Application error: a client-side exception has occurred"` fecha o diagnóstico
+  em dez segundos.
 - Camada rápida (roda no `pnpm test`, sem browser): `src/test/a11y.ts`
   (`assertNoA11yViolations`, `:34`) com `color-contrast` DESLIGADO (`:37`, jsdom não
   computa cor) — por isso `app/__tests__/theme-contrast.test.ts` trava os pares de
