@@ -118,6 +118,15 @@ const PAIRS: ReadonlyArray<{ text: string; bg: string; where: string }> = [
   { text: 'accent-foreground', bg: 'accent', where: 'item ativo do sidebar · hover de menu' },
   // Texto sobre os preenchimentos sólidos.
   { text: 'destructive-foreground', bg: 'destructive', where: 'botão destrutivo, badge do sino' },
+  // O estado de HOVER é um par próprio, e faltava (86e36ed1d): enquanto ele
+  // era `bg-destructive/90`, a cor medida era uma MISTURA com a superfície —
+  // não um token, logo intravável aqui. Passou despercebido até o axe medir
+  // o botão com o ponteiro parado em cima: 3,95:1 no escuro. Agora é sólido.
+  {
+    text: 'destructive-foreground',
+    bg: 'destructive-hover',
+    where: 'botão/badge destrutivo em hover',
+  },
   { text: 'primary-foreground', bg: 'primary', where: 'botão primário' },
   { text: 'success-foreground', bg: 'success', where: 'preenchimento de sucesso' },
   { text: 'warning-foreground', bg: 'warning', where: 'preenchimento de atenção' },

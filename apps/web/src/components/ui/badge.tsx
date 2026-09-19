@@ -12,7 +12,9 @@ const badgeVariants = cva(
         secondary:
           'border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80',
         destructive:
-          'border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80',
+          // Mesmo token sólido do botão: com alfa, o hover do badge
+          // destrutivo reprovava nos TRÊS temas (4,49 / 3,31 / 3,53).
+          'border-transparent bg-destructive text-destructive-foreground hover:bg-destructive-hover',
         outline: 'text-foreground',
       },
     },

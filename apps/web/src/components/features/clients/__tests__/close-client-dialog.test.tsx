@@ -32,6 +32,7 @@ const client: Client = {
   id: 'c1',
   name: 'Cliente Exemplo Ltda',
   active: true,
+  organization: { id: '0706eeb5-9718-4d03-bcda-ef615789e6ac', name: 'Hologram' },
   created_at: '2026-05-01T12:00:00Z',
   updated_at: '2026-07-20T12:00:00Z',
   responsible_manager: null,

@@ -7,19 +7,30 @@
  *   - 409 com `code = CONFLICT` na criação/edição com email duplicado;
  *     `userMessage` já vem em PT-BR ("Este e-mail já está em uso.").
  */
+import type { SystemUserRole, UserResponse } from '@/lib/contracts';
+
 import { apiGet, apiPatch, apiPost } from './client';
 
-export type UserRoleValue = 'admin' | 'manager';
+/**
+ * Papel aceito nesta API — vem do CONTRATO (`SystemUserRole`), não redigitado
+ * (86e36ecwa). `platform_admin` não está no union de propósito: ele nasce só
+ * por script no backend e nenhum endpoint o aceita; oferecê-lo num formulário
+ * daria 422. Se o backend mudar a whitelist, o `tsc` acusa aqui.
+ */
+export type UserRoleValue = SystemUserRole;
 
-export interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: UserRoleValue;
-  active: boolean;
-  created_at: string;
-  updated_at: string;
-}
+/**
+ * Um staff de organização, como o backend devolve (86e36ed1d).
+ *
+ * Vem do CONTRATO (`UserResponse`), com um único estreitamento: o `role`, que o
+ * OpenAPI expõe como `string` livre. O estreitamento é seguro porque
+ * `_staff_select` (users/repository.py) filtra `scope = 'system'` — esta
+ * listagem nunca devolve usuário de plataforma nem de cliente. Derivar do
+ * contrato em vez de redigitar significa que campo novo no backend chega aqui
+ * sozinho; foi assim que `scope`/`organization_id`/`organization_name`
+ * entraram.
+ */
+export type User = Omit<UserResponse, 'role'> & { role: UserRoleValue };
 
 export interface Pagination {
   page: number;
@@ -37,6 +48,13 @@ export interface ListUsersParams {
   page?: number;
   pageSize?: number;
   search?: string;
+  /**
+   * Filtro por organização (86e36ed1d). A plataforma escolhe qualquer uma; o
+   * staff só a própria (outra é 403, não uma lista vazia).
+   */
+  organizationId?: string;
+  /** Filtro por papel — usado pelo seletor de gerentes da carteira. */
+  role?: UserRoleValue;
 }
 
 export interface CreateUserPayload {
@@ -44,6 +62,11 @@ export interface CreateUserPayload {
   email: string;
   password: string;
   role: UserRoleValue;
+  /**
+   * Organização de destino (86e36ed1d): **obrigatória** para a plataforma,
+   * ausente para o admin de organização (o backend usa a da LINHA dele).
+   */
+  organization_id?: string;
 }
 
 export interface UpdateUserPayload {
@@ -58,6 +81,8 @@ function buildQuery(params: ListUsersParams): string {
   sp.set('pageSize', String(params.pageSize ?? 20));
   const search = params.search?.trim();
   if (search) sp.set('search', search);
+  if (params.organizationId) sp.set('organizationId', params.organizationId);
+  if (params.role) sp.set('role', params.role);
   return sp.toString();
 }
 

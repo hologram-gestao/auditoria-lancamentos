@@ -29,6 +29,13 @@ componente, nunca copiada na tela:
 - **Card / conteúdo não-tabular** → `components/ui/scroll-region.tsx` (`:30-41`):
   `overflow-auto` + `tabIndex={0}` + `role="region"` + `aria-label` — a prop `label`
   é obrigatória (`:27`). A ALTURA vem de quem chama (`min-h-0 flex-1` num flex column).
+  ⚠️ Dentro de uma `<section aria-labelledby>`, o `label` precisa ser DIFERENTE do
+  `<h2>`: a section nomeada já é um landmark, e dois aninhados com o mesmo nome são
+  confusos no leitor de tela e ambíguos para `getByRole('region', { name })` — o teste
+  reprova com "Found multiple elements". Desencontre como fazem
+  `client-managers-section` ("Gerentes com acesso" × "Gerentes com acesso ao cliente") e
+  `platform-admins-section` ("Administradores da plataforma" × "Lista de administradores
+  da plataforma").
 - **Tabela** → `<TableCard>` (`components/ui/table.tsx:73-82`, `flex max-h-full
 flex-col overflow-hidden`) + `<Table fill>` (`:27`, `:43`). Nunca `overflow` no
   container de fora: dois scrollers aninhados espremem as colunas em 390px em vez de
@@ -46,28 +53,46 @@ grep -rn "overflow-auto\|overflow-y-auto" apps/web/src/components apps/web/src/a
 ## 2. Autorização na tela: `lib/authz.ts`, nunca `role ===` para esconder ação
 
 O espelho da `PERMISSION_MATRIX` do backend é `lib/authz.ts` (`PERMISSION_MATRIX`,
-`:56`, indexada por papel: papel novo no contrato quebra a compilação até alguém decidir
-o que ele vê). **Isto não é segurança** (`:9-13`) — a autoridade é o backend, pela linha
-do usuário a cada request. O que o helper evita é o defeito de mostrar botão que devolve
-403 (CLAUDE.md §4.9: cada ❌ da matriz = bloqueio no backend E ação oculta na tela).
+`:83`, **13 permissões × 5 papéis** desde a camada de organizações; indexada por papel:
+papel novo no contrato quebra a compilação até alguém decidir o que ele vê — foi assim
+que `platform_admin` entrou em 86e36ecwa). **Isto não é segurança** (`:12-16`) — a
+autoridade é o backend, pela linha do usuário a cada request. O que o helper evita é o
+defeito de mostrar botão que devolve 403 (CLAUDE.md §4.9: cada ❌ da matriz = bloqueio no
+backend E ação oculta na tela).
 
-- `hasPermission(user, permission)` (`:95`) — ação por papel; `canAccessClient` (`:120`);
-  `canSeeSystemArea` (`:133`); `canManageSystemUsers` (`:138`); `homePathFor` (`:149`);
-  `roleLabel` (`:165`, nunca o enum cru na tela).
-- Copie de: `components/features/navigation/nav-items.tsx:170`,
-  `client-users/client-users-screen.tsx:59`, `clients/client-shell.tsx:75,119,125`,
-  `glossary/glossary-screen.tsx:68`. Deep link negado degrada para
-  `components/shared/access-denied.tsx` (mensagem + caminho de volta), nunca tela branca.
-- `role ===` fora do helper só para RÓTULO/badge ou filtro de dados — hoje 6 ocorrências
-  conhecidas (`users/user-badges.tsx:18`, `client-users/client-user-badges.tsx:25`,
-  `client-users/client-user-form-drawer.tsx:290`, `clients/edit-client-modal.tsx:102` e a
-  trava de auto-rebaixamento em `users/edit-user-modal.tsx:99,162`). Ocorrência nova que
-  MOSTRA/ESCONDE uma ação é defeito.
-- Travas no browser: "operador do cliente não vê a tela nem o item de menu" (`spec:1421`)
-  e "gerente do SISTEMA opera a carteira mas não gere usuários do tenant" (`:1439`).
+- `hasPermission(user, permission)` (`:155`) — ação por papel; `isPlatformScoped` (`:180`,
+  a checagem ESTRITA que espelha o `is_platform` do backend); `isStaff` (`:192`, plataforma
+  OU organização); `canAccessClient` (`:205`); `canSeeSystemArea` (`:219`);
+  `canManageSystemUsers` (`:230`, hoje é `hasPermission('manage_org_users')`);
+  `homePathFor` (`:242`); `USER_ROLE_LABELS` (`:250`) e `roleLabel` (`:259`, nunca o enum
+  cru na tela); `organizationLabel` (`:273`, "Plataforma" ou o nome da organização).
+- Copie de: `components/features/navigation/nav-items.tsx:97` (Configurações item a item
+  pela matriz) e `:201`, `client-users/client-users-screen.tsx:59`,
+  `clients/client-shell.tsx:119,125`, `glossary/glossary-screen.tsx:68`. Deep link negado
+  degrada para `components/shared/access-denied.tsx` (mensagem + caminho de volta), nunca
+  tela branca.
+- `role ===` fora do helper só para RÓTULO/badge ou filtro de dados — hoje **4**
+  ocorrências conhecidas (`client-users/client-user-badges.tsx:25`,
+  `client-users/client-user-form-drawer.tsx:290` e a trava de auto-rebaixamento em
+  `users/edit-user-modal.tsx:99,162`). Duas sumiram na 86e36ed1d, e por motivos
+  diferentes que vale conhecer: o badge de papel de `users/user-badges.tsx` era um
+  ternário `isAdmin ? 'Admin' : 'Gerente'` — com mais de dois papéis possíveis o `else`
+  deixa de ser "gerente" e vira "qualquer outro, rotulado errado" —, então virou um
+  `Record<UserRoleValue, …>` exaustivo com o rótulo vindo de `USER_ROLE_LABELS`; e o
+  filtro de candidatos de `clients/client-managers-section.tsx` recortava
+  `role === 'manager'` no NAVEGADOR sobre a primeira página de `/users`, o que com N
+  organizações ofereceria gerente de outra org, então virou
+  `?role=manager&organizationId=<org do cliente>` no servidor. **Ternário sobre papel é
+  a forma disfarçada desta regra**: se o `else` precisa saber qual papel é, use um
+  `Record` exaustivo.
+  Ocorrência nova que MOSTRA/ESCONDE uma ação é defeito.
+- Travas no browser: "operador do cliente não vê a tela nem o item de menu" (`spec:1710`)
+  e "gerente da ORGANIZAÇÃO gere os usuários do tenant da carteira" (`:1728` — a D2
+  inverteu este caso em 86e36ecjp; o negativo desta tela é o operador). A dimensão de
+  ORGANIZAÇÃO (coluna, filtro e seletor de criação) é medida a partir de `:2673`.
 
 ```bash
-grep -rn "role ===" apps/web/src --include=*.tsx --include=*.ts | grep -v "lib/authz.ts\|__tests__" | grep -v ":\s*\(\*\|//\)"   # esperado: as 6 acima, nenhuma nova
+grep -rn "role ===" apps/web/src --include=*.tsx --include=*.ts | grep -v "lib/authz.ts\|__tests__" | grep -v ":\s*\(\*\|//\)"   # esperado: as 4 acima, nenhuma nova
 grep -rn "hasPermission(\|canAccessClient(\|canSeeSystemArea(" apps/web/src/components/features/<sua-pasta>/   # a sua tela consulta o helper
 ```
 
@@ -77,13 +102,13 @@ grep -rn "hasPermission(\|canAccessClient(\|canSeeSystemArea(" apps/web/src/comp
 `.github/workflows/ci.yml` (matrix `theme: [light, dark, hologram]`): build standalone
 do Next → servidor de produção em `127.0.0.1:3100` (`A11Y_PORT` muda) →
 `e2e/a11y-mocked.spec.ts` com a API interceptada no browser (`page.route('**/api/v1/**')`,
-`spec:1040`) → `--retries=0` → guard por tema (`expected > 0`, `skipped = 0`,
+`spec:1329`) → `--retries=0` → guard por tema (`expected > 0`, `skipped = 0`,
 `flaky = 0`; `a11y-gate.sh:129-152`). NÃO precisa de Postgres, seed, API nem credencial.
 Roda em DOIS viewports (`playwright.config.ts:36-39`: desktop e Pixel 5 — o
 `scrollable-region-focusable` só existia em 390px). Relatório em
 `apps/web/test-results/a11y-report-<tema>.json` (diretório ignorado na raiz,
 `.gitignore:94`); screenshots só com `E2E_SHOTS=1`, em `apps/web/a11y-shots/<tema>/`
-(`spec:211-216`, ignorado em `apps/web/.gitignore:14`).
+(`spec:330-347`, ignorado em `apps/web/.gitignore:14`).
 
 **Não confunda** com a suíte irmã `e2e/a11y.spec.ts` (ambiente completo): sem
 `E2E_PASSWORD`/`E2E_CLIENT_ID` ela faz `test.skip` (`:40`) e deixaria o gate verde sem
@@ -119,15 +144,27 @@ docker run --rm --ipc=host -u "$(id -u):$(id -g)" -v "$PWD":"$PWD" -w "$PWD" -e 
   -e E2E_BASE_URL=http://127.0.0.1:3100 mcr.microsoft.com/playwright:v1.59.1-noble bash -c '
   PORT=3100 HOSTNAME=127.0.0.1 NODE_ENV=production node apps/web/.next/standalone/apps/web/server.js >/tmp/web.log 2>&1 &
   for _ in $(seq 1 60); do curl -sf -o /dev/null http://127.0.0.1:3100/login && break; sleep 1; done
-  cd apps/web && for THEME in light dark hologram; do
+  cd apps/web
+  FINAL_EXIT=0
+  for THEME in light dark hologram; do
     E2E_THEME=$THEME PLAYWRIGHT_JSON_OUTPUT_NAME=test-results/a11y-report-$THEME.json \
       node node_modules/@playwright/test/cli.js test e2e/a11y-mocked.spec.ts --retries=0 --trace=retain-on-failure --reporter=list,json | tail -3
-    node -e "const s=JSON.parse(require(\"fs\").readFileSync(\"test-results/a11y-report-$THEME.json\",\"utf8\")).stats;console.log(\"$THEME\",s);process.exit(s.expected>0&&!s.skipped&&!s.flaky?0:1)"
-  done'
+    node -e "const s=JSON.parse(require(\"fs\").readFileSync(\"test-results/a11y-report-$THEME.json\",\"utf8\")).stats;console.log(\"GUARD $THEME\",JSON.stringify(s));process.exit(s.expected>0&&!s.skipped&&!s.flaky&&!s.unexpected?0:1)" || FINAL_EXIT=1
+  done
+  echo "FINAL_EXIT=$FINAL_EXIT"'
 ```
 
 Confira o `pwd` antes (o `cd` vaza entre comandos): `$PWD` errado constrói em
 `apps/web/apps/web`. Um tema só: rode o loop com `THEME=hologram`.
+
+⚠️ **O `!s.unexpected` e o `FINAL_EXIT` não são enfeite, e a receita antiga não
+os tinha.** Aqui o `| tail -3` descarta o exit code do Playwright (o da
+pipeline é o do `tail`), então o guard é o ÚNICO sinal — e o guard do
+`a11y-gate.sh`, que não precisa olhar `unexpected` porque o script captura
+`TEST_EXIT` sem pipe, vira uma rede furada quando copiado para cá. Pior: a
+linha `N passed` do reporter de lista **continua aparecendo com falha na
+suíte**. Em 18/09/2026 uma rodada imprimiu `230 passed` nos três temas com
+`unexpected: 4` no JSON. Leia o JSON, nunca a última linha do reporter.
 
 **Medido em 10/09/2026 por esse caminho** (não-root, imagem em cache, sem rede além do
 registry): `198 passed` por tema — claro em 2,7 min, escuro em 2,3 min, Hologram em
@@ -147,12 +184,34 @@ registry): `198 passed` por tema — claro em 2,7 min, escuro em 2,3 min, Hologr
   fora do card, gaveta cortada, coluna espremida, valor monetário quebrado após o hífen
   (`-R$ 150,50` lido como crédito → `whitespace-nowrap`).
 - Corte corrigido é travado com MEDIDA, não com olho: `boundingBox().x + width <=
-viewportSize().width` (padrão em `spec:1638-1643` e `:1838-1853`). Antes de medir,
-  `aguardarAnimacao()` (`:915`) — a gaveta do Radix entra deslizando; e antes de medir
-  toast, `aguardarToastEstavel()` (`:931`) — o Sonner entra em fade e o axe mede cor
+viewportSize().width` (padrão em `spec:2147-2165` e `:2190-2205`). Antes de medir,
+  `aguardarAnimacao()` (`:1203`) — a gaveta do Radix entra deslizando; e antes de medir
+  toast, `aguardarToastEstavel()` (`:1219`) — o Sonner entra em fade e o axe mede cor
   mesclada (4,25:1 num par que dá 4,75:1). **Visível não é estável.**
 - `formatBRL` usa espaço NÃO-quebrável: locator com espaço normal nunca casa (use
   `/R\$\s*150,50/`).
+- **`toBeVisible` NÃO prova que o elemento está dentro da área rolável.** Linha empurrada
+  para fora do scroller interno de um `TableCard` continua "visível" para o Playwright —
+  não tem `display:none` nem caixa zerada. Em 18/09/2026 uma seção nova abaixo da tabela
+  disputou altura com o `flex-1` e espremeu a lista para UMA linha em 390px, com o gate
+  verde e o `toBeVisible` da 2ª linha passando; quem pegou foi comparar o PNG com o da
+  entrega anterior. Quando a altura importa, meça: suba do elemento até o primeiro
+  ancestral com `overflowY` em `auto|scroll|hidden` e compare
+  `getBoundingClientRect().bottom` dos dois (padrão em `e2e/a11y-mocked.spec.ts`, cenário
+  de Organizações). Encher a viewport (`h-full` + `flex-1`) só vale enquanto a tela
+  couber nela: abaixo de `md`, altura natural e quem rola é o `<main>`.
+- **O `json()` do `a11y-mocked.spec.ts` JÁ envelopa em `{ data }`.** Devolver
+  `json({ data: [...] })` produz `{ data: { data: [...] } }`; o `apiGet` desembrulha uma
+  vez (ele só desembrulha quando `data` é a chave ÚNICA), o componente recebe objeto onde
+  espera array e o `.map` derruba a página com "Application error". Resposta PAGINADA é a
+  exceção: ali `json({ data, pagination })` está certo, porque o payload real é o par.
+  Nem o vitest nem o `tsc` pegam isto — lá o mock é do HOOK e o `apiGet<T>` é genérico,
+  acredita no tipo declarado. Só o gate em browser passa pelo caminho real.
+- **Página com "Application error" aparece como locator não encontrado.** A mensagem do
+  Playwright é `element(s) not found`, e a tentação é mexer no locator. Leia o
+  `test-results/<caso>/error-context.md`: ele traz o snapshot da árvore, e um
+  `heading "Application error: a client-side exception has occurred"` fecha o diagnóstico
+  em dez segundos.
 - Camada rápida (roda no `pnpm test`, sem browser): `src/test/a11y.ts`
   (`assertNoA11yViolations`, `:34`) com `color-contrast` DESLIGADO (`:37`, jsdom não
   computa cor) — por isso `app/__tests__/theme-contrast.test.ts` trava os pares de
@@ -162,9 +221,20 @@ viewportSize().width` (padrão em `spec:1638-1643` e `:1838-1853`). Antes de med
 
 - **Cor só por token semântico** (`success`/`warning`/`info`/`destructive` + `-foreground`/
   `-muted`, neutros `muted`/`border`/`input`), definidos nos três blocos de
-  `app/globals.css` (`:root` `:6`, `.dark` `:69`, `.hologram` `:115`). Nada de
+  `app/globals.css` (`:root` `:6`, `.dark` `:76`, `.hologram` `:125`). Nada de
   `emerald-100`/`zinc-700` nem `dark:` em componente. Pareamento que não inverte:
   sobre o SÓLIDO usa-se `-foreground`; sobre `-muted` o texto é o SÓLIDO.
+- **Estado de HOVER é um par próprio, e sólido** (86e36ed1d). `hover:bg-destructive/90`
+  parece inofensivo e não é: a composição com **alfa** mistura o token com a superfície,
+  e o par resultante não é um token — `theme-contrast.test.ts` não consegue travá-lo. Nos
+  temas escuros, onde o rótulo do botão destrutivo é quase preto, escurecer o fundo
+  derrubava para **3,95:1** (badge destrutivo: reprovava nos TRÊS temas). O hover agora
+  é `--destructive-hover`, sólido, com par travado. **Hover novo = token novo + linha em
+  `PAIRS`**, nunca uma barra de opacidade.
+- **O axe só vê o hover se o ponteiro estiver lá.** Este defeito escapou de três rodadas
+  do gate local e só apareceu no CI porque o `.click()` anterior deixava o ponteiro numa
+  coordenada que, em 390px, calhava de cair sobre o botão do diálogo. Antes de `analyze`
+  numa tela com ação destrutiva, `await botao.hover()` de propósito.
   ```bash
   grep -rnE "\b(text|bg|border|ring|from|to|via)-(slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-[0-9]{2,3}\b|\bdark:" apps/web/src/components --include=*.tsx   # esperado: 0
   ```
@@ -174,7 +244,12 @@ viewportSize().width` (padrão em `spec:1638-1643` e `:1838-1853`). Antes de med
   `modal={false}` (`theme-toggle.tsx:55`, mesmo padrão do sino) — o modo modal do Radix
   marca o fundo com `aria-hidden` mantendo focáveis (`aria-hidden-focus`). O `Select`
   do Radix não tem `modal={false}`: no e2e, exercite-o aberto e rode `analyze()`
-  (`spec:888`) com ele FECHADO (86e34jd8m).
+  (`spec:1176`) com ele FECHADO (86e34jd8m). E `getByRole(..., { name })` do Playwright
+  casa por **SUBSTRING**: numa tabela, o nome acessível de uma célula de ações inclui os
+  `aria-label` dos botões dela, então `{ name: 'Prospecta' }` casou com 4 células e
+  quebrou o strict mode (86e36ed1d) — em célula de tabela, use `exact: true`. O
+  `getByRole` do Testing Library NÃO se comporta assim, e foi por isso que o vitest
+  passou e o browser reprovou.
 - **TypeScript strict, com `noUncheckedIndexedAccess`** (`apps/web/tsconfig.json`): indexar
   array ou dicionário devolve `T | undefined`, então acesso por índice pede verificação
   antes do uso. É o que impede um `.map()` sobre resultado de API vir a explodir em runtime.

@@ -39,6 +39,33 @@ class OrganizationListResponse(BaseModel):
     pagination: PaginationMeta
 
 
+class PlatformAdminItem(BaseModel):
+    """Um administrador da plataforma — quem alcança TODAS as organizações.
+
+    Enxuto de propósito: `role` é sempre `platform_admin` e organização é
+    sempre nenhuma, então repeti-los em cada linha seria ruído. Nada de hash,
+    tenant ou credencial (§3.2).
+    """
+
+    id: UUID
+    name: str
+    email: str
+    active: bool
+    created_at: datetime
+
+
+class PlatformAdminListResponse(BaseModel):
+    """Body de GET /api/v1/organizations/platform-admins.
+
+    NÃO é paginado: a plataforma é um punhado de pessoas, que entram e saem só
+    pelo script de promoção (`scripts/promote_platform_admin.py`, decisão Q3) —
+    não há fluxo que a faça crescer sozinha. Se um dia crescer, vira lista
+    paginada como a de organizações.
+    """
+
+    data: list[PlatformAdminItem]
+
+
 def _clean_name(value: str) -> str:
     cleaned = " ".join(value.split())
     if not cleaned:
