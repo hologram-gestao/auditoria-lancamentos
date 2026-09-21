@@ -46,3 +46,16 @@ export const updateUserSchema = z.object({
 });
 
 export type UpdateUserFormValues = z.infer<typeof updateUserSchema>;
+
+/**
+ * Transferência de staff entre organizações (86e3bvbfx) — só a plataforma.
+ * A organização de destino é obrigatória; o papel não entra (não muda).
+ */
+export const transferUserSchema = z.object({
+  // Não usa `organizationTargetField(true)`: o tipo de retorno da fábrica é a
+  // UNIÃO dos dois ramos, e o `z.infer` alargaria para `string | undefined` —
+  // o payload do contrato exige `string`. Mesma mensagem, tipo estreito.
+  organization_id: z.string().uuid('Escolha a organização de destino.'),
+});
+
+export type TransferUserFormValues = z.infer<typeof transferUserSchema>;

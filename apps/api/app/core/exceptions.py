@@ -384,6 +384,27 @@ class CannotRemoveResponsibleManagerError(ConflictError):
     )
 
 
+class UserAlreadyInOrganizationError(ConflictError):
+    """409 — transferência para a organização em que o usuário já está (86e3bvbfx)."""
+
+    default_user_message = "O usuário já pertence a esta organização."
+
+
+class UserIsPrimaryManagerError(ConflictError):
+    """409 — o usuário é o gerente RESPONSÁVEL de cliente(s) aberto(s) (86e3bvbfx).
+
+    Transferir apagaria a carteira e deixaria o cliente sem responsável, o que
+    a regra da carteira proíbe (§4.13: cliente nunca fica órfão). A plataforma
+    define outro responsável antes; só a CONTAGEM vai na mensagem — nome de
+    cliente nunca sai numa negação (§3.15).
+    """
+
+    default_user_message = (
+        "Este usuário é o gerente responsável de clientes abertos. "
+        "Defina outro responsável antes de transferir."
+    )
+
+
 class DuplicateFileError(AppError):
     """409 — violação de idempotência (mesmo arquivo, conta e mês)."""
 

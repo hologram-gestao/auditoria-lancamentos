@@ -144,6 +144,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/{user_id}/transfer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Transfere o staff para outra organização (só plataforma).
+         * @description Move admin ou gerente de uma organização para outra sem apagar e recriar.
+         *
+         *     Apagar e recriar não é alternativa: o e-mail é único no sistema e a linha
+         *     não pode ser apagada se a pessoa criou cliente ou conciliação (FK
+         *     RESTRICT). As regras (responsável de cliente aberto recusa; colaborador e
+         *     favoritos cross-org saem; encerrado e histórico ficam; papel não muda)
+         *     estão em `UserService.transfer_user`.
+         */
+        post: operations["transfer_user_api_v1_users__user_id__transfer_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clients/{client_id}/users": {
         parameters: {
             query?: never;
@@ -3225,6 +3251,21 @@ export interface components {
             message: string;
         };
         /**
+         * TransferUserRequest
+         * @description Body de POST /api/v1/users/{id}/transfer — só plataforma (86e3bvbfx).
+         *
+         *     Só a organização de destino. O papel NÃO é campo: admin continua admin e
+         *     gerente continua gerente na organização nova — trocar papel é o PATCH.
+         */
+        TransferUserRequest: {
+            /**
+             * Organization Id
+             * Format: uuid
+             * @description Organização de destino (existe e ativa).
+             */
+            organization_id: string;
+        };
+        /**
          * UnreadCountPayload
          * @description Conteúdo do envelope de GET /api/v1/notifications/unread-count.
          */
@@ -3740,6 +3781,43 @@ export interface operations {
             };
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    transfer_user_api_v1_users__user_id__transfer_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransferUserRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

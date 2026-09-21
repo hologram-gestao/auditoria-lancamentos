@@ -177,6 +177,9 @@ _BODIES: dict[str, dict[str, Any]] = {
     # validação passaria sem nunca tocar a autorização.
     "POST /api/v1/clients/{client_id}/managers": {"user_id": "{user_id}"},
     "PATCH /api/v1/clients/{client_id}/assign": {"user_id": "{user_id}"},
+    # 86e3bvbfx — transferência de staff. Body VÁLIDO de propósito (mesmo
+    # raciocínio do ADR-012): a organização existe; o que tem de negar é o guard.
+    "POST /api/v1/users/{user_id}/transfer": {"organization_id": "{org_b}"},
     # 86e36ecnp — rotas que viraram sensíveis a ORGANIZAÇÃO. Bodies válidos de
     # propósito (mesmo raciocínio do ADR-012).
     "POST /api/v1/clients": {
@@ -426,6 +429,7 @@ async def test_cross_tenant_por_endpoint(
         "anomaly_id": str(uuid4()),
         "entry_id": str(uuid4()),
         "user_id": str(tenants["admin"].id),
+        "org_b": str(tenants["org_b"].id),
         "category_id": str(tenants["cat_a"].id),
         "uuid": str(uuid4()),
     }

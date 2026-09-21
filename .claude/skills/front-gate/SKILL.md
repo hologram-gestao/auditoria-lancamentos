@@ -285,6 +285,15 @@ viewportSize().width` (padrão em `spec:2147-2165` e `:2190-2205`). Antes de med
 - **`cursor-pointer` no componente-base**, não tela a tela (`components/ui/button.tsx:8-11`);
   secundário com cor da paleta (`variant="secondary"` → `bg-secondary`, `:18`), nunca
   cinza indistinguível.
+- **Diálogo que abre OUTRO diálogo: nunca empilhe, e nunca no mesmo tick.** Dois `Dialog`
+  do Radix abertos marcam o fundo com `aria-hidden` e o de cima fica fora do teclado. E
+  fechar A e abrir B no MESMO clique também falha: o `Presence` mantém A montado ~200ms
+  para a animação, e ao desmontar o `FocusScope` de A devolve o foco ao gatilho dele — o
+  botão da tabela, por baixo do modal B. Padrão que funciona (86e3bvbfx,
+  `users/edit-user-modal.tsx`): guarde o alvo num `useRef`, chame `onOpenChange(false)`,
+  e abra B no `onCloseAutoFocus` do `DialogContent` de A com `event.preventDefault()` —
+  B abre com A já fora da árvore, e o foco vai para B. Quem MONTA B é a página, com
+  estado próprio (`transferring`), não A.
 - **Gaveta (Sheet)**: `SheetHeader`/`SheetBody`/`SheetFooter` — header e rodapé fixos,
   miolo rola, **Cancelar à esquerda** e primária à direita (`justify-between`,
   `components/ui/sheet.tsx:91-96`); exemplo `glossary-form-drawer.tsx:227-241`, ambos

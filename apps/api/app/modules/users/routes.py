@@ -6,9 +6,12 @@ Cobre BACK 2.1 do backlog:
     - PATCH /api/v1/users/{id}                    (update parcial)
     - POST /api/v1/users/{id}/activate            (reativa)
     - POST /api/v1/users/{id}/deactivate          (soft delete)
+    - POST /api/v1/users/{id}/transfer              (muda de organização — só plataforma)
 
 Toda rota exige a permissão `MANAGE_ORG_USERS` da matriz (plataforma e admin da
-organização); manager autenticado recebe 403. A listagem e o alvo por PK são
+organização); manager autenticado recebe 403. A EXCEÇÃO é `transfer`, que exige
+`MANAGE_PLATFORM`: mover gente entre organizações é escrita cross-org por
+definição, e o admin de uma organização não alcança a outra (86e3bvbfx). A listagem e o alvo por PK são
 SÓ staff (`scope='system'`) da organização do observador — plataforma e
 usuários de cliente nunca aparecem nem são alcançados por aqui (anti-IDOR); a
 criação carimba a organização do ator. A plataforma escolhe a organização
@@ -26,11 +29,14 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
-from app.core.dependencies import DbSessionDep, ManageOrgUsersDep
+from app.core.dependencies import DbSessionDep, ManageOrgUsersDep, ManagePlatformDep
 from app.db.models import SystemUserRole, UserRole
+from app.modules.usage_events.repository import UsageEventRepository
+from app.modules.usage_events.service import UsageEventService
 from app.modules.users.repository import StaffRow, UserRepository
 from app.modules.users.schemas import (
     CreateUserRequest,
+    TransferUserRequest,
     UpdateUserRequest,
     UserListResponse,
     UserResponse,
@@ -41,7 +47,10 @@ router = APIRouter(prefix="/api/v1/users", tags=["users"])
 
 
 def _get_user_service(db: DbSessionDep) -> UserService:
-    return UserService(UserRepository(db))
+    return UserService(
+        UserRepository(db),
+        usage_events=UsageEventService(UsageEventRepository(db)),
+    )
 
 
 UserServiceDep = Annotated[UserService, Depends(_get_user_service)]
@@ -162,3 +171,27 @@ async def activate_user(
     service: UserServiceDep,
 ) -> UserResponse:
     return _to_response(await service.set_user_active(user_id, active=True, viewer=admin))
+
+
+@router.post(
+    "/{user_id}/transfer",
+    summary="Transfere o staff para outra organização (só plataforma).",
+)
+async def transfer_user(
+    user_id: UUID,
+    payload: TransferUserRequest,
+    platform: ManagePlatformDep,
+    service: UserServiceDep,
+) -> UserResponse:
+    """Move admin ou gerente de uma organização para outra sem apagar e recriar.
+
+    Apagar e recriar não é alternativa: o e-mail é único no sistema e a linha
+    não pode ser apagada se a pessoa criou cliente ou conciliação (FK
+    RESTRICT). As regras (responsável de cliente aberto recusa; colaborador e
+    favoritos cross-org saem; encerrado e histórico ficam; papel não muda)
+    estão em `UserService.transfer_user`.
+    """
+    row = await service.transfer_user(
+        user_id, viewer=platform, organization_id=payload.organization_id
+    )
+    return _to_response(row)

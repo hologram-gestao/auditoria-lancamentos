@@ -62,6 +62,16 @@ class UpdateUserRequest(BaseModel):
     role: SystemUserRole | None = None
 
 
+class TransferUserRequest(BaseModel):
+    """Body de POST /api/v1/users/{id}/transfer — só plataforma (86e3bvbfx).
+
+    Só a organização de destino. O papel NÃO é campo: admin continua admin e
+    gerente continua gerente na organização nova — trocar papel é o PATCH.
+    """
+
+    organization_id: UUID = Field(..., description="Organização de destino (existe e ativa).")
+
+
 class UserResponse(BaseModel):
     """Representação pública de um usuário. NUNCA inclui `password_hash`.
 

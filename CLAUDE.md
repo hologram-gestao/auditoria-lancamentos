@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 **S0–S19 + Sprints 0–5 do agents-hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **62/62** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **63/63** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
 > **O que cada sprint do agents-hub entregou** (todas na `main`):
 >
@@ -192,7 +192,7 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**62** hoje — o arquivo é a fonte, confira com
+      (**63** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant E cross-org**: a bateria
       (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
@@ -200,7 +200,7 @@
       organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
-      (`PENDING_ENDPOINTS` está vazio: cobertura 62/62). Só
+      (`PENDING_ENDPOINTS` está vazio: cobertura 63/63). Só
       auth, tipos de anomalia, `test-connection`, `alert-test` e as 5 rotas de
       `/organizations` (plataforma, sem dado de cliente) ficam fora, com motivo.
       Essa lista é o denominador da métrica de isolamento — endpoint fora dela é
@@ -324,6 +324,15 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
      `client_manager` e `client_operator` (cliente). O papel do payload de
      criação é **whitelist** por API — `admin`/`manager` forjados num usuário de
      cliente são rejeitados, e `platform_admin` não existe em whitelist nenhuma.
+   - **Staff muda de organização só por TRANSFERÊNCIA** (`POST /users/{id}/transfer`,
+     86e3bvbfx), nunca por edição de `organization_id`: só a plataforma (403 para o
+     resto); recusa com 409 enquanto a pessoa for **responsável** de cliente ABERTO
+     (cliente nunca fica órfão, §4.13); remove, na MESMA transação, a carteira de
+     colaborador em cliente aberto e os favoritos fora da organização nova; linhas
+     de cliente encerrado (§4.12), `created_by`, `assigned_by` e trilha FICAM; o papel
+     não muda; vale no request seguinte (a autoridade é a linha, §3.15). "Apagar e
+     recriar" não é alternativa: `users.email` é UNIQUE global e `created_by` de
+     clientes e conciliações é `ondelete=RESTRICT`.
 9. **Matriz de permissões (Sprint 5 + camada de organizações):** declarativa e
    ÚNICA em `PERMISSION_MATRIX`
    ([apps/api/app/core/authz.py](apps/api/app/core/authz.py)), consultada por
@@ -741,6 +750,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.37 — 21/09/2026. **Staff passa a mudar de organização por TRANSFERÊNCIA, e o plano deixou de listar isso como limite (task 86e3bvbfx).** Caso real: o Murilo, gerente da Hologram, vai para a Prospecta, e "apagar e recriar" é IMPOSSÍVEL — `users.email` é UNIQUE no sistema inteiro e `created_by` de `clients` e `reconciliation_sessions` é `ondelete=RESTRICT`. Nasceu `POST /api/v1/users/{id}/transfer` (`ManagePlatformDep`) e a ação "Transferir de organização" no editar usuário, só para a plataforma, num diálogo PRÓPRIO que abre depois de o editar fechar (dois diálogos do Radix empilhados marcam o fundo com aria-hidden). **Não é um PATCH de `organization_id`**: `client_assignments` e `user_client_favorites` são pares usuário x cliente, e trocar só a organização deixaria a pessoa como responsável de clientes da organização antiga. As regras estão na §4.8: 409 enquanto responsável de cliente ABERTO, colaborador e favoritos cross-org saem na mesma transação, cliente encerrado e histórico ficam, papel não muda, efeito no request seguinte. Evento `usuario_transferido_de_organizacao` só com IDs e contagens. A lista canônica foi de 62 para **63** (DETAIL_PK, na bateria com os três atacantes). Duas armadilhas de teste desta entrega: `db.expire_all()` num teste async expira os objetos da fixture e o próximo `.name` estoura `MissingGreenlet` — refresh de UM objeto; e duas sessões de pytest no MESMO banco de teste ao mesmo tempo (bateria em background + arquivo em primeiro plano) dão 139 erros de setup que parecem regressão — rodada de banco também é exclusiva._
 
 _Versão 1.36 — 18/09/2026. **A plataforma não conseguia ver quem é plataforma, e isso era consequência de uma correção certa.** A task 2 do épico fechou um IDOR real fazendo `GET /users` filtrar `scope='system'` no próprio SELECT — o admin de uma organização não pode alcançar a conta da plataforma. O efeito colateral que ninguém decidiu: a plataforma também deixou de ver os pares dela, e o `users_count` de cada organização conta só o staff dela (usuário de plataforma tem `organization_id` nulo e fica fora de todo total). Depois da promoção das contas reais, essas pessoas simplesmente somem da tela de Usuários. Nasceu `GET /api/v1/organizations/platform-admins` (`ManagePlatformDep`, payload enxuto `{id, name, email, active, created_at}`, sem paginação) e a seção SÓ-LEITURA "Administradores da plataforma" na tela de Organizações. Ela é só-leitura por construção, e é por isso que não virou filtro na tela de Usuários: promover e despromover é pelo script (Q3) e `PATCH /users/{id}` de linha de plataforma é 404, então ali as ações da linha e o botão de criar teriam de ser escondidos caso a caso — ação que o servidor nega é defeito (§4.9). A lista canônica **não muda** (62/62): a rota entra em `NON_TENANT_ENDPOINTS`, que passou de 4 para **5** rotas de `/organizations`. **Três defeitos desta entrega só apareceram no browser, e a forma deles é o que vale guardar:** (1) o fetcher devolve o ARRAY, não o envelope, porque o `apiGet` desembrulha `{ data }` quando `data` é a chave única — e `apiGet<T>` é genérico, então o tipo errado compila limpo; (2) o `json()` do mock do e2e JÁ envelopa, e o envelope duplicado derrubou a página inteira com "Application error", que o Playwright reporta como `element(s) not found` (o diagnóstico está no `error-context.md`, não na mensagem); (3) a seção nova disputou altura com o `flex-1` da tabela e a espremeu para UMA linha em 390px, com o gate VERDE, porque `toBeVisible` não distingue "fora do scroller" de "visível" — quem pegou foi comparar o PNG com o da entrega anterior. Encher a viewport só vale enquanto a tela couber nela: abaixo de `md`, altura natural e quem rola é o `<main>`. A skill `front-gate` ganhou as três regras, mais o `!s.unexpected` no guard da receita de container (o `N passed` do reporter de lista aparece mesmo com falha: uma rodada imprimiu `230 passed` nos três temas com `unexpected: 4` no JSON)._
 

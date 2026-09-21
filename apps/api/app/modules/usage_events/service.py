@@ -37,6 +37,7 @@ from app.modules.usage_events.schemas import (
     OrganizacaoDesativadaProps,
     QualificacaoEmitidaProps,
     UsageEventName,
+    UsuarioTransferidoDeOrganizacaoProps,
 )
 
 if TYPE_CHECKING:
@@ -293,6 +294,29 @@ class UsageEventService:
             UsageEventName.ORGANIZACAO_DESATIVADA,
             props=OrganizacaoDesativadaProps(
                 organization_id=organization_id, n_usuarios=n_usuarios, n_clientes=n_clientes
+            ).model_dump(mode="json"),
+        )
+
+    async def emit_usuario_transferido_de_organizacao(
+        self,
+        *,
+        user_id: UUID,
+        from_organization_id: UUID,
+        to_organization_id: UUID,
+        n_carteira_removida: int,
+        n_favoritos_removidos: int,
+        n_notificacoes_removidas: int,
+    ) -> bool:
+        """86e3bvbfx — a plataforma transferiu um staff. Sem `session_id`."""
+        return await self.emit(
+            UsageEventName.USUARIO_TRANSFERIDO_DE_ORGANIZACAO,
+            props=UsuarioTransferidoDeOrganizacaoProps(
+                user_id=user_id,
+                from_organization_id=from_organization_id,
+                to_organization_id=to_organization_id,
+                n_carteira_removida=n_carteira_removida,
+                n_favoritos_removidos=n_favoritos_removidos,
+                n_notificacoes_removidas=n_notificacoes_removidas,
             ).model_dump(mode="json"),
         )
 
