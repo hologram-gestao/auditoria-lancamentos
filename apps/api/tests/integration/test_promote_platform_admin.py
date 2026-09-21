@@ -12,6 +12,7 @@ Isolamento: UMA conexão com transação externa + `async_sessionmaker` em
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -210,6 +211,61 @@ class TestPromoteScript:
                 .all()
             )
         assert len(left) == 1
+
+    async def test_carteira_em_cliente_encerrado_nao_conta_como_aviso(
+        self, factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        """A linha de carteira de cliente ENCERRADO é retida de propósito (§4.12)
+        e não aceita escrita (409) — avisá-la seria pendência sem ação. Caso real
+        de 21/09: promoção com `assignments_left=1` num cliente já encerrado."""
+        email = f"promo-enc-{uuid4().hex[:6]}@h.com"
+        async with factory() as s:
+            manager = await _seed_user(s, email=email, role=UserRole.MANAGER)
+            hex_key = get_settings().OMIE_ENCRYPTION_KEY.get_secret_value()
+            clients: list[Client] = []
+            for name, closed in (("Encerrado", True), ("Aberto", False)):
+                ct_k, iv_k = encrypt("k", hex_key)
+                ct_s, iv_s = encrypt("s", hex_key)
+                cli = Client(
+                    name=name,
+                    omie_app_key_encrypted=ct_k,
+                    omie_app_key_iv=iv_k,
+                    omie_app_secret_encrypted=ct_s,
+                    omie_app_secret_iv=iv_s,
+                    active=not closed,
+                    closed_at=datetime.now(UTC) if closed else None,
+                    created_by=manager.id,
+                )
+                s.add(cli)
+                clients.append(cli)
+            await s.flush()
+            for cli in clients:
+                s.add(
+                    ClientAssignment(
+                        client_id=cli.id,
+                        user_id=manager.id,
+                        assigned_by=manager.id,
+                        is_primary=True,
+                    )
+                )
+            await s.commit()
+
+        result = await promote_platform_admin(session_factory=factory, email=email)
+        assert result.outcome is PromotionOutcome.PROMOTED
+        # Duas linhas no banco, UMA em cliente aberto: só essa é aviso.
+        assert result.assignments_left == 1
+        row = await _reload(factory, email)
+        async with factory() as s:
+            left = (
+                (
+                    await s.execute(
+                        select(ClientAssignment).where(ClientAssignment.user_id == row.id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        assert len(left) == 2  # nada é apagado: o aviso é só sobre a linha acionável
 
 
 def test_cli_exige_email_e_aceita_dry_run() -> None:
