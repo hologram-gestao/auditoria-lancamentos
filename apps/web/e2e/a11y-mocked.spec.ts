@@ -984,6 +984,22 @@ async function fulfillApi(route: Route): Promise<void> {
   // Carteira compartilhada (86e390m4c): gerentes do sistema para o "Adicionar",
   // e a carteira do cliente com estado em memória — cada ação devolve a lista
   // inteira, como o backend, e o `assign` só troca o selo (ninguém sai).
+  // Transferência de staff (86e3bvbfx): devolve a MESMA pessoa já na
+  // organização de destino, como o backend. Só o Carlos é transferível no
+  // mock; qualquer outro id cai no 404 genérico do final.
+  const transferir = path.match(/^\/api\/v1\/users\/([^/]+)\/transfer$/);
+  if (transferir && route.request().method() === 'POST') {
+    if (transferir[1] !== OTHER_ORG_STAFF.id) {
+      return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
+    }
+    const body = route.request().postDataJSON() as { organization_id: string };
+    const destino = ORGANIZATIONS.find((o) => o.id === body.organization_id);
+    return json({
+      ...OTHER_ORG_STAFF,
+      organization_id: body.organization_id,
+      organization_name: destino?.name ?? OTHER_ORG_STAFF.organization_name,
+    });
+  }
   if (path === '/api/v1/users') {
     // O mock responde como o backend org-aware (86e36ecqz + 86e36ed1d): o
     // ALCANCE vem de quem pergunta (a plataforma vê o staff de todas as
@@ -2869,6 +2885,66 @@ for (const vp of VIEWPORTS) {
       await expect(dialog.getByRole('combobox', { name: 'Organização do usuário' })).toBeVisible();
       await shot(page, `usuarios-novo-organizacao-${slug}`);
       await analyze(page, `novo usuário com seletor de organização (${vp.label})`);
+    });
+
+    /**
+     * 86e3bvbfx — transferir staff entre organizações. Só a PLATAFORMA vê a
+     * ação (o servidor recusa 403 para o resto), e ela mora num diálogo
+     * PRÓPRIO que abre depois de o "Editar" fechar — dois diálogos do Radix
+     * empilhados marcam o fundo com aria-hidden e o de cima fica fora do
+     * teclado. O destino só lista organizações ATIVAS menos a atual; o Carlos
+     * é da Prospecta (suspensa), então a única opção dele é a Hologram.
+     */
+    test('usuários: a plataforma transfere um staff de organização (86e3bvbfx)', async ({
+      page,
+    }) => {
+      sessionUser = PLATFORM_USER;
+      await page.goto('/configuracoes/usuarios');
+      await expect(page.getByRole('heading', { name: 'Usuários', level: 1 })).toBeVisible();
+
+      await page.getByRole('button', { name: 'Editar Carlos Prospecta', exact: true }).click();
+      const editar = page.getByRole('dialog', { name: 'Editar Usuário' });
+      await aguardarAnimacao(editar);
+      await expect(editar.getByText('Prospecta')).toBeVisible();
+      await shot(page, `usuarios-editar-plataforma-${slug}`);
+      await analyze(page, `editar usuário com ação de transferir (${vp.label})`);
+
+      await editar.getByRole('button', { name: 'Transferir de organização' }).click();
+      const transferir = page.getByRole('dialog', { name: 'Transferir de organização' });
+      await expect(transferir).toBeVisible();
+      await aguardarAnimacao(transferir);
+      // Um diálogo só na tela: o de editar saiu antes de este entrar.
+      await expect(page.getByRole('dialog')).toHaveCount(1);
+      await expect(transferir).toContainText('carteira em clientes abertos');
+      await shot(page, `usuarios-transferir-${slug}`);
+      await analyze(page, `diálogo de transferir de organização (${vp.label})`);
+
+      await transferir.getByRole('combobox', { name: 'Organização de destino' }).click();
+      const opcoes = page.getByRole('listbox');
+      // A atual (Prospecta) NÃO é opção; a Hologram, ativa, é a única.
+      await expect(opcoes.getByRole('option', { name: /Prospecta/ })).toHaveCount(0);
+      await opcoes.getByRole('option', { name: ORGANIZATION_NAME }).click();
+      await expect(page.getByRole('listbox')).toHaveCount(0);
+      await transferir.getByRole('button', { name: 'Transferir' }).click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+    });
+
+    test('usuários: o admin da organização NÃO vê a ação de transferir (86e3bvbfx)', async ({
+      page,
+    }) => {
+      // Mostrar ação que o servidor nega é defeito (§4.9): para o admin, a
+      // seção nem é montada.
+      sessionUser = USER;
+      await page.goto('/configuracoes/usuarios');
+      await expect(page.getByRole('heading', { name: 'Usuários', level: 1 })).toBeVisible();
+
+      await page.getByRole('button', { name: 'Editar Gerente Hologram', exact: true }).click();
+      const editar = page.getByRole('dialog', { name: 'Editar Usuário' });
+      await aguardarAnimacao(editar);
+      await expect(editar.getByRole('button', { name: 'Transferir de organização' })).toHaveCount(
+        0,
+      );
+      await analyze(page, `editar usuário como admin, sem transferir (${vp.label})`);
     });
 
     test('categorias: a plataforma ganha coluna e filtro de organização (86e36ed1d)', async ({

@@ -10,11 +10,19 @@ from collections.abc import Sequence
 from typing import NamedTuple
 from uuid import UUID
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.authz import CurrentUser, scoped_by_organization
-from app.db.models import Organization, User, UserScope
+from app.db.models import (
+    Client,
+    ClientAssignment,
+    Notification,
+    Organization,
+    User,
+    UserClientFavorite,
+    UserScope,
+)
 
 
 class StaffRow(NamedTuple):
@@ -170,6 +178,81 @@ class UserRepository:
     async def get_by_email(self, email: str) -> User | None:
         result = await self._session.execute(select(User).where(User.email == email.lower()))
         return result.scalar_one_or_none()
+
+    async def count_primary_assignments_on_open_clients(self, user_id: UUID) -> int:
+        """Em quantos clientes ABERTOS o usuário é o gerente RESPONSÁVEL (86e3bvbfx).
+
+        É a pré-condição da transferência: apagar essa linha deixaria o cliente
+        sem responsável, o que a carteira proíbe (§4.13). Cliente encerrado não
+        conta — a linha dele é retida de propósito e não aceita escrita.
+        """
+        stmt = (
+            select(func.count(ClientAssignment.id))
+            .join(Client, Client.id == ClientAssignment.client_id)
+            .where(
+                ClientAssignment.user_id == user_id,
+                ClientAssignment.is_primary.is_(True),
+                Client.closed_at.is_(None),
+            )
+        )
+        return int((await self._session.execute(stmt)).scalar_one())
+
+    async def delete_assignments_on_open_clients(self, user_id: UUID) -> int:
+        """Remove a carteira de COLABORADOR do usuário em clientes ABERTOS.
+
+        `is_primary = false` no próprio SQL, como o remove da carteira
+        (`clients/repository.py`): linha de responsável NUNCA sai por aqui,
+        nem numa corrida com uma promoção — quem decide o 409 é o service,
+        re-contando depois. Linhas de cliente ENCERRADO ficam: retenção
+        (§4.12) e histórico de quem respondia.
+        """
+        open_clients = select(Client.id).where(Client.closed_at.is_(None))
+        removed = await self._session.execute(
+            delete(ClientAssignment)
+            .where(
+                ClientAssignment.user_id == user_id,
+                ClientAssignment.is_primary.is_(False),
+                ClientAssignment.client_id.in_(open_clients),
+            )
+            .returning(ClientAssignment.id)
+        )
+        return len(removed.scalars().all())
+
+    async def delete_favorites_outside_organization(
+        self, user_id: UUID, organization_id: UUID
+    ) -> int:
+        """Remove favoritos que apontem para cliente FORA da organização de destino.
+
+        Favorito é par usuário x cliente sem FK de organização: sem isto a linha
+        sobreviveria apontando para um cliente que o usuário não alcança mais.
+        """
+        outside = select(Client.id).where(Client.organization_id != organization_id)
+        removed = await self._session.execute(
+            delete(UserClientFavorite)
+            .where(
+                UserClientFavorite.user_id == user_id,
+                UserClientFavorite.client_id.in_(outside),
+            )
+            .returning(UserClientFavorite.id)
+        )
+        return len(removed.scalars().all())
+
+    async def delete_notifications_outside_organization(
+        self, user_id: UUID, organization_id: UUID
+    ) -> int:
+        """Remove as notificações do usuário sobre clientes FORA do destino.
+
+        O filtro de alcance já as esconderia, mas ficariam para sempre como
+        dado morto (e contando em "marcar todas como lidas"). Mesmo tratamento
+        do encerramento de cliente, que também purga notificações.
+        """
+        outside = select(Client.id).where(Client.organization_id != organization_id)
+        removed = await self._session.execute(
+            delete(Notification)
+            .where(Notification.user_id == user_id, Notification.client_id.in_(outside))
+            .returning(Notification.id)
+        )
+        return len(removed.scalars().all())
 
     # ------------------------------ WRITE -----------------------------
 

@@ -22,18 +22,37 @@ from app.core.exceptions import (
     EmailAlreadyExistsError,
     ForbiddenError,
     NotFoundError,
+    OrganizationNotFoundError,
+    UserAlreadyInOrganizationError,
+    UserIsPrimaryManagerError,
 )
 from app.core.security import hash_password
 from app.db.models import ClientUserRole, User, UserRole, UserScope
+from app.modules.usage_events.service import UsageEventService
 from app.modules.users.repository import StaffRow, UserRepository
 from app.modules.users.schemas import PaginationMeta
+
+
+def _primary_manager_message(n: int) -> str:
+    plural = "s" if n != 1 else ""
+    return (
+        f"Este usuário é o gerente responsável de {n} cliente{plural} aberto{plural}. "
+        "Defina outro responsável antes de transferir."
+    )
 
 
 class UserService:
     """CRUD + regras de negócio para `users`."""
 
-    def __init__(self, repository: UserRepository) -> None:
+    def __init__(
+        self,
+        repository: UserRepository,
+        usage_events: UsageEventService | None = None,
+    ) -> None:
         self._repo = repository
+        # Opcional para não obrigar todo caller a montar o serviço de eventos;
+        # a rota injeta (como o módulo de organizações).
+        self._usage_events = usage_events
 
     # ------------------------------ READ ------------------------------
 
@@ -178,6 +197,94 @@ class UserService:
         # antes de retornar (atualiza updated_at via onupdate).
         await self._repo.add(user)
         return StaffRow(user=user, organization_name=row.organization_name)
+
+    # ------------------------------ TRANSFER --------------------------
+
+    async def transfer_user(
+        self,
+        user_id: UUID,
+        *,
+        viewer: CurrentUser,
+        organization_id: UUID,
+    ) -> StaffRow:
+        """Move um staff para OUTRA organização — só plataforma (86e3bvbfx).
+
+        Não é edição de campo: `client_assignments` e `user_client_favorites`
+        são pares usuárioxcliente, e trocar só a organização deixaria lixo
+        cross-org (o usuário apareceria como responsável de clientes da
+        organização antiga). Por isso:
+
+        - alvo fora do alcance de staff (usuário de cliente, plataforma) → 404
+          pelo `get_staff_by_id`, como todo alvo por PK;
+        - mesma organização → 409; destino inexistente → 404; suspensa → 409
+          (as MESMAS respostas da criação de cliente pela plataforma);
+        - RESPONSÁVEL de cliente aberto → 409 e nada muda: a plataforma define
+          outro responsável antes (cliente nunca fica órfão, §4.13);
+        - colaborador em cliente aberto e favoritos fora da organização nova
+          são removidos NA MESMA transação; linhas em cliente encerrado ficam
+          (retenção, §4.12); histórico (`created_by`, `assigned_by`, trilha)
+          fica; o papel não muda;
+        - efeito imediato: a autoridade é a linha lida a cada request (§3.15),
+          então o JWT antigo já vale para a organização nova.
+
+        O guard da rota é `ManagePlatformDep`; a decisão de alcance por PK
+        continua sendo a do repositório, não uma segunda cópia aqui.
+        """
+        row = await self.get_user(user_id, viewer=viewer)
+        user = row.user
+        if user.organization_id == organization_id:
+            raise UserAlreadyInOrganizationError(
+                f"Usuário {user.id} já está na organização {organization_id}."
+            )
+        # A validação do destino é a MESMA decisão da criação (§3.15): existe e
+        # está ativa, ou 404/409. Uma terceira cópia aqui divergiria em silêncio.
+        await resolve_organization_for_creation(
+            viewer,
+            organization_id,
+            get_organization=self._repo.get_organization,
+            subject="o usuário",
+        )
+        organization = await self._repo.get_organization(organization_id)
+        if organization is None:  # o resolver acabou de validar; é só para o tipo
+            raise OrganizationNotFoundError(f"Organização inexistente: {organization_id}")
+
+        n_primary = await self._repo.count_primary_assignments_on_open_clients(user.id)
+        if n_primary:
+            raise UserIsPrimaryManagerError(
+                f"Usuário {user.id} é responsável de {n_primary} cliente(s) aberto(s).",
+                user_message=_primary_manager_message(n_primary),
+            )
+
+        from_organization_id = user.organization_id
+        # O DELETE nunca leva linha de responsável (`is_primary = false` no
+        # próprio SQL, como o remove da carteira). Se uma promoção entrou entre
+        # a contagem acima e este ponto, a linha sobra — e a re-contagem abaixo
+        # transforma isso em 409, desfazendo a transação inteira.
+        n_assignments = await self._repo.delete_assignments_on_open_clients(user.id)
+        if await self._repo.count_primary_assignments_on_open_clients(user.id):
+            raise UserIsPrimaryManagerError(
+                f"Usuário {user.id} virou responsável durante a transferência.",
+                user_message=_primary_manager_message(1),
+            )
+        n_favorites = await self._repo.delete_favorites_outside_organization(
+            user.id, organization_id
+        )
+        n_notifications = await self._repo.delete_notifications_outside_organization(
+            user.id, organization_id
+        )
+        user.organization_id = organization_id
+        await self._repo.add(user)
+
+        if self._usage_events is not None and from_organization_id is not None:
+            await self._usage_events.emit_usuario_transferido_de_organizacao(
+                user_id=user.id,
+                from_organization_id=from_organization_id,
+                to_organization_id=organization_id,
+                n_carteira_removida=n_assignments,
+                n_favoritos_removidos=n_favorites,
+                n_notificacoes_removidas=n_notifications,
+            )
+        return StaffRow(user=user, organization_name=organization.name)
 
     # ------------------------------ ACTIVATE / DEACTIVATE -------------
 

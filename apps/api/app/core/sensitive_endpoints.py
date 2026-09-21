@@ -143,6 +143,15 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         _VIA_STAFF_ORG,
     ),
     SensitiveEndpoint(
+        "POST",
+        "/api/v1/users/{user_id}/transfer",
+        ScopeKind.DETAIL_PK,
+        "app/modules/users/routes.py",
+        "ManagePlatformDep (só plataforma; admin e gerente de QUALQUER organização = 403 "
+        "antes de tocar a linha) + get_staff_by_id: alvo só staff (scope='system'), "
+        "usuário de cliente e plataforma = 404",
+    ),
+    SensitiveEndpoint(
         "GET",
         "/api/v1/client-categories",
         ScopeKind.COLLECTION,

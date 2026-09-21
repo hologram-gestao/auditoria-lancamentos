@@ -69,6 +69,10 @@ class UsageEventName(StrEnum):
     # cada suspensão é uma linha. Só IDs e contagens — nunca o nome do BPO.
     ORGANIZACAO_CRIADA = "organizacao_criada"
     ORGANIZACAO_DESATIVADA = "organizacao_desativada"
+    # 86e3bvbfx — a plataforma transferiu um staff de organização. De BACKEND,
+    # sem `session_id`, fora da dedup: cada transferência é uma linha. Só IDs e
+    # contagens do que foi removido — nunca nome de pessoa nem de organização.
+    USUARIO_TRANSFERIDO_DE_ORGANIZACAO = "usuario_transferido_de_organizacao"
 
 
 #: Eventos que o `POST /api/v1/usage-events` aceita. Os de backend ficam de fora
@@ -182,6 +186,22 @@ class OrganizacaoDesativadaProps(_StrictProps):
     organization_id: UUID
     n_usuarios: int = Field(ge=0)
     n_clientes: int = Field(ge=0)
+
+
+class UsuarioTransferidoDeOrganizacaoProps(_StrictProps):
+    """`usuario_transferido_de_organizacao` (86e3bvbfx) — staff mudou de BPO.
+
+    `n_carteira_removida` são as linhas de `client_assignments` em cliente
+    aberto que deixaram de fazer sentido; `n_favoritos_removidos`, os favoritos
+    apontando para cliente fora da organização nova. Só IDs e inteiros (§4.7).
+    """
+
+    user_id: UUID
+    from_organization_id: UUID
+    to_organization_id: UUID
+    n_carteira_removida: int = Field(ge=0)
+    n_favoritos_removidos: int = Field(ge=0)
+    n_notificacoes_removidas: int = Field(ge=0)
 
 
 class GlossarioEditadoProps(_StrictProps):

@@ -41,6 +41,7 @@ import {
 import { CreateUserModal } from '@/components/features/users/create-user-modal';
 import { DeactivateConfirm } from '@/components/features/users/deactivate-confirm';
 import { EditUserModal } from '@/components/features/users/edit-user-modal';
+import { TransferUserDialog } from '@/components/features/users/transfer-user-dialog';
 import { UserRoleBadge, UserStatusBadge } from '@/components/features/users/user-badges';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { Button } from '@/components/ui/button';
@@ -97,6 +98,9 @@ export default function UsersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
   const [deactivating, setDeactivating] = useState<User | null>(null);
+  // Alvo da transferência (86e3bvbfx): estado PRÓPRIO, fora do de edição — o
+  // diálogo de editar fecha antes de este abrir (nada de Radix empilhado).
+  const [transferring, setTransferring] = useState<User | null>(null);
 
   const activateMutation = useActivateUser();
 
@@ -326,6 +330,12 @@ export default function UsersPage() {
         onOpenChange={(o) => !o && setEditing(null)}
         user={editing}
         currentUserId={currentUser.id}
+        onTransfer={isPlatform ? setTransferring : undefined}
+      />
+      <TransferUserDialog
+        open={transferring !== null}
+        onOpenChange={(o) => !o && setTransferring(null)}
+        user={transferring}
       />
       <DeactivateConfirm
         open={deactivating !== null}
