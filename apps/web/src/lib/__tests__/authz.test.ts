@@ -1,13 +1,13 @@
 /**
- * Matriz de permissões do front (FRONT 05.7 / R4).
+ * Matriz de permissões do front (FRONT 05.7 / R4 + camada de organizações).
  *
  * **Executor:** job `Web (lint · type · test)` do `.github/workflows/ci.yml`
  * (`pnpm test:web` → vitest).
  *
- * Cada célula da matriz do PRD §4 vira um caso — inclusive **toda célula `❌`**,
- * que é o que a task cobra ("cada célula ❌ tem caso negativo"). O espelho no
- * backend é `apps/api/app/core/authz.py::PERMISSION_MATRIX`; se um dos dois
- * mudar sozinho, é aqui que a divergência aparece.
+ * Cada célula da matriz vira um caso — inclusive **toda célula `❌`**, que é o
+ * que a task cobra. O espelho no backend é
+ * `apps/api/app/core/authz.py::PERMISSION_MATRIX` (13 permissões × 5 papéis);
+ * se um dos dois mudar sozinho, é aqui que a divergência aparece.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -18,7 +18,10 @@ import {
   hasPermission,
   homePathFor,
   isClientScoped,
+  isPlatformScoped,
+  isStaff,
   isSystemScoped,
+  organizationLabel,
   roleLabel,
   type Permission,
 } from '@/lib/authz';
@@ -26,7 +29,23 @@ import type { AuthenticatedUser } from '@/lib/contracts';
 
 const TENANT_A = '11111111-1111-4111-8111-111111111111';
 const TENANT_B = '22222222-2222-4222-8222-222222222222';
+const ORG_HOLOGRAM = '0706eeb5-9718-4d03-bcda-ef615789e6ac';
+const ORG_PROSPECTA = '33333333-3333-4333-8333-333333333333';
 
+/**
+ * A plataforma é a única linha SEM organização e SEM tenant — é o que o CHECK
+ * do banco exige e o que `is_platform` confere no backend.
+ */
+const platform: AuthenticatedUser = {
+  id: 'p',
+  email: 'plataforma@hologram.com.br',
+  name: 'Plataforma',
+  role: 'platform_admin',
+  scope: 'platform',
+  client_id: null,
+  organization_id: null,
+  organization_name: null,
+};
 const admin: AuthenticatedUser = {
   id: 'a',
   email: 'admin@hologram.com.br',
@@ -34,6 +53,8 @@ const admin: AuthenticatedUser = {
   role: 'admin',
   scope: 'system',
   client_id: null,
+  organization_id: ORG_HOLOGRAM,
+  organization_name: 'Hologram',
 };
 const manager: AuthenticatedUser = { ...admin, id: 'm', role: 'manager' };
 const clientManager: AuthenticatedUser = {
@@ -43,14 +64,20 @@ const clientManager: AuthenticatedUser = {
   role: 'client_manager',
   scope: 'client',
   client_id: TENANT_A,
+  organization_id: ORG_HOLOGRAM,
+  organization_name: 'Hologram',
 };
 const clientOperator: AuthenticatedUser = { ...clientManager, id: 'co', role: 'client_operator' };
 
 /**
- * A tabela do PRD §4, transcrita. `true` = ✅, `false` = ❌ (caso negativo).
+ * A matriz do backend, transcrita. `true` = ✅, `false` = ❌ (caso negativo).
+ *
+ * "(carteira)" e "(própria org)" NÃO aparecem aqui: não são células, são
+ * `resolve_client_access` no servidor. A célula diz se o papel pode a AÇÃO.
  */
 const MATRIX: ReadonlyArray<{
   permission: Permission;
+  platform: boolean;
   admin: boolean;
   manager: boolean;
   clientManager: boolean;
@@ -58,6 +85,7 @@ const MATRIX: ReadonlyArray<{
 }> = [
   {
     permission: 'run_reconciliation',
+    platform: true,
     admin: true,
     manager: true,
     clientManager: true,
@@ -65,6 +93,7 @@ const MATRIX: ReadonlyArray<{
   },
   {
     permission: 'review_export',
+    platform: true,
     admin: true,
     manager: true,
     clientManager: true,
@@ -72,20 +101,33 @@ const MATRIX: ReadonlyArray<{
   },
   {
     permission: 'sync_omie_accounts',
+    platform: true,
     admin: true,
     manager: true,
     clientManager: true,
     clientOperator: true,
   },
+  // D2 (86e36ecjp): o gerente da organização passou a gerir os usuários dos
+  // clientes DA CARTEIRA — a célula abriu no backend e este espelho a segue.
   {
     permission: 'manage_client_users',
+    platform: true,
     admin: true,
-    manager: false,
+    manager: true,
+    clientManager: true,
+    clientOperator: false,
+  },
+  {
+    permission: 'manage_glossary',
+    platform: true,
+    admin: true,
+    manager: true,
     clientManager: true,
     clientOperator: false,
   },
   {
     permission: 'edit_client',
+    platform: true,
     admin: true,
     manager: false,
     clientManager: false,
@@ -93,19 +135,75 @@ const MATRIX: ReadonlyArray<{
   },
   {
     permission: 'view_other_tenant',
+    platform: true,
     admin: true,
     manager: true,
     clientManager: false,
     clientOperator: false,
   },
+  {
+    permission: 'create_client',
+    platform: true,
+    admin: true,
+    manager: true,
+    clientManager: false,
+    clientOperator: false,
+  },
+  {
+    permission: 'manage_org_users',
+    platform: true,
+    admin: true,
+    manager: false,
+    clientManager: false,
+    clientOperator: false,
+  },
+  {
+    permission: 'manage_client_categories',
+    platform: true,
+    admin: true,
+    manager: false,
+    clientManager: false,
+    clientOperator: false,
+  },
+  // D3 final (86e36ed1d): taxonomia GLOBAL, escrita só da plataforma. O admin
+  // saiu da célula na MESMA entrega em que a tela virou só-plataforma — tirar
+  // antes teria deixado a tela com botões que o servidor nega.
+  {
+    permission: 'manage_anomaly_types',
+    platform: true,
+    admin: false,
+    manager: false,
+    clientManager: false,
+    clientOperator: false,
+  },
+  {
+    permission: 'manage_platform',
+    platform: true,
+    admin: false,
+    manager: false,
+    clientManager: false,
+    clientOperator: false,
+  },
+  {
+    permission: 'run_alert_test',
+    platform: true,
+    admin: true,
+    manager: false,
+    clientManager: false,
+    clientOperator: false,
+  },
 ];
 
-describe('hasPermission — matriz do PRD §4', () => {
+describe('hasPermission — matriz do backend, célula a célula', () => {
+  it.each(MATRIX)('$permission: plataforma=$platform', ({ permission, platform: expected }) => {
+    expect(hasPermission(platform, permission)).toBe(expected);
+  });
+
   it.each(MATRIX)('$permission: admin=$admin', ({ permission, admin: expected }) => {
     expect(hasPermission(admin, permission)).toBe(expected);
   });
 
-  it.each(MATRIX)('$permission: gerente do sistema=$manager', ({ permission, manager: e }) => {
+  it.each(MATRIX)('$permission: gerente da organização=$manager', ({ permission, manager: e }) => {
     expect(hasPermission(manager, permission)).toBe(e);
   });
 
@@ -115,6 +213,14 @@ describe('hasPermission — matriz do PRD §4', () => {
 
   it.each(MATRIX)('$permission: operador do cliente=$clientOperator', ({ permission, ...row }) => {
     expect(hasPermission(clientOperator, permission)).toBe(row.clientOperator);
+  });
+
+  it('a plataforma está em TODA linha (D1 revisada em 09/09/2026)', () => {
+    // O mesmo invariante que o backend trava num teste unitário: permissão nova
+    // sem a célula da plataforma é regressão do acesso de suporte.
+    for (const row of MATRIX) {
+      expect(hasPermission(platform, row.permission)).toBe(true);
+    }
   });
 
   it('nega por padrão: sem usuário e com papel desconhecido', () => {
@@ -143,9 +249,12 @@ describe('canAccessClient — isolamento de tenant na UI', () => {
     expect(canAccessClient(quebrado, TENANT_A)).toBe(false);
   });
 
-  it('equipe do sistema passa: a carteira é decidida pelo backend', () => {
+  it('staff passa: organização e carteira são decididas pelo backend', () => {
     expect(canAccessClient(admin, TENANT_B)).toBe(true);
     expect(canAccessClient(manager, TENANT_B)).toBe(true);
+    // A plataforma entra em cliente de QUALQUER organização (acesso de suporte).
+    expect(canAccessClient(platform, TENANT_A)).toBe(true);
+    expect(canAccessClient(platform, TENANT_B)).toBe(true);
   });
 
   it('sem usuário, nega', () => {
@@ -154,28 +263,42 @@ describe('canAccessClient — isolamento de tenant na UI', () => {
 });
 
 describe('escopo, área do sistema e caminho de volta', () => {
-  it('separa tenant de equipe Hologram', () => {
+  it('separa os três escopos', () => {
     expect(isClientScoped(clientOperator)).toBe(true);
     expect(isClientScoped(admin)).toBe(false);
     expect(isSystemScoped(admin)).toBe(true);
-    expect(isSystemScoped(clientManager)).toBe(false);
+    expect(isSystemScoped(platform)).toBe(false);
+    expect(isPlatformScoped(platform)).toBe(true);
+    expect(isPlatformScoped(admin)).toBe(false);
   });
 
-  it('área do sistema (lista global + configurações) é só da equipe Hologram', () => {
+  it('staff é quem OPERA clientes: plataforma ou organização', () => {
+    expect(isStaff(platform)).toBe(true);
+    expect(isStaff(admin)).toBe(true);
+    expect(isStaff(manager)).toBe(true);
+    expect(isStaff(clientManager)).toBe(false);
+    expect(isStaff(clientOperator)).toBe(false);
+    expect(isStaff(null)).toBe(false);
+  });
+
+  it('área do sistema (lista global + configurações) é de quem opera clientes', () => {
+    expect(canSeeSystemArea(platform)).toBe(true);
     expect(canSeeSystemArea(admin)).toBe(true);
     expect(canSeeSystemArea(manager)).toBe(true);
     expect(canSeeSystemArea(clientManager)).toBe(false);
     expect(canSeeSystemArea(clientOperator)).toBe(false);
   });
 
-  it('gestão de usuários DO SISTEMA é só do admin', () => {
+  it('gestão de usuários da ORGANIZAÇÃO segue a matriz, não o papel', () => {
+    expect(canManageSystemUsers(platform)).toBe(true);
     expect(canManageSystemUsers(admin)).toBe(true);
     expect(canManageSystemUsers(manager)).toBe(false);
-    // Gerente do cliente administra o TENANT dele, nunca a Hologram.
+    // Gerente do cliente administra o TENANT dele, nunca a organização.
     expect(canManageSystemUsers(clientManager)).toBe(false);
   });
 
   it('o caminho de volta é a casa do papel — nunca um segundo beco sem saída', () => {
+    expect(homePathFor(platform)).toBe('/clientes');
     expect(homePathFor(admin)).toBe('/clientes');
     expect(homePathFor(manager)).toBe('/clientes');
     expect(homePathFor(clientManager)).toBe(`/clientes/${TENANT_A}`);
@@ -183,9 +306,53 @@ describe('escopo, área do sistema e caminho de volta', () => {
   });
 
   it('rótulo do papel é PT-BR, nunca o enum cru', () => {
+    expect(roleLabel(platform)).toBe('Administrador da plataforma');
     expect(roleLabel(clientManager)).toBe('Gerente do cliente');
     expect(roleLabel(clientOperator)).toBe('Operador do cliente');
     expect(roleLabel(admin)).toBe('Administrador');
     expect(roleLabel(manager)).toBe('Gerente');
+  });
+});
+
+describe('a plataforma bem formada — espelho de `is_platform` (backend)', () => {
+  it('linha `platform` com organização ou tenant é corrompida: não ganha alcance', () => {
+    // O CHECK do banco recusa estas linhas; o front as trata como o backend —
+    // negado por padrão, nunca "quase plataforma".
+    const comOrg = { ...platform, organization_id: ORG_HOLOGRAM };
+    const comTenant = { ...platform, client_id: TENANT_A };
+    expect(isPlatformScoped(comOrg)).toBe(false);
+    expect(isPlatformScoped(comTenant)).toBe(false);
+    expect(isStaff(comOrg)).toBe(false);
+    expect(canAccessClient(comOrg, TENANT_B)).toBe(false);
+    expect(canSeeSystemArea(comTenant)).toBe(false);
+  });
+});
+
+describe('organizationLabel — em que chapéu a pessoa está (86e36ecwa)', () => {
+  it('a plataforma não tem organização: o rótulo é o escopo', () => {
+    expect(organizationLabel(platform)).toBe('Plataforma');
+  });
+
+  it('staff e usuário de cliente mostram a organização da própria linha', () => {
+    expect(organizationLabel(admin)).toBe('Hologram');
+    expect(organizationLabel(clientManager)).toBe('Hologram');
+    expect(organizationLabel({ ...admin, organization_name: 'Prospecta' })).toBe('Prospecta');
+  });
+
+  it('sem nome na linha, omite em vez de inventar', () => {
+    // Estado inválido (o CHECK do banco não deixa acontecer fora da
+    // plataforma): o header some com o rótulo, nunca mostra "undefined".
+    expect(organizationLabel({ ...admin, organization_name: null })).toBeNull();
+    expect(organizationLabel(null)).toBeNull();
+  });
+
+  it('organização é dimensão separada do papel: mesmo papel, chapéus diferentes', () => {
+    const adminProspecta = {
+      ...admin,
+      organization_id: ORG_PROSPECTA,
+      organization_name: 'Prospecta',
+    };
+    expect(roleLabel(adminProspecta)).toBe(roleLabel(admin));
+    expect(organizationLabel(adminProspecta)).not.toBe(organizationLabel(admin));
   });
 });

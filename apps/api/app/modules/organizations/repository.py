@@ -100,6 +100,23 @@ class OrganizationRepository:
         )
         return result.scalar_one_or_none()
 
+    async def list_platform_admins(self) -> Sequence[User]:
+        """Quem tem `scope='platform'` — o oposto exato do `_staff_select` de
+        `/users`, que filtra `scope='system'` e por isso nunca devolve estas
+        linhas (é o anti-IDOR da 86e36ecar: o admin de uma organização não pode
+        alcançar a conta da plataforma).
+
+        Sem filtro de alcance porque quem chega aqui já passou por
+        `ManagePlatformDep`. Ordem alfabética por nome, com o e-mail (UNIQUE) de
+        desempate determinístico.
+        """
+        result = await self._session.execute(
+            select(User)
+            .where(User.scope == UserScope.PLATFORM.value)
+            .order_by(User.name.asc(), User.email.asc())
+        )
+        return result.scalars().all()
+
     # ------------------------------ WRITE -----------------------------
 
     async def add(self, organization: Organization) -> None:

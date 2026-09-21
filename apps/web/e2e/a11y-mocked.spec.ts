@@ -137,6 +137,19 @@ const BLOCKING = ['critical', 'serious'];
  * é deles que o gating de UI (`src/lib/authz.ts`) deriva. A fixture reflete o
  * contrato real; sem `scope`, o front trataria o admin como papel sem escopo.
  */
+/** A organização de todo mundo nas fixtures — a Hologram, de id fixo. */
+const ORGANIZATION_ID = '0706eeb5-9718-4d03-bcda-ef615789e6ac';
+const ORGANIZATION_NAME = 'Hologram';
+/**
+ * A SEGUNDA organização (86e36ed1d). Existe para que "coluna Organização" e
+ * "filtro por organização" possam ser medidos de verdade: com uma só, a coluna
+ * repetiria o mesmo nome e o filtro não teria o que escolher. Ela está
+ * SUSPENSA de propósito — é o que prova a assimetria entre criar e filtrar (o
+ * seletor de criação não a oferece, o filtro sim, dizendo que está suspensa).
+ */
+const OTHER_ORGANIZATION_ID = 'eeeeeeee-0000-4000-8000-000000000002';
+const OTHER_ORGANIZATION_NAME = 'Prospecta';
+
 const USER = {
   id: '33333333-3333-4333-8333-333333333333',
   email: 'admin@hologram.com.br',
@@ -144,6 +157,23 @@ const USER = {
   role: 'admin',
   scope: 'system',
   client_id: null,
+  organization_id: ORGANIZATION_ID,
+  organization_name: ORGANIZATION_NAME,
+};
+
+/**
+ * A PLATAFORMA (86e36ecwa): sem organização e sem tenant — é o que o CHECK do
+ * banco exige. Vê tudo, inclusive a tela de Organizações.
+ */
+const PLATFORM_USER = {
+  id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+  email: 'plataforma@hologram.com.br',
+  name: 'Plataforma QA',
+  role: 'platform_admin',
+  scope: 'platform',
+  client_id: null,
+  organization_id: null,
+  organization_name: null,
 };
 
 /** Usuário da sessão corrente — trocado por teste nos cenários de papel (S5). */
@@ -158,6 +188,9 @@ const CLIENT_MANAGER_USER = {
   role: 'client_manager',
   scope: 'client',
   client_id: CLIENT_ID,
+  // A org do usuário de cliente é a org do CLIENTE, desnormalizada (§4.8).
+  organization_id: ORGANIZATION_ID,
+  organization_name: ORGANIZATION_NAME,
 };
 
 const CLIENT_OPERATOR_USER = {
@@ -167,6 +200,8 @@ const CLIENT_OPERATOR_USER = {
   role: 'client_operator',
   scope: 'client',
   client_id: CLIENT_ID,
+  organization_id: ORGANIZATION_ID,
+  organization_name: ORGANIZATION_NAME,
 };
 
 const SYSTEM_MANAGER_USER = {
@@ -176,6 +211,8 @@ const SYSTEM_MANAGER_USER = {
   role: 'manager',
   scope: 'system',
   client_id: null,
+  organization_id: ORGANIZATION_ID,
+  organization_name: ORGANIZATION_NAME,
 };
 
 /**
@@ -202,11 +239,47 @@ const SPARE_MANAGER_USER = {
 const SYSTEM_MANAGERS = [SYSTEM_MANAGER_USER, COLLABORATOR_MANAGER_USER, SPARE_MANAGER_USER].map(
   (u) => ({
     ...u,
+    organization_id: ORGANIZATION_ID,
+    organization_name: ORGANIZATION_NAME,
     active: true,
     created_at: '2026-06-01T12:00:00Z',
     updated_at: '2026-06-01T12:00:00Z',
   }),
 );
+
+/**
+ * Staff da OUTRA organização (86e36ed1d). Só a plataforma o recebe de
+ * `/api/v1/users`: para o admin da Hologram, `scoped_by_organization` no
+ * servidor já o teria deixado de fora. É o que faz a coluna "Organização"
+ * mostrar dois nomes distintos na tela medida.
+ */
+const HOLOGRAM_ADMIN_STAFF = {
+  id: '14141414-1414-4141-8141-141414141414',
+  email: 'outro-admin@hologram.com.br',
+  name: 'Outro Admin Hologram',
+  role: 'admin',
+  scope: 'system',
+  client_id: null,
+  organization_id: ORGANIZATION_ID,
+  organization_name: ORGANIZATION_NAME,
+  active: true,
+  created_at: '2026-06-03T12:00:00Z',
+  updated_at: '2026-06-03T12:00:00Z',
+};
+
+const OTHER_ORG_STAFF = {
+  id: '13131313-1313-4131-8131-131313131313',
+  email: 'carlos@prospecta.com.br',
+  name: 'Carlos Prospecta',
+  role: 'admin',
+  scope: 'system',
+  client_id: null,
+  organization_id: OTHER_ORGANIZATION_ID,
+  organization_name: OTHER_ORGANIZATION_NAME,
+  active: true,
+  created_at: '2026-06-02T12:00:00Z',
+  updated_at: '2026-06-02T12:00:00Z',
+};
 type ManagerFixture = { id: string; name: string; email: string };
 function managerEntry(user: ManagerFixture, isResponsible: boolean) {
   return {
@@ -298,8 +371,69 @@ const CATEGORY_FINTECH = {
   tone: 'info',
 };
 const CLIENT_CATEGORIES = [
-  { ...CATEGORY_FINTECH, clients_count: 1 },
-  { id: 'cccccccc-0000-4000-8000-000000000002', name: 'Varejo', tone: 'success', clients_count: 0 },
+  {
+    ...CATEGORY_FINTECH,
+    clients_count: 1,
+    organization_id: ORGANIZATION_ID,
+    organization_name: ORGANIZATION_NAME,
+  },
+  {
+    id: 'cccccccc-0000-4000-8000-000000000002',
+    name: 'Varejo',
+    tone: 'success',
+    clients_count: 0,
+    organization_id: ORGANIZATION_ID,
+    organization_name: ORGANIZATION_NAME,
+  },
+];
+
+/**
+ * Organizações da área da plataforma (86e36ecwa): uma ATIVA com contagens
+ * cheias (é a linha que a suspensão usa para mostrar a consequência) e uma
+ * SUSPENSA, para o selo e o caminho de reativar existirem na tela medida.
+ */
+const ORGANIZATIONS = [
+  {
+    id: ORGANIZATION_ID,
+    name: ORGANIZATION_NAME,
+    active: true,
+    clients_count: 12,
+    users_count: 5,
+    created_at: '2026-09-01T12:00:00Z',
+    updated_at: '2026-09-10T12:00:00Z',
+  },
+  {
+    id: OTHER_ORGANIZATION_ID,
+    name: OTHER_ORGANIZATION_NAME,
+    active: false,
+    clients_count: 0,
+    users_count: 1,
+    created_at: '2026-09-05T12:00:00Z',
+    updated_at: '2026-09-12T12:00:00Z',
+  },
+];
+
+/**
+ * Administradores da PLATAFORMA — a lista que nenhuma outra tela mostra
+ * (`GET /users` filtra `scope='system'`; `users_count` conta só staff da org).
+ * Um INATIVO de propósito: desativar não tira o escopo, então a linha continua
+ * aparecendo, marcada.
+ */
+const PLATFORM_ADMINS = [
+  {
+    id: 'aaaaaaaa-1111-4000-8000-000000000001',
+    name: 'Pedro H.',
+    email: 'pedro@hologramgestao.com',
+    active: true,
+    created_at: '2026-09-18T12:00:00Z',
+  },
+  {
+    id: 'aaaaaaaa-1111-4000-8000-000000000002',
+    name: 'Laio S.',
+    email: 'laio@hologramgestao.com',
+    active: false,
+    created_at: '2026-09-18T12:00:00Z',
+  },
 ];
 
 const CLIENT_DETAIL = {
@@ -308,6 +442,9 @@ const CLIENT_DETAIL = {
   // versionado (CLAUDE.md §4.5 — razão social é dado identificável).
   name: 'Cliente Exemplo Ltda',
   active: true,
+  // Todo cliente pertence a uma organização desde a 86e36ecqz — a coluna
+  // "Organização" da lista lê DAQUI.
+  organization: { id: ORGANIZATION_ID, name: ORGANIZATION_NAME },
   created_at: '2026-05-01T12:00:00Z',
   updated_at: '2026-07-20T12:00:00Z',
   // Carteira compartilhada (86e390m4c): responsável + 1 colaborador → "+1" na lista.
@@ -322,6 +459,20 @@ const CLIENT_DETAIL = {
   category: CATEGORY_FINTECH,
   accounts: ACCOUNTS,
   accounts_synced_at: '2026-07-20T12:00:00Z',
+};
+
+/**
+ * O cliente da OUTRA organização (86e36ed1d) — só a plataforma o recebe.
+ */
+const OTHER_ORG_CLIENT = {
+  ...CLIENT_DETAIL,
+  id: '44444444-4444-4444-8444-444444444444',
+  name: 'Cliente da Prospecta ME',
+  organization: { id: OTHER_ORGANIZATION_ID, name: OTHER_ORGANIZATION_NAME },
+  category: null,
+  responsible_manager: null,
+  manager_count: 0,
+  is_favorite: false,
 };
 
 /** Uma linha por status — é o badge que precisa estar legível nos três casos. */
@@ -774,6 +925,45 @@ async function fulfillApi(route: Route): Promise<void> {
     });
   }
   if (path.endsWith('/read')) return json({ already_read: false, read_at: '2026-07-26T13:00:00Z' });
+  // Organizações (86e36ecwa): a área da plataforma. Leitura devolve a lista
+  // paginada; escrita ecoa um item (a tela só precisa do 2xx para fechar o
+  // diálogo). O PATCH reflete o `active` pedido — é o que a linha mostra depois.
+  if (path === '/api/v1/organizations') {
+    if (route.request().method() === 'POST') {
+      return json({
+        id: 'eeeeeeee-0000-4000-8000-000000000001',
+        name: 'Prospecta',
+        active: true,
+        clients_count: 0,
+        users_count: 0,
+        created_at: '2026-09-18T12:00:00Z',
+        updated_at: '2026-09-18T12:00:00Z',
+      });
+    }
+    return json({
+      data: ORGANIZATIONS,
+      pagination: { page: 1, pageSize: 20, total: ORGANIZATIONS.length, totalPages: 1 },
+    });
+  }
+  // ⚠️ ANTES do `startsWith('/api/v1/organizations/')` abaixo: o catch-all do
+  // DETALHE casaria com este path e devolveria uma organização no lugar da
+  // lista. É a mesma armadilha de ordem que a rota tem no FastAPI.
+  if (path === '/api/v1/organizations/platform-admins') {
+    // `json()` JÁ envelopa em `{ data }`. Passar `{ data: [...] }` aqui produz
+    // `{ data: { data: [...] } }`; o `apiGet` desembrulha UMA vez, o componente
+    // recebe objeto onde espera array, e o `.map` derruba a página inteira com
+    // "Application error". O vitest não pega: lá o mock é do HOOK, e o caminho
+    // do `apiGet` nunca roda. Só o gate em browser passa por ele.
+    return json(PLATFORM_ADMINS);
+  }
+  if (path.startsWith('/api/v1/organizations/')) {
+    // Resolve pelo ID do path: ecoar sempre a primeira faria um "reativar
+    // Prospecta" responder com a Hologram, e a asserção mediria a linha errada.
+    const id = path.split('/').pop();
+    const alvo = ORGANIZATIONS.find((o) => o.id === id) ?? ORGANIZATIONS[0];
+    const body = (route.request().postDataJSON() ?? {}) as { active?: boolean; name?: string };
+    return json({ ...alvo, ...body });
+  }
   // Catálogo de categorias (86e34jd8m): leitura devolve o catálogo; escrita
   // ecoa um item (a tela só precisa do 2xx para fechar o diálogo).
   if (path === '/api/v1/client-categories') {
@@ -795,9 +985,28 @@ async function fulfillApi(route: Route): Promise<void> {
   // e a carteira do cliente com estado em memória — cada ação devolve a lista
   // inteira, como o backend, e o `assign` só troca o selo (ninguém sai).
   if (path === '/api/v1/users') {
+    // O mock responde como o backend org-aware (86e36ecqz + 86e36ed1d): o
+    // ALCANCE vem de quem pergunta (a plataforma vê o staff de todas as
+    // organizações, o admin só o da própria), e `?role=`/`?organizationId=`
+    // filtram por cima disso. Filtrar no navegador aqui esconderia justamente o
+    // defeito que a task corrige — a seção "Gerentes com acesso" pedindo a lista
+    // errada.
+    const ehPlataforma = sessionUser['scope'] === 'platform';
+    // O admin da Hologram entra no alcance dos DOIS observadores de propósito:
+    // ele é staff da própria organização, e é o que faz o `?role=manager` da
+    // seção "Gerentes com acesso" ter consequência visível — sem o filtro, ele
+    // apareceria entre os candidatos e o backend recusaria com 400.
+    const alcance = ehPlataforma
+      ? [...SYSTEM_MANAGERS, HOLOGRAM_ADMIN_STAFF, OTHER_ORG_STAFF]
+      : [...SYSTEM_MANAGERS, HOLOGRAM_ADMIN_STAFF];
+    const papel = url.searchParams.get('role');
+    const org = url.searchParams.get('organizationId');
+    const data = alcance
+      .filter((u) => papel === null || u.role === papel)
+      .filter((u) => org === null || u.organization_id === org);
     return json({
-      data: SYSTEM_MANAGERS,
-      pagination: { page: 1, pageSize: 100, total: SYSTEM_MANAGERS.length, totalPages: 1 },
+      data,
+      pagination: { page: 1, pageSize: 100, total: data.length, totalPages: 1 },
     });
   }
   if (path === `/api/v1/clients/${CLIENT_ID}/managers`) {
@@ -837,7 +1046,28 @@ async function fulfillApi(route: Route): Promise<void> {
     return json({ ...CLIENT_DETAIL, is_favorite: favorited });
   }
   if (path === '/api/v1/clients') {
-    return json({ data: [{ ...CLIENT_DETAIL, is_favorite: favorited }], pagination: PAGINATION });
+    // Mesmo raciocínio do `/users`: o alcance é de quem pergunta. Só a
+    // plataforma enxerga o cliente da OUTRA organização — para o admin da
+    // Hologram, `scoped_by_reach` no servidor já o teria deixado de fora, e
+    // devolvê-lo aqui faria a tela dele parecer certa com dado que ela nunca
+    // receberia.
+    const ehPlataforma = sessionUser['scope'] === 'platform';
+    const alcance = ehPlataforma
+      ? [{ ...CLIENT_DETAIL, is_favorite: favorited }, OTHER_ORG_CLIENT]
+      : [{ ...CLIENT_DETAIL, is_favorite: favorited }];
+    const org = url.searchParams.get('organizationId');
+    const data = org === null ? alcance : alcance.filter((c) => c.organization.id === org);
+    return json({
+      data,
+      pagination: {
+        ...PAGINATION,
+        total: data.length,
+        // `ceil(total / pageSize)`, não `data.length`: com 2 clientes e
+        // pageSize 20 a barra diria "Página 1 de 2" e habilitaria "Próxima"
+        // para uma página que não existe.
+        totalPages: Math.max(1, Math.ceil(data.length / PAGINATION.pageSize)),
+      },
+    });
   }
   // Exclusão definitiva (86e34jd1d): 204 sem corpo; o front volta para a lista.
   if (path === `/api/v1/clients/${CLIENT_ID}` && route.request().method() === 'DELETE') {
@@ -1529,19 +1759,35 @@ for (const vp of VIEWPORTS) {
       await analyze(page, `usuários do cliente — operador negado (${vp.label})`);
     });
 
-    test('gerente do SISTEMA opera a carteira mas não gere usuários do tenant (R4)', async ({
-      page,
-    }) => {
+    test('gerente da ORGANIZAÇÃO gere os usuários do tenant da carteira (D2)', async ({ page }) => {
+      // Mudou na 86e36ecjp (já na main): a célula `manage_client_users` ganhou
+      // o gerente, para os clientes da CARTEIRA. Quem decide se ESTE cliente é
+      // da carteira dele é o backend; a tela não esconde o que o servidor
+      // libera. O caso negativo desta tela continua sendo o operador do
+      // cliente, no teste acima.
       sessionUser = SYSTEM_MANAGER_USER;
       await page.goto(`/clientes/${CLIENT_ID}/usuarios`);
-      // `getByRole('alert')` sozinho é ambíguo: o Next injeta o
-      // `#__next-route-announcer__`, que também é `role="alert"`.
-      await expect(
-        page.getByRole('heading', { name: 'Você não tem acesso a esta página' }),
-      ).toBeVisible();
+
+      await expect(page.getByRole('heading', { name: 'Usuários', level: 2 })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Novo usuário' })).toBeVisible();
+
+      // No mobile a navegação do cliente mora no DRAWER (86e2n4pf9): sem abrir,
+      // a asserção POSITIVA mede zero. (O caso negativo do teste acima passava
+      // em 390px pelo motivo errado — o item está ausente porque a gaveta está
+      // fechada, não porque o papel não o tem.)
+      if (vp.label !== 'desktop') {
+        await page.getByRole('button', { name: 'Abrir menu de navegação' }).click();
+        await aguardarAnimacao(page.getByRole('dialog', { name: 'Menu' }));
+      }
       await expect(
         page.getByRole('navigation', { name: 'Seções do cliente' }).getByText('Usuários'),
-      ).toHaveCount(0);
+      ).toHaveCount(1);
+      // Fechar antes de medir: o modal do Radix marca o fundo com `aria-hidden`.
+      if (vp.label !== 'desktop') {
+        await page.keyboard.press('Escape');
+        await expect(page.getByRole('dialog')).toHaveCount(0);
+      }
+      await analyze(page, `usuários do cliente — gerente da organização (${vp.label})`);
     });
   });
 }
@@ -1683,8 +1929,12 @@ test.describe('Menu mobile — drawer (86e2n4pf9)', () => {
     await aguardarAnimacao(dialog);
     const nav = dialog.getByRole('navigation', { name: 'Navegação principal' });
     await expect(nav.getByRole('link', { name: 'Clientes' })).toBeVisible();
-    await expect(nav.getByRole('link', { name: 'Tipos de Anomalia' })).toBeVisible();
     await expect(nav.getByRole('link', { name: 'Categorias de Cliente' })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Usuários' })).toBeVisible();
+    // D3 final (86e36ed1d): a taxonomia de anomalias é global do produto, e o
+    // admin da ORGANIZAÇÃO deixou de escrevê-la — o item some do menu dele na
+    // mesma entrega em que a rota passou a negá-lo.
+    await expect(nav.getByRole('link', { name: 'Tipos de Anomalia' })).toHaveCount(0);
     await shot(page, 'drawer-navegacao-global-390');
 
     await page.keyboard.press('Escape');
@@ -2159,12 +2409,21 @@ for (const vp of VIEWPORTS) {
  * dois.
  */
 const PROFILES = [
+  {
+    key: 'plataforma',
+    user: () => PLATFORM_USER,
+    systemArea: true,
+    clientUsers: true,
+    editClient: true,
+  },
   { key: 'admin', user: () => USER, systemArea: true, clientUsers: true, editClient: true },
   {
+    // D2 (86e36ecjp, já na main): o gerente da organização passou a gerir os
+    // usuários dos clientes da CARTEIRA — "Usuários" aparece para ele.
     key: 'manager-sistema',
     user: () => SYSTEM_MANAGER_USER,
     systemArea: true,
-    clientUsers: false,
+    clientUsers: true,
     editClient: false,
   },
   {
@@ -2381,6 +2640,301 @@ for (const vp of VIEWPORTS) {
       await analyze(page, `lista de clientes filtrada por categoria (${vp.label})`);
     });
 
+    /**
+     * 86e36ecwa — a área da PLATAFORMA: a tela de Organizações com a tabela, o
+     * diálogo de criação e a confirmação de suspensão (que mostra a
+     * consequência com os números da própria linha). É a única tela do produto
+     * com uma coluna só na matriz, então o deep link do admin da organização
+     * precisa degradar — o teste seguinte cobre isso.
+     */
+    test('configurações: área da plataforma — organizações (86e36ecwa)', async ({ page }) => {
+      sessionUser = PLATFORM_USER;
+      await page.goto('/configuracoes/organizacoes');
+      await expect(page.getByRole('heading', { name: 'Organizações', level: 1 })).toBeVisible();
+
+      // As duas contagens e os dois selos aparecem na tabela.
+      const linha = page.getByRole('row', { name: /Hologram/ });
+      await expect(linha.getByText('Ativa')).toBeVisible();
+      await expect(page.getByText('Suspensa')).toBeVisible();
+
+      // A segunda organização precisa caber na área rolável da TABELA, não só
+      // existir. `toBeVisible` não distingue as duas coisas: linha empurrada
+      // para fora do scroller interno continua "visível" para o Playwright, e
+      // foi assim que a seção de administradores espremeu a tabela para UMA
+      // linha em 390px sem reprovar nada — só o print mostrou.
+      const cortada = await page
+        .getByRole('row', { name: /Prospecta/ })
+        .evaluate((row: Element) => {
+          const caixa = row.getBoundingClientRect();
+          let pai = row.parentElement;
+          while (pai) {
+            const overflowY = getComputedStyle(pai).overflowY;
+            if (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'hidden') {
+              // 1px de folga para arredondamento de subpixel.
+              return caixa.bottom > pai.getBoundingClientRect().bottom + 1;
+            }
+            pai = pai.parentElement;
+          }
+          return false;
+        });
+      expect(cortada, 'a 2ª organização não pode ficar fora da área rolável da tabela').toBe(false);
+
+      // A ÚNICA lista de `platform_admin` do produto. O nome da região é o
+      // longo de propósito: `getByRole` do Playwright casa por SUBSTRING, e
+      // pedir "Administradores da plataforma" casaria também com a `<section>`
+      // homônima em volta (strict mode reprovaria com 2 elementos).
+      const plataforma = page.getByRole('region', {
+        name: 'Lista de administradores da plataforma',
+      });
+      await expect(plataforma.getByText('Pedro H.')).toBeVisible();
+      await expect(plataforma.getByText('pedro@hologramgestao.com')).toBeVisible();
+      // Desativado continua na lista, marcado: o escopo não sai com o `active`.
+      await expect(plataforma.getByText('Inativo')).toBeVisible();
+      // SÓ-LEITURA: promover e despromover é pelo script, e `PATCH /users/{id}`
+      // de uma linha de plataforma é 404 — botão aqui seria ação que o
+      // servidor nega (§4.9).
+      await expect(plataforma.getByRole('button')).toHaveCount(0);
+
+      // Em 390px é onde o e-mail longo empurraria o selo para fora do card.
+      const selo = plataforma.getByText('Inativo');
+      const seloBox = await selo.boundingBox();
+      const vpSize = page.viewportSize();
+      expect(seloBox, 'o selo do administrador inativo precisa ter caixa visível').not.toBeNull();
+      expect(
+        seloBox!.x + seloBox!.width,
+        'o selo não pode passar da borda da viewport',
+      ).toBeLessThanOrEqual(vpSize!.width);
+
+      await shot(page, `organizacoes-${slug}`);
+      await analyze(page, `área da plataforma: organizações (${vp.label})`);
+
+      await page.getByRole('button', { name: 'Nova organização' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Nova organização' });
+      await expect(dialog).toBeVisible();
+      await aguardarAnimacao(dialog);
+      await shot(page, `organizacoes-nova-${slug}`);
+      await analyze(page, `diálogo de nova organização (${vp.label})`);
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+
+      // Suspender: a consequência é dita ANTES de confirmar, com os números.
+      await page.getByRole('button', { name: 'Suspender Hologram' }).click();
+      const confirm = page.getByRole('dialog', { name: 'Suspender organização' });
+      await expect(confirm).toBeVisible();
+      await aguardarAnimacao(confirm);
+      await expect(confirm).toContainText('5 usuários perdem');
+      await expect(confirm).toContainText('12 clientes');
+      await shot(page, `organizacoes-suspender-${slug}`);
+
+      // HOVER EXPLÍCITO na ação destrutiva antes de medir (86e36ed1d). O estado
+      // de hover tem par de cor PRÓPRIO, e o axe só o vê se o ponteiro estiver
+      // sobre o botão na hora do scan. Isto já aconteceu por ACIDENTE: o clique
+      // anterior deixava o ponteiro numa coordenada que, em 390px, calhava de
+      // cair sobre o botão do diálogo — e o CI reprovou com 3,95:1 no escuro
+      // enquanto a mesma suíte passava aqui, porque poucos pixels de layout
+      // decidiam se o hover valia. Medir de propósito tira a sorte do caminho.
+      const suspender = confirm.getByRole('button', { name: 'Suspender' });
+      await suspender.hover();
+      await analyze(page, `confirmação de suspensão de organização (${vp.label})`);
+
+      // A ação primária precisa caber na viewport — em 390px é onde corta.
+      const box = await suspender.boundingBox();
+      expect(box, 'o botão Suspender precisa ter caixa visível').not.toBeNull();
+      expect(
+        (box?.x ?? 0) + (box?.width ?? 0),
+        `"Suspender" cortado fora da viewport (${vp.label})`,
+      ).toBeLessThanOrEqual(vp.size.width);
+
+      // Exercita a ESCRITA: sem isto o PATCH mockado é código morto e o
+      // caminho de confirmação nunca roda no browser.
+      await suspender.click();
+      await expect(page.getByText('Organização suspensa.')).toBeVisible();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await aguardarToastEstavel(page);
+      await analyze(page, `organização suspensa com confirmação (${vp.label})`);
+    });
+
+    /**
+     * 86e36ed1d — a dimensão de organização nas telas existentes.
+     *
+     * Este teste substituiu o que gravava a regra ANTIGA ("a plataforma ainda
+     * não cria cliente"): ela não criava porque o formulário não tinha o
+     * seletor de organização, e o seletor é justamente o que esta task
+     * entregou. A regra mudou, então o teste mudou com ela — não foi apagado.
+     */
+    test('lista de clientes: a plataforma ganha coluna, filtro e seletor de organização', async ({
+      page,
+    }) => {
+      sessionUser = PLATFORM_USER;
+      await page.goto('/clientes');
+      await expect(page.getByRole('heading', { name: 'Clientes', level: 1 })).toBeVisible();
+
+      // A coluna diz de QUEM é cada cliente — com N organizações, dois nomes
+      // iguais em organizações diferentes seriam indistinguíveis sem ela.
+      await expect(page.getByRole('columnheader', { name: 'Organização' })).toBeVisible();
+      // `exact`: o `name` do Playwright casa por SUBSTRING, e sem ele
+      // "Prospecta" pegaria também a célula de nome ("Cliente da Prospecta ME")
+      // e a de ações (os `aria-label` dos botões entram no nome acessível da
+      // célula) — 4 elementos, violação de strict mode.
+      await expect(
+        page.getByRole('cell', { name: OTHER_ORGANIZATION_NAME, exact: true }),
+      ).toBeVisible();
+      await shot(page, `clientes-organizacao-plataforma-${slug}`);
+      await analyze(page, `lista de clientes com coluna de organização (${vp.label})`);
+
+      // O filtro é SERVER-SIDE: o mock só devolve a linha da organização
+      // pedida, então a outra sumir prova que o `?organizationId=` foi mandado.
+      const filtro = page.getByRole('combobox', { name: 'Filtrar por organização' });
+      await filtro.click();
+      const opcoes = page.getByRole('listbox');
+      await expect(opcoes.getByRole('option', { name: 'Todas as organizações' })).toBeVisible();
+      // A suspensa aparece no FILTRO (os clientes dela continuam existindo) e é
+      // dita como suspensa — o seletor de CRIAÇÃO, abaixo, não a oferece.
+      await opcoes.getByRole('option', { name: `${OTHER_ORGANIZATION_NAME} (suspensa)` }).click();
+      await expect(page.getByRole('listbox')).toHaveCount(0);
+      await expect(
+        page.getByRole('cell', { name: 'Cliente da Prospecta ME', exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole('cell', { name: 'Cliente Exemplo Ltda' })).toHaveCount(0);
+      await shot(page, `clientes-organizacao-filtrada-${slug}`);
+      await analyze(page, `lista de clientes filtrada por organização (${vp.label})`);
+
+      // E o botão voltou: o formulário agora pergunta a organização de destino.
+      await page.getByRole('button', { name: 'Novo Cliente' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Novo Cliente' });
+      await aguardarAnimacao(dialog);
+      const seletor = dialog.getByRole('combobox', { name: 'Organização do cliente' });
+      await expect(seletor).toBeVisible();
+      await seletor.click();
+      const opcoesOrg = page.getByRole('listbox');
+      await expect(opcoesOrg.getByRole('option', { name: ORGANIZATION_NAME })).toBeVisible();
+      // Organização SUSPENSA não é oferecida na criação: o backend responderia
+      // 409, e ação que o servidor nega não aparece na tela (§4.9).
+      await expect(opcoesOrg.getByRole('option', { name: /Prospecta/ })).toHaveCount(0);
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('listbox')).toHaveCount(0);
+      await shot(page, `clientes-novo-organizacao-${slug}`);
+      // O axe mede com o Select FECHADO (ele é modal e marca o fundo com
+      // aria-hidden); o diálogo em si fica aberto de propósito.
+      await analyze(page, `novo cliente com seletor de organização (${vp.label})`);
+    });
+
+    test('lista de clientes: o admin da organização NÃO ganha a dimensão', async ({ page }) => {
+      // Toda linha da lista dele é da mesma organização: a coluna repetiria o
+      // mesmo nome e o filtro não teria o que escolher (outra org seria 403).
+      sessionUser = USER;
+      await page.goto('/clientes');
+      await expect(page.getByRole('heading', { name: 'Clientes', level: 1 })).toBeVisible();
+
+      await expect(page.getByRole('columnheader', { name: 'Organização' })).toHaveCount(0);
+      await expect(page.getByRole('combobox', { name: 'Filtrar por organização' })).toHaveCount(0);
+      // Mas ele cria normalmente — e sem o seletor.
+      await page.getByRole('button', { name: 'Novo Cliente' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Novo Cliente' });
+      await aguardarAnimacao(dialog);
+      await expect(dialog.getByRole('combobox', { name: 'Organização do cliente' })).toHaveCount(0);
+      await analyze(page, `novo cliente sem seletor de organização (${vp.label})`);
+    });
+
+    test('usuários: coluna e filtro de organização para a plataforma (86e36ed1d)', async ({
+      page,
+    }) => {
+      sessionUser = PLATFORM_USER;
+      await page.goto('/configuracoes/usuarios');
+      await expect(page.getByRole('heading', { name: 'Usuários', level: 1 })).toBeVisible();
+
+      await expect(page.getByRole('columnheader', { name: 'Organização' })).toBeVisible();
+      // `exact` pelo mesmo motivo da lista de clientes: sem ele, "Carlos
+      // Prospecta" casaria também com a célula de ações da linha dele.
+      await expect(page.getByRole('cell', { name: 'Carlos Prospecta', exact: true })).toBeVisible();
+      await shot(page, `usuarios-organizacao-${slug}`);
+      await analyze(page, `usuários com coluna de organização (${vp.label})`);
+
+      const filtro = page.getByRole('combobox', { name: 'Filtrar por organização' });
+      await filtro.click();
+      await page
+        .getByRole('listbox')
+        .getByRole('option', { name: `${OTHER_ORGANIZATION_NAME} (suspensa)` })
+        .click();
+      await expect(page.getByRole('listbox')).toHaveCount(0);
+      // Server-side de novo: só o staff da organização pedida sobra.
+      await expect(page.getByRole('cell', { name: 'Carlos Prospecta', exact: true })).toBeVisible();
+      await expect(page.getByRole('cell', { name: 'Gerente Hologram' })).toHaveCount(0);
+      await analyze(page, `usuários filtrados por organização (${vp.label})`);
+
+      // E o formulário de criação pergunta onde o usuário nasce.
+      await page.getByRole('button', { name: 'Novo Usuário' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Novo Usuário' });
+      await aguardarAnimacao(dialog);
+      await expect(dialog.getByRole('combobox', { name: 'Organização do usuário' })).toBeVisible();
+      await shot(page, `usuarios-novo-organizacao-${slug}`);
+      await analyze(page, `novo usuário com seletor de organização (${vp.label})`);
+    });
+
+    test('categorias: a plataforma ganha coluna e filtro de organização (86e36ed1d)', async ({
+      page,
+    }) => {
+      // O catálogo é POR organização e a plataforma lê o de TODAS: sem a coluna,
+      // duas "Varejo" de donos diferentes seriam linhas indistinguíveis. É a
+      // terceira tela da task, e a única cujo e2e só rodava como admin.
+      sessionUser = PLATFORM_USER;
+      await page.goto('/configuracoes/categorias');
+      await expect(
+        page.getByRole('heading', { name: 'Categorias de Cliente', level: 1 }),
+      ).toBeVisible();
+
+      await expect(page.getByRole('columnheader', { name: 'Organização' })).toBeVisible();
+      await expect(page.getByRole('combobox', { name: 'Filtrar por organização' })).toBeVisible();
+      await shot(page, `categorias-organizacao-${slug}`);
+      await analyze(page, `categorias com coluna de organização (${vp.label})`);
+
+      // E o diálogo de criação pergunta onde a categoria nasce.
+      await page.getByRole('button', { name: 'Nova categoria' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Nova categoria' });
+      await aguardarAnimacao(dialog);
+      await expect(
+        dialog.getByRole('combobox', { name: 'Organização da categoria' }),
+      ).toBeVisible();
+      await shot(page, `categorias-nova-organizacao-${slug}`);
+      await analyze(page, `nova categoria com seletor de organização (${vp.label})`);
+    });
+
+    test('tipos de anomalia: só a plataforma escreve (D3 final, 86e36ed1d)', async ({ page }) => {
+      // O admin da ORGANIZAÇÃO perde a tela junto com a célula da matriz: item
+      // de menu e rota consultam a MESMA permissão, então somem juntos.
+      sessionUser = USER;
+      await page.goto('/configuracoes/anomalias');
+      await expect(
+        page.getByRole('heading', { name: 'Você não tem acesso a este recurso' }),
+      ).toBeVisible();
+      await expect(page.locator('#__next_error__')).toHaveCount(0);
+      await shot(page, `anomalias-negado-admin-${slug}`);
+      await analyze(page, `tipos de anomalia negado ao admin da organização (${vp.label})`);
+
+      sessionUser = PLATFORM_USER;
+      await page.reload();
+      await expect(
+        page.getByRole('heading', { name: 'Tipos de Anomalia', level: 1 }),
+      ).toBeVisible();
+      await shot(page, `anomalias-plataforma-${slug}`);
+      await analyze(page, `tipos de anomalia pela plataforma (${vp.label})`);
+    });
+
+    test('deep link em organizações: só a plataforma entra (86e36ecwa)', async ({ page }) => {
+      // O admin da ORGANIZAÇÃO é o caso que interessa: ele vê as outras três
+      // configurações, e esta não. Nenhum nome de organização pode aparecer.
+      sessionUser = USER;
+      await page.goto('/configuracoes/organizacoes');
+
+      await expect(
+        page.getByRole('heading', { name: 'Você não tem acesso a este recurso' }),
+      ).toBeVisible();
+      await expect(page.getByText('Prospecta')).toHaveCount(0);
+      await expect(page.locator('#__next_error__')).toHaveCount(0);
+      await shot(page, `deeplink-organizacoes-negado-${slug}`);
+      await analyze(page, `deep link em organizações negado (${vp.label})`);
+    });
+
     test('deep link em categorias de cliente degrada em português (86e34jd8m)', async ({
       page,
     }) => {
@@ -2529,6 +3083,12 @@ for (const vp of VIEWPORTS) {
       await dialog.getByRole('combobox', { name: 'Adicionar gerente' }).click();
       const opcoes = page.getByRole('listbox');
       await expect(opcoes).toBeVisible();
+      // Trava do filtro de PAPEL (86e36ed1d): o admin da organização está no
+      // que `/users` devolveria SEM `?role=manager`, e não pode ser oferecido —
+      // `is_active_manager` recusaria com 400. Se a query perder o filtro, este
+      // assert cai. Sem ele, todos os candidatos do mock eram manager e o filtro
+      // podia sumir sem ninguém notar.
+      await expect(opcoes.getByRole('option', { name: 'Outro Admin Hologram' })).toHaveCount(0);
       await opcoes.getByRole('option', { name: 'Gerente Colaborador' }).click();
       await expect(page.getByRole('listbox')).toHaveCount(0);
       await dialog.getByRole('button', { name: 'Adicionar' }).click();

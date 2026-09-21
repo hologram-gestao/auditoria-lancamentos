@@ -45,7 +45,12 @@ import {
 import { useUpdateUser } from '@/hooks/use-users';
 import { ApiError } from '@/lib/api/client';
 import type { User } from '@/lib/api/users';
-import { updateUserSchema, type UpdateUserFormValues } from '@/lib/validation/users';
+import { USER_ROLE_LABELS } from '@/lib/authz';
+import {
+  SYSTEM_USER_ROLES,
+  updateUserSchema,
+  type UpdateUserFormValues,
+} from '@/lib/validation/users';
 
 interface EditUserModalProps {
   open: boolean;
@@ -154,9 +159,16 @@ export function EditUserModal({ open, onOpenChange, user, currentUserId }: EditU
                         <SelectValue placeholder="Selecione o perfil" />
                       </SelectTrigger>
                     </FormControl>
+                    {/* Mesmas opções e mesmos rótulos do "Novo Usuário"
+                        (86e36ed1d): a whitelist vem do CONTRATO e o rótulo de
+                        `USER_ROLE_LABELS`. Digitados à mão, os dois diálogos da
+                        MESMA tela diziam "Admin" aqui e "Administrador" lá. */}
                     <SelectContent>
-                      <SelectItem value="manager">Gerente</SelectItem>
-                      <SelectItem value="admin">Admin</SelectItem>
+                      {SYSTEM_USER_ROLES.map((role) => (
+                        <SelectItem key={role} value={role}>
+                          {USER_ROLE_LABELS[role]}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   {isSelf && user?.role === 'admin' ? (

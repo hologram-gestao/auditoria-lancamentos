@@ -12,10 +12,15 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2 } from 'lucide-react';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { toast } from 'sonner';
 
+import {
+  OrganizationLoadError,
+  organizationOptionLabel,
+  useOrganizationOptions,
+} from '@/components/features/organizations/organization-select';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -44,10 +49,12 @@ import {
 import { useCreateClientCategory, useUpdateClientCategory } from '@/hooks/use-client-categories';
 import { ApiError } from '@/lib/api/client';
 import type { ClientCategoryItem } from '@/lib/api/client-categories';
+import { isPlatformScoped } from '@/lib/authz';
 import {
-  clientCategorySchema,
+  makeClientCategorySchema,
   type ClientCategoryFormValues,
 } from '@/lib/validation/client-categories';
+import { useAuthStore } from '@/stores/auth';
 
 import {
   CLIENT_CATEGORY_TONE_LABELS,
@@ -67,9 +74,27 @@ export function ClientCategoryDialog({ open, onOpenChange, category }: ClientCat
   const createMutation = useCreateClientCategory();
   const updateMutation = useUpdateClientCategory(category?.id ?? '');
 
+  // O catálogo é POR organização (86e36ecqz): a plataforma escolhe em qual a
+  // categoria nasce. Na EDIÇÃO o campo não aparece — categoria não muda de
+  // organização, e o `PATCH` do backend nem aceita o campo.
+  const isPlatform = isPlatformScoped(useAuthStore((st) => st.user));
+  const needsOrganization = isPlatform && !isEdit;
+  const {
+    organizations,
+    isLoading: organizationsLoading,
+    isError: organizationsError,
+  } = useOrganizationOptions({
+    enabled: needsOrganization && open,
+    activeOnly: true,
+  });
+  const schema = useMemo(
+    () => makeClientCategorySchema({ requireOrganization: needsOrganization }),
+    [needsOrganization],
+  );
+
   const form = useForm<ClientCategoryFormValues>({
-    resolver: zodResolver(clientCategorySchema),
-    defaultValues: { name: '', tone: 'neutral' },
+    resolver: zodResolver(schema),
+    defaultValues: { name: '', tone: 'neutral', organization_id: '' },
     mode: 'onSubmit',
   });
   const watchedName = useWatch({ control: form.control, name: 'name' });
@@ -79,8 +104,8 @@ export function ClientCategoryDialog({ open, onOpenChange, category }: ClientCat
     if (open) {
       form.reset(
         category
-          ? { name: category.name, tone: toneOrNeutral(category.tone) }
-          : { name: '', tone: 'neutral' },
+          ? { name: category.name, tone: toneOrNeutral(category.tone), organization_id: '' }
+          : { name: '', tone: 'neutral', organization_id: '' },
       );
       createMutation.reset();
       updateMutation.reset();
@@ -91,11 +116,18 @@ export function ClientCategoryDialog({ open, onOpenChange, category }: ClientCat
 
   async function onSubmit(values: ClientCategoryFormValues) {
     try {
+      const { organization_id: organizationId, ...fields } = values;
       if (isEdit) {
-        await updateMutation.mutateAsync(values);
+        // O PATCH não tem `organization_id` (ClientCategoryUpdate): a categoria
+        // não troca de organização, e mandar o campo seria pedir por algo que o
+        // contrato não oferece.
+        await updateMutation.mutateAsync(fields);
         toast.success('Categoria atualizada.');
       } else {
-        await createMutation.mutateAsync(values);
+        await createMutation.mutateAsync({
+          ...fields,
+          ...(organizationId ? { organization_id: organizationId } : {}),
+        });
         toast.success('Categoria criada.');
       }
       onOpenChange(false);
@@ -147,6 +179,39 @@ export function ClientCategoryDialog({ open, onOpenChange, category }: ClientCat
                 </FormItem>
               )}
             />
+
+            {/* Só na CRIAÇÃO e só para a plataforma (86e36ed1d). */}
+            {needsOrganization && (
+              <FormField
+                control={form.control}
+                name="organization_id"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Organização</FormLabel>
+                    <Select
+                      value={field.value ?? ''}
+                      onValueChange={field.onChange}
+                      disabled={isSubmitting || organizationsLoading}
+                    >
+                      <FormControl>
+                        <SelectTrigger aria-label="Organização da categoria">
+                          <SelectValue placeholder="Selecione a organização" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {organizations.map((o) => (
+                          <SelectItem key={o.id} value={o.id}>
+                            {organizationOptionLabel(o)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {organizationsError && <OrganizationLoadError />}
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
 
             <FormField
               control={form.control}

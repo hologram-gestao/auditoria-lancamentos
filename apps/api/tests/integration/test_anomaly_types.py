@@ -2,14 +2,18 @@
 
 Cenários cobertos:
     - GET legado (sem `?page`) → envelope `{data: [...]}` para retrocompat
-      da tela de revisão (manager+admin).
-    - GET paginado (`?page=1`) → envelope `{data, pagination}` para o admin UI.
-    - `?include_inactive=true` — só admin enxerga inativos; manager filtra silently.
+      da tela de revisão (todo staff LÊ o catálogo).
+    - GET paginado (`?page=1`) → envelope `{data, pagination}` para a tela de
+      administração (só plataforma desde a D3, mas a LEITURA segue aberta).
+    - `?include_inactive=true` — só quem ESCREVE enxerga inativos: desde a D3
+      (86e36ed1d) isso é a plataforma; admin e manager filtram em silêncio.
     - POST: happy path, 409 (code duplicado), 400 (code inválido + severity).
     - PATCH: happy path, 404, code é imutável (ignorado no body).
     - PATCH active=false não apaga anomalias existentes (catálogo é histórico).
     - DELETE: 204 quando órfão, 409 quando vinculado, RBAC, 404.
-    - RBAC consistente: manager bloqueado em todas as mutações.
+    - RBAC consistente: manager E admin de organização bloqueados em todas as
+      mutações — a taxonomia é global do produto (D3), então só a plataforma
+      escreve; o admin de uma org não edita o catálogo que as outras usam.
 
 Os testes usam `db_session` para semear e `client_with_db` para chamar as
 rotas — a mesma session é injetada no DB, então mudanças no DB aparecem
@@ -23,7 +27,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import null, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
@@ -36,6 +40,7 @@ from app.db.models import (
     ReconciliationSession,
     User,
     UserRole,
+    UserScope,
 )
 from app.modules.reconciliations.processing.anomalies import (
     ANOMALY_CODE_MISSING_IN_FILE,
@@ -50,6 +55,7 @@ if TYPE_CHECKING:
 
 ADMIN_EMAIL = "anomtypes-admin@hologram.com.br"
 MANAGER_EMAIL = "anomtypes-mgr@hologram.com.br"
+PLATFORM_EMAIL = "anomtypes-plataforma@hologram.com.br"
 ADMIN_PLAIN = "Adm1n!Senh@Forte#"
 
 
@@ -58,19 +64,37 @@ async def _seed_user(
     *,
     email: str,
     role: UserRole = UserRole.ADMIN,
+    scope: UserScope = UserScope.SYSTEM,
     plain_text: str = ADMIN_PLAIN,
     active: bool = True,
 ) -> User:
+    extra: dict[str, object] = {}
+    if scope is UserScope.PLATFORM:
+        # `null()`, não `None`: com `server_default` o ORM omitiria a coluna e o
+        # banco preencheria a Hologram — e a plataforma não tem organização.
+        extra["organization_id"] = null()
     user = User(
         name="Test",
         email=email.lower(),
         password_hash=hash_password(plain_text),
         role=role.value,
+        scope=scope.value,
         active=active,
+        **extra,
     )
     session.add(user)
     await session.flush()
     return user
+
+
+async def _seed_platform(session: AsyncSession) -> User:
+    """O único papel que ESCREVE na taxonomia desde a D3 (86e36ed1d)."""
+    return await _seed_user(
+        session,
+        email=PLATFORM_EMAIL,
+        role=UserRole.PLATFORM_ADMIN,
+        scope=UserScope.PLATFORM,
+    )
 
 
 async def _login_as(client: AsyncClient, email: str, plain_text: str = ADMIN_PLAIN) -> None:
@@ -161,6 +185,47 @@ class TestAnomalyTypesRBAC:
         resp = await client_with_db.delete(f"/api/v1/anomaly-types/{at.id}")
         assert resp.status_code == 403
 
+    # --- D3 (86e36ed1d): a taxonomia é GLOBAL, então o admin de UMA organização
+    # não escreve nela. Antes desta task ele escrevia; estes três testes são a
+    # trava da mudança, e a tela virou só-plataforma na mesma entrega.
+
+    async def test_org_admin_post_returns_403(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        await _login_as(client_with_db, ADMIN_EMAIL)
+        resp = await client_with_db.post(
+            "/api/v1/anomaly-types",
+            json={
+                "code": "org_admin_blocked",
+                "name": "X",
+                "description": "y",
+                "severity": "info",
+            },
+        )
+        assert resp.status_code == 403
+
+    async def test_org_admin_patch_returns_403(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        at = await _seed_anomaly_type(db_session, code="org_admin_patch_block")
+        await _login_as(client_with_db, ADMIN_EMAIL)
+        resp = await client_with_db.patch(
+            f"/api/v1/anomaly-types/{at.id}",
+            json={"name": "blocked"},
+        )
+        assert resp.status_code == 403
+
+    async def test_org_admin_delete_returns_403(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        at = await _seed_anomaly_type(db_session, code="org_admin_delete_block")
+        await _login_as(client_with_db, ADMIN_EMAIL)
+        resp = await client_with_db.delete(f"/api/v1/anomaly-types/{at.id}")
+        assert resp.status_code == 403
+
 
 # ----------------------------------------------------------------------
 # GET /anomaly-types
@@ -219,9 +284,12 @@ class TestListAnomalyTypes:
         codes = {item["code"] for item in resp.json()["data"]}
         assert "mgr_inactive" not in codes
 
-    async def test_admin_include_inactive_returns_all(
+    async def test_org_admin_include_inactive_silently_filtered(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
+        """Desde a D3 (86e36ed1d) o admin da organização não escreve no catálogo,
+        e quem não escreve não enxerga inativo — mesmo silêncio do manager, pela
+        mesma razão (o GET é compartilhado com a tela de revisão)."""
         await _seed_user(db_session, email=ADMIN_EMAIL)
         await _seed_anomaly_type(db_session, code="adm_active", active=True)
         await _seed_anomaly_type(db_session, code="adm_inactive", active=False)
@@ -231,7 +299,21 @@ class TestListAnomalyTypes:
         assert resp.status_code == 200
         codes = {item["code"] for item in resp.json()["data"]}
         assert "adm_active" in codes
-        assert "adm_inactive" in codes
+        assert "adm_inactive" not in codes
+
+    async def test_platform_include_inactive_returns_all(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        await _seed_platform(db_session)
+        await _seed_anomaly_type(db_session, code="plat_active", active=True)
+        await _seed_anomaly_type(db_session, code="plat_inactive", active=False)
+        await _login_as(client_with_db, PLATFORM_EMAIL)
+
+        resp = await client_with_db.get("/api/v1/anomaly-types?include_inactive=true")
+        assert resp.status_code == 200
+        codes = {item["code"] for item in resp.json()["data"]}
+        assert "plat_active" in codes
+        assert "plat_inactive" in codes
 
     async def test_paginated_envelope_when_page_param_present(
         self, client_with_db: AsyncClient, db_session: AsyncSession
@@ -275,11 +357,11 @@ class TestListAnomalyTypes:
 
 
 class TestCreateAnomalyType:
-    async def test_admin_creates_happy_path(
+    async def test_platform_creates_happy_path(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
-        await _seed_user(db_session, email=ADMIN_EMAIL)
-        await _login_as(client_with_db, ADMIN_EMAIL)
+        await _seed_platform(db_session)
+        await _login_as(client_with_db, PLATFORM_EMAIL)
 
         resp = await client_with_db.post(
             "/api/v1/anomaly-types",
@@ -299,9 +381,9 @@ class TestCreateAnomalyType:
     async def test_duplicate_code_returns_409(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
-        await _seed_user(db_session, email=ADMIN_EMAIL)
+        await _seed_platform(db_session)
         await _seed_anomaly_type(db_session, code="already_here")
-        await _login_as(client_with_db, ADMIN_EMAIL)
+        await _login_as(client_with_db, PLATFORM_EMAIL)
 
         resp = await client_with_db.post(
             "/api/v1/anomaly-types",
@@ -320,8 +402,8 @@ class TestCreateAnomalyType:
     async def test_invalid_code_uppercase_returns_400(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
-        await _seed_user(db_session, email=ADMIN_EMAIL)
-        await _login_as(client_with_db, ADMIN_EMAIL)
+        await _seed_platform(db_session)
+        await _login_as(client_with_db, PLATFORM_EMAIL)
         resp = await client_with_db.post(
             "/api/v1/anomaly-types",
             json={
@@ -336,8 +418,8 @@ class TestCreateAnomalyType:
     async def test_invalid_code_with_dash_returns_400(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
-        await _seed_user(db_session, email=ADMIN_EMAIL)
-        await _login_as(client_with_db, ADMIN_EMAIL)
+        await _seed_platform(db_session)
+        await _login_as(client_with_db, PLATFORM_EMAIL)
         resp = await client_with_db.post(
             "/api/v1/anomaly-types",
             json={
@@ -352,8 +434,8 @@ class TestCreateAnomalyType:
     async def test_invalid_severity_returns_400(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
-        await _seed_user(db_session, email=ADMIN_EMAIL)
-        await _login_as(client_with_db, ADMIN_EMAIL)
+        await _seed_platform(db_session)
+        await _login_as(client_with_db, PLATFORM_EMAIL)
         resp = await client_with_db.post(
             "/api/v1/anomaly-types",
             json={
@@ -368,8 +450,8 @@ class TestCreateAnomalyType:
     async def test_code_too_long_returns_400(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
-        await _seed_user(db_session, email=ADMIN_EMAIL)
-        await _login_as(client_with_db, ADMIN_EMAIL)
+        await _seed_platform(db_session)
+        await _login_as(client_with_db, PLATFORM_EMAIL)
         resp = await client_with_db.post(
             "/api/v1/anomaly-types",
             json={
@@ -388,12 +470,12 @@ class TestCreateAnomalyType:
 
 
 class TestUpdateAnomalyType:
-    async def test_admin_updates_name_only(
+    async def test_platform_updates_name_only(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
-        await _seed_user(db_session, email=ADMIN_EMAIL)
+        await _seed_platform(db_session)
         at = await _seed_anomaly_type(db_session, code="upd_name", name="Old Name")
-        await _login_as(client_with_db, ADMIN_EMAIL)
+        await _login_as(client_with_db, PLATFORM_EMAIL)
 
         resp = await client_with_db.patch(
             f"/api/v1/anomaly-types/{at.id}",
@@ -404,12 +486,12 @@ class TestUpdateAnomalyType:
         assert body["name"] == "New Name"
         assert body["code"] == "upd_name"  # code não mudou
 
-    async def test_admin_deactivates(
+    async def test_platform_deactivates(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
-        await _seed_user(db_session, email=ADMIN_EMAIL)
+        await _seed_platform(db_session)
         at = await _seed_anomaly_type(db_session, code="to_deactivate", active=True)
-        await _login_as(client_with_db, ADMIN_EMAIL)
+        await _login_as(client_with_db, PLATFORM_EMAIL)
 
         resp = await client_with_db.patch(
             f"/api/v1/anomaly-types/{at.id}",
@@ -418,12 +500,12 @@ class TestUpdateAnomalyType:
         assert resp.status_code == 200
         assert resp.json()["active"] is False
 
-    async def test_admin_updates_severity(
+    async def test_platform_updates_severity(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
-        await _seed_user(db_session, email=ADMIN_EMAIL)
+        await _seed_platform(db_session)
         at = await _seed_anomaly_type(db_session, code="sev_upd", severity=AnomalySeverity.INFO)
-        await _login_as(client_with_db, ADMIN_EMAIL)
+        await _login_as(client_with_db, PLATFORM_EMAIL)
 
         resp = await client_with_db.patch(
             f"/api/v1/anomaly-types/{at.id}",
@@ -437,9 +519,9 @@ class TestUpdateAnomalyType:
     ) -> None:
         """`code` é IMUTÁVEL — Pydantic ignora keys extras silentemente,
         mantendo o `code` original."""
-        await _seed_user(db_session, email=ADMIN_EMAIL)
+        await _seed_platform(db_session)
         at = await _seed_anomaly_type(db_session, code="original_code")
-        await _login_as(client_with_db, ADMIN_EMAIL)
+        await _login_as(client_with_db, PLATFORM_EMAIL)
 
         resp = await client_with_db.patch(
             f"/api/v1/anomaly-types/{at.id}",
@@ -453,9 +535,9 @@ class TestUpdateAnomalyType:
     async def test_invalid_severity_returns_400(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
-        await _seed_user(db_session, email=ADMIN_EMAIL)
+        await _seed_platform(db_session)
         at = await _seed_anomaly_type(db_session, code="sev_invalid_upd")
-        await _login_as(client_with_db, ADMIN_EMAIL)
+        await _login_as(client_with_db, PLATFORM_EMAIL)
 
         resp = await client_with_db.patch(
             f"/api/v1/anomaly-types/{at.id}",
@@ -466,8 +548,8 @@ class TestUpdateAnomalyType:
     async def test_404_when_id_missing(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
-        await _seed_user(db_session, email=ADMIN_EMAIL)
-        await _login_as(client_with_db, ADMIN_EMAIL)
+        await _seed_platform(db_session)
+        await _login_as(client_with_db, PLATFORM_EMAIL)
 
         ghost = "00000000-0000-0000-0000-000000000000"
         resp = await client_with_db.patch(
@@ -483,12 +565,12 @@ class TestUpdateAnomalyType:
 
 
 class TestDeleteAnomalyType:
-    async def test_admin_deletes_orphan_returns_204(
+    async def test_platform_deletes_orphan_returns_204(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
-        await _seed_user(db_session, email=ADMIN_EMAIL)
+        await _seed_platform(db_session)
         at = await _seed_anomaly_type(db_session, code="orphan_to_delete")
-        await _login_as(client_with_db, ADMIN_EMAIL)
+        await _login_as(client_with_db, PLATFORM_EMAIL)
 
         resp = await client_with_db.delete(f"/api/v1/anomaly-types/{at.id}")
         assert resp.status_code == 204
@@ -502,8 +584,8 @@ class TestDeleteAnomalyType:
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
         """Não permite hard-delete de tipo referenciado por anomalias —
-        orientação ao admin é desativar via PATCH."""
-        admin = await _seed_user(db_session, email=ADMIN_EMAIL)
+        a orientação é desativar via PATCH."""
+        platform = await _seed_platform(db_session)
         at = await _seed_anomaly_type(db_session, code="in_use_block")
 
         # Seed mínimo de uma anomalia vinculada — precisa de Client + Session.
@@ -514,13 +596,13 @@ class TestDeleteAnomalyType:
             omie_app_secret_encrypted="0" * 32,
             omie_app_secret_iv="0" * 24,
             active=True,
-            created_by=admin.id,
+            created_by=platform.id,
         )
         db_session.add(client)
         await db_session.flush()
         sess = ReconciliationSession(
             client_id=client.id,
-            created_by=admin.id,
+            created_by=platform.id,
             omie_conta_id=1,
             reference_month=date(2026, 4, 1),
             date_tolerance_days=3,
@@ -538,7 +620,7 @@ class TestDeleteAnomalyType:
         db_session.add(anomaly)
         await db_session.flush()
 
-        await _login_as(client_with_db, ADMIN_EMAIL)
+        await _login_as(client_with_db, PLATFORM_EMAIL)
         resp = await client_with_db.delete(f"/api/v1/anomaly-types/{at.id}")
         assert resp.status_code == 409, resp.text
         body = resp.json()
@@ -548,8 +630,8 @@ class TestDeleteAnomalyType:
     async def test_404_when_id_missing(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
-        await _seed_user(db_session, email=ADMIN_EMAIL)
-        await _login_as(client_with_db, ADMIN_EMAIL)
+        await _seed_platform(db_session)
+        await _login_as(client_with_db, PLATFORM_EMAIL)
         ghost = "00000000-0000-0000-0000-000000000000"
         resp = await client_with_db.delete(f"/api/v1/anomaly-types/{ghost}")
         assert resp.status_code == 404

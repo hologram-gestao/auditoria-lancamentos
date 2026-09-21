@@ -17,6 +17,9 @@ function row(over: Partial<ClientCategoryItem> = {}): ClientCategoryItem {
     name: 'Fintech',
     tone: 'info',
     clients_count: 3,
+    // Toda categoria pertence a uma organização desde a 86e36ecqz.
+    organization_id: '0706eeb5-9718-4d03-bcda-ef615789e6ac',
+    organization_name: 'Hologram',
     ...over,
   };
 }
@@ -91,5 +94,51 @@ describe('ClientCategoriesTable', () => {
     expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ name: 'Varejo' }));
 
     await assertNoA11yViolations(container);
+  });
+});
+
+describe('ClientCategoriesTable — coluna Organização (86e36ed1d)', () => {
+  const rows = [
+    row(),
+    row({
+      id: '22222222-2222-4222-8222-222222222222',
+      name: 'Varejo',
+      organization_name: 'Prospecta',
+    }),
+  ];
+
+  it('para a PLATAFORMA, diz de quem é cada linha', async () => {
+    // Ela lê o catálogo de TODAS as organizações: sem a coluna, duas categorias
+    // homônimas de organizações diferentes viram duas linhas indistinguíveis.
+    const { container } = render(
+      <ClientCategoriesTable
+        rows={rows}
+        isLoading={false}
+        isError={false}
+        errorMessage=""
+        onEdit={noop}
+        onDelete={noop}
+        showOrganization
+      />,
+    );
+
+    expect(screen.getByRole('columnheader', { name: 'Organização' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'Prospecta' })).toBeInTheDocument();
+    await assertNoA11yViolations(container);
+  });
+
+  it('para o STAFF, a coluna não existe: repetiria a própria organização', () => {
+    render(
+      <ClientCategoriesTable
+        rows={rows}
+        isLoading={false}
+        isError={false}
+        errorMessage=""
+        onEdit={noop}
+        onDelete={noop}
+      />,
+    );
+
+    expect(screen.queryByRole('columnheader', { name: 'Organização' })).not.toBeInTheDocument();
   });
 });

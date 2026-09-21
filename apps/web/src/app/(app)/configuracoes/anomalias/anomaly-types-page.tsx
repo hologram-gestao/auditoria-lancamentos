@@ -6,9 +6,14 @@
  * Defesa em profundidade:
  *   - Middleware Next libera todas rotas autenticadas (não decodifica JWT) e
  *     NÃO é barreira de segurança (bypass por header — CVE-2025-29927).
- *   - Esta página (client component) degrada com `AccessDenied` para quem não
- *     é admin do sistema — gating presentacional, via `lib/authz`.
+ *   - Esta página (client component) degrada com `AccessDenied` para quem a
+ *     matriz não libera — gating presentacional, via `lib/authz`.
  *   - Backend bloqueia mutações com 403. É ele a autoridade.
+ *
+ * Desde a D3 final (86e36ed1d) a tela é da PLATAFORMA. O catálogo é uma tabela
+ * GLOBAL, compartilhada por todas as organizações: o admin de uma editaria o
+ * vocabulário que as outras usam. Ele continua LENDO os tipos onde eles
+ * importam (a tela de revisão), só não escreve aqui.
  *
  * Ordenação default (severidade crítica → moderada → info, depois name asc)
  * vem do backend (`anomaly_types/repository.py`); aqui não reordenamos no
@@ -35,7 +40,7 @@ import { useAnomalyTypesList } from '@/hooks/use-anomaly-types';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import type { AnomalyType } from '@/lib/api/anomaly-types';
 import { ApiError } from '@/lib/api/client';
-import { canManageSystemUsers, homePathFor } from '@/lib/authz';
+import { hasPermission, homePathFor } from '@/lib/authz';
 import { useAuthStore } from '@/stores/auth';
 
 const PAGE_SIZE = 100;
@@ -49,10 +54,13 @@ function normalize(value: string): string {
 
 export default function AnomalyTypesPage() {
   const currentUser = useAuthStore((s) => s.user);
-  // Matriz do R4 via `lib/authz` (Sprint 5): configurações do SISTEMA são do
-  // admin. Antes isto era um `router.replace('/clientes')` silencioso — que,
-  // para um usuário DE tenant, mandaria para outra rota que ele também não vê.
-  const canSee = canManageSystemUsers(currentUser);
+  // Matriz via `lib/authz`. Antes isto era um `router.replace('/clientes')`
+  // silencioso — que, para um usuário DE tenant, mandaria para outra rota que
+  // ele também não vê. O guard é a permissão DESTA tela (86e36ecwa), e é o que
+  // fez o item do menu e a rota sumirem JUNTOS quando a D3 (86e36ed1d) tirou o
+  // admin da célula: com o guard de outra permissão, o deep link ainda
+  // renderizaria a tela de escrita.
+  const canSee = hasPermission(currentUser, 'manage_anomaly_types');
 
   const [searchInput, setSearchInput] = useState('');
   const debouncedSearch = useDebouncedValue(searchInput, 300);
@@ -83,7 +91,7 @@ export default function AnomalyTypesPage() {
   if (!canSee) {
     return (
       <AccessDenied
-        message="As configurações do sistema são restritas ao administrador da Hologram."
+        message="O catálogo de tipos de anomalia é global do produto e só a plataforma o edita."
         backHref={homePathFor(currentUser)}
         backLabel="Voltar para o início"
       />
@@ -99,8 +107,9 @@ export default function AnomalyTypesPage() {
         <p className="text-muted-foreground text-sm">Configurações &gt; Tipos de Anomalia</p>
         <h1 className="text-2xl font-semibold">Tipos de Anomalia</h1>
         <p className="text-muted-foreground text-sm">
-          Gerencie o catálogo de tipos detectados durante a conciliação. Desativar impede que novas
-          anomalias do tipo sejam criadas; anomalias existentes permanecem visíveis.
+          Gerencie o catálogo de tipos detectados durante a conciliação. Ele é global: vale para
+          todas as organizações. Desativar impede que novas anomalias do tipo sejam criadas;
+          anomalias existentes permanecem visíveis.
         </p>
       </div>
 

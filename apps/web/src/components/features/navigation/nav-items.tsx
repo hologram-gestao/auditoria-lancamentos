@@ -11,6 +11,7 @@
 import {
   AlertTriangle,
   BookOpen,
+  Building2,
   Landmark,
   LayoutDashboard,
   ListChecks,
@@ -20,7 +21,7 @@ import {
   Users as UsersIcon,
 } from 'lucide-react';
 
-import { canManageSystemUsers, hasPermission, homePathFor, isClientScoped } from '@/lib/authz';
+import { hasPermission, homePathFor, isClientScoped, type Permission } from '@/lib/authz';
 import type { AuthenticatedUser } from '@/lib/contracts';
 
 export interface NavItem {
@@ -87,33 +88,61 @@ export function globalNavSections(user: AuthenticatedUser, pathname: string): Na
       ];
 
   const sections: NavSection[] = [{ items: main }];
-  if (canManageSystemUsers(user)) {
-    sections.push({
-      heading: 'Configurações',
-      items: [
-        {
-          href: '/configuracoes/usuarios',
-          label: 'Usuários',
-          icon: <Settings className="h-4 w-4" aria-hidden="true" />,
-          active: isPathActive(pathname, '/configuracoes/usuarios'),
-        },
-        {
-          href: '/configuracoes/anomalias',
-          label: 'Tipos de Anomalia',
-          icon: <AlertTriangle className="h-4 w-4" aria-hidden="true" />,
-          active: isPathActive(pathname, '/configuracoes/anomalias'),
-        },
-        {
-          href: '/configuracoes/categorias',
-          label: 'Categorias de Cliente',
-          icon: <Tags className="h-4 w-4" aria-hidden="true" />,
-          active: isPathActive(pathname, '/configuracoes/categorias'),
-        },
-      ],
-    });
+
+  // Configurações item a item pela MATRIZ (86e36ecwa): com organizações, o
+  // "quem vê Configurações" deixou de ser uma pergunta só. O admin da
+  // organização vê as três primeiras; a plataforma vê as quatro; o gerente não
+  // vê a seção — e ela some inteira quando nenhum item sobra, em vez de virar
+  // um cabeçalho órfão.
+  const settings = SETTINGS_ITEMS.filter((item) => hasPermission(user, item.permission)).map(
+    (item) => ({
+      href: item.href,
+      label: item.label,
+      icon: item.icon,
+      active: isPathActive(pathname, item.href),
+    }),
+  );
+  if (settings.length > 0) {
+    sections.push({ heading: 'Configurações', items: settings });
   }
   return sections;
 }
+
+/**
+ * Os itens de Configurações e a permissão que libera cada um — a lista existe
+ * separada para que "item novo" seja uma linha aqui, nunca um `if` a mais.
+ */
+const SETTINGS_ITEMS: ReadonlyArray<{
+  href: string;
+  label: string;
+  icon: React.ReactNode;
+  permission: Permission;
+}> = [
+  {
+    href: '/configuracoes/usuarios',
+    label: 'Usuários',
+    icon: <Settings className="h-4 w-4" aria-hidden="true" />,
+    permission: 'manage_org_users',
+  },
+  {
+    href: '/configuracoes/anomalias',
+    label: 'Tipos de Anomalia',
+    icon: <AlertTriangle className="h-4 w-4" aria-hidden="true" />,
+    permission: 'manage_anomaly_types',
+  },
+  {
+    href: '/configuracoes/categorias',
+    label: 'Categorias de Cliente',
+    icon: <Tags className="h-4 w-4" aria-hidden="true" />,
+    permission: 'manage_client_categories',
+  },
+  {
+    href: '/configuracoes/organizacoes',
+    label: 'Organizações',
+    icon: <Building2 className="h-4 w-4" aria-hidden="true" />,
+    permission: 'manage_platform',
+  },
+];
 
 /** Camada do CLIENTE: as seções internas de `/clientes/{id}/**`. */
 export function clientNavItems(
@@ -164,9 +193,11 @@ export function clientNavItems(
       active: isGlossary,
     },
   ];
-  // Matriz do R4: "Usuários" é do gerente do cliente e do admin do sistema. O
-  // gerente do sistema opera a carteira, mas não administra as pessoas de
-  // dentro do tenant.
+  // Matriz: "Usuários" é de quem gere as pessoas DO tenant — gerente do
+  // cliente, admin, plataforma e, desde a D2 (86e36ecjp), o gerente da
+  // organização nos clientes da CARTEIRA. O "da carteira" não é esta linha: é
+  // `resolve_client_access`, no servidor, que já decide se ele chega no cliente.
+  // O operador do cliente segue de fora.
   if (hasPermission(user, 'manage_client_users')) {
     items.push({
       href: usersHref,

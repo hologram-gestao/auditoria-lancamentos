@@ -11,6 +11,9 @@ Cobre:
       desfaz; a plataforma não cria cliente numa organização suspensa.
     - Eventos de uso: `organizacao_criada` e `organizacao_desativada` (uma
       linha por fato, só IDs e contagens).
+    - `GET /platform-admins`: quem administra a plataforma, só para a
+      plataforma, sem staff de organização na lista e sem ser engolida pela
+      rota `/{organization_id}`.
 """
 
 from __future__ import annotations
@@ -153,9 +156,79 @@ class TestRBAC:
             await client_with_db.post(BASE, json={"name": "Tentativa"}),
             await client_with_db.get(f"{BASE}/{org_id}"),
             await client_with_db.patch(f"{BASE}/{org_id}", json={"active": False}),
+            await client_with_db.get(f"{BASE}/platform-admins"),
         ):
             assert resp.status_code == 403, resp.text
             assert scene["org"].name not in resp.text
+
+
+class TestPlatformAdmins:
+    """`GET /platform-admins` — a única tela que mostra quem é plataforma.
+
+    Existe porque `GET /users` filtra `scope='system'` no próprio SELECT
+    (anti-IDOR da 86e36ecar) e o `users_count` de cada organização conta só o
+    staff dela: sem esta rota, nem a plataforma enxerga os pares dela.
+    """
+
+    async def test_sem_login_401(self, client_with_db: AsyncClient) -> None:
+        assert (await client_with_db.get(f"{BASE}/platform-admins")).status_code == 401
+
+    async def test_a_rota_literal_nao_e_lida_como_uuid(
+        self, client_with_db: AsyncClient, scene: dict[str, Any]
+    ) -> None:
+        """Regressão de ORDEM de declaração: se `/{organization_id}` viesse
+        antes, "platform-admins" seria parseado como UUID e a resposta seria
+        422 — verde no lint, quebrado na tela."""
+        await _login(client_with_db, scene["platform"].email)
+        resp = await client_with_db.get(f"{BASE}/platform-admins")
+        assert resp.status_code == 200, resp.text
+        assert resp.status_code != 422
+
+    async def test_lista_a_propria_plataforma_e_nenhum_staff_de_organizacao(
+        self, client_with_db: AsyncClient, scene: dict[str, Any]
+    ) -> None:
+        await _login(client_with_db, scene["platform"].email)
+        resp = await client_with_db.get(f"{BASE}/platform-admins")
+        assert resp.status_code == 200, resp.text
+
+        emails = {row["email"] for row in resp.json()["data"]}
+        assert scene["platform"].email in emails
+        # O complemento é o que prova o filtro: admin e gerente da organização
+        # e usuário de cliente NÃO são plataforma.
+        assert scene["admin"].email not in emails
+        assert scene["manager"].email not in emails
+        assert scene["operator"].email not in emails
+
+    async def test_plataforma_desativada_continua_aparecendo_marcada(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, scene: dict[str, Any]
+    ) -> None:
+        """Desativar não tira o escopo: quem responde "quem é plataforma?"
+        precisa mostrar a conta desativada, senão ela some da vista mantendo o
+        alcance no banco."""
+        outro = await _seed_user(
+            db_session,
+            email=f"plataforma-inativa-{scene['suffix']}@hologram.com.br",
+            role=UserRole.PLATFORM_ADMIN,
+            scope=UserScope.PLATFORM,
+        )
+        outro.active = False
+        await db_session.flush()
+
+        await _login(client_with_db, scene["platform"].email)
+        rows = (await client_with_db.get(f"{BASE}/platform-admins")).json()["data"]
+        por_email = {row["email"]: row for row in rows}
+        assert por_email[outro.email]["active"] is False
+        assert por_email[scene["platform"].email]["active"] is True
+
+    async def test_payload_e_enxuto_e_nao_carrega_hash_nem_tenant(
+        self, client_with_db: AsyncClient, scene: dict[str, Any]
+    ) -> None:
+        await _login(client_with_db, scene["platform"].email)
+        rows = (await client_with_db.get(f"{BASE}/platform-admins")).json()["data"]
+        assert rows, "a própria conta logada tem de estar na lista"
+        assert set(rows[0]) == {"id", "name", "email", "active", "created_at"}
+        # §3.2: hash de senha nunca sai em response, aqui inclusive.
+        assert "password_hash" not in rows[0]
 
 
 class TestCRUD:

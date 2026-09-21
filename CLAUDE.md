@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 **S0–S19 + Sprints 0–5 do agents-hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro de tenant é vazamento entre clientes — a Sprint 5 fechou 34/34 endpoints sensíveis e essa cobertura não pode regredir.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **62/62** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
 > **O que cada sprint do agents-hub entregou** (todas na `main`):
 >
@@ -36,7 +36,7 @@
 
 1. Analista faz upload de extrato/fatura → 2. IA (Claude) extrai movimentações → 3. Humano valida amostra → 4. Sistema busca lançamentos Omie e faz matching determinístico → 5. Humano revisa → 6. Relatório Excel gerado.
 
-**Não é multi-tenant de BPOs** — é uso interno da Hologram. Multi-cliente = múltiplos clientes finais da Hologram.
+**É multi-organização desde o épico 86e36ec0q** (até 09/2026 não era): a plataforma hospeda **organizações** (BPOs e escritórios de contabilidade), cada uma com os próprios clientes finais, staff e catálogo de categorias. A Hologram é a **primeira** organização, não a dona do sistema. "Multi-cliente" segue significando múltiplos clientes finais **de uma organização**. Ver §4.8.
 
 **Fontes da verdade:**
 
@@ -201,7 +201,7 @@
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
       (`PENDING_ENDPOINTS` está vazio: cobertura 62/62). Só
-      auth, tipos de anomalia, `test-connection`, `alert-test` e as 4 rotas de
+      auth, tipos de anomalia, `test-connection`, `alert-test` e as 5 rotas de
       `/organizations` (plataforma, sem dado de cliente) ficam fora, com motivo.
       Essa lista é o denominador da métrica de isolamento — endpoint fora dela é
       buraco que ninguém mede.
@@ -330,7 +330,13 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    `has_permission`; 13 permissões x 5 papéis, transcrita célula a célula em
    `tests/unit/test_authz_matrix.py`, com um teste que trava **a plataforma em
    toda linha**. No front, o espelho é `apps/web/src/lib/authz.ts` — **um**
-   helper, nunca `if (role === ...)` espalhado por componente.
+   helper, nunca `if (role === ...)` espalhado por componente — com a mesma
+   tabela transcrita em `src/lib/__tests__/authz.test.ts` (86e36ecwa): as duas
+   fontes divergindo é o que esse teste existe para pegar. A seção
+   **Configurações** do menu é montada item a item pela matriz
+   (`nav-items.tsx`), não por um "quem vê Configurações" único: o admin da
+   organização vê DOIS itens (Usuários e Categorias), a plataforma vê quatro
+   (Organizações e Tipos de Anomalia são dela), o gerente não vê a seção.
 
    | Ação                            | platform_admin | admin (org)      | manager (org)         | client_manager | client_operator |
    | ------------------------------- | -------------- | ---------------- | --------------------- | -------------- | --------------- |
@@ -344,14 +350,17 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    | Ver outro tenant                | ✅             | ✅ (própria org) | ✅ (carteira)         | ❌             | ❌              |
    | Gerir usuários da org           | ✅             | ✅ (própria org) | ❌                    | ❌             | ❌              |
    | Categorias de cliente (escrita) | ✅             | ✅ (própria org) | ❌                    | ❌             | ❌              |
-   | Tipos de anomalia (escrita)     | ✅             | ✅ (\*)          | ❌                    | ❌             | ❌              |
+   | Tipos de anomalia (escrita)     | ✅             | ❌               | ❌                    | ❌             | ❌              |
    | Gerir organizações              | ✅             | ❌               | ❌                    | ❌             | ❌              |
    | Teste de alerta                 | ✅             | ✅               | ❌                    | ❌             | ❌              |
 
    "(carteira)" e "(própria org)" **não** são células: são `resolve_client_access`
-   e os filtros de coleção. (\*) D3 final é só plataforma; o admin sai da célula
-   quando a tela de tipos de anomalia virar só-plataforma (onda 2, task
-   86e36ed1d) — tirar antes deixaria a tela atual com botões que o servidor nega.
+   e os filtros de coleção. **Tipos de anomalia é a única linha só-plataforma
+   além de "Gerir organizações"**: a taxonomia é uma tabela GLOBAL do produto, e
+   o admin de uma organização editaria o vocabulário que as outras usam (D3
+   final, 86e36ed1d). Ele continua LENDO o catálogo onde ele importa — a tela de
+   revisão —, só não escreve; e `?include_inactive=true` passou a ser silencioso
+   para ele, como já era para o gerente.
 
    **A UI não é barreira de segurança** — o backend é. Mas **mostrar ação que o
    servidor nega é defeito**: cada ❌ precisa de bloqueio no backend **e** de
@@ -616,6 +625,14 @@ ClickUp**, não no repo. `make sprints` lista o estado.
 | **6**  | Glossário e classificação por cliente      | `client_glossary_entries`, `clients.glossary_version`, `review_verdict`   |
 | **7**  | Lançamento de faturas no Omie              | `reconciliation_omie_postings`, `omie_posting/`, `OMIE_POSTING_ENABLED`   |
 
+**A camada de organizações NÃO foi uma sprint do hub.** Veio do épico ClickUp
+`86e36ec0q` (16–18/09/2026, 8 tasks em três ondas, plano em
+[Docs/PLANO_ORGANIZACOES.md](Docs/PLANO_ORGANIZACOES.md)) e deixou: tabela
+`organizations`, `organization_id` em `clients`/`users`/`client_categories`,
+`UserScope.PLATFORM`/`UserRole.PLATFORM_ADMIN`, `reach_filter`/`scoped_by_reach`,
+`resolve_organization_for_creation`/`resolve_organization_filter`,
+`modules/organizations/` e `scripts/promote_platform_admin.py`.
+
 ---
 
 ## 9. Comandos Frequentes
@@ -724,6 +741,16 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.36 — 18/09/2026. **A plataforma não conseguia ver quem é plataforma, e isso era consequência de uma correção certa.** A task 2 do épico fechou um IDOR real fazendo `GET /users` filtrar `scope='system'` no próprio SELECT — o admin de uma organização não pode alcançar a conta da plataforma. O efeito colateral que ninguém decidiu: a plataforma também deixou de ver os pares dela, e o `users_count` de cada organização conta só o staff dela (usuário de plataforma tem `organization_id` nulo e fica fora de todo total). Depois da promoção das contas reais, essas pessoas simplesmente somem da tela de Usuários. Nasceu `GET /api/v1/organizations/platform-admins` (`ManagePlatformDep`, payload enxuto `{id, name, email, active, created_at}`, sem paginação) e a seção SÓ-LEITURA "Administradores da plataforma" na tela de Organizações. Ela é só-leitura por construção, e é por isso que não virou filtro na tela de Usuários: promover e despromover é pelo script (Q3) e `PATCH /users/{id}` de linha de plataforma é 404, então ali as ações da linha e o botão de criar teriam de ser escondidos caso a caso — ação que o servidor nega é defeito (§4.9). A lista canônica **não muda** (62/62): a rota entra em `NON_TENANT_ENDPOINTS`, que passou de 4 para **5** rotas de `/organizations`. **Três defeitos desta entrega só apareceram no browser, e a forma deles é o que vale guardar:** (1) o fetcher devolve o ARRAY, não o envelope, porque o `apiGet` desembrulha `{ data }` quando `data` é a chave única — e `apiGet<T>` é genérico, então o tipo errado compila limpo; (2) o `json()` do mock do e2e JÁ envelopa, e o envelope duplicado derrubou a página inteira com "Application error", que o Playwright reporta como `element(s) not found` (o diagnóstico está no `error-context.md`, não na mensagem); (3) a seção nova disputou altura com o `flex-1` da tabela e a espremeu para UMA linha em 390px, com o gate VERDE, porque `toBeVisible` não distingue "fora do scroller" de "visível" — quem pegou foi comparar o PNG com o da entrega anterior. Encher a viewport só vale enquanto a tela couber nela: abaixo de `md`, altura natural e quem rola é o `<main>`. A skill `front-gate` ganhou as três regras, mais o `!s.unexpected` no guard da receita de container (o `N passed` do reporter de lista aparece mesmo com falha: uma rodada imprimiu `230 passed` nos três temas com `unexpected: 4` no JSON)._
+
+_Versão 1.35 — 18/09/2026. **A varredura de QA do épico de organizações (86e36ed4b) achou o primer afirmando o CONTRÁRIO do código, em dois lugares.** A §1 dizia "**Não é multi-tenant de BPOs** — é uso interno da Hologram": era verdade até 09/2026 e deixou de ser na PRIMEIRA migration do épico. A plataforma hospeda organizações, e a Hologram é a primeira delas, não a dona do sistema — um agent lendo só a §1 escreveria endpoint sem dimensão de organização, que é vazamento entre BPOs. A nota ⚠️ do topo dizia que "a Sprint 5 fechou **34/34** endpoints sensíveis": número de agosto, enquanto a §3.15 já dizia 62/62 desde a task 4 do épico — o arquivo se contradizia havia duas semanas. As duas frases agora dizem a lei atual, e a contagem vem com o `grep` ao lado, como já acontece na §3.15 e na §4.1. A §8 ganhou o registro de que a camada de organizações **não** foi sprint do hub, com o que ela deixou no código. E `apps/api/docs/endpoints-sensiveis-sprint5.md` foi regenerado: estava uma task atrasado, com as três linhas de `anomaly-types` ainda dizendo "escrita pela matriz" depois que a escrita virou só-plataforma na 86e36ed1d._
+
+_Versão 1.34 — 18/09/2026. **O primeiro CI da onda 2 reprovou e achou um defeito de contraste que estava na `main` havia semanas.** O `develop → main` derrubou os jobs `web_a11y` do escuro e do Hologram: o botão destrutivo do diálogo "Suspender organização" media **3,95:1** (mínimo 4,5). A causa não é da task 7 nem da 6: `hover:bg-destructive/90` compõe o vermelho com a superfície por **alfa**, e nos temas escuros, onde o rótulo do destrutivo é quase preto (`0 0% 9%`), escurecer o fundo aproxima os dois. Medindo todos os hovers com alfa contra os tokens reais, o **badge** destrutivo reprovava nos TRÊS temas (4,49 / 3,31 / 3,53); linha de tabela e demais variantes passam com folga. Correção: nasceu `--destructive-hover`, **sólido**, nos três blocos (escurece no claro, clareia no escuro e no Hologram — 7,68 / 5,63 / 6,00), e botão e badge passaram a usá-lo. **A regra nova vale para todo hover:** cor mesclada não é token e nenhum teste a trava, então estado de hover pede token próprio e linha em `PAIRS` do `theme-contrast.test.ts` (que foi de 54 para 57 asserções). **Por que passou três vezes no gate local e só o CI pegou:** o axe só enxerga o `:hover` se o ponteiro estiver sobre o elemento no instante do scan, e o `.click()` anterior deixava o ponteiro numa coordenada que, em 390px, calhava de cair sobre o botão — poucos pixels de layout decidiam. O e2e passou a fazer `hover()` **explícito** antes do `analyze`; com o alfa de volta, ele reprova nas quatro combinações de viewport e projeto, e não em uma só. §7 e a skill `front-gate` atualizadas._
+
+_Versão 1.33 — 18/09/2026. **As telas existentes ficaram cientes de organização e a onda 2 fechou (task 86e36ed1d, última do front do épico 86e36ec0q).** A mudança que não é de front: `MANAGE_ANOMALY_TYPES` passou de `_ADMINS` para `_PLATFORM_ONLY` — a taxonomia de anomalias é uma tabela GLOBAL do produto, e o admin de UMA organização editaria o vocabulário que as outras usam (D3 final). A célula e a tela mudaram na MESMA entrega, porque item de menu e rota consultam a mesma permissão: tirar a célula antes teria deixado botões que o servidor nega, e depois teria deixado a tela sem dono. `?include_inactive=true` virou silencioso para o admin, como já era para o gerente. No front, a plataforma ganhou **coluna + filtro de Organização** nas listas de clientes, usuários e categorias (server-side, via `?organizationId=` — a decisão é `resolve_organization_filter`) e **seletor de organização de destino** nos três formulários de criação, com uma fábrica de schema só (`organizationTargetField`) espelhando `resolve_organization_for_creation`: obrigatório para a plataforma, ausente para o staff. Criar e filtrar são assimétricos de propósito — a organização SUSPENSA aparece no filtro (os clientes dela existem) e não no seletor de criação (o backend responderia 409). O helper datado `canCreateWithoutOrganizationPicker` foi APAGADO com os três usos: as telas voltaram a perguntar só à matriz, e quem recuperou os botões de criar foi a PLATAFORMA (o gerente nunca os perdeu — o helper só excluía escopo de plataforma). Dois defeitos latentes caíram junto: o badge de papel era um ternário `isAdmin ? 'Admin' : 'Gerente'` (o `else` rotularia qualquer papel novo como gerente) e virou `Record` exaustivo sobre a whitelist do contrato; e a seção "Gerentes com acesso" filtrava `role === 'manager'` no navegador sobre a primeira página de `/users` — com N organizações ofereceria gerente de outra org, que o backend recusa com o MESMO 400 de "não é gerente" (anti-enumeração), então passou a perguntar `?role=manager&organizationId=<org do cliente>`. Copy neutra em 6 strings de tela de DADO; login, header, tema e logomark não mudaram (D4). §4.9 atualizada: a linha de tipos de anomalia perdeu o "(\*)" e o admin perdeu a célula._
+
+_Versão 1.32 — 18/09/2026. **O front aprendeu a camada de organizações (task 86e36ecwa, onda 2 do épico 86e36ec0q).** O contrato foi regenerado e o `Record<UserRole, …>` de `lib/authz.ts` quebrou a compilação até a matriz ganhar a coluna `platform_admin` — a armadilha desejada. O espelho do front virou 13 × 5, com `isStaff`, `canAccessClient` liberando a plataforma, `canManageSystemUsers` consultando `manage_org_users` e `organizationLabel` ("Plataforma" ou o nome da organização, que o header agora mostra ao lado do papel). Nasceu `/configuracoes/organizacoes` (só `manage_platform`): lista paginada com as duas contagens, criar, renomear e suspender/reativar, com a consequência dita ANTES de confirmar. A seção Configurações do menu passou a ser montada item a item pela matriz. ⚠️ **Três testes que gravavam a regra ANTIGA foram corrigidos**, não a regra: a D2 (86e36ecjp, na `main` desde 17/09) deu ao gerente da organização a célula `manage_client_users`, então "Usuários" dentro do cliente passa a aparecer para ele — o espelho do front seguia dizendo que não. §4.9 atualizada; âncoras da skill `front-gate` recolhidas._
 
 _Versão 1.31 — 17/09/2026. **As rotas existentes ficaram org-aware e a onda 1 fechou (task 86e36ecqz, última do back do épico 86e36ec0q).** `GET /users` ganhou `?organizationId=` e `?role=` e passou a dizer a organização de cada staff (`scope`, `organization_id`, `organization_name`); `POST /users` aceita `organization_id` só da plataforma (obrigatório para ela; o admin cria na própria e payload divergente é 403); `GET /clients` aceita `?organizationId=` e cada cliente traz `organization {id, name}`; a categoria de um cliente é validada no catálogo DA org dele (outra org = o mesmo 400 de inexistente); o catálogo de categorias virou por organização de ponta a ponta (leitura pela org da LINHA, plataforma todas, escrita na org do ator, alvo por PK alheio = 404, unicidade por org) e as 4 rotas saíram de `PENDING_ENDPOINTS` — cobertura 62/62. Duas decisões novas e únicas em `authz.py`: `resolve_organization_for_creation` e `resolve_organization_filter`. O rótulo de autoria virou "Equipe {org do cliente}" (a org vem de `CurrentUser.organization_name`; a Hologram segue "Equipe Hologram"). A sessão por PK sai do `SELECT` restrita ao ALCANCE (`scoped_by_reach`): o admin/gerente de outra organização nem carrega a linha, e `audit_session_tenant_miss` pergunta a `resolve_client_access` e grava a negação. Nasceu `scripts/promote_platform_admin.py` (por e-mail, idempotente, recusa tenant, `--dry-run`) — o único caminho para `platform_admin`. §3.15 e §4.8 atualizadas. **Em dev nada muda de visível** enquanto só a Hologram existir; a promoção dos cinco só depois da onda 2._
 
