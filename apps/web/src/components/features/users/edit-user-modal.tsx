@@ -13,7 +13,7 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2 } from 'lucide-react';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 
@@ -57,9 +57,24 @@ interface EditUserModalProps {
   onOpenChange: (open: boolean) => void;
   user: User | null;
   currentUserId: string;
+  /**
+   * Só a PLATAFORMA passa isto (86e3bvbfx): mover gente entre organizações é
+   * escrita cross-org, e o servidor recusa para qualquer outro papel. Sem a
+   * prop, a seção nem é montada — ação que o servidor nega não aparece (§4.9).
+   * Quem abre o diálogo de transferência é a PÁGINA, depois de fechar este:
+   * dois diálogos empilhados do Radix marcam o fundo com `aria-hidden` e o
+   * segundo fica inacessível por teclado.
+   */
+  onTransfer?: (user: User) => void;
 }
 
-export function EditUserModal({ open, onOpenChange, user, currentUserId }: EditUserModalProps) {
+export function EditUserModal({
+  open,
+  onOpenChange,
+  user,
+  currentUserId,
+  onTransfer,
+}: EditUserModalProps) {
   const updateMutation = useUpdateUser(user?.id ?? '');
 
   const form = useForm<UpdateUserFormValues>({
@@ -102,10 +117,27 @@ export function EditUserModal({ open, onOpenChange, user, currentUserId }: EditU
   const isSubmitting = updateMutation.isPending;
   const isSelf = user?.id === currentUserId;
   const roleSelectDisabled = isSubmitting || (isSelf && user?.role === 'admin');
+  // Transferência pendente (86e3bvbfx): o alvo fica guardado até este diálogo
+  // TERMINAR de fechar. Abrir o outro no mesmo tick deixaria o FocusScope
+  // daqui devolver o foco ao botão da tabela, por baixo do modal novo, quando
+  // o Radix desmontasse este ~200ms depois.
+  const pendingTransfer = useRef<User | null>(null);
+  const isDirty = form.formState.isDirty;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="sm:max-w-md"
+        onCloseAutoFocus={(event) => {
+          const target = pendingTransfer.current;
+          if (!target || !onTransfer) return;
+          // O foco não volta ao gatilho: quem o recebe é o diálogo de
+          // transferência, que abre agora, com este já fora da árvore.
+          event.preventDefault();
+          pendingTransfer.current = null;
+          onTransfer(target);
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Editar Usuário</DialogTitle>
           <DialogDescription>
@@ -180,6 +212,34 @@ export function EditUserModal({ open, onOpenChange, user, currentUserId }: EditU
                 </FormItem>
               )}
             />
+
+            {onTransfer && user ? (
+              <>
+                <div className="border-border flex flex-col gap-2 rounded-md border px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-muted-foreground text-xs">
+                    Organização atual:{' '}
+                    <span className="text-foreground font-medium">{user.organization_name}</span>
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={isSubmitting || isDirty}
+                    onClick={() => {
+                      pendingTransfer.current = user;
+                      onOpenChange(false);
+                    }}
+                  >
+                    Transferir de organização
+                  </Button>
+                </div>
+                {isDirty ? (
+                  <p className="text-muted-foreground -mt-2 text-xs">
+                    Salve ou descarte as alterações antes de transferir.
+                  </p>
+                ) : null}
+              </>
+            ) : null}
 
             <DialogFooter className="gap-2 sm:gap-2">
               <Button

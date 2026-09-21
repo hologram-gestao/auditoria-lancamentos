@@ -7,7 +7,7 @@
  *   - 409 com `code = CONFLICT` na criação/edição com email duplicado;
  *     `userMessage` já vem em PT-BR ("Este e-mail já está em uso.").
  */
-import type { SystemUserRole, UserResponse } from '@/lib/contracts';
+import type { SystemUserRole, UserResponse, TransferUserRequest } from '@/lib/contracts';
 
 import { apiGet, apiPatch, apiPost } from './client';
 
@@ -75,6 +75,12 @@ export interface UpdateUserPayload {
   role?: UserRoleValue;
 }
 
+/**
+ * Transferência de staff entre organizações (86e3bvbfx) — só a plataforma.
+ * O tipo vem do contrato: só a organização de destino, nunca o papel.
+ */
+export type TransferUserPayload = TransferUserRequest;
+
 function buildQuery(params: ListUsersParams): string {
   const sp = new URLSearchParams();
   sp.set('page', String(params.page ?? 1));
@@ -110,6 +116,16 @@ export async function updateUser(id: string, payload: UpdateUserPayload): Promis
 
 export async function activateUser(id: string): Promise<User> {
   return apiPost<User>(`/api/v1/users/${id}/activate`);
+}
+
+/**
+ * Move o staff para outra organização. NÃO é um PATCH de campo: o backend
+ * recusa (409) enquanto a pessoa for responsável de cliente aberto, remove a
+ * carteira de colaborador e os favoritos cross-org na mesma transação, e
+ * mantém papel e histórico. Só a plataforma; para o resto é 403.
+ */
+export async function transferUser(id: string, payload: TransferUserPayload): Promise<User> {
+  return apiPost<User>(`/api/v1/users/${id}/transfer`, payload);
 }
 
 export async function deactivateUser(id: string): Promise<User> {

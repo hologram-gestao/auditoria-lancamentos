@@ -27,6 +27,7 @@ const listState = {
 /** Último `params` que a tela mandou ao hook — prova o filtro server-side. */
 let lastQueryParams: Record<string, unknown> | undefined;
 const createMock = vi.fn();
+const transferMock = vi.fn();
 
 vi.mock('@/hooks/use-users', () => ({
   useUsersList: (params: Record<string, unknown>) => {
@@ -35,6 +36,7 @@ vi.mock('@/hooks/use-users', () => ({
   },
   useCreateUser: () => ({ mutateAsync: createMock, isPending: false, reset: vi.fn() }),
   useUpdateUser: () => ({ mutateAsync: vi.fn(), isPending: false, reset: vi.fn() }),
+  useTransferUser: () => ({ mutateAsync: transferMock, isPending: false, reset: vi.fn() }),
   useActivateUser: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDeactivateUser: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
@@ -63,6 +65,7 @@ vi.mock('sonner', () => ({ toast: { success: toastSuccess, error: toastError } }
 
 // Imports do SUT DEPOIS dos `vi.mock`.
 import UsersPage from '@/app/(app)/configuracoes/usuarios/page';
+import { ApiError } from '@/lib/api/client';
 import type { OrganizationItem } from '@/lib/api/organizations';
 import type { User } from '@/lib/api/users';
 import type { AuthenticatedUser } from '@/lib/contracts';
@@ -152,6 +155,9 @@ beforeEach(() => {
   organizationsState.isLoading = false;
   lastQueryParams = undefined;
   createMock.mockReset().mockResolvedValue(staff());
+  transferMock
+    .mockReset()
+    .mockResolvedValue(staff({ organization_id: PROSPECTA.id, organization_name: PROSPECTA.name }));
   toastSuccess.mockReset();
   toastError.mockReset();
 });
@@ -259,5 +265,89 @@ describe('UserRoleBadge — rótulo por papel, não "admin ou o resto"', () => {
     const table = screen.getByRole('table');
     expect(within(table).getByText('Gerente')).toBeInTheDocument();
     expect(within(table).getByText('Administrador')).toBeInTheDocument();
+  });
+});
+
+describe('Transferir de organização (86e3bvbfx) — só a plataforma', () => {
+  async function abrirEdicaoDe(ui: ReturnType<typeof userEvent.setup>, nome: string) {
+    await ui.click(screen.getByRole('button', { name: `Editar ${nome}` }));
+    return await screen.findByRole('dialog', { name: 'Editar Usuário' });
+  }
+
+  it('a plataforma vê a ação no editar, com a organização atual dita', async () => {
+    authState.user = PLATFORM;
+    const ui = userEvent.setup();
+    render(<UsersPage />);
+
+    const dialog = await abrirEdicaoDe(ui, 'Bruna R.');
+    expect(within(dialog).getByText('Hologram')).toBeVisible();
+    expect(within(dialog).getByRole('button', { name: 'Transferir de organização' })).toBeVisible();
+  });
+
+  it('o admin da organização NÃO vê a ação: o servidor negaria com 403', async () => {
+    authState.user = ORG_ADMIN;
+    const ui = userEvent.setup();
+    render(<UsersPage />);
+
+    const dialog = await abrirEdicaoDe(ui, 'Bruna R.');
+    expect(
+      within(dialog).queryByRole('button', { name: 'Transferir de organização' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('abre o diálogo próprio (o de editar fecha antes), exclui a organização atual e manda o destino no payload', async () => {
+    authState.user = PLATFORM;
+    const ui = userEvent.setup();
+    render(<UsersPage />);
+
+    const edit = await abrirEdicaoDe(ui, 'Bruna R.');
+    await ui.click(within(edit).getByRole('button', { name: 'Transferir de organização' }));
+
+    const transfer = await screen.findByRole('dialog', { name: 'Transferir de organização' });
+    // Um diálogo só: o de editar saiu de cena antes de este abrir.
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Editar Usuário' })).not.toBeInTheDocument(),
+    );
+    // A consequência é dita ANTES de confirmar.
+    expect(transfer).toHaveTextContent(/carteira em clientes abertos/i);
+
+    await ui.click(within(transfer).getByRole('combobox', { name: 'Organização de destino' }));
+    // Bruna é da Hologram: a Hologram NÃO é opção (o backend responderia 409).
+    expect(screen.queryByRole('option', { name: 'Hologram' })).not.toBeInTheDocument();
+    await ui.click(await screen.findByRole('option', { name: 'Prospecta' }));
+    await ui.click(within(transfer).getByRole('button', { name: 'Transferir' }));
+
+    await waitFor(() =>
+      expect(transferMock).toHaveBeenCalledWith({ organization_id: PROSPECTA.id }),
+    );
+    expect(toastSuccess).toHaveBeenCalledWith(
+      expect.stringContaining('agora é da organização Prospecta'),
+    );
+  });
+
+  it('o 409 do responsável de cliente aberto fica INLINE no campo, dizendo o que fazer', async () => {
+    authState.user = PLATFORM;
+    transferMock.mockReset().mockRejectedValue(
+      new ApiError(409, {
+        code: 'CONFLICT',
+        message: 'x',
+        userMessage:
+          'Este usuário é o gerente responsável de 2 clientes abertos. Defina outro responsável antes de transferir.',
+      }),
+    );
+    const ui = userEvent.setup();
+    render(<UsersPage />);
+
+    const edit = await abrirEdicaoDe(ui, 'Bruna R.');
+    await ui.click(within(edit).getByRole('button', { name: 'Transferir de organização' }));
+    const transfer = await screen.findByRole('dialog', { name: 'Transferir de organização' });
+    await ui.click(within(transfer).getByRole('combobox', { name: 'Organização de destino' }));
+    await ui.click(await screen.findByRole('option', { name: 'Prospecta' }));
+    await ui.click(within(transfer).getByRole('button', { name: 'Transferir' }));
+
+    expect(await within(transfer).findByText(/Defina outro responsável/)).toBeVisible();
+    // Continua aberto: a pessoa lê o que fazer e vai fazer.
+    expect(screen.getByRole('dialog', { name: 'Transferir de organização' })).toBeVisible();
+    expect(toastError).not.toHaveBeenCalled();
   });
 });

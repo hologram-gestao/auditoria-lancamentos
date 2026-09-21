@@ -508,7 +508,10 @@ construção (comportamento idêntico); (d) a promoção dos 5 acontece **só** 
 8. **`user_client_favorites` e `reconciliation_sessions.created_by`** são pares
    usuário×cliente: um usuário movido de org deixaria linhas cross-org. Não há operação
    "mover de org" nesta sprint; o script de promoção só muda para plataforma (que alcança
-   tudo). Registrar como limite.
+   tudo). Registrar como limite. **Atualização 21/09/2026 (task 86e3bvbfx): a operação
+   existe — `POST /users/{id}/transfer`, só plataforma — e trata os pares: carteira de
+   colaborador em cliente aberto e favoritos cross-org são removidos; responsável de cliente
+   aberto recusa (409); `created_by`/`assigned_by` ficam como histórico.**
 9. **Seeds e e2e reais** (`a11y.spec.ts`) usam `admin@hologram.com.br`, que continua admin
    da org Hologram: nada quebra.
 10. **`SystemUserRole`** segue `admin|manager`: `platform_admin` **não** entra em nenhuma

@@ -68,6 +68,8 @@ export type SystemUserRole = Schemas['SystemUserRole'];
  * estreita só o `role` (o OpenAPI o expõe como `string`).
  */
 export type UserResponse = Schemas['UserResponse'];
+/** Body de `POST /users/{id}/transfer` — só plataforma (86e3bvbfx). */
+export type TransferUserRequest = Schemas['TransferUserRequest'];
 
 // ---------------------------------------------------------------------------
 // Organizações — camada multi-BPO (épico 86e36ec0q)
