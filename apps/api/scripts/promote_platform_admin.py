@@ -21,7 +21,10 @@ O que NÃO faz:
       desativado; avisa).
     - Não apaga `client_assignments` (plano §8.8: a plataforma alcança tudo
       pela matriz; as linhas de carteira que sobrarem só afetam a exibição
-      "gerente responsável" — avisa a contagem).
+      "gerente responsável" — avisa a contagem). Conta só carteira de cliente
+      ABERTO: a de cliente encerrado fica de propósito (§4.12, retenção) e não
+      dá para mexer (toda escrita em encerrado é 409), então avisá-la seria
+      pendência sem ação possível.
     - Não loga nem imprime nada além do e-mail e do resultado (§3.3).
 
 ⚠️ Promover cedo demais tranca a conta fora dos clientes: o front só ganha a
@@ -55,7 +58,7 @@ from sqlalchemy import func, select  # noqa: E402
 
 from app.core.config import get_settings  # noqa: E402
 from app.core.logging import get_logger, setup_logging  # noqa: E402
-from app.db.models import ClientAssignment, User, UserRole, UserScope  # noqa: E402
+from app.db.models import Client, ClientAssignment, User, UserRole, UserScope  # noqa: E402
 from app.db.session import close_db, get_session_factory, init_db  # noqa: E402
 
 if TYPE_CHECKING:
@@ -106,12 +109,15 @@ async def promote_platform_admin(
             return PromotionResult(email=normalized, outcome=PromotionOutcome.REFUSED_NOT_FOUND)
         if user.scope == UserScope.CLIENT.value:
             return PromotionResult(email=normalized, outcome=PromotionOutcome.REFUSED_CLIENT_SCOPE)
+        # Só cliente ABERTO: a carteira de cliente encerrado é retida de
+        # propósito (§4.12) e não aceita escrita (409) — não há o que fazer
+        # com ela, então não é aviso.
         assignments_left = int(
             (
                 await db.execute(
-                    select(func.count(ClientAssignment.id)).where(
-                        ClientAssignment.user_id == user.id
-                    )
+                    select(func.count(ClientAssignment.id))
+                    .join(Client, Client.id == ClientAssignment.client_id)
+                    .where(ClientAssignment.user_id == user.id, Client.closed_at.is_(None))
                 )
             ).scalar_one()
         )
@@ -154,8 +160,9 @@ def _report(result: PromotionResult, *, dry_run: bool) -> None:
         print("  aviso: a conta está DESATIVADA — continua desativada.")
     if result.assignments_left:
         print(
-            f"  aviso: {result.assignments_left} linha(s) de carteira ficaram "
-            "(a plataforma alcança tudo pela matriz; só afeta a exibição de responsável)."
+            f"  aviso: {result.assignments_left} linha(s) de carteira em cliente ABERTO "
+            "ficaram (a plataforma alcança tudo pela matriz; só afeta a exibição de "
+            "responsável)."
         )
     log.info(
         "platform_admin_promotion",
