@@ -11,11 +11,25 @@
  *     lista dele é da mesma organização, e a coluna só repetiria o nome;
  *   - o formulário de criação só mostra o seletor de organização para a
  *     plataforma (o admin cria na própria, pela LINHA dele no servidor);
- *   - o badge de perfil rotula pelo papel, não por "admin ou o resto".
+ *   - o badge de perfil rotula pelo papel, não por "admin ou o resto";
+ *   - a aba "Administradores da plataforma" (86e3chrxw) existe SÓ para a
+ *     plataforma, vai na URL (`?tab=plataforma`) e é só-leitura por construção.
  */
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const replaceMock = vi.fn();
+let currentSearch = '';
+
+// A aba ativa mora na URL: o mock devolve a querystring que o teste escolher e
+// registra o `replace` — o "clique → URL" e o "URL → aba" são provados em
+// separado, como na lista de conciliações.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: replaceMock, push: vi.fn() }),
+  usePathname: () => '/configuracoes/usuarios',
+  useSearchParams: () => new URLSearchParams(currentSearch),
+}));
 
 const listState = {
   data: undefined as { data: User[]; pagination: Record<string, number> } | undefined,
@@ -26,12 +40,15 @@ const listState = {
 };
 /** Último `params` que a tela mandou ao hook — prova o filtro server-side. */
 let lastQueryParams: Record<string, unknown> | undefined;
+/** O `enabled` da última chamada — prova que a aba da plataforma não paga o request de staff. */
+let lastListEnabled: boolean | undefined;
 const createMock = vi.fn();
 const transferMock = vi.fn();
 
 vi.mock('@/hooks/use-users', () => ({
-  useUsersList: (params: Record<string, unknown>) => {
+  useUsersList: (params: Record<string, unknown>, options?: { enabled?: boolean }) => {
     lastQueryParams = params;
+    lastListEnabled = options?.enabled;
     return listState;
   },
   useCreateUser: () => ({ mutateAsync: createMock, isPending: false, reset: vi.fn() }),
@@ -45,8 +62,14 @@ const organizationsState = {
   data: undefined as { data: OrganizationItem[] } | undefined,
   isLoading: false,
 };
+const platformAdminsState = {
+  data: undefined as PlatformAdminItem[] | undefined,
+  isLoading: false,
+  isError: false,
+};
 vi.mock('@/hooks/use-organizations', () => ({
   useOrganizationsList: () => organizationsState,
+  usePlatformAdminsList: () => platformAdminsState,
 }));
 
 const authState = { user: null as AuthenticatedUser | null };
@@ -64,9 +87,9 @@ const { toastSuccess, toastError } = vi.hoisted(() => ({
 vi.mock('sonner', () => ({ toast: { success: toastSuccess, error: toastError } }));
 
 // Imports do SUT DEPOIS dos `vi.mock`.
-import UsersPage from '@/app/(app)/configuracoes/usuarios/page';
+import UsersPage from '@/app/(app)/configuracoes/usuarios/users-page';
 import { ApiError } from '@/lib/api/client';
-import type { OrganizationItem } from '@/lib/api/organizations';
+import type { OrganizationItem, PlatformAdminItem } from '@/lib/api/organizations';
 import type { User } from '@/lib/api/users';
 import type { AuthenticatedUser } from '@/lib/contracts';
 
@@ -107,6 +130,17 @@ function staff(over: Partial<User> = {}): User {
     active: true,
     created_at: '2026-06-01T12:00:00Z',
     updated_at: '2026-06-01T12:00:00Z',
+    ...over,
+  };
+}
+
+function platformAdmin(over: Partial<PlatformAdminItem> = {}): PlatformAdminItem {
+  return {
+    id: 'pa-1',
+    name: 'Pedro H.',
+    email: 'pedro@hologramgestao.com',
+    active: true,
+    created_at: '2026-09-18T12:00:00Z',
     ...over,
   };
 }
@@ -153,7 +187,16 @@ beforeEach(() => {
     data: [organization(), organization({ id: PROSPECTA.id, name: PROSPECTA.name })],
   };
   organizationsState.isLoading = false;
+  platformAdminsState.data = [
+    platformAdmin(),
+    platformAdmin({ id: 'pa-2', name: 'Laio S.', email: 'laio@hologramgestao.com', active: false }),
+  ];
+  platformAdminsState.isLoading = false;
+  platformAdminsState.isError = false;
+  currentSearch = '';
+  replaceMock.mockReset();
   lastQueryParams = undefined;
+  lastListEnabled = undefined;
   createMock.mockReset().mockResolvedValue(staff());
   transferMock
     .mockReset()
@@ -349,5 +392,134 @@ describe('Transferir de organização (86e3bvbfx) — só a plataforma', () => {
     // Continua aberto: a pessoa lê o que fazer e vai fazer.
     expect(screen.getByRole('dialog', { name: 'Transferir de organização' })).toBeVisible();
     expect(toastError).not.toHaveBeenCalled();
+  });
+});
+
+describe('Administradores da plataforma — aba própria, só para a plataforma (86e3chrxw)', () => {
+  // O nome da região rolável é DIFERENTE do rótulo da aba de propósito: a
+  // busca por papel e nome casa por substring, e "Administradores da
+  // plataforma" acertaria a aba e a região ao mesmo tempo.
+  function regiao() {
+    return screen.getByRole('region', { name: 'Lista de administradores da plataforma' });
+  }
+
+  it('a plataforma vê as duas abas, começa no staff e o clique grava a aba na URL', async () => {
+    authState.user = PLATFORM;
+    const ui = userEvent.setup();
+    render(<UsersPage />);
+
+    expect(screen.getAllByRole('tab')).toHaveLength(2);
+    expect(screen.getByRole('tab', { name: 'Staff das organizações' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    // A lista da plataforma NÃO está montada na aba de staff: nem o request
+    // dela é pago, nem o nome aparece fora da aba.
+    expect(screen.getByText('Bruna R.')).toBeVisible();
+    expect(screen.queryByText('Pedro H.')).not.toBeInTheDocument();
+
+    await ui.click(screen.getByRole('tab', { name: 'Administradores da plataforma' }));
+    expect(replaceMock).toHaveBeenCalledWith('/configuracoes/usuarios?tab=plataforma', {
+      scroll: false,
+    });
+  });
+
+  it('?tab=plataforma: a tabela lista nome, e-mail, status e data — e nenhuma ação', () => {
+    authState.user = PLATFORM;
+    currentSearch = 'tab=plataforma';
+    render(<UsersPage />);
+
+    expect(screen.getByRole('tab', { name: 'Administradores da plataforma' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    const lista = regiao();
+    expect(within(lista).getByText('Pedro H.')).toBeVisible();
+    expect(within(lista).getByText('pedro@hologramgestao.com')).toBeVisible();
+    expect(within(lista).getByText('Laio S.')).toBeVisible();
+    // Desativar não tira o escopo: a conta continua alcançando tudo se for
+    // reativada, então esconder a linha seria pior do que marcá-la.
+    expect(within(lista).getByText('Inativo')).toBeVisible();
+    expect(within(lista).getByText('Ativo')).toBeVisible();
+    // Os dois foram promovidos no mesmo dia: a data aparece duas vezes.
+    expect(within(lista).getAllByText('18 de set de 2026')).toHaveLength(2);
+    // SÓ-LEITURA por construção: `PATCH /users/{id}` responde 404 para linha
+    // de plataforma, e promover ou despromover é só pelo script. Nem coluna
+    // de ações, nem "Novo Usuário" nesta aba — botão aqui seria ação que o
+    // servidor nega (§4.9).
+    expect(within(lista).queryAllByRole('button')).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: 'Novo Usuário' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Bruna R.')).not.toBeInTheDocument();
+    // A lista de staff não é consultada nesta aba.
+    expect(lastListEnabled).toBe(false);
+  });
+
+  it('diz que a entrada e a saída são pelo script, não por esta tela', () => {
+    authState.user = PLATFORM;
+    currentSearch = 'tab=plataforma';
+    render(<UsersPage />);
+
+    expect(screen.getByText(/script de promoção/i)).toBeVisible();
+  });
+
+  it('voltar para o staff LIMPA o parâmetro: ?tab=staff seria ruído na URL', async () => {
+    authState.user = PLATFORM;
+    currentSearch = 'tab=plataforma';
+    const ui = userEvent.setup();
+    render(<UsersPage />);
+
+    await ui.click(screen.getByRole('tab', { name: 'Staff das organizações' }));
+    expect(replaceMock).toHaveBeenCalledWith('/configuracoes/usuarios', { scroll: false });
+  });
+
+  it('o admin da organização não vê abas, e ?tab=plataforma é ignorado em silêncio', () => {
+    // Só a plataforma pode saber quem é plataforma (a rota é
+    // `ManagePlatformDep`). O deep link não vira AccessDenied porque a página
+    // em si ele pode ver: cai na vista única, a de sempre.
+    authState.user = ORG_ADMIN;
+    currentSearch = 'tab=plataforma';
+    render(<UsersPage />);
+
+    expect(screen.queryAllByRole('tab')).toHaveLength(0);
+    expect(screen.queryByText('Pedro H.')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('region', { name: 'Lista de administradores da plataforma' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Novo Usuário' })).toBeVisible();
+    expect(screen.getByText('Bruna R.')).toBeVisible();
+  });
+
+  it('carregando: não finge lista vazia', () => {
+    authState.user = PLATFORM;
+    currentSearch = 'tab=plataforma';
+    platformAdminsState.data = undefined;
+    platformAdminsState.isLoading = true;
+    render(<UsersPage />);
+
+    expect(within(regiao()).getByText('Carregando...')).toBeVisible();
+    expect(within(regiao()).queryByText('Pedro H.')).not.toBeInTheDocument();
+  });
+
+  it('erro: diz que falhou, em vez de parecer que não há ninguém', () => {
+    authState.user = PLATFORM;
+    currentSearch = 'tab=plataforma';
+    platformAdminsState.data = undefined;
+    platformAdminsState.isError = true;
+    render(<UsersPage />);
+
+    expect(
+      within(regiao()).getByText('Não foi possível carregar os administradores da plataforma.'),
+    ).toBeVisible();
+  });
+
+  it('vazio: estado próprio, distinto do erro', () => {
+    authState.user = PLATFORM;
+    currentSearch = 'tab=plataforma';
+    platformAdminsState.data = [];
+    render(<UsersPage />);
+
+    expect(
+      within(regiao()).getByText('Nenhum administrador da plataforma cadastrado.'),
+    ).toBeVisible();
   });
 });
