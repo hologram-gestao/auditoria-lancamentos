@@ -32,10 +32,12 @@ componente, nunca copiada na tela:
   ⚠️ Dentro de uma `<section aria-labelledby>`, o `label` precisa ser DIFERENTE do
   `<h2>`: a section nomeada já é um landmark, e dois aninhados com o mesmo nome são
   confusos no leitor de tela e ambíguos para `getByRole('region', { name })` — o teste
-  reprova com "Found multiple elements". Desencontre como fazem
-  `client-managers-section` ("Gerentes com acesso" × "Gerentes com acesso ao cliente") e
-  `platform-admins-section` ("Administradores da plataforma" × "Lista de administradores
-  da plataforma").
+  reprova com "Found multiple elements". Desencontre como faz
+  `client-managers-section` ("Gerentes com acesso" × "Gerentes com acesso ao cliente").
+  O mesmo vale para tabela dentro de uma ABA: `getByRole` do Playwright casa por
+  substring, e um `scrollRegionLabel` igual ao rótulo do `tab` acerta os dois — por isso
+  `users/platform-admins-table` chama a região de "Lista de administradores da
+  plataforma" sob a aba "Administradores da plataforma".
 - **Tabela** → `<TableCard>` (`components/ui/table.tsx:73-82`, `flex max-h-full
 flex-col overflow-hidden`) + `<Table fill>` (`:27`, `:43`). Nunca `overflow` no
   container de fora: dois scrollers aninhados espremem as colunas em 390px em vez de

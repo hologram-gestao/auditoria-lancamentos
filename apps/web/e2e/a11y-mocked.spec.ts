@@ -2694,32 +2694,9 @@ for (const vp of VIEWPORTS) {
           return false;
         });
       expect(cortada, 'a 2ª organização não pode ficar fora da área rolável da tabela').toBe(false);
-
-      // A ÚNICA lista de `platform_admin` do produto. O nome da região é o
-      // longo de propósito: `getByRole` do Playwright casa por SUBSTRING, e
-      // pedir "Administradores da plataforma" casaria também com a `<section>`
-      // homônima em volta (strict mode reprovaria com 2 elementos).
-      const plataforma = page.getByRole('region', {
-        name: 'Lista de administradores da plataforma',
-      });
-      await expect(plataforma.getByText('Pedro H.')).toBeVisible();
-      await expect(plataforma.getByText('pedro@hologramgestao.com')).toBeVisible();
-      // Desativado continua na lista, marcado: o escopo não sai com o `active`.
-      await expect(plataforma.getByText('Inativo')).toBeVisible();
-      // SÓ-LEITURA: promover e despromover é pelo script, e `PATCH /users/{id}`
-      // de uma linha de plataforma é 404 — botão aqui seria ação que o
-      // servidor nega (§4.9).
-      await expect(plataforma.getByRole('button')).toHaveCount(0);
-
-      // Em 390px é onde o e-mail longo empurraria o selo para fora do card.
-      const selo = plataforma.getByText('Inativo');
-      const seloBox = await selo.boundingBox();
-      const vpSize = page.viewportSize();
-      expect(seloBox, 'o selo do administrador inativo precisa ter caixa visível').not.toBeNull();
-      expect(
-        seloBox!.x + seloBox!.width,
-        'o selo não pode passar da borda da viewport',
-      ).toBeLessThanOrEqual(vpSize!.width);
+      // Quem administra a plataforma NÃO mora mais aqui (86e3chrxw): é a aba
+      // própria da tela de Usuários, coberta no cenário dela.
+      await expect(page.getByText('Pedro H.')).toHaveCount(0);
 
       await shot(page, `organizacoes-${slug}`);
       await analyze(page, `área da plataforma: organizações (${vp.label})`);
@@ -2945,6 +2922,89 @@ for (const vp of VIEWPORTS) {
         0,
       );
       await analyze(page, `editar usuário como admin, sem transferir (${vp.label})`);
+    });
+
+    /**
+     * 86e3chrxw — a aba "Administradores da plataforma" da tela de Usuários,
+     * a ÚNICA lista de `platform_admin` do produto (`GET /users` filtra
+     * `scope='system'` e o `users_count` das organizações não os conta). Só a
+     * plataforma tem abas; para o admin de organização a tela é a de sempre,
+     * e o deep link `?tab=plataforma` é ignorado em silêncio (a página em si
+     * ele pode ver — não é AccessDenied).
+     */
+    test('usuários: a aba de administradores da plataforma (86e3chrxw)', async ({ page }) => {
+      sessionUser = PLATFORM_USER;
+      await page.goto('/configuracoes/usuarios');
+      await expect(page.getByRole('heading', { name: 'Usuários', level: 1 })).toBeVisible();
+
+      const abas = page.getByRole('tablist', { name: 'Seções de usuários' });
+      await expect(abas.getByRole('tab')).toHaveCount(2);
+      // Em 390px os dois rótulos não cabem lado a lado: a faixa QUEBRA linha
+      // em vez de transbordar — medido, não olhado.
+      const abasBox = await abas.boundingBox();
+      const vpSize = page.viewportSize();
+      expect(abasBox, 'a faixa de abas precisa ter caixa visível').not.toBeNull();
+      expect(
+        abasBox!.x + abasBox!.width,
+        'a faixa de abas não pode passar da borda da viewport',
+      ).toBeLessThanOrEqual(vpSize!.width);
+
+      await abas.getByRole('tab', { name: 'Administradores da plataforma' }).click();
+      // A aba vai na URL: o link reproduz a vista.
+      await expect(page).toHaveURL(/[?&]tab=plataforma(&|$)/);
+
+      // O nome da região é o longo de propósito: `getByRole` casa por SUBSTRING
+      // e "Administradores da plataforma" acertaria também a aba.
+      const lista = page.getByRole('region', { name: 'Lista de administradores da plataforma' });
+      await expect(lista.getByText('Pedro H.')).toBeVisible();
+      await expect(lista.getByText('pedro@hologramgestao.com')).toBeVisible();
+      // Desativado continua na lista, marcado: o escopo não sai com o `active`.
+      await expect(lista.getByText('Inativo')).toBeVisible();
+      // SÓ-LEITURA: promover e despromover é pelo script, e `PATCH /users/{id}`
+      // de uma linha de plataforma é 404 — nem ação na linha, nem "Novo
+      // Usuário" nesta aba (§4.9).
+      await expect(lista.getByRole('button')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Novo Usuário' })).toHaveCount(0);
+      // A tabela rola dentro da própria área: em 390px a linha é mais larga do
+      // que a região e passa da borda DELA por desenho (a região é o scroller,
+      // e o `toBeVisible` acima não distingue nada disso). O que não pode é a
+      // REGIÃO passar da viewport (aí quem rola é a página, e a coluna some) ou
+      // a linha sair dela na vertical.
+      const medida = await lista.getByRole('row', { name: /Laio S\./ }).evaluate((row: Element) => {
+        const caixa = row.getBoundingClientRect();
+        const regiao = row.closest('[role="region"]');
+        if (regiao === null) return { cortada: true, regiaoDireita: Number.POSITIVE_INFINITY };
+        const limite = regiao.getBoundingClientRect();
+        return { cortada: caixa.bottom > limite.bottom + 1, regiaoDireita: limite.right };
+      });
+      expect(medida.cortada, 'a linha do inativo não pode ficar fora da área rolável').toBe(false);
+      expect(
+        medida.regiaoDireita,
+        'a região rolável da tabela não pode passar da borda da viewport',
+      ).toBeLessThanOrEqual(vpSize!.width + 1);
+
+      await shot(page, `usuarios-plataforma-${slug}`);
+      await analyze(page, `usuários: aba de administradores da plataforma (${vp.label})`);
+
+      // Voltar para o staff limpa o parâmetro (`?tab=staff` seria ruído).
+      await abas.getByRole('tab', { name: 'Staff das organizações' }).click();
+      await expect(page).not.toHaveURL(/tab=/);
+      await expect(page.getByRole('button', { name: 'Novo Usuário' })).toBeVisible();
+    });
+
+    test('usuários: o admin da organização não vê abas, e ?tab=plataforma é ignorado (86e3chrxw)', async ({
+      page,
+    }) => {
+      sessionUser = USER;
+      await page.goto('/configuracoes/usuarios?tab=plataforma');
+      await expect(page.getByRole('heading', { name: 'Usuários', level: 1 })).toBeVisible();
+
+      await expect(page.getByRole('tab')).toHaveCount(0);
+      await expect(page.getByText('Pedro H.')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Novo Usuário' })).toBeVisible();
+      // `exact`: sem ele, casaria também com a célula de ações ("Editar Gerente Hologram").
+      await expect(page.getByRole('cell', { name: 'Gerente Hologram', exact: true })).toBeVisible();
+      await analyze(page, `usuários como admin, sem abas (${vp.label})`);
     });
 
     test('categorias: a plataforma ganha coluna e filtro de organização (86e36ed1d)', async ({
