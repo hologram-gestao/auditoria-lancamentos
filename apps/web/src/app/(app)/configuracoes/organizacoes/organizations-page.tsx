@@ -13,10 +13,8 @@
  * há exclusão — organização com clientes e usuários não some (FK RESTRICT no
  * banco); suspender é o caminho, e ele é reversível.
  *
- * Abaixo da tabela mora a única lista de `platform_admin` do produto
- * (`PlatformAdminsSection`), só-leitura: nem o `GET /users` nem o `users_count`
- * das organizações os mostram, então sem ela nem a plataforma sabe quem são os
- * pares dela.
+ * Quem administra a plataforma NÃO mora aqui: é a aba "Administradores da
+ * plataforma" da tela de Usuários (86e3chrxw) — pessoas ficam em Usuários.
  */
 
 import { Plus, Search } from 'lucide-react';
@@ -25,7 +23,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { OrganizationDialog } from '@/components/features/organizations/organization-dialog';
 import { OrganizationStatusConfirm } from '@/components/features/organizations/organization-status-confirm';
 import { OrganizationsTable } from '@/components/features/organizations/organizations-table';
-import { PlatformAdminsSection } from '@/components/features/organizations/platform-admins-section';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -94,11 +91,10 @@ export default function OrganizationsPage() {
     // a última linha.
     //
     // ABAIXO de `md`, nada disso: altura natural, e quem rola é o `<main>`.
-    // Com a seção de administradores embaixo, a disputa por altura em 390px
-    // espremia a tabela para UMA linha (medido no print: a organização suspensa
-    // saía da área visível, e o `toBeVisible` do Playwright não pega isso —
-    // fora da área de rolagem ainda é "visível"). Encher a viewport só vale
-    // enquanto a tela couber nela.
+    // Encher a viewport só vale enquanto a tela couber nela: em 390px, qualquer
+    // coisa que dispute altura com a tabela a espreme para UMA linha, e o
+    // `toBeVisible` do Playwright não pega (fora da área de rolagem ainda é
+    // "visível") — foi assim com a seção de administradores que morou aqui.
     <div className="flex flex-col gap-6 md:h-full">
       <div className="space-y-1">
         <p className="text-muted-foreground text-sm">Configurações &gt; Organizações</p>
@@ -163,10 +159,6 @@ export default function OrganizationsPage() {
           itemLabel="organizações"
         />
       </div>
-
-      {/* Abaixo da tabela, e com altura limitada: a área da tabela é `flex-1` e
-          uma seção que crescesse com o conteúdo comeria o espaço dela. */}
-      <PlatformAdminsSection />
 
       {/* O alvo NÃO é limpo ao fechar: enquanto o diálogo sai de cena, o
           conteúdo continua sendo o que a pessoa acabou de confirmar. Abrir para

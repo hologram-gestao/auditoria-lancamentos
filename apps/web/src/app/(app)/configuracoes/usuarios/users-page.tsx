@@ -1,0 +1,402 @@
+'use client';
+
+/**
+ * Tela de Gestão de Usuários — Doc §8.2 (admin-only).
+ *
+ * Estrutura:
+ *   - Breadcrumb "Configurações > Usuários"
+ *   - Busca debounced (300ms) + botão "Novo Usuário"
+ *   - Tabela com Nome, E-mail, Perfil (badge), Status (badge), Cadastro, Ações
+ *   - Paginação "Mostrando X-Y de Z" + setas
+ *   - Modais: criar, editar, desativar, transferir (componentes em features/users/)
+ *   - Para a PLATAFORMA, duas abas (86e3chrxw): o staff das organizações (o
+ *     conteúdo acima) e os administradores da plataforma, só-leitura. A aba
+ *     vai na URL (`?tab=plataforma`). O admin de organização não vê abas.
+ *
+ * Defesa em profundidade contra acesso de Manager:
+ *   - Middleware Next libera todas rotas autenticadas (não decodifica JWT) e
+ *     NÃO é barreira de segurança (bypass por header — CVE-2025-29927).
+ *   - Esta página, sendo client component, degrada com `AccessDenied` quando a
+ *     matriz (`lib/authz`) não libera — gating presentacional. O caminho de
+ *     volta é a casa do papel: usuário DE tenant não tem `/clientes`.
+ *   - Backend retorna 403 em todas as rotas /api/v1/users (RBAC). É ele a
+ *     autoridade.
+ */
+
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+import {
+  ChevronLeft,
+  ChevronRight,
+  PowerOff,
+  Power,
+  Search,
+  SquarePen,
+  UserPlus,
+} from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { toast } from 'sonner';
+
+import {
+  ALL_ORGANIZATIONS,
+  OrganizationFilterSelect,
+} from '@/components/features/organizations/organization-select';
+import { CreateUserModal } from '@/components/features/users/create-user-modal';
+import { DeactivateConfirm } from '@/components/features/users/deactivate-confirm';
+import { EditUserModal } from '@/components/features/users/edit-user-modal';
+import { PlatformAdminsTable } from '@/components/features/users/platform-admins-table';
+import { TransferUserDialog } from '@/components/features/users/transfer-user-dialog';
+import { UserRoleBadge, UserStatusBadge } from '@/components/features/users/user-badges';
+import { AccessDenied } from '@/components/shared/access-denied';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { useUrlState } from '@/hooks/use-url-state';
+import { useActivateUser, useUsersList } from '@/hooks/use-users';
+import { ApiError } from '@/lib/api/client';
+import type { User } from '@/lib/api/users';
+import { canManageSystemUsers, homePathFor, isPlatformScoped } from '@/lib/authz';
+import { cn } from '@/lib/utils';
+import { useAuthStore } from '@/stores/auth';
+
+const PAGE_SIZE = 20;
+
+type TabId = 'staff' | 'plataforma';
+const TAB_PARAM = 'tab';
+const DEFAULT_TAB: TabId = 'staff';
+
+export default function UsersPage() {
+  const currentUser = useAuthStore((s) => s.user);
+  const canSee = canManageSystemUsers(currentUser);
+
+  // A coluna/filtro de organização é da PLATAFORMA: para o admin toda linha da
+  // lista é da própria organização, e a coluna só repetiria o mesmo nome.
+  const isPlatform = isPlatformScoped(currentUser);
+
+  // A aba ativa vai na URL (`?tab=plataforma`), como as outras listas guardam
+  // estado na URL. Quem não é plataforma nunca ganha a segunda aba: um deep
+  // link `?tab=plataforma` do admin é IGNORADO em silêncio e cai na vista
+  // única — não é AccessDenied, porque a página em si ele pode ver.
+  const url = useUrlState();
+  const activeTab: TabId =
+    isPlatform && url.get(TAB_PARAM) === 'plataforma' ? 'plataforma' : DEFAULT_TAB;
+  function handleTabChange(value: string) {
+    // A aba padrão limpa o parâmetro: `?tab=staff` seria ruído na URL.
+    url.setMany({ [TAB_PARAM]: value === DEFAULT_TAB ? null : value });
+  }
+
+  const [searchInput, setSearchInput] = useState('');
+  const debouncedSearch = useDebouncedValue(searchInput, 300);
+  const [page, setPage] = useState(1);
+  const [organizationFilter, setOrganizationFilter] = useState<string>(ALL_ORGANIZATIONS);
+
+  // Reseta a paginação quando a busca ou o filtro mudam (UX padrão).
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, organizationFilter]);
+
+  const queryParams = useMemo(
+    () => ({
+      page,
+      pageSize: PAGE_SIZE,
+      search: debouncedSearch || undefined,
+      organizationId: organizationFilter === ALL_ORGANIZATIONS ? undefined : organizationFilter,
+    }),
+    [page, debouncedSearch, organizationFilter],
+  );
+  // A lista de staff só é consultada na aba dela: na outra, o request seria
+  // pago à toa a cada troca de aba.
+  const { data, isLoading, isFetching, isError, error } = useUsersList(queryParams, {
+    enabled: canSee && activeTab === 'staff',
+  });
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editing, setEditing] = useState<User | null>(null);
+  const [deactivating, setDeactivating] = useState<User | null>(null);
+  // Alvo da transferência (86e3bvbfx): estado PRÓPRIO, fora do de edição — o
+  // diálogo de editar fecha antes de este abrir (nada de Radix empilhado).
+  const [transferring, setTransferring] = useState<User | null>(null);
+
+  const activateMutation = useActivateUser();
+
+  async function handleActivate(user: User) {
+    try {
+      await activateMutation.mutateAsync(user.id);
+      toast.success('Usuário reativado.');
+    } catch (err) {
+      const msg =
+        err instanceof ApiError ? err.userMessage : 'Não foi possível reativar o usuário.';
+      toast.error(msg);
+    }
+  }
+
+  if (currentUser === null) return null;
+
+  if (!canSee) {
+    return (
+      <AccessDenied
+        message="A gestão de usuários da organização é restrita ao administrador."
+        backHref={homePathFor(currentUser)}
+        backLabel="Voltar para o início"
+      />
+    );
+  }
+
+  const total = data?.pagination.total ?? 0;
+  const rows = data?.data ?? [];
+  const totalPages = data?.pagination.totalPages ?? 0;
+  const colCount = isPlatform ? 7 : 6;
+  const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(page * PAGE_SIZE, total);
+
+  // Tudo que é do STAFF das organizações (busca, filtro, tabela, paginação e
+  // o botão de criar) fica junto: para a plataforma vira o conteúdo da
+  // primeira aba; para o admin de organização é a tela inteira, sem abas.
+  const staffView = (
+    <>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {/* Busca e filtros num grupo só, e a ação primária do outro lado do
+            `justify-between` — mesmo arranjo da lista de clientes. Soltos como
+            irmãos diretos, os três dividiriam o espaço livre e o filtro
+            flutuaria no meio da barra, descolado da busca. */}
+        <div className="flex flex-1 flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="relative max-w-sm flex-1">
+            <Search
+              className="text-muted-foreground absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
+              aria-hidden="true"
+            />
+            <Input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Buscar por nome ou e-mail..."
+              className="pl-9"
+              aria-label="Buscar usuários"
+            />
+          </div>
+          {/* Filtro por organização (86e36ed1d) — server-side, via
+              `?organizationId=`. Só a plataforma: o admin que mandasse outra
+              receberia 403 (`resolve_organization_filter`). */}
+          {isPlatform && (
+            <OrganizationFilterSelect
+              value={organizationFilter}
+              onValueChange={setOrganizationFilter}
+              ariaLabel="Filtrar por organização"
+              className="w-full sm:w-56"
+            />
+          )}
+        </div>
+        {/* Sem guarda própria: a tela inteira já é `manage_org_users` (o
+            `AccessDenied` acima), e quem chega aqui pode criar — a plataforma
+            escolhendo a organização no formulário, o admin na própria. */}
+        <Button onClick={() => setCreateOpen(true)}>
+          <UserPlus className="h-4 w-4" aria-hidden="true" />
+          Novo Usuário
+        </Button>
+      </div>
+
+      <div className="rounded-lg border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Nome</TableHead>
+              <TableHead>E-mail</TableHead>
+              {isPlatform && <TableHead>Organização</TableHead>}
+              <TableHead>Perfil</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Cadastrado em</TableHead>
+              <TableHead className="w-28 text-right">Ações</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoading ? (
+              <TableRow>
+                <TableCell
+                  colSpan={colCount}
+                  className="text-muted-foreground py-10 text-center text-sm"
+                >
+                  Carregando usuários...
+                </TableCell>
+              </TableRow>
+            ) : isError ? (
+              <TableRow>
+                <TableCell
+                  colSpan={colCount}
+                  className="text-destructive py-10 text-center text-sm"
+                >
+                  {error instanceof ApiError
+                    ? error.userMessage
+                    : 'Não foi possível carregar a lista.'}
+                </TableCell>
+              </TableRow>
+            ) : rows.length === 0 ? (
+              <TableRow>
+                <TableCell
+                  colSpan={colCount}
+                  className="text-muted-foreground py-10 text-center text-sm"
+                >
+                  Nenhum usuário encontrado.
+                </TableCell>
+              </TableRow>
+            ) : (
+              rows.map((u) => {
+                const isSelf = u.id === currentUser.id;
+                return (
+                  <TableRow key={u.id} className={cn(!u.active && 'opacity-60')}>
+                    <TableCell className="font-medium">{u.name}</TableCell>
+                    <TableCell className="text-muted-foreground">{u.email}</TableCell>
+                    {isPlatform && (
+                      <TableCell className="text-muted-foreground whitespace-nowrap">
+                        {u.organization_name ?? '—'}
+                      </TableCell>
+                    )}
+                    <TableCell>
+                      <UserRoleBadge role={u.role} />
+                    </TableCell>
+                    <TableCell>
+                      <UserStatusBadge active={u.active} />
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-sm">
+                      {format(new Date(u.created_at), "dd 'de' MMM 'de' yyyy", { locale: ptBR })}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setEditing(u)}
+                          aria-label={`Editar ${u.name}`}
+                        >
+                          <SquarePen className="h-4 w-4" aria-hidden="true" />
+                        </Button>
+                        {!isSelf &&
+                          (u.active ? (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => setDeactivating(u)}
+                              aria-label={`Desativar ${u.name}`}
+                            >
+                              <PowerOff className="text-destructive h-4 w-4" aria-hidden="true" />
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleActivate(u)}
+                              disabled={activateMutation.isPending}
+                              aria-label={`Reativar ${u.name}`}
+                            >
+                              {/* Token semântico, não `emerald-600` da paleta crua: cor de marca
+                                muda e o hardcoded não acompanha (regra do design-system). */}
+                              <Power className="text-success h-4 w-4" aria-hidden="true" />
+                            </Button>
+                          ))}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-muted-foreground text-sm" aria-live="polite">
+          {total === 0 ? 'Nenhum resultado.' : `Mostrando ${rangeStart}–${rangeEnd} de ${total}`}
+          {isFetching && total > 0 ? ' · atualizando...' : ''}
+        </p>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page <= 1 || isLoading}
+          >
+            <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+            Anterior
+          </Button>
+          <span className="text-muted-foreground text-sm">
+            Página {page}
+            {totalPages > 0 ? ` de ${totalPages}` : ''}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPage((p) => p + 1)}
+            disabled={page >= totalPages || isLoading || totalPages === 0}
+          >
+            Próxima
+            <ChevronRight className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        </div>
+      </div>
+    </>
+  );
+
+  return (
+    <div className="space-y-6">
+      <div className="space-y-1">
+        <p className="text-muted-foreground text-sm">Configurações &gt; Usuários</p>
+        <h1 className="text-2xl font-semibold">Usuários</h1>
+        <p className="text-muted-foreground text-sm">
+          {isPlatform
+            ? 'Crie, edite, ative e desative o staff de qualquer organização.'
+            : 'Crie, edite, ative e desative os usuários internos da sua organização.'}
+        </p>
+      </div>
+
+      {/* Só a PLATAFORMA tem abas (86e3chrxw): a segunda lista os
+          `platform_admin`, e só ela pode saber quem são (a rota é
+          `ManagePlatformDep`). Para o admin de organização não existe faixa
+          de abas: a tela é a de sempre, uma vista só. */}
+      {isPlatform ? (
+        <Tabs value={activeTab} onValueChange={handleTabChange}>
+          {/* `h-auto flex-wrap`, como as abas da conciliação: em 390px os
+              dois rótulos não cabem lado a lado e precisam quebrar linha em
+              vez de transbordar a viewport. */}
+          <TabsList className="h-auto flex-wrap" aria-label="Seções de usuários">
+            <TabsTrigger value="staff">Staff das organizações</TabsTrigger>
+            <TabsTrigger value="plataforma">Administradores da plataforma</TabsTrigger>
+          </TabsList>
+          <TabsContent value="staff" className="mt-6 space-y-6">
+            {staffView}
+          </TabsContent>
+          <TabsContent value="plataforma" className="mt-6">
+            <PlatformAdminsTable />
+          </TabsContent>
+        </Tabs>
+      ) : (
+        staffView
+      )}
+
+      <CreateUserModal open={createOpen} onOpenChange={setCreateOpen} />
+      <EditUserModal
+        open={editing !== null}
+        onOpenChange={(o) => !o && setEditing(null)}
+        user={editing}
+        currentUserId={currentUser.id}
+        onTransfer={isPlatform ? setTransferring : undefined}
+      />
+      <TransferUserDialog
+        open={transferring !== null}
+        onOpenChange={(o) => !o && setTransferring(null)}
+        user={transferring}
+      />
+      <DeactivateConfirm
+        open={deactivating !== null}
+        onOpenChange={(o) => !o && setDeactivating(null)}
+        user={deactivating}
+      />
+    </div>
+  );
+}
