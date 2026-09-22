@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from fastapi import FastAPI, Request, Response
@@ -37,6 +38,7 @@ from app.integrations.omie.lancamento_cache import OmieLancamentoCache
 from app.modules.anomaly_types import routes as anomaly_types_routes
 from app.modules.auth import routes as auth_routes
 from app.modules.client_categories import routes as client_categories_routes
+from app.modules.client_connections import routes as client_connections_routes
 from app.modules.clients import routes as clients_routes
 from app.modules.glossary import routes as glossary_routes
 from app.modules.notifications import routes as notifications_routes
@@ -50,7 +52,42 @@ from app.modules.usage_events import routes as usage_events_routes
 from app.modules.users import client_routes as client_users_routes
 from app.modules.users import routes as users_routes
 
+if TYPE_CHECKING:
+    from app.core.config import Settings
+
 CORRELATION_HEADER = "X-Correlation-ID"
+
+
+async def _log_legacy_fallback_state(settings: Settings, log: Any) -> None:
+    """Loga (e alerta, se preciso) o estado EFETIVO do fallback da S9.
+
+    Isolado do `lifespan` para poder falhar sozinho: um banco ainda subindo no
+    startup não pode impedir o serviço de subir por causa de um LOG. Sem a
+    contagem, o estado fica desconhecido e o fallback segue como a flag manda.
+    """
+    from app.db.session import get_session_factory
+    from app.modules.client_connections.legacy_fallback import (
+        count_pending_conversion,
+        effective_fallback_enabled,
+    )
+
+    try:
+        async with get_session_factory()() as db:
+            pending = await count_pending_conversion(db)
+            effective = await effective_fallback_enabled(db, settings)
+    except Exception as exc:
+        log.warning(
+            "legacy_fallback_state_unknown",
+            configured=settings.LEGACY_CREDENTIALS_FALLBACK_ENABLED,
+            error=type(exc).__name__,
+        )
+        return
+    log.info(
+        "legacy_fallback_state",
+        configured=settings.LEGACY_CREDENTIALS_FALLBACK_ENABLED,
+        effective=effective,
+        pending_clients=pending,
+    )
 
 
 @asynccontextmanager
@@ -72,6 +109,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # BACK 03.6 — fail-closed: em staging/production, sem NENHUM canal de alerta
     # entregável o serviço NÃO sobe (nunca rodar com alerting mudo). Em dev, warn.
     verify_alert_config(settings)
+    # S9 (BACK 09.5) — o estado EFETIVO do fallback da credencial legada é
+    # observável no startup. Desligar a flag não é promoção: se ainda houver
+    # cliente por converter, `effective_fallback_enabled` mantém o fallback
+    # ligado em memória e dispara o alerta de plantão. Nunca derruba a app —
+    # o serviço sobe servindo, e quem precisa saber é avisado.
+    await _log_legacy_fallback_state(settings, log)
     log.info("app_started", version=__version__)
     try:
         yield
@@ -263,6 +306,7 @@ def create_app() -> FastAPI:
     app.include_router(users_routes.router)
     app.include_router(client_users_routes.router)
     app.include_router(clients_routes.router)
+    app.include_router(client_connections_routes.router)
     app.include_router(glossary_routes.router)
     app.include_router(reconciliations_routes.router)
     app.include_router(review_routes.router)

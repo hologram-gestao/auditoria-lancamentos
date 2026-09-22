@@ -190,6 +190,35 @@ class Settings(BaseSettings):
         description="Ativa análise de qualificação no pipeline de conciliação (S19).",
     )
 
+    # ---------- Fallback da credencial legada (Sprint 9 / BACK 09.5) ----------
+    # Criado em **22/09/2026**, para a janela entre o deploy da Sprint 9 e a
+    # conversão verificada das credenciais já gravadas.
+    #
+    # **Default `True`** (ao contrário do `OMIE_POSTING_ENABLED`): ligado, ele
+    # só acrescenta um caminho de LEITURA para cliente que ainda não foi
+    # convertido; desligado antes da hora, todo cliente existente para de
+    # operar. O erro barato é deixar ligado demais; o caro é desligar cedo.
+    #
+    # **Critério de desligamento** (nesta ordem, sem pular):
+    #   1. `uv run python -m scripts.convert_credentials_to_connections` rodou
+    #      no ambiente, como Cloud Run Job, com as MESMAS secrets do serviço;
+    #   2. `--verify` devolveu **PASS** (clientes abertos com credencial ==
+    #      conexões convertidas);
+    #   3. só então `--update-env-vars LEGACY_CREDENTIALS_FALLBACK_ENABLED=false`.
+    #
+    # ⚠️ **Desligar a flag NÃO é promoção.** No `lifespan`, com a flag `False`,
+    # a app roda a MESMA contagem do `--verify`: se não bater, o fallback fica
+    # **efetivamente ligado em memória** e dispara `AlertCode.LEGACY_FALLBACK`
+    # no canal de plantão. Promoção é consequência da verificação, não do
+    # deploy — ver `modules/client_connections/legacy_fallback.py`.
+    LEGACY_CREDENTIALS_FALLBACK_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "Lê a credencial das colunas antigas de `clients` para cliente sem "
+            "conexão (janela de conversão da Sprint 9, criada em 22/09/2026)."
+        ),
+    )
+
     # ---------- Lançamento no Omie (Sprint 7 / BACK 07.4) ----------
     # Kill-switch do ÚNICO caminho de ESCRITA do ADL no ERP do cliente.
     #

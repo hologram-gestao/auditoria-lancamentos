@@ -18,7 +18,6 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import select
 
 from app.core.config import Settings, get_settings
-from app.core.crypto_service import load_client_cipher
 from app.core.dependencies import (
     DbSessionDep,
     SyncOmieAccountsDep,
@@ -31,7 +30,8 @@ from app.db.models import Client
 from app.integrations.omie.categorias_cache import OmieCategoriasCache
 from app.integrations.omie.client import OmieClient
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache
-from app.modules.clients.omie_factory import build_omie_client
+from app.integrations.providers.base import Capability
+from app.modules.client_connections.origin import build_capable_client
 from app.modules.omie_data.categorias_service import OmieCategoriasService
 from app.modules.omie_data.schemas import (
     OmieCategoriaListResponse,
@@ -119,9 +119,14 @@ async def get_omie_categorias(
     async def build_client() -> OmieClient:
         """Só chamado no MISS — em staging/prod o unwrap da DEK é uma ida ao
         Cloud KMS, e o ponto do cache é justamente não pagar latência por
-        abertura de combobox."""
-        cipher = await load_client_cipher(client, settings=settings)
-        return build_omie_client(client, settings, cipher)
+        abertura de combobox.
+
+        S9 (BACK 09.6): resolve a conexão capaz de LISTAR_LANCAMENTOS. Cliente
+        sem origem recebe 409 acionável aqui dentro — e só no MISS, então o hit
+        do cache continua não custando nada."""
+        return await build_capable_client(
+            db, client, Capability.LISTAR_LANCAMENTOS, settings=settings
+        )
 
     items = await service.list_categorias(
         client_id=client.id,
@@ -170,10 +175,14 @@ async def get_omie_lancamentos(
     cache: OmieLancamentoCache = request.app.state.omie_lancamento_cache
     service = OmieLancamentoService(ReviewRepository(db), cache)
 
-    cipher = await load_client_cipher(client, settings=settings)
+    # S9 (BACK 09.6): a conexão capaz é resolvida ANTES da fábrica — cliente
+    # sem origem recebe o 409 da taxonomia, não um 500 de credencial nula.
+    omie_client = await build_capable_client(
+        db, client, Capability.LISTAR_LANCAMENTOS, settings=settings
+    )
     items = await service.fetch_lancamentos(
         session_id=session_id,
         omie_ids=parsed_ids,
-        omie_client_factory=lambda: build_omie_client(client, settings, cipher),
+        omie_client_factory=lambda: omie_client,
     )
     return OmieLancamentoListResponse(data=items)

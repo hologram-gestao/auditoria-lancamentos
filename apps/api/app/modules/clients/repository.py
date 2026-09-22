@@ -41,7 +41,9 @@ from app.db.models import (
     Client,
     ClientAssignment,
     ClientCategory,
+    ClientConnection,
     ClientGlossaryEntry,
+    ConnectionStatus,
     Notification,
     OmieAccountCache,
     Organization,
@@ -75,6 +77,10 @@ class ClientRow(NamedTuple):
     category: ClientCategory | None = None
     #: Quantas pessoas têm acesso ao cliente, responsável incluído (86e390kz8).
     manager_count: int = 0
+    #: S9 (BACK 09.4): contagens de ORIGEM, para derivar `origin_status` sem
+    #: uma consulta por linha. Vêm de subqueries escalares na MESMA query.
+    connections_total: int = 0
+    connections_active: int = 0
 
 
 class _FavoriteJoin(NamedTuple):
@@ -127,6 +133,36 @@ def _manager_count_subquery() -> ScalarSelect[int]:
     )
 
 
+def _connection_counts_subqueries() -> tuple[ScalarSelect[int], ScalarSelect[int]]:
+    """(total de conexões, conexões ATIVAS) do cliente — S9 (BACK 09.4).
+
+    Duas subqueries escalares e não um `JOIN`: a lista do escritório parceiro
+    precisa mostrar quem está sem origem, e um join com `client_connections`
+    multiplicaria a linha do cliente por conexão (o cliente com duas contas no
+    mesmo ERP apareceria duas vezes). Contadas na MESMA query da listagem —
+    sem N+1, que é o que uma consulta por linha viraria numa carteira de 40.
+
+    São DOIS números porque os três estados de origem precisam deles: nenhuma
+    conexão (`sem_origem`), alguma ativa (`ativa`), existe mas nenhuma ativa
+    (`erro`). Um contador só não distinguiria os dois últimos.
+    """
+    total = aliased(ClientConnection)
+    ativa = aliased(ClientConnection)
+    total_sq = (
+        select(func.count(total.id))
+        .where(total.client_id == Client.id)
+        .correlate(Client)
+        .scalar_subquery()
+    )
+    ativa_sq = (
+        select(func.count(ativa.id))
+        .where(ativa.client_id == Client.id, ativa.status == ConnectionStatus.ATIVA.value)
+        .correlate(Client)
+        .scalar_subquery()
+    )
+    return total_sq, ativa_sq
+
+
 class _ClientRowQuery(NamedTuple):
     """O SELECT de uma linha de cliente + a expressão de favorito para o ORDER BY."""
 
@@ -156,6 +192,7 @@ def _client_row_query(viewer_user_id: UUID | None) -> _ClientRowQuery:
         .correlate(Client)
         .scalar_subquery()
     )
+    connections_total_sq, connections_active_sq = _connection_counts_subqueries()
     stmt = (
         select(
             Client,
@@ -165,6 +202,8 @@ def _client_row_query(viewer_user_id: UUID | None) -> _ClientRowQuery:
             ClientCategory,
             _manager_count_subquery().label("manager_count"),
             Organization,
+            connections_total_sq.label("connections_total"),
+            connections_active_sq.label("connections_active"),
         )
         .outerjoin(ClientAssignment, _responsible_join_clause())
         .outerjoin(manager, manager.id == ClientAssignment.user_id)
@@ -186,6 +225,8 @@ def _to_client_row(row: Row[Any]) -> ClientRow:
         category=row[4],
         manager_count=int(row[5] or 0),
         organization=row[6],
+        connections_total=int(row[7] or 0),
+        connections_active=int(row[8] or 0),
     )
 
 
@@ -418,7 +459,10 @@ class ClientRepository:
                RESTRICT e travaria o passo 4; levam os próprios favoritos;
             3. notificações do cliente — sem FK (só IDs), mas são item de UI de
                um recurso que deixa de existir;
-            4. a linha de `clients` — cascateia atribuições, glossário, cache de
+            4. as CONEXÕES de origem (S9) — o FK já é `CASCADE`, mas a lista
+               declarada é a fonte: o `DELETE` explícito mantém as duas
+               coerentes e faz a credencial cifrada da origem sumir junto;
+            5. a linha de `clients` — cascateia atribuições, glossário, cache de
                contas Omie e favoritos; a DEK morre com ela e tudo que ela
                cifrava vira indecifrável por construção (§4.1).
 
@@ -436,6 +480,7 @@ class ClientRepository:
             delete(User).where(User.client_id == client.id, User.scope == UserScope.CLIENT.value)
         )
         await s.execute(delete(Notification).where(Notification.client_id == client.id))
+        await s.execute(delete(ClientConnection).where(ClientConnection.client_id == client.id))
         await s.execute(delete(Client).where(Client.id == client.id))
         await s.flush()
         # A instância carregada pelo guard da rota não pode ficar viva na sessão
@@ -448,8 +493,10 @@ class ClientRepository:
         """Encerramento: remove o que NÃO tem valor operacional retido.
 
         Glossário (cifrado — já morreu com a DEK; linha de ciphertext morto não
-        serve para nada), cache de contas Omie (nomes de contas do cliente, TTL),
-        notificações (UI de um recurso que não opera mais) e favoritos (o
+        serve para nada), **conexões de origem** (S9 — a credencial cifrada
+        delas morre pelo mesmo motivo, e uma origem de um cliente encerrado não
+        tem o que operar), cache de contas Omie (nomes de contas do cliente,
+        TTL), notificações (UI de um recurso que não opera mais) e favoritos (o
         cliente sai do dia a dia). `client_assignments` FICA de propósito
         (decisão 09/09): o manager da carteira continua vendo o histórico.
         Conciliações, postings, `usage_events` e `access_audit` ficam — são a
@@ -459,6 +506,7 @@ class ClientRepository:
         await s.execute(
             delete(ClientGlossaryEntry).where(ClientGlossaryEntry.client_id == client_id)
         )
+        await s.execute(delete(ClientConnection).where(ClientConnection.client_id == client_id))
         await s.execute(delete(OmieAccountCache).where(OmieAccountCache.client_id == client_id))
         await s.execute(delete(Notification).where(Notification.client_id == client_id))
         await s.execute(delete(UserClientFavorite).where(UserClientFavorite.client_id == client_id))
@@ -616,6 +664,8 @@ class ClientRepository:
         self,
         client: Client,
         items: Sequence[OmieAccountCache],
+        *,
+        connection: ClientConnection | None = None,
     ) -> datetime:
         """Substitui o cache L1 do cliente por `items` em uma única transação.
 
@@ -630,13 +680,18 @@ class ClientRepository:
             concorrentes — o segundo a chegar levanta IntegrityError, que o
             handler global converte em 409, e a UI tenta de novo.
 
-        O `synced_at` final é gravado em `clients.omie_accounts_synced_at`
-        (NÃO derivar de MAX(omie_accounts_cache.synced_at) — quando o Omie
-        devolve lista vazia, o MAX volta None e o TTL não dispara, fazendo
-        toda request bater o Omie. Bug descoberto em 29/04/2026 com Quial).
+        O `synced_at` final é gravado em `connection.accounts_synced_at` (S9) e,
+        enquanto as colunas antigas existirem, TAMBÉM em
+        `clients.omie_accounts_synced_at` — a coluna do cliente deixou de ser
+        LIDA (`accounts_cache.get_or_sync` decide o TTL pela conexão), mas
+        continua escrita como salvaguarda de rollback até o `contract`.
 
-        Retorna o `synced_at` aplicado (mesmo timestamp para todas as linhas
-        e para a coluna do `Client`).
+        Nunca derivar de `MAX(omie_accounts_cache.synced_at)`: quando o provedor
+        devolve lista vazia o MAX volta `None`, o TTL não dispara e toda request
+        bate na rede (bug descoberto em 29/04/2026 com Quial).
+
+        Retorna o `synced_at` aplicado (mesmo timestamp para todas as linhas e
+        para os dois carimbos).
         """
         await self._session.execute(
             delete(OmieAccountCache).where(OmieAccountCache.client_id == client.id)
@@ -646,6 +701,11 @@ class ClientRepository:
             item.synced_at = synced_at
             self._session.add(item)
         client.omie_accounts_synced_at = synced_at
+        if connection is not None:
+            # O carimbo que MANDA desde a S9. Por conexão: sincronizar uma não
+            # pode marcar a outra do mesmo cliente como fresca.
+            connection.accounts_synced_at = synced_at
+            self._session.add(connection)
         # `add` em objeto já tracked é no-op, mas garante a presença na identity
         # map caso o caller tenha passado um Client detached por algum motivo.
         self._session.add(client)

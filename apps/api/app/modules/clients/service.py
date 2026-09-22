@@ -31,13 +31,6 @@ from app.core.authz import (
     resolve_organization_filter,
     resolve_organization_for_creation,
 )
-from app.core.crypto_service import (
-    AAD_CLIENT_APP_KEY,
-    AAD_CLIENT_APP_SECRET,
-    field_locator,
-    new_client_dek,
-    provision_client_cipher,
-)
 from app.core.exceptions import (
     CannotRemoveResponsibleManagerError,
     ClientClosedError,
@@ -54,7 +47,16 @@ from app.core.exceptions import (
     OmieTimeoutError,
 )
 from app.db.models import Client, ClientAssignment, OmieAccountCache, User
+from app.db.models.client_connection import ClientConnection, ProviderType
 from app.integrations.omie.client import OmieClient, OmieCredentials
+from app.integrations.providers.base import Capability
+from app.integrations.providers.omie_adapter import omie_credentials_payload
+from app.modules.client_connections.capability import (
+    connection_supports,
+    select_capable_connection,
+)
+from app.modules.client_connections.schemas import ClientConnectionResponse
+from app.modules.client_connections.service import ClientConnectionService
 from app.modules.clients.accounts_cache import OmieAccountsCacheService
 from app.modules.clients.repository import ClientRepository, ClientRow
 from app.modules.clients.schemas import (
@@ -68,6 +70,7 @@ from app.modules.clients.schemas import (
     OrganizationSummary,
     ReconciliationSessionSummary,
     TestConnectionResponse,
+    derive_origin_status,
 )
 from app.modules.reconciliations.service import author_for_viewer
 from app.modules.usage_events.service import UsageEventService
@@ -108,6 +111,10 @@ def _row_to_response(row: ClientRow) -> ClientResponse:
             if row.category is not None
             else None
         ),
+        # S9 (BACK 09.4): derivado das contagens que vieram na MESMA query.
+        origin_status=derive_origin_status(
+            total=row.connections_total, active=row.connections_active
+        ),
     )
 
 
@@ -121,6 +128,7 @@ class ClientService:
         *,
         accounts_cache: OmieAccountsCacheService | None = None,
         usage_events: UsageEventService | None = None,
+        connections: ClientConnectionService | None = None,
     ) -> None:
         self._repo = repository
         self._settings = settings
@@ -130,6 +138,12 @@ class ClientService:
         # Cache L1 — instanciado on-demand quando não passado pelo caller.
         # Em testes é injetado com `OmieClient` mockado via respx.
         self._accounts_cache = accounts_cache or OmieAccountsCacheService(repository, settings)
+        # S9 (BACK 09.4): o MESMO serviço da 09.3, para o `POST /clients` com
+        # credencial criar a conexão pelo caminho único — que valida contra o
+        # provedor antes de persistir. Opcional só na assinatura: o ramo "com
+        # credencial" exige (a rota sempre passa). Diferente do `usage_events`,
+        # aqui a ausência NÃO degrada em silêncio.
+        self._connections = connections
 
     # ------------------------------ READ ------------------------------
 
@@ -190,28 +204,40 @@ class ClientService:
         self,
         *,
         name: str,
-        omie_app_key: str,
-        omie_app_secret: str,
+        omie_app_key: str | None,
+        omie_app_secret: str | None,
         actor: CurrentUser,
         requested_organization_id: UUID | None,
         category_id: UUID | None = None,
     ) -> ClientResponse:
-        """Cria cliente com credenciais criptografadas + auto-assign do criador.
+        """Cria o cliente. A credencial é OPCIONAL desde a Sprint 9 (BACK 09.4).
 
-        A organização do cliente é decidida por `_resolve_organization_for_creation`
-        (§3.15): staff de organização cria na PRÓPRIA org (a da LINHA; um
-        `organization_id` diferente no payload é 403, nunca ignorado); a
-        plataforma escolhe, e a escolha é obrigatória e validada (org existe e
-        está ativa). Sem isso, um admin de outra organização criaria um cliente
-        na Hologram (o default do banco) e perderia o alcance a ele no request
-        seguinte.
+        **Dois ramos, uma transação:**
 
-        Sprint 3: cada cliente nasce com uma DEK própria (gerada e embrulhada
-        pela KEK do KMS). As credenciais são cifradas no envelope versionado
-        `v<n>:<key_id>:` + AAD (client_id‖tabela‖coluna‖pk). O `client.id` é
-        gerado ANTES para compor o AAD (o default `uuid4` só valeria no flush).
-        Cada credencial usa IV próprio; o texto plano só vive em memória local.
+        - **Sem credencial** — o cliente nasce pleno e SEM origem: as 4 colunas
+          antigas ficam `NULL` e **nenhuma DEK é provisionada**. Quem provisiona
+          é a primeira conexão (09.3); gerar DEK aqui criaria chave para um
+          cliente que talvez nunca cifre nada.
+        - **Com credencial** — o cliente nasce e, na MESMA transação,
+          `ClientConnectionService` cria a conexão `omie` com o rótulo padrão.
+          A validação contra o provedor acontece ANTES do commit: recusada, o
+          service levanta e **nem `clients` nem `client_connections` ganham
+          linha**. As colunas antigas continuam `NULL` — a credencial mora na
+          conexão, que é o caminho novo.
+
+        A organização é decidida por `resolve_organization_for_creation` (§3.15):
+        staff cria na PRÓPRIA org (a da LINHA; `organization_id` divergente no
+        payload é 403, nunca ignorado); a plataforma escolhe, e a escolha é
+        obrigatória e validada (org existe e está ativa).
+
+        Emite `cliente_criado` nos DOIS ramos — é a métrica da sprint, e sem o
+        ramo "com origem" a leitura não teria denominador.
         """
+        if (omie_app_key is None) != (omie_app_secret is None):
+            raise IncompleteCredentialsError(
+                "POST /clients: app_key e app_secret precisam vir juntos.",
+            )
+
         organization_id = await resolve_organization_for_creation(
             actor,
             requested_organization_id,
@@ -220,21 +246,10 @@ class ClientService:
         )
         await self._assert_category_exists(category_id, organization_id=organization_id)
         current_user_id = UUID(actor.id)
-        client_id = uuid4()
-        cipher, dek_wrapped = await new_client_dek(client_id, settings=self._settings)
-        ct_key, iv_key = cipher.encrypt(omie_app_key, field_locator(AAD_CLIENT_APP_KEY, client_id))
-        ct_secret, iv_secret = cipher.encrypt(
-            omie_app_secret, field_locator(AAD_CLIENT_APP_SECRET, client_id)
-        )
 
         client = Client(
-            id=client_id,
+            id=uuid4(),
             name=name,
-            dek_wrapped=dek_wrapped,
-            omie_app_key_encrypted=ct_key,
-            omie_app_key_iv=iv_key,
-            omie_app_secret_encrypted=ct_secret,
-            omie_app_secret_iv=iv_secret,
             active=True,
             created_by=current_user_id,
             category_id=category_id,
@@ -257,6 +272,31 @@ class ClientService:
             )
             await self._repo.add_assignment(assignment)
 
+        tipo_conexao: str | None = None
+        if omie_app_key is not None and omie_app_secret is not None:
+            # O MESMO serviço da 09.3 — nenhum segundo caminho de escrita de
+            # credencial. Ele verifica no provedor antes de persistir; se
+            # recusar, a exceção sobe e a transação do request inteira é
+            # desfeita (o cliente recém-criado some junto).
+            if self._connections is None:  # pragma: no cover - guarda de montagem
+                raise RuntimeError("ClientService sem ClientConnectionService para criar conexão.")
+            await self._connections.create_connection(
+                client=client,
+                user=actor,
+                provider_type=ProviderType.OMIE.value,
+                label=None,
+                credentials=omie_credentials_payload(omie_app_key, omie_app_secret),
+            )
+            tipo_conexao = ProviderType.OMIE.value
+
+        if self._usage_events is not None:
+            await self._usage_events.emit_cliente_criado(
+                client_id=client.id,
+                organization_id=organization_id,
+                tem_conexao=tipo_conexao is not None,
+                tipo_conexao=tipo_conexao,
+            )
+
         return await self.get_client_detail(client.id, viewer_user_id=current_user_id)
 
     # ------------------------------ UPDATE ----------------------------
@@ -267,8 +307,6 @@ class ClientService:
         *,
         name: str | None,
         active: bool | None,
-        omie_app_key: str | None,
-        omie_app_secret: str | None,
         viewer_user_id: UUID | None = None,
         category_id: UUID | None = None,
         category_set: bool = False,
@@ -278,9 +316,13 @@ class ClientService:
         `category_set` distingue "omitido" (mantém) de `null` explícito (limpa) —
         86e34jd8m; UUID troca depois de validar que existe no catálogo.
 
-        Para credenciais: precisa enviar AMBOS os campos juntos. Caso só um
-        venha preenchido, retorna 400 `IncompleteCredentialsError`. Quando
-        ambos vêm, recriptografa com IVs novos.
+        ⚠️ **Credencial saiu daqui na Sprint 9 (BACK 09.3).** A origem virou
+        entidade própria (`client_connections`) e a escrita passa por
+        `ClientConnectionService`, que verifica contra o provedor ANTES de
+        gravar. Este caminho não verificava nada — manter os dois seria manter
+        duas verdades sobre a mesma credencial, sendo que uma delas grava
+        qualquer coisa. O 422 que orienta quem ainda manda os campos antigos
+        está no `UpdateClientRequest`, não aqui: é validação de entrada.
         """
         if name is not None:
             client.name = name
@@ -289,27 +331,6 @@ class ClientService:
         if category_set:
             await self._assert_category_exists(category_id, organization_id=client.organization_id)
             client.category_id = category_id
-
-        # Pares possíveis: ambos None (ignora), ambos preenchidos (recriptografa),
-        # apenas um → 400 (evita silenciosamente manter credenciais inconsistentes).
-        if omie_app_key is not None and omie_app_secret is not None:
-            # Provisiona a DEK se o cliente for legado (dek_wrapped None) e
-            # recifra no envelope corrente com AAD amarrado à linha.
-            cipher = await provision_client_cipher(client, settings=self._settings)
-            ct_key, iv_key = cipher.encrypt(
-                omie_app_key, field_locator(AAD_CLIENT_APP_KEY, client.id)
-            )
-            ct_secret, iv_secret = cipher.encrypt(
-                omie_app_secret, field_locator(AAD_CLIENT_APP_SECRET, client.id)
-            )
-            client.omie_app_key_encrypted = ct_key
-            client.omie_app_key_iv = iv_key
-            client.omie_app_secret_encrypted = ct_secret
-            client.omie_app_secret_iv = iv_secret
-        elif omie_app_key is not None or omie_app_secret is not None:
-            raise IncompleteCredentialsError(
-                "PATCH /clients/{id}: app_key e app_secret precisam vir juntos.",
-            )
 
         await self._repo.add_client(client)
         return await self.get_client_detail(client.id, viewer_user_id=viewer_user_id)
@@ -488,26 +509,74 @@ class ClientService:
         miss falhar (Omie indisponível), `AccountsSyncError` propaga e o
         handler global retorna 502 — alinhado ao padrão do test-connection.
         """
+        connections = await self._load_connections(client)
         if client.closed_at is not None:
             # 86e36pm1z — encerrado NÃO fala com o Omie: as credenciais foram
             # destruídas e o cache purgado. O detalhe volta sem contas, só com
             # o histórico retido (sem isso, o miss do cache tentaria decifrar
             # credencial vazia e viraria 500).
             return await self._build_detail_response(
-                client.id, [], None, viewer_user_id=viewer_user_id
+                client.id, [], None, connections, viewer_user_id=viewer_user_id
             )
-        rows, synced_at = await self._accounts_cache.get_or_sync(client)
+        capable = self._first_capable(connections, Capability.LISTAR_CONTAS)
+        if capable is None:
+            # S9 (BACK 09.4): cliente SEM origem capaz de listar contas não
+            # bate no provedor. Este endpoint responde 200 sempre — 409 aqui
+            # impediria o parceiro de abrir a tela do cliente que acabou de
+            # cadastrar, e um `get_or_sync` sem credencial viraria 500.
+            return await self._build_detail_response(
+                client.id, [], None, connections, viewer_user_id=viewer_user_id
+            )
+        rows, synced_at = await self._accounts_cache.get_or_sync(client, capable)
         return await self._build_detail_response(
-            client.id, rows, synced_at, viewer_user_id=viewer_user_id
+            client.id, rows, synced_at, connections, viewer_user_id=viewer_user_id
         )
+
+    async def _load_connections(self, client: Client) -> list[ClientConnection]:
+        """As origens EFETIVAS do cliente — com o fallback da 09.5 aplicado.
+
+        `resolve_origins` e não `list_rows`: o cliente ainda não convertido
+        precisa operar, e é a conexão sintetizada que o mantém de pé.
+        """
+        if self._connections is None:  # pragma: no cover - montagem sem conexões
+            return []
+        return await self._connections.resolve_origins(client)
+
+    @staticmethod
+    def _first_capable(
+        connections: Sequence[ClientConnection], capability: Capability
+    ) -> ClientConnection | None:
+        """A primeira conexão capaz, ou `None`. Sem levantar.
+
+        Existe porque o DETALHE do cliente responde **200 sempre** (ADR-044-BE):
+        ele precisa saber se dá para sincronizar, não de uma exceção. Quem
+        levanta o 409 certo é `select_capable_connection`, usado no sync manual.
+
+        O predicado é o ÚNICO da 09.2 (`connection_supports`) — nunca um
+        `status == 'ativa'` escrito aqui.
+
+        ⚠️ A lista já vem de `resolve_origin_connections` (09.5), que inclui a
+        conexão SINTETIZADA do cliente ainda não convertido. Por isso não há
+        mais um "ou tem credencial nas colunas antigas": o fallback já resolveu.
+        """
+        return next((c for c in connections if connection_supports(c, capability)), None)
 
     async def force_sync_accounts(
         self, client: Client, *, viewer_user_id: UUID | None = None
     ) -> ClientDetailResponse:
-        """Endpoint B: força sync ignorando TTL e retorna o detalhe completo."""
-        rows, synced_at = await self._accounts_cache.force_sync(client)
+        """Endpoint B: força sync ignorando TTL e retorna o detalhe completo.
+
+        Ao contrário do detalhe, aqui o sync é o PEDIDO do usuário: sem origem
+        capaz, `select_capable_connection` (09.2) decide o 409 acionável — não
+        se devolve "sincronizado, zero contas" para quem clicou em sincronizar.
+        """
+        connections = await self._load_connections(client)
+        # Levanta o 409 CERTO dos três (sem_conexao / origem_com_erro /
+        # capacidade_ausente) a partir do estado real das conexões.
+        capable = select_capable_connection(connections, Capability.LISTAR_CONTAS)
+        rows, synced_at = await self._accounts_cache.force_sync(client, capable)
         return await self._build_detail_response(
-            client.id, rows, synced_at, viewer_user_id=viewer_user_id
+            client.id, rows, synced_at, connections, viewer_user_id=viewer_user_id
         )
 
     # ------------------------------ EXCLUSÃO (86e34jd1d) --------------
@@ -650,16 +719,18 @@ class ClientService:
         client_id: UUID,
         rows: Sequence[OmieAccountCache],
         synced_at: datetime | None,
+        connections: Sequence[ClientConnection] = (),
         *,
         viewer_user_id: UUID | None = None,
     ) -> ClientDetailResponse:
-        """Compõe `ClientDetailResponse` a partir de Client + manager + cache."""
+        """Compõe `ClientDetailResponse` a partir de Client + manager + cache + origens."""
         base = await self.get_client_detail(client_id, viewer_user_id=viewer_user_id)
         accounts = [BankAccountResponse.model_validate(r) for r in rows]
         return ClientDetailResponse(
             **base.model_dump(),
             accounts=accounts,
             accounts_synced_at=synced_at,
+            connections=[ClientConnectionResponse.from_connection(c) for c in connections],
         )
 
 

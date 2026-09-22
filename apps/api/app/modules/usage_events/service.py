@@ -27,6 +27,7 @@ from app.modules.reconciliations.tenant_scope import audit_session_tenant_miss
 from app.modules.usage_events.omie_rejection import classify_omie_rejection
 from app.modules.usage_events.repository import UsageEventRepository
 from app.modules.usage_events.schemas import (
+    ClienteCriadoProps,
     ClienteEncerradoProps,
     ClienteExcluidoProps,
     FlagRevisadoProps,
@@ -276,6 +277,31 @@ class UsageEventService:
             UsageEventName.CLIENTE_ENCERRADO,
             props=ClienteEncerradoProps(
                 client_id=client_id, n_conciliacoes=n_conciliacoes, n_usuarios=n_usuarios
+            ).model_dump(mode="json"),
+        )
+
+    async def emit_cliente_criado(
+        self,
+        *,
+        client_id: UUID,
+        organization_id: UUID,
+        tem_conexao: bool,
+        tipo_conexao: str | None,
+    ) -> bool:
+        """S9 BACK 09.4 — cadastro de cliente. **A métrica da Sprint 9.**
+
+        Emitido nos DOIS ramos (com e sem origem): sem o ramo "com", a leitura
+        não teria denominador e um zero em `tem_conexao=false` não distinguiria
+        "ninguém cadastrou sem origem" de "ninguém cadastrou". Sem `session_id`,
+        logo fora do índice parcial de dedup por construção.
+        """
+        return await self.emit(
+            UsageEventName.CLIENTE_CRIADO,
+            props=ClienteCriadoProps(
+                client_id=client_id,
+                organization_id=organization_id,
+                tem_conexao=tem_conexao,
+                tipo_conexao=tipo_conexao,
             ).model_dump(mode="json"),
         )
 

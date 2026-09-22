@@ -35,6 +35,7 @@ from app.db.models.organization import organization_id_server_default
 if TYPE_CHECKING:
     from app.db.models.client_assignment import ClientAssignment
     from app.db.models.client_category import ClientCategory
+    from app.db.models.client_connection import ClientConnection
     from app.db.models.omie_account_cache import OmieAccountCache
     from app.db.models.organization import Organization
     from app.db.models.reconciliation_session import ReconciliationSession
@@ -50,11 +51,24 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
 
-    # AES-256-GCM: ciphertext (com tag embutida) + IV próprio por campo
-    omie_app_key_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
-    omie_app_key_iv: Mapped[str] = mapped_column(String(IV_HEX_LENGTH), nullable=False)
-    omie_app_secret_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
-    omie_app_secret_iv: Mapped[str] = mapped_column(String(IV_HEX_LENGTH), nullable=False)
+    # AES-256-GCM: ciphertext (com tag embutida) + IV próprio por campo.
+    #
+    # NULÁVEIS desde a Sprint 9 (BACK 09.1, migration `a7f2c1d93e84`): o cliente
+    # deixou de SER um par de credenciais com nome e passou a existir sem nenhuma
+    # origem conectada — a maior parte da carteira de um escritório contábil não
+    # usa o Omie. As origens agora moram em `client_connections` (0..N por
+    # cliente). Estas 4 colunas seguem sendo a credencial Omie dos clientes já
+    # cadastrados: a conversão para a tabela nova é a 09.5 e a remoção delas é
+    # `contract` de sprint seguinte — até lá, quem lê precisa tratar o `None`
+    # (ver `modules/clients/omie_factory.py`).
+    #
+    # ⚠️ NULL e `''` são estados DIFERENTES: cliente ENCERRADO grava `''`
+    # (crypto-shredding, §4.12) e continua distinguível de cliente que nunca
+    # teve origem. O pré-check do downgrade da migration depende disso.
+    omie_app_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    omie_app_key_iv: Mapped[str | None] = mapped_column(String(IV_HEX_LENGTH), nullable=True)
+    omie_app_secret_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    omie_app_secret_iv: Mapped[str | None] = mapped_column(String(IV_HEX_LENGTH), nullable=True)
 
     # DEK-por-cliente (Sprint 3, BACK 03.3): a Data Encryption Key deste cliente,
     # embrulhada pela KEK do KMS (envelope encryption). A DEK em claro só existe
@@ -142,6 +156,13 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     omie_accounts: Mapped[list[OmieAccountCache]] = relationship(
         "OmieAccountCache",
+        back_populates="client",
+        cascade="all, delete-orphan",
+        lazy="raise",
+    )
+    # Sprint 9 (BACK 09.1): as ORIGENS de dado do cliente — 0..N, tipadas.
+    connections: Mapped[list[ClientConnection]] = relationship(
+        "ClientConnection",
         back_populates="client",
         cascade="all, delete-orphan",
         lazy="raise",

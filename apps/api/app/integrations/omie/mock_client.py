@@ -1,6 +1,6 @@
 """MockOmieClient — `OmieClient` que NÃO toca em rede.
 
-Ativado automaticamente pelo `omie_factory.build_omie_client` quando a credencial
+Ativado automaticamente por `providers.omie_adapter.build_omie_raw_client` quando a credencial
 descriptografada começa com o prefixo `FAKE_DEMO_OMIE_` (gerado pelo
 `scripts/seed_demo_client.py`). Esse prefixo é improvável em credencial real e
 nunca seria aceito pelo Omie em produção.
@@ -307,7 +307,7 @@ class MockOmieClient(OmieClient):
     """`OmieClient` que devolve payloads fixos sem tocar a rede.
 
     Subclass de `OmieClient` para manter os mesmos type hints nos callers
-    (`omie_factory.build_omie_client` retorna `OmieClient`), mas substitui
+    (`origin.build_origin_client` retorna `OmieClient`), mas substitui
     o `__init__` para NÃO criar o `httpx.AsyncClient` interno e sobrescreve
     o ciclo de vida (`__aenter__`/`__aexit__`/`aclose`) como no-op.
 

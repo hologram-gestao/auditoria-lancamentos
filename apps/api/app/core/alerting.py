@@ -71,6 +71,11 @@ class AlertCode(StrEnum):
     # Conta da Anthropic sem crédito (86e39yzxc): parsing e qualificação param
     # até alguém recarregar. Plantão, nunca o canal do sintético.
     ANTHROPIC_CREDIT = "anthropic_credit"
+    # S9 (BACK 09.5): alguém desligou `LEGACY_CREDENTIALS_FALLBACK_ENABLED`
+    # sem a conversão ter terminado. O fallback fica EFETIVAMENTE ligado (nada
+    # quebra), mas a intenção e o estado divergiram — e isso precisa de gente
+    # olhando. **Plantão, nunca o canal do sintético.**
+    LEGACY_FALLBACK = "legacy_fallback"
     SYNTHETIC = "synthetic"
 
 

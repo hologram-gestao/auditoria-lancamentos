@@ -73,6 +73,19 @@ class UsageEventName(StrEnum):
     # sem `session_id`, fora da dedup: cada transferência é uma linha. Só IDs e
     # contagens do que foi removido — nunca nome de pessoa nem de organização.
     USUARIO_TRANSFERIDO_DE_ORGANIZACAO = "usuario_transferido_de_organizacao"
+    # Sprint 9 (BACK 09.4) — **a métrica da sprint**. De BACKEND, sem
+    # `session_id`, fora da dedup por construção: cada cadastro é uma linha.
+    #
+    # Fórmula da leitura D+30:
+    #     count(usage_events)
+    #     WHERE event = 'cliente_criado'
+    #       AND props->>'tem_conexao' = 'false'
+    #       AND props->>'organization_id' = '<id da organização do parceiro>'
+    #
+    # O id da organização é **parâmetro da leitura**, resolvido na hora (a org
+    # do escritório parceiro é criada na operação, não aqui). Baseline 0: até
+    # esta sprint era impossível criar cliente sem credencial. Só IDs e enums.
+    CLIENTE_CRIADO = "cliente_criado"
 
 
 #: Eventos que o `POST /api/v1/usage-events` aceita. Os de backend ficam de fora
@@ -168,6 +181,26 @@ class ClienteEncerradoProps(_StrictProps):
     client_id: UUID
     n_conciliacoes: int = Field(ge=0)
     n_usuarios: int = Field(ge=0)
+
+
+class ClienteCriadoProps(_StrictProps):
+    """`cliente_criado` (S9 BACK 09.4) — o numerador da métrica da Sprint 9.
+
+    `tem_conexao` é o que a leitura D+30 filtra: `false` é exatamente o caso que
+    a sprint existe para tornar possível (cliente pleno sem nenhuma origem).
+    `tipo_conexao` é `None` nesse ramo e o tipo do provedor no outro — enum
+    fechado do servidor, nunca texto livre.
+
+    `organization_id` (e não o nome do BPO) porque a fórmula agrupa por
+    organização e **nome é dado identificável** (§4.7). `client_id` entra pelo
+    mesmo motivo dos irmãos `cliente_excluido`/`cliente_encerrado`: dá para
+    reconstituir a sequência de um cliente sem guardar quem ele é.
+    """
+
+    client_id: UUID
+    organization_id: UUID
+    tem_conexao: bool
+    tipo_conexao: str | None = None
 
 
 class OrganizacaoCriadaProps(_StrictProps):

@@ -245,7 +245,7 @@ class OmieLancamentoCache:
 
         Args:
             client_id: para a chave do cache.
-            omie_client: cliente já autenticado (via `build_omie_client`).
+            omie_client: cliente já autenticado (via `origin.build_origin_client`).
             omie_conta_id: nCodCC da sessão.
             period_start/period_end: período já expandido com tolerância.
 
