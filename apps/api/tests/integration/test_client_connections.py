@@ -363,7 +363,7 @@ class TestCriarConexao:
         )
         assert segunda.status_code in (400, 422), segunda.text
 
-    async def test_rotulo_vazio_e_422(
+    async def test_rotulo_vazio_e_400_da_validacao(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
         w = await _seed_world(db_session)
@@ -372,7 +372,10 @@ class TestCriarConexao:
             _base(w.client.id),
             json={"provider_type": "omie", "label": "   ", "credentials": DEMO_CREDENTIALS},
         )
-        assert resp.status_code == 422, resp.text
+        # Convenção da casa: erro de validação de entrada é 400 `VALIDATION_ERROR`
+        # com mensagem genérica (o handler global não ecoa input, 86e2rtxcm).
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
         assert await _connections_of(db_session, w.client.id) == []
 
     async def test_tipo_inexistente_e_recusado(
@@ -864,7 +867,8 @@ class TestPatchDoClienteRecusaCredencial:
             f"/api/v1/clients/{w.client.id}", json={"name": "Padaria renomeada"}
         )
         assert resp.status_code == 200, resp.text
-        assert resp.json()["data"]["name"] == "Padaria renomeada"
+        # O PATCH devolve o `ClientResponse` sem envelope, como o GET do detalhe.
+        assert resp.json()["name"] == "Padaria renomeada"
 
     async def test_so_uma_das_credenciais_tambem_e_422(
         self, client_with_db: AsyncClient, db_session: AsyncSession

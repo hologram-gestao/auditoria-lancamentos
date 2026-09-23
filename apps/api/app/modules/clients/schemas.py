@@ -19,7 +19,7 @@ from datetime import date, datetime
 from enum import StrEnum
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.models import ReconciliationStatus
 from app.modules.client_connections.schemas import ClientConnectionResponse
@@ -102,23 +102,12 @@ class UpdateClientRequest(BaseModel):
         None, description="Omitir mantém a categoria; `null` limpa; UUID troca."
     )
 
-    @model_validator(mode="after")
-    def _credencial_saiu_do_patch(self) -> UpdateClientRequest:
-        """Credencial no corpo do PATCH é erro, e o erro diz o caminho novo.
-
-        Vale para a PRESENÇA da chave, não para o valor: mandar
-        `{"omieAppKey": null}` também é 422 — quem manda a chave está usando o
-        caminho antigo e precisa saber que ele acabou.
-        """
-        enviados = {"omie_app_key", "omie_app_secret"} & self.model_fields_set
-        if enviados:
-            raise ValueError(
-                "As credenciais da origem não são mais editadas por aqui. "
-                "Use POST /api/v1/clients/{id}/connections para conectar uma origem, "
-                "ou PATCH /api/v1/clients/{id}/connections/{connectionId} para trocar "
-                "as credenciais de uma existente."
-            )
-        return self
+    # Credencial no corpo do PATCH é recusada NA ROTA com
+    # `CredentialsMovedToConnectionsError` (422 + a rota nova), não por validador
+    # Pydantic: `ValueError` aqui viraria o 400 genérico do handler global, que
+    # não ecoa mensagem de propósito (86e2rtxcm) — e o PRD (R5) exige apontar o
+    # caminho. Os dois campos continuam declarados para a PRESENÇA ser detectável
+    # em `model_fields_set`; sem eles o Pydantic descartaria a chave em silêncio.
 
 
 class TestConnectionRequest(BaseModel):

@@ -304,7 +304,13 @@ class TestCreationAndPortfolio:
 
         created = await client_with_db.post(
             "/api/v1/clients",
-            json={"name": "Criado pelo admin", "omie_app_key": "k", "omie_app_secret": "s"},
+            # Prefixo do MockOmieClient: desde a Sprint 9 o cadastro verifica a
+            # credencial contra o provedor, e "k"/"s" iria para o Omie REAL.
+            json={
+                "name": "Criado pelo admin",
+                "omie_app_key": "FAKE_DEMO_OMIE_APP_KEY_TESTE",
+                "omie_app_secret": "FAKE_DEMO_OMIE_APP_SECRET_TESTE",
+            },
         )
         assert created.status_code == 201, created.text
         assert created.json()["responsible_manager"] is None

@@ -354,6 +354,21 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
      (não há o que consertar). São 409 e não 5xx porque são estado esperado da
      configuração do cliente, e é o que permite à tela dar a instrução certa em vez
      de um toast genérico. Capacidade é derivada do ADAPTADOR, nunca persistida.
+   - **Todo client do Omie nasce no adaptador** (`build_omie_raw_client`, em
+     `integrations/providers/omie_adapter.py`): é o ÚNICO lugar que decide entre o
+     `OmieClient` real e o `MockOmieClient` (prefixo `FAKE_DEMO_OMIE_`). `OmieClient(...)`
+     construído à mão fora dele é defeito — foi assim que o "Testar conexão" da gaveta
+     saía para a rede com a credencial de demonstração enquanto `POST /connections`
+     com a mesma credencial nascia `ativa` (validação humana da S9, 23/09/2026).
+   - **Credencial no `PATCH /clients/{id}` é 422 `CREDENTIALS_MOVED`**, um `AppError`
+     próprio cuja `userMessage` aponta as rotas de conexão. Não é validador Pydantic:
+     `ValueError` de validador vira o **400 `VALIDATION_ERROR` genérico** do handler
+     global, que não ecoa mensagem nem campo de propósito (86e2rtxcm). Regra geral:
+     validação de forma é 400 genérico; resposta que precisa ORIENTAR o cliente da
+     API é exceção tipada com mensagem. E "recusa sem gravar" na criação de cliente é
+     um SAVEPOINT (`ClientRepository.savepoint()`) em volta de cliente + carteira +
+     conexão: escrita seguida de `raise` não é provada pela fixture `client_with_db`,
+     que não tem o `rollback()` da produção.
    - **Precedência do fallback datado (janela de conversão da S9):** cliente COM
      conexão usa a conexão e nem olha as colunas antigas; sem conexão, com o
      fallback ligado e as colunas preenchidas, sintetiza uma conexão `omie` **em
@@ -661,16 +676,16 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
 Rodadas pelo orquestrador multi-agente; o escopo de cada uma vive no **Doc do
 ClickUp**, não no repo. `make sprints` lista o estado.
 
-| Sprint | Foco                                       | Deixou no código                                                          |
-| ------ | ------------------------------------------ | ------------------------------------------------------------------------- |
-| **0**  | Estabilização                              | —                                                                         |
-| **1**  | Fatura de cartão + conta aplicação         | `account_type`, `DATE_DIVERGENCE_RANGE`                                   |
-| **2**  | Parsing sem perda silenciosa               | CSV grande, XLSX completo                                                 |
-| **3**  | Cripto por cliente, auditoria, alerta      | `clients.dek_wrapped`, `access_audit`, `core/kms.py`                      |
-| **4**  | Lista, gaveta, multi-arquivo, notificações | `reconciliation_files`, `usage_events`, `notifications`                   |
-| **5**  | Multi-tenancy e papéis de cliente          | `users.scope`/`client_id`, `core/authz.py`, `core/sensitive_endpoints.py` |
-| **6**  | Glossário e classificação por cliente      | `client_glossary_entries`, `clients.glossary_version`, `review_verdict`   |
-| **7**  | Lançamento de faturas no Omie              | `reconciliation_omie_postings`, `omie_posting/`, `OMIE_POSTING_ENABLED`   |
+| Sprint | Foco                                        | Deixou no código                                                          |
+| ------ | ------------------------------------------- | ------------------------------------------------------------------------- |
+| **0**  | Estabilização                               | —                                                                         |
+| **1**  | Fatura de cartão + conta aplicação          | `account_type`, `DATE_DIVERGENCE_RANGE`                                   |
+| **2**  | Parsing sem perda silenciosa                | CSV grande, XLSX completo                                                 |
+| **3**  | Cripto por cliente, auditoria, alerta       | `clients.dek_wrapped`, `access_audit`, `core/kms.py`                      |
+| **4**  | Lista, gaveta, multi-arquivo, notificações  | `reconciliation_files`, `usage_events`, `notifications`                   |
+| **5**  | Multi-tenancy e papéis de cliente           | `users.scope`/`client_id`, `core/authz.py`, `core/sensitive_endpoints.py` |
+| **6**  | Glossário e classificação por cliente       | `client_glossary_entries`, `clients.glossary_version`, `review_verdict`   |
+| **7**  | Lançamento de faturas no Omie               | `reconciliation_omie_postings`, `omie_posting/`, `OMIE_POSTING_ENABLED`   |
 | **9**  | Cliente sem sistema e conexões plugáveis ⏳ | `client_connections`, `integrations/providers/`, `legacy_fallback.py`     |
 
 ⏳ **A Sprint 9 é a única ainda FORA da `main`**: está na branch da sprint, aguardando o PR.
@@ -791,6 +806,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.40 — 23/09/2026. **A validação humana da Sprint 9 (task 86e3dcm2y) foi a primeira rodada REAL da integração e do cenário pela tela, e achou o que o sandbox dos agents não podia achar.** Nove testes de integração da própria sprint reprovavam e os três jobs de a11y caíam em dois cenários e2e; o `develop → main` (#193) nasceu vermelho. Um defeito de produto: o "Testar conexão" da gaveta de origem usava a rota legada `test-connection`, que construía `OmieClient(...)` direto e saía para a rede com a credencial `FAKE_DEMO_OMIE_`, travando o cadastro em dev, no ambiente de demonstração e no e2e — agora passa por `build*omie_raw_client`, e a §4.8 ganhou a regra "todo client nasce no adaptador". Um descompasso de convenção: o PRD pedia "422 apontando a rota de conexões" e o handler global responde 400 genérico sem mensagem de propósito; nasceu `CredentialsMovedToConnectionsError`(422,`CREDENTIALS_MOVED`) na rota, o validador Pydantic saiu do schema, e a §4.8 fixa a regra geral (forma é 400 genérico; orientação é exceção tipada). Um de durabilidade: "recusa sem gravar" na criação com credencial inválida agora é SAVEPOINT em volta de cliente + carteira + conexão. O resto era teste: dois casos afirmavam 422 onde a casa responde 400, um lia envelope `data`que o PATCH não devolve, um teste antigo criava cliente com credencial`"k"/"s"`e passou a bater no Omie REAL depois que o cadastro verifica no provedor (prefixo mock), e no e2e`getByText('Com erro')`casava com dois elementos e o mock da lista ignorava o`originState`. Ensaio da conversão de credenciais no banco de dev com linha bare: converte, `--verify` PASS, idempotente.*
 
 _Versão 1.39 — 23/09/2026. **O cliente deixou de ser "um par de credenciais Omie com nome" (Sprint 9 do hub, ainda na branch da sprint).** Ele é entidade plena **sem origem**: as 4 colunas de credencial de `clients` viraram nuláveis e a credencial mora em `client_connections` (0..N por cliente, `UNIQUE(client_id, provider_type, label)`), com a **DEK nascendo só na primeira conexão** — cliente sem origem não provisiona chave. §4.1 ganhou o **12º** par de AAD (`client_connections.credentials_encrypted`: **um** par para o JSON inteiro, para provedor de outro shape caber sem AAD novo); §4.8 ganhou o modelo de origem, a **taxonomia dos três 409** (`SEM_CONEXAO` conectar · `ORIGEM_COM_ERRO` reconectar · `CAPACIDADE_AUSENTE` não há o que consertar — são 409 porque são estado esperado da configuração, não falha) e a **precedência do fallback datado** (conexão vence coluna antiga; "desligar a flag não é promoção"); §4.9 virou **14 x 5** com `manage_client_connections`, e o **manager entra de propósito** — ele cria cliente, e sem a célula o gerente do escritório parceiro cadastraria a carteira sem conseguir conectar ninguém; §4.12 registra que encerrar e excluir levam as conexões na mesma transação. A lista canônica foi de 63 para **68** (as 5 rotas de conexão, na bateria dos três atacantes), `PENDING_ENDPOINTS` continua vazio. **Duas lições da revisão que valem fora da sprint:** escrita seguida de `raise` NÃO é provada por teste de integração (a fixture `client_with_db` não tem o `except: rollback()` da produção — durabilidade exige `commit()` explícito antes do `raise`, ou sessão própria); e fallback datado tem de cobrir o estado **derivado** que a UI usa para liberar ação, não só o caminho de execução — quem só DESCREVE não quebra com exceção, quebra com tela vazia, que passa por comportamento esperado._
 
