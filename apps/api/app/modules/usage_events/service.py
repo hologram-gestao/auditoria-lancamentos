@@ -36,6 +36,7 @@ from app.modules.usage_events.schemas import (
     OmieLancamentoRejeitadoProps,
     OrganizacaoCriadaProps,
     OrganizacaoDesativadaProps,
+    PlanoContasSincronizadoProps,
     QualificacaoEmitidaProps,
     UsageEventName,
     UsuarioTransferidoDeOrganizacaoProps,
@@ -302,6 +303,38 @@ class UsageEventService:
                 organization_id=organization_id,
                 tem_conexao=tem_conexao,
                 tipo_conexao=tipo_conexao,
+            ).model_dump(mode="json"),
+        )
+
+    async def emit_plano_contas_sincronizado(
+        self,
+        *,
+        client_id: UUID,
+        total_categorias: int,
+        ativas: int,
+        com_destino: int,
+        com_conta_contabil: int,
+    ) -> bool:
+        """S10 BACK 10.4 — **a métrica da Sprint 10**. Sem `session_id`.
+
+        Emitido no fim de TODA sincronização bem-sucedida, inclusive a forçada,
+        e **sem dedup**: a fórmula lê a ÚLTIMA linha por `client_id` no período,
+        então 30 sincronizações do mesmo cliente precisam gerar 30 linhas. Este
+        evento nasce fora de `DEDUPED_EVENT_NAMES` por construção (sem
+        `session_id`, o índice parcial nem o alcança).
+
+        `com_destino` e `com_conta_contabil` são contados sobre as ATIVAS, a
+        mesma base de `ativas` — é `com_destino ÷ ativas` que a leitura D+30
+        calcula, e misturar bases daria um percentual que não significa nada.
+        """
+        return await self.emit(
+            UsageEventName.PLANO_CONTAS_SINCRONIZADO,
+            props=PlanoContasSincronizadoProps(
+                client_id=client_id,
+                total_categorias=total_categorias,
+                ativas=ativas,
+                com_destino=com_destino,
+                com_conta_contabil=com_conta_contabil,
             ).model_dump(mode="json"),
         )
 

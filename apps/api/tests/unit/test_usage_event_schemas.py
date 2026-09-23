@@ -30,6 +30,7 @@ from app.modules.usage_events.schemas import (
     GlossarioEditadoProps,
     NotificacaoEntregueProps,
     NotificacaoEntregueRequest,
+    PlanoContasSincronizadoProps,
     QualificacaoEmitidaProps,
     QualificationVerdict,
     UsageEventName,
@@ -231,6 +232,11 @@ class TestEventosDaSprint6:
             UsageEventName.GLOSSARIO_EDITADO,
             UsageEventName.ORGANIZACAO_CRIADA,
             UsageEventName.ORGANIZACAO_DESATIVADA,
+            # S10 (BACK 10.4): a fórmula lê a ÚLTIMA linha por client_id, então
+            # 30 sincronizações do mesmo cliente PRECISAM gerar 30 linhas. Na
+            # allow-list, a 2ª em diante sumiria e a leitura D+30 mediria a foto
+            # do primeiro dia para sempre.
+            UsageEventName.PLANO_CONTAS_SINCRONIZADO,
         ],
         ids=lambda e: e.value,
     )
@@ -256,6 +262,11 @@ class TestAllowListDeDedup:
             UsageEventName.GLOSSARIO_EDITADO,
             UsageEventName.ORGANIZACAO_CRIADA,
             UsageEventName.ORGANIZACAO_DESATIVADA,
+            # S10 (BACK 10.4): a fórmula lê a ÚLTIMA linha por client_id, então
+            # 30 sincronizações do mesmo cliente PRECISAM gerar 30 linhas. Na
+            # allow-list, a 2ª em diante sumiria e a leitura D+30 mediria a foto
+            # do primeiro dia para sempre.
+            UsageEventName.PLANO_CONTAS_SINCRONIZADO,
         ],
         ids=lambda e: e.value,
     )
@@ -286,3 +297,69 @@ class TestAllowListDeDedup:
         spec.loader.exec_module(module)
 
         assert deduped_session_index_predicate() == module._NEW_PREDICATE
+
+
+class TestPlanoContasSincronizado:
+    """BACK 10.4 — **a métrica da Sprint 10**, com o vocabulário fechado.
+
+    O risco concreto deste evento é diferente dos irmãos: ele nasce de um
+    catálogo CONTÁBIL do cliente, e a tentação natural seria mandar junto a
+    lista de códigos sem destino "para facilitar o diagnóstico". Isso
+    reconstituiria o desenho contábil do cliente dentro do sink de métrica.
+    Daí só contagens.
+    """
+
+    #: A whitelist exata declarada no PRD.
+    CHAVES = ("client_id", "total_categorias", "ativas", "com_destino", "com_conta_contabil")
+
+    def _base(self) -> dict[str, Any]:
+        return {
+            "client_id": _CLIENT_ID,
+            "total_categorias": 50,
+            "ativas": 46,
+            "com_destino": 33,
+            "com_conta_contabil": 5,
+        }
+
+    def test_nome_literal_do_prd(self) -> None:
+        """Renomear quebra a leitura D+30, que filtra por esta string exata."""
+        assert UsageEventName.PLANO_CONTAS_SINCRONIZADO.value == "plano_contas_sincronizado"
+
+    def test_props_tem_exatamente_as_cinco_chaves_da_whitelist(self) -> None:
+        assert set(PlanoContasSincronizadoProps.model_fields) == set(self.CHAVES)
+
+    def test_caminho_feliz(self) -> None:
+        props = PlanoContasSincronizadoProps(**self._base())
+        assert props.model_dump(mode="json")["client_id"] == _CLIENT_ID
+
+    @pytest.mark.parametrize(
+        "extra",
+        [
+            {"categorias_sem_destino": ["1.01.01", "2.04.78"]},
+            {"nome_categoria": "BPO Controller - RB"},
+            {"razao_social": "Austral Ltda"},
+            {"cnpj": "12.345.678/0001-90"},
+            {"descricao": "Receita Bruta de Vendas"},
+        ],
+        ids=["lista_de_codigos", "nome_categoria", "razao_social", "cnpj", "descricao"],
+    )
+    def test_chave_fora_da_whitelist_e_rejeitada(self, extra: dict[str, Any]) -> None:
+        """`extra="forbid"`: chave a mais é erro na EMISSÃO, não campo silencioso."""
+        base = self._base()
+        assert PlanoContasSincronizadoProps(**base) is not None
+        with pytest.raises(ValidationError):
+            PlanoContasSincronizadoProps(**base, **extra)
+
+    @pytest.mark.parametrize(
+        "campo", ["total_categorias", "ativas", "com_destino", "com_conta_contabil"]
+    )
+    def test_nenhuma_contagem_aceita_negativo(self, campo: str) -> None:
+        base = self._base()
+        base[campo] = -1
+        with pytest.raises(ValidationError):
+            PlanoContasSincronizadoProps(**base)
+
+    def test_nenhum_campo_e_texto_livre(self) -> None:
+        """Todo campo é UUID ou `int` — o invariante do módulo inteiro (§4.7)."""
+        for name, field in PlanoContasSincronizadoProps.model_fields.items():
+            assert field.annotation in (UUID, int), f"{name} pode carregar texto livre"

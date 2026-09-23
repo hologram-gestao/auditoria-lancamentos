@@ -30,6 +30,7 @@ from app.db.models import (
     AccessAudit,
     Client,
     ClientAssignment,
+    ClientChartOfAccount,
     ClientConnection,
     Notification,
     NotificationType,
@@ -215,6 +216,10 @@ async def _seed_world(db: AsyncSession, *, processing: bool = False) -> _World:
             label="Omie",
         )
     )
+    # S10 (BACK 10.1): o plano de contas do cliente. Mesma razão da conexão
+    # acima — é mais uma FK no grafo, e a FK dela é `CASCADE`: a exclusão
+    # definitiva tem de continuar passando sem `DELETE` explícito.
+    db.add(ClientChartOfAccount(client_id=w.cli_a.id, category_code="1.01.01", dre_code="1.01"))
     db.add(
         AccessAudit(
             user_id=w.admin.id,
@@ -286,6 +291,17 @@ class TestDeleteClient:
             await _count(
                 db_session,
                 select(func.count(ClientConnection.id)).where(ClientConnection.client_id == a),
+            )
+            == 0
+        )
+        # O plano de contas também — pelo CASCADE da FK, sem `DELETE` explícito
+        # na lista do repositório. É o teste que prova o `ondelete` declarado.
+        assert (
+            await _count(
+                db_session,
+                select(func.count(ClientChartOfAccount.id)).where(
+                    ClientChartOfAccount.client_id == a
+                ),
             )
             == 0
         )

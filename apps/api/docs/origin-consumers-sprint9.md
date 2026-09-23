@@ -18,6 +18,7 @@ origem faria o glossário de um cliente sem Omie parar de funcionar.
 | `app/core/crypto_service.py` | definição | `load_client_cipher` · `provision_client_cipher` | declara `load_client_cipher` e `provision_client_cipher` |
 | `app/integrations/omie/lancamento_cache.py` | definição | `build_origin_client` | docstring: recebe o client já construído pelo caller, não o constrói |
 | `app/integrations/omie/mock_client.py` | definição | `build_origin_client` | docstring do cliente-demo; a resolução mora no adaptador (09.2) |
+| `app/modules/client_chart_of_accounts/service.py` | origem — convertido para o contrato | `build_origin_client` · `resolve_capable_connection` | sincroniza o plano de contas (S10): resolve a conexão capaz e constrói o client pela PORTA, sem tocar em credencial nem nas colunas antigas |
 | `app/modules/client_connections/legacy_fallback.py` | fallback / conversão do R2 | `load_client_cipher` · `resolve_origin_connections` | único leitor das colunas antigas; sintetiza a conexão da janela (09.5) |
 | `app/modules/client_connections/origin.py` | origem — convertido para o contrato | `build_omie_client` · `load_client_cipher` · `build_capable_client` · `build_origin_client` · `client_from_credentials` · `resolve_capable_connection` · `resolve_origin_connections` | a PORTA: resolve conexão capaz + decifra a credencial dela |
 | `app/modules/client_connections/service.py` | origem — convertido para o contrato | `load_client_cipher` · `provision_client_cipher` · `resolve_origin_connections` | CRUD de conexão: cifra e decifra a credencial DA CONEXÃO |
@@ -36,7 +37,7 @@ origem faria o glossário de um cliente sem Omie parar de funcionar.
 
 ## Contagens
 
-- **origem — convertido para o contrato**: 9
+- **origem — convertido para o contrato**: 10
 - **cifra de dado do tenant — declarado, sem conversão**: 4
 - **definição**: 3
 - **fallback / conversão do R2**: 2

@@ -43,6 +43,7 @@ from app.db.models import (
     Client,
     ClientAssignment,
     ClientCategory,
+    ClientChartOfAccount,
     ClientConnection,
     ClientGlossaryEntry,
     ConnectionStatus,
@@ -513,8 +514,9 @@ class ClientRepository:
                declarada é a fonte: o `DELETE` explícito mantém as duas
                coerentes e faz a credencial cifrada da origem sumir junto;
             5. a linha de `clients` — cascateia atribuições, glossário, cache de
-               contas Omie e favoritos; a DEK morre com ela e tudo que ela
-               cifrava vira indecifrável por construção (§4.1).
+               contas Omie, **plano de contas** (S10) e favoritos; a DEK morre
+               com ela e tudo que ela cifrava vira indecifrável por construção
+               (§4.1).
 
         `access_audit` e `usage_events` FICAM: são trilhas só de IDs (§4.7) e
         sobrevivem ao cliente de propósito.
@@ -546,17 +548,23 @@ class ClientRepository:
         serve para nada), **conexões de origem** (S9 — a credencial cifrada
         delas morre pelo mesmo motivo, e uma origem de um cliente encerrado não
         tem o que operar), cache de contas Omie (nomes de contas do cliente,
-        TTL), notificações (UI de um recurso que não opera mais) e favoritos (o
-        cliente sai do dia a dia). `client_assignments` FICA de propósito
-        (decisão 09/09): o manager da carteira continua vendo o histórico.
-        Conciliações, postings, `usage_events` e `access_audit` ficam — são a
-        retenção que motivou o encerramento.
+        TTL), notificações (UI de um recurso que não opera mais), favoritos (o
+        cliente sai do dia a dia) e o **plano de contas** (S10 — configuração do
+        cliente final: nada nele é cifrado, então nada morreu com a DEK, mas
+        cliente encerrado não tem plano de contas a operar).
+        `client_assignments` FICA de propósito (decisão 09/09): o manager da
+        carteira continua vendo o histórico. Conciliações, postings,
+        `usage_events` e `access_audit` ficam — são a retenção que motivou o
+        encerramento.
         """
         s = self._session
         await s.execute(
             delete(ClientGlossaryEntry).where(ClientGlossaryEntry.client_id == client_id)
         )
         await s.execute(delete(ClientConnection).where(ClientConnection.client_id == client_id))
+        await s.execute(
+            delete(ClientChartOfAccount).where(ClientChartOfAccount.client_id == client_id)
+        )
         await s.execute(delete(OmieAccountCache).where(OmieAccountCache.client_id == client_id))
         await s.execute(delete(Notification).where(Notification.client_id == client_id))
         await s.execute(delete(UserClientFavorite).where(UserClientFavorite.client_id == client_id))

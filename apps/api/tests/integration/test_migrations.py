@@ -1314,3 +1314,196 @@ class TestConexoesDeOrigemRoundTrip:
 
         assert _scalar(url, "SELECT count(*) FROM clients") == 2
         assert _scalar(url, "SELECT count(*) FROM client_connections") == 0
+
+
+# ----------------------------------------------------------------------
+# Sprint 10 (BACK 10.1) — plano de contas do cliente
+# ----------------------------------------------------------------------
+
+PRE_CHART_OF_ACCOUNTS_REV = "a7f2c1d93e84"
+CHART_OF_ACCOUNTS_REV = "f1b7a52c8e60"
+
+_INSERT_CHART_ROW = (
+    "INSERT INTO client_chart_of_accounts "
+    "(id, client_id, category_code, parent_code, dre_code, dre_level, dre_sign, "
+    "conta_contabil_code, status, synced_at, created_at, updated_at) "
+    "VALUES (gen_random_uuid(), :cid, :code, :parent, :dre, :nivel, :sinal, "
+    ":contabil, :status, now(), now(), now())"
+)
+
+#: A linha MÍNIMA: só cliente e código. Prova que tudo o que a origem pode não
+#: mandar (hierarquia, destino, conta contábil) é opcional NO BANCO — se
+#: qualquer uma virasse `NOT NULL`, a sincronização de um cliente menos
+#: organizado quebraria em produção, não aqui.
+_INSERT_CHART_ROW_MINIMAL = (
+    "INSERT INTO client_chart_of_accounts "
+    "(id, client_id, category_code, created_at, updated_at) "
+    "VALUES (gen_random_uuid(), :cid, :code, now(), now())"
+)
+
+
+class TestPlanoDeContasRoundTrip:
+    """BACK 10.1 — a migration do plano de contas sobe, desce e sobe."""
+
+    def test_upgrade_cria_tabela_colunas_e_garantias(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+
+        assert _table_exists(url, "client_chart_of_accounts")
+        assert (
+            _columns(
+                url,
+                "client_chart_of_accounts",
+                "client_id",
+                "category_code",
+                "parent_code",
+                "dre_code",
+                "dre_level",
+                "dre_sign",
+                "conta_contabil_code",
+                "totalizadora",
+                "transferencia",
+                "nao_exibir",
+                "status",
+                "synced_at",
+            )
+            == 12
+        )
+        # Nenhuma coluna de NOME/descrição (§4.5) — a lei vale no BANCO.
+        assert (
+            _columns(
+                url,
+                "client_chart_of_accounts",
+                "descricao",
+                "description",
+                "name",
+                "descricao_dre",
+                "conta_contabil_tag",
+                "tag_conta_contabil",
+            )
+            == 0
+        )
+        # O estado do sync mora em `clients`, como `omie_accounts_synced_at`.
+        assert (
+            _columns(
+                url,
+                "clients",
+                "chart_of_accounts_synced_at",
+                "chart_of_accounts_sync_failed_at",
+            )
+            == 2
+        )
+        # As garantias existem NO BANCO, não só na aplicação.
+        assert (
+            _scalar(
+                url,
+                _CONSTRAINT_COUNT,
+                name="uq_client_chart_of_accounts_client_code",
+            )
+            == 1
+        )
+        assert _scalar(url, _CONSTRAINT_COUNT, name="ck_client_chart_of_accounts_status") == 1
+
+    def test_linha_minima_basta_e_situacao_e_travada_pelo_banco(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        """Só `(cliente, código)` é obrigatório; `status` fora do vocabulário é recusado."""
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+
+        _execute(url, _INSERT_CHART_ROW_MINIMAL, cid=client_id, code="0.01")
+        assert (
+            _scalar(
+                url,
+                "SELECT count(*) FROM client_chart_of_accounts "
+                "WHERE dre_code IS NULL AND parent_code IS NULL AND status = 'ativa' "
+                "AND totalizadora = false",
+            )
+            == 1
+        ), "a linha mínima nasce 'sem destino declarado', ativa e sem flags"
+
+        with pytest.raises(sa.exc.IntegrityError):
+            _execute(
+                url,
+                _INSERT_CHART_ROW,
+                cid=client_id,
+                code="9.99",
+                parent=None,
+                dre=None,
+                nivel=None,
+                sinal=None,
+                contabil=None,
+                status="arquivada",
+            )
+
+    def test_unicidade_e_por_cliente_e_codigo(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        """O mesmo código em DOIS clientes é legítimo; duas vezes no mesmo, não.
+
+        É esta UNIQUE que torna o upsert da 10.2 idempotente sob concorrência —
+        sem ela, duas sincronizações simultâneas duplicariam o plano inteiro.
+        """
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        primeiro = _seed_client_row(url)
+        segundo = _seed_client_row(url)
+
+        for client_id in (primeiro, segundo):
+            _execute(url, _INSERT_CHART_ROW_MINIMAL, cid=client_id, code="1.01.01")
+        assert _scalar(url, "SELECT count(*) FROM client_chart_of_accounts") == 2
+
+        with pytest.raises(sa.exc.IntegrityError):
+            _execute(url, _INSERT_CHART_ROW_MINIMAL, cid=primeiro, code="1.01.01")
+
+    def test_exclusao_do_cliente_leva_o_plano_de_contas(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        """`ondelete=CASCADE` declarado — a FK não pode TRAVAR a exclusão do cliente."""
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        _execute(url, _INSERT_CHART_ROW_MINIMAL, cid=client_id, code="1.01.01")
+
+        _execute(url, "DELETE FROM clients WHERE id = :cid", cid=client_id)
+
+        assert _scalar(url, "SELECT count(*) FROM client_chart_of_accounts") == 0
+
+    def test_downgrade_e_real_e_o_ciclo_converge(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        """Desce de verdade (tabela e colunas somem) e o cliente sobrevive.
+
+        O plano de contas é DERIVADO da origem: perdê-lo no rollback custa uma
+        ressincronização, não um dado irrecuperável — por isso o downgrade não
+        tem pré-check, ao contrário do da credencial (`a7f2c1d93e84`).
+        """
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        _execute(url, _INSERT_CHART_ROW_MINIMAL, cid=client_id, code="1.01.01")
+
+        command.downgrade(alembic_cfg, PRE_CHART_OF_ACCOUNTS_REV)
+        assert not _table_exists(url, "client_chart_of_accounts")
+        assert (
+            _columns(
+                url,
+                "clients",
+                "chart_of_accounts_synced_at",
+                "chart_of_accounts_sync_failed_at",
+            )
+            == 0
+        )
+        assert _scalar(url, "SELECT count(*) FROM clients") == 1
+
+        for _ in range(2):
+            command.upgrade(alembic_cfg, "head")
+            command.downgrade(alembic_cfg, PRE_CHART_OF_ACCOUNTS_REV)
+
+        command.upgrade(alembic_cfg, "head")
+        assert _table_exists(url, "client_chart_of_accounts")
+        assert _scalar(url, "SELECT count(*) FROM clients") == 1
+        assert _scalar(url, "SELECT version_num FROM alembic_version") == CHART_OF_ACCOUNTS_REV

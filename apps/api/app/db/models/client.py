@@ -35,6 +35,7 @@ from app.db.models.organization import organization_id_server_default
 if TYPE_CHECKING:
     from app.db.models.client_assignment import ClientAssignment
     from app.db.models.client_category import ClientCategory
+    from app.db.models.client_chart_of_accounts import ClientChartOfAccount
     from app.db.models.client_connection import ClientConnection
     from app.db.models.omie_account_cache import OmieAccountCache
     from app.db.models.organization import Organization
@@ -104,6 +105,29 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         default=None,
     )
 
+    # Sprint 10 (BACK 10.1) — estado da sincronização do PLANO DE CONTAS.
+    # Duas colunas, mesmo precedente de `omie_accounts_synced_at` logo acima e
+    # pelo mesmo motivo: NÃO derivar de `MAX(client_chart_of_accounts.synced_at)`,
+    # porque um cliente cujo cadastro de categorias está vazio deixaria o MAX em
+    # NULL, o TTL de 24h nunca dispararia e toda abertura de tela bateria a
+    # origem.
+    #
+    # São DUAS e não uma com significado duplo: a tela precisa dizer "falhou
+    # agora, e a última boa foi tal dia" (R3) — um campo só escolheria entre
+    # esquecer a falha ou mentir sobre o sucesso. Fonte ÚNICA do "está dentro da
+    # validade": `chart_of_accounts_synced_at`. A falha NUNCA mexe nele, é o que
+    # garante "falha preserva a última sincronização bem-sucedida" (R2).
+    chart_of_accounts_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+    )
+    chart_of_accounts_sync_failed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+    )
+
     # Sprint 6 (BACK 06.2) — marcador de versão do GLOSSÁRIO deste tenant.
     # Contador incrementado na MESMA transação de qualquer escrita no glossário
     # (criação, edição E remoção). É o que permite invalidar o bloco de prompt
@@ -163,6 +187,13 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Sprint 9 (BACK 09.1): as ORIGENS de dado do cliente — 0..N, tipadas.
     connections: Mapped[list[ClientConnection]] = relationship(
         "ClientConnection",
+        back_populates="client",
+        cascade="all, delete-orphan",
+        lazy="raise",
+    )
+    # Sprint 10 (BACK 10.1): o plano de contas do cliente, só códigos e flags.
+    chart_of_accounts: Mapped[list[ClientChartOfAccount]] = relationship(
+        "ClientChartOfAccount",
         back_populates="client",
         cascade="all, delete-orphan",
         lazy="raise",

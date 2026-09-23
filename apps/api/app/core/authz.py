@@ -150,6 +150,18 @@ class Permission(StrEnum):
     #: escritório parceiro cadastrar a carteira e não conseguir conectar
     #: ninguém, que é exatamente o cadastro morto que a Sprint 9 quer evitar.
     MANAGE_CLIENT_CONNECTIONS = "manage_client_connections"
+    # --- Sprint 10 (BACK 10.3) ----------------------------------------------
+    #: LER o plano de contas do cliente (lista + cobertura). Todo papel com
+    #: acesso ao tenant: é a classificação contábil do próprio cliente, e o
+    #: operador precisa dela para entender o que a conciliação mostra.
+    VIEW_CLIENT_CHART_OF_ACCOUNTS = "view_client_chart_of_accounts"
+    #: SINCRONIZAR o plano de contas (ir à origem). Permissão PRÓPRIA, decidida
+    #: no PRD (R4), porque as duas reutilizações plausíveis dão resultados
+    #: OPOSTOS: `manage_client_categories` é admin-only e deixaria de fora o
+    #: `manager` do escritório parceiro — quem cadastra e conecta a carteira; e
+    #: `sync_omie_accounts` é de todos, o que deixaria o `client_operator`
+    #: forçar chamadas à origem do cliente.
+    SYNC_CLIENT_CHART_OF_ACCOUNTS = "sync_client_chart_of_accounts"
 
 
 _EVERYONE: frozenset[UserRole] = frozenset(UserRole)
@@ -182,6 +194,8 @@ _PLATFORM_ONLY: frozenset[UserRole] = frozenset({UserRole.PLATFORM_ADMIN})
 #: | Gerir organizações            | ✅             | ❌          | ❌             | ❌             | ❌              |
 #: | Teste de alerta               | ✅             | ✅          | ❌             | ❌             | ❌              |
 #: | Conexões de origem (S9)       | ✅             | ✅          | ✅ (carteira)  | ❌             | ❌              |
+#: | Ver plano de contas (S10)     | ✅             | ✅          | ✅ (carteira)  | ✅             | ✅              |
+#: | Sincronizar plano de contas   | ✅             | ✅          | ✅ (carteira)  | ✅             | ❌              |
 PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]] = {
     Permission.RUN_RECONCILIATION: _EVERYONE,
     Permission.REVIEW_EXPORT: _EVERYONE,
@@ -221,6 +235,19 @@ PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]] = {
     # Papéis de CLIENTE ficam de fora: credencial de sistema contábil é
     # configuração do escritório, não do cliente final.
     Permission.MANAGE_CLIENT_CONNECTIONS: _STAFF,
+    # S10 (BACK 10.3), células decididas no PRD (R4). LER é de todos: o plano de
+    # contas é a classificação contábil DO cliente, e o operador precisa dela
+    # para entender o que a conciliação está mostrando. O "(carteira)" do
+    # manager é `resolve_client_access`, não esta linha.
+    Permission.VIEW_CLIENT_CHART_OF_ACCOUNTS: _EVERYONE,
+    # SINCRONIZAR sai do `client_operator` e só dele: sincronizar é uma ida à
+    # origem do cliente, e o operador é quem mais abre tela. Nenhuma das duas
+    # permissões existentes servia — `manage_client_categories` (admin-only)
+    # excluiria o manager que cadastra a carteira; `sync_omie_accounts` (todos)
+    # deixaria o operador forçar chamadas.
+    Permission.SYNC_CLIENT_CHART_OF_ACCOUNTS: frozenset(
+        {UserRole.PLATFORM_ADMIN, UserRole.ADMIN, UserRole.MANAGER, UserRole.CLIENT_MANAGER}
+    ),
 }
 
 
