@@ -56,6 +56,18 @@ class OmieAccountCache(UUIDPrimaryKeyMixin, Base):
         nullable=False,
         index=True,
     )
+    #: A conexão de origem desta conta (Sprint 9, BACK 09.1). NULÁVEL de
+    #: propósito: as linhas já gravadas nasceram quando a origem era o par de
+    #: credenciais do próprio cliente, e a conversão delas é a 09.5. Quem passa
+    #: a ler/gravar o cache POR CONEXÃO é a 09.6 — até lá a coluna existe e fica
+    #: vazia. CASCADE: cache de uma origem removida não tem dono.
+    connection_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("client_connections.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+        default=None,
+    )
     omie_conta_id: Mapped[int] = mapped_column(BigInteger, nullable=False)  # nCodCC do Omie
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     bank_name: Mapped[str] = mapped_column(String(100), nullable=False)

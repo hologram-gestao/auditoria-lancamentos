@@ -54,6 +54,7 @@ from app.core.dependencies import (
     SyncOmieAccountsDep,
 )
 from app.core.rate_limit import limiter, user_id_key_func
+from app.modules.client_connections.service import ClientConnectionService
 from app.modules.clients.repository import ClientRepository
 from app.modules.clients.schemas import (
     AddClientManagerRequest,
@@ -81,6 +82,9 @@ def _get_client_service(db: DbSessionDep, settings: SettingsDep) -> ClientServic
         ClientRepository(db),
         settings,
         usage_events=UsageEventService(UsageEventRepository(db)),
+        # S9 (BACK 09.4): a MESMA sessão do request — criar cliente com
+        # credencial grava cliente e conexão na mesma transação.
+        connections=ClientConnectionService(db, settings),
     )
 
 
@@ -432,8 +436,6 @@ async def update_client(
         client,
         name=payload.name,
         active=payload.active,
-        omie_app_key=payload.omie_app_key,
-        omie_app_secret=payload.omie_app_secret,
         viewer_user_id=UUID(user.id),
         # Tri-estado (86e34jd8m): só mexe na categoria se o campo veio no body.
         category_id=payload.category_id,

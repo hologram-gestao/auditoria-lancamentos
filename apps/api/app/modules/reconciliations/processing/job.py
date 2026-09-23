@@ -45,7 +45,7 @@ from app.core.crypto_service import (
     field_locator,
     provision_client_cipher,
 )
-from app.core.exceptions import AppError, ErrorCode
+from app.core.exceptions import AppError, ErrorCode, OmieAuthError
 from app.core.logging import get_logger
 from app.db.models import (
     FileEntrySituation,
@@ -54,7 +54,13 @@ from app.db.models import (
     ReconciliationStatus,
 )
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache
-from app.modules.clients.omie_factory import build_omie_client
+from app.integrations.providers.base import Capability
+from app.modules.client_connections.origin import (
+    client_from_credentials,
+    credentials_for,
+    resolve_capable_connection,
+)
+from app.modules.client_connections.repository import ClientConnectionRepository
 from app.modules.notifications.repository import NotificationRepository
 from app.modules.notifications.service import NotificationService
 from app.modules.reconciliations.processing.anomalies import (
@@ -251,6 +257,23 @@ async def _run_and_settle(
         log.info("reconciliation_processing_finished", session_id=session_id)
 
 
+async def _mark_origin_connection_error(
+    connection_id: UUID,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Marca a conexão como `erro` numa sessão PRÓPRIA (S9, BACK 09.6).
+
+    Sessão própria porque o job roda fora do request e a do passo 1 já fechou —
+    e best-effort porque marcar o estado nunca pode transformar uma falha de
+    credencial numa falha de job pior. A exceção original segue subindo.
+    """
+    try:
+        async with session_factory() as db, db.begin():
+            await ClientConnectionRepository(db).mark_connection_error(connection_id)
+    except Exception:
+        log.warning("origin_connection_error_mark_failed", connection_id=str(connection_id))
+
+
 async def _execute_processing(
     session_id: UUID,
     settings: Settings,
@@ -313,9 +336,24 @@ async def _execute_processing(
             for entry in session_obj.file_entries
         ]
 
+        # S9 (BACK 09.6): a origem é resolvida DENTRO da sessão — a linha da
+        # conexão expira quando ela fecha, então o que atravessa daqui para
+        # frente é a credencial já decifrada (`SecretStr`, nunca texto) e o
+        # tipo do provedor. Sem origem capaz, o 409 da taxonomia sobe como
+        # `AppError` e vira sessão em ERRO com `user_message` acionável —
+        # nenhum 5xx no polling do front.
+        origin_connection = await resolve_capable_connection(
+            db, client, Capability.LISTAR_LANCAMENTOS, settings=settings
+        )
+        origin_connection_id = origin_connection.id
+        origin_provider_type = origin_connection.provider_type
+        origin_credentials = await credentials_for(client, origin_connection, settings=settings)
+
     # 2. Fetch Omie data — toda a interação com credencial em claro
     #    acontece dentro do `async with` do OmieClient.
-    omie_client = build_omie_client(client, settings, cipher)
+    omie_client = client_from_credentials(
+        origin_provider_type, origin_credentials, settings=settings
+    )
     # Cache L1 local a este processamento: popula supplier/category de cada
     # lançamento da janela atual pra alimentar a qualificação (S19). É uma
     # instância própria, não o singleton do app — a Tela de Revisão popula o
@@ -353,6 +391,14 @@ async def _execute_processing(
                         "qualification_cache_populate_failed",
                         session_id=str(session_id),
                     )
+    except OmieAuthError:
+        # S9 (BACK 09.6): credencial RECUSADA é estado persistente da conexão —
+        # marca `erro` (sem apagar a credencial: recusada não é perdida) para a
+        # tela do cliente poder oferecer "reconectar". Timeout e instabilidade
+        # NÃO caem aqui: são transitórios e não podem apagar o estado de ninguém.
+        # A exceção segue subindo e vira sessão em ERRO com `user_message`.
+        await _mark_origin_connection_error(origin_connection_id, session_factory)
+        raise
     finally:
         # Garantia extra de fechamento se o contexto async falhou antes do __aexit__.
         await omie_client.aclose()

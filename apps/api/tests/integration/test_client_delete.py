@@ -30,8 +30,10 @@ from app.db.models import (
     AccessAudit,
     Client,
     ClientAssignment,
+    ClientConnection,
     Notification,
     NotificationType,
+    ProviderType,
     ReconciliationFile,
     ReconciliationFileStatus,
     ReconciliationSession,
@@ -203,6 +205,16 @@ async def _seed_world(db: AsyncSession, *, processing: bool = False) -> _World:
         )
     )
     db.add(UserClientFavorite(user_id=w.admin.id, client_id=w.cli_a.id))
+    # S9 (BACK 09.1): a origem do cliente. Pendura uma FK a mais no grafo — e é
+    # por isso que ela está no mundo padrão, não num teste à parte: a exclusão
+    # inteira tem de continuar passando com ela lá.
+    db.add(
+        ClientConnection(
+            client_id=w.cli_a.id,
+            provider_type=ProviderType.OMIE.value,
+            label="Omie",
+        )
+    )
     db.add(
         AccessAudit(
             user_id=w.admin.id,
@@ -266,6 +278,14 @@ class TestDeleteClient:
             await _count(
                 db_session,
                 select(func.count(ClientAssignment.id)).where(ClientAssignment.client_id == a),
+            )
+            == 0
+        )
+        # A origem some junto — e não travou a exclusão (FK com ondelete declarado).
+        assert (
+            await _count(
+                db_session,
+                select(func.count(ClientConnection.id)).where(ClientConnection.client_id == a),
             )
             == 0
         )

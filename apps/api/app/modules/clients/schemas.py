@@ -16,11 +16,13 @@ Princípios:
 from __future__ import annotations
 
 from datetime import date, datetime
+from enum import StrEnum
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.db.models import ReconciliationStatus
+from app.modules.client_connections.schemas import ClientConnectionResponse
 from app.modules.reconciliations.schemas import SessionAuthor
 from app.modules.users.schemas import PaginationMeta
 
@@ -28,13 +30,33 @@ from app.modules.users.schemas import PaginationMeta
 class CreateClientRequest(BaseModel):
     """Body de POST /api/v1/clients — cria cliente + auto-assign do criador.
 
-    O backend confia que o frontend já chamou `/test-connection` antes (Doc §9.2);
-    aqui apenas criptografa e persiste.
+    ⚠️ **Sprint 9 (BACK 09.4): a credencial virou OPCIONAL.** Até aqui o cliente
+    **era**, por construção, um par de credenciais Omie com nome — o que impede
+    cadastrar a maior parte da carteira de um escritório contábil, onde a maioria
+    não usa o Omie (nem sistema nenhum). Sem credencial, o cliente nasce pleno e
+    **sem origem**; com credencial, a origem nasce junto, como `client_connections`.
+
+    Os dois campos continuam sendo exigidos **JUNTOS**: um só é 400
+    `IncompleteCredentialsError`, como já era no PATCH.
+
+    O gate do front (`POST /clients/test-connection`) continua existindo e sendo
+    útil — mas deixou de ser a única barreira: desde a 09.3 o servidor **verifica
+    a credencial contra o provedor antes de persistir** qualquer coisa.
     """
 
     name: str = Field(..., min_length=1, max_length=200, description="Nome interno na Hologram.")
-    omie_app_key: str = Field(..., min_length=1, max_length=200)
-    omie_app_secret: str = Field(..., min_length=1, max_length=200)
+    omie_app_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        description="Opcional desde a S9. Se vier, `omie_app_secret` também precisa vir.",
+    )
+    omie_app_secret: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        description="Opcional desde a S9. Se vier, `omie_app_key` também precisa vir.",
+    )
     category_id: UUID | None = Field(
         None, description="Categoria do catálogo (86e34jd8m). Ausente ou null = sem categoria."
     )
@@ -53,20 +75,50 @@ class CreateClientRequest(BaseModel):
 class UpdateClientRequest(BaseModel):
     """Body de PATCH /api/v1/clients/{id} — campos opcionais (PATCH semântico).
 
-    Para atualizar credenciais é OBRIGATÓRIO enviar `omie_app_key` E
-    `omie_app_secret` juntos. Apenas um dos dois resulta em 400
-    `IncompleteCredentialsError` (S6 §3.4).
+    ⚠️ **Sprint 9 (BACK 09.3): credencial NÃO se edita mais por aqui.** A
+    origem do cliente virou entidade própria (`client_connections`), e manter um
+    segundo caminho de escrita de credencial nas colunas antigas criaria duas
+    verdades sobre a mesma coisa — com a diferença de que este caminho **não**
+    valida contra o provedor antes de gravar. `omieAppKey`/`omieAppSecret` no
+    corpo agora são **422** apontando `POST /api/v1/clients/{id}/connections`;
+    `IncompleteCredentialsError` deixou de valer para o PATCH.
+
+    O `extra="forbid"` sozinho já daria 422, mas com a mensagem genérica do
+    Pydantic ("extra inputs are not permitted"). Os campos continuam declarados
+    para que a mensagem diga **para onde ir**.
     """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     name: str | None = Field(None, min_length=1, max_length=200)
     active: bool | None = None
-    omie_app_key: str | None = Field(None, min_length=1, max_length=200)
-    omie_app_secret: str | None = Field(None, min_length=1, max_length=200)
+    #: Aceitos pelo schema só para produzir um 422 acionável — ver
+    #: `_credencial_saiu_do_patch`. Nunca chegam ao service.
+    omie_app_key: str | None = Field(default=None, deprecated=True)
+    omie_app_secret: str | None = Field(default=None, deprecated=True)
     # Tri-estado (86e34jd8m): OMITIDO mantém; `null` explícito limpa; UUID troca.
     # A rota distingue omitido de null via `model_fields_set`.
     category_id: UUID | None = Field(
         None, description="Omitir mantém a categoria; `null` limpa; UUID troca."
     )
+
+    @model_validator(mode="after")
+    def _credencial_saiu_do_patch(self) -> UpdateClientRequest:
+        """Credencial no corpo do PATCH é erro, e o erro diz o caminho novo.
+
+        Vale para a PRESENÇA da chave, não para o valor: mandar
+        `{"omieAppKey": null}` também é 422 — quem manda a chave está usando o
+        caminho antigo e precisa saber que ele acabou.
+        """
+        enviados = {"omie_app_key", "omie_app_secret"} & self.model_fields_set
+        if enviados:
+            raise ValueError(
+                "As credenciais da origem não são mais editadas por aqui. "
+                "Use POST /api/v1/clients/{id}/connections para conectar uma origem, "
+                "ou PATCH /api/v1/clients/{id}/connections/{connectionId} para trocar "
+                "as credenciais de uma existente."
+            )
+        return self
 
 
 class TestConnectionRequest(BaseModel):
@@ -171,6 +223,31 @@ class OrganizationSummary(BaseModel):
     name: str
 
 
+class OriginStatus(StrEnum):
+    """Estado da ORIGEM de dado do cliente (S9 BACK 09.4), DERIVADO das conexões.
+
+    Não é coluna: derivar de `client_connections` impede a terceira verdade —
+    uma coluna `origin_status` ficaria mentindo no dia em que uma conexão
+    mudasse de estado e alguém esquecesse de atualizá-la.
+
+    Três estados porque as três situações pedem coisas diferentes do usuário:
+    `sem_origem` (conectar), `erro` (reconectar) e `ativa` (nada). Os mesmos
+    três da taxonomia 409 da 09.2 — de propósito: a tela decide pelo estado o
+    que oferecer, e o erro só aparece se ela oferecer errado.
+    """
+
+    SEM_ORIGEM = "sem_origem"
+    ATIVA = "ativa"
+    ERRO = "erro"
+
+
+def derive_origin_status(*, total: int, active: int) -> OriginStatus:
+    """Fonte ÚNICA da derivação — repositório, detalhe e testes usam ESTA."""
+    if total == 0:
+        return OriginStatus.SEM_ORIGEM
+    return OriginStatus.ATIVA if active > 0 else OriginStatus.ERRO
+
+
 class ClientResponse(BaseModel):
     """Representação pública de um Client. NUNCA inclui campos `*_encrypted`/`*_iv`."""
 
@@ -197,6 +274,17 @@ class ClientResponse(BaseModel):
     # mostra "Fulana +N" sem carregar os nomes de todo mundo em cada linha.
     manager_count: int = Field(
         0, ge=0, description="Pessoas com acesso ao cliente, responsável incluído."
+    )
+    # S9 (BACK 09.4) — estado da ORIGEM de dado, derivado das conexões. Está no
+    # `ClientResponse` (e não só no detalhe) de propósito: a lista do escritório
+    # parceiro precisa mostrar quem está sem origem, e o custo é uma subquery
+    # escalar na query que já existe — sem N+1.
+    origin_status: OriginStatus = Field(
+        OriginStatus.SEM_ORIGEM,
+        description=(
+            "`sem_origem` = nenhuma conexão; `ativa` = há conexão ativa; "
+            "`erro` = há conexão, nenhuma ativa."
+        ),
     )
 
     model_config = {"from_attributes": True}
@@ -244,10 +332,22 @@ class ClientDetailResponse(ClientResponse):
     Estende `ClientResponse`. `accounts_synced_at` é o MAX(synced_at) entre as
     linhas; o front usa para mostrar "Sincronizado há Xh". `None` apenas se
     não há nenhuma conta cacheada (cliente novo + Omie retornou zero contas).
+
+    ⚠️ **S9 (BACK 09.4): este endpoint responde 200 SEMPRE** — é a exceção
+    deliberada ao 409 da taxonomia de origem. Cliente sem origem devolve
+    `origin_status='sem_origem'`, `accounts=[]` e `accounts_synced_at=null`,
+    **sem chamar o provedor**. A alternativa (409 no detalhe) deixaria o
+    parceiro sem conseguir ABRIR a tela do cliente que acabou de cadastrar.
+
+    `connections` é o resumo das origens — sem credencial, nem mascarada.
     """
 
     accounts: list[BankAccountResponse] = Field(default_factory=list)
     accounts_synced_at: datetime | None = None
+    connections: list[ClientConnectionResponse] = Field(
+        default_factory=list,
+        description="Origens conectadas (0..N), com capacidades. Sem credencial.",
+    )
 
 
 #: Vocabulário de status do PRODUTO → status do banco (Sprint 4, R1/§17).

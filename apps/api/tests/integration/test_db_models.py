@@ -28,10 +28,13 @@ from app.db.models import (
     AnomalyType,
     Client,
     ClientAssignment,
+    ClientConnection,
+    ConnectionStatus,
     FileEntrySituation,
     OmieAccountCache,
     OmieAccountType,
     OmieEntryStatus,
+    ProviderType,
     ReconciliationAnomaly,
     ReconciliationFile,
     ReconciliationFileEntry,
@@ -233,6 +236,104 @@ class TestOmieAccountCache:
                 name="Outra",
                 bank_name="Sicredi",
                 account_type=OmieAccountType.CHECKING.value,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            await db_session.flush()
+
+
+class TestClientConnections:
+    """Sprint 9 (BACK 09.1) — o cliente existe sem origem, e as origens são 0..N."""
+
+    async def test_cliente_nasce_sem_credencial(self, db_session: AsyncSession) -> None:
+        """R1: a linha de `clients` existe com as 4 colunas de credencial nulas."""
+        admin = await _make_user(db_session, email="sem-origem@test.com")
+        client = Client(name="Padaria do Bairro", active=True, created_by=admin.id)
+        db_session.add(client)
+        await db_session.flush()
+
+        persisted = (
+            await db_session.execute(select(Client).where(Client.id == client.id))
+        ).scalar_one()
+        assert persisted.omie_app_key_encrypted is None
+        assert persisted.omie_app_key_iv is None
+        assert persisted.omie_app_secret_encrypted is None
+        assert persisted.omie_app_secret_iv is None
+
+    async def test_duas_conexoes_do_mesmo_tipo_com_rotulos_diferentes(
+        self, db_session: AsyncSession
+    ) -> None:
+        admin = await _make_user(db_session, email="conn1@test.com")
+        client = await _make_client(db_session, created_by=admin.id, name="Duas contas")
+        db_session.add(
+            ClientConnection(
+                client_id=client.id, provider_type=ProviderType.OMIE.value, label="Omie — matriz"
+            )
+        )
+        db_session.add(
+            ClientConnection(
+                client_id=client.id, provider_type=ProviderType.OMIE.value, label="Omie — filial"
+            )
+        )
+        await db_session.flush()
+
+        rows = (
+            (
+                await db_session.execute(
+                    select(ClientConnection).where(ClientConnection.client_id == client.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 2
+        # Nasce ativa e sem carimbo de verificação/sincronização.
+        assert {r.status for r in rows} == {ConnectionStatus.ATIVA.value}
+        assert all(r.last_checked_at is None and r.accounts_synced_at is None for r in rows)
+
+    async def test_mesmo_tipo_e_mesmo_rotulo_e_recusado(self, db_session: AsyncSession) -> None:
+        admin = await _make_user(db_session, email="conn2@test.com")
+        client = await _make_client(db_session, created_by=admin.id, name="Rótulo repetido")
+        db_session.add(
+            ClientConnection(
+                client_id=client.id, provider_type=ProviderType.OMIE.value, label="Omie"
+            )
+        )
+        await db_session.flush()
+        db_session.add(
+            ClientConnection(
+                client_id=client.id, provider_type=ProviderType.OMIE.value, label="Omie"
+            )
+        )
+        with pytest.raises(IntegrityError):
+            await db_session.flush()
+
+    async def test_status_fora_do_enum_e_recusado_pelo_check(
+        self, db_session: AsyncSession
+    ) -> None:
+        admin = await _make_user(db_session, email="conn3@test.com")
+        client = await _make_client(db_session, created_by=admin.id, name="Status inválido")
+        db_session.add(
+            ClientConnection(
+                client_id=client.id,
+                provider_type=ProviderType.OMIE.value,
+                label="Omie",
+                status="pendente",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            await db_session.flush()
+
+    async def test_iv_sem_ciphertext_e_recusado_pelo_check(self, db_session: AsyncSession) -> None:
+        """Meio envelope é dado indecifrável gravado em silêncio (§4.1)."""
+        admin = await _make_user(db_session, email="conn4@test.com")
+        client = await _make_client(db_session, created_by=admin.id, name="Meio envelope")
+        db_session.add(
+            ClientConnection(
+                client_id=client.id,
+                provider_type=ProviderType.OMIE.value,
+                label="Omie",
+                credentials_iv=FAKE_IV_KEY,
             )
         )
         with pytest.raises(IntegrityError):

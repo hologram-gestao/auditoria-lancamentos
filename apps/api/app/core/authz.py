@@ -143,6 +143,13 @@ class Permission(StrEnum):
     #: Disparar o alerta sintético (`POST /system/alert-test`). Fica com o admin
     #: da org também: o smoke do deploy loga como o admin de monitoração.
     RUN_ALERT_TEST = "run_alert_test"
+    # --- Sprint 9 (BACK 09.3) -----------------------------------------------
+    #: Conectar, testar, alterar e remover ORIGENS de dado do cliente.
+    #: Permissão PRÓPRIA, e não `edit_client`: o `manager` cria cliente (✅) mas
+    #: não edita (❌) — pendurar conexão em `edit_client` faria o contador do
+    #: escritório parceiro cadastrar a carteira e não conseguir conectar
+    #: ninguém, que é exatamente o cadastro morto que a Sprint 9 quer evitar.
+    MANAGE_CLIENT_CONNECTIONS = "manage_client_connections"
 
 
 _EVERYONE: frozenset[UserRole] = frozenset(UserRole)
@@ -174,6 +181,7 @@ _PLATFORM_ONLY: frozenset[UserRole] = frozenset({UserRole.PLATFORM_ADMIN})
 #: | Tipos de anomalia (escrita)   | ✅             | ❌          | ❌             | ❌             | ❌              |
 #: | Gerir organizações            | ✅             | ❌          | ❌             | ❌             | ❌              |
 #: | Teste de alerta               | ✅             | ✅          | ❌             | ❌             | ❌              |
+#: | Conexões de origem (S9)       | ✅             | ✅          | ✅ (carteira)  | ❌             | ❌              |
 PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]] = {
     Permission.RUN_RECONCILIATION: _EVERYONE,
     Permission.REVIEW_EXPORT: _EVERYONE,
@@ -208,6 +216,11 @@ PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]] = {
     Permission.MANAGE_ANOMALY_TYPES: _PLATFORM_ONLY,
     Permission.MANAGE_PLATFORM: _PLATFORM_ONLY,
     Permission.RUN_ALERT_TEST: _ADMINS,
+    # S9 (BACK 09.3): o `manager` ENTRA — ele cria cliente e precisa conectar a
+    # origem dele. O "(carteira)" é `resolve_client_access`, não esta linha.
+    # Papéis de CLIENTE ficam de fora: credencial de sistema contábil é
+    # configuração do escritório, não do cliente final.
+    Permission.MANAGE_CLIENT_CONNECTIONS: _STAFF,
 }
 
 

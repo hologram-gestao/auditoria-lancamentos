@@ -8,10 +8,22 @@ Estratégia de upsert (DELETE + INSERT em transação): ver docstring de
 `ClientRepository.replace_accounts_cache`. Resumo: clean-slate por cliente
 mantém o cache espelhando o Omie (contas removidas lá somem aqui também).
 
+⚠️ **Sprint 9 (BACK 09.6): o cache é POR CONEXÃO, não por cliente.**
+`get_or_sync`/`force_sync` recebem a `ClientConnection` que vai ser
+sincronizada; o TTL sai de `client_connections.accounts_synced_at` e as linhas
+de `omie_accounts_cache` carimbam o `connection_id`. Motivo: um cliente pode ter
+duas contas no mesmo ERP, e um carimbo por CLIENTE faria sincronizar uma marcar
+a outra como fresca — a segunda nunca sincronizaria.
+
+`clients.omie_accounts_synced_at` deixou de ser LIDO aqui (segue sendo escrito
+enquanto as colunas antigas existirem, como salvaguarda de rollback até o
+`contract`).
+
 CLAUDE.md §3 (segurança):
     - Não loga nem retorna credenciais Omie.
-    - O `OmieClient` é construído via `omie_factory.build_omie_client`,
-      que isola a descriptografia.
+    - O client do provedor vem de `client_connections.origin.build_origin_client`,
+      que isola a decifragem e vale tanto para conexão real quanto para a
+      sintetizada da janela de conversão (09.5).
 
 Testabilidade:
     Aceita um `OmieClient` injetado (`omie_client_override`) — o factory
@@ -25,7 +37,6 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from app.core.crypto_service import load_client_cipher
 from app.core.exceptions import (
     AccountsSyncError,
     OmieAuthError,
@@ -36,11 +47,12 @@ from app.core.exceptions import (
 from app.core.logging import get_logger
 from app.db.models import Client, OmieAccountCache
 from app.integrations.omie.schemas import ContaCorrente
-from app.modules.clients.omie_factory import build_omie_client
+from app.modules.client_connections.origin import build_origin_client
 from app.modules.clients.repository import ClientRepository
 
 if TYPE_CHECKING:
     from app.core.config import Settings
+    from app.db.models.client_connection import ClientConnection
     from app.integrations.omie.client import OmieClient
 
 log = get_logger(__name__)
@@ -67,25 +79,28 @@ class OmieAccountsCacheService:
         self._omie_client_override = omie_client_override
 
     async def get_or_sync(
-        self, client: Client
+        self, client: Client, connection: ClientConnection
     ) -> tuple[Sequence[OmieAccountCache], datetime | None]:
-        """Retorna o cache; sincroniza com o Omie se TTL expirado ou nunca rodou.
+        """Retorna o cache DA CONEXÃO; sincroniza se o TTL expirou ou nunca rodou.
 
-        O TTL é decidido por `client.omie_accounts_synced_at` (coluna no
-        Client) — NÃO por MAX(omie_accounts_cache.synced_at). Esta separação
-        garante que clientes cujo Omie devolveu lista vazia também respeitam
-        o TTL de 24 h: o sync é registrado mesmo sem nenhuma linha no cache.
+        O TTL é decidido por `connection.accounts_synced_at` — NÃO por
+        `clients.omie_accounts_synced_at` (que não distingue duas conexões do
+        mesmo cliente) e NÃO por `MAX(omie_accounts_cache.synced_at)` (que volta
+        `None` quando o provedor devolve lista vazia, fazendo toda request bater
+        na rede — bug real do cliente Quial, 29/04/2026). O sync é registrado
+        mesmo sem nenhuma linha no cache.
 
         Returns:
-            Tupla `(rows, synced_at)`. `synced_at=None` apenas se NUNCA
-            houve sync para esse cliente (cliente recém-criado, primeiro acesso).
+            Tupla `(rows, synced_at)`. `synced_at=None` apenas se NUNCA houve
+            sync para essa conexão.
         """
-        latest = client.omie_accounts_synced_at
+        latest = connection.accounts_synced_at
 
         if latest is not None and self._is_fresh(latest):
             log.info(
                 "accounts_cache_hit",
                 client_id=str(client.id),
+                connection_id=str(connection.id),
                 synced_at=latest.isoformat(),
             )
             rows = await self._repo.get_accounts_cache(client.id)
@@ -94,19 +109,26 @@ class OmieAccountsCacheService:
         log.info(
             "accounts_cache_miss",
             client_id=str(client.id),
+            connection_id=str(connection.id),
             had_sync=latest is not None,
             stale_since=latest.isoformat() if latest else None,
         )
-        return await self._sync(client)
+        return await self._sync(client, connection)
 
-    async def force_sync(self, client: Client) -> tuple[Sequence[OmieAccountCache], datetime]:
+    async def force_sync(
+        self, client: Client, connection: ClientConnection
+    ) -> tuple[Sequence[OmieAccountCache], datetime]:
         """Força sincronização imediata, mesmo com cache fresco.
 
-        Sempre chama o Omie e atualiza `synced_at` para `now()`. Retorno
-        garante `synced_at` non-None (a chamada Omie acabou de acontecer).
+        Sempre chama o provedor e atualiza `accounts_synced_at` para `now()`.
+        Retorno garante `synced_at` non-None (a chamada acabou de acontecer).
         """
-        log.info("accounts_cache_force_sync", client_id=str(client.id))
-        rows, synced_at = await self._sync(client)
+        log.info(
+            "accounts_cache_force_sync",
+            client_id=str(client.id),
+            connection_id=str(connection.id),
+        )
+        rows, synced_at = await self._sync(client, connection)
         if synced_at is None:  # pragma: no cover  -- defensivo
             raise AccountsSyncError(
                 "Sync forçado retornou synced_at=None — invariante violada.",
@@ -126,17 +148,23 @@ class OmieAccountsCacheService:
         """
         return datetime.now(UTC) - synced_at <= CACHE_TTL
 
-    async def _sync(self, client: Client) -> tuple[Sequence[OmieAccountCache], datetime | None]:
-        """Faz a chamada Omie + replace_cache. Wrapper de erro Omie."""
-        contas = await self._fetch_omie_accounts(client)
-        items = [_to_cache_row(client.id, c) for c in contas]
-        # `replace_accounts_cache` atualiza `client.omie_accounts_synced_at`
-        # mesmo quando `items` é vazio — TTL passa a respeitar clientes Omie
-        # sem contas correntes (caso real do cliente Quial).
-        synced_at = await self._repo.replace_accounts_cache(client, items)
+    async def _sync(
+        self, client: Client, connection: ClientConnection
+    ) -> tuple[Sequence[OmieAccountCache], datetime | None]:
+        """Faz a chamada ao provedor + replace_cache. Wrapper de erro Omie."""
+        contas = await self._fetch_omie_accounts(client, connection)
+        items = [_to_cache_row(client.id, connection.id, c) for c in contas]
+        # `replace_accounts_cache` carimba `connection.accounts_synced_at`
+        # mesmo quando `items` é vazio — TTL passa a respeitar origem sem contas
+        # correntes (caso real do cliente Quial).
+        synced_at = await self._repo.replace_accounts_cache(client, items, connection=connection)
 
         if not items:
-            log.info("accounts_sync_empty", client_id=str(client.id))
+            log.info(
+                "accounts_sync_empty",
+                client_id=str(client.id),
+                connection_id=str(connection.id),
+            )
             return [], synced_at
 
         log.info(
@@ -149,14 +177,19 @@ class OmieAccountsCacheService:
         rows = await self._repo.get_accounts_cache(client.id)
         return rows, synced_at
 
-    async def _fetch_omie_accounts(self, client: Client) -> list[ContaCorrente]:
-        """Chama Omie.listar_contas_correntes; converte exceções Omie em
-        AccountsSyncError com user_message específico."""
+    async def _fetch_omie_accounts(
+        self, client: Client, connection: ClientConnection
+    ) -> list[ContaCorrente]:
+        """Chama `listar_contas_correntes`; converte exceções Omie em
+        AccountsSyncError com user_message específico.
+
+        Quem resolve a conexão capaz é o CALLER (a rota / o service do cliente),
+        porque só ele sabe qual dos três 409 devolver quando não há nenhuma.
+        """
         if self._omie_client_override is not None:
             omie_client = self._omie_client_override
         else:
-            cipher = await load_client_cipher(client, settings=self._settings)
-            omie_client = build_omie_client(client, self._settings, cipher)
+            omie_client = await build_origin_client(client, connection, settings=self._settings)
         owns_client = self._omie_client_override is None
         try:
             return await omie_client.listar_contas_correntes()
@@ -197,7 +230,9 @@ class OmieAccountsCacheService:
                 await omie_client.aclose()
 
 
-def _to_cache_row(client_id: object, conta: ContaCorrente) -> OmieAccountCache:
+def _to_cache_row(
+    client_id: object, connection_id: object, conta: ContaCorrente
+) -> OmieAccountCache:
     """Converte um `ContaCorrente` (DTO Omie) em `OmieAccountCache` (ORM).
 
     `bank_name` recebe o código do banco (string de 3 dígitos) — o
@@ -207,6 +242,7 @@ def _to_cache_row(client_id: object, conta: ContaCorrente) -> OmieAccountCache:
     """
     return OmieAccountCache(
         client_id=client_id,
+        connection_id=connection_id,
         omie_conta_id=conta.n_cod_cc,
         name=conta.descricao,
         bank_name=conta.codigo_banco or "—",

@@ -39,6 +39,11 @@ AAD_ANOMALY_RESOLUTION_NOTE = ("reconciliation_anomalies", "resolution_note_encr
 AAD_GLOSSARY_CODE = ("client_glossary_entries", "code_encrypted")
 AAD_GLOSSARY_NAME = ("client_glossary_entries", "name_encrypted")
 AAD_GLOSSARY_DESCRIPTION = ("client_glossary_entries", "description_encrypted")
+# Sprint 9 (BACK 09.1) — credencial da ORIGEM, em `client_connections`. UMA
+# constante (e não uma por chave do provedor) porque a coluna guarda o JSON
+# inteiro de credenciais cifrado: provedor futuro com outro shape cabe sem AAD
+# novo — e AAD novo é par CONGELADO, não se cria por conveniência.
+AAD_CONNECTION_CREDENTIALS = ("client_connections", "credentials_encrypted")
 
 
 def field_locator(pair: tuple[str, str], pk: str | UUID) -> FieldLocator:

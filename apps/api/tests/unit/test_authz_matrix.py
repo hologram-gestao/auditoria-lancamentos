@@ -98,6 +98,13 @@ _TABLE: dict[Permission, tuple[bool, bool, bool, bool, bool]] = {
     Permission.MANAGE_ANOMALY_TYPES: (True, False, False, False, False),
     Permission.MANAGE_PLATFORM: (True, False, False, False, False),
     Permission.RUN_ALERT_TEST: (True, True, False, False, False),
+    # S9 (BACK 09.3): conectar/testar/alterar/remover ORIGEM do cliente. O
+    # `manager` entra (ele cria cliente e precisa conectar a origem dele — a
+    # armadilha do PRD era pendurar isso em `edit_client`, onde ele é ❌); os
+    # papéis de CLIENTE ficam de fora (credencial de sistema contábil é
+    # configuração do escritório, não do cliente final). O "(carteira)" é
+    # `resolve_client_access`, não esta linha.
+    Permission.MANAGE_CLIENT_CONNECTIONS: (True, True, True, False, False),
 }
 MATRIX_CELLS = [
     (permission, role, expected)

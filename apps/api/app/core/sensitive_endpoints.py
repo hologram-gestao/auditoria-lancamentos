@@ -538,6 +538,49 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         "app/modules/glossary/routes.py",
         f"{_VIA_CLIENT_PATH}; SELECT do alvo com AND client_id (anti-IDOR)",
     ),
+    # ------------------------------------------- conexões de origem (S9, 09.3)
+    # A credencial da origem é o dado mais sensível que estas rotas tocam — e
+    # nenhuma delas o devolve. O que se protege aqui é o de sempre: a conexão
+    # pertence a UM cliente, e o `client_id` do path é a única porta.
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/connections",
+        ScopeKind.COLLECTION,
+        "app/modules/client_connections/routes.py",
+        _VIA_CLIENT_PATH,
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients/{client_id}/connections",
+        ScopeKind.COLLECTION,
+        "app/modules/client_connections/routes.py",
+        f"{_VIA_CLIENT_PATH} + OpenClientDep + ManageClientConnectionsDep; "
+        "client_id da conexão fixado pelo servidor",
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients/{client_id}/connections/{connection_id}/test",
+        ScopeKind.DETAIL_PK,
+        "app/modules/client_connections/routes.py",
+        f"{_VIA_CLIENT_PATH} + OpenClientDep + ManageClientConnectionsDep; "
+        "SELECT do alvo com AND client_id (anti-IDOR)",
+    ),
+    SensitiveEndpoint(
+        "PATCH",
+        "/api/v1/clients/{client_id}/connections/{connection_id}",
+        ScopeKind.DETAIL_PK,
+        "app/modules/client_connections/routes.py",
+        f"{_VIA_CLIENT_PATH} + OpenClientDep + ManageClientConnectionsDep; "
+        "SELECT do alvo com AND client_id (anti-IDOR)",
+    ),
+    SensitiveEndpoint(
+        "DELETE",
+        "/api/v1/clients/{client_id}/connections/{connection_id}",
+        ScopeKind.DETAIL_PK,
+        "app/modules/client_connections/routes.py",
+        f"{_VIA_CLIENT_PATH} + OpenClientDep + ManageClientConnectionsDep; "
+        "DELETE com AND client_id (anti-IDOR)",
+    ),
 )
 
 #: Endpoints do denominador que AINDA não têm o mecanismo no código. Ficam na
