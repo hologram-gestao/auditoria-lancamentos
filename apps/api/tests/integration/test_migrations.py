@@ -1264,7 +1264,10 @@ class TestConexoesDeOrigemRoundTrip:
     ) -> None:
         """Inventar credencial para quem opera sem origem é decisão de DADO."""
         url = migrations_db_url
-        command.upgrade(alembic_cfg, "head")
+        # A revisão da S9, não `head`: com a migration da S10 por cima, o downgrade
+        # roda numa transação só e o abort da S9 desfaz também o passo da S10 —
+        # o `version_num` ficaria no head novo e a asserção abaixo mentiria.
+        command.upgrade(alembic_cfg, CONNECTIONS_REV)
         _seed_client_without_credential(url)
 
         with pytest.raises(sa.exc.DBAPIError) as exc:

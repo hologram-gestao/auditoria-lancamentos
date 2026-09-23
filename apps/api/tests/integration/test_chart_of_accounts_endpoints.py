@@ -397,20 +397,23 @@ class TestListaFiltrosEBusca:
         assert all(item["parentCode"] == "1.01" for item in filhas.json()["data"])
 
     @respx.mock
-    async def test_situacao_fora_do_vocabulario_e_422(
+    async def test_situacao_fora_do_vocabulario_e_400_da_validacao(
         self, client_with_db: AsyncClient, world: World
     ) -> None:
         """`Literal` no schema: 422 automático, nunca lista vazia silenciosa."""
         await _login(client_with_db, world.admin)
         resp = await client_with_db.get(_base(world), params={"status": "arquivada"})
-        assert resp.status_code == 422, resp.text
+        # Convenção da casa: validação de entrada é 400 `VALIDATION_ERROR` genérico
+        # (o handler global não ecoa input, 86e2rtxcm).
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
 
     @respx.mock
-    async def test_pagesize_acima_do_teto_e_422(
+    async def test_pagesize_acima_do_teto_e_400_da_validacao(
         self, client_with_db: AsyncClient, world: World
     ) -> None:
         await _login(client_with_db, world.admin)
-        assert (await client_with_db.get(_base(world), params={"pageSize": 500})).status_code == 422
+        assert (await client_with_db.get(_base(world), params={"pageSize": 500})).status_code == 400
 
 
 @pytest.mark.integration
