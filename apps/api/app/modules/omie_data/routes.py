@@ -18,7 +18,6 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import select
 
 from app.core.config import Settings, get_settings
-from app.core.crypto_service import load_client_cipher
 from app.core.dependencies import (
     DbSessionDep,
     SyncOmieAccountsDep,
@@ -31,7 +30,8 @@ from app.db.models import Client
 from app.integrations.omie.categorias_cache import OmieCategoriasCache
 from app.integrations.omie.client import OmieClient
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache
-from app.modules.clients.omie_factory import build_omie_client
+from app.integrations.providers.base import Capability
+from app.modules.client_connections.origin import build_capable_client
 from app.modules.omie_data.categorias_service import OmieCategoriasService
 from app.modules.omie_data.schemas import (
     OmieCategoriaListResponse,
@@ -119,9 +119,14 @@ async def get_omie_categorias(
     async def build_client() -> OmieClient:
         """Só chamado no MISS — em staging/prod o unwrap da DEK é uma ida ao
         Cloud KMS, e o ponto do cache é justamente não pagar latência por
-        abertura de combobox."""
-        cipher = await load_client_cipher(client, settings=settings)
-        return build_omie_client(client, settings, cipher)
+        abertura de combobox.
+
+        S9 (BACK 09.6): resolve a conexão capaz de LISTAR_LANCAMENTOS. Cliente
+        sem origem recebe 409 acionável aqui dentro — e só no MISS, então o hit
+        do cache continua não custando nada."""
+        return await build_capable_client(
+            db, client, Capability.LISTAR_LANCAMENTOS, settings=settings
+        )
 
     items = await service.list_categorias(
         client_id=client.id,
@@ -170,10 +175,25 @@ async def get_omie_lancamentos(
     cache: OmieLancamentoCache = request.app.state.omie_lancamento_cache
     service = OmieLancamentoService(ReviewRepository(db), cache)
 
-    cipher = await load_client_cipher(client, settings=settings)
+    async def build_client() -> OmieClient:
+        """S9 (BACK 09.6): resolve a conexão capaz de LISTAR_LANCAMENTOS.
+
+        DENTRO da fábrica, como no endpoint de categorias acima — e não antes
+        da chamada. O serviço só a invoca no MISS do cache, e o `aclose()` mora
+        no `finally` logo abaixo dela: construir por fora deixaria o
+        `httpx.AsyncClient` aberto sem dono a cada cache HIT (num processo
+        Cloud Run de vida longa, §10), pagaria o unwrap da DEK no KMS em toda
+        request, e faria o 409 de origem estourar numa request que o cache
+        resolveria sozinho. Esta rota é a da tela de revisão — hit é o caso
+        comum.
+        """
+        return await build_capable_client(
+            db, client, Capability.LISTAR_LANCAMENTOS, settings=settings
+        )
+
     items = await service.fetch_lancamentos(
         session_id=session_id,
         omie_ids=parsed_ids,
-        omie_client_factory=lambda: build_omie_client(client, settings, cipher),
+        omie_client_factory=build_client,
     )
     return OmieLancamentoListResponse(data=items)

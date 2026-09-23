@@ -1,14 +1,23 @@
 'use client';
 
 /**
- * Modal "Novo Cliente" — Doc §9.2.
+ * Modal "Novo Cliente" — Doc §9.2, revisto na Sprint 9 (R4).
  *
- * Fluxo:
- *   1. Preenche nome, app key, app secret.
- *   2. Clica "Testar conexão" — backend valida sem persistir.
- *   3. Salvar só fica habilitado APÓS sucesso do teste (UX guard, mas o backend
- *      não bloqueia tecnicamente — confia que o front chamou).
- *   4. Editar a key/secret após o teste invalida o sucesso e exige novo teste.
+ * **O cliente deixou de ser um par de credenciais com nome.** Até aqui o
+ * Salvar ficava preso ao "Testar conexão", e era esse gate que recusava 4 em
+ * cada 5 clientes de um escritório contábil — a maioria não usa o Omie, e
+ * muitos não usam sistema nenhum. Agora:
+ *
+ *   1. nome (+ organização/categoria) bastam: **Salvar habilitado sem teste**,
+ *      e o cliente nasce em "sem origem conectada";
+ *   2. a credencial vive numa seção OPCIONAL, "Conectar uma origem agora";
+ *   3. preencheu QUALQUER um dos dois campos → o gate do "Testar conexão"
+ *      volta a valer, como sempre valeu;
+ *   4. editar key/secret depois do teste invalida o sucesso e exige novo teste.
+ *
+ * O gate do front continua existindo, mas **não é mais a única barreira**: o
+ * servidor verifica a credencial contra o provedor antes de persistir, e
+ * `POST /clients` com credencial inválida não cria nem cliente nem conexão.
  *
  * Erros tratados:
  *   - Falha do test-connection → `ok=false` (200) → mensagem inline (não joga no toast).
@@ -45,6 +54,7 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { ScrollRegion } from '@/components/ui/scroll-region';
 import {
   Select,
   SelectContent,
@@ -55,7 +65,7 @@ import {
 import { useClientCategories } from '@/hooks/use-client-categories';
 import { useCreateClient, useTestConnection } from '@/hooks/use-clients';
 import { ApiError } from '@/lib/api/client';
-import { isPlatformScoped } from '@/lib/authz';
+import { hasPermission, isPlatformScoped } from '@/lib/authz';
 import { makeCreateClientSchema, type CreateClientFormValues } from '@/lib/validation/clients';
 import { useAuthStore } from '@/stores/auth';
 
@@ -87,6 +97,8 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
   // LINHA dele e recusa payload divergente com 403.
   const currentUser = useAuthStore((s) => s.user);
   const isPlatform = isPlatformScoped(currentUser);
+  // R5: conectar origem é UMA permissão, aqui e na tela do cliente.
+  const canManageConnections = hasPermission(currentUser, 'manage_client_connections');
   const {
     organizations,
     isLoading: organizationsLoading,
@@ -185,8 +197,13 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
   }
 
   async function onSubmit(values: CreateClientFormValues) {
-    if (testState.kind !== 'success') {
-      // UX guard — não deveria atingir esse caminho com o botão disabled.
+    const key = (values.omie_app_key ?? '').trim();
+    const secret = (values.omie_app_secret ?? '').trim();
+    const wantsOrigin = key.length > 0 || secret.length > 0;
+    if (wantsOrigin && testState.kind !== 'success') {
+      // UX guard — não deveria atingir esse caminho com o botão disabled, mas
+      // o submit por Enter passa por aqui.
+      toast.error('Teste a conexão antes de salvar as credenciais.');
       return;
     }
     try {
@@ -194,14 +211,19 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
         values.category_id && values.category_id !== 'none' ? values.category_id : undefined;
       await createMutation.mutateAsync({
         name: values.name,
-        omie_app_key: values.omie_app_key,
-        omie_app_secret: values.omie_app_secret,
+        // Omitidas quando não há origem: mandar `""` faria o backend tratar
+        // como credencial presente (e `min_length=1` recusaria com 422).
+        ...(wantsOrigin ? { omie_app_key: key, omie_app_secret: secret } : {}),
         ...(categoryId ? { category_id: categoryId } : {}),
         // Só a plataforma manda o campo: o staff omitindo é o que faz o
         // backend usar a organização da própria linha.
         ...(values.organization_id ? { organization_id: values.organization_id } : {}),
       });
-      toast.success('Cliente criado.');
+      toast.success(
+        wantsOrigin
+          ? 'Cliente criado com a origem conectada.'
+          : 'Cliente criado. Conecte uma origem quando houver uma para ligar.',
+      );
       onOpenChange(false);
     } catch (err) {
       const msg = err instanceof ApiError ? err.userMessage : 'Não foi possível criar o cliente.';
@@ -218,155 +240,198 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
     (watchedKey ?? '').trim().length > 0 &&
     (watchedSecret ?? '').trim().length > 0;
 
+  // S9 (R4): o gate do teste só vale quando há ALGUMA credencial no formulário.
+  // Com os dois campos vazios o cliente nasce sem origem, e o Salvar libera.
+  const credentialsTouched =
+    (watchedKey ?? '').trim().length > 0 || (watchedSecret ?? '').trim().length > 0;
+
   const canSubmit =
-    testState.kind === 'success' &&
     !isSubmitting &&
     !isTesting &&
-    form.getValues('name').trim().length > 0;
+    form.getValues('name').trim().length > 0 &&
+    (!credentialsTouched || testState.kind === 'success');
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      {/* `flex` vence o `grid` do componente-base via twMerge: header e rodapé
+          fixos, o miolo rola (`ScrollRegion`). Sem isto, em 390px a seção de
+          origem empurraria o "Salvar" para fora da viewport — o defeito que o
+          gate de a11y NÃO mede (CLAUDE.md §7). */}
+      <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Novo Cliente</DialogTitle>
           <DialogDescription>
-            As credenciais Omie são criptografadas e nunca persistem em texto plano.
+            Conectar uma origem é opcional. Se você conectar, as credenciais são criptografadas e
+            nunca persistem em texto plano.
           </DialogDescription>
         </DialogHeader>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4" noValidate>
-            <FormField
-              control={form.control}
-              name="name"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Nome do cliente</FormLabel>
-                  <FormControl>
-                    <Input
-                      autoComplete="off"
-                      autoFocus
-                      disabled={inputsDisabled}
-                      placeholder="Como a sua organização se refere ao cliente"
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="omie_app_key"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>App Key Omie</FormLabel>
-                  <FormControl>
-                    <PasswordInput
-                      visible={showKey}
-                      onToggle={() => setShowKey((v) => !v)}
-                      disabled={inputsDisabled}
-                      autoComplete="off"
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="omie_app_secret"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>App Secret Omie</FormLabel>
-                  <FormControl>
-                    <PasswordInput
-                      visible={showSecret}
-                      onToggle={() => setShowSecret((v) => !v)}
-                      disabled={inputsDisabled}
-                      autoComplete="off"
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <TestConnectionButton state={testState} disabled={!canTest} onClick={handleTest} />
-
-            {/* Só a plataforma escolhe onde o cliente nasce (86e36ed1d). O staff
-                não vê o campo: a organização dele vem da LINHA, no servidor. */}
-            {isPlatform && (
+          <form
+            onSubmit={form.handleSubmit(onSubmit)}
+            className="flex min-h-0 flex-1 flex-col gap-4"
+            noValidate
+          >
+            <ScrollRegion
+              label="Dados do novo cliente"
+              className="-mx-1 min-h-0 flex-1 space-y-4 px-1"
+            >
               <FormField
                 control={form.control}
-                name="organization_id"
+                name="name"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Organização</FormLabel>
-                    <Select
-                      value={field.value ?? ''}
-                      onValueChange={field.onChange}
-                      disabled={inputsDisabled || organizationsLoading}
-                    >
-                      <FormControl>
-                        <SelectTrigger aria-label="Organização do cliente">
-                          <SelectValue placeholder="Selecione a organização" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {organizations.map((o) => (
-                          <SelectItem key={o.id} value={o.id}>
-                            {organizationOptionLabel(o)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {organizationsError && <OrganizationLoadError />}
+                    <FormLabel>Nome do cliente</FormLabel>
+                    <FormControl>
+                      <Input
+                        autoComplete="off"
+                        autoFocus
+                        disabled={inputsDisabled}
+                        placeholder="Como a sua organização se refere ao cliente"
+                        {...field}
+                      />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
-            )}
 
-            <FormField
-              control={form.control}
-              name="category_id"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Categoria (opcional)</FormLabel>
-                  <Select
-                    value={field.value ?? 'none'}
-                    onValueChange={field.onChange}
-                    disabled={
-                      inputsDisabled ||
-                      categoriesQuery.isLoading ||
-                      // A plataforma escolhe a organização ANTES: sem ela não há
-                      // catálogo de onde escolher.
-                      (isPlatform && !watchedOrganization)
-                    }
-                  >
-                    <FormControl>
-                      <SelectTrigger aria-label="Categoria do cliente">
-                        <SelectValue placeholder="Sem categoria" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="none">Sem categoria</SelectItem>
-                      {visibleCategories.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {c.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
+              {/* Só a plataforma escolhe onde o cliente nasce (86e36ed1d). O staff
+                não vê o campo: a organização dele vem da LINHA, no servidor. */}
+              {isPlatform && (
+                <FormField
+                  control={form.control}
+                  name="organization_id"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Organização</FormLabel>
+                      <Select
+                        value={field.value ?? ''}
+                        onValueChange={field.onChange}
+                        disabled={inputsDisabled || organizationsLoading}
+                      >
+                        <FormControl>
+                          <SelectTrigger aria-label="Organização do cliente">
+                            <SelectValue placeholder="Selecione a organização" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {organizations.map((o) => (
+                            <SelectItem key={o.id} value={o.id}>
+                              {organizationOptionLabel(o)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {organizationsError && <OrganizationLoadError />}
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               )}
-            />
+
+              <FormField
+                control={form.control}
+                name="category_id"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Categoria (opcional)</FormLabel>
+                    <Select
+                      value={field.value ?? 'none'}
+                      onValueChange={field.onChange}
+                      disabled={
+                        inputsDisabled ||
+                        categoriesQuery.isLoading ||
+                        // A plataforma escolhe a organização ANTES: sem ela não há
+                        // catálogo de onde escolher.
+                        (isPlatform && !watchedOrganization)
+                      }
+                    >
+                      <FormControl>
+                        <SelectTrigger aria-label="Categoria do cliente">
+                          <SelectValue placeholder="Sem categoria" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="none">Sem categoria</SelectItem>
+                        {visibleCategories.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {/* Origem é OPCIONAL (R4) e fica visualmente destacada como um
+                bloco à parte, para o cadastro não parecer incompleto sem ela.
+                Some para quem não tem `manage_client_connections`: conectar
+                origem é a mesma permissão aqui e na tela do cliente (R5). */}
+              {canManageConnections && (
+                <fieldset className="space-y-4 rounded-lg border p-4">
+                  <legend className="px-1 text-sm font-medium">Conectar uma origem agora</legend>
+                  <p className="text-muted-foreground text-sm">
+                    Opcional. Sem credencial o cliente é criado do mesmo jeito e abre em &quot;sem
+                    origem conectada&quot; — dá para conectar depois, na tela dele.
+                  </p>
+
+                  <FormField
+                    control={form.control}
+                    name="omie_app_key"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>App Key Omie</FormLabel>
+                        <FormControl>
+                          <PasswordInput
+                            visible={showKey}
+                            onToggle={() => setShowKey((v) => !v)}
+                            disabled={inputsDisabled}
+                            autoComplete="off"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="omie_app_secret"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>App Secret Omie</FormLabel>
+                        <FormControl>
+                          <PasswordInput
+                            visible={showSecret}
+                            onToggle={() => setShowSecret((v) => !v)}
+                            disabled={inputsDisabled}
+                            autoComplete="off"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <TestConnectionButton
+                    state={testState}
+                    disabled={!canTest}
+                    onClick={handleTest}
+                  />
+
+                  {credentialsTouched && testState.kind !== 'success' && (
+                    <p className="text-muted-foreground text-sm">
+                      Com credencial preenchida, o teste é obrigatório antes de salvar.
+                    </p>
+                  )}
+                </fieldset>
+              )}
+            </ScrollRegion>
 
             <DialogFooter className="gap-2 sm:gap-2">
               <Button

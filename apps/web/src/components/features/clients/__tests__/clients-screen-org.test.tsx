@@ -134,6 +134,9 @@ function client(over: Partial<Client> = {}): Client {
     category: null,
     manager_count: 0,
     closed_at: null,
+    // S9: `origin_status` é obrigatório no contrato — o default aqui é
+    // "tem origem", para os casos desta suíte não medirem o selo novo.
+    origin_status: 'ativa',
     ...over,
   };
 }

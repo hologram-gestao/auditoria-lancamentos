@@ -419,3 +419,125 @@ já carrega o bullet "O relatório do gate de a11y é artefato, nunca fonte", qu
 reprova a reincidência na revisão.
 
 **Status.** ativo
+
+## 2026-09-22 — Escrita seguida de `raise` some em produção e o teste de integração não vê [escopo: backend | apps/api/app/modules/client_connections/service.py]
+**Sintoma:** `POST /clients/{id}/connections/{cid}/test` com credencial recusada marca a
+conexão como `erro` e grava a linha de negação na trilha, e o teste de integração
+(`test_credencial_recusada_marca_erro_e_preserva_o_ciphertext`) passa. Em produção a
+conexão continua `ativa` para sempre, a tela nunca oferece "reconectar" e a linha de
+`access_audit` da negação não existe.
+**Causa-raiz:** dois contratos de transação diferentes no mesmo sistema. O de produção
+(`app/db/session.py:100-102`) faz `rollback()` quando o handler levanta; o override de
+teste (`tests/conftest.py:216-217`) é um gerador simples, sem esse `except`. Um caminho
+que grava com `flush()` e depois re-levanta é **invisível** para o teste e **desfeito**
+na produção. O projeto já conhecia a armadilha — está escrita na docstring de
+`db/session.py:91-93` — e já tinha as duas soluções em uso (`commit()` explícito em
+`omie_posting/service.py:415,437`; sessão própria em `processing/job.py:260-272`). O que
+faltou foi a regra de REVISÃO que obriga a procurar o padrão, e não a solução.
+**Correção:** BACK 09.3 reprovada (86e3cwmn9) com a correção e o teste de regressão
+especificados: durabilidade explícita antes do `raise` e um teste que exercite a
+política real de transação, não a da fixture.
+**Encodado em:** `.claude/memory/decisions.md` → ADR-019-QA (regra de revisão + grep
+decisivo). O encode no `.md` do papel QA está no follow-up **86e3d1tt6**, porque
+`<repo>/.claude/agents/qa.md` é somente-leitura nesta sandbox (patch pronto no HANDOFF.md).
+**Status:** ativo
+
+## 2026-09-22 — Fallback cobriu quem EXECUTA e esqueceu quem DESCREVE [escopo: backend | apps/api/app/modules/clients/repository.py]
+**Sintoma:** com a ponte da janela de conversão funcionando (cliente legado opera
+normalmente), a UI mesmo assim bloqueia "Nova conciliação" e "Sincronizar contas" para
+todo cliente existente, porque `origin_status` sai `sem_origem`. A mesma resposta de
+detalhe fica contraditória: `connections` com uma conexão ativa e `origin_status` dizendo
+que não há origem.
+**Causa-raiz:** o fallback foi implementado no caminho de EXECUÇÃO
+(`resolve_origin_connections`, consultado por quem chama o provedor) e o campo derivado
+que a UI usa para habilitar ação foi calculado por outro caminho — subqueries que contam
+só `client_connections`. Os dois caminhos são legítimos e ninguém os cruzou, porque o
+segundo não falha com exceção: falha com uma tela vazia, que se parece com
+"comportamento esperado". Nenhum teste afirmava nada sobre `origin_status` de cliente
+legado, então a lacuna não tinha guardião.
+**Correção:** BACK 09.5 reprovada (86e3cwmp8) com duas saídas possíveis (reaproveitar o
+predicado de `clients_pending_conversion` nas subqueries, ou derivar da lista efetiva
+cuidando do N+1) e o teste de regressão exigido.
+**Encodado em:** `.claude/memory/decisions.md` → ADR-020-QA (checklist "liste os
+consumidores que DESCREVEM, não só os que EXECUTAM" + grep decisivo
+`grep -rn "<campo>" apps/web/src`). Encode no `.md` do papel: follow-up **86e3d1tt6**.
+**Status:** ativo
+
+## 2026-09-22 — Trocar quem constrói um client inverteu QUANDO ele é construído [escopo: backend | apps/api/app/modules/omie_data/routes.py]
+**Sintoma:** em `GET /omie-lancamentos`, todo request com cache cheio passa a criar um
+`OmieClient` que ninguém fecha (vazamento de `httpx.AsyncClient`), a pagar um unwrap de
+DEK no Cloud KMS, e a poder devolver 409 onde antes devolvia 200.
+**Causa-raiz:** o parâmetro `omie_client_factory` tem um contrato implícito — ele só é
+INVOCADO no caminho de miss (`omie_data/service.py:87`) e o `aclose()` mora no `finally`
+logo abaixo. A migração para a porta única construiu o client fora e passou
+`lambda: omie_client`, o que preserva o tipo e destrói a semântica. O `tsc`/mypy não
+enxerga isso porque a assinatura continua válida; e os dois serviços irmãos declaram o
+mesmo parâmetro com tipos diferentes (`Callable[[], X]` vs `Callable[[], Awaitable[X]]`),
+o que já era um convite ao engano.
+**Correção:** BACK 09.6 reprovada (86e3cwmq3): voltar a resolver dentro da fábrica (como
+o endpoint irmão do mesmo arquivo já faz), alinhar as duas assinaturas e acrescentar um
+teste que distinga cache hit de miss.
+**Encodado em:** `.claude/memory/decisions.md` → ADR-019-QA/ADR-020-QA (mesma família) e
+o item de grep no patch do `.md` do papel QA, follow-up **86e3d1tt6**.
+**Status:** ativo
+
+## 2026-09-23 — Teste de rota copiado do vizinho herdou um path que não existe [escopo: backend | apps/api/tests/integration/test_origin_required_routes.py]
+**Sintoma:** o teste que prova o rework da 09.6 (`TestCacheHitNaoResolveOrigem`) chama
+`/api/v1/omie-data/lancamentos` com `params={"sessionId": ...}`. A rota real é
+`/api/v1/omie/lancamentos` com `session_id`. Ele recebe 404, quebra na asserção
+`== 200` e, portanto, **não prova nada** — e vai vermelho no primeiro CI com Postgres.
+**Causa-raiz blameless:** o autor copiou a chamada do caso vizinho no MESMO arquivo
+(`test_categorias_do_omie`, rodada 1), que usa o mesmo prefixo errado. O vizinho passa
+porque a asserção dele é `status_code < 500` — e 404 é menor que 500. Uma asserção
+frouxa não distingue "a rota respondeu o esperado" de "a rota não existe", então ela
+transformou um erro em exemplo, e o exemplo foi copiado. Ninguém tinha como notar sem
+Postgres: o arquivo inteiro é `pytest.mark.integration`.
+**Correção:** BACK 09.6 reprovada (86e3cwmq3) com as duas strings a trocar e o pedido de
+consertar também o vizinho (`test_categorias_do_omie`), para a asserção parar de
+esconder o 404. O produto está CERTO — o defeito é do teste.
+**Encodado em:** `.claude/memory/decisions.md` → ADR-023-QA (receita mecânica: casar toda
+URL literal de teste contra os paths do OpenAPI gerado do código, com as chaves fake do
+`ci.yml`; nesta sprint 13/15, e os 2 que falharam são estes). O encode no `.md` do papel
+QA continua no follow-up **86e3d1tt6** (o arquivo-fonte segue somente-leitura na sandbox).
+**Status:** ativo
+
+## 2026-09-23 — Rollback por item expira o objeto, e ler o id dele no `except` vira ida ao banco [escopo: backend | apps/api/scripts/convert_credentials_to_connections.py]
+**Sintoma:** na conversão das credenciais, a primeira linha que falha derruba o processo
+inteiro com `MissingGreenlet` em vez de ser registrada e pulada — o `await db.commit()`
+do lote nunca roda, os clientes já convertidos daquele lote se perdem e o relatório (a
+evidência operacional do runbook de cutover) nunca é impresso.
+**Causa-raiz blameless:** `SessionTransaction._restore_snapshot(dirty_only=True)` expira
+todo estado `modified`/`_dirty` quando o SAVEPOINT (ou a sessão) faz rollback.
+`_convert_one` chama `provision_client_cipher`, que **seta `client.dek_wrapped` in-place**
+— exatamente no cliente *bare*, que é o legado típico e o que mais falha ao decifrar.
+Com o objeto expirado, `client.id` no `except` não é leitura de memória: é um SELECT, e
+em asyncio isso levanta. O defeito é **pré-existente** (a forma anterior, `await
+db.rollback()` no `except`, expira ainda mais), só que agora existe um teste que o
+encontraria — e ele não pôde rodar, porque o Docker está desligado nesta máquina.
+**Correção:** BACK 09.5 reprovada (86e3cwmp8): capturar `client_id = client.id` ANTES do
+bloco transacional e usar o escalar no `except`/nos stats. Uma linha.
+**Encodado em:** `.claude/memory/decisions.md` → ADR-024-QA, com a prova em
+`sqlite+aiosqlite` (roda sem Docker) e a regra geral: em laço async que trata erro por
+item, capture os escalares antes do bloco, nunca leia atributo de ORM depois do rollback.
+**Status:** ativo
+
+## 2026-09-23 — O `gitPaths` que resolveu o buraco do primer criou o risco de apagá-lo [escopo: operação | .agents-hub/config.env]
+**Sintoma:** com `CLAUDE.md` no `AGENT_PATHS_QA`, o commit do QA pode substituir o primer
+do projeto (102.777 bytes) pelo prompt do papel (9.717 bytes) — e sair no log como um
+commit normal.
+**Causa-raiz blameless:** a sugestão da rodada 1 ("ponha `CLAUDE.md` no gitPaths do QA")
+estava certa na intenção e errada no arquivo: dentro do worktree, `CLAUDE.md` é o PROMPT
+e `PROJECT.md` é o primer. O `orchestrate.js` faz o `git add` dos `gitPaths` (linha ~650)
+ANTES de materializar `PROJECT.md` em `CLAUDE.md` (linha ~685), e a materialização é
+condicional: só ocorre se o QA tiver EDITADO o primer. Sprint em que o QA não mexa no
+primer → o prompt fica staged e vai para o commit. O próprio comentário do hub (linha
+575) prevê essa falha; a configuração passou por cima dele.
+**Correção:** nesta rodada o primer FOI editado, então a materialização dispara e o
+commit sai certo. Pendente com o Pedro: tirar `CLAUDE.md` do `AGENT_PATHS_QA` (o bloco do
+primer já faz o `git add` sozinho — a entrada é desnecessária), ou mover a materialização
+para antes do `git add`.
+**Encodado em:** `.claude/memory/decisions.md` → ADR-025-QA e a seção "Antes de aprovar,
+confira o que o commit vai levar" do HANDOFF desta sprint. Comando de verificação:
+`wc -c CLAUDE.md PROJECT.md` no worktree do QA — se `CLAUDE.md` for o menor dos dois na
+hora do commit, o primer está em risco.
+**Status:** ativo

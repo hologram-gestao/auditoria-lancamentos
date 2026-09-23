@@ -36,11 +36,25 @@ if TYPE_CHECKING:
 
 
 class AccessAction(StrEnum):
-    """Lista FECHADA de ações auditadas. NÃO é 'todo GET' (guardrail de volume)."""
+    """Lista FECHADA de ações auditadas. NÃO é 'todo GET' (guardrail de volume).
+
+    Sprint 9 (BACK 09.3): as quatro ações de CONEXÃO entram. Não são "todo GET"
+    — são as ESCRITAS na origem de dado do cliente (e o teste explícito de
+    credencial, que fala com o provedor em nome dele). Listar conexão continua
+    fora: é navegação dentro do próprio tenant, que não infla a trilha (§4.7).
+
+    Os valores cabem em `access_audit.action`, `String(20)` **sem CHECK**
+    (conferido em 22/09/2026) — a lista é fechada pela aplicação, não pelo
+    banco, então acrescentar aqui basta e nenhuma migration é necessária.
+    """
 
     DENIED = "denied"
     VIEW = "view"
     EXPORT = "export"
+    CONN_CREATE = "conn_create"
+    CONN_TEST = "conn_test"
+    CONN_UPDATE = "conn_update"
+    CONN_DELETE = "conn_delete"
 
 
 def _current_rota() -> str:

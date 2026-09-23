@@ -62,7 +62,11 @@ from app.core.rate_limit import limiter, user_id_key_func
 from app.db.models import Client, ReconciliationStatus
 from app.integrations.anthropic.client import AnthropicClient
 from app.integrations.omie.client import OmieClient
-from app.modules.clients.omie_factory import build_omie_client
+from app.integrations.providers.base import Capability
+from app.modules.client_connections.origin import (
+    build_origin_client,
+    resolve_capable_connection,
+)
 from app.modules.reconciliations.omie_posting.schemas import (
     OmiePostingBatchRequest,
     OmiePostingBatchResponse,
@@ -364,6 +368,12 @@ async def create_reconciliation(
     # lazy re-embrulharia uma DEK nova num tenant cujo conteúdo já morreu.
     if client.closed_at is not None:
         raise ClientClosedError(f"Cliente {client.id} está encerrado; conciliação nova recusada.")
+
+    # S9 (BACK 09.6): conciliar é buscar lançamentos na origem. Sem origem capaz,
+    # o 409 da taxonomia sai AQUI — antes de gravar sessão e arquivos. Criar a
+    # sessão e descobrir no job seria deixar lixo no banco e um erro tardio na
+    # tela de processamento.
+    await resolve_capable_connection(db, client, Capability.LISTAR_LANCAMENTOS, settings=settings)
 
     # Provisiona a DEK do cliente (gera+embrulha se legado) e cifra as descrições
     # dos file_entries no envelope corrente + AAD. O `client` está anexado a `db`,
@@ -793,9 +803,15 @@ async def post_omie_lancamentos(
         raise ClientClosedError(f"Cliente {client.id} está encerrado; lançamento no Omie recusado.")
 
     cipher = await load_client_cipher(client, settings=settings)
+    # S9 (BACK 09.6): lançar exige a capacidade ESCREVER. A elegibilidade que já
+    # existia (kill-switch, só cartão, estorno bloqueado) ganha este pré-requisito
+    # — e ele é verificado ANTES do lote, não linha a linha.
+    connection = await resolve_capable_connection(
+        db, client, Capability.ESCREVER, settings=settings
+    )
 
     async def build_client() -> OmieClient:
-        return build_omie_client(client, settings, cipher)
+        return await build_origin_client(client, connection, settings=settings)
 
     service = OmiePostingService(
         db,

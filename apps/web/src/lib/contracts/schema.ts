@@ -415,6 +415,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clients/{client_id}/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista as origens de dado conectadas ao cliente (0..N). Visível a todo papel com acesso ao cliente — inclusive o operador, que precisa ver se a origem está ativa antes de rodar uma conciliação. Cada item traz `capabilities`, o que aquele tipo de origem sabe fazer (verificar credencial, listar contas, listar lançamentos, escrever) — é por esse campo que a tela decide o que oferecer, em vez de tentar e receber 409. Nenhuma credencial aparece na resposta, nem mascarada. Origem de outro cliente nunca aparece. */
+        get: operations["list_connections_api_v1_clients__client_id__connections_get"];
+        put?: never;
+        /** Conecta uma origem ao cliente. Requer a permissão `manage_client_connections` (plataforma, admin ou gerente da carteira) — papéis de cliente recebem 403, e cliente encerrado recebe 409. A credencial é **verificada contra o provedor ANTES de qualquer escrita**: recusada, nenhuma linha nasce. Aceita mais de uma origem do mesmo tipo no mesmo cliente, distinguidas pelo `label`; omitir o rótulo usa o padrão do tipo apenas na primeira conexão daquele tipo. Tipo e rótulo já existentes devolvem 409 com `details.existingConnectionId`. Rótulo vazio e tipo desconhecido são 422. */
+        post: operations["create_connection_api_v1_clients__client_id__connections_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/connections/{connection_id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reverifica a credencial JÁ GRAVADA desta origem contra o provedor. Requer a permissão `manage_client_connections`; cliente encerrado recebe 409. Sucesso marca a conexão como ativa e carimba a verificação; credencial recusada marca como `erro` **sem apagar a credencial** (recusada não é perdida — basta atualizar). Provedor fora do ar ou lento devolve 5xx e não muda o estado da conexão: é transitório. Origem de outro cliente devolve 404. */
+        post: operations["test_connection_api_v1_clients__client_id__connections__connection_id__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/connections/{connection_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a origem do cliente. Requer a permissão `manage_client_connections`; cliente encerrado recebe 409. A remoção é DEFINITIVA (a linha some, não é remoção lógica) — é isso que permite reconectar depois o mesmo tipo com o mesmo rótulo. O registro do que aconteceu fica na trilha de auditoria, não na linha. Origem de outro cliente devolve 404. */
+        delete: operations["delete_connection_api_v1_clients__client_id__connections__connection_id__delete"];
+        options?: never;
+        head?: never;
+        /** Renomeia a origem e/ou troca as credenciais dela. Requer a permissão `manage_client_connections`; cliente encerrado recebe 409. Os dois campos são independentes: dá para renomear sem mexer na credencial e vice-versa, mas o corpo vazio é 422. Credencial nova é verificada contra o provedor antes de substituir a antiga — recusada, nada muda. Rótulo que colida com outra origem do mesmo tipo devolve 409 com `details.existingConnectionId`. Origem de outro cliente devolve 404. */
+        patch: operations["update_connection_api_v1_clients__client_id__connections__connection_id__patch"];
+        trace?: never;
+    };
     "/api/v1/clients/{client_id}/glossary": {
         parameters: {
             query?: never;
@@ -1518,6 +1571,16 @@ export interface components {
             file: string;
         };
         /**
+         * Capability
+         * @description O que uma origem sabe fazer — enum FECHADO.
+         *
+         *     Fechado de propósito: capacidade é contrato entre o adaptador e as rotas, e
+         *     o front desenha em cima dela. Capacidade nova entra aqui, no adaptador que a
+         *     implementa e no schema de resposta — nunca como string solta num `if`.
+         * @enum {string}
+         */
+        Capability: "verificar_credencial" | "listar_contas" | "listar_lancamentos" | "escrever";
+        /**
          * CheckDuplicateResponse
          * @description Response de GET /api/v1/reconciliations/check-duplicate.
          */
@@ -1655,12 +1718,77 @@ export interface components {
             tone?: components["schemas"]["ClientCategoryTone"] | null;
         };
         /**
+         * ClientConnectionEnvelope
+         * @description Body de POST/PATCH/test — `{data: <conexão>}` (§7).
+         */
+        ClientConnectionEnvelope: {
+            data: components["schemas"]["ClientConnectionResponse"];
+        };
+        /** ClientConnectionListPayload */
+        ClientConnectionListPayload: {
+            /** Connections */
+            connections: components["schemas"]["ClientConnectionResponse"][];
+        };
+        /**
+         * ClientConnectionListResponse
+         * @description Body de GET /api/v1/clients/{client_id}/connections.
+         */
+        ClientConnectionListResponse: {
+            data: components["schemas"]["ClientConnectionListPayload"];
+        };
+        /**
+         * ClientConnectionResponse
+         * @description Uma origem do cliente, como a API a devolve.
+         */
+        ClientConnectionResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Provider Type
+             * @description Tipo da origem (ex.: `omie`).
+             */
+            provider_type: string;
+            /**
+             * Label
+             * @description Como o humano chama esta origem.
+             */
+            label: string;
+            /** @description `ativa` opera; `inativa` foi desligada; `erro` teve a credencial recusada. */
+            status: components["schemas"]["ConnectionStatus"];
+            /**
+             * Last Checked At
+             * @description Quando a credencial foi verificada pela última vez. Nulo = nunca.
+             */
+            last_checked_at?: string | null;
+            /**
+             * Accounts Synced At
+             * @description Último sync de contas DESTA conexão. Nulo = nunca sincronizou.
+             */
+            accounts_synced_at?: string | null;
+            /**
+             * Capabilities
+             * @description O que esta origem sabe fazer, derivado do adaptador do tipo. É DADO: a tela pergunta antes de oferecer a ação, em vez de descobrir pelo 409.
+             */
+            capabilities: components["schemas"]["Capability"][];
+        };
+        /**
          * ClientDetailResponse
          * @description Body de GET /api/v1/clients/{id} — detalhe + contas do cache L1.
          *
          *     Estende `ClientResponse`. `accounts_synced_at` é o MAX(synced_at) entre as
          *     linhas; o front usa para mostrar "Sincronizado há Xh". `None` apenas se
          *     não há nenhuma conta cacheada (cliente novo + Omie retornou zero contas).
+         *
+         *     ⚠️ **S9 (BACK 09.4): este endpoint responde 200 SEMPRE** — é a exceção
+         *     deliberada ao 409 da taxonomia de origem. Cliente sem origem devolve
+         *     `origin_status='sem_origem'`, `accounts=[]` e `accounts_synced_at=null`,
+         *     **sem chamar o provedor**. A alternativa (409 no detalhe) deixaria o
+         *     parceiro sem conseguir ABRIR a tela do cliente que acabou de cadastrar.
+         *
+         *     `connections` é o resumo das origens — sem credencial, nem mascarada.
          */
         ClientDetailResponse: {
             /**
@@ -1704,10 +1832,20 @@ export interface components {
              * @default 0
              */
             manager_count: number;
+            /**
+             * @description `sem_origem` = nenhuma conexão; `ativa` = há conexão ativa; `erro` = há conexão, nenhuma ativa.
+             * @default sem_origem
+             */
+            origin_status: components["schemas"]["OriginStatus"];
             /** Accounts */
             accounts?: components["schemas"]["BankAccountResponse"][];
             /** Accounts Synced At */
             accounts_synced_at?: string | null;
+            /**
+             * Connections
+             * @description Origens conectadas (0..N), com capacidades. Sem credencial.
+             */
+            connections?: components["schemas"]["ClientConnectionResponse"][];
         };
         /**
          * ClientListResponse
@@ -1804,6 +1942,11 @@ export interface components {
              * @default 0
              */
             manager_count: number;
+            /**
+             * @description `sem_origem` = nenhuma conexão; `ativa` = há conexão ativa; `erro` = há conexão, nenhuma ativa.
+             * @default sem_origem
+             */
+            origin_status: components["schemas"]["OriginStatus"];
         };
         /**
          * ClientUserListResponse
@@ -1856,6 +1999,34 @@ export interface components {
          * @enum {string}
          */
         ClientUserRole: "client_manager" | "client_operator";
+        /** ConnectionDeletedPayload */
+        ConnectionDeletedPayload: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Deleted */
+            deleted: boolean;
+        };
+        /**
+         * ConnectionDeletedResponse
+         * @description Body de DELETE — a remoção é DEFINITIVA, não há linha para devolver.
+         */
+        ConnectionDeletedResponse: {
+            data: components["schemas"]["ConnectionDeletedPayload"];
+        };
+        /**
+         * ConnectionStatus
+         * @description Estado da conexão — fonte ÚNICA do CHECK `ck_client_connections_status`.
+         *
+         *     `ativa` é o estado de quem opera; `inativa` é desligamento deliberado (a
+         *     conexão fica, deixa de ser usada); `erro` é o que a verificação registrou —
+         *     credencial recusada, provedor fora do ar — e é diferente de `inativa`
+         *     porque exige ação, não é uma escolha do usuário.
+         * @enum {string}
+         */
+        ConnectionStatus: "ativa" | "inativa" | "erro";
         /**
          * CreateAnomalyRequest
          * @description Body do POST /api/v1/reconciliations/{id}/anomalies.
@@ -1887,8 +2058,18 @@ export interface components {
          * CreateClientRequest
          * @description Body de POST /api/v1/clients — cria cliente + auto-assign do criador.
          *
-         *     O backend confia que o frontend já chamou `/test-connection` antes (Doc §9.2);
-         *     aqui apenas criptografa e persiste.
+         *     ⚠️ **Sprint 9 (BACK 09.4): a credencial virou OPCIONAL.** Até aqui o cliente
+         *     **era**, por construção, um par de credenciais Omie com nome — o que impede
+         *     cadastrar a maior parte da carteira de um escritório contábil, onde a maioria
+         *     não usa o Omie (nem sistema nenhum). Sem credencial, o cliente nasce pleno e
+         *     **sem origem**; com credencial, a origem nasce junto, como `client_connections`.
+         *
+         *     Os dois campos continuam sendo exigidos **JUNTOS**: um só é 400
+         *     `IncompleteCredentialsError`, como já era no PATCH.
+         *
+         *     O gate do front (`POST /clients/test-connection`) continua existindo e sendo
+         *     útil — mas deixou de ser a única barreira: desde a 09.3 o servidor **verifica
+         *     a credencial contra o provedor antes de persistir** qualquer coisa.
          */
         CreateClientRequest: {
             /**
@@ -1896,10 +2077,16 @@ export interface components {
              * @description Nome interno na Hologram.
              */
             name: string;
-            /** Omie App Key */
-            omie_app_key: string;
-            /** Omie App Secret */
-            omie_app_secret: string;
+            /**
+             * Omie App Key
+             * @description Opcional desde a S9. Se vier, `omie_app_secret` também precisa vir.
+             */
+            omie_app_key?: string | null;
+            /**
+             * Omie App Secret
+             * @description Opcional desde a S9. Se vier, `omie_app_key` também precisa vir.
+             */
+            omie_app_secret?: string | null;
             /**
              * Category Id
              * @description Categoria do catálogo (86e34jd8m). Ausente ou null = sem categoria.
@@ -1940,6 +2127,32 @@ export interface components {
             password: string;
             /** @description Papel dentro do cliente: client_manager ou client_operator. */
             role: components["schemas"]["ClientUserRole"];
+        };
+        /**
+         * CreateConnectionRequest
+         * @description Body de POST /api/v1/clients/{client_id}/connections.
+         *
+         *     `extra="forbid"`: campo desconhecido é erro, não é ignorado em silêncio — um
+         *     `client_id` no body, por exemplo, nunca decide tenant (quem decide é a rota).
+         */
+        CreateConnectionRequest: {
+            /**
+             * Provider Type
+             * @description Tipo da origem. Hoje só `omie`; tipo desconhecido é 422.
+             */
+            provider_type: string;
+            /**
+             * Label
+             * @description Como chamar esta origem. Omitir usa o rótulo padrão do tipo quando o cliente ainda não tem conexão daquele tipo; a partir da segunda, é obrigatório. Só-espaços é 422.
+             */
+            label?: string | null;
+            /**
+             * Credentials
+             * @description Credenciais do provedor. Para o Omie: `app_key` e `app_secret` — as chaves aceitas são as do adaptador (`OMIE_CREDENTIAL_KEYS`), em snake_case, e chave faltando é 422.
+             */
+            credentials: {
+                [key: string]: string;
+            };
         };
         /**
          * CreateGlossaryEntryRequest
@@ -2728,6 +2941,21 @@ export interface components {
             active?: boolean | null;
         };
         /**
+         * OriginStatus
+         * @description Estado da ORIGEM de dado do cliente (S9 BACK 09.4), DERIVADO das conexões.
+         *
+         *     Não é coluna: derivar de `client_connections` impede a terceira verdade —
+         *     uma coluna `origin_status` ficaria mentindo no dia em que uma conexão
+         *     mudasse de estado e alguém esquecesse de atualizá-la.
+         *
+         *     Três estados porque as três situações pedem coisas diferentes do usuário:
+         *     `sem_origem` (conectar), `erro` (reconectar) e `ativa` (nada). Os mesmos
+         *     três da taxonomia 409 da 09.2 — de propósito: a tela decide pelo estado o
+         *     que oferecer, e o erro só aparece se ela oferecer errado.
+         * @enum {string}
+         */
+        OriginStatus: "sem_origem" | "ativa" | "erro";
+        /**
          * PaginationMeta
          * @description Metadados de paginação. Compartilhado entre módulos no futuro.
          */
@@ -3284,18 +3512,32 @@ export interface components {
          * UpdateClientRequest
          * @description Body de PATCH /api/v1/clients/{id} — campos opcionais (PATCH semântico).
          *
-         *     Para atualizar credenciais é OBRIGATÓRIO enviar `omie_app_key` E
-         *     `omie_app_secret` juntos. Apenas um dos dois resulta em 400
-         *     `IncompleteCredentialsError` (S6 §3.4).
+         *     ⚠️ **Sprint 9 (BACK 09.3): credencial NÃO se edita mais por aqui.** A
+         *     origem do cliente virou entidade própria (`client_connections`), e manter um
+         *     segundo caminho de escrita de credencial nas colunas antigas criaria duas
+         *     verdades sobre a mesma coisa — com a diferença de que este caminho **não**
+         *     valida contra o provedor antes de gravar. `omieAppKey`/`omieAppSecret` no
+         *     corpo agora são **422** apontando `POST /api/v1/clients/{id}/connections`;
+         *     `IncompleteCredentialsError` deixou de valer para o PATCH.
+         *
+         *     O `extra="forbid"` sozinho já daria 422, mas com a mensagem genérica do
+         *     Pydantic ("extra inputs are not permitted"). Os campos continuam declarados
+         *     para que a mensagem diga **para onde ir**.
          */
         UpdateClientRequest: {
             /** Name */
             name?: string | null;
             /** Active */
             active?: boolean | null;
-            /** Omie App Key */
+            /**
+             * Omie App Key
+             * @deprecated
+             */
             omie_app_key?: string | null;
-            /** Omie App Secret */
+            /**
+             * Omie App Secret
+             * @deprecated
+             */
             omie_app_secret?: string | null;
             /**
              * Category Id
@@ -3313,6 +3555,28 @@ export interface components {
             /** Email */
             email?: string | null;
             role?: components["schemas"]["ClientUserRole"] | null;
+        };
+        /**
+         * UpdateConnectionRequest
+         * @description Body de PATCH /api/v1/clients/{client_id}/connections/{connection_id}.
+         *
+         *     Os dois campos são opcionais e independentes: dá para renomear sem mexer na
+         *     credencial, e trocar a credencial sem renomear. Corpo vazio é 422 — um PATCH
+         *     que não pede nada é engano de quem chamou, não no-op silencioso.
+         */
+        UpdateConnectionRequest: {
+            /**
+             * Label
+             * @description Novo rótulo. Omitir mantém o atual.
+             */
+            label?: string | null;
+            /**
+             * Credentials
+             * @description Credenciais NOVAS, completas. Omitir mantém as atuais. Não é patch parcial: a credencial é cifrada inteira, então trocar uma chave isolada exigiria decifrar o resto.
+             */
+            credentials?: {
+                [key: string]: string;
+            } | null;
         };
         /**
          * UpdateFileEntryRequest
@@ -4563,6 +4827,182 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_connections_api_v1_clients__client_id__connections_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientConnectionListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_connection_api_v1_clients__client_id__connections_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateConnectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientConnectionEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_connection_api_v1_clients__client_id__connections__connection_id__test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connection_id: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientConnectionEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_connection_api_v1_clients__client_id__connections__connection_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connection_id: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionDeletedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_connection_api_v1_clients__client_id__connections__connection_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connection_id: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateConnectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientConnectionEnvelope"];
+                };
             };
             /** @description Validation Error */
             422: {

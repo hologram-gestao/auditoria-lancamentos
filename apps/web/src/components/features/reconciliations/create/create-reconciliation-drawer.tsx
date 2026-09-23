@@ -28,6 +28,7 @@ import { useRef, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { toast } from 'sonner';
 
+import { OriginStateNotice } from '@/components/shared/origin-state-notice';
 import { Button, buttonVariants } from '@/components/ui/button';
 import {
   Form,
@@ -58,6 +59,7 @@ import { ApiError } from '@/lib/api/client';
 import { isCreditCardAccount, listReconciliations, type BankAccount } from '@/lib/api/clients';
 import { attachSessionFiles, createReconciliation } from '@/lib/api/reconciliations';
 import { formatReferenceMonth } from '@/lib/format';
+import { isOriginError } from '@/lib/origin-state';
 import { cn } from '@/lib/utils';
 import {
   ALLOWED_EXTENSIONS,
@@ -108,6 +110,8 @@ function DrawerContent({
   const [submitting, setSubmitting] = useState(false);
   /** Sessão existente da mesma conta+mês, descoberta após um 409. */
   const [conflictSessionId, setConflictSessionId] = useState<string | null>(null);
+  // S9 (R7): 409 da taxonomia de origem vira ESTADO na gaveta, não toast.
+  const [originError, setOriginError] = useState<unknown>(null);
   const primaryRef = useRef<HTMLButtonElement>(null);
   const pipeline = useFilePipeline();
 
@@ -127,7 +131,9 @@ function DrawerContent({
   const watchedAccountId = useWatch({ control: form.control, name: 'omie_conta_id' });
   const watchedMonth = useWatch({ control: form.control, name: 'reference_month' }) ?? '';
   const meta = { omie_conta_id: watchedAccountId, reference_month: watchedMonth };
-  const selectedAccount = sortedAccounts.find((a) => a.omie_conta_id === Number(meta.omie_conta_id));
+  const selectedAccount = sortedAccounts.find(
+    (a) => a.omie_conta_id === Number(meta.omie_conta_id),
+  );
   const parsedCount = pipeline.items.filter((it) => it.status === 'parsed').length;
   const canConfirm = parsedCount > 0 && !pipeline.isProcessing && !submitting;
 
@@ -200,6 +206,11 @@ function DrawerContent({
         const existing = await findExistingSession();
         setConflictSessionId(existing);
         toast.error(err.userMessage);
+      } else if (isOriginError(err)) {
+        // S9 (R7): os TRÊS códigos da taxonomia de origem viram estado dentro
+        // da própria gaveta — o toast genérico faria o usuário perder o
+        // contexto (e os arquivos já extraídos) sem saber o que consertar.
+        setOriginError(err);
       } else {
         toast.error(
           err instanceof ApiError
@@ -247,12 +258,21 @@ function DrawerContent({
       <SheetHeader>
         <SheetTitle>Criar conciliação</SheetTitle>
         <SheetDescription>
-          Passo {step} de 2 —{' '}
-          {step === 1 ? 'conta e mês de referência' : 'arquivos da conciliação'}
+          Passo {step} de 2 — {step === 1 ? 'conta e mês de referência' : 'arquivos da conciliação'}
         </SheetDescription>
       </SheetHeader>
 
       <SheetBody>
+        {/* R7: o estado de origem fica no TOPO do miolo, acima do formulário —
+            o usuário precisa ler por que o envio não foi aceito antes de tentar
+            de novo. Sem link: navegar daqui fecharia a gaveta e perderia as
+            extrações já pagas à IA. */}
+        {originError !== null && (
+          <div className="mb-4">
+            <OriginStateNotice error={originError} clientId={clientId} showAction={false} />
+          </div>
+        )}
+
         {/* O passo inativo é DESMONTADO (não escondido com `hidden`): markup
             focável dentro de um container `aria-hidden` é violação de a11y, e
             o RHF preserva os valores mesmo com os campos desmontados
@@ -263,163 +283,163 @@ function DrawerContent({
             <form id="create-reconciliation-step1" onSubmit={form.handleSubmit(handleAdvance)}>
               <div className="space-y-6">
                 <FormField
-                control={form.control}
-                name="omie_conta_id"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Conta bancária</FormLabel>
-                    <Select
-                      onValueChange={(v) => field.onChange(Number(v))}
-                      value={field.value !== undefined ? String(field.value) : undefined}
-                      disabled={!hasAccounts}
-                    >
-                      <FormControl>
-                        <SelectTrigger aria-label="Conta bancária">
-                          <SelectValue
-                            placeholder={
-                              hasAccounts ? 'Selecione uma conta' : 'Nenhuma conta disponível'
-                            }
-                          />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {sortedAccounts.map((account) => (
-                          <SelectItem key={account.id} value={String(account.omie_conta_id)}>
-                            {formatAccountLabel(account)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {!hasAccounts && (
-                      <FormDescription>
-                        Nenhuma conta sincronizada. Extraia as contas do Omie em &quot;Contas
-                        Bancárias&quot; antes de criar uma conciliação.
-                      </FormDescription>
-                    )}
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="reference_month"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Mês de referência</FormLabel>
-                    <FormControl>
-                      <input
-                        type="month"
-                        lang="pt-BR"
-                        max={currentMonth()}
+                  control={form.control}
+                  name="omie_conta_id"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Conta bancária</FormLabel>
+                      <Select
+                        onValueChange={(v) => field.onChange(Number(v))}
+                        value={field.value !== undefined ? String(field.value) : undefined}
                         disabled={!hasAccounts}
-                        aria-label="Mês de referência"
-                        className="border-input bg-background ring-offset-background focus-visible:ring-ring flex h-10 w-full cursor-pointer rounded-md border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                      >
+                        <FormControl>
+                          <SelectTrigger aria-label="Conta bancária">
+                            <SelectValue
+                              placeholder={
+                                hasAccounts ? 'Selecione uma conta' : 'Nenhuma conta disponível'
+                              }
+                            />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {sortedAccounts.map((account) => (
+                            <SelectItem key={account.id} value={String(account.omie_conta_id)}>
+                              {formatAccountLabel(account)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {!hasAccounts && (
+                        <FormDescription>
+                          Nenhuma conta sincronizada. Extraia as contas do Omie em &quot;Contas
+                          Bancárias&quot; antes de criar uma conciliação.
+                        </FormDescription>
+                      )}
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="reference_month"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Mês de referência</FormLabel>
+                      <FormControl>
+                        <input
+                          type="month"
+                          lang="pt-BR"
+                          max={currentMonth()}
+                          disabled={!hasAccounts}
+                          aria-label="Mês de referência"
+                          className="border-input bg-background ring-offset-background focus-visible:ring-ring flex h-10 w-full cursor-pointer rounded-md border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
             </form>
           </Form>
         )}
 
         {step === 2 && (
-        <div className="space-y-4">
-          <div className="bg-muted/40 rounded-md border p-3 text-sm">
-            <p className="font-medium">{selectedAccount?.name ?? '—'}</p>
-            <p className="text-muted-foreground text-xs">
-              {formatReferenceMonth(meta.reference_month)}
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <input
-              id="reconciliation-files"
-              type="file"
-              multiple
-              accept={FILE_ACCEPT}
-              onChange={handleFilesChosen}
-              disabled={pipeline.isProcessing || submitting}
-              className="sr-only"
-            />
-            <label
-              htmlFor="reconciliation-files"
-              aria-disabled={pipeline.isProcessing || submitting || undefined}
-              className={cn(
-                buttonVariants({ variant: 'outline' }),
-                'w-full cursor-pointer',
-                (pipeline.isProcessing || submitting) && 'pointer-events-none opacity-50',
-              )}
-            >
-              <Upload className="h-4 w-4" aria-hidden="true" />
-              Adicionar arquivos
-            </label>
-            <p className="text-muted-foreground text-xs">
-              Uma fatura grande pode vir quebrada em partes — envie todas aqui e elas viram um
-              resumo só. Formatos: {ALLOWED_EXTENSIONS.join(', ').toUpperCase()} · máx.{' '}
-              {MAX_FILE_SIZE_LABEL} por arquivo · até {MAX_FILES} arquivos.
-            </p>
-          </div>
-
-          {pipeline.items.length > 0 && (
-            <ul className="space-y-2" aria-label="Arquivos desta conciliação">
-              {pipeline.items.map((item) => (
-                <UploadItemRow
-                  key={item.id}
-                  item={item}
-                  onRemove={() => pipeline.remove(item.id)}
-                  disabled={submitting}
-                />
-              ))}
-            </ul>
-          )}
-
-          {pipeline.isProcessing && (
-            <p role="status" className="text-muted-foreground flex items-center gap-2 text-sm">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              Extraindo movimentações com IA. Isso pode levar até 60 segundos por arquivo.
-            </p>
-          )}
-
-          {selectedAccount !== undefined && isCreditCardAccount(selectedAccount.account_type) && (
-            <p role="note" className="text-muted-foreground flex items-start gap-2 text-xs">
-              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span>
-                Inclua somente arquivos da fatura do cartão. O pagamento da fatura aparece no
-                extrato da conta corrente — não inclua aqui.
-              </span>
-            </p>
-          )}
-
-          {conflictSessionId !== null && (
-            <div
-              role="alert"
-              className="border-info/40 bg-info-muted text-info flex items-start gap-3 rounded-md border p-3 text-sm"
-            >
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-              <div className="space-y-2">
-                <p>
-                  Já existe uma conciliação para esta conta e mês. Você pode adicionar estes
-                  arquivos a ela como novas partes.
-                </p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void handleAttachToExisting()}
-                  disabled={submitting}
-                >
-                  {submitting && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
-                  Adicionar à conciliação existente
-                </Button>
-              </div>
+          <div className="space-y-4">
+            <div className="bg-muted/40 rounded-md border p-3 text-sm">
+              <p className="font-medium">{selectedAccount?.name ?? '—'}</p>
+              <p className="text-muted-foreground text-xs">
+                {formatReferenceMonth(meta.reference_month)}
+              </p>
             </div>
-          )}
-        </div>
+
+            <div className="space-y-2">
+              <input
+                id="reconciliation-files"
+                type="file"
+                multiple
+                accept={FILE_ACCEPT}
+                onChange={handleFilesChosen}
+                disabled={pipeline.isProcessing || submitting}
+                className="sr-only"
+              />
+              <label
+                htmlFor="reconciliation-files"
+                aria-disabled={pipeline.isProcessing || submitting || undefined}
+                className={cn(
+                  buttonVariants({ variant: 'outline' }),
+                  'w-full cursor-pointer',
+                  (pipeline.isProcessing || submitting) && 'pointer-events-none opacity-50',
+                )}
+              >
+                <Upload className="h-4 w-4" aria-hidden="true" />
+                Adicionar arquivos
+              </label>
+              <p className="text-muted-foreground text-xs">
+                Uma fatura grande pode vir quebrada em partes — envie todas aqui e elas viram um
+                resumo só. Formatos: {ALLOWED_EXTENSIONS.join(', ').toUpperCase()} · máx.{' '}
+                {MAX_FILE_SIZE_LABEL} por arquivo · até {MAX_FILES} arquivos.
+              </p>
+            </div>
+
+            {pipeline.items.length > 0 && (
+              <ul className="space-y-2" aria-label="Arquivos desta conciliação">
+                {pipeline.items.map((item) => (
+                  <UploadItemRow
+                    key={item.id}
+                    item={item}
+                    onRemove={() => pipeline.remove(item.id)}
+                    disabled={submitting}
+                  />
+                ))}
+              </ul>
+            )}
+
+            {pipeline.isProcessing && (
+              <p role="status" className="text-muted-foreground flex items-center gap-2 text-sm">
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                Extraindo movimentações com IA. Isso pode levar até 60 segundos por arquivo.
+              </p>
+            )}
+
+            {selectedAccount !== undefined && isCreditCardAccount(selectedAccount.account_type) && (
+              <p role="note" className="text-muted-foreground flex items-start gap-2 text-xs">
+                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span>
+                  Inclua somente arquivos da fatura do cartão. O pagamento da fatura aparece no
+                  extrato da conta corrente — não inclua aqui.
+                </span>
+              </p>
+            )}
+
+            {conflictSessionId !== null && (
+              <div
+                role="alert"
+                className="border-info/40 bg-info-muted text-info flex items-start gap-3 rounded-md border p-3 text-sm"
+              >
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                <div className="space-y-2">
+                  <p>
+                    Já existe uma conciliação para esta conta e mês. Você pode adicionar estes
+                    arquivos a ela como novas partes.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleAttachToExisting()}
+                    disabled={submitting}
+                  >
+                    {submitting && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+                    Adicionar à conciliação existente
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </SheetBody>
 

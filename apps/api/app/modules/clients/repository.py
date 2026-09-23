@@ -23,15 +23,17 @@ from sqlalchemy import (
     Select,
     String,
     and_,
+    case,
     cast,
     delete,
     false,
     func,
+    literal,
     select,
     update,
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, AsyncSessionTransaction
 from sqlalchemy.orm import aliased, selectinload
 
 from app.core.authz import CurrentUser, reach_filter
@@ -41,7 +43,9 @@ from app.db.models import (
     Client,
     ClientAssignment,
     ClientCategory,
+    ClientConnection,
     ClientGlossaryEntry,
+    ConnectionStatus,
     Notification,
     OmieAccountCache,
     Organization,
@@ -53,6 +57,7 @@ from app.db.models import (
     UserRole,
     UserScope,
 )
+from app.modules.client_connections.legacy_fallback import legacy_origin_available
 
 
 class ClientRow(NamedTuple):
@@ -75,6 +80,10 @@ class ClientRow(NamedTuple):
     category: ClientCategory | None = None
     #: Quantas pessoas têm acesso ao cliente, responsável incluído (86e390kz8).
     manager_count: int = 0
+    #: S9 (BACK 09.4): contagens de ORIGEM, para derivar `origin_status` sem
+    #: uma consulta por linha. Vêm de subqueries escalares na MESMA query.
+    connections_total: int = 0
+    connections_active: int = 0
 
 
 class _FavoriteJoin(NamedTuple):
@@ -127,6 +136,56 @@ def _manager_count_subquery() -> ScalarSelect[int]:
     )
 
 
+def _connection_counts_subqueries(
+    *, include_legacy_origin: bool
+) -> tuple[ColumnElement[int], ColumnElement[int]]:
+    """(total de conexões, conexões ATIVAS) do cliente — S9 (BACK 09.4 + 09.5).
+
+    Duas subqueries escalares e não um `JOIN`: a lista do escritório parceiro
+    precisa mostrar quem está sem origem, e um join com `client_connections`
+    multiplicaria a linha do cliente por conexão (o cliente com duas contas no
+    mesmo ERP apareceria duas vezes). Contadas na MESMA query da listagem —
+    sem N+1, que é o que uma consulta por linha viraria numa carteira de 40.
+
+    São DOIS números porque os três estados de origem precisam deles: nenhuma
+    conexão (`sem_origem`), alguma ativa (`ativa`), existe mas nenhuma ativa
+    (`erro`). Um contador só não distinguiria os dois últimos.
+
+    `include_legacy_origin` (09.5) faz a contagem enxergar o cliente que ainda
+    opera pelas colunas antigas: com o fallback efetivamente ligado, ele vale
+    por UMA conexão ativa — o mesmo que `resolve_origin_connections` devolve
+    para ele. Sem isso, toda a base existente responderia `sem_origem` entre o
+    deploy e o fim da conversão, e a tela bloquearia "Nova conciliação" e
+    "Sincronizar contas" de quem o backend serve normalmente. O predicado é o
+    de `legacy_fallback` — aqui não se escreve um segundo. Quem decide o
+    booleano é o service, que sabe o estado EFETIVO da flag.
+
+    É `case` e não soma: o ramo legado exige ZERO conexões gravadas
+    (precedência), então os dois nunca se acumulam.
+    """
+    total = aliased(ClientConnection)
+    ativa = aliased(ClientConnection)
+    total_sq = (
+        select(func.count(total.id))
+        .where(total.client_id == Client.id)
+        .correlate(Client)
+        .scalar_subquery()
+    )
+    ativa_sq = (
+        select(func.count(ativa.id))
+        .where(ativa.client_id == Client.id, ativa.status == ConnectionStatus.ATIVA.value)
+        .correlate(Client)
+        .scalar_subquery()
+    )
+    if not include_legacy_origin:
+        return total_sq, ativa_sq
+    legado = legacy_origin_available()
+    return (
+        case((legado, literal(1)), else_=total_sq),
+        case((legado, literal(1)), else_=ativa_sq),
+    )
+
+
 class _ClientRowQuery(NamedTuple):
     """O SELECT de uma linha de cliente + a expressão de favorito para o ORDER BY."""
 
@@ -134,13 +193,19 @@ class _ClientRowQuery(NamedTuple):
     is_favorite: Any
 
 
-def _client_row_query(viewer_user_id: UUID | None) -> _ClientRowQuery:
+def _client_row_query(
+    viewer_user_id: UUID | None, *, include_legacy_origin: bool = False
+) -> _ClientRowQuery:
     """SELECT base de UMA linha: cliente + responsável + contagens + favorito + categoria.
 
     Lista e detalhe partem DAQUI — coluna nova entra uma vez e aparece nos dois,
     na mesma posição (o mapeamento em `_to_client_row` é posicional). O join de
     exibição é só do RESPONSÁVEL (`_responsible_join_clause`): com N gerentes o
     join continua 1:1 e o cliente sai uma vez.
+
+    `include_legacy_origin` chega até `_connection_counts_subqueries`; o default
+    `False` é o estado pós-conversão (só conexões gravadas contam) — quem sabe
+    que a janela de fallback está aberta é o service, e é ele que liga.
     """
     manager = aliased(User)
     favorite = _favorite_join_for(viewer_user_id)
@@ -156,6 +221,9 @@ def _client_row_query(viewer_user_id: UUID | None) -> _ClientRowQuery:
         .correlate(Client)
         .scalar_subquery()
     )
+    connections_total_sq, connections_active_sq = _connection_counts_subqueries(
+        include_legacy_origin=include_legacy_origin
+    )
     stmt = (
         select(
             Client,
@@ -165,6 +233,8 @@ def _client_row_query(viewer_user_id: UUID | None) -> _ClientRowQuery:
             ClientCategory,
             _manager_count_subquery().label("manager_count"),
             Organization,
+            connections_total_sq.label("connections_total"),
+            connections_active_sq.label("connections_active"),
         )
         .outerjoin(ClientAssignment, _responsible_join_clause())
         .outerjoin(manager, manager.id == ClientAssignment.user_id)
@@ -186,6 +256,8 @@ def _to_client_row(row: Row[Any]) -> ClientRow:
         category=row[4],
         manager_count=int(row[5] or 0),
         organization=row[6],
+        connections_total=int(row[7] or 0),
+        connections_active=int(row[8] or 0),
     )
 
 
@@ -194,6 +266,12 @@ class ClientRepository:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    def savepoint(self) -> AsyncSessionTransaction:
+        """SAVEPOINT (`begin_nested`) para o service desfazer um grupo de escritas
+        sem derrubar a transação da request — mesmo padrão de `usage_events` e do
+        job de processamento."""
+        return self._session.begin_nested()
 
     # ------------------------------ READ ------------------------------
 
@@ -206,6 +284,7 @@ class ClientRepository:
         search: str | None = None,
         category_id: UUID | None = None,
         organization_id: UUID | None = None,
+        include_legacy_origin: bool = False,
     ) -> tuple[Sequence[ClientRow], int]:
         """Lista paginada de clientes com manager + count de conciliações.
 
@@ -220,11 +299,15 @@ class ClientRepository:
             search: ILIKE em `clients.name` (case-insensitive).
             organization_id: filtro OPCIONAL da plataforma (86e36ecqz), já
                 decidido por `resolve_organization_filter` no service.
+            include_legacy_origin: o fallback da 09.5 está EFETIVAMENTE ligado?
+                Se sim, o cliente ainda não convertido conta como origem ativa
+                na derivação de `origin_status` — o mesmo que ele recebe ao
+                operar.
 
         Returns:
             Tupla `(rows, total_count)`. Total é a contagem ANTES da paginação.
         """
-        query = _client_row_query(UUID(user.id))
+        query = _client_row_query(UUID(user.id), include_legacy_origin=include_legacy_origin)
         base = query.stmt
         count_base = select(func.count(Client.id)).select_from(Client)
 
@@ -265,14 +348,22 @@ class ClientRepository:
         return rows, int(total)
 
     async def get_detail(
-        self, client_id: UUID, *, viewer_user_id: UUID | None = None
+        self,
+        client_id: UUID,
+        *,
+        viewer_user_id: UUID | None = None,
+        include_legacy_origin: bool = False,
     ) -> ClientRow | None:
         """Carrega 1 cliente com manager + count — usado em endpoints de retorno.
 
         `viewer_user_id` resolve `is_favorite` para quem pede (86e34jd5a); sem
-        viewer a linha sai com `False`.
+        viewer a linha sai com `False`. `include_legacy_origin` é o mesmo da
+        listagem: o detalhe TEM de concordar com ela e com a lista de
+        `connections` do mesmo corpo.
         """
-        stmt = _client_row_query(viewer_user_id).stmt.where(Client.id == client_id)
+        stmt = _client_row_query(
+            viewer_user_id, include_legacy_origin=include_legacy_origin
+        ).stmt.where(Client.id == client_id)
         row = (await self._session.execute(stmt)).first()
         return None if row is None else _to_client_row(row)
 
@@ -418,7 +509,10 @@ class ClientRepository:
                RESTRICT e travaria o passo 4; levam os próprios favoritos;
             3. notificações do cliente — sem FK (só IDs), mas são item de UI de
                um recurso que deixa de existir;
-            4. a linha de `clients` — cascateia atribuições, glossário, cache de
+            4. as CONEXÕES de origem (S9) — o FK já é `CASCADE`, mas a lista
+               declarada é a fonte: o `DELETE` explícito mantém as duas
+               coerentes e faz a credencial cifrada da origem sumir junto;
+            5. a linha de `clients` — cascateia atribuições, glossário, cache de
                contas Omie e favoritos; a DEK morre com ela e tudo que ela
                cifrava vira indecifrável por construção (§4.1).
 
@@ -436,6 +530,7 @@ class ClientRepository:
             delete(User).where(User.client_id == client.id, User.scope == UserScope.CLIENT.value)
         )
         await s.execute(delete(Notification).where(Notification.client_id == client.id))
+        await s.execute(delete(ClientConnection).where(ClientConnection.client_id == client.id))
         await s.execute(delete(Client).where(Client.id == client.id))
         await s.flush()
         # A instância carregada pelo guard da rota não pode ficar viva na sessão
@@ -448,8 +543,10 @@ class ClientRepository:
         """Encerramento: remove o que NÃO tem valor operacional retido.
 
         Glossário (cifrado — já morreu com a DEK; linha de ciphertext morto não
-        serve para nada), cache de contas Omie (nomes de contas do cliente, TTL),
-        notificações (UI de um recurso que não opera mais) e favoritos (o
+        serve para nada), **conexões de origem** (S9 — a credencial cifrada
+        delas morre pelo mesmo motivo, e uma origem de um cliente encerrado não
+        tem o que operar), cache de contas Omie (nomes de contas do cliente,
+        TTL), notificações (UI de um recurso que não opera mais) e favoritos (o
         cliente sai do dia a dia). `client_assignments` FICA de propósito
         (decisão 09/09): o manager da carteira continua vendo o histórico.
         Conciliações, postings, `usage_events` e `access_audit` ficam — são a
@@ -459,6 +556,7 @@ class ClientRepository:
         await s.execute(
             delete(ClientGlossaryEntry).where(ClientGlossaryEntry.client_id == client_id)
         )
+        await s.execute(delete(ClientConnection).where(ClientConnection.client_id == client_id))
         await s.execute(delete(OmieAccountCache).where(OmieAccountCache.client_id == client_id))
         await s.execute(delete(Notification).where(Notification.client_id == client_id))
         await s.execute(delete(UserClientFavorite).where(UserClientFavorite.client_id == client_id))
@@ -616,6 +714,8 @@ class ClientRepository:
         self,
         client: Client,
         items: Sequence[OmieAccountCache],
+        *,
+        connection: ClientConnection | None = None,
     ) -> datetime:
         """Substitui o cache L1 do cliente por `items` em uma única transação.
 
@@ -630,13 +730,18 @@ class ClientRepository:
             concorrentes — o segundo a chegar levanta IntegrityError, que o
             handler global converte em 409, e a UI tenta de novo.
 
-        O `synced_at` final é gravado em `clients.omie_accounts_synced_at`
-        (NÃO derivar de MAX(omie_accounts_cache.synced_at) — quando o Omie
-        devolve lista vazia, o MAX volta None e o TTL não dispara, fazendo
-        toda request bater o Omie. Bug descoberto em 29/04/2026 com Quial).
+        O `synced_at` final é gravado em `connection.accounts_synced_at` (S9) e,
+        enquanto as colunas antigas existirem, TAMBÉM em
+        `clients.omie_accounts_synced_at` — a coluna do cliente deixou de ser
+        LIDA (`accounts_cache.get_or_sync` decide o TTL pela conexão), mas
+        continua escrita como salvaguarda de rollback até o `contract`.
 
-        Retorna o `synced_at` aplicado (mesmo timestamp para todas as linhas
-        e para a coluna do `Client`).
+        Nunca derivar de `MAX(omie_accounts_cache.synced_at)`: quando o provedor
+        devolve lista vazia o MAX volta `None`, o TTL não dispara e toda request
+        bate na rede (bug descoberto em 29/04/2026 com Quial).
+
+        Retorna o `synced_at` aplicado (mesmo timestamp para todas as linhas e
+        para os dois carimbos).
         """
         await self._session.execute(
             delete(OmieAccountCache).where(OmieAccountCache.client_id == client.id)
@@ -646,6 +751,11 @@ class ClientRepository:
             item.synced_at = synced_at
             self._session.add(item)
         client.omie_accounts_synced_at = synced_at
+        if connection is not None:
+            # O carimbo que MANDA desde a S9. Por conexão: sincronizar uma não
+            # pode marcar a outra do mesmo cliente como fresca.
+            connection.accounts_synced_at = synced_at
+            self._session.add(connection)
         # `add` em objeto já tracked é no-op, mas garante a presença na identity
         # map caso o caller tenha passado um Client detached por algum motivo.
         self._session.add(client)

@@ -28,6 +28,7 @@ import { ApiError } from '@/lib/api/client';
 import { formatReferenceMonth, formatSyncedAt } from '@/lib/format';
 import { currentMonth } from '@/lib/validation/reconciliations';
 
+import { ClientConnectionsSection } from './connections/client-connections-section';
 import { ReconciliationStatusBadge } from './reconciliation-status-badge';
 
 /** Teto de leitura do mês — o painel é um resumo, não um relatório. */
@@ -36,7 +37,11 @@ const MONTH_PAGE_SIZE = 100;
 export function ClientDashboard({ clientId }: { clientId: string }) {
   const month = currentMonth();
   const detailQuery = useClientDetail(clientId);
-  const monthQuery = useReconciliationsList(clientId, { page: 1, pageSize: MONTH_PAGE_SIZE, month });
+  const monthQuery = useReconciliationsList(clientId, {
+    page: 1,
+    pageSize: MONTH_PAGE_SIZE,
+    month,
+  });
   const latestQuery = useReconciliationsList(clientId, { page: 1, pageSize: 1 });
 
   const isLoading = detailQuery.isLoading || monthQuery.isLoading || latestQuery.isLoading;
@@ -115,9 +120,20 @@ export function ClientDashboard({ clientId }: { clientId: string }) {
           icon={<CalendarCheck className="text-muted-foreground h-5 w-5" aria-hidden="true" />}
           label="Última conciliação"
           value={latest === undefined ? '—' : formatReferenceMonth(latest.reference_month)}
-          badge={latest === undefined ? undefined : <ReconciliationStatusBadge status={latest.status} />}
+          badge={
+            latest === undefined ? undefined : <ReconciliationStatusBadge status={latest.status} />
+          }
         />
       </div>
+
+      {/* Origem (S9 / R4 · R7): o bloco de estado + a gestão das conexões. Fica
+          no painel porque é a tela que responde 200 SEM origem — a exceção
+          deliberada do R6 à taxonomia 409. */}
+      <ClientConnectionsSection
+        clientId={clientId}
+        originStatus={detailQuery.data?.origin_status ?? 'sem_origem'}
+        isClosed={detailQuery.data?.closed_at != null}
+      />
 
       {latest === undefined ? (
         <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed p-8 text-center">

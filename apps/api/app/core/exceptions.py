@@ -48,6 +48,18 @@ class ErrorCode(StrEnum):
     # PRÓPRIO, e não VALIDATION_ERROR genérico, porque o front precisa
     # distinguir "campo inválido" de "acabou a cota" para orientar o usuário.
     GLOSSARY_LIMIT_EXCEEDED = "GLOSSARY_LIMIT_EXCEEDED"
+    # Sprint 9 (BACK 09.2 / R3): taxonomia FECHADA de "a origem não serve para
+    # esta ação". São três, todas 409, e existem separadas porque o que o
+    # usuário precisa FAZER é diferente em cada uma — conectar, reconectar,
+    # ou nada (aquele provedor não faz aquilo). Um `CONFLICT` genérico faria a
+    # UI adivinhar qual das três está vendo.
+    SEM_CONEXAO = "SEM_CONEXAO"
+    ORIGEM_COM_ERRO = "ORIGEM_COM_ERRO"
+    CAPACIDADE_AUSENTE = "CAPACIDADE_AUSENTE"
+    #: Credencial recusada por um provedor de origem (genérico; o do Omie
+    #: continua sendo `OMIE_AUTH_ERROR`, que não muda de valor).
+    PROVIDER_AUTH_ERROR = "PROVIDER_AUTH_ERROR"
+    CREDENTIALS_MOVED = "CREDENTIALS_MOVED"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
@@ -77,10 +89,18 @@ class AppError(Exception):
         *,
         user_message: str | None = None,
         metadata: dict[str, Any] | None = None,
+        details: dict[str, str] | None = None,
     ) -> None:
         self.message: str = message or self.default_user_message
         self.user_message: str = user_message or self.default_user_message
         self.metadata: dict[str, Any] = metadata or {}
+        #: Sprint 9: dados ESTRUTURADOS que o front precisa para agir — e que
+        #: ele não deveria extrair parseando `message`. Vai para a resposta
+        #: HTTP, ao contrário de `metadata`, e por isso carrega **só IDs**:
+        #: nome, razão social ou CNPJ aqui seria vazamento pela porta do erro
+        #: (§3.15 — negação não vaza o alvo). Ausente na esmagadora maioria dos
+        #: erros; o campo só aparece no corpo quando tem conteúdo.
+        self.details: dict[str, str] = details or {}
         super().__init__(self.message)
 
 
@@ -249,6 +269,108 @@ class ClientClosedError(ConflictError):
     )
 
 
+class ClientWithoutOmieCredentialsError(ConflictError):
+    """409 — o cliente não tem credencial Omie para a operação pedida (S9 BACK 09.1).
+
+    Desde a Sprint 9 as 4 colunas de credencial de `clients` são NULÁVEIS: o
+    cliente existe sem nenhuma origem conectada. Quem precisa falar com o Omie
+    (`modules/client_connections/legacy_fallback`) passa a encontrar `None`
+    onde antes o `NOT NULL` garantia texto, e o certo é recusar com mensagem
+    acionável — **nunca** seguir com credencial vazia, que viraria um 502 do
+    provedor dizendo outra coisa.
+
+    **409 e não 500**: é estado esperado do cliente (§7 — erro de negócio é 4xx
+    com mensagem acionável), não falha do sistema.
+
+    ⚠️ Hoje isto é inalcançável para os clientes já cadastrados — todos têm
+    credencial, e o encerrado grava `''`, não NULL. Passa a valer quando o
+    cadastro sem origem existir (09.4).
+    """
+
+    default_user_message = (
+        "Este cliente ainda não tem uma conexão com o Omie. Conecte uma origem "
+        "antes de usar esta ação."
+    )
+
+
+# ----------------------------------------------------------------------
+# S9 / R3 — a origem não serve para esta ação. Taxonomia FECHADA de três.
+# ----------------------------------------------------------------------
+
+
+class NoOriginConnectionError(ConflictError):
+    """409 — o cliente não tem NENHUMA conexão de origem (S9 BACK 09.2).
+
+    O estado que a Sprint 9 criou de propósito: cliente pleno, sem origem. Não
+    é erro do sistema nem falta de permissão — é uma etapa de configuração que
+    ninguém fez ainda. Por isso 409 com o próximo passo na mensagem, nunca 404
+    ("some coisa que existe") nem 5xx.
+    """
+
+    code = ErrorCode.SEM_CONEXAO
+    default_user_message = (
+        "Este cliente ainda não tem uma origem conectada. Conecte uma origem para usar esta ação."
+    )
+
+
+class OriginConnectionInErrorError(ConflictError):
+    """409 — existem conexões, nenhuma ATIVA (S9 BACK 09.2).
+
+    Distinto de `NoOriginConnectionError` porque a ação do usuário é outra: não
+    é conectar do zero, é **reconectar** a que está lá (credencial trocada,
+    provedor recusou). `inativa` entra aqui junto de `erro`: desligada de
+    propósito também não opera.
+    """
+
+    code = ErrorCode.ORIGEM_COM_ERRO
+    default_user_message = (
+        "A origem deste cliente não está ativa. Verifique a conexão e tente novamente."
+    )
+
+
+class OriginCapabilityMissingError(ConflictError):
+    """409 — há conexão ativa, e ela não faz o que foi pedido (S9 BACK 09.2).
+
+    O caso em que **não há nada a consertar**: o provedor conectado simplesmente
+    não oferece aquela operação. Mensagem que diz isso, em vez de mandar o
+    usuário reconectar algo que já está são.
+    """
+
+    code = ErrorCode.CAPACIDADE_AUSENTE
+    default_user_message = "A origem conectada a este cliente não oferece esta operação."
+
+
+class ConnectionLabelAlreadyExistsError(ConflictError):
+    """409 — `(cliente, tipo, rótulo)` já existe (S9 BACK 09.3).
+
+    A unicidade é do BANCO (`uq_client_connections_client_provider_label`); esta
+    exceção é a tradução dela. O corpo carrega `details.existingConnectionId`
+    para o front poder levar o usuário até a conexão que ocupa o par — e **só**
+    isso: nem o rótulo, nem o nome do cliente (§3.15).
+    """
+
+    default_user_message = (
+        "Já existe uma origem deste tipo com este rótulo neste cliente. "
+        "Use outro rótulo ou edite a conexão existente."
+    )
+
+
+class ProviderAuthError(AppError):
+    """502 — o provedor de origem recusou a credencial (S9 BACK 09.2).
+
+    Equivalente neutro de `OmieAuthError`: o adaptador traduz o erro específico
+    do provedor para este, e é ESTE (não timeout, não instabilidade) que marca a
+    conexão como `erro`. Credencial recusada é estado persistente da conexão;
+    provedor fora do ar é transitório e não pode apagar o estado de ninguém.
+    """
+
+    code = ErrorCode.PROVIDER_AUTH_ERROR
+    status_code = 502
+    default_user_message = (
+        "A origem recusou as credenciais desta conexão. Atualize a conexão e tente de novo."
+    )
+
+
 class OmiePostingDisabledError(ConflictError):
     """409 — o kill-switch `OMIE_POSTING_ENABLED` está desligado (S7 BACK 07.4).
 
@@ -314,6 +436,27 @@ class IncompleteCredentialsError(ValidationAppError):
 
     default_user_message = (
         "Para atualizar as credenciais, envie tanto a App Key quanto o App Secret."
+    )
+
+
+class CredentialsMovedToConnectionsError(AppError):
+    """422 — credencial no `PATCH /clients/{id}` é o caminho antigo, e o erro diz o novo.
+
+    Sprint 9 (BACK 09.3, R5): a credencial mora em `client_connections` e a escrita
+    passa por `POST/PATCH /clients/{id}/connections`, que verifica contra o provedor
+    antes de gravar. Este erro existe como classe própria, e não como `ValueError`
+    de validador Pydantic, porque o handler global de validação responde 400 com
+    mensagem GENÉRICA de propósito (não ecoar input, 86e2rtxcm) — e o PRD exige que
+    quem ainda manda os campos antigos receba a rota nova na resposta.
+    """
+
+    code = ErrorCode.CREDENTIALS_MOVED
+    status_code = 422
+    default_user_message = (
+        "As credenciais da origem não são mais editadas por aqui. Use "
+        "POST /api/v1/clients/{id}/connections para conectar uma origem, ou "
+        "PATCH /api/v1/clients/{id}/connections/{connectionId} para trocar as "
+        "credenciais de uma existente."
     )
 
 
@@ -567,15 +710,18 @@ class AccountsSyncError(AppError):
 # ----------------------------------------------------------------------
 
 
-def to_error_response(exc: AppError) -> dict[str, dict[str, str]]:
+def to_error_response(exc: AppError) -> dict[str, dict[str, Any]]:
     """Serializa `AppError` no formato de resposta padrão da API.
 
-    Não inclui `metadata` — esses dados vão apenas para logs/Sentry.
+    Não inclui `metadata` — esses dados vão apenas para logs/Sentry. Inclui
+    `details` **quando existe** (Sprint 9): a chave some do corpo se vazia, para
+    que nenhum erro existente mude de forma.
     """
-    return {
-        "error": {
-            "code": exc.code.value,
-            "message": exc.message,
-            "userMessage": exc.user_message,
-        }
+    error: dict[str, Any] = {
+        "code": exc.code.value,
+        "message": exc.message,
+        "userMessage": exc.user_message,
     }
+    if exc.details:
+        error["details"] = exc.details
+    return {"error": error}

@@ -53,7 +53,9 @@ from app.core.dependencies import (
     StaffDep,
     SyncOmieAccountsDep,
 )
+from app.core.exceptions import CredentialsMovedToConnectionsError
 from app.core.rate_limit import limiter, user_id_key_func
+from app.modules.client_connections.service import ClientConnectionService
 from app.modules.clients.repository import ClientRepository
 from app.modules.clients.schemas import (
     AddClientManagerRequest,
@@ -74,6 +76,9 @@ from app.modules.usage_events.service import UsageEventService
 
 router = APIRouter(prefix="/api/v1/clients", tags=["clients"])
 
+# S9 (R5): os campos de credencial do caminho antigo. Presença no PATCH é 422 tipado.
+_LEGACY_CREDENTIAL_FIELDS = frozenset({"omie_app_key", "omie_app_secret"})
+
 
 def _get_client_service(db: DbSessionDep, settings: SettingsDep) -> ClientService:
     """Provider para injeção do service em endpoints."""
@@ -81,6 +86,9 @@ def _get_client_service(db: DbSessionDep, settings: SettingsDep) -> ClientServic
         ClientRepository(db),
         settings,
         usage_events=UsageEventService(UsageEventRepository(db)),
+        # S9 (BACK 09.4): a MESMA sessão do request — criar cliente com
+        # credencial grava cliente e conexão na mesma transação.
+        connections=ClientConnectionService(db, settings),
     )
 
 
@@ -428,12 +436,16 @@ async def update_client(
     # manager, declarada no PRD).
     # `client` já vem carregado e validado pelo `require_client_access` —
     # se o caller não tem acesso, a dependency lança 403 antes daqui.
+    # S9 (R5): credencial no PATCH é o caminho antigo. Vale para a PRESENÇA da
+    # chave, não para o valor — `{"omieAppKey": null}` também é recusado.
+    if _LEGACY_CREDENTIAL_FIELDS & payload.model_fields_set:
+        raise CredentialsMovedToConnectionsError(
+            f"PATCH /clients/{client.id}: credencial no corpo; a origem vive em connections."
+        )
     return await service.update_client(
         client,
         name=payload.name,
         active=payload.active,
-        omie_app_key=payload.omie_app_key,
-        omie_app_secret=payload.omie_app_secret,
         viewer_user_id=UUID(user.id),
         # Tri-estado (86e34jd8m): só mexe na categoria se o campo veio no body.
         category_id=payload.category_id,

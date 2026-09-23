@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 **S0–S19 + Sprints 0–5 do agents-hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **63/63** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **68/68** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
 > **O que cada sprint do agents-hub entregou** (todas na `main`):
 >
@@ -192,7 +192,7 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**63** hoje — o arquivo é a fonte, confira com
+      (**68** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant E cross-org**: a bateria
       (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
@@ -271,16 +271,24 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    `[indecifrável]` + métrica `decrypt_failed` (não célula silenciosamente
    vazia sem sinal).
    **A fonte ÚNICA da lista são as constantes de AAD declaradas em
-   [apps/api/app/core/crypto_service.py](apps/api/app/core/crypto_service.py)** (11
+   [apps/api/app/core/crypto_service.py](apps/api/app/core/crypto_service.py)** (12
    hoje) — campo cifrado novo entra lá E aqui, na mesma entrega. Os pares
    (tabela, coluna) do AAD são **congelados**: renomear um invalida a decifragem de
    tudo que já foi gravado com ele. Campos:
-   - `clients.omie_app_key_encrypted`, `omie_app_secret_encrypted`
+   - `clients.omie_app_key_encrypted`, `omie_app_secret_encrypted` — **nuláveis
+     desde a Sprint 9**: é a credencial LEGADA, e quem nasce depois da S9 guarda
+     a dela em `client_connections`. Só `client_connections/legacy_fallback.py`
+     pode lê-las (gate em `tests/unit/test_legacy_credential_columns_gate.py`).
    - `reconciliation_files.filename_encrypted`
    - `reconciliation_file_entries.description_encrypted`, `user_note_encrypted`
    - `reconciliation_omie_entries.user_note_encrypted`
    - `reconciliation_anomalies.context_encrypted`, `resolution_note_encrypted`
    - `client_glossary_entries.code_encrypted`, `name_encrypted`, `description_encrypted`
+   - `client_connections.credentials_encrypted` (Sprint 9) — **um** par para o
+     JSON inteiro de credenciais do provedor, não um por chave: provedor com
+     outro shape (`{token}`, `{url,usuario,senha}`) cabe sem AAD novo, e AAD novo
+     é par congelado, não se cria por conveniência. CHECK no banco garante que
+     ciphertext e IV vivem e morrem juntos.
 2. **IV novo a cada operação** (12 bytes aleatórios). Nunca reutilize.
 3. **Valores monetários em claro** (campos `amount`, `balance`) — são números sem identificação, sem valor isolado.
 4. **Datas em claro** (`transaction_date`, `reference_month`) — necessárias para SQL ordering/filtering.
@@ -333,10 +341,46 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
      não muda; vale no request seguinte (a autoridade é a linha, §3.15). "Apagar e
      recriar" não é alternativa: `users.email` é UNIQUE global e `created_by` de
      clientes e conciliações é `ondelete=RESTRICT`.
+   - **Cliente é entidade PLENA sem origem (Sprint 9).** Ele deixou de ser "um par
+     de credenciais Omie com nome": as 4 colunas de credencial de `clients` são
+     NULÁVEIS e a credencial mora em `client_connections` (0..N por cliente,
+     `UNIQUE(client_id, provider_type, label)`). A **DEK só nasce na primeira
+     conexão** — cliente sem origem não provisiona chave. O estado da origem é
+     **derivado**, nunca persistido: `origin_status` ∈ {`sem_origem`, `ativa`,
+     `erro`}, uma função só (`derive_origin_status`), e LER esse estado não pede
+     permissão nenhuma.
+   - **Taxonomia de origem: três 409, fechados, com remédios diferentes** —
+     `SEM_CONEXAO` (conectar), `ORIGEM_COM_ERRO` (reconectar), `CAPACIDADE_AUSENTE`
+     (não há o que consertar). São 409 e não 5xx porque são estado esperado da
+     configuração do cliente, e é o que permite à tela dar a instrução certa em vez
+     de um toast genérico. Capacidade é derivada do ADAPTADOR, nunca persistida.
+   - **Todo client do Omie nasce no adaptador** (`build_omie_raw_client`, em
+     `integrations/providers/omie_adapter.py`): é o ÚNICO lugar que decide entre o
+     `OmieClient` real e o `MockOmieClient` (prefixo `FAKE_DEMO_OMIE_`). `OmieClient(...)`
+     construído à mão fora dele é defeito — foi assim que o "Testar conexão" da gaveta
+     saía para a rede com a credencial de demonstração enquanto `POST /connections`
+     com a mesma credencial nascia `ativa` (validação humana da S9, 23/09/2026).
+   - **Credencial no `PATCH /clients/{id}` é 422 `CREDENTIALS_MOVED`**, um `AppError`
+     próprio cuja `userMessage` aponta as rotas de conexão. Não é validador Pydantic:
+     `ValueError` de validador vira o **400 `VALIDATION_ERROR` genérico** do handler
+     global, que não ecoa mensagem nem campo de propósito (86e2rtxcm). Regra geral:
+     validação de forma é 400 genérico; resposta que precisa ORIENTAR o cliente da
+     API é exceção tipada com mensagem. E "recusa sem gravar" na criação de cliente é
+     um SAVEPOINT (`ClientRepository.savepoint()`) em volta de cliente + carteira +
+     conexão: escrita seguida de `raise` não é provada pela fixture `client_with_db`,
+     que não tem o `rollback()` da produção.
+   - **Precedência do fallback datado (janela de conversão da S9):** cliente COM
+     conexão usa a conexão e nem olha as colunas antigas; sem conexão, com o
+     fallback ligado e as colunas preenchidas, sintetiza uma conexão `omie` **em
+     memória** (nunca gravada — persistir seria uma segunda conversão, fora do
+     script e sem relatório). **Desligar a flag não é promoção**: com cliente
+     pendente, `effective_fallback_enabled` mantém o fallback LIGADO e alerta o
+     plantão (`AlertCode.LEGACY_FALLBACK`). A conversão é pelo script
+     `scripts/convert_credentials_to_connections.py` (idempotente, `--verify`).
 9. **Matriz de permissões (Sprint 5 + camada de organizações):** declarativa e
    ÚNICA em `PERMISSION_MATRIX`
    ([apps/api/app/core/authz.py](apps/api/app/core/authz.py)), consultada por
-   `has_permission`; 13 permissões x 5 papéis, transcrita célula a célula em
+   `has_permission`; 14 permissões x 5 papéis, transcrita célula a célula em
    `tests/unit/test_authz_matrix.py`, com um teste que trava **a plataforma em
    toda linha**. No front, o espelho é `apps/web/src/lib/authz.ts` — **um**
    helper, nunca `if (role === ...)` espalhado por componente — com a mesma
@@ -356,12 +400,19 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    | Gerir usuários do cliente       | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
    | Criar cliente                   | ✅             | ✅               | ✅ (vira responsável) | ❌             | ❌              |
    | Editar/excluir/encerrar cliente | ✅             | ✅               | ❌                    | ❌             | ❌              |
+   | Gerir conexões de origem        | ✅             | ✅               | ✅ (carteira)         | ❌             | ❌              |
    | Ver outro tenant                | ✅             | ✅ (própria org) | ✅ (carteira)         | ❌             | ❌              |
    | Gerir usuários da org           | ✅             | ✅ (própria org) | ❌                    | ❌             | ❌              |
    | Categorias de cliente (escrita) | ✅             | ✅ (própria org) | ❌                    | ❌             | ❌              |
    | Tipos de anomalia (escrita)     | ✅             | ❌               | ❌                    | ❌             | ❌              |
    | Gerir organizações              | ✅             | ❌               | ❌                    | ❌             | ❌              |
    | Teste de alerta                 | ✅             | ✅               | ❌                    | ❌             | ❌              |
+
+   **`manage_client_connections` (Sprint 9) inclui o `manager` de propósito**: ele
+   cria cliente, e sem a célula o gerente do escritório parceiro cadastraria a
+   carteira inteira sem conseguir conectar ninguém. Credencial de sistema contábil
+   é configuração do escritório — por isso `client_manager` e `client_operator`
+   ficam de fora, mesmo podendo rodar conciliação.
 
    "(carteira)" e "(própria org)" **não** são células: são `resolve_client_access`
    e os filtros de coleção. **Tipos de anomalia é a única linha só-plataforma
@@ -401,7 +452,9 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
       crypto-shredding** (§4.1: todo o conteúdo cifrado do tenant morre de uma
       vez); usuários do tenant **anonimizados + desativados** (as sessões retidas
       têm `created_by` RESTRICT — não podem ser apagados); glossário, cache de
-      contas, notificações e favoritos removidos; conciliações, valores, datas,
+      contas, notificações, favoritos e **conexões de origem** (S9) removidos — a
+      credencial cifrada delas morre junto com a DEK, pelo mesmo motivo do
+      glossário; conciliações, valores, datas,
       categoria e carteira FICAM, só-leitura.
     - **Encerrado é TERMINAL**: cliente que volta é cadastro novo. Toda escrita
       em cliente encerrado é 409 (`ClientClosedError`) — a trava de rota é
@@ -623,16 +676,19 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
 Rodadas pelo orquestrador multi-agente; o escopo de cada uma vive no **Doc do
 ClickUp**, não no repo. `make sprints` lista o estado.
 
-| Sprint | Foco                                       | Deixou no código                                                          |
-| ------ | ------------------------------------------ | ------------------------------------------------------------------------- |
-| **0**  | Estabilização                              | —                                                                         |
-| **1**  | Fatura de cartão + conta aplicação         | `account_type`, `DATE_DIVERGENCE_RANGE`                                   |
-| **2**  | Parsing sem perda silenciosa               | CSV grande, XLSX completo                                                 |
-| **3**  | Cripto por cliente, auditoria, alerta      | `clients.dek_wrapped`, `access_audit`, `core/kms.py`                      |
-| **4**  | Lista, gaveta, multi-arquivo, notificações | `reconciliation_files`, `usage_events`, `notifications`                   |
-| **5**  | Multi-tenancy e papéis de cliente          | `users.scope`/`client_id`, `core/authz.py`, `core/sensitive_endpoints.py` |
-| **6**  | Glossário e classificação por cliente      | `client_glossary_entries`, `clients.glossary_version`, `review_verdict`   |
-| **7**  | Lançamento de faturas no Omie              | `reconciliation_omie_postings`, `omie_posting/`, `OMIE_POSTING_ENABLED`   |
+| Sprint | Foco                                        | Deixou no código                                                          |
+| ------ | ------------------------------------------- | ------------------------------------------------------------------------- |
+| **0**  | Estabilização                               | —                                                                         |
+| **1**  | Fatura de cartão + conta aplicação          | `account_type`, `DATE_DIVERGENCE_RANGE`                                   |
+| **2**  | Parsing sem perda silenciosa                | CSV grande, XLSX completo                                                 |
+| **3**  | Cripto por cliente, auditoria, alerta       | `clients.dek_wrapped`, `access_audit`, `core/kms.py`                      |
+| **4**  | Lista, gaveta, multi-arquivo, notificações  | `reconciliation_files`, `usage_events`, `notifications`                   |
+| **5**  | Multi-tenancy e papéis de cliente           | `users.scope`/`client_id`, `core/authz.py`, `core/sensitive_endpoints.py` |
+| **6**  | Glossário e classificação por cliente       | `client_glossary_entries`, `clients.glossary_version`, `review_verdict`   |
+| **7**  | Lançamento de faturas no Omie               | `reconciliation_omie_postings`, `omie_posting/`, `OMIE_POSTING_ENABLED`   |
+| **9**  | Cliente sem sistema e conexões plugáveis ⏳ | `client_connections`, `integrations/providers/`, `legacy_fallback.py`     |
+
+⏳ **A Sprint 9 é a única ainda FORA da `main`**: está na branch da sprint, aguardando o PR.
 
 **A camada de organizações NÃO foi uma sprint do hub.** Veio do épico ClickUp
 `86e36ec0q` (16–18/09/2026, 8 tasks em três ondas, plano em
@@ -750,6 +806,10 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.40 — 23/09/2026. **A validação humana da Sprint 9 (task 86e3dcm2y) foi a primeira rodada REAL da integração e do cenário pela tela, e achou o que o sandbox dos agents não podia achar.** Nove testes de integração da própria sprint reprovavam e os três jobs de a11y caíam em dois cenários e2e; o `develop → main` (#193) nasceu vermelho. Um defeito de produto: o "Testar conexão" da gaveta de origem usava a rota legada `test-connection`, que construía `OmieClient(...)` direto e saía para a rede com a credencial `FAKE_DEMO_OMIE_`, travando o cadastro em dev, no ambiente de demonstração e no e2e — agora passa por `build*omie_raw_client`, e a §4.8 ganhou a regra "todo client nasce no adaptador". Um descompasso de convenção: o PRD pedia "422 apontando a rota de conexões" e o handler global responde 400 genérico sem mensagem de propósito; nasceu `CredentialsMovedToConnectionsError`(422,`CREDENTIALS_MOVED`) na rota, o validador Pydantic saiu do schema, e a §4.8 fixa a regra geral (forma é 400 genérico; orientação é exceção tipada). Um de durabilidade: "recusa sem gravar" na criação com credencial inválida agora é SAVEPOINT em volta de cliente + carteira + conexão. O resto era teste: dois casos afirmavam 422 onde a casa responde 400, um lia envelope `data`que o PATCH não devolve, um teste antigo criava cliente com credencial`"k"/"s"`e passou a bater no Omie REAL depois que o cadastro verifica no provedor (prefixo mock), e no e2e`getByText('Com erro')`casava com dois elementos e o mock da lista ignorava o`originState`. Ensaio da conversão de credenciais no banco de dev com linha bare: converte, `--verify` PASS, idempotente.*
+
+_Versão 1.39 — 23/09/2026. **O cliente deixou de ser "um par de credenciais Omie com nome" (Sprint 9 do hub, ainda na branch da sprint).** Ele é entidade plena **sem origem**: as 4 colunas de credencial de `clients` viraram nuláveis e a credencial mora em `client_connections` (0..N por cliente, `UNIQUE(client_id, provider_type, label)`), com a **DEK nascendo só na primeira conexão** — cliente sem origem não provisiona chave. §4.1 ganhou o **12º** par de AAD (`client_connections.credentials_encrypted`: **um** par para o JSON inteiro, para provedor de outro shape caber sem AAD novo); §4.8 ganhou o modelo de origem, a **taxonomia dos três 409** (`SEM_CONEXAO` conectar · `ORIGEM_COM_ERRO` reconectar · `CAPACIDADE_AUSENTE` não há o que consertar — são 409 porque são estado esperado da configuração, não falha) e a **precedência do fallback datado** (conexão vence coluna antiga; "desligar a flag não é promoção"); §4.9 virou **14 x 5** com `manage_client_connections`, e o **manager entra de propósito** — ele cria cliente, e sem a célula o gerente do escritório parceiro cadastraria a carteira sem conseguir conectar ninguém; §4.12 registra que encerrar e excluir levam as conexões na mesma transação. A lista canônica foi de 63 para **68** (as 5 rotas de conexão, na bateria dos três atacantes), `PENDING_ENDPOINTS` continua vazio. **Duas lições da revisão que valem fora da sprint:** escrita seguida de `raise` NÃO é provada por teste de integração (a fixture `client_with_db` não tem o `except: rollback()` da produção — durabilidade exige `commit()` explícito antes do `raise`, ou sessão própria); e fallback datado tem de cobrir o estado **derivado** que a UI usa para liberar ação, não só o caminho de execução — quem só DESCREVE não quebra com exceção, quebra com tela vazia, que passa por comportamento esperado._
 
 _Versão 1.38 — 22/09/2026. **A lista de administradores da plataforma saiu do rodapé de Organizações e virou aba própria em Usuários (task 86e3chrxw).** A seção da v1.36 estava certa e ficou ruim de ler em dev: a área da tabela é `flex-1`, então a seção era empurrada para o rodapé com um vão enorme acima, e a lista rolava numa faixa de 176px mostrando duas ou três linhas por vez. E, conceitualmente, é uma lista de PESSOAS — pessoas moram em Usuários. Agora Configurações → Usuários tem duas abas SÓ para a plataforma: "Staff das organizações" (a tela de sempre) e "Administradores da plataforma" (tabela só-leitura com nome, e-mail, status e data; sem coluna de ações e sem "Novo Usuário", porque promover e despromover é pelo script e `PATCH /users/{id}` de linha de plataforma é 404), com a aba na URL (`?tab=plataforma`). O admin de organização não vê faixa de abas, e o deep link `?tab=plataforma` é ignorado em silêncio — a página em si ele pode ver, então não é AccessDenied; só a plataforma pode saber quem é plataforma. Backend intocado: `GET /organizations/platform-admins` fica onde está e a lista canônica segue 63/63. Duas coisas de mecânica: a página de Usuários virou wrapper server + client component (`usuarios/page.tsx` + `users-page.tsx`, como `organizacoes/`), porque `useSearchParams` exige `<Suspense>`; e o `scrollRegionLabel` da tabela é "Lista de administradores da plataforma", diferente do rótulo da aba, porque `getByRole` do Playwright casa por substring e o nome igual acertaria aba e região. A tela de Organizações voltou a ser só a tabela; o ajuste responsivo da v1.36 (`md:h-full`) ficou, porque é correto por si._
 

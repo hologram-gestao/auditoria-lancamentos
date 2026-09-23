@@ -436,6 +436,59 @@ const PLATFORM_ADMINS = [
   },
 ];
 
+/**
+ * A origem do cliente (S9 / R3). `capabilities` é DADO — é por ela que a tela
+ * decide se oferece "Lançar no Omie" em vez de descobrir pelo 409.
+ */
+const OMIE_CONNECTION = {
+  id: '55555555-5555-4555-8555-555555555555',
+  provider_type: 'omie',
+  label: 'Omie',
+  status: 'ativa' as 'ativa' | 'inativa' | 'erro',
+  last_checked_at: '2026-09-22T12:00:00Z',
+  accounts_synced_at: '2026-09-22T12:00:00Z',
+  capabilities: ['verificar_credencial', 'listar_contas', 'listar_lancamentos', 'escrever'],
+};
+
+/**
+ * Estado de ORIGEM do cenário. Fica fora do `CLIENT_DETAIL` pelo mesmo motivo
+ * de `sessionAccountType`: o default ("ativa") mantém as telas anteriores
+ * medindo o que mediam, e só o bloco de origem o troca.
+ */
+let originState: 'ativa' | 'sem_origem' | 'erro' = 'ativa';
+
+/** O detalhe do cliente ajustado ao `originState` do cenário. */
+function clientDetailComOrigem(): Record<string, unknown> {
+  const base = tableListsOverflow
+    ? { ...CLIENT_DETAIL, accounts: MANY_ACCOUNTS }
+    : { ...CLIENT_DETAIL };
+  if (originState === 'ativa') return { ...base, origin_status: 'ativa' };
+  if (originState === 'sem_origem') {
+    // Sem origem o servidor não fala com o provedor: zero contas, sem carimbo.
+    return {
+      ...base,
+      accounts: [],
+      accounts_synced_at: null,
+      origin_status: 'sem_origem',
+      connections: [],
+    };
+  }
+  return {
+    ...base,
+    accounts: [],
+    accounts_synced_at: null,
+    origin_status: 'erro',
+    connections: [{ ...OMIE_CONNECTION, status: 'erro' }],
+  };
+}
+
+/** As conexões que `GET /clients/{id}/connections` devolve no cenário. */
+function conexoesDoCenario(): Record<string, unknown>[] {
+  if (originState === 'sem_origem') return [];
+  if (originState === 'erro') return [{ ...OMIE_CONNECTION, status: 'erro' }];
+  return [OMIE_CONNECTION];
+}
+
 const CLIENT_DETAIL = {
   id: CLIENT_ID,
   // Fixture fictícia de propósito: nome de cliente real não entra em arquivo
@@ -459,6 +512,11 @@ const CLIENT_DETAIL = {
   category: CATEGORY_FINTECH,
   accounts: ACCOUNTS,
   accounts_synced_at: '2026-07-20T12:00:00Z',
+  // S9 (R4): estado da ORIGEM, derivado das conexões no servidor. O default é
+  // "tem origem ativa" para que os cenários anteriores continuem medindo o que
+  // mediam; os três estados são exercitados no bloco de origem, adiante.
+  origin_status: 'ativa',
+  connections: [OMIE_CONNECTION],
 };
 
 /**
@@ -1068,9 +1126,11 @@ async function fulfillApi(route: Route): Promise<void> {
     // devolvê-lo aqui faria a tela dele parecer certa com dado que ela nunca
     // receberia.
     const ehPlataforma = sessionUser['scope'] === 'platform';
+    // `origin_status` acompanha o `originState` do cenário: o `CLIENT_DETAIL`
+    // fixo diz `ativa`, e com ele o selo "Sem origem" da lista nunca apareceria.
     const alcance = ehPlataforma
-      ? [{ ...CLIENT_DETAIL, is_favorite: favorited }, OTHER_ORG_CLIENT]
-      : [{ ...CLIENT_DETAIL, is_favorite: favorited }];
+      ? [{ ...CLIENT_DETAIL, is_favorite: favorited, origin_status: originState }, OTHER_ORG_CLIENT]
+      : [{ ...CLIENT_DETAIL, is_favorite: favorited, origin_status: originState }];
     const org = url.searchParams.get('organizationId');
     const data = org === null ? alcance : alcance.filter((c) => c.organization.id === org);
     return json({
@@ -1099,10 +1159,16 @@ async function fulfillApi(route: Route): Promise<void> {
   if (path === `/api/v1/clients/${CLIENT_ID}/close` && route.request().method() === 'POST') {
     return route.fulfill({ status: 204 });
   }
+  // S9 (R3/R5): as origens do cliente. Rota literal ANTES do detalhe, que é
+  // `startsWith`-compatível com este path.
+  if (path === `/api/v1/clients/${CLIENT_ID}/connections`) {
+    return json({ connections: conexoesDoCenario() });
+  }
   if (path === `/api/v1/clients/${CLIENT_ID}`) {
     // As contas bancárias da tela R6 vêm DAQUI (paginação client-side sobre
-    // `detail.accounts`), não de uma rota própria.
-    return json(tableListsOverflow ? { ...CLIENT_DETAIL, accounts: MANY_ACCOUNTS } : CLIENT_DETAIL);
+    // `detail.accounts`), não de uma rota própria. O `origin_status` também:
+    // desde a S9 ele decide o que a tela oferece (R4/R7).
+    return json(clientDetailComOrigem());
   }
   // O tenant alheio RESPONDE 200 de propósito: se o front pedir e renderizar,
   // o vazamento aparece no teste. Um 403 aqui esconderia o defeito atrás do
@@ -1376,6 +1442,8 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   patchAnomalyFails = false;
   listOverflows = false;
   tableListsOverflow = false;
+  // S9: origem ativa é o estado de partida — só o bloco de origem a troca.
+  originState = 'ativa';
   await page.route('**/api/v1/**', fulfillApi);
   // O `src/middleware.ts` decide navegação só pela PRESENÇA do cookie
   // `access_token` (a validação real é do backend). Um valor qualquer basta
@@ -3269,3 +3337,127 @@ test('Login (defeito 86e2ggm7r: senha sem nome acessível)', async ({ page, cont
   await expect(page.getByLabel('Senha', { exact: true })).toHaveAttribute('type', 'password');
   await analyze(page, 'login');
 });
+
+/**
+ * Sprint 9 — ausência ou falha de ORIGEM é ESTADO, não erro (R4 · R5 · R7).
+ *
+ * Bloco próprio porque troca `originState`, que é estado de módulo: misturá-lo
+ * com os cenários de papel faria um vazar no outro pela ordem de execução.
+ */
+for (const vp of VIEWPORTS) {
+  const slug = vp.label.replace(/\s+/g, '-');
+  test.describe(`Origem do cliente — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('painel: os TRÊS estados de origem, com copy própria em cada um', async ({ page }) => {
+      // 1) SEM ORIGEM — convida a conectar.
+      originState = 'sem_origem';
+      await page.goto(`/clientes/${CLIENT_ID}/painel`);
+      const bloco = page.locator('[data-origin-status]');
+      await expect(bloco).toHaveAttribute('data-origin-status', 'sem_origem');
+      await expect(bloco).toContainText('Sem origem conectada');
+      await expect(page.getByRole('heading', { name: 'Origens de dado' })).toBeVisible();
+      await shot(page, `painel-sem-origem-${slug}`);
+      await analyze(page, `painel sem origem conectada (${vp.label})`);
+
+      // 2) ORIGEM EM ERRO — diz "com erro" e manda RECONECTAR. Mandar "conectar"
+      // aqui faria o usuário criar uma conexão que já existe (o defeito do R7).
+      originState = 'erro';
+      await page.goto(`/clientes/${CLIENT_ID}/painel`);
+      await expect(bloco).toHaveAttribute('data-origin-status', 'erro');
+      await expect(bloco).toContainText('Origem com erro');
+      await expect(bloco).not.toContainText('Sem origem conectada');
+      await expect(bloco.getByRole('button', { name: 'Reconectar' })).toBeVisible();
+      // `exact`: sem ele casaria também com o parágrafo "Origem com erro" (strict mode).
+      await expect(page.getByText('Com erro', { exact: true })).toBeVisible();
+      await shot(page, `painel-origem-com-erro-${slug}`);
+      await analyze(page, `painel com origem em erro (${vp.label})`);
+
+      // 3) ORIGEM ATIVA — nada a consertar, nenhuma ação corretiva oferecida.
+      originState = 'ativa';
+      await page.goto(`/clientes/${CLIENT_ID}/painel`);
+      await expect(bloco).toHaveAttribute('data-origin-status', 'ativa');
+      await expect(bloco).toContainText('Origem ativa');
+      await expect(page.getByRole('button', { name: 'Reconectar' })).toHaveCount(0);
+      await analyze(page, `painel com origem ativa (${vp.label})`);
+    });
+
+    test('gaveta de conexão: Cancelar à esquerda e nada cortado na borda', async ({ page }) => {
+      originState = 'sem_origem';
+      await page.goto(`/clientes/${CLIENT_ID}/painel`);
+
+      await page.getByRole('button', { name: 'Conectar origem' }).first().click();
+      const gaveta = page.getByRole('dialog').filter({ hasText: 'Conectar origem' });
+      await expect(gaveta).toBeVisible();
+      // A gaveta do Radix entra DESLIZANDO: medir antes de a animação terminar
+      // devolve coordenada fora da tela que não é defeito nenhum.
+      await aguardarAnimacao(gaveta);
+
+      const cancelar = await gaveta.getByRole('button', { name: 'Cancelar' }).boundingBox();
+      const primaria = await gaveta.getByRole('button', { name: 'Salvar origem' }).boundingBox();
+      expect(cancelar?.x ?? 0, 'Cancelar precisa ficar à esquerda da ação primária').toBeLessThan(
+        primaria?.x ?? 0,
+      );
+      expect(
+        (primaria?.x ?? 0) + (primaria?.width ?? 0),
+        'ação primária da gaveta de conexão cortada pela borda da viewport',
+      ).toBeLessThanOrEqual(vp.size.width);
+      expect(
+        (cancelar?.x ?? 0) + (cancelar?.width ?? 0),
+        'Cancelar da gaveta de conexão cortado pela borda da viewport',
+      ).toBeLessThanOrEqual(vp.size.width);
+
+      // O gate do teste continua valendo: Salvar nasce bloqueado.
+      await expect(gaveta.getByRole('button', { name: 'Salvar origem' })).toBeDisabled();
+      await shot(page, `conectar-origem-gaveta-${slug}`);
+      await analyze(page, `gaveta de conectar origem (${vp.label})`);
+    });
+
+    test('telas dependentes de origem mostram ESTADO, não lista vazia ambígua', async ({
+      page,
+    }) => {
+      originState = 'sem_origem';
+
+      // Conciliações: o histórico continua, mas "Criar conciliação" some — o
+      // servidor responderia 409 `SEM_CONEXAO`.
+      await page.goto(`/clientes/${CLIENT_ID}`);
+      const estadoLista = page.locator('[data-origin-state="SEM_CONEXAO"]');
+      await expect(estadoLista).toBeVisible();
+      await expect(estadoLista).toContainText('Este cliente não tem origem conectada');
+      await expect(page.getByRole('button', { name: 'Criar conciliação' })).toHaveCount(0);
+      await shot(page, `conciliacoes-sem-origem-${slug}`);
+      await analyze(page, `lista de conciliações sem origem (${vp.label})`);
+
+      // Contas: nem a tabela vazia ("o Omie não tem contas?") nem o botão que
+      // daria 409 — o estado explica e leva ao painel.
+      await page.goto(`/clientes/${CLIENT_ID}/contas`);
+      await expect(page.locator('[data-origin-state="SEM_CONEXAO"]')).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Extrair contas do Omie' })).toHaveCount(0);
+      await shot(page, `contas-sem-origem-${slug}`);
+      await analyze(page, `contas bancárias sem origem (${vp.label})`);
+    });
+
+    test('operador do cliente vê o estado da origem e NENHUMA ação (R5)', async ({ page }) => {
+      sessionUser = CLIENT_OPERATOR_USER;
+      originState = 'sem_origem';
+      await page.goto(`/clientes/${CLIENT_ID}/painel`);
+
+      // Ele precisa SABER por que a conciliação dele não roda...
+      await expect(page.locator('[data-origin-status="sem_origem"]')).toContainText(
+        'Sem origem conectada',
+      );
+      // ...e não pode receber um botão que o servidor nega com 403.
+      await expect(page.getByRole('button', { name: /Conectar origem/ })).toHaveCount(0);
+      await expect(page.getByRole('columnheader', { name: 'Ações' })).toHaveCount(0);
+      await analyze(page, `painel sem origem para o operador (${vp.label})`);
+    });
+
+    test('lista de clientes marca quem está sem origem', async ({ page }) => {
+      originState = 'sem_origem';
+      await page.goto('/clientes');
+      const linha = page.getByRole('row', { name: /Cliente Exemplo Ltda/ });
+      await expect(linha.getByText('Sem origem')).toBeVisible();
+      await analyze(page, `lista de clientes com selo de sem origem (${vp.label})`);
+    });
+  });
+}
