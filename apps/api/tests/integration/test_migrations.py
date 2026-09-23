@@ -1016,3 +1016,301 @@ class TestOrganizacoesRoundTrip:
         assert _scalar(url, "SELECT version_num FROM alembic_version") == PRE_ORGANIZATIONS_REV
         assert not _table_exists(url, "organizations")
         assert _columns(url, "clients", "organization_id") == 0
+
+
+# ----------------------------------------------------------------------
+# Sprint 9 (BACK 09.1) — cliente sem credencial + origens tipadas
+# ----------------------------------------------------------------------
+
+PRE_CONNECTIONS_REV = "3e8f1a6c9d24"
+CONNECTIONS_REV = "a7f2c1d93e84"
+
+_INSERT_CLIENT_WITHOUT_CREDENTIAL = (
+    "INSERT INTO clients (id, name, active, created_by, created_at, updated_at) "
+    "VALUES (:cid, :name, true, :uid, now(), now())"
+)
+_INSERT_CONNECTION = (
+    "INSERT INTO client_connections (id, client_id, provider_type, label, created_at, updated_at) "
+    "VALUES (:id, :cid, :provider, :label, now(), now())"
+)
+_INSERT_CONNECTION_WITH_STATUS = (
+    "INSERT INTO client_connections "
+    "(id, client_id, provider_type, label, status, created_at, updated_at) "
+    "VALUES (gen_random_uuid(), :cid, :provider, :label, :status, now(), now())"
+)
+
+_NULLABLE_CREDENTIAL_COLUMNS = (
+    "SELECT count(*) FROM information_schema.columns WHERE table_name = 'clients' "
+    "AND column_name IN ('omie_app_key_encrypted', 'omie_app_key_iv', "
+    "'omie_app_secret_encrypted', 'omie_app_secret_iv') AND is_nullable = :nullable"
+)
+
+
+def _seed_admin_row(url: str) -> str:
+    user_id = str(uuid4())
+    _execute(
+        url,
+        "INSERT INTO users (id, name, email, password_hash, role, active, scope, "
+        "created_at, updated_at) VALUES (:uid, 'Seed', :email, 'x', 'admin', true, "
+        "'system', now(), now())",
+        uid=user_id,
+        email=f"seed-conn-{user_id}@hologram.com.br",
+    )
+    return user_id
+
+
+def _seed_client_without_credential(url: str, *, closed: bool = False) -> str:
+    """Cliente na forma NOVA: sem nenhuma das 4 colunas de credencial."""
+    client_id = str(uuid4())
+    _execute(
+        url,
+        _INSERT_CLIENT_WITHOUT_CREDENTIAL,
+        cid=client_id,
+        name=f"Sem origem {client_id[:8]}",
+        uid=_seed_admin_row(url),
+    )
+    if closed:
+        _execute(url, "UPDATE clients SET closed_at = now() WHERE id = :cid", cid=client_id)
+    return client_id
+
+
+def _seed_closed_client_with_empty_credentials(url: str) -> str:
+    """Cliente ENCERRADO como `close_client` o grava hoje: as 4 colunas com `''`."""
+    client_id = str(uuid4())
+    _execute(
+        url,
+        "INSERT INTO clients (id, name, omie_app_key_encrypted, omie_app_key_iv, "
+        "omie_app_secret_encrypted, omie_app_secret_iv, active, closed_at, created_by, "
+        "created_at, updated_at) VALUES (:cid, 'Encerrado', '', '', '', '', false, now(), "
+        ":uid, now(), now())",
+        cid=client_id,
+        uid=_seed_admin_row(url),
+    )
+    return client_id
+
+
+class TestConexoesDeOrigemRoundTrip:
+    """A fundação da Sprint 9 sobe, desce e sobe sem perder cliente nenhum."""
+
+    def test_upgrade_afrouxa_credencial_e_cria_a_tabela(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+
+        # As 4 colunas aceitam NULL — é o R1 inteiro.
+        assert _scalar(url, _NULLABLE_CREDENTIAL_COLUMNS, nullable="YES") == 4
+        assert _table_exists(url, "client_connections")
+        assert (
+            _columns(
+                url,
+                "client_connections",
+                "client_id",
+                "provider_type",
+                "label",
+                "status",
+                "last_checked_at",
+                "accounts_synced_at",
+                "credentials_encrypted",
+                "credentials_iv",
+            )
+            == 8
+        )
+        # As garantias existem NO BANCO, não só na aplicação.
+        assert (
+            _scalar(
+                url,
+                "SELECT count(*) FROM pg_constraint WHERE contype = 'u' "
+                "AND conname = 'uq_client_connections_client_provider_label'",
+            )
+            == 1
+        )
+        assert (
+            _scalar(
+                url,
+                "SELECT count(*) FROM pg_constraint WHERE contype = 'c' "
+                "AND conname = 'ck_client_connections_status'",
+            )
+            == 1
+        )
+        assert _columns(url, "omie_accounts_cache", "connection_id") == 1
+
+    def test_cliente_sem_credencial_e_aceito(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+
+        client_id = _seed_client_without_credential(url)
+
+        assert (
+            _scalar(
+                url,
+                "SELECT omie_app_key_encrypted IS NULL FROM clients WHERE id = :cid",
+                cid=client_id,
+            )
+            is True
+        )
+
+    def test_banco_recusa_tipo_e_rotulo_repetidos_e_aceita_rotulo_novo(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        """Contra o schema das MIGRATIONS (não o do `create_all`)."""
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        first_id = str(uuid4())
+
+        _execute(url, _INSERT_CONNECTION, id=first_id, cid=client_id, provider="omie", label="Omie")
+        # Mesmo tipo, MESMO rótulo: recusado.
+        with pytest.raises(sa.exc.IntegrityError):
+            _execute(
+                url,
+                _INSERT_CONNECTION,
+                id=str(uuid4()),
+                cid=client_id,
+                provider="omie",
+                label="Omie",
+            )
+        # Mesmo tipo, OUTRO rótulo: aceito (duas contas no mesmo ERP são legítimas).
+        _execute(
+            url,
+            _INSERT_CONNECTION,
+            id=str(uuid4()),
+            cid=client_id,
+            provider="omie",
+            label="Omie filial",
+        )
+        assert _scalar(url, "SELECT count(*) FROM client_connections") == 2
+
+        # Remoção é exclusão DEFINITIVA — e reconectar o mesmo par volta a funcionar.
+        _execute(url, "DELETE FROM client_connections WHERE id = :id", id=first_id)
+        _execute(
+            url, _INSERT_CONNECTION, id=str(uuid4()), cid=client_id, provider="omie", label="Omie"
+        )
+        assert _scalar(url, "SELECT count(*) FROM client_connections") == 2
+
+    def test_status_fora_do_enum_e_recusado_pelo_check_do_banco(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+
+        for status in ("ativa", "inativa", "erro"):
+            _execute(
+                url,
+                _INSERT_CONNECTION_WITH_STATUS,
+                cid=client_id,
+                provider="omie",
+                label=f"Omie {status}",
+                status=status,
+            )
+        with pytest.raises(sa.exc.IntegrityError):
+            _execute(
+                url,
+                _INSERT_CONNECTION_WITH_STATUS,
+                cid=client_id,
+                provider="omie",
+                label="Omie pendente",
+                status="pendente",
+            )
+        assert _scalar(url, "SELECT count(*) FROM client_connections") == 3
+
+    def test_excluir_cliente_leva_a_conexao_junto(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        """FK com `ondelete` DECLARADO: a conexão não trava a remoção do cliente."""
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        _execute(
+            url, _INSERT_CONNECTION, id=str(uuid4()), cid=client_id, provider="omie", label="Omie"
+        )
+
+        _execute(url, "DELETE FROM clients WHERE id = :cid", cid=client_id)
+        assert _scalar(url, "SELECT count(*) FROM client_connections") == 0
+
+    def test_upgrade_downgrade_upgrade_preserva_os_clientes(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, PRE_CONNECTIONS_REV)
+        legacy_client = _seed_client_row(url)
+
+        command.upgrade(alembic_cfg, "head")
+        _execute(
+            url,
+            _INSERT_CONNECTION,
+            id=str(uuid4()),
+            cid=legacy_client,
+            provider="omie",
+            label="Omie",
+        )
+
+        command.downgrade(alembic_cfg, PRE_CONNECTIONS_REV)
+        assert not _table_exists(url, "client_connections")
+        assert _columns(url, "omie_accounts_cache", "connection_id") == 0
+        # O cliente legado continua lá, com a credencial intacta e NOT NULL de volta.
+        assert _scalar(url, "SELECT count(*) FROM clients") == 1
+        assert _scalar(url, _NULLABLE_CREDENTIAL_COLUMNS, nullable="NO") == 4
+
+        command.upgrade(alembic_cfg, "head")
+        assert _scalar(url, "SELECT count(*) FROM clients") == 1
+        assert _table_exists(url, "client_connections")
+
+    def test_downgrade_aborta_com_mensagem_acionavel_se_houver_cliente_aberto_sem_credencial(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        """Inventar credencial para quem opera sem origem é decisão de DADO."""
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        _seed_client_without_credential(url)
+
+        with pytest.raises(sa.exc.DBAPIError) as exc:
+            command.downgrade(alembic_cfg, PRE_CONNECTIONS_REV)
+
+        assert "Downgrade bloqueado" in str(exc.value)
+        # Nada foi apagado e o schema novo continua de pé.
+        assert _scalar(url, "SELECT count(*) FROM clients") == 1
+        assert _table_exists(url, "client_connections")
+        assert _scalar(url, "SELECT version_num FROM alembic_version") == CONNECTIONS_REV
+
+    def test_downgrade_nao_aborta_por_cliente_encerrado(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        """Encerrado já grava `''` hoje (`service.py:570-573`) — incluí-lo no predicado
+        tornaria o rollback impossível em qualquer base real. Encerrado com NULL (forma
+        nova) é convertido para o MESMO `''` que o encerramento escreve."""
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        empty_id = _seed_closed_client_with_empty_credentials(url)
+        null_id = _seed_client_without_credential(url, closed=True)
+
+        command.downgrade(alembic_cfg, PRE_CONNECTIONS_REV)
+
+        assert _scalar(url, "SELECT count(*) FROM clients") == 2
+        assert (
+            _scalar(url, "SELECT omie_app_key_encrypted FROM clients WHERE id = :cid", cid=empty_id)
+            == ""
+        )
+        assert (
+            _scalar(url, "SELECT omie_app_key_encrypted FROM clients WHERE id = :cid", cid=null_id)
+            == ""
+        )
+
+    def test_ciclo_roda_duas_vezes_sem_mudar_o_estado(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        """Convergente: a normalização do cliente encerrado não é incremental."""
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        _seed_client_row(url)
+        _seed_client_without_credential(url, closed=True)
+
+        for _ in range(2):
+            command.downgrade(alembic_cfg, PRE_CONNECTIONS_REV)
+            command.upgrade(alembic_cfg, "head")
+
+        assert _scalar(url, "SELECT count(*) FROM clients") == 2
+        assert _scalar(url, "SELECT count(*) FROM client_connections") == 0

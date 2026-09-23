@@ -53,14 +53,14 @@ beforeEach(() => {
 
 describe('Anomalias — estado vazio', () => {
   it('sem filtro, afirma sobre a conciliação', () => {
-    render(<AnomaliesTab sessionId="s1" isCard={false} />);
+    render(<AnomaliesTab sessionId="s1" isCard={false} canPostToOmie />);
     expect(screen.getByText('Nenhuma anomalia registrada.')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Limpar filtros' })).not.toBeInTheDocument();
   });
 
   it('com filtro de severidade, cita o filtro e oferece a saída', async () => {
     const ui = userEvent.setup();
-    render(<AnomaliesTab sessionId="s1" isCard={false} />);
+    render(<AnomaliesTab sessionId="s1" isCard={false} canPostToOmie />);
 
     await ui.click(screen.getByRole('combobox', { name: 'Severidade' }));
     await ui.click(screen.getByRole('option', { name: 'Críticas' }));

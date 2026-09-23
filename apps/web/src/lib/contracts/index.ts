@@ -123,6 +123,37 @@ export type ManagerSummary = Schemas['ManagerSummary'];
 export type ClientCategorySummary = Schemas['ClientCategorySummary'];
 
 // ---------------------------------------------------------------------------
+// Origens de dado do cliente — `client_connections` (Sprint 9 / R1 · R3 · R5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Uma origem conectada ao cliente. **Não tem campo de credencial** — nem
+ * mascarado: o backend não o declara no schema, então nem o `tsc` deixa alguém
+ * tentar lê-lo aqui.
+ */
+export type ClientConnection = Schemas['ClientConnectionResponse'];
+/** `{ data: { connections } }` — envelope de UMA chave (o `client.ts` desembrulha). */
+export type ClientConnectionListPayload = Schemas['ClientConnectionListPayload'];
+/**
+ * `ativa` | `inativa` | `erro` — enum FECHADO. Só `ativa` opera: `inativa` foi
+ * desligada de propósito e `erro` teve a credencial recusada.
+ */
+export type ConnectionStatus = Schemas['ConnectionStatus'];
+/**
+ * O que uma origem sabe fazer. É **dado consultável**, não exceção: a tela
+ * pergunta antes de oferecer a ação, em vez de descobrir pelo 409.
+ */
+export type ProviderCapability = Schemas['Capability'];
+/**
+ * Estado da ORIGEM do cliente, derivado das conexões (nunca coluna):
+ * `sem_origem` (conectar) · `ativa` (nada a fazer) · `erro` (reconectar).
+ */
+export type OriginStatus = Schemas['OriginStatus'];
+export type CreateConnectionRequest = Schemas['CreateConnectionRequest'];
+export type UpdateConnectionRequest = Schemas['UpdateConnectionRequest'];
+export type ConnectionDeletedPayload = Schemas['ConnectionDeletedPayload'];
+
+// ---------------------------------------------------------------------------
 // Carteira compartilhada — quem tem ACESSO ao cliente (86e390m4c)
 // ---------------------------------------------------------------------------
 

@@ -9,7 +9,7 @@ saber `omie_conta_id` e o período, e tudo isso já está na sessão, exigimos
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -44,16 +44,23 @@ class OmieLancamentoService:
         *,
         session_id: UUID,
         omie_ids: list[int],
-        omie_client_factory: Callable[[], OmieClient],
+        omie_client_factory: Callable[[], Awaitable[OmieClient]],
     ) -> list[OmieLancamentoItem]:
         """Resolve IDs solicitados — L1 → L2 → re-fetch via extrato.
 
         Args:
             session_id: para resolver `client_id`, `omie_conta_id`, período.
             omie_ids: lista deduplicada de IDs (caller já saneou).
-            omie_client_factory: callable() → OmieClient. Permite que o
-                provider injete um client já construído sem precisar que o
-                serviço conheça a Settings/Client model.
+            omie_client_factory: constrói o `OmieClient` **só no MISS**, e o
+                `aclose()` logo abaixo é do que ela devolveu. É `async` (o
+                MESMO contrato de `OmieCategoriasService.list_categorias`, e
+                não por acaso: a divergência de assinatura entre os dois
+                serviços foi o que abriu espaço para um caller construir o
+                client por fora e vazá-lo em cache hit). Resolver a origem aqui
+                dentro tem três consequências que o hit precisa: nenhum
+                `httpx.AsyncClient` aberto sem dono, nenhum unwrap de DEK no
+                Cloud KMS, e nenhum 409 de origem numa request que o cache
+                resolveria sozinho.
 
         Returns:
             Lista de items na ordem em que foram solicitados; IDs não
@@ -84,7 +91,7 @@ class OmieLancamentoService:
             expanded_start, expanded_end = self._repo.expand_period(
                 period_start, period_end, DATE_DIVERGENCE_RANGE
             )
-            omie_client = omie_client_factory()
+            omie_client = await omie_client_factory()
             try:
                 populated = await self._cache.populate_from_extrato(
                     client_id=sess.client_id,

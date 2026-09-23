@@ -88,6 +88,8 @@ const client: Client = {
   is_favorite: false,
   category: null,
   manager_count: 2,
+  // S9: campo obrigatório do contrato; irrelevante para esta suíte.
+  origin_status: 'ativa',
 };
 
 function user(id: string, name: string, over: Partial<User> = {}): User {

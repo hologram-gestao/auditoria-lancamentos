@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.core import crypto_service
 from app.core.config import Settings
 from app.core.crypto_service import (
     AAD_CLIENT_APP_KEY,
@@ -20,6 +21,45 @@ from app.core.crypto_service import (
     provision_client_cipher,
 )
 from app.core.kms import get_kms_client
+
+#: Inventário CONGELADO dos pares `(tabela, coluna)` que compõem o AAD — a
+#: lista canônica do CLAUDE.md §4.1, transcrita. Renomear tabela ou coluna de um
+#: campo cifrado invalida a decifragem de TUDO que já foi gravado com ele, então
+#: a lista não se corrige "sem querer": campo novo entra aqui, no
+#: `crypto_service` e na §4.1 na MESMA entrega.
+EXPECTED_AAD_PAIRS = {
+    "AAD_CLIENT_APP_KEY": ("clients", "omie_app_key_encrypted"),
+    "AAD_CLIENT_APP_SECRET": ("clients", "omie_app_secret_encrypted"),
+    "AAD_FILE_NAME": ("reconciliation_files", "filename_encrypted"),
+    "AAD_FILE_ENTRY_DESCRIPTION": ("reconciliation_file_entries", "description_encrypted"),
+    "AAD_FILE_ENTRY_USER_NOTE": ("reconciliation_file_entries", "user_note_encrypted"),
+    "AAD_OMIE_ENTRY_USER_NOTE": ("reconciliation_omie_entries", "user_note_encrypted"),
+    "AAD_ANOMALY_CONTEXT": ("reconciliation_anomalies", "context_encrypted"),
+    "AAD_ANOMALY_RESOLUTION_NOTE": ("reconciliation_anomalies", "resolution_note_encrypted"),
+    "AAD_GLOSSARY_CODE": ("client_glossary_entries", "code_encrypted"),
+    "AAD_GLOSSARY_NAME": ("client_glossary_entries", "name_encrypted"),
+    "AAD_GLOSSARY_DESCRIPTION": ("client_glossary_entries", "description_encrypted"),
+    # Sprint 9 (BACK 09.1) — a credencial da origem. 11 → 12.
+    "AAD_CONNECTION_CREDENTIALS": ("client_connections", "credentials_encrypted"),
+}
+
+
+class TestInventarioDeCamposCifrados:
+    """Campo cifrado novo não entra em silêncio, e par existente não é renomeado."""
+
+    def test_as_constantes_declaradas_sao_exatamente_as_esperadas(self) -> None:
+        declared = {
+            name: value for name, value in vars(crypto_service).items() if name.startswith("AAD_")
+        }
+        assert declared == EXPECTED_AAD_PAIRS
+
+    def test_a_contagem_bate_com_a_lista_canonica_do_claude_md(self) -> None:
+        assert len(EXPECTED_AAD_PAIRS) == 12
+
+    def test_nenhum_par_tabela_coluna_se_repete(self) -> None:
+        """Dois campos com o MESMO AAD tornam o ciphertext de um legível no outro."""
+        pares = list(EXPECTED_AAD_PAIRS.values())
+        assert len(set(pares)) == len(pares)
 
 
 class _FakeClient:

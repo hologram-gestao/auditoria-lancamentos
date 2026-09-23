@@ -254,3 +254,6 @@ ManageAnomalyTypesDep = Annotated[
 ]
 ManagePlatformDep = Annotated[CurrentUser, Depends(require_permission(Permission.MANAGE_PLATFORM))]
 RunAlertTestDep = Annotated[CurrentUser, Depends(require_permission(Permission.RUN_ALERT_TEST))]
+ManageClientConnectionsDep = Annotated[
+    CurrentUser, Depends(require_permission(Permission.MANAGE_CLIENT_CONNECTIONS))
+]

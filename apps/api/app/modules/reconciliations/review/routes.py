@@ -26,7 +26,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.authz import CurrentUser
 from app.core.config import Settings, get_settings
-from app.core.crypto_service import load_client_cipher
 from app.core.dependencies import (
     DbSessionDep,
     ReviewExportDep,
@@ -38,7 +37,8 @@ from app.integrations.omie.categorias_cache import OmieCategoriasCache
 from app.integrations.omie.client import OmieClient
 from app.integrations.omie.clientes_cache import OmieClientesCache
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache
-from app.modules.clients.omie_factory import build_omie_client
+from app.integrations.providers.base import Capability
+from app.modules.client_connections.origin import build_capable_client
 from app.modules.reconciliations.review.repository import ReviewRepository
 from app.modules.reconciliations.review.schemas import (
     AnomalyListResponse,
@@ -240,8 +240,11 @@ async def list_available_omie_entries(
     if client is None:
         raise NotFoundError(_SESSION_NOT_FOUND_MSG)
 
-    cipher = await load_client_cipher(client, settings=settings)
-    omie_client = build_omie_client(client, settings, cipher)
+    # S9 (BACK 09.6): cliente sem origem capaz recebe 409 acionável aqui, em
+    # vez de um CryptoError virando 500 na tela de revisão.
+    omie_client = await build_capable_client(
+        db, client, Capability.LISTAR_LANCAMENTOS, settings=settings
+    )
     try:
         data = await service.list_available_omie_entries(
             session=sess,
@@ -287,8 +290,13 @@ async def list_omie_entries(
     # service só usa o client no MISS, e sem ele degrada para o lookup puro.
     omie_client: OmieClient | None = None
     try:
-        cipher = await load_client_cipher(client, settings=settings)
-        omie_client = build_omie_client(client, settings, cipher)
+        # S9 (BACK 09.6): cliente sem origem capaz cai no `except` abaixo como
+        # qualquer outra falha — a aba continua renderizando com "—". Aqui o
+        # fail-soft é deliberado e ANTERIOR à sprint: 409 numa aba que já sabe
+        # degradar seria uma regressão de experiência, não uma correção.
+        omie_client = await build_capable_client(
+            db, client, Capability.LISTAR_LANCAMENTOS, settings=settings
+        )
     except Exception as exc:
         logger.warning(
             "omie_entries_client_build_failed",

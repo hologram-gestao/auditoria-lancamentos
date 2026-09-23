@@ -41,6 +41,7 @@ Cenários cobertos (≥ 15):
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -52,13 +53,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.crypto import ClientCipher, encrypt
 from app.core.crypto_service import (
-    AAD_CLIENT_APP_KEY,
-    AAD_CLIENT_APP_SECRET,
+    AAD_CONNECTION_CREDENTIALS,
     field_locator,
     load_client_cipher,
 )
 from app.core.security import hash_password
-from app.db.models import Client, ClientAssignment, User, UserRole
+from app.db.models import Client, ClientAssignment, ClientConnection, User, UserRole
 
 if TYPE_CHECKING:
     from httpx import AsyncClient
@@ -262,9 +262,23 @@ class TestListClients:
 
 
 class TestCreateClient:
+    @respx.mock
     async def test_admin_creates_with_encrypted_credentials(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
+        """S9 (BACK 09.4): a credencial vai para a CONEXÃO, não para `clients`.
+
+        O que mudou: as 4 colunas antigas ficam NULAS e a origem nasce em
+        `client_connections`, cifrada com o locator dela. O que NÃO mudou: nada
+        de plaintext no banco, envelope `v1:` + DEK do cliente, e credencial
+        nenhuma na resposta.
+
+        O `respx` agora é obrigatório porque a criação **verifica a credencial
+        contra o provedor antes de persistir** (09.3).
+        """
+        respx.post(OMIE_LISTAR_CLIENTES_URL).mock(
+            return_value=httpx.Response(200, json={"clientes_cadastro": []})
+        )
         await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
         await _login_as(client_with_db, ADMIN_EMAIL)
 
@@ -280,59 +294,55 @@ class TestCreateClient:
         body = resp.json()
         assert body["name"] == "Novo Cliente"
         assert body["active"] is True
+        assert body["origin_status"] == "ativa"
         # Credenciais NUNCA aparecem em response
         assert "omie_app_key_encrypted" not in body
         assert "omie_app_key" not in body
         assert "omie_app_secret" not in body
 
-        # Confere persistência: credenciais armazenadas encriptadas + IVs
-        # diferentes para cada campo (regra crítica do AES-GCM)
         client_id = body["id"]
         # IMPORTANTE: o client_with_db ainda mantém a transação aberta — preciso
         # buscar via a mesma session usada na fixture
         row = (await db_session.execute(select(Client).where(Client.id == client_id))).scalar_one()
-        # Não persistiu plaintext em parte alguma
-        assert FAKE_APP_KEY not in row.omie_app_key_encrypted
-        assert FAKE_APP_SECRET not in row.omie_app_secret_encrypted
-        # IVs são distintos (cada operação gera seu próprio)
-        assert row.omie_app_key_iv != row.omie_app_secret_iv
-        # Sprint 3: envelope versionado v<n>:<key_id>: + DEK-por-cliente (não bare)
-        assert row.omie_app_key_encrypted.startswith("v1:")
-        assert not ClientCipher.is_legacy(row.omie_app_key_encrypted)
-        assert row.dek_wrapped is not None  # cliente novo nasce com DEK embrulhada
-        # Round-trip via o ClientCipher do cliente (DEK + AAD), não a chave global.
+        # As colunas ANTIGAS ficam nulas — a credencial mora na conexão agora.
+        assert row.omie_app_key_encrypted is None
+        assert row.omie_app_secret_encrypted is None
+        # Mas a DEK foi provisionada pelo serviço de conexão.
+        assert row.dek_wrapped is not None
+
+        connection = (
+            await db_session.execute(
+                select(ClientConnection).where(ClientConnection.client_id == row.id)
+            )
+        ).scalar_one()
+        assert connection.provider_type == "omie"
+        assert connection.credentials_encrypted is not None
+        assert connection.credentials_iv is not None
+        # Nada de plaintext, e envelope versionado com DEK (não bare).
+        assert FAKE_APP_KEY not in connection.credentials_encrypted
+        assert FAKE_APP_SECRET not in connection.credentials_encrypted
+        assert connection.credentials_encrypted.startswith("v1:")
+        assert not ClientCipher.is_legacy(connection.credentials_encrypted)
+        # Round-trip via o ClientCipher do cliente (DEK + AAD da CONEXÃO).
         cipher = await load_client_cipher(row, settings=get_settings())
-        assert (
+        decifrado = json.loads(
             cipher.decrypt(
-                row.omie_app_key_encrypted,
-                row.omie_app_key_iv,
-                field_locator(AAD_CLIENT_APP_KEY, row.id),
+                connection.credentials_encrypted,
+                connection.credentials_iv,
+                field_locator(AAD_CONNECTION_CREDENTIALS, connection.id),
             )
-            == FAKE_APP_KEY
         )
-        assert (
-            cipher.decrypt(
-                row.omie_app_secret_encrypted,
-                row.omie_app_secret_iv,
-                field_locator(AAD_CLIENT_APP_SECRET, row.id),
-            )
-            == FAKE_APP_SECRET
-        )
+        assert decifrado == {"app_key": FAKE_APP_KEY, "app_secret": FAKE_APP_SECRET}
 
     async def test_manager_creates_with_auto_assign(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
+        """Sem credencial de propósito: o auto-assign não depende da origem —
+        e desde a S9 o cliente pode nascer sem nenhuma."""
         mgr = await _seed_user(db_session, email=MANAGER_A_EMAIL, role=UserRole.MANAGER)
         await _login_as(client_with_db, MANAGER_A_EMAIL)
 
-        resp = await client_with_db.post(
-            "/api/v1/clients",
-            json={
-                "name": "Auto Assign",
-                "omie_app_key": FAKE_APP_KEY,
-                "omie_app_secret": FAKE_APP_SECRET,
-            },
-        )
+        resp = await client_with_db.post("/api/v1/clients", json={"name": "Auto Assign"})
         assert resp.status_code == 201, resp.text
         client_id = resp.json()["id"]
 
@@ -355,14 +365,7 @@ class TestCreateClient:
     ) -> None:
         await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
         await _login_as(client_with_db, ADMIN_EMAIL)
-        resp = await client_with_db.post(
-            "/api/v1/clients",
-            json={
-                "name": "",
-                "omie_app_key": FAKE_APP_KEY,
-                "omie_app_secret": FAKE_APP_SECRET,
-            },
-        )
+        resp = await client_with_db.post("/api/v1/clients", json={"name": ""})
         assert resp.status_code == 400
 
 
@@ -487,9 +490,17 @@ class TestUpdateClient:
         await db_session.refresh(cliente_b)
         assert cliente_b.name == "Do B"
 
-    async def test_only_app_key_returns_400(
+    async def test_credencial_no_patch_e_422_apontando_a_rota_de_conexao(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
+        """S9 (BACK 09.3): o PATCH deixou de escrever credencial.
+
+        Antes, mandar só a App Key era 400 `IncompleteCredentialsError` e mandar
+        as duas recifrava as colunas antigas. Agora a origem é entidade própria
+        (`client_connections`) e a escrita passa pelo serviço que valida contra
+        o provedor ANTES de gravar — manter os dois caminhos seria manter duas
+        verdades sobre a mesma credencial, e este não verificava nada.
+        """
         admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
         mgr = await _seed_user(db_session, email=MANAGER_A_EMAIL, role=UserRole.MANAGER)
         target = await _seed_client(db_session, name="C", creator=admin, manager=mgr)
@@ -499,20 +510,21 @@ class TestUpdateClient:
             f"/api/v1/clients/{target.id}",
             json={"omie_app_key": "nova-key"},
         )
-        assert resp.status_code == 400
-        body = resp.json()
-        assert body["error"]["code"] == "VALIDATION_ERROR"
-        assert "App Key" in body["error"]["userMessage"]
+        assert resp.status_code == 422, resp.text
+        assert "connections" in resp.text
 
-    async def test_both_credentials_recrypt_with_new_iv(
+    async def test_credencial_no_patch_nao_reescreve_as_colunas_antigas(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
         admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
         mgr = await _seed_user(db_session, email=MANAGER_A_EMAIL, role=UserRole.MANAGER)
         target = await _seed_client(db_session, name="C", creator=admin, manager=mgr)
-        old_iv_key = target.omie_app_key_iv
-        old_iv_secret = target.omie_app_secret_iv
-        old_ct_key = target.omie_app_key_encrypted
+        antes = (
+            target.omie_app_key_encrypted,
+            target.omie_app_key_iv,
+            target.omie_app_secret_encrypted,
+            target.omie_app_secret_iv,
+        )
         await _login_as(client_with_db, ADMIN_EMAIL)
 
         resp = await client_with_db.patch(
@@ -522,27 +534,15 @@ class TestUpdateClient:
                 "omie_app_secret": "novo-secret-xyz",
             },
         )
-        assert resp.status_code == 200, resp.text
+        assert resp.status_code == 422, resp.text
 
         await db_session.refresh(target)
-        # IVs novos (regra do AES-GCM: nunca reusar IV)
-        assert target.omie_app_key_iv != old_iv_key
-        assert target.omie_app_secret_iv != old_iv_secret
-        # Ciphertext mudou
-        assert target.omie_app_key_encrypted != old_ct_key
-        # PATCH recifra no envelope corrente + provisiona a DEK (cliente era legado).
-        assert target.omie_app_key_encrypted.startswith("v1:")
-        assert target.dek_wrapped is not None
-        # Round-trip via o ClientCipher do cliente (DEK + AAD) bate com o novo plaintext.
-        cipher = await load_client_cipher(target, settings=get_settings())
         assert (
-            cipher.decrypt(
-                target.omie_app_key_encrypted,
-                target.omie_app_key_iv,
-                field_locator(AAD_CLIENT_APP_KEY, target.id),
-            )
-            == "nova-app-key-xyz"
-        )
+            target.omie_app_key_encrypted,
+            target.omie_app_key_iv,
+            target.omie_app_secret_encrypted,
+            target.omie_app_secret_iv,
+        ) == antes
 
     async def test_admin_deactivates_via_active_field(
         self, client_with_db: AsyncClient, db_session: AsyncSession

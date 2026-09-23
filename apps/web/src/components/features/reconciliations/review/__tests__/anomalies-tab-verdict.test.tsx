@@ -117,7 +117,7 @@ beforeEach(() => {
 describe('Anomalias — veredito do revisor', () => {
   it('marca improcedente mandando SÓ review_verdict (resolved fica intocado)', async () => {
     const ui = userEvent.setup();
-    render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} />);
+    render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} canPostToOmie />);
 
     await ui.click(
       screen.getByRole('button', { name: 'Marcar "Classificação suspeita" como improcedente' }),
@@ -141,7 +141,7 @@ describe('Anomalias — veredito do revisor', () => {
       anomaly({ id: 'a2', review_verdict: 'procedente' }),
       anomaly({ id: 'a3', review_verdict: 'improcedente' }),
     ]);
-    render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} />);
+    render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} canPostToOmie />);
 
     // `selector: 'span'` separa o INDICADOR DE ESTADO dos botões, que carregam
     // o mesmo rótulo. Sem isso o teste passaria só por existirem os botões —
@@ -153,7 +153,7 @@ describe('Anomalias — veredito do revisor', () => {
 
   it('o estado vai em aria-pressed, não só na cor', () => {
     setList([anomaly({ review_verdict: 'procedente' })]);
-    render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} />);
+    render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} canPostToOmie />);
 
     expect(
       screen.getByRole('button', { name: 'Marcar "Classificação suspeita" como procedente' }),
@@ -166,7 +166,7 @@ describe('Anomalias — veredito do revisor', () => {
   it('reenviar o MESMO veredito não dispara request', async () => {
     const ui = userEvent.setup();
     setList([anomaly({ review_verdict: 'procedente' })]);
-    render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} />);
+    render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} canPostToOmie />);
 
     await ui.click(
       screen.getByRole('button', { name: 'Marcar "Classificação suspeita" como procedente' }),
@@ -186,7 +186,7 @@ describe('Anomalias — veredito do revisor', () => {
         },
       }),
     ]);
-    render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} />);
+    render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} canPostToOmie />);
 
     expect(
       screen.queryByRole('button', { name: /Marcar "Padrão quebrado" como/ }),
@@ -205,7 +205,7 @@ describe('Anomalias — veredito do revisor', () => {
         },
       }),
     ]);
-    render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} />);
+    render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} canPostToOmie />);
     expect(
       screen.getByRole('button', { name: 'Marcar "Classificação incoerente" como procedente' }),
     ).toBeVisible();
@@ -221,7 +221,7 @@ describe('Anomalias — veredito do revisor', () => {
           'Só é possível marcar como procedente ou improcedente uma suspeita levantada pela análise de classificação.',
       }),
     );
-    render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} />);
+    render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} canPostToOmie />);
 
     await ui.click(
       screen.getByRole('button', { name: 'Marcar "Classificação suspeita" como procedente' }),
@@ -235,7 +235,7 @@ describe('Anomalias — veredito do revisor', () => {
 
   it('durante a mutação os botões ficam desabilitados', () => {
     patchState.isPending = true;
-    render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} />);
+    render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} canPostToOmie />);
 
     expect(
       screen.getByRole('button', { name: 'Marcar "Classificação suspeita" como procedente' }),
@@ -250,7 +250,7 @@ describe('Anomalias — gating pela matriz (review_export)', () => {
   it('todos os papéis da matriz podem julgar', () => {
     for (const role of ['admin', 'manager', 'client_manager', 'client_operator'] as const) {
       authState.user = actor({ role });
-      const view = render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} />);
+      const view = render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} canPostToOmie />);
       expect(
         screen.getByRole('button', { name: 'Marcar "Classificação suspeita" como procedente' }),
       ).toBeVisible();
@@ -261,7 +261,7 @@ describe('Anomalias — gating pela matriz (review_export)', () => {
   it('sem usuário na sessão a ação some, mas o veredito continua legível', () => {
     authState.user = null;
     setList([anomaly({ review_verdict: 'improcedente' })]);
-    render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} />);
+    render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} canPostToOmie />);
 
     expect(
       screen.queryByRole('button', { name: /Marcar "Classificação suspeita" como/ }),
@@ -273,7 +273,7 @@ describe('Anomalias — gating pela matriz (review_export)', () => {
 describe('Anomalias — sem regressão nas colunas existentes', () => {
   it('mantém severidade, tipo, detectado por e status', () => {
     setList([anomaly({ resolved: true, resolution_note: 'Ajustado no Omie.' })]);
-    render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} />);
+    render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} canPostToOmie />);
 
     const row = screen.getByRole('row', { name: /Classificação suspeita/ });
     expect(within(row).getByText('Sistema')).toBeVisible();
@@ -283,7 +283,7 @@ describe('Anomalias — sem regressão nas colunas existentes', () => {
 
   it('lista vazia continua com a mensagem de sempre (colSpan acompanhou a coluna nova)', () => {
     setList([]);
-    render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} />);
+    render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} canPostToOmie />);
     expect(screen.getByText('Nenhuma anomalia registrada.')).toBeVisible();
   });
 });
@@ -295,7 +295,7 @@ describe('Anomalias — acessibilidade', () => {
       anomaly({ id: 'a2', review_verdict: 'procedente' }),
       anomaly({ id: 'a3', review_verdict: 'improcedente' }),
     ]);
-    const { container } = render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} />);
+    const { container } = render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} canPostToOmie />);
     await assertNoA11yViolations(container);
   });
 });

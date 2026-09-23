@@ -15,6 +15,9 @@
  *     compilador acusa via `never`.
  */
 
+import { formatDistanceToNow } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+
 const BRL_FORMATTER = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
   currency: 'BRL',
@@ -154,6 +157,22 @@ export function formatSyncedAt(syncedAt: string | null | undefined): string {
   if (hours < 24) return `Sincronizado há ${hours} h`;
   const days = Math.floor(hours / 24);
   return `Sincronizado há ${days} dia${days === 1 ? '' : 's'}`;
+}
+
+/**
+ * `last_checked_at` de uma origem (ISO) → "Verificada há cerca de 2 horas"
+ * (Sprint 9 / R3).
+ *
+ * Aqui `date-fns` + `ptBR` valem a pena (ao contrário do `formatSyncedAt`): a
+ * verificação pode ser de meses atrás e a escala do `formatDistanceToNow`
+ * cobre isso em português sem a tabela de casos crescer. `null` é **nunca
+ * verificada** — e isso é informação, não ausência de dado.
+ */
+export function formatLastCheckedAt(lastCheckedAt: string | null | undefined): string {
+  if (!lastCheckedAt) return 'Nunca verificada';
+  const date = new Date(lastCheckedAt);
+  if (Number.isNaN(date.getTime())) return 'Nunca verificada';
+  return `Verificada ${formatDistanceToNow(date, { addSuffix: true, locale: ptBR })}`;
 }
 
 /** Mapeia o `account_type` do parse IA para rótulo em PT-BR. */

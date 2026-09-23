@@ -1,33 +1,38 @@
 'use client';
 
 /**
- * Modal "Editar Cliente" — Doc §9.3.
+ * Modal "Editar Cliente" — Doc §9.3, revisto na Sprint 9 (R5).
+ *
+ * ⚠️ **A credencial saiu daqui.** Até a S8 este modal recriptografava as
+ * credenciais Omie nas colunas de `clients`. Isso virou a SEGUNDA via de
+ * escrita que o PRD manda fechar: a leitura passou a vir de
+ * `client_connections`, e gravar na coluna antiga faria o sistema autenticar
+ * com a credencial velha **em silêncio**. O backend agora responde **422** só
+ * pela presença de `omieAppKey`/`omieAppSecret` no corpo do PATCH — então os
+ * campos sumiram da tela, e no lugar deles há o caminho para a seção de
+ * origens, na tela do cliente.
  *
  * Comportamento:
  *   - Nome pré-preenchido editável; status (Ativo/Inativo) também.
- *   - App Key e App Secret sempre VAZIOS com placeholder `••••••••`. Se o
- *     usuário deixar vazio, as credenciais existentes são mantidas. Se
- *     preencher, o "Testar conexão" é obrigatório antes de salvar.
+ *   - Credencial → tela do cliente → seção "Origens de dado".
  *   - Admin vê a seção "Gerentes com acesso" (86e390m4c —
  *     `client-managers-section.tsx`): quem tem acesso, quem é o responsável,
  *     adicionar, remover (com aviso nomeando quem perde o acesso) e tornar
  *     responsável (sem remover ninguém). As ações da carteira são IMEDIATAS,
  *     cada uma com a própria confirmação — o "Salvar" só grava os campos.
- *   - Manager (não-admin) não vê a seção; só nome/status/credenciais.
+ *   - Manager (não-admin) não vê a seção; só nome/status/categoria.
  *   - O corpo do formulário rola dentro do modal (`ScrollRegion`), com header e
  *     rodapé fixos: em 390px a seção de gerentes empurraria o "Salvar" para fora
  *     da viewport — o defeito que o gate de a11y NÃO mede (CLAUDE.md §7).
  *
- * Erros tratados:
- *   - PATCH /clients/{id} com `IncompleteCredentialsError` (400) → toast.
- *     A validação Zod já bloqueia a maioria dos casos client-side.
- *   - Demais erros → toast destrutivo com `userMessage`.
+ * Erros tratados: toast destrutivo com o `userMessage` do backend.
  */
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
-import { useForm, useWatch } from 'react-hook-form';
+import Link from 'next/link';
+import { useEffect } from 'react';
+import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -57,16 +62,15 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useClientCategories } from '@/hooks/use-client-categories';
-import { useTestConnection, useUpdateClient } from '@/hooks/use-clients';
+import { useUpdateClient } from '@/hooks/use-clients';
 import { ApiError } from '@/lib/api/client';
 import type { Client, UpdateClientPayload } from '@/lib/api/clients';
 import { hasPermission } from '@/lib/authz';
+import { originFixPath } from '@/lib/origin-state';
 import { updateClientSchema, type UpdateClientFormValues } from '@/lib/validation/clients';
 import { useAuthStore } from '@/stores/auth';
 
 import { ClientManagersSection } from './client-managers-section';
-import { PasswordInput } from './password-input';
-import { TestConnectionButton, type TestConnectionState } from './test-connection-button';
 
 interface EditClientModalProps {
   open: boolean;
@@ -82,17 +86,10 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
   // "não-admin" por acidente em vez de por regra.
   const currentUser = useAuthStore((s) => s.user);
   const isAdmin = hasPermission(currentUser, 'edit_client');
-
-  const [showKey, setShowKey] = useState(false);
-  const [showSecret, setShowSecret] = useState(false);
-  const [testState, setTestState] = useState<TestConnectionState>({ kind: 'idle' });
-  // Última dupla submetida ao test (sucesso OU falha). Manter num ref evita
-  // colocar testState como dep do useEffect — se estivesse, setar `failure`
-  // dispararia o effect que rebobina pra idle antes da UI mostrar a mensagem.
-  const lastTestedRef = useRef<{ key: string; secret: string } | null>(null);
+  // R5: quem NÃO gere conexões não recebe nem o caminho para elas.
+  const canManageConnections = hasPermission(currentUser, 'manage_client_connections');
 
   const updateMutation = useUpdateClient(client?.id ?? '');
-  const testMutation = useTestConnection();
   // Catálogo de categorias (86e34jd8m) — só busca com o modal aberto.
   const categoriesQuery = useClientCategories({ enabled: open });
   const categories = categoriesQuery.data ?? [];
@@ -102,15 +99,10 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
     defaultValues: {
       name: '',
       active: 'active',
-      omie_app_key: '',
-      omie_app_secret: '',
       category_id: 'none',
     },
     mode: 'onSubmit',
   });
-
-  const watchedKey = useWatch({ control: form.control, name: 'omie_app_key' });
-  const watchedSecret = useWatch({ control: form.control, name: 'omie_app_secret' });
 
   // Sincroniza o form sempre que o modal abre (ou o cliente-alvo muda).
   useEffect(() => {
@@ -118,65 +110,15 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
       form.reset({
         name: client.name,
         active: client.active ? 'active' : 'inactive',
-        omie_app_key: '',
-        omie_app_secret: '',
         category_id: client.category?.id ?? 'none',
       });
-      setShowKey(false);
-      setShowSecret(false);
-      setTestState({ kind: 'idle' });
-      lastTestedRef.current = null;
       updateMutation.reset();
-      testMutation.reset();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, client]);
 
-  // Volta a `idle` quando o usuário edita key/secret APÓS um teste. Reage só
-  // a mudanças dos campos — testState NÃO é dependência (ver create-client-modal).
-  useEffect(() => {
-    if (lastTestedRef.current === null) return;
-    const { key, secret } = lastTestedRef.current;
-    if (watchedKey !== key || watchedSecret !== secret) {
-      lastTestedRef.current = null;
-      setTestState({ kind: 'idle' });
-    }
-  }, [watchedKey, watchedSecret]);
-
-  const credsFilled =
-    (watchedKey ?? '').trim().length > 0 || (watchedSecret ?? '').trim().length > 0;
-  const credsBothFilled =
-    (watchedKey ?? '').trim().length > 0 && (watchedSecret ?? '').trim().length > 0;
-
-  async function handleTest() {
-    const key = (form.getValues('omie_app_key') ?? '').trim();
-    const secret = (form.getValues('omie_app_secret') ?? '').trim();
-    if (!key || !secret) return;
-    setTestState({ kind: 'testing' });
-    try {
-      const res = await testMutation.mutateAsync({
-        omie_app_key: key,
-        omie_app_secret: secret,
-      });
-      lastTestedRef.current = { key, secret };
-      setTestState(res.ok ? { kind: 'success' } : { kind: 'failure', message: res.message });
-    } catch (err) {
-      lastTestedRef.current = { key, secret };
-      const message =
-        err instanceof ApiError ? err.userMessage : 'Não foi possível testar a conexão.';
-      setTestState({ kind: 'failure', message });
-    }
-  }
-
   async function onSubmit(values: UpdateClientFormValues) {
     if (!client) return;
-
-    // Se preencheu credenciais, exige teste OK. O guard do botão já cobre,
-    // mas mantemos a verificação para o caso de submit por Enter.
-    if (credsFilled && testState.kind !== 'success') {
-      toast.error('Teste a conexão antes de salvar as novas credenciais.');
-      return;
-    }
 
     const updatePayload: UpdateClientPayload = {
       name: values.name,
@@ -184,10 +126,6 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
       // Sempre enviado: 'none' vira `null` (limpa), uuid troca — tri-estado do backend.
       category_id: values.category_id && values.category_id !== 'none' ? values.category_id : null,
     };
-    if (credsBothFilled) {
-      updatePayload.omie_app_key = (values.omie_app_key ?? '').trim();
-      updatePayload.omie_app_secret = (values.omie_app_secret ?? '').trim();
-    }
 
     try {
       await updateMutation.mutateAsync(updatePayload);
@@ -201,20 +139,9 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
   }
 
   const isSubmitting = updateMutation.isPending;
-  const isTesting = testState.kind === 'testing';
-  const inputsDisabled = isSubmitting || isTesting;
+  const inputsDisabled = isSubmitting;
 
-  const canTest =
-    !inputsDisabled &&
-    (watchedKey ?? '').trim().length > 0 &&
-    (watchedSecret ?? '').trim().length > 0;
-
-  // Save liberado quando: nome preenchido E (credenciais vazias OU teste OK).
-  const canSubmit =
-    !isSubmitting &&
-    !isTesting &&
-    (form.getValues('name') ?? '').trim().length > 0 &&
-    (!credsFilled || testState.kind === 'success');
+  const canSubmit = !isSubmitting && (form.getValues('name') ?? '').trim().length > 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -224,7 +151,8 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
         <DialogHeader>
           <DialogTitle>Editar Cliente</DialogTitle>
           <DialogDescription>
-            Deixe os campos de credenciais vazios para manter os valores atuais.
+            Nome, situação e categoria. As credenciais da origem são alteradas na seção
+            &quot;Origens de dado&quot;, na tela do cliente.
           </DialogDescription>
         </DialogHeader>
 
@@ -249,49 +177,22 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
                 )}
               />
 
-              <FormField
-                control={form.control}
-                name="omie_app_key"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>App Key Omie</FormLabel>
-                    <FormControl>
-                      <PasswordInput
-                        visible={showKey}
-                        onToggle={() => setShowKey((v) => !v)}
-                        disabled={inputsDisabled}
-                        autoComplete="off"
-                        placeholder="••••••••"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="omie_app_secret"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>App Secret Omie</FormLabel>
-                    <FormControl>
-                      <PasswordInput
-                        visible={showSecret}
-                        onToggle={() => setShowSecret((v) => !v)}
-                        disabled={inputsDisabled}
-                        autoComplete="off"
-                        placeholder="••••••••"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <TestConnectionButton state={testState} disabled={!canTest} onClick={handleTest} />
+              {/* R5: o caminho para a credencial, não a credencial. Link e não
+                  botão: o destino é uma rota, e clicar fecha o modal de
+                  propósito — a seção de origens é onde a ação vive. */}
+              {client && canManageConnections && (
+                <p className="text-muted-foreground text-sm">
+                  Para trocar a credencial da origem, use{' '}
+                  <Link
+                    href={originFixPath(client.id)}
+                    onClick={() => onOpenChange(false)}
+                    className="text-foreground underline underline-offset-4"
+                  >
+                    Origens de dado
+                  </Link>{' '}
+                  na tela do cliente.
+                </p>
+              )}
 
               <FormField
                 control={form.control}

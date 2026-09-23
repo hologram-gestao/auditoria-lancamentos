@@ -32,7 +32,6 @@ from sqlalchemy import select
 
 from app.core.audit import AccessAction, record_access
 from app.core.config import Settings, get_settings
-from app.core.crypto_service import load_client_cipher
 from app.core.dependencies import (
     CurrentUserDep,
     DbSessionDep,
@@ -42,7 +41,8 @@ from app.core.exceptions import ConflictError, NotFoundError
 from app.core.logging import get_logger
 from app.db.models import Client, ReconciliationStatus
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache
-from app.modules.clients.omie_factory import build_omie_client
+from app.integrations.providers.base import Capability
+from app.modules.client_connections.origin import build_capable_client
 from app.modules.reconciliations.export.service import ExportService
 from app.modules.reconciliations.export.workbook import build_workbook
 from app.modules.reconciliations.tenant_scope import require_session_access
@@ -140,8 +140,11 @@ async def export_reconciliation(
         actor_organization_id=current_user.organization_id,
     )
 
-    cipher = await load_client_cipher(client_row, settings=settings)
-    omie_client = build_omie_client(client_row, settings, cipher)
+    # S9 (BACK 09.6): o export enriquece nomes em runtime (§4.5), então precisa
+    # de origem capaz de listar lançamentos. Sem ela, 409 acionável — nunca 500.
+    omie_client = await build_capable_client(
+        db, client_row, Capability.LISTAR_LANCAMENTOS, settings=settings
+    )
     try:
         payload = await service.build_payload(
             session=sess,

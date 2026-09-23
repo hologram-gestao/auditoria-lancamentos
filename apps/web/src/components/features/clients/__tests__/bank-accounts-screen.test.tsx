@@ -39,7 +39,13 @@ function account(id: number) {
 
 const detailState = {
   data: undefined as
-    | { accounts: ReturnType<typeof account>[]; accounts_synced_at: string | null }
+    | {
+        accounts: ReturnType<typeof account>[];
+        accounts_synced_at: string | null;
+        // S9: sem origem ATIVA o sync responderia 409 — a tela deixa de
+        // oferecer "Extrair contas" e explica o estado (R7).
+        origin_status?: 'sem_origem' | 'ativa' | 'erro';
+      }
     | undefined,
   isLoading: false,
   isFetching: false,
@@ -80,6 +86,7 @@ beforeEach(() => {
   detailState.data = {
     accounts: [account(1), account(2)],
     accounts_synced_at: '2026-06-10T09:00:00Z',
+    origin_status: 'ativa',
   };
   detailState.isLoading = false;
   detailState.isFetching = false;
@@ -119,6 +126,7 @@ describe('BankAccountsScreen — lista', () => {
     detailState.data = {
       accounts: Array.from({ length: 25 }, (_, i) => account(i + 1)),
       accounts_synced_at: '2026-06-10T09:00:00Z',
+      origin_status: 'ativa',
     };
     currentSearch = 'page=2&pageSize=10';
     render(<BankAccountsScreen clientId="c1" />);
@@ -167,7 +175,7 @@ describe('BankAccountsScreen — extrair contas do Omie', () => {
 
 describe('BankAccountsScreen — estados', () => {
   it('vazio convida a extrair as contas', () => {
-    detailState.data = { accounts: [], accounts_synced_at: null };
+    detailState.data = { accounts: [], accounts_synced_at: null, origin_status: 'ativa' };
     render(<BankAccountsScreen clientId="c1" />);
     expect(screen.getByText(/Nenhuma conta bancária sincronizada/)).toBeVisible();
     expect(screen.getByText('Nunca sincronizado')).toBeVisible();
@@ -186,6 +194,41 @@ describe('BankAccountsScreen — estados', () => {
     detailState.data = undefined;
     render(<BankAccountsScreen clientId="c1" />);
     expect(screen.getByLabelText('Carregando contas bancárias')).toBeInTheDocument();
+  });
+});
+
+/**
+ * S9 / R7 — ausência e falha de origem são ESTADO, não erro nem tabela vazia
+ * ambígua. E a ação que o servidor negaria com 409 não é oferecida (§4.9).
+ */
+describe('BankAccountsScreen — estado de origem (S9)', () => {
+  it('sem origem: explica o estado e NÃO oferece "Extrair contas"', () => {
+    detailState.data = { accounts: [], accounts_synced_at: null, origin_status: 'sem_origem' };
+    render(<BankAccountsScreen clientId="c1" />);
+
+    const notice = screen.getByText('Este cliente não tem origem conectada');
+    expect(notice).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Extrair contas do Omie' })).toBeNull();
+    expect(screen.getByText(/ainda não tem uma origem de onde buscá-las/)).toBeVisible();
+  });
+
+  it('origem com erro: diz "com erro" e NUNCA "sem origem"', () => {
+    detailState.data = { accounts: [], accounts_synced_at: null, origin_status: 'erro' };
+    render(<BankAccountsScreen clientId="c1" />);
+
+    expect(screen.getByText('A origem deste cliente está com erro')).toBeVisible();
+    expect(screen.queryByText('Este cliente não tem origem conectada')).toBeNull();
+  });
+
+  it('cliente encerrado não ganha estado de origem (já é só-leitura)', () => {
+    detailState.data = {
+      accounts: [],
+      accounts_synced_at: null,
+      origin_status: 'sem_origem',
+      closed_at: '2026-09-01T12:00:00Z',
+    } as never;
+    render(<BankAccountsScreen clientId="c1" />);
+    expect(screen.queryByText('Este cliente não tem origem conectada')).toBeNull();
   });
 });
 

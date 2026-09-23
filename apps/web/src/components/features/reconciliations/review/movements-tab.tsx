@@ -83,6 +83,13 @@ interface MovementsTabProps {
    * lançamento — conta corrente/aplicação não lança em lugar nenhum.
    */
   isCard: boolean;
+  /**
+   * S9 (R6): a origem ATIVA do cliente declara `escrever`? Sem isso o servidor
+   * responde `CAPACIDADE_AUSENTE` (409) ao lote inteiro, então a ação nem
+   * aparece (§4.9). Vem do detalhe do cliente (`connections[].capabilities`),
+   * resolvido em `originCanWrite` — a UI reflete, não decide.
+   */
+  canPostToOmie: boolean;
 }
 
 type SituationFilter =
@@ -97,7 +104,13 @@ type TypeFilter = 'all' | 'credit' | 'debit';
 const DEFAULT_PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE_MS = 300;
 
-export function MovementsTab({ sessionId, isCard }: MovementsTabProps) {
+export function MovementsTab({ sessionId, isCard, canPostToOmie }: MovementsTabProps) {
+  /**
+   * S9 (R6): lançar exige a capacidade `escrever` da origem ATIVA — o servidor
+   * responde `CAPACIDADE_AUSENTE` (409) ao lote se ela faltar. `isCard` sozinho
+   * deixou de bastar; a partir daqui TODA a UI de lançamento usa este booleano.
+   */
+  const showPosting = isCard && canPostToOmie;
   const [situation, setSituation] = useState<SituationFilter>('all');
   const [type, setType] = useState<TypeFilter>('all');
   const [searchInput, setSearchInput] = useState('');
@@ -223,8 +236,8 @@ export function MovementsTab({ sessionId, isCard }: MovementsTabProps) {
 
   /** Compras da página que o servidor aceitaria lançar (mesma regra dele). */
   const eligibleIds = useMemo(
-    () => items.filter((e) => getPostingBlock(e, { isCard }) === null).map((e) => e.id),
-    [items, isCard],
+    () => items.filter((e) => getPostingBlock(e, { isCard: showPosting }) === null).map((e) => e.id),
+    [items, showPosting],
   );
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -263,8 +276,8 @@ export function MovementsTab({ sessionId, isCard }: MovementsTabProps) {
     setSelectedIds(checked ? eligibleIds : []);
   }
 
-  /** Colunas fixas + a de seleção, que só existe em cartão. */
-  const columnCount = isCard ? 9 : 8;
+  /** Colunas fixas + a de seleção, que só existe quando dá para lançar. */
+  const columnCount = showPosting ? 9 : 8;
 
   return (
     <div className="space-y-4">
@@ -334,7 +347,7 @@ export function MovementsTab({ sessionId, isCard }: MovementsTabProps) {
         </div>
       </div>
 
-      {isCard && selectedIds.length > 0 && (
+      {showPosting && selectedIds.length > 0 && (
         <LancarLoteBar
           selectedCount={selectedIds.length}
           onLaunch={() => setLaunchTargets(selectedEntries)}
@@ -346,7 +359,7 @@ export function MovementsTab({ sessionId, isCard }: MovementsTabProps) {
         <Table scrollRegionLabel="Movimentações (rolável horizontalmente)">
           <TableHeader>
             <TableRow>
-              {isCard && (
+              {showPosting && (
                 <TableHead className="w-10">
                   <PostingCheckbox
                     checked={allEligibleSelected}
@@ -402,8 +415,8 @@ export function MovementsTab({ sessionId, isCard }: MovementsTabProps) {
                     key={entry.id}
                     entry={entry}
                     columnCount={columnCount}
-                    isCard={isCard}
-                    postingBlock={getPostingBlock(entry, { isCard })}
+                    isCard={showPosting}
+                    postingBlock={getPostingBlock(entry, { isCard: showPosting })}
                     posted={Object.prototype.hasOwnProperty.call(postedById, entry.id)}
                     postedOmieId={postedById[entry.id] ?? null}
                     selected={selectedIds.includes(entry.id)}

@@ -244,26 +244,17 @@ class TestClientCategoryOnClients:
         await _login_admin(client_with_db, db_session)
         cat = await _seed_category(db_session, name="Fintech", tone="info")
 
+        # S9: cliente nasce SEM origem — a categoria não depende de credencial.
         criado = await client_with_db.post(
             "/api/v1/clients",
-            json={
-                "name": "Novo",
-                "omie_app_key": FAKE_APP_KEY,
-                "omie_app_secret": FAKE_APP_SECRET,
-                "category_id": str(cat.id),
-            },
+            json={"name": "Novo", "category_id": str(cat.id)},
         )
         assert criado.status_code == 201, criado.text
         assert criado.json()["category"] == {"id": str(cat.id), "name": "Fintech", "tone": "info"}
 
         invalido = await client_with_db.post(
             "/api/v1/clients",
-            json={
-                "name": "Outro",
-                "omie_app_key": FAKE_APP_KEY,
-                "omie_app_secret": FAKE_APP_SECRET,
-                "category_id": str(uuid4()),
-            },
+            json={"name": "Outro", "category_id": str(uuid4())},
         )
         assert invalido.status_code == 400, invalido.text
         assert invalido.json()["error"]["code"] == "VALIDATION_ERROR"

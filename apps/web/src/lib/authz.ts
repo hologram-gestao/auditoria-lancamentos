@@ -52,14 +52,26 @@ export type Permission =
   /** Administrar ORGANIZAÇÕES — só a plataforma. */
   | 'manage_platform'
   /** Disparo do alerta sintético (diagnóstico do plantão). */
-  | 'run_alert_test';
+  | 'run_alert_test'
+  /**
+   * Sprint 9 (R5): conectar, testar, alterar e remover ORIGENS de dado do
+   * cliente (`client_connections`). Permissão PRÓPRIA, e não `edit_client`:
+   * o `manager` cria cliente (✅) mas não edita (❌) — pendurar conexão em
+   * `edit_client` faria o contador do escritório parceiro cadastrar a carteira
+   * inteira e não conseguir conectar nenhuma delas.
+   *
+   * A LEITURA do estado da origem não pede permissão nenhuma (o backend libera
+   * o `GET` a todo papel com acesso ao cliente): inventar uma aqui esconderia
+   * do operador o motivo pelo qual a conciliação dele não roda.
+   */
+  | 'manage_client_connections';
 
 /**
  * A matriz, indexada por PAPEL (e não por permissão) de propósito: assim o
  * `Record<UserRole, ...>` obriga a lista a cobrir todo papel do contrato.
  *
  * Transcrita célula a célula de `apps/api/app/core/authz.py::PERMISSION_MATRIX`
- * (13 permissões × 5 papéis) e travada em `__tests__/authz.test.ts`.
+ * (14 permissões × 5 papéis desde a Sprint 9) e travada em `__tests__/authz.test.ts`.
  *
  * | Ação                          | platform_admin | admin | manager | client_manager | client_operator |
  * | ----------------------------- | -------------- | ----- | ------- | -------------- | --------------- |
@@ -76,6 +88,7 @@ export type Permission =
  * | Tipos de anomalia             | ✅             | ❌    | ❌      | ❌             | ❌              |
  * | Gerir organizações            | ✅             | ❌    | ❌      | ❌             | ❌              |
  * | Teste de alerta               | ✅             | ✅    | ❌      | ❌             | ❌              |
+ * | Conexões de origem (S9)       | ✅             | ✅    | ✅ (carteira) | ❌       | ❌              |
  *
  * "(carteira)" e "(própria org)" **não são células**: são `resolve_client_access`
  * e os filtros de coleção, no servidor. A célula diz se o papel pode a AÇÃO.
@@ -97,6 +110,7 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'manage_anomaly_types',
     'manage_platform',
     'run_alert_test',
+    'manage_client_connections',
   ],
   // D3 final (86e36ed1d): `manage_anomaly_types` saiu daqui. A taxonomia de
   // anomalias é uma tabela GLOBAL do produto — o admin de uma organização
@@ -113,6 +127,7 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'manage_org_users',
     'manage_client_categories',
     'run_alert_test',
+    'manage_client_connections',
   ],
   // O gerente da organização enxerga outros tenants apenas dentro da carteira —
   // quem sabe a carteira é o backend (`client_assignments`), ver `canAccessClient`.
@@ -127,6 +142,9 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'manage_glossary',
     'view_other_tenant',
     'create_client',
+    // S9 (R5): o gerente ENTRA. Ele cria o cliente e precisa conectar a origem
+    // dele — o "(carteira)" é `resolve_client_access` no servidor, não a célula.
+    'manage_client_connections',
   ],
   client_manager: [
     'run_reconciliation',
