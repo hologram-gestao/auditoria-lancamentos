@@ -95,6 +95,12 @@ CLASSIFICATION: tuple[Entry, ...] = (
         "docstring: recebe o client já construído pelo caller, não o constrói",
     ),
     Entry(
+        "app/modules/client_chart_of_accounts/service.py",
+        Family.ORIGEM,
+        "sincroniza o plano de contas (S10): resolve a conexão capaz e constrói o client pela "
+        "PORTA, sem tocar em credencial nem nas colunas antigas",
+    ),
+    Entry(
         "app/modules/client_connections/legacy_fallback.py",
         Family.FALLBACK,
         "único leitor das colunas antigas; sintetiza a conexão da janela (09.5)",

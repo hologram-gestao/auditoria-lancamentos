@@ -160,6 +160,74 @@ class TestOmieRealFixtures:
         for raw in items:
             CategoriaOmie.model_validate(raw)
 
+    def test_listar_categorias_carrega_o_plano_de_contas(self) -> None:
+        """BACK 10.1 — os campos NOVOS do contrato, contra a resposta REAL.
+
+        A razão de existir da Sprint 10 é o vínculo categoria → conta de
+        demonstrativo que a origem já preenche. Se `dadosDRE.codigoDRE` for
+        lido com outro nome (ou não for lido), a tabela nova nasce com 100% de
+        "sem destino declarado" e a métrica da sprint fica travada em 0% sem
+        nada quebrar — o modo de falha silencioso que este teste existe para
+        pegar.
+
+        Os números são os da fixture: 37 de 50 com destino, 6 de 50 com conta
+        contábil.
+        """
+        resp = _load_response("listar_categorias")
+        if resp is None:
+            pytest.skip(_CAPTURE_HINT)
+        items = resp.get("categoria_cadastro")
+        assert isinstance(items, list)
+
+        categorias = [CategoriaOmie.model_validate(raw) for raw in items]
+        assert len(categorias) == 50, "a fixture capturada tem 50 categorias"
+
+        com_destino = [c for c in categorias if c.destino_code is not None]
+        com_conta_contabil = [c for c in categorias if c.conta_contabil_code is not None]
+        assert len(com_destino) == 37, (
+            "37 de 50 categorias da resposta real trazem `dadosDRE.codigoDRE`. "
+            "Divergiu = o nome do campo mudou ou o DTO parou de lê-lo, e o "
+            "plano de contas nasceria sem destino nenhum."
+        )
+        assert len(com_conta_contabil) == 6, "6 de 50 trazem `id_conta_contabil`"
+
+        # O bloco `dadosDRE` vem sempre presente — vazio (`{}`) nas 13 sem destino.
+        assert all("dadosDRE" in raw for raw in items)
+        assert len(categorias) - len(com_destino) == 13
+
+        # Hierarquia e flags são lidas de verdade, não ficam todas no default.
+        assert any(c.parent_code is not None for c in categorias), (
+            "nenhuma categoria com pai — `categoria_superior` não está sendo lida"
+        )
+        assert any(c.is_transferencia for c in categorias)
+        assert any(c.is_totalizadora for c in categorias)
+
+        # Nível e sinal do demonstrativo vêm preenchidos onde há destino.
+        assert all(c.dados_dre.nivel_dre is not None for c in com_destino)
+        assert {c.dados_dre.sinal_dre for c in com_destino} <= {"+", "-"}
+
+    def test_transferencia_da_fixture_nao_tem_destino(self) -> None:
+        """Ausência de destino é INFORMAÇÃO, não buraco — e é verificável.
+
+        A categoria `0.01` (Transferência) é totalizadora e de transferência na
+        resposta real, e por definição contábil não tem conta de demonstrativo
+        própria. Se um dia alguém "consertar" isso inferindo um destino, este
+        teste cai.
+        """
+        resp = _load_response("listar_categorias")
+        if resp is None:
+            pytest.skip(_CAPTURE_HINT)
+        items = resp.get("categoria_cadastro")
+        assert isinstance(items, list)
+
+        transferencia = next(
+            CategoriaOmie.model_validate(raw) for raw in items if raw.get("codigo") == "0.01"
+        )
+        assert transferencia.is_transferencia
+        assert transferencia.is_totalizadora
+        assert transferencia.destino_code is None
+        assert transferencia.parent_code is None, "`categoria_superior='0'` é raiz, não um código"
+
 
 @pytest.mark.unit
 class TestFixturesCarryNoSecrets:
