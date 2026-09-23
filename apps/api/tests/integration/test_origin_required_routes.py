@@ -190,8 +190,15 @@ class TestSemConexao:
         sess = await _seed_session(db_session, client, admin)
         assert await _login(client_with_db) == 200
 
-        resp = await client_with_db.get(f"/api/v1/reconciliations/{sess.id}/export")
-        assert resp.status_code < 500, resp.text
+        # A rota é POST. O GET que vivia aqui recebia 405 e o `< 500` engolia
+        # — 405 é menor que 500 —, então o export nunca tinha sido exercitado
+        # por esta bateria (follow-up 86e3dc16c; o gate de URLs do QA compara o
+        # path, não o método). Com o verbo certo e a sessão em `reviewing`
+        # (exportável), nada legítimo vem antes do resolvedor de origem: a
+        # rota carrega a sessão, o cliente, grava a trilha de export e SÓ
+        # ENTÃO pede a conexão capaz. Cliente sem origem é o 409 da taxonomia.
+        resp = await client_with_db.post(f"/api/v1/reconciliations/{sess.id}/export")
+        _assert_origin_409(resp)
 
     async def test_categorias_do_omie(
         self, client_with_db: AsyncClient, db_session: AsyncSession
@@ -220,11 +227,18 @@ class TestSemConexao:
         sess = await _seed_session(db_session, client, admin)
         assert await _login(client_with_db) == 200
 
+        # `cod_categoria` é obrigatório no schema: sem ele a validação do body
+        # devolvia 422 ANTES de o handler rodar, e o `< 500` que vivia aqui
+        # passava sem nunca exercitar a origem (follow-up 86e3dc16c). Com o body
+        # válido, a rota carrega a sessão e o cliente, carrega o cipher (sem
+        # DEK é `None`, não erro) e pede a capacidade ESCREVER antes do lote:
+        # cliente sem origem é o 409 da taxonomia, e o `file_entry_id`
+        # inventado nunca chega a ser consultado.
         resp = await client_with_db.post(
             f"/api/v1/reconciliations/{sess.id}/omie-postings",
-            json={"lines": [{"file_entry_id": str(uuid4())}]},
+            json={"lines": [{"file_entry_id": str(uuid4()), "cod_categoria": "2.01.03"}]},
         )
-        assert resp.status_code < 500, resp.text
+        _assert_origin_409(resp)
 
 
 class TestOrigemComErro:
