@@ -468,6 +468,57 @@ export interface paths {
         patch: operations["update_connection_api_v1_clients__client_id__connections__connection_id__patch"];
         trace?: never;
     };
+    "/api/v1/clients/{client_id}/chart-of-accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista o plano de contas do cliente — o que a origem classifica, já dentro do produto. Paginado (`page`/`pageSize`, máximo 100), com filtro por situação (`ativa`, `inativa`, `ausente_na_origem`) e por hierarquia (`parentCode`), e **busca por CÓDIGO** (`code`). Não existe busca por nome: o nome não é persistido (é resolvido em runtime pelo mesmo cache da tela de revisão) e vem `null` quando a origem não responde — a lista é servida assim mesmo. `dreCode` nulo significa **sem destino declarado**, que é informação e não pendência: transferências e totalizadoras não têm conta de demonstrativo própria. Plano de contas de outro cliente nunca aparece. */
+        get: operations["list_chart_of_accounts_api_v1_clients__client_id__chart_of_accounts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/chart-of-accounts/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Cobertura do plano de contas: total, ativas, com destino, sem destino declarado e com conta contábil — calculadas no SERVIDOR sobre o conjunto INTEIRO do cliente, não sobre a página. É a resposta para 'quanto do de-para já vem pronto': `comDestino + semDestino == ativas`. Traz também a data da última sincronização bem-sucedida (`null` = nunca sincronizou, estado vazio da tela) e a da última que falhou, quando a mais recente falhou. */
+        get: operations["get_chart_of_accounts_coverage_api_v1_clients__client_id__chart_of_accounts_coverage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/chart-of-accounts/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sincroniza o plano de contas com a origem e devolve a cobertura resultante. Requer a permissão `sync_client_chart_of_accounts` (plataforma, admin, gerente da carteira e gerente do cliente — o operador do cliente LÊ mas não sincroniza). Dentro da validade de 24 h serve do armazenamento local sem chamar a origem; `force=true` ('Sincronizar agora') ignora a validade e rebusca. Cliente encerrado: 409. Cliente sem origem capaz: 409 `SEM_CONEXAO`, `ORIGEM_COM_ERRO` ou `CAPACIDADE_AUSENTE`, conforme o caso — a leitura do que já existe continua funcionando. Falha da origem preserva a última sincronização bem-sucedida. */
+        post: operations["sync_chart_of_accounts_api_v1_clients__client_id__chart_of_accounts_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clients/{client_id}/glossary": {
         parameters: {
             query?: never;
@@ -1580,6 +1631,154 @@ export interface components {
          * @enum {string}
          */
         Capability: "verificar_credencial" | "listar_contas" | "listar_lancamentos" | "escrever";
+        /**
+         * ChartOfAccountEntryResponse
+         * @description Uma linha do plano de contas, como a API a devolve.
+         *
+         *     ⚠️ `name` **não** vem do banco: é resolvido em RUNTIME pelo mesmo
+         *     `OmieCategoriasService` que a tela de revisão usa, e é `None` quando a
+         *     origem não responde (fail-soft). Persistir o nome resolveria o `None` e
+         *     quebraria a §4.5 — e faria as duas telas divergirem no dia em que uma
+         *     descrição mudasse no Omie.
+         */
+        ChartOfAccountEntryResponse: {
+            /**
+             * Categorycode
+             * @description Código da categoria na origem.
+             */
+            categoryCode: string;
+            /**
+             * Name
+             * @description Descrição da categoria, resolvida em runtime pelo cache de categorias. `null` quando a origem não respondeu — a lista continua sendo servida assim mesmo.
+             */
+            name?: string | null;
+            /**
+             * Parentcode
+             * @description Código da categoria pai. `null` na raiz.
+             */
+            parentCode?: string | null;
+            /**
+             * Drecode
+             * @description Código da conta de demonstrativo vinculada. `null` = **sem destino declarado** — informação, não erro: transferências e totalizadoras não têm conta de demonstrativo própria.
+             */
+            dreCode?: string | null;
+            /**
+             * Drename
+             * @description Descrição da conta de demonstrativo, resolvida em runtime como o `name`. `null` quando não há destino ou a origem não respondeu.
+             */
+            dreName?: string | null;
+            /**
+             * Drelevel
+             * @description Profundidade no demonstrativo.
+             */
+            dreLevel?: number | null;
+            /**
+             * Dresign
+             * @description `+` ou `-` no demonstrativo.
+             */
+            dreSign?: string | null;
+            /**
+             * Contacontabilcode
+             * @description Código da conta contábil vinculada, quando houver.
+             */
+            contaContabilCode?: string | null;
+            /**
+             * Totalizadora
+             * @description Só soma as filhas; não recebe lançamento.
+             */
+            totalizadora: boolean;
+            /**
+             * Transferencia
+             * @description Categoria de transferência entre contas.
+             */
+            transferencia: boolean;
+            /**
+             * Naoexibir
+             * @description Escondida nas telas do Omie.
+             */
+            naoExibir: boolean;
+            /** @description `ativa` e `inativa` espelham a origem; `ausente_na_origem` é a categoria que sumiu do cadastro e **não** foi apagada aqui. */
+            status: components["schemas"]["ChartOfAccountsStatus"];
+            /**
+             * Syncedat
+             * Format: date-time
+             * @description Quando esta linha foi vista pela origem pela última vez.
+             */
+            syncedAt: string;
+        };
+        /**
+         * ChartOfAccountsCoverageEnvelope
+         * @description Body de `GET .../chart-of-accounts/coverage` e de `POST .../sync`.
+         */
+        ChartOfAccountsCoverageEnvelope: {
+            data: components["schemas"]["ChartOfAccountsCoverageResponse"];
+        };
+        /**
+         * ChartOfAccountsCoverageResponse
+         * @description As cinco contagens da cobertura, sobre o CONJUNTO INTEIRO do cliente.
+         *
+         *     Rota própria, e não um campo da lista: é uma pergunta diferente ("quanto do
+         *     de-para já vem pronto") e a resposta não pode mudar conforme a página.
+         *     `comDestino + semDestino == ativas` — as três parcelas saem da mesma base
+         *     ativa, na mesma query.
+         */
+        ChartOfAccountsCoverageResponse: {
+            /**
+             * Total
+             * @description Todas as linhas, inclusive inativas e ausentes.
+             */
+            total: number;
+            /**
+             * Ativas
+             * @description Linhas com situação `ativa`.
+             */
+            ativas: number;
+            /**
+             * Comdestino
+             * @description Ativas com conta de demonstrativo — o numerador da métrica da sprint.
+             */
+            comDestino: number;
+            /**
+             * Semdestino
+             * @description Ativas **sem destino declarado**. É informação, não pendência a corrigir.
+             */
+            semDestino: number;
+            /**
+             * Comcontacontabil
+             * @description Ativas com conta contábil vinculada.
+             */
+            comContaContabil: number;
+            /**
+             * Syncedat
+             * @description Última sincronização BEM-SUCEDIDA. `null` = nunca sincronizou (estado vazio).
+             */
+            syncedAt?: string | null;
+            /**
+             * Syncfailedat
+             * @description Última tentativa que FALHOU, quando a mais recente falhou. Vem junto com `syncedAt` de propósito: a tela precisa dizer 'falhou agora, e a última boa foi tal dia'.
+             */
+            syncFailedAt?: string | null;
+        };
+        /**
+         * ChartOfAccountsListResponse
+         * @description Body de `GET /clients/{client_id}/chart-of-accounts`.
+         */
+        ChartOfAccountsListResponse: {
+            /** Data */
+            data: components["schemas"]["ChartOfAccountEntryResponse"][];
+            pagination: components["schemas"]["PaginationMeta"];
+        };
+        /**
+         * ChartOfAccountsStatus
+         * @description Situação da linha do plano de contas — fonte ÚNICA do CHECK.
+         *
+         *     `ativa`/`inativa` espelham o `conta_inativa` da origem no momento da última
+         *     sincronização. `ausente_na_origem` é o terceiro estado que só esta camada
+         *     conhece: a categoria existia, sumiu do cadastro do cliente, e a linha FICA —
+         *     marcada, nunca apagada.
+         * @enum {string}
+         */
+        ChartOfAccountsStatus: "ativa" | "inativa" | "ausente_na_origem";
         /**
          * CheckDuplicateResponse
          * @description Response de GET /api/v1/reconciliations/check-duplicate.
@@ -5002,6 +5201,119 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClientConnectionEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_chart_of_accounts_api_v1_clients__client_id__chart_of_accounts_get: {
+        parameters: {
+            query?: {
+                /** @description Página, a partir de 1. */
+                page?: number;
+                /** @description Itens por página (máx. 100). */
+                pageSize?: number;
+                /** @description Filtra por situação. Ausente = todas. */
+                status?: ("ativa" | "inativa" | "ausente_na_origem") | null;
+                /** @description Filtra pelas filhas diretas deste código. */
+                parentCode?: string | null;
+                /** @description Busca por CÓDIGO (contém). Curingas de `LIKE` são literais. */
+                code?: string | null;
+            };
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChartOfAccountsListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_chart_of_accounts_coverage_api_v1_clients__client_id__chart_of_accounts_coverage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChartOfAccountsCoverageEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_chart_of_accounts_api_v1_clients__client_id__chart_of_accounts_sync_post: {
+        parameters: {
+            query?: {
+                /** @description Ignora a validade de 24 h e rebusca da origem. */
+                force?: boolean;
+            };
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChartOfAccountsCoverageEnvelope"];
                 };
             };
             /** @description Validation Error */

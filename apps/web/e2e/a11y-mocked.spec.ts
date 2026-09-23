@@ -611,6 +611,89 @@ const MANY_CLIENT_USERS = Array.from({ length: 20 }, (_, i) => ({
   updated_at: '2026-07-01T12:00:00Z',
 }));
 
+/**
+ * Sprint 10 / R3 — plano de contas do cliente.
+ *
+ * As contagens abaixo são as da AMOSTRA REAL capturada no repositório
+ * (`apps/api/tests/fixtures/omie/listar_categorias.response.json`): 50
+ * categorias, 50 ativas, 37 com conta de demonstrativo, 13 sem destino
+ * declarado e 6 com conta contábil. É o cenário que o critério de aceite cobra
+ * no print — e o que prova, em browser, que as cinco contagens vêm do SERVIDOR:
+ * a página mostra 2 linhas e o bloco continua dizendo 50.
+ */
+const CHART_COVERAGE = {
+  total: 50,
+  ativas: 50,
+  comDestino: 37,
+  semDestino: 13,
+  comContaContabil: 6,
+  syncedAt: '2026-09-23T09:00:00Z',
+  syncFailedAt: null as string | null,
+};
+
+/** Com `true`, a última tentativa falhou e a última BOA é de três dias antes. */
+let chartSyncFailed = false;
+
+function chartCoverageDoCenario(): Record<string, unknown> {
+  if (!chartSyncFailed) return CHART_COVERAGE;
+  return {
+    ...CHART_COVERAGE,
+    syncedAt: '2026-09-20T12:30:00Z',
+    syncFailedAt: '2026-09-23T09:00:00Z',
+  };
+}
+
+function chartEntry(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    categoryCode: '1.01.01',
+    name: 'BPO Controller - RB',
+    parentCode: '1.01',
+    dreCode: '1.01.01',
+    dreName: 'Receita Bruta de Vendas',
+    dreLevel: 3,
+    dreSign: '+',
+    contaContabilCode: '31101',
+    totalizadora: false,
+    transferencia: false,
+    naoExibir: false,
+    status: 'ativa',
+    syncedAt: '2026-09-23T09:00:00Z',
+    ...over,
+  };
+}
+
+/**
+ * Duas linhas: uma COM destino e uma de transferência SEM destino declarado —
+ * que é o caso que a tela precisa comunicar como informação, não como pendência.
+ */
+const CHART_ENTRIES = [
+  chartEntry(),
+  chartEntry({
+    categoryCode: '0.01',
+    name: 'Transferência entre contas',
+    parentCode: null,
+    dreCode: null,
+    dreName: null,
+    dreLevel: null,
+    dreSign: null,
+    contaContabilCode: null,
+    transferencia: true,
+  }),
+];
+
+/** 20 linhas: transborda com folga em 1440×900 e em 390×844. */
+const MANY_CHART_ENTRIES = Array.from({ length: 20 }, (_, i) =>
+  chartEntry({
+    categoryCode: `3.01.${String(i).padStart(2, '0')}`,
+    name: `Categoria ${String(i).padStart(2, '0')} do plano de contas`,
+    parentCode: '3.01',
+    dreCode: i % 4 === 0 ? null : `2.01.${String(i).padStart(2, '0')}`,
+    dreName: i % 4 === 0 ? null : `Conta de demonstrativo ${i}`,
+    totalizadora: i % 4 === 0,
+    status: i % 7 === 0 ? 'inativa' : 'ativa',
+  }),
+);
+
 const MANY_GLOSSARY_ENTRIES = Array.from({ length: 20 }, (_, i) => ({
   id: `ffffffff-ffff-4fff-8fff-f00000000f${String(i).padStart(2, '0')}`,
   kind: (['categoria', 'regra', 'fornecedor'] as const)[i % 3],
@@ -939,6 +1022,34 @@ async function fulfillApi(route: Route): Promise<void> {
     });
 
   if (path === '/api/v1/auth/refresh') return json({ user: sessionUser });
+  // Plano de contas (S10/R3). As rotas LITERAIS vêm antes da lista, como no
+  // FastAPI: `/coverage` e `/sync` casariam com um `startsWith` da lista e a
+  // tela receberia um array onde espera as contagens.
+  if (path === `/api/v1/clients/${CLIENT_ID}/chart-of-accounts/coverage`) {
+    return json(chartCoverageDoCenario());
+  }
+  if (path === `/api/v1/clients/${CLIENT_ID}/chart-of-accounts/sync`) {
+    return json(chartCoverageDoCenario());
+  }
+  if (path === `/api/v1/clients/${CLIENT_ID}/chart-of-accounts`) {
+    const entries = tableListsOverflow ? MANY_CHART_ENTRIES : CHART_ENTRIES;
+    // `{ data, pagination }` é o par REAL desta rota — por isso o `fulfill`
+    // cru e não o `json()`, que envelopa em `{ data }` e produziria
+    // `{ data: { data, pagination } }`.
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: entries,
+        pagination: {
+          page: 1,
+          pageSize: 20,
+          total: entries.length,
+          totalPages: 1,
+        },
+      }),
+    });
+  }
   // Glossário do tenant (S6/R2) — rota literal ANTES do fallback paginado.
   if (path === `/api/v1/clients/${CLIENT_ID}/glossary`) {
     const entries = tableListsOverflow ? MANY_GLOSSARY_ENTRIES : GLOSSARY_ENTRIES;
@@ -1444,6 +1555,8 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   tableListsOverflow = false;
   // S9: origem ativa é o estado de partida — só o bloco de origem a troca.
   originState = 'ativa';
+  // S10: a última sincronização do plano de contas deu certo, por padrão.
+  chartSyncFailed = false;
   await page.route('**/api/v1/**', fulfillApi);
   // O `src/middleware.ts` decide navegação só pela PRESENÇA do cookie
   // `access_token` (a validação real é do backend). Um valor qualquer basta
@@ -1708,6 +1821,15 @@ const TELAS_COM_TABELA = [
     titulo: 'Glossário',
     rota: `/clientes/${CLIENT_ID}/glossario`,
     regiao: 'Glossário do cliente (rolável)',
+    usuario: (): Record<string, unknown> => CLIENT_MANAGER_USER,
+  },
+  {
+    key: 'plano-de-contas',
+    titulo: 'Plano de Contas',
+    rota: `/clientes/${CLIENT_ID}/plano-de-contas`,
+    // O rótulo da região é DIFERENTE do `<h2>` da seção de propósito: dois
+    // nomes iguais aninhados quebram o `getByRole` no strict mode.
+    regiao: 'Categorias do plano de contas (rolável)',
     usuario: (): Record<string, unknown> => CLIENT_MANAGER_USER,
   },
 ] as const;
@@ -2477,6 +2599,127 @@ for (const vp of VIEWPORTS) {
 
       await shot(page, `glossario-operador-${slugG}`);
       await analyze(page, `glossário — operador somente leitura (${vp.label})`);
+    });
+  });
+}
+
+/**
+ * Sprint 10 / R3 · R4 (FRONT 10.5) — tela "Plano de Contas" do cliente.
+ *
+ * O que só um browser mede aqui: o CSS computado das badges de situação
+ * (tokens `success`/`warning`/`muted`), o bloco de cobertura montado de verdade
+ * — e, principalmente, o CAMINHO REAL do `apiGet`, que o vitest não percorre
+ * (lá o mock é do HOOK). É este gate que pegaria um envelope `{data}` a mais na
+ * cobertura, que derrubaria a página inteira com "Application error" sem o
+ * `tsc` reclamar.
+ *
+ * O gating é o do glossário, com uma diferença: aqui a leitura TEM permissão
+ * própria (`view_client_chart_of_accounts`, ✅ nos cinco papéis), e quem some
+ * para o operador é a ação de SINCRONIZAR. Um `AccessDenied` para ele seria
+ * defeito, não segurança.
+ */
+for (const vp of VIEWPORTS) {
+  const slugP = vp.label.replace(/\s+/g, '-');
+  test.describe(`Plano de contas do cliente — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('cobertura com as CINCO contagens do servidor (R3)', async ({ page }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-de-contas`);
+
+      await expect(page.getByRole('heading', { name: 'Plano de Contas', level: 2 })).toBeVisible();
+
+      // As cinco contagens, cada uma no seu PAR — e todas vindas da rota de
+      // cobertura: a página lista 2 linhas e o bloco continua dizendo 50.
+      const cobertura: Array<[string, string]> = [
+        ['Categorias', '50'],
+        ['Ativas', '50'],
+        ['Com destino', '37'],
+        ['Sem destino declarado', '13'],
+        ['Com conta contábil', '6'],
+      ];
+      for (const [rotulo, valor] of cobertura) {
+        const termo = page.locator('dt', { hasText: new RegExp(`^${rotulo}$`) });
+        await expect(termo).toHaveCount(1);
+        await expect(termo.locator('xpath=following-sibling::dd[1]')).toContainText(valor);
+      }
+      await expect(page.getByRole('row')).toHaveCount(3); // cabeçalho + 2 linhas
+
+      // Destino ausente é INFORMAÇÃO — e aparece como tal, não como célula vazia.
+      await expect(page.getByRole('cell', { name: 'Sem destino declarado' })).toBeVisible();
+      // Se a página tivesse caído no error boundary, o axe mediria a tela de erro.
+      await expect(page.locator('#__next_error__')).toHaveCount(0);
+      await shot(page, `plano-de-contas-cobertura-${slugP}`);
+      await analyze(page, `plano de contas — cobertura (${vp.label})`);
+    });
+
+    test('busca é por CÓDIGO; não há campo de busca por nome (R3)', async ({ page }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-de-contas`);
+
+      await expect(page.getByLabel('Buscar por código')).toBeVisible();
+      await expect(page.getByLabel(/buscar por nome/i)).toHaveCount(0);
+      await expect(page.getByLabel('Filhas do código')).toBeVisible();
+
+      // O recorte vive na URL: a view é linkável e sobrevive ao F5.
+      await page.getByLabel('Buscar por código').fill('1.01');
+      await expect(page).toHaveURL(/code=1\.01/);
+    });
+
+    test('última tentativa falhou: mostra a data da última BEM-SUCEDIDA (R3)', async ({ page }) => {
+      chartSyncFailed = true;
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-de-contas`);
+
+      await expect(page.getByText('A última tentativa de sincronização falhou')).toBeVisible();
+      // Sem a data, quem lê não sabe se o dado abaixo é de ontem ou de meses atrás.
+      await expect(
+        page.getByText(/última sincronização bem-sucedida, de 20\/09\/2026/),
+      ).toBeVisible();
+      await shot(page, `plano-de-contas-falha-${slugP}`);
+      await analyze(page, `plano de contas — falha na última sincronização (${vp.label})`);
+    });
+
+    test('operador do cliente LÊ e NÃO vê a ação de sincronizar (R4/§4.9)', async ({ page }) => {
+      sessionUser = CLIENT_OPERATOR_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-de-contas`);
+
+      // A rota NÃO é negada para ele: ler é ✅ nos cinco papéis.
+      await expect(page.getByRole('heading', { name: 'Plano de Contas', level: 2 })).toBeVisible();
+      await expect(page.getByRole('cell', { name: 'BPO Controller - RB' })).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: 'Você não tem acesso a esta página' }),
+      ).toHaveCount(0);
+
+      // Ação OCULTA, não desabilitada — botão desabilitado ainda anuncia
+      // "existe algo aqui que você não pode fazer".
+      await expect(page.getByRole('button', { name: /Sincronizar/ })).toHaveCount(0);
+
+      await shot(page, `plano-de-contas-operador-${slugP}`);
+      await analyze(page, `plano de contas — operador somente leitura (${vp.label})`);
+    });
+
+    test('gerente do cliente sincroniza e a tela confirma por toast (R3)', async ({ page }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-de-contas`);
+
+      const botao = page.getByRole('button', { name: 'Sincronizar agora' });
+      await expect(botao).toBeVisible();
+      // A ação primária não pode nascer cortada na borda em 390px — o gate de
+      // a11y mede semântica, não transbordo.
+      const caixa = await botao.boundingBox();
+      const largura = page.viewportSize()?.width ?? 0;
+      expect(caixa, 'o botão de sincronizar precisa ter caixa').not.toBeNull();
+      expect(
+        (caixa?.x ?? 0) + (caixa?.width ?? 0),
+        `"Sincronizar agora" cortado na borda (${vp.label})`,
+      ).toBeLessThanOrEqual(largura);
+
+      await botao.click();
+      await expect(page.getByText('Plano de contas sincronizado.')).toBeVisible();
+      await aguardarToastEstavel(page);
+      await shot(page, `plano-de-contas-sincronizado-${slugP}`);
+      await analyze(page, `plano de contas — depois de sincronizar (${vp.label})`);
     });
   });
 }
