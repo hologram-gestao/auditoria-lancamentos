@@ -172,6 +172,7 @@ class ClientService:
             search=search,
             category_id=category_id,
             organization_id=organization_id,
+            include_legacy_origin=await self._legacy_origin_visible(),
         )
         total_pages = (total + page_size - 1) // page_size if page_size else 0
         responses = [_row_to_response(r) for r in rows]
@@ -193,10 +194,34 @@ class ClientService:
         `require_client_access` (que retorna 403/404 antes), mas mantemos o
         guard aqui para reuso fora desse contexto.
         """
-        row = await self._repo.get_detail(client_id, viewer_user_id=viewer_user_id)
+        row = await self._repo.get_detail(
+            client_id,
+            viewer_user_id=viewer_user_id,
+            include_legacy_origin=await self._legacy_origin_visible(),
+        )
         if row is None:
             raise NotFoundError("Cliente não encontrado.")
         return _row_to_response(row)
+
+    async def _legacy_origin_visible(self) -> bool:
+        """O cliente ainda não convertido (09.5) conta como origem ATIVA?
+
+        É a MESMA pergunta que `resolve_origins` responde ao operar — feita uma
+        vez por request e projetada em `WHERE`, para a derivação de
+        `origin_status` não virar uma consulta por linha da listagem.
+
+        Sem isto, a resposta do detalhe se contradizia: `connections` trazia a
+        conexão sintetizada e `origin_status`, no mesmo corpo, dizia
+        `sem_origem` — e a tela bloqueava "Nova conciliação" e "Sincronizar
+        contas" de todo cliente existente no minuto do deploy.
+
+        Sem serviço de conexões montado (construção fora da rota) a resposta é
+        `False`: sem sessão para perguntar, o estado conservador é o
+        pós-conversão.
+        """
+        if self._connections is None:  # pragma: no cover - montagem sem conexões
+            return False
+        return await self._connections.legacy_fallback_active()
 
     # ------------------------------ CREATE ----------------------------
 

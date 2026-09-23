@@ -23,10 +23,12 @@ from sqlalchemy import (
     Select,
     String,
     and_,
+    case,
     cast,
     delete,
     false,
     func,
+    literal,
     select,
     update,
 )
@@ -55,6 +57,7 @@ from app.db.models import (
     UserRole,
     UserScope,
 )
+from app.modules.client_connections.legacy_fallback import legacy_origin_available
 
 
 class ClientRow(NamedTuple):
@@ -133,8 +136,10 @@ def _manager_count_subquery() -> ScalarSelect[int]:
     )
 
 
-def _connection_counts_subqueries() -> tuple[ScalarSelect[int], ScalarSelect[int]]:
-    """(total de conexões, conexões ATIVAS) do cliente — S9 (BACK 09.4).
+def _connection_counts_subqueries(
+    *, include_legacy_origin: bool
+) -> tuple[ColumnElement[int], ColumnElement[int]]:
+    """(total de conexões, conexões ATIVAS) do cliente — S9 (BACK 09.4 + 09.5).
 
     Duas subqueries escalares e não um `JOIN`: a lista do escritório parceiro
     precisa mostrar quem está sem origem, e um join com `client_connections`
@@ -145,6 +150,18 @@ def _connection_counts_subqueries() -> tuple[ScalarSelect[int], ScalarSelect[int
     São DOIS números porque os três estados de origem precisam deles: nenhuma
     conexão (`sem_origem`), alguma ativa (`ativa`), existe mas nenhuma ativa
     (`erro`). Um contador só não distinguiria os dois últimos.
+
+    `include_legacy_origin` (09.5) faz a contagem enxergar o cliente que ainda
+    opera pelas colunas antigas: com o fallback efetivamente ligado, ele vale
+    por UMA conexão ativa — o mesmo que `resolve_origin_connections` devolve
+    para ele. Sem isso, toda a base existente responderia `sem_origem` entre o
+    deploy e o fim da conversão, e a tela bloquearia "Nova conciliação" e
+    "Sincronizar contas" de quem o backend serve normalmente. O predicado é o
+    de `legacy_fallback` — aqui não se escreve um segundo. Quem decide o
+    booleano é o service, que sabe o estado EFETIVO da flag.
+
+    É `case` e não soma: o ramo legado exige ZERO conexões gravadas
+    (precedência), então os dois nunca se acumulam.
     """
     total = aliased(ClientConnection)
     ativa = aliased(ClientConnection)
@@ -160,7 +177,13 @@ def _connection_counts_subqueries() -> tuple[ScalarSelect[int], ScalarSelect[int
         .correlate(Client)
         .scalar_subquery()
     )
-    return total_sq, ativa_sq
+    if not include_legacy_origin:
+        return total_sq, ativa_sq
+    legado = legacy_origin_available()
+    return (
+        case((legado, literal(1)), else_=total_sq),
+        case((legado, literal(1)), else_=ativa_sq),
+    )
 
 
 class _ClientRowQuery(NamedTuple):
@@ -170,13 +193,19 @@ class _ClientRowQuery(NamedTuple):
     is_favorite: Any
 
 
-def _client_row_query(viewer_user_id: UUID | None) -> _ClientRowQuery:
+def _client_row_query(
+    viewer_user_id: UUID | None, *, include_legacy_origin: bool = False
+) -> _ClientRowQuery:
     """SELECT base de UMA linha: cliente + responsável + contagens + favorito + categoria.
 
     Lista e detalhe partem DAQUI — coluna nova entra uma vez e aparece nos dois,
     na mesma posição (o mapeamento em `_to_client_row` é posicional). O join de
     exibição é só do RESPONSÁVEL (`_responsible_join_clause`): com N gerentes o
     join continua 1:1 e o cliente sai uma vez.
+
+    `include_legacy_origin` chega até `_connection_counts_subqueries`; o default
+    `False` é o estado pós-conversão (só conexões gravadas contam) — quem sabe
+    que a janela de fallback está aberta é o service, e é ele que liga.
     """
     manager = aliased(User)
     favorite = _favorite_join_for(viewer_user_id)
@@ -192,7 +221,9 @@ def _client_row_query(viewer_user_id: UUID | None) -> _ClientRowQuery:
         .correlate(Client)
         .scalar_subquery()
     )
-    connections_total_sq, connections_active_sq = _connection_counts_subqueries()
+    connections_total_sq, connections_active_sq = _connection_counts_subqueries(
+        include_legacy_origin=include_legacy_origin
+    )
     stmt = (
         select(
             Client,
@@ -247,6 +278,7 @@ class ClientRepository:
         search: str | None = None,
         category_id: UUID | None = None,
         organization_id: UUID | None = None,
+        include_legacy_origin: bool = False,
     ) -> tuple[Sequence[ClientRow], int]:
         """Lista paginada de clientes com manager + count de conciliações.
 
@@ -261,11 +293,15 @@ class ClientRepository:
             search: ILIKE em `clients.name` (case-insensitive).
             organization_id: filtro OPCIONAL da plataforma (86e36ecqz), já
                 decidido por `resolve_organization_filter` no service.
+            include_legacy_origin: o fallback da 09.5 está EFETIVAMENTE ligado?
+                Se sim, o cliente ainda não convertido conta como origem ativa
+                na derivação de `origin_status` — o mesmo que ele recebe ao
+                operar.
 
         Returns:
             Tupla `(rows, total_count)`. Total é a contagem ANTES da paginação.
         """
-        query = _client_row_query(UUID(user.id))
+        query = _client_row_query(UUID(user.id), include_legacy_origin=include_legacy_origin)
         base = query.stmt
         count_base = select(func.count(Client.id)).select_from(Client)
 
@@ -306,14 +342,22 @@ class ClientRepository:
         return rows, int(total)
 
     async def get_detail(
-        self, client_id: UUID, *, viewer_user_id: UUID | None = None
+        self,
+        client_id: UUID,
+        *,
+        viewer_user_id: UUID | None = None,
+        include_legacy_origin: bool = False,
     ) -> ClientRow | None:
         """Carrega 1 cliente com manager + count — usado em endpoints de retorno.
 
         `viewer_user_id` resolve `is_favorite` para quem pede (86e34jd5a); sem
-        viewer a linha sai com `False`.
+        viewer a linha sai com `False`. `include_legacy_origin` é o mesmo da
+        listagem: o detalhe TEM de concordar com ela e com a lista de
+        `connections` do mesmo corpo.
         """
-        stmt = _client_row_query(viewer_user_id).stmt.where(Client.id == client_id)
+        stmt = _client_row_query(
+            viewer_user_id, include_legacy_origin=include_legacy_origin
+        ).stmt.where(Client.id == client_id)
         row = (await self._session.execute(stmt)).first()
         return None if row is None else _to_client_row(row)
 

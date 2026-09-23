@@ -132,8 +132,9 @@ class CreateConnectionRequest(BaseModel):
     )
     credentials: dict[str, SecretStr] = Field(
         description=(
-            "Credenciais do provedor. Para o Omie: `appKey` e `appSecret` — as "
-            "chaves aceitas são as do adaptador, e chave faltando é 422."
+            "Credenciais do provedor. Para o Omie: `app_key` e `app_secret` — as "
+            "chaves aceitas são as do adaptador (`OMIE_CREDENTIAL_KEYS`), em "
+            "snake_case, e chave faltando é 422."
         )
     )
 

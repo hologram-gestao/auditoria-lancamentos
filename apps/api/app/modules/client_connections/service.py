@@ -51,7 +51,10 @@ from app.core.exceptions import (
 )
 from app.db.models.client_connection import ClientConnection, ConnectionStatus
 from app.integrations.providers.registry import capabilities_for, get_provider
-from app.modules.client_connections.legacy_fallback import resolve_origin_connections
+from app.modules.client_connections.legacy_fallback import (
+    effective_fallback_enabled,
+    resolve_origin_connections,
+)
 from app.modules.client_connections.repository import ClientConnectionRepository
 from app.modules.client_connections.schemas import ClientConnectionResponse
 
@@ -118,6 +121,17 @@ class ClientConnectionService:
         409 `SEM_CONEXAO` no minuto do deploy.
         """
         return await resolve_origin_connections(self._db, client, settings=self._settings)
+
+    async def legacy_fallback_active(self) -> bool:
+        """A janela de conversão da 09.5 está aberta DE FATO?
+
+        Uma pergunta por request (e nenhuma consulta enquanto a flag estiver no
+        default `True`), para a derivação de `origin_status` enxergar o cliente
+        legado sem perguntar por LINHA — que é o que `resolve_origins` faria.
+        `alert=False`: isto é leitura de estado, e listar clientes não pode
+        acordar o plantão.
+        """
+        return await effective_fallback_enabled(self._db, self._settings, alert=False)
 
     async def _get_or_404(self, client: Client, connection_id: UUID) -> ClientConnection:
         connection = await self._repo.get_in_client(connection_id, client_id=client.id)
@@ -191,8 +205,15 @@ class ClientConnectionService:
             # desembrulha. O que não é auth propaga sem tocar no estado.
             if _is_auth_error(exc):
                 await self._repo.mark_connection_error(connection.id)
-                await self._db.flush()
                 await self._audit(user, client, AccessAction.CONN_TEST)
+                # **Barreira de durabilidade** (mesmo molde de
+                # `omie_posting/service.py` e de `_mark_origin_connection_error`
+                # no job). O `raise` abaixo sobe até `get_db_session`
+                # (`db/session.py`), que faz `rollback()` e re-levanta: com
+                # `flush()` no lugar deste `commit()`, o `status='erro'` E a
+                # linha de auditoria seriam DESFEITOS, a conexão ficaria `ativa`
+                # para sempre e a tela nunca ofereceria "reconectar".
+                await self._db.commit()
             raise
         await self._repo.mark_connection_checked(connection.id)
         await self._db.refresh(connection)

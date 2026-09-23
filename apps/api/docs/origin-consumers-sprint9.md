@@ -22,6 +22,7 @@ origem faria o glossário de um cliente sem Omie parar de funcionar.
 | `app/modules/client_connections/origin.py` | origem — convertido para o contrato | `build_omie_client` · `load_client_cipher` · `build_capable_client` · `build_origin_client` · `client_from_credentials` · `resolve_capable_connection` · `resolve_origin_connections` | a PORTA: resolve conexão capaz + decifra a credencial dela |
 | `app/modules/client_connections/service.py` | origem — convertido para o contrato | `load_client_cipher` · `provision_client_cipher` · `resolve_origin_connections` | CRUD de conexão: cifra e decifra a credencial DA CONEXÃO |
 | `app/modules/clients/accounts_cache.py` | origem — convertido para o contrato | `build_origin_client` | sync de contas por CONEXÃO (TTL em `client_connections.accounts_synced_at`) |
+| `app/modules/clients/repository.py` | fallback / conversão do R2 | `resolve_origin_connections` | projeta o predicado do cliente legado em `WHERE` (`legacy_origin_available`) para derivar `origin_status` sem N+1 — a MESMA decisão de `resolve_origin_connections`, em SQL. Não constrói client de provedor nem lê credencial |
 | `app/modules/clients/service.py` | origem — convertido para o contrato | `resolve_origin_connections` | detalhe (200 sempre) e sync manual (409 acionável); crypto-shredding do encerramento |
 | `app/modules/glossary/service.py` | cifra de dado do tenant — declarado, sem conversão | `load_client_cipher` · `provision_client_cipher` | cifra ENTRADAS DO GLOSSÁRIO do tenant — nada a ver com origem. Verificado em 22/09: nenhuma chamada ao provedor. NÃO converter |
 | `app/modules/omie_data/routes.py` | origem — convertido para o contrato | `build_capable_client` | categorias e lançamentos: resolve conexão capaz de `listar_lancamentos` |
@@ -38,7 +39,7 @@ origem faria o glossário de um cliente sem Omie parar de funcionar.
 - **origem — convertido para o contrato**: 9
 - **cifra de dado do tenant — declarado, sem conversão**: 4
 - **definição**: 3
-- **fallback / conversão do R2**: 1
+- **fallback / conversão do R2**: 2
 
 ## Invariante
 

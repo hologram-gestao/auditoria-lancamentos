@@ -115,6 +115,13 @@ CLASSIFICATION: tuple[Entry, ...] = (
         "sync de contas por CONEXÃO (TTL em `client_connections.accounts_synced_at`)",
     ),
     Entry(
+        "app/modules/clients/repository.py",
+        Family.FALLBACK,
+        "projeta o predicado do cliente legado em `WHERE` (`legacy_origin_available`) para "
+        "derivar `origin_status` sem N+1 — a MESMA decisão de `resolve_origin_connections`, "
+        "em SQL. Não constrói client de provedor nem lê credencial",
+    ),
+    Entry(
         "app/modules/clients/service.py",
         Family.ORIGEM,
         "detalhe (200 sempre) e sync manual (409 acionável); crypto-shredding do encerramento",

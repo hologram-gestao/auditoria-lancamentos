@@ -262,6 +262,30 @@ class TestClienteDemoNaoTocaARede:
         assert not isinstance(provider.raw_client, MockOmieClient)
 
 
+class TestDocDoContratoBateComAsChavesReais:
+    """A descrição de `credentials` é CONTRATO — vai para o OpenAPI e daí para o front.
+
+    Ela já saiu errada uma vez (`appKey`/`appSecret` em camelCase contra
+    `OMIE_CREDENTIAL_KEYS` em snake_case) e o front precisou escrever um
+    comentário corrigindo o backend. Aqui as duas fontes se olham.
+    """
+
+    def test_a_descricao_cita_exatamente_as_chaves_do_adaptador(self) -> None:
+        from app.integrations.providers.omie_adapter import OMIE_CREDENTIAL_KEYS
+        from app.modules.client_connections.schemas import CreateConnectionRequest
+
+        descricao = CreateConnectionRequest.model_fields["credentials"].description or ""
+        for chave in OMIE_CREDENTIAL_KEYS:
+            assert f"`{chave}`" in descricao, f"a descrição não cita `{chave}`"
+
+    def test_a_descricao_nao_cita_chave_em_camelcase(self) -> None:
+        from app.modules.client_connections.schemas import CreateConnectionRequest
+
+        descricao = CreateConnectionRequest.model_fields["credentials"].description or ""
+        assert "appKey" not in descricao
+        assert "appSecret" not in descricao
+
+
 class TestCredencialNaoVazaEmTexto:
     def test_secretstr_mascara_o_repr(self) -> None:
         creds = omie_credentials_payload("segredo-app-key", "segredo-app-secret")

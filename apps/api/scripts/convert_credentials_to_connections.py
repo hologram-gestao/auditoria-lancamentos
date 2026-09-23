@@ -30,9 +30,11 @@ Propriedades:
       então o 2º run converte 0 e uma interrupção no meio não duplica nada.
     - **NUNCA toca cliente encerrado** (`closed_at` preenchido): a credencial
       dele é `''` e a DEK foi destruída (§4.12).
-    - Falha permanente numa linha **não derruba o lote**: registra o `client_id`
-      no relatório e o processo termina com `exit != 0`.
-    - Relatório só com IDs e contagens — sem PII, sem credencial.
+    - Falha permanente numa linha **não derruba o lote** nem descarta o que o
+      lote já converteu (SAVEPOINT por cliente): registra o `client_id` no
+      relatório e o processo termina com `exit != 0`.
+    - Relatório só com IDs e contagens — sem PII, sem credencial — e os
+      contadores batem com o banco (nada de subtração que possa sair negativa).
 
 Runbook (nesta ordem, sem pular):
 
@@ -104,6 +106,8 @@ class ConversionStats:
     """Resultado da conversão — só IDs e contadores. NUNCA credencial."""
 
     converted: int = 0
+    #: Conexões `omie` que JÁ existiam quando o run começou (medido antes de
+    #: converter, nunca por subtração — ver `run_conversion`).
     skipped_already_converted: int = 0
     skipped_closed: int = 0
     deks_provisioned: int = 0
@@ -156,6 +160,19 @@ def _pending_clients_stmt(limit: int) -> Select[tuple[Client]]:
         )
         .order_by(Client.id)
         .limit(limit)
+    )
+
+
+async def _count_omie_connections(db: AsyncSession) -> int:
+    """Conexões `omie` já existentes — o "já convertido" do relatório."""
+    return int(
+        (
+            await db.execute(
+                select(func.count(ClientConnection.id)).where(
+                    ClientConnection.provider_type == ProviderType.OMIE.value
+                )
+            )
+        ).scalar_one()
     )
 
 
@@ -237,6 +254,13 @@ async def run_conversion(
     stats = ConversionStats()
     seen_failures: set[UUID] = set()
 
+    # Medido ANTES de converter qualquer coisa. Era uma subtração no fim
+    # (`conexões omie` menos `converted`), que podia sair NEGATIVA — e um número
+    # negativo na hora do cutover é o pior momento para o operador descobrir
+    # que não pode confiar no relatório.
+    async with session_factory() as db:
+        stats.skipped_already_converted = await _count_omie_connections(db)
+
     while True:
         async with session_factory() as db:
             pending = list((await db.execute(_pending_clients_stmt(batch_size))).scalars().all())
@@ -252,14 +276,20 @@ async def run_conversion(
 
             for client in pending:
                 try:
-                    provisioned, relinked = await _convert_one(
-                        db, client, settings=settings, kms=kms
-                    )
+                    # SAVEPOINT por cliente: o rollback da linha que falha não
+                    # pode levar junto os clientes já convertidos NESTE lote.
+                    # Com `rollback()` na sessão inteira o dado até convergia
+                    # (o `while` reprocessava os descartados no lote seguinte),
+                    # mas o RELATÓRIO mentia — `converted` já os tinha contado.
+                    # E o relatório é a evidência operacional do runbook.
+                    async with db.begin_nested():
+                        provisioned, relinked = await _convert_one(
+                            db, client, settings=settings, kms=kms
+                        )
                 except Exception:
                     # `except Exception` e não um tipo específico: sob anyio o
                     # erro do KMS pode vir dentro de um ExceptionGroup, e o que
                     # importa aqui é não parar o lote por causa de uma linha.
-                    await db.rollback()
                     seen_failures.add(client.id)
                     stats.failed_client_ids.append(str(client.id))
                     # Só o ID — a mensagem pode carregar contexto do ciphertext.
@@ -279,16 +309,6 @@ async def run_conversion(
             (
                 await db.execute(select(func.count(Client.id)).where(Client.closed_at.is_not(None)))
             ).scalar_one()
-        )
-        stats.skipped_already_converted = int(
-            (
-                await db.execute(
-                    select(func.count(ClientConnection.id)).where(
-                        ClientConnection.provider_type == ProviderType.OMIE.value
-                    )
-                )
-            ).scalar_one()
-            - stats.converted
         )
     log.info("conversion_done", **stats.as_report())
     return stats

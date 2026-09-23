@@ -175,14 +175,25 @@ async def get_omie_lancamentos(
     cache: OmieLancamentoCache = request.app.state.omie_lancamento_cache
     service = OmieLancamentoService(ReviewRepository(db), cache)
 
-    # S9 (BACK 09.6): a conexão capaz é resolvida ANTES da fábrica — cliente
-    # sem origem recebe o 409 da taxonomia, não um 500 de credencial nula.
-    omie_client = await build_capable_client(
-        db, client, Capability.LISTAR_LANCAMENTOS, settings=settings
-    )
+    async def build_client() -> OmieClient:
+        """S9 (BACK 09.6): resolve a conexão capaz de LISTAR_LANCAMENTOS.
+
+        DENTRO da fábrica, como no endpoint de categorias acima — e não antes
+        da chamada. O serviço só a invoca no MISS do cache, e o `aclose()` mora
+        no `finally` logo abaixo dela: construir por fora deixaria o
+        `httpx.AsyncClient` aberto sem dono a cada cache HIT (num processo
+        Cloud Run de vida longa, §10), pagaria o unwrap da DEK no KMS em toda
+        request, e faria o 409 de origem estourar numa request que o cache
+        resolveria sozinho. Esta rota é a da tela de revisão — hit é o caso
+        comum.
+        """
+        return await build_capable_client(
+            db, client, Capability.LISTAR_LANCAMENTOS, settings=settings
+        )
+
     items = await service.fetch_lancamentos(
         session_id=session_id,
         omie_ids=parsed_ids,
-        omie_client_factory=lambda: omie_client,
+        omie_client_factory=build_client,
     )
     return OmieLancamentoListResponse(data=items)

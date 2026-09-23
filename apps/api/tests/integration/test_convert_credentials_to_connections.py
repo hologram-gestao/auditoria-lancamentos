@@ -48,14 +48,18 @@ from app.db.models import (
     UserRole,
 )
 from app.modules.client_connections.legacy_fallback import (
+    SYNTHETIC_LABEL,
     count_pending_conversion,
     effective_fallback_enabled,
     is_synthetic,
     legacy_credentials,
     resolve_origin_connections,
 )
+from app.modules.clients.repository import ClientRepository
+from app.modules.clients.schemas import OriginStatus, derive_origin_status
 
 if TYPE_CHECKING:
+    from httpx import AsyncClient
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 pytestmark = pytest.mark.integration
@@ -267,6 +271,52 @@ class TestConversao:
                 for conexao in conexoes:
                     assert conexao.credentials_encrypted is not None
                     assert conexao.status == ConnectionStatus.ATIVA.value
+            await outer.rollback()
+
+    async def test_falha_no_meio_do_lote_nao_derruba_os_bons_nem_mente_no_relatorio(
+        self, db_engine: AsyncEngine
+    ) -> None:
+        """SAVEPOINT por cliente (retrabalho R1).
+
+        Antes, a linha que falhava dava `rollback()` na sessão do LOTE INTEIRO:
+        os clientes já convertidos naquele lote eram descartados, mas
+        `stats.converted` já os havia contado. O dado até convergia (o `while`
+        reprocessava os descartados), só o RELATÓRIO mentia — e ele é a
+        evidência operacional do runbook, lida justamente na hora do cutover.
+
+        Os 3 clientes cabem num lote só (`batch_size` padrão = 100) e um deles
+        tem ciphertext que não decifra. As duas asserções que só o savepoint
+        satisfaz: `converted` bate com as linhas REAIS em `client_connections`,
+        e `skipped_already_converted` não sai negativo.
+        """
+        settings = get_settings()
+        async with db_engine.connect() as conn:
+            outer = await conn.begin()
+            factory = async_sessionmaker(
+                bind=conn, expire_on_commit=False, join_transaction_mode="create_savepoint"
+            )
+            async with factory() as s:
+                admin = await _admin(s, email="conv7@hologram.com.br")
+                bons = [
+                    await _seed_bare_client(s, creator=admin, name=f"Bom {i}") for i in range(2)
+                ]
+                # Ciphertext inválido: `_convert_one` levanta na decifragem.
+                podre = await _seed_bare_client(s, creator=admin, name="Podre")
+                podre.omie_app_key_encrypted = "LIXO-QUE-NAO-DECIFRA"
+                await s.commit()
+
+            stats = await run_conversion(session_factory=factory, settings=settings)
+
+            assert stats.failed_client_ids == [str(podre.id)]
+            assert stats.converted == 2
+            # Nunca negativo: medido ANTES do run, não por subtração.
+            assert stats.skipped_already_converted == 0
+
+            async with factory() as s:
+                conexoes = (await s.execute(select(ClientConnection))).scalars().all()
+                # O contador do relatório bate com o banco — o ponto da reprovação.
+                assert len(conexoes) == stats.converted
+                assert {c.client_id for c in conexoes} == {c.id for c in bons}
             await outer.rollback()
 
     async def test_cache_de_contas_passa_a_apontar_para_a_conexao(
@@ -512,3 +562,145 @@ class TestPromocaoSoPorVerificacao:
         assert await count_pending_conversion(db_session) == 0
         conexoes = await resolve_origin_connections(db_session, client, settings=settings)
         assert [c.id for c in conexoes] == [real.id]
+
+
+class TestEstadoDeOrigemDoClienteLegado:
+    """O ESTADO que a UI lê, não só o caminho de operação (retrabalho R1).
+
+    O fallback mantinha o cliente legado OPERANDO, mas `origin_status` — que a
+    lista e o detalhe devolvem e a tela usa para liberar "Nova conciliação" e
+    "Sincronizar contas" — era derivado de uma contagem que só olhava
+    `client_connections`. Resultado: no minuto do deploy, todo cliente que já
+    usava o sistema aparecia como `sem_origem` e parava PELA UI, embora o
+    backend o servisse normalmente.
+    """
+
+    async def test_a_derivacao_enxerga_o_legado_e_para_quando_promovido(
+        self, db_session: AsyncSession
+    ) -> None:
+        """As duas pontas do interruptor, na MESMA linha do banco.
+
+        Por que a ponta "promovido" é testada aqui e não pela API: promoção
+        significa `count_pending_conversion() == 0`, e um cliente que o fallback
+        sintetizaria é pendente POR DEFINIÇÃO — os dois estados não coexistem
+        numa request. O que a API pode provar é a continuidade no cutover, e é
+        o teste seguinte.
+        """
+        admin = await _admin(db_session, email="orig1@hologram.com.br")
+        legado = await _seed_bare_client(db_session, creator=admin, name="Legado")
+        repo = ClientRepository(db_session)
+
+        com_fallback = await repo.get_detail(legado.id, include_legacy_origin=True)
+        promovido = await repo.get_detail(legado.id, include_legacy_origin=False)
+        assert com_fallback is not None
+        assert promovido is not None
+        assert (
+            derive_origin_status(
+                total=com_fallback.connections_total, active=com_fallback.connections_active
+            )
+            == OriginStatus.ATIVA
+        )
+        assert (
+            derive_origin_status(
+                total=promovido.connections_total, active=promovido.connections_active
+            )
+            == OriginStatus.SEM_ORIGEM
+        )
+
+    async def test_o_cutover_nao_pisca_o_estado(self, db_session: AsyncSession) -> None:
+        """Antes da conversão (fallback ligado) e depois dela (promovido), o
+        MESMO cliente responde `ativa` — a continuidade é o ponto do R2."""
+        admin = await _admin(db_session, email="orig2@hologram.com.br")
+        legado = await _seed_bare_client(db_session, creator=admin, name="Atravessa o cutover")
+        repo = ClientRepository(db_session)
+
+        antes = await repo.get_detail(legado.id, include_legacy_origin=True)
+        assert antes is not None
+        assert antes.connections_active == 1
+
+        # A conversão grava a conexão real; a partir daí o fallback é dispensável.
+        db_session.add(
+            ClientConnection(
+                client_id=legado.id,
+                provider_type="omie",
+                label=SYNTHETIC_LABEL,
+                status=ConnectionStatus.ATIVA.value,
+            )
+        )
+        await db_session.flush()
+
+        depois = await repo.get_detail(legado.id, include_legacy_origin=False)
+        assert depois is not None
+        assert (
+            derive_origin_status(total=depois.connections_total, active=depois.connections_active)
+            == OriginStatus.ATIVA
+        )
+
+    async def test_encerrado_com_colunas_preenchidas_continua_sem_origem(
+        self, db_session: AsyncSession
+    ) -> None:
+        """A contagem herda a exclusão do fallback: encerrado não sintetiza."""
+        from datetime import UTC, datetime
+
+        admin = await _admin(db_session, email="orig3@hologram.com.br")
+        encerrado = await _seed_bare_client(db_session, creator=admin, name="Encerrado")
+        encerrado.closed_at = datetime.now(UTC)
+        await db_session.flush()
+
+        row = await ClientRepository(db_session).get_detail(
+            encerrado.id, include_legacy_origin=True
+        )
+        assert row is not None
+        assert (
+            derive_origin_status(total=row.connections_total, active=row.connections_active)
+            == OriginStatus.SEM_ORIGEM
+        )
+
+    async def test_lista_e_detalhe_concordam_pela_api(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """A regressão de ponta a ponta: `GET /clients` e `GET /clients/{id}`.
+
+        O detalhe é o caso que mais doía — ele já trazia a conexão SINTETIZADA
+        em `connections` enquanto `origin_status`, no MESMO corpo, dizia
+        `sem_origem`.
+
+        Sem `respx`: o `omie_accounts_synced_at` fresco faz o cache bater, então
+        qualquer chamada HTTP real quebraria o teste.
+        """
+        from datetime import UTC, datetime
+
+        admin = await _admin(db_session, email="orig4@hologram.com.br")
+        legado = await _seed_bare_client(db_session, creator=admin, name="Legado na tela")
+        legado.omie_accounts_synced_at = datetime.now(UTC)
+        await db_session.flush()
+
+        login = await client_with_db.post(
+            "/api/v1/auth/login",
+            json={"email": "orig4@hologram.com.br", "password": "Senh@Forte#1"},
+        )
+        assert login.status_code == 200, login.text
+
+        lista = await client_with_db.get("/api/v1/clients?page=1&pageSize=50")
+        assert lista.status_code == 200, lista.text
+        por_nome = {c["name"]: c["origin_status"] for c in lista.json()["data"]}
+        assert por_nome["Legado na tela"] == OriginStatus.ATIVA.value
+
+        detalhe = await client_with_db.get(f"/api/v1/clients/{legado.id}")
+        assert detalhe.status_code == 200, detalhe.text
+        corpo = detalhe.json()
+        assert corpo["origin_status"] == OriginStatus.ATIVA.value
+        # E o corpo não se contradiz mais consigo mesmo.
+        assert len(corpo["connections"]) == 1
+        assert corpo["connections"][0]["status"] == ConnectionStatus.ATIVA.value
+        # A conexão sintetizada continua sem existir no banco.
+        gravadas = (
+            (
+                await db_session.execute(
+                    select(ClientConnection).where(ClientConnection.client_id == legado.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert gravadas == []

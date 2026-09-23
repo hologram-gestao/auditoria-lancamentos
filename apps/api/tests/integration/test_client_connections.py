@@ -33,6 +33,7 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 import respx
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 
 from app.core.config import get_settings
@@ -53,10 +54,13 @@ from app.db.models import (
     UserRole,
     UserScope,
 )
+from app.db.session import get_db_session
 from app.integrations.omie.mock_client import FAKE_DEMO_KEY_PREFIX
+from app.main import app as fastapi_app
 
 if TYPE_CHECKING:
-    from httpx import AsyncClient
+    from collections.abc import AsyncGenerator
+
     from sqlalchemy.ext.asyncio import AsyncSession
 
 PLAIN_PASSWORD = "Senh@ForteParaTeste#1"
@@ -193,6 +197,43 @@ async def _audited_conn_actions(session: AsyncSession, client_id: UUID) -> list[
 
 def _base(client_id: UUID) -> str:
     return f"/api/v1/clients/{client_id}/connections"
+
+
+@pytest.fixture
+async def client_with_request_rollback(db_session: AsyncSession) -> AsyncGenerator[AsyncClient]:
+    """Como `client_with_db`, mas com a POLÍTICA REAL de transação por request.
+
+    A fixture padrão (`conftest.client_with_db`) injeta um override de
+    `get_db_session` que é um gerador simples, **sem** o `except: rollback()` de
+    `app/db/session.py`. Por isso ela não consegue provar nada sobre o que
+    sobrevive a uma request que termina em exceção: tudo o que o handler deu
+    `flush()` continua visível no teste, mesmo que em produção o rollback já o
+    tivesse desfeito.
+
+    Este override copia a política de produção — `yield` → `commit()`, exceção →
+    `rollback()` e re-levanta — sobre a MESMA session da fixture. Como ela roda
+    com `join_transaction_mode="create_savepoint"`, o `commit()` da aplicação
+    libera o savepoint (o dado fica visível para o teste e morre no teardown) e
+    o `rollback()` seguinte volta só até o savepoint NOVO, sem desfazê-lo. É
+    exatamente a diferença que o defeito da 09.3 explorava.
+    """
+
+    async def _override() -> AsyncGenerator[AsyncSession]:
+        try:
+            yield db_session
+            await db_session.commit()
+        except Exception:
+            await db_session.rollback()
+            raise
+
+    fastapi_app.dependency_overrides[get_db_session] = _override
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=fastapi_app), base_url="http://test"
+        ) as ac:
+            yield ac
+    finally:
+        fastapi_app.dependency_overrides.pop(get_db_session, None)
 
 
 class TestCriarConexao:
@@ -475,6 +516,64 @@ class TestTestarConexao:
         assert await _login_as(client_with_db, ADMIN_EMAIL) == 200
         resp = await client_with_db.post(f"{_base(w.client.id)}/{uuid4()}/test")
         assert resp.status_code == 404, resp.text
+
+    @respx.mock
+    async def test_marcacao_de_erro_sobrevive_ao_rollback_da_request(
+        self, client_with_request_rollback: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """A marcação `erro` + a auditoria precisam ser DURÁVEIS, não só flushadas.
+
+        O `raise` do `test_connection` sobe até `get_db_session`, que dá
+        `rollback()` e re-levanta. Com `flush()` no lugar do `commit()`, esta
+        request deixaria a conexão `ativa` para sempre: a tela nunca mostraria
+        "origem com erro" e nunca ofereceria reconectar. O teste roda sob
+        `client_with_request_rollback` justamente porque a fixture padrão não
+        aplica o rollback e passaria verde com o defeito.
+        """
+        w = await _seed_world(db_session)
+        assert await _login_as(client_with_request_rollback, ADMIN_EMAIL) == 200
+        criada = await client_with_request_rollback.post(
+            _base(w.client.id),
+            json={"provider_type": "omie", "credentials": DEMO_CREDENTIALS},
+        )
+        assert criada.status_code == 201, criada.text
+        connection_id = UUID(criada.json()["data"]["id"])
+
+        # Credencial REAL na linha: é o caminho de rede, que o respx recusa.
+        connection = (await _connections_of(db_session, w.client.id))[0]
+        await db_session.refresh(w.client)
+        cipher = await load_client_cipher(w.client, settings=get_settings())
+        envelope, iv = cipher.encrypt(
+            json.dumps(REAL_CREDENTIALS, ensure_ascii=False, sort_keys=True),
+            field_locator(AAD_CONNECTION_CREDENTIALS, connection.id),
+        )
+        connection.credentials_encrypted = envelope
+        connection.credentials_iv = iv
+        await db_session.commit()
+
+        respx.post(_omie_url("geral", "clientes")).mock(
+            return_value=httpx.Response(200, json=_OMIE_AUTH_FAULT)
+        )
+        resp = await client_with_request_rollback.post(f"{_base(w.client.id)}/{connection_id}/test")
+        assert resp.status_code >= 400, resp.text
+
+        # Releitura do ZERO (a sessão passou por um rollback): nada de cache de
+        # identidade mascarando o estado real da linha.
+        db_session.expunge_all()
+        relida = (
+            await db_session.execute(
+                select(ClientConnection).where(ClientConnection.id == connection_id)
+            )
+        ).scalar_one()
+        assert relida.status == ConnectionStatus.ERRO.value
+        assert relida.credentials_encrypted == envelope
+
+        testes_auditados = [
+            row
+            for row in await _audited_conn_actions(db_session, w.client.id)
+            if row.action == "conn_test"
+        ]
+        assert len(testes_auditados) == 1
 
 
 class TestAlterarERemover:

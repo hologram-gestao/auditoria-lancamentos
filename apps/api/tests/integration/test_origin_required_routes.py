@@ -386,3 +386,66 @@ class TestCarimboPorConexao:
         )
         assert cache
         assert {row.connection_id for row in cache} == {carimbadas[0].id}
+
+
+class TestCacheHitNaoResolveOrigem:
+    """`/omie-data/lancamentos` em cache HIT não constrói client (retrabalho R1).
+
+    A migração da 09.6 tinha invertido o contrato desta rota: o client era
+    construído ANTES da chamada e entregue como `lambda: omie_client`. O serviço
+    só invoca a fábrica no MISS — e o `aclose()` mora no `finally` logo abaixo
+    dela. Em cache HIT, portanto, o `OmieClient` (com o `httpx.AsyncClient`
+    dentro) nascia e nunca era fechado, o unwrap da DEK no KMS passava a
+    acontecer em toda request, e o 409 de origem estourava numa request que o
+    cache resolveria sozinho.
+
+    Este é o teste de ROTA — o companheiro unitário
+    (`tests/unit/test_omie_lancamentos_cache_hit.py`) prova o outro lado: que o
+    serviço só chama a fábrica no miss, e que ela e a do endpoint de categorias
+    têm a MESMA assinatura.
+    """
+
+    async def test_cache_quente_responde_200_sem_tocar_na_origem(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from decimal import Decimal
+
+        from app.integrations.omie.lancamento_cache import OmieLancamentoData
+        from app.main import app as fastapi_app
+        from app.modules.omie_data import routes as omie_data_routes
+
+        admin = await _seed_admin(db_session)
+        # Cliente SEM origem de propósito: se a rota resolvesse a conexão no
+        # hit, este cenário devolveria 409 — a terceira consequência descrita
+        # na reprovação.
+        client = await _seed_client_sem_origem(db_session, admin)
+        sess = await _seed_session(db_session, client, admin)
+        assert await _login(client_with_db) == 200
+
+        # Cache quente: escrita direta no L1 (o singleton de `app.state`, criado
+        # em `create_app` e não no lifespan). Popular pela API exigiria rede.
+        cache = fastapi_app.state.omie_lancamento_cache
+        cache._l1[(client.id, 4242)] = OmieLancamentoData(
+            omie_id=4242,
+            transaction_date=date(2026, 4, 10),
+            description="Compra em cache",
+            amount=Decimal("10.00"),
+            supplier=None,
+            category=None,
+            status="conciliado",
+        )
+
+        async def _nao_deveria_resolver(*args: object, **kwargs: object) -> object:
+            raise AssertionError("cache hit resolveu a origem")
+
+        monkeypatch.setattr(omie_data_routes, "build_capable_client", _nao_deveria_resolver)
+
+        resp = await client_with_db.get(
+            "/api/v1/omie-data/lancamentos",
+            params={"ids": "4242", "sessionId": str(sess.id)},
+        )
+        assert resp.status_code == 200, resp.text
+        assert len(resp.json()["data"]) == 1

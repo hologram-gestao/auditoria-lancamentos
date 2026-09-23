@@ -39,10 +39,10 @@ efetivo sai no log de startup.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid5
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import ColumnElement, Select, and_, func, select
 
 from app.core.crypto_service import (
     AAD_CLIENT_APP_KEY,
@@ -75,6 +75,19 @@ _SYNTHETIC_NAMESPACE = UUID("6f1b2f2a-9a4e-5c1e-8f3d-2b7c4a5d6e70")
 SYNTHETIC_LABEL = "Omie"
 
 
+#: As colunas antigas de credencial, em UM lugar só. O predicado Python
+#: (`_has_legacy_credentials`) e os predicados SQL (`_filled`) leem DAQUI — sem
+#: isso, "tem credencial legada" seria escrito três vezes e divergiria na
+#: primeira mudança. Os nomes só podem aparecer neste arquivo: o gate
+#: `tests/unit/test_legacy_credential_columns_gate.py` reprova o resto do app.
+_LEGACY_CIPHERTEXT_COLUMNS = (
+    Client.omie_app_key_encrypted,
+    Client.omie_app_secret_encrypted,
+)
+_LEGACY_IV_COLUMNS = (Client.omie_app_key_iv, Client.omie_app_secret_iv)
+_LEGACY_CREDENTIAL_COLUMNS = _LEGACY_CIPHERTEXT_COLUMNS + _LEGACY_IV_COLUMNS
+
+
 def _has_legacy_credentials(client: Client) -> bool:
     """As 4 colunas antigas estão preenchidas de verdade?
 
@@ -82,12 +95,12 @@ def _has_legacy_credentials(client: Client) -> bool:
     dele foi destruída e não há o que decifrar. `None` é o cliente da Sprint 9,
     que nunca teve credencial ali.
     """
-    return bool(
-        client.omie_app_key_encrypted
-        and client.omie_app_key_iv
-        and client.omie_app_secret_encrypted
-        and client.omie_app_secret_iv
-    )
+    return all(getattr(client, column.key) for column in _LEGACY_CREDENTIAL_COLUMNS)
+
+
+def _filled(columns: tuple[Any, ...]) -> ColumnElement[bool]:
+    """Versão SQL de "preenchida de verdade": nem `NULL`, nem `''`."""
+    return and_(*[and_(column.is_not(None), column != "") for column in columns])
 
 
 def clients_pending_conversion() -> Select[tuple[int]]:
@@ -95,6 +108,12 @@ def clients_pending_conversion() -> Select[tuple[int]]:
 
     A MESMA consulta do `--verify` e do `lifespan` — uma só, para que "a
     conversão terminou" signifique a mesma coisa nos dois lugares.
+
+    Olha só o CIPHERTEXT, e não o par completo com os IVs (ao contrário de
+    `legacy_origin_available`), de propósito: linha com ciphertext e IV nulo é
+    corrupção, e ela tem de continuar contando como PENDENTE — assim o
+    `--verify` sai FAIL barulhento em vez de promover o fallback por cima de um
+    cliente que ninguém consegue decifrar.
     """
     ja_convertido = (
         select(ClientConnection.id)
@@ -107,12 +126,34 @@ def clients_pending_conversion() -> Select[tuple[int]]:
     )
     return select(func.count(Client.id)).where(
         Client.closed_at.is_(None),
-        Client.omie_app_key_encrypted.is_not(None),
-        Client.omie_app_key_encrypted != "",
-        Client.omie_app_secret_encrypted.is_not(None),
-        Client.omie_app_secret_encrypted != "",
+        _filled(_LEGACY_CIPHERTEXT_COLUMNS),
         ~ja_convertido,
     )
+
+
+def legacy_origin_available() -> ColumnElement[bool]:
+    """Espelho SQL do ramo que SINTETIZA em `resolve_origin_connections`.
+
+    Existe porque o ESTADO da origem (`origin_status`, que a lista e o detalhe
+    devolvem e a tela usa para liberar "Nova conciliação" e "Sincronizar") é
+    derivado por contagem, na MESMA query da listagem — e uma contagem que só
+    olha `client_connections` diria `sem_origem` para todo cliente legado entre
+    o deploy e o fim da conversão, justamente o cenário que este módulo existe
+    para evitar. Derivar o estado chamando `resolve_origin_connections` por
+    linha seria um N+1 na carteira inteira.
+
+    As condições são as MESMAS do fallback, na mesma ordem: aberto, par
+    completo de colunas preenchido e **nenhuma** conexão gravada (precedência —
+    quem tem conexão usa conexão). Quem ligar/desligar é o chamador, com o
+    veredito de `effective_fallback_enabled`.
+    """
+    tem_conexao = (
+        select(ClientConnection.id)
+        .where(ClientConnection.client_id == Client.id)
+        .correlate(Client)
+        .exists()
+    )
+    return and_(Client.closed_at.is_(None), _filled(_LEGACY_CREDENTIAL_COLUMNS), ~tem_conexao)
 
 
 async def count_pending_conversion(db: AsyncSession) -> int:
@@ -120,7 +161,9 @@ async def count_pending_conversion(db: AsyncSession) -> int:
     return int((await db.execute(clients_pending_conversion())).scalar_one())
 
 
-async def effective_fallback_enabled(db: AsyncSession, settings: Settings) -> bool:
+async def effective_fallback_enabled(
+    db: AsyncSession, settings: Settings, *, alert: bool = True
+) -> bool:
     """O fallback está ligado DE FATO? (intenção contra realidade)
 
     - flag `True` → ligado, sem consultar nada.
@@ -129,12 +172,20 @@ async def effective_fallback_enabled(db: AsyncSession, settings: Settings) -> bo
       `AlertCode.LEGACY_FALLBACK` no canal de plantão. Desligar a flag antes da
       conversão terminar deixaria clientes existentes sem operar; o certo é
       avisar alto e continuar servindo.
+
+    `alert=False` para quem só está LENDO o estado (a derivação de
+    `origin_status` na lista de clientes): `send_alert` não tem throttle, e uma
+    listagem paginada não pode virar fonte de alerta de plantão. O veredito é o
+    mesmo — o que muda é quem faz barulho: o startup e o caminho de OPERAÇÃO
+    (`resolve_origin_connections`), que é onde a configuração errada importa.
     """
     if settings.LEGACY_CREDENTIALS_FALLBACK_ENABLED:
         return True
     pending = await count_pending_conversion(db)
     if pending == 0:
         return False
+    if not alert:
+        return True
 
     from app.core.alerting import Alert, AlertCode, send_alert
 
