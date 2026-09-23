@@ -14,7 +14,23 @@
  * LINHA, é um erro do lote inteiro (400), e aqui vira o silêncio da coluna.
  */
 import type { FileEntryItem } from '@/lib/api/reconciliations';
-import type { OmiePostingLineReason } from '@/lib/contracts';
+import type { ClientConnection, OmiePostingLineReason } from '@/lib/contracts';
+
+/**
+ * A origem do cliente sabe ESCREVER? (Sprint 9 / R3 · R6)
+ *
+ * Espelho literal do predicado único do servidor
+ * (`modules/client_connections/capability.py::connection_supports`): **ativa E
+ * o tipo declara a capacidade**. `inativa` e `erro` não são capazes.
+ *
+ * Capacidade é DADO (vem em `connections[].capabilities`), e é por isso que a
+ * UI consegue esconder a ação em vez de oferecê-la e receber
+ * `CAPACIDADE_AUSENTE` depois de o operador montar o lote. Quem decide continua
+ * sendo o backend — aqui só se reflete.
+ */
+export function originCanWrite(connections: readonly ClientConnection[]): boolean {
+  return connections.some((c) => c.status === 'ativa' && c.capabilities.includes('escrever'));
+}
 
 export type PostingBlockReason =
   | Extract<

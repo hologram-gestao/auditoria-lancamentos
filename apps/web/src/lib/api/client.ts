@@ -27,12 +27,24 @@ export interface ApiErrorBody {
   code: string;
   message: string;
   userMessage: string;
+  /**
+   * Dados ESTRUTURADOS do erro (Sprint 9 — `AppError.details` no backend). A
+   * chave só aparece no corpo quando tem conteúdo, e carrega **só IDs**: nome,
+   * razão social ou CNPJ aqui seria vazamento pela porta do erro (§3.15).
+   *
+   * Hoje o único produtor é o 409 de rótulo repetido de conexão, com
+   * `existingConnectionId` — é o que permite a gaveta levar o usuário até a
+   * origem que já ocupa o par, em vez de o front parsear `message`.
+   */
+  details?: Record<string, string>;
 }
 
 export class ApiError extends Error {
   readonly code: string;
   readonly userMessage: string;
   readonly status: number;
+  /** Ver `ApiErrorBody.details`. `{}` quando o servidor não mandou nada. */
+  readonly details: Record<string, string>;
 
   constructor(status: number, body: ApiErrorBody) {
     super(body.message);
@@ -40,6 +52,7 @@ export class ApiError extends Error {
     this.code = body.code;
     this.userMessage = body.userMessage;
     this.status = status;
+    this.details = body.details ?? {};
   }
 }
 

@@ -6,25 +6,40 @@
  * Extraído do antigo `ReviewHeader` para ser reusado pelo novo cabeçalho do
  * detalhe. Botão async: `disabled` + spinner enquanto gera, reabilita em
  * sucesso OU erro.
+ *
+ * S9 (R6/R7): o export enriquece nomes em tempo real, então precisa de origem
+ * capaz de listar lançamentos — e responde um dos TRÊS 409 da taxonomia quando
+ * não há. Esses três NÃO viram toast: o botão dá lugar ao estado explicativo
+ * com o caminho de saída (variante `inline`, porque isto vive num cabeçalho).
  */
 
 import { Download, Loader2 } from 'lucide-react';
+import { useState } from 'react';
 import { toast } from 'sonner';
 
+import { OriginStateBlock } from '@/components/shared/origin-state-notice';
 import { Button } from '@/components/ui/button';
 import { useExportReconciliation } from '@/hooks/use-reconciliations';
 import { ApiError, NetworkError } from '@/lib/api/client';
+import { originErrorCode, type OriginErrorCode } from '@/lib/origin-state';
 
 interface ExportReportButtonProps {
   sessionId: string;
+  clientId: string;
   /** Usado só no fallback de nome do arquivo. */
   referenceMonthLabel: string;
 }
 
-export function ExportReportButton({ sessionId, referenceMonthLabel }: ExportReportButtonProps) {
+export function ExportReportButton({
+  sessionId,
+  clientId,
+  referenceMonthLabel,
+}: ExportReportButtonProps) {
   const exportMutation = useExportReconciliation(sessionId);
+  const [originCode, setOriginCode] = useState<OriginErrorCode | null>(null);
 
   function handleExport(): void {
+    setOriginCode(null);
     exportMutation.mutate(undefined, {
       onSuccess: ({ blob, filename }) => {
         // O backend manda o nome no Content-Disposition; o fallback evita
@@ -33,8 +48,19 @@ export function ExportReportButton({ sessionId, referenceMonthLabel }: ExportRep
           filename ?? `Conciliacao_${referenceMonthLabel.replace(/[ /]/g, '-')}.xlsx`;
         triggerBrowserDownload(blob, finalName);
       },
-      onError: (err) => toast.error(resolveExportErrorMessage(err)),
+      onError: (err) => {
+        const code = originErrorCode(err);
+        if (code !== null) {
+          setOriginCode(code);
+          return;
+        }
+        toast.error(resolveExportErrorMessage(err));
+      },
     });
+  }
+
+  if (originCode !== null) {
+    return <OriginStateBlock code={originCode} clientId={clientId} variant="inline" />;
   }
 
   return (

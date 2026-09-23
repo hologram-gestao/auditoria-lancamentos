@@ -43,6 +43,24 @@ vi.mock('@/hooks/use-clients', () => ({
     params.month !== undefined ? monthState : latestState,
 }));
 
+// S9: o painel passou a montar a seção de origens, que busca as conexões por
+// conta própria. Sem este mock o `useQuery` real exigiria um QueryClient —
+// e o que esta suíte mede é o RESUMO, não a seção (que tem suíte própria).
+vi.mock('@/hooks/use-client-connections', () => ({
+  useClientConnections: () => ({
+    data: [],
+    isLoading: false,
+    isFetching: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+  useTestStoredConnection: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useCreateConnection: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUpdateConnection: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteConnection: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
+
 import { ClientDashboard } from '@/components/features/clients/client-dashboard';
 import { assertNoA11yViolations } from '@/test/a11y';
 
@@ -73,6 +91,8 @@ beforeEach(() => {
   detailState.data = {
     accounts: [{ id: 'a1' }, { id: 'a2' }],
     accounts_synced_at: '2026-06-20T09:00:00Z',
+    origin_status: 'ativa',
+    connections: [],
   };
   detailState.isLoading = false;
   detailState.isError = false;

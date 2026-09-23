@@ -66,6 +66,12 @@ interface AnomaliesTabProps {
   sessionId: string;
   /** Sessão de cartão — só ela lança no Omie (FRONT 07.6). */
   isCard: boolean;
+  /**
+   * S9 (R6): a origem ATIVA do cliente declara `escrever`? Sem isso o lote
+   * inteiro recebe `CAPACIDADE_AUSENTE` (409), então a ação nem aparece (§4.9).
+   * Ver `originCanWrite` — a UI reflete o contrato, não decide.
+   */
+  canPostToOmie: boolean;
 }
 
 type SeverityFilter = 'all' | 'critical' | 'moderate' | 'info';
@@ -75,7 +81,9 @@ const DEFAULT_PAGE_SIZE = 20;
 /** Severidade · Tipo · Linha · Origem · Status · Veredito · Ações. */
 const BASE_COLUMN_COUNT = 7;
 
-export function AnomaliesTab({ sessionId, isCard }: AnomaliesTabProps) {
+export function AnomaliesTab({ sessionId, isCard, canPostToOmie }: AnomaliesTabProps) {
+  /** Cartão **e** origem capaz de escrever — daqui em diante é este booleano. */
+  const showPosting = isCard && canPostToOmie;
   // Matriz do R4 numa consulta só (`lib/authz`), no topo da aba — cada linha
   // recebe a resposta por prop. Nada de `role === '...'` dentro de célula.
   const currentUser = useAuthStore((s) => s.user);
@@ -104,7 +112,7 @@ export function AnomaliesTab({ sessionId, isCard }: AnomaliesTabProps) {
   // Sprint 7 / FRONT 07.6 — lançamento a partir da anomalia
   // ---------------------------------------------------------------------
 
-  const semOmieQuery = useAllSemOmieEntries(sessionId, { enabled: isCard });
+  const semOmieQuery = useAllSemOmieEntries(sessionId, { enabled: showPosting });
   const semOmieById = useMemo(() => {
     const map = new Map<string, FileEntryItem>();
     semOmieQuery.data?.forEach((entry) => map.set(entry.id, entry));
@@ -118,7 +126,7 @@ export function AnomaliesTab({ sessionId, isCard }: AnomaliesTabProps) {
    */
   const entryByAnomaly = useMemo(() => {
     const map = new Map<string, FileEntryItem>();
-    if (!isCard) return map;
+    if (!showPosting) return map;
     items.forEach((anomaly) => {
       const relatedId = anomaly.related_file_entry?.id;
       if (relatedId === undefined) return;
@@ -126,7 +134,7 @@ export function AnomaliesTab({ sessionId, isCard }: AnomaliesTabProps) {
       if (entry !== undefined) map.set(anomaly.id, entry);
     });
     return map;
-  }, [items, semOmieById, isCard]);
+  }, [items, semOmieById, showPosting]);
 
   const [selectedAnomalyIds, setSelectedAnomalyIds] = useState<string[]>([]);
   const [postedEntryIds, setPostedEntryIds] = useState<string[]>([]);
@@ -163,7 +171,7 @@ export function AnomaliesTab({ sessionId, isCard }: AnomaliesTabProps) {
 
   const allSelectableSelected =
     selectableAnomalyIds.length > 0 && selectedAnomalyIds.length === selectableAnomalyIds.length;
-  const columnCount = isCard ? BASE_COLUMN_COUNT + 1 : BASE_COLUMN_COUNT;
+  const columnCount = showPosting ? BASE_COLUMN_COUNT + 1 : BASE_COLUMN_COUNT;
 
   return (
     <div className="space-y-4">
@@ -202,7 +210,7 @@ export function AnomaliesTab({ sessionId, isCard }: AnomaliesTabProps) {
         </div>
       </div>
 
-      {isCard && selectedAnomalyIds.length > 0 && (
+      {showPosting && selectedAnomalyIds.length > 0 && (
         <LancarLoteBar
           selectedCount={selectedEntries.length}
           onLaunch={() => setLaunchTargets(selectedEntries)}
@@ -214,7 +222,7 @@ export function AnomaliesTab({ sessionId, isCard }: AnomaliesTabProps) {
         <Table>
           <TableHeader>
             <TableRow>
-              {isCard && (
+              {showPosting && (
                 <TableHead className="w-10">
                   <PostingCheckbox
                     checked={allSelectableSelected}
@@ -295,9 +303,9 @@ export function AnomaliesTab({ sessionId, isCard }: AnomaliesTabProps) {
                     sessionId={sessionId}
                     anomaly={anomaly}
                     canReview={canReview}
-                    isCard={isCard}
+                    isCard={showPosting}
                     postingBlock={resolvePostingBlock(anomaly, entry, {
-                      isCard,
+                      isCard: showPosting,
                       posted: postedEntryIds,
                     })}
                     selected={selectedAnomalyIds.includes(anomaly.id)}

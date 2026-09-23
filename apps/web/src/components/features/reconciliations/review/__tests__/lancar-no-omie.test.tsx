@@ -134,7 +134,7 @@ describe('Elegibilidade — espelho declarado do servidor', () => {
 
 describe('Aba de Movimentações — cartão', () => {
   it('linha sem_omie exibe a ação e pode ser selecionada', () => {
-    render(<MovementsTab sessionId={SESSION_ID} isCard />);
+    render(<MovementsTab sessionId={SESSION_ID} isCard canPostToOmie />);
 
     const acao = launchButtons()[0];
     expect(acao).toBeDefined();
@@ -151,7 +151,7 @@ describe('Aba de Movimentações — cartão', () => {
     'linha %s tem a ação indisponível, com o motivo alcançável, e não entra na seleção',
     (_nome, over, motivo) => {
       setEntries([entry(over)]);
-      render(<MovementsTab sessionId={SESSION_ID} isCard />);
+      render(<MovementsTab sessionId={SESSION_ID} isCard canPostToOmie />);
 
       const acao = launchButtons()[0];
       expect(acao).toHaveAttribute('aria-disabled', 'true');
@@ -168,7 +168,7 @@ describe('Aba de Movimentações — cartão', () => {
 
   it('a barra de lote aparece com a contagem ao marcar uma compra', async () => {
     const ui = userEvent.setup();
-    render(<MovementsTab sessionId={SESSION_ID} isCard />);
+    render(<MovementsTab sessionId={SESSION_ID} isCard canPostToOmie />);
 
     expect(screen.queryByRole('button', { name: /Lançar 1 compra no Omie/ })).toBeNull();
     await ui.click(screen.getByRole('checkbox', { name: /Selecionar a compra de/ }));
@@ -182,7 +182,7 @@ describe('Aba de Movimentações — cartão', () => {
       entry({ id: 'e2', situation: 'ignorado' }),
       entry({ id: 'e3', description: 'Uber 998' }),
     ]);
-    render(<MovementsTab sessionId={SESSION_ID} isCard />);
+    render(<MovementsTab sessionId={SESSION_ID} isCard canPostToOmie />);
 
     await ui.click(
       screen.getByRole('checkbox', { name: /Selecionar todas as compras desta página/ }),
@@ -197,7 +197,7 @@ describe('Aba de Movimentações — cartão', () => {
       entry({ id: 'e1' }),
       entry({ id: 'e2', description: 'Assinatura anual', situation: 'ignorado' }),
     ]);
-    const view = render(<MovementsTab sessionId={SESSION_ID} isCard />);
+    const view = render(<MovementsTab sessionId={SESSION_ID} isCard canPostToOmie />);
 
     await ui.click(screen.getByRole('checkbox', { name: /Posto Shell 1234/ }));
 
@@ -208,10 +208,32 @@ describe('Aba de Movimentações — cartão', () => {
 describe('Aba de Movimentações — conta corrente', () => {
   it('não expõe seleção nem ação de lançamento em lugar nenhum', () => {
     setEntries([entry(), entry({ id: 'e2', situation: 'conciliado', omie_lancamento_id: 9001 })]);
-    render(<MovementsTab sessionId={SESSION_ID} isCard={false} />);
+    render(<MovementsTab sessionId={SESSION_ID} isCard={false} canPostToOmie />);
 
     expect(launchButtons()).toHaveLength(0);
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+  });
+});
+
+/**
+ * S9 / R6 — capacidade é DADO: a ação some quando a origem ativa do cliente não
+ * declara `escrever`, em vez de o operador montar o lote e receber
+ * `CAPACIDADE_AUSENTE` (409) no fim.
+ */
+describe('Aba de Movimentações — origem sem a capacidade de escrever (S9)', () => {
+  it('cartão + origem que não escreve: nenhuma porta de entrada de lançamento', () => {
+    setEntries([entry()]);
+    render(<MovementsTab sessionId={SESSION_ID} isCard canPostToOmie={false} />);
+
+    expect(launchButtons()).toHaveLength(0);
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+  });
+
+  it('a mesma sessão COM origem capaz volta a oferecer a ação', () => {
+    setEntries([entry()]);
+    render(<MovementsTab sessionId={SESSION_ID} isCard canPostToOmie />);
+
+    expect(launchButtons().length).toBeGreaterThan(0);
   });
 });
 

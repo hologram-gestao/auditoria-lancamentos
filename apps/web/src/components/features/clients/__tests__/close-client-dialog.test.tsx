@@ -40,6 +40,8 @@ const client: Client = {
   is_favorite: false,
   manager_count: 1,
   category: null,
+  // S9: campo obrigatório do contrato; irrelevante para esta suíte.
+  origin_status: 'ativa',
 };
 
 beforeEach(() => {

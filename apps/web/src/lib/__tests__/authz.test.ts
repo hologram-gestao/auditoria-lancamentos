@@ -6,8 +6,9 @@
  *
  * Cada célula da matriz vira um caso — inclusive **toda célula `❌`**, que é o
  * que a task cobra. O espelho no backend é
- * `apps/api/app/core/authz.py::PERMISSION_MATRIX` (13 permissões × 5 papéis);
- * se um dos dois mudar sozinho, é aqui que a divergência aparece.
+ * `apps/api/app/core/authz.py::PERMISSION_MATRIX` (14 permissões × 5 papéis
+ * desde a Sprint 9); se um dos dois mudar sozinho, é aqui que a divergência
+ * aparece.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -189,6 +190,18 @@ const MATRIX: ReadonlyArray<{
     platform: true,
     admin: true,
     manager: false,
+    clientManager: false,
+    clientOperator: false,
+  },
+  // S9 / R5: a única célula nova em que o `manager` ✅ e o `client_manager` ❌
+  // — o inverso de `manage_glossary`. É de propósito: credencial de sistema
+  // contábil é configuração do escritório, não do cliente final; e sem o
+  // gerente aqui, quem cadastra a carteira não consegue conectá-la.
+  {
+    permission: 'manage_client_connections',
+    platform: true,
+    admin: true,
+    manager: true,
     clientManager: false,
     clientOperator: false,
   },

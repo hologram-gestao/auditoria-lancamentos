@@ -51,6 +51,7 @@ import { AnomaliesTab } from '../review/anomalies-tab';
 import { GlossarySeal } from '../review/glossary-seal';
 import { MovementsTab } from '../review/movements-tab';
 import { OmieDivergencesTab } from '../review/omie-divergences-tab';
+import { originCanWrite } from '../review/omie-posting-eligibility';
 import { SummaryTab } from '../review/summary-tab';
 import { accountNameFor } from '../session-label';
 
@@ -89,6 +90,10 @@ export function SessionDetailScreen({ clientId, sessionId }: SessionDetailScreen
   }
 
   const detail = detailQuery.data;
+  // S9 (R6): lançar no Omie exige a capacidade `escrever` de uma conexão ATIVA.
+  // `capabilities` vem do contrato (é DADO, não exceção), e o predicado é o
+  // mesmo do servidor — a ação some em vez de devolver `CAPACIDADE_AUSENTE`.
+  const canPostToOmie = originCanWrite(clientQuery.data?.connections ?? []);
   // Fonte única do rótulo (86e2u513w): o breadcrumb do ClientShell deriva o
   // mesmo nome do mesmo helper — divergir aqui é mostrar duas contas diferentes
   // na mesma tela.
@@ -153,7 +158,11 @@ export function SessionDetailScreen({ clientId, sessionId }: SessionDetailScreen
           </div>
         </div>
         {!isProcessing && !isError && (
-          <ExportReportButton sessionId={sessionId} referenceMonthLabel={referenceLabel} />
+          <ExportReportButton
+            sessionId={sessionId}
+            clientId={clientId}
+            referenceMonthLabel={referenceLabel}
+          />
         )}
       </header>
 
@@ -180,13 +189,21 @@ export function SessionDetailScreen({ clientId, sessionId }: SessionDetailScreen
             </TabsList>
 
             <TabsContent value="movements">
-              <MovementsTab sessionId={sessionId} isCard={detail.account_type === 'credit_card'} />
+              <MovementsTab
+                sessionId={sessionId}
+                isCard={detail.account_type === 'credit_card'}
+                canPostToOmie={canPostToOmie}
+              />
             </TabsContent>
             <TabsContent value="divergencias">
               <OmieDivergencesTab sessionId={sessionId} />
             </TabsContent>
             <TabsContent value="anomalias">
-              <AnomaliesTab sessionId={sessionId} isCard={detail.account_type === 'credit_card'} />
+              <AnomaliesTab
+                sessionId={sessionId}
+                isCard={detail.account_type === 'credit_card'}
+                canPostToOmie={canPostToOmie}
+              />
             </TabsContent>
             <TabsContent value="resumo">
               {/* Mesma fonte única do topo — por construção os números batem. */}

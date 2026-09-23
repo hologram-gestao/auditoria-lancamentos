@@ -23,9 +23,10 @@
  */
 
 import { RefreshCw, Loader2 } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
+import { OriginStateBlock } from '@/components/shared/origin-state-notice';
 import { Button } from '@/components/ui/button';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import {
@@ -41,6 +42,7 @@ import { useClientDetail, useSyncAccounts } from '@/hooks/use-clients';
 import { readPositiveInt, useUrlState } from '@/hooks/use-url-state';
 import { ApiError } from '@/lib/api/client';
 import { formatOmieAccountType, formatSyncedAt } from '@/lib/format';
+import { isOriginError, originErrorCode } from '@/lib/origin-state';
 
 const DEFAULT_PAGE_SIZE = 20;
 const PARAM = { page: 'page', pageSize: 'pageSize' } as const;
@@ -65,11 +67,21 @@ export function BankAccountsScreen({ clientId }: { clientId: string }) {
   const safePage = Math.min(page, totalPages);
   const pageItems = accounts.slice((safePage - 1) * pageSize, safePage * pageSize);
 
+  // S9 (R7): os três códigos da taxonomia de origem NÃO viram toast — viram
+  // estado explicativo com o caminho de saída. Guardar o erro é o que permite
+  // renderizá-lo no lugar da tabela; qualquer outro erro segue no toast.
+  const [originError, setOriginError] = useState<unknown>(null);
+
   async function handleSync() {
+    setOriginError(null);
     try {
       await syncMutation.mutateAsync();
       toast.success('Contas extraídas do Omie.');
     } catch (err) {
+      if (isOriginError(err)) {
+        setOriginError(err);
+        return;
+      }
       toast.error(
         err instanceof ApiError ? err.userMessage : 'Não foi possível extrair as contas do Omie.',
       );
@@ -80,6 +92,17 @@ export function BankAccountsScreen({ clientId }: { clientId: string }) {
   // 86e36pm1z — encerrado não tem credenciais Omie: o servidor nega o sync
   // com 409 e o botão some (§4.9). O cache exibido foi purgado (lista vazia).
   const isClosed = detailQuery.data?.closed_at != null;
+  // S9 (R4/R7): sem origem ATIVA o detalhe responde 200 com zero contas, e o
+  // sync responderia 409. Oferecer "Extrair contas" aqui seria oferecer o que o
+  // servidor nega (§4.9) — o lugar de agir é a seção de origens, no painel.
+  // O código vem do `origin_status` do detalhe se ainda não houve clique, e do
+  // erro real do sync depois dele (que pode ser `CAPACIDADE_AUSENTE`, um caso
+  // que o `origin_status` sozinho não distingue).
+  const originStatus = detailQuery.data?.origin_status ?? 'sem_origem';
+  const originReady = isClosed || originStatus === 'ativa';
+  const originCode =
+    originErrorCode(originError) ??
+    (originReady ? null : originStatus === 'sem_origem' ? 'SEM_CONEXAO' : 'ORIGEM_COM_ERRO');
 
   return (
     <section aria-labelledby="accounts-heading" className="flex h-full flex-col gap-4">
@@ -92,7 +115,7 @@ export function BankAccountsScreen({ clientId }: { clientId: string }) {
             {formatSyncedAt(detailQuery.data?.accounts_synced_at)}
           </p>
         </div>
-        {!isClosed && (
+        {!isClosed && originCode === null && (
           <Button type="button" onClick={() => void handleSync()} disabled={isSyncing}>
             {isSyncing ? (
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -103,6 +126,13 @@ export function BankAccountsScreen({ clientId }: { clientId: string }) {
           </Button>
         )}
       </div>
+
+      {/* R7: a ausência/falha de origem é ESTADO e aparece ANTES da tabela —
+          com contas em cache a lista continua legível, e sem elas a tabela
+          vazia deixaria de ser ambígua ("o Omie não tem contas?"). */}
+      {!detailQuery.isLoading && !detailQuery.isError && originCode !== null && (
+        <OriginStateBlock code={originCode} clientId={clientId} />
+      )}
 
       <div className="min-h-0 flex-1" aria-busy={detailQuery.isFetching}>
         {detailQuery.isLoading ? (
@@ -124,17 +154,20 @@ export function BankAccountsScreen({ clientId }: { clientId: string }) {
         ) : total === 0 ? (
           <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed p-8 text-center">
             <p className="text-muted-foreground text-sm">
-              Nenhuma conta bancária sincronizada. Clique em &quot;Extrair contas do Omie&quot; para
-              buscá-las.
+              {originCode === null
+                ? 'Nenhuma conta bancária sincronizada. Clique em "Extrair contas do Omie" para buscá-las.'
+                : 'Nenhuma conta bancária sincronizada — este cliente ainda não tem uma origem de onde buscá-las.'}
             </p>
-            <Button type="button" onClick={() => void handleSync()} disabled={isSyncing}>
-              {isSyncing ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <RefreshCw className="h-4 w-4" aria-hidden="true" />
-              )}
-              {isSyncing ? 'Extraindo…' : 'Extrair contas do Omie'}
-            </Button>
+            {originCode === null && (
+              <Button type="button" onClick={() => void handleSync()} disabled={isSyncing}>
+                {isSyncing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                )}
+                {isSyncing ? 'Extraindo…' : 'Extrair contas do Omie'}
+              </Button>
+            )}
           </div>
         ) : (
           <TableCard>
