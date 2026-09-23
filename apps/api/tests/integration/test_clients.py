@@ -407,6 +407,33 @@ class TestTestConnection:
         assert rows == []
 
     @respx.mock
+    async def test_credencial_mock_nao_vai_para_a_rede(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """O "Testar conexão" da gaveta com credencial `FAKE_DEMO_OMIE_*` tem de
+        cair no `MockOmieClient`, como `POST /connections` já caía.
+
+        Defeito da validação humana da Sprint 9 (23/09/2026): a rota legada
+        construía `OmieClient(...)` direto, fora do adaptador que decide entre o
+        client real e o mock, e a gaveta saía para a rede com a credencial de
+        demonstração. Sem NENHUMA rota registrada no respx, qualquer chamada
+        HTTP aqui estoura `AllMockedAssertionError` — é isso que prova "sem rede".
+        """
+        await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        await _login_as(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.post(
+            "/api/v1/clients/test-connection",
+            json={
+                "omie_app_key": "FAKE_DEMO_OMIE_APP_KEY_TESTE",
+                "omie_app_secret": "FAKE_DEMO_OMIE_APP_SECRET_TESTE",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["ok"] is True
+        assert not respx.calls, "a credencial mock não pode gerar chamada HTTP"
+
+    @respx.mock
     async def test_auth_error_returns_ok_false(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:

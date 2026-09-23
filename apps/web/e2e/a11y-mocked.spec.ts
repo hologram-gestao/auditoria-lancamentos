@@ -1126,9 +1126,11 @@ async function fulfillApi(route: Route): Promise<void> {
     // devolvê-lo aqui faria a tela dele parecer certa com dado que ela nunca
     // receberia.
     const ehPlataforma = sessionUser['scope'] === 'platform';
+    // `origin_status` acompanha o `originState` do cenário: o `CLIENT_DETAIL`
+    // fixo diz `ativa`, e com ele o selo "Sem origem" da lista nunca apareceria.
     const alcance = ehPlataforma
-      ? [{ ...CLIENT_DETAIL, is_favorite: favorited }, OTHER_ORG_CLIENT]
-      : [{ ...CLIENT_DETAIL, is_favorite: favorited }];
+      ? [{ ...CLIENT_DETAIL, is_favorite: favorited, origin_status: originState }, OTHER_ORG_CLIENT]
+      : [{ ...CLIENT_DETAIL, is_favorite: favorited, origin_status: originState }];
     const org = url.searchParams.get('organizationId');
     const data = org === null ? alcance : alcance.filter((c) => c.organization.id === org);
     return json({
@@ -3366,7 +3368,8 @@ for (const vp of VIEWPORTS) {
       await expect(bloco).toContainText('Origem com erro');
       await expect(bloco).not.toContainText('Sem origem conectada');
       await expect(bloco.getByRole('button', { name: 'Reconectar' })).toBeVisible();
-      await expect(page.getByText('Com erro')).toBeVisible();
+      // `exact`: sem ele casaria também com o parágrafo "Origem com erro" (strict mode).
+      await expect(page.getByText('Com erro', { exact: true })).toBeVisible();
       await shot(page, `painel-origem-com-erro-${slug}`);
       await analyze(page, `painel com origem em erro (${vp.label})`);
 

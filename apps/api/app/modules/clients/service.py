@@ -48,9 +48,12 @@ from app.core.exceptions import (
 )
 from app.db.models import Client, ClientAssignment, OmieAccountCache, User
 from app.db.models.client_connection import ClientConnection, ProviderType
-from app.integrations.omie.client import OmieClient, OmieCredentials
+from app.integrations.omie.client import OmieCredentials
 from app.integrations.providers.base import Capability
-from app.integrations.providers.omie_adapter import omie_credentials_payload
+from app.integrations.providers.omie_adapter import (
+    build_omie_raw_client,
+    omie_credentials_payload,
+)
 from app.modules.client_connections.capability import (
     connection_supports,
     select_capable_connection,
@@ -280,39 +283,47 @@ class ClientService:
             category_id=category_id,
             organization_id=organization_id,
         )
-        await self._repo.add_client(client)
-
-        # Carteira (86e390kz8): só GERENTE entra. Quem cria sendo manager vira
-        # o RESPONSÁVEL. Admin e plataforma já alcançam tudo pela matriz e não
-        # entram na carteira — nem como responsável provisório: o cliente nasce
-        # sem responsável e o primeiro gerente adicionado assume
-        # (`add_client_manager`), ou o admin define pelo `/assign`. A carteira é
-        # intra-org (86e36ecjp): o criador só entra se for gerente DA org do cliente.
-        if await self._repo.is_active_manager(current_user_id, organization_id=organization_id):
-            assignment = ClientAssignment(
-                client_id=client.id,
-                user_id=current_user_id,
-                assigned_by=current_user_id,
-                is_primary=True,
-            )
-            await self._repo.add_assignment(assignment)
-
         tipo_conexao: str | None = None
-        if omie_app_key is not None and omie_app_secret is not None:
-            # O MESMO serviço da 09.3 — nenhum segundo caminho de escrita de
-            # credencial. Ele verifica no provedor antes de persistir; se
-            # recusar, a exceção sobe e a transação do request inteira é
-            # desfeita (o cliente recém-criado some junto).
-            if self._connections is None:  # pragma: no cover - guarda de montagem
-                raise RuntimeError("ClientService sem ClientConnectionService para criar conexão.")
-            await self._connections.create_connection(
-                client=client,
-                user=actor,
-                provider_type=ProviderType.OMIE.value,
-                label=None,
-                credentials=omie_credentials_payload(omie_app_key, omie_app_secret),
-            )
-            tipo_conexao = ProviderType.OMIE.value
+        # SAVEPOINT em volta de cliente + carteira + conexão: a credencial é
+        # verificada contra o provedor DENTRO de `create_connection`, com o
+        # cliente já em flush. Recusada, o savepoint desfaz as três escritas na
+        # hora — "recusa sem gravar" (R4) vale na sessão da request E na sessão
+        # compartilhada da fixture de teste, que não tem o `rollback()` da
+        # produção (validação humana da Sprint 9, 23/09/2026).
+        async with self._repo.savepoint():
+            await self._repo.add_client(client)
+
+            # Carteira (86e390kz8): só GERENTE entra. Quem cria sendo manager
+            # vira o RESPONSÁVEL. Admin e plataforma já alcançam tudo pela
+            # matriz e não entram na carteira — nem como responsável
+            # provisório: o cliente nasce sem responsável e o primeiro gerente
+            # adicionado assume (`add_client_manager`), ou o admin define pelo
+            # `/assign`. A carteira é intra-org (86e36ecjp): o criador só entra
+            # se for gerente DA org do cliente.
+            if await self._repo.is_active_manager(current_user_id, organization_id=organization_id):
+                assignment = ClientAssignment(
+                    client_id=client.id,
+                    user_id=current_user_id,
+                    assigned_by=current_user_id,
+                    is_primary=True,
+                )
+                await self._repo.add_assignment(assignment)
+
+            if omie_app_key is not None and omie_app_secret is not None:
+                # O MESMO serviço da 09.3 — nenhum segundo caminho de escrita
+                # de credencial. Ele verifica no provedor antes de persistir.
+                if self._connections is None:  # pragma: no cover - guarda de montagem
+                    raise RuntimeError(
+                        "ClientService sem ClientConnectionService para criar conexão."
+                    )
+                await self._connections.create_connection(
+                    client=client,
+                    user=actor,
+                    provider_type=ProviderType.OMIE.value,
+                    label=None,
+                    credentials=omie_credentials_payload(omie_app_key, omie_app_secret),
+                )
+                tipo_conexao = ProviderType.OMIE.value
 
         if self._usage_events is not None:
             await self._usage_events.emit_cliente_criado(
@@ -501,7 +512,14 @@ class ClientService:
         )
         timeout = float(self._settings.OMIE_TEST_CONNECTION_TIMEOUT_SECONDS)
         async with httpx.AsyncClient(timeout=timeout) as http:
-            omie = OmieClient(creds, self._settings, http_client=http)
+            # Pelo adaptador, não `OmieClient(...)` direto: é o ÚNICO lugar que
+            # decide entre o client real e o `MockOmieClient` (prefixo
+            # `FAKE_DEMO_OMIE_`). Construir aqui à mão fazia o "Testar conexão"
+            # da gaveta sair para a rede com a credencial mock e travar o
+            # cadastro em dev, no ambiente de demonstração e no e2e, enquanto
+            # `POST /connections` com a MESMA credencial nascia `ativa`
+            # (validação humana da Sprint 9, 23/09/2026).
+            omie = build_omie_raw_client(creds, self._settings, http_client=http)
             try:
                 await omie.listar_clientes_minimal()
             except OmieAuthError:

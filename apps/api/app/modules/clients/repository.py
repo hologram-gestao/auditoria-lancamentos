@@ -33,7 +33,7 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, AsyncSessionTransaction
 from sqlalchemy.orm import aliased, selectinload
 
 from app.core.authz import CurrentUser, reach_filter
@@ -266,6 +266,12 @@ class ClientRepository:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    def savepoint(self) -> AsyncSessionTransaction:
+        """SAVEPOINT (`begin_nested`) para o service desfazer um grupo de escritas
+        sem derrubar a transação da request — mesmo padrão de `usage_events` e do
+        job de processamento."""
+        return self._session.begin_nested()
 
     # ------------------------------ READ ------------------------------
 

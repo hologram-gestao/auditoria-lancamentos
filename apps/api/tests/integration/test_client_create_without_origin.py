@@ -253,14 +253,16 @@ class TestCadastroComOrigem:
         assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
         assert await _clients(db_session) == []
 
-    async def test_nome_ausente_e_422_sem_criar(
+    async def test_nome_ausente_e_400_sem_criar(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:
         await _seed_staff(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
         assert await _login_as(client_with_db, ADMIN_EMAIL) == 200
         resp = await client_with_db.post("/api/v1/clients", json={})
-        assert resp.status_code == 422, resp.text
-        assert "name" in resp.text
+        # Convenção da casa: 400 `VALIDATION_ERROR` genérico; o campo que faltou
+        # vai só para o log sanitizado, nunca para a resposta (86e2rtxcm).
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
         assert await _clients(db_session) == []
 
 

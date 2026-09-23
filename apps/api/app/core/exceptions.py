@@ -59,6 +59,7 @@ class ErrorCode(StrEnum):
     #: Credencial recusada por um provedor de origem (genérico; o do Omie
     #: continua sendo `OMIE_AUTH_ERROR`, que não muda de valor).
     PROVIDER_AUTH_ERROR = "PROVIDER_AUTH_ERROR"
+    CREDENTIALS_MOVED = "CREDENTIALS_MOVED"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
@@ -435,6 +436,27 @@ class IncompleteCredentialsError(ValidationAppError):
 
     default_user_message = (
         "Para atualizar as credenciais, envie tanto a App Key quanto o App Secret."
+    )
+
+
+class CredentialsMovedToConnectionsError(AppError):
+    """422 — credencial no `PATCH /clients/{id}` é o caminho antigo, e o erro diz o novo.
+
+    Sprint 9 (BACK 09.3, R5): a credencial mora em `client_connections` e a escrita
+    passa por `POST/PATCH /clients/{id}/connections`, que verifica contra o provedor
+    antes de gravar. Este erro existe como classe própria, e não como `ValueError`
+    de validador Pydantic, porque o handler global de validação responde 400 com
+    mensagem GENÉRICA de propósito (não ecoar input, 86e2rtxcm) — e o PRD exige que
+    quem ainda manda os campos antigos receba a rota nova na resposta.
+    """
+
+    code = ErrorCode.CREDENTIALS_MOVED
+    status_code = 422
+    default_user_message = (
+        "As credenciais da origem não são mais editadas por aqui. Use "
+        "POST /api/v1/clients/{id}/connections para conectar uma origem, ou "
+        "PATCH /api/v1/clients/{id}/connections/{connectionId} para trocar as "
+        "credenciais de uma existente."
     )
 
 
