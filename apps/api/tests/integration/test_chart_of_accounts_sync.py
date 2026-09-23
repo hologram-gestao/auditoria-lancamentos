@@ -443,7 +443,9 @@ class TestFalhaPreservaOQueJaHavia:
         boa = await _service(db_session).sync(client)
 
         route.mock(return_value=_omie_fault("SOAP-ENV:Client-101", "Erro do fornecedor"))
-        with pytest.raises(OmieFaultError):
+        # `SOAP-ENV:Client-101` é fault de AUTENTICAÇÃO: o client Omie o classifica
+        # como `OmieAuthError`, não `OmieFaultError` (validação humana da S10).
+        with pytest.raises((OmieFaultError, OmieAuthError)):
             await _service(db_session).sync(client, force=True)
 
         rows = await _rows(db_session, client.id)
@@ -484,7 +486,9 @@ class TestFalhaPreservaOQueJaHavia:
         client = await _seed_client(db_session)
         route = respx.post(OMIE_CATEGORIAS_URL)
         route.mock(return_value=_omie_fault("SOAP-ENV:Client-101", "Erro"))
-        with pytest.raises(OmieFaultError):
+        # `SOAP-ENV:Client-101` é fault de AUTENTICAÇÃO: o client Omie o classifica
+        # como `OmieAuthError`, não `OmieFaultError` (validação humana da S10).
+        with pytest.raises((OmieFaultError, OmieAuthError)):
             await _service(db_session).sync(client)
 
         route.mock(return_value=_omie_response(_CATALOGO))
@@ -649,7 +653,9 @@ class TestMetricaDaSprint:
             return_value=_omie_fault("SOAP-ENV:Client-101", "Erro")
         )
 
-        with pytest.raises(OmieFaultError):
+        # `SOAP-ENV:Client-101` é fault de AUTENTICAÇÃO: o client Omie o classifica
+        # como `OmieAuthError`, não `OmieFaultError` (validação humana da S10).
+        with pytest.raises((OmieFaultError, OmieAuthError)):
             await _service(db_session).sync(client)
 
         assert await _usage_events(db_session, client.id) == []
