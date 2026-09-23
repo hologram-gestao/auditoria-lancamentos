@@ -3490,3 +3490,605 @@ registrar a armadilha. **Pendente para o Pedro:** ou tirar `CLAUDE.md` do
 desnecessário), ou o hub passa a materializar o primer ANTES do `git add` dos
 gitPaths. Enquanto nenhuma das duas acontecer, **sprint em que o QA não toque no
 primer destrói o primer**.
+
+---
+
+## ADR-058-BE — O plano de contas guarda CÓDIGO; nome de conta não entra no banco nem quando a task pede (Sprint 10 / BACK 10.1)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** `db/models/client_chart_of_accounts.py`, `modules/client_chart_of_accounts/schemas.py`, `integrations/omie/schemas.py`
+
+**Contexto.** A sugestão de desenho da task listava, entre as colunas da tabela
+nova, `conta_contabil_tag` — o `tag_conta_contabil` da origem. Na resposta real
+ele é o rótulo livre da conta contábil ("RENDIMENTOS APLICAÇÕES RENDA FIXA -
+FIN"): **nome de conta**, não código.
+
+**As três fontes que decidem contra persisti-lo.** (1) O primer §4.5 mantém
+"nomes/descrições de categorias **e de contas**" fora do disco em claro; (2) o
+próprio R1 do PRD escreve a lista de persistência como "código da categoria,
+código da conta de demonstrativo, **código** da conta contábil, código da
+categoria superior, situação e as flags — tudo código e booleano, **nunca
+nome**"; (3) nenhum critério de aceite cita a coluna, e o critério que existe diz
+o contrário ("apenas com códigos, situação e flags"). A linha da task é a
+outlier.
+
+**Decisão.** O **contrato** (`CategoriaOmie`) declara `tag_conta_contabil` e
+`dadosDRE.descricaoDRE` — a origem os manda e o R1 pede que o DTO os carregue.
+A **persistência** para no código: a tabela tem `conta_contabil_code` e
+`dre_code`, e nenhuma coluna de nome. O mesmo vale para `descricao`, que nunca
+esteve em discussão. `tests/unit/test_chart_of_accounts_schema.py::test_nenhuma_coluna_de_nome_ou_descricao`
+trava a lista de nomes proibidos, e
+`test_chart_of_accounts_mapping.py::test_linha_nao_carrega_nenhum_nome` prova que
+nenhum dos três VALORES atravessa o mapeador — a checagem por nome de coluna
+sozinha não pegaria alguém enfiando a tag em `dre_sign`.
+
+**Consequência desejada:** nada na tabela é cifrado (não há PII), então nada nela
+morre no crypto-shredding do encerramento (§4.12). Ela entra em
+`close_client_purge` **explicitamente**, por ser configuração do cliente final —
+se dependêssemos da DEK, sobreviveria ao encerramento.
+
+---
+
+## ADR-059-BE — `inativa` é VALOR de `status`, não uma segunda coluna (Sprint 10 / BACK 10.1)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** `db/models/client_chart_of_accounts.py`
+
+**Contexto.** A task pedia "flags booleanas (totalizadora, transferencia,
+nao_exibir, **inativa**)" **e** "status (ativa | inativa | ausente_na_origem)".
+As duas coisas juntas guardam o mesmo fato em dois lugares.
+
+**Decisão.** Só `status`, com CHECK no banco. `inativa` é um dos três valores.
+Um `UPDATE` que mexesse em `status` e esquecesse a booleana (ou o contrário)
+deixaria as duas discordando sem nada quebrar, e a cobertura da tela (R3) passaria
+a depender de qual das duas a query consultou — exatamente a classe de defeito
+que "um único lugar calcula cada valor derivado" existe para impedir.
+`test_situacao_nao_tem_flag_booleana_gemea` trava isso.
+
+`totalizadora`, `transferencia` e `nao_exibir` continuam booleanas: são fatos
+independentes da origem, não estados do ciclo de vida da linha.
+
+---
+
+## ADR-060-BE — Duas colunas de carimbo em `clients`, e a falha NUNCA toca a de sucesso (Sprint 10 / BACK 10.1)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** `db/models/client.py`, `modules/client_chart_of_accounts/repository.py`
+
+**Decisão.** `clients.chart_of_accounts_synced_at` (última bem-sucedida) e
+`clients.chart_of_accounts_sync_failed_at` (última tentativa que falhou),
+nuláveis, no precedente de `omie_accounts_synced_at`.
+
+**Por que não derivar de `MAX(client_chart_of_accounts.synced_at)`:** cliente cujo
+cadastro de categorias está vazio deixaria o MAX em NULL, a validade de 24h nunca
+dispararia e toda abertura de tela bateria a origem. É a mesma armadilha já
+documentada na coluna irmã.
+
+**Por que DUAS e não uma:** a tela do R3 precisa dizer "falhou agora, e a última
+boa foi tal dia". Um campo só escolheria entre esquecer a falha ou mentir sobre o
+sucesso. `mark_sync_failed` grava **só** a de falha — é o que sustenta, no
+schema e não só no fluxo do serviço, o "falha preserva a última sincronização
+bem-sucedida" do R2. `mark_sync_succeeded` limpa a de falha, porque "falhou" é
+sobre a ÚLTIMA tentativa: sem a limpeza o aviso ficaria pendurado para sempre.
+
+---
+
+## ADR-061-BE — Os números do exemplo do PRD não são os da fixture: 46 ativas, não 50 (Sprint 10 / BACK 10.1)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** `tests/unit/test_chart_of_accounts_mapping.py`, `tests/unit/test_omie_fixtures.py`, métrica da sprint
+
+**O fato, lido da fixture real** (`tests/fixtures/omie/listar_categorias.response.json`,
+50 categorias da conta Hologram):
+
+| medida | valor |
+| --- | --- |
+| total de categorias | 50 |
+| **ativas** (`conta_inativa != 'S'`) | **46** |
+| com `dadosDRE.codigoDRE` (sobre o total) | 37 |
+| com `id_conta_contabil` (sobre o total) | 6 |
+| **ativas com destino** | **33** |
+| **ativas com conta contábil** | **5** |
+
+**A divergência.** O exemplo do R3 e o critério de aceite da 10.3 dizem "50
+categorias · **50 ativas** · 37 com destino · 13 sem destino declarado · 6 com
+conta contábil". São **4 categorias com `conta_inativa='S'`** na resposta real
+(`1.02.02`, `1.02.99`, `1.03.02`, `1.03.26`) — o exemplo do PRD é ilustrativo e
+não foi conferido contra a fixture.
+
+**Decisão.** Os testes afirmam os números da FIXTURE, não os do exemplo (§6.16:
+não se ajusta assertion para casar com uma expectativa; investiga-se). Os do PRD
+ficam registrados aqui como o que são: ilustração.
+
+**Consequência para a métrica da sprint.** A fórmula do outcome é *categorias
+ativas com destino ÷ categorias ativas*, e sobre a amostra real ela dá
+**33/46 = 71,7%** — não os 74% (37/50) declarados no PRD, que misturam
+numerador de ativas com denominador de total. Continua **acima do alvo de 70%**,
+mas por margem bem menor do que o PRD sugere. Quem ler o resultado em D+30
+precisa saber disso antes de concluir que a cobertura caiu.
+
+**Onde isso importa na 10.4:** o evento `plano_contas_sincronizado` carrega
+`total_categorias`, `ativas`, `com_destino` e `com_conta_contabil` — e
+`com_destino` tem de ser contado **sobre as ativas**, pelo mesmo motivo: é o
+numerador da fórmula. `coverage()` no repositório já conta as três parcelas sobre
+a MESMA base ativa, para que `com_destino + sem_destino == ativas` feche na tela.
+
+---
+
+## ADR-062-BE — `''` e `dadosDRE: {}` da origem colapsam em `None` no DTO, não no caller (Sprint 10 / BACK 10.1)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** `integrations/omie/schemas.py`
+
+**Contexto.** A resposta real de `ListarCategorias` **nunca omite uma chave**:
+manda `""` para `categoria_superior`, `id_conta_contabil` e `tag_conta_contabil`
+quando não há valor, e `dadosDRE: {}` (bloco presente e vazio) nas 13 categorias
+sem conta de demonstrativo. Raiz da hierarquia vem como `categoria_superior: "0"`
+— um código que não existe como categoria.
+
+**Decisão.** A normalização mora no DTO, em properties: `destino_code`,
+`parent_code`, `conta_contabil_code`, `is_totalizadora`, `is_transferencia`,
+`is_nao_exibir`. `dadosDRE` é `default_factory=DadosDRE` (nunca `None`), então
+não há `is not None` espalhado.
+
+**Por que isso não é cosmético.** Se `""` chegasse ao banco, "sem destino
+declarado" e "destino vazio" virariam dois estados para o mesmo fato, e a
+contagem de cobertura passaria a depender de qual deles a linha calhou de
+receber — `dre_code IS NULL` erraria em silêncio. E `parent_code = '0'` faria o
+filtro por hierarquia da 10.3 ter de conhecer uma sentinela; com `None`, todo
+valor não-nulo é um `category_code` de verdade.
+
+---
+
+## ADR-063-BE — O acessor "cru" nasce DENTRO do serviço de categorias, e `list_categorias` passa a chamá-lo (Sprint 10 / BACK 10.2)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** `modules/omie_data/categorias_service.py`, `modules/client_chart_of_accounts/service.py`
+
+**Contexto.** A persistência precisa de hierarquia, flags e da conta de
+demonstrativo; `list_categorias` devolve `OmieCategoriaItem` (código +
+descrição), que é o que o combobox usa. O cache in-memory já guardava os
+objetos `CategoriaOmie` **completos** — faltava um acessor.
+
+**Decisão.** `OmieCategoriasService.list_raw_categorias(...)` devolve a lista
+completa pelo MESMO caminho de cache/fetch, e **`list_categorias` passou a
+chamá-la** em vez de duplicar a lógica de hit/miss/invalidate. A inversão
+importa: se o acessor novo fosse uma segunda função com a mesma lógica copiada,
+um `refresh` corrigido num lado só faria a tela de revisão e a tela do plano de
+contas verem catálogos diferentes — e o "contrato fonte única" do PRD nasceria
+falso no dia 1.
+
+**O cru traz INATIVAS; `list_categorias` continua filtrando.** O plano de contas
+precisa delas (categoria inativa segue existindo e pode ter de-para na Sprint
+12); o combobox de classificação não pode oferecê-las.
+
+**Como a prova é feita.** `respx`, não contagem no `MockOmieClient`: o mock não
+abre socket, então não distinguiria "reusou o caminho" de "foi à rede por outro
+caminho". `test_chart_of_accounts_sync.py::test_uma_sincronizacao_e_uma_chamada`
+afirma `route.call_count == 1`, e `test_dentro_da_validade_nao_chama_a_origem`
+afirma que a segunda sincronização é `0` **com um serviço NOVO** (cache de 6h
+vazio) — assim quem impede a chamada só pode ser a validade de 24h da
+persistência, e não o cache in-memory.
+
+---
+
+## ADR-064-BE — Dois relógios, e o de 6h não foi tocado (Sprint 10 / BACK 10.2)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** `modules/client_chart_of_accounts/service.py`
+
+**Decisão.** `CHART_OF_ACCOUNTS_TTL = 24h` para a PERSISTÊNCIA (carimbo em
+`clients.chart_of_accounts_synced_at`), alinhado ao `CACHE_TTL` de
+`clients/accounts_cache.py`. O `DEFAULT_TTL_SECONDS = 6h` do
+`OmieCategoriasCache`, que resolve NOMES em tempo de tela, **não muda**.
+
+São perguntas diferentes: "o plano de contas gravado ainda vale?" (24h, e o
+usuário vê a data) contra "posso desenhar esse combobox sem ir à rede?" (6h, e o
+usuário não vê nada). Unificar obrigaria a escolher entre bater a origem 4x mais
+ou deixar a tela de revisão 4x mais desatualizada.
+
+**`force=True` ignora os DOIS** — invalida o cache de 6h e a validade de 24h.
+Sem invalidar o de 6h, "Sincronizar agora" logo depois de criar a categoria no
+Omie devolveria o catálogo velho e pareceria que o Omie não gravou. Há teste
+para exatamente isso (`test_force_ignora_tambem_o_cache_de_seis_horas`, no MESMO
+serviço, com o cache quente).
+
+---
+
+## ADR-065-BE — A falha marca o carimbo e COMMITA antes de re-levantar (Sprint 10 / BACK 10.2)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** `modules/client_chart_of_accounts/service.py`
+
+**Decisão.** A chamada à origem acontece ANTES de qualquer escrita de linha.
+Falhou (fault com HTTP 200, auth, timeout, 5xx): `mark_sync_failed` +
+`await db.commit()` + `raise`. O `commit` é **barreira de durabilidade**, não
+fim de unidade de trabalho — mesma razão do ADR-053-BE: a política de
+`get_db_session` é `except: rollback(); raise`, e sem ele o carimbo de falha
+morreria com a exceção e a tela nunca mostraria o aviso.
+
+**Por que não há meia-escrita para desfazer:** no ponto do erro a sessão contém
+**só** essa marcação. As três escritas do caminho feliz (upsert, marcar
+ausentes, carimbar sucesso) acontecem depois, juntas, na transação do request.
+
+**`mark_sync_failed` não toca a coluna do sucesso**, e é isso que dá o
+"preserva a última sincronização bem-sucedida" no schema e não só no fluxo.
+
+**409 de origem NÃO marca falha.** Cliente sem conexão capaz recebe
+`SEM_CONEXAO`/`ORIGEM_COM_ERRO`/`CAPACIDADE_AUSENTE` antes de qualquer tentativa
+de rede: não é a origem que falhou, é a configuração do cliente que não permite
+tentar. Carimbar `sync_failed_at` aqui poria um aviso de erro numa tela cujo
+estado certo é "conecte uma origem". Teste: `route.call_count == 0` e as duas
+colunas continuam `None`.
+
+---
+
+## ADR-066-BE — Código repetido no mesmo lote é deduplicado antes do `ON CONFLICT` (Sprint 10 / BACK 10.2)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** `modules/client_chart_of_accounts/service.py::_dedupe_by_code`
+
+**Contexto.** `listar_categorias` é paginado. Página repetida por instabilidade
+do fornecedor devolve o mesmo `codigo` duas vezes no mesmo lote — e
+`INSERT ... ON CONFLICT DO UPDATE` com a mesma chave duas vezes no MESMO comando
+é erro do Postgres (`ON CONFLICT DO UPDATE command cannot affect row a second
+time`). A sincronização inteira morreria por um problema que não é do cliente.
+
+**Decisão.** `_dedupe_by_code` mantém a ÚLTIMA ocorrência e loga
+`chart_of_accounts_duplicate_codes` (só contagens) quando houve repetição — o
+log existe para que o dia em que isso virar rotina não passe despercebido.
+
+De quebra, o upsert é quebrado em `UPSERT_CHUNK_SIZE = 1000`: 13 placeholders
+por linha contra o teto de 65.535 do protocolo do Postgres. Os pedaços rodam na
+MESMA transação — quebrar o comando não quebra a atomicidade.
+
+---
+
+## ADR-067-BE — Duas permissões novas porque as duas reutilizações plausíveis erram em direções OPOSTAS (Sprint 10 / BACK 10.3)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** `core/authz.py`, `core/dependencies.py`
+
+**Contexto.** Havia dois candidatos óbvios a reuso, e cada um quebra de um jeito
+diferente: `MANAGE_CLIENT_CATEGORIES` é `_ADMINS` — deixaria de fora o `manager`
+do escritório parceiro, que é justamente quem cadastra e conecta a carteira; e
+`SYNC_OMIE_ACCOUNTS` é `_EVERYONE` — deixaria o `client_operator` forçar
+chamadas à origem do cliente. Por isso o PRD trouxe as células decididas (R4).
+
+**Decisão.** `VIEW_CLIENT_CHART_OF_ACCOUNTS` (`_EVERYONE`) e
+`SYNC_CLIENT_CHART_OF_ACCOUNTS` (plataforma, admin, manager, client_manager —
+todos menos `client_operator`). A matriz foi de 14 para **16 permissões x 5
+papéis = 80 células**, transcritas célula a célula em `test_authz_matrix.py`; o
+teste que trava a plataforma em toda linha continua valendo.
+
+**O teste que prova que nenhuma das duas foi reusada** é o par no MESMO caso:
+`client_operator` LÊ (200) e NÃO sincroniza (403). Reusar `sync_omie_accounts`
+daria 200 nos dois; reusar `manage_client_categories` daria 403 nos dois.
+Qualquer teste que olhasse só um dos verbos passaria com a permissão errada.
+
+**"(carteira)" não é célula**, como de praxe: é `resolve_client_access`. Há teste
+nominal do gerente FORA da carteira recebendo negativa nas três rotas com a
+permissão presente.
+
+---
+
+## ADR-068-BE — Cobertura é ROTA própria, e as três parcelas saem da mesma base ativa (Sprint 10 / BACK 10.3)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** `client_chart_of_accounts/routes.py`, `repository.py::coverage`
+
+**Decisão.** `GET .../chart-of-accounts/coverage` separado da lista, com as cinco
+contagens vindo de UMA query de agregação sobre o conjunto INTEIRO.
+
+**Por que não um campo da lista:** a pergunta é sobre o CLIENTE ("quanto do
+de-para já vem pronto"), não sobre a página. Embutida na lista, a resposta
+mudaria conforme `pageSize` — e recalcular por página é a forma mais fácil de
+publicar um número que ninguém consegue reproduzir. Há teste: a cobertura é
+idêntica antes e depois de paginar.
+
+**`ativas`, `com_destino` e `sem_destino` saem da MESMA base ativa**, para que
+`com_destino + sem_destino == ativas` feche na tela. Contar "com destino" sobre
+o total (incluindo inativas e `ausente_na_origem`) faria as parcelas não
+somarem, e alguém gastaria uma tarde procurando o bug que não existe.
+
+`syncedAt` e `syncFailedAt` vão juntos na resposta: a tela precisa dizer "falhou
+agora, e a última boa foi tal dia" (ADR-060-BE).
+
+---
+
+## ADR-069-BE — Nome em runtime, em DOIS mapas separados (Sprint 10 / BACK 10.3)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** `client_chart_of_accounts/schemas.py::ResolvedNames`, `service.py::resolve_names`
+
+**Contexto.** A lista mostra o nome da categoria e o nome da conta de
+demonstrativo. Nenhum dos dois está no banco (§4.5): os dois vêm do
+`OmieCategoriasService`, o MESMO cache da tela de revisão — é isso que impede a
+tela nova de divergir da antiga.
+
+**A armadilha, achada na fixture real.** Um dicionário só `código → nome` está
+ERRADO: os dois namespaces COLIDEM. A categoria `1.01.01` chama-se "BPO
+Controller - RB" e a conta de demonstrativo `1.01.01` chama-se "Receita Bruta de
+Vendas". Com um mapa só, a coluna de destino mostraria o nome da categoria — e a
+tela pareceria perfeitamente certa. Daí `ResolvedNames(categories=..., dre=...)`,
+e um teste que afirma os dois nomes diferentes para o mesmo código.
+
+**Fail-soft por decisão de produto.** Origem indisponível devolve os dois mapas
+vazios e a lista sai com `name: null`, 200. Propagar 502/409 deixaria o plano de
+contas ilegível justamente quando o usuário mais precisa dele (a credencial
+expirou) — e códigos, destinos e cobertura são LOCAIS, continuam corretos.
+`resolve_names` usa um `_fetch_names` separado do `_fetch` da sincronização,
+porque uma rota de LEITURA não pode carimbar `sync_failed_at`: poria na tela um
+aviso de "a sincronização falhou" que nunca aconteceu.
+
+---
+
+## ADR-070-BE — O contrato regenerado desta sprint NÃO cabe no gitPaths do backend (Sprint 10 / BACK 10.3)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** operação do hub, `apps/web/src/lib/contracts/schema.ts`
+
+**O fato.** O contrato que o front consome é
+`apps/web/src/lib/contracts/schema.ts`, gerado por `gen:types`. O agent
+**backend** tem `AGENT_DENY_PREFIXES=apps/web/` e `Write(apps/api/**)` — não
+pode gravá-lo. O critério de aceite da 10.3 pede "contrato regenerado e
+commitado na MESMA task", e essa parte é fisicamente impossível para este papel.
+
+**O que foi feito no lugar:** o spec foi gerado sem subir servidor (receita do
+ADR-021-QA) e o `schema.ts` foi regenerado e comparado. Resultado: diff
+**puramente aditivo**, **312 linhas**, nenhuma linha removida ou alterada — só
+os 3 paths novos e os schemas `ChartOfAccountEntryResponse`,
+`ChartOfAccountsListResponse`, `ChartOfAccountsCoverageResponse`,
+`ChartOfAccountsCoverageEnvelope` e `ChartOfAccountsStatus`. O comando exato
+está no `HANDOFF.md` para quem tem o caminho no gitPaths.
+
+**A regra que fica** (irmã de `gitpaths-nao-cobrem-a-raiz`): quando o critério de
+aceite de uma task pede artefato fora do escopo de escrita do papel, o agent
+**verifica e entrega o comando**, e diz explicitamente que não commitou. Fingir
+que commitou é pior do que a lacuna.
+
+**Nota separada:** o primer (`PROJECT.md` §3.15) diz **68** endpoints sensíveis;
+o arquivo agora tem **71**, comprovado por
+`grep -c "SensitiveEndpoint(" app/core/sensitive_endpoints.py`. Atualizar o
+primer é do QA (ADR-025-QA).
+
+---
+
+## ADR-071-BE — A fórmula, o baseline e o alvo da métrica da Sprint 10 (BACK 10.4)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** `usage_events`, leitura D+30
+
+**O evento.** `plano_contas_sincronizado`, no enum FECHADO de
+`modules/usage_events/schemas.py`, com a whitelist de `props` **exatamente**:
+
+    { client_id, total_categorias, ativas, com_destino, com_conta_contabil }
+
+`_StrictProps` (`extra="forbid"`) recusa chave a mais na EMISSÃO. Todo campo é
+UUID ou `int` — nenhum texto, nenhuma lista de códigos. A lista de códigos sem
+destino seria a tentação óbvia "para facilitar o diagnóstico", e
+reconstituiria o desenho contábil do cliente dentro do sink de métrica.
+
+**A fórmula da leitura D+30:**
+
+    com_destino ÷ ativas
+
+lidos da **ÚLTIMA** linha por `client_id` no período.
+
+**Baseline: 0%.** Não porque não se lia categoria — `listar_categorias` existe
+desde a Sprint 7, com cache de 6h e rota própria —, mas porque **nada era
+persistido com destino**: o vínculo com a conta de demonstrativo não era sequer
+declarado no DTO (`schemas.py` trazia 3 campos).
+
+**Alvo: ≥ 70% das ativas com destino.** É PREVISÃO declarada. Origem: a amostra
+real no repositório. ⚠️ Sobre ela, a fórmula dá **33/46 = 71,7%**, e não os 74%
+(37/50) que o PRD cita — os 74% misturam numerador de ATIVAS com denominador de
+TOTAL. Continua acima do alvo, por margem bem menor. Ver ADR-061-BE.
+
+**Sem dedup, e isso é requisito, não descuido.** O evento nasce FORA de
+`DEDUPED_EVENT_NAMES` por construção (não tem `session_id`, então o índice
+parcial nem o alcança) e há teste que o mantém fora da allow-list. Se entrasse,
+a 2ª sincronização em diante sumiria e a leitura mediria a foto do primeiro dia
+para sempre — invisível, porque a linha existiria.
+
+**Onde é emitido.** No fim de TODA sincronização **bem-sucedida**, inclusive a
+forçada, dentro de `_persist`. **Não** é emitido no caminho servido do
+armazenamento local (dentro da validade de 24h): o evento marca "foi à origem e
+persistiu", não "alguém abriu a tela" — emitir ali inflaria o denominador com
+repetições idênticas. E **não** é emitido em falha.
+
+**Fail-soft, reusando o emissor que já existe.** `UsageEventService.emit` engole
+a exceção, loga sem `props`, e o `begin_nested` do repository impede que o erro
+marque a transação como abortada. Teste: com
+`UsageEventRepository.insert_ignore_duplicate` explodindo, a sincronização
+termina, as 4 linhas ficam gravadas e o carimbo de sucesso permanece. Um
+segundo canal de telemetria seria uma segunda verdade sobre o mesmo fato — por
+isso o serviço constrói o emissor por default em vez de aceitá-lo opcional e
+silenciosamente não emitir.
+
+---
+
+## ADR-030-FE — A leitura do plano de contas TEM permissão própria; o glossário não tem, e os dois estão certos (Sprint 10 / FRONT 10.5)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** `apps/web/src/lib/authz.ts`, `nav-items.tsx`
+
+**Contexto.** O espelho do front nasceu com uma regra explícita na S6: "não existe
+permissão de *ler* glossário — inventá-la aqui criaria uma regra que o backend não
+tem, e a tela negaria o que o servidor libera". A S10 chega com uma tela de leitura
+parecida e a tentação é repetir o padrão: gatear só a escrita.
+
+**Decisão.** `view_client_chart_of_accounts` **entra** no espelho, com ✅ nos cinco
+papéis. A diferença não é de gosto: o backend a DECLARA (`Permission.VIEW_CLIENT_
+CHART_OF_ACCOUNTS`, com `ViewClientChartOfAccountsDep` na rota de lista e na de
+cobertura), enquanto no glossário a leitura não tem `Depends` de permissão nenhum.
+
+**A regra que isso fixa.** O espelho copia a matriz do backend **como ela é** — não
+o formato da tela anterior. Omitir uma permissão que existe é tão divergente quanto
+inventar uma que não existe: as duas formas fazem o teste de transcrição
+(`src/lib/__tests__/authz.test.ts`) deixar de ser uma cópia e virar uma opinião.
+
+**Consequência prática.** O item "Plano de Contas" do menu do cliente é montado por
+`hasPermission(user, 'view_client_chart_of_accounts')`, mesmo com a célula aberta
+para todo mundo hoje: no dia em que ela fechar para um papel, a rota e o item somem
+JUNTOS. É o mesmo desenho dos itens de Configurações (86e36ecwa) — e é o oposto do
+"Glossário", que é incondicional porque lá não há célula para consultar.
+
+---
+
+## ADR-031-FE — "Sem destino declarado" aparece duas vezes na tela, e isso obrigou a desencontrar o locator (Sprint 10 / FRONT 10.5)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** `components/features/chart-of-accounts/`
+
+**Contexto.** A frase é do domínio e cabe nos dois lugares: é o rótulo da 4ª contagem
+do bloco de cobertura (*13 sem destino declarado*) e é o valor da célula quando
+`dreCode` é nulo. Trocar uma das duas por sinônimo pioraria a tela — a força do
+vocabulário é ele ser um só.
+
+**Decisão.** Manter a frase nos dois lugares e **recortar o locator**: no vitest,
+`getByText(label, { selector: 'dt' })`; no Playwright, `locator('dt', { hasText:
+/^rótulo$/ })` + `following-sibling::dd[1]` para provar o PAR, e `getByRole('cell')`
+para a célula. O `^...$` não é decoração: sem ele "Com destino" casa também "Com
+destino declarado" de qualquer variação futura.
+
+**Por que registrar.** É a terceira vez que o strict mode do Playwright cobra isto
+(86e36ed1d com a célula de ações, a regra do `scrollRegionLabel` ≠ rótulo de aba, e
+agora). O padrão que resolve não é renomear o produto: é **assertar o par, não o
+texto solto** — um `<dt>` sozinho não prova cobertura nenhuma, e é justamente a
+asserção frouxa que convida a renomear a tela para consertar o teste.
+
+---
+
+## ADR-032-FE — Um `<p>` irmão do `<dd>` dentro de um `<dl>` é violação SERIOUS (Sprint 10 / FRONT 10.5)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** blocos de estatística (`<dl>`)
+
+**Contexto.** O bloco de cobertura é a primeira `<dl>` do produto usada como grade de
+cartões de número. A forma natural ao escrever é `<div><dt>rótulo</dt><dd>valor</dd>
+<p>frase de apoio</p></div>` — e ela reprova o axe `definition-list` (SERIOUS): a
+`<div>` entre o `<dl>` e o par é permitida, mas dentro dela **só** `<dt>`/`<dd>`.
+
+**Decisão.** A frase de apoio vive DENTRO do `<dd>`, junto do número que ela explica
+— o que, além de válido, é o agrupamento certo para o leitor de tela (rótulo →
+valor + explicação, num anúncio só).
+
+**Onde isto foi pego.** Na camada jsdom (`assertNoA11yViolations`, dentro do
+`pnpm test:web`), não no gate em browser. Vale contra a leitura preguiçosa de que
+"o axe de verdade só roda no `web_a11y`": a camada rápida pega violação de ESTRUTURA
+(ela só não mede `color-contrast`, que jsdom não computa). Estrutura errada some no
+vitest primeiro — e custa um ciclo de gate a menos.
+
+---
+
+## ADR-026-QA — O contrato do front foi conferido REGENERANDO, não lendo (Sprint 10 / QA 10.6)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** verificação de contrato back↔front
+
+**O problema desta sprint.** O backend e o front commitaram em **worktrees
+separados**, e o artefato que os liga — `apps/web/src/lib/contracts/schema.ts` —
+só cabe no `gitPaths` do front (ADR-070-BE). Ler o diff dos dois lados e concluir
+que "parece o mesmo" é exatamente a inspeção que já deixou passar o envelope
+`data` duplicado (primer v1.36) e o `apiGet<T>` genérico acreditando no tipo
+declarado.
+
+**O que o QA fez em vez de ler.** Gerou o `openapi.json` a partir do código do
+**backend**, sem subir servidor:
+
+    uv run python -c "import json; from app.main import app; \
+      open('qa-openapi.json','w').write(json.dumps(app.openapi()))"
+
+e regerou o contrato com a MESMA ferramenta do `gen:types`
+(`openapi-typescript` 7.13.0), apontando para o arquivo em vez de
+`http://localhost:8000/openapi.json`. `diff` do resultado contra o `schema.ts`
+commitado pelo front: **vazio**. É a prova literal do critério "`gen:types` diff
+0" — e não depende de as duas branches estarem mergeadas.
+
+**A regra que fica.** Quando o contrato nasce num papel e é commitado por outro,
+o QA **regenera e faz `diff`**; "o backend descreveu e o front copiou" não é
+evidência. O dump do spec dispensa Postgres, browser e servidor — ele roda mesmo
+quando o resto do ambiente não sobe.
+
+---
+
+## ADR-027-QA — A não-divergência da Sprint 10 é provada no SERVIÇO, por três asserções diferentes (Sprint 10 / QA 10.6 — R5)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** `apps/api/tests/unit/test_chart_of_accounts_no_divergence_qa.py`
+
+**O invariante do PRD** ("um único caminho de leitura da origem; a tela de
+revisão não pode divergir da persistência nova") é sobre a relação entre **dois
+consumidores** — `GET /api/v1/omie/categorias` (revisão) e
+`GET /clients/{id}/chart-of-accounts` (tela nova). Nenhuma task de execução podia
+prová-lo sozinha, e um teste que olhasse só um dos lados passaria com a
+divergência instalada.
+
+**Por que UNITÁRIO e não de integração.** O contrato sob prova é entre duas
+camadas de leitura — não depende de banco, rota nem autorização — e as rotas já
+estão cobertas pela bateria da sprint. Decisivo no dia: **este sandbox não tem
+Postgres nem socket do Docker**, então um teste de integração escrito aqui iria
+para o commit **sem nunca ter rodado** (§6.10/§6.12). Um teste verde que prova a
+mesma lei vale mais que um teste maior que ninguém executou.
+
+**As três asserções, e por que são três:**
+
+1. **`calls == 1`** com os dois consumidores em sequência, **nas duas ordens**.
+   Uma segunda leitura da origem leva o contador a 2. A ordem inversa pega o caso
+   "a tela nova aproveita o cache, mas a antiga não". O cache por tenant continua
+   travado (dois `client_id` dão `calls == 2`): sem isso, o acessor novo viraria
+   vazamento de vocabulário contábil entre clientes.
+2. **mesmo código, mesma descrição** para todo código que os dois enxergam, com a
+   diferença de RECORTE afirmada de propósito (50 cruas contra 46 na revisão — as
+   4 categorias inativas da fixture): "não divergir" é sobre o nome do mesmo
+   código, não sobre o que cada tela lista.
+3. **a persistência não tem de onde divergir** — varredura por VALOR sobre as 50
+   linhas reais: nenhuma descrição de categoria, de conta de demonstrativo ou
+   rótulo de conta contábil atravessa `chart_of_accounts_row`. A checagem por
+   valor pega o que a inspeção de schema não pega: alguém enfiando o nome num
+   campo de código (`dre_sign`, `parent_code`).
+
+**O quarto caso, que só a fixture real revela:** `1.01.01` é DUAS coisas —
+categoria "BPO Controller - RB" e conta de demonstrativo "Receita Bruta de
+Vendas". Um mapa só de código para nome mostraria o nome errado na coluna de
+destino e a tela **pareceria certa**. Daí a asserção nominal dos dois nomes.
+
+---
+
+## ADR-028-QA — Aprovação com pendência declarada: o que este sandbox não pôde medir (Sprint 10 / QA 10.6)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** veredito da Sprint 10
+
+**O que rodou e está verde** (output citado no `HANDOFF.md`): backend
+`ruff check` + `ruff format --check` (317 arquivos) + `mypy app` (178 arquivos) +
+**1.023 testes unitários**; front `tsc --noEmit` + `eslint` + **616 testes**
+(54 arquivos, incluindo o axe de ESTRUTURA em jsdom); contrato regenerado com
+**diff 0**; lista canônica em **71** com `PENDING_ENDPOINTS` vazio; e os **8**
+testes novos do R5.
+
+**O que NÃO rodou, e o motivo — não é opinião sobre o código:**
+
+- **suíte de integração inteira** (as provas novas do plano de contas, a bateria
+  dos três atacantes e o round-trip da migration): não há Postgres em
+  `5432`/`5433` e o socket do Docker é recusado pelo sandbox
+  (`operation not permitted`);
+- **gate de a11y em browser real** (axe nos 3 temas) e o **e2e mockado** novo:
+  sem browser no host — a receita conhecida exige Docker;
+- **cenário ponta a ponta em dev com `manager` e admin**, com prints — o critério
+  do R5 que depende de stack de pé.
+
+**A regra que isto encoda** (irmã de `gate-a11y-nao-mede-layout`): falha de
+AMBIENTE não vira reprovação do executor, e também **não** vira silêncio. O
+veredito aprova o que foi verificado e **nomeia** o que ficou devendo, com o
+comando para quem tiver o ambiente. Aprovar calado é o que transforma "não medi"
+em "está medido" na sprint seguinte.
+
+⚠️ **Maior risco residual:** a bateria cross-org das 3 rotas novas
+(`test_sensitive_endpoints.py`) é lida DA lista canônica — as entradas estão lá,
+mas ninguém viu o verde. É a primeira coisa a rodar quando o Docker subir.
+
+---
+
+## ADR-029-QA — Os números da tela na Sprint 10 têm DUAS versões, e a do PRD é a errada (Sprint 10 / QA 10.6)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** métrica da sprint, mock do e2e
+
+**Confirmado pelo QA contra a fixture real** (50 categorias da conta Hologram):
+`37` com `dadosDRE.codigoDRE` e `6` com `id_conta_contabil` são contagens sobre o
+**TOTAL**; **4** categorias estão inativas, então há **46 ativas**, e sobre a base
+ativa os números são **33 com destino** e **5 com conta contábil**. O backend
+acertou ao afirmar a FIXTURE e não o exemplo do PRD (ADR-061-BE).
+
+**A consequência que ainda está solta:** o mock do `a11y-mocked.spec.ts` usa
+`50 · 50 ativas · 37 · 13 · 6` e o comentário diz que são "as da AMOSTRA REAL".
+O cenário é internamente coerente (37 + 13 = 50) e o e2e é mockado, então **nada
+quebra** — mas o comentário afirma um fato falso, e é assim que o número errado
+volta a circular. Não é motivo de reprovação; fica registrado aqui e no
+`HANDOFF.md` para corrigir junto do próximo toque no arquivo.
+
+**A leitura D+30 lê `com_destino ÷ ativas`** e, sobre a amostra, dá **71,7%**
+(33/46) — acima do alvo de 70%, por margem bem menor do que os 74% do PRD
+sugerem. Quem ler o resultado precisa saber disso antes de concluir que a
+cobertura caiu.
