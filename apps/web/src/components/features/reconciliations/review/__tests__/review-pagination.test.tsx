@@ -89,7 +89,7 @@ const ABAS = [
   {
     nome: 'Movimentações',
     rotuloBarra: 'Paginação de movimentações',
-    render: () => render(<MovementsTab sessionId={SESSION_ID} isCard={false} />),
+    render: () => render(<MovementsTab sessionId={SESSION_ID} isCard={false} canPostToOmie />),
     params: () => fileEntriesParams,
   },
   {
@@ -101,7 +101,7 @@ const ABAS = [
   {
     nome: 'Anomalias',
     rotuloBarra: 'Paginação de anomalias',
-    render: () => render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} />),
+    render: () => render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} canPostToOmie />),
     params: () => anomaliesParams,
   },
 ] as const;

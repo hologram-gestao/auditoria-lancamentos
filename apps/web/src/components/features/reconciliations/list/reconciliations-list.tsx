@@ -26,6 +26,7 @@
 import { Plus } from 'lucide-react';
 import { useEffect, useMemo } from 'react';
 
+import { OriginStateBlock } from '@/components/shared/origin-state-notice';
 import { Button } from '@/components/ui/button';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { ScrollRegion } from '@/components/ui/scroll-region';
@@ -45,6 +46,7 @@ import {
   type ReconciliationStatusFilterValue,
   type ReconciliationsListParams,
 } from '@/lib/api/clients';
+import type { OriginErrorCode } from '@/lib/origin-state';
 import { currentMonth } from '@/lib/validation/reconciliations';
 import { usePendingCreations } from '@/stores/pending-creations';
 
@@ -108,6 +110,18 @@ export function ReconciliationsList({
   // do shell — sem request extra.
   const clientDetail = useClientDetail(clientId);
   const isClosed = clientDetail.data?.closed_at != null;
+  // S9 (R6/R7): `POST /clients/{id}/reconciliations` responde 409 da taxonomia
+  // de origem quando não há conexão capaz. A LISTAGEM continua 200 (o histórico
+  // é dado nosso), então a tela mostra o histórico E o estado — e não oferece
+  // "Criar conciliação", que o servidor negaria (§4.9).
+  const originStatus = clientDetail.data?.origin_status ?? 'ativa';
+  const originCode: OriginErrorCode | null =
+    isClosed || originStatus === 'ativa'
+      ? null
+      : originStatus === 'sem_origem'
+        ? 'SEM_CONEXAO'
+        : 'ORIGEM_COM_ERRO';
+  const canCreate = !isClosed && originCode === null;
 
   const accountLookup = useMemo(() => {
     const map = new Map<number, string>();
@@ -144,13 +158,18 @@ export function ReconciliationsList({
         <h2 id="reconciliations-heading" className="text-lg font-semibold">
           Conciliações
         </h2>
-        {!isClosed && (
+        {canCreate && (
           <Button type="button" onClick={onCreateClick}>
             <Plus className="h-4 w-4" aria-hidden="true" />
             Criar conciliação
           </Button>
         )}
       </div>
+
+      {/* R7: estado explicativo com o caminho de saída — nunca uma lista vazia
+          ambígua nem um toast genérico. Aparece mesmo com histórico, porque é o
+          que explica por que "Criar conciliação" sumiu. */}
+      {originCode !== null && <OriginStateBlock code={originCode} clientId={clientId} />}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:gap-4">
         <div className="min-w-[12rem] flex-1 space-y-1">
@@ -256,7 +275,7 @@ export function ReconciliationsList({
             onRetry={() => void refetch()}
           />
         ) : sessions.length === 0 ? (
-          <EmptyState hasFilters={hasFilters} canCreate={!isClosed} onCreateClick={onCreateClick} />
+          <EmptyState hasFilters={hasFilters} canCreate={canCreate} onCreateClick={onCreateClick} />
         ) : (
           sessions.map((session) => (
             <ReconciliationListItem

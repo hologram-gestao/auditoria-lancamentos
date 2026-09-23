@@ -52,8 +52,14 @@ export interface ListClientsParams {
 
 export interface CreateClientPayload {
   name: string;
-  omie_app_key: string;
-  omie_app_secret: string;
+  /**
+   * S9 (R4): **opcional**. Sem credencial o cliente nasce pleno e sem origem;
+   * com credencial a origem nasce junto, como `client_connections` — e as
+   * colunas antigas de `clients` continuam nulas. As duas vêm juntas ou
+   * nenhuma (400 `IncompleteCredentialsError`).
+   */
+  omie_app_key?: string;
+  omie_app_secret?: string;
   category_id?: string | null;
   /**
    * Organização de destino (86e36ed1d): **obrigatória** quando quem cria é a
@@ -63,11 +69,15 @@ export interface CreateClientPayload {
   organization_id?: string;
 }
 
+/**
+ * S9 (R5): credencial **não existe mais aqui**. O backend recusa com 422 só
+ * pela presença da chave (`_credencial_saiu_do_patch`), apontando as rotas de
+ * conexão — então tê-la no tipo seria oferecer ao `tsc` um caminho morto.
+ * Trocar credencial é `PATCH /clients/{id}/connections/{connectionId}`.
+ */
 export interface UpdateClientPayload {
   name?: string;
   active?: boolean;
-  omie_app_key?: string;
-  omie_app_secret?: string;
   /** Tri-estado no backend: omitido mantém, `null` limpa, UUID troca. */
   category_id?: string | null;
 }

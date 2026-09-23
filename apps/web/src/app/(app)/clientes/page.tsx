@@ -38,6 +38,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { CategoryBadge } from '@/components/features/client-categories/category-badge';
 import { ClientStatusBadge } from '@/components/features/clients/client-status-badge';
+import { OriginStatusBadge } from '@/components/features/clients/connections/connection-badges';
 import { CreateClientModal } from '@/components/features/clients/create-client-modal';
 import { EditClientModal } from '@/components/features/clients/edit-client-modal';
 import { FavoriteToggle } from '@/components/features/clients/favorite-toggle';
@@ -282,7 +283,18 @@ export default function ClientesPage() {
                       isFavorite={c.is_favorite}
                     />
                   </TableCell>
-                  <TableCell className="font-medium">{c.name}</TableCell>
+                  <TableCell className="font-medium">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span>{c.name}</span>
+                      {/* S9 (R7): quem está sem origem aparece na LISTA — é o
+                          escritório parceiro olhando a carteira inteira e
+                          vendo onde falta conectar. Selo por token semântico,
+                          nunca `opacity` na linha (ADR-007-FE). */}
+                      {c.origin_status === 'sem_origem' && (
+                        <OriginStatusBadge status={c.origin_status} />
+                      )}
+                    </div>
+                  </TableCell>
                   {isPlatform && (
                     <TableCell className="text-muted-foreground whitespace-nowrap">
                       {c.organization.name}
