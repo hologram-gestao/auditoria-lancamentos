@@ -275,6 +275,17 @@ async def run_conversion(
                 break
 
             for client in pending:
+                # O id sai do ORM AQUI, antes de qualquer transação. Depois do
+                # rollback do SAVEPOINT o `client` está EXPIRADO — o
+                # `_restore_snapshot` expira todo estado sujo, e `_convert_one`
+                # suja a linha (`provision_client_cipher` seta `dek_wrapped`
+                # in-place no cliente bare, que é o legado típico). Em objeto
+                # expirado `client.id` deixa de ser leitura de memória e vira
+                # SELECT: sob asyncio isso levanta `MissingGreenlet` DENTRO do
+                # `except`, a exceção escapa, o `commit()` abaixo nunca roda e
+                # o lote inteiro se perde sem relatório — exatamente a
+                # propriedade que o cabeçalho deste arquivo promete.
+                client_id = client.id
                 try:
                     # SAVEPOINT por cliente: o rollback da linha que falha não
                     # pode levar junto os clientes já convertidos NESTE lote.
@@ -290,10 +301,12 @@ async def run_conversion(
                     # `except Exception` e não um tipo específico: sob anyio o
                     # erro do KMS pode vir dentro de um ExceptionGroup, e o que
                     # importa aqui é não parar o lote por causa de uma linha.
-                    seen_failures.add(client.id)
-                    stats.failed_client_ids.append(str(client.id))
+                    # NENHUMA leitura de atributo do `client` pode entrar aqui:
+                    # só o escalar capturado antes do bloco transacional.
+                    seen_failures.add(client_id)
+                    stats.failed_client_ids.append(str(client_id))
                     # Só o ID — a mensagem pode carregar contexto do ciphertext.
-                    log.error("conversion_failed", client_id=str(client.id))
+                    log.error("conversion_failed", client_id=str(client_id))
                     continue
                 stats.converted += 1
                 stats.deks_provisioned += int(provisioned)

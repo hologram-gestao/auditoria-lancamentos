@@ -201,10 +201,16 @@ class TestSemConexao:
         sess = await _seed_session(db_session, client, admin)
         assert await _login(client_with_db) == 200
 
+        # O router é `APIRouter(prefix="/api/v1/omie")` e o parâmetro é
+        # `session_id` (sem alias). O path errado que estava aqui dava 404, e a
+        # asserção `< 500` engolia isso — 404 é menor que 500. Asserção que não
+        # distingue "rota respondeu" de "rota não existe" não pode ser a única
+        # guardiã de um path, então ela subiu para o que o caso realmente afirma:
+        # o 409 da taxonomia, como os vizinhos.
         resp = await client_with_db.get(
-            "/api/v1/omie-data/categorias", params={"sessionId": str(sess.id)}
+            "/api/v1/omie/categorias", params={"session_id": str(sess.id)}
         )
-        assert resp.status_code < 500, resp.text
+        _assert_origin_409(resp)
 
     async def test_lancamento_no_omie(
         self, client_with_db: AsyncClient, db_session: AsyncSession
@@ -444,8 +450,8 @@ class TestCacheHitNaoResolveOrigem:
         monkeypatch.setattr(omie_data_routes, "build_capable_client", _nao_deveria_resolver)
 
         resp = await client_with_db.get(
-            "/api/v1/omie-data/lancamentos",
-            params={"ids": "4242", "sessionId": str(sess.id)},
+            "/api/v1/omie/lancamentos",
+            params={"ids": "4242", "session_id": str(sess.id)},
         )
         assert resp.status_code == 200, resp.text
         assert len(resp.json()["data"]) == 1

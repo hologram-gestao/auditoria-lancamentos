@@ -1,4 +1,4 @@
-"""Cache HIT de `/omie-data/lancamentos` não constrói client (S9 / BACK 09.6 — retrabalho R1).
+"""Cache HIT de `/api/v1/omie/lancamentos` não constrói client (S9 / BACK 09.6 — retrabalho R1).
 
 A migração da 09.6 inverteu o contrato da fábrica nesta rota: o client passou a
 ser construído ANTES da chamada e entregue como `lambda: omie_client`. O serviço
