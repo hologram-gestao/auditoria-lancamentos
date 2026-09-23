@@ -15,10 +15,10 @@
 
 | | |
 | --- | --- |
-| Endpoints sensíveis (denominador) | **68** |
-| Com caso negativo cross-tenant verde | **68** |
+| Endpoints sensíveis (denominador) | **71** |
+| Com caso negativo cross-tenant verde | **71** |
 | Pendentes (implementação em outra task) | **0** |
-| Cobertura | **68/68 = 100%** |
+| Cobertura | **71/71 = 100%** |
 
 ## Lista canônica
 
@@ -94,6 +94,9 @@ Legenda de `tipo`: **coleção** = vaza forjando `client_id` na URL/payload · *
 | `POST` | `/api/v1/clients/{client_id}/connections/{connection_id}/test` | detalhe (PK) | `app/modules/client_connections/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + OpenClientDep + ManageClientConnectionsDep; SELECT do alvo com AND client_id (anti-IDOR) | ✅ verde |
 | `PATCH` | `/api/v1/clients/{client_id}/connections/{connection_id}` | detalhe (PK) | `app/modules/client_connections/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + OpenClientDep + ManageClientConnectionsDep; SELECT do alvo com AND client_id (anti-IDOR) | ✅ verde |
 | `DELETE` | `/api/v1/clients/{client_id}/connections/{connection_id}` | detalhe (PK) | `app/modules/client_connections/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + OpenClientDep + ManageClientConnectionsDep; DELETE com AND client_id (anti-IDOR) | ✅ verde |
+| `GET` | `/api/v1/clients/{client_id}/chart-of-accounts` | coleção | `app/modules/client_chart_of_accounts/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + ViewClientChartOfAccountsDep; todo SELECT nasce de _base_query, que já leva AND client_id | ✅ verde |
+| `GET` | `/api/v1/clients/{client_id}/chart-of-accounts/coverage` | coleção | `app/modules/client_chart_of_accounts/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + ViewClientChartOfAccountsDep; a agregação filtra por client_id na própria query | ✅ verde |
+| `POST` | `/api/v1/clients/{client_id}/chart-of-accounts/sync` | coleção | `app/modules/client_chart_of_accounts/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + OpenClientDep + SyncClientChartOfAccountsDep; cliente encerrado = 409 e a leitura segue 200 | ✅ verde |
 
 ## Rotas `/api/v1` fora do denominador
 

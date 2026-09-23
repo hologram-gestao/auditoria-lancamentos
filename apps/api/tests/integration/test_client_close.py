@@ -35,6 +35,7 @@ from app.db.models import (
     AccessAudit,
     Client,
     ClientAssignment,
+    ClientChartOfAccount,
     ClientGlossaryEntry,
     Notification,
     NotificationType,
@@ -229,6 +230,13 @@ async def _seed_world(db: AsyncSession, *, processing: bool = False) -> _World:
             account_type="CC",
         )
     )
+    # Plano de contas (S10): nada aqui é cifrado, então a purga precisa ser
+    # EXPLÍCITA — o crypto-shredding não o alcança, e sem a linha em
+    # `close_client_purge` a configuração do cliente sobreviveria ao
+    # encerramento. Duas linhas, uma em CADA cliente: a do vizinho prova que a
+    # purga é por tenant.
+    db.add(ClientChartOfAccount(client_id=w.cli_a.id, category_code="1.01.01", dre_code="1.01"))
+    db.add(ClientChartOfAccount(client_id=w.cli_b.id, category_code="1.01.01", dre_code="1.01"))
     db.add(
         AccessAudit(
             user_id=w.admin.id,
@@ -332,6 +340,26 @@ class TestCloseClient:
             )
             == 0
         )
+        # Plano de contas (S10): some junto — é configuração do cliente final, e
+        # nada nele morre com a DEK (não é cifrado).
+        assert (
+            await _count(
+                db_session,
+                select(func.count(ClientChartOfAccount.id)).where(
+                    ClientChartOfAccount.client_id == a
+                ),
+            )
+            == 0
+        )
+        assert (
+            await _count(
+                db_session,
+                select(func.count(ClientChartOfAccount.id)).where(
+                    ClientChartOfAccount.client_id == b
+                ),
+            )
+            == 1
+        ), "a purga é POR TENANT — o plano de contas do vizinho não pode ser tocado"
 
         # Usuários do tenant: FICAM (FK das sessões), mas anonimizados e mortos.
         users_a = (

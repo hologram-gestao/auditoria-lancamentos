@@ -223,18 +223,38 @@ describe('SidebarNav — camada do cliente', () => {
     expect(within(nav).getByText('Cliente Exemplo Ltda')).toBeInTheDocument();
   });
 
-  it('operador do cliente: sem Voltar e sem Usuários — 4 seções', () => {
+  it('operador do cliente: sem Voltar e sem Usuários — 5 seções', () => {
     currentPathname = '/clientes/c1';
     render(<SidebarNav user={CLIENT_OPERATOR} />);
 
     const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
     const links = within(nav).getAllByRole('link');
+    // "Plano de Contas" entrou na S10: LER é ✅ nos cinco papéis (o operador
+    // inclusive — é a classificação contábil do próprio cliente). Quem some
+    // para ele é a ação de SINCRONIZAR, dentro da tela, não o item de menu.
     expect(links.map((l) => l.textContent)).toEqual([
       'Conciliações',
       'Contas Bancárias',
       'Painel',
       'Glossário',
+      'Plano de Contas',
     ]);
+  });
+
+  it('a rota do plano de contas não deixa "Conciliações" ativo junto', () => {
+    // "Conciliações" é o FALLBACK da camada do cliente: rota nova que não entre
+    // na negação de `isReconciliations` marca dois itens ao mesmo tempo.
+    currentPathname = '/clientes/c1/plano-de-contas';
+    render(<SidebarNav user={ADMIN} />);
+
+    const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
+    expect(within(nav).getByRole('link', { name: 'Plano de Contas' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(within(nav).getByRole('link', { name: 'Conciliações' })).not.toHaveAttribute(
+      'aria-current',
+    );
   });
 
   it('detalhe de conciliação mantém "Conciliações" ativo (mesma área, nível abaixo)', () => {

@@ -370,21 +370,109 @@ class TituloAPagarReceber(BaseModel):
 
 
 # ----------------------------------------------------------------------
-# ListarCategorias (Sprint 7 / BACK 07.3)
+# ListarCategorias (Sprint 7 / BACK 07.3 · estendido na Sprint 10 / BACK 10.1)
 # ----------------------------------------------------------------------
+
+
+def _blank_to_none(value: str | None) -> str | None:
+    """`''` do Omie é ausência, não valor.
+
+    A resposta real de `ListarCategorias` nunca omite uma chave: ela devolve
+    `""` (e `dadosDRE: {}`) quando o cadastro não tem o dado. Gravar `""` no
+    banco faria "sem destino declarado" e "destino vazio" virarem dois estados
+    para o mesmo fato — e a contagem de cobertura (R3) passaria a depender de
+    qual dos dois a linha calhou de receber. Um estado só: `None`.
+    """
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _omie_flag(value: str | None) -> bool:
+    """`'S'`/`'N'` do Omie como booleano. Ausente ou desconhecido = `False`.
+
+    Mesmo default de `is_active`: falhar para o lado de NÃO marcar a flag. As
+    três flags (`totalizadora`, `transferencia`, `nao_exibir`) só excluem ou
+    escondem — marcá-las por engano some com linha da tela do cliente.
+    """
+    return (value or "N").strip().upper() == "S"
+
+
+class DadosDRE(BaseModel):
+    """Bloco `dadosDRE` de uma categoria — a **conta de demonstrativo** (BACK 10.1).
+
+    É o insumo que a Sprint 10 existe para trazer: o vínculo categoria → conta
+    de demonstrativo que a origem **já tem preenchido** (37 de 50 na fixture
+    real), e que o de-para da Sprint 12 herdaria pronto em vez de exigir
+    digitação linha a linha.
+
+    **Todos os campos são opcionais porque o bloco inteiro pode vir vazio.**
+    Verificado na resposta real (`tests/fixtures/omie/listar_categorias.response.json`,
+    capturada da conta Hologram): a chave `dadosDRE` está presente nas 50
+    categorias, mas 13 delas trazem `{}` — são transferências e totalizadoras,
+    que por definição contábil não têm conta de demonstrativo própria. Declarar
+    `codigoDRE` obrigatório faria a sincronização do cliente inteiro falhar por
+    causa das linhas que estão CORRETAS.
+
+    `nivelDRE` é NÚMERO JSON na resposta real (não string, ao contrário das
+    flags `'S'`/`'N'` do resto do cadastro).
+    """
+
+    codigo_dre: str | None = Field(
+        default=None,
+        alias="codigoDRE",
+        description="Código da conta de demonstrativo vinculada (ex.: '1.01.01').",
+    )
+    descricao_dre: str | None = Field(
+        default=None,
+        alias="descricaoDRE",
+        description=(
+            "Nome da conta de demonstrativo (ex.: 'Receita Bruta de Vendas'). "
+            "Trafega em memória e alimenta a exibição — **nunca** é persistido "
+            "(§4.5: nome de categoria/conta não encosta no disco em claro)."
+        ),
+    )
+    nivel_dre: int | None = Field(
+        default=None,
+        alias="nivelDRE",
+        description="Profundidade da conta na árvore do demonstrativo.",
+    )
+    sinal_dre: str | None = Field(
+        default=None,
+        alias="sinalDRE",
+        description="`'+'` ou `'-'` — como a conta entra no demonstrativo.",
+    )
+    totaliza_dre: str | None = Field(
+        default=None,
+        alias="totalizaDRE",
+        description="`'S'`/`'N'` — a conta de demonstrativo é totalizadora.",
+    )
+    nao_exibir_dre: str | None = Field(
+        default=None,
+        alias="naoExibirDRE",
+        description="`'S'`/`'N'` — a conta não é exibida no demonstrativo.",
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @property
+    def destino_code(self) -> str | None:
+        """Código do destino, ou `None` quando a origem não declarou nenhum.
+
+        Fonte ÚNICA de "esta categoria tem destino": `''` e ausência colapsam
+        aqui, e não em cada caller.
+        """
+        return _blank_to_none(self.codigo_dre)
 
 
 class CategoriaOmie(BaseModel):
     """Item de `categoria_cadastro` em `ListarCategorias` (`geral/categorias/`).
 
-    ⚠️ **NOMES DE CAMPO NÃO-VERIFICADOS contra uma resposta real.** Vêm da doc
-    oficial (https://app.omie.com.br/api/v1/geral/categorias/), não de uma
-    chamada gravada — a mesma situação que já quebrou em produção duas vezes
-    neste repositório (`ListarExtrato` e `ListarContasCorrentes`, ver
-    `LancamentoExtrato` e `ContaCorrente`). O `scripts/capture_omie_fixtures.py`
-    já captura este endpoint; assim que a fixture existir,
-    `tests/unit/test_omie_fixtures.py` valida este DTO contra ela e FALHA na
-    divergência.
+    ✅ **VERIFICADO contra resposta real** —
+    `tests/fixtures/omie/listar_categorias.response.json` (50 categorias,
+    capturadas da conta Hologram). O gate `tests/unit/test_omie_fixtures.py`
+    valida este DTO contra ela e FALHA na divergência.
 
     **O que é fato:** o campo que o lançamento precisa se chama `cCodCateg` no
     `IncluirLancCC` (BACK 07.1) e aparece como `codigo_categoria` no
@@ -392,9 +480,26 @@ class CategoriaOmie(BaseModel):
     diferentes para o mesmo dado em endpoints diferentes, o que é justamente o
     motivo de não deduzir o nome "por analogia".
 
-    Só dois campos são declarados: é tudo o que o combobox de classificação
-    precisa. Declarar campos que não usamos aumentaria a superfície de
-    divergência sem ganho nenhum.
+    **Por que o DTO cresceu na Sprint 10 (BACK 10.1).** Até aqui declarava três
+    campos de propósito ("declarar o que não usamos aumenta a superfície de
+    divergência"). O raciocínio segue valendo — o que mudou é que agora
+    **usamos** mais: o plano de contas do cliente (`client_chart_of_accounts`)
+    persiste hierarquia, situação, flags e, principalmente, o vínculo com a
+    conta de demonstrativo. Tudo o que entrou aqui foi conferido campo a campo
+    contra a fixture real, não deduzido da doc.
+
+    **Só `codigo` e `descricao` são obrigatórios.** Todo o resto é opcional: a
+    origem devolve `""`/`{}` para o que o cadastro não tem, e um cliente menos
+    maduro tem mais buracos — falhar por causa deles recusaria a sincronização
+    inteira por dado que está CORRETO. Campo obrigatório ausente, esse sim,
+    levanta `ValidationError` nomeando o campo, e a sincronização não grava
+    linha pela metade.
+
+    ⚠️ **`natureza` fica FORA de propósito.** Na resposta real ele é texto livre
+    de AJUDA ("Utilize esta categoria para os pagamentos de compras de
+    máquinas…"), não uma classificação de natureza de gasto — mapeá-lo na
+    coluna "tipo de gasto" da planilha do escritório produziria contagem sem
+    significado (PRD Sprint 10, Fora de escopo).
     """
 
     codigo: str = Field(
@@ -415,6 +520,57 @@ class CategoriaOmie(BaseModel):
         ),
     )
 
+    # ---- Sprint 10 (BACK 10.1): o que o plano de contas precisa ----
+    dados_dre: DadosDRE = Field(
+        default_factory=DadosDRE,
+        alias="dadosDRE",
+        description=(
+            "Conta de demonstrativo vinculada. `default_factory` (e não `None`) "
+            "porque a origem manda `{}` quando não há vínculo: bloco vazio e "
+            "bloco ausente são o mesmo fato, e colapsá-los aqui evita um "
+            "`is not None` espalhado por todo caller."
+        ),
+    )
+    categoria_superior: str | None = Field(
+        default=None,
+        alias="categoria_superior",
+        description=(
+            "Código da categoria PAI — é a hierarquia. Raiz vem como `'0'` na "
+            "resposta real; quem grava normaliza pela property `parent_code`."
+        ),
+    )
+    id_conta_contabil: str | None = Field(
+        default=None,
+        alias="id_conta_contabil",
+        description="Código da conta contábil vinculada (ex.: '3.1.3.01.00003').",
+    )
+    tag_conta_contabil: str | None = Field(
+        default=None,
+        alias="tag_conta_contabil",
+        description=(
+            "Rótulo livre da conta contábil ('RENDIMENTOS APLICAÇÕES RENDA FIXA "
+            "- FIN'). Declarado no contrato porque a origem o manda e o R1 pede, "
+            "mas **NUNCA persistido**: é NOME de conta, e a §4.5 mantém nome de "
+            "conta fora do disco em claro. Para o banco vai só o CÓDIGO "
+            "(`id_conta_contabil`)."
+        ),
+    )
+    totalizadora: str | None = Field(
+        default=None,
+        alias="totalizadora",
+        description="`'S'`/`'N'` — categoria que só soma filhas, não recebe lançamento.",
+    )
+    transferencia: str | None = Field(
+        default=None,
+        alias="transferencia",
+        description="`'S'`/`'N'` — categoria de transferência entre contas.",
+    )
+    nao_exibir: str | None = Field(
+        default=None,
+        alias="nao_exibir",
+        description="`'S'`/`'N'` — categoria escondida nas telas do Omie.",
+    )
+
     model_config = ConfigDict(populate_by_name=True)
 
     @property
@@ -426,6 +582,45 @@ class CategoriaOmie(BaseModel):
         demais é recuperável; sumir com as categorias trava o lançamento.
         """
         return (self.conta_inativa or "N").strip().upper() != "S"
+
+    @property
+    def destino_code(self) -> str | None:
+        """Código da conta de demonstrativo, ou `None` = "sem destino declarado".
+
+        **Nunca inferido.** Ausência de destino é informação (transferências e
+        totalizadoras não têm conta de demonstrativo própria), não um buraco a
+        preencher por heurística — é uma das invariantes do PRD da Sprint 10.
+        """
+        return self.dados_dre.destino_code
+
+    @property
+    def parent_code(self) -> str | None:
+        """Código da categoria pai, ou `None` na raiz.
+
+        A resposta real usa `'0'` para raiz — um código que não existe como
+        categoria. Traduzir para `None` aqui mantém o `parent_code` do banco
+        auto-consistente: todo valor não-nulo é um `category_code` de verdade,
+        e o filtro por hierarquia da 10.3 não precisa conhecer a sentinela.
+        """
+        code = _blank_to_none(self.categoria_superior)
+        return None if code == "0" else code
+
+    @property
+    def conta_contabil_code(self) -> str | None:
+        """Código da conta contábil, ou `None`. Só o CÓDIGO — a tag é nome (§4.5)."""
+        return _blank_to_none(self.id_conta_contabil)
+
+    @property
+    def is_totalizadora(self) -> bool:
+        return _omie_flag(self.totalizadora)
+
+    @property
+    def is_transferencia(self) -> bool:
+        return _omie_flag(self.transferencia)
+
+    @property
+    def is_nao_exibir(self) -> bool:
+        return _omie_flag(self.nao_exibir)
 
 
 # ----------------------------------------------------------------------

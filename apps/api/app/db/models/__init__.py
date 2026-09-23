@@ -20,6 +20,14 @@ from app.db.models.client_category import (
     ClientCategory,
     ClientCategoryTone,
 )
+from app.db.models.client_chart_of_accounts import (
+    CHART_OF_ACCOUNTS_STATUS_CONSTRAINT,
+    MAX_ACCOUNT_CODE_CHARS,
+    UQ_CHART_OF_ACCOUNTS_CLIENT_CODE,
+    ChartOfAccountsStatus,
+    ClientChartOfAccount,
+    chart_of_accounts_status_check,
+)
 from app.db.models.client_connection import (
     CONNECTION_CREDENTIALS_PAIR_CONSTRAINT,
     CONNECTION_STATUS_CONSTRAINT,
@@ -91,6 +99,7 @@ from app.db.models.user import (
 from app.db.models.user_client_favorite import UQ_USER_CLIENT_FAVORITE, UserClientFavorite
 
 __all__ = [
+    "CHART_OF_ACCOUNTS_STATUS_CONSTRAINT",
     "CLIENT_ROLES",
     "COD_INT_LANC_MAX_LENGTH",
     "CONNECTION_CREDENTIALS_PAIR_CONSTRAINT",
@@ -98,6 +107,7 @@ __all__ = [
     "HOLOGRAM_ORGANIZATION_ID",
     "HOLOGRAM_ORGANIZATION_NAME",
     "IV_HEX_LENGTH",
+    "MAX_ACCOUNT_CODE_CHARS",
     "MAX_CATEGORY_NAME_CHARS",
     "MAX_CODE_CHARS",
     "MAX_CONNECTION_LABEL_CHARS",
@@ -109,6 +119,7 @@ __all__ = [
     "SCOPE_CONSISTENCY_CHECK",
     "SCOPE_CONSISTENCY_CONSTRAINT",
     "SYSTEM_ROLES",
+    "UQ_CHART_OF_ACCOUNTS_CLIENT_CODE",
     "UQ_CLIENT_ASSIGNMENT_CLIENT_USER",
     "UQ_CLIENT_ASSIGNMENT_PRIMARY",
     "UQ_CLIENT_CATEGORY_ORGANIZATION_NAME",
@@ -121,10 +132,12 @@ __all__ = [
     "AnomalySeverity",
     "AnomalyType",
     "Base",
+    "ChartOfAccountsStatus",
     "Client",
     "ClientAssignment",
     "ClientCategory",
     "ClientCategoryTone",
+    "ClientChartOfAccount",
     "ClientConnection",
     "ClientGlossaryEntry",
     "ClientUserRole",
@@ -156,6 +169,7 @@ __all__ = [
     "UserClientFavorite",
     "UserRole",
     "UserScope",
+    "chart_of_accounts_status_check",
     "connection_credentials_pair_check",
     "connection_status_check",
     "organization_id_server_default",

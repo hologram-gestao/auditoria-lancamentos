@@ -86,6 +86,27 @@ class UsageEventName(StrEnum):
     # do escritório parceiro é criada na operação, não aqui). Baseline 0: até
     # esta sprint era impossível criar cliente sem credencial. Só IDs e enums.
     CLIENTE_CRIADO = "cliente_criado"
+    # Sprint 10 (BACK 10.4) — **a métrica da Sprint 10**. De BACKEND, sem
+    # `session_id`, fora da dedup por construção: cada sincronização é uma
+    # linha, e é isso que a fórmula exige (ver abaixo).
+    #
+    # Fórmula da leitura D+30:
+    #     com_destino ÷ ativas
+    # lidos da **ÚLTIMA** linha por `client_id` no período — um cliente que
+    # sincroniza 30 vezes gera 30 linhas, e a leitura usa a mais recente. Se o
+    # evento entrasse na allow-list de dedup, a 2ª sincronização em diante
+    # sumiria e a leitura mediria a foto do primeiro dia para sempre.
+    #
+    # Baseline **0%**: não porque não se lia categoria (`listar_categorias`
+    # existe desde a Sprint 7), mas porque **nada era persistido com destino** —
+    # o vínculo com a conta de demonstrativo não era sequer declarado no DTO.
+    # Alvo: ≥ 70% das ATIVAS com destino.
+    #
+    # ⚠️ `com_destino` e `com_conta_contabil` são contados sobre as **ATIVAS**,
+    # a mesma base de `ativas` — é o que faz a fórmula fechar. `total_categorias`
+    # é o conjunto inteiro (inclui inativas e `ausente_na_origem`) e serve de
+    # contexto, não de denominador.
+    PLANO_CONTAS_SINCRONIZADO = "plano_contas_sincronizado"
 
 
 #: Eventos que o `POST /api/v1/usage-events` aceita. Os de backend ficam de fora
@@ -201,6 +222,33 @@ class ClienteCriadoProps(_StrictProps):
     organization_id: UUID
     tem_conexao: bool
     tipo_conexao: str | None = None
+
+
+class PlanoContasSincronizadoProps(_StrictProps):
+    """`plano_contas_sincronizado` (S10 BACK 10.4) — **a métrica da Sprint 10**.
+
+    Só contagens e o id do tenant. **Nenhum nome de categoria**, nenhum código
+    de categoria, nenhum texto — nem sequer uma lista de códigos, que
+    reconstituiria o desenho contábil do cliente dentro do sink de métrica.
+    `extra="forbid"` do `_StrictProps` garante que chave a mais é erro, não
+    campo silencioso.
+
+    A fórmula da leitura D+30 é `com_destino ÷ ativas`, então os dois vêm da
+    MESMA base ativa. `total_categorias` é o conjunto inteiro (com inativas e
+    ausentes na origem) e serve de contexto: um `ativas` que cai sem
+    `total_categorias` cair é categoria sendo desativada, não sumindo.
+
+    `client_id` é PROP, e não coluna: `usage_events` só tem coluna de
+    `session_id`, e uma sincronização de plano de contas não pertence a
+    conciliação nenhuma. Mesmo lugar em que `glossario_editado` e
+    `cliente_criado` gravam o tenant deles.
+    """
+
+    client_id: UUID
+    total_categorias: int = Field(ge=0)
+    ativas: int = Field(ge=0)
+    com_destino: int = Field(ge=0)
+    com_conta_contabil: int = Field(ge=0)
 
 
 class OrganizacaoCriadaProps(_StrictProps):

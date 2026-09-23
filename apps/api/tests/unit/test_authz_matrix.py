@@ -105,6 +105,14 @@ _TABLE: dict[Permission, tuple[bool, bool, bool, bool, bool]] = {
     # configuração do escritório, não do cliente final). O "(carteira)" é
     # `resolve_client_access`, não esta linha.
     Permission.MANAGE_CLIENT_CONNECTIONS: (True, True, True, False, False),
+    # S10 (BACK 10.3), tabela do R4 do PRD. LER o plano de contas é de todos —
+    # é a classificação contábil DO cliente. SINCRONIZAR sai do
+    # `client_operator` e só dele: é uma ida à origem, e o operador é quem mais
+    # abre tela. As duas reutilizações plausíveis dariam resultados OPOSTOS
+    # (`manage_client_categories` é admin-only; `sync_omie_accounts` é de
+    # todos), e por isso as células vieram decididas no PRD.
+    Permission.VIEW_CLIENT_CHART_OF_ACCOUNTS: (True, True, True, True, True),
+    Permission.SYNC_CLIENT_CHART_OF_ACCOUNTS: (True, True, True, True, False),
 }
 MATRIX_CELLS = [
     (permission, role, expected)
@@ -128,7 +136,7 @@ def test_toda_permissao_esta_na_matriz() -> None:
 
 
 def test_toda_celula_da_tabela_do_prd_foi_transcrita() -> None:
-    """Guarda contra transcrição parcial: 13 permissões x 5 papéis = 65 células."""
+    """Guarda contra transcrição parcial: 16 permissões x 5 papéis = 80 células."""
     assert len(MATRIX_CELLS) == len(Permission) * len(UserRole)
     assert {(p, r) for p, r, _ in MATRIX_CELLS} == {(p, r) for p in Permission for r in UserRole}
 
