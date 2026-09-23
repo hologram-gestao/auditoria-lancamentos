@@ -2391,3 +2391,1102 @@ papel dono: `grep AGENT_PATHS .agents-hub/config.env`. Zona de risco: a raiz do 
 papel — o orquestrador o copia para o `CLAUDE.md` do worktree a cada run
 (`orchestrate.js:2325`) e nunca copia de volta. Encodar regra no `CLAUDE.md` do worktree é
 cometer o mesmo erro que esta ADR descreve.
+
+
+---
+
+## ADR-032-BE — Credencial da origem é UM par cifrado com JSON dentro, não uma coluna por chave (Sprint 9 / BACK 09.1)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `client_connections`, `core/crypto_service.py`
+
+**Contexto.** A tabela nova precisa guardar a credencial de cada origem. O caminho óbvio
+era espelhar `clients`: `app_key_encrypted`/`app_key_iv` + `app_secret_encrypted`/`app_secret_iv`,
+quatro colunas e **duas** constantes de AAD. Só que a sprint existe justamente para abrir a
+porta a provedores que não são o Omie, e credencial de provedor não tem forma comum: um
+quer `{app_key, app_secret}`, outro `{token}`, outro `{url, usuario, senha}`. Cada shape
+novo custaria migration, coluna e — pior — **par de AAD novo**, que é **congelado** por
+construção (`crypto_service.py:9-11`): renomear tabela/coluna depois invalida a decifragem
+de tudo que já foi gravado com ele.
+
+**Decisão.** Uma coluna só: `credentials_encrypted` (Text) + `credentials_iv`, guardando o
+**JSON inteiro de credenciais cifrado**, com a constante única
+`AAD_CONNECTION_CREDENTIALS = ("client_connections", "credentials_encrypted")` (11 → 12).
+Provedor com outro shape cabe sem coluna nova e sem AAD novo. O preço aceito é não poder
+ler uma chave isolada em SQL — o que não é perda: credencial nunca é consultada por SQL,
+só decifrada inteira no momento de falar com o provedor.
+
+**Integridade que veio junto.** `CHECK (credentials_encrypted IS NULL) = (credentials_iv IS NULL)`.
+Meio envelope (IV sem ciphertext, ou o contrário) é dado indecifrável gravado em silêncio —
+exatamente o modo de falha que a §4.1 existe para impedir. O par é **nulável** porque
+origem baseada em arquivo não tem segredo para guardar.
+
+**Prova.** `tests/unit/test_crypto_service.py::TestInventarioDeCamposCifrados` congela os
+12 pares e falha se alguém acrescentar constante sem passar pela lista — que é a mesma
+lista da §4.1 do CLAUDE.md.
+
+---
+
+## ADR-033-BE — `NULL` e `''` nas colunas de credencial são estados diferentes, e o downgrade depende disso (Sprint 9 / BACK 09.1)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `clients`, migration `a7f2c1d93e84`
+
+**Contexto.** A migration torna as 4 colunas de credencial nuláveis. O downgrade precisa
+devolvê-las para `NOT NULL`, e aí aparece o conflito: hoje **já existe** cliente com as 4
+colunas em `''` — é o que `close_client` grava no encerramento (`service.py:570-573`,
+crypto-shredding da §4.12). Se o pré-check do downgrade tratasse "vazio" e "nulo" como a
+mesma coisa e abortasse nos dois, o rollback seria **impossível em qualquer base real**:
+bastaria um cliente encerrado para travar.
+
+**Decisão.** Os dois estados são distintos e têm tratamento distinto:
+
+- **Cliente ABERTO** (`closed_at IS NULL`) com qualquer das 4 colunas **nula OU vazia** →
+  downgrade **ABORTA** com a consulta que lista os culpados. Inventar credencial para quem
+  opera sem origem é decisão de dado, não de schema.
+- **Cliente ENCERRADO** fica FORA do predicado de aborto. Se estiver com `NULL` (forma
+  nova), o downgrade o converte para `''` — **a mesma forma que o encerramento escreve** —
+  antes do `SET NOT NULL`. Convergente: rodar duas vezes não muda nada.
+
+**Consequência fora da migration.** O guard de `build_omie_client` (`omie_factory.py`)
+checa **só `None`**: cliente encerrado segue pelo caminho de sempre e falha na decifragem
+como antes da sprint, sem caso novo. Quem ler "cliente sem credencial" no código tem de
+saber qual dos dois estados está olhando.
+
+**Prova.** `TestConexoesDeOrigemRoundTrip` cobre os três casos: aborta com aberto sem
+credencial; **não** aborta com encerrado (nem `''` nem `NULL`); e o ciclo
+downgrade→upgrade roda 2× sem mudar o estado.
+
+---
+
+## ADR-034-BE — CHECK dentro de `create_table` recebe o RÓTULO; provado com `alembic --sql`, não com fé (Sprint 9 / BACK 09.1)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** toda migration que crie tabela com CHECK
+
+**Contexto.** O ambiente deste agent nega o socket do Docker, então o round-trip real da
+migration (`tests/integration/test_migrations.py`) não rodou aqui. Sem um DB, a tentação é
+entregar a migration "revisada à mão" e deixar o vermelho para a QA.
+
+**O que o modo offline pegou.** `uv run alembic upgrade <de>:<para> --sql` renderiza a DDL
+**sem banco nenhum**. A primeira versão desta migration saiu com:
+
+```
+CONSTRAINT ck_client_connections_ck_client_connections_status CHECK (...)
+```
+
+`sa.CheckConstraint(name=...)` dentro de `op.create_table` passa pela `NAMING_CONVENTION`
+(`ck_%(table_name)s_%(constraint_name)s`), então passar o **nome final** gera prefixo
+duplo — o mesmo erro que a `d5c81a4e9b27` documenta para `op.create_check_constraint`, que
+o skill `migration` já avisa, e que o `--sql` mostra em 2 segundos. Nome de constraint
+errado não quebra o upgrade: quebra o `drop_constraint` do downgrade e todo teste que
+procura a constraint pelo nome — vermelho no CI, longe daqui.
+
+**Decisão.** (a) Passar o **rótulo** (`"status"`, `"credentials_pair"`), nunca o nome
+final. (b) **`alembic upgrade --sql` e `alembic downgrade --sql` entram no roteiro** de
+toda migration, e não só quando falta Docker: são a única checagem de DDL que roda sem
+infra, e conferem de graça o predicado do `RAISE EXCEPTION` (onde as aspas simples do
+plpgsql precisam ser dobradas — o `= ''` do predicado vira `= ''''` dentro da mensagem,
+senão a consulta de diagnóstico sai truncada).
+
+**O que continua devendo.** O round-trip real (`upgrade → downgrade → upgrade` contra
+Postgres) **não** foi executado; está declarado como pendência explícita no `HANDOFF.md`
+para a QA rodar com Docker ligado. `--sql` prova a DDL, não prova o dado.
+
+
+---
+
+## ADR-035-BE — Capacidade é DADO do adaptador, derivada; nunca coluna no banco (Sprint 9 / BACK 09.2)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `integrations/providers/`, schema de conexão
+
+**Contexto.** "O que esta origem sabe fazer" precisa chegar ao front (para a tela
+oferecer só o que existe) e ao servidor (para recusar cedo, com 409 acionável, em vez de
+deixar o provedor falhar no meio de um job). Havia dois lugares óbvios para guardar isso:
+uma coluna `capabilities` em `client_connections`, ou uma tabela de provedores.
+
+**Decisão.** Nenhum dos dois: capacidade é **propriedade do TIPO**, declarada pelo
+adaptador (`OMIE_CAPABILITIES`) e lida pelo registry (`capabilities_for`) — sem
+credencial, sem I/O e sem linha no banco. A resposta da API a **deriva** na hora
+(`ClientConnectionResponse.from_connection`).
+
+**Por quê.** Capacidade persistida é uma segunda fonte que envelhece calada: no dia em
+que o adaptador ganhar uma operação, as linhas já gravadas continuariam dizendo a verdade
+antiga, e ninguém perceberia — não há erro, só uma ação que some da tela. Derivar torna o
+adaptador a fonte ÚNICA, e um `frozenset` no código é o tipo de coisa que revisão de PR
+pega.
+
+**O que fica proibido.** Comparar `status == "ativa"` ou conferir capacidade fora de
+`modules/client_connections/capability.py`. Mesmo raciocínio de `resolve_client_access`
+(§3.15): duas cópias divergem e a que esquecer um caso vira 500 no lugar de 409.
+
+---
+
+## ADR-036-BE — A taxonomia da origem tem TRÊS códigos porque a AÇÃO do usuário é diferente em cada um (Sprint 9 / BACK 09.2)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `ErrorCode`, `capability.py`
+
+**Contexto.** Com o cliente podendo existir sem origem, toda ação que dependa de uma
+passa a ter um caminho "não dá". A saída barata seria um `ConflictError` genérico com
+texto explicativo.
+
+**Decisão.** Três códigos distintos, todos **409**:
+
+| código               | estado                     | o que o usuário faz |
+| -------------------- | -------------------------- | ------------------- |
+| `SEM_CONEXAO`        | nenhuma conexão            | conectar            |
+| `ORIGEM_COM_ERRO`    | há conexão, nenhuma ativa  | reconectar          |
+| `CAPACIDADE_AUSENTE` | há ativa, nenhuma faz isso | nada a consertar    |
+
+**Por quê.** Um `CONFLICT` genérico obrigaria a UI a adivinhar qual dos três está vendo
+para escolher o botão — e ela erraria, porque a única diferença estaria no texto livre da
+mensagem. Códigos separados são o que permite a tela mandar para o lugar certo sem
+parsear português.
+
+**E por que 409 e não 5xx.** É estado esperado da configuração do cliente, não falha do
+sistema (§7): 5xx mentiria "tente de novo" e ainda encheria o alerting de um caso normal.
+`inativa` entra junto de `erro` porque o resultado prático é o mesmo — não opera.
+
+---
+
+## ADR-037-BE — Credencial recusada muda o ESTADO da conexão; o ciphertext não se toca (Sprint 9 / BACK 09.2)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `client_connections`, `repository.mark_connection_error`
+
+**Contexto.** Quando o provedor recusa a credencial, a conexão precisa registrar isso
+(`status='erro'`, `last_checked_at`). A tentação — "a credencial não vale mais, limpa" —
+é o defeito.
+
+**Decisão.** O `UPDATE` lista as DUAS colunas que muda e só elas. As colunas cifradas
+ficam intactas, byte a byte.
+
+**Por quê.** (a) "Recusada" e "perdida" são coisas diferentes: recusada pode ser senha
+trocada no provedor, conta suspensa, rate limit mal classificado — e apagar transforma
+"atualize a senha" em "refaça a conexão do zero". (b) O envelope apagado não volta: a DEK
+segue viva, mas o ciphertext não. (c) Provedor fora do ar é transitório e **não** marca
+erro — só `ProviderAuthError` (mapeado de `OmieAuthError`) faz isso; timeout e 5xx
+propagam como sempre.
+
+**Prova.** `tests/integration/test_connection_error_marking.py` compara o envelope antes
+e depois do flip **e** decifra o preservado — igual não basta, tem de servir.
+
+---
+
+## ADR-038-BE — A escolha entre `OmieClient` e `MockOmieClient` mudou de casa (Sprint 9 / BACK 09.2)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `omie_adapter.build_omie_raw_client`, `clients/omie_factory.py`
+
+**Contexto.** O prefixo `FAKE_DEMO_OMIE_` que resolve o `MockOmieClient` morava em
+`modules/clients/omie_factory.py`, no caminho que lê a credencial das colunas antigas de
+`clients`. A partir da 09.3 a credencial pode vir de `client_connections` — um caminho
+novo, que não passa por lá.
+
+**Decisão.** A heurística passou para `integrations/providers/omie_adapter.build_omie_raw_client`,
+e `build_omie_client` virou wrapper fino sobre ela (decifra e delega). O `OmieClient` cru
+segue acessível por `OmieProvider.raw_client`, para o `omie_posting` e o resto do fluxo já
+verificado contra fixture real continuarem intocados.
+
+**Por quê.** Se a heurística tivesse ficado só no factory antigo, o caminho novo subiria
+sem ela: o cliente-demo do seed, o ambiente local de validação e o e2e mockado passariam a
+falar com a Omie **de verdade**. Uma casa só, servindo os dois caminhos, é o que impede
+isso — e a migração dos call sites (09.6) não precisa lembrar de copiar nada.
+
+
+---
+
+## ADR-039-BE — `manage_client_connections` é permissão PRÓPRIA, e o manager está nela (Sprint 9 / BACK 09.3)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `PERMISSION_MATRIX`, rotas de conexão
+
+**Contexto.** Conectar uma origem parece "editar o cliente", e pendurar a ação em
+`EDIT_CLIENT` teria sido a mudança de uma linha. Só que a matriz diz outra coisa:
+`CREATE_CLIENT` inclui o `manager` (✅) e `EDIT_CLIENT` não (❌, decisão da camada de
+organizações). Em `edit_client`, o contador do escritório parceiro — que é `manager` —
+cadastraria os ~40 clientes da carteira e **não conseguiria conectar nenhum**.
+
+**Decisão.** Permissão nova, `manage_client_connections`, no grupo `_STAFF`: plataforma
+✅, admin ✅, manager ✅, `client_manager` ❌, `client_operator` ❌. O "(carteira)" do
+manager não é célula: é `resolve_client_access`, como sempre.
+
+**Por que os papéis de CLIENTE ficam de fora.** Credencial de sistema contábil é
+configuração do escritório, não do cliente final — quem a digita é quem responde pelo
+acesso ao ERP. O cliente **lê** o estado da origem (a listagem é liberada a todo papel
+com acesso ao tenant): sem isso ele não saberia por que uma conciliação falhou.
+
+**Prova.** `tests/unit/test_authz_matrix.py` transcreve a linha célula a célula, e a
+trava "a plataforma está em toda linha" quebra o CI se a célula da plataforma faltar.
+
+---
+
+## ADR-040-BE — Verificar contra o provedor ANTES de persistir, não depois (Sprint 9 / BACK 09.3)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `ClientConnectionService`
+
+**Contexto.** A alternativa barata seria gravar a conexão e verificar depois, marcando
+`status='erro'` se o provedor recusasse — menos I/O no caminho feliz e um estado que a UI
+já sabe desenhar.
+
+**Decisão.** A ordem é: (1) resolve o tipo no registry, (2) **verifica no provedor**, (3)
+só então provisiona a DEK e cifra. Credencial recusada **não vira linha nenhuma** — nem
+com `status='erro'`.
+
+**Por quê.** Uma conexão que nunca funcionou ocupa `(cliente, tipo, rótulo)` na UNIQUE:
+o usuário erra a senha, recebe o erro, corrige e tenta de novo — e agora leva um 409
+dizendo que já existe uma origem com aquele rótulo. O estado `erro` existe para uma
+conexão que **funcionou e parou**, não para uma que nunca nasceu.
+`tests/integration/test_client_connections.py::TestNadaPersisteAntesDoProvedorAceitar`
+mede isso pela contagem: ZERO linhas, e a DEK do cliente nem chega a ser provisionada.
+
+**Consequência de ordem que não é estética.** O passo (3) só roda depois do guard
+`OpenClientDep` da rota. `provision_client_cipher` faz read-modify-write de
+`dek_wrapped`; num cliente ENCERRADO ele ressuscitaria a capacidade de cifrar num tenant
+cujo conteúdo já morreu por crypto-shredding (§4.12).
+
+---
+
+## ADR-041-BE — O erro ganhou `details`, e ele carrega só IDs (Sprint 9 / BACK 09.3)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `AppError`, `to_error_response`
+
+**Contexto.** O 409 de rótulo repetido precisa levar o usuário até a conexão que ocupa o
+par. O envelope de erro (`{code, message, userMessage}`) não tinha onde pôr o id, e as
+saídas disponíveis eram ruins: `metadata` não é serializado (vai para log/Sentry), e
+enfiar o UUID no `message` obrigaria o front a parsear português.
+
+**Decisão.** `AppError` ganhou `details: dict[str, str]`, serializado **quando existe** —
+a chave some do corpo se vazia, então nenhum erro atual muda de forma. O 409 de conexão
+manda `{"existingConnectionId": "<uuid>"}`.
+
+**A regra que vem junto:** `details` vai para a resposta, então carrega **só IDs**. Nome,
+razão social ou CNPJ ali seria vazamento pela porta do erro — exatamente o que a §3.15
+proíbe ("negação não vaza o alvo"). O teste do 409 confere que o nome do cliente não
+aparece no corpo.
+
+---
+
+## ADR-042-BE — Credencial saiu do `PATCH /clients/{id}`: duas verdades, uma sem verificação (Sprint 9 / BACK 09.3)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `UpdateClientRequest`, `ClientService.update_client`
+
+**Contexto.** O `PATCH /clients/{id}` aceitava `omie_app_key` + `omie_app_secret` e
+recifrava as colunas antigas de `clients` — sem falar com a Omie. Com a origem virando
+entidade própria, passaria a haver **dois** caminhos de escrita da mesma credencial, e o
+antigo grava qualquer coisa: o cliente ficaria "conectado" com uma senha que nunca
+funcionou, e descobriria na próxima conciliação.
+
+**Decisão.** O PATCH recusa os dois campos com **422** cuja mensagem aponta
+`POST /api/v1/clients/{id}/connections` (conectar) e
+`PATCH /api/v1/clients/{id}/connections/{id}` (trocar credencial). A recusa é pela
+PRESENÇA da chave, não pelo valor — `{"omie_app_key": null}` também é 422, porque quem
+manda a chave está usando o caminho que acabou. `IncompleteCredentialsError` deixou de
+valer para o PATCH.
+
+**O que NÃO mudou.** As 4 colunas de `clients` continuam existindo e sendo lidas
+(`omie_factory`): a conversão do que já está gravado é a 09.5, e a remoção das colunas é
+`contract` de sprint seguinte. O que acabou é a ESCRITA por este caminho.
+
+**Efeito no front.** A gaveta de edição de cliente ainda manda os campos e passará a
+receber 422 até a task de front removê-los. Está declarado no `HANDOFF.md` — é mudança de
+contrato, não defeito.
+
+
+---
+
+## ADR-043-BE — `origin_status` é DERIVADO, e vem em subquery escalar na query que já existia (Sprint 9 / BACK 09.4)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `ClientResponse`, `clients/repository.py`
+
+**Contexto.** A lista do escritório parceiro precisa mostrar quem está sem origem — é o
+estado que a sprint inteira existe para permitir. Três caminhos estavam na mesa: uma
+coluna `origin_status` em `clients`, um `JOIN` com `client_connections` na listagem, ou
+uma consulta por linha no service.
+
+**Decisão.** Nenhum dos três. Duas **subqueries escalares correlacionadas** (total de
+conexões, conexões ativas) entram no `SELECT` que a listagem já fazia, e
+`derive_origin_status(total, active)` — função ÚNICA — traduz o par em
+`sem_origem | ativa | erro`.
+
+**Por que não coluna.** Seria uma terceira verdade: ela mentiria no dia em que uma
+conexão mudasse de estado e alguém esquecesse de atualizá-la, e o erro seria silencioso
+(um cliente "ativo" sem origem que funcione).
+
+**Por que não `JOIN`.** O join multiplica a linha do cliente por conexão: o cliente com
+duas contas no mesmo ERP apareceria duas vezes na lista e o `total` da paginação
+mentiria. Há teste para isso.
+
+**Por que não consulta por linha.** É N+1 — numa carteira de 40 clientes, 41 queries por
+tela.
+
+**Por que DOIS contadores e não um.** Com um só não dá para distinguir "nenhuma conexão"
+de "tem conexão, nenhuma ativa" — e são justamente os dois casos em que o usuário precisa
+fazer coisas diferentes (conectar × reconectar).
+
+---
+
+## ADR-044-BE — O detalhe do cliente responde 200 SEMPRE; o sync manual responde 409 (Sprint 9 / BACK 09.4)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `get_client_detail_with_accounts`, `force_sync_accounts`
+
+**Contexto.** Com cliente sem origem, `GET /clients/{id}` encontraria um cliente sem
+credencial e chamaria `accounts_cache.get_or_sync` — que tentaria decifrar credencial
+inexistente e viraria 500. A saída simétrica seria aplicar a taxonomia 409 da 09.2 aqui
+também.
+
+**Decisão.** Os dois endpoints divergem de propósito:
+
+- **`GET /clients/{id}` → 200 sempre.** Cliente sem origem devolve
+  `origin_status='sem_origem'`, `accounts=[]`, `accounts_synced_at=null` e a lista de
+  conexões — **sem tocar no provedor**. Um 409 aqui impediria o parceiro de ABRIR a tela
+  do cliente que acabou de cadastrar, que é o fluxo que a sprint existe para criar.
+- **`PATCH /clients/{id}/sync-accounts` → 409 acionável.** Aqui sincronizar é o PEDIDO
+  do usuário: devolver "sincronizado, zero contas" seria mentir sobre o que aconteceu. O
+  409 sai de `select_capable_connection` (09.2), que escolhe qual dos três códigos cabe.
+
+**A ponte com o legado.** `_can_list_accounts` pergunta DUAS coisas: há conexão capaz
+(pelo predicado único, `connection_supports`) **ou** há credencial nas colunas antigas? A
+base vive nos dois mundos até a 09.5 — cliente ainda não convertido continua
+sincronizando exatamente como hoje, sem caso novo.
+
+---
+
+## ADR-045-BE — `POST /clients` com credencial usa o MESMO serviço de conexão, na mesma transação (Sprint 9 / BACK 09.4)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `ClientService.create_client`
+
+**Contexto.** O caminho antigo cifrava a credencial direto nas colunas de `clients`.
+Mantê-lo para "quem já manda credencial no cadastro" teria sido a mudança menor — e teria
+criado o segundo caminho de escrita que a 09.3 acabou de eliminar, com a mesma falha:
+grava sem verificar.
+
+**Decisão.** `create_client` chama `ClientConnectionService.create_connection`, recebendo
+a sessão do request — cliente e conexão nascem na MESMA transação. As 4 colunas antigas
+ficam **NULAS** mesmo quando a credencial vem no payload: a credencial mora na conexão.
+
+**O que isso compra.** A verificação contra o provedor acontece antes do commit: recusada,
+a exceção sobe e a transação inteira é desfeita — **nem `clients` nem `client_connections`
+ganham linha**. Sem isso, o cadastro deixaria para trás um cliente órfão de uma conexão
+que nunca nasceu.
+
+**O que exige.** `ClientService` passou a receber `ClientConnectionService` no construtor.
+É opcional na assinatura (há call sites de teste que não criam com credencial), mas o
+ramo "com credencial" **falha alto** se ele faltar — instrumentação degrada em silêncio,
+escrita de credencial não.
+
+**Efeito nos seeds.** `seed_demo_client.py` continua construindo `Client(...)` com as
+colunas antigas e segue funcionando — elas ainda são lidas (`omie_factory`). A conversão é
+a 09.5.
+
+
+---
+
+## ADR-046-BE — Promoção do fallback é consequência da VERIFICAÇÃO, não do deploy (Sprint 9 / BACK 09.5)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `LEGACY_CREDENTIALS_FALLBACK_ENABLED`, `legacy_fallback.py`
+
+**Contexto.** O padrão da casa para feature nova é kill-switch: uma env var decide, e
+pronto (`OMIE_POSTING_ENABLED`, `QUALIFICATION_ENABLED`). Aplicado aqui, a var diria "pode
+parar de ler as colunas antigas" — e quem a desligasse antes de a conversão terminar
+derrubaria **todo cliente existente** de uma vez, com 409 `SEM_CONEXAO`. O erro seria de
+uma linha de `--update-env-vars`, e o efeito, total.
+
+**Decisão.** A flag declara a INTENÇÃO; o estado EFETIVO sai de
+`effective_fallback_enabled`, que confronta a intenção com a realidade:
+
+| flag    | clientes pendentes | efetivo       | o que acontece                                       |
+| ------- | ------------------ | ------------- | ---------------------------------------------------- |
+| `True`  | qualquer           | ligado        | nada — é o default                                   |
+| `False` | 0                  | **desligado** | promovido de verdade                                 |
+| `False` | > 0                | **LIGADO**    | `AlertCode.LEGACY_FALLBACK` no plantão + log `error` |
+
+A contagem é a MESMA do `--verify` (`clients_pending_conversion`) — uma fonte só, para
+que "a conversão terminou" signifique a mesma coisa no script e no `lifespan`.
+
+**Por que não fail-fast.** Recusar subir seria coerente com `verify_alert_config`, e
+errado aqui: o serviço tem como funcionar (o fallback), e derrubá-lo por causa de uma
+variável mal configurada transformaria um erro de operação em indisponibilidade. Serve, e
+grita.
+
+**Estado efetivo é observável**: `legacy_fallback_state {configured, effective,
+pending_clients}` no startup, dentro de um `try` — observabilidade não derruba boot.
+
+---
+
+## ADR-047-BE — Precedência do fallback: conexão primeiro, colunas depois (Sprint 9 / BACK 09.5)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `resolve_origin_connections`
+
+**Contexto.** Durante a janela de conversão a base tem **três** formas de cliente ao mesmo
+tempo: (a) antigo, credencial nas colunas, sem conexão; (b) convertido, conexão + colunas
+intactas (salvaguarda de rollback); (c) criado na janela pela 09.4, conexão + colunas
+**NULAS**.
+
+**Decisão.** A ordem é: **1)** tem conexão → usa conexão, ponto, nem olha as colunas;
+**2)** não tem conexão, fallback efetivo ligado, colunas preenchidas → sintetiza em
+memória; **3)** senão → lista vazia, e quem chamou decide o 409.
+
+**Por que a ordem importa.** Invertida, o cliente (c) cairia no fallback, não acharia nada
+nas colunas e pararia de operar — o cliente que a sprint acabou de ensinar o sistema a
+criar. E o cliente (b) usaria a credencial ANTIGA mesmo tendo uma conexão nova: o teste de
+precedência põe **lixo** nas colunas antigas de um cliente com conexão e prova que ele
+opera.
+
+**A conexão sintetizada NUNCA é gravada.** Persistir ali seria uma segunda conversão —
+fora do lote, sem relatório, sem verificação. Id determinístico (UUID v5 sobre o
+`client_id`) para não parecer conexão nova a cada request, e `is_synthetic()` para quem
+precisar distinguir.
+
+---
+
+## ADR-048-BE — Gate textual de CI para as colunas antigas, com allow-list fechada (Sprint 9 / BACK 09.5)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `tests/unit/test_legacy_credential_columns_gate.py`
+
+**Contexto.** A conversão resolve o que JÁ existe. Sem uma trava, um call site novo em
+`clients.omie_app_*` apareceria na semana seguinte — mais um lugar para converter, e
+ninguém saberia que ele existe até a base quebrar. Revisão de PR não pega isso de forma
+confiável: o nome da coluna é plausível em qualquer lugar.
+
+**Decisão.** Teste que varre `app/`, `scripts/` e `alembic/` pelos 4 nomes de coluna e
+pelas 2 constantes de AAD antigas, com allow-list **fechada e justificada arquivo a
+arquivo**: definição (`db/models/client.py`, `core/crypto_service.py`, migrations),
+comentário do redactor (`core/logging.py`), seed demo, backfill da S3
+(`rotate_encryption_key.py`) e os **três** call sites do R2 — crypto-shredding do
+`close_client`, `legacy_fallback.py` e o script de conversão.
+
+**O que o gate forçou a mudar.** `modules/clients/omie_factory.py` era um QUARTO call
+site. Ele passou a pedir a credencial a `legacy_fallback.legacy_credentials_with`
+(variante síncrona, recebe o cipher pronto) e não nomeia mais nem coluna nem AAD antigo.
+
+**Textual de propósito.** Não é análise de tipos e erra para o falso positivo — um
+comentário citando o nome já dispara. Aceitável: justificar uma linha na allow-list custa
+um minuto; uma credencial ilegível em produção custa a sprint.
+
+**Dois testes protegem o próprio gate:** um por MUTAÇÃO (arquivo temporário tocando a
+coluna precisa reprovar — gate verde por não olhar nada é pior que gate ausente) e um de
+entrada MORTA (exceção que não toca mais as colunas sai da lista, senão ela vira
+cemitério).
+
+
+---
+
+## ADR-049-BE — Uma PORTA para a origem, e o factory antigo foi removido (Sprint 9 / BACK 09.6)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `modules/client_connections/origin.py`
+
+**Contexto.** "Falar com a origem" eram duas linhas repetidas em 8 arquivos:
+
+```python
+cipher = await load_client_cipher(client, settings=settings)
+omie = build_omie_client(client, settings, cipher)
+```
+
+Elas embutem três suposições que a Sprint 9 desfez — que todo cliente tem
+origem, que a origem é o Omie, e que a credencial mora nas colunas de `clients`.
+Com cliente sem origem, a primeira linha estoura `CryptoError` e o handler
+devolve **500**, quando a resposta certa é um 409 acionável.
+
+**Decisão.** `client_connections/origin.py` junta as peças que já existiam —
+`resolve_origin_connections` (09.5) + `select_capable_connection` (09.2) +
+adaptador (09.2) — e vira a porta ÚNICA. Ela não acrescenta regra nenhuma; só
+impede que cada consumidor invente a sua.
+
+Três formas, porque os consumidores diferem:
+
+| função                       | para quem                                            |
+| ---------------------------- | ---------------------------------------------------- |
+| `build_capable_client`       | rota comum: resolve e constrói de uma vez             |
+| `resolve_capable_connection` | quem precisa da CONEXÃO (carimbar sync, marcar erro)  |
+| `client_from_credentials`    | o JOB: a sessão que carregou a linha já fechou        |
+
+**O factory antigo foi REMOVIDO.** `modules/clients/omie_factory.py` ficou sem
+nenhum chamador e saiu do repositório — um teste guarda isso
+(`test_o_factory_antigo_nao_existe_mais`). Deixá-lo ali, sem uso, seria um
+convite a recriar o caminho que assume "cliente ⇒ Omie".
+
+---
+
+## ADR-050-BE — Cifra de DADO do tenant não é consumo de ORIGEM (Sprint 9 / BACK 09.6)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** inventário de consumidores
+
+**Contexto.** O grep dos três símbolos do PRD (`build_omie_client`,
+`load_client_cipher`, `provision_client_cipher`) devolve 15 arquivos. Ler isso
+como "15 consumidores de origem para converter" seria o erro caro da task.
+
+**Decisão.** Os dois helpers de cipher aparecem em **dois papéis diferentes**:
+
+- **decifrar a CREDENCIAL** de uma origem → vira dependência de conexão;
+- **cifrar DADO DO TENANT** — nome de arquivo, descrição de linha, nota do
+  analista, contexto de anomalia, entrada de glossário → **não vira nada**.
+
+`glossary/service.py` é o caso puro do segundo grupo (verificado em 22/09:
+nenhuma chamada ao provedor), e está declarado assim no inventário, com teste.
+
+**Por que importa.** Converter cifra de dado em dependência de origem faria o
+**glossário de um cliente sem Omie parar de funcionar** — exatamente o oposto do
+que a sprint quer. O cliente sem origem tem de poder manter o vocabulário
+contábil dele.
+
+**Como fica travado.** `scripts/gen_origin_consumers_inventory.py` classifica
+cada arquivo em ORIGEM · CIFRA_DADO · DEFINICAO · FALLBACK e gera
+`docs/origin-consumers-sprint9.md`; o teste regenera e compara, e arquivo novo
+sem classificação reprova. O varredor rastreia os símbolos ANTIGOS **e** os da
+porta nova — só com os antigos, um consumidor convertido sumiria do inventário
+justamente por ter sido convertido.
+
+---
+
+## ADR-051-BE — Cache de contas é por CONEXÃO, e o carimbo do cliente parou de ser lido (Sprint 9 / BACK 09.6)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `accounts_cache.py`, `omie_accounts_cache`
+
+**Contexto.** O TTL de 24 h do cache de contas saía de
+`clients.omie_accounts_synced_at` — um carimbo por CLIENTE. Com duas conexões do
+mesmo tipo no mesmo cliente (duas contas no mesmo ERP, que a 09.1 passou a
+permitir), sincronizar a primeira marcaria a segunda como fresca: **ela nunca
+sincronizaria**, e o bug só apareceria no cliente que tem duas contas.
+
+**Decisão.** `get_or_sync`/`force_sync` recebem a `ClientConnection`; o TTL sai
+de `connection.accounts_synced_at` e as linhas de `omie_accounts_cache` carimbam
+o `connection_id`. `clients.omie_accounts_synced_at` **deixou de ser lido** —
+continua sendo escrito enquanto as colunas antigas existirem, como salvaguarda
+de rollback até o `contract`.
+
+**Quem resolve a conexão é o CALLER**, não o cache: só ele sabe se o caso pede
+409 (sync manual) ou 200 com lista vazia (detalhe do cliente — ADR-044-BE).
+
+**Prova.** Teste com duas conexões do mesmo cliente: sincronizar uma carimba
+exatamente uma, e as linhas do cache apontam só para ela.
+
+---
+
+## ADR-052-BE — No job, a credencial atravessa; a linha da conexão não (Sprint 9 / BACK 09.6)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `processing/job.py`
+
+**Contexto.** O job de conciliação roda em `BackgroundTasks`, fora do request, e
+abre várias sessões curtas. A conexão precisa ser resolvida numa delas — mas o
+`OmieClient` é construído depois que essa sessão fechou, e uma instância ORM
+detached tem os atributos expirados (`DetachedInstanceError` na primeira
+leitura).
+
+**Decisão.** Dentro da sessão: resolve a conexão capaz e **decifra a credencial**
+(`credentials_for`). O que atravessa para fora são três coisas inertes — o
+`provider_type`, o `connection_id` e o `ProviderCredentials` (mapa de
+`SecretStr`, nunca texto). Fora, `client_from_credentials` monta o client pelo
+registry, sem segunda ida ao KMS.
+
+**Falha de auth marca a conexão.** `except OmieAuthError` → `mark_connection_error`
+numa sessão PRÓPRIA (best-effort: marcar estado nunca pode piorar o desfecho do
+job) e re-levanta. Timeout e instabilidade **não** caem aí: são transitórios e
+não podem apagar o estado de ninguém.
+
+**E o 409 não vira 5xx no polling.** As três exceções da taxonomia herdam de
+`AppError`, que o `run_reconciliation_processing` já trata: a sessão vai para
+ERRO com `user_message` em PT-BR, e o front lê isso pelo polling normal — sem
+500 em lugar nenhum.
+
+## ADR-028-FE — Os três códigos 409 de origem são MAIÚSCULOS, e a copy deles mora num módulo só (Sprint 9 / FRONT 09.7)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `lib/origin-state.ts`,
+`components/shared/origin-state-notice.tsx`
+
+**Contexto.** O PRD da Sprint 9 escreve a taxonomia em minúsculas
+(`sem_conexao` · `origem_com_erro` · `capacidade_ausente`), e a descrição da
+task repete isso. O que viaja no corpo da resposta é outra coisa: o backend
+declara `ErrorCode.SEM_CONEXAO` (`app/core/exceptions.py`), e o `code` do JSON
+sai **`"SEM_CONEXAO"`**. Casar pelo texto do PRD produziria um front que nunca
+reconhece nenhum dos três — e o sintoma seria exatamente o defeito que o R7
+existe para evitar: toast genérico no lugar do estado.
+
+**Decisão.** Uma constante `ORIGIN_ERROR_CODES` com os três valores **como o
+contrato os emite**, e um `originErrorCode(error: unknown)` que é a ÚNICA porta
+de entrada. Quem consome (`contas`, `conciliações`, `export`, gaveta de criação)
+pergunta a ela; ninguém compara `err.code` na mão. `origin-state.test.ts` tem um
+caso negativo dedicado à versão minúscula, para que "corrigir" o backend para
+minúsculas apareça como teste vermelho e não como toast em produção.
+
+**Consequência.** A copy também mora lá (`ORIGIN_ERROR_COPY`), distinta por
+código: `SEM_CONEXAO` manda conectar, `ORIGEM_COM_ERRO` manda **reconectar**, e
+`CAPACIDADE_AUSENTE` não manda fazer nada (`actionLabel: null`) porque não há o
+que consertar. Reaproveitar o `userMessage` do servidor foi recusado: ele é uma
+frase escrita para quem chamou a API crua, e não muda conforme quem olha tem ou
+não `manage_client_connections`.
+
+## ADR-029-FE — O estado de origem vem do `origin_status`, não de um 409 fabricado (Sprint 9 / FRONT 09.7)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `bank-accounts-screen`,
+`reconciliations-list`, `OriginStateBlock`
+
+**Contexto.** Duas telas sabem que a ação vai falhar ANTES de tentar: o detalhe
+do cliente responde **200 sempre** (exceção deliberada do R6) e carrega
+`origin_status`. Oferecer "Extrair contas do Omie" ou "Criar conciliação" ali
+seria oferecer o que o servidor nega com 409 — o defeito que a §4.9 proíbe.
+
+**A tentação descartada.** A 1ª versão fabricava um `new ApiError(409, {code:
+'SEM_CONEXAO', …})` só para reusar o `OriginStateNotice`, que recebe `error`.
+Isso é mentir sobre ter havido uma resposta: um erro sintético no código é um
+erro que um dia alguém loga, conta em métrica ou repassa como se fosse do
+servidor.
+
+**Decisão.** O componente foi partido em dois. `OriginStateBlock({code})` é a
+caixa a partir do CÓDIGO — para quem já sabe o estado; `OriginStateNotice({error})`
+é o adaptador que deriva o código do erro e delega. A copy é a mesma nos dois
+(uma fonte), e a variante `inline` existe para onde a caixa não cabe (o botão de
+exportar, que vive num cabeçalho) — sem trocar o texto, porque texto por lugar
+recriaria a divergência.
+
+**Limite conhecido.** `origin_status` distingue três estados de CLIENTE
+(`sem_origem` · `ativa` · `erro`), não a `CAPACIDADE_AUSENTE`, que depende da
+operação pedida. Por isso o código do erro real, quando existe, **vence** o
+derivado: só a resposta sabe que a origem está ativa e não faz aquilo.
+
+## ADR-030-FE — Capacidade é dado: "Lançar no Omie" some, não é bloqueado com motivo (Sprint 9 / FRONT 09.7)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:**
+`review/omie-posting-eligibility.ts`, `movements-tab`, `anomalies-tab`,
+`session-detail-screen`
+
+**Contexto.** A elegibilidade de linha (ADR-018-FE) usa `aria-disabled` +
+motivo lido, porque o operador precisa saber por que AQUELA compra não pode ser
+lançada. A capacidade da origem é outra natureza: não é da linha, é do cliente
+inteiro, e o servidor recusa o **lote** com `CAPACIDADE_AUSENTE` antes de olhar
+qualquer linha.
+
+**Decisão.** `originCanWrite(connections)` — espelho literal de
+`connection_supports(c, ESCREVER)`: **ativa E declara a capacidade**. O
+resultado entra como prop `canPostToOmie` e se combina com `isCard` num
+`showPosting` único; onde `showPosting` é falso, a coluna de seleção, a barra de
+lote e o botão por linha simplesmente **não existem** — o mesmo tratamento que
+conta corrente já recebia. Bloquear com motivo aqui encheria a tela de
+`aria-disabled` repetindo a mesma frase em cada linha.
+
+**Por que a prop e não uma consulta dentro da aba.** As abas recebem `sessionId`
+e não conhecem o cliente; quem tem o detalhe (com `connections`) é o
+`session-detail-screen`. Buscar o cliente de dentro da aba criaria uma segunda
+query para um dado que a tela de cima já tem em cache.
+
+## ADR-031-FE — A credencial saiu da edição de cliente, e o caminho novo fica escrito na tela (Sprint 9 / FRONT 09.7)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `edit-client-modal`,
+`lib/validation/clients.ts`, `lib/api/clients.ts`
+
+**Contexto.** `PATCH /clients/{id}` passou a responder **422 só pela presença**
+de `omieAppKey`/`omieAppSecret` no corpo (`_credencial_saiu_do_patch`). Manter
+os campos no formulário seria oferecer um caminho que o servidor recusa.
+
+**Decisão.** Os campos, o botão "Testar conexão" e o estado de teste saíram do
+modal; `UpdateClientPayload` perdeu as duas chaves (assim o `tsc` barra quem
+tentar remontá-las) e o `updateClientSchema` deixou de ser um `superRefine`. No
+lugar entrou **uma frase com link** para a seção "Origens de dado", visível só
+para quem tem `manage_client_connections` — quem não pode trocar credencial não
+recebe nem o caminho.
+
+**Na criação a credencial ficou, e opcional.** A mensagem de "as duas juntas ou
+nenhuma" é **VERBATIM** do `IncompleteCredentialsError` do backend
+(`INCOMPLETE_CREDENTIALS_MESSAGE`), inclusive o verbo "atualizar", que soa
+estranho num cadastro: duas frases diferentes para a mesma regra fariam parecer
+duas regras, e essa é a frase que o usuário leria se postasse direto na API.
+
+## ADR-032-FE — As chaves de credencial do Omie são `app_key`/`app_secret`; a docstring do backend está errada (Sprint 9 / FRONT 09.7)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `lib/api/client-connections.ts`
+
+**Contexto.** O `CreateConnectionRequest` do backend descreve `credentials`
+como _"Para o Omie: `appKey` e `appSecret`"_. O adaptador procura outra coisa:
+`OMIE_CREDENTIAL_KEYS = ("app_key", "app_secret")`
+(`integrations/providers/omie_adapter.py:51`), e chave faltando é **422**.
+`credentials` é um `dict[str, SecretStr]` livre — não passa por alias generator
+nenhum, então a docstring não se auto-corrige.
+
+**Como foi verificado.** Não pela doc: pelo teste de integração do próprio
+backend (`tests/integration/test_client_connections.py`, que monta
+`{"app_key": …}`) e pela constante do adaptador. É o mesmo princípio do §6.8
+para a Omie — payload vem da evidência, não da documentação.
+
+**Decisão.** As chaves viram constante (`OMIE_CREDENTIAL_KEYS`) + helper
+(`omieCredentials`) no módulo de API, e o teste da gaveta afirma o corpo exato
+enviado. Nenhuma tela digita a string. A divergência fica **registrada aqui**
+para o QA não "corrigir" o front para camelCase lendo a docstring.
+
+## ADR-019-QA — Teste de integração que passa pela fixture `client_with_db` NÃO prova durabilidade (Sprint 9 / QA 09.8)
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** revisão de qualquer caminho "grava e depois levanta"
+
+**Contexto.** A Sprint 9 trouxe dois caminhos que gravam estado e **em seguida
+re-levantam a exceção** (marcar conexão como `erro` e gravar a linha de negação
+na trilha). Em produção, `app/db/session.py:100-102` faz `rollback()` quando o
+handler levanta — a escrita morre junto. A fixture `client_with_db`
+(`tests/conftest.py:216-217`) injeta um override de `get_db_session` que é um
+gerador simples, **sem** o `except: rollback()`, então o teste de integração
+observa o estado gravado e passa. A própria docstring de `db/session.py:91-93`
+já avisava dessa cegueira, e mesmo assim ela produziu o defeito da BACK 09.3.
+
+**Decisão de REVISÃO (não de código).** Quando o diff contiver `flush()` (ou
+qualquer escrita) seguido de `raise` no mesmo caminho, o QA **não aceita** o
+teste de integração como prova. A pergunta mecânica é: *esta escrita sobrevive
+ao rollback do request?* Só duas respostas valem:
+- `commit()` explícito antes do `raise`, como em
+  `reconciliations/omie_posting/service.py:415,437` ("barreira de durabilidade"); ou
+- sessão PRÓPRIA que commita sozinha, como em
+  `reconciliations/processing/job.py:260-272` (`async with session_factory() as db, db.begin()`).
+
+**Grep decisivo.** Nos arquivos do diff, procurar `raise` a até ~6 linhas depois
+de um `flush(`/`mark_`/`record_access(`; cada ocorrência exige uma das duas
+formas acima ao lado. Resultado não-vazio sem `commit()`/`session_factory` por
+perto é reprovação.
+
+**Por que não virou teste automático.** Um teste que force a política real de
+transação sobre a fixture existente é possível (override com try/commit/except/
+rollback) e foi PEDIDO no rework da 09.3 — mas ele prova um caminho por vez. A
+regra de revisão cobre a classe inteira, inclusive a próxima ocorrência.
+
+## ADR-020-QA — Estado derivado que a UI usa para liberar tela entra no escopo do fallback, não só o caminho de execução (Sprint 9 / QA 09.8)
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** revisão de qualquer ponte/fallback datado
+
+**Contexto.** A BACK 09.5 construiu a ponte da janela de conversão em
+`resolve_origin_connections` e ela funciona: o cliente legado OPERA. Mas o
+`origin_status` que o front lê para habilitar "Nova conciliação" e "Sincronizar
+contas" é derivado de subqueries que só contam `client_connections`
+(`clients/repository.py:136-165`), sem passar pela ponte. Resultado: o backend
+serve, a UI bloqueia, e a mesma resposta de detalhe fica contraditória consigo
+mesma (`connections` com 1 item ativo e `origin_status='sem_origem'`).
+
+**Decisão de REVISÃO.** Ao revisar um fallback/ponte datada, listar **todos** os
+consumidores do conceito que ela cobre, separando dois grupos: quem EXECUTA
+(chama o provedor) e quem só DESCREVE (contadores, badges, flags, campos
+derivados que a UI usa para habilitar ação). O segundo grupo é o que se esquece,
+porque ele não quebra com exceção — quebra com uma tela vazia, que passa por
+"comportamento esperado".
+
+**Grep decisivo.** Para cada campo derivado que a sprint cria, rodar
+`grep -rn "<campo>" apps/web/src` e conferir se algum consumidor **habilita ou
+bloqueia ação** com ele. Se sim, esse campo precisa passar pelo MESMO fallback
+do caminho de execução.
+
+## ADR-021-QA — Contrato se verifica REGENERANDO, e aqui deu para fazer sem subir o servidor (Sprint 9 / QA 09.8)
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** verificação de contrato backend↔front
+
+**Contexto.** O `gen:types` do projeto aponta para `http://localhost:8000/openapi.json`,
+o que sugere que verificar o contrato exige subir a API (banco, secrets, porta).
+Não exige: o spec sai do código, sem rede e sem banco.
+
+**Receita usada nesta sprint** (worktree do backend, chaves fake do CI):
+
+    cd apps/api && export DATABASE_URL=... OMIE_ENCRYPTION_KEY=0000... JWT_SECRET=1111... SEARCH_BLIND_INDEX_KEY=2222...
+    uv run --extra dev python -c "import json;from app.main import app;json.dump(app.openapi(), open('/tmp/openapi.json','w'), indent=2)"
+    cd apps/web && npx openapi-typescript /tmp/openapi.json -o /tmp/schema-regen.ts
+    diff -u apps/web/src/lib/contracts/schema.ts /tmp/schema-regen.ts
+
+**Resultado nesta sprint:** diff **vazio**, byte a byte (63 paths). Isso fecha
+"contrato regenerado" com evidência, e não com leitura.
+
+**Cuidado que custou uma tentativa.** O `.env` do worktree é negado pela sandbox,
+então o `Settings()` falha por 4 campos obrigatórios. Passar as chaves fake do
+`ci.yml` resolve — e é melhor assim: o spec sai sem nenhum segredo real por perto.
+
+---
+
+# Retrabalho da Sprint 9 (rodada 2) — decisões do backend
+
+> Consolidadas pelo QA em 23/09/2026 a partir do worktree `agent-backend`
+> (commit `4c9ad51`). São as decisões que fecharam os três defeitos da rodada 1.
+
+## ADR-053-BE — Marcar `erro` na conexão é escrita DURÁVEL, não `flush` (Sprint 9 / BACK 09.3 — retrabalho R1)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `client_connections/service.py::test_connection`
+
+**Contexto.** `POST /connections/{id}/test` com credencial recusada marcava
+`status='erro'`, gravava a auditoria e re-levantava a exceção. Em produção o
+`raise` sobe até `get_db_session` (`db/session.py`), cuja política é
+`except: rollback(); raise`. Resultado: a marcação E a linha de `access_audit`
+eram DESFEITAS. A conexão ficava `ativa` para sempre, e a tela nunca chegava a
+oferecer "reconectar" — que é o critério de aceite R5/R7 da sprint.
+
+**Decisão.** `await self._db.commit()` antes do `raise`, como **barreira de
+durabilidade**, no mesmo molde já usado duas vezes no projeto:
+`omie_posting/service.py` (commitar a tentativa antes de haver efeito externo) e
+`processing/job.py::_mark_origin_connection_error` (sessão própria porque o
+estado da conexão não pode morrer com a transação que falhou). Aqui o commit
+basta: a sessão vem do chamador, e no ponto do erro ela só contém a marcação e a
+auditoria — nada de meia-escrita de outro passo.
+
+**Por que commit e não sessão própria.** O serviço recebe a sessão de fora de
+propósito (a 09.4 cria cliente + conexão na MESMA transação). `test_connection`
+não é composto por ninguém: é chamado só pela rota de teste. Abrir uma segunda
+sessão aqui custaria uma conexão do pool para escrever duas linhas que já estão
+na mão.
+
+**O teste que existia não pegava — e isso é o defeito de fundo.** A fixture
+`client_with_db` do conftest injeta um override de `get_db_session` que é um
+gerador simples, **sem** o `except: rollback()`. Ela prova o repositório, nunca a
+request. A correção traz uma fixture local,
+`client_with_request_rollback`, que copia a política de produção sobre a mesma
+session (que roda com `join_transaction_mode="create_savepoint"`, então o
+`commit()` da app libera o savepoint e o `rollback()` seguinte não o desfaz).
+**Toda asserção sobre "o que sobrevive a uma request que falhou" precisa dessa
+fixture** — a padrão fica verde com o defeito.
+
+---
+
+## ADR-054-BE — A descrição de `credentials` é contrato, e as duas fontes se olham (Sprint 9 / BACK 09.3 — retrabalho R1)
+
+**Data:** 2026-09-22 · **Status:** ativo · **Escopo:** `client_connections/schemas.py`
+
+**Contexto.** A descrição de `CreateConnectionRequest.credentials` dizia
+"`appKey` e `appSecret`" (camelCase) enquanto as chaves reais são
+`OMIE_CREDENTIAL_KEYS = ("app_key", "app_secret")`. Docstring é contrato: o texto
+viajou para o OpenAPI e daí para o `schema.ts`, e o front acabou escrevendo um
+comentário corrigindo o backend.
+
+**Decisão.** O texto passa a citar `app_key`/`app_secret` e a nomear a fonte
+(`OMIE_CREDENTIAL_KEYS`). Como a prosa não tem quem a verifique, entram dois
+testes unitários em `test_origin_providers.py` que comparam a descrição com a
+tupla real e proíbem camelCase. Prosa de contrato sem teste volta a divergir na
+primeira mudança de chave.
+
+---
+
+## ADR-055-BE — `origin_status` enxerga o fallback pelo MESMO predicado, projetado em `WHERE` (Sprint 9 / BACK 09.5 — retrabalho R1)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** `client_connections/legacy_fallback.py`, `clients/repository.py`, `clients/service.py`
+
+**Contexto.** O fallback da 09.5 cobria o caminho de OPERAÇÃO (o cliente legado
+continua falando com o Omie) e não o caminho de ESTADO. `origin_status` é
+derivado de duas subqueries que só contavam `client_connections`, então TODO
+cliente existente respondia `sem_origem` entre o deploy e o fim da conversão — e
+é esse campo que o front usa para liberar "Nova conciliação"
+(`reconciliations-list.tsx`) e "Sincronizar contas" (`bank-accounts-screen.tsx`).
+Resultado: no minuto do deploy, quem já usava o sistema parava PELA UI embora o
+backend o servisse normalmente. Pior, o detalhe se contradizia dentro do mesmo
+corpo: `connections` trazia a conexão sintetizada e `origin_status` dizia
+`sem_origem`.
+
+**Decisão.** Caminho (a) da reprovação: o predicado do cliente legado vira
+cláusula SQL em `legacy_fallback.legacy_origin_available()` e entra nas
+contagens da MESMA query da listagem, dentro de um `CASE`. `derive_origin_status`
+segue sendo a única derivação, e o front não ganha regra nova.
+
+**Por que (a) e não (b) (derivar de `resolve_origin_connections`).** A derivação
+acontece por LINHA da listagem; chamar o resolvedor por cliente seria um N+1 na
+carteira inteira — que é exatamente por que as contagens já eram subqueries
+escalares. O `CASE` custa zero query extra.
+
+**Como as duas leituras não divergem.** Os nomes das 4 colunas antigas saem de
+UMA tupla (`_LEGACY_CREDENTIAL_COLUMNS`); o predicado Python
+(`_has_legacy_credentials`) e o SQL (`_filled`) leem dela.
+`tests/unit/test_legacy_origin_predicate.py` trava as duas pontas e o texto da
+cláusula renderizada.
+
+**A divergência que FICA, de propósito.** `clients_pending_conversion` (o
+`--verify`) olha só o ciphertext; `legacy_origin_available` exige o par completo
+com os IVs. Linha com ciphertext e IV nulo é corrupção: ela tem de continuar
+contando como PENDENTE, para o `--verify` sair FAIL barulhento em vez de
+promover o fallback por cima de um cliente que ninguém decifra. Está no teste.
+
+**Quem decide o booleano é o service**, uma vez por request, com
+`ClientConnectionService.legacy_fallback_active()` → `effective_fallback_enabled(
+..., alert=False)`. O `alert=False` é novo e importa: `send_alert` não tem
+throttle, e uma listagem paginada não pode virar fonte de alerta de plantão. O
+veredito é o mesmo; quem faz barulho continua sendo o startup e o caminho de
+OPERAÇÃO, que é onde a configuração errada machuca.
+
+**O que NÃO dá para testar pela API** (registrado para a QA não procurar): a
+ponta "promovido ⇒ volta a `sem_origem`" não é alcançável numa request, porque
+promoção significa `count_pending_conversion() == 0` e um cliente que o fallback
+sintetizaria é pendente por definição. A prova mora no repositório
+(`include_legacy_origin` True × False sobre a MESMA linha) e a continuidade real
+do cutover tem teste próprio.
+
+---
+
+## ADR-056-BE — SAVEPOINT por cliente na conversão, e relatório MEDIDO em vez de subtraído (Sprint 9 / BACK 09.5 — retrabalho R1)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** `scripts/convert_credentials_to_connections.py`
+
+**Contexto.** Falha permanente numa linha dava `await db.rollback()` na sessão do
+LOTE INTEIRO: os clientes já convertidos naquele lote eram descartados, enquanto
+`stats.converted` já os tinha contado. O dado convergia (o `while` reprocessava
+os descartados no lote seguinte), mas o RELATÓRIO mentia — e
+`skipped_already_converted`, calculado como `count(conexões omie) − converted`,
+podia sair NEGATIVO. Esse relatório é a evidência operacional do runbook, lida
+justamente na hora do cutover.
+
+**Decisão.** `async with db.begin_nested()` em volta de `_convert_one`: o
+rollback atinge só a linha que falhou e o lote segue vivo. Preferido a "commit
+por cliente" porque preserva o commit por LOTE (menos round-trips no Cloud Run
+Job) sem perder trabalho bom.
+
+**E o contador deixou de ser uma subtração.** `skipped_already_converted` é
+medido ANTES do run (`_count_omie_connections`), então é um fato do banco e não
+pode sair negativo por descompasso de contagem.
+
+**Teste que só o savepoint satisfaz:** 3 clientes num lote só, um com ciphertext
+que não decifra; `converted` tem de bater com as linhas REAIS em
+`client_connections` (com o rollback de lote saía 3 contra 2) e
+`skipped_already_converted` não pode sair negativo.
+
+---
+
+## ADR-057-BE — A fábrica de client resolve a origem DENTRO dela, e os dois serviços de `omie_data` declaram a mesma forma (Sprint 9 / BACK 09.6 — retrabalho R1)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** `omie_data/routes.py`, `omie_data/service.py`
+
+**Contexto.** Na migração da 09.6, `get_omie_lancamentos` passou a construir o
+client ANTES de chamar o serviço e a entregar `omie_client_factory=lambda:
+omie_client`. O contrato do parâmetro é outro: `OmieLancamentoService` só invoca
+a fábrica dentro do `if missing:` (o MISS do cache), e o `aclose()` mora no
+`finally` logo abaixo. Em cache HIT — o caso comum da tela de revisão, que chama
+esta rota repetidamente — a consequência era tripla: `OmieClient` (com o
+`httpx.AsyncClient` dentro) criado e NUNCA fechado, num processo Cloud Run de
+vida longa (§10); unwrap da DEK no Cloud KMS em toda request; e 409 de origem
+numa request que o cache resolveria sozinho (cliente com cache quente e origem
+removida passava a receber 409 onde recebia 200).
+
+**Decisão.** A resolução volta para dentro de uma fábrica `async def
+build_client()`, como o endpoint de categorias do mesmo arquivo sempre fez — com
+o argumento escrito na docstring dele desde a Sprint 7 ("o ponto do cache é
+justamente não pagar latência por abertura de combobox").
+
+**E a assinatura foi UNIFICADA.** `OmieLancamentoService.fetch_lancamentos`
+declarava `Callable[[], OmieClient]` (síncrono) enquanto
+`OmieCategoriasService.list_categorias` declarava
+`Callable[[], Awaitable[OmieClient]]`. Passou a ser a assíncrona nos dois, com
+`await` na invocação. Não é cosmético: foi essa divergência que tornou plausível
+entregar um client já construído — com o tipo assíncrono, o `lambda:
+omie_client` nem passa no mypy. Um teste compara as duas anotações.
+
+**Testes nos dois níveis, porque cada um pega uma metade.** O unitário
+(`tests/unit/test_omie_lancamentos_cache_hit.py`) prova o contrato do SERVIÇO
+(fábrica espiã: 0 construções no hit, 1 construção e 1 `aclose` no miss) — e
+sozinho NÃO pegaria o defeito, que era da rota. O de rota
+(`test_origin_required_routes.py::TestCacheHitNaoResolveOrigem`) põe o L1 quente
+para um cliente SEM origem e faz `build_capable_client` explodir se for chamado:
+com o `lambda`, a rota resolve a origem antes e devolve 409; com a fábrica, 200.
+
+---
+
+# Decisões do QA na rodada 2 da Sprint 9
+
+## ADR-022-QA — Prova de rework que roda sem Docker: uma guarda por defeito, e cada uma falha contra o código antigo (Sprint 9 / QA, rodada 2)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** `tests/unit/test_sprint9_qa_gate.py`
+
+**Contexto.** Os três defeitos da rodada 1 foram corrigidos, e as provas que
+vieram junto são de **integração** (Postgres) ou de **serviço**. Nesta máquina o
+Docker segue desligado, então aprovar por elas seria aprovar por leitura. Pior:
+o defeito da 09.6 morava na ROTA, e o teste unitário que veio com o rework prova
+o SERVIÇO — ele passaria verde com a rota defeituosa.
+
+**Decisão.** Cada defeito corrigido ganhou uma guarda no arquivo do QA, em nível
+que roda sem banco e sem rede:
+
+1. **Durabilidade (09.3)** — o serviço real montado com uma sessão de mentira
+   que registra a ORDEM das chamadas. Asserção: `mark_erro` → `audit` →
+   `commit`, e `commit` é a ÚLTIMA escrita antes do `raise`.
+2. **Fábrica de client (09.6)** — a função de rota `get_omie_lancamentos`
+   chamada de verdade, com `OmieLancamentoService` substituído por um dublê que
+   simula cache HIT (nunca invoca a fábrica) e com `build_capable_client`
+   contando invocações. Zero é a única resposta aceitável; um segundo teste
+   invoca a fábrica para ela não ser enfeite morto.
+
+**A parte que dá valor à guarda: ela falha contra o código antigo.** Exportei o
+commit pré-rework com `git archive f8b431e apps/api | tar -x -C $TMPDIR/...` e
+rodei o MESMO arquivo contra ele, com o venv do worktree do backend:
+
+    cd $TMPDIR/prerework/apps/api && PYTHONPATH=. <backend>/.venv/bin/python -m pytest \
+      $TMPDIR/qagate/test_sprint9_qa_gate.py -o asyncio_mode=auto -c ./pyproject.toml
+
+Resultado: **3 failed, 23 passed** — `assert 'commit' in ['mark_erro','flush','audit']`
+e `assert 1 == 0` (client construído em cache hit). Contra o código do rework:
+**26 passed**. É essa dupla que transforma "o teste passou" em evidência.
+
+**Receita de tropeço.** Rodar o arquivo do worktree do QA de dentro do worktree
+do backend importa o `app` ERRADO (o do QA, que está na base da sprint). Copiar
+o teste para `$TMPDIR` e rodar com `cwd` no backend resolve; e o `asyncio_mode`
+vem do `pyproject.toml` do backend, que precisa ser passado com `-c`.
+
+---
+
+## ADR-023-QA — URL de teste se confere contra o spec, não contra o vizinho: `< 500` transforma 404 em verde (Sprint 9 / QA, rodada 2)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** revisão de teste de integração
+
+**Contexto.** A bateria "toda rota de origem responde 409, nunca 5xx"
+(`test_origin_required_routes.py`) tinha, desde a rodada 1, um caso chamando
+`/api/v1/omie-data/categorias`. Esse path **não existe** — o router é
+`prefix="/api/v1/omie"`. Como a asserção do caso é `status_code < 500`, o **404
+passa**: o cenário nunca foi exercitado e ninguém percebeu. Na rodada 2, o teste
+de rota do rework da 09.6 foi escrito copiando o vizinho: mesmo prefixo errado
+(`omie-data`), mesmo nome de parâmetro errado (`sessionId` em vez de
+`session_id`) — só que agora a asserção é `== 200`, então ele **falha** assim
+que alguém subir o Postgres.
+
+**Decisão (mecânica, para o QA repetir).** Toda URL literal de teste é conferida
+contra os paths do OpenAPI gerado do próprio código, sem subir servidor: gera-se
+o spec com as chaves fake do `ci.yml` (ADR-021-QA) e casa-se cada `"/api/v1/..."`
+do arquivo de teste contra os paths do spec, com `{id}` virando curinga.
+
+Nesta sprint: `test_origin_required_routes.py` **13/15** (as duas acima),
+`test_client_connections.py` 7/7, `test_convert_credentials_to_connections.py`
+3/3. A regra que fica: **asserção frouxa (`< 500`, `!= 500`) não pode ser a única
+guardiã de um path** — ela é justamente a que não distingue "rota respondeu" de
+"rota não existe".
+
+---
+
+## ADR-024-QA — Rollback de SAVEPOINT EXPIRA o objeto modificado: ler `client.id` no `except` é IO (Sprint 9 / QA, rodada 2)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** qualquer laço async com
+`begin_nested()` ou `rollback()` por item
+
+**Contexto.** O script de conversão passou a isolar cada cliente num SAVEPOINT
+(ADR-056-BE), para a linha que falha não descartar o lote. A correção está certa
+no que se propôs a fazer — e esbarra numa semântica do SQLAlchemy que vale para
+os dois formatos (savepoint E rollback de sessão inteira):
+`SessionTransaction._restore_snapshot(dirty_only=True)` **expira** todo estado
+`modified` ou `_dirty`. `_convert_one` chama `provision_client_cipher`, que
+**seta `client.dek_wrapped` in-place** no cliente bare (o legado típico) — então
+o `client` está modificado quando a decifragem falha. No `except`, o primeiro
+`client.id` dispara refresh do atributo expirado, que em asyncio é
+`MissingGreenlet`.
+
+**Prova (sem Postgres, sem Docker).** Réplica estrutural do laço com
+`sqlite+aiosqlite` — objeto persistente modificado, filho adicionado, `flush`,
+exceção dentro do `begin_nested`, leitura do atributo no `except`:
+
+    uv run --extra dev --with aiosqlite python <repro>
+    # EXPLODIU no except: MissingGreenlet greenlet_spawn has not been called...
+
+Roda igual na forma anterior (`await db.rollback()` no `except`): **o defeito é
+pré-existente**, não uma regressão do rework — o que muda é que agora existe um
+teste que o encontraria (`test_falha_no_meio_do_lote...`, que usa um cliente
+**bare** como linha podre).
+
+**A regra que fica.** Em laço async que trata erro por item, **capture os
+escalares que o `except` vai usar ANTES de entrar no bloco transacional**
+(`client_id = client.id`), ou releia o objeto. Nunca leia atributo de instância
+ORM depois de um rollback — o acesso parece memória e é rede.
+
+---
+
+## ADR-025-QA — `CLAUDE.md` no `AGENT_PATHS_QA` só é seguro enquanto o QA editar o `PROJECT.md` (Sprint 9 / QA, rodada 2)
+
+**Data:** 2026-09-23 · **Status:** ativo · **Escopo:** `.agents-hub/config.env`, operação do hub
+
+**Contexto.** Depois da rodada 1 o `AGENT_PATHS_QA` ganhou `CLAUDE.md`, para o
+QA poder entregar o primer. Só que **dentro do worktree** `CLAUDE.md` é o PROMPT
+do papel (9.717 bytes, cópia de `.claude/agents/qa.md`) e `PROJECT.md` é o primer
+(102.777 bytes, cópia do `CLAUDE.md` da raiz). O `orchestrate.js` faz, nesta
+ordem: (1) `git add` de cada `gitPaths` — o que **staged o prompt como
+CLAUDE.md**; (2) só então o bloco do primer, que sobrescreve `CLAUDE.md` com o
+conteúdo de `PROJECT.md` **e apenas se** `primerFoiAtualizado(PROJECT.md,
+HEAD:CLAUDE.md)` for verdadeiro.
+
+**A consequência.** Se o QA **não** editar o `PROJECT.md`, os dois são idênticos,
+o passo (2) não dispara e o commit leva o prompt do papel por cima do primer do
+projeto: 102 KB viram 9,7 KB. O próprio comentário do `orchestrate.js` (linha
+575) diz que pôr `CLAUDE.md` no gitPaths do QA faria isso.
+
+**Decisão desta rodada.** Editar o `PROJECT.md` (o que já era obrigação do DoD) e
+registrar a armadilha. **Pendente para o Pedro:** ou tirar `CLAUDE.md` do
+`AGENT_PATHS_QA` (o bloco do primer faz o `git add` sozinho, então ele é
+desnecessário), ou o hub passa a materializar o primer ANTES do `git add` dos
+gitPaths. Enquanto nenhuma das duas acontecer, **sprint em que o QA não toque no
+primer destrói o primer**.
