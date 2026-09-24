@@ -61,6 +61,7 @@ import {
   TableBody,
   TableCard,
   TableCell,
+  TableEmpty,
   TableHead,
   TableHeader,
   TableRow,
@@ -374,29 +375,30 @@ export function ChartOfAccountsScreen({ clientId }: { clientId: string }) {
               <TableBody>
                 {listQuery.isLoading ? (
                   <TableSkeletonRows />
-                ) : rows.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={COLUMN_COUNT} className="py-12">
-                      {neverSynced ? (
-                        <NeverSyncedState
-                          action={showSyncAction ? syncButton : null}
-                          canSync={canSync}
-                          isClosed={isClosed}
-                        />
-                      ) : hasFilters ? (
-                        <FilteredEmptyState onClear={clearFilters} />
-                      ) : (
-                        <p className="text-muted-foreground text-center text-sm">
-                          Nenhuma categoria neste plano de contas.
-                        </p>
-                      )}
-                    </TableCell>
-                  </TableRow>
                 ) : (
                   rows.map((entry) => <ChartRow key={entry.categoryCode} entry={entry} />)
                 )}
               </TableBody>
             </Table>
+            {/* Fora do `<Table>` de propósito: a tabela rola na horizontal em 390px e
+                uma célula `colSpan` cortaria o texto à direita (ver `TableEmpty`). */}
+            {!listQuery.isLoading && rows.length === 0 && (
+              <TableEmpty>
+                {neverSynced ? (
+                  <NeverSyncedState
+                    action={showSyncAction ? syncButton : null}
+                    canSync={canSync}
+                    isClosed={isClosed}
+                  />
+                ) : hasFilters ? (
+                  <FilteredEmptyState onClear={clearFilters} />
+                ) : (
+                  <p className="text-muted-foreground text-center text-sm">
+                    Nenhuma categoria neste plano de contas.
+                  </p>
+                )}
+              </TableEmpty>
+            )}
           </TableCard>
         )}
       </div>

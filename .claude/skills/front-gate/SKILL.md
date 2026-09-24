@@ -41,7 +41,12 @@ componente, nunca copiada na tela:
 - **Tabela** → `<TableCard>` (`components/ui/table.tsx:73-82`, `flex max-h-full
 flex-col overflow-hidden`) + `<Table fill>` (`:27`, `:43`). Nunca `overflow` no
   container de fora: dois scrollers aninhados espremem as colunas em 390px em vez de
-  rolar (ADR-007-FE).
+  rolar (ADR-007-FE). **Estado vazio** (nunca sincronizou, filtro sem resultado, lista
+  vazia) → `<TableEmpty>` DEPOIS do `<Table>`, dentro do mesmo `<TableCard>`, nunca numa
+  `<TableCell colSpan>`: a célula tem a largura da tabela, que em 390px é maior que a
+  viewport, e o texto centralizado nela fica com a metade direita fora da tela, "visível"
+  para todo `toBeVisible()` (validação da Sprint 11). O e2e mede o texto do estado vazio
+  dentro da viewport (`exigirEstadoVazioLegivel`).
 - **Shell**: só o `<main>` rola — `app/(app)/layout.tsx:121` (`h-dvh overflow-hidden`)
   e `:168` (`main … overflow-y-auto`). Proibido `h-screen`/`min-h-screen`/`100vh`.
 - Travas no browser: "a barra de paginação NUNCA cobre um card" (`e2e/a11y-mocked.spec.ts:1081`)

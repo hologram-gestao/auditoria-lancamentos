@@ -256,11 +256,16 @@ class TestCriarConexao:
         assert data["label"] == "Omie"  # rótulo padrão na PRIMEIRA do tipo
         assert data["status"] == "ativa"
         assert data["last_checked_at"] is not None
+        # Nominal de propósito: é o que a resposta da API promete ao front, e
+        # derivar de `OMIE_CAPABILITIES` faria o teste concordar com qualquer
+        # mudança. Capacidade nova no adaptador entra AQUI na mesma task —
+        # `listar_titulos_em_aberto` é da Sprint 11 (carteira de títulos).
         assert set(data["capabilities"]) == {
             "verificar_credencial",
             "listar_contas",
             "listar_lancamentos",
             "escrever",
+            "listar_titulos_em_aberto",
         }
 
         await db_session.refresh(w.client)

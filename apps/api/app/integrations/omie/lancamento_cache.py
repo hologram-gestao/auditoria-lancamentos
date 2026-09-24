@@ -29,7 +29,6 @@ NÃO logar:
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable
 from datetime import date
 from decimal import Decimal
@@ -39,6 +38,7 @@ from cachetools import TTLCache
 
 from app.core.logging import get_logger
 from app.integrations.omie.client import OmieClient
+from app.integrations.omie.client_locks import OriginClientLocks, origin_client_locks
 from app.integrations.omie.schemas import LancamentoExtrato
 
 log = get_logger(__name__)
@@ -134,6 +134,7 @@ class OmieLancamentoCache:
         ttl_seconds: int = DEFAULT_TTL_SECONDS,
         l1_maxsize: int = DEFAULT_L1_MAXSIZE,
         unresolved_ttl_seconds: int = UNRESOLVED_TTL_SECONDS,
+        locks: OriginClientLocks | None = None,
     ) -> None:
         # L1: chave (client_id, omie_id) → data. TTLCache lida com expiração
         # lazy via time.monotonic e impõe upper bound LRU.
@@ -154,9 +155,16 @@ class OmieLancamentoCache:
         # Tela de Revisão dispara o enriquecimento por mais de um caminho ao
         # mesmo tempo (aba Movimentações via /omie/lancamentos + aba
         # Divergências via /omie-entries) contra este mesmo singleton
-        # (`app.state.omie_lancamento_cache`). Dict simples basta: asyncio é
-        # single-threaded e ~100 clientes x 1 Lock é custo desprezível.
-        self._populate_locks: dict[UUID, asyncio.Lock] = {}
+        # (`app.state.omie_lancamento_cache`).
+        #
+        # ⚠️ Sprint 11 (BACK 11.2): o `dict[UUID, asyncio.Lock]` que morava AQUI
+        # saiu para `client_locks.origin_client_locks`, e este cache passou a
+        # consumi-lo. Motivo: a ingestão da carteira de títulos fala com a MESMA
+        # credencial do mesmo cliente por outro caminho — um lock interno ao
+        # cache serializaria o cache consigo mesmo e deixaria a ingestão colidir
+        # com ele. Um mecanismo só, no processo todo. Injetável para o teste
+        # poder observar o registro sem depender do singleton.
+        self._locks = locks or origin_client_locks
 
     # ------------------------------------------------------------------
     # Lookup (read path)
@@ -253,8 +261,7 @@ class OmieLancamentoCache:
             Dict `{omie_id: data}` de TUDO que veio do extrato — caller
             tipicamente filtra pelos IDs que ele queria.
         """
-        lock = self._populate_locks.setdefault(client_id, asyncio.Lock())
-        async with lock:
+        async with self._locks.for_client(client_id):
             raw = await omie_client.listar_extrato(
                 n_cod_cc=omie_conta_id,
                 data_inicial=period_start,

@@ -346,6 +346,17 @@ class TituloAPagarReceber(BaseModel):
             "descrição neste endpoint; resolver via `ListarCategorias` futuro."
         ),
     )
+    id_conta_corrente: int | None = Field(
+        default=None,
+        description=(
+            "ID da conta corrente do título (`nCodCC`). **Presente na resposta "
+            "real** dos dois endpoints — verificado em "
+            "`tests/fixtures/omie/listar_contas_pagar.response.json` e "
+            "`...receber.response.json`, capturadas da conta real. É o que "
+            "permite à carteira (S11) saber a conta de cada título sem precisar "
+            "iterar conta a conta na leitura."
+        ),
+    )
     numero_documento: str | None = Field(
         default=None,
         description="Número do documento (ex: '00123/A') — útil pra rastreio na revisão.",

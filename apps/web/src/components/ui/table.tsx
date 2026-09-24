@@ -89,6 +89,28 @@ const TableHeader = React.forwardRef<
 ));
 TableHeader.displayName = 'TableHeader';
 
+/**
+ * Estado vazio de uma tabela de lista: vai DEPOIS do `<Table>`, dentro do mesmo
+ * `<TableCard>`, nunca numa `<TableCell colSpan>`.
+ *
+ * Por quê: a tabela costuma ser mais larga que a viewport em 390px (cinco colunas
+ * com `whitespace-nowrap` e padding) e rola na horizontal dentro do `ScrollRegion`.
+ * Uma célula `colSpan` tem a largura da TABELA, então o texto centralizado nela
+ * fica com a metade direita fora da tela — e continua "visível" para todo
+ * `toBeVisible()`. Fora do scroller, este bloco tem a largura do card, que é a da
+ * viewport, e o texto quebra em vez de ser cortado (validação humana da Sprint 11,
+ * 24/09/2026; a mesma família estava no plano de contas da Sprint 10).
+ *
+ * Quem chama decide o conteúdo (nunca sincronizou, filtro sem resultado, lista
+ * vazia): aqui só a moldura e o respiro.
+ */
+const TableEmpty = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => (
+    <div ref={ref} className={cn('px-4 py-12', className)} {...props} />
+  ),
+);
+TableEmpty.displayName = 'TableEmpty';
+
 const TableBody = React.forwardRef<
   HTMLTableSectionElement,
   React.HTMLAttributes<HTMLTableSectionElement>
@@ -164,6 +186,7 @@ export {
   TableCaption,
   TableCard,
   TableCell,
+  TableEmpty,
   TableFooter,
   TableHead,
   TableHeader,

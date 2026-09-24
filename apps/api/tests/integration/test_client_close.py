@@ -37,12 +37,15 @@ from app.db.models import (
     ClientAssignment,
     ClientChartOfAccount,
     ClientGlossaryEntry,
+    ClientTitle,
     Notification,
     NotificationType,
     OmieAccountCache,
     ReconciliationFile,
     ReconciliationFileStatus,
     ReconciliationSession,
+    TitleStatus,
+    TitleType,
     UsageEvent,
     User,
     UserClientFavorite,
@@ -237,6 +240,23 @@ async def _seed_world(db: AsyncSession, *, processing: bool = False) -> _World:
     # purga é por tenant.
     db.add(ClientChartOfAccount(client_id=w.cli_a.id, category_code="1.01.01", dre_code="1.01"))
     db.add(ClientChartOfAccount(client_id=w.cli_b.id, category_code="1.01.01", dre_code="1.01"))
+    # Carteira de títulos (S11): mesmo raciocínio do plano de contas logo acima.
+    # Nada nela é cifrado (só códigos, §4.5), então o crypto-shredding não a
+    # alcança — mas ela é o espelho OPERACIONAL do que está em aberto na origem,
+    # e cliente encerrado não opera. Sem a linha em `close_client_purge`, um
+    # tenant morto ficaria com uma lista de cobranças vivas. Duas linhas, uma em
+    # CADA cliente: a do vizinho prova que a purga é por tenant.
+    for cli in (w.cli_a, w.cli_b):
+        db.add(
+            ClientTitle(
+                client_id=cli.id,
+                external_id="9001",
+                title_type=TitleType.A_RECEBER.value,
+                due_date=date(2026, 8, 1),
+                amount=Decimal("1000.00"),
+                status=TitleStatus.EM_ABERTO.value,
+            )
+        )
     db.add(
         AccessAudit(
             user_id=w.admin.id,
@@ -360,6 +380,25 @@ class TestCloseClient:
             )
             == 1
         ), "a purga é POR TENANT — o plano de contas do vizinho não pode ser tocado"
+
+        # Carteira de títulos (S11): some junto, pelo mesmo motivo — é o espelho
+        # operacional da origem, e cliente encerrado não opera nem tem origem a
+        # consultar. A leitura do histórico retido continua sendo conciliação e
+        # trilha, não uma lista de cobranças de um tenant morto.
+        assert (
+            await _count(
+                db_session,
+                select(func.count(ClientTitle.id)).where(ClientTitle.client_id == a),
+            )
+            == 0
+        )
+        assert (
+            await _count(
+                db_session,
+                select(func.count(ClientTitle.id)).where(ClientTitle.client_id == b),
+            )
+            == 1
+        ), "a purga é POR TENANT — a carteira do vizinho não pode ser tocada"
 
         # Usuários do tenant: FICAM (FK das sessões), mas anonimizados e mortos.
         users_a = (

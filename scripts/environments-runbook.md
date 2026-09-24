@@ -1,4 +1,4 @@
-# Runbook do operador — provisionamento por ambiente (Sprint 3)
+# Runbook do operador — provisionamento por ambiente (Sprint 3 + Sprint 11)
 
 > Rodável para **dev E prod** (isolados: nunca compartilham KEK, secret nem serviço).
 > Todo passo é **idempotente** ou **1× por ambiente**. Nada aqui derruba um deploy
@@ -21,9 +21,18 @@ Cria/garante, sem duplicar:
 - **Secrets do canal de alerta** (Req. 4 / 03.7): `alert-webhook-url-<env>` e
   `alert-email-to-<env>` (container + versão **vazia** semeada + `secretAccessor`
   per-secret à SA de runtime).
+- **Sincronização diária da carteira de títulos** (Sprint 11 R5 / 11.6):
+  Cloud Run Job `auditoria-api-sync-titles-<env>` + Cloud Scheduler
+  `auditoria-sync-titles-<env>` — detalhes no passo 5.
 
 > ⚠️ Rode **antes** do 1º deploy: o `--update-secrets ...:latest` dos workflows
 > falha se o secret não tiver versão.
+>
+> ⚠️ **Ordem dentro do ambiente:** a parte da **carteira** clona a configuração
+> do job de `cleanup` (senão do de `migrate`) do MESMO ambiente. Num ambiente
+> novo esses jobs ainda não existem: o script **avisa e segue** (não derruba
+> nada), e você re-executa `setup-gcp.sh <env>` depois do 1º deploy. Nos dois
+> primeiros passos (KMS/secrets) a ordem continua sendo "antes do deploy".
 
 ### 2. Configurar o canal de plantão real (valor não versionado)
 
@@ -59,9 +68,9 @@ o pipeline **reprova**.
 
 2. No GitHub → **Settings → Environments → `<development|production>` → Secrets**:
 
-   | Secret | Valor |
-   | --- | --- |
-   | `SMOKE_ADMIN_EMAIL` | e-mail do admin de monitoração |
+   | Secret                 | Valor                          |
+   | ---------------------- | ------------------------------ |
+   | `SMOKE_ADMIN_EMAIL`    | e-mail do admin de monitoração |
    | `SMOKE_ADMIN_PASSWORD` | senha dele (nunca no repo/log) |
 
 3. Confirme a **Variable** `API_URL_<DEV\|PROD>` no mesmo Environment (base
@@ -81,6 +90,49 @@ secrets (KEK inclusive — o backfill de cripto precisa do unwrap). Em seguida o
 (read-only) `--min-instances>=1` + `--no-cpu-throttling` (o heartbeat depende
 disso; custo pendente de aprovação — ver CLAUDE.md §10).
 
+### 5. Carteira de títulos — sincronização diária (Sprint 11, R5 / 11.6)
+
+Não existe scheduler dentro da aplicação (a FASE 0 removeu Redis/ARQ; só há
+`BackgroundTasks` e Cloud Run Jobs). A carteira sincroniza por **Cloud Run Job +
+Cloud Scheduler**, no mesmo molde do job de limpeza — e **sem isso a carteira
+envelhece e o aging mente**, sem nenhum sintoma na tela.
+
+O `setup-gcp.sh <env>` do passo 1 já cria tudo, **1× por ambiente**:
+
+| Recurso         | Nome                              | O que é                                                               |
+| --------------- | --------------------------------- | --------------------------------------------------------------------- |
+| Cloud Run Job   | `auditoria-api-sync-titles-<env>` | roda `python -m scripts.sync_client_titles` na imagem `auditoria-api` |
+| Cloud Scheduler | `auditoria-sync-titles-<env>`     | dispara o job **1× por dia**, `04:12` `America/Sao_Paulo`             |
+| SA de invocação | `auditoria-scheduler-<env>@…`     | só `run.invoker`, e **só nesse job**                                  |
+
+Decisões que valem para os dois ambientes:
+
+- **04:12** é deliberado: horário de baixa, e longe das bordas do cron de 25 min
+  do cleanup (`:00`, `:25`, `:50`) — as duas cargas nunca disputam a janela de
+  API da origem.
+- **Sem retentativa automática** (`--max-retries=0` no job **e** no Scheduler):
+  falha do ciclo é registrada e o ciclo **seguinte** tenta de novo. Retentar na
+  hora criaria chamadas concorrentes do mesmo método para a mesma credencial —
+  exatamente o que a origem não tolera.
+- **Uma execução por ciclo** (`--tasks=1 --parallelism=1`) + teto de 30 min por
+  execução: é o que impede o job de ficar preso em "sincronizando".
+- A **configuração do job é clonada** do `cleanup`/`migrate` do ambiente, então
+  os secrets (banco, cripto, alerta) são os mesmos **por construção** — nenhuma
+  lista de secret mantida à mão neste script.
+
+Conferência depois de rodar o script:
+
+```bash
+gcloud scheduler jobs describe auditoria-sync-titles-<env> \
+  --location=southamerica-east1 --project=liberdade-assessoria
+# execução manual de conferência (o mesmo que o cron faz)
+gcloud run jobs execute auditoria-api-sync-titles-<env> \
+  --region=southamerica-east1 --project=liberdade-assessoria --wait
+```
+
+> O botão de sincronizar manual da tela é outro caminho (rota da API, papel
+> backend). Este agendamento é o que garante a carteira **diária**.
+
 ## Verificação rápida
 
 - [ ] `setup-gcp.sh <env>` rodou sem erro fatal; `KEK_KMS_KEY_NAME` impresso.
@@ -88,3 +140,8 @@ disso; custo pendente de aprovação — ver CLAUDE.md §10).
 - [ ] Admin de monitoração criado + `SMOKE_ADMIN_EMAIL/PASSWORD` no Environment.
 - [ ] `API_URL_<env>` setada no Environment.
 - [ ] Deploy verde, com `smoke-alert` provando `delivered=true`.
+- [ ] `auditoria-api-sync-titles-<env>` existe e o passo
+      `Re-resolve :dev digest in sync-titles Job` do deploy **não** emitiu
+      `::warning::` (se emitiu, o script do passo 1 ainda não rodou neste
+      ambiente e a carteira não está agendada).
+- [ ] `auditoria-sync-titles-<env>` agendado às `04:12` `America/Sao_Paulo`.

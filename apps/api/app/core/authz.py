@@ -162,6 +162,24 @@ class Permission(StrEnum):
     #: `sync_omie_accounts` é de todos, o que deixaria o `client_operator`
     #: forçar chamadas à origem do cliente.
     SYNC_CLIENT_CHART_OF_ACCOUNTS = "sync_client_chart_of_accounts"
+    # --- Sprint 11 (BACK 11.5) ----------------------------------------------
+    #: LER a CARTEIRA de títulos em aberto (lista + agregados/aging). Todo papel
+    #: com acesso ao tenant, como o plano de contas: é a posição financeira DO
+    #: cliente, e o operador precisa dela para entender o que cobra e o que paga.
+    #:
+    #: ⚠️ **O nome vem do PRD e é CONTRATO**, mesmo com a tabela chamando-se
+    #: `client_titles`: a carteira inclui **a pagar**, e "receivables" descreve
+    #: só metade dela. Renomear a permissão para casar com a tabela quebraria o
+    #: espelho do front (`lib/authz.ts`) e o PRD ao mesmo tempo — a tabela é que
+    #: está com o nome mais preciso, e é ela que fica como está.
+    VIEW_CLIENT_RECEIVABLES = "view_client_receivables"
+    #: SINCRONIZAR a carteira (ir à origem). Permissão PRÓPRIA, pelo MESMO
+    #: raciocínio da S10: sincronizar é uma ida à origem do cliente, e o
+    #: `client_operator` é quem mais abre tela. Reusar
+    #: `sync_client_chart_of_accounts` pareceria economia e amarraria duas
+    #: sincronizações diferentes a uma decisão só — o dia em que uma delas
+    #: mudasse de célula, a outra mudaria junto sem ninguém pedir.
+    SYNC_CLIENT_RECEIVABLES = "sync_client_receivables"
 
 
 _EVERYONE: frozenset[UserRole] = frozenset(UserRole)
@@ -196,6 +214,8 @@ _PLATFORM_ONLY: frozenset[UserRole] = frozenset({UserRole.PLATFORM_ADMIN})
 #: | Conexões de origem (S9)       | ✅             | ✅          | ✅ (carteira)  | ❌             | ❌              |
 #: | Ver plano de contas (S10)     | ✅             | ✅          | ✅ (carteira)  | ✅             | ✅              |
 #: | Sincronizar plano de contas   | ✅             | ✅          | ✅ (carteira)  | ✅             | ❌              |
+#: | Ver a carteira (S11)          | ✅             | ✅          | ✅ (carteira)  | ✅             | ✅              |
+#: | Sincronizar a carteira (S11)  | ✅             | ✅          | ✅ (carteira)  | ✅             | ❌              |
 PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]] = {
     Permission.RUN_RECONCILIATION: _EVERYONE,
     Permission.REVIEW_EXPORT: _EVERYONE,
@@ -246,6 +266,17 @@ PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]] = {
     # excluiria o manager que cadastra a carteira; `sync_omie_accounts` (todos)
     # deixaria o operador forçar chamadas.
     Permission.SYNC_CLIENT_CHART_OF_ACCOUNTS: frozenset(
+        {UserRole.PLATFORM_ADMIN, UserRole.ADMIN, UserRole.MANAGER, UserRole.CLIENT_MANAGER}
+    ),
+    # S11 (BACK 11.5), células decididas no PRD (R5) — as MESMAS do plano de
+    # contas, e não por preguiça: a pergunta é a mesma nos dois casos ("quem lê a
+    # configuração/posição do cliente" x "quem pode fazer o servidor ir à
+    # origem"), e a resposta do PRD coincidiu. São duas permissões distintas
+    # porque amarrá-las faria uma mudança de célula arrastar a outra.
+    Permission.VIEW_CLIENT_RECEIVABLES: _EVERYONE,
+    # SINCRONIZAR sai do `client_operator` e só dele. O "(carteira)" do manager é
+    # `resolve_client_access`, não esta linha.
+    Permission.SYNC_CLIENT_RECEIVABLES: frozenset(
         {UserRole.PLATFORM_ADMIN, UserRole.ADMIN, UserRole.MANAGER, UserRole.CLIENT_MANAGER}
     ),
 }

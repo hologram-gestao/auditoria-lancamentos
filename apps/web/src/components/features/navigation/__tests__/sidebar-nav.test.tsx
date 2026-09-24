@@ -223,22 +223,41 @@ describe('SidebarNav — camada do cliente', () => {
     expect(within(nav).getByText('Cliente Exemplo Ltda')).toBeInTheDocument();
   });
 
-  it('operador do cliente: sem Voltar e sem Usuários — 5 seções', () => {
+  it('operador do cliente: sem Voltar e sem Usuários — 6 seções', () => {
     currentPathname = '/clientes/c1';
     render(<SidebarNav user={CLIENT_OPERATOR} />);
 
     const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
     const links = within(nav).getAllByRole('link');
-    // "Plano de Contas" entrou na S10: LER é ✅ nos cinco papéis (o operador
-    // inclusive — é a classificação contábil do próprio cliente). Quem some
-    // para ele é a ação de SINCRONIZAR, dentro da tela, não o item de menu.
+    // "Plano de Contas" entrou na S10 e "Carteira" na S11: LER é ✅ nos cinco
+    // papéis nos dois casos (o operador inclusive — é a classificação contábil
+    // e a posição financeira do próprio cliente). Quem some para ele é a ação
+    // de SINCRONIZAR, dentro de cada tela, não o item de menu.
     expect(links.map((l) => l.textContent)).toEqual([
       'Conciliações',
       'Contas Bancárias',
       'Painel',
       'Glossário',
       'Plano de Contas',
+      'Carteira',
     ]);
+  });
+
+  it('a rota da carteira não deixa "Conciliações" ativo junto', () => {
+    // Mesma armadilha do plano de contas: "Conciliações" é o FALLBACK da camada
+    // do cliente, então rota nova que não entre na negação de
+    // `isReconciliations` marca dois itens ao mesmo tempo.
+    currentPathname = '/clientes/c1/carteira';
+    render(<SidebarNav user={ADMIN} />);
+
+    const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
+    expect(within(nav).getByRole('link', { name: 'Carteira' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(within(nav).getByRole('link', { name: 'Conciliações' })).not.toHaveAttribute(
+      'aria-current',
+    );
   });
 
   it('a rota do plano de contas não deixa "Conciliações" ativo junto', () => {
