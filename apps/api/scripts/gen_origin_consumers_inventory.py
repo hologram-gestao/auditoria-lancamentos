@@ -105,7 +105,9 @@ CLASSIFICATION: tuple[Entry, ...] = (
         Family.ORIGEM,
         "ingestão da carteira de títulos (S11): resolve a conexão capaz de "
         "`listar_titulos_em_aberto` e constrói o provedor pela PORTA. Não toca em credencial "
-        "nem nas colunas antigas, e não fala com o `OmieClient` direto",
+        "nem nas colunas antigas, e não fala com o `OmieClient` direto. `TitleContextService` "
+        "(S15) também mora aqui e usa `load_client_cipher`/`provision_client_cipher` para cifrar "
+        "o TEXTO do contexto do título — dado do tenant, sem relação com origem",
     ),
     Entry(
         "app/modules/client_titles/routes.py",

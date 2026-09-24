@@ -1,8 +1,12 @@
-"""Endpoints da CARTEIRA de títulos em aberto (Sprint 11, BACK 11.5 — R4 + R5).
+"""Endpoints da CARTEIRA de títulos em aberto (Sprint 11, BACK 11.5 — R4 + R5) e
+do contexto/relatório de recebíveis (Sprint 15, BACK 15.1/15.2).
 
     - GET  /api/v1/clients/{client_id}/titles
     - GET  /api/v1/clients/{client_id}/titles/summary
     - POST /api/v1/clients/{client_id}/titles/sync
+    - GET  /api/v1/clients/{client_id}/titles/receivables-report
+    - POST /api/v1/clients/{client_id}/titles/{title_id}/context
+    - GET  /api/v1/clients/{client_id}/titles/{title_id}/context
 
 **Duas travas, ambas necessárias** (mesmo desenho do plano de contas, S10):
 
@@ -18,10 +22,10 @@
 E a terceira, na camada de dados: todo `SELECT` da carteira nasce de `_base_query`,
 que já carrega `AND client_id = <tenant>`.
 
-⚠️ **As rotas literais vêm ANTES de qualquer rota com path param.** `/summary` e
-`/sync` são declaradas aqui sem ambiguidade porque nenhuma rota deste módulo tem
-path param depois do prefixo; se um `/{external_id}` aparecer, ele tem de ficar
-DEPOIS das duas — o FastAPI casa por ordem de declaração.
+⚠️ **As rotas literais vêm ANTES de qualquer rota com path param.** `/summary`,
+`/sync` e `/receivables-report` são declaradas aqui sem ambiguidade porque
+vêm antes de `/{title_id}/context` (Sprint 15) — o FastAPI casa por ordem de
+declaração.
 
 ⚠️ **Enum inválido em query é 400 `VALIDATION_ERROR`, nunca 422.** Validação de
 FORMA é tratada pelo handler global, sem ecoar mensagem nem campo (convenção de
@@ -40,29 +44,38 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
 
 from app.core.dependencies import (
     AccessibleClientDep,
     DbSessionDep,
+    ManageTitleContextDep,
     OpenClientDep,
     SettingsDep,
     SyncClientReceivablesDep,
     ViewClientReceivablesDep,
+    ViewTitleContextDep,
 )
 from app.core.logging import get_logger
 from app.db.models.client_title import ClientTitle, TitleType
+from app.db.models.title_context import TitleContextType
 from app.integrations.omie.clientes_cache import OmieClientesCache
 from app.integrations.omie.supplier_names import resolve_supplier_names
 from app.integrations.providers.base import Capability
 from app.modules.client_connections.origin import build_capable_client
 from app.modules.client_titles.aging import AgingBucket
-from app.modules.client_titles.repository import ClientTitlesRepository
+from app.modules.client_titles.repository import ClientTitlesRepository, TitleContextRepository
 from app.modules.client_titles.schemas import (
     ClientTitleResponse,
     ClientTitlesListResponse,
+    ReceivablesReportEnvelope,
+    ReceivablesReportResponse,
     TitleBucketFilter,
+    TitleContextCreateRequest,
+    TitleContextEnvelope,
+    TitleContextListResponse,
     TitleSituationFilter,
     TitleSortFieldFilter,
     TitleSortOrderFilter,
@@ -75,6 +88,8 @@ from app.modules.client_titles.schemas import (
 from app.modules.client_titles.service import (
     ClientTitlesReadService,
     ClientTitlesSyncService,
+    ReceivablesReportService,
+    TitleContextService,
 )
 from app.modules.clients.repository import ClientRepository
 from app.modules.users.schemas import PaginationMeta
@@ -115,6 +130,29 @@ def _get_sync_service(
 SyncServiceDep = Annotated[ClientTitlesSyncService, Depends(_get_sync_service)]
 
 
+def _get_context_repository(db: DbSessionDep) -> TitleContextRepository:
+    return TitleContextRepository(db)
+
+
+ContextRepositoryDep = Annotated[TitleContextRepository, Depends(_get_context_repository)]
+
+
+def _get_context_service(
+    db: DbSessionDep, settings: SettingsDep, repository: ContextRepositoryDep
+) -> TitleContextService:
+    return TitleContextService(db, repository=repository, settings=settings)
+
+
+ContextServiceDep = Annotated[TitleContextService, Depends(_get_context_service)]
+
+
+def _get_report_service(db: DbSessionDep, repository: RepositoryDep) -> ReceivablesReportService:
+    return ReceivablesReportService(db, repository=repository)
+
+
+ReportServiceDep = Annotated[ReceivablesReportService, Depends(_get_report_service)]
+
+
 @router.get(
     "",
     summary=(
@@ -122,9 +160,11 @@ SyncServiceDep = Annotated[ClientTitlesSyncService, Depends(_get_sync_service)]
         "de todas as contas correntes e sem recorte de competência, que é o que "
         "faz um título vencido há meses aparecer aqui e não na conciliação do "
         "mês. Paginada (`page`/`pageSize`, máximo 100), com filtros NO SERVIDOR "
-        "por tipo (`type`), situação (`situation`: `em_aberto` ou `vencido`) e "
-        "balde de aging (`bucket`), e ordenação por vencimento ou valor "
-        "(`sortBy`/`sortOrder`). O nome do devedor (`supplierName`) é resolvido "
+        "por tipo (`type`), situação (`situation`: `em_aberto` ou `vencido`), "
+        "balde de aging (`bucket`) e ausência de contexto (`hasNoContext`, "
+        "Sprint 15 — a fila de trabalho de quem registra), e ordenação por "
+        "vencimento ou valor (`sortBy`/`sortOrder`). O nome do devedor "
+        "(`supplierName`) é resolvido "
         "em runtime e nunca lido do banco: quando a origem não responde, a linha "
         "volta com `supplierNameResolved=false` e o código — nunca em branco, e "
         "nunca com erro. Carteira de outro cliente jamais aparece."
@@ -160,6 +200,17 @@ async def list_client_titles(
         TitleBucketFilter | None,
         Query(description="Filtra por balde de aging. Ausente = todos."),
     ] = None,
+    has_no_context: Annotated[
+        bool | None,
+        Query(
+            alias="hasNoContext",
+            description=(
+                "`true` = só títulos SEM nenhum registro em `title_contexts` (Sprint "
+                "15/R2) — a fila de trabalho de quem registra contexto. Combina com "
+                "qualquer outro filtro; a tela usa junto de `situation=vencido`."
+            ),
+        ),
+    ] = None,
     sort_by: Annotated[
         TitleSortFieldFilter,
         Query(alias="sortBy", description="Ordena por vencimento ou por valor."),
@@ -176,6 +227,7 @@ async def list_client_titles(
         title_type=TitleType(title_type) if title_type else None,
         situation=situation,
         bucket=AgingBucket(bucket) if bucket else None,
+        has_no_context=has_no_context,
         sort_by=sort_by,
         descending=sort_order == "desc",
         limit=page_size,
@@ -253,6 +305,88 @@ async def sync_client_titles(
             summary=TitlesSummaryResponse.from_summary(summary),
         )
     )
+
+
+@router.get(
+    "/receivables-report",
+    summary=(
+        "Relatório de recebíveis (Sprint 15) — separa, no SERVIDOR e sobre a "
+        "carteira INTEIRA, inadimplência real de vencido-com-contexto. Cada "
+        "lado (a pagar/a receber) tem dois grupos: `inadimplencia` (título "
+        "vencido sem nenhum contexto, ou cujo contexto mais recente é "
+        "`perda_provavel`) e `vencidoComContexto` (mais recente é acordo, "
+        "antecipação, nota a cancelar, cobrança suspensa ou outro), cada um "
+        "com total e os quatro baldes de aging da Sprint 11. Cliente sem "
+        "nenhum contexto: tudo em `inadimplencia`, sem erro — é o baseline. "
+        "Não expõe texto decifrado nem identificador de título, só agregados — "
+        "por isso usa a MESMA permissão de leitura da carteira "
+        "(`view_client_receivables`), não `view_title_context`."
+    ),
+)
+async def get_receivables_report(
+    _user: ViewClientReceivablesDep,
+    client: AccessibleClientDep,
+    service: ReportServiceDep,
+) -> ReceivablesReportEnvelope:
+    report = await service.report(client)
+    return ReceivablesReportEnvelope(data=ReceivablesReportResponse.from_report(report))
+
+
+# ⚠️ As duas rotas abaixo têm `{title_id}` — vêm DEPOIS de "", "/summary",
+# "/sync" e "/receivables-report" de propósito (nenhuma delas tem path param
+# depois do prefixo; o FastAPI casa por ordem de declaração).
+
+
+@router.post(
+    "/{title_id}/context",
+    summary=(
+        "Registra uma entrada de CONTEXTO sobre um título — acordo de pagamento, "
+        "antecipação, nota a cancelar, cobrança suspensa, perda provável ou "
+        "outro. Append-only: registrar de novo NÃO apaga o histórico, só adiciona "
+        "(a classificação do relatório usa o mais recente). O texto nasce cifrado "
+        "com a chave do cliente. `type` fora do vocabulário fechado é validação "
+        "de FORMA — 400 `VALIDATION_ERROR`, nunca 422. Cliente encerrado: 409. "
+        "Título de outro cliente: 404, sem revelar que existe alhures."
+    ),
+)
+async def register_title_context(
+    user: ManageTitleContextDep,
+    client: OpenClientDep,
+    title_id: UUID,
+    payload: TitleContextCreateRequest,
+    service: ContextServiceDep,
+) -> TitleContextEnvelope:
+    entry = await service.register(
+        client,
+        title_id=title_id,
+        context_type=TitleContextType(payload.type),
+        text=payload.text,
+        author=user,
+    )
+    return TitleContextEnvelope(data=entry)
+
+
+@router.get(
+    "/{title_id}/context",
+    summary=(
+        "Histórico COMPLETO de contexto de um título, mais recente primeiro. "
+        "Nunca paginado (é o registro de um título, não uma coleção sem teto). "
+        "O autor de cada entrada é ENXUTO e mascarado por escopo (mesma decisão "
+        "de autoria de sessão, §3.15) — usuário de cliente vendo autor de staff "
+        "recebe 'Equipe {organização}', sem e-mail. Falha de decifragem de uma "
+        "entrada não derruba o histórico: ela volta como `[indecifrável]` com "
+        "`decryptFailed=true`. Título de outro cliente: 404, sem revelar que "
+        "existe alhures."
+    ),
+)
+async def list_title_context(
+    user: ViewTitleContextDep,
+    client: AccessibleClientDep,
+    title_id: UUID,
+    service: ContextServiceDep,
+) -> TitleContextListResponse:
+    entries = await service.list_history(client, title_id=title_id, viewer=user)
+    return TitleContextListResponse(data=entries)
 
 
 async def _resolve_names_for_page(

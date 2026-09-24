@@ -34,14 +34,17 @@ from app.core.security import hash_password
 from app.db.models import (
     Client,
     ClientTitle,
+    TitleContext,
+    TitleContextType,
     TitleStatus,
     TitleType,
     User,
     UserRole,
     UserScope,
 )
+from app.db.models.client import IV_HEX_LENGTH
 from app.modules.client_titles.aging import AgingBucket
-from app.modules.client_titles.repository import ClientTitlesRepository
+from app.modules.client_titles.repository import ClientTitlesRepository, TitleContextRepository
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -211,6 +214,47 @@ class TestCicloDeSincronizacao:
         linhas = await _titles(db_session, client.id)
         assert [t.external_id for t in linhas] == ["2001", "2002"]
         assert {t.status for t in linhas} == {TitleStatus.EM_ABERTO.value}
+
+    async def test_contexto_sobrevive_a_dois_ciclos_de_sincronizacao(
+        self, db_session: AsyncSession
+    ) -> None:
+        """Reprova o defeito que o critério de aceite da S15 (R5) proíbe.
+
+        `title_contexts.title_id` é `ondelete=CASCADE` a partir de
+        `client_titles`. O upsert de `reconcile_cycle` faz `UPDATE`, não
+        `DELETE+INSERT` — mas nada além deste teste provava isso: um docstring
+        em outro teste AFIRMAVA a sobrevivência sem exercitá-la (reprovação de
+        24/09/2026). Se o upsert algum dia trocar de estratégia, a PK do
+        título muda, o `CASCADE` dispara e o contexto some em silêncio — é
+        exatamente isso que a asserção abaixo pegaria.
+        """
+        client = await _make_client(db_session, name="Carteira Com Contexto")
+        repo = ClientTitlesRepository(db_session)
+        payload = [_row("5001", due_date=date(2026, 5, 1))]
+
+        await repo.reconcile_cycle(client.id, payload, synced_at=datetime(2026, 9, 1, tzinfo=UTC))
+        titulo = (await _titles(db_session, client.id))[0]
+
+        contexto = TitleContext(
+            client_id=client.id,
+            title_id=titulo.id,
+            context_type=TitleContextType.ACORDO_DE_PAGAMENTO.value,
+            text_encrypted="v1:k1:" + "ab" * 16,
+            text_iv="a" * IV_HEX_LENGTH,
+            author_id=client.created_by,
+        )
+        context_repo = TitleContextRepository(db_session)
+        await context_repo.insert(contexto)
+        context_id = contexto.id
+
+        # Segundo ciclo, MESMO payload: o upsert deve atualizar a linha
+        # existente, nunca recriá-la sob uma PK nova.
+        await repo.reconcile_cycle(client.id, payload, synced_at=datetime(2026, 9, 2, tzinfo=UTC))
+        titulo_apos = (await _titles(db_session, client.id))[0]
+        assert titulo_apos.id == titulo.id
+
+        historico = await context_repo.list_for_title_with_authors(client.id, titulo.id)
+        assert [c.id for c, _ in historico] == [context_id]
 
     async def test_titulo_reemitido_com_outro_identificador(self, db_session: AsyncSession) -> None:
         """Reemissão: o antigo vira ausente, o novo entra, e os DOIS ficam.

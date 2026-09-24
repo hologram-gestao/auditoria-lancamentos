@@ -123,6 +123,11 @@ _TABLE: dict[Permission, tuple[bool, bool, bool, bool, bool]] = {
     # chamando-se `client_titles`: a carteira inclui a pagar.
     Permission.VIEW_CLIENT_RECEIVABLES: (True, True, True, True, True),
     Permission.SYNC_CLIENT_RECEIVABLES: (True, True, True, True, False),
+    # S15 (BACK 15.1), tabela do §3 do PRD. LER contexto é de todos — mesma
+    # pergunta de VIEW_CLIENT_RECEIVABLES. REGISTRAR sai do `client_operator` e
+    # só dele — mesmas células de SYNC_CLIENT_RECEIVABLES, decisão própria.
+    Permission.VIEW_TITLE_CONTEXT: (True, True, True, True, True),
+    Permission.MANAGE_TITLE_CONTEXT: (True, True, True, True, False),
 }
 MATRIX_CELLS = [
     (permission, role, expected)
@@ -146,7 +151,7 @@ def test_toda_permissao_esta_na_matriz() -> None:
 
 
 def test_toda_celula_da_tabela_do_prd_foi_transcrita() -> None:
-    """Guarda contra transcrição parcial: 18 permissões x 5 papéis = 90 células."""
+    """Guarda contra transcrição parcial: 20 permissões x 5 papéis = 100 células."""
     assert len(MATRIX_CELLS) == len(Permission) * len(UserRole)
     assert {(p, r) for p, r, _ in MATRIX_CELLS} == {(p, r) for p in Permission for r in UserRole}
 

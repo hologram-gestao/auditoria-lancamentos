@@ -41,6 +41,8 @@ EXPECTED_AAD_PAIRS = {
     "AAD_GLOSSARY_DESCRIPTION": ("client_glossary_entries", "description_encrypted"),
     # Sprint 9 (BACK 09.1) — a credencial da origem. 11 → 12.
     "AAD_CONNECTION_CREDENTIALS": ("client_connections", "credentials_encrypted"),
+    # Sprint 15 (BACK 15.1) — contexto do título. 12 → 13.
+    "AAD_TITLE_CONTEXT_TEXT": ("title_contexts", "text_encrypted"),
 }
 
 
@@ -54,7 +56,7 @@ class TestInventarioDeCamposCifrados:
         assert declared == EXPECTED_AAD_PAIRS
 
     def test_a_contagem_bate_com_a_lista_canonica_do_claude_md(self) -> None:
-        assert len(EXPECTED_AAD_PAIRS) == 12
+        assert len(EXPECTED_AAD_PAIRS) == 13
 
     def test_nenhum_par_tabela_coluna_se_repete(self) -> None:
         """Dois campos com o MESMO AAD tornam o ciphertext de um legível no outro."""
