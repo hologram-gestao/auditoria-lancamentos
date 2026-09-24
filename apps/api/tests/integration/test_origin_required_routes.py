@@ -240,6 +240,24 @@ class TestSemConexao:
         )
         _assert_origin_409(resp)
 
+    async def test_sync_do_plano_de_contas(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """S10 (BACK 10.3): sincronizar sem origem é 409, e LER continua 200.
+
+        A leitura fica de fora do 409 de propósito: o que já foi sincronizado
+        antes de a origem cair continua sendo dado bom, e a tela precisa
+        mostrá-lo junto com o aviso.
+        """
+        admin = await _seed_admin(db_session)
+        client = await _seed_client_sem_origem(db_session, admin)
+        assert await _login(client_with_db) == 200
+
+        base = f"/api/v1/clients/{client.id}/chart-of-accounts"
+        _assert_origin_409(await client_with_db.post(f"{base}/sync"))
+        assert (await client_with_db.get(base)).status_code == 200
+        assert (await client_with_db.get(f"{base}/coverage")).status_code == 200
+
 
 class TestOrigemComErro:
     async def test_conexao_inativa_devolve_origem_com_erro(

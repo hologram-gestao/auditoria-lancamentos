@@ -257,3 +257,10 @@ RunAlertTestDep = Annotated[CurrentUser, Depends(require_permission(Permission.R
 ManageClientConnectionsDep = Annotated[
     CurrentUser, Depends(require_permission(Permission.MANAGE_CLIENT_CONNECTIONS))
 ]
+# --- Sprint 10 (BACK 10.3): plano de contas do cliente ----------------------
+ViewClientChartOfAccountsDep = Annotated[
+    CurrentUser, Depends(require_permission(Permission.VIEW_CLIENT_CHART_OF_ACCOUNTS))
+]
+SyncClientChartOfAccountsDep = Annotated[
+    CurrentUser, Depends(require_permission(Permission.SYNC_CLIENT_CHART_OF_ACCOUNTS))
+]

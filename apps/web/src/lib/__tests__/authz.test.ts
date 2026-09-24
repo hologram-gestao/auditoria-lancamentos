@@ -6,8 +6,8 @@
  *
  * Cada célula da matriz vira um caso — inclusive **toda célula `❌`**, que é o
  * que a task cobra. O espelho no backend é
- * `apps/api/app/core/authz.py::PERMISSION_MATRIX` (14 permissões × 5 papéis
- * desde a Sprint 9); se um dos dois mudar sozinho, é aqui que a divergência
+ * `apps/api/app/core/authz.py::PERMISSION_MATRIX` (16 permissões × 5 papéis
+ * desde a Sprint 10); se um dos dois mudar sozinho, é aqui que a divergência
  * aparece.
  */
 import { describe, expect, it } from 'vitest';
@@ -203,6 +203,29 @@ const MATRIX: ReadonlyArray<{
     admin: true,
     manager: true,
     clientManager: false,
+    clientOperator: false,
+  },
+  // S10 / R4: LER o plano de contas é de TODOS — é a classificação contábil do
+  // próprio cliente, e o operador precisa dela para entender a conciliação.
+  {
+    permission: 'view_client_chart_of_accounts',
+    platform: true,
+    admin: true,
+    manager: true,
+    clientManager: true,
+    clientOperator: true,
+  },
+  // S10 / R4: SINCRONIZAR sai do `client_operator` e **só dele** — a única
+  // diferença entre as duas linhas novas, e a razão de serem duas permissões.
+  // Nenhuma das existentes servia: `manage_client_categories` (admin-only)
+  // excluiria o gerente que cadastra a carteira; `sync_omie_accounts` (todos)
+  // deixaria o operador forçar chamadas à origem.
+  {
+    permission: 'sync_client_chart_of_accounts',
+    platform: true,
+    admin: true,
+    manager: true,
+    clientManager: true,
     clientOperator: false,
   },
 ];

@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 **S0–S19 + Sprints 0–5 do agents-hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **68/68** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **71/71** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
 > **O que cada sprint do agents-hub entregou** (todas na `main`):
 >
@@ -192,7 +192,7 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**68** hoje — o arquivo é a fonte, confira com
+      (**71** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant E cross-org**: a bateria
       (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
@@ -200,7 +200,8 @@
       organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
-      (`PENDING_ENDPOINTS` está vazio: cobertura 63/63). Só
+      (`PENDING_ENDPOINTS` está vazio: cobertura **71/71**). As 3 rotas do
+      **plano de contas** (S10) entraram como coleção. Só
       auth, tipos de anomalia, `test-connection`, `alert-test` e as 5 rotas de
       `/organizations` (plataforma, sem dado de cliente) ficam fora, com motivo.
       Essa lista é o denominador da métrica de isolamento — endpoint fora dela é
@@ -380,7 +381,7 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
 9. **Matriz de permissões (Sprint 5 + camada de organizações):** declarativa e
    ÚNICA em `PERMISSION_MATRIX`
    ([apps/api/app/core/authz.py](apps/api/app/core/authz.py)), consultada por
-   `has_permission`; 14 permissões x 5 papéis, transcrita célula a célula em
+   `has_permission`; 16 permissões x 5 papéis, transcrita célula a célula em
    `tests/unit/test_authz_matrix.py`, com um teste que trava **a plataforma em
    toda linha**. No front, o espelho é `apps/web/src/lib/authz.ts` — **um**
    helper, nunca `if (role === ...)` espalhado por componente — com a mesma
@@ -407,12 +408,25 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    | Tipos de anomalia (escrita)     | ✅             | ❌               | ❌                    | ❌             | ❌              |
    | Gerir organizações              | ✅             | ❌               | ❌                    | ❌             | ❌              |
    | Teste de alerta                 | ✅             | ✅               | ❌                    | ❌             | ❌              |
+   | Ver plano de contas (S10)       | ✅             | ✅               | ✅ (carteira)         | ✅             | ✅              |
+   | Sincronizar plano de contas     | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
 
    **`manage_client_connections` (Sprint 9) inclui o `manager` de propósito**: ele
    cria cliente, e sem a célula o gerente do escritório parceiro cadastraria a
    carteira inteira sem conseguir conectar ninguém. Credencial de sistema contábil
    é configuração do escritório — por isso `client_manager` e `client_operator`
    ficam de fora, mesmo podendo rodar conciliação.
+
+   **As DUAS permissões do plano de contas (Sprint 10) são novas de propósito**:
+   nenhuma das existentes servia, e as duas reutilizações plausíveis erram em
+   direções OPOSTAS — `manage_client_categories` é admin-only e deixaria de fora
+   o `manager` do escritório parceiro (quem cadastra e conecta a carteira), e
+   `sync_omie_accounts` é de todos, o que deixaria o `client_operator` forçar
+   chamadas à origem. Por isso `view_client_chart_of_accounts` (LER, todo papel
+   com acesso ao tenant) e `sync_client_chart_of_accounts` (todos **menos** o
+   `client_operator`) são células separadas. O par de teste que prova que
+   nenhuma delas foi reusada é o MESMO caso: operador LÊ 200 e sincroniza 403 —
+   qualquer teste que olhasse só um dos verbos passaria com a permissão errada.
 
    "(carteira)" e "(própria org)" **não** são células: são `resolve_client_access`
    e os filtros de coleção. **Tipos de anomalia é a única linha só-plataforma
@@ -454,7 +468,11 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
       têm `created_by` RESTRICT — não podem ser apagados); glossário, cache de
       contas, notificações, favoritos e **conexões de origem** (S9) removidos — a
       credencial cifrada delas morre junto com a DEK, pelo mesmo motivo do
-      glossário; conciliações, valores, datas,
+      glossário; o **plano de contas** (S10) também sai, e por um motivo
+      diferente: nada nele é cifrado (são só códigos e flags), então nada dele
+      morreria com a DEK — ele entra na lista de `close_client_purge`
+      **explicitamente**, por ser configuração de um cliente que não opera mais;
+      conciliações, valores, datas,
       categoria e carteira FICAM, só-leitura.
     - **Encerrado é TERMINAL**: cliente que volta é cadastro novo. Toda escrita
       em cliente encerrado é 409 (`ClientClosedError`) — a trava de rota é
@@ -686,9 +704,37 @@ ClickUp**, não no repo. `make sprints` lista o estado.
 | **5**  | Multi-tenancy e papéis de cliente           | `users.scope`/`client_id`, `core/authz.py`, `core/sensitive_endpoints.py` |
 | **6**  | Glossário e classificação por cliente       | `client_glossary_entries`, `clients.glossary_version`, `review_verdict`   |
 | **7**  | Lançamento de faturas no Omie               | `reconciliation_omie_postings`, `omie_posting/`, `OMIE_POSTING_ENABLED`   |
-| **9**  | Cliente sem sistema e conexões plugáveis ⏳ | `client_connections`, `integrations/providers/`, `legacy_fallback.py`     |
+| **9**  | Cliente sem sistema e conexões plugáveis    | `client_connections`, `integrations/providers/`, `legacy_fallback.py`     |
+| **10** | Plano de contas do cliente ⏳               | `client_chart_of_accounts`, `modules/client_chart_of_accounts/`, `clients.chart_of_accounts_synced_at` |
 
-⏳ **A Sprint 9 é a única ainda FORA da `main`**: está na branch da sprint, aguardando o PR.
+✅ **A Sprint 9 entrou na `main`** (PR #191 da sprint e #193 do `develop → main`,
+com as correções da validação humana em #192 e #194): `develop` e `main` estão no
+mesmo commit, `a2442ff`.
+
+⏳ **A Sprint 10 é a única ainda FORA da `main`**: está na branch da sprint,
+aguardando o PR. Ela traz o **plano de contas do cliente** para dentro do
+produto — códigos, hierarquia, situação, flags e, principalmente, o vínculo que
+a origem **já declara** com a conta de demonstrativo (`dadosDRE.codigoDRE`), que
+é o insumo do de-para da Sprint 12. Três coisas dela valem como lei, não como
+detalhe de feature:
+
+- **nome de categoria continua fora do disco** (§4.5): a tabela guarda só
+  código, situação e flags; o nome é resolvido em runtime pelo MESMO
+  `OmieCategoriasService` (cache de 6 h) que serve a tela de revisão. É isso que
+  impede as duas telas de divergirem — e por isso a leitura da origem é **uma
+  só**: `list_categorias` passou a chamar `list_raw_categorias`, e não o
+  contrário. ⚠️ Código de categoria e código de conta de demonstrativo são
+  **namespaces diferentes que colidem** (`1.01.01` é "BPO Controller - RB" e
+  também "Receita Bruta de Vendas"): quem resolve nome trabalha com DOIS mapas;
+- **dois relógios**: o cache de NOMES segue com 6 h; a PERSISTÊNCIA vale 24 h
+  (`clients.chart_of_accounts_synced_at`), alinhada ao cache de contas
+  correntes. "Sincronizar agora" (`force`) ignora os dois. Falha carimba
+  `chart_of_accounts_sync_failed_at` e **nunca** toca o carimbo do último
+  sucesso;
+- **categoria não se apaga**: sumiu da origem, vira `ausente_na_origem` — pode
+  haver de-para apontando para ela. E **ausência de destino é informação**, não
+  pendência: transferências e totalizadoras não têm conta de demonstrativo
+  própria, e o destino **nunca** é inferido.
 
 **A camada de organizações NÃO foi uma sprint do hub.** Veio do épico ClickUp
 `86e36ec0q` (16–18/09/2026, 8 tasks em três ondas, plano em
@@ -806,6 +852,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.41 — 23/09/2026. **O plano de contas do cliente virou entidade do produto (Sprint 10 do hub, ainda na branch da sprint).** Até aqui a plataforma **lia** categorias do Omie só para resolver código → descrição na tela de revisão; agora `client_chart_of_accounts` persiste, por cliente, código, hierarquia (`categoria_superior`, com a raiz `'0'` normalizada para NULL), situação, flags e o **vínculo com a conta de demonstrativo** — o insumo que o de-para da Sprint 12 herdaria pronto em vez de exigir digitação linha a linha. **A §4.5 não abriu exceção:** nenhuma coluna de nome, nem `descricaoDRE`, nem `tag_conta_contabil` (rótulo é nome) — o DTO os declara porque a origem os manda, e a persistência para no código; como nada ali é cifrado, a tabela entra em `close_client_purge` **explicitamente** (§4.12), senão sobreviveria ao encerramento. A §4.9 foi de 14 para **16 permissões x 5 papéis**: `view_client_chart_of_accounts` (todos) e `sync_client_chart_of_accounts` (todos menos o `client_operator`) são novas porque as duas reutilizações plausíveis erram em direções OPOSTAS — admin-only excluiria o gerente do escritório parceiro; "de todos" deixaria o operador forçar chamadas à origem. A lista canônica foi de 68 para **71**, `PENDING_ENDPOINTS` continua vazio. **O que vale fora da sprint:** (1) quando um catálogo já é lido em algum lugar, a leitura nova é um ACESSOR do caminho existente e o caminho antigo passa a chamá-lo — duplicar o hit/miss do cache faria duas telas verem catálogos diferentes, e o "fonte única" nasceria falso; (2) **código de categoria e código de conta de demonstrativo colidem** (`1.01.01` é "BPO Controller - RB" e "Receita Bruta de Vendas"), então resolver nome exige DOIS mapas — um só mostraria o nome errado e a tela pareceria certa; (3) `''` e bloco `{}` da origem colapsam em `None` **no DTO**, não em cada caller, senão "sem destino declarado" e "destino vazio" viram dois estados do mesmo fato e a contagem de cobertura passa a depender de qual deles a linha calhou de receber. ⚠️ **Os números do exemplo do PRD estão errados e o código está certo:** na fixture real são **46 ativas** (4 inativas), **33** com destino e **5** com conta contábil — os 37 e 6 do PRD são contagens sobre o TOTAL. A métrica (`com_destino ÷ ativas`) dá **71,7%**, não os 74% citados: acima do alvo de 70%, por margem bem menor. **Pendência declarada do QA desta rodada:** a suíte de integração, a bateria cross-org das 3 rotas novas, o gate de a11y em browser e o cenário ponta a ponta em dev **não rodaram** — sem Postgres e com o socket do Docker recusado pelo sandbox. O que rodou está no `HANDOFF.md`, com output._
 
 _Versão 1.40 — 23/09/2026. **A validação humana da Sprint 9 (task 86e3dcm2y) foi a primeira rodada REAL da integração e do cenário pela tela, e achou o que o sandbox dos agents não podia achar.** Nove testes de integração da própria sprint reprovavam e os três jobs de a11y caíam em dois cenários e2e; o `develop → main` (#193) nasceu vermelho. Um defeito de produto: o "Testar conexão" da gaveta de origem usava a rota legada `test-connection`, que construía `OmieClient(...)` direto e saía para a rede com a credencial `FAKE_DEMO_OMIE_`, travando o cadastro em dev, no ambiente de demonstração e no e2e — agora passa por `build*omie_raw_client`, e a §4.8 ganhou a regra "todo client nasce no adaptador". Um descompasso de convenção: o PRD pedia "422 apontando a rota de conexões" e o handler global responde 400 genérico sem mensagem de propósito; nasceu `CredentialsMovedToConnectionsError`(422,`CREDENTIALS_MOVED`) na rota, o validador Pydantic saiu do schema, e a §4.8 fixa a regra geral (forma é 400 genérico; orientação é exceção tipada). Um de durabilidade: "recusa sem gravar" na criação com credencial inválida agora é SAVEPOINT em volta de cliente + carteira + conexão. O resto era teste: dois casos afirmavam 422 onde a casa responde 400, um lia envelope `data`que o PATCH não devolve, um teste antigo criava cliente com credencial`"k"/"s"`e passou a bater no Omie REAL depois que o cadastro verifica no provedor (prefixo mock), e no e2e`getByText('Com erro')`casava com dois elementos e o mock da lista ignorava o`originState`. Ensaio da conversão de credenciais no banco de dev com linha bare: converte, `--verify` PASS, idempotente.*
 

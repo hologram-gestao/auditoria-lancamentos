@@ -15,6 +15,7 @@ import {
   Landmark,
   LayoutDashboard,
   ListChecks,
+  ListTree,
   Settings,
   Tags,
   UserCog,
@@ -155,14 +156,21 @@ export function clientNavItems(
   const dashboardHref = `${base}/painel`;
   const usersHref = `${base}/usuarios`;
   const glossaryHref = `${base}/glossario`;
+  const chartOfAccountsHref = `${base}/plano-de-contas`;
   // "Conciliações" continua ativo dentro do detalhe de uma conciliação — é a
   // mesma área de navegação, só que um nível abaixo (regra herdada do
   // ClientShell, que era o dono desta árvore até a 86e2n39h7).
+  //
+  // ⚠️ Rota nova do cliente entra TAMBÉM nesta negação: "Conciliações" é o
+  // fallback, então esquecer a linha aqui deixa dois itens marcados como ativos
+  // ao mesmo tempo.
   const isAccounts = pathname.startsWith(accountsHref);
   const isDashboard = pathname.startsWith(dashboardHref);
   const isUsers = pathname.startsWith(usersHref);
   const isGlossary = pathname.startsWith(glossaryHref);
-  const isReconciliations = !isAccounts && !isDashboard && !isUsers && !isGlossary;
+  const isChartOfAccounts = pathname.startsWith(chartOfAccountsHref);
+  const isReconciliations =
+    !isAccounts && !isDashboard && !isUsers && !isGlossary && !isChartOfAccounts;
 
   const items: NavItem[] = [
     {
@@ -193,6 +201,19 @@ export function clientNavItems(
       active: isGlossary,
     },
   ];
+  // S10 (R4): "Plano de Contas" é montado pela MATRIZ, como os itens de
+  // Configurações. A célula de LER é ✅ nos cinco papéis hoje, então na prática
+  // todo mundo com acesso ao cliente vê o item — o que o gating garante é que,
+  // no dia em que a célula fechar para algum papel, a rota e o item sumam
+  // JUNTOS. Quem pede permissão separada é SINCRONIZAR, dentro da tela.
+  if (hasPermission(user, 'view_client_chart_of_accounts')) {
+    items.push({
+      href: chartOfAccountsHref,
+      label: 'Plano de Contas',
+      icon: <ListTree className="h-4 w-4" aria-hidden="true" />,
+      active: isChartOfAccounts,
+    });
+  }
   // Matriz: "Usuários" é de quem gere as pessoas DO tenant — gerente do
   // cliente, admin, plataforma e, desde a D2 (86e36ecjp), o gerente da
   // organização nos clientes da CARTEIRA. O "da carteira" não é esta linha: é

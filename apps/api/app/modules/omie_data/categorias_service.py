@@ -62,16 +62,48 @@ class OmieCategoriasService:
                 operador que acabou de criar uma categoria no Omie — melhor do
                 que um TTL curto que faria toda tela pagar a latência.
         """
+        categorias = await self.list_raw_categorias(
+            client_id=client_id,
+            omie_client_factory=omie_client_factory,
+            refresh=refresh,
+        )
+        return _to_items(categorias)
+
+    async def list_raw_categorias(
+        self,
+        *,
+        client_id: UUID,
+        omie_client_factory: Callable[[], Awaitable[OmieClient]],
+        refresh: bool = False,
+    ) -> list[CategoriaOmie]:
+        """As categorias do cliente **inteiras**, pelo MESMO caminho de cache.
+
+        Sprint 10 (BACK 10.2). O plano de contas precisa de hierarquia, flags e
+        da conta de demonstrativo — coisas que `list_categorias` descarta ao
+        mapear para `OmieCategoriaItem` (código + descrição, o que o combobox
+        usa). O cache já guardava os objetos completos; o que faltava era um
+        acessor.
+
+        **Não é um segundo caminho de leitura.** `list_categorias` passou a
+        chamar esta função: um cache, um fetch, uma chamada à origem. Uma
+        segunda leitura faria a tela de revisão e a tela do plano de contas
+        divergirem, e o "contrato fonte única" do PRD nasceria falso.
+
+        Inativas vêm JUNTO — quem filtra é `list_categorias`. A persistência
+        precisa delas: categoria inativa continua existindo no plano de contas
+        (com situação `inativa`), e sumir com ela faria o de-para da Sprint 12
+        perder o vínculo de uma conta que ainda tem lançamento histórico.
+        """
         if refresh:
             self._cache.invalidate(client_id)
         else:
             cached = self._cache.get(client_id)
             if cached is not None:
-                return _to_items(cached)
+                return cached
 
         categorias = await self._fetch(client_id=client_id, factory=omie_client_factory)
         self._cache.set(client_id, categorias)
-        return _to_items(categorias)
+        return categorias
 
     async def _fetch(
         self,

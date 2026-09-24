@@ -64,14 +64,34 @@ export type Permission =
    * o `GET` a todo papel com acesso ao cliente): inventar uma aqui esconderia
    * do operador o motivo pelo qual a conciliação dele não roda.
    */
-  | 'manage_client_connections';
+  | 'manage_client_connections'
+  /**
+   * Sprint 10 (R4): LER o plano de contas do cliente — lista e cobertura. Todo
+   * papel com acesso ao tenant, o operador inclusive: é a classificação
+   * contábil do próprio cliente e é o que explica o que a conciliação mostra.
+   *
+   * Ao contrário do glossário — onde a leitura NÃO tem permissão própria —
+   * aqui ela tem, porque o backend a declara (`VIEW_CLIENT_CHART_OF_ACCOUNTS`,
+   * com `ViewClientChartOfAccountsDep` na rota). Espelhar a permissão que
+   * existe é a regra; inventar ou omitir uma é que cria divergência.
+   */
+  | 'view_client_chart_of_accounts'
+  /**
+   * Sprint 10 (R4): SINCRONIZAR o plano de contas (ir à origem). Permissão
+   * PRÓPRIA, decidida no PRD, porque as duas reutilizações plausíveis dão
+   * resultados OPOSTOS: `manage_client_categories` é admin-only e deixaria de
+   * fora o `manager` do escritório parceiro — quem cadastra e conecta a
+   * carteira; e `sync_omie_accounts` é de todos, o que deixaria o
+   * `client_operator` forçar chamadas à origem do cliente.
+   */
+  | 'sync_client_chart_of_accounts';
 
 /**
  * A matriz, indexada por PAPEL (e não por permissão) de propósito: assim o
  * `Record<UserRole, ...>` obriga a lista a cobrir todo papel do contrato.
  *
  * Transcrita célula a célula de `apps/api/app/core/authz.py::PERMISSION_MATRIX`
- * (14 permissões × 5 papéis desde a Sprint 9) e travada em `__tests__/authz.test.ts`.
+ * (16 permissões × 5 papéis desde a Sprint 10) e travada em `__tests__/authz.test.ts`.
  *
  * | Ação                          | platform_admin | admin | manager | client_manager | client_operator |
  * | ----------------------------- | -------------- | ----- | ------- | -------------- | --------------- |
@@ -89,6 +109,8 @@ export type Permission =
  * | Gerir organizações            | ✅             | ❌    | ❌      | ❌             | ❌              |
  * | Teste de alerta               | ✅             | ✅    | ❌      | ❌             | ❌              |
  * | Conexões de origem (S9)       | ✅             | ✅    | ✅ (carteira) | ❌       | ❌              |
+ * | Ver plano de contas (S10)     | ✅             | ✅    | ✅ (carteira) | ✅       | ✅              |
+ * | Sincronizar plano de contas   | ✅             | ✅    | ✅ (carteira) | ✅       | ❌              |
  *
  * "(carteira)" e "(própria org)" **não são células**: são `resolve_client_access`
  * e os filtros de coleção, no servidor. A célula diz se o papel pode a AÇÃO.
@@ -111,6 +133,8 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'manage_platform',
     'run_alert_test',
     'manage_client_connections',
+    'view_client_chart_of_accounts',
+    'sync_client_chart_of_accounts',
   ],
   // D3 final (86e36ed1d): `manage_anomaly_types` saiu daqui. A taxonomia de
   // anomalias é uma tabela GLOBAL do produto — o admin de uma organização
@@ -128,6 +152,8 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'manage_client_categories',
     'run_alert_test',
     'manage_client_connections',
+    'view_client_chart_of_accounts',
+    'sync_client_chart_of_accounts',
   ],
   // O gerente da organização enxerga outros tenants apenas dentro da carteira —
   // quem sabe a carteira é o backend (`client_assignments`), ver `canAccessClient`.
@@ -145,6 +171,8 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     // S9 (R5): o gerente ENTRA. Ele cria o cliente e precisa conectar a origem
     // dele — o "(carteira)" é `resolve_client_access` no servidor, não a célula.
     'manage_client_connections',
+    'view_client_chart_of_accounts',
+    'sync_client_chart_of_accounts',
   ],
   client_manager: [
     'run_reconciliation',
@@ -152,8 +180,18 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'sync_omie_accounts',
     'manage_client_users',
     'manage_glossary',
+    'view_client_chart_of_accounts',
+    'sync_client_chart_of_accounts',
   ],
-  client_operator: ['run_reconciliation', 'review_export', 'sync_omie_accounts'],
+  // S10 (R4): o operador LÊ o plano de contas e **não** sincroniza — é o único
+  // ❌ da linha de sincronizar. Sincronizar é uma ida à origem do cliente, e o
+  // operador é quem mais abre tela.
+  client_operator: [
+    'run_reconciliation',
+    'review_export',
+    'sync_omie_accounts',
+    'view_client_chart_of_accounts',
+  ],
 };
 
 type MaybeUser =

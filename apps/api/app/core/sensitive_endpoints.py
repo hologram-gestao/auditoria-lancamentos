@@ -581,6 +581,34 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         f"{_VIA_CLIENT_PATH} + OpenClientDep + ManageClientConnectionsDep; "
         "DELETE com AND client_id (anti-IDOR)",
     ),
+    # ------------------------------------ plano de contas (S10, 10.3)
+    # A classificação contábil do cliente: códigos, hierarquia e o vínculo com
+    # a conta de demonstrativo. Nenhum NOME é persistido (§4.5), mas os códigos
+    # são dado do tenant — e a lista revela o desenho contábil de quem a tem.
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/chart-of-accounts",
+        ScopeKind.COLLECTION,
+        "app/modules/client_chart_of_accounts/routes.py",
+        f"{_VIA_CLIENT_PATH} + ViewClientChartOfAccountsDep; todo SELECT nasce de "
+        "_base_query, que já leva AND client_id",
+    ),
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/chart-of-accounts/coverage",
+        ScopeKind.COLLECTION,
+        "app/modules/client_chart_of_accounts/routes.py",
+        f"{_VIA_CLIENT_PATH} + ViewClientChartOfAccountsDep; a agregação filtra "
+        "por client_id na própria query",
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients/{client_id}/chart-of-accounts/sync",
+        ScopeKind.COLLECTION,
+        "app/modules/client_chart_of_accounts/routes.py",
+        f"{_VIA_CLIENT_PATH} + OpenClientDep + SyncClientChartOfAccountsDep; "
+        "cliente encerrado = 409 e a leitura segue 200",
+    ),
 )
 
 #: Endpoints do denominador que AINDA não têm o mecanismo no código. Ficam na

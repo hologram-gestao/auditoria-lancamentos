@@ -273,6 +273,50 @@ export type ListGlossaryQuery = NonNullable<
 >;
 
 // ---------------------------------------------------------------------------
+// Plano de contas do cliente (Sprint 10 / R1 · R3 — BACK 10.1 · 10.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Uma linha do plano de contas, como a API a devolve.
+ *
+ * ⚠️ **Os campos vêm em camelCase** (`categoryCode`, `dreCode`, `naoExibir`…) —
+ * o backend declara `alias=` em cada um. O resto do produto é snake_case, então
+ * chutar `category_code` compilaria aqui como `undefined` em toda linha e a
+ * coluna Código apareceria vazia sem erro nenhum. Ler do contrato é o que
+ * impede isso.
+ *
+ * `name` e `dreName` são resolvidos em RUNTIME pelo mesmo cache de categorias da
+ * tela de revisão e chegam `null` quando a origem não respondeu (fail-soft) —
+ * nome de categoria nunca persiste (§4.5). `dreCode` nulo é **sem destino
+ * declarado**: informação, não pendência.
+ */
+export type ChartOfAccountEntry = Schemas['ChartOfAccountEntryResponse'];
+/** `{ data: [...], pagination }` — DUAS chaves, então o `apiGet` NÃO desembrulha. */
+export type ChartOfAccountsListResponse = Schemas['ChartOfAccountsListResponse'];
+/**
+ * As cinco contagens da cobertura + as duas datas de sincronização. Calculadas
+ * no SERVIDOR sobre o conjunto inteiro do cliente: somar a página no navegador
+ * daria um número que muda conforme a paginação.
+ */
+export type ChartOfAccountsCoverage = Schemas['ChartOfAccountsCoverageResponse'];
+/** `{ data: {...} }` — chave ÚNICA: o `apiGet`/`apiPost` já entrega o miolo. */
+export type ChartOfAccountsCoverageEnvelope = Schemas['ChartOfAccountsCoverageEnvelope'];
+/** `ativa` | `inativa` | `ausente_na_origem` — enum FECHADO (a UI ramifica nos três). */
+export type ChartOfAccountsStatus = Schemas['ChartOfAccountsStatus'];
+/**
+ * Query real de `GET /clients/{id}/chart-of-accounts`: `page`, `pageSize`,
+ * `status`, `parentCode` e `code`. **Não existe busca por nome** — o nome não
+ * está no banco, e inventar o parâmetro aqui daria 422.
+ */
+export type ListChartOfAccountsQuery = NonNullable<
+  paths['/api/v1/clients/{client_id}/chart-of-accounts']['get']['parameters']['query']
+>;
+/** Query real do `POST .../sync` — só `force` ("Sincronizar agora"). */
+export type SyncChartOfAccountsQuery = NonNullable<
+  paths['/api/v1/clients/{client_id}/chart-of-accounts/sync']['post']['parameters']['query']
+>;
+
+// ---------------------------------------------------------------------------
 // Lançamento no Omie (Sprint 7 / R1 · R2 · R5 — BACK 07.3 · 07.4)
 // ---------------------------------------------------------------------------
 
