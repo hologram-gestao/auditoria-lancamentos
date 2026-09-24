@@ -42,7 +42,7 @@
  * primeira exceção, não o primeiro uso.
  */
 
-import { Loader2, RefreshCw } from 'lucide-react';
+import { Loader2, MessageSquareText, RefreshCw } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
@@ -93,6 +93,7 @@ import {
 } from './client-titles-badges';
 import { ClientTitlesSummaryBlock, ClientTitlesSummarySkeleton } from './client-titles-summary';
 import { ReceivablesReportScreen } from './receivables-report-screen';
+import { TitleContextSheet } from './title-context-sheet';
 
 const PARAM = {
   page: 'page',
@@ -115,7 +116,7 @@ const VIEW_VALUES = ['carteira', 'relatorio'] as const;
 const DEFAULT_PAGE_SIZE = 20;
 /** O Radix não aceita `''` como valor de item — `all` é o "sem filtro". */
 const ALL = 'all';
-const COLUMN_COUNT = 5;
+const COLUMN_COUNT = 6;
 
 /**
  * Os vocabulários FECHADOS do servidor (`Literal` no Pydantic). Valor fora
@@ -207,6 +208,12 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
   // renderizá-lo; qualquer outro erro segue no toast.
   const [originError, setOriginError] = useState<unknown>(null);
 
+  // Sprint 15 (FRONT 15.1): a gaveta de contexto abre sobre UM título por vez —
+  // guardamos o `ClientTitle` inteiro (não só o id) para o cabeçalho da gaveta
+  // não precisar de um 2º request só para mostrar o que a pessoa já via na
+  // linha (vencimento, tipo, valor).
+  const [contextTitle, setContextTitle] = useState<ClientTitle | null>(null);
+
   if (currentUser === null) return null;
 
   const summary = summaryQuery.data;
@@ -232,6 +239,7 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
   const hasFilters =
     titleType !== undefined || situation !== undefined || bucket !== undefined || hasNoContext;
   const canViewTitleContext = hasPermission(currentUser, 'view_title_context');
+  const canManageTitleContext = hasPermission(currentUser, 'manage_title_context');
   // "Nunca sincronizou" é o estado VAZIO da tela (R3) — e é o único caso em que
   // os agregados NÃO aparecem: zeros ali seriam lidos como "não deve nada".
   const neverSynced = summary?.neverSynced === true;
@@ -516,13 +524,27 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
                       <TableHead>Devedor / credor</TableHead>
                       <TableHead className="whitespace-nowrap">Valor</TableHead>
                       <TableHead>Situação</TableHead>
+                      {canViewTitleContext && (
+                        <TableHead>
+                          <span className="sr-only">Contexto</span>
+                        </TableHead>
+                      )}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {listQuery.isLoading ? (
-                      <TableSkeletonRows />
+                      <TableSkeletonRows
+                        columnCount={canViewTitleContext ? COLUMN_COUNT : COLUMN_COUNT - 1}
+                      />
                     ) : (
-                      rows.map((title) => <TitleRow key={title.externalId} title={title} />)
+                      rows.map((title) => (
+                        <TitleRow
+                          key={title.externalId}
+                          title={title}
+                          canViewTitleContext={canViewTitleContext}
+                          onOpenContext={() => setContextTitle(title)}
+                        />
+                      ))
                     )}
                   </TableBody>
                 </Table>
@@ -565,11 +587,33 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
           )}
         </TabsContent>
       </Tabs>
+
+      {/* Sprint 15 (FRONT 15.1): mesma gaveta serve o REGISTRO (para quem tem
+          `manage_title_context`) e o HISTÓRICO em leitura (para quem só tem
+          `view_title_context`) — a permissão que rege as duas é a mesma que
+          esconde/mostra a coluna de ação na tabela, nunca um `role === `. */}
+      <TitleContextSheet
+        open={contextTitle !== null}
+        onOpenChange={(next) => {
+          if (!next) setContextTitle(null);
+        }}
+        clientId={clientId}
+        title={contextTitle}
+        canManage={canManageTitleContext}
+      />
     </section>
   );
 }
 
-function TitleRow({ title }: { title: ClientTitle }) {
+function TitleRow({
+  title,
+  canViewTitleContext,
+  onOpenContext,
+}: {
+  title: ClientTitle;
+  canViewTitleContext: boolean;
+  onOpenContext: () => void;
+}) {
   return (
     <TableRow>
       <TableCell className="whitespace-nowrap font-medium tabular-nums">
@@ -598,6 +642,19 @@ function TitleRow({ title }: { title: ClientTitle }) {
           <TitleBucketBadge bucket={title.bucket ?? null} />
         </div>
       </TableCell>
+      {canViewTitleContext && (
+        <TableCell>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label={`Contexto do título ${title.externalId}`}
+            onClick={onOpenContext}
+          >
+            <MessageSquareText className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        </TableCell>
+      )}
     </TableRow>
   );
 }
@@ -644,12 +701,12 @@ function SupplierCell({ title }: { title: ClientTitle }) {
   );
 }
 
-function TableSkeletonRows() {
+function TableSkeletonRows({ columnCount }: { columnCount: number }) {
   return (
     <>
       {Array.from({ length: 5 }).map((_, index) => (
         <TableRow key={index} aria-hidden="true">
-          {Array.from({ length: COLUMN_COUNT }).map((__, cell) => (
+          {Array.from({ length: columnCount }).map((__, cell) => (
             <TableCell key={cell}>
               <div className="bg-muted h-4 w-full animate-pulse rounded" />
             </TableCell>

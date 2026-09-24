@@ -2312,6 +2312,12 @@ export interface components {
          */
         ClientTitleResponse: {
             /**
+             * Id
+             * Format: uuid
+             * @description PK do título. O tenant já lê a linha inteira nesta resposta — não há razão de segurança para esconder o identificador, e sem ele a tela não tem como montar a URL de `.../titles/{title_id}/context` (Sprint 15).
+             */
+            id: string;
+            /**
              * Externalid
              * @description Identificador do título na origem.
              */
