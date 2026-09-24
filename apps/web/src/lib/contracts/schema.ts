@@ -519,6 +519,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clients/{client_id}/titles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista a carteira de títulos em aberto do cliente — a pagar e a receber, de todas as contas correntes e sem recorte de competência, que é o que faz um título vencido há meses aparecer aqui e não na conciliação do mês. Paginada (`page`/`pageSize`, máximo 100), com filtros NO SERVIDOR por tipo (`type`), situação (`situation`: `em_aberto` ou `vencido`) e balde de aging (`bucket`), e ordenação por vencimento ou valor (`sortBy`/`sortOrder`). O nome do devedor (`supplierName`) é resolvido em runtime e nunca lido do banco: quando a origem não responde, a linha volta com `supplierNameResolved=false` e o código — nunca em branco, e nunca com erro. Carteira de outro cliente jamais aparece. */
+        get: operations["list_client_titles_api_v1_clients__client_id__titles_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/titles/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Agregados e aging da carteira, calculados no SERVIDOR sobre o conjunto INTEIRO do cliente — nunca sobre a página. Total em aberto, total a vencer, total vencido e os quatro baldes (1-30, 31-60, 61-90 e 90+ dias), separadamente para a pagar e a receber; os quatro baldes somam exatamente o total vencido. `neverSynced=true` significa que a carteira NUNCA foi sincronizada: a tela oferece sincronizar em vez de mostrar zeros que pareceriam resultado. Quando a última tentativa falhou, os números são os da última sincronização íntegra (`syncedAt` diz de quando) e `syncFailedAt` traz o aviso. `referenceDate` é o 'hoje' do servidor usado no aging. */
+        get: operations["get_client_titles_summary_api_v1_clients__client_id__titles_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/titles/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sincroniza a carteira com a origem e devolve as contagens do ciclo mais os agregados resultantes. Requer a permissão `sync_client_receivables` (plataforma, admin, gerente da carteira e gerente do cliente — o operador do cliente LÊ mas não sincroniza). Lê todos os títulos não liquidados de todas as contas, sem recorte de competência, serializando as chamadas por cliente. Cliente encerrado: 409. Cliente sem origem capaz: 409 `SEM_CONEXAO`, `ORIGEM_COM_ERRO` ou `CAPACIDADE_AUSENTE`, conforme o caso — a leitura do que já existe continua funcionando. Falha no meio preserva a última carteira íntegra e registra a falha, sem nunca deixar carteira parcial passando por completa. */
+        post: operations["sync_client_titles_api_v1_clients__client_id__titles_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clients/{client_id}/glossary": {
         parameters: {
             query?: never;
@@ -1244,6 +1295,69 @@ export interface components {
             user_id: string;
         };
         /**
+         * AgingBucket
+         * @description Balde de aging — enum FECHADO, usado como filtro de query e como chave
+         *     dos agregados.
+         *
+         *     `a_vencer` existe como valor de propósito: sem ele, "não vencido" seria a
+         *     ausência de balde, e um filtro por balde não teria como pedir os títulos que
+         *     ainda vão vencer. Ele **não** é um dos quatro baldes de vencidos — ver
+         *     `OVERDUE_BUCKETS`.
+         * @enum {string}
+         */
+        AgingBucket: "a_vencer" | "1_30" | "31_60" | "61_90" | "90_mais";
+        /**
+         * AgingTotalsResponse
+         * @description Agregados de UM tipo de título, com os quatro baldes.
+         *
+         *     Os baldes são campos NOMEADOS (e não um dicionário): o contrato do front
+         *     precisa ser tipado, e um mapa com chave dinâmica deixaria um balde renomeado
+         *     passar pelo `gen:types` sem erro.
+         */
+        AgingTotalsResponse: {
+            /**
+             * Totalemaberto
+             * @description Tudo que está em aberto, vencido ou não.
+             */
+            totalEmAberto: string;
+            /**
+             * Totalavencer
+             * @description Em aberto com vencimento futuro (ou hoje).
+             */
+            totalAVencer: string;
+            /**
+             * Totalvencido
+             * @description Em aberto com vencimento passado. **Igual à soma dos quatro baldes.**
+             */
+            totalVencido: string;
+            /**
+             * Bucket1A30
+             * @description Atraso de 1 a 30 dias.
+             */
+            bucket1a30: string;
+            /**
+             * Bucket31A60
+             * @description Atraso de 31 a 60 dias.
+             */
+            bucket31a60: string;
+            /**
+             * Bucket61A90
+             * @description Atraso de 61 a 90 dias.
+             */
+            bucket61a90: string;
+            /**
+             * Bucket90Mais
+             * @description Atraso de 91 dias ou mais.
+             */
+            bucket90Mais: string;
+            /** Qtdemaberto */
+            qtdEmAberto: number;
+            /** Qtdavencer */
+            qtdAVencer: number;
+            /** Qtdvencido */
+            qtdVencido: number;
+        };
+        /**
          * AnomalyItem
          * @description Item de GET /api/v1/reconciliations/{id}/anomalies.
          */
@@ -1630,7 +1744,7 @@ export interface components {
          *     implementa e no schema de resposta — nunca como string solta num `if`.
          * @enum {string}
          */
-        Capability: "verificar_credencial" | "listar_contas" | "listar_lancamentos" | "escrever";
+        Capability: "verificar_credencial" | "listar_contas" | "listar_lancamentos" | "escrever" | "listar_titulos_em_aberto";
         /**
          * ChartOfAccountEntryResponse
          * @description Uma linha do plano de contas, como a API a devolve.
@@ -2146,6 +2260,94 @@ export interface components {
              * @default sem_origem
              */
             origin_status: components["schemas"]["OriginStatus"];
+        };
+        /**
+         * ClientTitleResponse
+         * @description Um título da carteira, como a API o devolve.
+         *
+         *     ⚠️ `supplierName` **não** vem do banco: é resolvido em RUNTIME pelo mesmo
+         *     `ConsultarCliente` + `OmieClientesCache` que a aba de Divergências usa, e é
+         *     `None` quando a origem não responde (fail-soft). Persistir o nome resolveria o
+         *     `None` e quebraria a §4.5.
+         *
+         *     `supplierNameResolved` existe para a tela **não** ter de adivinhar o que um
+         *     `null` significa: `false` diz "mostre o código e marque como não resolvido",
+         *     que é o comportamento que o R4 pede — e é diferente de "este título não tem
+         *     fornecedor" (aí `supplierCode` também é nulo).
+         */
+        ClientTitleResponse: {
+            /**
+             * Externalid
+             * @description Identificador do título na origem.
+             */
+            externalId: string;
+            /** @description `a_pagar` ou `a_receber`. */
+            titleType: components["schemas"]["TitleType"];
+            /**
+             * Duedate
+             * Format: date
+             * @description Data de vencimento — base do aging.
+             */
+            dueDate: string;
+            /**
+             * Amount
+             * @description Valor do documento, SEM sinal: `titleType` já diz se é obrigação ou direito. `Numeric(14,2)` — nunca ponto flutuante.
+             */
+            amount: string;
+            /** @description `em_aberto` é o que a carteira cobra. `liquidado` e `ausente_na_origem` são SAÍDAS: a linha fica (pode haver contexto apontando para ela), mas não entra nos agregados. */
+            status: components["schemas"]["TitleStatus"];
+            /**
+             * Overduedays
+             * @description Dias de atraso contra a data de referência do SERVIDOR. `0` = ainda não venceu (ou vence hoje) — nunca negativo.
+             */
+            overdueDays: number;
+            /** @description Balde de aging da linha. `null` para título que já saiu do aberto (`liquidado`/`ausente_na_origem`), que não pertence a balde nenhum. */
+            bucket?: components["schemas"]["AgingBucket"] | null;
+            /**
+             * Categorycode
+             * @description Código da categoria na origem.
+             */
+            categoryCode?: string | null;
+            /**
+             * Suppliercode
+             * @description Código do devedor/credor no cadastro da origem. Nunca o nome.
+             */
+            supplierCode?: number | null;
+            /**
+             * Suppliername
+             * @description Razão social resolvida em RUNTIME pelo cache de clientes. `null` quando não há código ou a origem não respondeu — a lista continua sendo servida assim mesmo.
+             */
+            supplierName?: string | null;
+            /**
+             * Suppliernameresolved
+             * @description `false` quando existe `supplierCode` e o nome NÃO pôde ser resolvido: a tela mostra o código com a marcação de 'não resolvido', nunca um campo vazio.
+             */
+            supplierNameResolved: boolean;
+            /**
+             * Omiecontaid
+             * @description Conta corrente do título na origem.
+             */
+            omieContaId?: number | null;
+            /**
+             * Documentnumber
+             * @description Número do documento, quando houver.
+             */
+            documentNumber?: string | null;
+            /**
+             * Lastsyncedat
+             * Format: date-time
+             * @description Quando esta linha foi vista pela origem pela última vez.
+             */
+            lastSyncedAt: string;
+        };
+        /**
+         * ClientTitlesListResponse
+         * @description Body de `GET /clients/{client_id}/titles`.
+         */
+        ClientTitlesListResponse: {
+            /** Data */
+            data: components["schemas"]["ClientTitleResponse"][];
+            pagination: components["schemas"]["PaginationMeta"];
         };
         /**
          * ClientUserListResponse
@@ -3676,6 +3878,100 @@ export interface components {
             ok: boolean;
             /** Message */
             message: string;
+        };
+        /**
+         * TitleStatus
+         * @description Situação da linha na carteira — fonte ÚNICA do CHECK de `status`.
+         *
+         *     `em_aberto` é o que a carteira existe para enxergar. Os outros dois são
+         *     **saídas**, e são duas porque contam histórias diferentes: `liquidado` é a
+         *     origem dizendo que o título foi pago/recebido; `ausente_na_origem` é o
+         *     título tendo simplesmente sumido do cadastro — inclusive o caso da
+         *     **reemissão**, em que o antigo some e outro identificador entra no lugar.
+         *     Colapsar os dois num só faria a tela chamar de "pago" um título que ninguém
+         *     pagou.
+         *
+         *     Nenhum deles apaga a linha (R2).
+         * @enum {string}
+         */
+        TitleStatus: "em_aberto" | "liquidado" | "ausente_na_origem";
+        /**
+         * TitleType
+         * @description A pagar ou a receber — fonte ÚNICA do CHECK de `title_type`.
+         *
+         *     Duas origens diferentes (`ListarContasPagar` / `ListarContasReceber`), um
+         *     vocabulário só. O tipo é da LINHA e não muda: um título a pagar não vira a
+         *     receber, e a chave `(cliente, identificador)` é única por cliente inteiro,
+         *     não por tipo — se a origem um dia repetir o identificador entre os dois
+         *     cadastros, queremos o erro barulhento da UNIQUE, não duas linhas.
+         * @enum {string}
+         */
+        TitleType: "a_pagar" | "a_receber";
+        /**
+         * TitlesSummaryEnvelope
+         * @description Envelope `{data: ...}` de `GET /clients/{client_id}/titles/summary`.
+         */
+        TitlesSummaryEnvelope: {
+            data: components["schemas"]["TitlesSummaryResponse"];
+        };
+        /**
+         * TitlesSummaryResponse
+         * @description Bloco de agregados da carteira, com o estado da sincronização.
+         *
+         *     `neverSynced` é campo EXPLÍCITO, e não algo a derivar de `syncedAt == null`
+         *     no front: é a diferença entre "este cliente não deve nada" e "ninguém nunca
+         *     consultou a origem deste cliente", e ela não pode depender de cada tela
+         *     lembrar da regra (R3).
+         */
+        TitlesSummaryResponse: {
+            aPagar: components["schemas"]["AgingTotalsResponse"];
+            aReceber: components["schemas"]["AgingTotalsResponse"];
+            /**
+             * Neversynced
+             * @description `true` = a carteira NUNCA foi sincronizada. A tela oferece 'sincronizar' e **não** mostra zeros como se fossem resultado.
+             */
+            neverSynced: boolean;
+            /**
+             * Syncedat
+             * @description Última sincronização ÍNTEGRA. `null` = nunca houve uma.
+             */
+            syncedAt?: string | null;
+            /**
+             * Syncfailedat
+             * @description Última tentativa que FALHOU, quando a mais recente falhou. Vem junto com `syncedAt` de propósito: os agregados acima são os da última íntegra, e a tela precisa dizer de quando eles são.
+             */
+            syncFailedAt?: string | null;
+            /**
+             * Referencedate
+             * Format: date
+             * @description Data do SERVIDOR usada como referência do aging. A tela exibe os baldes com ela — recalcular com o relógio do navegador poria o mesmo título em baldes diferentes para pessoas em fusos diferentes.
+             */
+            referenceDate: string;
+        };
+        /**
+         * TitlesSyncEnvelope
+         * @description Envelope `{data: ...}` de `POST /clients/{client_id}/titles/sync`.
+         */
+        TitlesSyncEnvelope: {
+            data: components["schemas"]["TitlesSyncResponse"];
+        };
+        /**
+         * TitlesSyncResponse
+         * @description O que uma sincronização manual fez, em contagens — e o bloco resultante.
+         *
+         *     Devolver o `summary` junto evita que a tela dispare uma segunda requisição só
+         *     para redesenhar os baldes que acabaram de mudar.
+         */
+        TitlesSyncResponse: {
+            /** Titulospagar */
+            titulosPagar: number;
+            /** Titulosreceber */
+            titulosReceber: number;
+            /** Vencidos */
+            vencidos: number;
+            /** Maisantigodias */
+            maisAntigoDias: number;
+            summary: components["schemas"]["TitlesSummaryResponse"];
         };
         /**
          * TransferUserRequest
@@ -5314,6 +5610,120 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChartOfAccountsCoverageEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_client_titles_api_v1_clients__client_id__titles_get: {
+        parameters: {
+            query?: {
+                /** @description Página, a partir de 1. */
+                page?: number;
+                /** @description Itens por página (máx. 100). */
+                pageSize?: number;
+                /** @description Filtra por tipo. Ausente = os dois. */
+                type?: ("a_pagar" | "a_receber") | null;
+                /** @description `em_aberto` = tudo que a carteira cobra; `vencido` = o subconjunto com vencimento passado. Ausente = inclui também o que já saiu do aberto. */
+                situation?: ("em_aberto" | "vencido") | null;
+                /** @description Filtra por balde de aging. Ausente = todos. */
+                bucket?: ("a_vencer" | "1_30" | "31_60" | "61_90" | "90_mais") | null;
+                /** @description Ordena por vencimento ou por valor. */
+                sortBy?: "due_date" | "amount";
+                /** @description Crescente ou decrescente. */
+                sortOrder?: "asc" | "desc";
+            };
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientTitlesListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_client_titles_summary_api_v1_clients__client_id__titles_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TitlesSummaryEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_client_titles_api_v1_clients__client_id__titles_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TitlesSyncEnvelope"];
                 };
             };
             /** @description Validation Error */
