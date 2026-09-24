@@ -46,6 +46,7 @@ from app.db.models import (
     ClientChartOfAccount,
     ClientConnection,
     ClientGlossaryEntry,
+    ClientTitle,
     ConnectionStatus,
     Notification,
     OmieAccountCache,
@@ -514,9 +515,9 @@ class ClientRepository:
                declarada é a fonte: o `DELETE` explícito mantém as duas
                coerentes e faz a credencial cifrada da origem sumir junto;
             5. a linha de `clients` — cascateia atribuições, glossário, cache de
-               contas Omie, **plano de contas** (S10) e favoritos; a DEK morre
-               com ela e tudo que ela cifrava vira indecifrável por construção
-               (§4.1).
+               contas Omie, **plano de contas** (S10), **carteira de títulos**
+               (S11) e favoritos; a DEK morre com ela e tudo que ela cifrava
+               vira indecifrável por construção (§4.1).
 
         `access_audit` e `usage_events` FICAM: são trilhas só de IDs (§4.7) e
         sobrevivem ao cliente de propósito.
@@ -556,6 +557,15 @@ class ClientRepository:
         carteira continua vendo o histórico. Conciliações, postings,
         `usage_events` e `access_audit` ficam — são a retenção que motivou o
         encerramento.
+
+        A **carteira de títulos** (S11) entra pelo MESMO precedente do plano de
+        contas, e a decisão está tomada aqui: nada nela é cifrado (só códigos,
+        §4.5), então nada morreu com a DEK — mas a carteira é o espelho
+        OPERACIONAL do que está em aberto na origem, e cliente encerrado não
+        opera nem tem origem a consultar. Deixá-la ficaria com uma lista de
+        cobranças vivas de um tenant morto. O histórico que o encerramento
+        protege é o das conciliações e da trilha, não o de um espelho que a
+        origem reconstrói em uma sincronização.
         """
         s = self._session
         await s.execute(
@@ -565,6 +575,7 @@ class ClientRepository:
         await s.execute(
             delete(ClientChartOfAccount).where(ClientChartOfAccount.client_id == client_id)
         )
+        await s.execute(delete(ClientTitle).where(ClientTitle.client_id == client_id))
         await s.execute(delete(OmieAccountCache).where(OmieAccountCache.client_id == client_id))
         await s.execute(delete(Notification).where(Notification.client_id == client_id))
         await s.execute(delete(UserClientFavorite).where(UserClientFavorite.client_id == client_id))

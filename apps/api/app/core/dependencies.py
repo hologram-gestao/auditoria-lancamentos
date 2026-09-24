@@ -264,3 +264,12 @@ ViewClientChartOfAccountsDep = Annotated[
 SyncClientChartOfAccountsDep = Annotated[
     CurrentUser, Depends(require_permission(Permission.SYNC_CLIENT_CHART_OF_ACCOUNTS))
 ]
+# --- Sprint 11 (BACK 11.5): carteira de títulos em aberto -------------------
+# Os nomes das PERMISSÕES vêm do PRD e são contrato (`*_receivables`), mesmo com a
+# tabela chamando-se `client_titles` — ver a nota em `Permission`.
+ViewClientReceivablesDep = Annotated[
+    CurrentUser, Depends(require_permission(Permission.VIEW_CLIENT_RECEIVABLES))
+]
+SyncClientReceivablesDep = Annotated[
+    CurrentUser, Depends(require_permission(Permission.SYNC_CLIENT_RECEIVABLES))
+]

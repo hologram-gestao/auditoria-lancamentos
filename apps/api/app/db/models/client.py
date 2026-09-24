@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from app.db.models.client_category import ClientCategory
     from app.db.models.client_chart_of_accounts import ClientChartOfAccount
     from app.db.models.client_connection import ClientConnection
+    from app.db.models.client_title import ClientTitle
     from app.db.models.omie_account_cache import OmieAccountCache
     from app.db.models.organization import Organization
     from app.db.models.reconciliation_session import ReconciliationSession
@@ -128,6 +129,28 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         default=None,
     )
 
+    # Sprint 11 (BACK 11.1) — estado da sincronização da CARTEIRA DE TÍTULOS.
+    # Espelham exatamente o par do plano de contas logo acima, e pelos mesmos
+    # dois motivos: (a) NÃO derivar de `MAX(client_titles.last_synced_at)`,
+    # porque um cliente sem nenhum título em aberto deixaria o MAX em NULL e a
+    # tela não saberia distinguir "carteira vazia" de "nunca sincronizou" — e o
+    # R3 exige que essas duas coisas apareçam diferentes; (b) são DUAS porque a
+    # tela precisa dizer "falhou agora, e a última íntegra foi tal dia".
+    #
+    # `titles_synced_at` é o carimbo do último sucesso ÍNTEGRO — sincronização
+    # que falhou no meio NUNCA o toca, e é isso que sustenta "falha preserva a
+    # última carteira íntegra" (R1) no schema, e não só no fluxo do serviço.
+    titles_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+    )
+    titles_sync_failed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+    )
+
     # Sprint 6 (BACK 06.2) — marcador de versão do GLOSSÁRIO deste tenant.
     # Contador incrementado na MESMA transação de qualquer escrita no glossário
     # (criação, edição E remoção). É o que permite invalidar o bloco de prompt
@@ -194,6 +217,13 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Sprint 10 (BACK 10.1): o plano de contas do cliente, só códigos e flags.
     chart_of_accounts: Mapped[list[ClientChartOfAccount]] = relationship(
         "ClientChartOfAccount",
+        back_populates="client",
+        cascade="all, delete-orphan",
+        lazy="raise",
+    )
+    # Sprint 11 (BACK 11.1): a CARTEIRA de títulos em aberto, só códigos.
+    titles: Mapped[list[ClientTitle]] = relationship(
+        "ClientTitle",
         back_populates="client",
         cascade="all, delete-orphan",
         lazy="raise",
