@@ -23,6 +23,7 @@ que o redactor do structlog cobre por chave. Quem precisa do texto chama
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date
 from decimal import Decimal
 from enum import StrEnum
@@ -49,6 +50,27 @@ class Capability(StrEnum):
     LISTAR_CONTAS = "listar_contas"
     LISTAR_LANCAMENTOS = "listar_lancamentos"
     ESCREVER = "escrever"
+    #: Sprint 11 — a CARTEIRA: títulos a pagar e a receber **não liquidados**, de
+    #: **todas** as contas correntes, **sem recorte de competência**. É uma
+    #: capacidade separada de `LISTAR_LANCAMENTOS` de propósito: lançamento é
+    #: movimento realizado numa conta e num período (o extrato), título em aberto
+    #: é compromisso futuro sem conta nem período — um provedor pode
+    #: perfeitamente ter o primeiro e não ter o segundo, e a tela da carteira
+    #: precisa saber disso ANTES de tentar.
+    LISTAR_TITULOS_EM_ABERTO = "listar_titulos_em_aberto"
+
+
+class ProviderTitleKind(StrEnum):
+    """A pagar ou a receber, em forma NEUTRA.
+
+    Os valores são **os mesmos** de `db.models.client_title.TitleType`, e
+    `tests/unit/test_provider_open_title_contract.py` compara as duas listas: o
+    DTO não importa modelo de banco (a camada de integração não conhece o
+    schema), então a coincidência precisa ser vigiada em vez de suposta.
+    """
+
+    A_PAGAR = "a_pagar"
+    A_RECEBER = "a_receber"
 
 
 class ProviderAccount(BaseModel):
@@ -93,6 +115,44 @@ class ProviderEntry(BaseModel):
     supplier_code: str | None = None
 
 
+class ProviderOpenTitle(BaseModel):
+    """Um título EM ABERTO da origem, em forma NEUTRA (Sprint 11, BACK 11.2).
+
+    **Só códigos, nunca nome (§4.5).** `supplier_code` é o código do
+    devedor/credor no cadastro da origem; a razão social continua resolvida em
+    runtime, pelo `clientes_cache` que a aba de divergências já usa. Não existe
+    aqui campo de nome nem `observacao`: observação é texto livre de terceiro, e
+    a Omie ecoa nela a descrição da compra (§4.5/§3.16).
+
+    **`amount` é o valor do documento, SEM sinal.** Diferente de
+    `ProviderEntry.amount` (que já vem com sinal porque o extrato tem natureza),
+    aqui o sinal é redundante: `kind` já diz se é obrigação ou direito, e
+    inventar sinal faria a soma do aging depender de qual dos dois campos o
+    consumidor olhou. `Decimal` sempre — nunca `float` (§3.4).
+
+    **`situation` é o rótulo de situação VERBATIM da origem** (no Omie:
+    `status_titulo`, ex.: `'ATRASADO'`). Ele **não é persistido**: serve para o
+    serviço derivar o `status` da carteira, e guardar o rótulo do terceiro no
+    banco criaria um segundo vocabulário de estado ao lado do nosso.
+
+    **`account_external_id` é nulável** porque é dado da origem: o Omie devolve
+    `id_conta_corrente` em todo título (verificado na captura real), mas um
+    provedor sem o conceito de conta corrente não teria o que preencher.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    external_id: str
+    kind: ProviderTitleKind
+    due_date: date
+    amount: Decimal
+    situation: str = ""
+    category_code: str | None = None
+    supplier_code: str | None = None
+    account_external_id: str | None = None
+    document_number: str | None = None
+
+
 @runtime_checkable
 class OriginProvider(Protocol):
     """O que qualquer origem precisa saber fazer.
@@ -128,5 +188,28 @@ class OriginProvider(Protocol):
     async def list_entries(
         self, *, account_external_id: str, start: date, end: date
     ) -> list[ProviderEntry]: ...
+
+    async def list_open_titles(
+        self, *, known_account_external_ids: Sequence[str] = ()
+    ) -> list[ProviderOpenTitle]:
+        """A CARTEIRA: todos os títulos não liquidados, todas as contas (S11 R1).
+
+        **Sem recorte de competência e sem recorte de conta** — é o oposto exato
+        da leitura da conciliação, e é o que faz um título vencido há quatro
+        meses voltar.
+
+        `known_account_external_ids` é o **ramo (b)** do R1, e existe como
+        parâmetro em vez de como decisão interna do adaptador porque quem sabe
+        quais contas o cliente tem é a camada de cima (o cache de contas do
+        cliente), não a integração. O adaptador tenta primeiro **sem** filtro de
+        conta; se a origem recusar a chamada sem ele, itera estas contas
+        **serialmente** e une os resultados. O resultado é o mesmo nos dois
+        ramos — muda só o custo em requisições.
+
+        Implementação que não sabe fazer isso **não declara**
+        `Capability.LISTAR_TITULOS_EM_ABERTO`, e a rota responde
+        `capacidade_ausente` em vez de estourar aqui.
+        """
+        ...
 
     async def aclose(self) -> None: ...

@@ -101,6 +101,20 @@ CLASSIFICATION: tuple[Entry, ...] = (
         "PORTA, sem tocar em credencial nem nas colunas antigas",
     ),
     Entry(
+        "app/modules/client_titles/service.py",
+        Family.ORIGEM,
+        "ingestão da carteira de títulos (S11): resolve a conexão capaz de "
+        "`listar_titulos_em_aberto` e constrói o provedor pela PORTA. Não toca em credencial "
+        "nem nas colunas antigas, e não fala com o `OmieClient` direto",
+    ),
+    Entry(
+        "app/modules/client_titles/routes.py",
+        Family.ORIGEM,
+        "lista da carteira (S11): resolve a conexão capaz de `listar_lancamentos` só para "
+        "resolver NOME de devedor em runtime (§4.5), e é FAIL-SOFT — sem origem alcançável a "
+        "lista sai com o código e `supplierNameResolved=false`, nunca 409 numa leitura",
+    ),
+    Entry(
         "app/modules/client_connections/legacy_fallback.py",
         Family.FALLBACK,
         "único leitor das colunas antigas; sintetiza a conexão da janela (09.5)",
