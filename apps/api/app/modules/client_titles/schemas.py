@@ -16,19 +16,38 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.models.client_title import TitleStatus, TitleType
+from app.db.models.title_context import TitleContextType
 from app.modules.client_titles.aging import AgingBucket, bucket_for_days
+from app.modules.reconciliations.schemas import SessionAuthor
 from app.modules.users.schemas import PaginationMeta
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from app.db.models.client_title import ClientTitle
+    from app.db.models.title_context import TitleContext
     from app.integrations.providers.base import ProviderOpenTitle
-    from app.modules.client_titles.repository import AgingTotals, TitlesSummary
+    from app.modules.client_titles.repository import (
+        AgingTotals,
+        ReceivablesGroupTotals,
+        ReceivablesReport,
+        ReceivablesSideReport,
+        TitlesSummary,
+    )
+
+#: Teto do texto livre do contexto — mesmo teto de `resolution_note` da revisão
+#: de anomalias (`reconciliations/review/schemas.py`), convenção da casa para
+#: nota de texto livre.
+MAX_TITLE_CONTEXT_TEXT_CHARS = 2000
+
+#: Marcador de falha de decifragem — mesma convenção do glossário
+#: (`glossary/schemas.py`). Célula NUNCA fica vazia em silêncio (CLAUDE.md §4.1).
+TITLE_CONTEXT_UNDECIPHERABLE = "[indecifrável]"
 
 #: Rótulos de situação com que a origem diz "este título foi liquidado".
 #: Fechado de propósito, e é a **única** porta para `TitleStatus.LIQUIDADO`.
@@ -362,3 +381,174 @@ class TitlesSyncEnvelope(BaseModel):
     """Envelope `{data: ...}` de `POST /clients/{client_id}/titles/sync`."""
 
     data: TitlesSyncResponse
+
+
+# ----------------------------------------------------------------------
+# Contexto do título (Sprint 15, BACK 15.1)
+# ----------------------------------------------------------------------
+
+#: Vocabulário aceito em `POST .../context`. `Literal` (não `str`) para que um
+#: valor fora do conjunto seja validação de FORMA — 400 `VALIDATION_ERROR`
+#: genérico pelo handler global (convenção de 23/09/2026), nunca um 422
+#: inventado. As seis strings são as de `TitleContextType`.
+TitleContextTypeFilter = Literal[
+    "acordo_de_pagamento",
+    "pagamento_antecipado",
+    "nota_a_cancelar",
+    "cobranca_suspensa",
+    "perda_provavel",
+    "outro",
+]
+
+
+class TitleContextCreateRequest(BaseModel):
+    """Body de `POST /clients/{client_id}/titles/{title_id}/context`."""
+
+    type: TitleContextTypeFilter = Field(
+        description=(
+            "Um dos seis tipos fechados. Fora do conjunto: 400 `VALIDATION_ERROR` "
+            "(validação de forma, não 422)."
+        )
+    )
+    text: str = Field(
+        min_length=1,
+        max_length=MAX_TITLE_CONTEXT_TEXT_CHARS,
+        description="Texto livre do analista — nasce cifrado com a chave do cliente.",
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class TitleContextResponse(BaseModel):
+    """Uma entrada de contexto, como a API a devolve — já decifrada.
+
+    `author` é o objeto ENXUTO e MASCARADO por escopo (`author_for_viewer`,
+    `reconciliations/service.py`) — o mesmo precedente da autoria de sessão
+    (§3.15): nunca a linha de `users`, nunca o `id` do autor.
+    """
+
+    id: UUID
+    title_id: UUID = Field(alias="titleId")
+    type: TitleContextType
+    text: str
+    decrypt_failed: bool = Field(
+        default=False,
+        alias="decryptFailed",
+        description="`true` quando o texto não pôde ser decifrado — nunca célula vazia em silêncio.",
+    )
+    author: SessionAuthor
+    created_at: datetime = Field(alias="createdAt")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def build(
+        cls,
+        context: TitleContext,
+        *,
+        text: str,
+        decrypt_failed: bool = False,
+        author: SessionAuthor,
+    ) -> TitleContextResponse:
+        return cls(
+            id=context.id,
+            title_id=context.title_id,
+            type=TitleContextType(context.context_type),
+            text=text,
+            decrypt_failed=decrypt_failed,
+            author=author,
+            created_at=context.created_at,
+        )
+
+
+class TitleContextListResponse(BaseModel):
+    """Body de `GET /clients/{client_id}/titles/{title_id}/context`.
+
+    Histórico COMPLETO, mais recente primeiro — sem paginação: é o registro de
+    um título, não uma coleção que cresce sem teto (CLAUDE.md: append-only,
+    mas por título, não por cliente).
+    """
+
+    data: list[TitleContextResponse]
+
+
+class TitleContextEnvelope(BaseModel):
+    """Envelope `{data: ...}` de `POST /clients/{client_id}/titles/{title_id}/context`."""
+
+    data: TitleContextResponse
+
+
+# ----------------------------------------------------------------------
+# Relatório de recebíveis (Sprint 15, BACK 15.2)
+# ----------------------------------------------------------------------
+
+
+class ReceivablesGroupResponse(BaseModel):
+    """Os agregados de UM grupo (inadimplência OU vencido-com-contexto) de UM
+    lado — todos vencidos por construção, sem balde `a_vencer` (ver
+    `ReceivablesGroupTotals`)."""
+
+    total: Decimal
+    bucket_1_30: Decimal = Field(alias="bucket1a30", description="Atraso de 1 a 30 dias.")
+    bucket_31_60: Decimal = Field(alias="bucket31a60", description="Atraso de 31 a 60 dias.")
+    bucket_61_90: Decimal = Field(alias="bucket61a90", description="Atraso de 61 a 90 dias.")
+    bucket_90_mais: Decimal = Field(alias="bucket90Mais", description="Atraso de 91 dias ou mais.")
+    qtd: int = Field(ge=0)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def from_totals(cls, totals: ReceivablesGroupTotals) -> ReceivablesGroupResponse:
+        return cls(
+            total=totals.total,
+            bucket_1_30=totals.baldes[AgingBucket.D1_30],
+            bucket_31_60=totals.baldes[AgingBucket.D31_60],
+            bucket_61_90=totals.baldes[AgingBucket.D61_90],
+            bucket_90_mais=totals.baldes[AgingBucket.D90_MAIS],
+            qtd=totals.qtd,
+        )
+
+
+class ReceivablesSideResponse(BaseModel):
+    """Os dois grupos de UM lado (a pagar OU a receber)."""
+
+    inadimplencia: ReceivablesGroupResponse
+    vencido_com_contexto: ReceivablesGroupResponse = Field(alias="vencidoComContexto")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def from_side(cls, side: ReceivablesSideReport) -> ReceivablesSideResponse:
+        return cls(
+            inadimplencia=ReceivablesGroupResponse.from_totals(side.inadimplencia),
+            vencido_com_contexto=ReceivablesGroupResponse.from_totals(side.vencido_com_contexto),
+        )
+
+
+class ReceivablesReportResponse(BaseModel):
+    """Body de `GET /clients/{client_id}/titles/receivables-report`.
+
+    Os DOIS lados, cada um com os DOIS grupos — calculados no SERVIDOR sobre a
+    carteira INTEIRA. `referenceDate` é o "hoje" do servidor usado no aging dos
+    baldes, mesma razão de `TitlesSummaryResponse.referenceDate`.
+    """
+
+    a_pagar: ReceivablesSideResponse = Field(alias="aPagar")
+    a_receber: ReceivablesSideResponse = Field(alias="aReceber")
+    reference_date: date = Field(alias="referenceDate")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def from_report(cls, report: ReceivablesReport) -> ReceivablesReportResponse:
+        return cls(
+            a_pagar=ReceivablesSideResponse.from_side(report.a_pagar),
+            a_receber=ReceivablesSideResponse.from_side(report.a_receber),
+            reference_date=report.referencia,
+        )
+
+
+class ReceivablesReportEnvelope(BaseModel):
+    """Envelope `{data: ...}` de `GET /clients/{client_id}/titles/receivables-report`."""
+
+    data: ReceivablesReportResponse

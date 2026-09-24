@@ -44,6 +44,9 @@ AAD_GLOSSARY_DESCRIPTION = ("client_glossary_entries", "description_encrypted")
 # inteiro de credenciais cifrado: provedor futuro com outro shape cabe sem AAD
 # novo — e AAD novo é par CONGELADO, não se cria por conveniência.
 AAD_CONNECTION_CREDENTIALS = ("client_connections", "credentials_encrypted")
+# Sprint 15 (BACK 15.1) — contexto do título (acordo/antecipação/perda), no
+# molde de `reconciliation_file_entries.user_note_encrypted`. 13º par.
+AAD_TITLE_CONTEXT_TEXT = ("title_contexts", "text_encrypted")
 
 
 def field_locator(pair: tuple[str, str], pk: str | UUID) -> FieldLocator:

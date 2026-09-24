@@ -31,6 +31,7 @@ from app.modules.usage_events.schemas import (
     ClienteCriadoProps,
     ClienteEncerradoProps,
     ClienteExcluidoProps,
+    ContextoTituloRegistradoProps,
     FlagRevisadoProps,
     GlossarioEditadoProps,
     OmieLancamentoEnviadoProps,
@@ -39,6 +40,7 @@ from app.modules.usage_events.schemas import (
     OrganizacaoDesativadaProps,
     PlanoContasSincronizadoProps,
     QualificacaoEmitidaProps,
+    RecebiveisClassificadosProps,
     UsageEventName,
     UsuarioTransferidoDeOrganizacaoProps,
 )
@@ -53,6 +55,7 @@ if TYPE_CHECKING:
         NotificacaoEntregueRequest,
         OmieRejectionCode,
         QualificationVerdict,
+        TitleContextTypeName,
     )
 
 logger = get_logger(__name__)
@@ -373,6 +376,50 @@ class UsageEventService:
                 titulos_pagar=titulos_pagar,
                 vencidos=vencidos,
                 mais_antigo_dias=mais_antigo_dias,
+            ).model_dump(mode="json"),
+        )
+
+    async def emit_contexto_titulo_registrado(
+        self, *, client_id: UUID, tipo_contexto: TitleContextTypeName
+    ) -> bool:
+        """S15 BACK 15.1 — instrumenta a suposição S-1. Sem `session_id`.
+
+        Uma linha por REGISTRO (não por título): o mesmo título pode acumular
+        vários contextos no histórico, e cada um é um evento de quem atende
+        agindo — contar só o mais recente subestimaria a adoção. Sem dedup, pelo
+        mesmo motivo de `carteira_sincronizada`: aqui não há nem `client_id`
+        único por período que justificasse colapsar.
+        """
+        return await self.emit(
+            UsageEventName.CONTEXTO_TITULO_REGISTRADO,
+            props=ContextoTituloRegistradoProps(
+                client_id=client_id, tipo_contexto=tipo_contexto
+            ).model_dump(mode="json"),
+        )
+
+    async def emit_recebiveis_classificados(
+        self,
+        *,
+        client_id: UUID,
+        valor_vencido_total_centavos: int,
+        valor_sem_contexto_centavos: int,
+        titulos_vencidos: int,
+    ) -> bool:
+        """S15 BACK 15.2 — **a métrica da Sprint 15**. Sem `session_id`.
+
+        Emitido a cada CÁLCULO do relatório (não só quando algo muda): a
+        leitura D+30 lê a última linha por `client_id`, então abrir o relatório
+        30 vezes precisa gerar 30 linhas. Sem dedup, mesmo motivo de
+        `carteira_sincronizada` — este evento nasce fora de
+        `DEDUPED_EVENT_NAMES` por construção (sem `session_id`).
+        """
+        return await self.emit(
+            UsageEventName.RECEBIVEIS_CLASSIFICADOS,
+            props=RecebiveisClassificadosProps(
+                client_id=client_id,
+                valor_vencido_total_centavos=valor_vencido_total_centavos,
+                valor_sem_contexto_centavos=valor_sem_contexto_centavos,
+                titulos_vencidos=titulos_vencidos,
             ).model_dump(mode="json"),
         )
 

@@ -27,6 +27,7 @@ from app.modules.usage_events.schemas import (
     AutorNavegouForaProps,
     AutorNavegouForaRequest,
     CarteiraSincronizadaProps,
+    ContextoTituloRegistradoProps,
     FlagRevisadoProps,
     GlossarioEditadoProps,
     NotificacaoEntregueProps,
@@ -34,6 +35,7 @@ from app.modules.usage_events.schemas import (
     PlanoContasSincronizadoProps,
     QualificacaoEmitidaProps,
     QualificationVerdict,
+    RecebiveisClassificadosProps,
     UsageEventName,
     UsageEventRequest,
 )
@@ -48,6 +50,8 @@ _PROPS_MODELS: list[type[BaseModel]] = [
     QualificacaoEmitidaProps,
     FlagRevisadoProps,
     GlossarioEditadoProps,
+    ContextoTituloRegistradoProps,
+    RecebiveisClassificadosProps,
 ]
 
 #: Tipos que NÃO carregam texto livre. `bool`/`int` são grandezas, `Literal` é
@@ -275,6 +279,13 @@ class TestAllowListDeDedup:
             # ÚLTIMA linha por client_id — o job diário gera uma por dia, e na
             # allow-list todas depois da primeira sumiriam.
             UsageEventName.CARTEIRA_SINCRONIZADA,
+            # S15 (BACK 15.1): conta REGISTROS — o mesmo título pode acumular
+            # vários contextos, e cada um é um evento de quem atende agindo. Na
+            # allow-list, o 2º registro em diante no mesmo título sumiria.
+            UsageEventName.CONTEXTO_TITULO_REGISTRADO,
+            # S15 (BACK 15.2): a leitura D+30 lê a ÚLTIMA linha por client_id —
+            # abrir o relatório 30 vezes precisa gerar 30 linhas.
+            UsageEventName.RECEBIVEIS_CLASSIFICADOS,
         ],
         ids=lambda e: e.value,
     )
@@ -470,3 +481,149 @@ class TestCarteiraSincronizada:
             mais_antigo_dias=0,
         )
         assert props.mais_antigo_dias == 0
+
+
+class TestContextoTituloRegistrado:
+    """BACK 15.1 — instrumenta a suposição S-1 (quem atende registra sozinho?).
+
+    Mesmo risco da série: a tentação seria mandar o texto livre ou o
+    identificador do título "para contexto". O texto é PII em potencial (§4.7)
+    e o identificador reconstituiria a carteira de cobranças dentro do sink —
+    daí só o tenant e o TIPO (enum fechado).
+    """
+
+    #: A whitelist EXATA — duas chaves, nenhuma a mais.
+    CHAVES = ("client_id", "tipo_contexto")
+
+    def _base(self) -> dict[str, Any]:
+        return {"client_id": _CLIENT_ID, "tipo_contexto": "acordo_de_pagamento"}
+
+    def test_nome_literal_do_prd(self) -> None:
+        """Renomear quebra a leitura D+30, que filtra por esta string exata."""
+        assert UsageEventName.CONTEXTO_TITULO_REGISTRADO.value == "contexto_titulo_registrado"
+
+    def test_props_tem_exatamente_as_duas_chaves_da_whitelist(self) -> None:
+        assert set(ContextoTituloRegistradoProps.model_fields) == set(self.CHAVES)
+
+    def test_caminho_feliz(self) -> None:
+        props = ContextoTituloRegistradoProps(**self._base())
+        payload = props.model_dump(mode="json")
+        assert payload["client_id"] == _CLIENT_ID
+        assert set(payload) == set(self.CHAVES)
+
+    @pytest.mark.parametrize(
+        "tipo",
+        [
+            "acordo_de_pagamento",
+            "pagamento_antecipado",
+            "nota_a_cancelar",
+            "cobranca_suspensa",
+            "perda_provavel",
+            "outro",
+        ],
+    )
+    def test_aceita_os_seis_tipos_do_vocabulario_fechado(self, tipo: str) -> None:
+        props = ContextoTituloRegistradoProps(client_id=_CLIENT_ID, tipo_contexto=tipo)
+        assert props.tipo_contexto == tipo
+
+    def test_tipo_fora_do_vocabulario_e_rejeitado(self) -> None:
+        with pytest.raises(ValidationError):
+            ContextoTituloRegistradoProps(client_id=_CLIENT_ID, tipo_contexto="invalido")
+
+    @pytest.mark.parametrize(
+        "extra",
+        [
+            {"titulo_id": "3f7b1e2a-0000-4000-8000-0000000000d1"},
+            {"texto": "cliente fecha a cada quatro meses"},
+            {"nome_devedor": "Austral Ltda"},
+            {"autor": "fulano@hologram.com"},
+        ],
+        ids=["titulo_id", "texto_livre", "nome_devedor", "autor"],
+    )
+    def test_chave_fora_da_whitelist_e_rejeitada(self, extra: dict[str, Any]) -> None:
+        """`extra="forbid"`: chave a mais é erro na EMISSÃO, não campo silencioso."""
+        base = self._base()
+        assert ContextoTituloRegistradoProps(**base) is not None
+        with pytest.raises(ValidationError):
+            ContextoTituloRegistradoProps(**base, **extra)
+
+
+class TestRecebiveisClassificados:
+    """BACK 15.2 — **a métrica da Sprint 15**, com o vocabulário fechado.
+
+    O risco é o mesmo da série: a tentação seria mandar o valor em `Decimal`
+    (nunca no sink — §3.4, só `int` em centavos) ou o detalhe por título. Daí só
+    o tenant, dois valores em centavos e uma contagem.
+    """
+
+    #: A whitelist EXATA — quatro chaves, nenhuma a mais.
+    CHAVES = (
+        "client_id",
+        "valor_vencido_total_centavos",
+        "valor_sem_contexto_centavos",
+        "titulos_vencidos",
+    )
+
+    def _base(self) -> dict[str, Any]:
+        """Os números da base consolidada de 17/06/2026 (em centavos)."""
+        return {
+            "client_id": _CLIENT_ID,
+            "valor_vencido_total_centavos": 10_741_310,
+            "valor_sem_contexto_centavos": 2_454_500,
+            "titulos_vencidos": 97,
+        }
+
+    def test_nome_literal_do_prd(self) -> None:
+        """Renomear quebra a leitura D+30, que filtra por esta string exata."""
+        assert UsageEventName.RECEBIVEIS_CLASSIFICADOS.value == "recebiveis_classificados"
+
+    def test_props_tem_exatamente_as_quatro_chaves_da_whitelist(self) -> None:
+        assert set(RecebiveisClassificadosProps.model_fields) == set(self.CHAVES)
+
+    def test_caminho_feliz(self) -> None:
+        props = RecebiveisClassificadosProps(**self._base())
+        payload = props.model_dump(mode="json")
+        assert payload["client_id"] == _CLIENT_ID
+        assert set(payload) == set(self.CHAVES)
+
+    @pytest.mark.parametrize(
+        "extra",
+        [
+            {"titulo_id": "3f7b1e2a-0000-4000-8000-0000000000d1"},
+            {"nome_devedor": "Austral Ltda"},
+            {"valor_vencido_total": "107413.10"},
+            {"categoria": "2.04.94"},
+        ],
+        ids=["titulo_id", "nome_devedor", "valor_decimal", "categoria"],
+    )
+    def test_chave_fora_da_whitelist_e_rejeitada(self, extra: dict[str, Any]) -> None:
+        """`extra="forbid"`: chave a mais é erro na EMISSÃO, não campo silencioso."""
+        base = self._base()
+        assert RecebiveisClassificadosProps(**base) is not None
+        with pytest.raises(ValidationError):
+            RecebiveisClassificadosProps(**base, **extra)
+
+    @pytest.mark.parametrize(
+        "campo",
+        ["valor_vencido_total_centavos", "valor_sem_contexto_centavos", "titulos_vencidos"],
+    )
+    def test_nenhum_valor_aceita_negativo(self, campo: str) -> None:
+        base = self._base()
+        base[campo] = -1
+        with pytest.raises(ValidationError):
+            RecebiveisClassificadosProps(**base)
+
+    def test_valores_sao_int_nunca_decimal_ou_float(self) -> None:
+        """§3.4: dinheiro no sink é `int` em CENTAVOS — nunca `Decimal`/float."""
+        for name, field in RecebiveisClassificadosProps.model_fields.items():
+            assert field.annotation in (UUID, int), f"{name} não é UUID/int"
+
+    def test_carteira_sem_contexto_algum_e_100_por_cento_inadimplencia(self) -> None:
+        """R4 (baseline): sem nenhum contexto, `valor_sem_contexto` == `total`."""
+        props = RecebiveisClassificadosProps(
+            client_id=_CLIENT_ID,
+            valor_vencido_total_centavos=10_741_310,
+            valor_sem_contexto_centavos=10_741_310,
+            titulos_vencidos=97,
+        )
+        assert props.valor_sem_contexto_centavos == props.valor_vencido_total_centavos
