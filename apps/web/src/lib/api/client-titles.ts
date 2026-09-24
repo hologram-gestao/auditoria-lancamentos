@@ -24,6 +24,9 @@
 import type {
   ClientTitlesListResponse,
   ListClientTitlesQuery,
+  ReceivablesReport,
+  TitleContext,
+  TitleContextCreateRequest,
   TitlesSummary,
   TitlesSyncResult,
 } from '@/lib/contracts';
@@ -56,6 +59,9 @@ export function buildClientTitlesQuery(params: ListClientTitlesParams): string {
   if (params.type) sp.set('type', params.type);
   if (params.situation) sp.set('situation', params.situation);
   if (params.bucket) sp.set('bucket', params.bucket);
+  // Sprint 15: só manda `hasNoContext=true` quando marcado — `false` não é
+  // "sem filtro" para o servidor, é "só os que TÊM contexto" (o inverso).
+  if (params.hasNoContext) sp.set('hasNoContext', 'true');
   return sp.toString();
 }
 
@@ -88,4 +94,40 @@ export async function getClientTitlesSummary(clientId: string): Promise<TitlesSu
  */
 export async function syncClientTitles(clientId: string): Promise<TitlesSyncResult> {
   return apiPost<TitlesSyncResult>(`${basePath(clientId)}/sync`);
+}
+
+/**
+ * Histórico COMPLETO de contexto de um título (Sprint 15 — BACK 15.1), mais
+ * recente primeiro, sem paginação. `client_id` na rota é o tenant — título de
+ * outro cliente responde 404 sem revelar que existe alhures.
+ */
+export async function listTitleContext(clientId: string, titleId: string): Promise<TitleContext[]> {
+  // `{ data: [...] }` tem UMA chave só: o `apiGet` já desembrulha.
+  return apiGet<TitleContext[]>(`${basePath(clientId)}/${encodeURIComponent(titleId)}/context`);
+}
+
+/**
+ * Registra uma entrada de contexto sobre um título. Append-only: registrar de
+ * novo NÃO apaga o histórico. Cliente encerrado: 409. `type` fora do
+ * vocabulário fechado: 400 `VALIDATION_ERROR`.
+ */
+export async function registerTitleContext(
+  clientId: string,
+  titleId: string,
+  payload: TitleContextCreateRequest,
+): Promise<TitleContext> {
+  return apiPost<TitleContext>(
+    `${basePath(clientId)}/${encodeURIComponent(titleId)}/context`,
+    payload,
+  );
+}
+
+/**
+ * Relatório de recebíveis (Sprint 15 — BACK 15.2): separa, no servidor e sobre
+ * a carteira INTEIRA, inadimplência real de vencido-com-contexto, para os dois
+ * lados (a pagar / a receber). Mesma permissão de leitura da carteira
+ * (`view_client_receivables`) — não expõe texto decifrado nem título.
+ */
+export async function getReceivablesReport(clientId: string): Promise<ReceivablesReport> {
+  return apiGet<ReceivablesReport>(`${basePath(clientId)}/receivables-report`);
 }

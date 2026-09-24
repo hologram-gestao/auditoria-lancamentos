@@ -251,6 +251,26 @@ const MATRIX: ReadonlyArray<{
     clientManager: true,
     clientOperator: false,
   },
+  // S15 / §3: LER o contexto do título é de TODOS — mesma base de
+  // `view_client_receivables`.
+  {
+    permission: 'view_title_context',
+    platform: true,
+    admin: true,
+    manager: true,
+    clientManager: true,
+    clientOperator: true,
+  },
+  // S15 / §3: REGISTRAR contexto sai do `client_operator` e **só dele** — as
+  // mesmas células de `sync_client_receivables`, decisão própria do PRD.
+  {
+    permission: 'manage_title_context',
+    platform: true,
+    admin: true,
+    manager: true,
+    clientManager: true,
+    clientOperator: false,
+  },
 ];
 
 describe('hasPermission — matriz do backend, célula a célula', () => {

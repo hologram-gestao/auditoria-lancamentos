@@ -42,7 +42,7 @@
  * primeira exceção, não o primeiro uso.
  */
 
-import { Loader2, RefreshCw } from 'lucide-react';
+import { Loader2, MessageSquareText, RefreshCw } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
@@ -57,6 +57,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import {
   Table,
   TableBody,
@@ -67,6 +68,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   useClientTitlesList,
@@ -90,6 +92,8 @@ import {
   TitleTypeBadge,
 } from './client-titles-badges';
 import { ClientTitlesSummaryBlock, ClientTitlesSummarySkeleton } from './client-titles-summary';
+import { ReceivablesReportScreen } from './receivables-report-screen';
+import { TitleContextSheet } from './title-context-sheet';
 
 const PARAM = {
   page: 'page',
@@ -99,12 +103,20 @@ const PARAM = {
   bucket: 'bucket',
   sortBy: 'sortBy',
   sortOrder: 'sortOrder',
+  // Sprint 15: `hasNoContext` é o filtro "vencidos sem contexto" (a fila de
+  // trabalho de quem registra); `view` é a aba (`carteira` | `relatorio`),
+  // estado na URL como o resto da tela.
+  hasNoContext: 'hasNoContext',
+  view: 'view',
 } as const;
+
+const DEFAULT_VIEW = 'carteira';
+const VIEW_VALUES = ['carteira', 'relatorio'] as const;
 
 const DEFAULT_PAGE_SIZE = 20;
 /** O Radix não aceita `''` como valor de item — `all` é o "sem filtro". */
 const ALL = 'all';
-const COLUMN_COUNT = 5;
+const COLUMN_COUNT = 6;
 
 /**
  * Os vocabulários FECHADOS do servidor (`Literal` no Pydantic). Valor fora
@@ -164,6 +176,10 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
   const bucket = readEnum(get(PARAM.bucket), BUCKET_FILTERS);
   const sortBy = readEnum(get(PARAM.sortBy), SORT_FIELDS) ?? 'due_date';
   const sortOrder = readEnum(get(PARAM.sortOrder), SORT_ORDERS) ?? 'asc';
+  // Sprint 15: só `true` é um valor com significado — qualquer outra coisa na
+  // URL (ausente, `false`, lixo) é "sem este filtro", igual aos outros.
+  const hasNoContext = get(PARAM.hasNoContext) === 'true';
+  const view = readEnum(get(PARAM.view), VIEW_VALUES) ?? DEFAULT_VIEW;
 
   // Sem `useMemo`: o objeto é a query key do TanStack Query, que compara por
   // VALOR (hash estrutural). Uma referência nova a cada render não refaz
@@ -177,6 +193,7 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
     bucket: bucket ?? null,
     sortBy,
     sortOrder,
+    hasNoContext: hasNoContext || null,
   };
 
   const listQuery = useClientTitlesList(clientId, queryParams);
@@ -190,6 +207,12 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
   // de saída, nunca um toast genérico (S9 / R7). Guardar o erro é o que permite
   // renderizá-lo; qualquer outro erro segue no toast.
   const [originError, setOriginError] = useState<unknown>(null);
+
+  // Sprint 15 (FRONT 15.1): a gaveta de contexto abre sobre UM título por vez —
+  // guardamos o `ClientTitle` inteiro (não só o id) para o cabeçalho da gaveta
+  // não precisar de um 2º request só para mostrar o que a pessoa já via na
+  // linha (vencimento, tipo, valor).
+  const [contextTitle, setContextTitle] = useState<ClientTitle | null>(null);
 
   if (currentUser === null) return null;
 
@@ -213,7 +236,10 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
   const showSyncAction = canSync && !isClosed && originCode === null;
   const isSyncing = syncMutation.isPending;
 
-  const hasFilters = titleType !== undefined || situation !== undefined || bucket !== undefined;
+  const hasFilters =
+    titleType !== undefined || situation !== undefined || bucket !== undefined || hasNoContext;
+  const canViewTitleContext = hasPermission(currentUser, 'view_title_context');
+  const canManageTitleContext = hasPermission(currentUser, 'manage_title_context');
   // "Nunca sincronizou" é o estado VAZIO da tela (R3) — e é o único caso em que
   // os agregados NÃO aparecem: zeros ali seriam lidos como "não deve nada".
   const neverSynced = summary?.neverSynced === true;
@@ -239,6 +265,7 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
       [PARAM.type]: null,
       [PARAM.situation]: null,
       [PARAM.bucket]: null,
+      [PARAM.hasNoContext]: null,
       [PARAM.page]: null,
     });
   }
@@ -254,6 +281,8 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
     </Button>
   );
 
+  const showCarteiraHeaderActions = view === DEFAULT_VIEW;
+
   return (
     <section aria-labelledby="client-titles-heading" className="flex h-full flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -266,10 +295,10 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
             sem recorte de mês.
           </p>
         </div>
-        {showSyncAction && syncButton}
+        {showCarteiraHeaderActions && showSyncAction && syncButton}
         {/* Encerrado é só-leitura: a ação some COM o motivo, em vez de sumir em
             silêncio e deixar a pessoa procurando o botão (§4.12). */}
-        {canSync && isClosed && (
+        {showCarteiraHeaderActions && canSync && isClosed && (
           <p className="text-muted-foreground max-w-xs text-sm">
             Cliente encerrado: a sincronização está indisponível. A carteira já sincronizada
             continua disponível para leitura.
@@ -277,147 +306,188 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
         )}
       </div>
 
-      {/* Agregados ANTES da lista: o aging é a pergunta que a reunião faz, e
-          quem opera precisa dele antes de percorrer as linhas. */}
-      {summaryQuery.isLoading ? (
-        <ClientTitlesSummarySkeleton />
-      ) : summary !== undefined && !neverSynced ? (
-        <ClientTitlesSummaryBlock summary={summary} />
-      ) : null}
+      {/* Sprint 15 (FRONT 15.2): "Relatório de recebíveis" é aba DENTRO desta
+          tela, não rota-irmã — mesma permissão de leitura
+          (`view_client_receivables`) que já guarda a tela inteira, então não
+          precisa de gate próprio aqui. Estado na aba vive na URL (`?view=`),
+          como todo o resto desta tela. */}
+      <Tabs
+        value={view}
+        onValueChange={(value) => setMany({ [PARAM.view]: value === DEFAULT_VIEW ? null : value })}
+        className="flex flex-1 flex-col gap-4"
+      >
+        <TabsList>
+          <TabsTrigger value="carteira">Carteira</TabsTrigger>
+          <TabsTrigger value="relatorio">Relatório de recebíveis</TabsTrigger>
+        </TabsList>
 
-      {/* R3: "a última tentativa falhou" mostra os agregados da última ÍNTEGRA
+        <TabsContent value="relatorio" className="mt-0">
+          <ReceivablesReportScreen clientId={clientId} />
+        </TabsContent>
+
+        <TabsContent value="carteira" className="mt-0 flex flex-1 flex-col gap-4">
+          {/* Agregados ANTES da lista: o aging é a pergunta que a reunião faz, e
+          quem opera precisa dele antes de percorrer as linhas. */}
+          {summaryQuery.isLoading ? (
+            <ClientTitlesSummarySkeleton />
+          ) : summary !== undefined && !neverSynced ? (
+            <ClientTitlesSummaryBlock summary={summary} />
+          ) : null}
+
+          {/* R3: "a última tentativa falhou" mostra os agregados da última ÍNTEGRA
           com a data dela — sem isso, a pessoa não sabe se está olhando a
           posição de ontem ou a de três meses atrás. */}
-      {summary?.syncFailedAt != null && (
-        <div
-          role="status"
-          className="bg-warning-muted text-warning ring-warning/30 space-y-1 rounded-lg p-4 text-sm ring-1 ring-inset"
-        >
-          <p className="font-medium">A última tentativa de sincronização falhou</p>
-          <p>
-            A carteira abaixo é a da última sincronização bem-sucedida
-            {summary.syncedAt != null
-              ? `, de ${formatCreatedAt(summary.syncedAt)}.`
-              : ' — que ainda não aconteceu.'}
-          </p>
-        </div>
-      )}
+          {summary?.syncFailedAt != null && (
+            <div
+              role="status"
+              className="bg-warning-muted text-warning ring-warning/30 space-y-1 rounded-lg p-4 text-sm ring-1 ring-inset"
+            >
+              <p className="font-medium">A última tentativa de sincronização falhou</p>
+              <p>
+                A carteira abaixo é a da última sincronização bem-sucedida
+                {summary.syncedAt != null
+                  ? `, de ${formatCreatedAt(summary.syncedAt)}.`
+                  : ' — que ainda não aconteceu.'}
+              </p>
+            </div>
+          )}
 
-      {hasOriginBlock && originCode !== null && (
-        <OriginStateBlock code={originCode} clientId={clientId} />
-      )}
+          {hasOriginBlock && originCode !== null && (
+            <OriginStateBlock code={originCode} clientId={clientId} />
+          )}
 
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
-        <div className="space-y-1.5 lg:w-48">
-          <Label htmlFor="titles-type-filter">Tipo</Label>
-          <Select
-            value={titleType ?? ALL}
-            onValueChange={(value) =>
-              setMany({
-                [PARAM.type]: value === ALL ? null : value,
-                [PARAM.page]: null,
-              })
-            }
-          >
-            <SelectTrigger id="titles-type-filter" className="w-full">
-              <SelectValue placeholder="Todos os tipos" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>Todos os tipos</SelectItem>
-              {TYPE_FILTERS.map((value) => (
-                <SelectItem key={value} value={value}>
-                  {TYPE_FILTER_LABELS[value]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+            <div className="space-y-1.5 lg:w-48">
+              <Label htmlFor="titles-type-filter">Tipo</Label>
+              <Select
+                value={titleType ?? ALL}
+                onValueChange={(value) =>
+                  setMany({
+                    [PARAM.type]: value === ALL ? null : value,
+                    [PARAM.page]: null,
+                  })
+                }
+              >
+                <SelectTrigger id="titles-type-filter" className="w-full">
+                  <SelectValue placeholder="Todos os tipos" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL}>Todos os tipos</SelectItem>
+                  {TYPE_FILTERS.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {TYPE_FILTER_LABELS[value]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-        <div className="space-y-1.5 lg:w-48">
-          <Label htmlFor="titles-situation-filter">Situação</Label>
-          <Select
-            value={situation ?? ALL}
-            onValueChange={(value) =>
-              setMany({
-                [PARAM.situation]: value === ALL ? null : value,
-                [PARAM.page]: null,
-              })
-            }
-          >
-            <SelectTrigger id="titles-situation-filter" className="w-full">
-              <SelectValue placeholder="Todas as situações" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>Todas as situações</SelectItem>
-              {SITUATION_FILTERS.map((value) => (
-                <SelectItem key={value} value={value}>
-                  {SITUATION_FILTER_LABELS[value]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+            <div className="space-y-1.5 lg:w-48">
+              <Label htmlFor="titles-situation-filter">Situação</Label>
+              <Select
+                value={situation ?? ALL}
+                onValueChange={(value) =>
+                  setMany({
+                    [PARAM.situation]: value === ALL ? null : value,
+                    [PARAM.page]: null,
+                  })
+                }
+              >
+                <SelectTrigger id="titles-situation-filter" className="w-full">
+                  <SelectValue placeholder="Todas as situações" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL}>Todas as situações</SelectItem>
+                  {SITUATION_FILTERS.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {SITUATION_FILTER_LABELS[value]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-        <div className="space-y-1.5 lg:w-48">
-          <Label htmlFor="titles-bucket-filter">Balde de atraso</Label>
-          <Select
-            value={bucket ?? ALL}
-            onValueChange={(value) =>
-              setMany({
-                [PARAM.bucket]: value === ALL ? null : value,
-                [PARAM.page]: null,
-              })
-            }
-          >
-            <SelectTrigger id="titles-bucket-filter" className="w-full">
-              <SelectValue placeholder="Todos os baldes" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>Todos os baldes</SelectItem>
-              {BUCKET_FILTERS.map((value) => (
-                <SelectItem key={value} value={value}>
-                  {BUCKET_LABELS[value]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+            <div className="space-y-1.5 lg:w-48">
+              <Label htmlFor="titles-bucket-filter">Balde de atraso</Label>
+              <Select
+                value={bucket ?? ALL}
+                onValueChange={(value) =>
+                  setMany({
+                    [PARAM.bucket]: value === ALL ? null : value,
+                    [PARAM.page]: null,
+                  })
+                }
+              >
+                <SelectTrigger id="titles-bucket-filter" className="w-full">
+                  <SelectValue placeholder="Todos os baldes" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL}>Todos os baldes</SelectItem>
+                  {BUCKET_FILTERS.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {BUCKET_LABELS[value]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-        <div className="space-y-1.5 lg:w-56">
-          <Label htmlFor="titles-sort">Ordenar por</Label>
-          <Select
-            value={`${sortBy}:${sortOrder}`}
-            onValueChange={(value) => {
-              const option = SORT_OPTIONS.find((item) => item.value === value);
-              if (!option) return;
-              setMany({
-                [PARAM.sortBy]: option.sortBy,
-                [PARAM.sortOrder]: option.sortOrder,
-                [PARAM.page]: null,
-              });
-            }}
-          >
-            <SelectTrigger id="titles-sort" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {SORT_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+            <div className="space-y-1.5 lg:w-56">
+              <Label htmlFor="titles-sort">Ordenar por</Label>
+              <Select
+                value={`${sortBy}:${sortOrder}`}
+                onValueChange={(value) => {
+                  const option = SORT_OPTIONS.find((item) => item.value === value);
+                  if (!option) return;
+                  setMany({
+                    [PARAM.sortBy]: option.sortBy,
+                    [PARAM.sortOrder]: option.sortOrder,
+                    [PARAM.page]: null,
+                  });
+                }}
+              >
+                <SelectTrigger id="titles-sort" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SORT_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-        {hasFilters && (
-          <Button type="button" variant="outline" onClick={clearFilters}>
-            Limpar filtros
-          </Button>
-        )}
-      </div>
+            {/* Sprint 15 (FRONT 15.1): a fila de trabalho de quem registra contexto —
+            aplicado NO SERVIDOR (`hasNoContext=true`), nunca filtro client-side. */}
+            {canViewTitleContext && (
+              <div className="flex items-center gap-2 lg:pb-2">
+                <Switch
+                  id="titles-has-no-context-filter"
+                  checked={hasNoContext}
+                  onCheckedChange={(checked) =>
+                    setMany({
+                      [PARAM.hasNoContext]: checked ? 'true' : null,
+                      [PARAM.page]: null,
+                    })
+                  }
+                  aria-label="Mostrar só vencidos sem contexto registrado"
+                />
+                <Label htmlFor="titles-has-no-context-filter" className="cursor-pointer text-sm">
+                  Vencidos sem contexto
+                </Label>
+              </div>
+            )}
 
-      {/* `min-h-0 flex-1` sozinho COLAPSAVA a tabela a 0px abaixo de `lg`: a
+            {hasFilters && (
+              <Button type="button" variant="outline" onClick={clearFilters}>
+                Limpar filtros
+              </Button>
+            )}
+          </div>
+
+          {/* `min-h-0 flex-1` sozinho COLAPSAVA a tabela a 0px abaixo de `lg`: a
           seção é `h-full`, e com os quatro filtros empilhados (a barra só vira
           linha em `lg`) o que está acima já consumia o viewport — o `flex-1`
           recebia 0 e o `min-h-0` autorizava encolher. Não sobrava cabeçalho,
@@ -429,83 +499,121 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
           ⚠️ `toBeVisible()` do Playwright NÃO pega esse defeito: ele não enxerga
           clipping por ancestral com `overflow`. A guarda é medir `boundingBox()`
           da região rolável (e2e `a11y-mocked.spec.ts`). */}
-      <div className="min-h-[24rem] flex-1 lg:min-h-0" aria-busy={listQuery.isFetching}>
-        {listQuery.isError ? (
-          <ErrorState
-            message={
-              listQuery.error instanceof ApiError
-                ? listQuery.error.userMessage
-                : 'Não foi possível carregar a carteira.'
-            }
-            onRetry={() => void listQuery.refetch()}
-          />
-        ) : (
-          // Sem `overflow-x-auto` por fora: o `<Table>` já embrulha num
-          // `ScrollRegion` focável, e um segundo scroller aninhado espreme as
-          // colunas em 390px em vez de rolar (ADR-007-FE). O rótulo da região é
-          // DIFERENTE do `<h2>` da seção de propósito: dois nomes iguais
-          // aninhados quebram o `getByRole` no strict mode.
-          <TableCard>
-            <Table fill scrollRegionLabel="Títulos da carteira (rolável)">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="whitespace-nowrap">Vencimento</TableHead>
-                  <TableHead>Tipo</TableHead>
-                  <TableHead>Devedor / credor</TableHead>
-                  <TableHead className="whitespace-nowrap">Valor</TableHead>
-                  <TableHead>Situação</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {listQuery.isLoading ? (
-                  <TableSkeletonRows />
-                ) : (
-                  rows.map((title) => <TitleRow key={title.externalId} title={title} />)
-                )}
-              </TableBody>
-            </Table>
-            {/* Fora do `<Table>` de propósito: a tabela rola na horizontal em 390px e
+          <div className="min-h-[24rem] flex-1 lg:min-h-0" aria-busy={listQuery.isFetching}>
+            {listQuery.isError ? (
+              <ErrorState
+                message={
+                  listQuery.error instanceof ApiError
+                    ? listQuery.error.userMessage
+                    : 'Não foi possível carregar a carteira.'
+                }
+                onRetry={() => void listQuery.refetch()}
+              />
+            ) : (
+              // Sem `overflow-x-auto` por fora: o `<Table>` já embrulha num
+              // `ScrollRegion` focável, e um segundo scroller aninhado espreme as
+              // colunas em 390px em vez de rolar (ADR-007-FE). O rótulo da região é
+              // DIFERENTE do `<h2>` da seção de propósito: dois nomes iguais
+              // aninhados quebram o `getByRole` no strict mode.
+              <TableCard>
+                <Table fill scrollRegionLabel="Títulos da carteira (rolável)">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="whitespace-nowrap">Vencimento</TableHead>
+                      <TableHead>Tipo</TableHead>
+                      <TableHead>Devedor / credor</TableHead>
+                      <TableHead className="whitespace-nowrap">Valor</TableHead>
+                      <TableHead>Situação</TableHead>
+                      {canViewTitleContext && (
+                        <TableHead>
+                          <span className="sr-only">Contexto</span>
+                        </TableHead>
+                      )}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {listQuery.isLoading ? (
+                      <TableSkeletonRows
+                        columnCount={canViewTitleContext ? COLUMN_COUNT : COLUMN_COUNT - 1}
+                      />
+                    ) : (
+                      rows.map((title) => (
+                        <TitleRow
+                          key={title.externalId}
+                          title={title}
+                          canViewTitleContext={canViewTitleContext}
+                          onOpenContext={() => setContextTitle(title)}
+                        />
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+                {/* Fora do `<Table>` de propósito: a tabela rola na horizontal em 390px e
                 uma célula `colSpan` cortaria o texto à direita (ver `TableEmpty`). */}
-            {!listQuery.isLoading && rows.length === 0 && (
-              <TableEmpty>
-                {neverSynced ? (
-                  <NeverSyncedState
-                    action={showSyncAction ? syncButton : null}
-                    canSync={canSync}
-                    isClosed={isClosed}
-                  />
-                ) : hasFilters ? (
-                  <FilteredEmptyState onClear={clearFilters} />
-                ) : (
-                  <p className="text-muted-foreground text-center text-sm">
-                    Nenhum título nesta carteira.
-                  </p>
+                {!listQuery.isLoading && rows.length === 0 && (
+                  <TableEmpty>
+                    {neverSynced ? (
+                      <NeverSyncedState
+                        action={showSyncAction ? syncButton : null}
+                        canSync={canSync}
+                        isClosed={isClosed}
+                      />
+                    ) : hasFilters ? (
+                      <FilteredEmptyState onClear={clearFilters} />
+                    ) : (
+                      <p className="text-muted-foreground text-center text-sm">
+                        Nenhum título nesta carteira.
+                      </p>
+                    )}
+                  </TableEmpty>
                 )}
-              </TableEmpty>
+              </TableCard>
             )}
-          </TableCard>
-        )}
-      </div>
+          </div>
 
-      {!listQuery.isError && (
-        <PaginationBar
-          page={pagination?.page ?? page}
-          pageSize={pagination?.pageSize ?? pageSize}
-          total={pagination?.total ?? 0}
-          totalPages={pagination?.totalPages ?? 0}
-          onPageChange={(next) => setMany({ [PARAM.page]: String(next) })}
-          onPageSizeChange={(next) =>
-            setMany({ [PARAM.pageSize]: String(next), [PARAM.page]: null })
-          }
-          disabled={listQuery.isLoading}
-          itemLabel="títulos"
-        />
-      )}
+          {!listQuery.isError && (
+            <PaginationBar
+              page={pagination?.page ?? page}
+              pageSize={pagination?.pageSize ?? pageSize}
+              total={pagination?.total ?? 0}
+              totalPages={pagination?.totalPages ?? 0}
+              onPageChange={(next) => setMany({ [PARAM.page]: String(next) })}
+              onPageSizeChange={(next) =>
+                setMany({ [PARAM.pageSize]: String(next), [PARAM.page]: null })
+              }
+              disabled={listQuery.isLoading}
+              itemLabel="títulos"
+            />
+          )}
+        </TabsContent>
+      </Tabs>
+
+      {/* Sprint 15 (FRONT 15.1): mesma gaveta serve o REGISTRO (para quem tem
+          `manage_title_context`) e o HISTÓRICO em leitura (para quem só tem
+          `view_title_context`) — a permissão que rege as duas é a mesma que
+          esconde/mostra a coluna de ação na tabela, nunca um `role === `. */}
+      <TitleContextSheet
+        open={contextTitle !== null}
+        onOpenChange={(next) => {
+          if (!next) setContextTitle(null);
+        }}
+        clientId={clientId}
+        title={contextTitle}
+        canManage={canManageTitleContext}
+      />
     </section>
   );
 }
 
-function TitleRow({ title }: { title: ClientTitle }) {
+function TitleRow({
+  title,
+  canViewTitleContext,
+  onOpenContext,
+}: {
+  title: ClientTitle;
+  canViewTitleContext: boolean;
+  onOpenContext: () => void;
+}) {
   return (
     <TableRow>
       <TableCell className="whitespace-nowrap font-medium tabular-nums">
@@ -534,6 +642,19 @@ function TitleRow({ title }: { title: ClientTitle }) {
           <TitleBucketBadge bucket={title.bucket ?? null} />
         </div>
       </TableCell>
+      {canViewTitleContext && (
+        <TableCell>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label={`Contexto do título ${title.externalId}`}
+            onClick={onOpenContext}
+          >
+            <MessageSquareText className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        </TableCell>
+      )}
     </TableRow>
   );
 }
@@ -580,12 +701,12 @@ function SupplierCell({ title }: { title: ClientTitle }) {
   );
 }
 
-function TableSkeletonRows() {
+function TableSkeletonRows({ columnCount }: { columnCount: number }) {
   return (
     <>
       {Array.from({ length: 5 }).map((_, index) => (
         <TableRow key={index} aria-hidden="true">
-          {Array.from({ length: COLUMN_COUNT }).map((__, cell) => (
+          {Array.from({ length: columnCount }).map((__, cell) => (
             <TableCell key={cell}>
               <div className="bg-muted h-4 w-full animate-pulse rounded" />
             </TableCell>
