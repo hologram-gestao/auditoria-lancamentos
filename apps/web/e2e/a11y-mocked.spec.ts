@@ -694,6 +694,135 @@ const MANY_CHART_ENTRIES = Array.from({ length: 20 }, (_, i) =>
   }),
 );
 
+/**
+ * Sprint 11 / R3 · R4 — carteira de títulos em aberto.
+ *
+ * Os números são os da base consolidada de 17/06/2026 que motivou a sprint
+ * (`inadimplencia_ar = 107.413,10`, aging 90+ = `82.865,50`, 148 títulos) — e
+ * é o que prova, em browser, que os agregados vêm do SERVIDOR: a página mostra
+ * 2 linhas e o bloco continua dizendo 107.413,10.
+ */
+function agingTotals(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    totalEmAberto: '107413.10',
+    totalAVencer: '10000.00',
+    totalVencido: '97413.10',
+    bucket1a30: '8000.00',
+    bucket31a60: '3547.60',
+    bucket61a90: '3000.00',
+    bucket90Mais: '82865.50',
+    qtdEmAberto: 148,
+    qtdAVencer: 12,
+    qtdVencido: 136,
+    ...over,
+  };
+}
+
+/** Com `true`, a carteira NUNCA foi sincronizada (estado vazio, não zeros). */
+let titlesNeverSynced = false;
+/** Com `true`, a última tentativa falhou e a última BOA é de quatro dias antes. */
+let titlesSyncFailed = false;
+
+function titlesSummaryDoCenario(): Record<string, unknown> {
+  const base = {
+    aPagar: agingTotals({ totalEmAberto: '20000.00', qtdEmAberto: 30 }),
+    aReceber: agingTotals(),
+    neverSynced: false,
+    syncedAt: '2026-09-24T09:00:00Z',
+    syncFailedAt: null as string | null,
+    referenceDate: '2026-09-24',
+  };
+  if (titlesNeverSynced) {
+    return {
+      ...base,
+      aPagar: agingTotals({
+        totalEmAberto: '0.00',
+        totalAVencer: '0.00',
+        totalVencido: '0.00',
+        bucket1a30: '0.00',
+        bucket31a60: '0.00',
+        bucket61a90: '0.00',
+        bucket90Mais: '0.00',
+        qtdEmAberto: 0,
+        qtdAVencer: 0,
+        qtdVencido: 0,
+      }),
+      aReceber: agingTotals({
+        totalEmAberto: '0.00',
+        totalAVencer: '0.00',
+        totalVencido: '0.00',
+        bucket1a30: '0.00',
+        bucket31a60: '0.00',
+        bucket61a90: '0.00',
+        bucket90Mais: '0.00',
+        qtdEmAberto: 0,
+        qtdAVencer: 0,
+        qtdVencido: 0,
+      }),
+      neverSynced: true,
+      syncedAt: null,
+    };
+  }
+  if (titlesSyncFailed) {
+    return { ...base, syncedAt: '2026-09-20T12:30:00Z', syncFailedAt: '2026-09-24T09:00:00Z' };
+  }
+  return base;
+}
+
+function clientTitle(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    externalId: '4010',
+    titleType: 'a_receber',
+    dueDate: '2026-06-10',
+    amount: '1500.00',
+    status: 'em_aberto',
+    overdueDays: 106,
+    bucket: '90_mais',
+    categoryCode: '1.01.01',
+    supplierCode: 2624256082,
+    supplierName: 'Padaria Aurora Ltda',
+    supplierNameResolved: true,
+    omieContaId: 777,
+    documentNumber: 'NF 1234',
+    lastSyncedAt: '2026-09-24T09:00:00Z',
+    ...over,
+  };
+}
+
+/**
+ * Duas linhas: uma com o nome resolvido e uma em que a origem NÃO respondeu —
+ * o caso que a tela precisa mostrar como código marcado, nunca célula vazia.
+ */
+const CLIENT_TITLES = [
+  clientTitle(),
+  clientTitle({
+    externalId: '4011',
+    titleType: 'a_pagar',
+    dueDate: '2026-10-05',
+    amount: '250.90',
+    overdueDays: 0,
+    bucket: 'a_vencer',
+    supplierName: null,
+    supplierNameResolved: false,
+    documentNumber: null,
+  }),
+];
+
+/** 20 linhas: transborda com folga em 1440×900 e em 390×844. */
+const MANY_CLIENT_TITLES = Array.from({ length: 20 }, (_, i) =>
+  clientTitle({
+    externalId: `50${String(i).padStart(2, '0')}`,
+    titleType: i % 2 === 0 ? 'a_receber' : 'a_pagar',
+    dueDate: `2026-0${(i % 9) + 1}-15`,
+    amount: `${1000 + i * 137}.50`,
+    overdueDays: i * 9,
+    bucket: (['a_vencer', '1_30', '31_60', '61_90', '90_mais'] as const)[i % 5],
+    supplierCode: 2624256000 + i,
+    supplierName: i % 4 === 0 ? null : `Fornecedor ${String(i).padStart(2, '0')} Ltda`,
+    supplierNameResolved: i % 4 !== 0,
+  }),
+);
+
 const MANY_GLOSSARY_ENTRIES = Array.from({ length: 20 }, (_, i) => ({
   id: `ffffffff-ffff-4fff-8fff-f00000000f${String(i).padStart(2, '0')}`,
   kind: (['categoria', 'regra', 'fornecedor'] as const)[i % 3],
@@ -1046,6 +1175,41 @@ async function fulfillApi(route: Route): Promise<void> {
           pageSize: 20,
           total: entries.length,
           totalPages: 1,
+        },
+      }),
+    });
+  }
+  // Carteira de títulos (S11/R3·R4). Mesma ordem do FastAPI: as rotas LITERAIS
+  // vêm antes da lista, senão `/summary` e `/sync` casariam com um `startsWith`
+  // da lista e a tela receberia um array onde espera os agregados.
+  if (path === `/api/v1/clients/${CLIENT_ID}/titles/summary`) {
+    return json(titlesSummaryDoCenario());
+  }
+  if (path === `/api/v1/clients/${CLIENT_ID}/titles/sync`) {
+    titlesNeverSynced = false;
+    return json({
+      titulosPagar: 30,
+      titulosReceber: 148,
+      vencidos: 136,
+      maisAntigoDias: 214,
+      summary: titlesSummaryDoCenario(),
+    });
+  }
+  if (path === `/api/v1/clients/${CLIENT_ID}/titles`) {
+    const titles = titlesNeverSynced ? [] : tableListsOverflow ? MANY_CLIENT_TITLES : CLIENT_TITLES;
+    // `{ data, pagination }` é o par REAL desta rota — por isso o `fulfill` cru
+    // e não o `json()`, que envelopa em `{ data }` e produziria
+    // `{ data: { data, pagination } }`.
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: titles,
+        pagination: {
+          page: 1,
+          pageSize: 20,
+          total: titles.length,
+          totalPages: titles.length === 0 ? 0 : 1,
         },
       }),
     });
@@ -1557,6 +1721,9 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   originState = 'ativa';
   // S10: a última sincronização do plano de contas deu certo, por padrão.
   chartSyncFailed = false;
+  // S11: a carteira está sincronizada e a última tentativa deu certo, por padrão.
+  titlesNeverSynced = false;
+  titlesSyncFailed = false;
   await page.route('**/api/v1/**', fulfillApi);
   // O `src/middleware.ts` decide navegação só pela PRESENÇA do cookie
   // `access_token` (a validação real é do backend). Um valor qualquer basta
@@ -1830,6 +1997,16 @@ const TELAS_COM_TABELA = [
     // O rótulo da região é DIFERENTE do `<h2>` da seção de propósito: dois
     // nomes iguais aninhados quebram o `getByRole` no strict mode.
     regiao: 'Categorias do plano de contas (rolável)',
+    usuario: (): Record<string, unknown> => CLIENT_MANAGER_USER,
+  },
+  {
+    key: 'carteira',
+    titulo: 'Carteira',
+    rota: `/clientes/${CLIENT_ID}/carteira`,
+    // Mesmo cuidado do plano de contas: o rótulo da região é DIFERENTE do
+    // `<h2>` da seção ("Carteira"), senão o `getByRole` casa os dois por
+    // substring e quebra no strict mode.
+    regiao: 'Títulos da carteira (rolável)',
     usuario: (): Record<string, unknown> => CLIENT_MANAGER_USER,
   },
 ] as const;
@@ -2720,6 +2897,165 @@ for (const vp of VIEWPORTS) {
       await aguardarToastEstavel(page);
       await shot(page, `plano-de-contas-sincronizado-${slugP}`);
       await analyze(page, `plano de contas — depois de sincronizar (${vp.label})`);
+    });
+  });
+}
+
+/**
+ * Sprint 11 / R3 · R4 · R5 (FRONT 11.7) — tela "Carteira" do cliente.
+ *
+ * O que só um browser mede aqui: o CSS computado das badges de situação e de
+ * balde (tokens `info`/`success`/`warning`/`destructive`), os dois cartões de
+ * agregados montados de verdade — e, principalmente, o CAMINHO REAL do
+ * `apiGet`, que o vitest não percorre (lá o mock é do HOOK). É este gate que
+ * pegaria um envelope `{data}` a mais no summary, que derrubaria a página
+ * inteira com "Application error" sem o `tsc` reclamar.
+ *
+ * O gating é o do plano de contas: a leitura tem permissão própria
+ * (`view_client_receivables`, ✅ nos cinco papéis) e quem some para o operador
+ * é a ação de SINCRONIZAR. Um `AccessDenied` para ele seria defeito, não
+ * segurança.
+ */
+for (const vp of VIEWPORTS) {
+  const slugC = vp.label.replace(/\s+/g, '-');
+  test.describe(`Carteira do cliente — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('agregados com os quatro baldes POR TIPO, vindos do servidor (R3)', async ({ page }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/carteira`);
+
+      await expect(page.getByRole('heading', { name: 'Carteira', level: 2 })).toBeVisible();
+
+      // Os dois tipos são blocos separados: somá-los num total único daria o
+      // número que não serve para decisão nenhuma.
+      const aReceber = page.getByRole('region', { name: 'A receber' });
+      await expect(aReceber).toBeVisible();
+      await expect(page.getByRole('region', { name: 'A pagar' })).toBeVisible();
+
+      // Os quatro baldes, cada um no seu PAR — e todos vindos do `/summary`: a
+      // página lista 2 linhas e o bloco continua dizendo 107.413,10.
+      for (const rotulo of ['1 a 30 dias', '31 a 60 dias', '61 a 90 dias', '90+ dias']) {
+        await expect(aReceber.locator('dt', { hasText: new RegExp(`^${rotulo}$`) })).toHaveCount(1);
+      }
+      // `formatBRL` usa espaço NÃO-quebrável: locator com espaço normal nunca casa.
+      await expect(
+        aReceber
+          .locator('dt', { hasText: /^90\+ dias$/ })
+          .locator('xpath=following-sibling::dd[1]'),
+      ).toContainText(/R\$\s*82\.865,50/);
+      await expect(page.getByRole('row')).toHaveCount(3); // cabeçalho + 2 títulos
+
+      // Se a página tivesse caído no error boundary, o axe mediria a tela de erro.
+      await expect(page.locator('#__next_error__')).toHaveCount(0);
+      await shot(page, `carteira-agregados-${slugC}`);
+      await analyze(page, `carteira — agregados e aging (${vp.label})`);
+    });
+
+    test('nome não resolvido mostra o CÓDIGO marcado, nunca vazio (R4)', async ({ page }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/carteira`);
+
+      await expect(page.getByRole('cell', { name: /Padaria Aurora Ltda/ })).toBeVisible();
+      // A dica é acessível (`role="img"` + `aria-label`), nunca `title` nativo.
+      await expect(
+        page.getByRole('img', { name: /Código 2624256082 — nome não resolvido/ }),
+      ).toBeVisible();
+      await expect(page.getByText('Nome não resolvido')).toBeVisible();
+      await shot(page, `carteira-nome-nao-resolvido-${slugC}`);
+    });
+
+    test('filtros e ordenação vão para o SERVIDOR, pela URL (R4)', async ({ page }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/carteira`);
+
+      // O recorte vive na URL: a view é linkável e sobrevive ao F5. O `Select`
+      // do Radix não aceita `modal={false}`, então ele é exercitado aberto e o
+      // `analyze` roda com ele FECHADO (86e34jd8m).
+      await page.getByLabel('Tipo').click();
+      await page.getByRole('option', { name: 'A pagar' }).click();
+      await expect(page).toHaveURL(/type=a_pagar/);
+
+      await page.getByLabel('Ordenar por').click();
+      await page.getByRole('option', { name: 'Valor (maior)' }).click();
+      await expect(page).toHaveURL(/sortBy=amount/);
+      await expect(page).toHaveURL(/sortOrder=desc/);
+
+      await analyze(page, `carteira — filtros e ordenação (${vp.label})`);
+    });
+
+    test('nunca sincronizada: ação de sincronizar, e NENHUM zero (R3)', async ({ page }) => {
+      titlesNeverSynced = true;
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/carteira`);
+
+      await expect(
+        page.getByText('A carteira deste cliente ainda não foi sincronizada'),
+      ).toBeVisible();
+      // Zeros ali seriam lidos como "este cliente não deve nada": o bloco de
+      // agregados não pode existir neste estado.
+      await expect(page.getByRole('region', { name: 'A receber' })).toHaveCount(0);
+      await expect(page.getByText(/R\$\s*0,00/)).toHaveCount(0);
+      await shot(page, `carteira-nunca-sincronizada-${slugC}`);
+      await analyze(page, `carteira — nunca sincronizada (${vp.label})`);
+    });
+
+    test('última tentativa falhou: agregados anteriores + data + aviso (R3)', async ({ page }) => {
+      titlesSyncFailed = true;
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/carteira`);
+
+      await expect(page.getByText('A última tentativa de sincronização falhou')).toBeVisible();
+      // Sem a data, quem lê não sabe se o dado abaixo é de ontem ou de meses atrás.
+      await expect(
+        page.getByText(/última sincronização bem-sucedida, de 20\/09\/2026/),
+      ).toBeVisible();
+      // E os agregados da última ÍNTEGRA continuam na tela.
+      await expect(page.getByRole('region', { name: 'A receber' })).toBeVisible();
+      await shot(page, `carteira-falha-${slugC}`);
+      await analyze(page, `carteira — falha na última sincronização (${vp.label})`);
+    });
+
+    test('operador do cliente LÊ e NÃO vê a ação de sincronizar (R5/§4.9)', async ({ page }) => {
+      sessionUser = CLIENT_OPERATOR_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/carteira`);
+
+      // A rota NÃO é negada para ele: ler é ✅ nos cinco papéis.
+      await expect(page.getByRole('heading', { name: 'Carteira', level: 2 })).toBeVisible();
+      await expect(page.getByRole('cell', { name: /Padaria Aurora Ltda/ })).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: 'Você não tem acesso a esta página' }),
+      ).toHaveCount(0);
+
+      // Ação OCULTA, não desabilitada — botão desabilitado ainda anuncia
+      // "existe algo aqui que você não pode fazer".
+      await expect(page.getByRole('button', { name: /Sincronizar/ })).toHaveCount(0);
+
+      await shot(page, `carteira-operador-${slugC}`);
+      await analyze(page, `carteira — operador somente leitura (${vp.label})`);
+    });
+
+    test('gerente do cliente sincroniza e a tela confirma por toast (R5)', async ({ page }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/carteira`);
+
+      const botao = page.getByRole('button', { name: 'Sincronizar agora' });
+      await expect(botao).toBeVisible();
+      // A ação primária não pode nascer cortada na borda em 390px — o gate de
+      // a11y mede semântica, não transbordo.
+      const caixa = await botao.boundingBox();
+      const largura = page.viewportSize()?.width ?? 0;
+      expect(caixa, 'o botão de sincronizar precisa ter caixa').not.toBeNull();
+      expect(
+        (caixa?.x ?? 0) + (caixa?.width ?? 0),
+        `"Sincronizar agora" cortado na borda (${vp.label})`,
+      ).toBeLessThanOrEqual(largura);
+
+      await botao.click();
+      await expect(page.getByText('Carteira sincronizada.')).toBeVisible();
+      await aguardarToastEstavel(page);
+      await shot(page, `carteira-sincronizada-${slugC}`);
+      await analyze(page, `carteira — depois de sincronizar (${vp.label})`);
     });
   });
 }

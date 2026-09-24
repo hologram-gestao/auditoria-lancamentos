@@ -317,6 +317,54 @@ export type SyncChartOfAccountsQuery = NonNullable<
 >;
 
 // ---------------------------------------------------------------------------
+// Carteira de títulos em aberto (Sprint 11 / R2 · R3 · R4 — BACK 11.5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Um título da carteira, como a API o devolve.
+ *
+ * ⚠️ **camelCase**, como o plano de contas (`titleType`, `dueDate`,
+ * `supplierNameResolved`…): o backend declara `alias=` campo a campo. E
+ * `amount` é **string** — `Decimal` serializado pelo Pydantic v2 —, então
+ * `formatBRL` recebe a string crua e nenhuma conta acontece no navegador.
+ *
+ * `supplierName` é resolvido em RUNTIME (nunca persiste, §4.5) e vem `null`
+ * quando a origem não respondeu. Quem diz o que esse `null` significa é
+ * `supplierNameResolved`: `false` = mostre o código marcado como não resolvido;
+ * `true` com `supplierCode` nulo = o título simplesmente não tem devedor.
+ */
+export type ClientTitle = Schemas['ClientTitleResponse'];
+/** `{ data: [...], pagination }` — DUAS chaves, então o `apiGet` NÃO desembrulha. */
+export type ClientTitlesListResponse = Schemas['ClientTitlesListResponse'];
+/**
+ * Agregados e aging da carteira INTEIRA, calculados no servidor. `neverSynced`
+ * é campo explícito de propósito: "não deve nada" e "ninguém nunca consultou a
+ * origem" são estados diferentes, e derivar isso de `syncedAt == null` em cada
+ * tela é como a regra se perde.
+ */
+export type TitlesSummary = Schemas['TitlesSummaryResponse'];
+/** `{ data: {...} }` — chave ÚNICA: o `apiGet` já entrega o miolo. */
+export type TitlesSummaryEnvelope = Schemas['TitlesSummaryEnvelope'];
+/** Os totais de UM tipo (a pagar OU a receber), com os quatro baldes nomeados. */
+export type AgingTotals = Schemas['AgingTotalsResponse'];
+/** Contagens do ciclo de sincronização + o `summary` resultante (evita 2º request). */
+export type TitlesSyncResult = Schemas['TitlesSyncResponse'];
+/** `a_pagar` | `a_receber` — enum FECHADO (a UI ramifica nos dois). */
+export type TitleType = Schemas['TitleType'];
+/** `em_aberto` | `liquidado` | `ausente_na_origem` — os dois últimos são SAÍDAS. */
+export type TitleStatus = Schemas['TitleStatus'];
+/** `a_vencer` | `1_30` | `31_60` | `61_90` | `90_mais` — baldes do aging. */
+export type AgingBucket = Schemas['AgingBucket'];
+/**
+ * Query real de `GET /clients/{id}/titles`: `page`, `pageSize`, `type`,
+ * `situation`, `bucket`, `sortBy` e `sortOrder`. Os filtros são `Literal` no
+ * servidor — valor fora do vocabulário é **400**, não lista vazia.
+ */
+export type ListClientTitlesQuery = NonNullable<
+  paths['/api/v1/clients/{client_id}/titles']['get']['parameters']['query']
+>;
+
+// ---------------------------------------------------------------------------
 // Lançamento no Omie (Sprint 7 / R1 · R2 · R5 — BACK 07.3 · 07.4)
 // ---------------------------------------------------------------------------
 

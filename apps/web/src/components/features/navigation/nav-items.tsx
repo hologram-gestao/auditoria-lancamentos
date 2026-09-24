@@ -20,6 +20,7 @@ import {
   Tags,
   UserCog,
   Users as UsersIcon,
+  Wallet,
 } from 'lucide-react';
 
 import { hasPermission, homePathFor, isClientScoped, type Permission } from '@/lib/authz';
@@ -157,6 +158,7 @@ export function clientNavItems(
   const usersHref = `${base}/usuarios`;
   const glossaryHref = `${base}/glossario`;
   const chartOfAccountsHref = `${base}/plano-de-contas`;
+  const titlesHref = `${base}/carteira`;
   // "Conciliações" continua ativo dentro do detalhe de uma conciliação — é a
   // mesma área de navegação, só que um nível abaixo (regra herdada do
   // ClientShell, que era o dono desta árvore até a 86e2n39h7).
@@ -169,8 +171,9 @@ export function clientNavItems(
   const isUsers = pathname.startsWith(usersHref);
   const isGlossary = pathname.startsWith(glossaryHref);
   const isChartOfAccounts = pathname.startsWith(chartOfAccountsHref);
+  const isTitles = pathname.startsWith(titlesHref);
   const isReconciliations =
-    !isAccounts && !isDashboard && !isUsers && !isGlossary && !isChartOfAccounts;
+    !isAccounts && !isDashboard && !isUsers && !isGlossary && !isChartOfAccounts && !isTitles;
 
   const items: NavItem[] = [
     {
@@ -212,6 +215,19 @@ export function clientNavItems(
       label: 'Plano de Contas',
       icon: <ListTree className="h-4 w-4" aria-hidden="true" />,
       active: isChartOfAccounts,
+    });
+  }
+  // S11 (R5): "Carteira" pela MESMA regra do Plano de Contas. A célula de LER é
+  // ✅ nos cinco papéis hoje, então na prática todo mundo com acesso ao cliente
+  // vê o item — o que o gating garante é que, no dia em que a célula fechar
+  // para algum papel, a rota e o item sumam JUNTOS. Quem pede permissão
+  // separada é SINCRONIZAR, dentro da tela.
+  if (hasPermission(user, 'view_client_receivables')) {
+    items.push({
+      href: titlesHref,
+      label: 'Carteira',
+      icon: <Wallet className="h-4 w-4" aria-hidden="true" />,
+      active: isTitles,
     });
   }
   // Matriz: "Usuários" é de quem gere as pessoas DO tenant — gerente do
