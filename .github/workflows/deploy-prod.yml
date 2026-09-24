@@ -18,7 +18,10 @@ name: Deploy to Prod
 #   3. Rodar `bash scripts/setup-gcp.sh prod` (provisiona a KEK do KMS -prod e
 #      os secrets de alerta -prod, isolados dos de dev) ANTES do primeiro deploy
 #      — senão o wrap/unwrap 500a e o alerting não sobe. Adicionar o VALOR real
-#      do canal de plantão de PROD (pelo menos um: webhook ou e-mail).
+#      do canal de plantão de PROD (pelo menos um: webhook ou e-mail). O mesmo
+#      script provisiona o Cloud Run Job + Cloud Scheduler da carteira
+#      (auditoria-api-sync-titles-prod) clonando a config do job de
+#      migração/cleanup de PROD — logo, rode-o DEPOIS de esses jobs existirem.
 #   4. Remover `if: false` dos jobs; injetar KEK_KMS_KEY_NAME + montar
 #      ALERT_WEBHOOK_URL/ALERT_EMAIL_TO (secrets abaixo) no serviço da API E nos
 #      jobs (migração/cleanup), paridade — igual ao deploy-dev.yml.
@@ -68,6 +71,9 @@ env:
   WEB_SERVICE: auditoria-web-prod
   MIGRATE_JOB: auditoria-api-migrate-prod
   CLEANUP_JOB: auditoria-api-cleanup-stuck-prod
+  # Carteira de títulos (Sprint 11, R5) — job diário isolado do de dev pelo
+  # sufixo de ambiente. Provisionado por `bash scripts/setup-gcp.sh prod`.
+  SYNC_TITLES_JOB: auditoria-api-sync-titles-prod
   # KEK do KMS -prod (isolada da de dev). Provisionada por scripts/setup-gcp.sh prod.
   KEK_KMS_KEY_NAME: projects/liberdade-assessoria/locations/southamerica-east1/keyRings/auditoria-prod/cryptoKeys/omie-encryption-kek
   # Alerting -prod (isolado do de dev). Secrets provisionados por setup-gcp.sh prod;
@@ -100,3 +106,8 @@ jobs:
   #     auditoria-api-prod: --no-cpu-throttling + --min-instances=1.
   #   - re-resolve digest do cleanup Job prod (espelho do dev) dentro do
   #     migrate, igual fazemos pro CLEANUP_JOB em dev.
+  #   - re-resolve digest do SYNC_TITLES_JOB prod (carteira diária, Sprint 11
+  #     R5), com a MESMA paridade de env/secrets do cleanup e o mesmo guard
+  #     best-effort (`describe` antes do `update`) — provisionamento nunca
+  #     derruba o deploy. O agendamento (Cloud Run Job + Cloud Scheduler) vem do
+  #     `setup-gcp.sh prod`, que roda ANTES do 1º deploy de prod.

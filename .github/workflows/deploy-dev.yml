@@ -63,6 +63,12 @@ env:
   WEB_SERVICE: auditoria-web-dev
   MIGRATE_JOB: auditoria-api-migrate-dev
   CLEANUP_JOB: auditoria-api-cleanup-stuck-dev
+  # Sincronização diária da CARTEIRA DE TÍTULOS (Sprint 11, R5). Não há scheduler
+  # dentro da aplicação (a FASE 0 removeu Redis/ARQ), então o molde é o cleanup:
+  # Cloud Run Job + Cloud Scheduler, provisionados 1× por ambiente em
+  # scripts/setup-gcp.sh <env> e re-resolvidos a cada deploy (abaixo).
+  # O comando de aplicação é `python -m scripts.sync_client_titles` (BACK 11.2).
+  SYNC_TITLES_JOB: auditoria-api-sync-titles-dev
   # Nome canônico do recurso da KEK (Cloud KMS) — provisionado 1× por ambiente
   # via scripts/setup-gcp.sh dev. NÃO é segredo (é um resource path), então vai
   # como env var comum. O backend usa este nome pra wrap/unwrap das DEKs por
@@ -188,6 +194,34 @@ jobs:
             --update-secrets=ALERT_WEBHOOK_URL=${{ env.ALERT_WEBHOOK_SECRET }}:latest,ALERT_EMAIL_TO=${{ env.ALERT_EMAIL_SECRET }}:latest,ALERT_WEBHOOK_URL_SYNTHETIC=${{ env.ALERT_WEBHOOK_SYNTHETIC_SECRET }}:latest \
             --region=${{ env.REGION }} \
             --project=${{ env.PROJECT_ID }}
+
+      - name: Re-resolve :dev digest in sync-titles Job
+        # Mesmo problema do migrate/cleanup, com uma janela MAIOR: o job da
+        # carteira (Sprint 11, R5) roda uma vez por DIA pelo Cloud Scheduler e
+        # guarda o digest no manifest. Sem este update, o cron roda imagem velha
+        # pra sempre depois que :dev avança — a carteira sincronizaria com o
+        # código de ontem e o aging mentiria sem ninguém ver.
+        #
+        # Paridade de secrets serviço × job (a MESMA do cleanup): o job sobe o
+        # app inteiro (config + alerting fail-closed no lifespan) e precisa da
+        # KEK pro unwrap das DEKs por cliente. Sem isso, falha no boot.
+        #
+        # ⚠️ Best-effort de propósito: o Job é provisionado 1× por ambiente pelo
+        # operador (`bash scripts/setup-gcp.sh <env>`). Enquanto não existir,
+        # este passo AVISA e segue — provisionamento nunca derruba o deploy.
+        run: |
+          if gcloud run jobs describe "${SYNC_TITLES_JOB}" \
+               --region="${REGION}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+            gcloud run jobs update "${SYNC_TITLES_JOB}" \
+              --image=${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/auditoria-api:dev \
+              --update-env-vars=KEK_KMS_KEY_NAME=${{ env.KEK_KMS_KEY_NAME }} \
+              --update-secrets=ALERT_WEBHOOK_URL=${{ env.ALERT_WEBHOOK_SECRET }}:latest,ALERT_EMAIL_TO=${{ env.ALERT_EMAIL_SECRET }}:latest,ALERT_WEBHOOK_URL_SYNTHETIC=${{ env.ALERT_WEBHOOK_SYNTHETIC_SECRET }}:latest \
+              --region="${REGION}" \
+              --project="${PROJECT_ID}" \
+            || echo "::warning::Falha ao re-resolver o digest de ${SYNC_TITLES_JOB} — a sincronização diária da carteira pode rodar com imagem velha."
+          else
+            echo "::warning::Cloud Run Job ${SYNC_TITLES_JOB} não existe — rode 'bash scripts/setup-gcp.sh dev' (1× por ambiente, ver scripts/environments-runbook.md). A sincronização diária da carteira NÃO está agendada."
+          fi
 
       - name: Execute alembic upgrade head
         run: |
