@@ -54,6 +54,12 @@ _CAPTURE_HINT = (
     "com credencial Omie autorizada (ver tests/fixtures/omie/README.md)."
 )
 
+#: O faultcode **como a Omie devolve**, com o prefixo SOAP — não o número solto.
+#: Verificado no transporte em 24/09/2026 (`omie_call_fault call=ListarContasPagar
+#: fault_code=SOAP-ENV:Client-5001`), e coerente com o `_AUTH_FAULT_CODES` do
+#: client, que já casa `soap-env:client-101`.
+_FAULT_CODE_REAL_TAG_INVALIDA = "SOAP-ENV:Client-5001"
+
 
 @pytest.fixture(autouse=True)
 def _no_inter_call_delay(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -123,7 +129,12 @@ class _FakeOmieClient:
             if self.reject_without_account and conta_corrente_id is None:
                 raise OmieFaultError(
                     "Fault em ListarContasPagar: Tag não faz parte da estrutura",
-                    metadata={"fault_code": "5001"},
+                    # ⚠️ O faultcode REAL, com o prefixo SOAP. O duplo usava
+                    # `"5001"` solto e por isso este teste passava verde sobre um
+                    # predicado que nunca desviava em produção (reprovação de
+                    # 24/09/2026). Duplo com valor mais bonito que o da origem é
+                    # um teste que prova o duplo.
+                    metadata={"fault_code": _FAULT_CODE_REAL_TAG_INVALIDA},
                 )
             # Cede o controle: se alguém paralelizar as chamadas, `concurrent_peak`
             # passa de 1 e o teste de serialização quebra.
@@ -433,6 +444,53 @@ class TestRamoBIteracaoPorConta:
         client = _FakeOmieClient(auth_error=True)
         with pytest.raises(ProviderAuthError):
             await _provider_with(client).list_open_titles()
+
+
+class TestPredicadoDaRecusaDeTag:
+    """O gatilho do ramo (b), testado DIRETO e com o valor real da origem.
+
+    Por que um teste unitário do predicado, e não só o caso de integração: o caso
+    de integração só falha para quem tem Docker, e foi exatamente por isso que o
+    defeito de 24/09/2026 chegou ao review — o predicado comparava `"5001"` por
+    igualdade contra `SOAP-ENV:Client-5001`, nunca dava verdadeiro, e o ramo (b)
+    era código MORTO. Aqui ele roda em qualquer máquina, em microssegundos.
+    """
+
+    @staticmethod
+    def _fault(code: str | None) -> OmieFaultError:
+        return OmieFaultError(
+            "Fault em ListarContasPagar: Tag não faz parte da estrutura",
+            metadata={"fault_code": code},
+        )
+
+    def test_o_faultcode_real_da_omie_desvia(self) -> None:
+        """`SOAP-ENV:Client-5001` — a forma que o transporte de fato entrega."""
+        assert OmieProvider._is_tag_rejection(self._fault(_FAULT_CODE_REAL_TAG_INVALIDA)) is True
+
+    def test_o_numero_solto_tambem_desvia(self) -> None:
+        """Se a origem algum dia devolver só o número, o ramo (b) segue valendo."""
+        assert OmieProvider._is_tag_rejection(self._fault("5001")) is True
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "SOAP-ENV:Client-8020",  # o lock de lançamento — NÃO é "preciso da conta"
+            "SOAP-ENV:Client-101",  # credencial inválida: propaga como auth
+            "SOAP-ENV:Client-1880",  # rate limit por método: propaga e retenta
+            "SOAP-ENV:Client-15001",  # termina em "5001" e NÃO é o 5001
+            "9999",
+            "",
+            None,
+        ],
+    )
+    def test_o_que_nao_e_5001_nao_desvia(self, code: str | None) -> None:
+        """O predicado é ESTREITO de propósito.
+
+        Tratar qualquer falha como "preciso do filtro de conta" gastaria 78 páginas
+        x N contas por uma credencial expirada, antes de falhar de novo. O
+        `15001` está na lista porque é o que um `endswith` solto deixaria passar.
+        """
+        assert OmieProvider._is_tag_rejection(self._fault(code)) is False
 
 
 # ----------------------------------------------------------------------

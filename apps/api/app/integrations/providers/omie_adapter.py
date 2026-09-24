@@ -90,9 +90,14 @@ _OPEN_TITLE_STATUSES = (OmieTituloStatus.ATRASADO, OmieTituloStatus.AVENCER)
 #: do MESMO endpoint nunca ficam adjacentes.
 _INTER_CALL_DELAY_SECONDS = 1.5
 
-#: `faultstring` da Omie que significa "essa tag não pertence ao tipo complexo" —
-#: é assim que ela recusaria a listagem sem o filtro de conta corrente. É o
-#: gatilho do ramo (b) do R1.
+#: Código da Omie que significa "essa tag não pertence ao tipo complexo" — é assim
+#: que ela recusaria a listagem sem o filtro de conta corrente. É o gatilho do ramo
+#: (b) do R1.
+#:
+#: ⚠️ É só a PARTE NUMÉRICA. No transporte a Omie devolve o faultcode SOAP inteiro
+#: (`SOAP-ENV:Client-5001`), então `_is_tag_rejection` compara o último segmento do
+#: código — comparar com o valor completo foi o defeito que deixou o ramo (b) morto
+#: (reprovação de 24/09/2026).
 _FAULT_CODE_TAG_INVALIDA = "5001"
 
 
@@ -317,12 +322,24 @@ class OmieProvider:
     def _is_tag_rejection(exc: OmieFaultError) -> bool:
         """A recusa é "tag inválida" (ramo b) ou outra falha (que propaga)?
 
-        Só o `5001` desvia para o ramo (b). Tratar qualquer `faultstring` como
-        "preciso do filtro de conta" transformaria credencial expirada e
-        instabilidade da origem em 78 paginas x N contas de requisições inúteis
-        antes de falhar de novo.
+        ⚠️ **A Omie devolve o faultcode SOAP INTEIRO** —
+        `SOAP-ENV:Client-5001`, nunca o número solto (verificado no transporte em
+        24/09/2026; o próprio `_AUTH_FAULT_CODES` do cliente já casa a forma
+        `soap-env:client-101`). Comparar por igualdade contra `"5001"` nunca dava
+        verdadeiro, e o ramo (b) inteiro era código MORTO: no dia em que a origem
+        exigisse o filtro de conta, a sincronização falharia e o cliente ficaria
+        sem carteira, em vez de cair na iteração por conta.
+
+        A comparação é pelo ÚLTIMO segmento do código, não por `endswith` solto:
+        um `SOAP-ENV:Client-15001` hipotético termina em "5001" e não é isto.
+
+        Só o `5001` desvia para o ramo (b) — o predicado continua ESTREITO. Tratar
+        qualquer `faultstring` como "preciso do filtro de conta" transformaria
+        credencial expirada e instabilidade da origem em 78 paginas x N contas de
+        requisições inúteis antes de falhar de novo.
         """
-        return exc.metadata.get("fault_code") == _FAULT_CODE_TAG_INVALIDA
+        code = str(exc.metadata.get("fault_code") or "")
+        return code.rpartition("-")[2] == _FAULT_CODE_TAG_INVALIDA
 
     async def aclose(self) -> None:
         await self._client.aclose()

@@ -14,6 +14,10 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING, cast
+from uuid import uuid4
+
+import pytest
 
 from app.db.models.client_title import TitleType
 from app.modules.client_titles.aging import OVERDUE_BUCKETS, AgingBucket
@@ -23,6 +27,13 @@ from app.modules.client_titles.repository import (
     TitlesSummary,
     _zeroed_totals,
 )
+from app.modules.client_titles.service import ClientTitlesReadService
+
+if TYPE_CHECKING:
+    from uuid import UUID
+
+    from app.db.models import Client
+    from app.modules.client_titles.repository import ClientTitlesRepository
 
 _HOJE = date(2026, 9, 24)
 
@@ -198,3 +209,108 @@ class TestOsDoisTiposSaoSeparados:
         summary = _summary()
         assert summary.a_pagar is not summary.a_receber
         assert {TitleType.A_PAGAR, TitleType.A_RECEBER} == set(TitleType)
+
+
+class _RepositorioDuble:
+    """Dublê do repositório: devolve agregados prontos, sem banco.
+
+    Existe para que `ClientTitlesReadService.summary()` seja EXECUTADO num teste
+    unitário. Montar `TitlesSummary` direto (o que o resto deste arquivo faz)
+    prova o dataclass, não o serviço — e foi esse buraco que deixou um
+    `NameError` de import sob `TYPE_CHECKING` passar por `mypy --strict` e por
+    1.141 unitários, quebrando duas das três rotas da sprint com 500.
+    """
+
+    def __init__(
+        self,
+        *,
+        synced_at: datetime | None,
+        failed_at: datetime | None,
+        a_pagar: AgingTotals | None = None,
+        a_receber: AgingTotals | None = None,
+    ) -> None:
+        self._state = (synced_at, failed_at)
+        self._aging = {
+            TitleType.A_PAGAR: a_pagar or _zeroed_totals(),
+            TitleType.A_RECEBER: a_receber or _zeroed_totals(),
+        }
+        #: O `today` que o serviço passou — o teste confere que é o do SERVIDOR.
+        self.today_recebido: date | None = None
+
+    async def aging(self, client_id: UUID, *, today: date) -> dict[TitleType, AgingTotals]:
+        self.today_recebido = today
+        return self._aging
+
+    async def get_sync_state(self, client_id: UUID) -> tuple[datetime | None, datetime | None]:
+        return self._state
+
+
+def _read_service(repo: _RepositorioDuble) -> ClientTitlesReadService:
+    """O dublê não é um `ClientTitlesRepository`, e não precisa ser.
+
+    O serviço só chama `aging` e `get_sync_state` — o `cast` mantém o mypy
+    honesto sem arrastar banco para um teste de unidade.
+    """
+    return ClientTitlesReadService(cast("ClientTitlesRepository", repo))
+
+
+class _ClienteDuble:
+    """Só o `id` — é tudo o que `summary()` lê do cliente."""
+
+    def __init__(self) -> None:
+        self.id = uuid4()
+
+
+class TestOServicoConsegueMontarOSummary:
+    """A chamada REAL ao serviço, que nenhum unitário fazia (reprovação de 24/09).
+
+    Regra que fica: símbolo usado como CHAMÁVEL (construtor, função, decorator)
+    nunca vai para `if TYPE_CHECKING:` — ali entra só o que aparece
+    exclusivamente depois de `:` ou `->`.
+    """
+
+    @pytest.mark.asyncio
+    async def test_summary_do_servico_nao_levanta_e_devolve_um_titles_summary(self) -> None:
+        """O caso que reproduz o defeito: antes da correção, `NameError`."""
+        repo = _RepositorioDuble(synced_at=None, failed_at=None)
+        summary = await _read_service(repo).summary(cast("Client", _ClienteDuble()), today=_HOJE)
+
+        assert isinstance(summary, TitlesSummary)
+        assert summary.nunca_sincronizada is True
+        assert summary.referencia == _HOJE
+
+    @pytest.mark.asyncio
+    async def test_o_servico_serve_os_tres_estados(self) -> None:
+        """Os três estados do R3 passando pelo serviço, não pelo dataclass."""
+        integra = datetime(2026, 9, 20, 3, 0, tzinfo=UTC)
+        falha = datetime(2026, 9, 24, 3, 0, tzinfo=UTC)
+
+        nunca = await _read_service(_RepositorioDuble(synced_at=None, failed_at=None)).summary(
+            cast("Client", _ClienteDuble()), today=_HOJE
+        )
+        integra_ok = await _read_service(
+            _RepositorioDuble(synced_at=integra, failed_at=None)
+        ).summary(cast("Client", _ClienteDuble()), today=_HOJE)
+        falhou = await _read_service(_RepositorioDuble(synced_at=integra, failed_at=falha)).summary(
+            cast("Client", _ClienteDuble()), today=_HOJE
+        )
+
+        assert nunca.nunca_sincronizada is True
+        assert integra_ok.nunca_sincronizada is False
+        assert integra_ok.sync_failed_at is None
+        assert falhou.synced_at == integra
+        assert falhou.sync_failed_at == falha
+
+    @pytest.mark.asyncio
+    async def test_a_referencia_e_a_data_do_servidor_quando_ninguem_passa_today(self) -> None:
+        """R3: o "hoje" é do SERVIDOR — `today` existe para o teste, não para a rota.
+
+        Sem `today`, o serviço usa `datetime.now(UTC).date()` e repassa a MESMA
+        data ao repositório: a referência exibida e a usada no SQL não podem
+        divergir, senão a tela mostra baldes calculados com outro dia.
+        """
+        repo = _RepositorioDuble(synced_at=None, failed_at=None)
+        summary = await _read_service(repo).summary(cast("Client", _ClienteDuble()))
+
+        assert summary.referencia == datetime.now(UTC).date()
+        assert repo.today_recebido == summary.referencia

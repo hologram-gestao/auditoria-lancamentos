@@ -41,11 +41,15 @@ from app.modules.client_connections.origin import (
     build_origin_provider,
     resolve_capable_connection,
 )
+from app.modules.client_titles.repository import TitlesSummary
 from app.modules.client_titles.schemas import client_title_row
 from app.modules.usage_events.repository import UsageEventRepository
 from app.modules.usage_events.service import UsageEventService
 
 if TYPE_CHECKING:
+    # Só o que aparece EXCLUSIVAMENTE em anotação entra aqui. `TitlesSummary` é
+    # importado no topo, em RUNTIME, porque `summary()` o CONSTRÓI — sob
+    # `TYPE_CHECKING` o mypy fica satisfeito e a rota responde 500.
     from collections.abc import Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,7 +58,7 @@ if TYPE_CHECKING:
     from app.db.models import Client, OmieAccountCache
     from app.integrations.omie.client_locks import OriginClientLocks
     from app.integrations.providers.base import ProviderOpenTitle
-    from app.modules.client_titles.repository import ClientTitlesRepository, TitlesSummary
+    from app.modules.client_titles.repository import ClientTitlesRepository
     from app.modules.clients.repository import ClientRepository
 
 log = get_logger(__name__)

@@ -23,6 +23,7 @@ import pytest
 import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 
 from app.core.config import get_settings
 
@@ -85,6 +86,33 @@ def _execute(url: str, sql: str, **params: object) -> None:
             conn.execute(sa.text(sql), params)
     finally:
         engine.dispose()
+
+
+def _head_revision(cfg: Config) -> str:
+    """O head ATUAL da cadeia, lido do `ScriptDirectory`.
+
+    Existe para que um teste possa afirmar "o ciclo convergiu no head" sem FIXAR
+    a revisão da sprint que o escreveu. Fixar custou pedágio em três sprintes
+    seguidas: a asserção `version_num == <revisão da minha sprint>` vira falsa no
+    dia em que a sprint seguinte acrescenta uma migration, e o teste passa a
+    reprovar código correto (reprovação de 24/09/2026).
+
+    Também afirma que o head é ÚNICO: dois heads significam cadeia bifurcada, que
+    é defeito real e some silenciosamente se o teste pegar só o primeiro.
+    """
+    script = ScriptDirectory.from_config(cfg)
+    heads = script.get_heads()
+    assert len(heads) == 1, f"cadeia bifurcada: {heads}"
+    return heads[0]
+
+
+def _revisions_in_chain(cfg: Config) -> set[str]:
+    """Toda revisão alcançável a partir do head — a linhagem, sem ordem.
+
+    Permite afirmar "a revisão da MINHA sprint continua na cadeia" sem afirmar
+    "ela é o head", que é a parte que envelhece.
+    """
+    return {rev.revision for rev in ScriptDirectory.from_config(cfg).walk_revisions()}
 
 
 # Revisões da Sprint 5, da mais antiga para a mais nova. Downgrade percorre ao
@@ -1509,4 +1537,14 @@ class TestPlanoDeContasRoundTrip:
         command.upgrade(alembic_cfg, "head")
         assert _table_exists(url, "client_chart_of_accounts")
         assert _scalar(url, "SELECT count(*) FROM clients") == 1
-        assert _scalar(url, "SELECT version_num FROM alembic_version") == CHART_OF_ACCOUNTS_REV
+        # "o ciclo converge no head ATUAL" — e não "o head é a revisão do plano de
+        # contas", que deixou de ser verdade quando a S11 acrescentou
+        # `c2d9e7f41ab5` por cima. O head vem do `ScriptDirectory`; o que este
+        # teste garante é que subir-e-descer duas vezes chega ao mesmo lugar.
+        assert _scalar(url, "SELECT version_num FROM alembic_version") == _head_revision(
+            alembic_cfg
+        )
+        # O que o teste ainda afirma sobre a revisão desta suíte: ela continua NA
+        # cadeia que leva ao head. Sem isto, "convergiu no head" passaria verde
+        # mesmo se a migration do plano de contas tivesse saído da linhagem.
+        assert CHART_OF_ACCOUNTS_REV in _revisions_in_chain(alembic_cfg)

@@ -104,6 +104,20 @@ def _row(
 
 
 async def _titles(db_session: AsyncSession, client_id: Any) -> list[ClientTitle]:
+    """A carteira do cliente, LIDA DO BANCO — nunca do identity map.
+
+    ⚠️ O `expire_all()` é obrigatório e não é zelo. `reconcile_cycle` escreve em
+    **Core** (`INSERT ... ON CONFLICT DO UPDATE`), que não repovoa instância ORM já
+    carregada: um teste que leia a mesma linha antes e depois de um ciclo recebe de
+    volta o objeto ANTIGO, com o `status` da leitura anterior. Foi exatamente essa
+    a armadilha da reprovação de 24/09/2026 — o banco estava certo (`em_aberto`) e o
+    teste afirmava `ausente_na_origem`, o pior defeito possível num teste, porque a
+    próxima pessoa "conserta" o repositório.
+
+    Fica no helper, e não no teste, porque o helper é usado por todo o arquivo: assim
+    qualquer teste futuro que leia duas vezes o mesmo título já nasce imune.
+    """
+    db_session.expire_all()
     rows = await db_session.execute(
         select(ClientTitle)
         .where(ClientTitle.client_id == client_id)
