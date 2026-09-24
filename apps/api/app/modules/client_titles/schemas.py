@@ -144,6 +144,14 @@ class ClientTitleResponse(BaseModel):
     fornecedor" (aí `supplierCode` também é nulo).
     """
 
+    id: UUID = Field(
+        description=(
+            "PK do título. O tenant já lê a linha inteira nesta resposta — não "
+            "há razão de segurança para esconder o identificador, e sem ele a "
+            "tela não tem como montar a URL de `.../titles/{title_id}/context` "
+            "(Sprint 15)."
+        )
+    )
     external_id: str = Field(alias="externalId", description="Identificador do título na origem.")
     title_type: TitleType = Field(alias="titleType", description="`a_pagar` ou `a_receber`.")
     due_date: date = Field(alias="dueDate", description="Data de vencimento — base do aging.")
@@ -230,6 +238,7 @@ class ClientTitleResponse(BaseModel):
         aberto = row.status == TitleStatus.EM_ABERTO.value
         atraso = max((today - row.due_date).days, 0)
         return cls(
+            id=row.id,
             external_id=row.external_id,
             title_type=TitleType(row.title_type),
             due_date=row.due_date,
