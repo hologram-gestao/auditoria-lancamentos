@@ -2915,7 +2915,73 @@ for (const vp of VIEWPORTS) {
  * (`view_client_receivables`, ✅ nos cinco papéis) e quem some para o operador
  * é a ação de SINCRONIZAR. Um `AccessDenied` para ele seria defeito, não
  * segurança.
+ *
+ * **Duas guardas que NÃO são de acessibilidade e mesmo assim moram aqui**
+ * (rodada de QA da S11): o gate de axe passou verde nos três temas enquanto, a
+ * 390px, a tabela inteira estava com 0px de altura e os três valores do bloco
+ * de agregados se imprimiam um por cima do outro. Nenhum dos dois é medível por
+ * `toBeVisible()` — a visibilidade do Playwright não enxerga clipping por
+ * ancestral com `overflow`, e sobreposição é geometria. Por isso as duas
+ * conferências abaixo medem `boundingBox()`.
  */
+
+/** O rótulo é DADO: `90+ dias` vira `90\+ dias`, não "9 e vários zeros". */
+function escaparRegex(texto: string): string {
+  return texto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * A região rolável da tabela precisa ter ALTURA de verdade. Com 0px o
+ * cabeçalho, as linhas e o estado vazio somem da tela e todo `toBeVisible()`
+ * continua passando.
+ */
+async function exigirAlturaDaTabela(page: Page, contexto: string) {
+  const regiao = page.getByRole('region', { name: 'Títulos da carteira (rolável)' });
+  const caixa = await regiao.boundingBox();
+  expect(caixa, `${contexto}: a região rolável da carteira precisa ter caixa`).not.toBeNull();
+  expect(
+    caixa?.height ?? 0,
+    `${contexto}: a área da tabela colapsou (altura ${caixa?.height ?? 0}px)`,
+  ).toBeGreaterThan(80);
+}
+
+/**
+ * Os três valores do bloco de agregados não podem se sobrepor nem sair pela
+ * direita. Duas caixas se sobrepõem quando há interseção nos DOIS eixos.
+ */
+async function exigirAgregadosLegiveis(page: Page, contexto: string) {
+  const largura = page.viewportSize()?.width ?? 0;
+  const valores = page
+    .getByRole('region', { name: 'A receber' })
+    .locator('dd > span.whitespace-nowrap');
+  await expect(valores).toHaveCount(3);
+
+  const caixas = await valores
+    .all()
+    .then((itens) => Promise.all(itens.map((v) => v.boundingBox())));
+  caixas.forEach((caixa, indice) => {
+    expect(caixa, `${contexto}: o valor ${indice + 1} precisa ter caixa`).not.toBeNull();
+    expect(
+      (caixa?.x ?? 0) + (caixa?.width ?? 0),
+      `${contexto}: o valor ${indice + 1} do bloco de agregados está cortado na borda`,
+    ).toBeLessThanOrEqual(largura);
+  });
+
+  for (let a = 0; a < caixas.length; a += 1) {
+    for (let b = a + 1; b < caixas.length; b += 1) {
+      const um = caixas[a];
+      const outro = caixas[b];
+      if (um == null || outro == null) continue;
+      const cruzaX = um.x < outro.x + outro.width && outro.x < um.x + um.width;
+      const cruzaY = um.y < outro.y + outro.height && outro.y < um.y + um.height;
+      expect(
+        cruzaX && cruzaY,
+        `${contexto}: os valores ${a + 1} e ${b + 1} do bloco de agregados se sobrepõem`,
+      ).toBe(false);
+    }
+  }
+}
+
 for (const vp of VIEWPORTS) {
   const slugC = vp.label.replace(/\s+/g, '-');
   test.describe(`Carteira do cliente — ${vp.label}`, () => {
@@ -2936,7 +3002,12 @@ for (const vp of VIEWPORTS) {
       // Os quatro baldes, cada um no seu PAR — e todos vindos do `/summary`: a
       // página lista 2 linhas e o bloco continua dizendo 107.413,10.
       for (const rotulo of ['1 a 30 dias', '31 a 60 dias', '61 a 90 dias', '90+ dias']) {
-        await expect(aReceber.locator('dt', { hasText: new RegExp(`^${rotulo}$`) })).toHaveCount(1);
+        // `new RegExp(rotulo)` cru transformava `90+ dias` em "9 seguido de um
+        // ou mais zeros", que não casa com rótulo nenhum. O rótulo é DADO, não
+        // padrão: escapar antes de ancorar.
+        await expect(
+          aReceber.locator('dt', { hasText: new RegExp(`^${escaparRegex(rotulo)}$`) }),
+        ).toHaveCount(1);
       }
       // `formatBRL` usa espaço NÃO-quebrável: locator com espaço normal nunca casa.
       await expect(
@@ -2945,6 +3016,12 @@ for (const vp of VIEWPORTS) {
           .locator('xpath=following-sibling::dd[1]'),
       ).toContainText(/R\$\s*82\.865,50/);
       await expect(page.getByRole('row')).toHaveCount(3); // cabeçalho + 2 títulos
+
+      // Geometria, não semântica: os três valores lado a lado e a tabela com
+      // altura. Os dois defeitos que o gate verde da rodada anterior deixou
+      // passar em 390px.
+      await exigirAgregadosLegiveis(page, vp.label);
+      await exigirAlturaDaTabela(page, vp.label);
 
       // Se a página tivesse caído no error boundary, o axe mediria a tela de erro.
       await expect(page.locator('#__next_error__')).toHaveCount(0);
@@ -2996,6 +3073,9 @@ for (const vp of VIEWPORTS) {
       // agregados não pode existir neste estado.
       await expect(page.getByRole('region', { name: 'A receber' })).toHaveCount(0);
       await expect(page.getByText(/R\$\s*0,00/)).toHaveCount(0);
+      // Era ESTE o estado em que a área da tabela ia a 0px em 390px: o texto do
+      // estado vazio mora dentro dela, e sumia da tela continuando "visível".
+      await exigirAlturaDaTabela(page, `${vp.label} · nunca sincronizada`);
       await shot(page, `carteira-nunca-sincronizada-${slugC}`);
       await analyze(page, `carteira — nunca sincronizada (${vp.label})`);
     });
@@ -3012,6 +3092,10 @@ for (const vp of VIEWPORTS) {
       ).toBeVisible();
       // E os agregados da última ÍNTEGRA continuam na tela.
       await expect(page.getByRole('region', { name: 'A receber' })).toBeVisible();
+      // O aviso de falha empurra tudo para baixo: é o estado com MAIS conteúdo
+      // acima da tabela, e o pior caso do colapso de altura em 390px.
+      await exigirAgregadosLegiveis(page, `${vp.label} · última falhou`);
+      await exigirAlturaDaTabela(page, `${vp.label} · última falhou`);
       await shot(page, `carteira-falha-${slugC}`);
       await analyze(page, `carteira — falha na última sincronização (${vp.label})`);
     });

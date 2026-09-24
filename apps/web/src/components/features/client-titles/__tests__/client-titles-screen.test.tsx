@@ -257,6 +257,22 @@ describe('ClientTitlesScreen — agregados e aging (R3)', () => {
     render(<ClientTitlesScreen clientId="c1" />);
     expect(screen.getByLabelText('Carregando os agregados da carteira')).toBeInTheDocument();
   });
+
+  /**
+   * As três parcelas em `grid-cols-3` fixo imprimiam os três valores UM POR
+   * CIMA DO OUTRO a 390px (colunas de ~95px para um `text-xl whitespace-nowrap`
+   * de ~150px). O `whitespace-nowrap` do valor NÃO sai — valor monetário que
+   * quebra depois do hífen vira outro número (S7) —, então quem cede é a
+   * contagem de colunas. Sobreposição de verdade só o browser mede: o e2e
+   * compara `boundingBox()` dos três valores.
+   */
+  it('as três parcelas empilham até sm (não dividem 390px em três colunas)', () => {
+    render(<ClientTitlesScreen clientId="c1" />);
+    const aReceber = within(screen.getByRole('region', { name: 'A receber' }));
+    const parcelas = aReceber.getByText('Em aberto', { selector: 'dt' }).closest('dl');
+    expect(parcelas).toHaveClass('grid-cols-1', 'sm:grid-cols-3');
+    expect(parcelas).not.toHaveClass('grid-cols-3');
+  });
 });
 
 describe('ClientTitlesScreen — lista', () => {
@@ -297,6 +313,23 @@ describe('ClientTitlesScreen — lista', () => {
     expect(screen.queryByText('Nome não resolvido')).toBeNull();
   });
 
+  /**
+   * `bg-destructive/10` dava 4,22:1 no escuro e 4,42:1 no Hologram (axe
+   * `serious`, AA pede 4,5:1 em 12px): o alfa mistura o vermelho com o fundo da
+   * página e apaga o contraste. `destructive-muted` é o token OPACO de fundo de
+   * badge — mesma convenção que `warning`/`success`/`info` no arquivo.
+   */
+  it('o balde vencido usa o token OPACO de fundo, nunca destructive com alfa', () => {
+    listState.data = {
+      data: [title({ bucket: '90_mais' })],
+      pagination: { page: 1, pageSize: 20, total: 1, totalPages: 1 },
+    };
+    render(<ClientTitlesScreen clientId="c1" />);
+    const badge = within(screen.getAllByRole('row')[1]!).getByText('90+ dias');
+    expect(badge).toHaveClass('bg-destructive-muted', 'text-destructive');
+    expect(badge.className).not.toContain('bg-destructive/');
+  });
+
   it('título liquidado não ganha balde (ele saiu do aberto)', () => {
     listState.data = {
       data: [title({ status: 'liquidado', bucket: null })],
@@ -317,6 +350,21 @@ describe('ClientTitlesScreen — lista', () => {
     expect(region).not.toContainElement(
       screen.getByRole('navigation', { name: 'Paginação de títulos' }),
     );
+  });
+
+  /**
+   * O jsdom não faz layout, então isto é o que dá para travar AQUI: a área da
+   * tabela tinha `min-h-0 flex-1` e COLAPSAVA para 0px a 390px (a seção é
+   * `h-full` e os filtros empilhados consumiam o viewport). O piso vale abaixo
+   * de `lg`; de `lg` para cima continua `min-h-0`, que é o desktop verificado.
+   * A medida de verdade é o `boundingBox()` do e2e — esta é a rede barata.
+   */
+  it('a área da tabela tem PISO de altura abaixo de lg (não colapsa em 390px)', () => {
+    render(<ClientTitlesScreen clientId="c1" />);
+    const region = screen.getByRole('region', { name: 'Títulos da carteira (rolável)' });
+    const area = region.closest('[aria-busy]');
+    expect(area).not.toBeNull();
+    expect(area).toHaveClass('min-h-[24rem]', 'flex-1', 'lg:min-h-0');
   });
 });
 

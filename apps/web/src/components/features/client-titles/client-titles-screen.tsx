@@ -416,7 +416,19 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
         )}
       </div>
 
-      <div className="min-h-0 flex-1" aria-busy={listQuery.isFetching}>
+      {/* `min-h-0 flex-1` sozinho COLAPSAVA a tabela a 0px abaixo de `lg`: a
+          seção é `h-full`, e com os quatro filtros empilhados (a barra só vira
+          linha em `lg`) o que está acima já consumia o viewport — o `flex-1`
+          recebia 0 e o `min-h-0` autorizava encolher. Não sobrava cabeçalho,
+          nem linha, nem estado vazio: só os filtros, um fio e "0–0 de 0".
+          O piso de 24rem abaixo de `lg` faz o conteúdo transbordar a seção e
+          quem rola passa a ser o `<main>` (o comportamento mobile previsto no
+          `<TableCard>`). De `lg` para cima nada muda — ali a altura disponível
+          é a do shell, e o desktop já estava certo.
+          ⚠️ `toBeVisible()` do Playwright NÃO pega esse defeito: ele não enxerga
+          clipping por ancestral com `overflow`. A guarda é medir `boundingBox()`
+          da região rolável (e2e `a11y-mocked.spec.ts`). */}
+      <div className="min-h-[24rem] flex-1 lg:min-h-0" aria-busy={listQuery.isFetching}>
         {listQuery.isError ? (
           <ErrorState
             message={

@@ -67,7 +67,13 @@ function TotalsCard({
         {TITLE_TYPE_LABELS[titleType]}
       </h3>
 
-      <dl className="grid grid-cols-3 gap-3">
+      {/* Uma coluna até `sm`, três a partir dali. Em 390px as três parcelas em
+          colunas de ~95px imprimiam os três valores UM POR CIMA DO OUTRO
+          (`R$ 107.413R$10.000,0R$ 97.413,10`): `text-xl` + `whitespace-nowrap`
+          não cabem em 95px, e o `nowrap` NÃO sai — valor monetário que quebra
+          depois do hífen vira outro número (defeito da S7). Quem cede é a
+          contagem de colunas, não o valor. */}
+      <dl className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div>
           <dt className="text-muted-foreground text-xs font-medium">Em aberto</dt>
           <dd>
@@ -170,7 +176,9 @@ export function ClientTitlesSummarySkeleton() {
       {Array.from({ length: 2 }).map((_, card) => (
         <div key={card} className="space-y-3 rounded-lg border p-4">
           <div className="bg-muted h-4 w-24 animate-pulse rounded" />
-          <div className="grid grid-cols-3 gap-3">
+          {/* Mesmas colunas do bloco real: esqueleto com outra grade promete
+              uma altura que o conteúdo não cumpre, e a tela pula ao carregar. */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {Array.from({ length: 3 }).map((__, stat) => (
               <div key={stat} className="space-y-2">
                 <div className="bg-muted h-3 w-16 animate-pulse rounded" />
