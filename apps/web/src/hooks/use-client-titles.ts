@@ -16,17 +16,34 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 
 import {
   getClientTitlesSummary,
+  getReceivablesReport,
   listClientTitles,
+  listTitleContext,
+  registerTitleContext,
   syncClientTitles,
   type ListClientTitlesParams,
 } from '@/lib/api/client-titles';
-import type { ClientTitlesListResponse, TitlesSummary, TitlesSyncResult } from '@/lib/contracts';
+import type {
+  ClientTitlesListResponse,
+  ReceivablesReport,
+  TitleContext,
+  TitleContextCreateRequest,
+  TitlesSummary,
+  TitlesSyncResult,
+} from '@/lib/contracts';
 
 export const clientTitlesKeys = {
   all: (clientId: string) => ['client-titles', clientId] as const,
   list: (clientId: string, params: ListClientTitlesParams) =>
     ['client-titles', clientId, 'list', params] as const,
   summary: (clientId: string) => ['client-titles', clientId, 'summary'] as const,
+  receivablesReport: (clientId: string) =>
+    ['client-titles', clientId, 'receivables-report'] as const,
+};
+
+/** Sprint 15 — histórico de contexto de UM título, sempre sob o `clientId`. */
+export const titleContextKeys = {
+  history: (clientId: string, titleId: string) => ['title-context', clientId, titleId] as const,
 };
 
 export function useClientTitlesList(
@@ -60,6 +77,49 @@ export function useSyncClientTitles(clientId: string) {
   return useMutation<TitlesSyncResult, Error, void>({
     mutationFn: () => syncClientTitles(clientId),
     onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: clientTitlesKeys.all(clientId) });
+    },
+  });
+}
+
+/**
+ * Relatório de recebíveis (Sprint 15 — BACK 15.2). Query PRÓPRIA (não deriva
+ * da lista/summary): os grupos são calculados no servidor sobre a carteira
+ * inteira e dependem do contexto mais recente de cada título.
+ */
+export function useReceivablesReport(clientId: string, options: { enabled?: boolean } = {}) {
+  return useQuery<ReceivablesReport>({
+    queryKey: clientTitlesKeys.receivablesReport(clientId),
+    queryFn: () => getReceivablesReport(clientId),
+    enabled: options.enabled ?? true,
+  });
+}
+
+/** Histórico completo de contexto de UM título (Sprint 15 — BACK 15.1). */
+export function useTitleContextHistory(
+  clientId: string,
+  titleId: string,
+  options: { enabled?: boolean } = {},
+) {
+  return useQuery<TitleContext[]>({
+    queryKey: titleContextKeys.history(clientId, titleId),
+    queryFn: () => listTitleContext(clientId, titleId),
+    enabled: options.enabled ?? true,
+  });
+}
+
+/**
+ * Registra uma entrada de contexto. Invalida o histórico DESTE título, a
+ * carteira INTEIRA do cliente (o indicador de linha e o filtro
+ * "vencidos sem contexto" dependem dela) e o relatório de recebíveis (o
+ * contexto muda o grupo em que o título entra).
+ */
+export function useRegisterTitleContext(clientId: string, titleId: string) {
+  const qc = useQueryClient();
+  return useMutation<TitleContext, Error, TitleContextCreateRequest>({
+    mutationFn: (payload) => registerTitleContext(clientId, titleId, payload),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: titleContextKeys.history(clientId, titleId) });
       void qc.invalidateQueries({ queryKey: clientTitlesKeys.all(clientId) });
     },
   });

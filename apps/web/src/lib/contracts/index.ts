@@ -365,6 +365,48 @@ export type ListClientTitlesQuery = NonNullable<
 >;
 
 // ---------------------------------------------------------------------------
+// Contexto do título e relatório de recebíveis (Sprint 15 — BACK 15.1 · 15.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * `acordo_de_pagamento` | `pagamento_antecipado` | `nota_a_cancelar` |
+ * `cobranca_suspensa` | `perda_provavel` | `outro` — vocabulário FECHADO
+ * (`Literal` no backend); valor fora dele é 400, não 422.
+ */
+export type TitleContextType = Schemas['TitleContextType'];
+/** Body de `POST .../titles/{title_id}/context`. */
+export type TitleContextCreateRequest = Schemas['TitleContextCreateRequest'];
+/**
+ * Uma entrada de contexto, já decifrada. `decryptFailed=true` é o marcador de
+ * falha de decifragem (mesma convenção do glossário) — a célula NUNCA fica
+ * vazia em silêncio. `author` é o objeto ENXUTO e mascarado por escopo (mesmo
+ * precedente da autoria de sessão), nunca a linha de `users`.
+ */
+export type TitleContext = Schemas['TitleContextResponse'];
+/** `{ data: {...} }` — chave ÚNICA: o `apiPost` já entrega o miolo. */
+export type TitleContextEnvelope = Schemas['TitleContextEnvelope'];
+/**
+ * `{ data: [...] }` — histórico COMPLETO de um título, mais recente primeiro,
+ * SEM paginação (é o registro de um título, não uma coleção sem teto).
+ */
+export type TitleContextListResponse = Schemas['TitleContextListResponse'];
+/**
+ * Os agregados de UM grupo (`inadimplencia` OU `vencidoComContexto`) de UM
+ * lado — todos vencidos por construção, sem balde `a_vencer`.
+ */
+export type ReceivablesGroup = Schemas['ReceivablesGroupResponse'];
+/** Os dois grupos de UM lado (a pagar OU a receber). */
+export type ReceivablesSide = Schemas['ReceivablesSideResponse'];
+/**
+ * Body de `GET .../titles/receivables-report` — os DOIS lados, cada um com os
+ * DOIS grupos, calculados no servidor sobre a carteira INTEIRA. Cliente sem
+ * nenhum contexto: tudo em `inadimplencia`, sem erro — é o baseline.
+ */
+export type ReceivablesReport = Schemas['ReceivablesReportResponse'];
+/** `{ data: {...} }` — chave ÚNICA: o `apiGet` já entrega o miolo. */
+export type ReceivablesReportEnvelope = Schemas['ReceivablesReportEnvelope'];
+
+// ---------------------------------------------------------------------------
 // Lançamento no Omie (Sprint 7 / R1 · R2 · R5 — BACK 07.3 · 07.4)
 // ---------------------------------------------------------------------------
 
