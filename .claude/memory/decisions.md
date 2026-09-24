@@ -4092,3 +4092,854 @@ volta a circular. Não é motivo de reprovação; fica registrado aqui e no
 (33/46) — acima do alvo de 70%, por margem bem menor do que os 74% do PRD
 sugerem. Quem ler o resultado precisa saber disso antes de concluir que a
 cobertura caiu.
+
+---
+
+## ADR-062-BE — A carteira de títulos é entidade PRÓPRIA, e a saída do "em aberto" tem DOIS nomes (Sprint 11 / BACK 11.1)
+
+**Data:** 2026-09-24 · **Status:** ativo · **Escopo:** `client_titles`,
+`app/modules/client_titles/`, migration `c2d9e7f41ab5`
+
+**Por que uma tabela nova em vez de estender a que existe.**
+`reconciliation_omie_entries` nasce pendurada numa `session_id` com
+`ondelete=CASCADE`, guarda **só** os títulos sem correspondente no arquivo, e a
+leitura que a alimenta pede `conta_corrente_id=<a conta conciliada>` entre
+`reference_month` e o último dia do mês. Três recortes, todos errados para a
+carteira: uma conta, um mês, e só o que divergiu. Nenhum deles se remove sem
+mudar o significado da tabela para a conciliação — que esta sprint não toca.
+
+**A decisão mais cara de errar: `liquidado` ≠ `ausente_na_origem`.** A ingestão
+da 11.2 lê **só o conjunto em aberto**. Logo, um título que desaparece entre dois
+ciclos pode ter sido pago, cancelado **ou reemitido com outro identificador** — e
+a plataforma não tem como saber qual. Marcar tudo que some como `liquidado`
+seria afirmar um fato não verificado, e a tela diria "quitado" sobre um título
+que ninguém pagou. Por isso o default de `close_titles_absent_from` é
+`ausente_na_origem`, e `liquidado` só é gravado quando a **origem** o declara —
+entrando pelo caminho normal do upsert (`status` vem do DTO), nunca por
+inferência da camada de dados. Colapsar os dois estados economizaria uma coluna
+e custaria a honestidade do número.
+
+**Reemissão sai de graça do ciclo.** Um título que volta com outro identificador
+é, para `reconcile_cycle`, duas coisas independentes: o identificador novo não
+existe (entra pelo `INSERT`) e o antigo não veio (vira `ausente_na_origem`). O
+contexto da Sprint 15 continua pendurado na linha antiga, **visível como órfão**.
+Não foi preciso detectar reemissão — foi preciso não apagar nada.
+
+**`BigInteger` não é zelo: é obrigatório, e a evidência é a captura real.**
+`tests/fixtures/omie/listar_contas_pagar.response.json` traz
+`codigo_cliente_fornecedor = 2624256082` e `id_conta_corrente = 2617722760`,
+ambos **acima** do teto de `INTEGER` (2.147.483.647). Um `Integer` aqui
+estouraria na primeira sincronização real — não em teste, não em dev: em
+produção, no primeiro cliente de verdade.
+
+**`id_conta_corrente` está na resposta real** dos dois endpoints (mesma captura),
+o que desfez uma preocupação de desenho: `omie_conta_id` **não** depende de a
+ingestão ter iterado conta a conta. O ramo (a) do R1 — listar sem o filtro de
+conta — já devolve a conta de cada título.
+
+**Os dois relógios em `clients` (`titles_synced_at`, `titles_sync_failed_at`)**
+copiam o par da S10 pelos mesmos dois motivos, e o segundo é o que importa aqui:
+derivar de `MAX(client_titles.last_synced_at)` deixaria "carteira vazia"
+indistinguível de "nunca sincronizou" — que é exatamente a distinção que o R3
+exige para não mostrar zeros parecendo resultado.
+
+**`client_titles` entra em `close_client_purge`**, seguindo o precedente
+explícito do plano de contas (S10): nada nela é cifrado (só códigos, §4.5), então
+o crypto-shredding não a alcança, mas a carteira é o espelho **operacional** do
+que está em aberto na origem — e cliente encerrado não opera. Deixá-la ficaria
+com uma lista de cobranças vivas de um tenant morto.
+
+⚠️ **Pendência de ambiente, não de código:** os 19 testes de integração desta
+task foram escritos e **nunca rodaram** — este sandbox não tem Docker (socket
+recusado) nem Postgres. Ver `HANDOFF.md`.
+
+---
+
+## ADR-063-BE — O ramo (a) do R1 está PROVADO pela captura real que já estava no repo (Sprint 11 / BACK 11.2)
+
+**Data:** 2026-09-24 · **Status:** ativo · **Escopo:** `Capability.LISTAR_TITULOS_EM_ABERTO`,
+`OmieProvider.list_open_titles`, `OmieClient.listar_contas_pagar/_receber`
+
+**A suposição que a task mandava declarar como NÃO-VERIFICADA já tinha
+evidência.** O PRD pedia: "capturar a evidência real do ramo (a); se não der,
+declarar NÃO-VERIFICADO em voz alta". Antes de escrever o payload, a skill `omie`
+manda ler a resposta REAL — e
+`tests/fixtures/omie/listar_contas_pagar.request.json` (captura da conta real)
+mostra a chamada com `param` de **só** `pagina` e `registros_por_pagina`: **sem**
+filtro de conta corrente, **sem** filtro de data. A resposta dessa mesma captura
+traz `total_de_registros: 3896` em 78 páginas e **nenhuma** `faultstring`. Ou
+seja: listar títulos sem o filtro de conta **é aceito pela Omie**, e isso não é
+doc nem memória — é o request que saiu e a resposta que voltou.
+
+`tests/unit/test_open_titles_contract.py` (classe `TestEvidenciaDaCapturaReal`)
+**lê a fixture** para afirmar isso. Se a captura for refeita um dia e a Omie
+passar a exigir o filtro, o teste fica vermelho aqui em vez de a carteira perder
+títulos em silêncio em produção.
+
+**Descoberta de bônus, e ela mudou o desenho:** `id_conta_corrente` **existe na
+resposta real** dos dois endpoints. Sem isso, `client_titles.omie_conta_id` só
+poderia ser preenchido no ramo (b) e nasceria NULO para todo mundo no caminho
+normal. Foi acrescentado ao DTO `TituloAPagarReceber` **com base na captura**, não
+na doc.
+
+**O ramo (b) continua implementado, e o gatilho é ESTREITO.** Só o `fault_code`
+`5001` ("Tag não faz parte da estrutura") desvia para a iteração por conta.
+Tratar qualquer `faultstring` como "preciso do filtro de conta" transformaria
+credencial expirada e instabilidade em 78 páginas de requisições inúteis por
+conta antes de falhar de novo. As contas vêm do cache que já existe
+(`omie_accounts_cache`) — descobri-las com uma chamada nova gastaria justamente a
+requisição que o ramo (a) economiza.
+
+**Filtro `None` é filtro OMITIDO, não filtro nulo.** `listar_contas_pagar` e
+`listar_contas_receber` passaram a aceitar conta e datas **opcionais**, e a
+montagem do `param` é condicional. Mandar a tag com valor nulo **não** é o mesmo
+que não mandar a tag: a Omie valida a estrutura do `param` e já respondeu 5001 por
+tag que não pertence ao tipo complexo. `processing/omie_fetch.py` não foi tocado —
+a conciliação continua passando os três filtros.
+
+---
+
+## ADR-064-BE — O lock por cliente saiu de dentro do cache e virou fonte única (Sprint 11 / BACK 11.2)
+
+**Data:** 2026-09-24 · **Status:** ativo · **Escopo:** `app/integrations/omie/client_locks.py`,
+`OmieLancamentoCache`, `ClientTitlesSyncService`
+
+**O que existia:** `OmieLancamentoCache._populate_locks`, um dicionário de
+`asyncio.Lock` por cliente **interno ao cache**, serializando
+`populate_from_extrato` — porque a Omie processa uma requisição por método por
+credencial e a Tela de Revisão dispara o enriquecimento por dois caminhos ao mesmo
+tempo (`8020`/`1880`, incidente real).
+
+**Por que não bastava.** A ingestão da carteira fala com a MESMA credencial do
+mesmo cliente, por um terceiro caminho. Um lock interno ao cache serializaria o
+cache **consigo mesmo** e deixaria a ingestão colidir com ele: dois mecanismos, um
+buraco — exatamente o que o PRD proíbe ("o MESMO lock, não um segundo
+mecanismo").
+
+**O que foi feito:** `OriginClientLocks` num módulo próprio, com um singleton de
+processo (`origin_client_locks`). O cache passou a **consumi-lo** (o dicionário
+interno deixou de existir) e o serviço da carteira consome o mesmo. Injetável só
+para o teste poder observar.
+
+`tests/unit/test_origin_client_locks.py` trava as duas metades: o cache aponta
+para o registro compartilhado, e `_populate_locks` não existe mais como atributo.
+Se alguém reintroduzir um dicionário interno, o vermelho avisa que a colisão
+voltou a ser possível.
+
+**Escopo declarado: PROCESSO.** `asyncio.Lock` não atravessa instância do Cloud
+Run e o módulo não finge que atravessa. A defesa contra a colisão entre instâncias
+é o comando em lote rodar um cliente de cada vez.
+
+**Regra que acompanha o mecanismo: NUNCA aninhar.** `asyncio.Lock` não é
+reentrante; há dois tomadores hoje (`populate_from_extrato` e a ingestão) e nenhum
+chama o outro. Tomador novo precisa manter isso, ou o resultado é deadlock sem
+traceback.
+
+---
+
+## ADR-065-BE — Falha de ingestão carimba com commit, e os três 409 NÃO carimbam nada (Sprint 11 / BACK 11.2)
+
+**Data:** 2026-09-24 · **Status:** ativo · **Escopo:** `ClientTitlesSyncService`,
+`scripts/sync_client_titles.py`
+
+**Duas classes de desfecho negativo, tratadas de formas opostas de propósito.**
+
+**1. Falha da ORIGEM** (fault com HTTP 200, auth recusada, timeout, 5xx):
+`titles_sync_failed_at` é carimbado, `titles_synced_at` fica **intocado**, e a
+exceção propaga. O `commit()` explícito é obrigatório (irmão do ADR-053-BE): a
+política de `get_db_session` é `except: rollback(); raise`, então sem a barreira de
+durabilidade o carimbo morreria junto com a exceção que o motivou — escrita
+seguida de `raise` é desfeita em produção e **invisível** no teste de integração,
+cuja fixture não tem o `rollback()` da produção.
+
+**2. Os três 409 da taxonomia da S9** (`SEM_CONEXAO`, `ORIGEM_COM_ERRO`,
+`CAPACIDADE_AUSENTE`): **nada** é carimbado. Não é a origem que falhou — é a
+configuração do cliente que não permite tentar. Marcar falha aqui poria na tela "a
+sincronização falhou" para um cliente que nunca conectou nada. O teste
+`test_os_409_nao_carimbam_falha_de_sincronizacao` trava isso.
+
+**Ordem que sustenta "nunca carteira parcial".** A origem é lida INTEIRA antes de
+qualquer escrita, então falha no meio não tem meia-gravação a desfazer. O ciclo
+(upsert, fechar quem saiu, carimbar sucesso) roda na MESMA transação.
+
+**Lista vazia da origem é carteira vazia de VERDADE.** Quem converte erro do
+fornecedor em exceção é o `OmieClient` (a Omie responde HTTP 200 com
+`faultstring`), então uma lista vazia significa "sem título em aberto". Tratar o
+contrário fecharia a carteira inteira de quem teve uma credencial expirar. E é por
+isso que "carteira vazia" e "nunca sincronizou" precisam ser distinguíveis por
+`titles_synced_at`, não por contagem.
+
+**Sem TTL, ao contrário do plano de contas (S10).** A cadência é decidida fora (o
+job diário da INFRA 11.6 e o botão manual), e um TTL faria o botão "Sincronizar"
+mentir para quem acabou de registrar um pagamento no ERP.
+
+**O comando em lote** (`scripts/sync_client_titles.py`) varre só os clientes com
+`closed_at` nulo (`active=False` **continua** no lote: desativado não é
+encerrado), usa uma sessão e uma transação por cliente, e **conta e pula** a falha
+de um cliente em vez de abortar. Os escalares (o `client_id`) são capturados ANTES
+do bloco transacional — ler atributo de ORM depois do `rollback()` levanta
+`MissingGreenlet`, e apareceria justamente no log de erro, que é o único sinal de
+que algo deu errado.
+
+---
+
+## ADR-066-BE — `carteira_sincronizada`: cinco chaves, zero dedup, e o teste que CONTA LINHAS (Sprint 11 / BACK 11.3)
+
+**Data:** 2026-09-24 · **Status:** ativo · **Escopo:**
+`UsageEventName.CARTEIRA_SINCRONIZADA`, `CarteiraSincronizadaProps`,
+`UsageEventService.emit_carteira_sincronizada`
+
+**As cinco chaves são as do PRD, e nenhuma a mais.** `client_id`,
+`titulos_receber`, `titulos_pagar`, `vencidos`, `mais_antigo_dias`. O risco deste
+evento é o pior da série: ele nasce da carteira de **cobranças** do cliente, e a
+tentação natural é mandar junto "o título mais antigo" ou "os fornecedores em
+atraso" para facilitar o diagnóstico. Isso poria nome de devedor e identidade de
+título dentro do sink de métrica, que é o lugar do sistema com menos proteção. O
+`extra="forbid"` do `_StrictProps` recusa na EMISSÃO, e o teste unitário tenta
+oito chaves proibidas nominalmente (lista de ids de título, nome de devedor,
+razão social, CNPJ, observação, categoria, valor total).
+
+**`vencidos` é SUBCONJUNTO do total, não uma terceira parcela.** Somá-lo a
+`titulos_pagar + titulos_receber` daria um número sem significado. Está escrito no
+docstring porque é o tipo de erro que alguém comete lendo o payload seis meses
+depois.
+
+**`mais_antigo_dias == 0` significa "nada vencido"** — inclusive na carteira
+vazia. É informação honesta, não ausência de dado. A distinção que importa
+("nunca sincronizou") mora em `clients.titles_synced_at`, não aqui, e é por isso
+que aquela coluna existe.
+
+**Fora de `DEDUPED_EVENT_NAMES`, por construção E por teste.** A fórmula lê a
+ÚLTIMA linha por `client_id` no período; o job diário gera uma linha por dia, e na
+allow-list todas depois da primeira sumiriam — a leitura mediria a foto do
+primeiro dia para sempre. Sem `session_id`, o índice parcial nem alcança o evento;
+entrar na allow-list exigiria migration, que é a revisão que se quer ter.
+
+**Fora de `CLIENT_EMITTED_EVENTS`.** Aceitá-lo do browser deixaria quem usa o
+produto forjar **numerador e denominador** da cobertura. O endpoint público
+responde **400 `VALIDATION_ERROR`** (não 422: validação de forma é do handler
+global — convenção de 23/09/2026), e um teste de integração afirma isso.
+
+**Emitido num lugar só, no fim de uma sincronização ÍNTEGRA.** O caminho de falha
+(`_fetch`) re-levanta antes de chegar ao `_persist`, então a garantia "falha no
+meio não emite" é estrutural, não um `if`. Os três 409 de configuração também não
+emitem: cliente sem origem não tem cobertura zero, tem **ausência de medição** —
+contar zero ali diluiria a métrica com clientes que nunca foram consultados.
+
+**As contagens vêm de `TitleSyncResult`**, calculadas uma vez sobre o que a
+origem devolveu. O emissor não reconta nada: é o que impede a métrica e o banco de
+divergirem, e a métrica é o único jeito de saber se a sprint funcionou.
+
+**A reprovação histórica que isto evita** (Sprint 4): a chave divergia entre o
+enum, o schema e o emissor; o `42P10` era engolido pelo fail-soft; e **nada** era
+gravado, em silêncio. Daí o teste que **conta as linhas** (duas sincronizações
+geram duas linhas, com as contagens certas em cada uma), em vez de um teste que só
+verifica que o `emit` foi chamado.
+
+---
+
+## ADR-067-BE — O aging é UMA query de agregação, e "nunca sincronizada" é CAMPO, não zero (Sprint 11 / BACK 11.4)
+
+**Data:** 2026-09-24 · **Status:** ativo · **Escopo:**
+`ClientTitlesRepository.aging`, `AgingTotals`, `TitlesSummary`,
+`ClientTitlesReadService`
+
+**Uma query, não duas nem 28.** A tela precisa de 2 tipos x (total em aberto + a
+vencer + vencido + 4 baldes) x (valor + quantidade) = 28 números.
+`GROUP BY title_type` com `FILTER` por balde entrega os 28 numa ida ao banco.
+Buscá-los um a um seriam 28 idas para responder uma pergunta só.
+
+**Por que no BANCO e não em Python.** Somar em Python exigiria carregar a carteira
+inteira, e — pior — o número passaria a depender do recorte que o chamador tinha
+carregado. É exatamente assim que nasce um aging calculado sobre a página, que é o
+defeito que o R3 nomeia.
+
+**Sem `CAST` de 64 bits, e isso é deliberado.** A regra do primer ("cast antes de
+multiplicar") existe para `BIGINT`, que estoura em `SUM`. `SUM` sobre `NUMERIC` no
+Postgres é de precisão arbitrária e não tem teto; forçar um cast só acrescentaria
+um lugar para perder centavos.
+
+**`COALESCE(SUM(...), 0)` em toda soma**, e `ZERO_MONEY = Decimal("0.00")` como
+constante única. `SUM` de conjunto vazio é `NULL`, e a resposta certa para "não há
+título neste balde" é zero. A constante com escala existe porque `Decimal(0)` e
+`Decimal("0.00")` comparam iguais mas **serializam diferente** — a tela veria "0"
+num lugar e "0,00" no outro.
+
+**Tipo sem nenhum título em aberto não aparece no `GROUP BY`**, e a tela precisa
+das duas colunas de qualquer forma. O preenchimento com `_zeroed_totals()` fecha
+isso, com **todas** as quatro chaves de balde presentes: chave ausente viraria
+`KeyError` ou, pior, um balde silenciosamente omitido. O caso não é hipotético — o
+escritório parceiro que motivou a sprint só tem títulos a receber.
+
+**As duas identidades que a tela promete, e que são ASSERÇÃO:**
+
+    total_a_vencer + total_vencido == total_em_aberto
+    soma dos quatro baldes         == total_vencido
+
+Elas valem porque as duas metades saem da MESMA base (`status = em_aberto`) e
+porque os baldes particionam exatamente `dias >= 1`. É aqui que um `>=` virado `>`
+numa fronteira aparece: a soma para de fechar, mesmo que cada parcela continue
+plausível sozinha. Testadas em dois níveis — unitário (sobre valores montados, roda
+sem banco) e integração (sobre o resultado real do SQL, com 30/31 e 90/91
+plantados).
+
+**`nunca_sincronizada` é campo derivado num lugar só, e o teste afirma O CAMPO.**
+O critério do R3 é "estado vazio distinguível de zeros; o teste afirma o campo, não
+o valor 0". Uma tela que decidisse por `total_em_aberto == 0` diria "este cliente
+não deve nada" para um cliente que ninguém nunca consultou. E o inverso também
+importa: cliente consultado sem título em aberto é um resultado legítimo de zero.
+
+**Falha na última tentativa NÃO descarta os agregados.** Eles descrevem a última
+carteira ÍNTEGRA (a falha não escreveu nada), e `sync_failed_at` ao lado de
+`synced_at` é o que permite à tela dizer "falhou agora, e estes números são de tal
+dia". Descartá-los deixaria a tela vazia justamente quando o usuário precisa dela.
+
+**`referencia` (o "hoje" do servidor) viaja na resposta.** Sem ela, a tela
+recalcularia os baldes com o relógio do navegador e dois usuários em fusos
+diferentes veriam o mesmo título em baldes diferentes. O parâmetro `today` do
+serviço existe para o TESTE plantar títulos em cada balde sem depender do
+calendário do dia — nunca para a rota aceitar data do cliente.
+
+**`ClientTitlesReadService` é separado do serviço de sincronização** pelo mesmo
+motivo que `_fetch_names` é separado de `_fetch` no plano de contas (S10): uma rota
+de LEITURA que pudesse carimbar `titles_sync_failed_at` poria na tela um aviso de
+"a sincronização falhou" que nunca aconteceu. Há teste para isso.
+
+---
+
+## ADR-068-BE — A resolução de nome de devedor virou ACESSOR, e a carteira é fail-soft até o fim (Sprint 11 / BACK 11.5)
+
+**Data:** 2026-09-24 · **Status:** ativo · **Escopo:**
+`integrations/omie/supplier_names.py`, `client_titles/routes.py`,
+`reconciliations/review/service.py`
+
+**O método saiu de dentro do serviço de revisão.** `_resolve_supplier_names` morava
+em `reconciliations/review/service.py` e servia só a aba de Divergências. A
+carteira precisa do MESMO nome para os MESMOS códigos; copiar o método criaria uma
+**segunda leitura da origem sobre o mesmo cache** — duas implementações de
+fail-soft, duas chances de uma delas logar o nome (PII, §3.3) ou esquecer o cache
+negativo. Agora há um acessor só (`resolve_supplier_names`), e o serviço de revisão
+**delega** para ele. A chave do log de falha da revisão
+(`omie_entries_supplier_resolve_failed`) é preservada via parâmetro, para não
+invalidar consulta de observabilidade apontando para ela.
+
+**A distinção que justifica a função ter corpo** (e que uma cópia perderia):
+`OmieFaultError` (a origem RESPONDEU e recusou) marca cache negativo de 15 min;
+falha de TRANSPORTE (timeout, 5xx) **não marca nada**, para o próximo render tentar
+de novo. Marcar no segundo caso silenciaria o retry de uma indisponibilidade
+passageira; não marcar no primeiro faria cada render pagar a mesma consulta inútil.
+
+**Fail-soft até o fim, e o 409 da S9 é ENGOLIDO na leitura.** A lista da carteira
+resolve o nome dentro de um `try` que aceita qualquer exceção ao construir o client
+da origem — inclusive os três 409 da taxonomia da S9. Isso é decisão de produto, não
+descuido: cliente sem origem conectada **continua tendo carteira para ler** (a que
+foi sincronizada antes de a conexão sair), e responder 409 numa LEITURA
+transformaria uma configuração pendente numa tela quebrada. Códigos, valores,
+vencimentos e o aging inteiro são LOCAIS e continuam corretos; o que falta é o nome.
+O caminho fica no log (`client_titles_supplier_names_origin_unavailable`) — nunca
+`except: pass`.
+
+**`supplierNameResolved` é campo próprio, e não `supplierName is null` derivado.**
+São três estados diferentes e a tela precisa distinguir: (a) título sem
+`supplierCode` — não há o que resolver, `resolved=true`; (b) código presente e nome
+resolvido — `resolved=true`; (c) código presente e nome ausente — `resolved=false`,
+e a tela mostra o CÓDIGO com a marcação, nunca campo vazio (R4). Derivar do `null`
+colapsaria (a) e (c).
+
+**Resolução em LOTE, contada por código DISTINTO.** O teste planta 6 títulos com 2
+fornecedores e exige **2** chamadas à origem. Um `ConsultarCliente` por linha
+renderizada seriam 6 idas por abertura de tela, contra uma origem que processa uma
+requisição por método por credencial.
+
+---
+
+## ADR-069-BE — `view_client_receivables` / `sync_client_receivables`: o nome é contrato, a tabela é que está certa (Sprint 11 / BACK 11.5)
+
+**Data:** 2026-09-24 · **Status:** ativo · **Escopo:** `Permission`,
+`PERMISSION_MATRIX`, `core/dependencies.py`, `core/sensitive_endpoints.py`
+
+**A divergência de nome é DELIBERADA e está documentada nos dois lados.** A tabela
+é `client_titles` (a carteira inclui **a pagar**, e "receivables" descreve só
+metade dela); as permissões são `view_client_receivables` e
+`sync_client_receivables` porque **vêm do PRD e são contrato** — o espelho do front
+(`lib/authz.ts`) e a tabela de permissões do PRD usam esses nomes. Renomear a
+permissão para casar com a tabela quebraria os dois ao mesmo tempo. A nota está no
+`Permission`, no `dependencies.py`, nas rotas e no teste da matriz, porque é
+exatamente o tipo de "inconsistência" que alguém corrige de boa-fé seis meses
+depois.
+
+**Duas permissões, e não uma, com as MESMAS células do plano de contas.** A
+coincidência não é preguiça: a pergunta é a mesma nos dois casos ("quem lê a
+posição/configuração do cliente" x "quem pode fazer o servidor ir à origem"), e a
+resposta do PRD coincidiu. Continuam SEPARADAS para que uma mudança de célula não
+arraste a outra — reusar `sync_client_chart_of_accounts` amarraria duas
+sincronizações diferentes a uma decisão só.
+
+**A célula que importa é a do `client_operator`:** LÊ (200) e **não** sincroniza
+(403). O teste nominal do par (`test_o_par_de_permissoes_nao_foi_reusado`) afirma os
+dois lados no mesmo teste — se alguém tivesse reusado uma permissão só, um dos dois
+quebraria.
+
+**Lista canônica: 71 para 74, `PENDING_ENDPOINTS` continua vazio.** As três rotas
+entraram como `COLLECTION` e a doc companheira foi regenerada (`74/74 endpoints
+cobertos`). A justificativa registrada na entrada é específica: nenhum NOME é
+persistido, mas **vazar esta coleção é vazar quanto um cliente está inadimplente** —
+o dado mais sensível que a plataforma passa a guardar nesta sprint.
+
+**Enum inválido em query é 400 `VALIDATION_ERROR`, nunca 422.** Os cinco filtros
+(`type`, `situation`, `bucket`, `sortBy`, `sortOrder`) são `Literal`, então valor
+fora do vocabulário cai no handler global — e o teste parametrizado afirma **400** e
+o `error.code`, conforme a convenção de 23/09/2026 e a §4.8. Um `str` livre daria
+lista vazia, que o usuário leria como "este cliente não tem nada vencido".
+
+⚠️ **O `schema.ts` NÃO pôde ser regenerado por este papel.**
+`apps/web/src/lib/contracts/schema.ts` está fora do escopo de escrita do backend (o
+scope-guard bloqueia `apps/web/**`), e `openapi-typescript` não está instalado no
+worktree. O que FOI verificado aqui: o spec do FastAPI expõe as 3 rotas com os
+aliases certos (`pageSize`, `sortBy`, `sortOrder`) e os 10 schemas novos — dump via
+`app.openapi()`, sem servidor. A regeneração e o commit do `schema.ts` são da FRONT
+11.7; o QA confirma com `diff` (ADR-026-QA).
+
+---
+
+## ADR-033-FE — O bloco de agregados SOME quando a carteira nunca foi sincronizada (Sprint 11 / FRONT 11.7)
+
+**Data:** 2026-09-24 · **Status:** ativo · **Escopo:** `client-titles-screen.tsx`
+
+O contrato da BACK 11.5 traz `neverSynced` como campo EXPLÍCITO, ao lado de
+agregados que, nesse estado, são todos `0.00`. A tentação é renderizar o bloco
+sempre e deixar o estado vazio só para a tabela — e é errado: `R$ 0,00` em
+"Em aberto" é lido como **"este cliente não deve nada"**, que é uma afirmação
+que ninguém verificou. O R3 nomeia esse defeito ("nunca zeros que pareçam
+resultado").
+
+**Decisão:** com `neverSynced=true` a tela não renderiza `ClientTitlesSummaryBlock`
+de jeito nenhum; o que aparece é o estado vazio com a ação de sincronizar (ou,
+para quem não pode sincronizar, o texto que diz de quem é a ação). Travado nos
+dois níveis: vitest afirma que `getByRole('region', {name:'A receber'})` é nulo
+e que não existe `R$ 0,00` na tela; o e2e repete em browser.
+
+**Por que `neverSynced` e não `syncedAt == null`:** derivar isso em cada tela é
+como a regra se perde. O backend já decidiu — a tela obedece.
+
+---
+
+## ADR-034-FE — Ordenação: UM controle, DOIS parâmetros de URL (Sprint 11 / FRONT 11.7)
+
+**Data:** 2026-09-24 · **Status:** ativo · **Escopo:** `client-titles-screen.tsx`
+
+O contrato tem `sortBy` (`due_date`|`amount`) e `sortOrder` (`asc`|`desc`), e a
+tradução literal seria dois `Select`. Com os três filtros do R4 (tipo, situação,
+balde) isso dá **cinco** controles empilhados em 390px, o que empurra a tabela
+para fora da primeira dobra — o mesmo mecanismo que, em 18/09, espremeu uma
+lista para uma linha com o gate verde.
+
+**Decisão:** um `Select` "Ordenar por" com as quatro combinações úteis
+(`due_date:asc|desc`, `amount:desc|asc`), que escreve os **dois** parâmetros na
+URL. O estado continua sendo o do contrato; o que é único é o controle.
+
+**Cabeçalho de coluna clicável com `aria-sort` foi considerado e recusado:** não
+existe esse padrão em nenhuma tabela do produto hoje, e estrear maquinaria nova
+de a11y numa sprint cujo gate em browser não pôde rodar seria apostar no escuro.
+
+---
+
+## ADR-035-FE — "Nome não resolvido" é TRÊS casos, e o contrato distingue os três (Sprint 11 / FRONT 11.7)
+
+**Data:** 2026-09-24 · **Status:** ativo · **Escopo:** `SupplierCell`
+
+`supplierName` nulo não tem UM significado. O contrato dá as duas chaves para
+separar:
+
+| `supplierCode` | `supplierNameResolved` | O que a célula mostra |
+| --- | --- | --- |
+| tem | `true` | a razão social resolvida em runtime |
+| tem | `false` | **o código** + "Nome não resolvido" + dica acessível |
+| nulo | `true` | "Sem devedor informado" |
+
+O caso do meio é o que o R4 cobra: **nunca** célula vazia e **nunca** o código
+posando de nome. A dica é `Tooltip` com `role="img"` + `aria-label` (o padrão de
+`situation-badge.tsx`), nunca `title` nativo — que não aparece no toque, não
+alcança o teclado e o leitor ignora.
+
+**Armadilha de teste que isto criou:** "90+ dias" é rótulo de balde no bloco de
+agregados **e** badge na linha. `queryByText` sem `within` casa os dois e o
+teste do título liquidado reprova com "Found multiple elements" — o mesmo
+mecanismo do ADR-031-FE com "Sem destino declarado".
+
+---
+
+## ADR-036-FE — O gate de a11y da S11 NÃO rodou: sandbox sem Docker e sem Chromium (Sprint 11 / FRONT 11.7)
+
+**Data:** 2026-09-24 · **Status:** ativo · **Escopo:** verificação da entrega
+
+Os dois caminhos da receita do `front-gate` estão fechados nesta sessão:
+`docker ps` devolve `dial unix /var/run/docker.sock: socket: operation not
+permitted` (o **sandbox** bloqueia o socket — não é o Docker Desktop desligado,
+e o `DOCKER_CONFIG` alternativo não muda isso), e o Chromium do host não sobe.
+
+**O que foi feito mesmo assim:** os seis cenários da carteira foram escritos no
+`a11y-mocked.spec.ts` (com as fixtures e a entrada na varredura
+`TELAS_COM_TABELA`), e a camada rápida de axe do vitest — `assertNoA11yViolations`,
+que roda sem browser — cobre a tela cheia **e** o estado vazio.
+
+**O que fica devendo, e não pode ser dado por medido:** axe nos três temas em
+browser real, e os PNGs desktop/390px abertos. Gate verde não prova layout, e o
+inverso também vale: **gate não rodado não prova nada**. O e2e novo rodou zero
+vezes — a primeira execução pode acusar locator, não só transbordo.
+
+**A regra que isto encoda** (irmã do ADR-029-QA): falha de ambiente se NOMEIA,
+com o que ficou por verificar e o comando de quem tiver o ambiente. Declarar
+"deve passar" é o que o CLAUDE.md §6.10 proíbe.
+
+---
+
+## ADR-011-INFRA — A sincronização diária da carteira CLONA o job de cleanup em vez de declarar os secrets (Sprint 11 / INFRA 11.6)
+
+**Data:** 2026-09-24 · **Status:** ativo · **Escopo:** `scripts/setup-gcp.sh`, `deploy-dev.yml`, `deploy-prod.yml`
+
+**Contexto.** O R5 da Sprint 11 exige sincronizar a carteira de títulos **1× por
+dia por cliente**, e não há scheduler dentro da aplicação (a FASE 0 removeu
+Redis/ARQ). O molde é o job de limpeza que já roda: Cloud Run Job disparado por
+Cloud Scheduler. O comando de aplicação é `python -m scripts.sync_client_titles`
+(BACK 11.2), na imagem `auditoria-api`.
+
+**Decisão 1 — a configuração do job novo é CLONADA, não declarada.**
+`setup-gcp.sh` lê o job de referência do ambiente (`auditoria-api-cleanup-stuck-<env>`,
+senão `auditoria-api-migrate-<env>`) com `run jobs describe --format=export`,
+troca o nome e aplica com `run jobs replace`. Em cima disso reaplica, explícito,
+o que é contrato desta task: `--command=python --args=-m,scripts.sync_client_titles`,
+a SA de runtime, `KEK_KMS_KEY_NAME`, os secrets de alerta e a política de
+retentativa (`--update-*` faz merge, não zera o clone).
+
+**Por quê:** o conjunto completo de secrets dos jobs (`DATABASE_URL`, JWT,
+chaves de cripto, Anthropic) **não está versionado em lugar nenhum** — os jobs
+de dev foram criados à mão e `setup-gcp.sh` nunca os criou. Um `--set-secrets`
+escrito de memória acerta os nomes que eu consigo adivinhar e erra o resto: o
+job sobe sem `DATABASE_URL` e falha **todo dia às 4h**, sem tela, sem usuário e
+sem ninguém olhando. Clonar dá **paridade serviço × job por construção**, que é
+a regra do papel, em vez de uma lista mantida à mão que envelhece no primeiro
+secret novo. O custo é a dependência de ordem: em ambiente novo (prod) não há
+job de referência — o script **avisa e sai 0**, e o operador re-executa depois
+do 1º deploy. Está escrito no runbook.
+
+**Decisão 2 — nenhuma retentativa automática.** `--max-retries=0` no Cloud Run
+Job **e** `--max-retry-attempts=0` no Scheduler, com `--tasks=1 --parallelism=1`
+e `--task-timeout=1800s`. É a leitura literal do R5 ("registrar a falha e tentar
+de novo **no ciclo seguinte**") e a única compatível com o guardrail da origem:
+ela processa **uma requisição por método por credencial**, então retentar na
+hora é o caminho mais curto para duas execuções do mesmo cliente disputando a
+mesma credencial. O teto de 30 min é o que impede a execução de ficar presa em
+"sincronizando" — a mesma função que o cron de 25 min cumpre para a conciliação.
+
+**Decisão 3 — `12 4 * * *` em `America/Sao_Paulo`.** Horário de baixa, e o
+minuto `:12` é escolhido, não arbitrário: o cleanup roda de 25 em 25 minutos
+(`:00`, `:25`, `:50`), e `:12` é o ponto mais longe de todas as bordas. Cadência
+diária é decisão de engenharia declarada no PRD (fechamento e reunião são
+mensais; diário dá uma ordem de grandeza de folga).
+
+**Decisão 4 — SA de invocação dedicada.** `auditoria-scheduler-<env>` com
+`roles/run.invoker` **no job** (`run jobs add-iam-policy-binding`), nunca no
+projeto: o agendador só pode disparar ESTE job. O runtime continua na SA da API
+(nunca a default do compute, nunca a de deploy) e o script **confere e avisa**
+se a SA do job regrediu para a default — esse erro é silencioso, só aparece no
+primeiro acesso a secret. `sleep 10` após criar a SA: criação é
+eventual-consistente e o binding falharia com "does not exist".
+
+**Decisão 5 — o passo de deploy é best-effort com guard.** O
+`Re-resolve :dev digest in sync-titles Job` faz `run jobs describe` ANTES do
+`update`: se o job ainda não existe (operador não rodou o `setup-gcp.sh`), emite
+`::warning::` apontando o runbook e o deploy segue **verde**. Provisionamento
+nunca derruba deploy — e um `jobs update` sem guard em recurso que pode não
+existir é exatamente como se derruba.
+
+⚠️ **O que ninguém verificou ainda:** `apps/api/scripts/sync_client_titles.py`
+não estava na árvore quando esta task fechou (BACK 11.2 roda em paralelo na
+Fase 1). O nome do módulo veio da descrição da task; se o backend nomear
+diferente, o job dispara `python -m` num módulo inexistente e falha no 1º ciclo.
+É 1 linha (`--args=`) em `setup-gcp.sh` — mas tem de ser conferido no merge de
+integração.
+
+> **Conferido pelo QA em 24/09/2026 e RESOLVIDO:** `apps/api/scripts/sync_client_titles.py`
+> existe na árvore da sprint, e `docker/Dockerfile.api` faz `COPY apps/api /app/`
+> com `WORKDIR /app` — `python -m scripts.sync_client_titles` resolve dentro da
+> imagem. Nenhuma linha de `--args=` precisa mudar.
+
+---
+
+## ADR-030-QA — Os dois defeitos de produto da Sprint 11 são invisíveis para ruff, mypy strict e 1141 unitários (Sprint 11 / QA 11.8)
+
+**Data:** 2026-09-24 · **Status:** ativo · **Escopo:** gate de qualidade, o que cada camada consegue provar
+
+Esta foi a primeira rodada do hub em que a suíte de **integração** rodou dentro do
+sandbox do QA (receita no ADR-032-QA). Ela achou dois defeitos de PRODUTO que
+nenhuma das camadas que os agents conseguem rodar sozinhos enxerga. Registro os
+dois porque a lição não é sobre a Sprint 11: é sobre o que cada gate prova.
+
+**Defeito 1 — símbolo chamado em runtime importado sob `TYPE_CHECKING`.**
+`client_titles/service.py:262` constrói `TitlesSummary(...)`, e o import está em
+`if TYPE_CHECKING:` (linha 57). Em runtime: `NameError`. Efeito: `GET
+/titles/summary` e `POST /titles/sync` respondem **500** — duas das três rotas da
+sprint, inteiras.
+
+Por que passou por tudo:
+
+- `mypy --strict` aprova **por definição** — `TYPE_CHECKING` existe para isso;
+- `ruff` não distingue uso em anotação de uso como chamável;
+- o teste unitário dos três estados (`test_client_titles_summary_states.py`)
+  monta `TitlesSummary` DIRETO, com import correto no topo do arquivo de teste.
+  Ele prova o dataclass; nunca chama `ClientTitlesReadService.summary()`.
+
+**Regra que fica:** símbolo usado como CHAMÁVEL (construtor, função, decorator)
+nunca vai para `if TYPE_CHECKING:` — ali só entra o que aparece exclusivamente
+depois de `:` ou `->`. E todo serviço novo precisa de pelo menos UM teste que o
+CHAME (com repositório dublê, sem banco): um teste que só instancia o valor de
+retorno não prova que alguém consegue produzi-lo.
+
+**Defeito 2 — igualdade exata contra um código de falha de terceiro.**
+`omie_adapter._is_tag_rejection` compara `metadata["fault_code"] == "5001"`. A
+Omie devolve o fault code SOAP inteiro: **`SOAP-ENV:Client-5001`**. A comparação
+nunca é verdadeira, o ramo (b) do R1 (iterar as contas conhecidas quando a origem
+recusa a listagem sem filtro) é **código morto**, e o fallback que sustenta a
+suposição de risco do R1 não existe na prática.
+
+O teste de integração da própria task usava o valor REAL (`_fault("SOAP-ENV:Client-5001", …)`)
+e por isso pegou o defeito. Não havia teste unitário do predicado — e é o unitário
+que roda em qualquer máquina.
+
+**Regra que fica:** código de erro de terceiro nunca se compara por igualdade sem
+a evidência do formato capturado. Quando o predicado decide um DESVIO de caminho
+(fallback, retry, classificação), ele ganha teste unitário próprio com o valor
+real e com um valor que NÃO deve desviar. Predicado de desvio testado só na
+integração é predicado que ninguém roda.
+
+---
+
+## ADR-031-QA — Três testes vermelhos da Sprint 11 não são defeito de produto, e cada um tem uma armadilha reaproveitável (Sprint 11 / QA 11.8)
+
+**Data:** 2026-09-24 · **Status:** ativo · **Escopo:** testes de integração
+
+Dos 14 vermelhos da rodada, 10 vêm do defeito 1 do ADR-030-QA. Os outros quatro
+são três armadilhas de TESTE, e vale registrar porque as três voltam.
+
+**1. Identity map contra escrita em Core.** `test_titulo_que_reaparece_volta_a_valer`
+afirmava `ausente_na_origem` onde o banco tem `em_aberto`. O teste lê o título no
+MEIO (carrega no identity map), o ciclo seguinte faz `INSERT … ON CONFLICT DO
+UPDATE` em Core — que **não** repovoa instância ORM já carregada — e o `select()`
+seguinte devolve o objeto antigo. Sonda do QA, os dois caminhos no mesmo instante:
+
+    depois de sumir             (ORM): ausente_na_origem
+    depois de voltar            (ORM): ausente_na_origem
+    depois de voltar (SQL cru, BANCO): em_aberto
+    depois de voltar  (ORM expirado): em_aberto
+
+**Regra:** teste que lê a MESMA linha antes e depois de uma escrita em Core precisa
+de `expire_all()` (ou do `expire_all()` dentro do helper de leitura). Um teste que
+falha pelo motivo errado é pior que teste ausente: a próxima pessoa "conserta" o
+repositório que estava certo.
+
+**2. Revisão de head fixada no teste.** `test_migrations.py::TestPlanoDeContasRoundTrip`
+afirma `version_num == CHART_OF_ACCOUNTS_REV` depois de `upgrade head`. Toda sprint
+que acrescenta migration quebra esse teste — é a terceira vez que se paga o
+pedágio. **Regra:** asserção de convergência lê o head do `ScriptDirectory`; não
+se fixa revisão como se fosse constante do produto.
+
+**3. Conjunto de capacidades afirmado nominalmente.** `test_client_connections.py`
+compara o set de capacidades do Omie por igualdade; `Capability.LISTAR_TITULOS_EM_ABERTO`
+entrou e o teste caiu. Aqui a rigidez é DESEJADA (capacidade nova tem de ser uma
+decisão), mas quem acrescenta a capacidade atualiza o teste **na mesma task**.
+
+---
+
+## ADR-032-QA — Como rodar a integração e o a11y dentro do sandbox do agent (Sprint 11 / QA 11.8)
+
+**Data:** 2026-09-24 · **Status:** ativo · **Escopo:** ambiente de verificação do QA
+
+As Sprints 9 e 10 foram aprovadas com "a integração não rodou" como pendência
+declarada, e a validação humana achou 9 e 6 testes quebrados depois. Nesta rodada
+a integração rodou **dentro do sandbox**, e achou 14 — dois deles defeitos de
+produto. A receita vale registro porque não é óbvia.
+
+**O bloqueio real não é o Docker — é a porta.** O socket do Docker funciona; o que
+o sandbox recusa é a conexão TCP do processo do agent para uma porta do host
+(`Connection refused` em `127.0.0.1:<porta>`). Testcontainers mapeia para porta
+aleatória do host, então cai na mesma parede. A saída é rodar **o pytest também
+dentro de um container**, com `--network host`, apontando `TEST_DATABASE_URL` para
+o Postgres em container.
+
+    docker run -d --name pg -e POSTGRES_USER=auditoria -e POSTGRES_DB=auditoria_test \
+      -e POSTGRES_HOST_AUTH_METHOD=trust -p 55433:5432 postgres:16-alpine
+
+    docker run --rm --network host \
+      -v <worktree>:/repo \
+      -v ~/.local/share/uv/python:~/.local/share/uv/python:ro \
+      -w /repo/apps/api \
+      -e TEST_DATABASE_URL=postgresql+psycopg://auditoria@127.0.0.1:55433/auditoria_test \
+      <imagem-local> /repo/apps/api/.venv/bin/python -m pytest tests/integration -q
+
+Três armadilhas que custaram tempo:
+
+1. **O `.venv` é um symlink para o python gerenciado pelo uv.** Montar só o
+   worktree deixa `.venv/bin/python` quebrado dentro do container — o diretório
+   `~/.local/share/uv/python` tem de ser montado NO MESMO caminho absoluto.
+2. **`--env-file` é bloqueado** pelo harness, e o `$TMPDIR` do sandbox **não é
+   visível** para o daemon do Docker (o mount sai silenciosamente vazio). Arquivo
+   que o container precisa ler tem de estar dentro de um worktree.
+3. **Imagem com prefixo de registry (`mcr.microsoft.com/...`) faz o CLI tentar
+   resolver credencial** e bater no `~/.docker/config.json`, que o sandbox nega.
+   `docker tag <imagem> local:tag` uma vez resolve. O mesmo erro aparece
+   intermitentemente em qualquer `docker run` — é ruído do sandbox, não Docker
+   fora do ar: **re-tente antes de concluir que o Docker caiu**.
+
+**O mesmo caminho serve para o gate de a11y**, e resolve o `EROFS` que impede o
+agent de buildar o front: o container roda como root sobre o worktree montado,
+então o `next build` escreve o `.next` que o processo do agent não consegue
+escrever. `scripts/a11y-gate.sh` roda inteiro assim, nos três temas, com a imagem
+`mcr.microsoft.com/playwright` (retagueada) que já traz as libs do Chromium:
+
+    docker run -d --name a11y --network host -v <worktree-front>:/w -w /w \
+      -e HOME=/tmp/h -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pwlocal \
+      bash -c "corepack enable && corepack prepare pnpm@9.12.0 --activate \
+               && pnpm install --frozen-lockfile && bash scripts/a11y-gate.sh"
+
+**O que fica como lei do papel:** enquanto houver Docker na máquina, "a integração
+não rodou" deixa de ser pendência aceitável do QA do hub. A receita está aqui.
+
+---
+
+## ADR-033-QA — O gate de a11y rodou em browser e achou 1 violação; ABRIR o PNG achou 2 defeitos que o gate não mede (Sprint 11 / QA 11.8)
+
+**Data:** 2026-09-24 · **Status:** ativo · **Escopo:** FRONT 11.7, gate de a11y, design tokens
+
+Primeira vez que o gate de a11y rodou dentro do sandbox do QA (receita no
+ADR-032-QA). Resultado: **324 de 330 passam** no tema Hologram, e os 6 vermelhos
+são todos da Carteira. Vale registrar o que cada instrumento pegou, porque a
+divisão é a lição.
+
+**O que o axe pegou (1):** o badge `90+ dias`/`61 a 90 dias` usa
+`bg-destructive/10 text-destructive` com texto de 12px, e isso dá **4,22:1** no
+tema escuro e **4,42:1** no Hologram — abaixo do mínimo AA de 4,5:1. No tema
+claro passa, e é por isso que rodar UM tema só teria deixado passar.
+
+O token certo já existia: **`bg-destructive-muted`**, declarado nos três temas
+(`tailwind.config.ts`, `--destructive-muted` em `globals.css`), com o comentário
+do próprio config dizendo que `muted` é "a variante de FUNDO de banner/badge". O
+arquivo do badge já seguia essa convenção para `warning`, `success` e `info` — só
+o `destructive` saiu da linha. **Regra:** fundo de badge/banner usa o token
+`-muted` do semântico; `bg-<token>/10` sobre fundo escuro não sobrevive ao AA.
+
+⚠️ O mesmo par está em `reconciliation-status-badge.tsx`, `client-user-badges.tsx`
+e `glossary-badges.tsx`. Eles **não** aparecem vermelhos porque nenhum cenário do
+gate os RENDERIZA no escuro/Hologram — o defeito existe e não é medido.
+Follow-up `86e3dxund` (agent-frontend), que pede a troca **e** um cenário que os
+renderize: correção sem cenário é correção que o gate não protege.
+
+**O que só ABRIR o PNG pegou (2), com o gate verde em cima dos dois:**
+
+1. A 390px, os três valores do bloco de agregados **se sobrepõem**:
+   `grid grid-cols-3` + `text-xl` + `whitespace-nowrap` em colunas de ~95px
+   imprime `R$ 107.413R$10.000,0R$ 97.413,10`. O número que a sprint existe para
+   mostrar, ilegível no celular.
+2. A 390px, a área da tabela **colapsa para altura zero**: `min-h-0 flex-1`
+   dentro de `flex h-full flex-col`, com os quatro filtros empilhados consumindo
+   o viewport. Nem cabeçalho, nem linhas, nem estado vazio.
+
+**Por que os testes passaram em cima do defeito 2 — e isso é a parte
+reaproveitável:** a visibilidade do Playwright **não enxerga clipping por
+ancestral com `overflow`**. Um `getByText(...).toBeVisible()` continua verde com
+o contêiner em 0px de altura. Asserção de layout se faz com `boundingBox()`, não
+com `toBeVisible()`.
+
+**A lei que fica:** "gate de a11y verde" prova contraste, papel ARIA e foco. Não
+prova que o conteúdo cabe, não prova que dá para ler, e não prova que apareceu.
+Toda task de UI termina com o PNG de 390px **aberto** — e é a terceira sprint
+seguida em que isso pega algo (S7: valor quebrando depois do hífen; S7: NBSP do
+`formatBRL`; S11: os dois acima).
+
+---
+
+## ADR-034-QA — A regra do `TYPE_CHECKING` virou GATE de AST, não recomendação em prosa (Sprint 11 / QA 11.8)
+
+**Data:** 2026-09-24 · **Status:** ativo · **Escopo:** `tests/unit/test_type_checking_imports_gate.py`, `app/`, `scripts/`
+
+O ADR-030-QA terminava numa regra ("símbolo chamável nunca vai para
+`if TYPE_CHECKING:`"). Regra em prosa dentro de um `decisions.md` é exatamente o
+tipo de coisa que a sprint seguinte não lê. Esta rodada a encodou em teste.
+
+**O gate** varre `app/` e `scripts/` com `ast`, coleta os nomes importados dentro
+de um `if TYPE_CHECKING:` de nível de módulo, subtrai os que são reimportados em
+runtime (inclusive import dentro de função, que é o truque legítimo contra ciclo
+de import) e acusa os que sobram nas **quatro posições em que o nome é de fato
+AVALIADO**: chamada, decorator, classe-base e `raise`. Anotação não entra — é
+justamente o uso para o qual o bloco existe.
+
+**Provado nos dois sentidos**, que é o que separa gate de decoração:
+
+    árvore corrigida (HEAD da S11):  200 arquivos varridos, 0 problemas
+    service.py pré-correção (a685343): service.py:262 — `TitlesSummary` ...
+                                       importado só sob `TYPE_CHECKING`, aparece como chamada
+
+O arquivo tem uma classe própria (`TestOGateRealmenteDetecta`) com o defeito
+sintético, o decorator, a classe-base, a anotação legítima e o reimport em
+função — sem ela, um `_offenders` que devolvesse `[]` para sempre passaria verde
+e daria a MESMA falsa segurança que os 1.141 unitários deram enquanto duas rotas
+respondiam 500.
+
+**Por que em `scripts/` também:** `scripts/sync_client_titles.py` é o comando do
+Cloud Run Job diário. `NameError` ali é uma sincronização que falha de
+madrugada, sem ninguém olhando — e o job não tem tela para mostrar o 500.
+
+⚠️ **Custo de manutenção declarado:** o gate é estreito de propósito e não
+entende anotação em string nem `cast("X", ...)` — os dois são resolvidos pelo
+type checker e nunca tocam o runtime. Se um dia acusar um deles, o erro é do
+gate, e o conserto é estreitar mais, nunca abrir uma allow-list por conveniência.
+
+---
+
+## ADR-035-QA — O que a 2ª rodada da S11 conseguiu provar, e o que ficou devendo por falta de Docker (Sprint 11 / QA 11.8)
+
+**Data:** 2026-09-24 · **Status:** ativo · **Escopo:** veredito da S11, limites do ambiente do QA
+
+A 1ª rodada reprovou 5 tasks com 14 testes de integração vermelhos, 4 e2e
+vermelhos e 1 violação `serious` do axe. A 2ª rodada corrigiu tudo. O registro
+importante é **como** cada correção foi verificada, porque o ambiente mudou
+entre as duas rodadas.
+
+**O ambiente REGREDIU.** Na 1ª rodada o socket do Docker respondia (ADR-032-QA).
+Nesta, não: `dial unix /var/run/docker.sock: socket: operation not permitted` —
+negação do **sandbox**, não daemon fora do ar. Sem Docker não há Postgres
+(as três portas candidatas recusam conexão) nem Chromium (o binário do Playwright
+existe e não sobe: `error while loading shared libraries: libnspr4.so`). Então a
+suíte de integração e o gate de a11y **não rodaram nesta rodada**.
+
+**O que salvou o veredito:** os **dois defeitos de PRODUTO** da 1ª rodada passaram
+a ter **teste unitário**, e unitário roda em qualquer máquina. Não foi sorte — foi
+o item 2 de cada reprovação que pediu exatamente isso:
+
+- `TestOServicoConsegueMontarOSummary` CHAMA `ClientTitlesReadService.summary()`
+  com repositório dublê. Se o `NameError` voltasse, este teste fica vermelho sem
+  Postgres nenhum.
+- `TestPredicadoDaRecusaDeTag` exercita `_is_tag_rejection` com o valor real
+  (`SOAP-ENV:Client-5001`) e com 7 que NÃO devem desviar — inclusive o
+  `SOAP-ENV:Client-15001`, que um `endswith` solto deixaria passar. (O agent
+  implementou melhor do que a reprovação pedia: `rpartition("-")[2]` em vez do
+  `endswith` que sugeri.)
+
+**A lição que fica, e que vale mais que a sprint:** quando o QA reprova por teste
+vermelho que só roda com infraestrutura, **o item de correção tem de pedir a
+cobertura na camada mais barata que ainda prova o defeito**. Se as duas
+reprovações tivessem pedido só "deixe a integração verde", esta rodada teria
+terminado sem NENHUMA evidência executável — e eu estaria aprovando por leitura.
+
+**O que foi verificado por aritmética, não por gate:** o contraste do balde. Os
+tokens de `globals.css` dão, sobre `bg-destructive-muted` opaco: claro
+**5,92:1**, escuro **4,84:1**, Hologram **4,57:1** — os três acima do mínimo AA
+de 4,5:1. A margem do Hologram é de 0,07, então **qualquer** mexida no
+`--destructive-muted` daquele tema precisa remedir.
+
+**O que ficou nominalmente devendo** (está no veredito de cada task e no
+HANDOFF): a suíte de integração inteira, a bateria dos 74 endpoints sensíveis x 3
+atacantes, o gate de a11y nos três temas, os PNGs de 390px reabertos, e os itens
+de cenário com cliente real de dev da própria task de QA (conferência
+carteira x origem, o título de 90+ dias, a medição da suposição S-1).
+

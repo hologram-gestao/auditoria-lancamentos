@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 **S0–S19 + Sprints 0–5 do agents-hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **71/71** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **74/74** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
 > **O que cada sprint do agents-hub entregou** (todas na `main`):
 >
@@ -192,7 +192,7 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**71** hoje — o arquivo é a fonte, confira com
+      (**74** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant E cross-org**: a bateria
       (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
@@ -200,8 +200,9 @@
       organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
-      (`PENDING_ENDPOINTS` está vazio: cobertura **71/71**). As 3 rotas do
-      **plano de contas** (S10) entraram como coleção. Só
+      (`PENDING_ENDPOINTS` está vazio: cobertura **74/74**). As 3 rotas do
+      **plano de contas** (S10) e as 3 da **carteira de títulos** (S11 — lista,
+      agregados e sincronizar) entraram como coleção. Só
       auth, tipos de anomalia, `test-connection`, `alert-test` e as 5 rotas de
       `/organizations` (plataforma, sem dado de cliente) ficam fora, com motivo.
       Essa lista é o denominador da métrica de isolamento — endpoint fora dela é
@@ -381,7 +382,7 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
 9. **Matriz de permissões (Sprint 5 + camada de organizações):** declarativa e
    ÚNICA em `PERMISSION_MATRIX`
    ([apps/api/app/core/authz.py](apps/api/app/core/authz.py)), consultada por
-   `has_permission`; 16 permissões x 5 papéis, transcrita célula a célula em
+   `has_permission`; 18 permissões x 5 papéis, transcrita célula a célula em
    `tests/unit/test_authz_matrix.py`, com um teste que trava **a plataforma em
    toda linha**. No front, o espelho é `apps/web/src/lib/authz.ts` — **um**
    helper, nunca `if (role === ...)` espalhado por componente — com a mesma
@@ -410,6 +411,8 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    | Teste de alerta                 | ✅             | ✅               | ❌                    | ❌             | ❌              |
    | Ver plano de contas (S10)       | ✅             | ✅               | ✅ (carteira)         | ✅             | ✅              |
    | Sincronizar plano de contas     | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
+   | Ver títulos em aberto (S11)      | ✅             | ✅               | ✅ (carteira)         | ✅             | ✅              |
+   | Sincronizar títulos em aberto    | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
 
    **`manage_client_connections` (Sprint 9) inclui o `manager` de propósito**: ele
    cria cliente, e sem a célula o gerente do escritório parceiro cadastraria a
@@ -427,6 +430,17 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    `client_operator`) são células separadas. O par de teste que prova que
    nenhuma delas foi reusada é o MESMO caso: operador LÊ 200 e sincroniza 403 —
    qualquer teste que olhasse só um dos verbos passaria com a permissão errada.
+
+   **O par da carteira de títulos (Sprint 11) repete as mesmas células — e ainda
+   assim são permissões PRÓPRIAS.** `view_client_receivables` e
+   `sync_client_receivables` têm hoje exatamente os mesmos ✅/❌ do par do plano de
+   contas, porque a pergunta é a mesma ("quem lê a posição do cliente" x "quem
+   faz o servidor ir à origem") e o PRD respondeu igual. Reusá-las seria amarrar
+   duas sincronizações diferentes a uma decisão só: no dia em que uma mudasse de
+   célula, a outra mudaria junto sem ninguém pedir. ⚠️ **O nome diz "receivables"
+   e a tabela guarda os DOIS tipos** (a pagar e a receber): o nome da permissão
+   é contrato com o front e com o PRD, então quem está certo é `client_titles` —
+   não leia a permissão como se recortasse metade da carteira (ADR-069-BE).
 
    "(carteira)" e "(própria org)" **não** são células: são `resolve_client_access`
    e os filtros de coleção. **Tipos de anomalia é a única linha só-plataforma
@@ -706,6 +720,21 @@ ClickUp**, não no repo. `make sprints` lista o estado.
 | **7**  | Lançamento de faturas no Omie              | `reconciliation_omie_postings`, `omie_posting/`, `OMIE_POSTING_ENABLED`                                |
 | **9**  | Cliente sem sistema e conexões plugáveis   | `client_connections`, `integrations/providers/`, `legacy_fallback.py`                                  |
 | **10** | Plano de contas do cliente                 | `client_chart_of_accounts`, `modules/client_chart_of_accounts/`, `clients.chart_of_accounts_synced_at` |
+| **11** | Carteira de títulos em aberto              | `client_titles`, `modules/client_titles/`, `clients.titles_synced_at`/`titles_sync_failed_at`           |
+
+⏳ **A Sprint 11 foi aprovada pelo QA do hub em 24/09/2026 e ainda NÃO passou pela
+validação humana.** Ela traz a **carteira de títulos em aberto**: `client_titles`
+persiste, por cliente, os títulos a pagar e a receber ainda não liquidados —
+**sem recorte de conta e sem recorte de competência**, que é o que faz um título
+vencido há quatro meses aparecer, enquanto a conciliação (que sempre pede uma
+conta e um mês) nunca o traria. `processing/omie_fetch.py` **não foi tocado**: a
+conciliação continua exatamente como estava.
+O que ela move nos números deste primer: a lista canônica de endpoints sensíveis
+foi de 71 para **74** (`PENDING_ENDPOINTS` segue vazio) e a matriz da §4.9 foi de
+16 para **18** permissões (`view_client_receivables`, `sync_client_receivables`).
+⚠️ **A carteira é sincronizada por um Cloud Run Job diário**
+(`scripts/sync_client_titles.py`, agendado por Cloud Scheduler) — mais um trabalho
+de fundo com agendador real, no molde do `cleanup`.
 
 ✅ **As Sprints 9 e 10 estão na `main` e em dev** (S9: PR #191 da sprint e #193 do
 `develop → main`, correções da validação humana em #192 e #194, credenciais de dev
@@ -855,6 +884,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.43 — 24/09/2026. **A carteira de títulos em aberto entrou no produto (Sprint 11 do hub), aprovada pelo QA em 2ª rodada e AINDA SEM validação humana.** `client_titles` persiste os títulos a pagar e a receber não liquidados **sem recorte de conta e sem recorte de competência** — é esse recorte invertido, e só ele, que faz um título vencido há quatro meses aparecer onde a conciliação (sempre uma conta, sempre um mês) nunca o traria; `processing/omie_fetch.py` não foi tocado. A §4.5 não abriu exceção: a tabela guarda código de devedor, nunca nome — o nome é resolvido em runtime e o caminho é **fail-soft** (origem fora do ar devolve o código com 200, não 500). A lista canônica foi de 71 para **74** e a §4.9 de 16 para **18 permissões**. **O que vale fora da sprint, e é o motivo de a 1ª rodada ter sido reprovada:** (1) símbolo usado como CHAMÁVEL nunca vai para `if TYPE_CHECKING:` — `mypy --strict` aprova **por definição**, `ruff` não distingue, e o `NameError` resultante deixou duas das três rotas da sprint respondendo **500** com 1.141 unitários verdes em cima; a regra virou gate de AST (`tests/unit/test_type_checking_imports_gate.py`, varre `app/` e `scripts/`); (2) código de erro de terceiro não se compara por igualdade sem a evidência do formato capturado — a Omie devolve `SOAP-ENV:Client-5001`, não `5001`, e a comparação exata tinha deixado um ramo de fallback inteiro como código MORTO; (3) predicado que decide DESVIO de caminho ganha teste unitário com o valor real, porque teste que só roda com Docker é teste que ninguém roda. ⚠️ **Pendência declarada desta rodada, maior que a das S9/S10:** o sandbox recusou o socket do Docker (`operation not permitted`), então **a suíte de integração, a bateria dos 74 endpoints sensíveis x 3 atacantes e o gate de a11y nos três temas NÃO rodaram** — nem o cenário com cliente real de dev, nem a medição da suposição S-1. O que sustentou a aprovação foi que os DOIS defeitos de produto da 1ª rodada passaram a ter teste **unitário** (1.153 verdes) e o contraste foi conferido por aritmética sobre os tokens (4,57:1 no Hologram, a margem mais apertada). A validação humana desta sprint é mais necessária que a das anteriores, não menos._
 
 _Versão 1.42 — 23/09/2026. **A Sprint 10 está na `main` e em dev, e o primer deixou de dizer o contrário.** A v1.41 foi escrita pelo QA do hub com a sprint ainda na branch; a validação humana (task 86e3dqcf4) achou 6 testes de integração quebrados, todos de teste (tipo de exceção `OmieAuthError`, 400 em vez de 422, revisão fixa no guard de downgrade) e nenhum defeito de produto; a correção (`fix/S10-validation-findings`, PR #196) entrou no #195 e o `develop → main` fechou em 23/09. A §8 passou a dizer que as Sprints 9 e 10 estão na `main`, com a regra que as duas ensinaram: toda sprint do hub termina com validação humana FORA do sandbox, porque os agents não têm Docker e a integração, o a11y e o cenário pela tela só rodam de verdade ali. Nada mais mudou._
 
