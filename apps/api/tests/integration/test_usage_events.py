@@ -567,6 +567,44 @@ class TestUsageEventsEndpoint:
         rows = await db_session.execute(select(UsageEvent).where(UsageEvent.session_id == sess.id))
         assert list(rows.scalars().all()) == []
 
+    async def test_evento_de_backend_e_recusado_pelo_endpoint_publico(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """S11 BACK 11.3 — `carteira_sincronizada` NÃO entra pelo browser.
+
+        `CLIENT_EMITTED_EVENTS` é allow-list, então o evento já nasce recusado
+        pela union discriminada. Se ele fosse aceito do cliente, quem usa o
+        produto poderia forjar **numerador e denominador** da cobertura da
+        carteira — a métrica que decide se a Sprint 11 funcionou.
+
+        400 e não 422: validação de FORMA é tratada pelo handler global
+        (convenção de 23/09/2026 e §4.8).
+        """
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="Austral", creator=admin)
+        sess = await _seed_session(db_session, client=cliente, creator=admin)
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.post(
+            "/api/v1/usage-events",
+            json={
+                "event": "carteira_sincronizada",
+                "session_id": str(sess.id),
+                "props": {
+                    "client_id": str(cliente.id),
+                    "titulos_receber": 148,
+                    "titulos_pagar": 0,
+                    "vencidos": 97,
+                    "mais_antigo_dias": 214,
+                },
+            },
+        )
+
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
+        rows = await db_session.execute(select(UsageEvent).where(UsageEvent.session_id == sess.id))
+        assert list(rows.scalars().all()) == []
+
     async def test_via_fora_do_enum_retorna_400(
         self, client_with_db: AsyncClient, db_session: AsyncSession
     ) -> None:

@@ -721,9 +721,9 @@ class OmieClient:
     async def listar_contas_pagar(
         self,
         *,
-        conta_corrente_id: int,
-        data_de: date,
-        data_ate: date,
+        conta_corrente_id: int | None = None,
+        data_de: date | None = None,
+        data_ate: date | None = None,
         status: OmieTituloStatus,
     ) -> list[TituloAPagarReceber]:
         """Lista contas a pagar com `status_titulo` filtrado.
@@ -732,6 +732,15 @@ class OmieClient:
         `"AVENCER,ATRASADO"`). Por ora mantemos chamadas separadas por status
         para preservar a granularidade do log (uma falha em ATRASADO não
         invalida o batch de AVENCER) — pode virar otimização futura.
+
+        ⚠️ **Sprint 11:** `conta_corrente_id`, `data_de` e `data_ate` passaram a
+        ser OPCIONAIS. A conciliação continua chamando com os três (uma conta,
+        um mês) e o comportamento dela não muda em nada; a **carteira** chama
+        sem nenhum deles, que é o recorte oposto — todas as contas, sem
+        competência. Filtro ausente simplesmente **não entra no `param`**: a
+        captura real em `tests/fixtures/omie/listar_contas_pagar.request.json`
+        mostra a chamada aceita com só `pagina`/`registros_por_pagina`,
+        devolvendo 3.896 registros em 78 páginas.
         """
         return await self._listar_titulos(
             endpoint="contapagar",
@@ -746,9 +755,9 @@ class OmieClient:
     async def listar_contas_receber(
         self,
         *,
-        conta_corrente_id: int,
-        data_de: date,
-        data_ate: date,
+        conta_corrente_id: int | None = None,
+        data_de: date | None = None,
+        data_ate: date | None = None,
         status: OmieTituloStatus,
     ) -> list[TituloAPagarReceber]:
         """Lista contas a receber com `status_titulo` filtrado. Estrutura igual
@@ -769,9 +778,9 @@ class OmieClient:
         endpoint: str,
         call_name: str,
         list_key: str,
-        conta_corrente_id: int,
-        data_de: date,
-        data_ate: date,
+        conta_corrente_id: int | None,
+        data_de: date | None,
+        data_ate: date | None,
         status: OmieTituloStatus,
     ) -> list[TituloAPagarReceber]:
         """Implementação compartilhada entre `listar_contas_pagar` e `_receber`.
@@ -779,13 +788,21 @@ class OmieClient:
         O nome do filtro de conta corrente é `filtrar_conta_corrente` (sem
         `por_`) — vimos em prod que `filtrar_por_conta_corrente` faz a Omie
         responder 5001 "Tag não faz parte da estrutura do tipo complexo".
+
+        **Filtro `None` é filtro OMITIDO, não filtro vazio.** Mandar
+        `filtrar_conta_corrente: null` não é o mesmo que não mandar a tag: a
+        Omie valida a ESTRUTURA do `param` e já respondeu 5001 por tag que não
+        pertence ao tipo complexo. A montagem condicional abaixo é o que torna o
+        ramo (a) do R1 (sem filtro de conta) uma chamada de forma idêntica à
+        captura real.
         """
-        extra = {
-            "filtrar_por_data_de": data_de.strftime("%d/%m/%Y"),
-            "filtrar_por_data_ate": data_ate.strftime("%d/%m/%Y"),
-            "filtrar_conta_corrente": conta_corrente_id,
-            "filtrar_por_status": status.value,
-        }
+        extra: dict[str, Any] = {"filtrar_por_status": status.value}
+        if data_de is not None:
+            extra["filtrar_por_data_de"] = data_de.strftime("%d/%m/%Y")
+        if data_ate is not None:
+            extra["filtrar_por_data_ate"] = data_ate.strftime("%d/%m/%Y")
+        if conta_corrente_id is not None:
+            extra["filtrar_conta_corrente"] = conta_corrente_id
         items: list[TituloAPagarReceber] = []
         async for raw in self._paginate(
             module="financas",

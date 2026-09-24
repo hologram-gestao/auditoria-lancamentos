@@ -27,6 +27,7 @@ from app.modules.reconciliations.tenant_scope import audit_session_tenant_miss
 from app.modules.usage_events.omie_rejection import classify_omie_rejection
 from app.modules.usage_events.repository import UsageEventRepository
 from app.modules.usage_events.schemas import (
+    CarteiraSincronizadaProps,
     ClienteCriadoProps,
     ClienteEncerradoProps,
     ClienteExcluidoProps,
@@ -335,6 +336,43 @@ class UsageEventService:
                 ativas=ativas,
                 com_destino=com_destino,
                 com_conta_contabil=com_conta_contabil,
+            ).model_dump(mode="json"),
+        )
+
+    async def emit_carteira_sincronizada(
+        self,
+        *,
+        client_id: UUID,
+        titulos_receber: int,
+        titulos_pagar: int,
+        vencidos: int,
+        mais_antigo_dias: int,
+    ) -> bool:
+        """S11 BACK 11.3 — **a métrica da Sprint 11**. Sem `session_id`.
+
+        Emitido só ao concluir uma sincronização **ÍNTEGRA**, nunca numa que
+        falhou no meio: a cobertura é sobre o que a plataforma de fato enxerga, e
+        contar uma carteira parcial como se fosse completa é exatamente o erro
+        que o R1 existe para impedir.
+
+        **Sem dedup**, e não por esquecimento: a fórmula lê a ÚLTIMA linha por
+        `client_id` no período, então 30 sincronizações do mesmo cliente precisam
+        gerar 30 linhas. Este evento nasce fora de `DEDUPED_EVENT_NAMES` por
+        construção (sem `session_id`, o índice parcial nem o alcança) — e entrar
+        na allow-list exigiria migration, o que é a revisão que se quer ter.
+
+        `vencidos` é SUBCONJUNTO do total, não uma terceira parcela. As cinco
+        chaves são as declaradas no PRD, e `CarteiraSincronizadaProps` recusa
+        qualquer outra.
+        """
+        return await self.emit(
+            UsageEventName.CARTEIRA_SINCRONIZADA,
+            props=CarteiraSincronizadaProps(
+                client_id=client_id,
+                titulos_receber=titulos_receber,
+                titulos_pagar=titulos_pagar,
+                vencidos=vencidos,
+                mais_antigo_dias=mais_antigo_dias,
             ).model_dump(mode="json"),
         )
 

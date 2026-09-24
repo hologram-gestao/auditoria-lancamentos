@@ -84,14 +84,33 @@ export type Permission =
    * carteira; e `sync_omie_accounts` é de todos, o que deixaria o
    * `client_operator` forçar chamadas à origem do cliente.
    */
-  | 'sync_client_chart_of_accounts';
+  | 'sync_client_chart_of_accounts'
+  /**
+   * Sprint 11 (R5): LER a CARTEIRA de títulos em aberto — lista e agregados.
+   * Todo papel com acesso ao tenant, o operador inclusive: é a posição
+   * financeira do próprio cliente, e é ela que explica o que ele cobra e paga.
+   *
+   * ⚠️ **O nome é `*_receivables` por CONTRATO do PRD**, mesmo a tabela do
+   * backend chamando-se `client_titles` e a carteira incluindo os títulos **a
+   * pagar**. Renomear aqui para casar com a tabela quebraria o espelho da
+   * matriz do backend — que é exatamente o que este módulo existe para manter.
+   */
+  | 'view_client_receivables'
+  /**
+   * Sprint 11 (R5): SINCRONIZAR a carteira (ir à origem). Permissão PRÓPRIA
+   * pelo mesmo raciocínio da S10, e não uma reutilização de
+   * `sync_client_chart_of_accounts`: são duas idas à origem diferentes, e
+   * amarrá-las faria o dia em que uma célula mudasse arrastar a outra junto,
+   * sem ninguém ter pedido.
+   */
+  | 'sync_client_receivables';
 
 /**
  * A matriz, indexada por PAPEL (e não por permissão) de propósito: assim o
  * `Record<UserRole, ...>` obriga a lista a cobrir todo papel do contrato.
  *
  * Transcrita célula a célula de `apps/api/app/core/authz.py::PERMISSION_MATRIX`
- * (16 permissões × 5 papéis desde a Sprint 10) e travada em `__tests__/authz.test.ts`.
+ * (18 permissões × 5 papéis desde a Sprint 11) e travada em `__tests__/authz.test.ts`.
  *
  * | Ação                          | platform_admin | admin | manager | client_manager | client_operator |
  * | ----------------------------- | -------------- | ----- | ------- | -------------- | --------------- |
@@ -111,6 +130,8 @@ export type Permission =
  * | Conexões de origem (S9)       | ✅             | ✅    | ✅ (carteira) | ❌       | ❌              |
  * | Ver plano de contas (S10)     | ✅             | ✅    | ✅ (carteira) | ✅       | ✅              |
  * | Sincronizar plano de contas   | ✅             | ✅    | ✅ (carteira) | ✅       | ❌              |
+ * | Ver a carteira (S11)          | ✅             | ✅    | ✅ (carteira) | ✅       | ✅              |
+ * | Sincronizar a carteira (S11)  | ✅             | ✅    | ✅ (carteira) | ✅       | ❌              |
  *
  * "(carteira)" e "(própria org)" **não são células**: são `resolve_client_access`
  * e os filtros de coleção, no servidor. A célula diz se o papel pode a AÇÃO.
@@ -135,6 +156,8 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'manage_client_connections',
     'view_client_chart_of_accounts',
     'sync_client_chart_of_accounts',
+    'view_client_receivables',
+    'sync_client_receivables',
   ],
   // D3 final (86e36ed1d): `manage_anomaly_types` saiu daqui. A taxonomia de
   // anomalias é uma tabela GLOBAL do produto — o admin de uma organização
@@ -154,6 +177,8 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'manage_client_connections',
     'view_client_chart_of_accounts',
     'sync_client_chart_of_accounts',
+    'view_client_receivables',
+    'sync_client_receivables',
   ],
   // O gerente da organização enxerga outros tenants apenas dentro da carteira —
   // quem sabe a carteira é o backend (`client_assignments`), ver `canAccessClient`.
@@ -173,6 +198,8 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'manage_client_connections',
     'view_client_chart_of_accounts',
     'sync_client_chart_of_accounts',
+    'view_client_receivables',
+    'sync_client_receivables',
   ],
   client_manager: [
     'run_reconciliation',
@@ -182,15 +209,19 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'manage_glossary',
     'view_client_chart_of_accounts',
     'sync_client_chart_of_accounts',
+    'view_client_receivables',
+    'sync_client_receivables',
   ],
-  // S10 (R4): o operador LÊ o plano de contas e **não** sincroniza — é o único
-  // ❌ da linha de sincronizar. Sincronizar é uma ida à origem do cliente, e o
-  // operador é quem mais abre tela.
+  // S10 (R4) e S11 (R5): o operador LÊ o plano de contas e a carteira, e **não**
+  // sincroniza nenhum dos dois — são os únicos ❌ das duas linhas de
+  // sincronizar. Sincronizar é uma ida à origem do cliente, e o operador é quem
+  // mais abre tela.
   client_operator: [
     'run_reconciliation',
     'review_export',
     'sync_omie_accounts',
     'view_client_chart_of_accounts',
+    'view_client_receivables',
   ],
 };
 

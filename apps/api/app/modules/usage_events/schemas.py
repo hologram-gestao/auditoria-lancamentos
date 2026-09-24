@@ -107,6 +107,27 @@ class UsageEventName(StrEnum):
     # é o conjunto inteiro (inclui inativas e `ausente_na_origem`) e serve de
     # contexto, não de denominador.
     PLANO_CONTAS_SINCRONIZADO = "plano_contas_sincronizado"
+    # Sprint 11 (BACK 11.3) — **a métrica da Sprint 11**. De BACKEND, sem
+    # `session_id`, fora da dedup por construção: cada sincronização da carteira
+    # é uma linha, e é isso que a fórmula exige (ver abaixo).
+    #
+    # Fórmula da leitura D+30 (cobertura da carteira):
+    #     títulos em aberto persistidos ÷ títulos em aberto que a origem devolve
+    #     numa consulta ampla de conferência
+    # lidos da **ÚLTIMA** linha por `client_id` no período — o numerador sai de
+    # `titulos_pagar + titulos_receber`, e o denominador é a conferência manual
+    # do QA contra a origem (não há como o servidor saber o que a origem tem
+    # sem consultá-la de novo). Um cliente que sincroniza 30 vezes gera 30
+    # linhas; se o evento entrasse na allow-list de dedup, a 2ª sincronização em
+    # diante sumiria e a leitura mediria a foto do primeiro dia para sempre.
+    #
+    # Baseline **0%**: nenhum título em aberto é persistido COMO TÍTULO hoje. O
+    # que existe são divergências de conciliação, presas a uma sessão de conta e
+    # mês (`reconciliation_omie_entries`, verificado em 21/09/2026). Alvo: 100%
+    # dos títulos em aberto do cliente, em todas as contas — previsão declarada,
+    # e o único número honesto, porque carteira parcial produz aging errado, que
+    # é pior que aging nenhum.
+    CARTEIRA_SINCRONIZADA = "carteira_sincronizada"
 
 
 #: Eventos que o `POST /api/v1/usage-events` aceita. Os de backend ficam de fora
@@ -249,6 +270,39 @@ class PlanoContasSincronizadoProps(_StrictProps):
     ativas: int = Field(ge=0)
     com_destino: int = Field(ge=0)
     com_conta_contabil: int = Field(ge=0)
+
+
+class CarteiraSincronizadaProps(_StrictProps):
+    """`carteira_sincronizada` (S11 BACK 11.3) — **a métrica da Sprint 11**.
+
+    As **cinco** chaves declaradas no PRD, e nenhuma a mais. Só contagens, um
+    número de dias e o id do tenant: **nenhum nome de devedor**, nenhum código de
+    fornecedor, nenhum identificador de título, nem sequer uma lista de códigos —
+    que reconstituiria a carteira de cobranças do cliente dentro do sink de
+    métrica. O `extra="forbid"` do `_StrictProps` garante que chave a mais é erro,
+    não campo silencioso.
+
+    `mais_antigo_dias` é o **maior atraso** da carteira, em dias, e **`0`
+    significa "nada vencido"** — inclusive na carteira vazia. É informação
+    honesta, não ausência de dado: quem precisa distinguir "carteira vazia" de
+    "nada vencido" soma `titulos_pagar + titulos_receber`, e quem precisa
+    distinguir as duas de "nunca sincronizou" olha `clients.titles_synced_at`,
+    que existe exatamente para isso (§R3).
+
+    `client_id` é PROP, e não coluna: `usage_events` só tem coluna de
+    `session_id`, e uma sincronização de carteira não pertence a conciliação
+    nenhuma. Mesmo lugar em que `plano_contas_sincronizado` e `cliente_criado`
+    gravam o tenant deles.
+
+    ⚠️ `vencidos` é um SUBCONJUNTO de `titulos_pagar + titulos_receber`, não uma
+    terceira parcela: somá-lo ao total daria um número que não significa nada.
+    """
+
+    client_id: UUID
+    titulos_receber: int = Field(ge=0)
+    titulos_pagar: int = Field(ge=0)
+    vencidos: int = Field(ge=0)
+    mais_antigo_dias: int = Field(ge=0)
 
 
 class OrganizacaoCriadaProps(_StrictProps):

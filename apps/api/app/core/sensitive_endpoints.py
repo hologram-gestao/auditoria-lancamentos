@@ -609,6 +609,35 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         f"{_VIA_CLIENT_PATH} + OpenClientDep + SyncClientChartOfAccountsDep; "
         "cliente encerrado = 409 e a leitura segue 200",
     ),
+    # ------------------------------ carteira de títulos (S11, 11.5)
+    # A posição financeira do cliente: o que ele deve, o que tem a receber, de
+    # quem e desde quando. Nenhum NOME é persistido (§4.5) — mas vazar esta
+    # coleção é vazar quanto um cliente está inadimplente, que é o dado mais
+    # sensível que a plataforma passa a guardar nesta sprint.
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/titles",
+        ScopeKind.COLLECTION,
+        "app/modules/client_titles/routes.py",
+        f"{_VIA_CLIENT_PATH} + ViewClientReceivablesDep; todo SELECT nasce de "
+        "_base_query, que já leva AND client_id",
+    ),
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/titles/summary",
+        ScopeKind.COLLECTION,
+        "app/modules/client_titles/routes.py",
+        f"{_VIA_CLIENT_PATH} + ViewClientReceivablesDep; a agregação do aging "
+        "filtra por client_id na própria query",
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients/{client_id}/titles/sync",
+        ScopeKind.COLLECTION,
+        "app/modules/client_titles/routes.py",
+        f"{_VIA_CLIENT_PATH} + OpenClientDep + SyncClientReceivablesDep; "
+        "cliente encerrado = 409 e a leitura segue 200",
+    ),
 )
 
 #: Endpoints do denominador que AINDA não têm o mecanismo no código. Ficam na

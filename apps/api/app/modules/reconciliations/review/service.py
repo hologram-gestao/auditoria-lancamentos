@@ -35,7 +35,7 @@ from app.core.crypto_service import (
     load_client_cipher,
     provision_client_cipher,
 )
-from app.core.exceptions import NotFoundError, OmieFaultError, ValidationAppError
+from app.core.exceptions import NotFoundError, ValidationAppError
 from app.core.logging import get_logger
 from app.core.search_index import compute_query_hmacs
 from app.db.models import (
@@ -48,6 +48,7 @@ from app.db.models import (
     ReconciliationSession,
 )
 from app.integrations.omie.schemas import unescape_omie_text
+from app.integrations.omie.supplier_names import resolve_supplier_names
 from app.modules.reconciliations.processing.matcher import DATE_DIVERGENCE_RANGE
 from app.modules.reconciliations.qualification.service import (
     QUALIFICATION_FLAG_CODES,
@@ -660,51 +661,24 @@ class ReviewService:
     ) -> dict[int, str]:
         """`supplier_code` → nome de exibição, via ConsultarCliente cacheado.
 
-        Consulta por código (não a lista inteira): o cadastro de clientes pode
-        ter milhares de entradas — N consultas pontuais cacheadas (TTL 6 h)
-        custam menos que paginar tudo por render. Sequencial de propósito: o
-        Omie processa 1 requisição por método por app_key.
-
-        Fail-soft nos dois modos de falha, com tratamentos DIFERENTES:
-        - fault (o Omie respondeu e recusou — código excluído/inexistente) →
-          cache negativo 15 min, não repete a consulta a cada render;
-        - falha de transporte (timeout/5xx) → nada é marcado, retry no próximo
-          render. Nome NUNCA é logado (PII) nem persistido (§4.5).
+        ⚠️ **Sprint 11 (BACK 11.5): o corpo saiu daqui.** A carteira de títulos
+        precisa do MESMO nome para os MESMOS códigos, e copiar este método criaria
+        uma segunda leitura da origem sobre o mesmo cache — duas implementações de
+        fail-soft, duas chances de uma delas logar o nome (PII) ou esquecer o cache
+        negativo. Agora existe um acessor só, em
+        `integrations/omie/supplier_names.py`, e este método **delega** para ele.
+        O comportamento (TTL 6 h, cache negativo de 15 min, sequencial, os dois
+        modos de falha tratados diferente) é idêntico; a chave do log de falha é
+        preservada de propósito, para não invalidar consulta de observabilidade
+        apontando para ela.
         """
-        if not codes or self._clientes_cache is None:
-            return {}
-        resolved: dict[int, str] = {}
-        to_consult: list[int] = []
-        for code in codes:
-            name = self._clientes_cache.get_name(client_id=client_id, codigo=code)
-            if name is not None:
-                resolved[code] = name
-            elif not self._clientes_cache.known_unresolved(client_id=client_id, codigo=code):
-                to_consult.append(code)
-        if omie_client is None:
-            return resolved
-        for code in to_consult:
-            try:
-                cliente = await omie_client.consultar_cliente(codigo_cliente_omie=code)
-            except OmieFaultError:
-                self._clientes_cache.mark_unresolved(client_id=client_id, codigo=code)
-                continue
-            except Exception as exc:
-                logger.warning(
-                    "omie_entries_supplier_resolve_failed",
-                    client_id=str(client_id),
-                    codigo=code,
-                    error=type(exc).__name__,
-                )
-                continue
-            name = cliente.display_name
-            if name:
-                self._clientes_cache.set_name(client_id=client_id, codigo=code, name=name)
-                resolved[code] = name
-            else:
-                # Cadastro existe mas sem razão social/fantasia — irresolúvel.
-                self._clientes_cache.mark_unresolved(client_id=client_id, codigo=code)
-        return resolved
+        return await resolve_supplier_names(
+            cache=self._clientes_cache,
+            client_id=client_id,
+            codes=codes,
+            omie_client=omie_client,
+            failure_log_event="omie_entries_supplier_resolve_failed",
+        )
 
     # ------------------------------------------------------------------
     # BACK 9.6 — Atualizar omie_entry

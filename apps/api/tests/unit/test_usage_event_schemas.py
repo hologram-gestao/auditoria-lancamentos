@@ -26,6 +26,7 @@ from app.modules.usage_events.schemas import (
     CLIENT_EMITTED_EVENTS,
     AutorNavegouForaProps,
     AutorNavegouForaRequest,
+    CarteiraSincronizadaProps,
     FlagRevisadoProps,
     GlossarioEditadoProps,
     NotificacaoEntregueProps,
@@ -237,6 +238,9 @@ class TestEventosDaSprint6:
             # allow-list, a 2ª em diante sumiria e a leitura D+30 mediria a foto
             # do primeiro dia para sempre.
             UsageEventName.PLANO_CONTAS_SINCRONIZADO,
+            # S11 (BACK 11.3): mesmo raciocínio — aceitar do browser deixaria o
+            # cliente forjar numerador E denominador da cobertura da carteira.
+            UsageEventName.CARTEIRA_SINCRONIZADA,
         ],
         ids=lambda e: e.value,
     )
@@ -267,6 +271,10 @@ class TestAllowListDeDedup:
             # allow-list, a 2ª em diante sumiria e a leitura D+30 mediria a foto
             # do primeiro dia para sempre.
             UsageEventName.PLANO_CONTAS_SINCRONIZADO,
+            # S11 (BACK 11.3): a leitura da cobertura da carteira também usa a
+            # ÚLTIMA linha por client_id — o job diário gera uma por dia, e na
+            # allow-list todas depois da primeira sumiriam.
+            UsageEventName.CARTEIRA_SINCRONIZADA,
         ],
         ids=lambda e: e.value,
     )
@@ -363,3 +371,102 @@ class TestPlanoContasSincronizado:
         """Todo campo é UUID ou `int` — o invariante do módulo inteiro (§4.7)."""
         for name, field in PlanoContasSincronizadoProps.model_fields.items():
             assert field.annotation in (UUID, int), f"{name} pode carregar texto livre"
+
+
+class TestCarteiraSincronizada:
+    """BACK 11.3 — **a métrica da Sprint 11**, com o vocabulário fechado.
+
+    O risco concreto deste evento é o pior da série: ele nasce da carteira de
+    COBRANÇAS do cliente, e a tentação natural seria mandar junto "o título mais
+    antigo" ou "os fornecedores em atraso" para facilitar o diagnóstico. Isso
+    poria nome de devedor e identidade de título dentro do sink de métrica, que é
+    o lugar do sistema com menos proteção. Daí só contagens.
+    """
+
+    #: A whitelist EXATA declarada no PRD — cinco chaves, nenhuma a mais.
+    CHAVES = (
+        "client_id",
+        "titulos_receber",
+        "titulos_pagar",
+        "vencidos",
+        "mais_antigo_dias",
+    )
+
+    def _base(self) -> dict[str, Any]:
+        """Os números da base consolidada de 17/06/2026 que motivou a sprint."""
+        return {
+            "client_id": _CLIENT_ID,
+            "titulos_receber": 148,
+            "titulos_pagar": 0,
+            "vencidos": 97,
+            "mais_antigo_dias": 214,
+        }
+
+    def test_nome_literal_do_prd(self) -> None:
+        """Renomear quebra a leitura D+30, que filtra por esta string exata."""
+        assert UsageEventName.CARTEIRA_SINCRONIZADA.value == "carteira_sincronizada"
+
+    def test_props_tem_exatamente_as_cinco_chaves_da_whitelist(self) -> None:
+        assert set(CarteiraSincronizadaProps.model_fields) == set(self.CHAVES)
+
+    def test_caminho_feliz(self) -> None:
+        props = CarteiraSincronizadaProps(**self._base())
+        payload = props.model_dump(mode="json")
+        assert payload["client_id"] == _CLIENT_ID
+        assert set(payload) == set(self.CHAVES)
+
+    @pytest.mark.parametrize(
+        "extra",
+        [
+            {"titulos": ["2624256084", "2624256085"]},
+            {"nome_devedor": "Austral Ltda"},
+            {"fornecedores": ["2624256082"]},
+            {"razao_social": "Austral Ltda"},
+            {"cnpj": "12.345.678/0001-90"},
+            {"observacao": "COMPRA NO FORNECEDOR ACME"},
+            {"categoria_mais_antiga": "2.04.94"},
+            {"valor_total": "107413.10"},
+        ],
+        ids=[
+            "lista_de_ids_de_titulo",
+            "nome_devedor",
+            "lista_de_fornecedores",
+            "razao_social",
+            "cnpj",
+            "observacao",
+            "categoria",
+            "valor_total",
+        ],
+    )
+    def test_chave_fora_da_whitelist_e_rejeitada(self, extra: dict[str, Any]) -> None:
+        """`extra="forbid"`: chave a mais é erro na EMISSÃO, não campo silencioso."""
+        base = self._base()
+        assert CarteiraSincronizadaProps(**base) is not None
+        with pytest.raises(ValidationError):
+            CarteiraSincronizadaProps(**base, **extra)
+
+    @pytest.mark.parametrize(
+        "campo", ["titulos_receber", "titulos_pagar", "vencidos", "mais_antigo_dias"]
+    )
+    def test_nenhuma_contagem_aceita_negativo(self, campo: str) -> None:
+        base = self._base()
+        base[campo] = -1
+        with pytest.raises(ValidationError):
+            CarteiraSincronizadaProps(**base)
+
+    def test_nenhum_campo_e_texto_livre(self) -> None:
+        """Todo campo é UUID ou `int` — o invariante do módulo inteiro (§4.7)."""
+        for name, field in CarteiraSincronizadaProps.model_fields.items():
+            assert field.annotation in (UUID, int), f"{name} pode carregar texto livre"
+
+    def test_carteira_vazia_e_um_payload_valido(self) -> None:
+        """Zeros são resultado legítimo aqui — o "nunca sincronizou" mora em
+        `clients.titles_synced_at`, não neste evento."""
+        props = CarteiraSincronizadaProps(
+            client_id=_CLIENT_ID,
+            titulos_receber=0,
+            titulos_pagar=0,
+            vencidos=0,
+            mais_antigo_dias=0,
+        )
+        assert props.mais_antigo_dias == 0

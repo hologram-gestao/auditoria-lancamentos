@@ -228,6 +228,29 @@ const MATRIX: ReadonlyArray<{
     clientManager: true,
     clientOperator: false,
   },
+  // S11 / R5: LER a carteira é de TODOS — é a posição financeira do próprio
+  // cliente, e o operador precisa dela para entender o que cobra e o que paga.
+  {
+    permission: 'view_client_receivables',
+    platform: true,
+    admin: true,
+    manager: true,
+    clientManager: true,
+    clientOperator: true,
+  },
+  // S11 / R5: SINCRONIZAR a carteira sai do `client_operator` e **só dele** — as
+  // mesmas células do plano de contas, e não por preguiça: a pergunta é a mesma
+  // ("quem faz o servidor ir à origem") e a resposta do PRD coincidiu. São duas
+  // permissões distintas porque amarrá-las faria uma mudança de célula arrastar
+  // a outra.
+  {
+    permission: 'sync_client_receivables',
+    platform: true,
+    admin: true,
+    manager: true,
+    clientManager: true,
+    clientOperator: false,
+  },
 ];
 
 describe('hasPermission — matriz do backend, célula a célula', () => {

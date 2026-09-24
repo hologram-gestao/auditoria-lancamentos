@@ -303,6 +303,24 @@ _MOCK_CATEGORIAS: list[CategoriaOmie] = [
 ]
 
 
+def _within(
+    titulos: list[TituloAPagarReceber], data_de: date | None, data_ate: date | None
+) -> list[TituloAPagarReceber]:
+    """Recorta por vencimento, respeitando limite AUSENTE como "sem limite".
+
+    Sprint 11: os filtros de data do `listar_contas_*` passaram a ser opcionais
+    (a carteira lê sem recorte de competência). O mock precisa refletir isso,
+    senão a ingestão da carteira contra o cliente-demo devolveria vazio por um
+    motivo que a origem real não tem.
+    """
+    return [
+        t
+        for t in titulos
+        if (data_de is None or t.data_vencimento >= data_de)
+        and (data_ate is None or t.data_vencimento <= data_ate)
+    ]
+
+
 class MockOmieClient(OmieClient):
     """`OmieClient` que devolve payloads fixos sem tocar a rede.
 
@@ -432,21 +450,21 @@ class MockOmieClient(OmieClient):
     async def listar_contas_pagar(
         self,
         *,
-        conta_corrente_id: int,
-        data_de: date,
-        data_ate: date,
+        conta_corrente_id: int | None = None,
+        data_de: date | None = None,
+        data_ate: date | None = None,
         status: OmieTituloStatus,
     ) -> list[TituloAPagarReceber]:
         # Só Itaú (id 900_000_001) tem títulos no mock — outras contas vazias.
         await asyncio.sleep(_DELAY_LISTAR_TITULOS_SECONDS)
-        if conta_corrente_id != 900_000_001:
+        if conta_corrente_id is not None and conta_corrente_id != 900_000_001:
             return []
         bucket = (
             _MOCK_CONTAS_PAGAR_ATRASADO
             if status == OmieTituloStatus.ATRASADO
             else _MOCK_CONTAS_PAGAR_AVENCER
         )
-        filtered = [t for t in bucket if data_de <= t.data_vencimento <= data_ate]
+        filtered = _within(bucket, data_de, data_ate)
         log.info(
             "omie_mock_call",
             call="listar_contas_pagar",
@@ -459,16 +477,16 @@ class MockOmieClient(OmieClient):
     async def listar_contas_receber(
         self,
         *,
-        conta_corrente_id: int,
-        data_de: date,
-        data_ate: date,
+        conta_corrente_id: int | None = None,
+        data_de: date | None = None,
+        data_ate: date | None = None,
         status: OmieTituloStatus,
     ) -> list[TituloAPagarReceber]:
         await asyncio.sleep(_DELAY_LISTAR_TITULOS_SECONDS)
-        if conta_corrente_id != 900_000_001:
+        if conta_corrente_id is not None and conta_corrente_id != 900_000_001:
             return []
         bucket = _MOCK_CONTAS_RECEBER_ATRASADO if status == OmieTituloStatus.ATRASADO else []
-        filtered = [t for t in bucket if data_de <= t.data_vencimento <= data_ate]
+        filtered = _within(bucket, data_de, data_ate)
         log.info(
             "omie_mock_call",
             call="listar_contas_receber",
