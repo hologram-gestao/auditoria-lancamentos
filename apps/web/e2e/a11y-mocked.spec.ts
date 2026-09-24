@@ -2946,6 +2946,27 @@ async function exigirAlturaDaTabela(page: Page, contexto: string) {
 }
 
 /**
+ * O estado vazio precisa estar INTEIRO na tela: com caixa, e sem sair pela
+ * direita. Era o defeito que sobrou da rodada de QA: o texto morava numa
+ * `<TableCell colSpan>` de uma tabela mais larga que a viewport, e a metade
+ * direita ficava fora da tela — "visível" para o Playwright, ilegível para a
+ * pessoa. Hoje ele vive fora do `<table>` (`TableEmpty`), então é medível.
+ */
+async function exigirEstadoVazioLegivel(page: Page, texto: string, contexto: string) {
+  const largura = page.viewportSize()?.width ?? 0;
+  const caixa = await page.getByText(texto).boundingBox();
+  expect(caixa, `${contexto}: o estado vazio precisa ter caixa`).not.toBeNull();
+  expect(caixa?.height ?? 0, `${contexto}: o estado vazio colapsou`).toBeGreaterThan(0);
+  expect(caixa?.x ?? -1, `${contexto}: o estado vazio começa fora da tela`).toBeGreaterThanOrEqual(
+    0,
+  );
+  expect(
+    (caixa?.x ?? 0) + (caixa?.width ?? 0),
+    `${contexto}: o estado vazio está cortado na borda direita`,
+  ).toBeLessThanOrEqual(largura);
+}
+
+/**
  * Os três valores do bloco de agregados não podem se sobrepor nem sair pela
  * direita. Duas caixas se sobrepõem quando há interseção nos DOIS eixos.
  */
@@ -3073,9 +3094,15 @@ for (const vp of VIEWPORTS) {
       // agregados não pode existir neste estado.
       await expect(page.getByRole('region', { name: 'A receber' })).toHaveCount(0);
       await expect(page.getByText(/R\$\s*0,00/)).toHaveCount(0);
-      // Era ESTE o estado em que a área da tabela ia a 0px em 390px: o texto do
-      // estado vazio mora dentro dela, e sumia da tela continuando "visível".
-      await exigirAlturaDaTabela(page, `${vp.label} · nunca sincronizada`);
+      // Era ESTE o estado em que a área da tabela ia a 0px em 390px, e depois o
+      // que ficava cortado à direita por morar numa célula da tabela rolável. O
+      // estado vazio agora vive fora do `<table>`, e a medida é sobre ELE: com
+      // caixa, e inteiro dentro da viewport.
+      await exigirEstadoVazioLegivel(
+        page,
+        'A carteira deste cliente ainda não foi sincronizada',
+        `${vp.label} · nunca sincronizada`,
+      );
       await shot(page, `carteira-nunca-sincronizada-${slugC}`);
       await analyze(page, `carteira — nunca sincronizada (${vp.label})`);
     });

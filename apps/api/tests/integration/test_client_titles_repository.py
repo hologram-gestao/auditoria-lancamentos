@@ -116,12 +116,19 @@ async def _titles(db_session: AsyncSession, client_id: Any) -> list[ClientTitle]
 
     Fica no helper, e não no teste, porque o helper é usado por todo o arquivo: assim
     qualquer teste futuro que leia duas vezes o mesmo título já nasce imune.
+
+    ⚠️ E é `populate_existing`, NÃO `expire_all()`. Expirar a sessão inteira expira
+    também o `Client` criado pelo teste; o próximo `client.id` dispara um refresh
+    lazy, que é I/O fora do greenlet do driver async e estoura `MissingGreenlet`
+    (validação humana de 24/09/2026: dois testes deste arquivo caíram assim, com o
+    banco certo). `populate_existing` sobrescreve, a partir das linhas desta query,
+    só as instâncias que ela devolve — exatamente o que se quer, e nada além.
     """
-    db_session.expire_all()
     rows = await db_session.execute(
         select(ClientTitle)
         .where(ClientTitle.client_id == client_id)
         .order_by(ClientTitle.external_id)
+        .execution_options(populate_existing=True)
     )
     return list(rows.scalars().all())
 
