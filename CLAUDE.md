@@ -480,6 +480,12 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
     improvisado:**
     - **Exclusão DEFINITIVA** (`DELETE /clients/{id}`): apaga tudo que pende do
       cliente; só `access_audit` e `usage_events` ficam (trilhas de IDs, §4.7).
+      **Não tem botão na tela desde 25/09/2026** (86e3eqxdt, decisão de produto):
+      a rota segue na API para quem tem `edit_client`, como caminho do apagamento
+      pedido pelo titular (LGPD), e a única saída pela tela é o encerramento. É
+      uma exceção DELIBERADA à §4.9 (lá, a tela esconde o que o servidor NEGA;
+      aqui, esconde o que ele aceita): não traga o botão de volta por "coerência
+      com a matriz".
     - **Encerramento com RETENÇÃO** (`POST /clients/{id}/close`, direção do
       Lucas 09/09/2026): apaga quem o cliente É e mantém o que ACONTECEU. Nome →
       rótulo anônimo; credenciais Omie → vazias; **`dek_wrapped` → NULL =
@@ -909,6 +915,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.47 — 25/09/2026. **"Excluir cliente" saiu da tela, para todos os papéis (86e3eqxdt, decisão do Pedro).** A saída do cliente pela interface passa a ser só o encerramento com retenção; a exclusão definitiva continua inteira no servidor (`DELETE /clients/{id}`, `edit_client`, lista canônica e testes intocados) como caminho do apagamento LGPD. A §4.12 registra a exceção à §4.9, que normalmente manda a tela esconder só o que o servidor nega. No front saíram o diálogo, o hook, a chamada da API e os mocks mortos em 9 testes; o cabeçalho do cliente encerrado, que só tinha o Excluir, passou a não renderizar o grupo de ações. O e2e troca o teste do fluxo de exclusão por dois: o admin não encontra "Excluir cliente" em forma nenhuma, e o cliente encerrado não tem ação nenhuma no cabeçalho._
 
 _Versão 1.46 — 25/09/2026. **Os dois débitos que a validação da Sprint 15 registrou foram pagos antes do `develop → main`.** A lista da carteira passou a dizer, na própria linha, quais títulos têm contexto: `contextCount` na resposta de `GET /titles`, preenchido por UMA query agrupada pela página (sem N+1, com `client_id` no próprio `WHERE`), só a contagem e nunca o texto; na tela, ícone em destaque com o número para quem tem contexto e apagado para quem não tem, e a contagem também no nome acessível ("2 registrados" / "nenhum registrado"). E o gate de a11y em browser ganhou três cenários (gaveta com histórico e formulário, gaveta só-leitura do operador, aba do relatório), agora 342 por tema. De quebra, um teste de unidade que ainda afirmava o piso antigo (`lg:min-h-0`) estava vermelho na `develop` e derrubava o job de web do #205: passou a travar os dois pisos (24rem e `lg:min-h-[8rem]`). **Regra que fica:** mudou classe de layout, roda o vitest da tela antes do commit — o teste de classe existe justamente para travar esse desenho._
 
