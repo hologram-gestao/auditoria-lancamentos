@@ -4295,6 +4295,23 @@ test('Login (defeito 86e2ggm7r: senha sem nome acessível)', async ({ page, cont
   await analyze(page, 'login');
 });
 
+test('Login: e-mail inválido avisa ao sair do campo (86e2n39eg)', async ({ page, context }) => {
+  // O estado que a task criou: o erro aparece no BLUR, sem clicar em Entrar. O
+  // axe mede o campo com `aria-invalid` e a mensagem vermelha sobre o card.
+  await context.clearCookies();
+  await page.goto('/login');
+  const email = page.getByLabel('E-mail', { exact: true });
+  await email.fill('joao@');
+  await email.blur();
+  await expect(page.getByText('E-mail inválido.')).toBeVisible();
+  await expect(email).toHaveAttribute('aria-invalid', 'true');
+  // O botão NÃO trava por formato (só por campo vazio): quem explica é o campo.
+  await page.getByLabel('Senha', { exact: true }).fill('qualquer');
+  await expect(page.getByRole('button', { name: 'Entrar' })).toBeEnabled();
+  await shot(page, 'login-email-invalido');
+  await analyze(page, 'login com e-mail inválido');
+});
+
 /**
  * Sprint 9 — ausência ou falha de ORIGEM é ESTADO, não erro (R4 · R5 · R7).
  *

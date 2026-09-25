@@ -4,7 +4,13 @@
  * Tela de login — Doc §7.1.
  *
  * Comportamento:
- *   - Botão "Entrar" desabilitado se email ou senha vazios; troca para spinner+"Entrando..." em flight.
+ *   - Validação `onTouched` (86e2n39eg): o formato do e-mail é conferido quando a
+ *     pessoa SAI do campo e, depois do primeiro erro, a cada tecla. Não valida
+ *     durante a primeira digitação (acusar "E-mail inválido." no primeiro
+ *     caractere pune quem ainda está escrevendo). O e-mail vai com `trim`.
+ *   - Botão "Entrar" desabilitado só com email ou senha VAZIOS, nunca por formato
+ *     inválido: botão travado sem explicação é pior de usar e de ler em leitor de
+ *     tela; o certo é deixar clicar e mostrar o erro no campo. Spinner+"Entrando..." em flight.
  *   - Senha com toggle de visibilidade (ícone de olho).
  *   - Em sucesso: setUser no Zustand + redireciona para /clientes (server-side via router.replace).
  *   - Em erro: mensagem inline genérica; PT-BR.
@@ -42,7 +48,7 @@ export default function LoginPage() {
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: { email: '', password: '' },
-    mode: 'onSubmit',
+    mode: 'onTouched',
   });
 
   const email = form.watch('email');
