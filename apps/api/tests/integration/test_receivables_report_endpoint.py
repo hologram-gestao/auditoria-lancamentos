@@ -17,10 +17,10 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.config import get_settings
 from app.core.crypto import encrypt
@@ -28,6 +28,7 @@ from app.core.security import hash_password
 from app.db.models import (
     Client,
     ClientTitle,
+    TitleContext,
     TitleStatus,
     TitleType,
     UsageEvent,
@@ -167,8 +168,36 @@ async def _seed_title(
 ) -> str:
     repo = ClientTitlesRepository(db)
     now = datetime(2026, 9, 24, 3, 0, tzinfo=UTC)
-    row = _row(external_id, due_date=due_date, amount=amount, title_type=title_type)
-    await repo.reconcile_cycle(client.id, [row], synced_at=now)
+    # ⚠️ `reconcile_cycle` é um CICLO de sincronização: todo título do cliente que
+    # não vier no payload vira `ausente_na_origem`. Semear um título por chamada
+    # derrubava do aberto os semeados antes, e o relatório (que só soma
+    # `em_aberto`) perdia o valor deles — foi assim que três casos deste arquivo
+    # falharam na validação humana de 24/09/2026, com o relatório certo. O ciclo
+    # recebe o conjunto inteiro já semeado + o novo.
+    ja_semeados = (
+        (
+            await db.execute(
+                select(ClientTitle).where(
+                    ClientTitle.client_id == client.id,
+                    ClientTitle.status == TitleStatus.EM_ABERTO.value,
+                    ClientTitle.external_id != external_id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    payload = [
+        _row(
+            t.external_id,
+            due_date=t.due_date,
+            amount=str(t.amount),
+            title_type=TitleType(t.title_type),
+        )
+        for t in ja_semeados
+    ]
+    payload.append(_row(external_id, due_date=due_date, amount=amount, title_type=title_type))
+    await repo.reconcile_cycle(client.id, payload, synced_at=now)
     await repo.mark_sync_succeeded(client.id, at=now)
     await db.flush()
     title_id = (
@@ -289,6 +318,18 @@ class TestClassificacaoPorContexto:
         )
         assert primeiro.status_code == 200, primeiro.text
         assert segundo.status_code == 200, segundo.text
+        # ⚠️ `created_at` vem de `now()` no banco, e a fixture roda o teste inteiro
+        # numa transação só: os dois POSTs saíam com o MESMO instante e o
+        # `DISTINCT ON ... ORDER BY created_at DESC` desempatava ao acaso (falhou
+        # assim na validação humana de 24/09/2026). Em produção cada registro é um
+        # request e uma transação próprios, então os instantes diferem. Aqui o
+        # acordo é datado explicitamente ANTES, que é o cenário que o teste descreve.
+        await db_session.execute(
+            update(TitleContext)
+            .where(TitleContext.id == UUID(primeiro.json()["data"]["id"]))
+            .values(created_at=datetime(2026, 9, 24, 3, 0, tzinfo=UTC))
+        )
+        await db_session.flush()
 
         resp = await client_with_db.get(_report_url(world.client))
 
