@@ -192,7 +192,7 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**74** hoje — o arquivo é a fonte, confira com
+      (**77** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant E cross-org**: a bateria
       (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
@@ -200,9 +200,10 @@
       organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
-      (`PENDING_ENDPOINTS` está vazio: cobertura **74/74**). As 3 rotas do
+      (`PENDING_ENDPOINTS` está vazio: cobertura **77/77**). As 3 rotas do
       **plano de contas** (S10) e as 3 da **carteira de títulos** (S11 — lista,
-      agregados e sincronizar) entraram como coleção. Só
+      agregados e sincronizar) e as 3 da S15 (relatório de recebíveis, leitura e
+      registro do contexto do título) entraram como coleção. Só
       auth, tipos de anomalia, `test-connection`, `alert-test` e as 5 rotas de
       `/organizations` (plataforma, sem dado de cliente) ficam fora, com motivo.
       Essa lista é o denominador da métrica de isolamento — endpoint fora dela é
@@ -273,7 +274,7 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    `[indecifrável]` + métrica `decrypt_failed` (não célula silenciosamente
    vazia sem sinal).
    **A fonte ÚNICA da lista são as constantes de AAD declaradas em
-   [apps/api/app/core/crypto_service.py](apps/api/app/core/crypto_service.py)** (12
+   [apps/api/app/core/crypto_service.py](apps/api/app/core/crypto_service.py)** (13
    hoje) — campo cifrado novo entra lá E aqui, na mesma entrega. Os pares
    (tabela, coluna) do AAD são **congelados**: renomear um invalida a decifragem de
    tudo que já foi gravado com ele. Campos:
@@ -291,6 +292,9 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
      outro shape (`{token}`, `{url,usuario,senha}`) cabe sem AAD novo, e AAD novo
      é par congelado, não se cria por conveniência. CHECK no banco garante que
      ciphertext e IV vivem e morrem juntos.
+   - `title_contexts.text_encrypted` (Sprint 15) — o texto livre do contexto do
+     título (acordo, nota a cancelar, cobrança suspensa…), no molde do
+     `user_note_encrypted`: é PII em potencial e nasce cifrado com a DEK do cliente.
 2. **IV novo a cada operação** (12 bytes aleatórios). Nunca reutilize.
 3. **Valores monetários em claro** (campos `amount`, `balance`) — são números sem identificação, sem valor isolado.
 4. **Datas em claro** (`transaction_date`, `reference_month`) — necessárias para SQL ordering/filtering.
@@ -382,7 +386,7 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
 9. **Matriz de permissões (Sprint 5 + camada de organizações):** declarativa e
    ÚNICA em `PERMISSION_MATRIX`
    ([apps/api/app/core/authz.py](apps/api/app/core/authz.py)), consultada por
-   `has_permission`; 18 permissões x 5 papéis, transcrita célula a célula em
+   `has_permission`; 20 permissões x 5 papéis, transcrita célula a célula em
    `tests/unit/test_authz_matrix.py`, com um teste que trava **a plataforma em
    toda linha**. No front, o espelho é `apps/web/src/lib/authz.ts` — **um**
    helper, nunca `if (role === ...)` espalhado por componente — com a mesma
@@ -413,6 +417,8 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    | Sincronizar plano de contas     | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
    | Ver títulos em aberto (S11)     | ✅             | ✅               | ✅ (carteira)         | ✅             | ✅              |
    | Sincronizar títulos em aberto   | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
+   | Ver contexto do título (S15)    | ✅             | ✅               | ✅ (carteira)         | ✅             | ✅              |
+   | Registrar contexto do título    | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
 
    **`manage_client_connections` (Sprint 9) inclui o `manager` de propósito**: ele
    cria cliente, e sem a célula o gerente do escritório parceiro cadastraria a
@@ -485,7 +491,9 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
       glossário; o **plano de contas** (S10) também sai, e por um motivo
       diferente: nada nele é cifrado (são só códigos e flags), então nada dele
       morreria com a DEK — ele entra na lista de `close_client_purge`
-      **explicitamente**, por ser configuração de um cliente que não opera mais;
+      **explicitamente**, por ser configuração de um cliente que não opera mais; a
+      **carteira de títulos** (S11) e os **contextos do título** (S15) também saem
+      explicitamente no purge;
       conciliações, valores, datas,
       categoria e carteira FICAM, só-leitura.
     - **Encerrado é TERMINAL**: cliente que volta é cadastro novo. Toda escrita
@@ -708,19 +716,33 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
 Rodadas pelo orquestrador multi-agente; o escopo de cada uma vive no **Doc do
 ClickUp**, não no repo. `make sprints` lista o estado.
 
-| Sprint | Foco                                       | Deixou no código                                                                                       |
-| ------ | ------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| **0**  | Estabilização                              | —                                                                                                      |
-| **1**  | Fatura de cartão + conta aplicação         | `account_type`, `DATE_DIVERGENCE_RANGE`                                                                |
-| **2**  | Parsing sem perda silenciosa               | CSV grande, XLSX completo                                                                              |
-| **3**  | Cripto por cliente, auditoria, alerta      | `clients.dek_wrapped`, `access_audit`, `core/kms.py`                                                   |
-| **4**  | Lista, gaveta, multi-arquivo, notificações | `reconciliation_files`, `usage_events`, `notifications`                                                |
-| **5**  | Multi-tenancy e papéis de cliente          | `users.scope`/`client_id`, `core/authz.py`, `core/sensitive_endpoints.py`                              |
-| **6**  | Glossário e classificação por cliente      | `client_glossary_entries`, `clients.glossary_version`, `review_verdict`                                |
-| **7**  | Lançamento de faturas no Omie              | `reconciliation_omie_postings`, `omie_posting/`, `OMIE_POSTING_ENABLED`                                |
-| **9**  | Cliente sem sistema e conexões plugáveis   | `client_connections`, `integrations/providers/`, `legacy_fallback.py`                                  |
-| **10** | Plano de contas do cliente                 | `client_chart_of_accounts`, `modules/client_chart_of_accounts/`, `clients.chart_of_accounts_synced_at` |
-| **11** | Carteira de títulos em aberto              | `client_titles`, `modules/client_titles/`, `clients.titles_synced_at`/`titles_sync_failed_at`          |
+| Sprint | Foco                                       | Deixou no código                                                                                             |
+| ------ | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| **0**  | Estabilização                              | —                                                                                                            |
+| **1**  | Fatura de cartão + conta aplicação         | `account_type`, `DATE_DIVERGENCE_RANGE`                                                                      |
+| **2**  | Parsing sem perda silenciosa               | CSV grande, XLSX completo                                                                                    |
+| **3**  | Cripto por cliente, auditoria, alerta      | `clients.dek_wrapped`, `access_audit`, `core/kms.py`                                                         |
+| **4**  | Lista, gaveta, multi-arquivo, notificações | `reconciliation_files`, `usage_events`, `notifications`                                                      |
+| **5**  | Multi-tenancy e papéis de cliente          | `users.scope`/`client_id`, `core/authz.py`, `core/sensitive_endpoints.py`                                    |
+| **6**  | Glossário e classificação por cliente      | `client_glossary_entries`, `clients.glossary_version`, `review_verdict`                                      |
+| **7**  | Lançamento de faturas no Omie              | `reconciliation_omie_postings`, `omie_posting/`, `OMIE_POSTING_ENABLED`                                      |
+| **9**  | Cliente sem sistema e conexões plugáveis   | `client_connections`, `integrations/providers/`, `legacy_fallback.py`                                        |
+| **10** | Plano de contas do cliente                 | `client_chart_of_accounts`, `modules/client_chart_of_accounts/`, `clients.chart_of_accounts_synced_at`       |
+| **11** | Carteira de títulos em aberto              | `client_titles`, `modules/client_titles/`, `clients.titles_synced_at`/`titles_sync_failed_at`                |
+| **15** | Contexto do título: acordo × inadimplência | `title_contexts`, rotas `/titles/{id}/context` e `/titles/receivables-report`, aba "Relatório de recebíveis" |
+
+✅ **A Sprint 15 (contexto do título) foi validada em 24/09/2026 à noite** (PR #203
+da sprint, correções da validação em `fix/S15-validation-findings`). Ela pendura no
+título da carteira um **contexto tipado e append-only** (seis tipos fechados, texto
+cifrado com a DEK do cliente, autor e data) e lê esse contexto no **relatório de
+recebíveis**: para a receber e a pagar, dois grupos calculados no servidor sobre a
+carteira inteira, **inadimplência real** (sem contexto ou `perda_provavel`) e
+**vencido com contexto**, classificando pelo contexto mais recente. O contexto
+**nunca altera o título**. Números deste primer: endpoints sensíveis 74 → **77**,
+matriz 18 → **20** (`view_title_context`, `manage_title_context`), pares de AAD
+12 → **13**. ⚠️ Rodou pela Sprint 15 do hub, mas as Sprints 12, 13 e 14 continuam
+FORA da `main`: a 12 (de-para) é a próxima do caminho crítico, a 14 depende dela e
+a 13 está bloqueada pelo layout do arquivo contábil.
 
 ✅ **A Sprint 11 passou pela validação humana em 24/09/2026** (PR #200 da sprint,
 correções da validação em `fix/S11-validation-findings`); depois do merge na `main`
@@ -887,6 +909,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.45 — 24/09/2026. **A Sprint 15 entrou (contexto do título) e a validação humana achou o primer inteiro APAGADO na branch da sprint.** O commit do QA do hub trocou o `CLAUDE.md` da raiz pelo PROMPT do papel QA (76 linhas no lugar de 977): dentro do worktree o `CLAUDE.md` é o prompt do agente e o primer é o `PROJECT.md`; como o QA desta sprint não editou o `PROJECT.md`, a materialização não rodou e o `gitPaths` do QA (que inclui `CLAUDE.md`) commitou o prompt por cima do primer. O PR #203 mergearia isso. A correção desta rodada restaura o primer da `develop` e aplica à mão o que a sprint muda nele; a correção do hub (nunca commitar `CLAUDE.md` do worktree quando o `PROJECT.md` não mudou) é do repositório `agents-hub`. O que a validação rodou: suíte completa com Postgres, lint/tsc/vitest (676), contrato com diff 0, gate de a11y nos três temas, cenário de API (registro com histórico append-only, 400 genérico em tipo e texto inválidos, filtro `hasNoContext` no servidor, relatório em dois grupos com o mais recente decidindo, 404 sem vazar para título de outro cliente, operador lê e não registra, autor mascarado como "Equipe Hologram" para o tenant) e prints desktop e 390px. O gate de a11y em browser também pegou uma REGRESSÃO de layout que o QA do hub não podia ver: a aba nova (`Tabs`) quebrou a cadeia de altura da carteira e a tabela parou de rolar dentro da própria área (o defeito 86e2uca1d de volta), porque `Tabs` e `TabsContent` são itens flex sem `min-h-0`; corrigido na mesma branch, e como a faixa de abas tirou ~56px da tabela, o estado "última tentativa falhou" passou a espremê-la a 75px em desktop, então a área ganhou um piso de 8rem de `lg` para cima. E a suíte com Postgres pegou 3 testes do relatório quebrados, todos de TESTE: o helper semeava um título por `reconcile_cycle` (o ciclo marca como `ausente_na_origem` quem não veio no payload) e o teste do "contexto mais recente" postava dois contextos na mesma transação da fixture, onde `now()` devolve o mesmo instante. **Dois débitos ficaram registrados, não corrigidos:** a lista de títulos não diz quais têm contexto (o ícone é igual em toda linha, o R2 pedia indicador) e nenhum cenário novo entrou no gate de a11y em browser para a gaveta e o relatório. **Regra que fica:** toda validação humana começa por `git diff --stat origin/develop...HEAD -- CLAUDE.md`; um primer que encolhe é a sprint apagando a lei._
 
 _Versão 1.44 — 24/09/2026. **A validação humana da Sprint 11 (task 86e3dzp64) rodou o que o QA do hub não pôde rodar na aprovação, e o produto passou.** O sandbox dos agents tinha perdido o Docker entre as duas rodadas, então a aprovação da 2ª rodada foi sem integração e sem a11y em browser. Fora do sandbox: suíte completa com Postgres (2401 passed, 5 failed: 3 ambientais de alerting e 2 de TESTE), gate de a11y nos três temas (330 cenários cada, guard limpo), contrato regenerado com diff 0, cenário de API completo (sincronização, aging no servidor, 400 genérico em enum e `pageSize`, 409 `SEM_CONEXAO`, operador lê 200 e sincroniza 403, outro tenant 403, evento `carteira_sincronizada` com as 5 chaves e sem PII) e prints em desktop e 390px com os agregados empilhados sem sobreposição. Os 2 testes quebrados eram a correção da 1ª rodada do QA: `db_session.expire_all()` no helper `_titles()` expira também o `Client` do teste e o `client.id` seguinte faz refresh lazy fora do greenlet (`MissingGreenlet`, a mesma armadilha de 21/09); virou `populate_existing=True` no select do helper, que repovoa só o que a query devolve. **Regra que fica:** em teste async, nunca `expire_all()`; refresh de UM objeto ou `populate_existing` na query. E um defeito cosmético corrigido nas DUAS telas da família: a 390px o estado vazio dentro da tabela (`TableCell colSpan`) ficava cortado à direita porque a tabela rola na horizontal, e o plano de contas da S10 tinha o mesmo padrão. Nasceu `TableEmpty` (`ui/table.tsx`): o estado vazio de uma tabela de lista vai DEPOIS do `<Table>`, dentro do `<TableCard>`, nunca numa célula `colSpan`, e o e2e passou a medir o texto do estado vazio dentro da viewport em vez da altura da região._
 

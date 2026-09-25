@@ -526,7 +526,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Lista a carteira de títulos em aberto do cliente — a pagar e a receber, de todas as contas correntes e sem recorte de competência, que é o que faz um título vencido há meses aparecer aqui e não na conciliação do mês. Paginada (`page`/`pageSize`, máximo 100), com filtros NO SERVIDOR por tipo (`type`), situação (`situation`: `em_aberto` ou `vencido`) e balde de aging (`bucket`), e ordenação por vencimento ou valor (`sortBy`/`sortOrder`). O nome do devedor (`supplierName`) é resolvido em runtime e nunca lido do banco: quando a origem não responde, a linha volta com `supplierNameResolved=false` e o código — nunca em branco, e nunca com erro. Carteira de outro cliente jamais aparece. */
+        /** Lista a carteira de títulos em aberto do cliente — a pagar e a receber, de todas as contas correntes e sem recorte de competência, que é o que faz um título vencido há meses aparecer aqui e não na conciliação do mês. Paginada (`page`/`pageSize`, máximo 100), com filtros NO SERVIDOR por tipo (`type`), situação (`situation`: `em_aberto` ou `vencido`), balde de aging (`bucket`) e ausência de contexto (`hasNoContext`, Sprint 15 — a fila de trabalho de quem registra), e ordenação por vencimento ou valor (`sortBy`/`sortOrder`). O nome do devedor (`supplierName`) é resolvido em runtime e nunca lido do banco: quando a origem não responde, a linha volta com `supplierNameResolved=false` e o código — nunca em branco, e nunca com erro. Carteira de outro cliente jamais aparece. */
         get: operations["list_client_titles_api_v1_clients__client_id__titles_get"];
         put?: never;
         post?: never;
@@ -564,6 +564,41 @@ export interface paths {
         put?: never;
         /** Sincroniza a carteira com a origem e devolve as contagens do ciclo mais os agregados resultantes. Requer a permissão `sync_client_receivables` (plataforma, admin, gerente da carteira e gerente do cliente — o operador do cliente LÊ mas não sincroniza). Lê todos os títulos não liquidados de todas as contas, sem recorte de competência, serializando as chamadas por cliente. Cliente encerrado: 409. Cliente sem origem capaz: 409 `SEM_CONEXAO`, `ORIGEM_COM_ERRO` ou `CAPACIDADE_AUSENTE`, conforme o caso — a leitura do que já existe continua funcionando. Falha no meio preserva a última carteira íntegra e registra a falha, sem nunca deixar carteira parcial passando por completa. */
         post: operations["sync_client_titles_api_v1_clients__client_id__titles_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/titles/receivables-report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Relatório de recebíveis (Sprint 15) — separa, no SERVIDOR e sobre a carteira INTEIRA, inadimplência real de vencido-com-contexto. Cada lado (a pagar/a receber) tem dois grupos: `inadimplencia` (título vencido sem nenhum contexto, ou cujo contexto mais recente é `perda_provavel`) e `vencidoComContexto` (mais recente é acordo, antecipação, nota a cancelar, cobrança suspensa ou outro), cada um com total e os quatro baldes de aging da Sprint 11. Cliente sem nenhum contexto: tudo em `inadimplencia`, sem erro — é o baseline. Não expõe texto decifrado nem identificador de título, só agregados — por isso usa a MESMA permissão de leitura da carteira (`view_client_receivables`), não `view_title_context`. */
+        get: operations["get_receivables_report_api_v1_clients__client_id__titles_receivables_report_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/titles/{title_id}/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Histórico COMPLETO de contexto de um título, mais recente primeiro. Nunca paginado (é o registro de um título, não uma coleção sem teto). O autor de cada entrada é ENXUTO e mascarado por escopo (mesma decisão de autoria de sessão, §3.15) — usuário de cliente vendo autor de staff recebe 'Equipe {organização}', sem e-mail. Falha de decifragem de uma entrada não derruba o histórico: ela volta como `[indecifrável]` com `decryptFailed=true`. Título de outro cliente: 404, sem revelar que existe alhures. */
+        get: operations["list_title_context_api_v1_clients__client_id__titles__title_id__context_get"];
+        put?: never;
+        /** Registra uma entrada de CONTEXTO sobre um título — acordo de pagamento, antecipação, nota a cancelar, cobrança suspensa, perda provável ou outro. Append-only: registrar de novo NÃO apaga o histórico, só adiciona (a classificação do relatório usa o mais recente). O texto nasce cifrado com a chave do cliente. `type` fora do vocabulário fechado é validação de FORMA — 400 `VALIDATION_ERROR`, nunca 422. Cliente encerrado: 409. Título de outro cliente: 404, sem revelar que existe alhures. */
+        post: operations["register_title_context_api_v1_clients__client_id__titles__title_id__context_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2277,6 +2312,12 @@ export interface components {
          */
         ClientTitleResponse: {
             /**
+             * Id
+             * Format: uuid
+             * @description PK do título. O tenant já lê a linha inteira nesta resposta — não há razão de segurança para esconder o identificador, e sem ele a tela não tem como montar a URL de `.../titles/{title_id}/context` (Sprint 15).
+             */
+            id: string;
+            /**
              * Externalid
              * @description Identificador do título na origem.
              */
@@ -3431,6 +3472,70 @@ export interface components {
             data: components["schemas"]["PlatformAdminItem"][];
         };
         /**
+         * ReceivablesGroupResponse
+         * @description Os agregados de UM grupo (inadimplência OU vencido-com-contexto) de UM
+         *     lado — todos vencidos por construção, sem balde `a_vencer` (ver
+         *     `ReceivablesGroupTotals`).
+         */
+        ReceivablesGroupResponse: {
+            /** Total */
+            total: string;
+            /**
+             * Bucket1A30
+             * @description Atraso de 1 a 30 dias.
+             */
+            bucket1a30: string;
+            /**
+             * Bucket31A60
+             * @description Atraso de 31 a 60 dias.
+             */
+            bucket31a60: string;
+            /**
+             * Bucket61A90
+             * @description Atraso de 61 a 90 dias.
+             */
+            bucket61a90: string;
+            /**
+             * Bucket90Mais
+             * @description Atraso de 91 dias ou mais.
+             */
+            bucket90Mais: string;
+            /** Qtd */
+            qtd: number;
+        };
+        /**
+         * ReceivablesReportEnvelope
+         * @description Envelope `{data: ...}` de `GET /clients/{client_id}/titles/receivables-report`.
+         */
+        ReceivablesReportEnvelope: {
+            data: components["schemas"]["ReceivablesReportResponse"];
+        };
+        /**
+         * ReceivablesReportResponse
+         * @description Body de `GET /clients/{client_id}/titles/receivables-report`.
+         *
+         *     Os DOIS lados, cada um com os DOIS grupos — calculados no SERVIDOR sobre a
+         *     carteira INTEIRA. `referenceDate` é o "hoje" do servidor usado no aging dos
+         *     baldes, mesma razão de `TitlesSummaryResponse.referenceDate`.
+         */
+        ReceivablesReportResponse: {
+            aPagar: components["schemas"]["ReceivablesSideResponse"];
+            aReceber: components["schemas"]["ReceivablesSideResponse"];
+            /**
+             * Referencedate
+             * Format: date
+             */
+            referenceDate: string;
+        };
+        /**
+         * ReceivablesSideResponse
+         * @description Os dois grupos de UM lado (a pagar OU a receber).
+         */
+        ReceivablesSideResponse: {
+            inadimplencia: components["schemas"]["ReceivablesGroupResponse"];
+            vencidoComContexto: components["schemas"]["ReceivablesGroupResponse"];
+        };
+        /**
          * ReconciliationFileInput
          * @description Uma **parte** (arquivo) de uma conciliação — BACK 04.2.
          *
@@ -3879,6 +3984,93 @@ export interface components {
             /** Message */
             message: string;
         };
+        /**
+         * TitleContextCreateRequest
+         * @description Body de `POST /clients/{client_id}/titles/{title_id}/context`.
+         */
+        TitleContextCreateRequest: {
+            /**
+             * Type
+             * @description Um dos seis tipos fechados. Fora do conjunto: 400 `VALIDATION_ERROR` (validação de forma, não 422).
+             * @enum {string}
+             */
+            type: "acordo_de_pagamento" | "pagamento_antecipado" | "nota_a_cancelar" | "cobranca_suspensa" | "perda_provavel" | "outro";
+            /**
+             * Text
+             * @description Texto livre do analista — nasce cifrado com a chave do cliente.
+             */
+            text: string;
+        };
+        /**
+         * TitleContextEnvelope
+         * @description Envelope `{data: ...}` de `POST /clients/{client_id}/titles/{title_id}/context`.
+         */
+        TitleContextEnvelope: {
+            data: components["schemas"]["TitleContextResponse"];
+        };
+        /**
+         * TitleContextListResponse
+         * @description Body de `GET /clients/{client_id}/titles/{title_id}/context`.
+         *
+         *     Histórico COMPLETO, mais recente primeiro — sem paginação: é o registro de
+         *     um título, não uma coleção que cresce sem teto (CLAUDE.md: append-only,
+         *     mas por título, não por cliente).
+         */
+        TitleContextListResponse: {
+            /** Data */
+            data: components["schemas"]["TitleContextResponse"][];
+        };
+        /**
+         * TitleContextResponse
+         * @description Uma entrada de contexto, como a API a devolve — já decifrada.
+         *
+         *     `author` é o objeto ENXUTO e MASCARADO por escopo (`author_for_viewer`,
+         *     `reconciliations/service.py`) — o mesmo precedente da autoria de sessão
+         *     (§3.15): nunca a linha de `users`, nunca o `id` do autor.
+         */
+        TitleContextResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Titleid
+             * Format: uuid
+             */
+            titleId: string;
+            type: components["schemas"]["TitleContextType"];
+            /** Text */
+            text: string;
+            /**
+             * Decryptfailed
+             * @description `true` quando o texto não pôde ser decifrado — nunca célula vazia em silêncio.
+             * @default false
+             */
+            decryptFailed: boolean;
+            author: components["schemas"]["SessionAuthor"];
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
+        /**
+         * TitleContextType
+         * @description Vocabulário FECHADO do contexto — fonte ÚNICA do CHECK de `context_type`.
+         *
+         *     Os seis cobrem os casos observados na reunião de 17/06/2026 (CONTEXT.md).
+         *     `outro` é a escotilha declarada: um tipo novo é acréscimo de enum, nunca
+         *     migração de dado — não faz sentido travar a sprint esperando descobrir um
+         *     sétimo caso real.
+         *
+         *     **`PERDA_PROVAVEL` classifica como inadimplência, não como acordo** (R4) —
+         *     é o único tipo cujo contexto mais recente NÃO tira o título do grupo de
+         *     inadimplência real no relatório da BACK 15.2. Os outros quatro tipam
+         *     "vencido com contexto".
+         * @enum {string}
+         */
+        TitleContextType: "acordo_de_pagamento" | "pagamento_antecipado" | "nota_a_cancelar" | "cobranca_suspensa" | "perda_provavel" | "outro";
         /**
          * TitleStatus
          * @description Situação da linha na carteira — fonte ÚNICA do CHECK de `status`.
@@ -5636,6 +5828,8 @@ export interface operations {
                 situation?: ("em_aberto" | "vencido") | null;
                 /** @description Filtra por balde de aging. Ausente = todos. */
                 bucket?: ("a_vencer" | "1_30" | "31_60" | "61_90" | "90_mais") | null;
+                /** @description `true` = só títulos SEM nenhum registro em `title_contexts` (Sprint 15/R2) — a fila de trabalho de quem registra contexto. Combina com qualquer outro filtro; a tela usa junto de `situation=vencido`. */
+                hasNoContext?: boolean | null;
                 /** @description Ordena por vencimento ou por valor. */
                 sortBy?: "due_date" | "amount";
                 /** @description Crescente ou decrescente. */
@@ -5724,6 +5918,111 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TitlesSyncEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_receivables_report_api_v1_clients__client_id__titles_receivables_report_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceivablesReportEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_title_context_api_v1_clients__client_id__titles__title_id__context_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                title_id: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TitleContextListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    register_title_context_api_v1_clients__client_id__titles__title_id__context_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                title_id: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TitleContextCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TitleContextEnvelope"];
                 };
             };
             /** @description Validation Error */

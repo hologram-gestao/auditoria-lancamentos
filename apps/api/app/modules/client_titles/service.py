@@ -31,18 +31,34 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING
+from uuid import UUID, uuid4
 
+from app.core.crypto_service import (
+    AAD_TITLE_CONTEXT_TEXT,
+    field_locator,
+    load_client_cipher,
+    provision_client_cipher,
+)
+from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
 from app.db.models.client_title import TitleType
+from app.db.models.title_context import TitleContext, TitleContextType
 from app.integrations.omie.client_locks import origin_client_locks
 from app.integrations.providers.base import Capability, ProviderTitleKind
 from app.modules.client_connections.origin import (
     build_origin_provider,
     resolve_capable_connection,
 )
-from app.modules.client_titles.repository import TitlesSummary
-from app.modules.client_titles.schemas import client_title_row
+from app.modules.client_titles.repository import ReceivablesReport, TitlesSummary
+from app.modules.client_titles.schemas import (
+    TITLE_CONTEXT_UNDECIPHERABLE,
+    TitleContextResponse,
+    client_title_row,
+)
+from app.modules.reconciliations.schemas import SessionAuthor
+from app.modules.reconciliations.service import author_for_viewer
 from app.modules.usage_events.repository import UsageEventRepository
 from app.modules.usage_events.service import UsageEventService
 
@@ -54,11 +70,13 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from app.core.authz import CurrentUser
     from app.core.config import Settings
+    from app.core.crypto import ClientCipher
     from app.db.models import Client, OmieAccountCache
     from app.integrations.omie.client_locks import OriginClientLocks
     from app.integrations.providers.base import ProviderOpenTitle
-    from app.modules.client_titles.repository import ClientTitlesRepository
+    from app.modules.client_titles.repository import ClientTitlesRepository, TitleContextRepository
     from app.modules.clients.repository import ClientRepository
 
 log = get_logger(__name__)
@@ -272,6 +290,66 @@ class ClientTitlesReadService:
         )
 
 
+class ReceivablesReportService:
+    """Relatório de recebíveis (Sprint 15, BACK 15.2 — R4). Nunca fala com a
+    origem, nunca expõe texto decifrado — só agregados sobre o vencido.
+    """
+
+    def __init__(
+        self,
+        db: AsyncSession,
+        *,
+        repository: ClientTitlesRepository,
+        usage_events: UsageEventService | None = None,
+    ) -> None:
+        self._db = db
+        self._repo = repository
+        self._usage_events = usage_events or UsageEventService(UsageEventRepository(db))
+
+    async def report(self, client: Client, *, today: date | None = None) -> ReceivablesReport:
+        """Calcula o relatório e emite a métrica da sprint (R1/R4).
+
+        `today` é a data do SERVIDOR (mesmo padrão de `summary`) — parâmetro só
+        para o teste plantar títulos em cada balde sem depender do calendário.
+
+        A métrica soma os DOIS lados (a pagar + a receber) numa linha só: o
+        evento tem quatro chaves fechadas pelo PRD, sem separação por tipo — a
+        UI vê a separação na RESPOSTA (`a_pagar`/`a_receber`), a leitura D+30
+        vê a posição financeira inteira do cliente.
+        """
+        reference = today or datetime.now(UTC).date()
+        result = await self._repo.receivables_report(client.id, today=reference)
+
+        valor_vencido_total = (
+            result.a_pagar.inadimplencia.total
+            + result.a_pagar.vencido_com_contexto.total
+            + result.a_receber.inadimplencia.total
+            + result.a_receber.vencido_com_contexto.total
+        )
+        valor_sem_contexto = (
+            result.a_pagar.inadimplencia.total + result.a_receber.inadimplencia.total
+        )
+        titulos_vencidos = (
+            result.a_pagar.inadimplencia.qtd
+            + result.a_pagar.vencido_com_contexto.qtd
+            + result.a_receber.inadimplencia.qtd
+            + result.a_receber.vencido_com_contexto.qtd
+        )
+
+        await self._usage_events.emit_recebiveis_classificados(
+            client_id=client.id,
+            valor_vencido_total_centavos=_to_cents(valor_vencido_total),
+            valor_sem_contexto_centavos=_to_cents(valor_sem_contexto),
+            titulos_vencidos=titulos_vencidos,
+        )
+        return result
+
+
+def _to_cents(value: Decimal) -> int:
+    """`Numeric(14,2)` já tem no máximo 2 casas — a multiplicação é exata."""
+    return int((value * 100).to_integral_value())
+
+
 def _summarize(
     titles: Sequence[ProviderOpenTitle],
     *,
@@ -311,3 +389,136 @@ TITLE_KIND_TO_TYPE = {
     ProviderTitleKind.A_PAGAR: TitleType.A_PAGAR,
     ProviderTitleKind.A_RECEBER: TitleType.A_RECEBER,
 }
+
+
+class TitleContextService:
+    """Registrar e ler o CONTEXTO de um título (Sprint 15, BACK 15.1).
+
+    Não decide permissão nem rota (isso é `ManageTitleContextDep`/
+    `ViewTitleContextDep` + `OpenClientDep`/`AccessibleClientDep`). Só regra de
+    negócio: existência do título dentro do tenant, cifra, autoria mascarada e
+    a métrica da sprint.
+    """
+
+    def __init__(
+        self,
+        db: AsyncSession,
+        *,
+        repository: TitleContextRepository,
+        settings: Settings,
+        usage_events: UsageEventService | None = None,
+    ) -> None:
+        self._db = db
+        self._repo = repository
+        self._settings = settings
+        self._usage_events = usage_events or UsageEventService(UsageEventRepository(db))
+
+    async def register(
+        self,
+        client: Client,
+        *,
+        title_id: UUID,
+        context_type: TitleContextType,
+        text: str,
+        author: CurrentUser,
+    ) -> TitleContextResponse:
+        """Registra UMA entrada nova. Nunca atualiza, nunca apaga (append-only).
+
+        Título de outro cliente é 404 sem revelar que existe alhures (§3.15) —
+        `OpenClientDep` já garante que o CLIENTE está no tenant certo e aberto;
+        falta garantir que o TÍTULO é dele.
+        """
+        title = await self._repo.get_title_for_client(client.id, title_id)
+        if title is None:
+            raise NotFoundError(f"Título {title_id} não encontrado para o cliente {client.id}.")
+
+        # A pk entra no AAD ANTES do INSERT (padrão `clients/service.py`): gerar
+        # o id agora e não deixar o default do ORM resolver no flush, senão o
+        # ciphertext seria cifrado com uma pk que ainda não existe.
+        context_id = uuid4()
+        cipher = await provision_client_cipher(client, settings=self._settings)
+        text_ct, text_iv = cipher.encrypt(text, field_locator(AAD_TITLE_CONTEXT_TEXT, context_id))
+
+        context = TitleContext(
+            id=context_id,
+            client_id=client.id,
+            title_id=title.id,
+            context_type=context_type.value,
+            text_encrypted=text_ct,
+            text_iv=text_iv,
+            author_id=UUID(author.id),
+        )
+        await self._repo.insert(context)
+
+        # Métrica da sprint (R1). Fail-soft por construção (`emit` engole a
+        # falha) — instrumentação com defeito não pode reverter um registro que
+        # acabou de dar certo.
+        await self._usage_events.emit_contexto_titulo_registrado(
+            client_id=client.id, tipo_contexto=context_type.value
+        )
+
+        # O autor de UM registro novo é sempre quem está fazendo a chamada —
+        # nunca há máscara a aplicar contra si mesmo (`author_for_viewer` só
+        # mascara quando o OBSERVADO é staff e o OBSERVADOR é de outro tenant).
+        return TitleContextResponse.build(
+            context,
+            text=text,
+            author=SessionAuthor(name=author.name, email=author.email),
+        )
+
+    async def list_history(
+        self,
+        client: Client,
+        *,
+        title_id: UUID,
+        viewer: CurrentUser,
+    ) -> list[TitleContextResponse]:
+        """Histórico completo de UM título, mais recente primeiro, decifrado.
+
+        Falha de decifragem de UMA entrada não derruba o histórico inteiro — a
+        entrada vira `[indecifrável]` + `decryptFailed=true` (mesmo precedente
+        do glossário, `glossary/service.py`), nunca célula vazia em silêncio.
+        """
+        title = await self._repo.get_title_for_client(client.id, title_id)
+        if title is None:
+            raise NotFoundError(f"Título {title_id} não encontrado para o cliente {client.id}.")
+
+        rows = await self._repo.list_for_title_with_authors(client.id, title_id)
+        if not rows:
+            return []
+
+        cipher = await load_client_cipher(client, settings=self._settings)
+        result: list[TitleContextResponse] = []
+        for context, author_row in rows:
+            text, decrypt_failed = _decrypt_context_text(cipher, context, client_id=client.id)
+            result.append(
+                TitleContextResponse.build(
+                    context,
+                    text=text,
+                    decrypt_failed=decrypt_failed,
+                    author=author_for_viewer(author_row, viewer),
+                )
+            )
+        return result
+
+
+def _decrypt_context_text(
+    cipher: ClientCipher, context: TitleContext, *, client_id: UUID
+) -> tuple[str, bool]:
+    """Decifra o texto de UMA entrada; nunca deixa a leitura inteira cair."""
+    try:
+        return (
+            cipher.decrypt(
+                context.text_encrypted,
+                context.text_iv,
+                field_locator(AAD_TITLE_CONTEXT_TEXT, context.id),
+            ),
+            False,
+        )
+    except Exception:
+        log.warning(
+            "title_context_decrypt_failed",
+            client_id=str(client_id),
+            context_id=str(context.id),
+        )
+        return TITLE_CONTEXT_UNDECIPHERABLE, True

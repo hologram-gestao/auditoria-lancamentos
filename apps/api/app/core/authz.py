@@ -180,6 +180,15 @@ class Permission(StrEnum):
     #: sincronizações diferentes a uma decisão só — o dia em que uma delas
     #: mudasse de célula, a outra mudaria junto sem ninguém pedir.
     SYNC_CLIENT_RECEIVABLES = "sync_client_receivables"
+    # --- Sprint 15 (BACK 15.1) --------------------------------------------
+    #: LER o contexto de um título (acordo, antecipação, perda provável...).
+    #: Todo papel com acesso ao tenant — é leitura sobre a posição financeira
+    #: do próprio cliente, mesma base de `VIEW_CLIENT_RECEIVABLES`.
+    VIEW_TITLE_CONTEXT = "view_title_context"
+    #: REGISTRAR contexto num título. Permissão PRÓPRIA, decidida no PRD
+    #: (Sprint 15, §3): as MESMAS células de `SYNC_CLIENT_RECEIVABLES` — o
+    #: `client_operator` lê mas não escreve.
+    MANAGE_TITLE_CONTEXT = "manage_title_context"
 
 
 _EVERYONE: frozenset[UserRole] = frozenset(UserRole)
@@ -216,6 +225,8 @@ _PLATFORM_ONLY: frozenset[UserRole] = frozenset({UserRole.PLATFORM_ADMIN})
 #: | Sincronizar plano de contas   | ✅             | ✅          | ✅ (carteira)  | ✅             | ❌              |
 #: | Ver a carteira (S11)          | ✅             | ✅          | ✅ (carteira)  | ✅             | ✅              |
 #: | Sincronizar a carteira (S11)  | ✅             | ✅          | ✅ (carteira)  | ✅             | ❌              |
+#: | Ver contexto do título (S15)  | ✅             | ✅          | ✅ (carteira)  | ✅             | ✅              |
+#: | Registrar contexto (S15)      | ✅             | ✅          | ✅ (carteira)  | ✅             | ❌              |
 PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]] = {
     Permission.RUN_RECONCILIATION: _EVERYONE,
     Permission.REVIEW_EXPORT: _EVERYONE,
@@ -277,6 +288,16 @@ PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]] = {
     # SINCRONIZAR sai do `client_operator` e só dele. O "(carteira)" do manager é
     # `resolve_client_access`, não esta linha.
     Permission.SYNC_CLIENT_RECEIVABLES: frozenset(
+        {UserRole.PLATFORM_ADMIN, UserRole.ADMIN, UserRole.MANAGER, UserRole.CLIENT_MANAGER}
+    ),
+    # S15 (BACK 15.1), células decididas no PRD (§3). LER é de todos — mesma
+    # base de VIEW_CLIENT_RECEIVABLES. O "(carteira)" do manager é
+    # `resolve_client_access`, não esta linha.
+    Permission.VIEW_TITLE_CONTEXT: _EVERYONE,
+    # REGISTRAR sai do `client_operator` e só dele — mesmas células de
+    # SYNC_CLIENT_RECEIVABLES, decisão própria do PRD (não reuso por
+    # coincidência: as duas perguntas puderam ter respostas diferentes).
+    Permission.MANAGE_TITLE_CONTEXT: frozenset(
         {UserRole.PLATFORM_ADMIN, UserRole.ADMIN, UserRole.MANAGER, UserRole.CLIENT_MANAGER}
     ),
 }

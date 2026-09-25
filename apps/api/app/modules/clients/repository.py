@@ -54,6 +54,7 @@ from app.db.models import (
     ReconciliationFile,
     ReconciliationSession,
     ReconciliationStatus,
+    TitleContext,
     User,
     UserClientFavorite,
     UserRole,
@@ -566,6 +567,14 @@ class ClientRepository:
         cobranças vivas de um tenant morto. O histórico que o encerramento
         protege é o das conciliações e da trilha, não o de um espelho que a
         origem reconstrói em uma sincronização.
+
+        O **contexto do título** (S15) entra JUNTO com a carteira, pelo mesmo
+        raciocínio: é cifrado (já morreu com a DEK, como o glossário), e é
+        leitura sobre títulos que estão saindo agora — sem a carteira, o
+        contexto fica pendurado no vazio. O `DELETE` explícito aqui roda ANTES
+        do de `ClientTitle` só por clareza de leitura (o FK `title_id` já é
+        `CASCADE`, mas a lista declarada é a fonte — mesmo precedente das
+        conexões de origem).
         """
         s = self._session
         await s.execute(
@@ -575,6 +584,7 @@ class ClientRepository:
         await s.execute(
             delete(ClientChartOfAccount).where(ClientChartOfAccount.client_id == client_id)
         )
+        await s.execute(delete(TitleContext).where(TitleContext.client_id == client_id))
         await s.execute(delete(ClientTitle).where(ClientTitle.client_id == client_id))
         await s.execute(delete(OmieAccountCache).where(OmieAccountCache.client_id == client_id))
         await s.execute(delete(Notification).where(Notification.client_id == client_id))

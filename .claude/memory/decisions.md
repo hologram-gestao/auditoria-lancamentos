@@ -4943,3 +4943,204 @@ atacantes, o gate de a11y nos três temas, os PNGs de 390px reabertos, e os iten
 de cenário com cliente real de dev da própria task de QA (conferência
 carteira x origem, o título de 90+ dias, a medição da suposição S-1).
 
+
+
+
+---
+
+## ADR-037-FE — `ClientTitleResponse` não expõe o `id` interno do título: FRONT 15.1 não consegue chamar os endpoints de contexto (Sprint 15 / FRONT 15.1)
+
+**Data:** 2026-09-24 · **Status:** BLOQUEADOR ATIVO (confirmado pelo QA — ver
+ADR-036-QA) · **Escopo:** `client_titles/schemas.py::ClientTitleResponse`
+(backend), FRONT 15.1
+
+BACK 15.1 declarou os dois endpoints de contexto sob
+`POST/GET /clients/{client_id}/titles/{title_id}/context`, com `title_id: UUID`
+— o `id` interno (`UUIDPrimaryKeyMixin`) da linha em `client_titles`, o mesmo
+que `TitleContextRepository.get_title_for_client(client_id, title_id)` usa para
+localizar o título. Conferido em `apps/api/app/modules/client_titles/routes.py`
+e `repository.py` (branch `sprint-15/backend`, commit `0d3fc1b`).
+
+**O problema:** `ClientTitleResponse` — a resposta de `GET
+/clients/{client_id}/titles`, a lista que a tela da Carteira renderiza — NUNCA
+expõe esse `id`. Os campos são `externalId` (o identificador NA ORIGEM,
+string, não-UUID), `titleType`, `dueDate`, `amount`, `status`, `overdueDays`,
+`bucket`, `categoryCode`, `supplierCode`, `supplierName`,
+`supplierNameResolved`, `omieContaId`, `documentNumber`, `lastSyncedAt` — sem
+`id`. Conferido em três lugares (schema Pydantic, `schema.ts` gerado via
+`openapi-typescript` contra o OpenAPI real do branch do backend, e o próprio
+`from_row()` que monta a resposta): **nenhum expõe o PK**.
+
+**Consequência:** a tela da Carteira não tem como saber o `title_id` de uma
+linha visível. Não é possível montar a URL
+`.../titles/{title_id}/context` para NENHUMA ação da FRONT 15.1 —
+"Registrar contexto", o indicador de contexto na linha e o histórico no
+detalhe dependem todos do mesmo dado ausente. Não é um caso de "correção
+posterior possível no front": é um campo que só o backend pode adicionar.
+
+**O que eu NÃO fiz, de propósito:**
+- Não inventei o campo (`ClientTitle.id`) no alias do contrato — violaria a
+  regra "nunca redeclarar shape à mão" e faria o `tsc` mentir sobre um campo
+  que não existe em runtime.
+- Não usei `externalId` como se fosse o `title_id` da rota — ele não é UUID
+  (é o `codigo_lancamento_omie`, texto), e o FastAPI devolveria 422 antes de
+  chegar no serviço.
+- Não fiz `N+1` (buscar o histórico de cada título visível para descobrir se
+  existe, e usar isso como proxy do id) — o backend não tem endpoint de busca
+  por `externalId`, e o padrão do próprio repositório (`resolve_supplier_names`
+  em LOTE) é explicitamente CONTRA esse tipo de chamada por linha.
+
+**O que ENTREGUEI mesmo assim** (não depende do `id`):
+- Filtro **"Vencidos sem contexto"** na Carteira (`hasNoContext=true`, aplicado
+  no servidor) — funciona com o contrato como está.
+- **FRONT 15.2 completo**: aba "Relatório de recebíveis" dentro da tela da
+  Carteira (`?view=relatorio`), consumindo `GET .../receivables-report` — não
+  precisa de `title_id` nenhum, o relatório é agregado.
+- Tipos, hooks (`useTitleContextHistory`, `useRegisterTitleContext`),
+  validação Zod (`titleContextFormSchema`, os 6 tipos com `AssertSameUnion`
+  contra o contrato) e `lib/api/client-titles.ts` (`listTitleContext`,
+  `registerTitleContext`) — prontos para ligar na tela assim que o campo
+  existir. Não usados ainda (sem consumidor), então não têm teste próprio
+  ainda — virá junto com a tela quando o bloqueio sair.
+- `view_title_context`/`manage_title_context` em `lib/authz.ts` e no espelho
+  de `__tests__/authz.test.ts`, célula a célula contra
+  `apps/api/app/core/authz.py::PERMISSION_MATRIX` do branch do backend.
+
+**O que falta e como destrava:** BACK precisa acrescentar um campo (ex.:
+`id: UUID` aliasado, ou manter `id` mesmo — não há razão de segurança para
+escondê-lo: é o PK de uma linha que o próprio tenant já lê por completo) em
+`ClientTitleResponse`, regenerar o schema, e então a FRONT 15.1 liga a ação de
+registrar, o indicador de linha e o histórico. Sem isso, "Registrar contexto"
+na Carteira permanece INDISPONÍVEL — a tarefa foi para IN REVIEW documentando
+exatamente esta lacuna, não silenciada.
+
+---
+
+## ADR-036-QA — O `id` ausente do `ClientTitleResponse` é bloqueador confirmado, não suspeita do front (Sprint 15 / QA 15.1)
+
+**Data:** 2026-09-24 · **Status:** ativo · **Escopo:** verificação de contrato
+backend↔frontend, BACK 15.1 / FRONT 15.1
+
+A ADR-037-FE (acima) chegou como alegação do frontend, sem o QA ter lido o
+backend ainda. Confirmado de forma independente nesta revisão, nos TRÊS lados:
+`apps/api/app/modules/client_titles/schemas.py:147-206` (`ClientTitleResponse`,
+Pydantic), `from_row()` (mesmo arquivo, linhas 213-231) e
+`apps/web/src/lib/contracts/schema.ts:2313` (o `schema.ts` já regenerado que o
+frontend trouxe) — nenhum dos três tem `id`. `routes.py:341,370` exige
+`title_id: UUID` no path das duas rotas novas. Sem o campo, "Registrar
+contexto" é código morto: os testes de integração passam porque semeiam o
+título direto no banco (`_seed_title`) e já têm o UUID em mãos — o teste nunca
+precisa "descobrir" o id a partir da lista, então a bateria fica verde com o
+contrato quebrado. **Reprovado o BACK 15.1** (campo faltando) e, por bloqueio
+de dependência, **também o FRONT 15.1** (nada dele pôde ligar à tela) — mesma
+regra de "falhar a causa-raiz e a bloqueada" do papel do QA. Ver comentário de
+reprovação nas duas tasks (86e3e79rk, 86e3e79tg) para o "como corrigir".
+
+**Achado secundário no mesmo BACK 15.1**: falta o teste dedicado que o próprio
+critério de aceite da sprint pede — "contexto preservado após dois ciclos de
+sincronização da carteira". `test_titulo_reemitido_com_outro_identificador`
+(`tests/integration/test_client_titles_repository.py:215-240`) tem um
+docstring que AFIRMA que o contexto sobrevive à reemissão, mas o corpo não cria
+nenhum `TitleContext` nem assert nada sobre ele — é `grep -rln "TitleContext("
+apps/api/tests/` devolvendo VAZIO, o comando que decide isso. Como
+`title_contexts.title_id` é `ondelete=CASCADE`, uma futura mudança do upsert de
+UPDATE para DELETE+INSERT apagaria contexto em cascata sem nenhum teste
+acusando.
+
+**O que passou limpo nesta revisão** (não é o motivo da reprovação, registrado
+para não repetir o trabalho na próxima rodada): crypto do `text_encrypted`
+(AAD `("title_contexts", "text_encrypted")`, par novo e único, decrypt
+fail-soft com `[indecifrável]`/`decryptFailed`, nunca o texto em log), migration
+reversível de verdade (`downgrade()` derruba índice e tabela), isolamento de
+tenant em `get_title_for_client`/`receivables_report` (client_id no próprio
+`WHERE`), os dois endpoints novos + o de relatório entrando automaticamente na
+bateria `test_cross_tenant_por_endpoint` (3 atacantes) por estarem em
+`SENSITIVE_ENDPOINTS`/COVERED, permissões `view_title_context`/
+`manage_title_context` espelhadas célula a célula no front, evento novo fora
+da allow-list de dedup, conversão para centavos sem float. 1226 unitários do
+backend + 670 do frontend verdes, `tsc`/`ruff` limpos.
+
+---
+
+## ADR-037-QA — A branch `develop` está uma sprint inteira atrás de `main`, e o comando de diff do prompt do orquestrador mentiu por omissão (Sprint 15 / QA 15.1)
+
+**Data:** 2026-09-24 · **Status:** achado operacional, sem dono de código —
+avisar o Pedro · **Escopo:** fluxo de branches do agents-hub
+
+O prompt do orquestrador manda revisar `git diff develop..HEAD` de cada
+worktree. Rodado ao pé da letra, o diff do backend e do frontend trazia TODO o
+histórico da Sprint 11 (ADR-062-BE a ADR-035-QA) como se fosse novo — porque
+`develop` (tip `7a02e39`, 4094 linhas de `decisions.md`) nunca recebeu a Sprint
+11, que foi direto para `main` via PR #200/#201 e ficou só lá (tip `646a699`,
+4945 linhas). `git merge-base --is-ancestor develop main` confirma: `develop`
+é ancestral de `main`, nunca o contrário. Mesmo assim, os agents `backend` e
+`frontend` desta sprint branchearam corretamente a partir de `main` (o
+histórico de `agent-backend`/`agent-frontend` inclui `9168a96` e tudo antes) —
+quem está desatualizada é só a branch `develop` em si, não a base real usada
+pelo agents-hub para subir os worktrees.
+
+**Por que importa mesmo sem ter causado dano nesta sprint**: se um sprint
+futuro branchear literalmente de `develop` (em vez de `main`, como
+aconteceu aqui por sorte do mecanismo do hub), o agent começaria sem a tabela
+`client_titles`/`title_contexts` da Sprint 11/15 e sem a cadeia de migration
+correspondente — a mesma classe de risco que a memória do usuário já registra
+em "Fluxo de branches develop-first": *"verificar develop==main ANTES de rodar
+sprint"*. Aqui não foi verificado, e passou batido só porque o hub usa `main`
+por baixo.
+
+**Ação registrada, não código**: fora do `gitPaths` de qualquer agent (é
+operação de git no repositório, não edição de arquivo) — reportado ao usuário
+no fechamento desta rodada de QA, não vira follow-up de agent.
+
+---
+
+## ADR-038-QA — BACK 15.1 e FRONT 15.1 aprovadas na re-revisão #1: rework fechou o bloqueio de contrato e o gap de teste (Sprint 15 / QA 15.1)
+
+**Data:** 2026-09-24 · **Status:** ativo · **Escopo:** re-revisão pós-rework,
+BACK 15.1 (`86e3e79rk`), FRONT 15.1 (`86e3e79tg`)
+
+Os dois problemas da reprovação da rodada 1 (ADR-036-QA/ADR-037-FE) foram
+corrigidos:
+
+1. **`ClientTitleResponse.id`** acrescentado (`schemas.py:147-153`,
+   `from_row()` linha 241, commit `92f5cf2`). Confirmado nesta revisão por
+   três caminhos independentes, não só leitura de diff: introspecção direta
+   de `app.openapi()` (o backend real expõe `id` com a descrição exata do
+   commit), o `schema.ts` regenerado da FRONT 15.1 batendo campo a campo — a
+   descrição em PT-BR bate palavra por palavra, o que só ocorre com
+   regeneração real — e `grep "ClientTitleResponse("` confirmando que
+   `from_row()` é o único construtor (nenhum outro ponto ficou com `id`
+   faltando).
+2. **Teste dedicado de sobrevivência a 2 ciclos** acrescentado
+   (`test_contexto_sobrevive_a_dois_ciclos_de_sincronizacao`,
+   `tests/integration/test_client_titles_repository.py:218-260`): registra um
+   `TitleContext`, roda `reconcile_cycle` uma segunda vez com o mesmo
+   payload, assert que `title.id` não mudou e que
+   `list_for_title_with_authors` ainda devolve a mesma linha. Lido linha a
+   linha — usa os repositórios reais, sem mock. **Não pôde ser EXECUTADO**
+   neste sandbox (é `pytest.mark.integration`, precisa de Postgres via
+   testcontainers; socket do Docker negado — mesma limitação das Sprints
+   9/10/11); aprovado por leitura de código, roda no CI.
+
+FRONT 15.1 (`title-context-sheet.tsx`, commit `8d1a789`) liga o que estava
+pronto e parado: gaveta única serve histórico (`view_title_context`) e
+formulário de registro (`manage_title_context`), mesma permissão que esconde
+a ação na tabela esconde o formulário na gaveta — sem `role === ` na tela.
+39/39 testes do arquivo verdes (`pnpm test -- client-titles`), `tsc
+--noEmit` e `eslint --no-cache` limpos nesta revisão.
+
+**Evidência backend geral:** 1229 unitários verdes (`pytest -m "not
+integration"`), ruff limpo. Sensitive endpoints em 77 (era 74 antes da
+sprint), os 2 endpoints de contexto presentes e cobertos pela bateria de 3
+atacantes — item já confirmado na rodada 1 (ADR-036-QA), sem mudança neste
+rework.
+
+**Pendências não-bloqueantes, herdadas da rodada 1:** gate de a11y (3 temas)
+e screenshots desktop/390px seguem PENDENTES neste ambiente — sandbox sem
+Docker/browser.
+
+**Lição registrada:** `.claude/memory/learnings.md` (entrada 2026-09-24,
+"Endpoint aninhado novo referenciava um PK que a listagem-pai não expunha").
+Encode do checklist mecânico correspondente pedido no follow-up **86e3ebkfj**
+(tag `agent-review`) — arquivo-fonte `.claude/agents/qa.md` fora do alcance
+de escrita do sandbox do QA nesta run.

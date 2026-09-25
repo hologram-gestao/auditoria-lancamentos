@@ -103,7 +103,21 @@ export type Permission =
    * amarrá-las faria o dia em que uma célula mudasse arrastar a outra junto,
    * sem ninguém ter pedido.
    */
-  | 'sync_client_receivables';
+  | 'sync_client_receivables'
+  /**
+   * Sprint 15 (BACK 15.1): LER o contexto de um título (acordo de pagamento,
+   * antecipação, nota a cancelar, cobrança suspensa, perda provável). Todo
+   * papel com acesso ao tenant — mesma base de `view_client_receivables`: é
+   * leitura sobre a posição financeira do próprio cliente.
+   */
+  | 'view_title_context'
+  /**
+   * Sprint 15 (BACK 15.1): REGISTRAR contexto num título. Permissão PRÓPRIA,
+   * decidida no PRD (§3) com as MESMAS células de `sync_client_receivables` —
+   * o `client_operator` lê mas não escreve. Não é reuso por coincidência: as
+   * duas perguntas puderam ter respostas diferentes.
+   */
+  | 'manage_title_context';
 
 /**
  * A matriz, indexada por PAPEL (e não por permissão) de propósito: assim o
@@ -132,6 +146,8 @@ export type Permission =
  * | Sincronizar plano de contas   | ✅             | ✅    | ✅ (carteira) | ✅       | ❌              |
  * | Ver a carteira (S11)          | ✅             | ✅    | ✅ (carteira) | ✅       | ✅              |
  * | Sincronizar a carteira (S11)  | ✅             | ✅    | ✅ (carteira) | ✅       | ❌              |
+ * | Ver contexto do título (S15)  | ✅             | ✅    | ✅ (carteira) | ✅       | ✅              |
+ * | Registrar contexto (S15)      | ✅             | ✅    | ✅ (carteira) | ✅       | ❌              |
  *
  * "(carteira)" e "(própria org)" **não são células**: são `resolve_client_access`
  * e os filtros de coleção, no servidor. A célula diz se o papel pode a AÇÃO.
@@ -158,6 +174,8 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'sync_client_chart_of_accounts',
     'view_client_receivables',
     'sync_client_receivables',
+    'view_title_context',
+    'manage_title_context',
   ],
   // D3 final (86e36ed1d): `manage_anomaly_types` saiu daqui. A taxonomia de
   // anomalias é uma tabela GLOBAL do produto — o admin de uma organização
@@ -179,6 +197,8 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'sync_client_chart_of_accounts',
     'view_client_receivables',
     'sync_client_receivables',
+    'view_title_context',
+    'manage_title_context',
   ],
   // O gerente da organização enxerga outros tenants apenas dentro da carteira —
   // quem sabe a carteira é o backend (`client_assignments`), ver `canAccessClient`.
@@ -200,6 +220,8 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'sync_client_chart_of_accounts',
     'view_client_receivables',
     'sync_client_receivables',
+    'view_title_context',
+    'manage_title_context',
   ],
   client_manager: [
     'run_reconciliation',
@@ -211,6 +233,8 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'sync_client_chart_of_accounts',
     'view_client_receivables',
     'sync_client_receivables',
+    'view_title_context',
+    'manage_title_context',
   ],
   // S10 (R4) e S11 (R5): o operador LÊ o plano de contas e a carteira, e **não**
   // sincroniza nenhum dos dois — são os únicos ❌ das duas linhas de
@@ -222,6 +246,7 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'sync_omie_accounts',
     'view_client_chart_of_accounts',
     'view_client_receivables',
+    'view_title_context',
   ],
 };
 

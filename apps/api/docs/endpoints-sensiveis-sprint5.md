@@ -15,10 +15,10 @@
 
 | | |
 | --- | --- |
-| Endpoints sensíveis (denominador) | **74** |
-| Com caso negativo cross-tenant verde | **74** |
+| Endpoints sensíveis (denominador) | **77** |
+| Com caso negativo cross-tenant verde | **77** |
 | Pendentes (implementação em outra task) | **0** |
-| Cobertura | **74/74 = 100%** |
+| Cobertura | **77/77 = 100%** |
 
 ## Lista canônica
 
@@ -100,6 +100,9 @@ Legenda de `tipo`: **coleção** = vaza forjando `client_id` na URL/payload · *
 | `GET` | `/api/v1/clients/{client_id}/titles` | coleção | `app/modules/client_titles/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + ViewClientReceivablesDep; todo SELECT nasce de _base_query, que já leva AND client_id | ✅ verde |
 | `GET` | `/api/v1/clients/{client_id}/titles/summary` | coleção | `app/modules/client_titles/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + ViewClientReceivablesDep; a agregação do aging filtra por client_id na própria query | ✅ verde |
 | `POST` | `/api/v1/clients/{client_id}/titles/sync` | coleção | `app/modules/client_titles/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + OpenClientDep + SyncClientReceivablesDep; cliente encerrado = 409 e a leitura segue 200 | ✅ verde |
+| `POST` | `/api/v1/clients/{client_id}/titles/{title_id}/context` | coleção | `app/modules/client_titles/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + OpenClientDep + ManageTitleContextDep; título buscado por get_title_for_client (AND client_id = tenant); título de outro cliente = 404 sem vazar | ✅ verde |
+| `GET` | `/api/v1/clients/{client_id}/titles/{title_id}/context` | coleção | `app/modules/client_titles/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + ViewTitleContextDep; título buscado por get_title_for_client (AND client_id = tenant); título de outro cliente = 404 sem vazar | ✅ verde |
+| `GET` | `/api/v1/clients/{client_id}/titles/receivables-report` | coleção | `app/modules/client_titles/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + ViewClientReceivablesDep; a agregação filtra por client_id na própria query | ✅ verde |
 
 ## Rotas `/api/v1` fora do denominador
 
