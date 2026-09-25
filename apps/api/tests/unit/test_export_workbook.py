@@ -821,3 +821,149 @@ class TestSheet5Anomalias:
         # Na ordem recebida — o rótulo é o que está sob teste, não a posição.
         assert ws.cell(row=2, column=6).value == "Resolvida"  # type: ignore[attr-defined]
         assert ws.cell(row=3, column=6).value == "Pendente"  # type: ignore[attr-defined]
+
+
+# ======================================================================
+# Injeção de fórmula (86e3anx2p) — nenhuma aba pode gravar texto como fórmula
+# ======================================================================
+
+_FORMULA = '=HYPERLINK("http://x","clique")'
+
+
+def _reload_full(payload: ExportPayload):  # type: ignore[no-untyped-def]
+    """Reabre SEM `read_only`: é o modo que expõe `data_type` e `quotePrefix`."""
+    return load_workbook(build_workbook(payload))
+
+
+def _assert_text_cell(ws, row: int, col: int, expected: str) -> None:  # type: ignore[no-untyped-def]
+    cell = ws.cell(row=row, column=col)
+    assert cell.value == expected, "o valor EXIBIDO tem de ser o texto original"
+    assert cell.data_type == "s", f"{ws.title}!{cell.coordinate} gravada como {cell.data_type}"
+    assert cell.quotePrefix is True, f"{ws.title}!{cell.coordinate} sem quotePrefix"
+
+
+def _sheet_xml_has_formula(payload: ExportPayload) -> bool:
+    import zipfile
+
+    with zipfile.ZipFile(build_workbook(payload)) as z:
+        sheets = [n for n in z.namelist() if n.startswith("xl/worksheets/sheet")]
+        return any("<f>" in z.read(n).decode() or "<f " in z.read(n).decode() for n in sheets)
+
+
+@pytest.mark.unit
+class TestFormulaInjection:
+    def test_sheet1_client_name(self) -> None:
+        wb = _reload_full(_payload(summary=_summary(client_name=_FORMULA)))
+        ws = wb[SHEET_NAME_SUMMARY]
+        found = [c for row in ws.iter_rows() for c in row if c.value == _FORMULA]
+        assert found, "o nome do cliente precisa aparecer no resumo"
+        for cell in found:
+            _assert_text_cell(ws, cell.row, cell.column, _FORMULA)
+
+    def test_sheet2_description_supplier_category_and_note(self) -> None:
+        row = FileEntryRow(
+            transaction_date=date(2026, 4, 10),
+            description=_FORMULA,
+            amount=Decimal("-500.00"),
+            balance=Decimal("1500.00"),
+            supplier="+cmd|' /C calc'!A0",
+            category="@SUM(1+1)",
+            situation="sem_omie",
+            user_note="-2+3",
+        )
+        wb = _reload_full(_payload(file_entries=[row]))
+        ws = wb[SHEET_NAME_MOVIMENTACAO]
+        texts = {c.value: c for c in ws[2] if isinstance(c.value, str)}
+        for value in (_FORMULA, "+cmd|' /C calc'!A0", "@SUM(1+1)", "-2+3"):
+            assert value in texts, f"{value!r} não foi escrito na aba 2"
+            cell = texts[value]
+            _assert_text_cell(ws, cell.row, cell.column, value)
+
+    def test_sheet3_supplier_and_note(self) -> None:
+        row = OmieDivergenceRow(
+            transaction_date=date(2026, 4, 5),
+            supplier=_FORMULA,
+            category="Aluguel",
+            amount=Decimal("-1500.00"),
+            omie_status="Atrasado",
+            user_note="\t=1+1",
+        )
+        ws = _reload_full(_payload(omie_divergences=[row]))[SHEET_NAME_DIVERGENCIAS]
+        _assert_text_cell(ws, 2, 2, _FORMULA)
+        _assert_text_cell(ws, 2, 6, "\t=1+1")
+
+    def test_sheet4_description(self) -> None:
+        row = SemOmieRow(
+            transaction_date=date(2026, 4, 5),
+            description=_FORMULA,
+            amount=Decimal("-10.00"),
+            user_note=None,
+        )
+        ws = _reload_full(_payload(sem_omie=[row]))[SHEET_NAME_SEM_OMIE]
+        _assert_text_cell(ws, 2, 2, _FORMULA)
+
+    def test_sheet5_context_and_resolution_note(self) -> None:
+        row = AnomalyRow(
+            severity="critical",
+            type_name="Qualificação incoerente",
+            context=_FORMULA,
+            related_line="—",
+            detected_by="manual",
+            resolved=True,
+            resolution_note="=cmd|' /C calc'!A0",
+        )
+        ws = _reload_full(_payload(anomalies=[row]))[SHEET_NAME_ANOMALIAS]
+        _assert_text_cell(ws, 2, 3, _FORMULA)
+        _assert_text_cell(ws, 2, 7, "=cmd|' /C calc'!A0")
+
+    def test_no_sheet_carries_a_formula(self) -> None:
+        payload = _payload(
+            summary=_summary(client_name=_FORMULA),
+            file_entries=[
+                FileEntryRow(
+                    transaction_date=date(2026, 4, 10),
+                    description=_FORMULA,
+                    amount=Decimal("-500.00"),
+                    balance=None,
+                    supplier=_FORMULA,
+                    category=_FORMULA,
+                    situation="sem_omie",
+                    user_note=_FORMULA,
+                )
+            ],
+            sem_omie=[
+                SemOmieRow(
+                    transaction_date=date(2026, 4, 5),
+                    description=_FORMULA,
+                    amount=Decimal("-10.00"),
+                    user_note=_FORMULA,
+                )
+            ],
+        )
+        assert not _sheet_xml_has_formula(payload)
+
+    def test_numbers_stay_numbers(self) -> None:
+        # Valor negativo é Decimal, não texto: continua número, com o formato BRL.
+        row = SemOmieRow(
+            transaction_date=date(2026, 4, 5),
+            description="Tarifa",
+            amount=Decimal("-10.00"),
+            user_note=None,
+        )
+        ws = _reload_full(_payload(sem_omie=[row]))[SHEET_NAME_SEM_OMIE]
+        amount = ws.cell(row=2, column=3)
+        assert amount.data_type == "n"
+        assert amount.value == pytest.approx(-10.0)
+        assert amount.quotePrefix is False
+
+    def test_plain_text_is_untouched(self) -> None:
+        row = SemOmieRow(
+            transaction_date=date(2026, 4, 5),
+            description="Pix Fornecedor",
+            amount=Decimal("10.00"),
+            user_note=None,
+        )
+        ws = _reload_full(_payload(sem_omie=[row]))[SHEET_NAME_SEM_OMIE]
+        cell = ws.cell(row=2, column=2)
+        assert cell.value == "Pix Fornecedor"
+        assert cell.quotePrefix is False

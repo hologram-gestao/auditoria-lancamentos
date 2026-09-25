@@ -163,10 +163,47 @@ def build_workbook(payload: ExportPayload) -> BytesIO:
         payload.anomalies,
     )
 
+    # Ponto ÚNICO da proteção: roda sobre o workbook pronto, não em cada
+    # `ws.cell(...)`. Aba nova já nasce coberta, sem depender de alguém lembrar.
+    _neutralize_formula_injection(wb)
+
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)
     return buf
+
+
+# Primeiro caractere que planilha (Excel, LibreOffice, Sheets) pode ler como
+# início de fórmula ou de comando: `=`, `+`, `-`, `@`, TAB e CR.
+_FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _neutralize_formula_injection(wb: Workbook) -> None:
+    """Garante que texto vindo de fora NUNCA vire fórmula no relatório (86e3anx2p).
+
+    A descrição vem do arquivo do cliente (extraída pela IA) e do cadastro do
+    Omie; o nome do cliente, de quem o cadastrou. O openpyxl grava como FÓRMULA
+    toda string que começa com `=` (`data_type='f'`): um extrato com
+    `=HYPERLINK(...)` viraria link ativo, no Excel de quem abre, dentro de um
+    anexo que a Hologram entrega.
+
+    Por célula de texto que começa com um gatilho:
+      - `data_type = "s"`: grava como texto; o valor EXIBIDO continua o original
+        (o apóstrofo manual apareceria na célula e mudaria o que o cliente lê);
+      - `quotePrefix = True`: marca "texto que parece fórmula", para o Excel não
+        reinterpretar quando alguém editar a célula e der Enter.
+
+    Número e data ficam como estão: não são caminho de execução, e a formatação
+    BRL depende do tipo. O relatório não grava fórmula nenhuma de propósito;
+    se um dia gravar, ela precisa nascer DEPOIS desta passada.
+    """
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                value = cell.value
+                if isinstance(value, str) and value.startswith(_FORMULA_TRIGGERS):
+                    cell.data_type = "s"
+                    cell.quotePrefix = True
 
 
 # ======================================================================
