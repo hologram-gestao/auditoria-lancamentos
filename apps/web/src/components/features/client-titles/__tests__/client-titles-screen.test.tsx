@@ -57,6 +57,14 @@ const summaryState = {
 
 const syncState = { mutateAsync: vi.fn(), isPending: false };
 
+const historyState = {
+  data: undefined as TitleContext[] | undefined,
+  isLoading: false,
+  isError: false,
+};
+
+const registerContextState = { mutateAsync: vi.fn(), isPending: false };
+
 /** Último `params` que a tela mandou para o hook — prova o "URL → request". */
 let lastQueryParams: ListClientTitlesParams | undefined;
 
@@ -67,6 +75,8 @@ vi.mock('@/hooks/use-client-titles', () => ({
   },
   useClientTitlesSummary: () => summaryState,
   useSyncClientTitles: () => syncState,
+  useTitleContextHistory: () => historyState,
+  useRegisterTitleContext: () => registerContextState,
 }));
 
 const clientDetailState = {
@@ -88,7 +98,13 @@ vi.mock('@/stores/auth', () => ({
 // deste módulo; importar antes as avaliaria na TDZ).
 import { ClientTitlesScreen } from '@/components/features/client-titles/client-titles-screen';
 import { buildClientTitlesQuery, type ListClientTitlesParams } from '@/lib/api/client-titles';
-import type { AgingTotals, AuthenticatedUser, ClientTitle, TitlesSummary } from '@/lib/contracts';
+import type {
+  AgingTotals,
+  AuthenticatedUser,
+  ClientTitle,
+  TitleContext,
+  TitlesSummary,
+} from '@/lib/contracts';
 import { assertNoA11yViolations } from '@/test/a11y';
 
 const TENANT = '11111111-1111-4111-8111-111111111111';
@@ -107,6 +123,7 @@ const clientOperator: AuthenticatedUser = { ...clientManager, id: 'co', role: 'c
 
 function title(overrides: Partial<ClientTitle> = {}): ClientTitle {
   return {
+    id: '99999999-9999-4999-8999-999999999999',
     externalId: '4010',
     titleType: 'a_receber',
     dueDate: '2026-06-10',
@@ -121,6 +138,7 @@ function title(overrides: Partial<ClientTitle> = {}): ClientTitle {
     omieContaId: 777,
     documentNumber: 'NF 1234',
     lastSyncedAt: '2026-09-24T09:00:00Z',
+    contextCount: 0,
     ...overrides,
   };
 }
@@ -217,6 +235,11 @@ beforeEach(() => {
   summaryState.data = summary();
   summaryState.isLoading = false;
   summaryState.isError = false;
+  historyState.data = [];
+  historyState.isLoading = false;
+  historyState.isError = false;
+  registerContextState.mutateAsync = vi.fn().mockResolvedValue({});
+  registerContextState.isPending = false;
 });
 
 describe('ClientTitlesScreen — agregados e aging (R3)', () => {
@@ -303,6 +326,25 @@ describe('ClientTitlesScreen — lista', () => {
     ).toBeVisible();
   });
 
+  it('a linha diz se o título já tem contexto, no visual e no nome acessível (R2)', () => {
+    listState.data = {
+      data: [
+        title({ id: '11111111-1111-4111-8111-111111111111', externalId: '4010', contextCount: 2 }),
+        title({ id: '22222222-2222-4222-8222-222222222222', externalId: '4011', contextCount: 0 }),
+      ],
+      pagination: { page: 1, pageSize: 20, total: 2, totalPages: 1 },
+    };
+    render(<ClientTitlesScreen clientId="c1" />);
+    const comContexto = screen.getByRole('button', {
+      name: 'Contexto do título 4010 (2 registrados)',
+    });
+    expect(comContexto).toHaveTextContent('2');
+    const semContexto = screen.getByRole('button', {
+      name: 'Contexto do título 4011 (nenhum registrado)',
+    });
+    expect(semContexto).not.toHaveTextContent(/\d/);
+  });
+
   it('título sem devedor não é "não resolvido": não há o que resolver', () => {
     listState.data = {
       data: [title({ supplierCode: null, supplierName: null, supplierNameResolved: true })],
@@ -359,12 +401,17 @@ describe('ClientTitlesScreen — lista', () => {
    * de `lg`; de `lg` para cima continua `min-h-0`, que é o desktop verificado.
    * A medida de verdade é o `boundingBox()` do e2e — esta é a rede barata.
    */
-  it('a área da tabela tem PISO de altura abaixo de lg (não colapsa em 390px)', () => {
+  it('a área da tabela tem PISO de altura nos dois tamanhos (não colapsa em 390px nem no desktop)', () => {
+    // Abaixo de `lg`, 24rem: sem ele a tabela ia a 0px em 390px (S11). De `lg`
+    // para cima, 8rem: a faixa de abas da S15 deixava a tabela com 75px no estado
+    // "última tentativa falhou" a 900px (validação humana de 24/09/2026). O
+    // `lg:min-h-0` antigo é justamente o que NÃO pode voltar.
     render(<ClientTitlesScreen clientId="c1" />);
     const region = screen.getByRole('region', { name: 'Títulos da carteira (rolável)' });
     const area = region.closest('[aria-busy]');
     expect(area).not.toBeNull();
-    expect(area).toHaveClass('min-h-[24rem]', 'flex-1', 'lg:min-h-0');
+    expect(area).toHaveClass('min-h-[24rem]', 'flex-1', 'lg:min-h-[8rem]');
+    expect(area).not.toHaveClass('lg:min-h-0');
   });
 });
 
@@ -590,6 +637,92 @@ describe('ClientTitlesScreen — estados (R3)', () => {
     render(<ClientTitlesScreen clientId="c1" />);
     expect(screen.getByRole('alert')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Tentar novamente' })).toBeVisible();
+  });
+});
+
+describe('ClientTitlesScreen — contexto do título (Sprint 15 / R1 · R2)', () => {
+  it('abre a gaveta de contexto a partir da linha, com o histórico e o formulário para quem PODE registrar', async () => {
+    const user = userEvent.setup();
+    historyState.data = [
+      {
+        id: 'ctx-1',
+        titleId: title().id,
+        type: 'acordo_de_pagamento',
+        text: 'Fechamento quadrimestral acordado.',
+        decryptFailed: false,
+        author: { name: 'Ana Analista', email: 'ana@hologram.com.br' },
+        createdAt: '2026-09-20T10:00:00Z',
+      },
+    ];
+    render(<ClientTitlesScreen clientId="c1" />);
+
+    await user.click(screen.getByRole('button', { name: /Contexto do título 4010/ }));
+
+    expect(await screen.findByRole('heading', { name: 'Contexto do título' })).toBeVisible();
+    const entrada = screen.getByText('Fechamento quadrimestral acordado.');
+    expect(entrada).toBeVisible();
+    // Recorte na ENTRADA do histórico: "Acordo de pagamento" também é o valor
+    // default do select do formulário logo abaixo — sem `within` o locator
+    // casaria os dois.
+    expect(within(entrada.closest('li')!).getByText('Acordo de pagamento')).toBeVisible();
+    // Formulário presente: gerente do cliente tem `manage_title_context`.
+    expect(screen.getByRole('button', { name: 'Registrar contexto' })).toBeVisible();
+  });
+
+  it('operador do cliente vê o histórico em LEITURA, sem a ação de registrar', async () => {
+    authState.user = clientOperator;
+    const user = userEvent.setup();
+    render(<ClientTitlesScreen clientId="c1" />);
+
+    await user.click(screen.getByRole('button', { name: /Contexto do título 4010/ }));
+
+    expect(await screen.findByRole('heading', { name: 'Contexto do título' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Registrar contexto' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Fechar gaveta de contexto' })).toBeVisible();
+  });
+
+  it('nenhum contexto registrado: mensagem clara, não uma lista vazia muda', async () => {
+    const user = userEvent.setup();
+    render(<ClientTitlesScreen clientId="c1" />);
+    await user.click(screen.getByRole('button', { name: /Contexto do título 4010/ }));
+    expect(await screen.findByText('Nenhum contexto registrado para este título.')).toBeVisible();
+  });
+
+  it('registra um novo contexto e mostra o toast de sucesso', async () => {
+    const { toast } = await import('sonner');
+    const user = userEvent.setup();
+    render(<ClientTitlesScreen clientId="c1" />);
+
+    await user.click(screen.getByRole('button', { name: /Contexto do título 4010/ }));
+    await user.type(await screen.findByLabelText('Descrição'), 'Cliente antecipou o pagamento.');
+    await user.click(screen.getByRole('button', { name: 'Registrar contexto' }));
+
+    await waitFor(() =>
+      expect(registerContextState.mutateAsync).toHaveBeenCalledWith({
+        type: 'acordo_de_pagamento',
+        text: 'Cliente antecipou o pagamento.',
+      }),
+    );
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Contexto registrado.'));
+  });
+
+  it('texto vazio é bloqueado pela validação do formulário (zod)', async () => {
+    const user = userEvent.setup();
+    render(<ClientTitlesScreen clientId="c1" />);
+    await user.click(screen.getByRole('button', { name: /Contexto do título 4010/ }));
+    await user.click(await screen.findByRole('button', { name: 'Registrar contexto' }));
+    expect(await screen.findByText('Descreva o contexto.')).toBeVisible();
+    expect(registerContextState.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('Cancelar fecha a gaveta sem registrar', async () => {
+    const user = userEvent.setup();
+    render(<ClientTitlesScreen clientId="c1" />);
+    await user.click(screen.getByRole('button', { name: /Contexto do título 4010/ }));
+    await user.click(await screen.findByRole('button', { name: 'Cancelar' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { name: 'Contexto do título' })).toBeNull(),
+    );
   });
 });
 

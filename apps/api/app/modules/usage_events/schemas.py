@@ -128,6 +128,27 @@ class UsageEventName(StrEnum):
     # e o único número honesto, porque carteira parcial produz aging errado, que
     # é pior que aging nenhum.
     CARTEIRA_SINCRONIZADA = "carteira_sincronizada"
+    # Sprint 15 (BACK 15.1) — instrumentação de R1. De BACKEND, sem
+    # `session_id`, fora da dedup por construção: cada registro de contexto é
+    # uma linha (o mesmo cliente pode registrar vários no mesmo título).
+    #
+    # Conta REGISTROS, não o universo: é o `S-1` do PRD ("quem atende registra
+    # espontaneamente?") — quem mede a COBERTURA sobre o vencido é o outro
+    # evento da sprint, `recebiveis_classificados` (BACK 15.2).
+    CONTEXTO_TITULO_REGISTRADO = "contexto_titulo_registrado"
+    # Sprint 15 (BACK 15.2) — **a métrica da Sprint 15**. De BACKEND, sem
+    # `session_id`, fora da dedup por construção: cada cálculo do relatório é
+    # uma linha (o mesmo cliente pode abrir o relatório várias vezes).
+    #
+    # Fórmula da leitura D+30:
+    #     valor_sem_contexto_centavos ÷ valor_vencido_total_centavos
+    # lidos da **ÚLTIMA** linha por `client_id` no período — abrir o relatório
+    # 30 vezes precisa gerar 30 linhas, senão a leitura mediria a foto do
+    # primeiro cálculo para sempre.
+    #
+    # Baseline **100%**: hoje todo título vencido conta como inadimplência,
+    # porque não existe onde registrar o contrário (verificado em 21/09/2026).
+    RECEBIVEIS_CLASSIFICADOS = "recebiveis_classificados"
 
 
 #: Eventos que o `POST /api/v1/usage-events` aceita. Os de backend ficam de fora
@@ -303,6 +324,54 @@ class CarteiraSincronizadaProps(_StrictProps):
     titulos_pagar: int = Field(ge=0)
     vencidos: int = Field(ge=0)
     mais_antigo_dias: int = Field(ge=0)
+
+
+#: Vocabulário fechado do tipo de contexto, ESPELHO de `TitleContextType`
+#: (`db/models/title_context.py`). `Literal` (e não importar o enum do modelo)
+#: pelo mesmo motivo de `QualificationVerdict`: o sink de métrica não depende do
+#: módulo de domínio, e a consistência entre os dois é travada por teste.
+TitleContextTypeName = Literal[
+    "acordo_de_pagamento",
+    "pagamento_antecipado",
+    "nota_a_cancelar",
+    "cobranca_suspensa",
+    "perda_provavel",
+    "outro",
+]
+
+
+class ContextoTituloRegistradoProps(_StrictProps):
+    """`contexto_titulo_registrado` (S15 BACK 15.1) — instrumenta a suposição S-1.
+
+    Só o tenant e o TIPO — nunca o texto livre (é PII em potencial, §4.7) nem o
+    identificador do título (reconstituiria a carteira de cobranças dentro do
+    sink, mesmo raciocínio de `carteira_sincronizada`).
+    """
+
+    client_id: UUID
+    tipo_contexto: TitleContextTypeName
+
+
+class RecebiveisClassificadosProps(_StrictProps):
+    """`recebiveis_classificados` (S15 BACK 15.2) — **a métrica da Sprint 15**.
+
+    As **quatro** chaves declaradas no PRD, e nenhuma a mais. Só valores em
+    CENTAVOS (`int`, §3.4 — nunca `Decimal`/float no sink), uma contagem e o id
+    do tenant: nenhum identificador de título, nenhum código de fornecedor —
+    que reconstituiria a carteira de cobranças do cliente dentro do sink de
+    métrica, mesmo raciocínio de `carteira_sincronizada`.
+
+    `valor_sem_contexto_centavos` soma os títulos vencidos SEM contexto E os
+    com contexto `perda_provavel` (R4) — é o numerador da inadimplência real.
+    `valor_vencido_total_centavos` é o denominador, os DOIS grupos somados. Os
+    dois cobrem a pagar + a receber juntos: o evento não separa por tipo, a
+    RESPOSTA do relatório separa.
+    """
+
+    client_id: UUID
+    valor_vencido_total_centavos: int = Field(ge=0)
+    valor_sem_contexto_centavos: int = Field(ge=0)
+    titulos_vencidos: int = Field(ge=0)
 
 
 class OrganizacaoCriadaProps(_StrictProps):

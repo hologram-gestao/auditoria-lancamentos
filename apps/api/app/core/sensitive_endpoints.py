@@ -638,6 +638,42 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         f"{_VIA_CLIENT_PATH} + OpenClientDep + SyncClientReceivablesDep; "
         "cliente encerrado = 409 e a leitura segue 200",
     ),
+    # ------------------------- contexto do título (S15, BACK 15.1)
+    # Acordo, antecipação, perda provável — a leitura por trás do relatório de
+    # recebíveis (BACK 15.2). `title_id` não vem sozinho: a rota carrega o
+    # TÍTULO pela PK **restrita ao `client_id` do path**
+    # (`TitleContextRepository.get_title_for_client`), então título de outro
+    # cliente é 404, não um vazamento por PK solta.
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients/{client_id}/titles/{title_id}/context",
+        ScopeKind.COLLECTION,
+        "app/modules/client_titles/routes.py",
+        f"{_VIA_CLIENT_PATH} + OpenClientDep + ManageTitleContextDep; título "
+        "buscado por get_title_for_client (AND client_id = tenant); título de "
+        "outro cliente = 404 sem vazar",
+    ),
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/titles/{title_id}/context",
+        ScopeKind.COLLECTION,
+        "app/modules/client_titles/routes.py",
+        f"{_VIA_CLIENT_PATH} + ViewTitleContextDep; título buscado por "
+        "get_title_for_client (AND client_id = tenant); título de outro "
+        "cliente = 404 sem vazar",
+    ),
+    # ------------------------- relatório de recebíveis (S15, BACK 15.2)
+    # Só agregados (nunca texto decifrado nem identificador de título) — usa a
+    # MESMA permissão de leitura da carteira (view_client_receivables), não
+    # view_title_context.
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/titles/receivables-report",
+        ScopeKind.COLLECTION,
+        "app/modules/client_titles/routes.py",
+        f"{_VIA_CLIENT_PATH} + ViewClientReceivablesDep; a agregação filtra "
+        "por client_id na própria query",
+    ),
 )
 
 #: Endpoints do denominador que AINDA não têm o mecanismo no código. Ficam na

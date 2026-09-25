@@ -197,6 +197,13 @@ _BODIES: dict[str, dict[str, Any]] = {
     "PATCH /api/v1/users/{user_id}": {"name": "Sequestrado pela bateria"},
     "POST /api/v1/client-categories": {"name": "Categoria da bateria"},
     "PATCH /api/v1/client-categories/{category_id}": {"name": "Renomeada pela bateria"},
+    # S15 (BACK 15.1) — contexto do título. Body VÁLIDO de propósito (mesmo
+    # raciocínio do ADR-012): o título é que não existe (UUID aleatório), mas
+    # quem tem de negar primeiro é o guard de tenant/organização sobre `client_id`.
+    "POST /api/v1/clients/{client_id}/titles/{title_id}/context": {
+        "type": "acordo_de_pagamento",
+        "text": "fechamento quadrimestral acordado",
+    },
 }
 
 #: Query string mínima por endpoint.
@@ -428,6 +435,10 @@ async def test_cross_tenant_por_endpoint(
         "notification_id": str(tenants["notif_b"].id),
         "anomaly_id": str(uuid4()),
         "entry_id": str(uuid4()),
+        # S15 (BACK 15.1): a rota rejeita pelo `client_id` (cross-tenant/cross-org)
+        # ANTES de buscar o título — um UUID aleatório basta, mesmo padrão de
+        # `entry_id`/`anomaly_id` acima.
+        "title_id": str(uuid4()),
         "user_id": str(tenants["admin"].id),
         "org_b": str(tenants["org_b"].id),
         "category_id": str(tenants["cat_a"].id),

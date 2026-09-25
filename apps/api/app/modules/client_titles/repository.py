@@ -22,7 +22,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
 
-from sqlalchemy import CursorResult, Integer, Select, delete, func, literal, select, update
+from sqlalchemy import CursorResult, Integer, Select, case, delete, func, literal, select, update
 from sqlalchemy import Date as SQLDate
 from sqlalchemy import cast as sa_cast
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -35,6 +35,8 @@ from app.db.models.client_title import (
     TitleStatus,
     TitleType,
 )
+from app.db.models.title_context import CONTEXT_TYPES_NOT_DELINQUENT, TitleContext
+from app.db.models.user import User
 from app.modules.client_titles.aging import (
     AGING_BUCKET_BOUNDS,
     OVERDUE_BUCKETS,
@@ -160,6 +162,65 @@ class TitlesSummary:
         return self.synced_at is None
 
 
+#: Os DOIS grupos do relatório de recebíveis (Sprint 15, BACK 15.2). Strings —
+#: não `TitleContextType` — porque `inadimplencia` NÃO é um tipo de contexto:
+#: é a AUSÊNCIA de um (ou a presença de `perda_provavel`). Valores string
+#: literais para poderem viver dentro de uma expressão SQL `CASE` sem import
+#: circular com o schema de resposta.
+RECEIVABLES_GROUP_INADIMPLENCIA = "inadimplencia"
+RECEIVABLES_GROUP_VENCIDO_COM_CONTEXTO = "vencido_com_contexto"
+
+#: Os valores de `TitleContextType` cujo contexto MAIS RECENTE classifica o
+#: título como "vencido com contexto" — importado do modelo (fonte única,
+#: `CONTEXT_TYPES_NOT_DELINQUENT`) e não redeclarado aqui.
+_NOT_DELINQUENT_VALUES = [t.value for t in CONTEXT_TYPES_NOT_DELINQUENT]
+
+
+@dataclass(frozen=True, slots=True)
+class ReceivablesGroupTotals:
+    """Os agregados de UM grupo (inadimplência OU vencido-com-contexto), de UM
+    tipo de título — todos VENCIDOS por construção (R4 é só sobre o vencido).
+
+    Sem balde `a_vencer` aqui, ao contrário de `AgingTotals`: este relatório
+    existe para separar inadimplência real de vencido-com-acordo, e um título
+    que ainda não venceu não é nenhum dos dois — ele nem entra na query.
+    """
+
+    total: Decimal
+    baldes: Mapping[AgingBucket, Decimal]
+    qtd: int
+    baldes_qtd: Mapping[AgingBucket, int]
+
+
+@dataclass(frozen=True, slots=True)
+class ReceivablesSideReport:
+    """Os dois grupos de UM lado (a pagar OU a receber)."""
+
+    inadimplencia: ReceivablesGroupTotals
+    vencido_com_contexto: ReceivablesGroupTotals
+
+
+@dataclass(frozen=True, slots=True)
+class ReceivablesReport:
+    """O relatório inteiro (BACK 15.2, R4) — os dois lados, cada um com os dois
+    grupos, calculados no SERVIDOR sobre a carteira INTEIRA."""
+
+    a_pagar: ReceivablesSideReport
+    a_receber: ReceivablesSideReport
+    referencia: date
+
+
+def _zeroed_group_totals() -> ReceivablesGroupTotals:
+    """Combinação (tipo, grupo) sem nenhum título vencido — tudo zero, os
+    quatro baldes presentes (mesmo motivo de `_zeroed_totals`)."""
+    return ReceivablesGroupTotals(
+        total=ZERO_MONEY,
+        baldes=dict.fromkeys(OVERDUE_BUCKETS, ZERO_MONEY),
+        qtd=0,
+        baldes_qtd=dict.fromkeys(OVERDUE_BUCKETS, 0),
+    )
+
+
 class ClientTitlesRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -182,6 +243,7 @@ class ClientTitlesRepository:
         title_type: TitleType | None = None,
         situation: TitleSituation | None = None,
         bucket: AgingBucket | None = None,
+        has_no_context: bool | None = None,
         sort_by: TitleSortField = "due_date",
         descending: bool = False,
         limit: int,
@@ -197,6 +259,11 @@ class ClientTitlesRepository:
         total, duas páginas seguidas podem repetir e pular linhas quando muitos
         títulos compartilham o mesmo vencimento — e vencimento repetido é a
         regra, não a exceção (parcelas).
+
+        `has_no_context=True` (Sprint 15, R2) filtra os títulos que NÃO têm
+        nenhuma linha em `title_contexts` — combina com qualquer outro filtro
+        (a tela usa junto de `situation=vencido` para a fila "vencidos sem
+        contexto", mas o filtro em si não presume isso).
         """
         stmt = self._base_query(client_id)
         if title_type is not None:
@@ -205,6 +272,15 @@ class ClientTitlesRepository:
             stmt = stmt.where(*_situation_predicates(situation, today))
         if bucket is not None:
             stmt = stmt.where(*_bucket_predicates(bucket, today))
+        if has_no_context:
+            # Sprint 15 (BACK 15.1, R2) — a fila de trabalho de quem registra
+            # contexto: título SEM nenhuma linha em `title_contexts`. `NOT
+            # EXISTS`, não `NOT IN`: o segundo trata NULL do lado errado e o
+            # primeiro é o padrão do resto do módulo para "situação derivada".
+            no_context = (
+                select(TitleContext.id).where(TitleContext.title_id == ClientTitle.id).exists()
+            )
+            stmt = stmt.where(~no_context)
 
         total_stmt = select(func.count()).select_from(stmt.order_by(None).subquery())
         total = (await self._session.execute(total_stmt)).scalar_one()
@@ -214,6 +290,24 @@ class ClientTitlesRepository:
         page_stmt = stmt.order_by(order, ClientTitle.external_id).limit(limit).offset(offset)
         rows = list((await self._session.execute(page_stmt)).scalars().all())
         return rows, total
+
+    async def context_counts(self, client_id: UUID, title_ids: list[UUID]) -> dict[UUID, int]:
+        """Quantos contextos (Sprint 15) cada título DESTA página tem.
+
+        Uma query agrupada para a página inteira, nunca uma por linha (sem N+1).
+        Filtra por `client_id` no próprio `WHERE` além do `title_id`: a contagem
+        é de dado de tenant, e o isolamento é da query, não de quem chama. Título
+        sem nenhum contexto simplesmente não aparece no dicionário.
+        """
+        if not title_ids:
+            return {}
+        stmt = (
+            select(TitleContext.title_id, func.count())
+            .where(TitleContext.client_id == client_id, TitleContext.title_id.in_(title_ids))
+            .group_by(TitleContext.title_id)
+        )
+        rows = (await self._session.execute(stmt)).tuples().all()
+        return dict(rows)
 
     async def existing_external_ids(self, client_id: UUID) -> set[str]:
         """Os identificadores que o cliente já tem gravados.
@@ -302,6 +396,90 @@ class ClientTitlesRepository:
         for title_type in TitleType:
             by_type.setdefault(title_type, _zeroed_totals())
         return by_type
+
+    async def receivables_report(self, client_id: UUID, *, today: date) -> ReceivablesReport:
+        """O relatório de recebíveis (BACK 15.2, R4) — sobre a carteira INTEIRA.
+
+        **A classificação é do SERVIDOR, numa query só.** `latest_context` é
+        `DISTINCT ON (title_id)` ordenado por `created_at DESC` — o Postgres
+        devolve exatamente UMA linha por título, a mais recente, sem precisar de
+        `ROW_NUMBER()` + filtro. É a MESMA pergunta que `TitleContextRepository.
+        list_for_title_with_authors` responde por título; aqui ela roda para a
+        carteira inteira de uma vez, porque o relatório soma por CLIENTE, não
+        lê um título por vez.
+
+        `LEFT JOIN`, não `INNER`: título sem nenhum contexto tem
+        `context_type IS NULL`, que o `CASE` classifica como `inadimplencia` —
+        é o R4 "cliente sem nenhum contexto: tudo em inadimplência, sem erro",
+        e não precisa de um `COALESCE` porque `IN (...)` com `NULL` já avalia
+        para falso (nunca `vencido_com_contexto`).
+
+        Só títulos VENCIDOS entram (`status = em_aberto AND due_date < hoje`):
+        um título a vencer não é inadimplência nem vencido-com-acordo — ele
+        simplesmente não é vencido, e por isso nem aparece na query.
+        """
+        latest_context = (
+            select(TitleContext.title_id, TitleContext.context_type)
+            .distinct(TitleContext.title_id)
+            .where(TitleContext.client_id == client_id)
+            .order_by(TitleContext.title_id, TitleContext.created_at.desc())
+            .subquery()
+        )
+        grupo = case(
+            (
+                latest_context.c.context_type.in_(_NOT_DELINQUENT_VALUES),
+                literal(RECEIVABLES_GROUP_VENCIDO_COM_CONTEXTO),
+            ),
+            else_=literal(RECEIVABLES_GROUP_INADIMPLENCIA),
+        ).label("grupo")
+
+        aberto = ClientTitle.status == TitleStatus.EM_ABERTO.value
+        vencido = ClientTitle.due_date < today
+
+        columns: list[Any] = [
+            ClientTitle.title_type.label("title_type"),
+            grupo,
+            _sum_amount().label("total"),
+            func.count().label("qtd"),
+        ]
+        for bucket in OVERDUE_BUCKETS:
+            predicates = _bucket_predicates(bucket, today)
+            columns.append(_sum_amount(*predicates).label(f"valor_{bucket.name}"))
+            columns.append(func.count().filter(*predicates).label(f"qtd_{bucket.name}"))
+
+        stmt = (
+            select(*columns)
+            .select_from(ClientTitle)
+            .outerjoin(latest_context, latest_context.c.title_id == ClientTitle.id)
+            .where(ClientTitle.client_id == client_id, aberto, vencido)
+            .group_by(ClientTitle.title_type, grupo)
+        )
+        rows = (await self._session.execute(stmt)).all()
+
+        by_key: dict[tuple[TitleType, str], ReceivablesGroupTotals] = {}
+        for row in rows:
+            by_key[(TitleType(row.title_type), row.grupo)] = ReceivablesGroupTotals(
+                total=row.total,
+                baldes={b: getattr(row, f"valor_{b.name}") for b in OVERDUE_BUCKETS},
+                qtd=row.qtd,
+                baldes_qtd={b: getattr(row, f"qtd_{b.name}") for b in OVERDUE_BUCKETS},
+            )
+
+        def _side(title_type: TitleType) -> ReceivablesSideReport:
+            return ReceivablesSideReport(
+                inadimplencia=by_key.get(
+                    (title_type, RECEIVABLES_GROUP_INADIMPLENCIA), _zeroed_group_totals()
+                ),
+                vencido_com_contexto=by_key.get(
+                    (title_type, RECEIVABLES_GROUP_VENCIDO_COM_CONTEXTO), _zeroed_group_totals()
+                ),
+            )
+
+        return ReceivablesReport(
+            a_pagar=_side(TitleType.A_PAGAR),
+            a_receber=_side(TitleType.A_RECEBER),
+            referencia=today,
+        )
 
     async def get_sync_state(self, client_id: UUID) -> tuple[datetime | None, datetime | None]:
         """`(última íntegra, última falha)` — as duas colunas de `clients`.
@@ -466,6 +644,63 @@ class ClientTitlesRepository:
         o ciclo de sincronização; encerrar o cliente é outra coisa.
         """
         await self._session.execute(delete(ClientTitle).where(ClientTitle.client_id == client_id))
+
+
+class TitleContextRepository:
+    """Camada de dados do CONTEXTO de título (Sprint 15, BACK 15.1).
+
+    SQL puro, uma função por query — mesma lei do `ClientTitlesRepository`.
+    **Append-only**: não existe `update`/`delete` aqui, de propósito. A única
+    escrita é `insert`.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get_title_for_client(self, client_id: UUID, title_id: UUID) -> ClientTitle | None:
+        """O título pela PK, restrito ao TENANT no próprio `SELECT`.
+
+        Título de outro cliente é indistinguível de inexistente — a rota
+        converte em 404 sem revelar que ele existe alhures (§3.15).
+        """
+        stmt = select(ClientTitle).where(
+            ClientTitle.id == title_id, ClientTitle.client_id == client_id
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def insert(self, context: TitleContext) -> None:
+        """Grava UMA entrada nova. Nunca sobrescreve — é o único caminho de escrita."""
+        self._session.add(context)
+        await self._session.flush()
+
+    async def list_for_title_with_authors(
+        self, client_id: UUID, title_id: UUID
+    ) -> list[tuple[TitleContext, User]]:
+        """Histórico completo de UM título, mais recente primeiro, com o autor.
+
+        `JOIN` com `users` em vez de N buscas: a tela abre o detalhe do título
+        e o histórico pode ter várias entradas — um autor por linha renderizada
+        seria N idas ao banco para uma pergunta só. `author_id` é `RESTRICT`,
+        então o JOIN nunca perde linha por autor ausente.
+        """
+        stmt = (
+            select(TitleContext, User)
+            .join(User, User.id == TitleContext.author_id)
+            .where(TitleContext.client_id == client_id, TitleContext.title_id == title_id)
+            .order_by(TitleContext.created_at.desc())
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return [(row[0], row[1]) for row in rows]
+
+    async def delete_for_client(self, client_id: UUID) -> None:
+        """Purga o contexto do cliente (encerramento, §4.12 — `close_client_purge`).
+
+        O FK `title_id`/`client_id` já é `CASCADE` a partir de `client_titles`/
+        `clients`, mas a exclusão explícita aqui segue o mesmo precedente das
+        outras entradas de `close_client_purge`: a lista declarada é a fonte,
+        não uma cascata implícita que ninguém lê.
+        """
+        await self._session.execute(delete(TitleContext).where(TitleContext.client_id == client_id))
 
 
 # --------------------------- PREDICADOS ------------------------------------

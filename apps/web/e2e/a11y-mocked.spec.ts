@@ -771,6 +771,8 @@ function titlesSummaryDoCenario(): Record<string, unknown> {
 
 function clientTitle(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
+    id: '9a9a9a9a-9a9a-4a9a-8a9a-9a9a9a9a9a9a',
+    contextCount: 0,
     externalId: '4010',
     titleType: 'a_receber',
     dueDate: '2026-06-10',
@@ -794,8 +796,11 @@ function clientTitle(over: Record<string, unknown> = {}): Record<string, unknown
  * o caso que a tela precisa mostrar como código marcado, nunca célula vazia.
  */
 const CLIENT_TITLES = [
-  clientTitle(),
+  // Sprint 15: a primeira linha já tem histórico de contexto (o indicador da
+  // linha e a gaveta com entradas); a segunda não tem nenhum.
+  clientTitle({ contextCount: 2 }),
   clientTitle({
+    id: '9b9b9b9b-9b9b-4b9b-8b9b-9b9b9b9b9b9b',
     externalId: '4011',
     titleType: 'a_pagar',
     dueDate: '2026-10-05',
@@ -811,6 +816,8 @@ const CLIENT_TITLES = [
 /** 20 linhas: transborda com folga em 1440×900 e em 390×844. */
 const MANY_CLIENT_TITLES = Array.from({ length: 20 }, (_, i) =>
   clientTitle({
+    id: `9c9c9c9c-9c9c-4c9c-8c9c-9c9c9c9c9c${String(i).padStart(2, '0')}`,
+    contextCount: i % 3,
     externalId: `50${String(i).padStart(2, '0')}`,
     titleType: i % 2 === 0 ? 'a_receber' : 'a_pagar',
     dueDate: `2026-0${(i % 9) + 1}-15`,
@@ -1194,6 +1201,62 @@ async function fulfillApi(route: Route): Promise<void> {
       maisAntigoDias: 214,
       summary: titlesSummaryDoCenario(),
     });
+  }
+  // Sprint 15: relatório de recebíveis e histórico de contexto. Também LITERAIS
+  // (ou com o id no meio), então antes da lista.
+  if (path === `/api/v1/clients/${CLIENT_ID}/titles/receivables-report`) {
+    const grupo = (total: string, qtd: number, b90: string) => ({
+      total,
+      bucket1a30: '0.00',
+      bucket31a60: '0.00',
+      bucket61a90: '0.00',
+      bucket90Mais: b90,
+      qtd,
+    });
+    return json({
+      aReceber: {
+        inadimplencia: grupo('82865.50', 96, '82865.50'),
+        vencidoComContexto: grupo('14547.60', 40, '0.00'),
+      },
+      aPagar: {
+        inadimplencia: grupo('2017.30', 2, '2017.30'),
+        vencidoComContexto: grupo('890.00', 1, '890.00'),
+      },
+      referenceDate: '2026-09-24',
+    });
+  }
+  if (/^\/api\/v1\/clients\/[^/]+\/titles\/[^/]+\/context$/.test(path)) {
+    if (route.request().method() === 'POST') {
+      return json({
+        id: '7e7e7e7e-7e7e-4e7e-8e7e-7e7e7e7e7e00',
+        titleId: path.split('/')[6],
+        type: 'outro',
+        text: 'Registrado no teste',
+        decryptFailed: false,
+        author: { name: 'Gerente do cliente', email: null },
+        createdAt: '2026-09-24T12:00:00Z',
+      });
+    }
+    return json([
+      {
+        id: '7e7e7e7e-7e7e-4e7e-8e7e-7e7e7e7e7e01',
+        titleId: path.split('/')[6],
+        type: 'cobranca_suspensa',
+        text: 'Cobrança suspensa até a revisão do contrato.',
+        decryptFailed: false,
+        author: { name: 'Equipe Hologram', email: null },
+        createdAt: '2026-09-20T15:30:00Z',
+      },
+      {
+        id: '7e7e7e7e-7e7e-4e7e-8e7e-7e7e7e7e7e02',
+        titleId: path.split('/')[6],
+        type: 'acordo_de_pagamento',
+        text: 'Fechamento quadrimestral acordado com o cliente.',
+        decryptFailed: false,
+        author: { name: 'Equipe Hologram', email: null },
+        createdAt: '2026-08-02T10:00:00Z',
+      },
+    ]);
   }
   if (path === `/api/v1/clients/${CLIENT_ID}/titles`) {
     const titles = titlesNeverSynced ? [] : tableListsOverflow ? MANY_CLIENT_TITLES : CLIENT_TITLES;
@@ -3144,6 +3207,85 @@ for (const vp of VIEWPORTS) {
 
       await shot(page, `carteira-operador-${slugC}`);
       await analyze(page, `carteira — operador somente leitura (${vp.label})`);
+    });
+
+    /**
+     * Sprint 15 (R1/R2): a gaveta de contexto e o indicador da linha. Entraram no
+     * gate na validação humana de 24/09/2026 — até ali o axe nunca tinha medido a
+     * gaveta nem o relatório nos três temas.
+     */
+    test('indicador na linha + gaveta de contexto com histórico e formulário (S15 R1·R2)', async ({
+      page,
+    }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/carteira`);
+
+      // A linha diz QUEM tem contexto: o título com histórico e o sem nenhum têm
+      // nomes acessíveis diferentes (o ícone igual em toda linha era o defeito).
+      await expect(
+        page.getByRole('button', { name: 'Contexto do título 4010 (2 registrados)' }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole('button', { name: 'Contexto do título 4011 (nenhum registrado)' }),
+      ).toBeVisible();
+
+      await page.getByRole('button', { name: /^Contexto do título 4010/ }).click();
+      const gaveta = page.getByRole('dialog');
+      await expect(gaveta.getByRole('heading', { name: 'Contexto do título' })).toBeVisible();
+      await aguardarAnimacao(gaveta);
+      await expect(gaveta.getByText('Cobrança suspensa até a revisão do contrato.')).toBeVisible();
+      await expect(
+        gaveta.getByText('Fechamento quadrimestral acordado com o cliente.'),
+      ).toBeVisible();
+      await expect(gaveta.getByRole('heading', { name: 'Registrar novo contexto' })).toBeVisible();
+
+      // A ação primária da gaveta não pode nascer cortada na borda em 390px.
+      const registrar = gaveta.getByRole('button', { name: 'Registrar contexto' });
+      await expect(registrar).toBeVisible();
+      const caixa = await registrar.boundingBox();
+      expect(caixa, `${vp.label}: o botão da gaveta precisa ter caixa`).not.toBeNull();
+      expect(
+        (caixa?.x ?? 0) + (caixa?.width ?? 0),
+        `${vp.label}: "Registrar contexto" cortado na borda direita`,
+      ).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0);
+
+      await shot(page, `carteira-gaveta-contexto-${slugC}`);
+      await analyze(page, `carteira — gaveta de contexto (${vp.label})`);
+    });
+
+    test('operador do cliente LÊ o contexto e NÃO registra (S15 R3)', async ({ page }) => {
+      sessionUser = CLIENT_OPERATOR_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/carteira`);
+
+      await page.getByRole('button', { name: /^Contexto do título 4010/ }).click();
+      const gaveta = page.getByRole('dialog');
+      await expect(gaveta.getByRole('heading', { name: 'Contexto do título' })).toBeVisible();
+      await aguardarAnimacao(gaveta);
+      await expect(gaveta.getByText('Cobrança suspensa até a revisão do contrato.')).toBeVisible();
+      // Ação OCULTA, não desabilitada (§4.9): nem o formulário nem o botão.
+      await expect(gaveta.getByRole('heading', { name: 'Registrar novo contexto' })).toHaveCount(0);
+      await expect(gaveta.getByRole('button', { name: 'Registrar contexto' })).toHaveCount(0);
+
+      await shot(page, `carteira-gaveta-operador-${slugC}`);
+      await analyze(page, `carteira — gaveta de contexto somente leitura (${vp.label})`);
+    });
+
+    test('aba Relatório de recebíveis: dois grupos por lado (S15 R4)', async ({ page }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/carteira`);
+
+      await page.getByRole('tab', { name: 'Relatório de recebíveis' }).click();
+      await expect(page).toHaveURL(/view=relatorio/);
+      await expect(page.getByRole('heading', { name: 'A receber', level: 3 })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'A pagar', level: 3 })).toBeVisible();
+      // Os dois grupos existem nos dois lados, com os totais do servidor.
+      await expect(page.getByRole('region', { name: 'Inadimplência real' })).toHaveCount(2);
+      await expect(page.getByRole('region', { name: 'Vencido com contexto' })).toHaveCount(2);
+      await expect(page.getByText(/R\$\s*82\.865,50/).first()).toBeVisible();
+      await expect(page.getByText(/R\$\s*890,00/).first()).toBeVisible();
+
+      await shot(page, `carteira-relatorio-recebiveis-${slugC}`);
+      await analyze(page, `carteira — relatório de recebíveis (${vp.label})`);
     });
 
     test('gerente do cliente sincroniza e a tela confirma por toast (R5)', async ({ page }) => {

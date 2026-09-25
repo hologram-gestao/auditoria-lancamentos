@@ -541,3 +541,29 @@ confira o que o commit vai levar" do HANDOFF desta sprint. Comando de verificaç
 `wc -c CLAUDE.md PROJECT.md` no worktree do QA — se `CLAUDE.md` for o menor dos dois na
 hora do commit, o primer está em risco.
 **Status:** ativo
+
+## 2026-09-24 — Endpoint aninhado novo referenciava um PK que a listagem-pai não expunha [escopo: backend | apps/api/app/modules/client_titles/schemas.py]
+**Sintoma:** BACK 15.1 declarou `POST/GET /clients/{client_id}/titles/{title_id}/context`
+com `title_id: UUID` no path, mas `ClientTitleResponse` — a resposta de
+`GET /clients/{client_id}/titles`, a listagem que a tela da Carteira renderiza — nunca
+expunha esse `id`/PK. Resultado: os dois endpoints novos existiam e os testes de
+integração passavam (semeavam o título direto no banco, com o UUID já em mãos — nunca
+precisavam "descobrir" o id a partir da lista), mas a UI não tinha como montar a URL do
+recurso aninhado para NENHUMA linha visível. "Registrar contexto" ficava código morto
+apesar do gate verde.
+**Causa-raiz blameless:** o checklist de contrato do QA ("front usa só tipos do contrato
+gerado") verifica se o front INVENTOU campo — não verifica a direção oposta: se um
+endpoint aninhado novo referencia, no path, um campo que a listagem do recurso pai
+simplesmente não tem. Teste de integração que semeia o id direto no banco não pega essa
+classe de furo, porque nunca passa pelo caminho "listar → ler o id da linha → montar a
+URL do aninhado" que a UI real percorre.
+**Correção:** BACK 15.1 reprovada nesta rodada (86e3e79rk); rework (commit 92f5cf2)
+acrescentou `id: UUID` em `ClientTitleResponse` + `from_row()`, contrato regenerado.
+Confirmado por introspecção de `app.openapi()` nesta revisão (não só leitura de diff).
+**Encodado em:** follow-up **86e3ebkfj** (tag `agent-review`) — pede a linha mecânica no
+checklist "Contrato" do arquivo-fonte `<repo>/.claude/agents/qa.md`: para todo endpoint
+novo cujo path usa `{id}` de um recurso aninhado, confirmar que o `response_model` da
+LISTAGEM do recurso pai expõe esse mesmo campo. Não encodado inline nesta sprint porque
+o arquivo-fonte (raiz do monorepo, fora do worktree) não está no alcance de escrita do
+sandbox do QA nesta run.
+**Status:** ativo

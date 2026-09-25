@@ -273,3 +273,10 @@ ViewClientReceivablesDep = Annotated[
 SyncClientReceivablesDep = Annotated[
     CurrentUser, Depends(require_permission(Permission.SYNC_CLIENT_RECEIVABLES))
 ]
+# --- Sprint 15 (BACK 15.1): contexto do título ------------------------------
+ViewTitleContextDep = Annotated[
+    CurrentUser, Depends(require_permission(Permission.VIEW_TITLE_CONTEXT))
+]
+ManageTitleContextDep = Annotated[
+    CurrentUser, Depends(require_permission(Permission.MANAGE_TITLE_CONTEXT))
+]
