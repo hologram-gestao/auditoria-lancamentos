@@ -499,12 +499,17 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
           nem linha, nem estado vazio: só os filtros, um fio e "0–0 de 0".
           O piso de 24rem abaixo de `lg` faz o conteúdo transbordar a seção e
           quem rola passa a ser o `<main>` (o comportamento mobile previsto no
-          `<TableCard>`). De `lg` para cima nada muda — ali a altura disponível
-          é a do shell, e o desktop já estava certo.
+          `<TableCard>`). De `lg` para cima o piso é MENOR, 8rem: a altura é a do
+          shell e a tabela rola dentro da própria área, mas a Sprint 15 pôs a
+          faixa de abas acima da carteira e, no estado "última tentativa falhou"
+          (aviso + agregados + filtros), sobravam 75px para a tabela a 900px de
+          altura. O piso de 8rem fica abaixo do que sobra no estado normal (~167px),
+          então ali nada muda e a tabela continua rolando por dentro; só no estado
+          mais cheio ele transborda e quem rola é o `<main>`.
           ⚠️ `toBeVisible()` do Playwright NÃO pega esse defeito: ele não enxerga
           clipping por ancestral com `overflow`. A guarda é medir `boundingBox()`
           da região rolável (e2e `a11y-mocked.spec.ts`). */}
-          <div className="min-h-[24rem] flex-1 lg:min-h-0" aria-busy={listQuery.isFetching}>
+          <div className="min-h-[24rem] flex-1 lg:min-h-[8rem]" aria-busy={listQuery.isFetching}>
             {listQuery.isError ? (
               <ErrorState
                 message={
