@@ -44,7 +44,6 @@ let lastQueryParams: ReconciliationsListParams | undefined;
 
 vi.mock('@/hooks/use-clients', () => ({
   // O ClientShell agora monta o diálogo de exclusão (86e34jd1d).
-  useDeleteClient: () => ({ mutateAsync: vi.fn(), isPending: false, reset: vi.fn() }),
   // A lista consulta o detalhe do cache para saber se o cliente está
   // ENCERRADO (86e36pm1z) — `undefined` = aberto, o botão de criar aparece.
   useClientDetail: () => ({ data: undefined }),

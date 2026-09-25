@@ -457,11 +457,18 @@ const OMIE_CONNECTION = {
  */
 let originState: 'ativa' | 'sem_origem' | 'erro' = 'ativa';
 
+/**
+ * 86e3eqxdt: com `true`, o detalhe volta ENCERRADO (86e36pm1z). Só o cenário do
+ * cabeçalho de cliente encerrado o liga — o resto mede o cliente aberto.
+ */
+let clientClosed = false;
+
 /** O detalhe do cliente ajustado ao `originState` do cenário. */
 function clientDetailComOrigem(): Record<string, unknown> {
-  const base = tableListsOverflow
+  const aberto = tableListsOverflow
     ? { ...CLIENT_DETAIL, accounts: MANY_ACCOUNTS }
     : { ...CLIENT_DETAIL };
+  const base = clientClosed ? { ...aberto, closed_at: '2026-09-20T12:00:00Z' } : aberto;
   if (originState === 'ativa') return { ...base, origin_status: 'ativa' };
   if (originState === 'sem_origem') {
     // Sem origem o servidor não fala com o provedor: zero contas, sem carimbo.
@@ -1483,10 +1490,6 @@ async function fulfillApi(route: Route): Promise<void> {
       },
     });
   }
-  // Exclusão definitiva (86e34jd1d): 204 sem corpo; o front volta para a lista.
-  if (path === `/api/v1/clients/${CLIENT_ID}` && route.request().method() === 'DELETE') {
-    return route.fulfill({ status: 204 });
-  }
   // Encerramento com retenção (86e36pm1z): 204 sem corpo; o diálogo fecha e o
   // cliente segue existindo (o refetch devolve o mock de sempre).
   if (path === `/api/v1/clients/${CLIENT_ID}/close` && route.request().method() === 'POST') {
@@ -1782,6 +1785,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   tableListsOverflow = false;
   // S9: origem ativa é o estado de partida — só o bloco de origem a troca.
   originState = 'ativa';
+  clientClosed = false;
   // S10: a última sincronização do plano de contas deu certo, por padrão.
   chartSyncFailed = false;
   // S11: a carteira está sincronizada e a última tentativa deu certo, por padrão.
@@ -3394,10 +3398,10 @@ for (const vp of VIEWPORTS) {
         await expect(page.getByRole('button', { name: 'Editar cliente' })).toHaveCount(
           profile.editClient ? 1 : 0,
         );
-        // Excluir (86e34jd1d) é a mesma célula da matriz: só admin.
-        await expect(page.getByRole('button', { name: 'Excluir cliente' })).toHaveCount(
-          profile.editClient ? 1 : 0,
-        );
+        // Excluir cliente NÃO aparece para perfil nenhum, nem para quem tem
+        // `edit_client` (86e3eqxdt, decisão de produto de 25/09/2026): a saída
+        // pela tela é o encerramento; a exclusão segue só na API (LGPD).
+        await expect(page.getByRole('button', { name: 'Excluir cliente' })).toHaveCount(0);
         // Criar conciliação vale para todo papel (matriz: ✅ nas 4 colunas).
         await expect(page.getByRole('button', { name: 'Criar conciliação' })).toBeVisible();
 
@@ -3984,39 +3988,45 @@ for (const vp of VIEWPORTS) {
     });
 
     /**
-     * 86e34jd1d — exclusão definitiva: `alertdialog` com confirmação DIGITADA. A
-     * ação primária nasce desabilitada, libera quando o nome bate, e o sucesso
-     * (204 mockado) volta para a lista. Medido em desktop e 390px com o diálogo
-     * montado; a ação não pode passar da borda da viewport.
+     * 86e3eqxdt — a exclusão definitiva SAIU da tela (decisão de produto de
+     * 25/09/2026). O admin é o perfil que mais importa aqui: é o único que via o
+     * botão. Ele continua com Editar e Encerrar; "Excluir cliente" não existe em
+     * forma nenhuma (botão, item de menu ou texto). A rota `DELETE` segue na API
+     * para o apagamento pedido pelo titular (LGPD) — esconder não é defeito.
      */
-    test('excluir cliente: alertdialog com confirmação digitada (86e34jd1d)', async ({ page }) => {
+    test('excluir cliente não aparece nem para o admin (86e3eqxdt)', async ({ page }) => {
       await page.goto(`/clientes/${CLIENT_ID}`);
-      await page.getByRole('button', { name: 'Excluir cliente' }).click();
-      const confirm = page.getByRole('alertdialog', { name: 'Excluir cliente' });
-      await expect(confirm).toBeVisible();
-      await aguardarAnimacao(confirm);
-      const acao = confirm.getByRole('button', { name: 'Excluir definitivamente' });
-      await expect(acao).toBeDisabled();
-      await shot(page, `excluir-cliente-${slug}`);
-      await analyze(page, `confirmação de exclusão do cliente (${vp.label})`);
-      const caixa = await acao.boundingBox();
-      expect(
-        (caixa?.x ?? 0) + (caixa?.width ?? 0),
-        'ação de excluir cortada pela borda da viewport',
-      ).toBeLessThanOrEqual(vp.size.width);
-
-      await confirm
-        .getByLabel('Digite o nome do cliente para confirmar')
-        .fill('Cliente Exemplo Ltda');
-      await expect(acao).toBeEnabled();
-      await acao.click();
-      await page.waitForURL(/\/clientes$/);
-      await expect(page.getByRole('heading', { name: 'Clientes', level: 1 })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Encerrar cliente' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Editar cliente' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Excluir cliente' })).toHaveCount(0);
+      await expect(page.getByRole('menuitem', { name: 'Excluir cliente' })).toHaveCount(0);
+      await expect(page.getByText('Excluir cliente')).toHaveCount(0);
+      await expect(page.locator('#__next_error__')).toHaveCount(0);
+      await shot(page, `cabecalho-cliente-sem-excluir-${slug}`);
+      await analyze(page, `cabeçalho do cliente sem excluir (${vp.label})`);
     });
 
     /**
-     * 86e36pm1z — encerramento com retenção: mesmo ritual da exclusão
-     * (`alertdialog` + confirmação DIGITADA), mas o sucesso NÃO navega — o
+     * 86e3eqxdt — cliente ENCERRADO não tem ação nenhuma no cabeçalho: editar e
+     * encerrar já sumiam (o servidor daria 409, §4.12), e o Excluir, que era o
+     * único que sobrava, saiu da tela. O grupo de ações some inteiro, em vez de
+     * deixar um contêiner vazio.
+     */
+    test('cliente encerrado: cabeçalho sem nenhuma ação (86e3eqxdt)', async ({ page }) => {
+      clientClosed = true;
+      await page.goto(`/clientes/${CLIENT_ID}`);
+      await expect(page.getByText('Encerrado', { exact: true })).toBeVisible();
+      for (const acao of ['Editar cliente', 'Encerrar cliente', 'Excluir cliente']) {
+        await expect(page.getByRole('button', { name: acao })).toHaveCount(0);
+      }
+      await expect(page.locator('#__next_error__')).toHaveCount(0);
+      await shot(page, `cabecalho-cliente-encerrado-${slug}`);
+      await analyze(page, `cabeçalho do cliente encerrado (${vp.label})`);
+    });
+
+    /**
+     * 86e36pm1z — encerramento com retenção: ritual de ação irreversível
+     * (`alertdialog` + confirmação DIGITADA), e o sucesso NÃO navega — o
      * cliente continua existindo, só-leitura. Medido nos dois viewports com o
      * diálogo montado; a ação não pode passar da borda da viewport.
      */
