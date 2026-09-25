@@ -82,15 +82,6 @@ function contrast(fg: Rgb, bg: Rgb): number {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
-/** Composição alpha do `bg-<token>/<n>` do Tailwind sobre um fundo opaco. */
-function over(fg: Rgb, bg: Rgb, alpha: number): Rgb {
-  return [
-    fg[0] * alpha + bg[0] * (1 - alpha),
-    fg[1] * alpha + bg[1] * (1 - alpha),
-    fg[2] * alpha + bg[2] * (1 - alpha),
-  ];
-}
-
 /**
  * Pares que a UI de fato usa, por tema.
  *
@@ -149,11 +140,12 @@ describe.each(['root', 'dark', 'hologram'] as const)(
       expect(contrast(rgb(text), rgb(bg))).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
     });
 
-    // O badge "Erro" não usa um `-muted`: ele pinta 10% do destrutivo sobre o
-    // fundo. Composto à mão porque o Tailwind resolve isso em runtime.
-    it('destructive sobre bg-destructive/10 (badge "Erro") passa 4.5:1', () => {
-      const bg = over(rgb('destructive'), rgb('background'), 0.1);
-      expect(contrast(rgb('destructive'), bg)).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
-    });
+    // Não há mais caso para `bg-destructive/10` (86e3dxund). Ele compunha os 10%
+    // sobre `background` e PASSAVA nos três temas enquanto a tela reprovava: o
+    // badge vive em linha de tabela, e em hover (`hover:bg-muted/50`) o que fica
+    // embaixo é outro — 4,23:1 no escuro e 4,44:1 no Hologram, medido no e2e.
+    // Fundo com alfa depende da superfície de baixo, e este teste não sabe qual
+    // é. Por isso fundo destrutivo de badge ou de hover é `destructive-muted`
+    // (opaco, travado no par "toast de erro" acima), nunca `/N`.
   },
 );

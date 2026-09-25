@@ -347,7 +347,7 @@ function ErrorPanel({
               size="sm"
               onClick={() => setConfirmOpen(true)}
               disabled={busy}
-              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+              className="text-destructive hover:text-destructive hover:bg-destructive-muted"
             >
               <Trash2 className="h-4 w-4" aria-hidden="true" />
               Excluir conciliação

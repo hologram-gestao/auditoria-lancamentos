@@ -206,7 +206,7 @@ export function ReconciliationListItem({
                 setConfirmCancelOpen(true);
               }}
               disabled={cancelMutation.isPending}
-              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+              className="text-destructive hover:text-destructive hover:bg-destructive-muted"
             >
               <XCircle className="h-3.5 w-3.5" aria-hidden="true" />
               Cancelar
@@ -242,7 +242,7 @@ export function ReconciliationListItem({
                 setConfirmDiscardOpen(true);
               }}
               disabled={discardMutation.isPending || reprocessMutation.isPending}
-              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+              className="text-destructive hover:text-destructive hover:bg-destructive-muted"
             >
               <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
               Excluir

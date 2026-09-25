@@ -47,7 +47,7 @@ const STATUS_CLASSES: Record<string, string> = {
   processing: 'bg-info-muted text-info ring-info/30',
   reviewing: 'bg-success-muted text-success ring-success/30',
   done: 'bg-success-muted text-success ring-success/30',
-  error: 'bg-destructive/10 text-destructive ring-destructive/30',
+  error: 'bg-destructive-muted text-destructive ring-destructive/30',
 };
 
 const FALLBACK_CLASSES = 'bg-muted text-muted-foreground ring-border';
