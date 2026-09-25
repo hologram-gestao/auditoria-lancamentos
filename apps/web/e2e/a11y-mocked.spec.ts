@@ -902,6 +902,12 @@ let sessionUsedGlossary = false;
  * ligou o modo cartão nesta suíte.
  */
 let sessionAccountType: string | null = null;
+/**
+ * 86e3dxund: com `true`, o detalhe da sessão volta com ERRO — é o estado que
+ * mostra "Tentar novamente" e "Excluir conciliação". Só o cenário de contraste
+ * em hover o liga.
+ */
+let sessionErrorDetail = false;
 
 /**
  * Linhas `sem_omie` de uma fatura de cartão: são as únicas lançáveis. A
@@ -1526,6 +1532,7 @@ async function fulfillApi(route: Route): Promise<void> {
     return json({
       ...DETAIL,
       ...(sessionAccountType === null ? {} : { account_type: sessionAccountType }),
+      ...(sessionErrorDetail ? { status: 'error', error_code: 'ADL-PARSE-LIMIT' } : {}),
       qualification_used_glossary: sessionUsedGlossary,
     });
   }
@@ -1706,6 +1713,52 @@ async function measuredContrast(page: Page, selector: string): Promise<number> {
 }
 
 /**
+ * Contraste com o fundo COMPOSTO (86e3dxund). O `measuredContrast` acima pega o
+ * primeiro ancestral com fundo não transparente e trata a cor como opaca — com
+ * `bg-destructive/10` ele mediria o vermelho puro. Aqui cada fundo com alfa é
+ * misturado sobre o de baixo até chegar num opaco, que é o que o browser pinta.
+ * Foi assim que o defeito apareceu: o badge `/10` numa linha em hover
+ * (`hover:bg-muted/50` do `<TableRow>`) é vermelho a 10% sobre cinza a 50%
+ * sobre o fundo, e o axe devolve `incomplete` para fundo translúcido — nunca
+ * `violation`.
+ */
+async function contrasteComposto(locator: Locator): Promise<number> {
+  return locator.evaluate((el) => {
+    type Rgba = [number, number, number, number];
+    const parse = (c: string): Rgba => {
+      const [r = 0, g = 0, b = 0, a = 1] = (c.match(/[\d.]+/g) ?? []).map(Number);
+      return [r, g, b, a];
+    };
+    const camadas: Rgba[] = [];
+    for (let node: Element | null = el; node !== null; node = node.parentElement) {
+      const c = parse(getComputedStyle(node).backgroundColor);
+      if (c[3] > 0) camadas.push(c);
+      if (c[3] >= 1) break;
+    }
+    // Da camada opaca (a última achada) para cima, misturando por alfa.
+    let fundo: Rgba = [255, 255, 255, 1];
+    for (const [r, g, b, a] of camadas.reverse()) {
+      fundo = [
+        r * a + fundo[0] * (1 - a),
+        g * a + fundo[1] * (1 - a),
+        b * a + fundo[2] * (1 - a),
+        1,
+      ];
+    }
+    const lum = ([r, g, b]: number[]): number => {
+      const f = (u = 0): number => {
+        const v = u / 255;
+        return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+      };
+      return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+    };
+    const l1 = lum(parse(getComputedStyle(el).color));
+    const l2 = lum(fundo);
+    return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+  });
+}
+
+/**
  * Conteúdo que está POR BAIXO da barra de paginação (defeitos 86e2u4nxg e
  * 86e2uca1d), amostrando 9 pontos do retângulo da barra.
  *
@@ -1779,6 +1832,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   // Sprint 7: conta corrente é o estado de partida — só os cenários de
   // lançamento ligam o cartão.
   sessionAccountType = null;
+  sessionErrorDetail = false;
   reviewVerdict = null;
   patchAnomalyFails = false;
   listOverflows = false;
@@ -2020,6 +2074,67 @@ for (const vp of VIEWPORTS) {
         ratio,
         `badge "Processada" (${vp.label}): ${ratio.toFixed(2)}:1`,
       ).toBeGreaterThanOrEqual(4.5);
+    });
+  });
+}
+
+/**
+ * 86e3dxund — o vermelho de fundo em HOVER. O QA da Sprint 11 mediu o badge
+ * `bg-destructive/10` a 4,22:1 no escuro e 4,42:1 no Hologram; refeita a conta,
+ * os fundos medidos são os de uma linha de tabela em hover (`hover:bg-muted/50`).
+ * Em superfície lisa o `/10` passa, e por isso nenhum cenário o pegava. Os três
+ * casos abaixo põem o ponteiro EM CIMA antes de medir (o `:hover` só existe com
+ * o ponteiro ali — v1.34 do primer), medem o contraste composto e rodam o axe.
+ * Com `destructive-muted`, que é opaco, a superfície de baixo deixa de importar.
+ */
+for (const vp of VIEWPORTS) {
+  test.describe(`Contraste do destrutivo em hover (86e3dxund) — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('usuário inativo com a linha em hover', async ({ page }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/usuarios`);
+      const linha = page.getByRole('row').filter({ hasText: 'Inativo' }).first();
+      await linha.hover();
+      await aguardarAnimacao(linha);
+      const badge = linha.getByText('Inativo', { exact: true });
+      const ratio = await contrasteComposto(badge);
+      expect(
+        ratio,
+        `badge "Inativo" em hover (${vp.label}): ${ratio.toFixed(2)}:1`,
+      ).toBeGreaterThanOrEqual(4.5);
+      await analyze(page, `usuário inativo em hover (${vp.label})`);
+    });
+
+    test('entrada indecifrável com a linha em hover', async ({ page }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/glossario`);
+      const badge = page.getByText('Indecifrável', { exact: true });
+      const linha = page.getByRole('row').filter({ has: badge });
+      await linha.hover();
+      await aguardarAnimacao(linha);
+      const ratio = await contrasteComposto(badge);
+      expect(
+        ratio,
+        `badge "Indecifrável" em hover (${vp.label}): ${ratio.toFixed(2)}:1`,
+      ).toBeGreaterThanOrEqual(4.5);
+      await analyze(page, `entrada indecifrável em hover (${vp.label})`);
+    });
+
+    test('"Excluir conciliação" em hover, dentro do aviso de erro', async ({ page }) => {
+      sessionErrorDetail = true;
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}`);
+      const botao = page.getByRole('button', { name: 'Excluir conciliação' });
+      await expect(botao).toBeVisible();
+      await botao.hover();
+      await aguardarAnimacao(botao);
+      const ratio = await contrasteComposto(botao);
+      expect(
+        ratio,
+        `"Excluir conciliação" em hover (${vp.label}): ${ratio.toFixed(2)}:1`,
+      ).toBeGreaterThanOrEqual(4.5);
+      await shot(page, `excluir-conciliacao-hover-${vp.label.replace(/\s+/g, '-')}`);
+      await analyze(page, `"Excluir conciliação" em hover (${vp.label})`);
     });
   });
 }

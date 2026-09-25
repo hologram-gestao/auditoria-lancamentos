@@ -242,6 +242,16 @@ viewportSize().width` (padrão em `spec:2147-2165` e `:2190-2205`). Antes de med
   do gate local e só apareceu no CI porque o `.click()` anterior deixava o ponteiro numa
   coordenada que, em 390px, calhava de cair sobre o botão do diálogo. Antes de `analyze`
   numa tela com ação destrutiva, `await botao.hover()` de propósito.
+- **Fundo destrutivo de badge ou de hover é `destructive-muted`, nunca `bg-destructive/N`**
+  (86e3dxund). O alfa depende do que está EMBAIXO: o badge `/10` passava em superfície
+  lisa e reprovava numa linha de tabela em hover (`hover:bg-muted/50`): 4,23:1 no escuro,
+  4,44:1 no Hologram. O axe devolve `incomplete` (não `violation`) para fundo translúcido,
+  e o `measuredContrast` do e2e trata o primeiro fundo como opaco: para medir alfa use o
+  `contrasteComposto`, que mistura as camadas até a opaca, com o ponteiro em cima da linha.
+  A caixa de aviso `bg-destructive/5` (sem hover, fora de tabela) passa e fica.
+  ```bash
+  grep -rnE "bg-destructive/(10|20)\b" apps/web/src/components --include=*.tsx | grep -v "__tests__\|//"   # esperado: só o qualification-cell (hover /20, achado da 86e3dxund, ainda sem correção)
+  ```
   ```bash
   grep -rnE "\b(text|bg|border|ring|from|to|via)-(slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-[0-9]{2,3}\b|\bdark:" apps/web/src/components --include=*.tsx   # esperado: 0
   ```

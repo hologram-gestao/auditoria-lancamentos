@@ -60,8 +60,8 @@ const BUCKET_CLASSES: Record<AgingBucket, string> = {
   '1_30': 'bg-warning-muted text-warning ring-warning/30',
   '31_60': 'bg-warning-muted text-warning ring-warning/30',
   // `bg-destructive/10` reprovou no gate (4,22:1 no escuro, 4,42:1 no Hologram,
-  // AA pede 4,5:1 em 12px): o alfa mistura o vermelho com o fundo da página e
-  // apaga o contraste. `destructive-muted` é o token de FUNDO de badge, opaco e
+  // AA pede 4,5:1 em 12px): o alfa mistura o vermelho com o que estiver embaixo,
+  // e numa linha em hover (`hover:bg-muted/50`) isso apaga o contraste (86e3dxund). `destructive-muted` é o token de FUNDO de badge, opaco e
   // calibrado nos três temas — a mesma convenção que `warning`/`success`/`info`
   // acima já seguem.
   '61_90': 'bg-destructive-muted text-destructive ring-destructive/30',
