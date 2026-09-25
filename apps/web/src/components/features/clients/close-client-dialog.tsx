@@ -6,10 +6,12 @@
  * destruídas, usuários do cliente anonimizados) e MANTÉM o que aconteceu
  * (conciliações, valores, datas) como histórico só-leitura.
  *
- * É terminal como a exclusão — se o cliente voltar, é cadastro novo — então
- * passa pelo mesmo ritual do `DeleteClientDialog`: `AlertDialog` (ADR-006-FE)
- * + digitar o nome do cliente. O backend é a barreira (admin pela matriz + 409
- * com conciliação em processamento); aqui é UX.
+ * É terminal — se o cliente voltar, é cadastro novo —, então pede o ritual de
+ * ação irreversível: `AlertDialog` (ADR-006-FE) + digitar o nome do cliente. É
+ * a ÚNICA saída do cliente pela tela: a exclusão definitiva não tem botão desde
+ * 25/09/2026 (86e3eqxdt) e segue só na API, para o apagamento LGPD. O backend é
+ * a barreira (admin pela matriz + 409 com conciliação em processamento); aqui é
+ * UX.
  */
 
 import { Loader2 } from 'lucide-react';

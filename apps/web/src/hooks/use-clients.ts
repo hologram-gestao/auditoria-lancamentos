@@ -18,7 +18,6 @@ import {
   assignClient,
   createClient,
   closeClient,
-  deleteClient,
   favoriteClient,
   getClientDetail,
   listClientManagers,
@@ -168,22 +167,7 @@ export function useSetFavorite(id: string) {
 }
 
 /**
- * Exclusão definitiva (86e34jd1d). No sucesso o detalhe sai do cache (a rota
- * passa a devolver 404) e as listagens recarregam.
- */
-export function useDeleteClient(id: string) {
-  const qc = useQueryClient();
-  return useMutation<void, Error, void>({
-    mutationFn: () => deleteClient(id),
-    onSuccess: () => {
-      qc.removeQueries({ queryKey: clientsKeys.detail(id) });
-      void qc.invalidateQueries({ queryKey: clientsKeys.all });
-    },
-  });
-}
-
-/**
- * Encerramento com retenção (86e36pm1z). Diferente da exclusão, o cliente
+ * Encerramento com retenção (86e36pm1z). Diferente da exclusão definitiva, o cliente
  * CONTINUA existindo (anonimizado, só-leitura): o detalhe é refetchado — o
  * nome, o selo "Encerrado" e o sumiço das ações vêm do servidor.
  */

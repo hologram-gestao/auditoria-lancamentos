@@ -12,7 +12,6 @@ const mutationState = {
 };
 vi.mock('@/hooks/use-clients', () => ({
   // O ClientShell agora monta o diálogo de exclusão (86e34jd1d).
-  useDeleteClient: () => ({ mutateAsync: vi.fn(), isPending: false, reset: vi.fn() }),
   useSetFavorite: () => mutationState,
 }));
 

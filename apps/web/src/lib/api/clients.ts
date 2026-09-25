@@ -132,15 +132,6 @@ export async function unfavoriteClient(id: string): Promise<Client> {
 }
 
 /**
- * Exclusão DEFINITIVA (86e34jd1d): 204 sem corpo. Admin-only no backend; 409
- * (`CONFLICT`) quando há conciliação em processamento — o `userMessage` já vem
- * pronto para o toast.
- */
-export async function deleteClient(id: string): Promise<void> {
-  await apiDelete<void>(`/api/v1/clients/${id}`);
-}
-
-/**
  * Encerramento com RETENÇÃO (86e36pm1z): 204 sem corpo. Terminal e admin-only;
  * anonimiza a identidade e mantém o histórico só-leitura. 409 (`CONFLICT`) com
  * conciliação em processamento ou se o cliente já estiver encerrado.

@@ -49,7 +49,6 @@ vi.mock('@/hooks/use-clients', () => ({
   useAddClientManager: noopMutation,
   useRemoveClientManager: noopMutation,
   useSetFavorite: noopMutation,
-  useDeleteClient: noopMutation,
   useCloseClient: noopMutation,
 }));
 
