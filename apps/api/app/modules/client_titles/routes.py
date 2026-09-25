@@ -235,9 +235,16 @@ async def list_client_titles(
     )
 
     supplier_names = await _resolve_names_for_page(request, db, settings, client=client, rows=rows)
+    # R2 da Sprint 15: a linha diz se o título já tem contexto. Só a CONTAGEM,
+    # numa query agrupada pela página; `view_title_context` tem as mesmas células
+    # de `view_client_receivables` (todos os papéis), então quem lê a lista pode
+    # saber que o contexto existe.
+    context_counts = await repository.context_counts(client.id, [row.id for row in rows])
     return ClientTitlesListResponse(
         data=[
-            ClientTitleResponse.from_row(row, supplier_names=supplier_names, today=today)
+            ClientTitleResponse.from_row(
+                row, supplier_names=supplier_names, today=today, context_counts=context_counts
+            )
             for row in rows
         ],
         pagination=PaginationMeta(

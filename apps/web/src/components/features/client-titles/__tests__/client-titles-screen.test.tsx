@@ -138,6 +138,7 @@ function title(overrides: Partial<ClientTitle> = {}): ClientTitle {
     omieContaId: 777,
     documentNumber: 'NF 1234',
     lastSyncedAt: '2026-09-24T09:00:00Z',
+    contextCount: 0,
     ...overrides,
   };
 }
@@ -325,6 +326,25 @@ describe('ClientTitlesScreen — lista', () => {
     ).toBeVisible();
   });
 
+  it('a linha diz se o título já tem contexto, no visual e no nome acessível (R2)', () => {
+    listState.data = {
+      data: [
+        title({ id: '11111111-1111-4111-8111-111111111111', externalId: '4010', contextCount: 2 }),
+        title({ id: '22222222-2222-4222-8222-222222222222', externalId: '4011', contextCount: 0 }),
+      ],
+      pagination: { page: 1, pageSize: 20, total: 2, totalPages: 1 },
+    };
+    render(<ClientTitlesScreen clientId="c1" />);
+    const comContexto = screen.getByRole('button', {
+      name: 'Contexto do título 4010 (2 registrados)',
+    });
+    expect(comContexto).toHaveTextContent('2');
+    const semContexto = screen.getByRole('button', {
+      name: 'Contexto do título 4011 (nenhum registrado)',
+    });
+    expect(semContexto).not.toHaveTextContent(/\d/);
+  });
+
   it('título sem devedor não é "não resolvido": não há o que resolver', () => {
     listState.data = {
       data: [title({ supplierCode: null, supplierName: null, supplierNameResolved: true })],
@@ -381,12 +401,17 @@ describe('ClientTitlesScreen — lista', () => {
    * de `lg`; de `lg` para cima continua `min-h-0`, que é o desktop verificado.
    * A medida de verdade é o `boundingBox()` do e2e — esta é a rede barata.
    */
-  it('a área da tabela tem PISO de altura abaixo de lg (não colapsa em 390px)', () => {
+  it('a área da tabela tem PISO de altura nos dois tamanhos (não colapsa em 390px nem no desktop)', () => {
+    // Abaixo de `lg`, 24rem: sem ele a tabela ia a 0px em 390px (S11). De `lg`
+    // para cima, 8rem: a faixa de abas da S15 deixava a tabela com 75px no estado
+    // "última tentativa falhou" a 900px (validação humana de 24/09/2026). O
+    // `lg:min-h-0` antigo é justamente o que NÃO pode voltar.
     render(<ClientTitlesScreen clientId="c1" />);
     const region = screen.getByRole('region', { name: 'Títulos da carteira (rolável)' });
     const area = region.closest('[aria-busy]');
     expect(area).not.toBeNull();
-    expect(area).toHaveClass('min-h-[24rem]', 'flex-1', 'lg:min-h-0');
+    expect(area).toHaveClass('min-h-[24rem]', 'flex-1', 'lg:min-h-[8rem]');
+    expect(area).not.toHaveClass('lg:min-h-0');
   });
 });
 

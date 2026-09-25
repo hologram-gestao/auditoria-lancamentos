@@ -217,6 +217,16 @@ class ClientTitleResponse(BaseModel):
         alias="lastSyncedAt",
         description="Quando esta linha foi vista pela origem pela última vez.",
     )
+    context_count: int = Field(
+        default=0,
+        alias="contextCount",
+        description=(
+            "Quantos contextos (Sprint 15) este título tem registrados. `0` = "
+            "nenhum: é o que a tela usa para distinguir, na própria linha, o "
+            "título que já tem contexto do que ainda não tem (R2). Só a "
+            "CONTAGEM: o texto é cifrado e só sai pela rota de contexto."
+        ),
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -227,6 +237,7 @@ class ClientTitleResponse(BaseModel):
         *,
         supplier_names: Mapping[int, str],
         today: date,
+        context_counts: Mapping[UUID, int] | None = None,
     ) -> ClientTitleResponse:
         """Monta a resposta juntando a linha com os nomes resolvidos em runtime.
 
@@ -255,6 +266,7 @@ class ClientTitleResponse(BaseModel):
             omie_conta_id=row.omie_conta_id,
             document_number=row.document_number,
             last_synced_at=row.last_synced_at,
+            context_count=(context_counts or {}).get(row.id, 0),
         )
 
 

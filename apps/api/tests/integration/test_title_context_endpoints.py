@@ -471,3 +471,38 @@ class TestFiltroSemContexto:
         ids = {row["externalId"] for row in resp.json()["data"]}
         assert "sem-ctx" in ids
         assert "com-ctx" not in ids
+
+
+class TestIndicadorDeContextoNaLista:
+    async def test_a_lista_diz_quantos_contextos_cada_titulo_tem(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
+    ) -> None:
+        """R2: "indicador de que há contexto registrado" NA LINHA.
+
+        A validação humana de 24/09/2026 achou a lista mostrando o mesmo ícone em
+        toda linha: a resposta não dizia quem tinha contexto. `contextCount` conta
+        o histórico inteiro (append-only), e título sem nenhum contexto vem com 0,
+        nunca ausente.
+        """
+        com_contexto = await _seed_title(db_session, world.client, external_id="dois-ctx")
+        await _seed_title(db_session, world.client, external_id="zero-ctx")
+        await _login(client_with_db, world.tenant_manager)
+
+        for tipo, texto in (
+            ("acordo_de_pagamento", "primeiro"),
+            ("cobranca_suspensa", "segundo"),
+        ):
+            resp = await client_with_db.post(
+                _context_url(world.client, com_contexto), json={"type": tipo, "text": texto}
+            )
+            assert resp.status_code == 200, resp.text
+
+        resp = await client_with_db.get(_titles_base(world.client))
+
+        assert resp.status_code == 200, resp.text
+        por_id = {row["externalId"]: row for row in resp.json()["data"]}
+        assert por_id["dois-ctx"]["contextCount"] == 2
+        assert por_id["zero-ctx"]["contextCount"] == 0
+        # Só a contagem: o texto cifrado nunca vaza pela lista.
+        assert "primeiro" not in resp.text
+        assert "segundo" not in resp.text
