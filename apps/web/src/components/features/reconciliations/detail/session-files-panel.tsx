@@ -64,7 +64,11 @@ export function SessionFilesPanel({ sessionId, isProcessing }: SessionFilesPanel
 
   if (filesQuery.isLoading) {
     return (
-      <div role="status" className="bg-card space-y-2 rounded-lg border p-4" aria-label="Carregando arquivos">
+      <div
+        role="status"
+        className="bg-card space-y-2 rounded-lg border p-4"
+        aria-label="Carregando arquivos"
+      >
         <div className="bg-muted h-4 w-40 animate-pulse rounded" />
         <div className="bg-muted h-4 w-full animate-pulse rounded" />
       </div>
@@ -114,7 +118,7 @@ export function SessionFilesPanel({ sessionId, isProcessing }: SessionFilesPanel
                 size="sm"
                 onClick={() => setPendingRemoval(file)}
                 disabled={deleteFile.isPending}
-                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                className="text-destructive hover:text-destructive hover:bg-destructive-muted"
                 aria-label={`Remover ${file.filename ?? `arquivo ${index + 1}`}`}
               >
                 <Trash2 className="h-4 w-4" aria-hidden="true" />

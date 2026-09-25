@@ -43,7 +43,7 @@ export function GlossaryKindBadge({ kind }: { kind: string }) {
 export function GlossaryUndecipherableBadge() {
   return (
     <span
-      className={cn(baseBadge, 'bg-destructive/10 text-destructive ring-destructive/30')}
+      className={cn(baseBadge, 'bg-destructive-muted text-destructive ring-destructive/30')}
       title="O texto desta entrada não pôde ser decifrado."
     >
       Indecifrável

@@ -44,7 +44,7 @@ export function ClientUserStatusBadge({ active }: { active: boolean }) {
         baseBadge,
         active
           ? 'bg-success-muted text-success ring-success/30'
-          : 'bg-destructive/10 text-destructive ring-destructive/30',
+          : 'bg-destructive-muted text-destructive ring-destructive/30',
       )}
     >
       {active ? 'Ativo' : 'Inativo'}
