@@ -23,7 +23,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select, update
@@ -276,6 +276,17 @@ class TestRegistrarELer:
         )
         assert primeiro.status_code == 200, primeiro.text
         assert segundo.status_code == 200, segundo.text
+        # ⚠️ `created_at` vem de `now()` no banco, e a fixture roda o teste inteiro
+        # numa transação só: os dois POSTs saíam com o MESMO instante e a ordem do
+        # histórico virava sorteio (passou local e falhou no CI do #205, 25/09/2026).
+        # Em produção cada registro é um request e uma transação próprios. Aqui o
+        # primeiro é datado explicitamente ANTES, que é o cenário que o teste descreve.
+        await db_session.execute(
+            update(TitleContext)
+            .where(TitleContext.id == UUID(primeiro.json()["data"]["id"]))
+            .values(created_at=datetime(2026, 9, 24, 3, 0, tzinfo=UTC))
+        )
+        await db_session.flush()
 
         historico = await client_with_db.get(_context_url(world.client, title_id))
         entradas = historico.json()["data"]
