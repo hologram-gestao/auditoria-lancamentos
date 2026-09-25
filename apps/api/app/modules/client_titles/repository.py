@@ -291,6 +291,24 @@ class ClientTitlesRepository:
         rows = list((await self._session.execute(page_stmt)).scalars().all())
         return rows, total
 
+    async def context_counts(self, client_id: UUID, title_ids: list[UUID]) -> dict[UUID, int]:
+        """Quantos contextos (Sprint 15) cada título DESTA página tem.
+
+        Uma query agrupada para a página inteira, nunca uma por linha (sem N+1).
+        Filtra por `client_id` no próprio `WHERE` além do `title_id`: a contagem
+        é de dado de tenant, e o isolamento é da query, não de quem chama. Título
+        sem nenhum contexto simplesmente não aparece no dicionário.
+        """
+        if not title_ids:
+            return {}
+        stmt = (
+            select(TitleContext.title_id, func.count())
+            .where(TitleContext.client_id == client_id, TitleContext.title_id.in_(title_ids))
+            .group_by(TitleContext.title_id)
+        )
+        rows = (await self._session.execute(stmt)).tuples().all()
+        return dict(rows)
+
     async def existing_external_ids(self, client_id: UUID) -> set[str]:
         """Os identificadores que o cliente já tem gravados.
 

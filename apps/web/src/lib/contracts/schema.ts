@@ -2380,6 +2380,12 @@ export interface components {
              * @description Quando esta linha foi vista pela origem pela última vez.
              */
             lastSyncedAt: string;
+            /**
+             * Contextcount
+             * @description Quantos contextos (Sprint 15) este título tem registrados. `0` = nenhum: é o que a tela usa para distinguir, na própria linha, o título que já tem contexto do que ainda não tem (R2). Só a CONTAGEM: o texto é cifrado e só sai pela rota de contexto.
+             * @default 0
+             */
+            contextCount: number;
         };
         /**
          * ClientTitlesListResponse

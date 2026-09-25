@@ -654,14 +654,31 @@ function TitleRow({
       </TableCell>
       {canViewTitleContext && (
         <TableCell>
+          {/* R2: a LINHA diz se o título já tem contexto. Sem isto o ícone era o
+              mesmo em toda linha e quem registra não sabia onde já havia
+              registro sem abrir a gaveta de cada título (validação humana da
+              Sprint 15). A contagem vai no nome acessível também: quem usa leitor
+              de tela ouve "2 registrados", não só vê o número. */}
           <Button
             type="button"
             variant="ghost"
-            size="icon"
-            aria-label={`Contexto do título ${title.externalId}`}
+            size="sm"
+            aria-label={`Contexto do título ${title.externalId} (${
+              title.contextCount === 0
+                ? 'nenhum registrado'
+                : `${title.contextCount} ${title.contextCount === 1 ? 'registrado' : 'registrados'}`
+            })`}
             onClick={onOpenContext}
+            className={
+              title.contextCount > 0 ? 'text-primary gap-1.5' : 'text-muted-foreground gap-1.5'
+            }
           >
             <MessageSquareText className="h-4 w-4" aria-hidden="true" />
+            {title.contextCount > 0 && (
+              <span className="text-xs font-semibold tabular-nums" aria-hidden="true">
+                {title.contextCount}
+              </span>
+            )}
           </Button>
         </TableCell>
       )}
