@@ -314,7 +314,12 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
       <Tabs
         value={view}
         onValueChange={(value) => setMany({ [PARAM.view]: value === DEFAULT_VIEW ? null : value })}
-        className="flex flex-1 flex-col gap-4"
+        // `min-h-0` nos DOIS níveis (Tabs e TabsContent): item flex tem
+        // `min-height: auto`, então sem ele a cadeia de altura para aqui, o
+        // `min-h-0 flex-1` da área da tabela recebe o conteúdo inteiro e a
+        // tabela deixa de rolar dentro da própria área — o defeito 86e2uca1d de
+        // volta, pego pelo gate de a11y na validação humana da Sprint 15.
+        className="flex min-h-0 flex-1 flex-col gap-4"
       >
         <TabsList>
           <TabsTrigger value="carteira">Carteira</TabsTrigger>
@@ -325,7 +330,7 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
           <ReceivablesReportScreen clientId={clientId} />
         </TabsContent>
 
-        <TabsContent value="carteira" className="mt-0 flex flex-1 flex-col gap-4">
+        <TabsContent value="carteira" className="mt-0 flex min-h-0 flex-1 flex-col gap-4">
           {/* Agregados ANTES da lista: o aging é a pergunta que a reunião faz, e
           quem opera precisa dele antes de percorrer as linhas. */}
           {summaryQuery.isLoading ? (
