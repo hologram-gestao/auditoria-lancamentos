@@ -6,8 +6,8 @@
  *
  * Cada célula da matriz vira um caso — inclusive **toda célula `❌`**, que é o
  * que a task cobra. O espelho no backend é
- * `apps/api/app/core/authz.py::PERMISSION_MATRIX` (16 permissões × 5 papéis
- * desde a Sprint 10); se um dos dois mudar sozinho, é aqui que a divergência
+ * `apps/api/app/core/authz.py::PERMISSION_MATRIX` (23 permissões × 5 papéis
+ * desde a Sprint 12); se um dos dois mudar sozinho, é aqui que a divergência
  * aparece.
  */
 import { describe, expect, it } from 'vitest';
@@ -269,6 +269,36 @@ const MATRIX: ReadonlyArray<{
     admin: true,
     manager: true,
     clientManager: true,
+    clientOperator: false,
+  },
+  // S12 / R0: SINCRONIZAR a base de movimentos — as MESMAS células de
+  // `sync_client_receivables` (PRD), em permissão própria.
+  {
+    permission: 'sync_client_movements',
+    platform: true,
+    admin: true,
+    manager: true,
+    clientManager: true,
+    clientOperator: false,
+  },
+  // S12 / R6: as 5 células do PRD. O `manager` ENTRA — é a armadilha que o R6
+  // fechou (com `edit_client` o parceiro montaria a carteira e não a classificaria).
+  {
+    permission: 'manage_client_mapping',
+    platform: true,
+    admin: true,
+    manager: true,
+    clientManager: true,
+    clientOperator: false,
+  },
+  // S12 / R1: o catálogo é configuração da ORGANIZAÇÃO — plataforma e admin
+  // (ADR-074-BE, decisão do planejador do backend).
+  {
+    permission: 'manage_mapping_catalog',
+    platform: true,
+    admin: true,
+    manager: false,
+    clientManager: false,
     clientOperator: false,
   },
 ];

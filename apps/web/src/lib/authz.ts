@@ -117,14 +117,39 @@ export type Permission =
    * o `client_operator` lê mas não escreve. Não é reuso por coincidência: as
    * duas perguntas puderam ter respostas diferentes.
    */
-  | 'manage_title_context';
+  | 'manage_title_context'
+  /**
+   * Sprint 12 (R0 — BACK 12.2): SINCRONIZAR a base de movimentos de uma
+   * competência (ir à origem). As MESMAS células de `sync_client_receivables`,
+   * decididas no PRD — e permissão PRÓPRIA pelo motivo da S11: reusar amarraria
+   * duas sincronizações diferentes a uma decisão só. LER o estado da base não
+   * pede permissão (quem alcança o cliente lê).
+   */
+  | 'sync_client_movements'
+  /**
+   * Sprint 12 (R6 — BACK 12.4): EDITAR o de-para de um cliente — decisões,
+   * herança, confirmação em lote, importação e materialização. Células
+   * decididas no PRD, e não `edit_client` (admin-only): o `manager` do
+   * escritório parceiro constrói a carteira e precisa classificá-la. O
+   * `client_operator` VÊ a tela (a leitura não tem permissão própria) e não
+   * edita.
+   */
+  | 'manage_client_mapping'
+  /**
+   * Sprint 12 (R1 — BACK 12.3): ESCREVER no catálogo de destinos e alvos da
+   * ORGANIZAÇÃO — plataforma e admin. A LEITURA do catálogo não pede
+   * permissão: quem escolhe alvo (o `client_manager` inclusive) precisa ler.
+   * ⚠️ Células decididas pelo planejador do backend (ADR-074-BE), pendentes de
+   * validação humana — espelhadas como estão.
+   */
+  | 'manage_mapping_catalog';
 
 /**
  * A matriz, indexada por PAPEL (e não por permissão) de propósito: assim o
  * `Record<UserRole, ...>` obriga a lista a cobrir todo papel do contrato.
  *
  * Transcrita célula a célula de `apps/api/app/core/authz.py::PERMISSION_MATRIX`
- * (18 permissões × 5 papéis desde a Sprint 11) e travada em `__tests__/authz.test.ts`.
+ * (23 permissões × 5 papéis desde a Sprint 12) e travada em `__tests__/authz.test.ts`.
  *
  * | Ação                          | platform_admin | admin | manager | client_manager | client_operator |
  * | ----------------------------- | -------------- | ----- | ------- | -------------- | --------------- |
@@ -148,6 +173,9 @@ export type Permission =
  * | Sincronizar a carteira (S11)  | ✅             | ✅    | ✅ (carteira) | ✅       | ❌              |
  * | Ver contexto do título (S15)  | ✅             | ✅    | ✅ (carteira) | ✅       | ✅              |
  * | Registrar contexto (S15)      | ✅             | ✅    | ✅ (carteira) | ✅       | ❌              |
+ * | Sincronizar movimentos (S12)  | ✅             | ✅    | ✅ (carteira) | ✅       | ❌              |
+ * | Editar o de-para (S12)        | ✅             | ✅    | ✅ (carteira) | ✅       | ❌              |
+ * | Catálogo do de-para (S12)     | ✅             | ✅ (org) | ❌   | ❌             | ❌              |
  *
  * "(carteira)" e "(própria org)" **não são células**: são `resolve_client_access`
  * e os filtros de coleção, no servidor. A célula diz se o papel pode a AÇÃO.
@@ -176,6 +204,9 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'sync_client_receivables',
     'view_title_context',
     'manage_title_context',
+    'sync_client_movements',
+    'manage_client_mapping',
+    'manage_mapping_catalog',
   ],
   // D3 final (86e36ed1d): `manage_anomaly_types` saiu daqui. A taxonomia de
   // anomalias é uma tabela GLOBAL do produto — o admin de uma organização
@@ -199,6 +230,11 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'sync_client_receivables',
     'view_title_context',
     'manage_title_context',
+    'sync_client_movements',
+    'manage_client_mapping',
+    // S12: o catálogo de destinos/alvos é configuração da ORGANIZAÇÃO — escreve
+    // quem a administra (o "(org)" é o filtro do servidor, não a célula).
+    'manage_mapping_catalog',
   ],
   // O gerente da organização enxerga outros tenants apenas dentro da carteira —
   // quem sabe a carteira é o backend (`client_assignments`), ver `canAccessClient`.
@@ -222,6 +258,10 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'sync_client_receivables',
     'view_title_context',
     'manage_title_context',
+    'sync_client_movements',
+    // S12 (R6): a armadilha que o PRD fechou — o contador parceiro (manager)
+    // classifica a carteira que ele mesmo constrói. Sem catálogo: esse é da org.
+    'manage_client_mapping',
   ],
   client_manager: [
     'run_reconciliation',
@@ -235,6 +275,8 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'sync_client_receivables',
     'view_title_context',
     'manage_title_context',
+    'sync_client_movements',
+    'manage_client_mapping',
   ],
   // S10 (R4) e S11 (R5): o operador LÊ o plano de contas e a carteira, e **não**
   // sincroniza nenhum dos dois — são os únicos ❌ das duas linhas de

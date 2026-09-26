@@ -837,6 +837,137 @@ const MANY_CLIENT_TITLES = Array.from({ length: 20 }, (_, i) =>
   }),
 );
 
+/**
+ * Sprint 12 / R6 — de-para multi-destino. Os dois destinos do caso medido: a
+ * transferência entre contas de mesma titularidade é `nao_mapear` no
+ * demonstrativo e alvo real no fluxo de caixa.
+ */
+const MAPPING_DESTINATIONS = [
+  {
+    id: 'dddddddd-0000-4000-8000-000000000001',
+    type: 'demonstrativo_contabil',
+    name: 'Demonstrativo contábil',
+    active: true,
+    organizationId: ORGANIZATION_ID,
+    targetsCount: 14,
+  },
+  {
+    id: 'dddddddd-0000-4000-8000-000000000002',
+    type: 'fluxo_de_caixa',
+    name: 'Fluxo de caixa',
+    active: true,
+    organizationId: ORGANIZATION_ID,
+    targetsCount: 8,
+  },
+];
+
+const MAPPING_TARGETS = [
+  {
+    id: 'eeeeeeee-0000-4000-8000-000000000001',
+    code: '3.1',
+    name: 'Despesas administrativas',
+    active: true,
+  },
+  { id: 'eeeeeeee-0000-4000-8000-000000000002', code: '3.2', name: 'Utilidades', active: true },
+];
+
+function mappingItem(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    sourceType: 'omie',
+    categoryCode: '2.01.01',
+    categoryName: 'Aluguel',
+    categoryNameResolved: true,
+    situation: 'herdada',
+    decision: 'alvo',
+    targetCode: '3.1',
+    targetName: 'Despesas administrativas',
+    effectiveFrom: '2026-09',
+    divergent: false,
+    originDreCode: '3.1',
+    ...over,
+  };
+}
+
+/** As QUATRO situações, uma por linha, e uma divergência com a origem. */
+const MAPPING_ITEMS = [
+  mappingItem(),
+  mappingItem({
+    categoryCode: '2.01.02',
+    categoryName: 'Energia elétrica',
+    situation: 'confirmada',
+    targetCode: '3.2',
+    targetName: 'Utilidades',
+    divergent: true,
+    originDreCode: '3.9',
+  }),
+  mappingItem({
+    categoryCode: '1.09.01',
+    categoryName: 'OS - Transferência Entre Contas de Mesma Titularidade',
+    situation: 'nao_mapear',
+    decision: 'nao_mapear',
+    targetCode: null,
+    targetName: null,
+  }),
+  mappingItem({
+    categoryCode: '1.04.02',
+    categoryName: null,
+    categoryNameResolved: false,
+    situation: 'sem_decisao',
+    decision: null,
+    targetCode: null,
+    targetName: null,
+    effectiveFrom: null,
+  }),
+];
+
+/** Com `true`, a competência da prévia NUNCA foi sincronizada. */
+let mappingNeverSynced = false;
+
+function mappingSyncState(competence: string): Record<string, unknown> {
+  if (mappingNeverSynced) {
+    return { competence, neverSynced: true, syncedAt: null, syncFailedAt: null };
+  }
+  return { competence, neverSynced: false, syncedAt: '2026-09-25T12:00:00Z', syncFailedAt: null };
+}
+
+/** O exemplo do PRD (R5): três categorias sem decisão, a maior com R$ 12.400. */
+function mappingPreview(competence: string): Record<string, unknown> {
+  return {
+    competence,
+    destination: 'demonstrativo_contabil',
+    baseState: { syncedAt: '2026-09-25T12:00:00Z', syncFailedAt: null },
+    situations: {
+      alvo: { amount: '682413.90', count: 1240 },
+      naoMapear: { amount: '15320.00', count: 68 },
+      semDecisao: { amount: '14120.00', count: 5 },
+      semCategoria: { amount: '0.00', count: 0 },
+    },
+    coveragePct: '98.0',
+    naoMapearPct: '2.2',
+    coverageNumerator: '697733.90',
+    coverageDenominator: '711853.90',
+    undecidedCategories: [
+      { sourceType: 'omie', categoryCode: '1.04.02', amount: '12400.00', count: 3 },
+      { sourceType: 'omie', categoryCode: '1.04.07', amount: '1200.00', count: 1 },
+      { sourceType: 'omie', categoryCode: '2.09.99', amount: '520.00', count: 1 },
+    ],
+    previewToken: 'e2e-preview-token',
+    latestVersion: 1,
+  };
+}
+
+const MAPPING_IMPORT_PREVIEW = {
+  effectiveFrom: '2026-09',
+  created: 12,
+  altered: 3,
+  altersConfirmed: 1,
+  ignored: 110,
+  rejected: [
+    { line: 18, categoryCode: '9.99.01', targetCode: '3.1', reason: 'categoria_inexistente' },
+    { line: 42, categoryCode: '2.01.05', targetCode: '7.7', reason: 'alvo_inexistente' },
+  ],
+};
+
 const MANY_GLOSSARY_ENTRIES = Array.from({ length: 20 }, (_, i) => ({
   id: `ffffffff-ffff-4fff-8fff-f00000000f${String(i).padStart(2, '0')}`,
   kind: (['categoria', 'regra', 'fornecedor'] as const)[i % 3],
@@ -1198,6 +1329,63 @@ async function fulfillApi(route: Route): Promise<void> {
         },
       }),
     });
+  }
+  // De-para (S12/R0·R5·R6). Catálogo da organização: `{ data: [...] }` com
+  // chave ÚNICA (o `apiGet` desembrulha); alvos e lista do de-para são pares
+  // `{ data, pagination[, competence] }` REAIS — `fulfill` cru, não `json()`.
+  if (path === '/api/v1/mapping-destinations') return json(MAPPING_DESTINATIONS);
+  if (/^\/api\/v1\/mapping-destinations\/[^/]+\/targets$/.test(path)) {
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: MAPPING_TARGETS,
+        pagination: { page: 1, pageSize: 100, total: MAPPING_TARGETS.length, totalPages: 1 },
+      }),
+    });
+  }
+  if (path === `/api/v1/clients/${CLIENT_ID}/movements/sync-state`) {
+    return json(mappingSyncState(url.searchParams.get('competence') ?? '2026-09'));
+  }
+  if (path === `/api/v1/clients/${CLIENT_ID}/movements/sync`) {
+    mappingNeverSynced = false;
+    const competence = String(
+      (route.request().postDataJSON() as { competence?: string } | null)?.competence ?? '2026-09',
+    );
+    return json({
+      movimentos: 80,
+      semCategoria: 0,
+      contas: 6,
+      ausentes: 0,
+      state: mappingSyncState(competence),
+    });
+  }
+  const deParaRota = path.match(
+    new RegExp(`^/api/v1/clients/${CLIENT_ID}/mapping/([a-z0-9_]+)(/.*)?$`),
+  );
+  if (deParaRota) {
+    const sub = deParaRota[2] ?? '';
+    if (sub === '/preview') {
+      return json(mappingPreview(url.searchParams.get('competence') ?? '2026-09'));
+    }
+    if (sub === '/decisions/confirm-inherited') {
+      return json({ affected: 1, applied: false, result: null });
+    }
+    if (sub === '/decisions') {
+      return json({ effectiveFrom: '2026-09', created: 1, resolved: 0, unchanged: 0 });
+    }
+    if (sub === '/import/preview') return json(MAPPING_IMPORT_PREVIEW);
+    if (sub === '') {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: MAPPING_ITEMS,
+          pagination: { page: 1, pageSize: 20, total: MAPPING_ITEMS.length, totalPages: 1 },
+          competence: '2026-09',
+        }),
+      });
+    }
   }
   // Carteira de títulos (S11/R3·R4). Mesma ordem do FastAPI: as rotas LITERAIS
   // vêm antes da lista, senão `/summary` e `/sync` casariam com um `startsWith`
@@ -1845,6 +2033,8 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   // S11: a carteira está sincronizada e a última tentativa deu certo, por padrão.
   titlesNeverSynced = false;
   titlesSyncFailed = false;
+  // S12: a competência da prévia do de-para está sincronizada, por padrão.
+  mappingNeverSynced = false;
   await page.route('**/api/v1/**', fulfillApi);
   // O `src/middleware.ts` decide navegação só pela PRESENÇA do cookie
   // `access_token` (a validação real é do backend). Um valor qualquer basta
@@ -3428,6 +3618,192 @@ for (const vp of VIEWPORTS) {
       await aguardarToastEstavel(page);
       await shot(page, `carteira-sincronizada-${slugC}`);
       await analyze(page, `carteira — depois de sincronizar (${vp.label})`);
+    });
+  });
+}
+
+/**
+ * A ação primária não pode nascer cortada na borda em 390px — o axe mede
+ * semântica, não transbordo (defeito da Sprint 7).
+ */
+async function exigirDentroDaViewport(page: Page, alvo: Locator, contexto: string) {
+  await expect(alvo).toBeVisible();
+  const caixa = await alvo.boundingBox();
+  expect(caixa, `${contexto}: precisa ter caixa`).not.toBeNull();
+  expect(caixa?.x ?? -1, `${contexto}: começa fora da tela`).toBeGreaterThanOrEqual(0);
+  expect(
+    (caixa?.x ?? 0) + (caixa?.width ?? 0),
+    `${contexto}: cortado na borda direita`,
+  ).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0);
+}
+
+/**
+ * Sprint 12 / R6 (FRONT 12.7) — a tela do de-para nos três temas e nos dois
+ * viewports: lista com edição (o `manager`, contador parceiro), lista
+ * só-leitura (o operador), a gaveta de decisão com a vigência, a prévia da
+ * competência com o diálogo de materializar, a base nunca sincronizada e a
+ * prévia da importação.
+ */
+for (const vp of VIEWPORTS) {
+  const slugD = vp.label.replace(/\s+/g, '-');
+  test.describe(`De-para do cliente — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('lista com edição: quatro situações distintas + divergência (manager)', async ({
+      page,
+    }) => {
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/de-para`);
+
+      await expect(page.getByRole('heading', { name: 'De-para', level: 2 })).toBeVisible();
+      await expect(page.getByRole('row')).toHaveCount(5); // cabeçalho + 4 categorias
+      // `getByText` exato e não `getByRole('cell')`: o nome da célula soma o
+      // selo de divergência e deixaria de casar (o `getByRole` casa por substring).
+      for (const selo of ['Herdada da origem', 'Confirmada', 'Não mapear', 'Sem decisão']) {
+        await expect(page.getByRole('table').getByText(selo, { exact: true })).toBeVisible();
+      }
+      await expect(page.getByRole('img', { name: /^Divergente da origem/ })).toBeVisible();
+      // A busca é rotulada "por código".
+      await expect(page.getByLabel('Buscar por código da categoria')).toBeVisible();
+      // O manager é a armadilha do R6: ELE edita.
+      await expect(page.getByRole('button', { name: 'Decidir a categoria 1.04.02' })).toBeVisible();
+      await expect(page.getByRole('button', { name: /Confirmar herdadas/ })).toBeVisible();
+      await expect(page.getByRole('button', { name: /Importar/ })).toBeVisible();
+
+      const regiao = page.getByRole('region', { name: 'Categorias do de-para (rolável)' });
+      const caixa = await regiao.boundingBox();
+      expect(caixa?.height ?? 0, `${vp.label}: a área da tabela colapsou`).toBeGreaterThan(80);
+      await expect(page.locator('#__next_error__')).toHaveCount(0);
+
+      await shot(page, `de-para-lista-${slugD}`);
+      await analyze(page, `de-para — lista com edição (${vp.label})`);
+    });
+
+    test('operador do cliente: lista só-leitura, sem nenhuma ação de escrita', async ({ page }) => {
+      sessionUser = CLIENT_OPERATOR_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/de-para`);
+
+      await expect(page.getByRole('heading', { name: 'De-para', level: 2 })).toBeVisible();
+      await expect(page.getByRole('row')).toHaveCount(5);
+      // Ação OCULTA, não desabilitada (§4.9).
+      await expect(
+        page.getByRole('button', { name: /^(Alterar|Decidir) a categoria/ }),
+      ).toHaveCount(0);
+      for (const nome of [/Confirmar herdadas/, /Iniciar de-para/, /Importar/]) {
+        await expect(page.getByRole('button', { name: nome })).toHaveCount(0);
+      }
+      // Exportar é de todos que leem.
+      await expect(page.getByRole('button', { name: /Exportar/ })).toBeVisible();
+
+      await shot(page, `de-para-operador-${slugD}`);
+      await analyze(page, `de-para — lista só-leitura do operador (${vp.label})`);
+    });
+
+    test('gaveta da decisão: competência de início e vigência nova explícitas (R4)', async ({
+      page,
+    }) => {
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/de-para`);
+
+      await page.getByRole('button', { name: 'Alterar a categoria 2.01.01' }).click();
+      const gaveta = page.getByRole('dialog');
+      await expect(gaveta.getByRole('heading', { name: 'Decisão do de-para' })).toBeVisible();
+      await aguardarAnimacao(gaveta);
+      await expect(gaveta.getByLabel('Competência de início')).toHaveValue('2026-09');
+      await expect(gaveta.getByTestId('vigencia-explanation')).toContainText(
+        'Cria uma vigência nova a partir de Setembro de 2026',
+      );
+      await exigirDentroDaViewport(
+        page,
+        gaveta.getByRole('button', { name: 'Gravar decisão' }),
+        `${vp.label}: "Gravar decisão"`,
+      );
+
+      await shot(page, `de-para-gaveta-vigencia-${slugD}`);
+      await analyze(page, `de-para — gaveta de vigência (${vp.label})`);
+    });
+
+    test('prévia da competência: base, quatro situações e materializar (R5)', async ({ page }) => {
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/de-para?view=previa&competence=2026-06`);
+
+      const previa = page.getByTestId('mapping-preview');
+      await expect(previa).toBeVisible();
+      await expect(page.getByTestId('mapping-base-state')).toContainText('Sincronizada em');
+      for (const rotulo of ['Com alvo', 'Não mapear', 'Sem decisão', 'Sem categoria de origem']) {
+        await expect(previa.locator('dt', { hasText: new RegExp(`^${rotulo}$`) })).toHaveCount(1);
+      }
+      await expect(previa.getByText('98%')).toBeVisible();
+      await expect(previa.getByText(/R\$\s*12\.400,00/)).toBeVisible();
+      await exigirDentroDaViewport(
+        page,
+        page.getByRole('button', { name: 'Sincronizar competência' }),
+        `${vp.label}: "Sincronizar competência"`,
+      );
+      await shot(page, `de-para-previa-${slugD}`);
+      await analyze(page, `de-para — prévia (${vp.label})`);
+
+      // Há valor sem decisão: a confirmação extra trava o botão até ser marcada.
+      await page.getByRole('button', { name: 'Materializar', exact: true }).click();
+      const dialogo = page.getByRole('alertdialog');
+      await aguardarAnimacao(dialogo);
+      const confirmar = dialogo.getByRole('button', { name: 'Materializar versão 2' });
+      await expect(confirmar).toBeDisabled();
+      await dialogo.getByRole('switch').click();
+      await expect(confirmar).toBeEnabled();
+      await exigirDentroDaViewport(page, confirmar, `${vp.label}: "Materializar versão 2"`);
+      await shot(page, `de-para-materializar-${slugD}`);
+      await analyze(page, `de-para — confirmar materialização (${vp.label})`);
+    });
+
+    test('base nunca sincronizada: instrução de sincronizar, nunca "0%" (R0/R5)', async ({
+      page,
+    }) => {
+      mappingNeverSynced = true;
+      sessionUser = CLIENT_OPERATOR_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/de-para?view=previa&competence=2026-06`);
+
+      await expect(page.getByText('Junho de 2026 ainda não tem base de movimentos')).toBeVisible();
+      await expect(page.getByTestId('mapping-preview')).toHaveCount(0);
+      // O operador não sincroniza: a instrução manda pedir, e o botão não existe.
+      await expect(page.getByRole('button', { name: /Sincronizar competência/ })).toHaveCount(0);
+      await exigirEstadoVazioLegivel(
+        page,
+        'Junho de 2026 ainda não tem base de movimentos',
+        `${vp.label} · base nunca sincronizada`,
+      );
+      await shot(page, `de-para-nunca-sincronizada-${slugD}`);
+      await analyze(page, `de-para — base nunca sincronizada (${vp.label})`);
+    });
+
+    test('prévia da importação: contagens e linhas recusadas antes de aplicar (R6)', async ({
+      page,
+    }) => {
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/de-para`);
+
+      await page.getByRole('button', { name: /Importar/ }).click();
+      const gaveta = page.getByRole('dialog');
+      await expect(gaveta.getByRole('heading', { name: 'Importar de-para' })).toBeVisible();
+      await aguardarAnimacao(gaveta);
+      await gaveta.getByLabel('Planilha (.xlsx)').setInputFiles({
+        name: 'de-para.xlsx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        buffer: Buffer.from('PK\u0003\u0004e2e'),
+      });
+      await gaveta.getByRole('button', { name: 'Gerar prévia' }).click();
+
+      const resumo = gaveta.getByTestId('mapping-import-preview');
+      await expect(resumo).toContainText('12');
+      await expect(gaveta.getByText('Categoria inexistente no cliente')).toBeVisible();
+      await expect(gaveta.getByText('Alvo inexistente ou inativo no catálogo')).toBeVisible();
+      // Altera 1 confirmada: aplicar só depois da confirmação explícita.
+      const aplicar = gaveta.getByRole('button', { name: 'Aplicar importação' });
+      await expect(aplicar).toBeDisabled();
+      await exigirDentroDaViewport(page, aplicar, `${vp.label}: "Aplicar importação"`);
+
+      await shot(page, `de-para-importacao-${slugD}`);
+      await analyze(page, `de-para — prévia da importação (${vp.label})`);
     });
   });
 }
