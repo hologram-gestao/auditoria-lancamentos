@@ -44,7 +44,13 @@ const TabsContent = React.forwardRef<
   <TabsPrimitive.Content
     ref={ref}
     className={cn(
-      'ring-offset-background focus-visible:ring-ring mt-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
+      // `data-[state=inactive]:hidden`: o Radix mantém o painel inativo MONTADO
+      // com o atributo `hidden`, e uma classe de display do consumidor (`flex`)
+      // vence o `hidden` do HTML. Com `flex-1`, o painel invisível crescia para
+      // ocupar a sobra da coluna: 209px de vão entre as abas e a prévia do
+      // de-para no estado "nunca sincronizada" (validação humana da Sprint 12).
+      // A variante entra depois das utilities de display, então vence o `flex`.
+      'ring-offset-background focus-visible:ring-ring mt-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 data-[state=inactive]:hidden',
       className,
     )}
     {...props}
