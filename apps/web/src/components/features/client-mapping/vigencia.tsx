@@ -48,15 +48,20 @@ function monthList(competences: string[]): string {
 /**
  * O texto que diz o que a gravação FAZ. `hasCurrentDecision=false` é a primeira
  * decisão da categoria: não há vigência anterior para "continuar valendo".
+ * `continuityNote` é para a ação em lote cuja continuidade não é "a decisão
+ * atual segue até o mês anterior" (o "Iniciar de-para" não toca decisão nenhuma).
  */
 export function VigenciaExplanation({
   effectiveFrom,
   serverCompetence,
   hasCurrentDecision,
+  continuityNote,
 }: {
   effectiveFrom: string;
   serverCompetence: string;
   hasCurrentDecision: boolean;
+  /** Substitui a frase de continuidade quando a ação não é "trocar a decisão atual". */
+  continuityNote?: string;
 }) {
   if (!isCompetence(effectiveFrom)) return null;
   const retroactive = isBefore(effectiveFrom, serverCompetence);
@@ -69,9 +74,10 @@ export function VigenciaExplanation({
         Cria uma vigência nova a partir de {formatReferenceMonth(effectiveFrom)}.
       </p>
       <p>
-        {hasCurrentDecision
-          ? `A decisão atual continua valendo até ${formatReferenceMonth(previousCompetence(effectiveFrom))}; nada é sobrescrito.`
-          : 'Competências anteriores continuam sem esta decisão.'}
+        {continuityNote ??
+          (hasCurrentDecision
+            ? `A decisão atual continua valendo até ${formatReferenceMonth(previousCompetence(effectiveFrom))}; nada é sobrescrito.`
+            : 'Competências anteriores continuam sem esta decisão.')}
       </p>
       {retroactive && (
         <p>
