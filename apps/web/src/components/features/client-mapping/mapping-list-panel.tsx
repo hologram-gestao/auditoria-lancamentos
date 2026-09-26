@@ -15,7 +15,8 @@
  * **Gating.** Ler é de quem alcança o cliente (o operador inclusive). Editar,
  * confirmar herdadas em lote e "Iniciar de-para" pedem `manage_client_mapping`
  * — as ações ficam OCULTAS para quem não a tem (nunca desabilitadas), e cliente
- * encerrado também as esconde, com o motivo dito na tela (§4.12).
+ * encerrado também as esconde, com o motivo dito na tela (§4.12). As duas ações
+ * do LOTE só existem no destino que herda (R7).
  */
 
 import { CheckCheck, Loader2, Pencil, Search, Sprout } from 'lucide-react';
@@ -94,6 +95,8 @@ interface MappingListPanelProps {
   };
   situation: MappingSituation | undefined;
   codeInput: string;
+  /** O recorte por código APLICADO (o da URL, que a lista já mostra) — não o que está sendo digitado. */
+  codeFilter: string;
   onCodeInputChange: (value: string) => void;
   onSituationChange: (value: MappingSituation | null) => void;
   onClearFilters: () => void;
@@ -113,6 +116,7 @@ export function MappingListPanel({
   listQuery,
   situation,
   codeInput,
+  codeFilter,
   onCodeInputChange,
   onSituationChange,
   onClearFilters,
@@ -203,22 +207,22 @@ export function MappingListPanel({
           </Button>
         )}
 
-        {showWriteActions && (
+        {/* As duas ações do lote só existem onde há herança (R7): nos outros
+            destinos não há herdada para confirmar, e o botão abria um diálogo
+            com "Confirmar" desabilitado (validação humana da S12). */}
+        {showWriteActions && inherits && (
           <div className="flex flex-wrap gap-2 lg:ml-auto">
-            {inherits && (
-              <InheritAction
-                clientId={clientId}
-                destination={destination}
-                serverCompetence={serverCompetence}
-              />
-            )}
+            <InheritAction
+              clientId={clientId}
+              destination={destination}
+              serverCompetence={serverCompetence}
+            />
             <ConfirmInheritedAction
               clientId={clientId}
               destination={destination}
               serverCompetence={serverCompetence}
-              codeFilterActive={
-                codeInput.trim() !== '' || (situation !== undefined && situation !== 'herdada')
-              }
+              codeFilter={codeFilter}
+              situationFilter={situation}
             />
           </div>
         )}
@@ -448,39 +452,55 @@ function ListErrorState({ error, onRetry }: { error: unknown; onRetry: () => voi
  * confirmar (`confirm=false` não grava), e é ela que o diálogo mostra — nunca o
  * número de linhas da página.
  *
- * ⚠️ A rota confirma TODAS as herdadas vigentes do destino: o servidor não
- * recebe o filtro da tela. Quando a lista está recortada por outra coisa, o
- * diálogo diz isso em vez de deixar a pessoa achar que confirmou só o que via.
+ * Duas coisas que o follow-up 86e3f0uxb fechou:
+ *   - o recorte por CÓDIGO da lista vai ao servidor (`code`, começando por): a
+ *     pessoa confirma "estas", não o destino inteiro, e `affected` respeita o
+ *     recorte. O filtro de SITUAÇÃO não se aplica — o lote só toca herdadas — e
+ *     o diálogo diz isso quando ele está ativo;
+ *   - as herdadas VIGENTES dependem da competência de início: mudar o mês no
+ *     diálogo reconta, senão o diálogo mostrava N e o servidor aplicava 0.
  */
 function ConfirmInheritedAction({
   clientId,
   destination,
   serverCompetence,
-  codeFilterActive,
+  codeFilter,
+  situationFilter,
 }: {
   clientId: string;
   destination: MappingDestination;
   serverCompetence: string;
-  codeFilterActive: boolean;
+  codeFilter: string;
+  situationFilter: MappingSituation | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const countMutation = useConfirmInheritedDecisions(clientId, destination.type);
   const applyMutation = useConfirmInheritedDecisions(clientId, destination.type);
   const count: ConfirmInheritedResult | undefined = countMutation.data;
+  const code = codeFilter.trim();
+  const situationFilterIgnored = situationFilter !== undefined && situationFilter !== 'herdada';
 
-  // A contagem sai no CLIQUE (evento), nunca num efeito: o diálogo abre já
-  // perguntando ao servidor quantas herdadas a confirmação atingiria.
-  function handleOpen() {
-    setOpen(true);
+  // A contagem sai em EVENTO (o clique que abre, a troca do mês), nunca num
+  // efeito: o diálogo abre já perguntando ao servidor quantas herdadas a
+  // confirmação atingiria a partir da competência escolhida.
+  function recount(effectiveFrom: string) {
     countMutation.mutate(
-      { confirm: false, confirmRetroactive: false },
+      { confirm: false, confirmRetroactive: false, effectiveFrom, ...(code ? { code } : {}) },
       {
-        onError: (err) =>
+        onError: (err) => {
+          // Contagem velha não vale para o mês novo: sem número, sem confirmar.
+          countMutation.reset();
           toast.error(
             err instanceof ApiError ? err.userMessage : 'Não foi possível contar as herdadas.',
-          ),
+          );
+        },
       },
     );
+  }
+
+  function handleOpen() {
+    setOpen(true);
+    recount(serverCompetence);
   }
 
   function handleOpenChange(next: boolean) {
@@ -499,12 +519,15 @@ function ConfirmInheritedAction({
     <div className="bg-muted space-y-1 rounded-lg p-3 text-sm" role="status">
       <p className="font-medium" data-testid="confirm-inherited-count">
         {affected === 0
-          ? 'Não há decisões herdadas para confirmar neste destino.'
-          : `${affected} ${affected === 1 ? 'decisão herdada será confirmada' : 'decisões herdadas serão confirmadas'}.`}
+          ? code
+            ? `Não há decisões herdadas com código começando por "${code}" para confirmar.`
+            : 'Não há decisões herdadas para confirmar neste destino.'
+          : `${affected} ${affected === 1 ? 'decisão herdada será confirmada' : 'decisões herdadas serão confirmadas'}${code ? ` (código começando por "${code}")` : ''}.`}
       </p>
-      {affected > 0 && codeFilterActive && (
+      {affected > 0 && situationFilterIgnored && (
         <p className="text-muted-foreground">
-          Vale para todas as herdadas do destino, não só as que o filtro atual mostra.
+          O filtro de situação não se aplica: o lote atinge só as herdadas
+          {code ? ' dentro do recorte por código' : ' do destino'}.
         </p>
       )}
     </div>
@@ -524,6 +547,7 @@ function ConfirmInheritedAction({
         summary={summary}
         confirmLabel={affected > 0 ? `Confirmar ${affected}` : 'Confirmar'}
         confirmDisabled={count === undefined || affected === 0}
+        onEffectiveFromChange={recount}
         serverCompetence={serverCompetence}
         errorFallback="Não foi possível confirmar as herdadas."
         onConfirm={async ({ effectiveFrom, confirmRetroactive }) => {
@@ -531,6 +555,7 @@ function ConfirmInheritedAction({
             confirm: true,
             effectiveFrom,
             confirmRetroactive,
+            ...(code ? { code } : {}),
           });
           toast.success(
             `${result.affected} ${result.affected === 1 ? 'decisão confirmada' : 'decisões confirmadas'}, vigentes a partir de ${formatReferenceMonth(effectiveFrom)}.`,
@@ -571,6 +596,7 @@ function InheritAction({
         title="Iniciar de-para"
         description={`Pré-preenche "${destination.name}" com a conta de demonstrativo que o plano de contas da origem já traz. Cada decisão entra como herdada, para você confirmar ou alterar. Decisões existentes não são tocadas.`}
         confirmLabel="Iniciar de-para"
+        continuityNote="Só as categorias sem decisão recebem a herdada; quem já tem decisão não é tocado."
         serverCompetence={serverCompetence}
         errorFallback="Não foi possível iniciar o de-para."
         onConfirm={async ({ effectiveFrom, confirmRetroactive }) => {

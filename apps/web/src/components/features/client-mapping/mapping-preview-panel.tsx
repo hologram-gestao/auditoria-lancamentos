@@ -16,13 +16,19 @@
  *      `BASE_NAO_SINCRONIZADA` do R5 existe para isso).
  *   3. **Materializar** (`manage_client_mapping`) com confirmação — e uma
  *      confirmação EXTRA, explícita, quando houver valor sem decisão — e as
- *      versões materializadas da competência, só-leitura.
+ *      versões materializadas da competência, só-leitura, lidas da rota de
+ *      materializações (quando, quem, cobertura e o selo de cobertura parcial).
+ *
+ * Follow-up 86e3f0uxb: o estado da base que falha tem "Tentar novamente" (antes
+ * a prévia nunca rodava e não havia saída), e a instrução da base nunca
+ * sincronizada só fala em "botão acima" quando o botão existe.
  */
 
 import { AlertTriangle, CheckCircle2, Layers, Loader2, RefreshCw } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
+import { AuthorLabel } from '@/components/features/reconciliations/author-label';
 import { OriginStateBlock } from '@/components/shared/origin-state-notice';
 import {
   AlertDialog,
@@ -48,6 +54,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
+  useMappingMaterializations,
   useMappingPreview,
   useMaterializeMapping,
   useMovementsSyncState,
@@ -59,11 +66,22 @@ import type {
   MappingDestination,
   MappingPreview,
   MappingSituationTotal,
+  MaterializationSummary,
   MovementsSyncState,
   OriginStatus,
 } from '@/lib/contracts';
 import { formatBRL, formatCreatedAt, formatPercent, formatReferenceMonth } from '@/lib/format';
 import { isOriginError, originErrorCode } from '@/lib/origin-state';
+import { cn } from '@/lib/utils';
+
+/**
+ * Por que a pessoa não pode (ou pode) sincronizar daqui — decide a instrução da
+ * base nunca sincronizada. "botão acima" só quando o botão EXISTE.
+ */
+type SyncHint = 'button' | 'origin' | 'closed' | 'no_permission';
+
+const baseBadge =
+  'inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset';
 
 interface MappingPreviewPanelProps {
   clientId: string;
@@ -102,6 +120,13 @@ export function MappingPreviewPanel({
   const originCode =
     originErrorCode(originError) ?? (originStatus === 'ativa' ? null : 'SEM_CONEXAO');
   const showSyncAction = canSync && !isClosed && originCode === null;
+  const syncHint: SyncHint = isClosed
+    ? 'closed'
+    : !canSync
+      ? 'no_permission'
+      : originCode !== null
+        ? 'origin'
+        : 'button';
 
   async function handleSync() {
     if (!validCompetence) return;
@@ -163,7 +188,7 @@ export function MappingPreviewPanel({
             <h3 id="mapping-base-state-heading" className="text-sm font-semibold">
               Base de movimentos de {formatReferenceMonth(validCompetence)}
             </h3>
-            <BaseStateText query={stateQuery} />
+            <BaseStateText query={stateQuery} onRetry={() => void stateQuery.refetch()} />
           </div>
           {showSyncAction && syncButton}
         </div>
@@ -178,13 +203,13 @@ export function MappingPreviewPanel({
       </section>
 
       {neverSynced ? (
-        <NeverSyncedInstruction canSync={canSync && !isClosed} competence={validCompetence} />
+        <NeverSyncedInstruction syncHint={syncHint} competence={validCompetence} />
       ) : previewQuery.isLoading || stateQuery.isLoading ? (
         <PreviewSkeleton />
       ) : previewQuery.isError ? (
         <PreviewErrorState
           error={previewQuery.error}
-          canSync={canSync && !isClosed}
+          syncHint={syncHint}
           competence={validCompetence}
           onGoTo={onCompetenceChange}
           onRetry={() => void previewQuery.refetch()}
@@ -204,17 +229,26 @@ export function MappingPreviewPanel({
 
 function BaseStateText({
   query,
+  onRetry,
 }: {
   query: { data?: MovementsSyncState; isLoading: boolean; isError: boolean };
+  onRetry: () => void;
 }) {
   if (query.isLoading) {
     return <div className="bg-muted h-4 w-56 animate-pulse rounded" aria-hidden="true" />;
   }
   if (query.isError || !query.data) {
+    // Sem o estado, a prévia nem é pedida (ela depende dele): a saída é
+    // tentar de novo, e ela tem de existir na tela.
     return (
-      <p role="alert" className="text-destructive text-sm">
-        Não foi possível ler o estado da base desta competência.
-      </p>
+      <div role="alert" className="space-y-2">
+        <p className="text-destructive text-sm">
+          Não foi possível ler o estado da base desta competência. Sem ele a prévia não é calculada.
+        </p>
+        <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+          Tentar novamente
+        </Button>
+      </div>
     );
   }
   const state = query.data;
@@ -238,7 +272,24 @@ function BaseStateText({
   );
 }
 
-function NeverSyncedInstruction({ canSync, competence }: { canSync: boolean; competence: string }) {
+const NEVER_SYNCED_HINTS: Record<SyncHint, string> = {
+  button:
+    'Sincronize a competência (botão acima) para trazer os movimentos da origem. A prévia do de-para é calculada sobre eles.',
+  origin:
+    'A prévia do de-para é calculada sobre os movimentos da origem. A sincronização depende de uma origem conectada e ativa; veja o estado da origem acima.',
+  closed:
+    'A prévia é calculada sobre os movimentos da competência. Com o cliente encerrado, a sincronização não está disponível.',
+  no_permission:
+    'A prévia é calculada sobre os movimentos da competência. Peça a alguém da equipe com acesso de sincronização para sincronizá-la.',
+};
+
+function NeverSyncedInstruction({
+  syncHint,
+  competence,
+}: {
+  syncHint: SyncHint;
+  competence: string;
+}) {
   return (
     <div
       role="status"
@@ -247,31 +298,27 @@ function NeverSyncedInstruction({ canSync, competence }: { canSync: boolean; com
       <p className="font-medium">
         {formatReferenceMonth(competence)} ainda não tem base de movimentos
       </p>
-      <p>
-        {canSync
-          ? 'Sincronize a competência (botão acima) para trazer os movimentos da origem. A prévia do de-para é calculada sobre eles.'
-          : 'A prévia é calculada sobre os movimentos da competência. Peça a alguém da equipe com acesso de sincronização para sincronizá-la.'}
-      </p>
+      <p>{NEVER_SYNCED_HINTS[syncHint]}</p>
     </div>
   );
 }
 
 function PreviewErrorState({
   error,
-  canSync,
+  syncHint,
   competence,
   onGoTo,
   onRetry,
 }: {
   error: unknown;
-  canSync: boolean;
+  syncHint: SyncHint;
   competence: string;
   onGoTo: (competence: string) => void;
   onRetry: () => void;
 }) {
   if (error instanceof ApiError) {
     if (error.code === 'BASE_NAO_SINCRONIZADA') {
-      return <NeverSyncedInstruction canSync={canSync} competence={competence} />;
+      return <NeverSyncedInstruction syncHint={syncHint} competence={competence} />;
     }
     if (error.code === 'SEM_MOVIMENTOS') {
       return (
@@ -430,7 +477,11 @@ function PreviewContent({
         )}
       </section>
 
-      <MaterializedVersions latestVersion={preview.latestVersion} />
+      <MaterializedVersions
+        clientId={clientId}
+        destinationType={destination.type}
+        competence={preview.competence}
+      />
 
       {canMaterialize && (
         <MaterializeDialog
@@ -469,35 +520,86 @@ function SituationStat({
 }
 
 /**
- * As versões materializadas da competência, só-leitura. O contrato desta
- * sprint devolve só a ÚLTIMA versão (`latestVersion`) — as versões são
- * sequenciais e imutáveis (N+1 a cada materialização, nunca sobrescritas), então
- * a lista 1..N é derivada dela, sem data (não há rota que liste o detalhe).
+ * As versões materializadas da competência, só-leitura, lidas de
+ * `GET …/materializations?competence=` (follow-up 86e3f0ux7): versão, quando,
+ * quem (autor enxuto, já mascarado pelo servidor — usuário de tenant lê "Equipe
+ * {org}"), cobertura e o selo de cobertura parcial. Só o cabeçalho: os itens
+ * são a leitura da Sprint 13. A lista vive na árvore do destino, então
+ * materializar a atualiza junto com a prévia.
  */
-function MaterializedVersions({ latestVersion }: { latestVersion: number }) {
-  const versions = Array.from({ length: latestVersion }, (_, index) => latestVersion - index);
+function MaterializedVersions({
+  clientId,
+  destinationType,
+  competence,
+}: {
+  clientId: string;
+  destinationType: string;
+  competence: string;
+}) {
+  const query = useMappingMaterializations(clientId, destinationType, competence);
+  const versions: MaterializationSummary[] = query.data ?? [];
+  const latestVersion = versions[0]?.version ?? 0;
   return (
-    <section aria-labelledby="mapping-versions-heading" className="space-y-2">
+    <section
+      aria-labelledby="mapping-versions-heading"
+      className="space-y-2"
+      data-testid="mapping-versions"
+    >
       <h3 id="mapping-versions-heading" className="text-sm font-semibold">
         Versões materializadas
       </h3>
-      {versions.length === 0 ? (
+      {query.isLoading ? (
+        <div className="bg-muted h-10 w-full animate-pulse rounded-lg" aria-hidden="true" />
+      ) : query.isError ? (
+        <div role="alert" className="space-y-2">
+          <p className="text-destructive text-sm">
+            {query.error instanceof ApiError
+              ? query.error.userMessage
+              : 'Não foi possível carregar as versões materializadas.'}
+          </p>
+          <Button type="button" variant="outline" size="sm" onClick={() => void query.refetch()}>
+            Tentar novamente
+          </Button>
+        </div>
+      ) : versions.length === 0 ? (
         <p className="text-muted-foreground text-sm">
           Nenhuma versão materializada nesta competência.
         </p>
       ) : (
         <>
           <ul
-            className="flex flex-wrap gap-2"
+            className="divide-y rounded-lg border"
             aria-label="Versões materializadas desta competência"
           >
-            {versions.map((version) => (
+            {versions.map((item) => (
               <li
-                key={version}
-                className="bg-muted text-muted-foreground ring-border rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset"
+                key={item.id}
+                className="flex flex-col gap-1 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-3"
               >
-                Versão {version}
-                {version === latestVersion ? ' (mais recente)' : ''}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">Versão {item.version}</span>
+                  {item.version === latestVersion && (
+                    <span className={cn(baseBadge, 'bg-muted text-muted-foreground ring-border')}>
+                      mais recente
+                    </span>
+                  )}
+                  {item.partialCoverageConfirmed && (
+                    <span
+                      className={cn(baseBadge, 'bg-warning-muted text-warning ring-warning/30')}
+                    >
+                      <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                      cobertura parcial
+                    </span>
+                  )}
+                </div>
+                <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                  <span>
+                    por <AuthorLabel author={item.author} /> em {formatCreatedAt(item.createdAt)}
+                  </span>
+                  <span className="whitespace-nowrap tabular-nums">
+                    Cobertura {item.coveragePct === null ? '—' : formatPercent(item.coveragePct)}
+                  </span>
+                </div>
               </li>
             ))}
           </ul>

@@ -37,6 +37,7 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { ApiError } from '@/lib/api/client';
+import { isCompetence } from '@/lib/competence';
 import { formatReferenceMonth } from '@/lib/format';
 import {
   mappingVigenciaFormSchema,
@@ -65,6 +66,19 @@ interface VigenciaActionDialogProps {
   confirmLabel: string;
   /** Ação indisponível (contando, ou nada a fazer): o botão de confirmar fica desabilitado. */
   confirmDisabled?: boolean;
+  /**
+   * A competência de início mudou pela mão da pessoa (valor válido). Quem
+   * conta o lote no servidor reconta aqui: as herdadas VIGENTES dependem do
+   * início escolhido, e a contagem feita para a corrente não vale para outro
+   * mês (follow-up 86e3f0uxb).
+   */
+  onEffectiveFromChange?: (effectiveFrom: string) => void;
+  /**
+   * A segunda frase da explicação de vigência, quando "a decisão atual continua
+   * valendo" não descreve a ação (o "Iniciar de-para" só cria para quem não tem
+   * decisão). Ausente, a frase padrão.
+   */
+  continuityNote?: string;
   serverCompetence: string;
   /** Mensagem de erro genérica, quando o servidor não mandou `userMessage`. */
   errorFallback: string;
@@ -80,6 +94,8 @@ export function VigenciaActionDialog({
   summary,
   confirmLabel,
   confirmDisabled = false,
+  onEffectiveFromChange,
+  continuityNote,
   serverCompetence,
   errorFallback,
   onConfirm,
@@ -142,7 +158,21 @@ export function VigenciaActionDialog({
                 <FormItem>
                   <FormLabel>Competência de início</FormLabel>
                   <FormControl>
-                    <Input type="month" lang="pt-BR" disabled={submitting} {...field} />
+                    <Input
+                      type="month"
+                      lang="pt-BR"
+                      disabled={submitting}
+                      {...field}
+                      onChange={(event) => {
+                        field.onChange(event);
+                        // No EVENTO, não num efeito sobre o `watch`: o reset ao
+                        // abrir também muda o valor e dispararia uma recontagem
+                        // duplicada da que quem chama já fez ao abrir.
+                        if (isCompetence(event.target.value)) {
+                          onEffectiveFromChange?.(event.target.value);
+                        }
+                      }}
+                    />
                   </FormControl>
                   <FormDescription>
                     Padrão: a competência corrente ({formatReferenceMonth(serverCompetence)}).
@@ -155,6 +185,7 @@ export function VigenciaActionDialog({
               effectiveFrom={effectiveFrom}
               serverCompetence={serverCompetence}
               hasCurrentDecision
+              continuityNote={continuityNote}
             />
             {conflict && <VigenciaConflictNotice conflict={conflict} />}
             <DialogFooter className="gap-2 sm:justify-between">

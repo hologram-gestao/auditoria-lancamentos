@@ -956,6 +956,54 @@ function mappingPreview(competence: string): Record<string, unknown> {
   };
 }
 
+/**
+ * As versões materializadas da competência (follow-up 86e3f0ux7): a mais
+ * recente primeiro; a 1 foi confirmada com cobertura parcial e tem autor
+ * MASCARADO (como o tenant vê a equipe); a 2 tem autor com e-mail.
+ */
+function mappingMaterializations(competence: string): Record<string, unknown>[] {
+  return [
+    {
+      id: 'ffffffff-0000-4000-8000-000000000002',
+      competence,
+      version: 2,
+      createdAt: '2026-09-26T14:30:00Z',
+      author: { name: 'Bruna Gerente', email: 'bruna@hologram.com.br' },
+      partialCoverageConfirmed: false,
+      coveragePct: '98.0',
+      mappedAmount: '682413.90',
+      mappedCount: 1240,
+      notMappedAmount: '15320.00',
+      notMappedCount: 68,
+      undecidedAmount: '14120.00',
+      undecidedCount: 5,
+      uncategorizedAmount: '0.00',
+      uncategorizedCount: 0,
+      undecidedCategories: 3,
+      decisionsUsed: 40,
+    },
+    {
+      id: 'ffffffff-0000-4000-8000-000000000001',
+      competence,
+      version: 1,
+      createdAt: '2026-09-20T10:00:00Z',
+      author: { name: 'Equipe Hologram', email: null },
+      partialCoverageConfirmed: true,
+      coveragePct: '71.5',
+      mappedAmount: '500000.00',
+      mappedCount: 900,
+      notMappedAmount: '15320.00',
+      notMappedCount: 68,
+      undecidedAmount: '196533.90',
+      undecidedCount: 345,
+      uncategorizedAmount: '0.00',
+      uncategorizedCount: 0,
+      undecidedCategories: 12,
+      decisionsUsed: 31,
+    },
+  ];
+}
+
 const MAPPING_IMPORT_PREVIEW = {
   effectiveFrom: '2026-09',
   created: 12,
@@ -1367,6 +1415,11 @@ async function fulfillApi(route: Route): Promise<void> {
     const sub = deParaRota[2] ?? '';
     if (sub === '/preview') {
       return json(mappingPreview(url.searchParams.get('competence') ?? '2026-09'));
+    }
+    // GET lista as versões (`{ data: [...] }`, chave única); o POST de
+    // materializar não é exercitado até o fim no gate.
+    if (sub === '/materializations' && route.request().method() === 'GET') {
+      return json(mappingMaterializations(url.searchParams.get('competence') ?? '2026-09'));
     }
     if (sub === '/decisions/confirm-inherited') {
       return json({ affected: 1, applied: false, result: null });
@@ -3733,8 +3786,21 @@ for (const vp of VIEWPORTS) {
       for (const rotulo of ['Com alvo', 'Não mapear', 'Sem decisão', 'Sem categoria de origem']) {
         await expect(previa.locator('dt', { hasText: new RegExp(`^${rotulo}$`) })).toHaveCount(1);
       }
-      await expect(previa.getByText('98%')).toBeVisible();
+      // `exact`: a lista de versões também mostra "Cobertura 98%".
+      await expect(previa.getByText('98%', { exact: true })).toBeVisible();
       await expect(previa.getByText(/R\$\s*12\.400,00/)).toBeVisible();
+      // Versões da ROTA (follow-up 86e3f0uxb): autor, data, cobertura e o selo.
+      const versoes = previa.getByTestId('mapping-versions').getByRole('listitem');
+      await expect(versoes).toHaveCount(2);
+      await expect(versoes.nth(0)).toContainText('Versão 2');
+      await expect(versoes.nth(0)).toContainText('mais recente');
+      await expect(versoes.nth(0).getByRole('img', { name: /Bruna Gerente/ })).toBeVisible();
+      await expect(versoes.nth(1)).toContainText('cobertura parcial');
+      await expect(versoes.nth(1)).toContainText('Equipe Hologram');
+      // A seção fica abaixo da dobra (quem rola é o `<main>`, então o print de
+      // página inteira não a alcança): print próprio, com ela em vista.
+      await versoes.nth(1).scrollIntoViewIfNeeded();
+      await shot(page, `de-para-versoes-${slugD}`);
       await exigirDentroDaViewport(
         page,
         page.getByRole('button', { name: 'Sincronizar competência' }),
@@ -3765,8 +3831,11 @@ for (const vp of VIEWPORTS) {
 
       await expect(page.getByText('Junho de 2026 ainda não tem base de movimentos')).toBeVisible();
       await expect(page.getByTestId('mapping-preview')).toHaveCount(0);
-      // O operador não sincroniza: a instrução manda pedir, e o botão não existe.
+      // O operador não sincroniza: a instrução manda pedir, e o botão não existe
+      // — e a copy não cita um "botão acima" que não está lá (86e3f0uxb).
       await expect(page.getByRole('button', { name: /Sincronizar competência/ })).toHaveCount(0);
+      await expect(page.getByText(/botão acima/)).toHaveCount(0);
+      await expect(page.getByText(/Peça a alguém da equipe/)).toBeVisible();
       await exigirEstadoVazioLegivel(
         page,
         'Junho de 2026 ainda não tem base de movimentos',
