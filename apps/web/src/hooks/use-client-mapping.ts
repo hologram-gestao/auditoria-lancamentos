@@ -27,6 +27,7 @@ import {
   listAllActiveMappingTargets,
   listClientMapping,
   listMappingDestinations,
+  listMappingMaterializations,
   materializeMapping,
   previewMappingImport,
   syncMovements,
@@ -50,6 +51,7 @@ import type {
   MappingTarget,
   MaterializationRequest,
   MaterializationResult,
+  MaterializationSummary,
   MovementsSyncResult,
   MovementsSyncState,
 } from '@/lib/contracts';
@@ -62,6 +64,8 @@ export const clientMappingKeys = {
     ['client-mapping', clientId, destinationType, 'list', params] as const,
   preview: (clientId: string, destinationType: string, competence: string) =>
     ['client-mapping', clientId, destinationType, 'preview', competence] as const,
+  materializations: (clientId: string, destinationType: string, competence: string | null) =>
+    ['client-mapping', clientId, destinationType, 'materializations', competence ?? 'all'] as const,
   syncState: (clientId: string, competence: string) =>
     ['client-movements', clientId, 'sync-state', competence] as const,
 };
@@ -129,6 +133,24 @@ export function useMappingPreview(
     queryFn: () => getMappingPreview(clientId, destinationType, competence),
     enabled: (options.enabled ?? true) && destinationType !== '' && competence !== '',
     retry: false,
+  });
+}
+
+/**
+ * As versões materializadas do destino (uma competência ou todas). Vive na
+ * árvore do DESTINO: materializar invalida a árvore e a lista ganha a versão
+ * nova sem tratamento à parte.
+ */
+export function useMappingMaterializations(
+  clientId: string,
+  destinationType: string,
+  competence: string | null,
+  options: { enabled?: boolean } = {},
+) {
+  return useQuery<MaterializationSummary[]>({
+    queryKey: clientMappingKeys.materializations(clientId, destinationType, competence),
+    queryFn: () => listMappingMaterializations(clientId, destinationType, competence),
+    enabled: (options.enabled ?? true) && destinationType !== '',
   });
 }
 

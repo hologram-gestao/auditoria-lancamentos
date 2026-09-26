@@ -16,7 +16,13 @@
  *   - alterar pede competência de início com padrão = corrente do servidor e diz
  *     que cria vigência nova; a retroativa mostra as competências afetadas e só
  *     então confirma com `confirmRetroactive`;
- *   - o lote mostra a quantidade afetada que veio do servidor;
+ *   - o lote mostra a quantidade afetada que veio do servidor, manda o recorte
+ *     por código da lista, reconta ao trocar o mês de início e só existe no
+ *     destino que herda;
+ *   - sem destino na URL a tela abre no demonstrativo contábil;
+ *   - as versões materializadas vêm da rota (autor, data, cobertura, selo);
+ *   - o estado da base que falha tem "Tentar novamente"; a instrução da base
+ *     nunca sincronizada só cita o botão quando ele existe;
  *   - a prévia mostra o estado da base e as quatro situações; base nunca
  *     sincronizada mostra a instrução (e nem pede a prévia); materializar com
  *     valor sem decisão exige a confirmação extra;
@@ -68,6 +74,14 @@ const syncStateQuery = {
   data: undefined as MovementsSyncState | undefined,
   isLoading: false,
   isError: false,
+  refetch: vi.fn(),
+};
+const materializationsState = {
+  data: undefined as MaterializationSummary[] | undefined,
+  isLoading: false,
+  isError: false,
+  error: null as unknown,
+  refetch: vi.fn(),
 };
 const previewState = {
   data: undefined as MappingPreview | undefined,
@@ -100,6 +114,7 @@ vi.mock('@/hooks/use-client-mapping', () => ({
     return listState;
   },
   useMovementsSyncState: () => syncStateQuery,
+  useMappingMaterializations: () => materializationsState,
   useMappingPreview: (_c: string, _d: string, _k: string, options: { enabled?: boolean }) => {
     previewEnabled = options.enabled;
     return options.enabled === false ? { ...previewState, data: undefined } : previewState;
@@ -147,6 +162,7 @@ import type {
   MappingListResponse,
   MappingPreview,
   MappingTarget,
+  MaterializationSummary,
   MovementsSyncState,
 } from '@/lib/contracts';
 import { assertNoA11yViolations } from '@/test/a11y';
@@ -224,6 +240,29 @@ function preview(overrides: Partial<MappingPreview> = {}): MappingPreview {
     ],
     previewToken: 'tok-1',
     latestVersion: 2,
+    ...overrides,
+  };
+}
+
+function materialization(overrides: Partial<MaterializationSummary> = {}): MaterializationSummary {
+  return {
+    id: 'mat-2',
+    competence: '2026-06',
+    version: 2,
+    createdAt: '2026-09-26T14:30:00Z',
+    author: { name: 'Contador Parceiro', email: 'contador@parceiro.com.br' },
+    partialCoverageConfirmed: false,
+    coveragePct: '88.9',
+    mappedAmount: '98200.00',
+    mappedCount: 310,
+    notMappedAmount: '1200.00',
+    notMappedCount: 20,
+    undecidedAmount: '12400.00',
+    undecidedCount: 3,
+    uncategorizedAmount: '0.00',
+    uncategorizedCount: 0,
+    undecidedCategories: 1,
+    decisionsUsed: 40,
     ...overrides,
   };
 }
@@ -307,6 +346,21 @@ beforeEach(() => {
   };
   syncStateQuery.isLoading = false;
   syncStateQuery.isError = false;
+  syncStateQuery.refetch = vi.fn();
+  materializationsState.data = [
+    materialization(),
+    materialization({
+      id: 'mat-1',
+      version: 1,
+      createdAt: '2026-09-20T10:00:00Z',
+      author: { name: 'Equipe Hologram', email: null },
+      partialCoverageConfirmed: true,
+      coveragePct: '71.5',
+    }),
+  ];
+  materializationsState.isLoading = false;
+  materializationsState.isError = false;
+  materializationsState.error = null;
   previewState.data = preview();
   previewState.isLoading = false;
   previewState.isError = false;
@@ -381,11 +435,16 @@ describe('ClientMappingScreen — gating por papel (R6)', () => {
     expect(screen.getByRole('button', { name: /Materializar/ })).toBeVisible();
   });
 
-  it('"Iniciar de-para" só existe no destino que herda', () => {
+  it('"Iniciar de-para" e "Confirmar herdadas" só existem no destino que herda', () => {
     currentSearch = 'destination=fluxo_de_caixa';
     render(<ClientMappingScreen clientId={TENANT} />);
     expect(screen.queryByRole('button', { name: /Iniciar de-para/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Confirmar herdadas/ })).toBeVisible();
+    // Validação humana da S12: no destino sem herança o botão abria um diálogo
+    // com "Confirmar" desabilitado. Agora não existe.
+    expect(screen.queryByRole('button', { name: /Confirmar herdadas/ })).not.toBeInTheDocument();
+    // A edição individual e a importação continuam.
+    expect(screen.getByRole('button', { name: 'Decidir a categoria 1.04.02' })).toBeVisible();
+    expect(screen.getByRole('button', { name: /Importar/ })).toBeVisible();
   });
 
   it('cliente encerrado: nenhuma escrita, com o motivo dito na tela', () => {
@@ -396,6 +455,42 @@ describe('ClientMappingScreen — gating por papel (R6)', () => {
     ).toBeVisible();
     expect(screen.queryByRole('button', { name: /Importar/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Confirmar herdadas/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('ClientMappingScreen — destino padrão', () => {
+  it('sem destino na URL abre no demonstrativo contábil, mesmo que não seja o primeiro', () => {
+    destinationsState.data = [
+      destination({
+        id: 'd-conta',
+        type: 'conta_contabil',
+        name: 'Conta contábil',
+        targetsCount: 0,
+      }),
+      destination(),
+    ];
+    render(<ClientMappingScreen clientId={TENANT} />);
+    expect(screen.getByRole('combobox', { name: 'Destino' })).toHaveTextContent(
+      'Demonstrativo contábil',
+    );
+    expect(
+      screen.queryByText('O catálogo de alvos deste destino está vazio'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('sem demonstrativo no catálogo, cai no primeiro', () => {
+    destinationsState.data = [
+      destination({ id: 'd-caixa', type: 'fluxo_de_caixa', name: 'Fluxo de caixa' }),
+      destination({ id: 'd-conta', type: 'conta_contabil', name: 'Conta contábil' }),
+    ];
+    render(<ClientMappingScreen clientId={TENANT} />);
+    expect(screen.getByRole('combobox', { name: 'Destino' })).toHaveTextContent('Fluxo de caixa');
+  });
+
+  it('o destino da URL vence o padrão', () => {
+    currentSearch = 'destination=fluxo_de_caixa';
+    render(<ClientMappingScreen clientId={TENANT} />);
+    expect(screen.getByRole('combobox', { name: 'Destino' })).toHaveTextContent('Fluxo de caixa');
   });
 });
 
@@ -560,8 +655,9 @@ describe('ClientMappingScreen — lote das herdadas (R6)', () => {
     render(<ClientMappingScreen clientId={TENANT} />);
     await user.click(screen.getByRole('button', { name: /Confirmar herdadas/ }));
 
+    // A contagem já sai para a competência de início padrão (a corrente).
     expect(confirmInheritedState.mutate).toHaveBeenCalledWith(
-      { confirm: false, confirmRetroactive: false },
+      { confirm: false, confirmRetroactive: false, effectiveFrom: '2026-09' },
       expect.anything(),
     );
     const dialogo = await screen.findByRole('dialog');
@@ -576,6 +672,69 @@ describe('ClientMappingScreen — lote das herdadas (R6)', () => {
         confirmRetroactive: false,
       }),
     );
+  });
+
+  it('manda o recorte por código da lista e diz isso no diálogo', async () => {
+    const user = userEvent.setup();
+    currentSearch = 'code=2.01';
+    confirmInheritedState.data = { affected: 2, applied: false, result: null };
+    render(<ClientMappingScreen clientId={TENANT} />);
+    await user.click(screen.getByRole('button', { name: /Confirmar herdadas/ }));
+
+    expect(confirmInheritedState.mutate).toHaveBeenCalledWith(
+      { confirm: false, confirmRetroactive: false, effectiveFrom: '2026-09', code: '2.01' },
+      expect.anything(),
+    );
+    const dialogo = await screen.findByRole('dialog');
+    expect(within(dialogo).getByTestId('confirm-inherited-count')).toHaveTextContent(
+      '2 decisões herdadas serão confirmadas (código começando por "2.01").',
+    );
+    await user.click(within(dialogo).getByRole('button', { name: 'Confirmar 2' }));
+    await waitFor(() =>
+      expect(confirmInheritedState.mutateAsync).toHaveBeenCalledWith({
+        confirm: true,
+        effectiveFrom: '2026-09',
+        confirmRetroactive: false,
+        code: '2.01',
+      }),
+    );
+  });
+
+  it('filtro de situação ativo: avisa que o lote ignora o filtro (só herdadas)', async () => {
+    const user = userEvent.setup();
+    currentSearch = 'situation=confirmada';
+    confirmInheritedState.data = { affected: 3, applied: false, result: null };
+    render(<ClientMappingScreen clientId={TENANT} />);
+    await user.click(screen.getByRole('button', { name: /Confirmar herdadas/ }));
+    const dialogo = await screen.findByRole('dialog');
+    expect(dialogo).toHaveTextContent(/O filtro de situação não se aplica/);
+  });
+
+  it('trocar a competência de início reconta no servidor (a vigência muda o lote)', async () => {
+    const user = userEvent.setup();
+    confirmInheritedState.data = { affected: 3, applied: false, result: null };
+    render(<ClientMappingScreen clientId={TENANT} />);
+    await user.click(screen.getByRole('button', { name: /Confirmar herdadas/ }));
+    const dialogo = await screen.findByRole('dialog');
+    const mes = within(dialogo).getByLabelText('Competência de início');
+    await user.clear(mes);
+    await user.type(mes, '2026-07');
+    await waitFor(() =>
+      expect(confirmInheritedState.mutate).toHaveBeenLastCalledWith(
+        { confirm: false, confirmRetroactive: false, effectiveFrom: '2026-07' },
+        expect.anything(),
+      ),
+    );
+  });
+
+  it('"Iniciar de-para" não diz que "a decisão atual continua valendo"', async () => {
+    const user = userEvent.setup();
+    render(<ClientMappingScreen clientId={TENANT} />);
+    await user.click(screen.getByRole('button', { name: /Iniciar de-para/ }));
+    const dialogo = await screen.findByRole('dialog');
+    const explicacao = within(dialogo).getByTestId('vigencia-explanation');
+    expect(explicacao).toHaveTextContent(/Só as categorias sem decisão recebem a herdada/);
+    expect(explicacao).not.toHaveTextContent(/continua valendo/);
   });
 });
 
@@ -592,8 +751,51 @@ describe('ClientMappingScreen — prévia da competência (R0 · R5)', () => {
     ).toHaveTextContent(brl('12.400,00'));
     expect(within(previa).getByText('88,9%')).toBeVisible();
     expect(within(previa).getByText('1,1%')).toBeVisible();
-    // Versões materializadas, só-leitura.
-    expect(within(previa).getByText('Versão 2 (mais recente)')).toBeVisible();
+  });
+
+  it('versões materializadas vêm da rota: autor, data, cobertura e o selo de parcial', () => {
+    currentSearch = 'view=previa&competence=2026-06';
+    render(<ClientMappingScreen clientId={TENANT} />);
+    const versoes = screen.getByTestId('mapping-versions');
+    const linhas = within(versoes).getAllByRole('listitem');
+    expect(linhas).toHaveLength(2);
+    expect(linhas[0]).toHaveTextContent(/Versão 2/);
+    expect(linhas[0]).toHaveTextContent(/mais recente/);
+    expect(linhas[0]).toHaveTextContent(/Cobertura 88,9%/);
+    expect(linhas[0]).not.toHaveTextContent(/cobertura parcial/);
+    // Autor com e-mail: nome na tela, e-mail na dica acessível (86e2n39f1).
+    expect(
+      within(linhas[0]!).getByRole('img', { name: 'Contador Parceiro — contador@parceiro.com.br' }),
+    ).toBeVisible();
+    // Autor MASCARADO pelo servidor: texto simples, sem dica.
+    expect(linhas[1]).toHaveTextContent(/Versão 1/);
+    expect(linhas[1]).toHaveTextContent(/Equipe Hologram/);
+    expect(within(linhas[1]!).queryByRole('img')).not.toBeInTheDocument();
+    expect(linhas[1]).toHaveTextContent(/cobertura parcial/);
+    expect(linhas[1]).toHaveTextContent(/Cobertura 71,5%/);
+  });
+
+  it('sem versão materializada: diz isso, sem lista', () => {
+    currentSearch = 'view=previa&competence=2026-06';
+    materializationsState.data = [];
+    render(<ClientMappingScreen clientId={TENANT} />);
+    expect(screen.getByText('Nenhuma versão materializada nesta competência.')).toBeVisible();
+    expect(
+      within(screen.getByTestId('mapping-versions')).queryByRole('list'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('estado da base com erro: "Tentar novamente", e a prévia nem é pedida', async () => {
+    const user = userEvent.setup();
+    currentSearch = 'view=previa&competence=2026-06';
+    syncStateQuery.data = undefined;
+    syncStateQuery.isError = true;
+    render(<ClientMappingScreen clientId={TENANT} />);
+    expect(previewEnabled).toBe(false);
+    const alerta = screen.getByRole('alert');
+    expect(alerta).toHaveTextContent(/Não foi possível ler o estado da base/);
+    await user.click(within(alerta).getByRole('button', { name: 'Tentar novamente' }));
+    expect(syncStateQuery.refetch).toHaveBeenCalledTimes(1);
   });
 
   it('base nunca sincronizada: instrução de sincronizar, e a prévia nem é pedida', () => {
@@ -607,8 +809,34 @@ describe('ClientMappingScreen — prévia da competência (R0 · R5)', () => {
     render(<ClientMappingScreen clientId={TENANT} />);
     expect(previewEnabled).toBe(false);
     expect(screen.getByText(/ainda não tem base de movimentos/)).toBeVisible();
-    expect(screen.getByText(/Sincronize a competência/)).toBeVisible();
+    expect(screen.getByText(/Sincronize a competência \(botão acima\)/)).toBeVisible();
     expect(screen.queryByTestId('mapping-preview')).not.toBeInTheDocument();
+  });
+
+  it('base nunca sincronizada: "botão acima" só quando o botão existe', () => {
+    currentSearch = 'view=previa';
+    syncStateQuery.data = {
+      competence: '2026-09',
+      neverSynced: true,
+      syncedAt: null,
+      syncFailedAt: null,
+    };
+    // Operador: sem permissão de sincronizar, a instrução manda pedir.
+    authState.user = clientOperator;
+    const { unmount } = render(<ClientMappingScreen clientId={TENANT} />);
+    expect(screen.queryByText(/botão acima/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Peça a alguém da equipe/)).toBeVisible();
+    unmount();
+
+    // Manager com a origem sem conexão: o botão não existe; a instrução aponta a origem.
+    authState.user = manager;
+    clientDetailState.data = { ...clientDetailState.data!, origin_status: 'sem_origem' };
+    render(<ClientMappingScreen clientId={TENANT} />);
+    expect(
+      screen.queryByRole('button', { name: /Sincronizar competência/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/botão acima/)).not.toBeInTheDocument();
+    expect(screen.getByText(/depende de uma origem conectada e ativa/)).toBeVisible();
   });
 
   it('409 BASE_NAO_SINCRONIZADA vira a instrução, não um erro genérico', () => {

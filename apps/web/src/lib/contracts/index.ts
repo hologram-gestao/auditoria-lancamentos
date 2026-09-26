@@ -461,6 +461,12 @@ export type UndecidedCategory = Schemas['UndecidedCategoryResponse'];
 export type MaterializationRequest = Schemas['MaterializationRequest'];
 /** A versão N+1 criada — imutável. */
 export type MaterializationResult = Schemas['MaterializationResponse'];
+/**
+ * Uma versão materializada na LISTA (follow-up 86e3f0ux7): só o cabeçalho —
+ * quando, quem (já mascarado pelo servidor), cobertura e o selo de cobertura
+ * parcial. Os itens são a leitura da Sprint 13.
+ */
+export type MaterializationSummary = Schemas['MaterializationSummaryResponse'];
 
 /** Prévia da importação: criadas · alteradas · ignoradas + recusadas com motivo. */
 export type MappingImportPreview = Schemas['ImportPreviewResponse'];

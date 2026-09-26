@@ -56,7 +56,11 @@ import type { MappingDestination } from '@/lib/contracts';
 import { useAuthStore } from '@/stores/auth';
 
 import { MappingImportSheet } from './mapping-import-sheet';
-import { MappingListPanel, SITUATION_FILTERS } from './mapping-list-panel';
+import {
+  INHERITING_DESTINATION_TYPE,
+  MappingListPanel,
+  SITUATION_FILTERS,
+} from './mapping-list-panel';
 import { MappingPreviewPanel } from './mapping-preview-panel';
 
 const PARAM = {
@@ -99,9 +103,7 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
     readEnum(
       get(PARAM.destination),
       destinations.map((item) => item.type),
-    ) ??
-    destinations[0]?.type ??
-    '';
+    ) ?? defaultDestinationType(destinations);
   const destination = destinations.find((item) => item.type === destinationType) ?? null;
 
   const view = readEnum(get(PARAM.view), VIEW_VALUES) ?? DEFAULT_VIEW;
@@ -278,6 +280,7 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
                 listQuery={listQuery}
                 situation={situation}
                 codeInput={codeInput}
+                codeFilter={codeParam}
                 onCodeInputChange={setCodeInput}
                 onSituationChange={(value) =>
                   setMany({ [PARAM.situation]: value, [PARAM.page]: null })
@@ -324,6 +327,20 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
         </>
       )}
     </section>
+  );
+}
+
+/**
+ * Sem destino na URL, a tela abre no demonstrativo contábil quando ele existe no
+ * catálogo (validação humana da S12): é o destino principal do PRD, o único que
+ * herda e o que a Sprint 13 lê. Abrir no primeiro do catálogo ("Conta contábil")
+ * levava a um destino vazio com o aviso amarelo. O primeiro é só o fallback.
+ */
+export function defaultDestinationType(destinations: readonly MappingDestination[]): string {
+  return (
+    destinations.find((item) => item.type === INHERITING_DESTINATION_TYPE)?.type ??
+    destinations[0]?.type ??
+    ''
   );
 }
 

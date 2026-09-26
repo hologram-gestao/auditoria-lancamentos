@@ -41,6 +41,7 @@ import type {
   MappingTargetListResponse,
   MaterializationRequest,
   MaterializationResult,
+  MaterializationSummary,
   MovementsSyncResult,
   MovementsSyncState,
 } from '@/lib/contracts';
@@ -198,6 +199,22 @@ export async function getMappingPreview(
 ): Promise<MappingPreview> {
   return apiGet<MappingPreview>(
     `${mappingBase(clientId, destinationType)}/preview?competence=${encodeURIComponent(competence)}`,
+  );
+}
+
+/**
+ * As versões materializadas do destino, mais recentes primeiro (follow-up
+ * 86e3f0ux7). `competence` recorta uma; ausente, todas. Responde `{ data }`
+ * com chave única — chega desempacotado, como a prévia.
+ */
+export async function listMappingMaterializations(
+  clientId: string,
+  destinationType: string,
+  competence?: string | null,
+): Promise<MaterializationSummary[]> {
+  const qs = competence ? `?competence=${encodeURIComponent(competence)}` : '';
+  return apiGet<MaterializationSummary[]>(
+    `${mappingBase(clientId, destinationType)}/materializations${qs}`,
   );
 }
 
