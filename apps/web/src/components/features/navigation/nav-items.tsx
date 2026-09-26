@@ -10,6 +10,7 @@
  */
 import {
   AlertTriangle,
+  ArrowRightLeft,
   BookOpen,
   Building2,
   Landmark,
@@ -159,6 +160,7 @@ export function clientNavItems(
   const glossaryHref = `${base}/glossario`;
   const chartOfAccountsHref = `${base}/plano-de-contas`;
   const titlesHref = `${base}/carteira`;
+  const mappingHref = `${base}/de-para`;
   // "Conciliações" continua ativo dentro do detalhe de uma conciliação — é a
   // mesma área de navegação, só que um nível abaixo (regra herdada do
   // ClientShell, que era o dono desta árvore até a 86e2n39h7).
@@ -172,8 +174,15 @@ export function clientNavItems(
   const isGlossary = pathname.startsWith(glossaryHref);
   const isChartOfAccounts = pathname.startsWith(chartOfAccountsHref);
   const isTitles = pathname.startsWith(titlesHref);
+  const isMapping = pathname.startsWith(mappingHref);
   const isReconciliations =
-    !isAccounts && !isDashboard && !isUsers && !isGlossary && !isChartOfAccounts && !isTitles;
+    !isAccounts &&
+    !isDashboard &&
+    !isUsers &&
+    !isGlossary &&
+    !isChartOfAccounts &&
+    !isTitles &&
+    !isMapping;
 
   const items: NavItem[] = [
     {
@@ -230,6 +239,18 @@ export function clientNavItems(
       active: isTitles,
     });
   }
+  // S12 (R6): "De-para" NÃO é gated, pela regra do Glossário: LER é de todo
+  // papel que alcança o cliente — o operador inclusive, que vê a lista e a
+  // prévia. O backend não declara permissão de leitura (a rota é
+  // `AccessibleClientDep`), e inventar uma aqui esconderia o que o servidor
+  // libera. Quem pede permissão é a ESCRITA (`manage_client_mapping`) e o
+  // sincronizar (`sync_client_movements`), dentro da tela.
+  items.push({
+    href: mappingHref,
+    label: 'De-para',
+    icon: <ArrowRightLeft className="h-4 w-4" aria-hidden="true" />,
+    active: isMapping,
+  });
   // Matriz: "Usuários" é de quem gere as pessoas DO tenant — gerente do
   // cliente, admin, plataforma e, desde a D2 (86e36ecjp), o gerente da
   // organização nos clientes da CARTEIRA. O "da carteira" não é esta linha: é

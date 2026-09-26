@@ -19,6 +19,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 
 from app.core.dependencies import DbSessionDep, ManagePlatformDep
+from app.modules.mapping_catalog.repository import MappingCatalogRepository
 from app.modules.organizations.repository import OrganizationRepository
 from app.modules.organizations.schemas import (
     OrganizationCreate,
@@ -38,6 +39,7 @@ def _get_service(db: DbSessionDep) -> OrganizationService:
     return OrganizationService(
         OrganizationRepository(db),
         usage_events=UsageEventService(UsageEventRepository(db)),
+        mapping_catalog=MappingCatalogRepository(db),
     )
 
 

@@ -16,6 +16,7 @@ nunca o texto da exceção do driver (pode conter fragmento do statement).
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -23,6 +24,7 @@ from app.core.authz import CurrentUser
 from app.core.dependencies import require_client_access
 from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
+from app.modules.client_movements.competence import format_competence
 from app.modules.reconciliations.tenant_scope import audit_session_tenant_miss
 from app.modules.usage_events.omie_rejection import classify_omie_rejection
 from app.modules.usage_events.repository import UsageEventRepository
@@ -32,8 +34,10 @@ from app.modules.usage_events.schemas import (
     ClienteEncerradoProps,
     ClienteExcluidoProps,
     ContextoTituloRegistradoProps,
+    DeparaAplicadoProps,
     FlagRevisadoProps,
     GlossarioEditadoProps,
+    MovimentosSincronizadosProps,
     OmieLancamentoEnviadoProps,
     OmieLancamentoRejeitadoProps,
     OrganizacaoCriadaProps,
@@ -46,8 +50,10 @@ from app.modules.usage_events.schemas import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
+    from datetime import date
 
+    from pydantic import BaseModel
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from app.modules.usage_events.schemas import (
@@ -61,6 +67,21 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 _SESSION_NOT_FOUND_MSG = "Sessão de conciliação não encontrada."
+
+
+def decimal_to_cents(value: Decimal) -> int:
+    """`Decimal` de dinheiro → centavos inteiros, EXATO e sem `float` (§3.4).
+
+    Dinheiro do sistema é `Numeric(14,2)`, então `value * 100` é inteiro; um
+    valor com mais de duas casas é erro de quem chamou (somou algo que não é
+    dinheiro do banco), e arredondar em silêncio mudaria a métrica sem ninguém
+    ver — daí o `ValueError`.
+    """
+    cents = value * 100
+    if cents != cents.to_integral_value():
+        msg = f"valor com mais de 2 casas decimais não é dinheiro do sistema: {value}"
+        raise ValueError(msg)
+    return int(cents)
 
 
 class UsageEventService:
@@ -103,6 +124,23 @@ class UsageEventService:
                 session_id=str(session_id) if session_id else None,
             )
             return False
+
+    @staticmethod
+    def _props_or_none(
+        event: UsageEventName, build: Callable[[], BaseModel]
+    ) -> dict[str, Any] | None:
+        """Monta as props estritas DENTRO do caminho fail-soft.
+
+        Para emissores chamados DEPOIS de um commit de negócio (sincronização,
+        materialização): uma prop que o `extra=forbid`/padrão recusa não pode virar
+        500 numa escrita que já foi gravada — a métrica nunca derruba o fluxo. O
+        defeito continua visível pelo warning (sem valores: nada de props no log).
+        """
+        try:
+            return build().model_dump(mode="json")
+        except Exception:
+            logger.warning("usage_event_props_invalid", usage_event=event.value)
+            return None
 
     # ------------------------------------------------------------------
     # Emissores do backend (props em UM lugar só — CLAUDE.md: fonte única)
@@ -422,6 +460,77 @@ class UsageEventService:
                 titulos_vencidos=titulos_vencidos,
             ).model_dump(mode="json"),
         )
+
+    async def emit_movimentos_sincronizados(
+        self,
+        *,
+        client_id: UUID,
+        competencia: date,
+        movimentos: int,
+        sem_categoria: int,
+        contas: int,
+    ) -> bool:
+        """S12 BACK 12.2 — instrumentação do R0. Sem `session_id`.
+
+        Emitido só ao concluir uma sincronização **ÍNTEGRA** da competência: a
+        falha no meio re-levanta antes de chegar ao emissor, e os 409 de
+        configuração nem começam. As contagens vêm do resultado da ingestão (BACK
+        12.1), calculadas uma vez — o emissor não reconta nada.
+
+        **Sem dedup** (mesmo motivo de `carteira_sincronizada`): cada sincronização
+        é uma linha. `competencia` entra como `YYYY-MM`. Props montadas no caminho
+        fail-soft: a base já foi gravada quando este emissor roda.
+        """
+        event = UsageEventName.MOVIMENTOS_SINCRONIZADOS
+        props = self._props_or_none(
+            event,
+            lambda: MovimentosSincronizadosProps(
+                client_id=client_id,
+                competencia=format_competence(competencia),
+                movimentos=movimentos,
+                sem_categoria=sem_categoria,
+                contas=contas,
+            ),
+        )
+        if props is None:
+            return False
+        return await self.emit(event, props=props)
+
+    async def emit_depara_aplicado(
+        self,
+        *,
+        client_id: UUID,
+        destino: str,
+        valor_com_decisao: Decimal,
+        valor_nao_mapear: Decimal,
+        valor_sem_decisao: Decimal,
+        categorias_sem_decisao: int,
+    ) -> bool:
+        """S12 — **a métrica da Sprint 12**. Sem `session_id`, sem dedup.
+
+        O ponto de chamada é a MATERIALIZAÇÃO do de-para (BACK 12.6), depois do
+        commit dela — prévia não emite. Os valores chegam em `Decimal` (Σ|valor|
+        em `Numeric(14,2)`) e viram CENTAVOS inteiros aqui, por
+        `decimal_to_cents`, sem passar por `float`. `destino` é o slug do TIPO do
+        destino, nunca nome de alvo ou de categoria (`DeparaAplicadoProps`
+        recusa o formato). Props montadas no caminho fail-soft: a materialização
+        já foi commitada quando este emissor roda.
+        """
+        event = UsageEventName.DEPARA_APLICADO
+        props = self._props_or_none(
+            event,
+            lambda: DeparaAplicadoProps(
+                client_id=client_id,
+                destino=destino,
+                valor_com_decisao_centavos=decimal_to_cents(valor_com_decisao),
+                valor_nao_mapear_centavos=decimal_to_cents(valor_nao_mapear),
+                valor_sem_decisao_centavos=decimal_to_cents(valor_sem_decisao),
+                categorias_sem_decisao=categorias_sem_decisao,
+            ),
+        )
+        if props is None:
+            return False
+        return await self.emit(event, props=props)
 
     async def emit_organizacao_criada(self, *, organization_id: UUID) -> bool:
         """86e36ecnp — a plataforma cadastrou uma organização. Sem `session_id`."""

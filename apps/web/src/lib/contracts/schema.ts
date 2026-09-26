@@ -605,6 +605,298 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clients/{client_id}/movements/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sincroniza a base de movimentos REALIZADOS de uma competência (`YYYY-MM`) com a origem: todas as contas conhecidas do cliente, de qualquer tipo, do primeiro ao último dia do mês, serializando as chamadas por cliente. É a entrada do de-para — a prévia NÃO sincroniza sozinha. Requer a permissão `sync_client_movements` (plataforma, admin, gerente da carteira e gerente do cliente; o operador do cliente recebe 403 e a negação fica na trilha). Movimento que saiu da origem vira `ausente_na_origem`, nunca é apagado; movimento sem categoria é gravado e contado em `semCategoria`. Falha no meio preserva a última base íntegra e registra `syncFailedAt`. Cliente encerrado: 409. Cliente sem origem capaz: 409 `SEM_CONEXAO`, `ORIGEM_COM_ERRO` ou `CAPACIDADE_AUSENTE`; contas do cliente nunca sincronizadas: 409 `CONFLICT`. Competência malformada: 400. */
+        post: operations["sync_client_movements_api_v1_clients__client_id__movements_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/movements/sync-state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Estado da base de movimentos de UMA competência: `syncedAt` (última sincronização íntegra), `syncFailedAt` (última falha, se a mais recente falhou) e `neverSynced` — CAMPO explícito, nunca inferido de zero movimentos. Não fala com a origem e não pede permissão além de alcançar o cliente (o operador do cliente lê). Cliente encerrado continua legível. Competência malformada: 400. */
+        get: operations["get_client_movements_sync_state_api_v1_clients__client_id__movements_sync_state_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mapping-destinations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista os destinos do de-para da organização de quem pede (a plataforma vê todas; `organizationId` restringe). Cada organização nasce com os cinco destinos do PRD. Leitura de quem pertence à organização — staff e usuários de cliente dela. */
+        get: operations["list_mapping_destinations_api_v1_mapping_destinations_get"];
+        put?: never;
+        /** Cria um destino na organização do ator (a plataforma escolhe, obrigatório). O tipo é um slug; um por organização (409 se repetido). Organização suspensa: 409. Requer `manage_mapping_catalog`. */
+        post: operations["create_mapping_destination_api_v1_mapping_destinations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mapping-destinations/{destination_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Edita nome e/ou situação do destino (o tipo não muda). Destino desativado não recebe decisão nova. 404 fora da própria organização; 409 se a organização estiver suspensa. */
+        patch: operations["update_mapping_destination_api_v1_mapping_destinations__destination_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/mapping-destinations/{destination_id}/targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista os alvos de um destino, por código (paginado: `page`/`pageSize`, máximo 100). Filtros: `active` e `codePrefix`. 404 fora da própria organização. */
+        get: operations["list_mapping_targets_api_v1_mapping_destinations__destination_id__targets_get"];
+        put?: never;
+        /** Cria alvos EM LOTE (código + nome), atômico: código repetido no lote ou já existente no destino recusa tudo com 409 listando os códigos. Até 500 por chamada. Requer `manage_mapping_catalog`. */
+        post: operations["create_mapping_targets_api_v1_mapping_destinations__destination_id__targets_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mapping-destinations/{destination_id}/targets/{target_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Apaga um alvo SEM decisões apontando para ele. Referenciado por qualquer decisão: 409 — desative em vez de excluir. */
+        delete: operations["delete_mapping_target_api_v1_mapping_destinations__destination_id__targets__target_id__delete"];
+        options?: never;
+        head?: never;
+        /** Edita nome e/ou situação do alvo — desativar é permitido mesmo com decisões apontando para ele. O código não muda. */
+        patch: operations["update_mapping_target_api_v1_mapping_destinations__destination_id__targets__target_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/mapping/{destination_type}/decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Grava UMA decisão de de-para (categoria → alvo do catálogo ou `nao_mapear`) com vigência a partir de `effectiveFrom` (padrão: competência corrente). Append-only: alterar cria vigência nova; a anterior vale até o mês anterior. Alvo inexistente/inativo: 422 `ALVO_INEXISTENTE` nomeando o código. Destino não configurado: 409 `DESTINO_NAO_CONFIGURADO`. Decisão confirmada já existente na mesma vigência: 409 `DECISAO_DUPLICADA`. Início retroativo: 409 `COMPETENCIA_MATERIALIZADA` se atingir competência materializada; senão 409 `RETROATIVA_REQUER_CONFIRMACAO` até `confirmRetroactive=true`. Requer `manage_client_mapping`; cliente encerrado: 409. */
+        post: operations["write_decision_api_v1_clients__client_id__mapping__destination_type__decisions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/mapping/{destination_type}/decisions/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Grava VÁRIAS decisões na mesma vigência, atômico (até 500). Mesmas regras da rota unitária; categoria repetida no lote: 400. */
+        post: operations["write_decisions_batch_api_v1_clients__client_id__mapping__destination_type__decisions_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/mapping/{destination_type}/decisions/confirm-inherited": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirma EM LOTE as decisões HERDADAS vigentes do destino. Sem `confirm=true` nada é gravado e a resposta traz a quantidade que seria afetada (`affected`); com ela, cada herdada vira decisão confirmada de mesmo efeito. Requer `manage_client_mapping`. */
+        post: operations["confirm_inherited_decisions_api_v1_clients__client_id__mapping__destination_type__decisions_confirm_inherited_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/mapping/{destination_type}/decisions/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Todas as vigências de UMA categoria (por CÓDIGO) no destino, da mais antiga à mais nova, com a origem (herdada/confirmada). Leitura de quem alcança o cliente. */
+        get: operations["get_decision_history_api_v1_clients__client_id__mapping__destination_type__decisions_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/mapping/{destination_type}/inherit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Inicia o de-para do destino a partir do plano de contas sincronizado — explícito e idempotente. Só o `demonstrativo_contabil` herda: categoria ativa com conta de demonstrativo vira decisão HERDADA para o alvo de mesmo código; 'sem destino declarado' fica sem decisão (nunca `nao_mapear`); conta sem alvo no catálogo fica sem decisão e é listada. Os outros destinos respondem `destino_sem_heranca`; cliente sem plano de contas, `sem_plano_de_contas` — sem erro. Requer `manage_client_mapping`. */
+        post: operations["inherit_mapping_api_v1_clients__client_id__mapping__destination_type__inherit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/mapping/{destination_type}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** O de-para do cliente no destino: UMA linha por categoria do universo (plano de contas + categorias vistas na base de movimentos + as que já têm decisão), com a decisão vigente na competência corrente do servidor. Paginado (`page`/`pageSize`, máximo 100), com filtro por situação no SERVIDOR (`herdada`, `confirmada`, `nao_mapear`, `sem_decisao`) e busca por CÓDIGO (`code`, prefixo). O nome da categoria é resolvido em runtime e NÃO é buscável; origem fora do ar devolve o código com `categoryNameResolved=false`. `divergent` sinaliza que o plano de contas mudou na origem depois da decisão. Leitura de quem alcança o cliente. */
+        get: operations["list_client_mapping_api_v1_clients__client_id__mapping__destination_type__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/mapping/{destination_type}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Exporta o de-para do cliente no destino em planilha .xlsx: códigos nas colunas-chave (categoria, destino, decisão, alvo, vigência) e os nomes resolvidos NA GERAÇÃO (nunca persistidos). Célula de texto que começaria fórmula é neutralizada. Registra a exportação na trilha de acesso. */
+        get: operations["export_client_mapping_api_v1_clients__client_id__mapping__destination_type__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/mapping/{destination_type}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** PRÉVIA da aplicação do de-para na competência (`YYYY-MM`): sobre a base de movimentos PRESENTES, de todas as contas, as QUATRO situações (alvo, `nao_mapear`, sem decisão, sem categoria de origem) em valor e quantidade, a cobertura (Σ|valor| com decisão ÷ Σ|valor| com categoria — 'sem categoria' fica fora) e a contra-métrica `naoMapearPct`, as categorias sem decisão por |valor| decrescente e o estado da base. Determinística e sem IA. Não sincroniza. Erros, nesta ordem: competência nunca sincronizada 409 `BASE_NAO_SINCRONIZADA`; sem movimento 409 `SEM_MOVIMENTOS`; destino não configurado 409 `DESTINO_NAO_CONFIGURADO`; anterior à primeira vigência 409 `ANTERIOR_A_PRIMEIRA_VIGENCIA` (`details.earliestCompetence`). Leitura de quem alcança o cliente. */
+        get: operations["preview_client_mapping_api_v1_clients__client_id__mapping__destination_type__preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/mapping/{destination_type}/materializations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** MATERIALIZA a prévia confirmada: recalcula no servidor e só grava se o `previewToken` bater (senão 409 `PREVIA_DESATUALIZADA` — gere a prévia de novo). Havendo valor sem decisão exige `confirmPartialCoverage=true` (409 `COBERTURA_PARCIAL_REQUER_CONFIRMACAO`), e a confirmação fica no próprio registro. Cria a versão N+1 — imutável; reaplicar nunca sobrescreve e não existe rota que altere ou apague materialização. Emite a métrica `depara_aplicado`. Requer `manage_client_mapping`; cliente encerrado: 409. */
+        post: operations["materialize_client_mapping_api_v1_clients__client_id__mapping__destination_type__materializations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/mapping/{destination_type}/import/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** PRÉVIA da importação da planilha exportada — NÃO grava nada. Casa por CÓDIGO (a coluna de nome é ignorada). Devolve criadas / alteradas / ignoradas e as linhas recusadas com o motivo (categoria ou alvo inexistente, decisão inválida…); a linha recusada não derruba o lote. Arquivo .xlsx, até 2 MB e 2.000 linhas. Requer `manage_client_mapping`. */
+        post: operations["preview_client_mapping_import_api_v1_clients__client_id__mapping__destination_type__import_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/mapping/{destination_type}/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** APLICA a importação — exige `confirm=true` (sem ele: 409, a prévia é obrigatória). Recalcula a prévia no servidor e grava TODAS as linhas válidas de uma vez (atômico), como vigência nova a partir de `effectiveFrom` (padrão: competência corrente) — nunca sobrescreve a vigente. Início retroativo segue as regras da escrita de decisão (`confirmRetroactive`). Requer `manage_client_mapping`; cliente encerrado: 409. */
+        post: operations["apply_client_mapping_import_api_v1_clients__client_id__mapping__destination_type__import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clients/{client_id}/glossary": {
         parameters: {
             query?: never;
@@ -1756,6 +2048,37 @@ export interface components {
              */
             synced_at: string;
         };
+        /** BaseStateResponse */
+        BaseStateResponse: {
+            /** Syncedat */
+            syncedAt?: string | null;
+            /** Syncfailedat */
+            syncFailedAt?: string | null;
+        };
+        /** Body_apply_client_mapping_import_api_v1_clients__client_id__mapping__destination_type__import_post */
+        Body_apply_client_mapping_import_api_v1_clients__client_id__mapping__destination_type__import_post: {
+            /**
+             * File
+             * @description Planilha .xlsx do de-para.
+             */
+            file: string;
+            /**
+             * Confirm
+             * @description Confirmação explícita da importação.
+             * @default false
+             */
+            confirm: boolean;
+            /**
+             * Effectivefrom
+             * @description `YYYY-MM`.
+             */
+            effectiveFrom?: string | null;
+            /**
+             * Confirmretroactive
+             * @default false
+             */
+            confirmRetroactive: boolean;
+        };
         /** Body_parse_statement_api_v1_reconciliations_parse_post */
         Body_parse_statement_api_v1_reconciliations_parse_post: {
             /**
@@ -1769,6 +2092,19 @@ export interface components {
              * @description Extrato/fatura: PDF, CSV ou XLSX.
              */
             file: string;
+        };
+        /** Body_preview_client_mapping_import_api_v1_clients__client_id__mapping__destination_type__import_preview_post */
+        Body_preview_client_mapping_import_api_v1_clients__client_id__mapping__destination_type__import_preview_post: {
+            /**
+             * File
+             * @description Planilha .xlsx do de-para.
+             */
+            file: string;
+            /**
+             * Effectivefrom
+             * @description `YYYY-MM`.
+             */
+            effectiveFrom?: string | null;
         };
         /**
          * Capability
@@ -2447,6 +2783,47 @@ export interface components {
          * @enum {string}
          */
         ClientUserRole: "client_manager" | "client_operator";
+        /** ConfirmInheritedEnvelope */
+        ConfirmInheritedEnvelope: {
+            data: components["schemas"]["ConfirmInheritedResponse"];
+        };
+        /**
+         * ConfirmInheritedRequest
+         * @description Corpo de `POST …/decisions/confirm-inherited`.
+         */
+        ConfirmInheritedRequest: {
+            /**
+             * Effectivefrom
+             * @description Competência de início da vigência (`YYYY-MM`). Ausente = a competência corrente do servidor.
+             */
+            effectiveFrom?: string | null;
+            /**
+             * Confirmretroactive
+             * @description Confirmação explícita de vigência RETROATIVA. Sem ela, um início anterior à competência corrente responde 409 `RETROATIVA_REQUER_CONFIRMACAO` listando as competências afetadas em `details.competences`.
+             * @default false
+             */
+            confirmRetroactive: boolean;
+            /**
+             * Confirm
+             * @description Sem `true` nada é gravado: a resposta traz só `affected`, a quantidade de decisões HERDADAS que a confirmação atingiria.
+             * @default false
+             */
+            confirm: boolean;
+        };
+        /** ConfirmInheritedResponse */
+        ConfirmInheritedResponse: {
+            /**
+             * Affected
+             * @description Herdadas vigentes que a confirmação atinge.
+             */
+            affected: number;
+            /**
+             * Applied
+             * @description `false` = só contagem; nada gravado.
+             */
+            applied: boolean;
+            result?: components["schemas"]["DecisionWriteResponse"] | null;
+        };
         /** ConnectionDeletedPayload */
         ConnectionDeletedPayload: {
             /**
@@ -2722,6 +3099,135 @@ export interface components {
             organization_id?: string | null;
         };
         /**
+         * DecisionBatchRequest
+         * @description Corpo de `POST …/decisions/batch` — várias decisões, mesma vigência, atômico.
+         */
+        DecisionBatchRequest: {
+            /**
+             * Effectivefrom
+             * @description Competência de início da vigência (`YYYY-MM`). Ausente = a competência corrente do servidor.
+             */
+            effectiveFrom?: string | null;
+            /**
+             * Confirmretroactive
+             * @description Confirmação explícita de vigência RETROATIVA. Sem ela, um início anterior à competência corrente responde 409 `RETROATIVA_REQUER_CONFIRMACAO` listando as competências afetadas em `details.competences`.
+             * @default false
+             */
+            confirmRetroactive: boolean;
+            /** Decisions */
+            decisions: components["schemas"]["DecisionItemRequest"][];
+        };
+        /** DecisionHistoryResponse */
+        DecisionHistoryResponse: {
+            /** Data */
+            data: components["schemas"]["DecisionViewResponse"][];
+        };
+        /**
+         * DecisionItemRequest
+         * @description Uma decisão: categoria (CÓDIGO) → alvo do catálogo ou `nao_mapear`.
+         */
+        DecisionItemRequest: {
+            /** Categorycode */
+            categoryCode: string;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "alvo" | "nao_mapear";
+            /** Targetcode */
+            targetCode?: string | null;
+            /**
+             * Sourcetype
+             * @description Tipo do provedor de origem da categoria (`omie`, `arquivo`…).
+             * @default omie
+             */
+            sourceType: string;
+        };
+        /** DecisionViewResponse */
+        DecisionViewResponse: {
+            /** Sourcetype */
+            sourceType: string;
+            /** Categorycode */
+            categoryCode: string;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "alvo" | "nao_mapear";
+            /** Targetcode */
+            targetCode?: string | null;
+            /**
+             * Origin
+             * @enum {string}
+             */
+            origin: "herdada" | "confirmada";
+            /** Effectivefrom */
+            effectiveFrom: string;
+            /**
+             * Divergent
+             * @description Só no destino que herda: a conta de demonstrativo ATUAL da origem difere da decisão vigente (re-sincronização). Nada é reescrito — a pessoa decide.
+             */
+            divergent: boolean;
+            /** Origindrecode */
+            originDreCode?: string | null;
+        };
+        /** DecisionWriteEnvelope */
+        DecisionWriteEnvelope: {
+            data: components["schemas"]["DecisionWriteResponse"];
+        };
+        /**
+         * DecisionWriteRequest
+         * @description Corpo de `POST …/decisions` — UMA decisão.
+         */
+        DecisionWriteRequest: {
+            /**
+             * Effectivefrom
+             * @description Competência de início da vigência (`YYYY-MM`). Ausente = a competência corrente do servidor.
+             */
+            effectiveFrom?: string | null;
+            /**
+             * Confirmretroactive
+             * @description Confirmação explícita de vigência RETROATIVA. Sem ela, um início anterior à competência corrente responde 409 `RETROATIVA_REQUER_CONFIRMACAO` listando as competências afetadas em `details.competences`.
+             * @default false
+             */
+            confirmRetroactive: boolean;
+            /** Categorycode */
+            categoryCode: string;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "alvo" | "nao_mapear";
+            /** Targetcode */
+            targetCode?: string | null;
+            /**
+             * Sourcetype
+             * @description Tipo do provedor de origem da categoria (`omie`, `arquivo`…).
+             * @default omie
+             */
+            sourceType: string;
+        };
+        /** DecisionWriteResponse */
+        DecisionWriteResponse: {
+            /** Effectivefrom */
+            effectiveFrom: string;
+            /**
+             * Created
+             * @description Vigências novas gravadas.
+             */
+            created: number;
+            /**
+             * Resolved
+             * @description Decisões HERDADAS resolvidas pela pessoa na mesma competência de início.
+             */
+            resolved: number;
+            /**
+             * Unchanged
+             * @description Idênticas à decisão confirmada vigente.
+             */
+            unchanged: number;
+        };
+        /**
          * DuplicateCheckPayload
          * @description Conteúdo do envelope `{data: ...}` do check-duplicate.
          */
@@ -2929,6 +3435,111 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** ImportApplyEnvelope */
+        ImportApplyEnvelope: {
+            data: components["schemas"]["ImportApplyResponse"];
+        };
+        /** ImportApplyResponse */
+        ImportApplyResponse: {
+            preview: components["schemas"]["ImportPreviewResponse"];
+            result?: components["schemas"]["DecisionWriteResponse"] | null;
+        };
+        /** ImportPreviewEnvelope */
+        ImportPreviewEnvelope: {
+            data: components["schemas"]["ImportPreviewResponse"];
+        };
+        /** ImportPreviewResponse */
+        ImportPreviewResponse: {
+            /** Effectivefrom */
+            effectiveFrom: string;
+            /**
+             * Created
+             * @description Categorias sem decisão que passam a ter.
+             */
+            created: number;
+            /**
+             * Altered
+             * @description Decisões que mudam (vigência nova).
+             */
+            altered: number;
+            /**
+             * Altersconfirmed
+             * @description Das alteradas, as que mudam decisão CONFIRMADA por pessoa.
+             */
+            altersConfirmed: number;
+            /**
+             * Ignored
+             * @description Iguais à vigente confirmada, ou sem decisão.
+             */
+            ignored: number;
+            /** Rejected */
+            rejected: components["schemas"]["ImportRejectedLine"][];
+        };
+        /** ImportRejectedLine */
+        ImportRejectedLine: {
+            /**
+             * Line
+             * @description Número da linha na planilha (1 = cabeçalho).
+             */
+            line: number;
+            /** Categorycode */
+            categoryCode: string;
+            /** Targetcode */
+            targetCode?: string | null;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "categoria_inexistente" | "alvo_inexistente" | "decisao_invalida" | "alvo_ausente" | "alvo_nao_permitido" | "destino_diferente" | "linha_repetida" | "conflito_na_vigencia";
+        };
+        /** InheritEnvelope */
+        InheritEnvelope: {
+            data: components["schemas"]["InheritResponse"];
+        };
+        /**
+         * InheritRequest
+         * @description Corpo de `POST …/inherit` — iniciar o de-para do destino.
+         */
+        InheritRequest: {
+            /**
+             * Effectivefrom
+             * @description Competência de início da vigência (`YYYY-MM`). Ausente = a competência corrente do servidor.
+             */
+            effectiveFrom?: string | null;
+            /**
+             * Confirmretroactive
+             * @description Confirmação explícita de vigência RETROATIVA. Sem ela, um início anterior à competência corrente responde 409 `RETROATIVA_REQUER_CONFIRMACAO` listando as competências afetadas em `details.competences`.
+             * @default false
+             */
+            confirmRetroactive: boolean;
+        };
+        /** InheritResponse */
+        InheritResponse: {
+            /**
+             * State
+             * @description `ok` = herança aplicada; `sem_plano_de_contas` = o cliente não tem plano de contas sincronizado (nada a herdar, sem erro); `destino_sem_heranca` = só o `demonstrativo_contabil` herda — este destino abre sem decisão.
+             * @enum {string}
+             */
+            state: "ok" | "sem_plano_de_contas" | "destino_sem_heranca";
+            /** Effectivefrom */
+            effectiveFrom: string;
+            /** Created */
+            created: number;
+            /** Alreadydecided */
+            alreadyDecided: number;
+            /**
+             * Withoutdre
+             * @description Categorias 'sem destino declarado' na origem: ficam SEM decisão.
+             */
+            withoutDre: number;
+            /** Missingtargetcategories */
+            missingTargetCategories: string[];
+            /**
+             * Missingtargetcodes
+             * @description Contas de demonstrativo sem alvo no catálogo — nunca criadas implicitamente.
+             */
+            missingTargetCodes: string[];
+        };
         /**
          * ListedFileEntry
          * @description Item de GET /api/v1/reconciliations/{id}/file-entries.
@@ -3010,6 +3621,224 @@ export interface components {
             email: string;
         };
         /**
+         * MappingDestinationCreate
+         * @description Cria destino na organização do ator (a plataforma escolhe, obrigatório).
+         */
+        MappingDestinationCreate: {
+            /**
+             * Type
+             * @description Tipo do destino, em slug (minúsculas, dígitos e `_`). Os cinco do PRD já nascem em toda organização; um sexto é cadastro, não migração.
+             */
+            type: string;
+            /** Name */
+            name: string;
+            /**
+             * Organizationid
+             * @description Organização dona. Obrigatória para a plataforma; o admin omite (usa a própria) ou repete a própria — outra é 403.
+             */
+            organizationId?: string | null;
+        };
+        /** MappingDestinationEnvelope */
+        MappingDestinationEnvelope: {
+            data: components["schemas"]["MappingDestinationItem"];
+        };
+        /**
+         * MappingDestinationItem
+         * @description Um destino do catálogo da organização.
+         */
+        MappingDestinationItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Type
+             * @description Tipo do destino (slug, ex.: `demonstrativo_contabil`).
+             */
+            type: string;
+            /** Name */
+            name: string;
+            /** Active */
+            active: boolean;
+            /**
+             * Organizationid
+             * Format: uuid
+             */
+            organizationId: string;
+            /**
+             * Targetscount
+             * @description Alvos cadastrados.
+             */
+            targetsCount: number;
+        };
+        /** MappingDestinationListResponse */
+        MappingDestinationListResponse: {
+            /** Data */
+            data: components["schemas"]["MappingDestinationItem"][];
+        };
+        /**
+         * MappingDestinationUpdate
+         * @description Edita nome e/ou situação. O TIPO não muda (é a chave do de-para e da métrica).
+         */
+        MappingDestinationUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Active */
+            active?: boolean | null;
+        };
+        /**
+         * MappingListItem
+         * @description Uma categoria do universo com a decisão vigente — códigos + nomes de runtime.
+         */
+        MappingListItem: {
+            /** Sourcetype */
+            sourceType: string;
+            /** Categorycode */
+            categoryCode: string;
+            /**
+             * Categoryname
+             * @description Resolvido em runtime (nunca persistido, nunca buscável).
+             */
+            categoryName?: string | null;
+            /**
+             * Categorynameresolved
+             * @description `false` = a origem não respondeu (ou a categoria não é do plano); a tela mostra o CÓDIGO.
+             */
+            categoryNameResolved: boolean;
+            /**
+             * Situation
+             * @enum {string}
+             */
+            situation: "herdada" | "confirmada" | "nao_mapear" | "sem_decisao";
+            /** Decision */
+            decision?: ("alvo" | "nao_mapear") | null;
+            /** Targetcode */
+            targetCode?: string | null;
+            /** Targetname */
+            targetName?: string | null;
+            /** Effectivefrom */
+            effectiveFrom?: string | null;
+            /** Divergent */
+            divergent: boolean;
+            /** Origindrecode */
+            originDreCode?: string | null;
+        };
+        /** MappingListResponse */
+        MappingListResponse: {
+            /** Data */
+            data: components["schemas"]["MappingListItem"][];
+            pagination: components["schemas"]["PaginationMeta"];
+            /**
+             * Competence
+             * @description Competência (servidor) em que a vigente foi resolvida.
+             */
+            competence: string;
+        };
+        /** MappingPreviewEnvelope */
+        MappingPreviewEnvelope: {
+            data: components["schemas"]["MappingPreviewResponse"];
+        };
+        /** MappingPreviewResponse */
+        MappingPreviewResponse: {
+            /** Competence */
+            competence: string;
+            /**
+             * Destination
+             * @description Tipo do destino.
+             */
+            destination: string;
+            baseState: components["schemas"]["BaseStateResponse"];
+            situations: components["schemas"]["SituationTotalsResponse"];
+            /**
+             * Coveragepct
+             * @description Σ|valor| com decisão (alvo + nao_mapear) ÷ Σ|valor| com categoria, em %. `null` quando o denominador é zero (nenhum movimento com categoria).
+             */
+            coveragePct?: string | null;
+            /**
+             * Naomapearpct
+             * @description A CONTRA-MÉTRICA: Σ|valor| nao_mapear ÷ o mesmo denominador, em %.
+             */
+            naoMapearPct?: string | null;
+            /** Coveragenumerator */
+            coverageNumerator: string;
+            /** Coveragedenominator */
+            coverageDenominator: string;
+            /**
+             * Undecidedcategories
+             * @description Categorias sem decisão, por |valor| DECRESCENTE.
+             */
+            undecidedCategories: components["schemas"]["UndecidedCategoryResponse"][];
+            /**
+             * Previewtoken
+             * @description Enviar na materialização: prova que ela é ESTA prévia.
+             */
+            previewToken: string;
+            /**
+             * Latestversion
+             * @description Última versão materializada (0 = nenhuma).
+             */
+            latestVersion: number;
+        };
+        /**
+         * MappingTargetBatchCreate
+         * @description Lote de alvos (ex.: os 14 do demonstrativo). Atômico: tudo ou nada.
+         */
+        MappingTargetBatchCreate: {
+            /** Targets */
+            targets: components["schemas"]["MappingTargetCreate"][];
+        };
+        /** MappingTargetBatchResponse */
+        MappingTargetBatchResponse: {
+            /** Data */
+            data: components["schemas"]["MappingTargetItem"][];
+        };
+        /** MappingTargetCreate */
+        MappingTargetCreate: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+        };
+        /** MappingTargetEnvelope */
+        MappingTargetEnvelope: {
+            data: components["schemas"]["MappingTargetItem"];
+        };
+        /**
+         * MappingTargetItem
+         * @description Um alvo do destino — código de catálogo + nome.
+         */
+        MappingTargetItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /** Active */
+            active: boolean;
+        };
+        /** MappingTargetListResponse */
+        MappingTargetListResponse: {
+            /** Data */
+            data: components["schemas"]["MappingTargetItem"][];
+            pagination: components["schemas"]["PaginationMeta"];
+        };
+        /**
+         * MappingTargetUpdate
+         * @description Edita nome e/ou situação. O CÓDIGO não muda: é por ele que a importação casa
+         *     e que a materialização guarda snapshot.
+         */
+        MappingTargetUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Active */
+            active?: boolean | null;
+        };
+        /**
          * MarkAllReadPayload
          * @description Conteúdo do envelope de POST /api/v1/notifications/read-all.
          *
@@ -3054,6 +3883,138 @@ export interface components {
          */
         MarkReadResponse: {
             data: components["schemas"]["MarkReadPayload"];
+        };
+        /** MaterializationEnvelope */
+        MaterializationEnvelope: {
+            data: components["schemas"]["MaterializationResponse"];
+        };
+        /**
+         * MaterializationRequest
+         * @description Corpo de `POST …/materializations`.
+         */
+        MaterializationRequest: {
+            /**
+             * Competence
+             * @description `YYYY-MM`.
+             */
+            competence: string;
+            /**
+             * Previewtoken
+             * @description O `previewToken` da prévia que a pessoa confirmou.
+             */
+            previewToken: string;
+            /**
+             * Confirmpartialcoverage
+             * @description Obrigatório quando há movimento SEM decisão: confirma aplicar com cobertura parcial (fica registrado na materialização).
+             * @default false
+             */
+            confirmPartialCoverage: boolean;
+        };
+        /** MaterializationResponse */
+        MaterializationResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Version */
+            version: number;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Partialcoverageconfirmed */
+            partialCoverageConfirmed: boolean;
+            preview: components["schemas"]["MappingPreviewResponse"];
+        };
+        /**
+         * MovementsSyncEnvelope
+         * @description Envelope `{data: ...}` de `POST /movements/sync`.
+         */
+        MovementsSyncEnvelope: {
+            data: components["schemas"]["MovementsSyncResponse"];
+        };
+        /**
+         * MovementsSyncRequest
+         * @description Corpo de `POST /movements/sync`: a competência a trazer da origem.
+         *
+         *     Formato inválido (`2026-13`, `06/2026`, ausente) é validação de FORMA: 400
+         *     `VALIDATION_ERROR` genérico do handler global, nunca 422 (§4.8).
+         */
+        MovementsSyncRequest: {
+            /**
+             * Competence
+             * @description Competência a sincronizar, `YYYY-MM` (ex.: `2026-06`).
+             */
+            competence: string;
+        };
+        /**
+         * MovementsSyncResponse
+         * @description O que uma sincronização fez, em contagens — e o estado resultante.
+         *
+         *     Devolver o `state` junto evita que a tela dispare uma segunda requisição só
+         *     para redesenhar "sincronizada em".
+         */
+        MovementsSyncResponse: {
+            /**
+             * Movimentos
+             * @description Movimentos da competência na origem.
+             */
+            movimentos: number;
+            /**
+             * Semcategoria
+             * @description Deles, quantos vieram SEM código de categoria (subconjunto).
+             */
+            semCategoria: number;
+            /**
+             * Contas
+             * @description Contas lidas.
+             */
+            contas: number;
+            /**
+             * Ausentes
+             * @description Quantos estavam na base e saíram da origem nesta passada — marcados `ausente_na_origem`, nunca apagados.
+             */
+            ausentes: number;
+            state: components["schemas"]["MovementsSyncStateResponse"];
+        };
+        /**
+         * MovementsSyncStateEnvelope
+         * @description Envelope `{data: ...}` de `GET /movements/sync-state`.
+         */
+        MovementsSyncStateEnvelope: {
+            data: components["schemas"]["MovementsSyncStateResponse"];
+        };
+        /**
+         * MovementsSyncStateResponse
+         * @description O estado da base de UMA competência — os dois relógios e o "nunca".
+         *
+         *     `neverSynced` é CAMPO, não zero (ADR-067-BE): competência sem movimento algum
+         *     e competência que ninguém consultou são respostas diferentes, e a tela não pode
+         *     decidir isso contando linhas.
+         */
+        MovementsSyncStateResponse: {
+            /**
+             * Competence
+             * @description A competência consultada, `YYYY-MM`.
+             */
+            competence: string;
+            /**
+             * Neversynced
+             * @description `true` = esta competência NUNCA foi sincronizada com sucesso. A prévia do de-para recusa com 409 orientando a sincronizar.
+             */
+            neverSynced: boolean;
+            /**
+             * Syncedat
+             * @description Última sincronização ÍNTEGRA da competência. `null` = nunca houve.
+             */
+            syncedAt?: string | null;
+            /**
+             * Syncfailedat
+             * @description Última tentativa que FALHOU, se a mais recente falhou. Com `syncedAt` preenchido, a base continua sendo a da última sincronização íntegra.
+             */
+            syncFailedAt?: string | null;
         };
         /**
          * NotificacaoEntregueProps
@@ -3937,6 +4898,27 @@ export interface components {
         SessionStatusResponse: {
             data: components["schemas"]["SessionStatusPayload"];
         };
+        /** SituationTotalResponse */
+        SituationTotalResponse: {
+            /**
+             * Amount
+             * @description Σ|valor| dos movimentos na situação (BRL).
+             */
+            amount: string;
+            /** Count */
+            count: number;
+        };
+        /**
+         * SituationTotalsResponse
+         * @description As QUATRO situações da prévia (R5).
+         */
+        SituationTotalsResponse: {
+            alvo: components["schemas"]["SituationTotalResponse"];
+            naoMapear: components["schemas"]["SituationTotalResponse"];
+            semDecisao: components["schemas"]["SituationTotalResponse"];
+            /** @description Movimentos sem categoria de origem: FORA do denominador da cobertura. */
+            semCategoria: components["schemas"]["SituationTotalResponse"];
+        };
         /** SyntheticAlertResponse */
         SyntheticAlertResponse: {
             data: components["schemas"]["SyntheticAlertResult"];
@@ -4185,6 +5167,17 @@ export interface components {
              * @description Organização de destino (existe e ativa).
              */
             organization_id: string;
+        };
+        /** UndecidedCategoryResponse */
+        UndecidedCategoryResponse: {
+            /** Sourcetype */
+            sourceType: string;
+            /** Categorycode */
+            categoryCode: string;
+            /** Amount */
+            amount: string;
+            /** Count */
+            count: number;
         };
         /**
          * UnreadCountPayload
@@ -6029,6 +7022,763 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TitleContextEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_client_movements_api_v1_clients__client_id__movements_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MovementsSyncRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MovementsSyncEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_client_movements_sync_state_api_v1_clients__client_id__movements_sync_state_get: {
+        parameters: {
+            query: {
+                /** @description Competência consultada, `YYYY-MM` (ex.: `2026-06`). */
+                competence: string;
+            };
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MovementsSyncStateEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_mapping_destinations_api_v1_mapping_destinations_get: {
+        parameters: {
+            query?: {
+                /** @description Plataforma: restringe a uma organização. Staff: só a própria. */
+                organizationId?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MappingDestinationListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_mapping_destination_api_v1_mapping_destinations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MappingDestinationCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MappingDestinationEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_mapping_destination_api_v1_mapping_destinations__destination_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                destination_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MappingDestinationUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MappingDestinationEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_mapping_targets_api_v1_mapping_destinations__destination_id__targets_get: {
+        parameters: {
+            query?: {
+                /** @description Página, a partir de 1. */
+                page?: number;
+                /** @description Itens por página (máx. 100). */
+                pageSize?: number;
+                /** @description Só ativos / só inativos. */
+                active?: boolean | null;
+                /** @description Código começando por. */
+                codePrefix?: string | null;
+            };
+            header?: never;
+            path: {
+                destination_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MappingTargetListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_mapping_targets_api_v1_mapping_destinations__destination_id__targets_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                destination_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MappingTargetBatchCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MappingTargetBatchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_mapping_target_api_v1_mapping_destinations__destination_id__targets__target_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                destination_id: string;
+                target_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_mapping_target_api_v1_mapping_destinations__destination_id__targets__target_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                destination_id: string;
+                target_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MappingTargetUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MappingTargetEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    write_decision_api_v1_clients__client_id__mapping__destination_type__decisions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Tipo do destino (slug, ex.: `demonstrativo_contabil`). */
+                destination_type: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DecisionWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DecisionWriteEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    write_decisions_batch_api_v1_clients__client_id__mapping__destination_type__decisions_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Tipo do destino (slug, ex.: `demonstrativo_contabil`). */
+                destination_type: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DecisionBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DecisionWriteEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_inherited_decisions_api_v1_clients__client_id__mapping__destination_type__decisions_confirm_inherited_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Tipo do destino (slug, ex.: `demonstrativo_contabil`). */
+                destination_type: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmInheritedRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfirmInheritedEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_decision_history_api_v1_clients__client_id__mapping__destination_type__decisions_history_get: {
+        parameters: {
+            query: {
+                /** @description Código da categoria na origem. */
+                categoryCode: string;
+                sourceType?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Tipo do destino (slug, ex.: `demonstrativo_contabil`). */
+                destination_type: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DecisionHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inherit_mapping_api_v1_clients__client_id__mapping__destination_type__inherit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Tipo do destino (slug, ex.: `demonstrativo_contabil`). */
+                destination_type: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InheritRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InheritEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_client_mapping_api_v1_clients__client_id__mapping__destination_type__get: {
+        parameters: {
+            query?: {
+                /** @description Página, a partir de 1. */
+                page?: number;
+                /** @description Itens por página (máx. 100). */
+                pageSize?: number;
+                /** @description Filtra por situação. */
+                situation?: ("herdada" | "confirmada" | "nao_mapear" | "sem_decisao") | null;
+                /** @description Código começando por. */
+                code?: string | null;
+            };
+            header?: never;
+            path: {
+                /** @description Tipo do destino (slug, ex.: `demonstrativo_contabil`). */
+                destination_type: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MappingListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_client_mapping_api_v1_clients__client_id__mapping__destination_type__export_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Tipo do destino (slug, ex.: `demonstrativo_contabil`). */
+                destination_type: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_client_mapping_api_v1_clients__client_id__mapping__destination_type__preview_get: {
+        parameters: {
+            query: {
+                /** @description Competência, `YYYY-MM`. */
+                competence: string;
+            };
+            header?: never;
+            path: {
+                /** @description Tipo do destino (slug, ex.: `demonstrativo_contabil`). */
+                destination_type: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MappingPreviewEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    materialize_client_mapping_api_v1_clients__client_id__mapping__destination_type__materializations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Tipo do destino (slug, ex.: `demonstrativo_contabil`). */
+                destination_type: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MaterializationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaterializationEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_client_mapping_import_api_v1_clients__client_id__mapping__destination_type__import_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Tipo do destino (slug, ex.: `demonstrativo_contabil`). */
+                destination_type: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_preview_client_mapping_import_api_v1_clients__client_id__mapping__destination_type__import_preview_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportPreviewEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_client_mapping_import_api_v1_clients__client_id__mapping__destination_type__import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Tipo do destino (slug, ex.: `demonstrativo_contabil`). */
+                destination_type: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_apply_client_mapping_import_api_v1_clients__client_id__mapping__destination_type__import_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportApplyEnvelope"];
                 };
             };
             /** @description Validation Error */

@@ -46,6 +46,10 @@ from app.db.models import (
     ClientChartOfAccount,
     ClientConnection,
     ClientGlossaryEntry,
+    ClientMappingDecision,
+    ClientMappingMaterialization,
+    ClientMovement,
+    ClientMovementSync,
     ClientTitle,
     ConnectionStatus,
     Notification,
@@ -517,7 +521,7 @@ class ClientRepository:
                coerentes e faz a credencial cifrada da origem sumir junto;
             5. a linha de `clients` — cascateia atribuições, glossário, cache de
                contas Omie, **plano de contas** (S10), **carteira de títulos**
-               (S11) e favoritos; a DEK morre com ela e tudo que ela cifrava
+               (S11), **base de movimentos** e carimbos dela (S12) e favoritos; a DEK morre com ela e tudo que ela cifrava
                vira indecifrável por construção (§4.1).
 
         `access_audit` e `usage_events` FICAM: são trilhas só de IDs (§4.7) e
@@ -529,6 +533,17 @@ class ClientRepository:
         s = self._session
         await s.execute(
             delete(ReconciliationSession).where(ReconciliationSession.client_id == client.id)
+        )
+        # S12 (BACK 12.3): o de-para tem `author_id` RESTRICT para `users` — um
+        # usuário DO tenant que decidiu ou materializou travaria o passo seguinte.
+        # Saem antes dos usuários (os itens da materialização vão pelo CASCADE).
+        await s.execute(
+            delete(ClientMappingMaterialization).where(
+                ClientMappingMaterialization.client_id == client.id
+            )
+        )
+        await s.execute(
+            delete(ClientMappingDecision).where(ClientMappingDecision.client_id == client.id)
         )
         await s.execute(
             delete(User).where(User.client_id == client.id, User.scope == UserScope.CLIENT.value)
@@ -575,6 +590,18 @@ class ClientRepository:
         do de `ClientTitle` só por clareza de leitura (o FK `title_id` já é
         `CASCADE`, mas a lista declarada é a fonte — mesmo precedente das
         conexões de origem).
+
+        A **base de movimentos** (S12, R0) e os carimbos dela saem pelo MESMO
+        precedente da carteira: só códigos, nada cifrado, e é espelho OPERACIONAL
+        da origem — que cliente encerrado não tem. O que do de-para é "o que
+        aconteceu" são as MATERIALIZAÇÕES (BACK 12.3), que guardam snapshot sem FK
+        para a base e por isso ficam.
+
+        As **decisões do de-para** (S12, BACK 12.3) também saem — decisão do
+        planejador, ADR-074-BE: são CONFIGURAÇÃO do cliente (como o glossário e o
+        plano de contas), e cliente encerrado não classifica mais nada. As
+        materializações e seus itens FICAM, só-leitura: são "o que aconteceu", o
+        que a Sprint 13 transformou (ou vai transformar) em arquivo contábil.
         """
         s = self._session
         await s.execute(
@@ -586,6 +613,11 @@ class ClientRepository:
         )
         await s.execute(delete(TitleContext).where(TitleContext.client_id == client_id))
         await s.execute(delete(ClientTitle).where(ClientTitle.client_id == client_id))
+        await s.execute(delete(ClientMovementSync).where(ClientMovementSync.client_id == client_id))
+        await s.execute(delete(ClientMovement).where(ClientMovement.client_id == client_id))
+        await s.execute(
+            delete(ClientMappingDecision).where(ClientMappingDecision.client_id == client_id)
+        )
         await s.execute(delete(OmieAccountCache).where(OmieAccountCache.client_id == client_id))
         await s.execute(delete(Notification).where(Notification.client_id == client_id))
         await s.execute(delete(UserClientFavorite).where(UserClientFavorite.client_id == client_id))

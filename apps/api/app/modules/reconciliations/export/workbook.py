@@ -165,7 +165,7 @@ def build_workbook(payload: ExportPayload) -> BytesIO:
 
     # Ponto ÚNICO da proteção: roda sobre o workbook pronto, não em cada
     # `ws.cell(...)`. Aba nova já nasce coberta, sem depender de alguém lembrar.
-    _neutralize_formula_injection(wb)
+    neutralize_formula_injection(wb)
 
     buf = BytesIO()
     wb.save(buf)
@@ -178,7 +178,7 @@ def build_workbook(payload: ExportPayload) -> BytesIO:
 _FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r")
 
 
-def _neutralize_formula_injection(wb: Workbook) -> None:
+def neutralize_formula_injection(wb: Workbook) -> None:
     """Garante que texto vindo de fora NUNCA vire fórmula no relatório (86e3anx2p).
 
     A descrição vem do arquivo do cliente (extraída pela IA) e do cadastro do
