@@ -285,6 +285,7 @@ class TestMaterializacao:
             assert evento.props == {
                 "client_id": str(world.client.id),
                 "destino": "demonstrativo_contabil",
+                "competencia": "2026-06",
                 "valor_com_decisao_centavos": 13000,
                 "valor_nao_mapear_centavos": 3000,
                 "valor_sem_decisao_centavos": 2000,
@@ -353,3 +354,53 @@ class TestMaterializacao:
         encerrado = await _materialize(client_with_db, world, p["previewToken"])
         assert encerrado.status_code == 409
         assert await _events(db_session, world) == []
+
+
+class TestListaDeVersoes:
+    """Follow-up 86e3f0ux7 (item 1): a lista que a tela derivava de `latestVersion`."""
+
+    async def test_lista_com_autor_cobertura_e_recorte_por_competencia(
+        self, client_with_db: AsyncClient, world: World
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        p = await _preview(client_with_db, world)
+        created = await _materialize(client_with_db, world, p["previewToken"])
+        assert created.status_code == 201, created.text
+
+        resp = await client_with_db.get(f"{_base(world)}/materializations")
+        assert resp.status_code == 200, resp.text
+        data = resp.json()["data"]
+        assert [v["version"] for v in data] == [1]
+        v = data[0]
+        assert v["competence"] == "2026-06"
+        assert v["partialCoverageConfirmed"] is True
+        assert v["author"] == {"name": world.admin.name, "email": world.admin.email}
+        # A MESMA conta da prévia: cobertura por Σ|valor| com decisão sobre com categoria.
+        assert Decimal(v["coveragePct"]) == Decimal(p["coveragePct"])
+        assert (v["undecidedCount"], v["uncategorizedCount"]) == (1, 1)
+        assert v["decisionsUsed"] == 2
+        assert "items" not in v, "só o cabeçalho da versão, nunca os itens"
+
+        vazio = await client_with_db.get(
+            f"{_base(world)}/materializations", params={"competence": "2026-05"}
+        )
+        assert vazio.status_code == 200
+        assert vazio.json()["data"] == []
+        invalida = await client_with_db.get(
+            f"{_base(world)}/materializations", params={"competence": "2026-13"}
+        )
+        assert invalida.status_code == 400
+
+    async def test_operador_le_a_lista_com_o_autor_mascarado(
+        self, client_with_db: AsyncClient, world: World
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        p = await _preview(client_with_db, world)
+        assert (await _materialize(client_with_db, world, p["previewToken"])).status_code == 201
+        await _login(client_with_db, world.operator)
+        resp = await client_with_db.get(f"{_base(world)}/materializations")
+        assert resp.status_code == 200, resp.text
+        author = resp.json()["data"][0]["author"]
+        assert author["email"] is None
+        assert author["name"].startswith("Equipe "), author
+        assert world.admin.name not in resp.text

@@ -182,6 +182,10 @@ class ClientMappingDecisionService:
         """Grava uma ou várias decisões na competência de início escolhida."""
         _ensure_open(client)
         destination = await self.resolve_destination(client, destination_type)
+        # Serializa com a materialização do MESMO (cliente, destino): a checagem
+        # "competência já materializada?" e o INSERT ficam sob o mesmo lock
+        # transacional (follow-up 86e3f0ux7, item 5).
+        await self._repo.lock_client_destination(client.id, destination.id)
         current = current_competence(today)
         start = effective_from or current
 
@@ -300,8 +304,13 @@ class ClientMappingDecisionService:
         effective_from: date | None = None,
         confirm_retroactive: bool = False,
         today: date | None = None,
+        code_prefix: str | None = None,
     ) -> tuple[int, DecisionWriteResult | None]:
         """Confirma EM LOTE as herdadas vigentes do destino (R6).
+
+        `code_prefix` é o recorte da tela (follow-up 86e3f0ux7, item 2): a pessoa
+        filtra a lista por código e confirma "estas", não o destino inteiro. Sem
+        ele, o comportamento original: todas as herdadas vigentes.
 
         Sem `confirm=True` não grava nada: devolve só a quantidade que seria
         afetada — a confirmação explícita mostra o número antes (R6). Com ela,
@@ -314,6 +323,8 @@ class ClientMappingDecisionService:
         decisions = await self._repo.list_decisions(client.id, destination.id)
         vigentes = resolve_vigentes(decisions, start)
         herdadas = [d for d in vigentes.values() if d.origin == DecisionOrigin.HERDADA.value]
+        if code_prefix:
+            herdadas = [d for d in herdadas if d.category_code.startswith(code_prefix)]
         if not confirm or not herdadas:
             return len(herdadas), None
         codes = await self._repo.target_codes(d.target_id for d in herdadas if d.target_id)
@@ -350,6 +361,7 @@ class ClientMappingDecisionService:
         """ "Iniciar o de-para do destino" (R7) — explícita e IDEMPOTENTE."""
         _ensure_open(client)
         destination = await self.resolve_destination(client, destination_type)
+        await self._repo.lock_client_destination(client.id, destination.id)
         current = current_competence(today)
         start = effective_from or current
         if destination.destination_type != INHERITING_DESTINATION_TYPE:

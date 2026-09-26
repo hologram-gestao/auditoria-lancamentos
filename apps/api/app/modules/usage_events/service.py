@@ -501,6 +501,7 @@ class UsageEventService:
         *,
         client_id: UUID,
         destino: str,
+        competencia: date,
         valor_com_decisao: Decimal,
         valor_nao_mapear: Decimal,
         valor_sem_decisao: Decimal,
@@ -522,6 +523,7 @@ class UsageEventService:
             lambda: DeparaAplicadoProps(
                 client_id=client_id,
                 destino=destino,
+                competencia=format_competence(competencia),
                 valor_com_decisao_centavos=decimal_to_cents(valor_com_decisao),
                 valor_nao_mapear_centavos=decimal_to_cents(valor_nao_mapear),
                 valor_sem_decisao_centavos=decimal_to_cents(valor_sem_decisao),

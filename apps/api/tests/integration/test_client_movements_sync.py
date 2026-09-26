@@ -15,7 +15,7 @@ afirma a ordem das escritas e o lock, sem banco):
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -24,7 +24,7 @@ from uuid import uuid4
 import httpx
 import pytest
 import respx
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.core.config import get_settings
 from app.core.crypto import encrypt
@@ -128,6 +128,9 @@ async def _seed_client(session: AsyncSession, *, contas: tuple[int, ...] = (CONT
         omie_app_key_iv=iv_key,
         omie_app_secret_encrypted=ct_secret,
         omie_app_secret_iv=iv_secret,
+        # Contas sincronizadas "agora": o refresh do cache antes da leitura (follow-up
+        # 86e3f0ux7) respeita o TTL de 24h e não chama a origem nestes testes.
+        omie_accounts_synced_at=datetime.now(UTC),
         active=True,
         created_by=creator.id,
     )
@@ -317,3 +320,103 @@ class TestIsolamentoEntreClientes:
         assert rows_b["1"].status == MovementStatus.PRESENTE.value
         estado_a = await ClientMovementsRepository(db_session).get_sync_state(a.id, JUNHO)
         assert estado_a.synced_at is not None
+
+
+# ---------------------------------------------------------------------------
+# Follow-up 86e3f0ux7 (item 3): a base só é honesta se as contas lidas forem as da origem
+# ---------------------------------------------------------------------------
+
+OMIE_CONTAS_URL = "https://app.omie.com.br/api/v1/geral/contacorrente/"
+OUTRA = 2625046999
+NOVA = 2625047000
+
+
+def _contas(*ids: int) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "ListarContasCorrentes": [
+                {
+                    "nCodCC": i,
+                    "descricao": f"Conta {i}",
+                    "codigo_banco": "077",
+                    "tipo_conta_corrente": "CC",
+                }
+                for i in ids
+            ]
+        },
+    )
+
+
+def _por_conta(mapa: dict[int, list[dict[str, Any]]]) -> Any:
+    """`ListarExtrato` respondendo POR CONTA: o `nCodCC` do request escolhe a lista."""
+
+    def _responder(request: httpx.Request) -> httpx.Response:
+        param = json.loads(request.content)["param"][0]
+        return _extrato(mapa.get(int(param["nCodCC"]), []))
+
+    return _responder
+
+
+class TestBaseHonesta:
+    @respx.mock
+    async def test_cache_de_contas_vencido_e_renovado_antes_da_leitura(
+        self, db_session: AsyncSession
+    ) -> None:
+        """Conta nova na origem entrava na base só depois de alguém clicar em
+        "Sincronizar contas", e a competência era carimbada como íntegra sem ela.
+        Com o TTL vencido, o `get_or_sync` de sempre roda ANTES da leitura."""
+        client = await _seed_client(db_session)
+        client.omie_accounts_synced_at = datetime.now(UTC) - timedelta(hours=25)
+        await db_session.flush()
+        contas = respx.post(OMIE_CONTAS_URL).mock(return_value=_contas(CONTA, NOVA))
+        respx.post(OMIE_EXTRATO_URL).mock(
+            side_effect=_por_conta({CONTA: [_mov(1)], NOVA: [_mov(2, categoria="1.01.01")]})
+        )
+        result = await _service(db_session).sync(client, JUNHO)
+        assert contas.called, "o cache de contas tinha de ser renovado antes de ler a origem"
+        assert result.contas == 2
+        rows = await _rows(db_session, client, JUNHO)
+        assert set(rows) == {"1", "2"}
+        assert rows["2"].source_account_id == str(NOVA)
+
+    @respx.mock
+    async def test_cache_de_contas_dentro_do_ttl_nao_chama_a_origem(
+        self, db_session: AsyncSession
+    ) -> None:
+        client = await _seed_client(db_session)
+        contas = respx.post(OMIE_CONTAS_URL).mock(return_value=_contas(CONTA))
+        respx.post(OMIE_EXTRATO_URL).mock(return_value=_extrato([_mov(1)]))
+        await _service(db_session).sync(client, JUNHO)
+        assert not contas.called, "dentro do TTL o refresh é no-op: nenhuma chamada a mais"
+
+    @respx.mock
+    async def test_conta_que_saiu_do_cache_nao_marca_os_movimentos_dela_como_ausentes(
+        self, db_session: AsyncSession
+    ) -> None:
+        """A ausência é recortada pelas contas LIDAS: conta fora do cache não foi
+        consultada, e os movimentos dela continuam existindo na origem."""
+        client = await _seed_client(db_session, contas=(CONTA, OUTRA))
+        route = respx.post(OMIE_EXTRATO_URL)
+        route.mock(side_effect=_por_conta({CONTA: [_mov(1)], OUTRA: [_mov(2)]}))
+        await _service(db_session).sync(client, JUNHO)
+        rows = await _rows(db_session, client, JUNHO)
+        assert rows["2"].source_account_id == str(OUTRA)
+
+        await db_session.execute(
+            delete(OmieAccountCache).where(
+                OmieAccountCache.client_id == client.id, OmieAccountCache.omie_conta_id == OUTRA
+            )
+        )
+        result = await _service(db_session).sync(client, JUNHO)
+        rows = await _rows(db_session, client, JUNHO)
+        assert rows["2"].status == MovementStatus.PRESENTE.value, "conta não lida não dá ausência"
+        assert (result.contas, result.ausentes) == (1, 0)
+
+        # ...e a ausência continua valendo dentro da conta que FOI lida.
+        route.mock(side_effect=_por_conta({CONTA: []}))
+        result = await _service(db_session).sync(client, JUNHO)
+        rows = await _rows(db_session, client, JUNHO)
+        assert rows["1"].status == MovementStatus.AUSENTE_NA_ORIGEM.value
+        assert rows["2"].status == MovementStatus.PRESENTE.value
+        assert result.ausentes == 1

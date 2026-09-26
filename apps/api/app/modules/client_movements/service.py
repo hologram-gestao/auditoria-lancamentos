@@ -41,6 +41,7 @@ from app.modules.client_connections.origin import (
     resolve_capable_connection,
 )
 from app.modules.client_movements.competence import competence_bounds, competence_of
+from app.modules.clients.accounts_cache import OmieAccountsCacheService
 from app.modules.usage_events.repository import UsageEventRepository
 from app.modules.usage_events.service import UsageEventService
 
@@ -104,11 +105,16 @@ class ClientMovementsSyncService:
         settings: Settings,
         locks: OriginClientLocks | None = None,
         usage_events: UsageEventService | None = None,
+        accounts_cache: OmieAccountsCacheService | None = None,
     ) -> None:
         self._db = db
         self._repo = repository
         self._clients = clients
         self._settings = settings
+        # O MESMO serviço de cache de contas do detalhe do cliente e do "Sincronizar
+        # contas" (S7/S9), com o TTL de 24h dele: a base só é honesta se as contas
+        # que ela lê forem as que a origem tem hoje (follow-up 86e3f0ux7, item 3).
+        self._accounts_cache = accounts_cache or OmieAccountsCacheService(clients, settings)
         # O lock por cliente da fonte única (`client_locks`), o MESMO que o cache
         # de lançamentos e a carteira consomem. Injetável só para o teste observar.
         self._locks = locks or origin_client_locks
@@ -129,9 +135,9 @@ class ClientMovementsSyncService:
                 f"Cliente {client.id} está encerrado; sincronização de movimentos recusada."
             )
         start, end = competence_bounds(competence)
-        source_type, entries, contas = await self._fetch(client, competence, start=start, end=end)
+        source_type, entries, accounts = await self._fetch(client, competence, start=start, end=end)
         return await self._persist(
-            client, competence, source_type=source_type, entries=entries, contas=contas
+            client, competence, source_type=source_type, entries=entries, accounts=accounts
         )
 
     # ------------------------------------------------------------------
@@ -140,15 +146,35 @@ class ClientMovementsSyncService:
 
     async def _fetch(
         self, client: Client, competence: date, *, start: date, end: date
-    ) -> tuple[str, list[tuple[str, ProviderEntry]], int]:
+    ) -> tuple[str, list[tuple[str, ProviderEntry]], list[str]]:
         """A origem INTEIRA da competência — todas as contas, em série, sob o lock.
 
         A conexão capaz é resolvida ANTES de qualquer coisa: cliente sem origem
-        recebe um dos três 409 da S9 e **nada** é carimbado.
+        recebe um dos três 409 da S9 e **nada** é carimbado. Devolve também as
+        contas LIDAS: a marcação de ausência é recortada por elas.
         """
         connection = await resolve_capable_connection(
             self._db, client, Capability.LISTAR_LANCAMENTOS, settings=self._settings
         )
+        try:
+            # Renova o cache de contas ANTES de ler (follow-up 86e3f0ux7, item 3):
+            # conta nova na origem só entrava na base depois de alguém clicar em
+            # "Sincronizar contas", e a competência era carimbada como íntegra sem
+            # ela. É o `get_or_sync` de sempre, com o TTL de 24h dele — não uma
+            # chamada nova a cada sincronização. Fica FORA do lock abaixo porque o
+            # cache pega o mesmo lock por dentro (fonte única, ADR-064-BE): aqui é
+            # sequência, nunca aninhamento. Falha da origem neste passo carimba a
+            # falha como qualquer outra e nada é escrito.
+            await self._accounts_cache.get_or_sync(client, connection)
+        except Exception:
+            await self._repo.mark_sync_failed(client.id, competence, at=datetime.now(UTC))
+            await self._db.commit()
+            log.warning(
+                "client_movements_accounts_refresh_failed",
+                client_id=str(client.id),
+                competence=competence.isoformat(),
+            )
+            raise
         accounts = await self._known_account_ids(client)
         if not accounts and connection.accounts_synced_at is None:
             raise MovementAccountsUnknownError(
@@ -185,7 +211,7 @@ class ClientMovementsSyncService:
             raise
         finally:
             await provider.aclose()
-        return provider.provider_type, entries, len(accounts)
+        return provider.provider_type, entries, accounts
 
     async def _known_account_ids(self, client: Client) -> list[str]:
         """As contas que o cache de contas do cliente já conhece — de QUALQUER tipo.
@@ -204,7 +230,7 @@ class ClientMovementsSyncService:
         *,
         source_type: str,
         entries: Sequence[tuple[str, ProviderEntry]],
-        contas: int,
+        accounts: Sequence[str],
     ) -> MovementSyncResult:
         """Grava o ciclo inteiro numa transação — e só então carimba o sucesso.
 
@@ -217,21 +243,40 @@ class ClientMovementsSyncService:
             [movement_row(entry, source_type=source_type, account=acc) for acc, entry in entries],
             client_id=client.id,
         )
-        outcome = await self._repo.reconcile_cycle(
-            client.id,
-            source_type=source_type,
-            competence=competence,
-            rows=rows,
-            synced_at=now,
-        )
-        await self._repo.mark_sync_succeeded(client.id, competence, at=now)
+        try:
+            outcome = await self._repo.reconcile_cycle(
+                client.id,
+                source_type=source_type,
+                competence=competence,
+                rows=rows,
+                synced_at=now,
+                accounts_read=accounts,
+            )
+            await self._repo.mark_sync_succeeded(client.id, competence, at=now)
+        except Exception:
+            # Falha de BANCO no meio do ciclo (follow-up 86e3f0ux7, item 4). Até
+            # aqui só o caminho da ORIGEM carimbava a falha; uma exceção do
+            # Postgres deixava a competência sem carimbo nenhum, como se a
+            # sincronização nunca tivesse sido tentada. A transação está
+            # inutilizável depois do erro, então: ROLLBACK (a base anterior fica
+            # inteira — nada do ciclo sobrevive), carimbo de falha, COMMIT como
+            # barreira, e o erro segue para virar 500 no handler.
+            await self._db.rollback()
+            await self._repo.mark_sync_failed(client.id, competence, at=datetime.now(UTC))
+            await self._db.commit()
+            log.warning(
+                "client_movements_persist_failed",
+                client_id=str(client.id),
+                competence=competence.isoformat(),
+            )
+            raise
 
         result = MovementSyncResult(
             competence=competence,
             synced_at=now,
             movimentos=len(rows),
             sem_categoria=sum(1 for row in rows if row["category_code"] is None),
-            contas=contas,
+            contas=len(accounts),
             ausentes=outcome.absent,
         )
         log.info(

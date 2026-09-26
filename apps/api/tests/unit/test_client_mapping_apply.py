@@ -223,6 +223,9 @@ class _Repo:
     async def target_codes(self, ids: Any) -> dict[UUID, str]:
         return dict.fromkeys(ids, "1.01")
 
+    async def lock_client_destination(self, *a: Any) -> None:
+        self.ledger.calls.append("lock")
+
     async def latest_version(self, *a: Any) -> int:
         return self.latest
 
@@ -336,7 +339,7 @@ class TestMaterializacao:
                 confirm_partial_coverage=True,
                 author=_user(),
             )
-        assert ledger.calls == []
+        assert ledger.calls == ["lock"], "o lock entra, e NADA é gravado"
 
     async def test_cobertura_parcial_sem_confirmacao_e_recusada(self) -> None:
         service, ledger = _service()
@@ -351,7 +354,7 @@ class TestMaterializacao:
                 author=_user(),
             )
         assert exc.value.details == {"undecidedAmount": "25.00", "undecidedCount": "2"}
-        assert ledger.calls == []
+        assert ledger.calls == ["lock"], "o lock entra, e NADA é gravado"
 
     async def test_versao_n_mais_1_registro_de_parcial_e_evento_depois_do_commit(self) -> None:
         service, ledger = _service(latest=1)
@@ -366,7 +369,9 @@ class TestMaterializacao:
             confirm_partial_coverage=True,
             author=user,
         )
-        assert ledger.calls == ["insert", "commit", "emit"]
+        # `lock` primeiro (follow-up 86e3f0ux7, item 5): a prévia é recalculada já
+        # sob o lock transacional de (cliente, destino), antes do INSERT.
+        assert ledger.calls == ["lock", "insert", "commit", "emit"]
         assert outcome.version == 2
         mat, items = ledger.inserted[0]
         assert mat.version == 2
@@ -396,7 +401,7 @@ class TestMaterializacao:
             author=_user(),
         )
         assert outcome.partial_coverage_confirmed is False
-        assert ledger.calls == ["insert", "commit", "emit"]
+        assert ledger.calls == ["lock", "insert", "commit", "emit"]
 
     async def test_cliente_encerrado_e_409(self) -> None:
         service, ledger = _service()

@@ -192,7 +192,7 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**97** hoje — o arquivo é a fonte, confira com
+      (**98** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant E cross-org**: a bateria
       (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
@@ -200,14 +200,15 @@
       organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
-      (`PENDING_ENDPOINTS` está vazio: cobertura **97/97**). As 3 rotas do
+      (`PENDING_ENDPOINTS` está vazio: cobertura **98/98**). As 3 rotas do
       **plano de contas** (S10) e as 3 da **carteira de títulos** (S11 — lista,
       agregados e sincronizar) e as 3 da S15 (relatório de recebíveis, leitura e
       registro do contexto do título) entraram como coleção; as 20 da S12 também:
       2 da base de movimentos (sincronizar e estado da competência), 7 do
       catálogo de destinos e alvos (`/mapping-destinations`, por ORGANIZAÇÃO — o
       alvo atacado na bateria é de uma terceira org, porque o operador lê o
-      catálogo da própria) e 11 do de-para (`/clients/{id}/mapping/{tipo}/…`). Só
+      catálogo da própria) e 11 do de-para (`/clients/{id}/mapping/{tipo}/…`), mais
+      a lista de materializações do follow-up 86e3f0ux7. Só
       auth, tipos de anomalia, `test-connection`, `alert-test` e as 5 rotas de
       `/organizations` (plataforma, sem dado de cliente) ficam fora, com motivo.
       Essa lista é o denominador da métrica de isolamento — endpoint fora dela é
@@ -988,6 +989,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.52 — 26/09/2026. **Os seis achados do QA da Sprint 12 sobre o de-para e a base de movimentos foram pagos (follow-up 86e3f0ux7).** A base ficou honesta em dois pontos que a §8 não cobria: o cache de contas é renovado pelo `get_or_sync` de sempre (TTL de 24h, mesmo lock, em sequência e nunca aninhado) ANTES de ler a origem, e a marcação de `ausente_na_origem` é recortada pelas contas LIDAS na passada (conta fora do cache não foi consultada, e os movimentos dela continuam existindo). Falha de BANCO no meio do ciclo passou a carimbar `sync_failed_at` (rollback, carimbo, commit como barreira, re-levanta), como a falha de origem já fazia. As escritas do de-para (decisão, herança, materialização) passaram a rodar sob `pg_advisory_xact_lock` por (cliente, destino): a checagem "competência já materializada?" e o INSERT não se cruzam mais entre duas requisições. Nasceu `GET …/mapping/{tipo}/materializations` (lista canônica 97 → **98**; autor por `author_for_viewer`, só o cabeçalho da versão), o lote `confirm-inherited` aceita o recorte por código da lista, e `depara_aplicado` ganhou `competencia` (lacuna do PRD: a leitura D+30 por competência era impossível). Contrato e doc de endpoints regenerados. **Regra que fica:** o mesmo lock que serializa a origem por credencial não serve para serializar ESCRITAS concorrentes no banco; para isso é lock transacional do Postgres por chave de negócio._
 
 _Versão 1.51 — 26/09/2026. **A validação humana da Sprint 12 (86e3f14qc) rodou fora do sandbox o que a sprint não conseguiu, e o produto passou.** Suíte completa com Postgres (2903 verdes, 3 ambientais), a11y em browser nos três temas (384 por tema), contrato com diff 0, ciclo de migrations num banco limpo, cenário de API de ponta a ponta (a tese dos dois destinos nos números, os 409 tipados, export/import, 403 do operador e cross-tenant sem vazar nome, trilha e eventos) e prints. **Um defeito, invisível ao axe:** o `TabsContent` inativo fica montado com `hidden`, a classe `flex` do consumidor vence o atributo e o `flex-1` faz o painel invisível crescer na sobra da coluna: 209px de vão entre as abas e a prévia do de-para quando a prévia é curta. Corrigido no primitivo (`data-[state=inactive]:hidden`), com teste de classe e guarda geométrica no e2e; a regra entrou na skill `front-gate` §1. **Regra que fica:** painel condicional que recebe classe de display esconde por variante de estado, nunca pelo atributo. Ficaram para o follow-up de front: destino padrão da tela ("Conta contábil", o primeiro do catálogo, em vez do demonstrativo) e "Confirmar herdadas" em destino que não herda. As seis decisões do planejador (ADR-074/075/077-BE) seguem pendentes do Pedro; S-1 segue sem medição._
 
