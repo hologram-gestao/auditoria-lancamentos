@@ -567,3 +567,60 @@ LISTAGEM do recurso pai expõe esse mesmo campo. Não encodado inline nesta spri
 o arquivo-fonte (raiz do monorepo, fora do worktree) não está no alcance de escrita do
 sandbox do QA nesta run.
 **Status:** ativo
+
+## 2026-09-26 — Sprint 12: 3 testes de integração novos VERMELHOS no primeiro run real, e dois 500 que o teste sequencial não pega [escopo: backend | apps/api/tests/integration/, client_mapping/portability.py, client_movements/competence.py]
+**Sintoma:** o backend entregou 6 tasks com "pytest verde", mas nenhum teste de integração
+tinha sido executado (sandbox sem socket do Docker). No primeiro run real, feito pelo QA
+em container contra o Postgres local (2851 passed, 3 failed), as 3 falhas eram defeitos DE
+TESTE: identity map velho (`expire_on_commit=False`), `expire_all()` → `MissingGreenlet`
+e aritmética de paginação. A revisão achou ainda três caminhos para 500:
+- ano `0000` passa no `COMPETENCE_PATTERN` e `date(0, …)` estoura;
+- `.xlsx` malformado na importação (`ParseError`, ou `ValueError` com o texto da célula na
+  mensagem, que o handler de 500 loga);
+- duplo clique em "Iniciar de-para" (`IntegrityError`).
+E um DoS: uma célula na linha 300.000 prende 199 s de CPU num handler `async`.
+**Causa-raiz blameless:** o executor não tinha como rodar a integração, e o HANDOFF dizia
+isso. Faltavam a regra "sem rodar, não é verde" e a receita que funciona sem socket no
+Python: o `docker run` direto no shell funcionou no sandbox do QA desta mesma sprint. Os
+três 500 são da mesma família: validação de FORMA (regex) tratada como se garantisse que
+o valor pode ser construído, e parse de arquivo de terceiro protegido só na abertura.
+**Correção:** BACK 12.1, 12.2, 12.4, 12.5 e 12.6 foram para FAILED, com instrução por
+arquivo:linha no ClickUp (26/09). BACK 12.3 e FRONT 12.7 foram para DONE. Testes de
+regressão do QA, os dois vermelhos até o rework:
+`tests/integration/test_s12_qa_two_destinations.py::test_competencia_malformada_e_400_nunca_5xx`
+e `tests/unit/test_s12_qa_import_hardening.py`.
+**Encodado em:** os testes de regressão acima (existem nesta branch) e o follow-up
+**86e3f0uzh** (tag `agent-review`), que leva as 4 lições para `<repo>/.claude/agents/backend.md`.
+A edição inline foi tentada e o sandbox a negou ("sensitive file").
+**Status:** ativo
+
+## 2026-09-26 — Sprint 12, rework #1: os 5 reprovados voltaram corrigidos, e a regra virou lei do primer [escopo: backend | client_movements/competence.py, client_mapping/{portability,repository,service}.py, usage_events/service.py, testes de integração]
+**Sintoma:** na rodada 1, BACK 12.1, 12.2, 12.4, 12.5 e 12.6 foram para FAILED: 3 testes de
+integração vermelhos que nunca tinham rodado (identity map velho, `expire_all()` →
+`MissingGreenlet`, aritmética de paginação) e quatro caminhos para 500 (ano `0000` na
+competência, props de métrica montadas fora do fail-soft depois do commit, `.xlsx`
+malformado com o texto da célula indo para o log e 199 s de CPU presos no event loop,
+`IntegrityError` no duplo clique de "Iniciar de-para"), mais a competência corrente em UTC.
+**Causa-raiz blameless:** o executor não tinha Postgres no sandbox e declarou "verde" o
+que só estava escrito; e os 500 são da mesma família: checar a FORMA (regex) ou checar
+"já existe?" antes de inserir foi tratado como garantia, quando o construtor (`date`), o
+parser de terceiro e a concorrência podem falhar depois da checagem.
+**Correção:** commit `43c1949` (fix, rework #1): padrão `^[1-9]\d{3}-…`,
+`_props_or_none` nos dois emissores pós-commit, `parse_import` com `except Exception` +
+`from None` + orçamento de zip, colunas e linhas percorridas + `run_in_threadpool`,
+código longo recusado em vez de truncado, `insert_inherited` com `ON CONFLICT DO
+NOTHING`, `insert_decisions` com SAVEPOINT → 409, `current_competence` em UTC-3 num lugar
+só, e os 3 testes relendo com `populate_existing=True`. Re-revisão do QA: suíte completa
+contra Postgres **2898 passed, 0 failed**; os 4 testes de regressão do QA, antes
+vermelhos, verdes; contrato com diff 0. As 5 tasks foram para DONE.
+**Escopo:** backend (toda rota que recebe competência, lê arquivo enviado ou grava sob
+UNIQUE alcançável por corrida); testes de integração async.
+**Encodado em:** `CLAUDE.md` (primer, via `PROJECT.md` do QA) §7 Backend, bullets "Falha
+esperada nunca é 500", "O mês de agora é no fuso do Brasil" e "Teste de integração que
+não rodou não é verde" (v1.50); testes de regressão
+`apps/api/tests/unit/test_s12_qa_import_hardening.py` e
+`apps/api/tests/integration/test_s12_qa_two_destinations.py::test_competencia_malformada_e_400_nunca_5xx`;
+e o follow-up **86e3f0uzh** (`agent-review`) para copiar as regras no
+`.claude/agents/backend.md`, que o sandbox do QA não alcança.
+**Status:** ativo
+

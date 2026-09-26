@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 **S0–S19 + Sprints 0–5 do agents-hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **74/74** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **97/97** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
 > **O que cada sprint do agents-hub entregou** (todas na `main`):
 >
@@ -192,7 +192,7 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**77** hoje — o arquivo é a fonte, confira com
+      (**97** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant E cross-org**: a bateria
       (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
@@ -200,10 +200,14 @@
       organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
-      (`PENDING_ENDPOINTS` está vazio: cobertura **77/77**). As 3 rotas do
+      (`PENDING_ENDPOINTS` está vazio: cobertura **97/97**). As 3 rotas do
       **plano de contas** (S10) e as 3 da **carteira de títulos** (S11 — lista,
       agregados e sincronizar) e as 3 da S15 (relatório de recebíveis, leitura e
-      registro do contexto do título) entraram como coleção. Só
+      registro do contexto do título) entraram como coleção; as 20 da S12 também:
+      2 da base de movimentos (sincronizar e estado da competência), 7 do
+      catálogo de destinos e alvos (`/mapping-destinations`, por ORGANIZAÇÃO — o
+      alvo atacado na bateria é de uma terceira org, porque o operador lê o
+      catálogo da própria) e 11 do de-para (`/clients/{id}/mapping/{tipo}/…`). Só
       auth, tipos de anomalia, `test-connection`, `alert-test` e as 5 rotas de
       `/organizations` (plataforma, sem dado de cliente) ficam fora, com motivo.
       Essa lista é o denominador da métrica de isolamento — endpoint fora dela é
@@ -386,7 +390,7 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
 9. **Matriz de permissões (Sprint 5 + camada de organizações):** declarativa e
    ÚNICA em `PERMISSION_MATRIX`
    ([apps/api/app/core/authz.py](apps/api/app/core/authz.py)), consultada por
-   `has_permission`; 20 permissões x 5 papéis, transcrita célula a célula em
+   `has_permission`; 23 permissões x 5 papéis, transcrita célula a célula em
    `tests/unit/test_authz_matrix.py`, com um teste que trava **a plataforma em
    toda linha**. No front, o espelho é `apps/web/src/lib/authz.ts` — **um**
    helper, nunca `if (role === ...)` espalhado por componente — com a mesma
@@ -419,6 +423,9 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    | Sincronizar títulos em aberto   | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
    | Ver contexto do título (S15)    | ✅             | ✅               | ✅ (carteira)         | ✅             | ✅              |
    | Registrar contexto do título    | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
+   | Sincronizar movimentos (S12)    | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
+   | Editar o de-para (S12)          | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
+   | Catálogo de destinos (escrita)  | ✅             | ✅ (própria org) | ❌                    | ❌             | ❌              |
 
    **`manage_client_connections` (Sprint 9) inclui o `manager` de propósito**: ele
    cria cliente, e sem a célula o gerente do escritório parceiro cadastraria a
@@ -447,6 +454,18 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    e a tabela guarda os DOIS tipos** (a pagar e a receber): o nome da permissão
    é contrato com o front e com o PRD, então quem está certo é `client_titles` —
    não leia a permissão como se recortasse metade da carteira (ADR-069-BE).
+
+   **As três da Sprint 12 (de-para) também são próprias.** `sync_client_movements`
+   repete as células de `sync_client_receivables` pelo mesmo motivo da S11 (duas
+   sincronizações diferentes não se amarram a uma decisão só); a LEITURA da base
+   e do de-para não pede permissão (`AccessibleClientDep`), então o operador vê a
+   tela e não edita. `manage_client_mapping` inclui o `manager` DE PROPÓSITO:
+   `edit_client` é admin-only, e preso a ela o contador parceiro construiria a
+   carteira sem conseguir classificá-la (armadilha do R6). `manage_mapping_catalog`
+   (escrever destinos e alvos) é configuração da ORGANIZAÇÃO — usuário de cliente
+   escrevendo nela mudaria o de-para dos outros tenants; a leitura do catálogo é
+   de quem pertence à org (ADR-074-BE, decisão do planejador pendente de validação
+   humana).
 
    "(carteira)" e "(própria org)" **não** são células: são `resolve_client_access`
    e os filtros de coleção. **Tipos de anomalia é a única linha só-plataforma
@@ -499,7 +518,10 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
       morreria com a DEK — ele entra na lista de `close_client_purge`
       **explicitamente**, por ser configuração de um cliente que não opera mais; a
       **carteira de títulos** (S11) e os **contextos do título** (S15) também saem
-      explicitamente no purge;
+      explicitamente no purge; a **base de movimentos** e as **decisões do de-para**
+      (S12) saem também (são configuração/insumo), mas as **materializações do
+      de-para FICAM**, só-leitura — são "o que aconteceu", com itens em snapshot de
+      códigos e valores, sem FK para a base (ADR-074-BE);
       conciliações, valores, datas,
       categoria e carteira FICAM, só-leitura.
     - **Encerrado é TERMINAL**: cliente que volta é cadastro novo. Toda escrita
@@ -633,6 +655,27 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
 - **Exceptions custom** (`AppError` → `DuplicateFileError`, `OmieAuthError`, etc.) com `code` e `user_message`. Exception handler global converte para formato §9 do PLANO.
 - **Dependency Injection** via `Depends`. Proibido estado global.
 - **Lint obrigatório:** ruff (`E, F, I, N, W, UP, B, C4, SIM, RUF, S, A, ASYNC, ANN, PT, TID`) + ruff format (line-length 100), mypy strict.
+- **Falha esperada nunca é 500** (Sprint 12, ADR-078-BE: quatro caminhos para 500 pegos
+  pelo QA, nenhum por teste sequencial):
+  - validar a FORMA não basta: o padrão tem de recusar o que o construtor não aceita
+    (`COMPETENCE_PATTERN` aceitava `0000` e `date(0, …)` estourava). Teste de ida e volta
+    `format(parse(x)) == x` para tudo que o padrão aceita;
+  - props de métrica montadas DEPOIS de um commit de negócio ficam dentro do fail-soft
+    (`UsageEventService._props_or_none`): a métrica nunca derruba a escrita já gravada;
+  - arquivo de terceiro (planilha, zip, XML): QUALQUER falha de abertura OU de iteração
+    é o mesmo 400 com `raise … from None` (a exceção original traz o texto da célula e o
+    handler de 500 loga `exc_info`); custo limitado ANTES de iterar (tamanho
+    descomprimido, colunas, linhas PERCORRIDAS, vazias inclusive); parse síncrono via
+    `run_in_threadpool`; código longo é recusado, nunca truncado;
+  - UNIQUE que a corrida alcança (duplo clique, duas abas): `ON CONFLICT DO NOTHING` para
+    ação idempotente, SAVEPOINT + nome da constraint → 409 para escrita. Checar antes de
+    inserir não protege nada sob concorrência.
+- **"O mês de agora" é no fuso do Brasil**, num lugar só:
+  `client_movements/competence.py::current_competence` (UTC-3 fixo, como o export). Em
+  UTC, das 21h às 23h59 do último dia o servidor já está no mês seguinte.
+- **Teste de integração que não rodou não é verde.** Sem Postgres no sandbox, o HANDOFF diz
+  "escrito e NÃO executado" e o QA roda (receita no ADR-032-QA). Releitura em teste async:
+  `execution_options(populate_existing=True)` ou `refresh(obj)`, nunca `expire_all()`.
 
 ### Frontend
 
@@ -735,7 +778,37 @@ ClickUp**, não no repo. `make sprints` lista o estado.
 | **9**  | Cliente sem sistema e conexões plugáveis   | `client_connections`, `integrations/providers/`, `legacy_fallback.py`                                        |
 | **10** | Plano de contas do cliente                 | `client_chart_of_accounts`, `modules/client_chart_of_accounts/`, `clients.chart_of_accounts_synced_at`       |
 | **11** | Carteira de títulos em aberto              | `client_titles`, `modules/client_titles/`, `clients.titles_synced_at`/`titles_sync_failed_at`                |
+| **12** | De-para multi-destino                      | `client_movements`/`client_movement_syncs`, `mapping_destinations`/`mapping_targets`, `client_mapping_decisions`, `client_mapping_materializations(_items)`, aba "De-para" |
 | **15** | Contexto do título: acordo × inadimplência | `title_contexts`, rotas `/titles/{id}/context` e `/titles/receivables-report`, aba "Relatório de recebíveis" |
+
+**A Sprint 12 (de-para multi-destino)** criou a peça central da plataforma: a decisão
+`(cliente, tipo de origem, categoria, destino) → alvo`, em que a MESMA categoria vai para
+destinos diferentes (ex.: transferência entre contas próprias é `nao_mapear` no
+demonstrativo e alvo real no fluxo de caixa). O que vale como lei, não como detalhe:
+
+- **a base é `client_movements` (R0)**, agnóstica de origem e só com CÓDIGOS (nenhum nome
+  nem texto livre), sincronizada por competência (`POST /clients/{id}/movements/sync`),
+  num ciclo que nunca apaga (`ausente_na_origem`); o de-para NUNCA lê as divergências da
+  conciliação nem a origem ao vivo. A S14 alimenta a MESMA tabela com `source_type=arquivo`;
+- **`tipo de origem` é o tipo do provedor**, nunca FK de conexão: recriar a conexão não
+  leva o de-para junto;
+- **três estados distintos:** `nao_mapear` é decisão (linha), "sem decisão" é ausência de
+  linha, "sem categoria de origem" é buraco de ingestão e fica FORA do denominador da
+  cobertura;
+- **vigência por competência, append-only** (`resolve_vigente`, função pura única);
+  retroativa sobre competência materializada é 409;
+- **alvo é código de catálogo por organização** (5 tipos semeados; o 6º é cadastro,
+  não migration); herança só no `demonstrativo_contabil`, a partir do `dre_code` do
+  plano de contas (S10);
+- **materialização imutável** `(cliente, destino, competência, versão)`, gravada só com o
+  hash da prévia confirmada — é o que a Sprint 13 lê. `depara_aplicado` e
+  `movimentos_sincronizados` são os eventos da métrica (sem dedup, só IDs e números).
+
+Números deste primer: endpoints sensíveis 77 → **97**, matriz 20 → **23**, pares de AAD
+seguem **13** (nenhum campo cifrado nasceu: a base só guarda códigos). O QA reprovou 5
+das 7 tasks na rodada 1 (testes de integração nunca rodados e quatro caminhos para 500,
+ADR-039-QA) e aprovou as 7 na re-revisão de 26/09, com a suíte completa contra Postgres
+verde (2898 passed; ADR-040-QA). As lições viraram regra na §7 Backend.
 
 ✅ **A Sprint 15 (contexto do título) foi validada em 24/09/2026 à noite** (PR #203
 da sprint, correções da validação em `fix/S15-validation-findings`). Ela pendura no
@@ -915,6 +988,10 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.50 — 26/09/2026. **Re-revisão da Sprint 12: as 5 tasks reprovadas voltaram corrigidas e a sprint foi aprovada inteira (ADR-040-QA).** A §7 Backend ganhou três regras que saíram dos defeitos da rodada 1: falha esperada nunca é 500 (padrão que recusa o que o construtor não aceita, props de métrica pós-commit dentro do fail-soft, arquivo de terceiro com 400 único `from None` e custo limitado antes de iterar, UNIQUE alcançável por corrida tratada com `ON CONFLICT DO NOTHING` ou SAVEPOINT → 409); "o mês de agora" no fuso do Brasil por `client_movements/competence.py::current_competence`; e teste de integração que não rodou não é verde (releitura async com `populate_existing`, nunca `expire_all()`). A nota da Sprint 12 na §8 passou a registrar a aprovação. Nenhum número do primer mudou (97 endpoints, 23 permissões, 13 pares de AAD)._
+
+_Versão 1.49 — 26/09/2026. **A Sprint 12 (de-para multi-destino) entrou no primer.** §3.15 com a lista canônica em 97 (as 20 rotas novas: movimentos, catálogo por organização e de-para), §4.9 com as três permissões novas e o porquê de cada uma ser própria (`manage_client_mapping` inclui o manager de propósito; `manage_mapping_catalog` é da organização), §4.12 com movimentos e decisões no purge e as materializações RETIDAS, e §8 com o que a sprint deixou no código. Nenhum AAD novo. Escrito pelo QA na rodada 1, com 5 tasks ainda em retrabalho (ADR-039-QA): se o retrabalho mudar algum destes fatos, a rodada seguinte corrige aqui._
 
 _Versão 1.48 — 25/09/2026. **Fundo destrutivo de badge ou de hover é `destructive-muted`, nunca `bg-destructive/N` (86e3dxund).** O QA da Sprint 11 mediu o badge `/10` a 4,22:1 no escuro e 4,42:1 no Hologram, e o `theme-contrast.test.ts` dizia que o par passava: ele compunha os 10% sobre `background`, mas o badge vive em linha de tabela, e em hover (`hover:bg-muted/50`) a superfície de baixo é outra. Os três badges (status "Erro", usuário "Inativo", glossário "Indecifrável") e os quatro botões com `hover:bg-destructive/10` passaram ao token opaco, o caso enganoso saiu do teste unitário e o e2e ganhou três cenários com o ponteiro EM CIMA e contraste COMPOSTO (`contrasteComposto`, porque o axe dá `incomplete` para fundo translúcido e o `measuredContrast` trata o primeiro fundo como opaco); com as classes antigas eles reprovam 4,23:1 e 4,44:1, com as novas passam. Regra na skill `front-gate` §4 e no `.claude/design-system.md`. ⚠️ Achado fora do escopo, ainda aberto: na célula de qualificação da revisão, o `hover:bg-destructive/20` sobre `destructive-muted` cai para 4,23 / 3,76 / 3,46:1 (claro / escuro / Hologram) e o `hover:bg-warning/20` para 3,68:1 no claro (conta sobre os tokens, não medida em browser)._
 
