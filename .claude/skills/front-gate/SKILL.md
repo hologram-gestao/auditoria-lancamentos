@@ -47,6 +47,15 @@ flex-col overflow-hidden`) + `<Table fill>` (`:27`, `:43`). Nunca `overflow` no
   viewport, e o texto centralizado nela fica com a metade direita fora da tela, "visível"
   para todo `toBeVisible()` (validação da Sprint 11). O e2e mede o texto do estado vazio
   dentro da viewport (`exigirEstadoVazioLegivel`).
+- **Abas (`ui/tabs.tsx`)**: o Radix mantém o `TabsContent` INATIVO montado com o atributo
+  `hidden`, e uma classe de display do consumidor (`flex`, que a cadeia de altura pede) vence o
+  atributo. Com `flex-1`, o painel invisível cresce na sobra da coluna: 209px de vão entre as
+  abas e a prévia do de-para, com o axe verde (validação da S12). O primitivo tem
+  `data-[state=inactive]:hidden` por isso; não o remova, e não esconda painel por atributo
+  quando o consumidor põe classe de display. `Tabs` e `TabsContent` que carregam tabela
+  precisam de `min-h-0 flex-1` nos DOIS níveis (validação da S15). Guardas: teste de classe
+  em `ui/__tests__/tabs.test.tsx` e a medição do painel inativo no cenário "nunca
+  sincronizada" do de-para.
 - **Shell**: só o `<main>` rola — `app/(app)/layout.tsx:121` (`h-dvh overflow-hidden`)
   e `:168` (`main … overflow-y-auto`). Proibido `h-screen`/`min-h-screen`/`100vh`.
 - Travas no browser: "a barra de paginação NUNCA cobre um card" (`e2e/a11y-mocked.spec.ts:1081`)

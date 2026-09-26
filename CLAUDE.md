@@ -765,21 +765,21 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
 Rodadas pelo orquestrador multi-agente; o escopo de cada uma vive no **Doc do
 ClickUp**, não no repo. `make sprints` lista o estado.
 
-| Sprint | Foco                                       | Deixou no código                                                                                             |
-| ------ | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| **0**  | Estabilização                              | —                                                                                                            |
-| **1**  | Fatura de cartão + conta aplicação         | `account_type`, `DATE_DIVERGENCE_RANGE`                                                                      |
-| **2**  | Parsing sem perda silenciosa               | CSV grande, XLSX completo                                                                                    |
-| **3**  | Cripto por cliente, auditoria, alerta      | `clients.dek_wrapped`, `access_audit`, `core/kms.py`                                                         |
-| **4**  | Lista, gaveta, multi-arquivo, notificações | `reconciliation_files`, `usage_events`, `notifications`                                                      |
-| **5**  | Multi-tenancy e papéis de cliente          | `users.scope`/`client_id`, `core/authz.py`, `core/sensitive_endpoints.py`                                    |
-| **6**  | Glossário e classificação por cliente      | `client_glossary_entries`, `clients.glossary_version`, `review_verdict`                                      |
-| **7**  | Lançamento de faturas no Omie              | `reconciliation_omie_postings`, `omie_posting/`, `OMIE_POSTING_ENABLED`                                      |
-| **9**  | Cliente sem sistema e conexões plugáveis   | `client_connections`, `integrations/providers/`, `legacy_fallback.py`                                        |
-| **10** | Plano de contas do cliente                 | `client_chart_of_accounts`, `modules/client_chart_of_accounts/`, `clients.chart_of_accounts_synced_at`       |
-| **11** | Carteira de títulos em aberto              | `client_titles`, `modules/client_titles/`, `clients.titles_synced_at`/`titles_sync_failed_at`                |
+| Sprint | Foco                                       | Deixou no código                                                                                                                                                           |
+| ------ | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **0**  | Estabilização                              | —                                                                                                                                                                          |
+| **1**  | Fatura de cartão + conta aplicação         | `account_type`, `DATE_DIVERGENCE_RANGE`                                                                                                                                    |
+| **2**  | Parsing sem perda silenciosa               | CSV grande, XLSX completo                                                                                                                                                  |
+| **3**  | Cripto por cliente, auditoria, alerta      | `clients.dek_wrapped`, `access_audit`, `core/kms.py`                                                                                                                       |
+| **4**  | Lista, gaveta, multi-arquivo, notificações | `reconciliation_files`, `usage_events`, `notifications`                                                                                                                    |
+| **5**  | Multi-tenancy e papéis de cliente          | `users.scope`/`client_id`, `core/authz.py`, `core/sensitive_endpoints.py`                                                                                                  |
+| **6**  | Glossário e classificação por cliente      | `client_glossary_entries`, `clients.glossary_version`, `review_verdict`                                                                                                    |
+| **7**  | Lançamento de faturas no Omie              | `reconciliation_omie_postings`, `omie_posting/`, `OMIE_POSTING_ENABLED`                                                                                                    |
+| **9**  | Cliente sem sistema e conexões plugáveis   | `client_connections`, `integrations/providers/`, `legacy_fallback.py`                                                                                                      |
+| **10** | Plano de contas do cliente                 | `client_chart_of_accounts`, `modules/client_chart_of_accounts/`, `clients.chart_of_accounts_synced_at`                                                                     |
+| **11** | Carteira de títulos em aberto              | `client_titles`, `modules/client_titles/`, `clients.titles_synced_at`/`titles_sync_failed_at`                                                                              |
 | **12** | De-para multi-destino                      | `client_movements`/`client_movement_syncs`, `mapping_destinations`/`mapping_targets`, `client_mapping_decisions`, `client_mapping_materializations(_items)`, aba "De-para" |
-| **15** | Contexto do título: acordo × inadimplência | `title_contexts`, rotas `/titles/{id}/context` e `/titles/receivables-report`, aba "Relatório de recebíveis" |
+| **15** | Contexto do título: acordo × inadimplência | `title_contexts`, rotas `/titles/{id}/context` e `/titles/receivables-report`, aba "Relatório de recebíveis"                                                               |
 
 **A Sprint 12 (de-para multi-destino)** criou a peça central da plataforma: a decisão
 `(cliente, tipo de origem, categoria, destino) → alvo`, em que a MESMA categoria vai para
@@ -988,6 +988,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.51 — 26/09/2026. **A validação humana da Sprint 12 (86e3f14qc) rodou fora do sandbox o que a sprint não conseguiu, e o produto passou.** Suíte completa com Postgres (2903 verdes, 3 ambientais), a11y em browser nos três temas (384 por tema), contrato com diff 0, ciclo de migrations num banco limpo, cenário de API de ponta a ponta (a tese dos dois destinos nos números, os 409 tipados, export/import, 403 do operador e cross-tenant sem vazar nome, trilha e eventos) e prints. **Um defeito, invisível ao axe:** o `TabsContent` inativo fica montado com `hidden`, a classe `flex` do consumidor vence o atributo e o `flex-1` faz o painel invisível crescer na sobra da coluna: 209px de vão entre as abas e a prévia do de-para quando a prévia é curta. Corrigido no primitivo (`data-[state=inactive]:hidden`), com teste de classe e guarda geométrica no e2e; a regra entrou na skill `front-gate` §1. **Regra que fica:** painel condicional que recebe classe de display esconde por variante de estado, nunca pelo atributo. Ficaram para o follow-up de front: destino padrão da tela ("Conta contábil", o primeiro do catálogo, em vez do demonstrativo) e "Confirmar herdadas" em destino que não herda. As seis decisões do planejador (ADR-074/075/077-BE) seguem pendentes do Pedro; S-1 segue sem medição._
 
 _Versão 1.50 — 26/09/2026. **Re-revisão da Sprint 12: as 5 tasks reprovadas voltaram corrigidas e a sprint foi aprovada inteira (ADR-040-QA).** A §7 Backend ganhou três regras que saíram dos defeitos da rodada 1: falha esperada nunca é 500 (padrão que recusa o que o construtor não aceita, props de métrica pós-commit dentro do fail-soft, arquivo de terceiro com 400 único `from None` e custo limitado antes de iterar, UNIQUE alcançável por corrida tratada com `ON CONFLICT DO NOTHING` ou SAVEPOINT → 409); "o mês de agora" no fuso do Brasil por `client_movements/competence.py::current_competence`; e teste de integração que não rodou não é verde (releitura async com `populate_existing`, nunca `expire_all()`). A nota da Sprint 12 na §8 passou a registrar a aprovação. Nenhum número do primer mudou (97 endpoints, 23 permissões, 13 pares de AAD)._
 
