@@ -60,6 +60,18 @@ class ErrorCode(StrEnum):
     #: continua sendo `OMIE_AUTH_ERROR`, que não muda de valor).
     PROVIDER_AUTH_ERROR = "PROVIDER_AUTH_ERROR"
     CREDENTIALS_MOVED = "CREDENTIALS_MOVED"
+    # Sprint 12 — de-para. Maiúsculos em português, no padrão da taxonomia da S9:
+    # a tela decide a INSTRUÇÃO pelo código, não pelo texto.
+    ALVO_INEXISTENTE = "ALVO_INEXISTENTE"
+    DESTINO_NAO_CONFIGURADO = "DESTINO_NAO_CONFIGURADO"
+    DECISAO_DUPLICADA = "DECISAO_DUPLICADA"
+    RETROATIVA_REQUER_CONFIRMACAO = "RETROATIVA_REQUER_CONFIRMACAO"
+    COMPETENCIA_MATERIALIZADA = "COMPETENCIA_MATERIALIZADA"
+    BASE_NAO_SINCRONIZADA = "BASE_NAO_SINCRONIZADA"
+    SEM_MOVIMENTOS = "SEM_MOVIMENTOS"
+    ANTERIOR_A_PRIMEIRA_VIGENCIA = "ANTERIOR_A_PRIMEIRA_VIGENCIA"
+    PREVIA_DESATUALIZADA = "PREVIA_DESATUALIZADA"
+    COBERTURA_PARCIAL_REQUER_CONFIRMACAO = "COBERTURA_PARCIAL_REQUER_CONFIRMACAO"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
@@ -340,6 +352,26 @@ class OriginCapabilityMissingError(ConflictError):
     default_user_message = "A origem conectada a este cliente não oferece esta operação."
 
 
+class MovementAccountsUnknownError(ConflictError):
+    """409 — a base de movimentos não sabe QUAIS contas ler (Sprint 12, BACK 12.1).
+
+    A sincronização de uma competência itera as contas que o cache de contas do
+    cliente já conhece. Com o cache vazio E a conexão nunca tendo sincronizado
+    contas, "zero movimentos" seria uma base vazia passando por completa — e, numa
+    competência já sincronizada antes, marcaria todo movimento como ausente sem a
+    origem ter dito nada. Não é falha da origem (nada é carimbado): é uma etapa
+    de configuração pendente, com remédio na mensagem.
+
+    Cache vazio com as contas JÁ sincronizadas é outra coisa — a origem disse que
+    não há conta — e segue como base vazia de verdade.
+    """
+
+    default_user_message = (
+        "As contas deste cliente ainda não foram sincronizadas. Sincronize as contas "
+        "e tente novamente."
+    )
+
+
 class ConnectionLabelAlreadyExistsError(ConflictError):
     """409 — `(cliente, tipo, rótulo)` já existe (S9 BACK 09.3).
 
@@ -457,6 +489,162 @@ class CredentialsMovedToConnectionsError(AppError):
         "POST /api/v1/clients/{id}/connections para conectar uma origem, ou "
         "PATCH /api/v1/clients/{id}/connections/{connectionId} para trocar as "
         "credenciais de uma existente."
+    )
+
+
+class MappingTargetNotFoundError(AppError):
+    """422 — a decisão aponta um alvo que o destino não tem (Sprint 12, R1).
+
+    Exceção TIPADA com mensagem, não validação Pydantic: o validador de forma vira
+    o 400 genérico do handler global (que não ecoa o campo, 86e2rtxcm), e o PRD
+    exige que a resposta NOMEIE o alvo. Precedente: `CredentialsMovedToConnectionsError`.
+    O código do alvo é do catálogo da ORGANIZAÇÃO de quem pede — não é dado de
+    outro tenant, pode voltar no corpo. Alvo DESATIVADO também cai aqui: não recebe
+    decisão nova.
+    """
+
+    code = ErrorCode.ALVO_INEXISTENTE
+    status_code = 422
+    default_user_message = "O alvo informado não existe neste destino."
+
+
+class MappingDestinationNotConfiguredError(ConflictError):
+    """409 — o destino pedido não está configurado (ou está inativo) na organização
+    do cliente (Sprint 12, R2). A mensagem NOMEIA o tipo do destino ausente."""
+
+    code = ErrorCode.DESTINO_NAO_CONFIGURADO
+    default_user_message = "Este destino não está configurado para a organização do cliente."
+
+
+class MappingDecisionDuplicateError(ConflictError):
+    """409 — já existe decisão CONFIRMADA para a mesma chave na mesma vigência (R2).
+
+    Alterar uma decisão é vigência NOVA (outra competência de início), nunca uma
+    segunda linha na mesma competência nem `UPDATE` da vigente (R4).
+    """
+
+    code = ErrorCode.DECISAO_DUPLICADA
+    default_user_message = (
+        "Já existe uma decisão para esta categoria neste destino a partir desta "
+        "competência. Para alterar, escolha outra competência de início."
+    )
+
+
+class RetroactiveMappingRequiresConfirmationError(ConflictError):
+    """409 — vigência retroativa sem materialização pede confirmação EXPLÍCITA (R4).
+
+    `details.competences` lista as competências afetadas (`YYYY-MM,YYYY-MM`) — a
+    confirmação tem de nomeá-las para quem confirma.
+    """
+
+    code = ErrorCode.RETROATIVA_REQUER_CONFIRMACAO
+    default_user_message = (
+        "Esta alteração vale para competências passadas. Confirme para aplicá-la a elas."
+    )
+
+
+class RetroactiveOverMaterializedError(ConflictError):
+    """409 — vigência retroativa sobre competência JÁ materializada (R4).
+
+    O resultado entregue não muda sob os pés de ninguém: nem com confirmação.
+    `details.competences` lista as materializadas.
+    """
+
+    code = ErrorCode.COMPETENCIA_MATERIALIZADA
+    default_user_message = (
+        "Esta alteração atingiria uma competência que já teve o de-para aplicado. "
+        "Escolha uma competência de início posterior."
+    )
+
+
+class MovementBaseNotSyncedError(ConflictError):
+    """409 — a competência NUNCA foi sincronizada (R0/R5): a prévia não sai vazia.
+
+    Uma prévia com zero movimentos teria cara de "0% de cobertura" — resultado —
+    quando o que falta é a base. A mensagem manda sincronizar.
+    """
+
+    code = ErrorCode.BASE_NAO_SINCRONIZADA
+    default_user_message = (
+        "Esta competência ainda não foi sincronizada. Sincronize os movimentos da "
+        "competência antes de aplicar o de-para."
+    )
+
+
+class NoMovementsToMapError(ConflictError):
+    """409 — competência sincronizada e sem nenhum movimento presente (R3)."""
+
+    code = ErrorCode.SEM_MOVIMENTOS
+    default_user_message = "Não há movimentos nesta competência — não há o que traduzir."
+
+
+class CompetenceBeforeFirstVigenciaError(ConflictError):
+    """409 — competência anterior à primeira vigência do destino (R4).
+
+    `details.earliestCompetence` traz a competência mais antiga disponível.
+    """
+
+    code = ErrorCode.ANTERIOR_A_PRIMEIRA_VIGENCIA
+    default_user_message = (
+        "O de-para deste destino não existia nesta competência. Escolha uma competência "
+        "a partir da primeira vigência."
+    )
+
+
+class StaleMappingPreviewError(ConflictError):
+    """409 — a base ou as decisões mudaram desde a prévia confirmada (R5).
+
+    Nada materializa sem a prévia que a pessoa viu: o token enviado não bate com o
+    recálculo no servidor.
+    """
+
+    code = ErrorCode.PREVIA_DESATUALIZADA
+    default_user_message = (
+        "Os movimentos ou as decisões mudaram desde a prévia. Gere a prévia de novo e confirme."
+    )
+
+
+class PartialCoverageRequiresConfirmationError(ConflictError):
+    """409 — há valor SEM decisão e a cobertura parcial não foi confirmada (R5)."""
+
+    code = ErrorCode.COBERTURA_PARCIAL_REQUER_CONFIRMACAO
+    default_user_message = (
+        "Há movimentos sem decisão nesta competência. Confirme que deseja aplicar com "
+        "cobertura parcial."
+    )
+
+
+class MappingImportRequiresConfirmationError(ConflictError):
+    """409 — aplicar a importação do de-para sem a confirmação explícita (R6).
+
+    A prévia é obrigatória e não grava nada; a aplicação só acontece com
+    `confirm=true`. `details` traz as contagens da prévia recalculada.
+    """
+
+    default_user_message = "Revise a prévia da importação e confirme para aplicar as decisões."
+
+
+class MappingDestinationTypeAlreadyExistsError(ConflictError):
+    """409 — a organização já tem um destino deste tipo (`UNIQUE(org, tipo)`)."""
+
+    default_user_message = "Esta organização já tem um destino deste tipo."
+
+
+class MappingTargetCodeAlreadyExistsError(ConflictError):
+    """409 — código de alvo repetido no destino (`UNIQUE(destino, código)`).
+
+    O lote é atômico: um código repetido recusa o lote inteiro, e a mensagem lista
+    os códigos (do catálogo da própria organização).
+    """
+
+    default_user_message = "Já existe alvo com este código neste destino."
+
+
+class MappingTargetInUseError(ConflictError):
+    """409 — apagar alvo referenciado por decisão de de-para (R1). Desativar é o caminho."""
+
+    default_user_message = (
+        "Este alvo está em uso por decisões de de-para — desative em vez de excluir."
     )
 
 

@@ -32,6 +32,8 @@ from app.db.models import (
     ClientAssignment,
     ClientChartOfAccount,
     ClientConnection,
+    ClientMovement,
+    ClientMovementSync,
     Notification,
     NotificationType,
     ProviderType,
@@ -220,6 +222,20 @@ async def _seed_world(db: AsyncSession, *, processing: bool = False) -> _World:
     # acima — é mais uma FK no grafo, e a FK dela é `CASCADE`: a exclusão
     # definitiva tem de continuar passando sem `DELETE` explícito.
     db.add(ClientChartOfAccount(client_id=w.cli_a.id, category_code="1.01.01", dre_code="1.01"))
+    # S12 (BACK 12.1): a base de movimentos e o carimbo da competência. Mais duas
+    # FKs `CASCADE` no grafo — a exclusão definitiva leva as duas sem `DELETE`
+    # explícito na lista do repositório.
+    db.add(
+        ClientMovement(
+            client_id=w.cli_a.id,
+            source_type=ProviderType.OMIE.value,
+            source_movement_id="7001",
+            competence=date(2026, 4, 1),
+            movement_date=date(2026, 4, 10),
+            amount=Decimal("-150.00"),
+        )
+    )
+    db.add(ClientMovementSync(client_id=w.cli_a.id, competence=date(2026, 4, 1)))
     db.add(
         AccessAudit(
             user_id=w.admin.id,
@@ -305,6 +321,12 @@ class TestDeleteClient:
             )
             == 0
         )
+        # A base de movimentos (S12) e os carimbos dela também, pelo CASCADE.
+        for model in (ClientMovement, ClientMovementSync):
+            assert (
+                await _count(db_session, select(func.count(model.id)).where(model.client_id == a))
+                == 0
+            ), f"{model.__tablename__} sobreviveu à exclusão definitiva"
         # Trilha LGPD sobrevive ao cliente (só IDs).
         assert (
             await _count(

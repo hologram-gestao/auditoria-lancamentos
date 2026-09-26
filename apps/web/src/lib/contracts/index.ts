@@ -407,6 +407,69 @@ export type ReceivablesReport = Schemas['ReceivablesReportResponse'];
 export type ReceivablesReportEnvelope = Schemas['ReceivablesReportEnvelope'];
 
 // ---------------------------------------------------------------------------
+// De-para multi-destino (Sprint 12 — BACK 12.2 a 12.6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Estado da base de movimentos de UMA competência. `neverSynced` é CAMPO (não
+ * "zero movimentos"): competência sem movimento e competência que ninguém
+ * consultou são respostas diferentes, e a tela não decide isso contando linhas.
+ */
+export type MovementsSyncState = Schemas['MovementsSyncStateResponse'];
+/** Contagens do ciclo + o `state` resultante (evita 2º request). */
+export type MovementsSyncResult = Schemas['MovementsSyncResponse'];
+export type MovementsSyncRequest = Schemas['MovementsSyncRequest'];
+
+/** Um destino do catálogo da ORGANIZAÇÃO (tipo + nome + situação). */
+export type MappingDestination = Schemas['MappingDestinationItem'];
+/** `{ data: [...] }` — chave ÚNICA: o `apiGet` já entrega o array. */
+export type MappingDestinationListResponse = Schemas['MappingDestinationListResponse'];
+/** Um alvo do destino — código de catálogo + nome. */
+export type MappingTarget = Schemas['MappingTargetItem'];
+/** `{ data, pagination }` — DUAS chaves: o envelope chega inteiro. */
+export type MappingTargetListResponse = Schemas['MappingTargetListResponse'];
+
+/**
+ * Uma categoria do universo do cliente com a decisão VIGENTE no destino. O nome
+ * é de runtime (`categoryNameResolved=false` ⇒ a tela mostra o código).
+ */
+export type MappingListItem = Schemas['MappingListItem'];
+/** `{ data, pagination, competence }` — TRÊS chaves: o envelope chega inteiro. */
+export type MappingListResponse = Schemas['MappingListResponse'];
+/** `herdada` | `confirmada` | `nao_mapear` | `sem_decisao` — enum FECHADO. */
+export type MappingSituation = Schemas['MappingListItem']['situation'];
+/** Query real de `GET /clients/{id}/mapping/{tipo}` (`page`, `pageSize`, `situation`, `code`). */
+export type ListClientMappingQuery = NonNullable<
+  paths['/api/v1/clients/{client_id}/mapping/{destination_type}']['get']['parameters']['query']
+>;
+
+/** `alvo` | `nao_mapear` — `nao_mapear` é DECISÃO; "sem decisão" é ausência dela. */
+export type MappingDecisionType = Schemas['DecisionItemRequest']['decision'];
+export type DecisionWriteRequest = Schemas['DecisionWriteRequest'];
+export type DecisionWriteResult = Schemas['DecisionWriteResponse'];
+/** `confirm=false` só CONTA as herdadas afetadas; `true` grava. */
+export type ConfirmInheritedRequest = Schemas['ConfirmInheritedRequest'];
+export type ConfirmInheritedResult = Schemas['ConfirmInheritedResponse'];
+export type InheritRequest = Schemas['InheritRequest'];
+/** `ok` | `sem_plano_de_contas` | `destino_sem_heranca` — nenhum é erro. */
+export type InheritResult = Schemas['InheritResponse'];
+
+/** Prévia da competência: as QUATRO situações, cobertura e contra-métrica. */
+export type MappingPreview = Schemas['MappingPreviewResponse'];
+export type MappingSituationTotal = Schemas['SituationTotalResponse'];
+export type UndecidedCategory = Schemas['UndecidedCategoryResponse'];
+export type MaterializationRequest = Schemas['MaterializationRequest'];
+/** A versão N+1 criada — imutável. */
+export type MaterializationResult = Schemas['MaterializationResponse'];
+
+/** Prévia da importação: criadas · alteradas · ignoradas + recusadas com motivo. */
+export type MappingImportPreview = Schemas['ImportPreviewResponse'];
+export type MappingImportApplyResult = Schemas['ImportApplyResponse'];
+export type MappingImportRejectedLine = Schemas['ImportRejectedLine'];
+/** Motivo da recusa — enum FECHADO (a UI rotula cada um). */
+export type MappingImportRejectReason = Schemas['ImportRejectedLine']['reason'];
+
+// ---------------------------------------------------------------------------
 // Lançamento no Omie (Sprint 7 / R1 · R2 · R5 — BACK 07.3 · 07.4)
 // ---------------------------------------------------------------------------
 
