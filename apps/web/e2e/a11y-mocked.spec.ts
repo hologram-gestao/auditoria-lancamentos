@@ -3772,6 +3772,25 @@ for (const vp of VIEWPORTS) {
         'Junho de 2026 ainda não tem base de movimentos',
         `${vp.label} · base nunca sincronizada`,
       );
+      // Validação humana da S12: o painel INATIVO da aba "Decisões" continuava
+      // montado com `hidden`, mas a classe `flex` do consumidor vencia o atributo
+      // e o `flex-1` o fazia crescer na sobra da coluna — 209px de vão entre as
+      // abas e "Competência" em 1440×900, com o axe verde. A guarda é geométrica:
+      // o painel inativo não ocupa altura, e o campo vem logo abaixo das abas.
+      const painelInativo = page.locator('[role="tabpanel"][data-state="inactive"]');
+      await expect(painelInativo).toHaveCount(1);
+      expect(
+        (await painelInativo.boundingBox())?.height ?? 0,
+        `${vp.label}: o painel inativo ocupa altura`,
+      ).toBe(0);
+      const abas = await page.getByRole('tablist').boundingBox();
+      const competencia = await page.getByLabel('Competência', { exact: true }).boundingBox();
+      expect(abas, 'faixa de abas sem caixa').not.toBeNull();
+      expect(competencia, 'campo de competência sem caixa').not.toBeNull();
+      expect(
+        (competencia?.y ?? 0) - ((abas?.y ?? 0) + (abas?.height ?? 0)),
+        `${vp.label}: vão entre as abas e o campo de competência`,
+      ).toBeLessThan(64);
       await shot(page, `de-para-nunca-sincronizada-${slugD}`);
       await analyze(page, `de-para — base nunca sincronizada (${vp.label})`);
     });
