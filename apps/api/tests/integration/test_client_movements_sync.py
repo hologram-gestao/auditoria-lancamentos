@@ -24,6 +24,7 @@ from uuid import uuid4
 import httpx
 import pytest
 import respx
+from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.crypto import encrypt
@@ -157,7 +158,16 @@ def _service(db: AsyncSession) -> ClientMovementsSyncService:
 
 
 async def _rows(db: AsyncSession, client: Client, competence: date) -> dict[str, ClientMovement]:
-    rows = await ClientMovementsRepository(db).list_for_competence(client.id, competence)
+    # Relê do BANCO: com expire_on_commit=False o select devolveria o objeto que já
+    # está no identity map, com o status do ciclo anterior. populate_existing força o
+    # refresh. NUNCA expire_all() aqui: expira o `client` da fixture e o próximo
+    # `client.id` estoura MissingGreenlet (lição da S11).
+    stmt = (
+        select(ClientMovement)
+        .where(ClientMovement.client_id == client.id, ClientMovement.competence == competence)
+        .execution_options(populate_existing=True)
+    )
+    rows = (await db.execute(stmt)).scalars().all()
     return {row.source_movement_id: row for row in rows}
 
 

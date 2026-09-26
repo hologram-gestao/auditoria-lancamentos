@@ -144,6 +144,21 @@ class TestMovimentosSincronizados:
             "contas": 3,
         }
 
+    async def test_props_invalidas_nao_derrubam_a_sincronizacao_ja_gravada(self) -> None:
+        """Retrabalho 12.2: o ano 999 sai do `strftime` como `'999-06'` e as props o
+        recusam. O emissor roda DEPOIS do commit da base — devolve False e loga,
+        nunca levanta (antes: 500 com a base já gravada)."""
+        repo = _Repo()
+        ok = await UsageEventService(repo).emit_movimentos_sincronizados(  # type: ignore[arg-type]
+            client_id=_CLIENT_ID,
+            competencia=date(999, 6, 1),
+            movimentos=1,
+            sem_categoria=0,
+            contas=1,
+        )
+        assert ok is False
+        assert repo.rows == []
+
 
 class TestDeparaAplicado:
     def test_props_tem_exatamente_as_seis_chaves_do_outcome(self) -> None:
@@ -238,6 +253,28 @@ class TestDeparaAplicado:
             "valor_sem_decisao_centavos",
         ):
             assert type(props[chave]) is int, "centavos são int — nunca Decimal nem float"
+
+    @pytest.mark.parametrize(
+        "over",
+        [{"destino": "Receita Bruta de Vendas"}, {"valor_com_decisao": Decimal("1.001")}],
+        ids=["destino_invalido", "mais_de_2_casas"],
+    )
+    async def test_props_invalidas_nao_derrubam_a_materializacao_commitada(
+        self, over: dict[str, Any]
+    ) -> None:
+        """Props recusadas (padrão do destino, `decimal_to_cents`) → False, sem levantar."""
+        repo = _Repo()
+        kwargs: dict[str, Any] = {
+            "client_id": _CLIENT_ID,
+            "destino": "demonstrativo_contabil",
+            "valor_com_decisao": Decimal("1.00"),
+            "valor_nao_mapear": Decimal("0"),
+            "valor_sem_decisao": Decimal("0"),
+            "categorias_sem_decisao": 0,
+        } | over
+        ok = await UsageEventService(repo).emit_depara_aplicado(**kwargs)  # type: ignore[arg-type]
+        assert ok is False
+        assert repo.rows == []
 
 
 class TestDecimalParaCentavos:

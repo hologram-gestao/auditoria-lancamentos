@@ -10,7 +10,10 @@ para log em ponto nenhum; o relatório de linhas recusadas devolve número da li
 códigos e um MOTIVO de vocabulário fechado — sem eco de texto livre.
 
 **Limites declarados** (ADR-076-BE): `.xlsx` (magic bytes de ZIP `PK\\x03\\x04`), até
-`MAX_IMPORT_BYTES` e `MAX_IMPORT_ROWS` linhas de dados.
+`MAX_IMPORT_BYTES` e `MAX_IMPORT_ROWS` linhas de dados; e o CUSTO da leitura (ADR-078-BE):
+`MAX_IMPORT_UNCOMPRESSED_BYTES`, `MAX_IMPORT_COMPRESSION_RATIO`, `MAX_IMPORT_COLUMNS` e
+`MAX_IMPORT_SCANNED_ROWS` (linhas percorridas, vazias inclusive). Planilha malformada
+é sempre o mesmo 400, e o parse roda fora do event loop.
 
 **Duas fases.** A PRÉVIA não grava nada e devolve criadas / alteradas / ignoradas +
 recusadas (a linha recusada não derruba o lote). A APLICAÇÃO exige confirmação
@@ -27,17 +30,14 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 from openpyxl import Workbook, load_workbook
+from starlette.concurrency import run_in_threadpool
 
 from app.core.exceptions import MappingImportRequiresConfirmationError, ValidationAppError
 from app.db.models import DecisionOrigin, DecisionType
 from app.db.models.client_movement import MAX_MOVEMENT_CATEGORY_CODE_CHARS
 from app.db.models.mapping_catalog import MAX_TARGET_CODE_CHARS
-from app.modules.client_mapping.service import (
-    CHART_SOURCE_TYPE,
-    DecisionInput,
-    current_competence,
-)
-from app.modules.client_movements.competence import format_competence
+from app.modules.client_mapping.service import CHART_SOURCE_TYPE, DecisionInput
+from app.modules.client_movements.competence import current_competence, format_competence
 from app.modules.reconciliations.export.workbook import neutralize_formula_injection
 
 if TYPE_CHECKING:
@@ -60,6 +60,20 @@ MAX_IMPORT_BYTES = 2 * 1024 * 1024
 #: Teto de linhas de dados. O plano de contas real mais longo visto tem ~130
 #: categorias; 2.000 cobre qualquer cliente com folga.
 MAX_IMPORT_ROWS = 2000
+#: Teto de linhas PERCORRIDAS (vazias inclusive). O openpyxl em `read_only` devolve
+#: uma linha vazia para cada buraco até a próxima linha do XML: uma célula perdida na
+#: linha 300.000 custava minutos de CPU síncrona. O dobro de `MAX_IMPORT_ROWS` deixa
+#: folga para linhas em branco legítimas no meio da planilha.
+MAX_IMPORT_SCANNED_ROWS = 2 * MAX_IMPORT_ROWS
+#: Colunas lidas por linha. A planilha exportada tem 9; o resto é ignorado (uma
+#: célula na coluna XFD não obriga a montar 16.384 posições por linha).
+MAX_IMPORT_COLUMNS = 32
+#: Teto do conteúdo DESCOMPRIMIDO do zip (soma de `file_size`). Uma planilha de 2.000
+#: linhas tem ~1 MB de XML; 20 MB barra a bomba de descompressão antes do parse.
+MAX_IMPORT_UNCOMPRESSED_BYTES = 20 * 1024 * 1024
+#: Razão máxima de compressão por entrada do zip. XML de planilha comprime ~10-20x;
+#: acima de 100x é arquivo fabricado.
+MAX_IMPORT_COMPRESSION_RATIO = 100
 #: Assinatura de todo `.xlsx` (é um ZIP).
 XLSX_MAGIC = b"PK\x03\x04"
 
@@ -216,47 +230,86 @@ def _cell_text(value: Any) -> str:
     return str(value).strip()
 
 
+def _check_zip_budget(content: bytes) -> None:
+    """Tamanho descomprimido e razão de compressão ANTES de o openpyxl abrir o zip."""
+    with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        total = 0
+        for info in archive.infolist():
+            total += info.file_size
+            if total > MAX_IMPORT_UNCOMPRESSED_BYTES:
+                raise _invalid_file("descomprimido grande demais")
+            if info.file_size > MAX_IMPORT_COMPRESSION_RATIO * max(info.compress_size, 1):
+                raise _invalid_file("razão de compressão")
+
+
 def parse_import(content: bytes) -> list[ImportLine]:
-    """Linhas de dados da 1ª planilha, casadas pelo CABEÇALHO (não pela posição)."""
+    """Linhas de dados da 1ª planilha, casadas pelo CABEÇALHO (não pela posição).
+
+    CPU síncrona: quem está num handler `async` chama via threadpool. QUALQUER falha
+    de leitura (abertura OU iteração: XML truncado, texto em célula numérica, zip
+    quebrado) é o MESMO 400 de mensagem fixa, `from None` — a exceção original pode
+    trazer o texto da célula, e nada do arquivo vai para log nem para a resposta.
+    O custo é limitado antes de iterar: orçamento do zip, dimensão declarada ignorada
+    (`reset_dimensions`), colunas e linhas PERCORRIDAS com teto.
+
+    Código de categoria/alvo NÃO é cortado no tamanho da coluna: um código longo
+    cortado poderia casar com outro que seja prefixo dele. Ele segue inteiro e a
+    classificação o recusa (não está no universo nem no catálogo).
+    """
     try:
+        _check_zip_budget(content)
         wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-    except (zipfile.BadZipFile, KeyError, ValueError, OSError) as exc:
-        raise _invalid_file("não abre como xlsx") from exc
+    except ValidationAppError:
+        raise
+    except Exception:
+        raise _invalid_file("não abre como xlsx") from None
     try:
-        ws = wb.worksheets[0] if wb.worksheets else None
-        if ws is None:
-            raise _invalid_file("sem planilha")
-        rows = ws.iter_rows(values_only=True)
-        header = next(rows, None)
-        if header is None:
-            raise _invalid_file("vazia")
-        index = {_cell_text(name): pos for pos, name in enumerate(header) if name is not None}
-        if any(col not in index for col in REQUIRED_IMPORT_COLUMNS):
-            raise _invalid_file("cabeçalho")
-
-        def get(values: tuple[Any, ...], col: str) -> str:
-            pos = index.get(col)
-            return _cell_text(values[pos]) if pos is not None and pos < len(values) else ""
-
-        lines: list[ImportLine] = []
-        for offset, values in enumerate(rows, start=2):
-            if not any(v not in (None, "") for v in values):
-                continue
-            if len(lines) >= MAX_IMPORT_ROWS:
-                raise _invalid_file("linhas demais")
-            lines.append(
-                ImportLine(
-                    line=offset,
-                    source_type=get(values, COL_SOURCE) or CHART_SOURCE_TYPE,
-                    category_code=get(values, COL_CATEGORY)[:MAX_MOVEMENT_CATEGORY_CODE_CHARS],
-                    destination=get(values, COL_DESTINATION),
-                    decision=get(values, COL_DECISION).lower(),
-                    target_code=get(values, COL_TARGET)[:MAX_TARGET_CODE_CHARS],
-                )
-            )
-        return lines
+        return _read_lines(wb)
+    except ValidationAppError:
+        raise
+    except Exception:
+        raise _invalid_file("leitura das linhas") from None
     finally:
         wb.close()
+
+
+def _read_lines(wb: Any) -> list[ImportLine]:
+    ws = wb.worksheets[0] if wb.worksheets else None
+    if ws is None:
+        raise _invalid_file("sem planilha")
+    # A dimensão (`<dimension ref=…>`) é declarada pelo arquivo — não confiar nela.
+    ws.reset_dimensions()
+    rows = ws.iter_rows(max_col=MAX_IMPORT_COLUMNS, values_only=True)
+    header = next(rows, None)
+    if header is None:
+        raise _invalid_file("vazia")
+    index = {_cell_text(name): pos for pos, name in enumerate(header) if name is not None}
+    if any(col not in index for col in REQUIRED_IMPORT_COLUMNS):
+        raise _invalid_file("cabeçalho")
+
+    def get(values: tuple[Any, ...], col: str) -> str:
+        pos = index.get(col)
+        return _cell_text(values[pos]) if pos is not None and pos < len(values) else ""
+
+    lines: list[ImportLine] = []
+    for offset, values in enumerate(rows, start=2):
+        if offset > MAX_IMPORT_SCANNED_ROWS:
+            raise _invalid_file("linhas demais")
+        if not any(v not in (None, "") for v in values):
+            continue
+        if len(lines) >= MAX_IMPORT_ROWS:
+            raise _invalid_file("linhas demais")
+        lines.append(
+            ImportLine(
+                line=offset,
+                source_type=get(values, COL_SOURCE) or CHART_SOURCE_TYPE,
+                category_code=get(values, COL_CATEGORY),
+                destination=get(values, COL_DESTINATION),
+                decision=get(values, COL_DECISION).lower(),
+                target_code=get(values, COL_TARGET),
+            )
+        )
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -282,11 +335,13 @@ def plan_import(
     seen: set[tuple[str, str]] = set()
 
     def reject(line: ImportLine, reason: RejectionReason) -> None:
+        # O ECO é recortado no tamanho da coluna (a célula pode ter 32 mil caracteres);
+        # a decisão, não — o código inteiro é que foi recusado.
         plan.rejected.append(
             RejectedLine(
                 line=line.line,
-                category_code=line.category_code,
-                target_code=line.target_code or None,
+                category_code=line.category_code[:MAX_MOVEMENT_CATEGORY_CODE_CHARS],
+                target_code=line.target_code[:MAX_TARGET_CODE_CHARS] or None,
                 reason=reason,
             )
         )
@@ -415,12 +470,20 @@ class ClientMappingPortabilityService:
     ) -> ImportPlan:
         """A PRÉVIA: valida o arquivo, lê em memória e classifica. Não grava nada."""
         validate_import_file(filename, content)
-        lines = parse_import(content)
+        # Parse é CPU síncrona (zip + XML): fora do event loop.
+        lines = await run_in_threadpool(parse_import, content)
         destination = await self._decisions.resolve_destination(client, destination_type)
         start = default_effective_from(effective_from, today)
         rows = await self._listing.universe(client, destination, start)
+        # Código maior que a coluna não existe no catálogo: nem vai à consulta (e o
+        # plano o recusa como `alvo_inexistente`).
         targets = await self._catalog.get_targets_by_codes(
-            destination.id, {line.target_code for line in lines if line.target_code}
+            destination.id,
+            {
+                line.target_code
+                for line in lines
+                if line.target_code and len(line.target_code) <= MAX_TARGET_CODE_CHARS
+            },
         )
         vigentes = await self._decisions.vigentes(client, destination, start)
         return plan_import(

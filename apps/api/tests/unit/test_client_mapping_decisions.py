@@ -202,11 +202,30 @@ class _Repo:
     async def target_codes(self, target_ids: Any) -> dict[UUID, str]:
         return {tid: self.catalog.targets[tid].code for tid in target_ids if tid}
 
-    async def insert_decisions(self, decisions: list[ClientMappingDecision]) -> None:
+    def _taken(self, d: ClientMappingDecision) -> bool:
+        """A UNIQUE `(chave, effective_from)` do banco."""
+        return any(
+            (e.client_id, e.source_type, e.category_code, e.destination_id, e.effective_from)
+            == (d.client_id, d.source_type, d.category_code, d.destination_id, d.effective_from)
+            for e in self.decisions
+        )
+
+    async def insert_decisions(self, decisions: list[ClientMappingDecision]) -> bool:
+        if any(self._taken(d) for d in decisions):
+            return False  # SAVEPOINT: nada entra
         for d in decisions:
             d.id = uuid4()
             d.created_at = datetime.now(UTC)
         self.decisions.extend(decisions)
+        return True
+
+    async def insert_inherited(self, decisions: list[ClientMappingDecision]) -> int:
+        fresh = [d for d in decisions if not self._taken(d)]  # ON CONFLICT DO NOTHING
+        for d in fresh:
+            d.id = uuid4()
+            d.created_at = datetime.now(UTC)
+        self.decisions.extend(fresh)
+        return len(fresh)
 
     async def resolve_inherited(
         self,
@@ -399,6 +418,61 @@ class TestEscrita:
             await service.write_decisions(
                 _client(closed=True), "fluxo_de_caixa", [_nao()], author=_user(), today=HOJE
             )
+
+
+def _other_request_writes_after_our_read(repo: _Repo, write: Any) -> None:
+    """Simula a corrida: a OUTRA requisição grava logo depois da NOSSA leitura.
+
+    A leitura devolve o estado de antes; a UNIQUE do banco (aqui, o dublê) vê o
+    estado de depois — exatamente o duplo clique que o teste sequencial não pega.
+    """
+    original = repo.list_decisions
+
+    async def stale(*args: Any, **kwargs: Any) -> list[ClientMappingDecision]:
+        snapshot = await original(*args, **kwargs)
+        write()
+        return snapshot
+
+    repo.list_decisions = stale  # type: ignore[method-assign]
+
+
+class TestCorrida:
+    """Retrabalho 12.4: corrida entre o "já existe?" e o INSERT → 409/no-op, nunca 500."""
+
+    async def test_escrita_concorrente_da_mesma_chave_e_vigencia_e_409(self) -> None:
+        service, repo, catalog = _world()
+        a = catalog.plant("demonstrativo_contabil", "1.01")
+        catalog.plant("demonstrativo_contabil", "1.02")
+        client = _client()
+        _other_request_writes_after_our_read(
+            repo, lambda: _plant_decision(repo, client, catalog, start=SET, target=a)
+        )
+        with pytest.raises(MappingDecisionDuplicateError) as exc:
+            await service.write_decisions(
+                client, "demonstrativo_contabil", [_alvo("1.02")], author=_user(), today=HOJE
+            )
+        assert exc.value.status_code == 409
+        assert len(repo.decisions) == 1, "só a da outra requisição"
+
+    async def test_iniciar_de_para_em_duplo_clique_e_no_op(self) -> None:
+        service, repo, catalog = _world()
+        a = catalog.plant("demonstrativo_contabil", "1.01")
+        client = _client()
+        repo.chart = [
+            SimpleNamespace(
+                category_code="2.04", dre_code="1.01", status=ChartOfAccountsStatus.ATIVA.value
+            )
+        ]
+        _other_request_writes_after_our_read(
+            repo,
+            lambda: _plant_decision(
+                repo, client, catalog, start=SET, target=a, origin=DecisionOrigin.HERDADA
+            ),
+        )
+        result = await service.inherit(client, "demonstrativo_contabil", author=_user(), today=HOJE)
+        assert result.state == INHERIT_STATE_OK
+        assert (result.created, result.already_decided) == (0, 1), "created = o que entrou"
+        assert len(repo.decisions) == 1
 
 
 class TestRetroatividade:

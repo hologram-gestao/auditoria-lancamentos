@@ -50,9 +50,10 @@ from app.modules.usage_events.schemas import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
     from datetime import date
 
+    from pydantic import BaseModel
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from app.modules.usage_events.schemas import (
@@ -123,6 +124,23 @@ class UsageEventService:
                 session_id=str(session_id) if session_id else None,
             )
             return False
+
+    @staticmethod
+    def _props_or_none(
+        event: UsageEventName, build: Callable[[], BaseModel]
+    ) -> dict[str, Any] | None:
+        """Monta as props estritas DENTRO do caminho fail-soft.
+
+        Para emissores chamados DEPOIS de um commit de negócio (sincronização,
+        materialização): uma prop que o `extra=forbid`/padrão recusa não pode virar
+        500 numa escrita que já foi gravada — a métrica nunca derruba o fluxo. O
+        defeito continua visível pelo warning (sem valores: nada de props no log).
+        """
+        try:
+            return build().model_dump(mode="json")
+        except Exception:
+            logger.warning("usage_event_props_invalid", usage_event=event.value)
+            return None
 
     # ------------------------------------------------------------------
     # Emissores do backend (props em UM lugar só — CLAUDE.md: fonte única)
@@ -460,18 +478,23 @@ class UsageEventService:
         12.1), calculadas uma vez — o emissor não reconta nada.
 
         **Sem dedup** (mesmo motivo de `carteira_sincronizada`): cada sincronização
-        é uma linha. `competencia` entra como `YYYY-MM`.
+        é uma linha. `competencia` entra como `YYYY-MM`. Props montadas no caminho
+        fail-soft: a base já foi gravada quando este emissor roda.
         """
-        return await self.emit(
-            UsageEventName.MOVIMENTOS_SINCRONIZADOS,
-            props=MovimentosSincronizadosProps(
+        event = UsageEventName.MOVIMENTOS_SINCRONIZADOS
+        props = self._props_or_none(
+            event,
+            lambda: MovimentosSincronizadosProps(
                 client_id=client_id,
                 competencia=format_competence(competencia),
                 movimentos=movimentos,
                 sem_categoria=sem_categoria,
                 contas=contas,
-            ).model_dump(mode="json"),
+            ),
         )
+        if props is None:
+            return False
+        return await self.emit(event, props=props)
 
     async def emit_depara_aplicado(
         self,
@@ -490,19 +513,24 @@ class UsageEventService:
         em `Numeric(14,2)`) e viram CENTAVOS inteiros aqui, por
         `decimal_to_cents`, sem passar por `float`. `destino` é o slug do TIPO do
         destino, nunca nome de alvo ou de categoria (`DeparaAplicadoProps`
-        recusa o formato).
+        recusa o formato). Props montadas no caminho fail-soft: a materialização
+        já foi commitada quando este emissor roda.
         """
-        return await self.emit(
-            UsageEventName.DEPARA_APLICADO,
-            props=DeparaAplicadoProps(
+        event = UsageEventName.DEPARA_APLICADO
+        props = self._props_or_none(
+            event,
+            lambda: DeparaAplicadoProps(
                 client_id=client_id,
                 destino=destino,
                 valor_com_decisao_centavos=decimal_to_cents(valor_com_decisao),
                 valor_nao_mapear_centavos=decimal_to_cents(valor_nao_mapear),
                 valor_sem_decisao_centavos=decimal_to_cents(valor_sem_decisao),
                 categorias_sem_decisao=categorias_sem_decisao,
-            ).model_dump(mode="json"),
+            ),
         )
+        if props is None:
+            return False
+        return await self.emit(event, props=props)
 
     async def emit_organizacao_criada(self, *, organization_id: UUID) -> bool:
         """86e36ecnp — a plataforma cadastrou uma organização. Sem `session_id`."""

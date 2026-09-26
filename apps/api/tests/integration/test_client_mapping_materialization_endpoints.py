@@ -259,9 +259,16 @@ class TestMaterializacao:
         assert v2.status_code == 201, v2.text
         assert v2.json()["data"]["version"] == 2
 
-        db_session.expire_all()
-        mat1_again = await db_session.get(ClientMappingMaterialization, snapshot["id"])
-        assert mat1_again is not None
+        # Relê do BANCO sem expire_all(): em teste async ele expiraria também o
+        # `world.client` da fixture, e o `w.client.id` de `_events` estouraria
+        # MissingGreenlet (lição da S11). populate_existing força o refresh.
+        mat1_again = (
+            await db_session.execute(
+                select(ClientMappingMaterialization)
+                .where(ClientMappingMaterialization.id == snapshot["id"])
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one()
         assert {
             c.name: getattr(mat1_again, c.name) for c in ClientMappingMaterialization.__table__.c
         } == snapshot

@@ -263,8 +263,12 @@ class ClientMappingMaterialization(UUIDPrimaryKeyMixin, Base):
     #: Hash da ENTRADA (base de movimentos presentes + decisões vigentes) que a
     #: prévia confirmada viu. É o que prova que o registro corresponde à prévia.
     input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    #: As vigências usadas: `[{decision_id, category_code, effective_from, decision_type,
-    #: target_code}]`. JSONB porque é registro histórico, não chave de consulta.
+    #: As vigências usadas, como gravadas pela materialização (12.6): `[{sourceType,
+    #: categoryCode, decisionType, targetCode, effectiveFrom ("YYYY-MM")}]`. SEM
+    #: `decision_id` de propósito: a herdada pode ser resolvida no lugar (ADR-075-BE),
+    #: então o id apontaria para uma linha que muda depois; a chave (origem, categoria,
+    #: destino, vigência) já identifica a vigência, e o EFEITO fica congelado aqui
+    #: (ADR-077-BE/078-BE). JSONB porque é registro histórico, não chave de consulta.
     decisions_used: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
 
     # Totais das QUATRO situações, calculados uma vez pela função pura (12.6).

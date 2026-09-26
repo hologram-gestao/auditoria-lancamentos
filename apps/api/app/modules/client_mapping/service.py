@@ -24,7 +24,7 @@ divergência e a pessoa decide.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -51,7 +51,7 @@ from app.modules.client_mapping.vigencia import (
     resolve_vigente,
     resolve_vigentes,
 )
-from app.modules.client_movements.competence import competence_of, format_competence
+from app.modules.client_movements.competence import current_competence, format_competence
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -72,11 +72,6 @@ CHART_SOURCE_TYPE = ProviderType.OMIE.value
 INHERIT_STATE_OK = "ok"
 INHERIT_STATE_NO_CHART = "sem_plano_de_contas"
 INHERIT_STATE_NOT_INHERITING = "destino_sem_heranca"
-
-
-def current_competence(today: date | None = None) -> date:
-    """A competência corrente do SERVIDOR (dia 1 do mês). `today` só para teste."""
-    return competence_of(today or datetime.now(UTC).date())
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,15 +251,7 @@ class ClientMappingDecisionService:
             )
 
         if duplicates:
-            raise MappingDecisionDuplicateError(
-                f"Decisão confirmada já existe em {start} para {sorted(duplicates)}",
-                user_message=(
-                    "Já existe decisão confirmada a partir de "
-                    f"{format_competence(start)} para: {', '.join(sorted(duplicates))}. "
-                    "Para alterar, escolha outra competência de início."
-                ),
-                details={"categoryCodes": ",".join(sorted(duplicates))},
-            )
+            raise _duplicate_error(start, duplicates)
 
         touched_keys = [decision_key(d) for d in to_insert] + [
             decision_key(row) for row, _ in to_resolve
@@ -292,8 +279,10 @@ class ClientMappingDecisionService:
                 raise MappingDecisionDuplicateError(
                     f"Herdada {row.id} deixou de ser herdada durante a escrita."
                 )
-        if to_insert:
-            await self._repo.insert_decisions(to_insert)
+        if to_insert and not await self._repo.insert_decisions(to_insert):
+            # Corrida: outra requisição gravou a MESMA chave e vigência entre a leitura
+            # acima e esta escrita. A UNIQUE barrou; é a mesma resposta da duplicada.
+            raise _duplicate_error(start, [d.category_code for d in to_insert])
         return DecisionWriteResult(
             effective_from=start,
             created=len(to_insert),
@@ -414,13 +403,14 @@ class ClientMappingDecisionService:
             current=current,
             confirm_retroactive=confirm_retroactive,
         )
-        if to_insert:
-            await self._repo.insert_decisions(to_insert)
+        # ON CONFLICT DO NOTHING: uma requisição concorrente que já herdou a mesma
+        # chave e vigência vira no-op — `created` é o que entrou DE FATO.
+        created = await self._repo.insert_inherited(to_insert)
         return InheritResult(
             state=INHERIT_STATE_OK,
             effective_from=start,
-            created=len(to_insert),
-            already_decided=already,
+            created=created,
+            already_decided=already + len(to_insert) - created,
             without_dre=len(chart) - len(with_dre),
             missing_target_categories=missing_categories,
             missing_target_codes=sorted(missing_codes),
@@ -513,6 +503,20 @@ def _ensure_open(client: Client) -> None:
     """Escrita em cliente ENCERRADO é 409 também no serviço (a rota já usa `OpenClientDep`)."""
     if client.closed_at is not None:
         raise ClientClosedError(f"Cliente {client.id} está encerrado; de-para só-leitura.")
+
+
+def _duplicate_error(start: date, category_codes: Sequence[str]) -> MappingDecisionDuplicateError:
+    """409 `DECISAO_DUPLICADA` — a checagem do serviço e a UNIQUE (corrida) respondem igual."""
+    codes = sorted(set(category_codes))
+    return MappingDecisionDuplicateError(
+        f"Decisão confirmada já existe em {start} para {codes}",
+        user_message=(
+            "Já existe decisão confirmada a partir de "
+            f"{format_competence(start)} para: {', '.join(codes)}. "
+            "Para alterar, escolha outra competência de início."
+        ),
+        details={"categoryCodes": ",".join(codes)},
+    )
 
 
 def _group_by_key(

@@ -15,6 +15,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import func, select, update
 
+from app.core.authz import CurrentUser
+from app.core.exceptions import MappingDecisionDuplicateError
 from app.core.security import hash_password
 from app.db.models import (
     HOLOGRAM_ORGANIZATION_ID,
@@ -23,14 +25,18 @@ from app.db.models import (
     ClientAssignment,
     ClientChartOfAccount,
     ClientMappingDecision,
+    DecisionType,
     MappingDestination,
     MappingTarget,
     User,
     UserRole,
     UserScope,
 )
-from app.modules.client_movements.competence import competence_of, format_competence
+from app.modules.client_mapping.repository import ClientMappingRepository
+from app.modules.client_mapping.service import ClientMappingDecisionService, DecisionInput
+from app.modules.client_movements.competence import current_competence, format_competence
 from app.modules.mapping_catalog.repository import MappingCatalogRepository
+from app.modules.mapping_catalog.service import MappingCatalogService
 
 if TYPE_CHECKING:
     from httpx import AsyncClient
@@ -131,7 +137,7 @@ class TestPermissao:
             _url(world), json={"categoryCode": "2.04", "decision": "alvo", "targetCode": "1.01"}
         )
         assert resp.status_code == 200, resp.text
-        corrente = format_competence(competence_of(datetime.now(UTC).date()))
+        corrente = format_competence(current_competence())
         assert resp.json()["data"] == {
             "effectiveFrom": corrente,
             "created": 1,
@@ -336,3 +342,117 @@ class TestHerancaPelaRota:
         assert confirma.json()["data"]["applied"] is True
         origens = {d.origin for d in await _decisions(db_session, world)}
         assert origens == {"confirmada"}
+
+
+class TestCorridaNoBanco:
+    """Retrabalho 12.4: a outra requisição grava ENTRE a nossa leitura e o nosso INSERT.
+
+    A leitura do serviço devolve o estado de antes; a linha concorrente entra na MESMA
+    chave e vigência logo depois. A UNIQUE real do Postgres decide: escrita → 409
+    `DECISAO_DUPLICADA` (SAVEPOINT, a sessão segue viva); herança → no-op pelo
+    `ON CONFLICT DO NOTHING`. Nunca `IntegrityError` → 500.
+    """
+
+    @staticmethod
+    def _service(db: AsyncSession) -> ClientMappingDecisionService:
+        catalog = MappingCatalogRepository(db)
+        return ClientMappingDecisionService(
+            ClientMappingRepository(db),
+            catalog=catalog,
+            catalog_service=MappingCatalogService(catalog),
+        )
+
+    @staticmethod
+    def _author(user: User) -> CurrentUser:
+        return CurrentUser(
+            id=str(user.id),
+            email=user.email,
+            name=user.name,
+            role=user.role,
+            scope=user.scope,
+            client_id=None,
+            organization_id=user.organization_id,
+        )
+
+    @staticmethod
+    def _concurrent_row(w: World, *, target_code: str, origin: str) -> Any:
+        async def write(db: AsyncSession) -> None:
+            target = (
+                await db.execute(
+                    select(MappingTarget).where(
+                        MappingTarget.destination_id == w.demonstrativo.id,
+                        MappingTarget.code == target_code,
+                    )
+                )
+            ).scalar_one()
+            db.add(
+                ClientMappingDecision(
+                    client_id=w.client.id,
+                    source_type="omie",
+                    category_code="2.01",
+                    destination_id=w.demonstrativo.id,
+                    decision_type="alvo",
+                    target_id=target.id,
+                    origin=origin,
+                    effective_from=current_competence(),
+                    author_id=w.admin.id,
+                )
+            )
+            await db.flush()
+
+        return write
+
+    @staticmethod
+    def _stale_read(service: ClientMappingDecisionService, db: AsyncSession, write: Any) -> None:
+        repo = service._repo
+        original = repo.list_decisions
+
+        async def stale(*args: Any, **kwargs: Any) -> list[ClientMappingDecision]:
+            snapshot = await original(*args, **kwargs)
+            await write(db)
+            return snapshot
+
+        repo.list_decisions = stale  # type: ignore[method-assign]
+
+    async def test_escrita_concorrente_vira_409_e_a_sessao_segue(
+        self, db_session: AsyncSession, world: World
+    ) -> None:
+        service = self._service(db_session)
+        self._stale_read(
+            service,
+            db_session,
+            self._concurrent_row(world, target_code="1.01", origin="confirmada"),
+        )
+        with pytest.raises(MappingDecisionDuplicateError) as exc:
+            await service.write_decisions(
+                world.client,
+                "demonstrativo_contabil",
+                [
+                    DecisionInput(
+                        category_code="2.01", decision_type=DecisionType.ALVO, target_code="1.02"
+                    )
+                ],
+                author=self._author(world.admin),
+            )
+        assert exc.value.status_code == 409
+        (so_a_outra,) = await _decisions(db_session, world)
+        assert so_a_outra.target_id is not None
+
+    async def test_iniciar_de_para_concorrente_e_no_op(
+        self, db_session: AsyncSession, world: World
+    ) -> None:
+        db_session.add(
+            ClientChartOfAccount(client_id=world.client.id, category_code="2.01", dre_code="1.01")
+        )
+        await db_session.flush()
+        service = self._service(db_session)
+        self._stale_read(
+            service,
+            db_session,
+            self._concurrent_row(world, target_code="1.01", origin="herdada"),
+        )
+        result = await service.inherit(
+            world.client, "demonstrativo_contabil", author=self._author(world.admin)
+        )
+        assert (result.state, result.created, result.already_decided) == ("ok", 0, 1)
+        assert len(await _decisions(db_session, world)) == 1

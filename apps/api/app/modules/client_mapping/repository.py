@@ -12,10 +12,11 @@ mesma chave na MESMA competência de início, a linha herdada é resolvida no lu
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import CursorResult, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 
 from app.db.models import (
     ChartOfAccountsStatus,
@@ -26,6 +27,7 @@ from app.db.models import (
     ClientMovement,
     DecisionOrigin,
 )
+from app.db.models.client_mapping import UQ_CLIENT_MAPPING_DECISION
 from app.db.models.mapping_catalog import MappingTarget
 
 if TYPE_CHECKING:
@@ -37,6 +39,33 @@ if TYPE_CHECKING:
 #: Itens por comando no INSERT da materialização — 13 placeholders por linha contra
 #: o teto de 65.535; 1.000 é folga de 5x, o mesmo teto da base de movimentos.
 _ITEM_CHUNK_SIZE = 1000
+
+
+def _violated_constraint(exc: IntegrityError) -> str | None:
+    """Nome da constraint violada, pelo diagnóstico do driver (psycopg)."""
+    diag = getattr(exc.orig, "diag", None)
+    name = getattr(diag, "constraint_name", None)
+    return name if isinstance(name, str) else None
+
+
+def _decision_row(decision: ClientMappingDecision) -> dict[str, Any]:
+    """As colunas que o serviço preenche; `created_at` fica com o default do banco.
+
+    O `id` é gerado aqui: o objeto ORM ainda não passou por flush (o `default=uuid4`
+    do mixin só roda no flush), e o INSERT é Core.
+    """
+    return {
+        "id": decision.id or uuid4(),
+        "client_id": decision.client_id,
+        "source_type": decision.source_type,
+        "category_code": decision.category_code,
+        "destination_id": decision.destination_id,
+        "decision_type": decision.decision_type,
+        "target_id": decision.target_id,
+        "origin": decision.origin,
+        "effective_from": decision.effective_from,
+        "author_id": decision.author_id,
+    }
 
 
 class ClientMappingRepository:
@@ -78,10 +107,41 @@ class ClientMappingRepository:
         stmt = select(MappingTarget.id, MappingTarget.code).where(MappingTarget.id.in_(wanted))
         return {row.id: row.code for row in (await self._session.execute(stmt)).all()}
 
-    async def insert_decisions(self, decisions: Sequence[ClientMappingDecision]) -> None:
-        """Grava vigências NOVAS. A UNIQUE `(chave, effective_from)` é a rede final."""
-        self._session.add_all(list(decisions))
-        await self._session.flush()
+    async def insert_decisions(self, decisions: Sequence[ClientMappingDecision]) -> bool:
+        """Grava vigências NOVAS, tudo ou nada, num SAVEPOINT.
+
+        A UNIQUE `(chave, effective_from)` é a rede final contra a corrida entre o
+        "já existe?" do serviço e esta escrita (duplo clique, duas abas, importação
+        concorrente). Devolve `False` se ESSA UNIQUE barrou o lote — nada foi gravado
+        e a transação de quem chamou segue viva; o serviço responde 409. Qualquer
+        outra violação (CHECK, FK) re-levanta: é defeito, não corrida.
+        """
+        try:
+            async with self._session.begin_nested():
+                self._session.add_all(list(decisions))
+                await self._session.flush()
+        except IntegrityError as exc:
+            if _violated_constraint(exc) != UQ_CLIENT_MAPPING_DECISION:
+                raise
+            return False
+        return True
+
+    async def insert_inherited(self, decisions: Sequence[ClientMappingDecision]) -> int:
+        """Grava as HERDADAS com `ON CONFLICT DO NOTHING` na UNIQUE da vigência.
+
+        "Iniciar de-para" é idempotente também SOB CONCORRÊNCIA: duas requisições
+        juntas passam no "já decidido?" do serviço, e a segunda vira no-op aqui em vez
+        de `IntegrityError` → 500. Devolve quantas linhas entraram DE FATO.
+        """
+        if not decisions:
+            return 0
+        stmt = (
+            pg_insert(ClientMappingDecision)
+            .values([_decision_row(d) for d in decisions])
+            .on_conflict_do_nothing(constraint=UQ_CLIENT_MAPPING_DECISION)
+            .returning(ClientMappingDecision.id)
+        )
+        return len((await self._session.execute(stmt)).scalars().all())
 
     async def resolve_inherited(
         self,

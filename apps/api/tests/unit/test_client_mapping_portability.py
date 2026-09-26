@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import io
 import logging
+import re
+import time
+import zipfile
 from datetime import UTC, date, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -18,6 +21,8 @@ from openpyxl import Workbook, load_workbook
 
 from app.core.exceptions import ValidationAppError
 from app.db.models import Client, MappingDestination, MappingTarget
+from app.db.models.client_movement import MAX_MOVEMENT_CATEGORY_CODE_CHARS
+from app.db.models.mapping_catalog import MAX_TARGET_CODE_CHARS
 from app.modules.client_chart_of_accounts.schemas import ResolvedNames
 from app.modules.client_mapping.listing import (
     ClientMappingListService,
@@ -28,7 +33,10 @@ from app.modules.client_mapping.listing import (
 from app.modules.client_mapping.portability import (
     EXPORT_COLUMNS,
     MAX_IMPORT_BYTES,
+    MAX_IMPORT_COMPRESSION_RATIO,
     MAX_IMPORT_ROWS,
+    MAX_IMPORT_SCANNED_ROWS,
+    MAX_IMPORT_UNCOMPRESSED_BYTES,
     ClientMappingPortabilityService,
     ImportLine,
     build_export_workbook,
@@ -391,6 +399,102 @@ class TestArquivo:
             parse_import(b"PK\x03\x04 isto nao e um zip de verdade")
 
 
+_SHEET = "xl/worksheets/sheet1.xml"
+
+
+def _patch_sheet(raw: bytes, fn: Any, *, compression: int = zipfile.ZIP_DEFLATED) -> bytes:
+    """Reescreve o XML da 1ª planilha de um xlsx válido (magic bytes seguem válidos)."""
+    src = zipfile.ZipFile(io.BytesIO(raw))
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", compression) as dst:
+        for info in src.infolist():
+            data = src.read(info.filename)
+            dst.writestr(info.filename, fn(data) if info.filename == _SHEET else data)
+    return out.getvalue()
+
+
+def _book() -> bytes:
+    return _xlsx([["omie", "2.01", "", "demonstrativo_contabil", "alvo", "1.01", "", "", ""]])
+
+
+class TestPlanilhaMalformada:
+    """Retrabalho 12.5: toda falha de LEITURA é o mesmo 400, sem eco, com custo limitado."""
+
+    @pytest.mark.parametrize(
+        "mutation",
+        [
+            lambda d: d[: len(d) // 2],
+            lambda d: d.replace(
+                b"</sheetData>",
+                f'<row r="3"><c r="A3"><v>{SEGREDO}</v></c></row></sheetData>'.encode(),
+            ),
+        ],
+        ids=["xml-truncado", "texto-em-celula-numerica"],
+    )
+    def test_falha_na_abertura_ou_na_iteracao_e_400_sem_eco(self, mutation: Any) -> None:
+        content = _patch_sheet(_book(), mutation)
+        validate_import_file("de-para.xlsx", content)
+        with pytest.raises(ValidationAppError) as exc:
+            parse_import(content)
+        assert exc.value.status_code == 400
+        assert exc.value.code == "VALIDATION_ERROR"
+        assert SEGREDO not in exc.value.message
+        assert SEGREDO not in exc.value.user_message
+        assert exc.value.__cause__ is None, "from None: a exceção original traz a célula"
+
+    def test_celula_distante_nao_prende_a_cpu(self) -> None:
+        far = b'<row r="300000"><c r="XFD300000" t="inlineStr"><is><t>x</t></is></c></row>'
+
+        def mutation(data: bytes) -> bytes:
+            data = data.replace(b"</sheetData>", far + b"</sheetData>")
+            return re.sub(rb'<dimension ref="[^"]*"', b'<dimension ref="A1:XFD300000"', data)
+
+        content = _patch_sheet(_book(), mutation)
+        started = time.monotonic()
+        with pytest.raises(ValidationAppError) as exc:
+            parse_import(content)
+        assert time.monotonic() - started < 5
+        assert exc.value.status_code == 400
+
+    def test_dimensao_mentirosa_sem_celula_distante_le_so_o_que_existe(self) -> None:
+        """A dimensão declarada é ignorada: não gera 300 mil linhas vazias no fim."""
+        content = _patch_sheet(
+            _book(),
+            lambda d: re.sub(rb'<dimension ref="[^"]*"', b'<dimension ref="A1:XFD300000"', d),
+        )
+        (line,) = parse_import(content)
+        assert line.category_code == "2.01"
+
+    def test_linhas_em_branco_contam_no_teto_de_linhas_percorridas(self) -> None:
+        wb = Workbook()
+        ws = wb.active
+        assert ws is not None
+        ws.append(list(EXPORT_COLUMNS))
+        ws.cell(row=MAX_IMPORT_SCANNED_ROWS + 1, column=2, value="2.01")
+        buf = io.BytesIO()
+        wb.save(buf)
+        with pytest.raises(ValidationAppError):
+            parse_import(buf.getvalue())
+
+    def test_bomba_de_descompressao_e_400_antes_do_parse(self) -> None:
+        pad = b"<!--" + b"A" * (MAX_IMPORT_COMPRESSION_RATIO * 2000) + b"-->"
+        content = _patch_sheet(_book(), lambda d: d.replace(b"<sheetData>", pad + b"<sheetData>"))
+        with pytest.raises(ValidationAppError) as exc:
+            parse_import(content)
+        assert "compressão" in exc.value.message or "descomprimido" in exc.value.message
+
+    def test_descomprimido_acima_do_teto_e_400(self) -> None:
+        pad = b"<!--" + b"A" * (MAX_IMPORT_UNCOMPRESSED_BYTES + 1) + b"-->"
+        content = _patch_sheet(
+            _book(),
+            lambda d: d.replace(b"<sheetData>", pad + b"<sheetData>"),
+            compression=zipfile.ZIP_STORED,
+        )
+        with pytest.raises(ValidationAppError) as exc:
+            parse_import(content)
+        assert "descomprimido" in exc.value.message
+
+
 # ---------------------------------------------------------------------------
 # Importação — plano
 # ---------------------------------------------------------------------------
@@ -461,6 +565,32 @@ class TestPlano:
         )
         assert [r.reason for r in plan.rejected] == ["conflito_na_vigencia"]
         assert plan.to_write == []
+
+    def test_codigo_maior_que_a_coluna_e_recusado_nunca_cortado(self) -> None:
+        """Cortado, `<código de 64>7` casaria com `<código de 64>` (prefixo). Recusa."""
+        categoria = "2." + "1" * (MAX_MOVEMENT_CATEGORY_CODE_CHARS - 2)
+        alvo = "1." + "0" * (MAX_TARGET_CODE_CHARS - 2)
+        content = _xlsx(
+            [
+                ["omie", categoria + "7", "", "", "nao_mapear", "", "", "", ""],
+                ["omie", "2.01", "", "", "alvo", alvo + "7", "", "", ""],
+            ]
+        )
+        plan = plan_import(
+            parse_import(content),
+            destination=_destination(),
+            universe={("omie", categoria), ("omie", "2.01")},
+            active_target_codes={alvo},
+            vigentes={},
+            effective_from=SET,
+        )
+        assert [(r.line, r.reason) for r in plan.rejected] == [
+            (2, "categoria_inexistente"),
+            (3, "alvo_inexistente"),
+        ]
+        assert plan.to_write == []
+        (cat, _) = plan.rejected
+        assert len(cat.category_code) == MAX_MOVEMENT_CATEGORY_CODE_CHARS, "eco recortado"
 
     def test_casa_por_codigo_nome_da_planilha_e_ignorado(self) -> None:
         """Renomear a categoria na origem (ou na planilha) não muda nada."""

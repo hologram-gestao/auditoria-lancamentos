@@ -164,7 +164,8 @@ class TestLista:
         assert page.status_code == 200, page.text
         body = page.json()
         assert body["pagination"]["total"] == 6
-        assert [r["categoryCode"] for r in body["data"]] == ["3.01"]
+        # 6 itens, 2 por página: a página 3 é a ÚLTIMA e tem dois (5º e 6º).
+        assert [r["categoryCode"] for r in body["data"]] == ["2.05", "3.01"]
         teto = await client_with_db.get(_base(world), params={"pageSize": 101})
         assert teto.status_code == 400
         assert teto.json()["error"]["code"] == "VALIDATION_ERROR"

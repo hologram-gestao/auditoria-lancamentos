@@ -22,7 +22,8 @@ from typing import TYPE_CHECKING, Literal, Protocol
 
 from app.core.logging import get_logger
 from app.db.models import DecisionOrigin, DecisionType, ProviderType
-from app.modules.client_mapping.service import CHART_SOURCE_TYPE, current_competence
+from app.modules.client_mapping.service import CHART_SOURCE_TYPE
+from app.modules.client_movements.competence import current_competence
 
 if TYPE_CHECKING:
     from datetime import date
