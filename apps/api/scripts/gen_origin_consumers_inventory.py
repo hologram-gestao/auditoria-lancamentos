@@ -110,6 +110,14 @@ CLASSIFICATION: tuple[Entry, ...] = (
         "o TEXTO do contexto do título — dado do tenant, sem relação com origem",
     ),
     Entry(
+        "app/modules/client_movements/service.py",
+        Family.ORIGEM,
+        "ingestão da base de movimentos por competência (S12, R0): resolve a conexão capaz de "
+        "`listar_lancamentos` e constrói o provedor pela PORTA, iterando as contas do cache sob "
+        "o lock por cliente. Não toca em credencial nem nas colunas antigas, e não fala com o "
+        "`OmieClient` direto",
+    ),
+    Entry(
         "app/modules/client_titles/routes.py",
         Family.ORIGEM,
         "lista da carteira (S11): resolve a conexão capaz de `listar_lancamentos` só para "

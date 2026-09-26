@@ -31,6 +31,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+# O formato da competência tem UMA fonte (a borda HTTP e o sink validam igual).
+# `competence.py` não importa nada do domínio — não cria ciclo.
+from app.modules.client_movements.competence import COMPETENCE_PATTERN
+
 #: Vereditos possíveis da qualificação (Camada 1). Espelha `SemanticStatus` de
 #: `app.modules.reconciliations.qualification.schemas` — importar de lá criaria
 #: uma dependência do sink de métrica no módulo de conciliação; a consistência
@@ -149,6 +153,28 @@ class UsageEventName(StrEnum):
     # Baseline **100%**: hoje todo título vencido conta como inadimplência,
     # porque não existe onde registrar o contrário (verificado em 21/09/2026).
     RECEBIVEIS_CLASSIFICADOS = "recebiveis_classificados"
+    # Sprint 12 (BACK 12.2) — instrumentação do R0. De BACKEND, sem
+    # `session_id`, fora da dedup por construção: cada sincronização de
+    # competência é uma linha (a mesma competência pode ser sincronizada várias
+    # vezes antes do fechamento). Mede se a base existe e quanto dela chega SEM
+    # categoria de origem — o buraco de ingestão que o R3 separa do de-para.
+    MOVIMENTOS_SINCRONIZADOS = "movimentos_sincronizados"
+    # Sprint 12 (BACK 12.2, emitido pela materialização da 12.6) — **a métrica
+    # da Sprint 12**. De BACKEND, sem `session_id`, fora da dedup: cada
+    # materialização (v1, v2…) é uma linha.
+    #
+    # Fórmula da leitura D+30 (cobertura do de-para no destino):
+    #     valor_com_decisao_centavos ÷
+    #         (valor_com_decisao_centavos + valor_sem_decisao_centavos)
+    # lidos da ÚLTIMA linha por (client_id, destino) e competência. O
+    # denominador é o valor COM categoria de origem ("sem categoria de origem"
+    # fica fora, R3). Contra-métrica obrigatória: valor_nao_mapear_centavos ÷ o
+    # mesmo denominador — marcar tudo `nao_mapear` daria 100% de cobertura com o
+    # demonstrativo vazio.
+    #
+    # Baseline **0%**: não existe de-para na plataforma. Alvo ≥ 85% do valor no
+    # destino `demonstrativo_contabil` (o único que herda, R7).
+    DEPARA_APLICADO = "depara_aplicado"
 
 
 #: Eventos que o `POST /api/v1/usage-events` aceita. Os de backend ficam de fora
@@ -372,6 +398,56 @@ class RecebiveisClassificadosProps(_StrictProps):
     valor_vencido_total_centavos: int = Field(ge=0)
     valor_sem_contexto_centavos: int = Field(ge=0)
     titulos_vencidos: int = Field(ge=0)
+
+
+#: Tipo de destino do de-para como SLUG (`demonstrativo_contabil`,
+#: `fluxo_de_caixa`…). O catálogo de destinos é configuração por organização (o
+#: sexto tipo é cadastro, não migração), então o vocabulário não é `Literal` —
+#: mas o formato é fechado: minúsculas, dígitos e `_`, sem espaço. Nome de ALVO
+#: ou de categoria (texto livre, com espaço e acento) não passa.
+DESTINO_SLUG_PATTERN = r"^[a-z][a-z0-9_]{0,59}$"
+
+
+class MovimentosSincronizadosProps(_StrictProps):
+    """`movimentos_sincronizados` (S12 BACK 12.2) — instrumentação do R0.
+
+    As **cinco** chaves declaradas no PRD. Só contagens, a competência e o id do
+    tenant: nenhum código de categoria, nenhum identificador de movimento, nenhum
+    valor — que reconstituiriam o extrato do cliente dentro do sink de métrica.
+
+    `sem_categoria` é SUBCONJUNTO de `movimentos` (o "sem categoria de origem" do
+    R3), não uma terceira parcela.
+    """
+
+    client_id: UUID
+    #: `YYYY-MM`, pelo padrão ÚNICO da competência (`COMPETENCE_PATTERN`): o
+    #: formato é fechado e não comporta nome nem descrição.
+    competencia: str = Field(pattern=COMPETENCE_PATTERN)
+    movimentos: int = Field(ge=0)
+    sem_categoria: int = Field(ge=0)
+    contas: int = Field(ge=0)
+
+
+class DeparaAplicadoProps(_StrictProps):
+    """`depara_aplicado` (S12 BACK 12.2) — **a métrica da Sprint 12**.
+
+    As **seis** chaves declaradas no Outcome do PRD, e nenhuma a mais. Valores em
+    CENTAVOS (`int`, §3.4 — nunca `Decimal`/float no sink). `destino` é o TIPO do
+    destino (slug), **nunca** nome de alvo nem de categoria (§4.5): o PRD diz "só
+    IDs e números, sem nome de categoria".
+
+    `valor_com_decisao_centavos` é o NUMERADOR da cobertura e INCLUI o
+    `nao_mapear` (decisão tomada é decisão, R2); `valor_nao_mapear_centavos` é a
+    contra-métrica, SUBCONJUNTO do anterior. `valor_sem_decisao_centavos` é o
+    pendente. O que não tem categoria de origem não entra em nenhum dos três (R3).
+    """
+
+    client_id: UUID
+    destino: str = Field(pattern=DESTINO_SLUG_PATTERN)
+    valor_com_decisao_centavos: int = Field(ge=0)
+    valor_nao_mapear_centavos: int = Field(ge=0)
+    valor_sem_decisao_centavos: int = Field(ge=0)
+    categorias_sem_decisao: int = Field(ge=0)
 
 
 class OrganizacaoCriadaProps(_StrictProps):

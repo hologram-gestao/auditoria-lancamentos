@@ -222,16 +222,16 @@ describe('SidebarNav — camada do cliente', () => {
     expect(within(nav).getByText('Cliente Exemplo Ltda')).toBeInTheDocument();
   });
 
-  it('operador do cliente: sem Voltar e sem Usuários — 6 seções', () => {
+  it('operador do cliente: sem Voltar e sem Usuários — 7 seções', () => {
     currentPathname = '/clientes/c1';
     render(<SidebarNav user={CLIENT_OPERATOR} />);
 
     const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
     const links = within(nav).getAllByRole('link');
-    // "Plano de Contas" entrou na S10 e "Carteira" na S11: LER é ✅ nos cinco
-    // papéis nos dois casos (o operador inclusive — é a classificação contábil
-    // e a posição financeira do próprio cliente). Quem some para ele é a ação
-    // de SINCRONIZAR, dentro de cada tela, não o item de menu.
+    // "Plano de Contas" entrou na S10, "Carteira" na S11 e "De-para" na S12:
+    // LER é de todo papel que alcança o cliente nos três casos (o operador
+    // inclusive). Quem some para ele é a ESCRITA — sincronizar, editar o
+    // de-para —, dentro de cada tela, não o item de menu.
     expect(links.map((l) => l.textContent)).toEqual([
       'Conciliações',
       'Contas Bancárias',
@@ -239,7 +239,24 @@ describe('SidebarNav — camada do cliente', () => {
       'Glossário',
       'Plano de Contas',
       'Carteira',
+      'De-para',
     ]);
+  });
+
+  it('a rota do de-para não deixa "Conciliações" ativo junto', () => {
+    // "Conciliações" é o FALLBACK da camada do cliente: rota nova que não entre
+    // na negação de `isReconciliations` marca dois itens ao mesmo tempo.
+    currentPathname = '/clientes/c1/de-para';
+    render(<SidebarNav user={ADMIN} />);
+
+    const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
+    expect(within(nav).getByRole('link', { name: 'De-para' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(within(nav).getByRole('link', { name: 'Conciliações' })).not.toHaveAttribute(
+      'aria-current',
+    );
   });
 
   it('a rota da carteira não deixa "Conciliações" ativo junto', () => {

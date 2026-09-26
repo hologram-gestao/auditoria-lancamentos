@@ -187,6 +187,23 @@ export function formatAccountType(type: 'checking' | 'credit_card' | 'investment
   }
 }
 
+const PERCENT_FORMATTER = new Intl.NumberFormat('pt-BR', {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 1,
+});
+
+/**
+ * Percentual que o SERVIDOR calculou (Decimal serializado, ex.: `"98.20"`) →
+ * `"98,2%"`. `null` é "não há denominador" (nenhum movimento com categoria) e
+ * vira `—`, nunca `0%` — zero seria um resultado, e ali não há resultado.
+ */
+export function formatPercent(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) return '—';
+  const num = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(num)) return '—';
+  return `${PERCENT_FORMATTER.format(num)}%`;
+}
+
 /** `2026-06-12T14:32:00Z` → `12/06/2026 às 14h32` (timezone do navegador).
  *  Morava no card da lista; o header da revisão passou a usar também
  *  (86e2n39f1) — uma cópia só, nunca duas. */

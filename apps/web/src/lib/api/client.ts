@@ -316,11 +316,28 @@ export async function apiPostBlob(
   body?: unknown,
   options: FetchOptions = {},
 ): Promise<BlobResponse> {
+  return rawBlobFetch(
+    path,
+    { method: 'POST', body: body === undefined ? null : JSON.stringify(body) },
+    options,
+  );
+}
+
+/**
+ * GET que devolve binário + filename — a exportação do de-para (Sprint 12 /
+ * R6) é `GET …/export`. Mesmo fluxo de auth e de erro do `apiPostBlob`: o
+ * método faz parte do contrato, e chamar a rota com POST daria 405.
+ */
+export async function apiGetBlob(path: string, options: FetchOptions = {}): Promise<BlobResponse> {
+  return rawBlobFetch(path, { method: 'GET' }, options);
+}
+
+async function rawBlobFetch(
+  path: string,
+  init: RequestInit,
+  options: FetchOptions,
+): Promise<BlobResponse> {
   const url = path.startsWith('http') ? path : `${BASE_URL}${path}`;
-  const init: RequestInit = {
-    method: 'POST',
-    body: body === undefined ? null : JSON.stringify(body),
-  };
 
   let res: Response;
   try {
@@ -339,7 +356,7 @@ export async function apiPostBlob(
     if (errBody.code === 'TOKEN_EXPIRED') {
       const outcome = await refreshOnce();
       if (outcome === 'renewed') {
-        return apiPostBlob(path, body, { ...options, skipRefresh: true });
+        return rawBlobFetch(path, init, { ...options, skipRefresh: true });
       }
       if (outcome === 'invalid') {
         redirectToLogin();

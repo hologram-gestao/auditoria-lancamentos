@@ -15,10 +15,10 @@
 
 | | |
 | --- | --- |
-| Endpoints sensíveis (denominador) | **77** |
-| Com caso negativo cross-tenant verde | **77** |
+| Endpoints sensíveis (denominador) | **97** |
+| Com caso negativo cross-tenant verde | **97** |
 | Pendentes (implementação em outra task) | **0** |
-| Cobertura | **77/77 = 100%** |
+| Cobertura | **97/97 = 100%** |
 
 ## Lista canônica
 
@@ -103,6 +103,26 @@ Legenda de `tipo`: **coleção** = vaza forjando `client_id` na URL/payload · *
 | `POST` | `/api/v1/clients/{client_id}/titles/{title_id}/context` | coleção | `app/modules/client_titles/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + OpenClientDep + ManageTitleContextDep; título buscado por get_title_for_client (AND client_id = tenant); título de outro cliente = 404 sem vazar | ✅ verde |
 | `GET` | `/api/v1/clients/{client_id}/titles/{title_id}/context` | coleção | `app/modules/client_titles/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + ViewTitleContextDep; título buscado por get_title_for_client (AND client_id = tenant); título de outro cliente = 404 sem vazar | ✅ verde |
 | `GET` | `/api/v1/clients/{client_id}/titles/receivables-report` | coleção | `app/modules/client_titles/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + ViewClientReceivablesDep; a agregação filtra por client_id na própria query | ✅ verde |
+| `POST` | `/api/v1/clients/{client_id}/movements/sync` | coleção | `app/modules/client_movements/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + OpenClientDep + SyncClientMovementsDep (guard auditado); todo SELECT/UPDATE da base filtra client_id; cliente encerrado = 409 | ✅ verde |
+| `GET` | `/api/v1/clients/{client_id}/movements/sync-state` | coleção | `app/modules/client_movements/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); o estado é lido por (client_id, competência) na própria query | ✅ verde |
+| `GET` | `/api/v1/mapping-destinations` | coleção | `app/modules/mapping_catalog/routes.py` | scoped_by_organization no SELECT do destino (AND organization_id = <org da LINHA do observador>; plataforma: todas); destino/alvo de outra organização = 404 | ✅ verde |
+| `POST` | `/api/v1/mapping-destinations` | coleção | `app/modules/mapping_catalog/routes.py` | ManageMappingCatalogDep; o destino nasce na org da LINHA do ator (resolve_organization_for_creation); org suspensa = 409 | ✅ verde |
+| `PATCH` | `/api/v1/mapping-destinations/{destination_id}` | detalhe (PK) | `app/modules/mapping_catalog/routes.py` | ManageMappingCatalogDep + scoped_by_organization no SELECT do destino (AND organization_id = <org da LINHA do observador>; plataforma: todas); destino/alvo de outra organização = 404 | ✅ verde |
+| `GET` | `/api/v1/mapping-destinations/{destination_id}/targets` | detalhe (PK) | `app/modules/mapping_catalog/routes.py` | scoped_by_organization no SELECT do destino (AND organization_id = <org da LINHA do observador>; plataforma: todas); destino/alvo de outra organização = 404 | ✅ verde |
+| `POST` | `/api/v1/mapping-destinations/{destination_id}/targets` | detalhe (PK) | `app/modules/mapping_catalog/routes.py` | ManageMappingCatalogDep + scoped_by_organization no SELECT do destino (AND organization_id = <org da LINHA do observador>; plataforma: todas); destino/alvo de outra organização = 404 | ✅ verde |
+| `PATCH` | `/api/v1/mapping-destinations/{destination_id}/targets/{target_id}` | detalhe (PK) | `app/modules/mapping_catalog/routes.py` | ManageMappingCatalogDep + scoped_by_organization no SELECT do destino (AND organization_id = <org da LINHA do observador>; plataforma: todas); destino/alvo de outra organização = 404; alvo buscado dentro do destino (AND destination_id) | ✅ verde |
+| `DELETE` | `/api/v1/mapping-destinations/{destination_id}/targets/{target_id}` | detalhe (PK) | `app/modules/mapping_catalog/routes.py` | ManageMappingCatalogDep + scoped_by_organization no SELECT do destino (AND organization_id = <org da LINHA do observador>; plataforma: todas); destino/alvo de outra organização = 404; alvo em uso = 409 | ✅ verde |
+| `POST` | `/api/v1/clients/{client_id}/mapping/{destination_type}/decisions` | coleção | `app/modules/client_mapping/routes.py` | AccessibleClientDep -> resolve_client_access + OpenClientDep + ManageClientMappingDep (guard auditado); destino resolvido na org DO CLIENTE; toda query de decisão filtra client_id | ✅ verde |
+| `POST` | `/api/v1/clients/{client_id}/mapping/{destination_type}/decisions/batch` | coleção | `app/modules/client_mapping/routes.py` | AccessibleClientDep -> resolve_client_access + OpenClientDep + ManageClientMappingDep (guard auditado); destino resolvido na org DO CLIENTE; toda query de decisão filtra client_id | ✅ verde |
+| `POST` | `/api/v1/clients/{client_id}/mapping/{destination_type}/decisions/confirm-inherited` | coleção | `app/modules/client_mapping/routes.py` | AccessibleClientDep -> resolve_client_access + OpenClientDep + ManageClientMappingDep (guard auditado); destino resolvido na org DO CLIENTE; toda query de decisão filtra client_id | ✅ verde |
+| `GET` | `/api/v1/clients/{client_id}/mapping/{destination_type}/decisions/history` | coleção | `app/modules/client_mapping/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); decisões lidas por client_id + destino da org do cliente | ✅ verde |
+| `POST` | `/api/v1/clients/{client_id}/mapping/{destination_type}/inherit` | coleção | `app/modules/client_mapping/routes.py` | AccessibleClientDep -> resolve_client_access + OpenClientDep + ManageClientMappingDep (guard auditado); destino resolvido na org DO CLIENTE; toda query de decisão filtra client_id | ✅ verde |
+| `GET` | `/api/v1/clients/{client_id}/mapping/{destination_type}` | coleção | `app/modules/client_mapping/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); universo e decisões lidos por client_id | ✅ verde |
+| `GET` | `/api/v1/clients/{client_id}/mapping/{destination_type}/export` | coleção | `app/modules/client_mapping/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); 1 linha `export` em access_audit | ✅ verde |
+| `POST` | `/api/v1/clients/{client_id}/mapping/{destination_type}/import/preview` | coleção | `app/modules/client_mapping/routes.py` | AccessibleClientDep -> resolve_client_access + OpenClientDep + ManageClientMappingDep (guard auditado); destino resolvido na org DO CLIENTE; toda query de decisão filtra client_id; não grava nada | ✅ verde |
+| `POST` | `/api/v1/clients/{client_id}/mapping/{destination_type}/import` | coleção | `app/modules/client_mapping/routes.py` | AccessibleClientDep -> resolve_client_access + OpenClientDep + ManageClientMappingDep (guard auditado); destino resolvido na org DO CLIENTE; toda query de decisão filtra client_id | ✅ verde |
+| `GET` | `/api/v1/clients/{client_id}/mapping/{destination_type}/preview` | coleção | `app/modules/client_mapping/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); base e decisões lidas por client_id | ✅ verde |
+| `POST` | `/api/v1/clients/{client_id}/mapping/{destination_type}/materializations` | coleção | `app/modules/client_mapping/routes.py` | AccessibleClientDep -> resolve_client_access + OpenClientDep + ManageClientMappingDep (guard auditado); destino resolvido na org DO CLIENTE; toda query de decisão filtra client_id; versão N+1 imutável, nunca UPDATE/DELETE | ✅ verde |
 
 ## Rotas `/api/v1` fora do denominador
 

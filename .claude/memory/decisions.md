@@ -5144,3 +5144,604 @@ Docker/browser.
 Encode do checklist mecânico correspondente pedido no follow-up **86e3ebkfj**
 (tag `agent-review`) — arquivo-fonte `.claude/agents/qa.md` fora do alcance
 de escrita do sandbox do QA nesta run.
+
+---
+
+## ADR-072-BE — A base de movimentos é entidade PRÓPRIA e agnóstica, e o estado mora POR COMPETÊNCIA (Sprint 12 / BACK 12.1 — R0)
+
+**Data:** 2026-09-25 · **Status:** ativo · **Escopo:** `client_movements`,
+`client_movement_syncs`, `app/modules/client_movements/`, migration `d3a8f5c21e47`
+
+**Duas tabelas, não colunas em `clients`.** S10 e S11 carimbam em `clients` porque a
+unidade delas é o cliente. Aqui a unidade é `(cliente, competência)`: junho pode ter
+sincronizado ontem e julho nunca, e é essa diferença que a prévia do de-para (12.6)
+precisa distinguir. `client_movement_syncs` tem `UNIQUE(client_id, competence)` e os
+dois carimbos viram upsert (`ON CONFLICT`); o `set_` da falha NÃO contém `synced_at`
+— "a falha nunca toca o sucesso" está no SQL, não só no fluxo. Linha ausente =
+nunca tentou; `synced_at IS NULL` = nunca sincronizada (um estado, uma pergunta).
+
+**Identificadores de terceiro como TEXTO** (`supplier_code`, `source_account_id`),
+ao contrário de `client_titles` (`BigInteger`). Deliberado: esta tabela nasce para
+receber também a origem por ARQUIVO (S14), e supor `int` fecharia a porta a um
+código alfanumérico (mesma decisão de `ProviderAccount.external_id`, S9).
+`source_type` sem FK e sem CHECK, no precedente de `ProviderType`.
+
+**CHECK de competência (`EXTRACT(DAY FROM competence) = 1`).** Competência gravada
+como `2026-06-15` por engano viraria um mês que nenhuma consulta `= '2026-06-01'`
+enxerga — erro silencioso na cobertura. O CHECK torna-o barulhento.
+
+**A competência da linha é a da DATA do movimento**, não a pedida: movimento que a
+origem mudou de mês muda de competência no upsert (a chave única não inclui
+competência). O `ausente_na_origem` é recortado por `(cliente, source_type,
+competência)` — sincronizar junho não encosta em julho, nem a origem `omie` no que a
+S14 gravar como `arquivo`.
+
+**`<> ALL(:array)` em vez de `NOT IN (…)`.** A lista de mantidos vai como UM
+parâmetro: `NOT IN` expandido estouraria o teto de 65.535 placeholders numa
+competência grande. Lista vazia marca tudo como ausente — desfecho honesto de
+"competência vazia" (a Omie devolve erro como exceção, então `[]` é vazio de verdade,
+ADR-065-BE).
+
+**409 novo: `MovementAccountsUnknownError`** (código genérico `CONFLICT`, mensagem
+acionável). Cache de contas vazio E `connection.accounts_synced_at` nulo = a
+ingestão não sabe QUAIS contas ler; "zero movimentos" seria base vazia mentindo e, numa
+competência já sincronizada, marcaria tudo ausente sem a origem ter dito nada. Não
+carimba (é configuração, como os 409 da S9). Cache vazio COM contas sincronizadas é
+"a origem disse que não há conta" e segue como base vazia. Não reusei
+`OmieAccountsCacheService.get_or_sync` para descobrir contas: com a conexão
+SINTETIZADA do fallback (09.5) ele faria `session.add` de uma conexão que não existe.
+
+**Cliente encerrado é checado no SERVIÇO** (`ClientClosedError` antes de tocar a
+origem), além do `OpenClientDep` que a rota da 12.2 terá. A S11 evitou o terceiro
+check; aqui o critério de aceite pede a prova sem rota, e o serviço é quem escreve.
+
+**Pausa entre contas** (`INTER_ACCOUNT_DELAY_SECONDS = 1.5`) é o MESMO número de
+`omie_adapter._INTER_CALL_DELAY_SECONDS`, copiado: extratos de contas diferentes com
+a mesma credencial são chamadas adjacentes do MESMO método (`1880`).
+
+⚠️ **Risco não verificado:** se a Omie devolver o MESMO `nCodLancamento` em dois
+extratos (ex.: transferência entre contas do mesmo cliente), o dedup mantém a última
+conta e a outra ponta some da base. A captura real é de UMA conta (cartão) — não há
+evidência nem a favor nem contra. Log `client_movements_duplicate_ids` mede.
+
+⚠️ **Pendência de ambiente:** os testes de integração (`test_client_movements_sync.py`
++ os acréscimos em `test_client_close.py`/`test_client_delete.py`) foram escritos e
+**não rodaram** — o sandbox nega o socket do Docker. A migration foi validada em modo
+offline (`alembic upgrade/downgrade --sql`) e o DDL do modelo bate com ela.
+
+---
+
+## ADR-073-BE — Guard de permissão AUDITADO por cliente, e os dois eventos da S12 com formato fechado em vez de `Literal` (Sprint 12 / BACK 12.2)
+
+**Data:** 2026-09-25 · **Status:** ativo · **Escopo:** `core/dependencies.require_client_permission`,
+`Permission.SYNC_CLIENT_MOVEMENTS`, `modules/client_movements/routes.py`,
+`UsageEventName.MOVIMENTOS_SINCRONIZADOS`/`DEPARA_APLICADO`
+
+**`require_client_permission` (novo), e não `require_permission`.** O critério pede
+"`client_operator` recebe 403 COM linha em `access_audit`". O guard antigo só levanta
+403 — a trilha de negação existia apenas no caminho cross-tenant
+(`deny_client_access`). O guard novo: (1) depende de `AccessibleClientDep`, então o
+ALCANCE é decidido antes da célula — atacante de outro tenant/organização cai na
+negação cross-tenant (com a trilha dela) e nunca chega aqui, sem linha duplicada;
+(2) grava `denied` com `commit=True` antes do 403 (ADR-019-QA: sem o commit o
+`get_db_session` desfaz a linha). É reutilizável pelas rotas de escrita de
+12.3–12.6 (`manage_client_mapping` também pede "negação gera 1 linha").
+`access_audit.client_id` não tem FK, e o alvo aqui sempre existe (o guard roda
+depois de carregar o cliente).
+
+**`sync_client_movements`: mesmas células de `sync_client_receivables`, permissão
+própria** (PRD R0; motivo da S11). A leitura do estado da base NÃO pede permissão
+(`AccessibleClientDep`), então o operador lê 200 e sincroniza 403 — o par que prova
+que não houve reuso.
+
+**Duas rotas, lista canônica 77 → 79** (`PENDING_ENDPOINTS` vazio; doc companheira
+regenerada: `79/79`). `GET /movements/sync-state?competence=YYYY-MM` e
+`POST /movements/sync` com corpo `{competence}`. Competência malformada em corpo OU
+query = 400 `VALIDATION_ERROR` (pattern Pydantic → handler global). O padrão
+`COMPETENCE_PATTERN` mora em `client_movements/competence.py` e é o MESMO que o sink
+usa — uma fonte de formato.
+
+**Por que `competencia` e `destino` são `str` com `pattern` e não `Literal`.** O
+guardrail da casa (`test_nenhum_props_aceita_texto_livre`) aceita só int/bool/UUID/
+Literal. `competencia` é um mês (`YYYY-MM`) — Literal não cabe; `destino` é o TIPO do
+destino, que por decisão do PRD é CADASTRO por organização (o sexto tipo não é
+migração), então um `Literal` dos cinco quebraria a métrica do sexto. A saída é
+formato FECHADO: `^\d{4}-(0[1-9]|1[0-2])$` e slug `^[a-z][a-z0-9_]{0,59}$`. Nome de
+alvo ou categoria (espaço, acento, maiúscula, ponto) não passa — o teste unitário
+tenta "Receita Bruta de Vendas", "1.01.01" e afins.
+
+**`valor_com_decisao_centavos` INCLUI o `nao_mapear`** (numerador da cobertura, R2:
+decisão tomada é decisão); `valor_nao_mapear_centavos` é a contra-métrica,
+subconjunto. Declarado no docstring do props e no comentário do enum, com a fórmula
+D+30 — é o tipo de coisa que alguém soma errado seis meses depois.
+
+**`decimal_to_cents` levanta em vez de arredondar** valor com mais de 2 casas: Σ de
+`Numeric(14,2)` é sempre exato, e um arredondamento silencioso mudaria a métrica sem
+ninguém ver.
+
+**`movimentos_sincronizados` é emitido pelo SERVIÇO da 12.1** (`_persist`), não pela
+rota: o caminho de falha re-levanta antes e os 409 nem começam — "falha e 409 não
+emitem" é estrutural. `depara_aplicado` fica com o emissor pronto e testado; o ponto
+de chamada é a materialização da 12.6.
+
+⚠️ `schema.ts` NÃO foi regenerado por este papel (fora do gitPaths do backend,
+ADR-070-BE). Comando para o FRONT 12.7, com a API de pé:
+`pnpm --filter web gen:types` (= `openapi-typescript http://localhost:8000/openapi.json -o src/lib/contracts/schema.ts`).
+
+---
+
+## ADR-074-BE — Catálogo do de-para por organização e o schema inteiro numa migration; três decisões do PLANEJADOR pendentes de validação humana (Sprint 12 / BACK 12.3)
+
+**Data:** 2026-09-26 · **Status:** ativo (decisões (a), (b) e (c) PENDENTES de validação humana) ·
+**Escopo:** `mapping_destinations`, `mapping_targets`, `client_mapping_decisions`,
+`client_mapping_materializations(_items)`, migration `e6b2c9d47f13`, `modules/mapping_catalog/`,
+`Permission.MANAGE_MAPPING_CATALOG`
+
+**Decisões do planejador (o PRD não fixou) — registradas para a revisão humana:**
+(a) `manage_mapping_catalog` = plataforma + admin (própria org). O manager e os papéis
+de cliente NÃO escrevem: o catálogo é configuração da organização, e um usuário de
+cliente escrevendo nele mudaria o de-para dos OUTROS tenants. A LEITURA é de quem
+pertence à org — inclusive usuário de cliente (o `client_manager` escolhe alvo) —,
+por `scoped_by_organization`; sem permissão de leitura.
+(b) Um destino por (organização, tipo): `UNIQUE(organization_id, destination_type)`.
+O tipo é SLUG com CHECK de FORMATO (`~ '^[a-z][a-z0-9_]{0,59}$'`), não enum nem CHECK
+dos cinco: o sexto é cadastro (teste cria `orcamento` → 201). O formato é o MESMO do
+`destino` do evento `depara_aplicado` — o CHECK garante que a métrica nunca é recusada.
+(c) Retenção no encerramento: DECISÕES entram em `close_client_purge` (configuração);
+MATERIALIZAÇÕES + itens FICAM (o que aconteceu). A exclusão definitiva leva tudo.
+
+**`author_id` RESTRICT e a ordem da exclusão definitiva.** Decisão e materialização
+têm autor (FK `users` RESTRICT). A exclusão definitiva apagava os usuários do tenant
+ANTES do cliente — um `client_manager` que decidiu travaria o `DELETE` com
+`IntegrityError`. `delete_client_cascade` passou a apagar materializações e decisões
+logo depois das conciliações, antes dos usuários (teste de ordem por fonte + teste
+de integração com autor do tenant).
+
+**Nomes ≤ 63 caracteres.** A UNIQUE "descritiva" da vigência tinha 72; o `alembic
+--sql` recusou (o Postgres truncaria em silêncio). Nomes curtos e EXPLÍCITOS no
+modelo e na migration; o teste unitário mede todos.
+
+**Itens da materialização em SNAPSHOT**, sem FK para `client_movements` nem para a
+decisão: `source_movement_id`, data, valor, `category_code`, `target_code`,
+`decision_effective_from`. O purge da base (R0) e das decisões no encerramento não
+toca o histórico. `client_id` desnormalizado nos itens (toda query filtra tenant).
+
+**Validador de alvo único:** `MappingCatalogService.require_targets` — inexistente OU
+desativado → `MappingTargetNotFoundError` (422, `ALVO_INEXISTENTE`, userMessage
+nomeia o código, `details.targetCodes`). Consumido por 12.4 e 12.5. Novo código
+`DESTINO_NAO_CONFIGURADO` (409) para a 12.4.
+
+**Seed:** migration semeia os cinco em toda org existente (`ON CONFLICT DO NOTHING`,
+bind params — roda no `--sql`); `OrganizationService.create_organization` chama
+`seed_default_destinations` na mesma transação (parâmetro `mapping_catalog`
+OBRIGATÓRIO no construtor: org sem destinos seria um BPO que não classifica nada).
+
+**Lista canônica 79 → 86.** Na bateria dos três atacantes, o catálogo-alvo é de uma
+TERCEIRA organização (C): o operador de cliente da Hologram LÊ o catálogo da Hologram
+por desenho, então o recurso atacado tem de ser de uma org a que nenhum atacante
+pertence. `SECRET_TARGET_C` nunca pode aparecer no corpo.
+
+⚠️ Integração (`test_mapping_catalog_endpoints.py` + bateria) escrita e NÃO executada
+(sem Docker). Migration validada no `--sql` (upgrade e downgrade).
+
+---
+
+## ADR-075-BE — Vigência append-only com UMA exceção: a herdada é proposta, e a pessoa a resolve no lugar (Sprint 12 / BACK 12.4)
+
+**Data:** 2026-09-26 · **Status:** ativo (interpretação do planejador — validar na revisão humana) ·
+**Escopo:** `modules/client_mapping/` (vigencia.py, repository.py, service.py, routes.py),
+`Permission.MANAGE_CLIENT_MAPPING`
+
+**O conflito que a spec deixou.** R4 manda "alterar cria linha nova; nunca UPDATE da
+vigente" e R2 manda "duas decisões na mesma chave e mesma vigência → 409". A herança
+(R7) cria decisões HERDADAS com início na competência escolhida (padrão: corrente) e a
+confirmação em lote pede para a pessoa assumi-las. Literal, isso tornava impossível
+confirmar ou corrigir uma herdada no MESMO mês em que o de-para foi iniciado (a linha
+nova colidiria com a herdada na UNIQUE) — a pessoa teria de "corrigir a partir de
+outubro" uma sugestão errada de setembro.
+
+**Decisão:** a herdada é PROPOSTA do sistema, não decisão de ninguém. Quando uma pessoa
+decide a mesma chave na MESMA competência de início de uma herdada, a linha é RESOLVIDA
+no lugar (`ClientMappingRepository.resolve_inherited`): tipo, alvo, `origin=confirmada`,
+autor. É a ÚNICA escrita não-append da tabela, e condicional no próprio SQL
+(`WHERE origin = 'herdada'`). Decisão CONFIRMADA nunca muda: mesma chave + mesma
+vigência com efeito diferente → 409 `DECISAO_DUPLICADA`; com o MESMO efeito → no-op
+(`unchanged`), o que torna o lote e a importação idempotentes. As regras de
+retroatividade valem também para a resolução (competência passada materializada = 409).
+
+**Destino endereçado pelo TIPO no path** (`/mapping/{destination_type}/…`), resolvido
+na organização DO CLIENTE: inexistente e desativado recebem o MESMO 409
+`DESTINO_NAO_CONFIGURADO` nomeando o tipo (não dá para nomear um id de outra org).
+
+**Retroatividade medida por chave, não por data solta.** `affected_competences`: de
+`start` até a véspera da PRÓXIMA vigência da chave (que continua mandando), limitado
+ao mês anterior ao corrente. A trava de materialização olha esse conjunto + a corrente
+quando a vigência nova passa a regê-la ("do início até a corrente"). Materialização em
+mês já regido por vigência posterior NÃO bloqueia (teste dirigido). Materializada → 409
+`COMPETENCIA_MATERIALIZADA` nem com confirmação; sem materialização → 409
+`RETROATIVA_REQUER_CONFIRMACAO` com `details.competences` até `confirmRetroactive=true`.
+
+**`resolve_vigente` é função PURA e única** (`vigencia.py`, genérica sobre um Protocol):
+a escrita, a leitura (12.5) e a aplicação (12.6) consultam ELA. "Qual vale" é a de maior
+`effective_from ≤ competência`, nunca a mais recente.
+
+**Herança:** só `demonstrativo_contabil`; `dre_code` nulo → sem decisão (nunca
+`nao_mapear`); `dre_code` sem alvo ATIVO de mesmo código → sem decisão, listado em
+`missingTargetCodes` (nunca cria alvo implícito — decisão do planejador); idempotente
+(chave com qualquer vigência é pulada); `source_type` das herdadas = `omie` (o plano de
+contas da S10 vem do Omie — vira dado da linha quando a S14 trouxer plano próprio).
+Sem plano de contas: `state=sem_plano_de_contas`, 200. Divergência pós re-sincronização
+é CAMPO na leitura (`divergent`, `originDreCode`), nunca reescrita.
+
+**Confirmação em lote:** `confirm=false` (padrão) só CONTA (`affected`, `applied=false`);
+`confirm=true` reusa `write_decisions` (vigência nova ou resolução da herdada).
+
+**Guard auditado** (`require_client_permission`, ADR-073-BE) em toda escrita: operador
+403 + 1 `denied`. Lista canônica 86 → 91.
+
+⚠️ Integração (`test_client_mapping_decisions_endpoints.py`) escrita e NÃO executada.
+
+---
+
+## ADR-076-BE — Leitura do de-para por UNIVERSO de categorias; portabilidade por planilha casada por código, com limites declarados (Sprint 12 / BACK 12.5)
+
+**Data:** 2026-09-26 · **Status:** ativo · **Escopo:** `client_mapping/listing.py`,
+`client_mapping/portability.py`, rotas `GET …/mapping/{tipo}`, `/export`,
+`/import/preview`, `/import`
+
+**Universo = plano de contas ∪ categorias da base de movimentos (R0) ∪ categorias com
+decisão.** Uma linha por (tipo de origem, código), ordem total. É o que faz "sem
+decisão" aparecer como pendência. As quatro situações (`herdada`, `confirmada`,
+`nao_mapear` — de qualquer origem —, `sem_decisao`) são calculadas por UMA função
+(`situation_of`) no servidor, sobre o universo inteiro, ANTES de paginar. Universo em
+memória (dezenas/centenas de categorias por cliente) — consciente: o filtro depende da
+vigente, que é resolvida pela função pura da 12.4, não por SQL paralelo.
+
+**Nome de categoria pelo acessor que já existe** (`ChartOfAccountsSyncService.
+resolve_names`, cache de 6 h em `app.state`), fail-soft: sem origem → código com
+`categoryNameResolved=false`, 200. A busca (`code`) é prefixo de CÓDIGO; nome não é
+buscável (teste: "Receita" devolve 0). Nome de ALVO vem do catálogo da organização.
+
+**Exportação:** colunas `tipo_origem, codigo_categoria, nome_categoria, destino,
+decisao, codigo_alvo, nome_alvo, origem, vigencia_inicio`; códigos como TEXTO
+(`number_format '@'`, para "1.10" não virar 1.1); nomes resolvidos na geração;
+neutralização de fórmula pela MESMA função do relatório de conciliação
+(`neutralize_formula_injection`, tornada pública — uma implementação só); 1 linha
+`export` em `access_audit`; nome do arquivo só com IDs.
+
+**Importação — limites (constantes em `portability.py`):** extensão `.xlsx`, magic bytes
+`PK\x03\x04`, `MAX_IMPORT_BYTES = 2 MB` (streaming com corte, `read_upload_within_limit`),
+`MAX_IMPORT_ROWS = 2000`. Arquivo inválido = 400 com mensagem FIXA (não ecoa conteúdo).
+Cabeçalho casado por NOME de coluna (não posição); obrigatórias `codigo_categoria,
+decisao, codigo_alvo`. Em memória; nada em disco nem em log (teste com caplog/capsys).
+
+**Duas fases, um cálculo (`plan_import`, função pura):** criadas (sem vigente),
+alteradas (vigente diferente, ou herdada a confirmar), ignoradas (igual à confirmada ou
+linha sem decisão), recusadas com motivo de vocabulário FECHADO (`categoria_inexistente`,
+`alvo_inexistente`, `decisao_invalida`, `alvo_ausente`, `alvo_nao_permitido`,
+`destino_diferente`, `linha_repetida`, `conflito_na_vigencia`) — a recusa não derruba o
+lote. `altersConfirmed` conta as que mudam decisão CONFIRMADA. A aplicação exige
+`confirm=true` (sem ele: 409 com as contagens em `details`), RECALCULA o plano no
+servidor e grava as válidas numa chamada de `write_decisions` (atômico; vigência nova;
+retroatividade pelas regras da 12.4). Confirmada diferente na MESMA vigência vira
+recusa na prévia (seria 409 na escrita e derrubaria o lote atômico).
+
+Lista canônica 91 → 95.
+
+⚠️ Integração (`test_client_mapping_portability_endpoints.py`) escrita e NÃO executada.
+
+---
+
+## ADR-077-BE — Aplicação pura com hash de prévia; materialização N+1 imutável, cobertura parcial no próprio registro, métrica depois do commit (Sprint 12 / BACK 12.6)
+
+**Data:** 2026-09-26 · **Status:** ativo · **Escopo:** `client_mapping/apply.py`,
+`client_mapping/materialization.py`, rotas `GET …/preview` e `POST …/materializations`
+
+**`apply_mapping` é PURA** (sem IA, sem I/O, sem relógio; o teste de fonte proíbe
+`httpx`/`anthropic`/`integrations`/`sqlalchemy` no módulo): recebe os movimentos, o
+conjunto COMPLETO de vigências e a competência, e resolve a vigente por
+`resolve_vigentes` (12.4). Saída ordenada por `(source_type, source_movement_id)` —
+chave única da base, ordem total —, agregados em `Decimal`, `ausente_na_origem` fora.
+Cobertura = Σ|valor|(alvo + nao_mapear) ÷ Σ|valor|(alvo + nao_mapear + sem_decisao);
+`sem_categoria` fora do denominador; denominador zero → `None` (nunca divisão por zero,
+nunca "0%" com cara de resultado). Percentuais quantizados a 0,01 (HALF_EVEN).
+
+**"Nada materializa sem prévia confirmada" é um HASH.** `ApplyResult.fingerprint`:
+SHA-256 do JSON canônico (competência, destino, cada item com situação/alvo/vigência,
+vigências usadas; valor em escala fixa). A prévia devolve `previewToken`; a
+materialização RECALCULA no servidor e só grava se bater — base ou decisão que mudou
+entre a prévia e a confirmação → 409 `PREVIA_DESATUALIZADA`. O hash fica no registro
+(`input_hash`), prova de qual prévia foi confirmada.
+
+**Ordem dos erros da prévia:** nunca sincronizada (`BASE_NAO_SINCRONIZADA`) → sem
+movimento presente (`SEM_MOVIMENTOS`) → destino não configurado → anterior à primeira
+vigência (`ANTERIOR_A_PRIMEIRA_VIGENCIA`, `details.earliestCompetence`). O destino vem
+antes da vigência porque "primeira vigência" é DO destino. **Destino sem nenhuma
+vigência não é 409:** a prévia sai com tudo `sem_decisao` (cobertura 0,00%) — é
+justamente o que mostra por onde começar; decisão de engenharia, validar na revisão.
+
+**Cobertura parcial:** havendo `sem_decisao`, exige `confirmPartialCoverage=true` (409
+`COBERTURA_PARCIAL_REQUER_CONFIRMACAO` com o valor pendente em `details`); a trilha é o
+PRÓPRIO registro imutável — `author_id` (quem), `created_at` (quando),
+`undecided_amount`/`undecided_count` (quanto) e `partial_coverage_confirmed=true`. Não
+criei uma segunda trilha: a materialização já é append-only e nunca muda.
+
+**Versão N+1 num SAVEPOINT;** corrida pela mesma versão bate na UNIQUE, o SAVEPOINT
+desfaz só a tentativa e a resposta é 409 (refazer a prévia). Não há `UPDATE`/`DELETE`
+de materialização no código (teste de fonte) nem rota que altere ou apague.
+
+**Métrica depois do fato:** `insert → refresh → commit → emit_depara_aplicado` (ordem
+provada no unitário). `valor_com_decisao` = numerador (inclui `nao_mapear`),
+`valor_nao_mapear` = contra-métrica, `valor_sem_decisao`, `categorias_sem_decisao`;
+centavos por `decimal_to_cents`. Prévia sozinha e materialização recusada não emitem
+(teste de integração que CONTA LINHAS).
+
+Lista canônica 95 → 97. ⚠️ Integração (`test_client_mapping_materialization_endpoints.py`)
+escrita e NÃO executada (sem Docker).
+
+---
+
+## ADR-078-BE — Retrabalho da Sprint 12 (rodada 1): o que mudou em cada task e por quê (Sprint 12 / BACK 12.1–12.6)
+
+**12.1 — releitura em teste de integração.** Com `expire_on_commit=False`, um `select`
+que devolve um objeto já no identity map NÃO atualiza os atributos: o teste lia o
+status do ciclo anterior. Releitura em teste = `execution_options(populate_existing=True)`
+(ou `refresh(obj)`); **nunca `expire_all()`** em teste async (expira o objeto da fixture
+e o próximo atributo estoura `MissingGreenlet`). Vale para 12.1 e 12.6.
+
+**12.2 — padrão da competência e emissor fail-soft.** `COMPETENCE_PATTERN` passa a
+`^[1-9]\d{3}-(0[1-9]|1[0-2])$` (ano 1000–9999): `0000` estourava `date(0, …)` e
+`0001`–`0999` saíam do `strftime` sem zero à esquerda. É o padrão ÚNICO: sync,
+sync-state, prévia, materialização, `effectiveFrom` (JSON e Form) herdam. Os emissores
+chamados DEPOIS de commit de negócio (`movimentos_sincronizados`, `depara_aplicado`)
+montam as props em `UsageEventService._props_or_none`: prop recusada → warning
+`usage_event_props_invalid` (sem valores) + `False`, nunca 500 sobre escrita gravada.
+Os demais emissores não foram tocados (fora do apontado).
+
+**12.4 — corrida na escrita/herança e competência no fuso do Brasil.**
+- `ClientMappingRepository.insert_decisions` grava num SAVEPOINT e devolve `False` quando
+  a UNIQUE `uq_client_mapping_decisions_key_effective_from` barra o lote (constraint lida
+  de `exc.orig.diag.constraint_name`; outra violação re-levanta). O serviço responde o
+  MESMO 409 `DECISAO_DUPLICADA` da checagem (`_duplicate_error`). Cobre escrita única, lote,
+  confirmação em lote e importação (todas passam por `write_decisions`).
+- "Iniciar de-para" usa `insert_inherited` = `INSERT … ON CONFLICT DO NOTHING RETURNING id`:
+  o duplo clique vira no-op e `created` é o que entrou de fato (o resto soma em
+  `already_decided`). Preferido à trava por (cliente, destino) por não segurar lock
+  durante a leitura do plano de contas.
+- `current_competence`/`today_brt` moram em `client_movements/competence.py` (lugar
+  ÚNICO, UTC-3 fixo no molde do export da conciliação, sem `zoneinfo`); decisões (12.4),
+  listagem e importação (12.5) importam de lá. 30/09 23:30 BRT = setembro (teste).
+
+**12.5 — importação blindada contra planilha malformada (complementa o ADR-076-BE).**
+- QUALQUER falha de leitura (abertura E iteração) = o MESMO 400 `_invalid_file`, com
+  `except Exception` e `raise … from None` — a exceção original pode trazer o texto da
+  célula (`could not convert string to float: '<célula>'`), e o handler de 500 loga
+  `exc_info`. `ValidationAppError` nossa passa direto.
+- Custo limitado ANTES/DURANTE a leitura, com limites em constante: `MAX_IMPORT_UNCOMPRESSED_BYTES`
+  = 20 MB (soma de `file_size`) e `MAX_IMPORT_COMPRESSION_RATIO` = 100x por entrada, checados
+  no `ZipFile` antes do openpyxl; `ws.reset_dimensions()` (a `<dimension>` é declarada pelo
+  arquivo); `iter_rows(max_col=MAX_IMPORT_COLUMNS=32)`; `MAX_IMPORT_SCANNED_ROWS` = 2 ×
+  `MAX_IMPORT_ROWS` conta linhas PERCORRIDAS, vazias inclusive (o openpyxl `read_only` emite
+  uma linha vazia por buraco até a próxima linha do XML). Célula em XFD300000: de 199 s
+  para ~10 ms, 400 "linhas demais".
+- Parse via `run_in_threadpool` (CPU síncrona fora do event loop).
+- Código de categoria/alvo maior que a coluna NÃO é cortado (cortado, casaria com um
+  código-prefixo): segue inteiro e cai em `categoria_inexistente`/`alvo_inexistente`; só o
+  ECO na linha recusada é recortado no tamanho da coluna. Alvo grande nem vai à consulta.
+
+**12.6 — `decisions_used` sem `decision_id` (decidido) e releitura sem `expire_all()`.**
+- O registro imutável guarda `{sourceType, categoryCode, decisionType, targetCode,
+  effectiveFrom}` por vigência usada, e NÃO o `decision_id`: a herdada pode ser resolvida
+  no lugar (ADR-075-BE), então o id apontaria para uma linha que muda depois da
+  materialização; a chave (origem, categoria, destino, vigência) já identifica a
+  vigência (UNIQUE), e o EFEITO congelado é o que a Sprint 13 precisa para gerar o
+  arquivo. O comentário do modelo passou a descrever exatamente isso.
+- O teste de reaplicação (v2 criada, v1 intacta) relê a v1 com `populate_existing=True`.
+
+---
+
+## ADR-038-FE — De-para: rota própria, leitura sem gate, e o destino é endereçado pelo TIPO (Sprint 12 / FRONT 12.7)
+
+**Data:** 2026-09-26 · **Status:** ativo · **Escopo:** `apps/web` — tela do de-para
+
+- **Rota `/clientes/{id}/de-para`**, item "De-para" no menu do cliente **sem gate**,
+  pela regra do Glossário: a LEITURA do backend é `AccessibleClientDep` (não há
+  permissão de ler), e inventar uma no front esconderia do operador o que o
+  servidor libera. Toda ESCRITA pede `manage_client_mapping`; sincronizar pede
+  `sync_client_movements`; a ação some (nunca desabilitada) e some também com
+  cliente encerrado, com o motivo na tela.
+- **As três permissões novas** entraram em `lib/authz.ts` célula a célula
+  (23 × 5) e em `authz.test.ts`. `manage_mapping_catalog` (plataforma + admin) é
+  decisão do planejador do backend (ADR-074-BE), espelhada como está — a tela
+  não tem editor de catálogo (fora de escopo), só orienta o admin quando o
+  catálogo de alvos está vazio.
+- **O destino é endereçado pelo TIPO** (`demonstrativo_contabil`) nas rotas do
+  de-para e pelo `id` só nos alvos do catálogo. Os destinos vêm de
+  `GET /mapping-destinations`, filtrados pela organização DO CLIENTE; só a
+  plataforma manda `?organizationId=` (staff e usuário de cliente levam 403 se
+  mandarem). O `isPlatformScoped` aqui decide FILTRO de dado, não ação.
+- **Competência corrente = a do SERVIDOR** (`MappingListResponse.competence`);
+  o relógio do navegador é só fallback enquanto a lista não chegou. Aritmética
+  de competência em `lib/competence.ts`, só sobre a string (nunca `new Date`).
+- **"Iniciar de-para" só no `demonstrativo_contabil`** — constante
+  `INHERITING_DESTINATION_TYPE`, espelho da regra do servidor (os outros quatro
+  respondem `destino_sem_heranca`).
+
+---
+
+## ADR-039-FE — Os 409 de vigência e de base viram ESTADO, nunca toast (Sprint 12 / FRONT 12.7)
+
+**Data:** 2026-09-26 · **Status:** ativo · **Escopo:** `components/features/client-mapping/`
+
+`RETROATIVA_REQUER_CONFIRMACAO` e `COMPETENCIA_MATERIALIZADA` trazem
+`details.competences` como **string separada por vírgula** (o `details` do
+`ApiError` é `Record<string, string>`). `vigencia.tsx` é o ponto ÚNICO que lê os
+dois: a retroativa lista as competências e troca a ação para "Confirmar
+alteração retroativa" (reenvia com `confirmRetroactive=true`); a materializada é
+recusa com as competências nomeadas e trava o botão. Os quatro fluxos de escrita
+(decisão, lote, iniciar, importar) usam as mesmas peças. Trocar a competência de
+início descarta o conflito — a confirmação vale para AQUELE início.
+
+Na prévia: base nunca sincronizada não chega a pedir a prévia (`enabled` pelo
+`neverSynced` do `sync-state`) e mostra a instrução; o 409
+`BASE_NAO_SINCRONIZADA` (corrida) cai na MESMA instrução. `SEM_MOVIMENTOS` e
+`ANTERIOR_A_PRIMEIRA_VIGENCIA` (com botão para `details.earliestCompetence`)
+também são estado. `retry: false` nas duas queries: 409 aqui é estado, não
+falha transitória.
+
+---
+
+## ADR-040-FE — Três lacunas do contrato da S12 que a tela contorna sem inventar campo (Sprint 12 / FRONT 12.7)
+
+**Data:** 2026-09-26 · **Status:** ativo — **follow-up de backend sugerido** · **Escopo:** contrato
+
+1. **Não existe rota que LISTE as materializações.** A prévia devolve só
+   `latestVersion`. Como as versões são sequenciais e imutáveis (N+1, nunca
+   sobrescritas), a lista "Versão N (mais recente) … Versão 1" é DERIVADA dela,
+   sem data nem autor. Para mostrar data/autor/cobertura parcial confirmada de
+   cada versão, o backend precisa de `GET …/mapping/{tipo}/materializations`.
+2. **O lote das herdadas não recebe o filtro da tela.** `confirm-inherited`
+   confirma TODAS as herdadas vigentes do destino. A contagem do diálogo é a do
+   servidor (`confirm=false`), e quando a lista está recortada por código ou por
+   outra situação o diálogo diz que a confirmação vale para o destino inteiro.
+3. **Nomes de categoria não vêm na prévia** (`undecidedCategories` só tem
+   código). A lista de sem-decisão mostra código, valor e quantidade.
+
+---
+
+## ADR-041-FE — O gate de a11y da S12 NÃO rodou em browser: Docker negado pelo sandbox e Chromium sem libnspr4 (Sprint 12 / FRONT 12.7)
+
+**Data:** 2026-09-26 · **Status:** ativo · **Escopo:** verificação da entrega
+
+Mesma situação do ADR-036-FE, com um sintoma novo: aqui a CLI do Docker para
+antes do socket — `~/.docker/config.json: permission denied` (arquivo na
+deny-list de leitura do sandbox). O `chrome-headless-shell` do host falha com
+`libnspr4.so: cannot open shared object file`.
+
+**Feito:** seis cenários novos em `e2e/a11y-mocked.spec.ts` (lista com edição,
+lista só-leitura do operador, gaveta de vigência, prévia + diálogo de
+materializar, base nunca sincronizada, prévia da importação), com medida de
+borda (`exigirDentroDaViewport`) nas ações primárias e altura da região da
+tabela; fixtures + rotas mockadas do de-para no `fulfillApi`. `tsc` cobre o
+spec (o `tsconfig` inclui `**/*.ts`). Camada rápida de axe no vitest para a
+lista e a prévia.
+
+**Fica devendo, e não pode ser dado por medido:** axe nos três temas em browser
+real e os PNGs desktop/390px. Os cenários novos rodaram ZERO vezes. Comando para
+quem tiver o ambiente: a receita do `front-gate` §3 (build no host + servidor e
+suíte em UM container `mcr.microsoft.com/playwright:v1.59.1-noble`), com
+`E2E_SHOTS=1` para os prints `de-para-*`.
+
+**Ambiente do worktree (não é código):** o `package.json` da raiz está
+sobrescrito pelo do agents-hub e o `node_modules` da raiz é o do bridge, então
+`pnpm install --frozen-lockfile` não roda sem quebrar o `clickup-bridge.js`.
+Para tsc/lint/vitest o `apps/web/node_modules` apontou (symlink, removido ao
+fim) para o do checkout principal, mesmo lockfile. `next build` compila, checa
+tipos e gera as 10 páginas; só a cópia de traces do standalone falha, por causa
+do symlink.
+
+---
+
+## ADR-039-QA — Sprint 12 (de-para multi-destino), rodada 1: 2 aprovadas, 5 reprovadas; a tese da sprint está provada, a entrega não (Sprint 12 / QA 12.8)
+
+**Data:** 2026-09-26 · **Status:** ativo · **Escopo:** veredito da rodada 1 da Sprint 12
+
+**Como foi verificado (fora do "leitura de diff").** Árvore integrada `sprint-12/backend`
++ `sprint-12/frontend` (merge local, worktree destacado). O Docker estava acessível no
+sandbox do QA desta vez, então tudo rodou de verdade:
+- ruff, format e mypy verdes;
+- migrations `upgrade → downgrade -2 → upgrade` verdes, com um head só (`e6b2c9d47f13`) e
+  os 5 destinos semeados na Hologram, conferidos no banco;
+- **suíte completa contra Postgres: 2851 passed, 3 failed (25 min)**;
+- `gen:types` a partir do `app.openapi()` do backend com **diff 0** contra o `schema.ts`
+  commitado;
+- tsc e lint limpos, vitest 724/724;
+- **gate de a11y em browser: 384 cenários × 3 temas, unexpected=0, skipped=0, flaky=0**;
+- PNGs desktop e 390px abertos e conferidos.
+
+**A tese foi provada pela API** (`tests/integration/test_s12_qa_two_destinations.py`, com
+admin E com manager). As quatro categorias só-caixa, 24/21/20/3, com DADO SINTÉTICO porque a
+fixture real é uma conta de cartão sem essas categorias, saem `nao_mapear` no
+`demonstrativo_contabil` e alvo real no `fluxo_de_caixa`, no registro imutável. São
+exatamente 2 `depara_aplicado` (um por destino), com as 6 chaves e sem código nem nome.
+A organização B leva 403/404 sem ler o nome, e o cliente encerrado leva 409 em sync,
+decisão, herança, materialização e importação.
+
+**Reprovadas (FAILED, comentário por arquivo:linha):**
+- 12.1: teste do 3º ciclo vermelho, defeito de teste;
+- 12.2: ano `0000` → 500 em todas as rotas com competência, e anos `0001`–`0999`
+  derrubam o emissor depois do Omie;
+- 12.4: `IntegrityError` → 500 no duplo clique da herança e em escritas concorrentes;
+  competência corrente em UTC;
+- 12.5: `.xlsx` malformado → 500 com texto da célula no log, e DoS de 199 s; código
+  truncado em vez de recusado; teste de paginação vermelho;
+- 12.6: teste vermelho (`expire_all()` → `MissingGreenlet`) e comentário de
+  `decisions_used` que não bate com o gravado.
+
+**Aprovadas:** 12.3 (catálogo e schema) e FRONT 12.7. O contrato do front não muda com o
+rework: o padrão de competência não aparece no `schema.ts`.
+
+**Decisões do planejador que ficam para a VALIDAÇÃO HUMANA** (não são reprovação):
+- `manage_mapping_catalog` = plataforma + admin (ADR-074-BE);
+- um destino por (organização, tipo);
+- materializações retidas no encerramento, decisões purgadas;
+- alvo ausente na herança → sem decisão, listado;
+- herdada resolvida in-place (ADR-075-BE: a única escrita não-append da tabela);
+- destino sem vigência nenhuma → prévia com tudo `sem_decisao` em vez de 409 (ADR-077-BE).
+
+**S-1 (de-para estável mês a mês) segue ASSUMIDA — NÃO TESTADA**: medir aplicando o de-para
+de um mês ao seguinte e contando categorias novas.
+
+**Follow-ups:**
+- 86e3f0ux7 (backend): lista de materializações, filtro do lote, robustez da base;
+- 86e3f0uxb (front): contagem do lote, retry do estado da base, copy;
+- 86e3f0uzh (`agent-review`): encode no `backend.md`.
+
+---
+
+## ADR-040-QA — Sprint 12, re-revisão #1: as 5 reprovadas voltaram corrigidas; sprint inteira aprovada (Sprint 12 / QA 12.8)
+
+**Data:** 2026-09-26 · **Status:** ativo · **Escopo:** veredito da rodada 2 da Sprint 12
+
+**O que foi revisado.** Um commit de rework no backend (`43c1949`, sobre `578ad87`); o
+front (`6e3093e`) e a infra não mudaram. Árvore integrada backend + frontend refeita no
+worktree destacado `.qa-s12/`, com os testes do QA copiados.
+
+**Item a item das reprovações da rodada 1 (ADR-039-QA):**
+- 12.1: `_rows` relê com `populate_existing=True`; o 3º ciclo passa.
+- 12.2: `COMPETENCE_PATTERN = ^[1-9]\d{3}-(0[1-9]|1[0-2])$`, e o teste de ida e volta
+  cobre `1000-01`…`9999-12`. As props de `movimentos_sincronizados` e `depara_aplicado`
+  são montadas em `_props_or_none`, então prop recusada vira warning e `False`, nunca 500.
+- 12.4: `insert_inherited` (`ON CONFLICT DO NOTHING` na UNIQUE nomeada,
+  `created` = linhas que entraram) e `insert_decisions` em SAVEPOINT, que só engole a
+  UNIQUE da vigência (lida de `diag.constraint_name`) e responde o mesmo 409
+  `DECISAO_DUPLICADA`. O nome no modelo bate com a migration (`uq_client_mapping_decisions_key_effective_from`,
+  explícito, e a naming convention não o reescreve). Não há `relationship` no modelo, então
+  o objeto do INSERT Core não entra na sessão por cascade. A competência corrente está em
+  `competence.py::current_competence` (UTC-3), reusada por decisões, listagem e importação.
+- 12.5: `except Exception` + `from None` na abertura E na iteração; orçamento de zip
+  (20 MB e 100x); `reset_dimensions` + `max_col=32` + teto de 4.000 linhas PERCORRIDAS;
+  `run_in_threadpool` no único call site (`plan`, que o `apply` reusa); código longo
+  recusado, eco recortado. Teste da paginação corrigido para `['2.05', '3.01']`.
+- 12.6: releitura sem `expire_all()`; comentário de `decisions_used` descreve o que é
+  gravado (sem `decision_id`, decisão registrada no ADR-078-BE).
+
+**Evidência (output real):**
+- ruff check `All checks passed!`, format `386 files already formatted`, mypy
+  `Success: no issues found in 213 source files`;
+- arquivos do rework + testes do QA: `185 passed in 50.70s`;
+- suíte completa contra Postgres: **`2898 passed, 103 warnings in 1415.65s`**;
+- `openapi-typescript` 7.13 sobre o `app.openapi()` do rework: **diff 0** contra o
+  `schema.ts` commitado.
+
+**Testes do QA ajustados nesta rodada:** `test_s12_qa_import_hardening.py` ganhou a
+asserção de que a exceção sai sem cadeia (`__cause__ is None`, `__suppress_context__`),
+e o `PT017` do ruff foi resolvido; `test_s12_qa_two_destinations.py` só foi formatado.
+
+**Não re-executado nesta rodada** (nada mudou no que medem): migrations (o rework não
+tocou `alembic/`, só um comentário do modelo), gate de a11y e PNGs (front sem commit
+novo; rodada 1: 384 × 3 temas, unexpected=0).
+
+**Fica para a validação humana** (igual à rodada 1): as decisões do planejador listadas no
+ADR-039-QA e a S-1, ASSUMIDA e NÃO TESTADA. Follow-ups: 86e3f0ux7, 86e3f0uxb, 86e3f0uzh.
+
