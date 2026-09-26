@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import CursorResult, String, all_, bindparam, func, select, update
+from sqlalchemy import CursorResult, String, all_, any_, bindparam, func, select, update
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -130,6 +130,7 @@ class ClientMovementsRepository:
         competence: date,
         rows: Sequence[dict[str, Any]],
         synced_at: datetime,
+        accounts_read: Sequence[str],
     ) -> MovementCycleOutcome:
         """Aplica UM ciclo: atualiza o que mudou, insere o novo e marca quem saiu.
 
@@ -147,6 +148,7 @@ class ClientMovementsRepository:
             source_type=source_type,
             competence=competence,
             keep_source_ids=[str(row["source_movement_id"]) for row in rows],
+            accounts_read=accounts_read,
         )
         return MovementCycleOutcome(upserted=upserted, absent=absent)
 
@@ -197,8 +199,14 @@ class ClientMovementsRepository:
         source_type: str,
         competence: date,
         keep_source_ids: Sequence[str],
+        accounts_read: Sequence[str],
     ) -> int:
         """Marca `ausente_na_origem` quem não veio nesta passada. **Nunca apaga.**
+
+        Só quem pertence a uma conta LIDA nesta passada pode ser dado como ausente
+        (follow-up 86e3f0ux7, item 3): conta que saiu do cache não foi consultada, e
+        os movimentos dela continuam existindo na origem — marcá-los seria mentir na
+        cobertura. Sem conta lida, nada é marcado.
 
         O recorte é `(cliente, tipo de origem, competência)`: sincronizar junho não
         encosta em julho, e a origem Omie não encosta no que a Sprint 14 gravar
@@ -213,7 +221,10 @@ class ClientMovementsRepository:
         `last_synced_at` NÃO é tocado: ele diz quando a linha foi vista pela
         origem pela última vez, e ela não foi.
         """
+        if not accounts_read:
+            return 0
         keep = bindparam("keep_source_ids", value=list(keep_source_ids), type_=ARRAY(String()))
+        read = bindparam("accounts_read", value=list(accounts_read), type_=ARRAY(String()))
         stmt = (
             update(ClientMovement)
             .where(
@@ -222,6 +233,7 @@ class ClientMovementsRepository:
                 ClientMovement.competence == competence,
                 ClientMovement.status == MovementStatus.PRESENTE.value,
                 ClientMovement.source_movement_id != all_(keep),
+                ClientMovement.source_account_id == any_(read),
             )
             .values(status=MovementStatus.AUSENTE_NA_ORIGEM.value, updated_at=func.now())
         )

@@ -73,6 +73,9 @@ class _Ledger:
     calls: list[str] = field(default_factory=list)
     cycles: list[dict[str, Any]] = field(default_factory=list)
     events: list[dict[str, Any]] = field(default_factory=list)
+    #: Quantas vezes o cache de contas foi renovado (fora de `calls` de propósito:
+    #: os testes de ordem das escritas não são sobre a leitura das contas).
+    refreshes: int = 0
 
 
 class _Events:
@@ -94,10 +97,25 @@ class _Db:
     async def commit(self) -> None:
         self._ledger.calls.append("commit")
 
+    async def rollback(self) -> None:
+        self._ledger.calls.append("rollback")
 
-class _Repo:
+
+class _AccountsCache:
+    """Cache de contas falso: só registra que foi consultado ANTES da origem."""
+
     def __init__(self, ledger: _Ledger) -> None:
         self._ledger = ledger
+
+    async def get_or_sync(self, client: object, connection: object) -> tuple[list[Any], None]:
+        self._ledger.refreshes += 1
+        return [], None
+
+
+class _Repo:
+    def __init__(self, ledger: _Ledger, *, fail_cycle: bool = False) -> None:
+        self._ledger = ledger
+        self._fail_cycle = fail_cycle
 
     async def reconcile_cycle(
         self,
@@ -107,10 +125,18 @@ class _Repo:
         competence: date,
         rows: list[dict[str, Any]],
         synced_at: datetime,
+        accounts_read: list[str],
     ) -> MovementCycleOutcome:
         self._ledger.calls.append("reconcile_cycle")
+        if self._fail_cycle:
+            raise RuntimeError("banco caiu no meio do ciclo")
         self._ledger.cycles.append(
-            {"source_type": source_type, "competence": competence, "rows": list(rows)}
+            {
+                "source_type": source_type,
+                "competence": competence,
+                "rows": list(rows),
+                "accounts_read": list(accounts_read),
+            }
         )
         return MovementCycleOutcome(upserted=len(rows), absent=0)
 
@@ -200,6 +226,7 @@ def _wire(
     accounts_synced_at: datetime | None = datetime(2026, 6, 1, tzinfo=UTC),
     locks: OriginClientLocks | None = None,
     connection_error: Exception | None = None,
+    repo_fails: bool = False,
 ) -> tuple[ClientMovementsSyncService, _Ledger]:
     ledger = _Ledger()
 
@@ -215,11 +242,12 @@ def _wire(
     monkeypatch.setattr(service_module, "build_origin_provider", _build)
     service = ClientMovementsSyncService(
         _Db(ledger),  # type: ignore[arg-type]
-        repository=_Repo(ledger),  # type: ignore[arg-type]
+        repository=_Repo(ledger, fail_cycle=repo_fails),  # type: ignore[arg-type]
         clients=_Clients(accounts),  # type: ignore[arg-type]
         settings=get_settings(),
         locks=locks or OriginClientLocks(),
         usage_events=_Events(ledger),  # type: ignore[arg-type]
+        accounts_cache=_AccountsCache(ledger),  # type: ignore[arg-type]
     )
     return service, ledger
 
@@ -536,3 +564,37 @@ class TestFixtureRealDoExtrato:
                 assert valor <= 0
             elif raw["cNatureza"] == "R":
                 assert valor >= 0
+
+
+# ---------------------------------------------------------------------------
+# Follow-up 86e3f0ux7: base honesta (contas renovadas, ausência recortada, falha de banco)
+# ---------------------------------------------------------------------------
+
+
+class TestBaseHonesta:
+    async def test_cache_de_contas_e_renovado_antes_da_leitura_e_as_contas_lidas_vao_ao_ciclo(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Item 3: o `get_or_sync` (com o TTL dele) roda ANTES da origem, e a
+        marcação de ausência recebe exatamente as contas que foram lidas."""
+        provider = _Provider({"111": [_entry("1")], "222": [_entry("2")]})
+        service, ledger = _wire(monkeypatch, provider, accounts=[111, 222])
+        result = await service.sync(_client(), JUNHO)
+        assert ledger.refreshes == 1
+        assert ledger.cycles[0]["accounts_read"] == ["111", "222"]
+        assert result.contas == 2
+
+    async def test_falha_de_banco_no_ciclo_faz_rollback_carimba_a_falha_e_re_levanta(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Item 4: até aqui só a falha da ORIGEM carimbava `sync_failed_at`; uma
+        exceção do Postgres no meio do ciclo deixava a competência sem carimbo
+        nenhum. A ordem importa: ROLLBACK (a transação está inutilizável e a base
+        anterior fica inteira), carimbo, COMMIT como barreira, e o erro segue."""
+        provider = _Provider({"111": [_entry("1")]})
+        service, ledger = _wire(monkeypatch, provider, accounts=[111], repo_fails=True)
+        with pytest.raises(RuntimeError):
+            await service.sync(_client(), JUNHO)
+        assert ledger.calls == ["reconcile_cycle", "rollback", "mark_failed", "commit"]
+        assert "mark_ok" not in ledger.calls
+        assert "emit" not in ledger.calls, "métrica só no fim de uma sincronização íntegra"

@@ -187,6 +187,9 @@ class _Repo:
         self.materialized: set[date] = set()
         self.chart: list[Any] = []
 
+    async def lock_client_destination(self, client_id: UUID, destination_id: UUID) -> None:
+        """Lock transacional por (cliente, destino): no-op no dublê."""
+
     async def list_decisions(
         self, client_id: UUID, destination_id: UUID, *, category_codes: Any = None
     ) -> list[ClientMappingDecision]:

@@ -341,6 +341,7 @@ async def test_mesma_categoria_dois_destinos_saidas_diferentes(
     chaves = {
         "client_id",
         "destino",
+        "competencia",  # follow-up 86e3f0ux7 (item 6): a leitura D+30 é POR competência
         "valor_com_decisao_centavos",
         "valor_nao_mapear_centavos",
         "valor_sem_decisao_centavos",
