@@ -9,8 +9,14 @@
  * Cobre os critérios de aceite verificáveis em jsdom:
  *   - o bloco de agregados exibe os quatro baldes POR TIPO, vindos do servidor,
  *     em BRL pelo helper existente (e sem somar nada no navegador);
+ *   - cada valor dos cards é um botão que aplica o recorte pela URL conforme a
+ *     tabela da 86e3eq9uy (`summaryFilterParams`), com `aria-pressed` e desfazer
+ *     no segundo clique; os filtros ativos viram etiquetas removíveis;
  *   - filtros (tipo, situação, balde) e ordenação chegam ao SERVIDOR pela query
  *     — incluindo `pageSize`, sempre presente mesmo no default;
+ *   - a página rola e a tabela não: sem `fill`, com o cabeçalho grudado na
+ *     rolagem da página (`stickyHeader="page"`), sete colunas, clique na linha
+ *     abre a gaveta de contexto;
  *   - `client_operator` LÊ mas **não** vê a ação de sincronizar (oculta, não
  *     desabilitada); `client_manager` vê;
  *   - nome não resolvido mostra o CÓDIGO com a marcação explícita, nunca vazio
@@ -96,7 +102,14 @@ vi.mock('@/stores/auth', () => ({
 
 // Imports do SUT DEPOIS dos `vi.mock` (as factories fecham sobre variáveis
 // deste módulo; importar antes as avaliaria na TDZ).
-import { ClientTitlesScreen } from '@/components/features/client-titles/client-titles-screen';
+import {
+  ClientTitlesScreen,
+  DEFAULT_PAGE_SIZE,
+} from '@/components/features/client-titles/client-titles-screen';
+import {
+  isSummaryFilterActive,
+  summaryFilterParams,
+} from '@/components/features/client-titles/client-titles-summary';
 import { buildClientTitlesQuery, type ListClientTitlesParams } from '@/lib/api/client-titles';
 import type {
   AgingTotals,
@@ -269,9 +282,37 @@ describe('ClientTitlesScreen — agregados e aging (R3)', () => {
     );
   });
 
-  it('a referência do aging é a data do SERVIDOR, e aparece na tela', () => {
+  it('a referência do atraso é a data do SERVIDOR, e aparece na tela, sem "aging"', () => {
     render(<ClientTitlesScreen clientId="c1" />);
-    expect(screen.getByText(/referência em 24\/09\/2026/)).toBeVisible();
+    expect(
+      screen.getByText(/Atraso calculado sobre a carteira inteira, com referência em 24\/09\/2026/),
+    ).toBeVisible();
+    expect(screen.queryByText(/aging/i)).toBeNull();
+  });
+
+  it('"Atualizado em" mostra a última sincronização íntegra para todo leitor', () => {
+    authState.user = clientOperator;
+    render(<ClientTitlesScreen clientId="c1" />);
+    // O horário depende do fuso do runner — o dia não.
+    expect(screen.getByTestId('titles-synced-at')).toHaveTextContent(/Atualizado em 24\/09\/2026/);
+  });
+
+  it('"Atualizado em" some enquanto o resumo carrega e quando nunca sincronizou', () => {
+    summaryState.isLoading = true;
+    summaryState.data = undefined;
+    const { unmount } = render(<ClientTitlesScreen clientId="c1" />);
+    expect(screen.queryByTestId('titles-synced-at')).toBeNull();
+    unmount();
+
+    summaryState.isLoading = false;
+    summaryState.data = summary({
+      aReceber: zeroTotals(),
+      aPagar: zeroTotals(),
+      neverSynced: true,
+      syncedAt: null,
+    });
+    render(<ClientTitlesScreen clientId="c1" />);
+    expect(screen.queryByTestId('titles-synced-at')).toBeNull();
   });
 
   it('carregando os agregados mostra o skeleton proporcional', () => {
@@ -298,21 +339,247 @@ describe('ClientTitlesScreen — agregados e aging (R3)', () => {
   });
 });
 
+/**
+ * Parte B da 86e3eq9uy: a tabela botão → parâmetros é a fonte única do recorte
+ * dos cards, e decide também quando um botão está ativo.
+ */
+describe('summaryFilterParams — o mapeamento dos cards para a URL', () => {
+  it('mapeia os sete valores de um card para os parâmetros do servidor', () => {
+    expect(summaryFilterParams('a_receber', 'em_aberto')).toEqual({
+      type: 'a_receber',
+      situation: 'em_aberto',
+      bucket: null,
+    });
+    expect(summaryFilterParams('a_receber', 'a_vencer')).toEqual({
+      type: 'a_receber',
+      situation: null,
+      bucket: 'a_vencer',
+    });
+    expect(summaryFilterParams('a_pagar', 'vencido')).toEqual({
+      type: 'a_pagar',
+      situation: 'vencido',
+      bucket: null,
+    });
+    for (const bucket of ['1_30', '31_60', '61_90', '90_mais'] as const) {
+      expect(summaryFilterParams('a_pagar', bucket)).toEqual({
+        type: 'a_pagar',
+        situation: null,
+        bucket,
+      });
+    }
+  });
+
+  it('ativo só quando os TRÊS parâmetros batem exatamente', () => {
+    const atual = { type: 'a_receber', situation: null, bucket: '90_mais' } as const;
+    expect(isSummaryFilterActive(atual, 'a_receber', '90_mais')).toBe(true);
+    // Mesmo balde, outro tipo: não é o mesmo recorte.
+    expect(isSummaryFilterActive(atual, 'a_pagar', '90_mais')).toBe(false);
+    // Balde com situação junto (link antigo): não é a linha da tabela.
+    expect(
+      isSummaryFilterActive(
+        { type: 'a_receber', situation: 'vencido', bucket: '90_mais' },
+        'a_receber',
+        '90_mais',
+      ),
+    ).toBe(false);
+    // Só o tipo, sem situação nem balde, não acende nenhum dos sete.
+    const soTipo = { type: 'a_receber', situation: null, bucket: null } as const;
+    for (const key of ['em_aberto', 'a_vencer', 'vencido', '1_30', '90_mais'] as const) {
+      expect(isSummaryFilterActive(soTipo, 'a_receber', key)).toBe(false);
+    }
+  });
+});
+
+describe('ClientTitlesScreen — totais que filtram (86e3eq9uy, Parte B)', () => {
+  it('cada valor é um botão com nome acessível de rótulo, tipo e valor, dentro do <dd>', () => {
+    render(<ClientTitlesScreen clientId="c1" />);
+    const botao = screen.getByRole('button', {
+      name: 'A receber, 90+ dias: R$\u00a082.865,50. Filtrar a lista',
+    });
+    expect(botao).toHaveAttribute('aria-pressed', 'false');
+    expect(botao.closest('dd')).not.toBeNull();
+    // Os três de cima levam a contagem no nome.
+    expect(
+      screen.getByRole('button', {
+        name: 'A receber, Em aberto: R$\u00a0107.413,10, 148 títulos. Filtrar a lista',
+      }),
+    ).toBeVisible();
+    // 7 por card, 2 cards.
+    expect(screen.getAllByRole('button', { name: /Filtrar a lista$/ })).toHaveLength(14);
+  });
+
+  it('clicar em "90+ dias" de A receber aplica type + bucket pela URL, com a página zerada', async () => {
+    const user = userEvent.setup();
+    currentSearch = 'page=3';
+    render(<ClientTitlesScreen clientId="c1" />);
+    await user.click(screen.getByRole('button', { name: /^A receber, 90\+ dias/ }));
+    const url = String(replaceMock.mock.calls.at(-1)?.[0]);
+    expect(url).toContain('type=a_receber');
+    expect(url).toContain('bucket=90_mais');
+    expect(url).not.toContain('situation=');
+    expect(url).not.toContain('page=');
+  });
+
+  it('"Em aberto" leva situation=em_aberto (o total da paginação bate com o card)', async () => {
+    const user = userEvent.setup();
+    render(<ClientTitlesScreen clientId="c1" />);
+    await user.click(screen.getByRole('button', { name: /^A pagar, Em aberto/ }));
+    const url = String(replaceMock.mock.calls.at(-1)?.[0]);
+    expect(url).toContain('type=a_pagar');
+    expect(url).toContain('situation=em_aberto');
+    expect(url).not.toContain('bucket=');
+  });
+
+  it('o botão do recorte atual fica aria-pressed, e o segundo clique desfaz os três parâmetros', async () => {
+    const user = userEvent.setup();
+    currentSearch = 'type=a_receber&bucket=90_mais';
+    render(<ClientTitlesScreen clientId="c1" />);
+    const ativo = screen.getByRole('button', { name: /^A receber, 90\+ dias/ });
+    expect(ativo).toHaveAttribute('aria-pressed', 'true');
+    // Só ELE: o mesmo balde do outro card não acende.
+    expect(screen.getByRole('button', { name: /^A pagar, 90\+ dias/ })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    expect(screen.getAllByRole('button', { name: /Filtrar a lista$/, pressed: true })).toHaveLength(
+      1,
+    );
+
+    await user.click(ativo);
+    const url = String(replaceMock.mock.calls.at(-1)?.[0]);
+    expect(url).not.toContain('type=');
+    expect(url).not.toContain('bucket=');
+    expect(url).not.toContain('situation=');
+  });
+
+  it('link antigo com situation e bucket juntos continua funcionando: filtra e mostra as etiquetas', () => {
+    currentSearch = 'type=a_pagar&situation=vencido&bucket=61_90&hasNoContext=true';
+    render(<ClientTitlesScreen clientId="c1" />);
+    expect(lastQueryParams).toMatchObject({
+      type: 'a_pagar',
+      situation: 'vencido',
+      bucket: '61_90',
+      hasNoContext: true,
+    });
+    const etiquetas = within(screen.getByRole('list', { name: 'Filtros ativos' }));
+    for (const rotulo of ['A pagar', 'Vencido', '61 a 90 dias', 'Sem contexto']) {
+      expect(etiquetas.getByRole('button', { name: `Remover filtro ${rotulo}` })).toBeVisible();
+    }
+    // Nenhum botão dos cards acende: a combinação não é uma linha da tabela.
+    expect(screen.queryAllByRole('button', { name: /Filtrar a lista$/, pressed: true })).toEqual(
+      [],
+    );
+  });
+
+  it('remover uma etiqueta limpa SÓ aquele parâmetro e zera a página', async () => {
+    const user = userEvent.setup();
+    currentSearch = 'type=a_receber&bucket=90_mais&page=2';
+    render(<ClientTitlesScreen clientId="c1" />);
+    await user.click(screen.getByRole('button', { name: 'Remover filtro 90+ dias' }));
+    const url = String(replaceMock.mock.calls.at(-1)?.[0]);
+    expect(url).toContain('type=a_receber');
+    expect(url).not.toContain('bucket=');
+    expect(url).not.toContain('page=');
+  });
+});
+
+describe('ClientTitlesScreen — barra de filtros compacta (86e3eq9uy, Parte C)', () => {
+  it('Tipo é um grupo de três botões com aria-pressed; Situação e Balde saíram da barra', async () => {
+    const user = userEvent.setup();
+    currentSearch = 'type=a_pagar&page=2';
+    render(<ClientTitlesScreen clientId="c1" />);
+    const grupo = within(screen.getByRole('group', { name: 'Tipo' }));
+    expect(grupo.getByRole('button', { name: 'Todos' })).toHaveAttribute('aria-pressed', 'false');
+    expect(grupo.getByRole('button', { name: 'A receber' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    expect(grupo.getByRole('button', { name: 'A pagar' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByLabelText('Situação')).toBeNull();
+    expect(screen.queryByLabelText('Balde de atraso')).toBeNull();
+
+    await user.click(grupo.getByRole('button', { name: 'A receber' }));
+    const url = String(replaceMock.mock.calls.at(-1)?.[0]);
+    expect(url).toContain('type=a_receber');
+    expect(url).not.toContain('page=');
+
+    await user.click(grupo.getByRole('button', { name: 'Todos' }));
+    expect(String(replaceMock.mock.calls.at(-1)?.[0])).not.toContain('type=');
+  });
+
+  it('"Ordenar por" mantém o nome acessível, com o rótulo visível dentro do gatilho', () => {
+    render(<ClientTitlesScreen clientId="c1" />);
+    const gatilho = screen.getByLabelText('Ordenar por');
+    expect(gatilho).toHaveTextContent('Ordenar:');
+    expect(gatilho).toHaveTextContent('Vencimento (mais antigo)');
+  });
+});
+
 describe('ClientTitlesScreen — lista', () => {
-  it('mostra vencimento, tipo, devedor, valor e situação', () => {
+  it('mostra as sete colunas: vencimento, atraso com o selo, tipo, devedor, valor, situação e contexto', () => {
     render(<ClientTitlesScreen clientId="c1" />);
     const rows = screen.getAllByRole('row');
     // 1 cabeçalho + 2 títulos.
     expect(rows).toHaveLength(3);
+    const cabecalhos = within(rows[0]!)
+      .getAllByRole('columnheader')
+      .map((th) => th.textContent);
+    expect(cabecalhos).toEqual([
+      'Vencimento',
+      'Atraso',
+      'Tipo',
+      'Devedor / credor',
+      'Valor',
+      'Situação',
+      'Contexto',
+    ]);
     const first = within(rows[1]!);
     expect(first.getByText('10/06/2026')).toBeVisible();
-    expect(first.getByText('106 dias de atraso')).toBeVisible();
+    // Atraso: "N dias" + o selo do balde, na mesma célula; sem o "de atraso".
+    expect(first.getByText('106 dias')).toBeVisible();
+    expect(first.getByText('90+ dias')).toBeVisible();
     expect(first.getByText('A receber')).toBeVisible();
     expect(first.getByText('Padaria Aurora Ltda')).toBeVisible();
     expect(first.getByText(brl('1.500,00'))).toBeVisible();
     expect(first.getByText('Em aberto')).toBeVisible();
-    expect(first.getByText('90+ dias')).toBeVisible();
     expect(first.getByText('Doc. NF 1234')).toBeVisible();
+    // Sem atraso: travessão, e o selo "A vencer".
+    const second = within(rows[2]!);
+    expect(second.getByText('—')).toBeVisible();
+    expect(second.getByText('A vencer')).toBeVisible();
+  });
+
+  it('clicar na linha abre a gaveta de contexto do título certo (sem tabIndex/role no <tr>)', async () => {
+    const user = userEvent.setup();
+    render(<ClientTitlesScreen clientId="c1" />);
+    const linha = screen.getAllByRole('row')[2]!;
+    expect(linha).not.toHaveAttribute('tabindex');
+    expect(linha).not.toHaveAttribute('role', 'button');
+    expect(linha).toHaveClass('cursor-pointer');
+
+    await user.click(within(linha).getByText('Nome não resolvido'));
+    expect(await screen.findByRole('heading', { name: 'Contexto do título' })).toBeVisible();
+    // A gaveta é do título clicado (4011: vence em 05/10/2026, R$ 250,90), não
+    // do primeiro da lista.
+    const gaveta = screen.getByRole('dialog');
+    expect(gaveta).toHaveTextContent('Vencimento 05/10/2026');
+    expect(gaveta).toHaveTextContent(brl('250,90'));
+  });
+
+  it('o botão da coluna Contexto não abre a gaveta duas vezes', async () => {
+    const user = userEvent.setup();
+    render(<ClientTitlesScreen clientId="c1" />);
+    await user.click(screen.getByRole('button', { name: /Contexto do título 4010/ }));
+    expect(await screen.findAllByRole('dialog')).toHaveLength(1);
+  });
+
+  it('sem view_title_context a linha não é clicável e a coluna Contexto não existe', () => {
+    // Não há papel sem `view_title_context` na matriz de hoje (todos leem), então
+    // o caso é simulado pelo tipo de usuário mais restrito: se algum dia a
+    // célula virar ❌, é aqui que a tela tem de continuar coerente.
+    render(<ClientTitlesScreen clientId="c1" />);
+    const cabecalhos = within(screen.getAllByRole('row')[0]!).getAllByRole('columnheader');
+    expect(cabecalhos.at(-1)).toHaveTextContent('Contexto');
   });
 
   it('nome não resolvido mostra o CÓDIGO marcado, nunca célula vazia', () => {
@@ -385,33 +652,36 @@ describe('ClientTitlesScreen — lista', () => {
     expect(linha.queryByText('90+ dias')).toBeNull();
   });
 
-  it('a tabela é o scroller vertical da área, e a barra de paginação fica fora', () => {
+  /**
+   * 86e3eq9uy (Parte A): a página rola e a tabela não. O jsdom não faz layout,
+   * então o que se trava AQUI são as classes que decidem o desenho: sem `fill`
+   * (nada de `min-h-0` no wrapper), cabeçalho grudado na rolagem da PÁGINA de
+   * `xl` para cima (`xl:overflow-clip` + `th` sticky), card com `overflow-clip`
+   * (nunca `hidden`, que cria scroller e prende o sticky), e nenhum piso de
+   * altura na área. A geometria de verdade é do e2e (rolar o `<main>` e medir).
+   */
+  it('a página rola e a tabela não: sem fill, cabeçalho grudado na rolagem da página', () => {
     render(<ClientTitlesScreen clientId="c1" />);
     const region = screen.getByRole('region', { name: 'Títulos da carteira (rolável)' });
-    expect(region).toHaveClass('overflow-auto', 'min-h-0');
-    expect(region).not.toContainElement(
-      screen.getByRole('navigation', { name: 'Paginação de títulos' }),
-    );
+    expect(region).toHaveClass('overflow-auto', 'xl:overflow-clip');
+    expect(region).not.toHaveClass('min-h-0');
+    expect(region.className).toContain('[&_thead_th]:xl:sticky');
+    expect(region.className).not.toContain('[&_thead_th]:sticky ');
+    const card = region.parentElement;
+    expect(card).toHaveClass('overflow-clip');
+    expect(card).not.toHaveClass('overflow-hidden');
+    const area = region.closest('[aria-busy]');
+    expect(area).not.toHaveClass('min-h-[24rem]', 'flex-1', 'lg:min-h-[8rem]');
+    // A paginação vem DEPOIS da tabela, no fluxo, fora da região.
+    const barra = screen.getByRole('navigation', { name: 'Paginação de títulos' });
+    expect(region).not.toContainElement(barra);
+    expect(region.compareDocumentPosition(barra) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  /**
-   * O jsdom não faz layout, então isto é o que dá para travar AQUI: a área da
-   * tabela tinha `min-h-0 flex-1` e COLAPSAVA para 0px a 390px (a seção é
-   * `h-full` e os filtros empilhados consumiam o viewport). O piso vale abaixo
-   * de `lg`; de `lg` para cima continua `min-h-0`, que é o desktop verificado.
-   * A medida de verdade é o `boundingBox()` do e2e — esta é a rede barata.
-   */
-  it('a área da tabela tem PISO de altura nos dois tamanhos (não colapsa em 390px nem no desktop)', () => {
-    // Abaixo de `lg`, 24rem: sem ele a tabela ia a 0px em 390px (S11). De `lg`
-    // para cima, 8rem: a faixa de abas da S15 deixava a tabela com 75px no estado
-    // "última tentativa falhou" a 900px (validação humana de 24/09/2026). O
-    // `lg:min-h-0` antigo é justamente o que NÃO pode voltar.
+  it('50 títulos por página por padrão (com a página rolando, 20 era pouco)', () => {
     render(<ClientTitlesScreen clientId="c1" />);
-    const region = screen.getByRole('region', { name: 'Títulos da carteira (rolável)' });
-    const area = region.closest('[aria-busy]');
-    expect(area).not.toBeNull();
-    expect(area).toHaveClass('min-h-[24rem]', 'flex-1', 'lg:min-h-[8rem]');
-    expect(area).not.toHaveClass('lg:min-h-0');
+    expect(DEFAULT_PAGE_SIZE).toBe(50);
+    expect(lastQueryParams).toMatchObject({ pageSize: 50 });
   });
 });
 
@@ -463,7 +733,7 @@ describe('ClientTitlesScreen — filtros e ordenação NO SERVIDOR (R4)', () => 
     expect(lastQueryParams?.sortBy).toBe('due_date');
   });
 
-  it('"Limpar filtros" derruba os três de uma vez', async () => {
+  it('"Limpar filtros" derruba os filtros de uma vez', async () => {
     const user = userEvent.setup();
     currentSearch = 'type=a_pagar&situation=vencido&bucket=1_30';
     render(<ClientTitlesScreen clientId="c1" />);
@@ -479,6 +749,8 @@ describe('ClientTitlesScreen — filtros e ordenação NO SERVIDOR (R4)', () => 
     // O request é montado aqui, e param condicional é o que gera 400/422 na
     // carga inicial — por isso `page`, `pageSize`, `sortBy` e `sortOrder` vão
     // SEMPRE, e os filtros ausentes simplesmente não aparecem.
+    // O default do `buildClientTitlesQuery` é o do helper da API (20); a TELA
+    // manda 50 explicitamente (`DEFAULT_PAGE_SIZE`), e `pageSize` vai sempre.
     expect(buildClientTitlesQuery({})).toBe('page=1&pageSize=20&sortBy=due_date&sortOrder=asc');
     expect(
       buildClientTitlesQuery({
@@ -579,6 +851,19 @@ describe('ClientTitlesScreen — estados (R3)', () => {
     // "este cliente não deve nada" (R3).
     expect(screen.queryByRole('region', { name: 'A receber' })).toBeNull();
     expect(screen.queryByText(/R\$\s*0,00/)).toBeNull();
+  });
+
+  it('nunca sincronizada: o texto fala em "atraso por faixa", não em aging', () => {
+    summaryState.data = summary({
+      aReceber: zeroTotals(),
+      aPagar: zeroTotals(),
+      neverSynced: true,
+      syncedAt: null,
+    });
+    listState.data = { data: [], pagination: { page: 1, pageSize: 20, total: 0, totalPages: 0 } };
+    render(<ClientTitlesScreen clientId="c1" />);
+    expect(screen.getByText(/ver o total devido e o atraso por faixa/)).toBeVisible();
+    expect(screen.queryByText(/aging/i)).toBeNull();
   });
 
   it('operador no estado vazio não ganha a ação, e o texto muda', () => {

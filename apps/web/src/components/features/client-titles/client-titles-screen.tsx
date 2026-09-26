@@ -1,7 +1,8 @@
 'use client';
 
 /**
- * Tela "Carteira" do cliente — Sprint 11 / R3 · R4 · R5 (FRONT 11.7).
+ * Tela "Carteira" do cliente — Sprint 11 / R3 · R4 · R5 (FRONT 11.7), lista
+ * redesenhada na 86e3eq9uy.
  *
  * A posição de títulos em aberto do cliente: todos os títulos a pagar e a
  * receber não liquidados, de **todas** as contas correntes e sem recorte de
@@ -12,9 +13,9 @@
  *
  *   - **não soma nada.** Totais, vencido e os quatro baldes vêm da rota
  *     `/summary`, calculados no servidor sobre a carteira INTEIRA. Somar as
- *     linhas da página daria um aging que muda ao paginar e ao filtrar — e
- *     aging errado é pior que aging nenhum, exatamente o problema do relatório
- *     manual que motivou a sprint;
+ *     linhas da página daria um atraso por faixa que muda ao paginar e ao
+ *     filtrar — e atraso errado é pior que atraso nenhum, exatamente o problema
+ *     do relatório manual que motivou a sprint;
  *   - **não recalcula o atraso.** `overdueDays` e `bucket` vêm prontos, com a
  *     `referenceDate` do SERVIDOR. Recalcular com o relógio do navegador poria
  *     o mesmo título em baldes diferentes para pessoas em fusos diferentes;
@@ -35,14 +36,26 @@
  * **Estado na URL** (`page`, `pageSize`, `type`, `situation`, `bucket`,
  * `sortBy`, `sortOrder`): a view fica linkável e sobrevive ao F5. Todos os
  * filtros e a ordenação são aplicados **no servidor** — o request carrega os
- * parâmetros, e nenhuma linha é recortada no navegador.
+ * parâmetros, e nenhuma linha é recortada no navegador. Desde a 86e3eq9uy o
+ * recorte por SITUAÇÃO e por BALDE vem dos cards de totais (cada valor é um
+ * botão que aplica o recorte); os parâmetros continuam os mesmos, e link antigo
+ * com eles continua abrindo o mesmo recorte, com as etiquetas na barra.
+ *
+ * **A página rola, a tabela não** (86e3eq9uy). O padrão "encher a altura da
+ * janela e a tabela rola por dentro" (`<Table fill>`) deixava 2 ou 3 linhas
+ * visíveis num notebook: acima da tabela ficam cabeçalho, abas, dois cards de
+ * totais e a barra de filtros. Aqui a seção tem altura natural, quem rola é o
+ * `<main>` do shell e o cabeçalho da tabela gruda no topo dele
+ * (`<Table stickyHeader="page">`, de `xl` para cima; abaixo disso o wrapper
+ * rola na horizontal como em toda tabela). A paginação vem depois da última
+ * linha, no fluxo — nunca grudada no rodapé, porque barra grudada cobre linha.
  *
  * **Sem virtualização, de propósito:** `pageSize` tem teto de 100 no servidor,
  * então a tabela nunca renderiza mais que 100 linhas. Virtualizar aqui seria a
  * primeira exceção, não o primeiro uso.
  */
 
-import { Loader2, MessageSquareText, RefreshCw } from 'lucide-react';
+import { Loader2, MessageSquareText, RefreshCw, X } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
@@ -83,6 +96,7 @@ import { hasPermission } from '@/lib/authz';
 import type { AgingBucket, ClientTitle, TitleType } from '@/lib/contracts';
 import { formatBRDate, formatBRL, formatCreatedAt } from '@/lib/format';
 import { isOriginError, originErrorCode } from '@/lib/origin-state';
+import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth';
 
 import {
@@ -91,7 +105,13 @@ import {
   TitleStatusBadge,
   TitleTypeBadge,
 } from './client-titles-badges';
-import { ClientTitlesSummaryBlock, ClientTitlesSummarySkeleton } from './client-titles-summary';
+import {
+  ClientTitlesSummaryBlock,
+  ClientTitlesSummarySkeleton,
+  isSummaryFilterActive,
+  summaryFilterParams,
+  type SummaryFilterKey,
+} from './client-titles-summary';
 import { ReceivablesReportScreen } from './receivables-report-screen';
 import { TitleContextSheet } from './title-context-sheet';
 
@@ -113,10 +133,10 @@ const PARAM = {
 const DEFAULT_VIEW = 'carteira';
 const VIEW_VALUES = ['carteira', 'relatorio'] as const;
 
-const DEFAULT_PAGE_SIZE = 20;
-/** O Radix não aceita `''` como valor de item — `all` é o "sem filtro". */
-const ALL = 'all';
-const COLUMN_COUNT = 6;
+/** Com a página rolando (86e3eq9uy), 20 era pouco; o teto de 100 do servidor não muda. */
+export const DEFAULT_PAGE_SIZE = 50;
+/** Vencimento · Atraso · Tipo · Devedor / credor · Valor · Situação · Contexto. */
+const COLUMN_COUNT = 7;
 
 /**
  * Os vocabulários FECHADOS do servidor (`Literal` no Pydantic). Valor fora
@@ -144,9 +164,9 @@ const SITUATION_FILTER_LABELS: Record<(typeof SITUATION_FILTERS)[number], string
  * As quatro combinações de ordenação num controle só.
  *
  * Um `Select` por campo e outro por direção somariam dois controles a uma
- * barra que já tem três filtros — em 390px isso empurra a tabela para fora da
- * primeira dobra. A URL continua guardando os DOIS parâmetros do contrato
- * (`sortBy` e `sortOrder`): o que é único é o controle, não o estado.
+ * barra que precisa caber numa linha — em 390px isso empurra a tabela para
+ * fora da primeira dobra. A URL continua guardando os DOIS parâmetros do
+ * contrato (`sortBy` e `sortOrder`): o que é único é o controle, não o estado.
  */
 const SORT_OPTIONS = [
   {
@@ -244,6 +264,12 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
   // os agregados NÃO aparecem: zeros ali seriam lidos como "não deve nada".
   const neverSynced = summary?.neverSynced === true;
 
+  const activeFilters = {
+    type: titleType ?? null,
+    situation: situation ?? null,
+    bucket: bucket ?? null,
+  };
+
   async function handleSync() {
     setOriginError(null);
     try {
@@ -270,6 +296,30 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
     });
   }
 
+  /**
+   * Clique num valor dos cards (Parte B da 86e3eq9uy): aplica o recorte da
+   * tabela `summaryFilterParams`; clicar no que já está ativo desfaz os três
+   * parâmetros. Sempre com a página zerada.
+   */
+  function handleSummarySelect(type: TitleType, key: SummaryFilterKey) {
+    if (isSummaryFilterActive(activeFilters, type, key)) {
+      setMany({
+        [PARAM.type]: null,
+        [PARAM.situation]: null,
+        [PARAM.bucket]: null,
+        [PARAM.page]: null,
+      });
+      return;
+    }
+    const next = summaryFilterParams(type, key);
+    setMany({
+      [PARAM.type]: next.type,
+      [PARAM.situation]: next.situation,
+      [PARAM.bucket]: next.bucket,
+      [PARAM.page]: null,
+    });
+  }
+
   const syncButton = (
     <Button type="button" onClick={() => void handleSync()} disabled={isSyncing}>
       {isSyncing ? (
@@ -282,66 +332,117 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
   );
 
   const showCarteiraHeaderActions = view === DEFAULT_VIEW;
+  // Parte F: quando foi a última sincronização ÍNTEGRA, para todo leitor. Some
+  // enquanto o resumo carrega e quando nunca sincronizou (não há data). Com
+  // falha depois, o aviso amarelo continua e esta linha segue com a íntegra.
+  const syncedAtLabel =
+    !summaryQuery.isLoading && summary !== undefined && !neverSynced && summary.syncedAt != null
+      ? `Atualizado em ${formatCreatedAt(summary.syncedAt)}`
+      : null;
+
+  // Parte C: cada filtro ativo vira etiqueta removível; remover limpa SÓ aquele
+  // parâmetro (e zera a página).
+  const activeChips: { key: string; label: string; onRemove: () => void }[] = [];
+  if (titleType !== undefined) {
+    activeChips.push({
+      key: 'type',
+      label: TYPE_FILTER_LABELS[titleType],
+      onRemove: () => setMany({ [PARAM.type]: null, [PARAM.page]: null }),
+    });
+  }
+  if (situation !== undefined) {
+    activeChips.push({
+      key: 'situation',
+      label: SITUATION_FILTER_LABELS[situation],
+      onRemove: () => setMany({ [PARAM.situation]: null, [PARAM.page]: null }),
+    });
+  }
+  if (bucket !== undefined) {
+    activeChips.push({
+      key: 'bucket',
+      label: BUCKET_LABELS[bucket],
+      onRemove: () => setMany({ [PARAM.bucket]: null, [PARAM.page]: null }),
+    });
+  }
+  if (hasNoContext) {
+    activeChips.push({
+      key: 'hasNoContext',
+      label: 'Sem contexto',
+      onRemove: () => setMany({ [PARAM.hasNoContext]: null, [PARAM.page]: null }),
+    });
+  }
 
   return (
-    <section aria-labelledby="client-titles-heading" className="flex h-full flex-col gap-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-1">
-          <h2 id="client-titles-heading" className="text-lg font-semibold">
-            Carteira
-          </h2>
-          <p className="text-muted-foreground text-sm">
-            Os títulos a pagar e a receber em aberto deste cliente, de todas as contas correntes e
-            sem recorte de mês.
-          </p>
-        </div>
-        {showCarteiraHeaderActions && showSyncAction && syncButton}
-        {/* Encerrado é só-leitura: a ação some COM o motivo, em vez de sumir em
-            silêncio e deixar a pessoa procurando o botão (§4.12). */}
-        {showCarteiraHeaderActions && canSync && isClosed && (
-          <p className="text-muted-foreground max-w-xs text-sm">
-            Cliente encerrado: a sincronização está indisponível. A carteira já sincronizada
-            continua disponível para leitura.
-          </p>
-        )}
+    <section aria-labelledby="client-titles-heading" className="flex flex-col gap-4">
+      <div className="space-y-1">
+        <h2 id="client-titles-heading" className="text-lg font-semibold">
+          Carteira
+        </h2>
+        <p className="text-muted-foreground text-sm">
+          Títulos a pagar e a receber em aberto, de todas as contas e sem recorte de mês.
+        </p>
       </div>
 
       {/* Sprint 15 (FRONT 15.2): "Relatório de recebíveis" é aba DENTRO desta
           tela, não rota-irmã — mesma permissão de leitura
           (`view_client_receivables`) que já guarda a tela inteira, então não
           precisa de gate próprio aqui. Estado na aba vive na URL (`?view=`),
-          como todo o resto desta tela. */}
+          como todo o resto desta tela. Sem `min-h-0 flex-1`: a seção tem altura
+          natural e quem rola é o `<main>` (86e3eq9uy). */}
       <Tabs
         value={view}
         onValueChange={(value) => setMany({ [PARAM.view]: value === DEFAULT_VIEW ? null : value })}
-        // `min-h-0` nos DOIS níveis (Tabs e TabsContent): item flex tem
-        // `min-height: auto`, então sem ele a cadeia de altura para aqui, o
-        // `min-h-0 flex-1` da área da tabela recebe o conteúdo inteiro e a
-        // tabela deixa de rolar dentro da própria área — o defeito 86e2uca1d de
-        // volta, pego pelo gate de a11y na validação humana da Sprint 15.
-        className="flex min-h-0 flex-1 flex-col gap-4"
+        className="flex flex-col gap-4"
       >
-        <TabsList>
-          <TabsTrigger value="carteira">Carteira</TabsTrigger>
-          <TabsTrigger value="relatorio">Relatório de recebíveis</TabsTrigger>
-        </TabsList>
+        {/* Parte G: a lista de abas à esquerda e, na MESMA linha à direita, a
+            data da última sincronização e a ação (ou o motivo de ela não
+            existir), só na aba Carteira. */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <TabsList className="self-start">
+            <TabsTrigger value="carteira">Carteira</TabsTrigger>
+            <TabsTrigger value="relatorio">Relatório de recebíveis</TabsTrigger>
+          </TabsList>
+          {showCarteiraHeaderActions && (
+            <div className="flex flex-wrap items-center gap-3">
+              {syncedAtLabel !== null && (
+                <p className="text-muted-foreground text-sm" data-testid="titles-synced-at">
+                  {syncedAtLabel}
+                </p>
+              )}
+              {showSyncAction && syncButton}
+              {/* Encerrado é só-leitura: a ação some COM o motivo, em vez de sumir
+                  em silêncio e deixar a pessoa procurando o botão (§4.12). */}
+              {canSync && isClosed && (
+                <p className="text-muted-foreground max-w-xs text-sm">
+                  Cliente encerrado: a sincronização está indisponível. A carteira já sincronizada
+                  continua disponível para leitura.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
 
         <TabsContent value="relatorio" className="mt-0">
           <ReceivablesReportScreen clientId={clientId} />
         </TabsContent>
 
-        <TabsContent value="carteira" className="mt-0 flex min-h-0 flex-1 flex-col gap-4">
-          {/* Agregados ANTES da lista: o aging é a pergunta que a reunião faz, e
-          quem opera precisa dele antes de percorrer as linhas. */}
+        <TabsContent value="carteira" className="mt-0 flex flex-col gap-4">
+          {/* Totais ANTES da lista: o atraso por faixa é a pergunta que a reunião
+              faz, e quem opera precisa dele antes de percorrer as linhas. Cada
+              valor filtra a lista (Parte B). */}
           {summaryQuery.isLoading ? (
             <ClientTitlesSummarySkeleton />
           ) : summary !== undefined && !neverSynced ? (
-            <ClientTitlesSummaryBlock summary={summary} />
+            <ClientTitlesSummaryBlock
+              summary={summary}
+              active={activeFilters}
+              onSelect={handleSummarySelect}
+            />
           ) : null}
 
           {/* R3: "a última tentativa falhou" mostra os agregados da última ÍNTEGRA
-          com a data dela — sem isso, a pessoa não sabe se está olhando a
-          posição de ontem ou a de três meses atrás. */}
+              com a data dela — sem isso, a pessoa não sabe se está olhando a
+              posição de ontem ou a de três meses atrás. */}
           {summary?.syncFailedAt != null && (
             <div
               role="status"
@@ -361,84 +462,52 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
             <OriginStateBlock code={originCode} clientId={clientId} />
           )}
 
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
-            <div className="space-y-1.5 lg:w-48">
-              <Label htmlFor="titles-type-filter">Tipo</Label>
-              <Select
-                value={titleType ?? ALL}
-                onValueChange={(value) =>
-                  setMany({
-                    [PARAM.type]: value === ALL ? null : value,
-                    [PARAM.page]: null,
-                  })
-                }
-              >
-                <SelectTrigger id="titles-type-filter" className="w-full">
-                  <SelectValue placeholder="Todos os tipos" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>Todos os tipos</SelectItem>
-                  {TYPE_FILTERS.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {TYPE_FILTER_LABELS[value]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          {/* Parte C: barra compacta — numa linha só de `xl` para cima. Situação e
+              balde saíram daqui (vêm dos cards); os parâmetros continuam na URL e
+              aparecem como etiquetas removíveis. */}
+          <div className="flex flex-col gap-3 xl:flex-row xl:flex-wrap xl:items-center">
+            {/* Grupo de botões, não `Select`: três opções cabem numa linha e não
+                escondem o estado atrás de um clique. Não há `ToggleGroup` em
+                `components/ui/` e não se cria primitivo novo para isso. */}
+            <div
+              role="group"
+              aria-label="Tipo"
+              className="bg-background inline-flex self-start rounded-md border p-0.5"
+            >
+              {(
+                [
+                  { value: null, label: 'Todos' },
+                  ...TYPE_FILTERS.map((value) => ({ value, label: TYPE_FILTER_LABELS[value] })),
+                ] as { value: TitleType | null; label: string }[]
+              ).map((option) => {
+                const pressed = (titleType ?? null) === option.value;
+                return (
+                  <Button
+                    key={option.label}
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-pressed={pressed}
+                    className={cn('h-8', pressed && 'bg-accent text-accent-foreground')}
+                    onClick={() =>
+                      setMany({
+                        [PARAM.type]: option.value,
+                        [PARAM.page]: null,
+                      })
+                    }
+                  >
+                    {option.label}
+                  </Button>
+                );
+              })}
             </div>
 
-            <div className="space-y-1.5 lg:w-48">
-              <Label htmlFor="titles-situation-filter">Situação</Label>
-              <Select
-                value={situation ?? ALL}
-                onValueChange={(value) =>
-                  setMany({
-                    [PARAM.situation]: value === ALL ? null : value,
-                    [PARAM.page]: null,
-                  })
-                }
-              >
-                <SelectTrigger id="titles-situation-filter" className="w-full">
-                  <SelectValue placeholder="Todas as situações" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>Todas as situações</SelectItem>
-                  {SITUATION_FILTERS.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {SITUATION_FILTER_LABELS[value]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1.5 lg:w-48">
-              <Label htmlFor="titles-bucket-filter">Balde de atraso</Label>
-              <Select
-                value={bucket ?? ALL}
-                onValueChange={(value) =>
-                  setMany({
-                    [PARAM.bucket]: value === ALL ? null : value,
-                    [PARAM.page]: null,
-                  })
-                }
-              >
-                <SelectTrigger id="titles-bucket-filter" className="w-full">
-                  <SelectValue placeholder="Todos os baldes" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>Todos os baldes</SelectItem>
-                  {BUCKET_FILTERS.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {BUCKET_LABELS[value]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1.5 lg:w-56">
-              <Label htmlFor="titles-sort">Ordenar por</Label>
+            <div className="xl:w-64">
+              {/* Nome acessível "Ordenar por" (o e2e usa `getByLabel`); o rótulo
+                  visível mora dentro do gatilho, como no mockup. */}
+              <Label htmlFor="titles-sort" className="sr-only">
+                Ordenar por
+              </Label>
               <Select
                 value={`${sortBy}:${sortOrder}`}
                 onValueChange={(value) => {
@@ -452,7 +521,12 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
                 }}
               >
                 <SelectTrigger id="titles-sort" className="w-full">
-                  <SelectValue />
+                  {/* Sem `flex`/`gap` aqui: o gatilho aplica `line-clamp-1` ao filho
+                      (`display: -webkit-box`), que engole o `gap`; o espaço é do texto. */}
+                  <span className="min-w-0">
+                    <span className="text-muted-foreground">Ordenar: </span>
+                    <SelectValue />
+                  </span>
                 </SelectTrigger>
                 <SelectContent>
                   {SORT_OPTIONS.map((option) => (
@@ -465,9 +539,9 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
             </div>
 
             {/* Sprint 15 (FRONT 15.1): a fila de trabalho de quem registra contexto —
-            aplicado NO SERVIDOR (`hasNoContext=true`), nunca filtro client-side. */}
+                aplicado NO SERVIDOR (`hasNoContext=true`), nunca filtro client-side. */}
             {canViewTitleContext && (
-              <div className="flex items-center gap-2 lg:pb-2">
+              <div className="flex items-center gap-2">
                 <Switch
                   id="titles-has-no-context-filter"
                   checked={hasNoContext}
@@ -485,31 +559,38 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
               </div>
             )}
 
+            {activeChips.length > 0 && (
+              <ul aria-label="Filtros ativos" className="flex flex-wrap items-center gap-2">
+                {activeChips.map((chip) => (
+                  <li
+                    key={chip.key}
+                    className="bg-accent text-accent-foreground ring-border inline-flex items-center gap-1 rounded-full py-0.5 pl-2.5 pr-1 text-xs font-medium ring-1 ring-inset"
+                  >
+                    {chip.label}
+                    <button
+                      type="button"
+                      aria-label={`Remover filtro ${chip.label}`}
+                      onClick={chip.onRemove}
+                      className="hover:bg-background/60 focus-visible:ring-ring inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2"
+                    >
+                      <X className="h-3 w-3" aria-hidden="true" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
             {hasFilters && (
-              <Button type="button" variant="outline" onClick={clearFilters}>
+              <Button type="button" variant="outline" size="sm" onClick={clearFilters}>
                 Limpar filtros
               </Button>
             )}
           </div>
 
-          {/* `min-h-0 flex-1` sozinho COLAPSAVA a tabela a 0px abaixo de `lg`: a
-          seção é `h-full`, e com os quatro filtros empilhados (a barra só vira
-          linha em `lg`) o que está acima já consumia o viewport — o `flex-1`
-          recebia 0 e o `min-h-0` autorizava encolher. Não sobrava cabeçalho,
-          nem linha, nem estado vazio: só os filtros, um fio e "0–0 de 0".
-          O piso de 24rem abaixo de `lg` faz o conteúdo transbordar a seção e
-          quem rola passa a ser o `<main>` (o comportamento mobile previsto no
-          `<TableCard>`). De `lg` para cima o piso é MENOR, 8rem: a altura é a do
-          shell e a tabela rola dentro da própria área, mas a Sprint 15 pôs a
-          faixa de abas acima da carteira e, no estado "última tentativa falhou"
-          (aviso + agregados + filtros), sobravam 75px para a tabela a 900px de
-          altura. O piso de 8rem fica abaixo do que sobra no estado normal (~167px),
-          então ali nada muda e a tabela continua rolando por dentro; só no estado
-          mais cheio ele transborda e quem rola é o `<main>`.
-          ⚠️ `toBeVisible()` do Playwright NÃO pega esse defeito: ele não enxerga
-          clipping por ancestral com `overflow`. A guarda é medir `boundingBox()`
-          da região rolável (e2e `a11y-mocked.spec.ts`). */}
-          <div className="min-h-[24rem] flex-1 lg:min-h-[8rem]" aria-busy={listQuery.isFetching}>
+          {/* Altura NATURAL (86e3eq9uy): sem `min-h-0 flex-1`, sem piso. A tabela
+              cresce com as linhas e quem rola é o `<main>`; o cabeçalho gruda no
+              topo dele de `xl` para cima (`stickyHeader="page"`). */}
+          <div aria-busy={listQuery.isFetching}>
             {listQuery.isError ? (
               <ErrorState
                 message={
@@ -525,20 +606,23 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
               // colunas em 390px em vez de rolar (ADR-007-FE). O rótulo da região é
               // DIFERENTE do `<h2>` da seção de propósito: dois nomes iguais
               // aninhados quebram o `getByRole` no strict mode.
-              <TableCard>
-                <Table fill scrollRegionLabel="Títulos da carteira (rolável)">
+              <TableCard pageScroll>
+                <Table
+                  stickyHeader="page"
+                  scrollRegionLabel="Títulos da carteira (rolável)"
+                  // Linha mais baixa (Parte D): ~40px sem documento, duas linhas de
+                  // texto com documento. O `p-4` padrão da célula dava 72px.
+                  className="[&_td]:py-2 [&_th]:h-10"
+                >
                   <TableHeader>
                     <TableRow>
                       <TableHead className="whitespace-nowrap">Vencimento</TableHead>
+                      <TableHead>Atraso</TableHead>
                       <TableHead>Tipo</TableHead>
                       <TableHead>Devedor / credor</TableHead>
-                      <TableHead className="whitespace-nowrap">Valor</TableHead>
+                      <TableHead className="whitespace-nowrap text-right">Valor</TableHead>
                       <TableHead>Situação</TableHead>
-                      {canViewTitleContext && (
-                        <TableHead>
-                          <span className="sr-only">Contexto</span>
-                        </TableHead>
-                      )}
+                      {canViewTitleContext && <TableHead>Contexto</TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -559,7 +643,7 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
                   </TableBody>
                 </Table>
                 {/* Fora do `<Table>` de propósito: a tabela rola na horizontal em 390px e
-                uma célula `colSpan` cortaria o texto à direita (ver `TableEmpty`). */}
+                    uma célula `colSpan` cortaria o texto à direita (ver `TableEmpty`). */}
                 {!listQuery.isLoading && rows.length === 0 && (
                   <TableEmpty>
                     {neverSynced ? (
@@ -581,6 +665,8 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
             )}
           </div>
 
+          {/* No fluxo, depois da última linha — nunca grudada no rodapé: barra
+              grudada cobre linha durante a rolagem (86e2uca1d). */}
           {!listQuery.isError && (
             <PaginationBar
               page={pagination?.page ?? page}
@@ -615,6 +701,15 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
   );
 }
 
+/**
+ * Uma linha da carteira (Parte D da 86e3eq9uy): sete colunas, mais baixa.
+ *
+ * Clicar em qualquer ponto da linha abre a gaveta de contexto para quem tem
+ * `view_title_context` (a mesma regra da coluna). O caminho de TECLADO continua
+ * sendo o botão da coluna Contexto: nada de `tabIndex`, `role="button"` nem
+ * `onKeyDown` no `<tr>` — elemento interativo aninhado reprova no axe. O botão
+ * da coluna para a propagação para não abrir a gaveta duas vezes.
+ */
 function TitleRow({
   title,
   canViewTitleContext,
@@ -625,19 +720,29 @@ function TitleRow({
   onOpenContext: () => void;
 }) {
   return (
-    <TableRow>
+    <TableRow
+      className={cn(canViewTitleContext && 'cursor-pointer')}
+      onClick={canViewTitleContext ? onOpenContext : undefined}
+    >
       <TableCell className="whitespace-nowrap font-medium tabular-nums">
         {formatBRDate(title.dueDate)}
-        {title.overdueDays > 0 && (
-          <span className="text-muted-foreground block text-xs">
-            {title.overdueDays} {title.overdueDays === 1 ? 'dia' : 'dias'} de atraso
+      </TableCell>
+      <TableCell>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="whitespace-nowrap tabular-nums">
+            {title.overdueDays > 0
+              ? `${title.overdueDays} ${title.overdueDays === 1 ? 'dia' : 'dias'}`
+              : '—'}
           </span>
-        )}
+          <TitleBucketBadge bucket={title.bucket ?? null} />
+        </div>
       </TableCell>
       <TableCell>
         <TitleTypeBadge titleType={title.titleType} />
       </TableCell>
-      <TableCell className="min-w-48">
+      {/* Quebra linha em vez de alargar a tabela: em `xl`+ ela precisa caber na
+          largura (o wrapper deixa de rolar). Valor e datas seguem `nowrap`. */}
+      <TableCell className="min-w-40 whitespace-normal">
         <SupplierCell title={title} />
         {title.documentNumber != null && (
           <span className="text-muted-foreground block text-xs">Doc. {title.documentNumber}</span>
@@ -645,12 +750,11 @@ function TitleRow({
       </TableCell>
       {/* `whitespace-nowrap`: valor monetário que quebra depois do hífen vira
           outro número para quem lê (defeito da S7). */}
-      <TableCell className="whitespace-nowrap tabular-nums">{formatBRL(title.amount)}</TableCell>
+      <TableCell className="whitespace-nowrap text-right tabular-nums">
+        {formatBRL(title.amount)}
+      </TableCell>
       <TableCell>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <TitleStatusBadge status={title.status} />
-          <TitleBucketBadge bucket={title.bucket ?? null} />
-        </div>
+        <TitleStatusBadge status={title.status} />
       </TableCell>
       {canViewTitleContext && (
         <TableCell>
@@ -668,10 +772,14 @@ function TitleRow({
                 ? 'nenhum registrado'
                 : `${title.contextCount} ${title.contextCount === 1 ? 'registrado' : 'registrados'}`
             })`}
-            onClick={onOpenContext}
-            className={
-              title.contextCount > 0 ? 'text-primary gap-1.5' : 'text-muted-foreground gap-1.5'
-            }
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenContext();
+            }}
+            className={cn(
+              'h-8 gap-1.5',
+              title.contextCount > 0 ? 'text-primary' : 'text-muted-foreground',
+            )}
           >
             <MessageSquareText className="h-4 w-4" aria-hidden="true" />
             {title.contextCount > 0 && (
@@ -766,7 +874,7 @@ function NeverSyncedState({
           {isClosed
             ? 'O cliente foi encerrado antes de sincronizar, e a sincronização não fica disponível para clientes encerrados.'
             : canSync
-              ? 'Traga os títulos em aberto da origem para ver o total devido e o aging.'
+              ? 'Traga os títulos em aberto da origem para ver o total devido e o atraso por faixa.'
               : 'Quando alguém da equipe sincronizar, os títulos em aberto da origem aparecem aqui.'}
         </p>
       </div>
