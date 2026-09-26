@@ -35,6 +35,8 @@ from app.core.sensitive_endpoints import (
 from app.db.models import (
     Client,
     ClientCategory,
+    MappingDestination,
+    MappingTarget,
     Notification,
     NotificationType,
     Organization,
@@ -61,6 +63,11 @@ SECRET_STAFF_A = "Ciclano Staff Sigiloso"
 #: Nome de uma categoria do catálogo da Hologram (86e36ecqz): o catálogo é por
 #: organização, e o admin/gerente de outra organização não pode lê-lo.
 SECRET_CATEGORY_A = "Categoria Sigilosa da Hologram"
+#: Nome de um ALVO do catálogo do de-para de uma TERCEIRA organização (S12, BACK
+#: 12.3). Terceira de propósito: o catálogo é legível por quem pertence à org —
+#: inclusive o usuário de cliente —, então o alvo da bateria tem de ser de uma
+#: organização a que NENHUM dos três atacantes pertence.
+SECRET_TARGET_C = "Alvo Sigiloso do Escritorio C"
 
 
 def _hex64(seed: str) -> str:
@@ -204,6 +211,35 @@ _BODIES: dict[str, dict[str, Any]] = {
         "type": "acordo_de_pagamento",
         "text": "fechamento quadrimestral acordado",
     },
+    # S12 (BACK 12.2) — base de movimentos. Competência VÁLIDA de propósito
+    # (ADR-012): um 400 de forma passaria sem nunca tocar a autorização.
+    "POST /api/v1/clients/{client_id}/movements/sync": {"competence": "2026-06"},
+    # S12 (BACK 12.3) — catálogo do de-para. Bodies VÁLIDOS (ADR-012).
+    "POST /api/v1/mapping-destinations": {"type": "destino_da_bateria", "name": "Bateria"},
+    "PATCH /api/v1/mapping-destinations/{destination_id}": {"name": "Sequestrado"},
+    "POST /api/v1/mapping-destinations/{destination_id}/targets": {
+        "targets": [{"code": "9.99", "name": "Alvo da bateria"}]
+    },
+    "PATCH /api/v1/mapping-destinations/{destination_id}/targets/{target_id}": {
+        "name": "Sequestrado"
+    },
+    # S12 (BACK 12.4) — decisões do de-para. Bodies VÁLIDOS (ADR-012).
+    "POST /api/v1/clients/{client_id}/mapping/{destination_type}/decisions": {
+        "categoryCode": "2.04.94",
+        "decision": "nao_mapear",
+    },
+    "POST /api/v1/clients/{client_id}/mapping/{destination_type}/decisions/batch": {
+        "decisions": [{"categoryCode": "2.04.94", "decision": "nao_mapear"}]
+    },
+    "POST /api/v1/clients/{client_id}/mapping/{destination_type}/decisions/confirm-inherited": {
+        "confirm": True
+    },
+    "POST /api/v1/clients/{client_id}/mapping/{destination_type}/inherit": {},
+    # S12 (BACK 12.6) — materialização. Token de 64 hex VÁLIDO na forma (ADR-012).
+    "POST /api/v1/clients/{client_id}/mapping/{destination_type}/materializations": {
+        "competence": "2026-06",
+        "previewToken": "0" * 64,
+    },
 }
 
 #: Query string mínima por endpoint.
@@ -216,6 +252,11 @@ _QUERIES: dict[str, dict[str, str]] = {
     },
     "GET /api/v1/omie/lancamentos": {"ids": "1,2", "session_id": "{session_b}"},
     "GET /api/v1/omie/categorias": {"session_id": "{session_b}"},
+    "GET /api/v1/clients/{client_id}/movements/sync-state": {"competence": "2026-06"},
+    "GET /api/v1/clients/{client_id}/mapping/{destination_type}/decisions/history": {
+        "categoryCode": "2.04.94"
+    },
+    "GET /api/v1/clients/{client_id}/mapping/{destination_type}/preview": {"competence": "2026-06"},
 }
 
 
@@ -301,6 +342,17 @@ async def tenants(db_session: AsyncSession) -> dict[str, Any]:
         role=UserRole.PLATFORM_ADMIN,
         scope=UserScope.PLATFORM,
     )
+    org_c = Organization(name=f"Escritorio C {uuid4().hex[:6]}")
+    db_session.add(org_c)
+    await db_session.flush()
+    destination_c = MappingDestination(
+        organization_id=org_c.id, destination_type="demonstrativo_contabil", name="Demonstrativo C"
+    )
+    db_session.add(destination_c)
+    await db_session.flush()
+    target_c = MappingTarget(destination_id=destination_c.id, code="1.01", name=SECRET_TARGET_C)
+    db_session.add(target_c)
+    await db_session.flush()
     cli_a = await _seed_client(db_session, creator=admin, name="Austral Lista")
     cli_b = await _seed_client(db_session, creator=admin, name=SECRET_NAME_B)
     # Categoria da Hologram (org pelo `server_default`): alvo do catálogo por org.
@@ -366,6 +418,8 @@ async def tenants(db_session: AsyncSession) -> dict[str, Any]:
         "sess_b": sess_b,
         "file_b": file_b,
         "notif_b": notif_b,
+        "destination_c": destination_c,
+        "target_c": target_c,
     }
 
 
@@ -442,6 +496,12 @@ async def test_cross_tenant_por_endpoint(
         "user_id": str(tenants["admin"].id),
         "org_b": str(tenants["org_b"].id),
         "category_id": str(tenants["cat_a"].id),
+        # S12 (BACK 12.3): catálogo do de-para de uma TERCEIRA organização.
+        "destination_id": str(tenants["destination_c"].id),
+        # S12 (BACK 12.4+): o destino das rotas de de-para é o TIPO, resolvido na
+        # organização do cliente — a negação vem antes, pelo `client_id`.
+        "destination_type": "demonstrativo_contabil",
+        "target_id": str(tenants["target_c"].id),
         "uuid": str(uuid4()),
     }
 
@@ -458,6 +518,7 @@ async def test_cross_tenant_por_endpoint(
     assert SECRET_NAME_B not in resp.text, f"{endpoint.key} vazou dado do tenant B"
     assert SECRET_STAFF_A not in resp.text, f"{endpoint.key} vazou staff da Hologram"
     assert SECRET_CATEGORY_A not in resp.text, f"{endpoint.key} vazou o catálogo da Hologram"
+    assert SECRET_TARGET_C not in resp.text, f"{endpoint.key} vazou o catálogo do de-para"
 
     if endpoint.kind is ScopeKind.COLLECTION and "{" not in endpoint.path:
         # Coleções globais (notificações) respondem 200 com a lista vazia de B.

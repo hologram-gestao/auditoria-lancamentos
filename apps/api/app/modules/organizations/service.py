@@ -15,6 +15,7 @@ from uuid import UUID
 
 from app.core.exceptions import OrganizationNameAlreadyExistsError, OrganizationNotFoundError
 from app.db.models import Organization
+from app.modules.mapping_catalog.repository import MappingCatalogRepository
 from app.modules.organizations.repository import OrganizationRepository, OrganizationRow
 from app.modules.organizations.schemas import OrganizationItem, PlatformAdminItem
 from app.modules.usage_events.service import UsageEventService
@@ -39,9 +40,15 @@ class OrganizationService:
         self,
         repository: OrganizationRepository,
         usage_events: UsageEventService | None = None,
+        *,
+        mapping_catalog: MappingCatalogRepository,
     ) -> None:
         self._repo = repository
         self._usage_events = usage_events
+        # Obrigatório (sem default): organização nova SEM os cinco destinos do
+        # de-para seria um BPO que não consegue classificar nada — e nenhum erro
+        # apareceria até alguém tentar (Sprint 12, BACK 12.3).
+        self._mapping_catalog = mapping_catalog
 
     async def list_organizations(
         self, *, page: int, page_size: int, search: str | None = None
@@ -79,6 +86,10 @@ class OrganizationService:
             raise OrganizationNameAlreadyExistsError(f"Organização já existe: {name!r}")
         organization = Organization(name=name, active=True)
         await self._repo.add(organization)
+        # Os cinco destinos do de-para nascem com a organização, na MESMA
+        # transação — o mesmo seed que a migration `e6b2c9d47f13` fez nas que já
+        # existiam (idempotente).
+        await self._mapping_catalog.seed_default_destinations(organization.id)
         if self._usage_events is not None:
             await self._usage_events.emit_organizacao_criada(organization_id=organization.id)
         return _to_item(OrganizationRow(organization=organization, clients_count=0, users_count=0))

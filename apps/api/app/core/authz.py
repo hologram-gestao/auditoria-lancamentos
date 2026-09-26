@@ -189,6 +189,28 @@ class Permission(StrEnum):
     #: (Sprint 15, §3): as MESMAS células de `SYNC_CLIENT_RECEIVABLES` — o
     #: `client_operator` lê mas não escreve.
     MANAGE_TITLE_CONTEXT = "manage_title_context"
+    # --- Sprint 12 (BACK 12.2) --------------------------------------------
+    #: SINCRONIZAR a base de movimentos de uma competência (ir à origem). As
+    #: MESMAS células de `SYNC_CLIENT_RECEIVABLES`, decididas no PRD (R0) — e
+    #: permissão PRÓPRIA pelo motivo registrado na S11: reusar amarraria duas
+    #: sincronizações diferentes a uma decisão só. LER o estado da base não pede
+    #: permissão (quem alcança o cliente lê, via `AccessibleClientDep`).
+    SYNC_CLIENT_MOVEMENTS = "sync_client_movements"
+    # --- Sprint 12 (BACK 12.3) --------------------------------------------
+    #: ESCREVER no catálogo de destinos e alvos do de-para da ORGANIZAÇÃO.
+    #: ⚠️ DECISÃO DO PLANEJADOR, pendente de validação humana (ADR-074-BE): o PRD
+    #: não fixou as células. Só plataforma e admin — o catálogo é configuração da
+    #: organização, e um usuário de cliente escrevendo nele afetaria OUTROS
+    #: tenants. Não reusa `manage_client_categories` pelo precedente S10/S11. A
+    #: LEITURA do catálogo não pede permissão: quem pertence à organização lê
+    #: (o `client_manager` precisa escolher alvo).
+    MANAGE_MAPPING_CATALOG = "manage_mapping_catalog"
+    # --- Sprint 12 (BACK 12.4) --------------------------------------------
+    #: EDITAR o de-para de um cliente (decisões, herança, importação,
+    #: materialização). Células DECIDIDAS no PRD (R6) — e não `edit_client`, que é
+    #: admin-only: o `manager` do escritório parceiro constrói a carteira e
+    #: precisa classificá-la. O `client_operator` VÊ a tela, não edita.
+    MANAGE_CLIENT_MAPPING = "manage_client_mapping"
 
 
 _EVERYONE: frozenset[UserRole] = frozenset(UserRole)
@@ -227,6 +249,9 @@ _PLATFORM_ONLY: frozenset[UserRole] = frozenset({UserRole.PLATFORM_ADMIN})
 #: | Sincronizar a carteira (S11)  | ✅             | ✅          | ✅ (carteira)  | ✅             | ❌              |
 #: | Ver contexto do título (S15)  | ✅             | ✅          | ✅ (carteira)  | ✅             | ✅              |
 #: | Registrar contexto (S15)      | ✅             | ✅          | ✅ (carteira)  | ✅             | ❌              |
+#: | Sincronizar movimentos (S12)  | ✅             | ✅          | ✅ (carteira)  | ✅             | ❌              |
+#: | Catálogo do de-para (S12)     | ✅             | ✅ (org)    | ❌             | ❌             | ❌              |
+#: | Editar o de-para (S12)        | ✅             | ✅          | ✅ (carteira)  | ✅             | ❌              |
 PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]] = {
     Permission.RUN_RECONCILIATION: _EVERYONE,
     Permission.REVIEW_EXPORT: _EVERYONE,
@@ -298,6 +323,21 @@ PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]] = {
     # SYNC_CLIENT_RECEIVABLES, decisão própria do PRD (não reuso por
     # coincidência: as duas perguntas puderam ter respostas diferentes).
     Permission.MANAGE_TITLE_CONTEXT: frozenset(
+        {UserRole.PLATFORM_ADMIN, UserRole.ADMIN, UserRole.MANAGER, UserRole.CLIENT_MANAGER}
+    ),
+    # S12 (BACK 12.2), células decididas no PRD (R0): as MESMAS de
+    # SYNC_CLIENT_RECEIVABLES — sincronizar é ir à origem, e o `client_operator`
+    # é quem mais abre tela. Permissão própria (não reuso por coincidência).
+    Permission.SYNC_CLIENT_MOVEMENTS: frozenset(
+        {UserRole.PLATFORM_ADMIN, UserRole.ADMIN, UserRole.MANAGER, UserRole.CLIENT_MANAGER}
+    ),
+    # S12 (BACK 12.3) — decisão do PLANEJADOR (ADR-074-BE): catálogo é da
+    # organização; escrevem plataforma e admin (a própria org). O manager não —
+    # mesma leitura de `manage_client_categories`, permissão própria.
+    Permission.MANAGE_MAPPING_CATALOG: _ADMINS,
+    # S12 (BACK 12.4), células DECIDIDAS no PRD (R6). O "(carteira)" do manager é
+    # `resolve_client_access`, não esta linha.
+    Permission.MANAGE_CLIENT_MAPPING: frozenset(
         {UserRole.PLATFORM_ADMIN, UserRole.ADMIN, UserRole.MANAGER, UserRole.CLIENT_MANAGER}
     ),
 }

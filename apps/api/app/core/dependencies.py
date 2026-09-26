@@ -22,7 +22,7 @@ propósito: `platform_admin` não pode casar com um literal por acidente.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Annotated
 from uuid import UUID
 
@@ -30,7 +30,7 @@ from fastapi import Cookie, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.audit import record_cross_tenant_denied
+from app.core.audit import AccessAction, record_access, record_cross_tenant_denied
 from app.core.authz import (
     CurrentUser,
     Permission,
@@ -229,6 +229,49 @@ def require_permission(permission: Permission) -> Callable[[CurrentUser], Curren
     return _guard
 
 
+def require_client_permission(
+    permission: Permission,
+) -> Callable[[CurrentUser, Client, AsyncSession], Awaitable[CurrentUser]]:
+    """Guard de permissão para ação SOBRE UM CLIENTE — e a negação fica na trilha.
+
+    Mesma decisão de `require_permission` (a MATRIZ), com duas diferenças que as
+    rotas da Sprint 12 pedem ("negação de acesso gera 1 linha em `access_audit`"):
+
+    1. depende de `AccessibleClientDep`, então o ALCANCE é decidido ANTES da
+       permissão — atacante de outro tenant/organização recebe a negação
+       cross-tenant (com a trilha dela) e nunca chega aqui; a linha gravada aqui é
+       só a do papel que alcança o cliente mas não pode a ação (o `client_operator`
+       tentando sincronizar);
+    2. grava `denied` em `access_audit` com `commit=True` antes do 403 — a request
+       termina em erro e o `get_db_session` daria ROLLBACK (ADR-019-QA). Até este
+       ponto a dependência só fez `SELECT`, então o commit persiste só a trilha.
+
+    Só IDs na linha e no corpo (§3.15): nada do tenant alvo.
+    """
+
+    async def _guard(
+        user: CurrentUserDep, client: AccessibleClientDep, db: DbSessionDep
+    ) -> CurrentUser:
+        if not has_permission(user, permission):
+            await record_access(
+                db,
+                user_id=UUID(user.id),
+                client_id=client.id,
+                action=AccessAction.DENIED,
+                user_scope=user.scope,
+                actor_client_id=user.client_id,
+                actor_organization_id=user.organization_id,
+                commit=True,
+            )
+            raise ForbiddenError(
+                f"Papel {user.role} não tem a permissão {permission.value}.",
+                user_message="Você não tem permissão para esta ação.",
+            )
+        return user
+
+    return _guard
+
+
 # Guards prontos por permissão da matriz (§4 do PRD). Rotas importam estes —
 # assim a matriz é o único lugar que decide quem pode o quê.
 RunReconciliationDep = Annotated[
@@ -279,4 +322,20 @@ ViewTitleContextDep = Annotated[
 ]
 ManageTitleContextDep = Annotated[
     CurrentUser, Depends(require_permission(Permission.MANAGE_TITLE_CONTEXT))
+]
+# --- Sprint 12 (BACK 12.2): base de movimentos ------------------------------
+# Guard AUDITADO (`require_client_permission`): a negação do papel que alcança o
+# cliente mas não pode a ação vira 1 linha `denied` em `access_audit`.
+SyncClientMovementsDep = Annotated[
+    CurrentUser, Depends(require_client_permission(Permission.SYNC_CLIENT_MOVEMENTS))
+]
+# Catálogo do de-para (BACK 12.3): configuração da ORGANIZAÇÃO, sem `client_id` —
+# guard da matriz simples (`access_audit` é por tenant alvo, e aqui não há um).
+ManageMappingCatalogDep = Annotated[
+    CurrentUser, Depends(require_permission(Permission.MANAGE_MAPPING_CATALOG))
+]
+# De-para do cliente (BACK 12.4+): guard AUDITADO — a negação vira 1 linha em
+# `access_audit` (R6: "negar a rota, registrando a negação").
+ManageClientMappingDep = Annotated[
+    CurrentUser, Depends(require_client_permission(Permission.MANAGE_CLIENT_MAPPING))
 ]
