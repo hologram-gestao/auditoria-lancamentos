@@ -842,6 +842,15 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         "app/modules/client_mapping/routes.py",
         _VIA_CLIENT_MAPPING_WRITE + "; versão N+1 imutável, nunca UPDATE/DELETE",
     ),
+    # Follow-up 86e3f0ux7 (item 1): a lista de versões que a tela derivava de
+    # `latestVersion`. Leitura por client_id; autor mascarado por escopo (§3.15).
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/mapping/{destination_type}/materializations",
+        ScopeKind.COLLECTION,
+        "app/modules/client_mapping/routes.py",
+        f"{_VIA_CLIENT_PATH}; versões lidas por client_id, autor por author_for_viewer",
+    ),
 )
 
 #: Endpoints do denominador que AINDA não têm o mecanismo no código. Ficam na

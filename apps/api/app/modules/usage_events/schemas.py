@@ -444,6 +444,10 @@ class DeparaAplicadoProps(_StrictProps):
 
     client_id: UUID
     destino: str = Field(pattern=DESTINO_SLUG_PATTERN)
+    #: `YYYY-MM`, o mesmo padrão de `movimentos_sincronizados`. Entrou no follow-up
+    #: 86e3f0ux7 (item 6): sem ela a leitura D+30 do Outcome POR COMPETÊNCIA era
+    #: impossível — o PRD listou as seis chaves e esqueceu o eixo do tempo.
+    competencia: str = Field(pattern=COMPETENCE_PATTERN)
     valor_com_decisao_centavos: int = Field(ge=0)
     valor_nao_mapear_centavos: int = Field(ge=0)
     valor_sem_decisao_centavos: int = Field(ge=0)

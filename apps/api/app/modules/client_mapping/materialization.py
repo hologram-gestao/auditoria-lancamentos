@@ -53,7 +53,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from app.core.authz import CurrentUser
-    from app.db.models import Client
+    from app.db.models import Client, User
     from app.db.models.mapping_catalog import MappingDestination
     from app.modules.client_mapping.repository import ClientMappingRepository
     from app.modules.client_mapping.service import ClientMappingDecisionService
@@ -147,6 +147,15 @@ class ClientMappingApplyService:
             latest_version=await self._repo.latest_version(client.id, destination.id, competence),
         )
 
+    async def list_materializations(
+        self, client: Client, destination_type: str, *, competence: date | None = None
+    ) -> list[tuple[ClientMappingMaterialization, User]]:
+        """As versões do destino (uma competência ou todas), com o autor (item 1)."""
+        destination = await self._decisions.resolve_destination(client, destination_type)
+        return await self._repo.list_materializations(
+            client.id, destination.id, competence=competence
+        )
+
     async def materialize(
         self,
         client: Client,
@@ -160,6 +169,11 @@ class ClientMappingApplyService:
         """Cria a versão N+1 — só se a prévia confirmada ainda for a verdade."""
         if client.closed_at is not None:
             raise ClientClosedError(f"Cliente {client.id} encerrado; materialização recusada.")
+        # O mesmo lock transacional das escritas de decisão (follow-up 86e3f0ux7,
+        # item 5): entre "a prévia ainda vale?" e o INSERT, nenhuma decisão
+        # retroativa deste (cliente, destino) entra — e vice-versa.
+        destination = await self._decisions.resolve_destination(client, destination_type)
+        await self._repo.lock_client_destination(client.id, destination.id)
         preview = await self.preview(client, destination_type, competence)
         if preview.token != preview_token:
             raise StaleMappingPreviewError(
@@ -247,6 +261,7 @@ class ClientMappingApplyService:
         await self._usage_events.emit_depara_aplicado(
             client_id=client.id,
             destino=preview.destination.destination_type,
+            competencia=competence,
             valor_com_decisao=result.numerator,
             valor_nao_mapear=result.totals[MaterializedSituation.NAO_MAPEAR].amount,
             valor_sem_decisao=pending.amount,

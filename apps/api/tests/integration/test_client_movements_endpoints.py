@@ -109,6 +109,8 @@ async def _seed_client(session: AsyncSession, *, creator: User, with_origin: boo
             "omie_app_key_iv": iv_key,
             "omie_app_secret_encrypted": ct_secret,
             "omie_app_secret_iv": iv_secret,
+            # Carimbo fresco: o refresh do cache de contas (86e3f0ux7) respeita o TTL.
+            "omie_accounts_synced_at": datetime.now(UTC),
         }
     client = Client(name="Cliente movimentos", active=True, created_by=creator.id, **kwargs)
     session.add(client)

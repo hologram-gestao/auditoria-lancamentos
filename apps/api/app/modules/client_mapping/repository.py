@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import CursorResult, func, select, update
+from sqlalchemy import CursorResult, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
@@ -26,6 +26,7 @@ from app.db.models import (
     ClientMappingMaterializationItem,
     ClientMovement,
     DecisionOrigin,
+    User,
 )
 from app.db.models.client_mapping import UQ_CLIENT_MAPPING_DECISION
 from app.db.models.mapping_catalog import MappingTarget
@@ -180,6 +181,24 @@ class ClientMappingRepository:
 
     # ------------------------------ MATERIALIZAÇÕES (leitura) ---------
 
+    async def lock_client_destination(self, client_id: UUID, destination_id: UUID) -> None:
+        """Serializa as escritas de UM (cliente, destino) dentro da transação.
+
+        `pg_advisory_xact_lock` é liberado no fim da transação, sem tabela nem
+        linha para travar: a decisão retroativa checa "competência já
+        materializada?" e a materialização checa "prévia ainda vale?", e as duas
+        podiam se cruzar entre a checagem e o INSERT (follow-up 86e3f0ux7, item
+        5). Com o lock, quem chega segundo lê o estado que o primeiro deixou.
+        A chave é derivada dos dois UUIDs (`hashtext` → int4, em dois argumentos
+        para o par não colidir com o de outro cliente) e a query é `text()` com
+        bind params (§3.7) — o lock é a única coisa que o ORM não expressa.
+        """
+        await self._session.execute(
+            text(
+                "SELECT pg_advisory_xact_lock(hashtext(:client), hashtext(:destination))"
+            ).bindparams(client=str(client_id), destination=str(destination_id))
+        )
+
     async def materialized_competences(
         self, client_id: UUID, destination_id: UUID, competences: Iterable[date]
     ) -> list[date]:
@@ -198,6 +217,33 @@ class ClientMappingRepository:
             .order_by(ClientMappingMaterialization.competence)
         )
         return list((await self._session.execute(stmt)).scalars().all())
+
+    async def list_materializations(
+        self, client_id: UUID, destination_id: UUID, *, competence: date | None = None
+    ) -> list[tuple[ClientMappingMaterialization, User]]:
+        """As versões materializadas do destino, com o autor, mais recentes primeiro.
+
+        Uma competência ou todas (follow-up 86e3f0ux7, item 1): até aqui a tela
+        derivava "Versão 1..N" de `latestVersion`, sem data, autor nem cobertura.
+        Só o cabeçalho (`client_mapping_materializations`), nunca os itens: a lista
+        é de versões, e os itens são a leitura da Sprint 13.
+        """
+        stmt = (
+            select(ClientMappingMaterialization, User)
+            .join(User, User.id == ClientMappingMaterialization.author_id)
+            .where(
+                ClientMappingMaterialization.client_id == client_id,
+                ClientMappingMaterialization.destination_id == destination_id,
+            )
+        )
+        if competence is not None:
+            stmt = stmt.where(ClientMappingMaterialization.competence == competence)
+        stmt = stmt.order_by(
+            ClientMappingMaterialization.competence.desc(),
+            ClientMappingMaterialization.version.desc(),
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return [(row[0], row[1]) for row in rows]
 
     async def latest_version(self, client_id: UUID, destination_id: UUID, competence: date) -> int:
         """A maior versão materializada de (cliente, destino, competência); 0 = nenhuma."""

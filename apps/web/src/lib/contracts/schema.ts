@@ -853,7 +853,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** As VERSÕES materializadas do destino, mais recentes primeiro: competência, versão, quando, quem (autor enxuto e mascarado por escopo), se foi confirmada com cobertura parcial, os totais por situação e a cobertura — a mesma conta da prévia. `competence` (`YYYY-MM`) recorta uma competência; ausente, todas. Só o cabeçalho da versão, nunca os itens. Leitura de quem alcança o cliente. */
+        get: operations["list_client_mapping_materializations_api_v1_clients__client_id__mapping__destination_type__materializations_get"];
         put?: never;
         /** MATERIALIZA a prévia confirmada: recalcula no servidor e só grava se o `previewToken` bater (senão 409 `PREVIA_DESATUALIZADA` — gere a prévia de novo). Havendo valor sem decisão exige `confirmPartialCoverage=true` (409 `COBERTURA_PARCIAL_REQUER_CONFIRMACAO`), e a confirmação fica no próprio registro. Cria a versão N+1 — imutável; reaplicar nunca sobrescreve e não existe rota que altere ou apague materialização. Emite a métrica `depara_aplicado`. Requer `manage_client_mapping`; cliente encerrado: 409. */
         post: operations["materialize_client_mapping_api_v1_clients__client_id__mapping__destination_type__materializations_post"];
@@ -2809,6 +2810,11 @@ export interface components {
              * @default false
              */
             confirm: boolean;
+            /**
+             * Code
+             * @description Recorte por CÓDIGO da categoria (começando por), o mesmo filtro da lista: confirma só as herdadas que casam. Ausente = todas as herdadas do destino. `affected` respeita o recorte.
+             */
+            code?: string | null;
         };
         /** ConfirmInheritedResponse */
         ConfirmInheritedResponse: {
@@ -3888,6 +3894,11 @@ export interface components {
         MaterializationEnvelope: {
             data: components["schemas"]["MaterializationResponse"];
         };
+        /** MaterializationListEnvelope */
+        MaterializationListEnvelope: {
+            /** Data */
+            data: components["schemas"]["MaterializationSummaryResponse"][];
+        };
         /**
          * MaterializationRequest
          * @description Corpo de `POST …/materializations`.
@@ -3927,6 +3938,68 @@ export interface components {
             /** Partialcoverageconfirmed */
             partialCoverageConfirmed: boolean;
             preview: components["schemas"]["MappingPreviewResponse"];
+        };
+        /**
+         * MaterializationSummaryResponse
+         * @description Uma versão materializada, como a lista de versões da tela precisa.
+         *
+         *     Follow-up 86e3f0ux7 (item 1): até aqui a tela derivava "Versão 1..N" de
+         *     `latestVersion`, sem data, autor nem cobertura. Só o CABEÇALHO da versão
+         *     (`client_mapping_materializations`); os itens são a leitura da Sprint 13. Os
+         *     valores são Σ|valor| por situação, os mesmos da prévia, e a cobertura sai da
+         *     MESMA função da prévia (`coverage_pct`), para as duas nunca divergirem. O autor
+         *     passa por `author_for_viewer` na rota (§3.15): usuário de tenant vendo autor da
+         *     equipe recebe "Equipe {org}" sem e-mail.
+         */
+        MaterializationSummaryResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Competence
+             * @description `YYYY-MM`.
+             */
+            competence: string;
+            /** Version */
+            version: number;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            author: components["schemas"]["SessionAuthor"];
+            /** Partialcoverageconfirmed */
+            partialCoverageConfirmed: boolean;
+            /**
+             * Coveragepct
+             * @description Σ|valor| com decisão (alvo + `nao_mapear`) ÷ Σ|valor| com categoria, em %, como na prévia. `null` quando não havia valor com categoria.
+             */
+            coveragePct: string | null;
+            /** Mappedamount */
+            mappedAmount: string;
+            /** Mappedcount */
+            mappedCount: number;
+            /** Notmappedamount */
+            notMappedAmount: string;
+            /** Notmappedcount */
+            notMappedCount: number;
+            /** Undecidedamount */
+            undecidedAmount: string;
+            /** Undecidedcount */
+            undecidedCount: number;
+            /** Uncategorizedamount */
+            uncategorizedAmount: string;
+            /** Uncategorizedcount */
+            uncategorizedCount: number;
+            /** Undecidedcategories */
+            undecidedCategories: number;
+            /**
+             * Decisionsused
+             * @description Quantas vigências a versão usou (snapshot).
+             */
+            decisionsUsed: number;
         };
         /**
          * MovementsSyncEnvelope
@@ -7662,6 +7735,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MappingPreviewEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_client_mapping_materializations_api_v1_clients__client_id__mapping__destination_type__materializations_get: {
+        parameters: {
+            query?: {
+                /** @description Competência, `YYYY-MM`. */
+                competence?: string | null;
+            };
+            header?: never;
+            path: {
+                /** @description Tipo do destino (slug, ex.: `demonstrativo_contabil`). */
+                destination_type: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaterializationListEnvelope"];
                 };
             };
             /** @description Validation Error */

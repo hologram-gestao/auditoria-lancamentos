@@ -80,8 +80,10 @@ from app.modules.client_mapping.schemas import (
     MappingPreviewResponse,
     MappingSituationName,
     MaterializationEnvelope,
+    MaterializationListEnvelope,
     MaterializationRequest,
     MaterializationResponse,
+    MaterializationSummaryResponse,
 )
 from app.modules.client_mapping.service import ClientMappingDecisionService, DecisionInput
 from app.modules.client_movements.competence import (
@@ -93,6 +95,7 @@ from app.modules.client_movements.repository import ClientMovementsRepository
 from app.modules.mapping_catalog.repository import MappingCatalogRepository
 from app.modules.mapping_catalog.service import MappingCatalogService
 from app.modules.omie_data.categorias_service import OmieCategoriasService
+from app.modules.reconciliations.service import author_for_viewer
 from app.modules.users.schemas import PaginationMeta
 from app.utils.upload import parse_content_length, read_upload_within_limit
 
@@ -252,6 +255,7 @@ async def confirm_inherited_decisions(
         confirm=payload.confirm,
         effective_from=payload.effective_from_date,
         confirm_retroactive=payload.confirm_retroactive,
+        code_prefix=payload.code,
     )
     return ConfirmInheritedEnvelope(
         data=ConfirmInheritedResponse(
@@ -472,6 +476,38 @@ async def preview_client_mapping(
 ) -> MappingPreviewEnvelope:
     preview = await service.preview(client, destination_type, parse_competence(competence))
     return MappingPreviewEnvelope(data=MappingPreviewResponse.build(preview))
+
+
+@router.get(
+    "/materializations",
+    summary=(
+        "As VERSÕES materializadas do destino, mais recentes primeiro: competência, "
+        "versão, quando, quem (autor enxuto e mascarado por escopo), se foi confirmada "
+        "com cobertura parcial, os totais por situação e a cobertura — a mesma conta da "
+        "prévia. `competence` (`YYYY-MM`) recorta uma competência; ausente, todas. Só o "
+        "cabeçalho da versão, nunca os itens. Leitura de quem alcança o cliente."
+    ),
+)
+async def list_client_mapping_materializations(
+    client: AccessibleClientDep,
+    viewer: CurrentUserDep,
+    destination_type: DestinationTypePath,
+    service: ApplyServiceDep,
+    competence: Annotated[
+        str | None, Query(pattern=COMPETENCE_PATTERN, description="Competência, `YYYY-MM`.")
+    ] = None,
+) -> MaterializationListEnvelope:
+    rows = await service.list_materializations(
+        client,
+        destination_type,
+        competence=parse_competence(competence) if competence else None,
+    )
+    return MaterializationListEnvelope(
+        data=[
+            MaterializationSummaryResponse.build(row, author_for_viewer(author, viewer))
+            for row, author in rows
+        ]
+    )
 
 
 @router.post(

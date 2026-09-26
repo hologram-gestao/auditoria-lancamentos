@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 
 from app.core.authz import CurrentUser
 from app.core.exceptions import MappingDecisionDuplicateError
@@ -456,3 +456,60 @@ class TestCorridaNoBanco:
         )
         assert (result.state, result.created, result.already_decided) == ("ok", 0, 1)
         assert len(await _decisions(db_session, world)) == 1
+
+
+class TestRecorteELock:
+    """Follow-up 86e3f0ux7: itens 2 (recorte do lote) e 5 (lock por cliente + destino)."""
+
+    async def test_confirmacao_em_lote_respeita_o_recorte_por_codigo(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
+    ) -> None:
+        db_session.add_all(
+            [
+                ClientChartOfAccount(
+                    client_id=world.client.id, category_code="2.01", dre_code="1.01"
+                ),
+                ClientChartOfAccount(
+                    client_id=world.client.id, category_code="3.01", dre_code="1.02"
+                ),
+            ]
+        )
+        await db_session.flush()
+        await _login(client_with_db, world.admin)
+        assert (
+            await client_with_db.post(_url(world, suffix="inherit"), json={})
+        ).status_code == 200
+        url = _url(world, suffix="decisions/confirm-inherited")
+
+        so_conta = await client_with_db.post(url, json={"code": "2."})
+        assert so_conta.json()["data"]["affected"] == 1, so_conta.text
+        nada = await client_with_db.post(url, json={"code": "9", "confirm": True})
+        assert nada.json()["data"] == {"affected": 0, "applied": False, "result": None}
+        confirma = await client_with_db.post(url, json={"code": " 2. ", "confirm": True})
+        assert confirma.json()["data"]["applied"] is True, confirma.text
+
+        origens = {d.category_code: d.origin for d in await _decisions(db_session, world)}
+        assert origens == {"2.01": "confirmada", "3.01": "herdada"}
+
+    async def test_escrita_de_decisao_segura_o_lock_transacional_do_destino(
+        self, db_session: AsyncSession, world: World
+    ) -> None:
+        """`pg_advisory_xact_lock` fica preso até o fim da transação: é o que
+        serializa a decisão retroativa com a materialização do mesmo destino."""
+        service = TestCorridaNoBanco._service(db_session)
+        await service.write_decisions(
+            world.client,
+            "demonstrativo_contabil",
+            [
+                DecisionInput(
+                    category_code="2.01", decision_type=DecisionType.ALVO, target_code="1.01"
+                )
+            ],
+            author=TestCorridaNoBanco._author(world.admin),
+        )
+        held = await db_session.scalar(
+            text(
+                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid()"
+            )
+        )
+        assert held == 1

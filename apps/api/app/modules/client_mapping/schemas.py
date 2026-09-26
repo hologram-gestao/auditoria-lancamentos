@@ -19,14 +19,17 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.db.models import MaterializedSituation
 from app.db.models.client_movement import MAX_MOVEMENT_CATEGORY_CODE_CHARS
 from app.db.models.mapping_catalog import DESTINATION_TYPE_PATTERN, MAX_TARGET_CODE_CHARS
+from app.modules.client_mapping.apply import _pct
 from app.modules.client_movements.competence import (
     COMPETENCE_PATTERN,
     format_competence,
     parse_competence,
 )
+from app.modules.reconciliations.schemas import SessionAuthor
 from app.modules.users.schemas import PaginationMeta
 
 if TYPE_CHECKING:
+    from app.db.models import ClientMappingMaterialization
     from app.modules.client_mapping.apply import SituationTotal
     from app.modules.client_mapping.materialization import MappingPreview, MaterializationOutcome
     from app.modules.client_mapping.portability import ImportPlan
@@ -132,6 +135,21 @@ class ConfirmInheritedRequest(_Competence):
             "decisões HERDADAS que a confirmação atingiria."
         ),
     )
+    code: str | None = Field(
+        default=None,
+        max_length=MAX_MOVEMENT_CATEGORY_CODE_CHARS,
+        description=(
+            "Recorte por CÓDIGO da categoria (começando por), o mesmo filtro da lista: "
+            "confirma só as herdadas que casam. Ausente = todas as herdadas do destino. "
+            "`affected` respeita o recorte."
+        ),
+    )
+
+    @field_validator("code")
+    @classmethod
+    def _clean_code(cls, value: str | None) -> str | None:
+        cleaned = _no_spaces(value) if value is not None else None
+        return cleaned or None
 
 
 class InheritRequest(_Competence):
@@ -523,3 +541,72 @@ class MaterializationResponse(BaseModel):
 
 class MaterializationEnvelope(BaseModel):
     data: MaterializationResponse
+
+
+class MaterializationSummaryResponse(BaseModel):
+    """Uma versão materializada, como a lista de versões da tela precisa.
+
+    Follow-up 86e3f0ux7 (item 1): até aqui a tela derivava "Versão 1..N" de
+    `latestVersion`, sem data, autor nem cobertura. Só o CABEÇALHO da versão
+    (`client_mapping_materializations`); os itens são a leitura da Sprint 13. Os
+    valores são Σ|valor| por situação, os mesmos da prévia, e a cobertura sai da
+    MESMA função da prévia (`coverage_pct`), para as duas nunca divergirem. O autor
+    passa por `author_for_viewer` na rota (§3.15): usuário de tenant vendo autor da
+    equipe recebe "Equipe {org}" sem e-mail.
+    """
+
+    id: UUID
+    competence: str = Field(description="`YYYY-MM`.")
+    version: int
+    created_at: datetime = Field(alias="createdAt")
+    author: SessionAuthor
+    partial_coverage_confirmed: bool = Field(alias="partialCoverageConfirmed")
+    coverage_pct: Decimal | None = Field(
+        alias="coveragePct",
+        description=(
+            "Σ|valor| com decisão (alvo + `nao_mapear`) ÷ Σ|valor| com categoria, em %, "
+            "como na prévia. `null` quando não havia valor com categoria."
+        ),
+    )
+    mapped_amount: Decimal = Field(alias="mappedAmount")
+    mapped_count: int = Field(alias="mappedCount")
+    not_mapped_amount: Decimal = Field(alias="notMappedAmount")
+    not_mapped_count: int = Field(alias="notMappedCount")
+    undecided_amount: Decimal = Field(alias="undecidedAmount")
+    undecided_count: int = Field(alias="undecidedCount")
+    uncategorized_amount: Decimal = Field(alias="uncategorizedAmount")
+    uncategorized_count: int = Field(alias="uncategorizedCount")
+    undecided_categories: int = Field(alias="undecidedCategories")
+    decisions_used: int = Field(
+        alias="decisionsUsed", description="Quantas vigências a versão usou (snapshot)."
+    )
+    model_config = ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def build(
+        cls, row: ClientMappingMaterialization, author: SessionAuthor
+    ) -> MaterializationSummaryResponse:
+        decided = row.mapped_amount + row.not_mapped_amount
+        return cls(
+            id=row.id,
+            competence=format_competence(row.competence),
+            version=row.version,
+            created_at=row.created_at,
+            author=author,
+            partial_coverage_confirmed=row.partial_coverage_confirmed,
+            coverage_pct=_pct(decided, decided + row.undecided_amount),
+            mapped_amount=row.mapped_amount,
+            mapped_count=row.mapped_count,
+            not_mapped_amount=row.not_mapped_amount,
+            not_mapped_count=row.not_mapped_count,
+            undecided_amount=row.undecided_amount,
+            undecided_count=row.undecided_count,
+            uncategorized_amount=row.uncategorized_amount,
+            uncategorized_count=row.uncategorized_count,
+            undecided_categories=row.undecided_categories,
+            decisions_used=len(row.decisions_used),
+        )
+
+
+class MaterializationListEnvelope(BaseModel):
+    data: list[MaterializationSummaryResponse]

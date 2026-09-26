@@ -62,6 +62,7 @@ def _depara(**over: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
         "client_id": _CLIENT_ID,
         "destino": "demonstrativo_contabil",
+        "competencia": "2026-06",
         "valor_com_decisao_centavos": 9_820_00,
         "valor_nao_mapear_centavos": 1_200_00,
         "valor_sem_decisao_centavos": 180_00,
@@ -161,10 +162,13 @@ class TestMovimentosSincronizados:
 
 
 class TestDeparaAplicado:
-    def test_props_tem_exatamente_as_seis_chaves_do_outcome(self) -> None:
+    def test_props_tem_exatamente_as_sete_chaves(self) -> None:
+        """As seis do Outcome do PRD + `competencia` (follow-up 86e3f0ux7, item 6):
+        sem ela a leitura D+30 por competência não era possível."""
         assert set(DeparaAplicadoProps.model_fields) == {
             "client_id",
             "destino",
+            "competencia",
             "valor_com_decisao_centavos",
             "valor_nao_mapear_centavos",
             "valor_sem_decisao_centavos",
@@ -234,6 +238,7 @@ class TestDeparaAplicado:
         ok = await UsageEventService(repo).emit_depara_aplicado(  # type: ignore[arg-type]
             client_id=_CLIENT_ID,
             destino="demonstrativo_contabil",
+            competencia=date(2026, 6, 1),
             valor_com_decisao=Decimal("98200.00"),
             valor_nao_mapear=Decimal("12000.10"),
             valor_sem_decisao=Decimal("1800.05"),
@@ -267,6 +272,7 @@ class TestDeparaAplicado:
         kwargs: dict[str, Any] = {
             "client_id": _CLIENT_ID,
             "destino": "demonstrativo_contabil",
+            "competencia": date(2026, 6, 1),
             "valor_com_decisao": Decimal("1.00"),
             "valor_nao_mapear": Decimal("0"),
             "valor_sem_decisao": Decimal("0"),
