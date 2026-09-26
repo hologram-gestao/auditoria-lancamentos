@@ -22,6 +22,7 @@ origem faria o glossário de um cliente sem Omie parar de funcionar.
 | `app/modules/client_connections/legacy_fallback.py` | fallback / conversão do R2 | `load_client_cipher` · `resolve_origin_connections` | único leitor das colunas antigas; sintetiza a conexão da janela (09.5) |
 | `app/modules/client_connections/origin.py` | origem — convertido para o contrato | `build_omie_client` · `load_client_cipher` · `build_capable_client` · `build_origin_client` · `client_from_credentials` · `resolve_capable_connection` · `resolve_origin_connections` | a PORTA: resolve conexão capaz + decifra a credencial dela |
 | `app/modules/client_connections/service.py` | origem — convertido para o contrato | `load_client_cipher` · `provision_client_cipher` · `resolve_origin_connections` | CRUD de conexão: cifra e decifra a credencial DA CONEXÃO |
+| `app/modules/client_movements/service.py` | origem — convertido para o contrato | `resolve_capable_connection` | ingestão da base de movimentos por competência (S12, R0): resolve a conexão capaz de `listar_lancamentos` e constrói o provedor pela PORTA, iterando as contas do cache sob o lock por cliente. Não toca em credencial nem nas colunas antigas, e não fala com o `OmieClient` direto |
 | `app/modules/client_titles/routes.py` | origem — convertido para o contrato | `build_capable_client` | lista da carteira (S11): resolve a conexão capaz de `listar_lancamentos` só para resolver NOME de devedor em runtime (§4.5), e é FAIL-SOFT — sem origem alcançável a lista sai com o código e `supplierNameResolved=false`, nunca 409 numa leitura |
 | `app/modules/client_titles/service.py` | origem — convertido para o contrato | `load_client_cipher` · `provision_client_cipher` · `resolve_capable_connection` | ingestão da carteira de títulos (S11): resolve a conexão capaz de `listar_titulos_em_aberto` e constrói o provedor pela PORTA. Não toca em credencial nem nas colunas antigas, e não fala com o `OmieClient` direto. `TitleContextService` (S15) também mora aqui e usa `load_client_cipher`/`provision_client_cipher` para cifrar o TEXTO do contexto do título — dado do tenant, sem relação com origem |
 | `app/modules/clients/accounts_cache.py` | origem — convertido para o contrato | `build_origin_client` | sync de contas por CONEXÃO (TTL em `client_connections.accounts_synced_at`) |
@@ -39,7 +40,7 @@ origem faria o glossário de um cliente sem Omie parar de funcionar.
 
 ## Contagens
 
-- **origem — convertido para o contrato**: 12
+- **origem — convertido para o contrato**: 13
 - **cifra de dado do tenant — declarado, sem conversão**: 4
 - **definição**: 3
 - **fallback / conversão do R2**: 2

@@ -128,6 +128,18 @@ _TABLE: dict[Permission, tuple[bool, bool, bool, bool, bool]] = {
     # só dele — mesmas células de SYNC_CLIENT_RECEIVABLES, decisão própria.
     Permission.VIEW_TITLE_CONTEXT: (True, True, True, True, True),
     Permission.MANAGE_TITLE_CONTEXT: (True, True, True, True, False),
+    # S12 (BACK 12.2), R0 do PRD: SINCRONIZAR a base de movimentos. Mesmas
+    # células de SYNC_CLIENT_RECEIVABLES, permissão PRÓPRIA (reusar amarraria duas
+    # sincronizações a uma decisão só). Ler o estado da base não pede permissão.
+    Permission.SYNC_CLIENT_MOVEMENTS: (True, True, True, True, False),
+    # S12 (BACK 12.3) — DECISÃO DO PLANEJADOR (ADR-074-BE, pendente de validação
+    # humana): o catálogo de destinos/alvos é configuração da ORGANIZAÇÃO. Só
+    # plataforma e admin escrevem; usuário de cliente escrevendo afetaria os
+    # outros tenants da organização.
+    Permission.MANAGE_MAPPING_CATALOG: (True, True, False, False, False),
+    # S12 (BACK 12.4), tabela do R6 do PRD — células DECIDIDAS lá: o manager
+    # (contador parceiro) edita o de-para da carteira; o operador só vê.
+    Permission.MANAGE_CLIENT_MAPPING: (True, True, True, True, False),
 }
 MATRIX_CELLS = [
     (permission, role, expected)
@@ -151,7 +163,7 @@ def test_toda_permissao_esta_na_matriz() -> None:
 
 
 def test_toda_celula_da_tabela_do_prd_foi_transcrita() -> None:
-    """Guarda contra transcrição parcial: 20 permissões x 5 papéis = 100 células."""
+    """Guarda contra transcrição parcial: toda permissão x os 5 papéis."""
     assert len(MATRIX_CELLS) == len(Permission) * len(UserRole)
     assert {(p, r) for p, r, _ in MATRIX_CELLS} == {(p, r) for p in Permission for r in UserRole}
 

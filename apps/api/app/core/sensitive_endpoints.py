@@ -70,6 +70,15 @@ _VIA_SESSION = (
     "require_session_access: SELECT da sessão já com AND client_id = <tenant da "
     "linha> (scoped_by_tenant) + resolve_client_access; 404 uniforme"
 )
+_VIA_MAPPING_CATALOG_ORG = (
+    "scoped_by_organization no SELECT do destino (AND organization_id = <org da LINHA "
+    "do observador>; plataforma: todas); destino/alvo de outra organização = 404"
+)
+_VIA_CLIENT_MAPPING_WRITE = (
+    "AccessibleClientDep -> resolve_client_access + OpenClientDep + "
+    "ManageClientMappingDep (guard auditado); destino resolvido na org DO CLIENTE; "
+    "toda query de decisão filtra client_id"
+)
 _VIA_CLIENT_PATH = (
     "AccessibleClientDep -> require_client_access -> resolve_client_access "
     "(o client_id do path só passa se for o tenant da linha)"
@@ -673,6 +682,165 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         "app/modules/client_titles/routes.py",
         f"{_VIA_CLIENT_PATH} + ViewClientReceivablesDep; a agregação filtra "
         "por client_id na própria query",
+    ),
+    # ------------------------- base de movimentos (S12, BACK 12.2 — R0)
+    # Nenhum NOME é persistido, mas vazar esta coleção é vazar o extrato do
+    # cliente (valores, datas, códigos de categoria e de fornecedor) — é a
+    # entrada do de-para.
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients/{client_id}/movements/sync",
+        ScopeKind.COLLECTION,
+        "app/modules/client_movements/routes.py",
+        f"{_VIA_CLIENT_PATH} + OpenClientDep + SyncClientMovementsDep (guard "
+        "auditado); todo SELECT/UPDATE da base filtra client_id; cliente "
+        "encerrado = 409",
+    ),
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/movements/sync-state",
+        ScopeKind.COLLECTION,
+        "app/modules/client_movements/routes.py",
+        f"{_VIA_CLIENT_PATH}; o estado é lido por (client_id, competência) na própria query",
+    ),
+    # ------------------------- catálogo do de-para (S12, BACK 12.3 — R1)
+    # Por ORGANIZAÇÃO: o plano de demonstração de um BPO. Vazar é expor como o
+    # escritório estrutura os demonstrativos dos clientes dele.
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/mapping-destinations",
+        ScopeKind.COLLECTION,
+        "app/modules/mapping_catalog/routes.py",
+        _VIA_MAPPING_CATALOG_ORG,
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/mapping-destinations",
+        ScopeKind.COLLECTION,
+        "app/modules/mapping_catalog/routes.py",
+        "ManageMappingCatalogDep; o destino nasce na org da LINHA do ator "
+        "(resolve_organization_for_creation); org suspensa = 409",
+    ),
+    SensitiveEndpoint(
+        "PATCH",
+        "/api/v1/mapping-destinations/{destination_id}",
+        ScopeKind.DETAIL_PK,
+        "app/modules/mapping_catalog/routes.py",
+        "ManageMappingCatalogDep + " + _VIA_MAPPING_CATALOG_ORG,
+    ),
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/mapping-destinations/{destination_id}/targets",
+        ScopeKind.DETAIL_PK,
+        "app/modules/mapping_catalog/routes.py",
+        _VIA_MAPPING_CATALOG_ORG,
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/mapping-destinations/{destination_id}/targets",
+        ScopeKind.DETAIL_PK,
+        "app/modules/mapping_catalog/routes.py",
+        "ManageMappingCatalogDep + " + _VIA_MAPPING_CATALOG_ORG,
+    ),
+    SensitiveEndpoint(
+        "PATCH",
+        "/api/v1/mapping-destinations/{destination_id}/targets/{target_id}",
+        ScopeKind.DETAIL_PK,
+        "app/modules/mapping_catalog/routes.py",
+        "ManageMappingCatalogDep + " + _VIA_MAPPING_CATALOG_ORG + "; alvo buscado "
+        "dentro do destino (AND destination_id)",
+    ),
+    SensitiveEndpoint(
+        "DELETE",
+        "/api/v1/mapping-destinations/{destination_id}/targets/{target_id}",
+        ScopeKind.DETAIL_PK,
+        "app/modules/mapping_catalog/routes.py",
+        "ManageMappingCatalogDep + " + _VIA_MAPPING_CATALOG_ORG + "; alvo em uso = 409",
+    ),
+    # ------------------------- decisões do de-para (S12, BACK 12.4 — R2/R4/R7)
+    # O desenho contábil do cliente: qual categoria vai para qual conta. O destino
+    # é resolvido na organização DO CLIENTE (nunca do payload).
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients/{client_id}/mapping/{destination_type}/decisions",
+        ScopeKind.COLLECTION,
+        "app/modules/client_mapping/routes.py",
+        _VIA_CLIENT_MAPPING_WRITE,
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients/{client_id}/mapping/{destination_type}/decisions/batch",
+        ScopeKind.COLLECTION,
+        "app/modules/client_mapping/routes.py",
+        _VIA_CLIENT_MAPPING_WRITE,
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients/{client_id}/mapping/{destination_type}/decisions/confirm-inherited",
+        ScopeKind.COLLECTION,
+        "app/modules/client_mapping/routes.py",
+        _VIA_CLIENT_MAPPING_WRITE,
+    ),
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/mapping/{destination_type}/decisions/history",
+        ScopeKind.COLLECTION,
+        "app/modules/client_mapping/routes.py",
+        f"{_VIA_CLIENT_PATH}; decisões lidas por client_id + destino da org do cliente",
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients/{client_id}/mapping/{destination_type}/inherit",
+        ScopeKind.COLLECTION,
+        "app/modules/client_mapping/routes.py",
+        _VIA_CLIENT_MAPPING_WRITE,
+    ),
+    # ------------------------- leitura e portabilidade do de-para (S12, BACK 12.5)
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/mapping/{destination_type}",
+        ScopeKind.COLLECTION,
+        "app/modules/client_mapping/routes.py",
+        f"{_VIA_CLIENT_PATH}; universo e decisões lidos por client_id",
+    ),
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/mapping/{destination_type}/export",
+        ScopeKind.COLLECTION,
+        "app/modules/client_mapping/routes.py",
+        f"{_VIA_CLIENT_PATH}; 1 linha `export` em access_audit",
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients/{client_id}/mapping/{destination_type}/import/preview",
+        ScopeKind.COLLECTION,
+        "app/modules/client_mapping/routes.py",
+        _VIA_CLIENT_MAPPING_WRITE + "; não grava nada",
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients/{client_id}/mapping/{destination_type}/import",
+        ScopeKind.COLLECTION,
+        "app/modules/client_mapping/routes.py",
+        _VIA_CLIENT_MAPPING_WRITE,
+    ),
+    # ------------------------- aplicação e materialização (S12, BACK 12.6)
+    # A prévia expõe VALORES da competência (Σ por situação) — o extrato do cliente
+    # agregado. A materialização grava o resultado que a Sprint 13 transforma em
+    # arquivo contábil.
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/mapping/{destination_type}/preview",
+        ScopeKind.COLLECTION,
+        "app/modules/client_mapping/routes.py",
+        f"{_VIA_CLIENT_PATH}; base e decisões lidas por client_id",
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients/{client_id}/mapping/{destination_type}/materializations",
+        ScopeKind.COLLECTION,
+        "app/modules/client_mapping/routes.py",
+        _VIA_CLIENT_MAPPING_WRITE + "; versão N+1 imutável, nunca UPDATE/DELETE",
     ),
 )
 

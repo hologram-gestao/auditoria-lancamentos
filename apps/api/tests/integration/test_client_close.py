@@ -21,7 +21,7 @@ O cross-tenant (operador do tenant A contra cliente B) está no parametrizado de
 from __future__ import annotations
 
 import hashlib
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -37,6 +37,8 @@ from app.db.models import (
     ClientAssignment,
     ClientChartOfAccount,
     ClientGlossaryEntry,
+    ClientMovement,
+    ClientMovementSync,
     ClientTitle,
     Notification,
     NotificationType,
@@ -257,6 +259,28 @@ async def _seed_world(db: AsyncSession, *, processing: bool = False) -> _World:
                 status=TitleStatus.EM_ABERTO.value,
             )
         )
+    # Base de movimentos (S12, R0) e o carimbo da competência: mesmo precedente
+    # da carteira — só códigos, nada cifrado, espelho operacional da origem.
+    # Uma linha de cada em CADA cliente, pelo mesmo motivo (purga por tenant).
+    for cli in (w.cli_a, w.cli_b):
+        db.add(
+            ClientMovement(
+                client_id=cli.id,
+                source_type="omie",
+                source_movement_id="7001",
+                competence=date(2026, 6, 1),
+                movement_date=date(2026, 6, 10),
+                amount=Decimal("-150.00"),
+                category_code="2.04.94",
+            )
+        )
+        db.add(
+            ClientMovementSync(
+                client_id=cli.id,
+                competence=date(2026, 6, 1),
+                synced_at=datetime.now(UTC),
+            )
+        )
     db.add(
         AccessAudit(
             user_id=w.admin.id,
@@ -399,6 +423,18 @@ class TestCloseClient:
             )
             == 1
         ), "a purga é POR TENANT — a carteira do vizinho não pode ser tocada"
+
+        # Base de movimentos (S12, R0) e carimbos da competência: somem juntos,
+        # pelo precedente da carteira. O vizinho fica com os dele.
+        for model in (ClientMovement, ClientMovementSync):
+            assert (
+                await _count(db_session, select(func.count(model.id)).where(model.client_id == a))
+                == 0
+            ), f"{model.__tablename__} do cliente encerrado sobreviveu à purga"
+            assert (
+                await _count(db_session, select(func.count(model.id)).where(model.client_id == b))
+                == 1
+            ), f"a purga é POR TENANT — {model.__tablename__} do vizinho foi tocada"
 
         # Usuários do tenant: FICAM (FK das sessões), mas anonimizados e mortos.
         users_a = (
