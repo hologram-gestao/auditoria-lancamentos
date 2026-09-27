@@ -2433,6 +2433,11 @@ const TELAS_COM_TABELA = [
     // substring e quebra no strict mode.
     regiao: 'Títulos da carteira (rolável)',
     usuario: (): Record<string, unknown> => CLIENT_MANAGER_USER,
+    // 86e3eq9uy: a carteira é a tela em que a PÁGINA rola e a tabela não
+    // (`<Table stickyHeader="page">`). Ela continua no teste da barra (a barra
+    // vem depois da tabela, no fluxo, e nunca cobre linha) e sai só do teste de
+    // rolagem interna — que tem um cenário próprio adiante.
+    pageScroll: true,
   },
 ] as const;
 
@@ -2463,7 +2468,7 @@ for (const vp of VIEWPORTS) {
        * motivo da lista de cards — abaixo de `lg` o shell vira coluna, a altura
        * deixa de ser fixa e quem rola é o `<main>`.
        */
-      if (vp.label === 'desktop') {
+      if (vp.label === 'desktop' && !('pageScroll' in tela)) {
         test(`${tela.key}: a tabela rola dentro da própria área (86e2uca1d)`, async ({ page }) => {
           tableListsOverflow = true;
           sessionUser = tela.usuario();
@@ -3397,9 +3402,11 @@ async function exigirEstadoVazioLegivel(page: Page, texto: string, contexto: str
  */
 async function exigirAgregadosLegiveis(page: Page, contexto: string) {
   const largura = page.viewportSize()?.width ?? 0;
+  // Desde a 86e3eq9uy cada valor é um BOTÃO dentro do `<dd>`; os três totais
+  // de cima levam `data-summary="total"` (os baldes não, para a contagem ser 3).
   const valores = page
     .getByRole('region', { name: 'A receber' })
-    .locator('dd > span.whitespace-nowrap');
+    .locator('dd button [data-summary="total"]');
   await expect(valores).toHaveCount(3);
 
   const caixas = await valores
@@ -3492,12 +3499,21 @@ for (const vp of VIEWPORTS) {
       sessionUser = CLIENT_MANAGER_USER;
       await page.goto(`/clientes/${CLIENT_ID}/carteira`);
 
-      // O recorte vive na URL: a view é linkável e sobrevive ao F5. O `Select`
-      // do Radix não aceita `modal={false}`, então ele é exercitado aberto e o
-      // `analyze` roda com ele FECHADO (86e34jd8m).
-      await page.getByLabel('Tipo').click();
-      await page.getByRole('option', { name: 'A pagar' }).click();
+      // O recorte vive na URL: a view é linkável e sobrevive ao F5. Tipo é um
+      // grupo de botões (86e3eq9uy) com `aria-pressed`; o `Select` do Radix não
+      // aceita `modal={false}`, então ele é exercitado aberto e o `analyze` roda
+      // com ele FECHADO (86e34jd8m).
+      const tipo = page.getByRole('group', { name: 'Tipo' });
+      await tipo.getByRole('button', { name: 'A pagar' }).click();
       await expect(page).toHaveURL(/type=a_pagar/);
+      await expect(tipo.getByRole('button', { name: 'A pagar' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+      await expect(page.getByRole('button', { name: 'Remover filtro A pagar' })).toBeVisible();
+      // Situação e balde saíram da barra: o recorte vem dos cards.
+      await expect(page.getByLabel('Situação')).toHaveCount(0);
+      await expect(page.getByLabel('Balde de atraso')).toHaveCount(0);
 
       await page.getByLabel('Ordenar por').click();
       await page.getByRole('option', { name: 'Valor (maior)' }).click();
@@ -3506,6 +3522,133 @@ for (const vp of VIEWPORTS) {
 
       await analyze(page, `carteira — filtros e ordenação (${vp.label})`);
     });
+
+    /**
+     * 86e3eq9uy (Parte B): os valores dos cards FILTRAM a lista pela URL, com
+     * `aria-pressed` no ativo, desfazer no segundo clique e etiquetas removíveis.
+     */
+    test('os totais filtram a lista: 90+ dias de A receber vai para a URL e vira etiqueta (86e3eq9uy)', async ({
+      page,
+    }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/carteira`);
+
+      const noventaMais = page.getByRole('button', { name: /^A receber, 90\+ dias/ });
+      await expect(noventaMais).toHaveAttribute('aria-pressed', 'false');
+      await noventaMais.click();
+      await expect(page).toHaveURL(/type=a_receber/);
+      await expect(page).toHaveURL(/bucket=90_mais/);
+      await expect(page).not.toHaveURL(/situation=/);
+      await expect(noventaMais).toHaveAttribute('aria-pressed', 'true');
+      // Só ele: o mesmo balde do outro card não acende.
+      await expect(page.getByRole('button', { name: /^A pagar, 90\+ dias/ })).toHaveAttribute(
+        'aria-pressed',
+        'false',
+      );
+      await expect(page.getByRole('button', { name: 'Remover filtro A receber' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Remover filtro 90+ dias' })).toBeVisible();
+      await exigirAgregadosLegiveis(page, `${vp.label} · filtro ativo`);
+      await shot(page, `carteira-filtro-ativo-${slugC}`);
+      await analyze(page, `carteira — totais com filtro ativo (${vp.label})`);
+
+      // Segundo clique desfaz os três parâmetros.
+      await noventaMais.click();
+      await expect(page).not.toHaveURL(/type=/);
+      await expect(page).not.toHaveURL(/bucket=/);
+      await expect(noventaMais).toHaveAttribute('aria-pressed', 'false');
+
+      // Remover a etiqueta tira SÓ o balde; o tipo fica.
+      await noventaMais.click();
+      await expect(page).toHaveURL(/bucket=90_mais/);
+      await page.getByRole('button', { name: 'Remover filtro 90+ dias' }).click();
+      await expect(page).toHaveURL(/type=a_receber/);
+      await expect(page).not.toHaveURL(/bucket=/);
+      await expect(page.getByRole('button', { name: 'Remover filtro 90+ dias' })).toHaveCount(0);
+    });
+
+    /**
+     * 86e3eq9uy (Parte D): clicar em qualquer ponto da linha abre a gaveta de
+     * contexto do título certo. O caminho de teclado continua sendo o botão da
+     * coluna; o `<tr>` não ganha `tabIndex` nem `role`.
+     */
+    test('clicar na linha abre a gaveta de contexto do título certo (86e3eq9uy)', async ({
+      page,
+    }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/carteira`);
+
+      const linha = page.getByRole('row').nth(2); // o 2º título: 4011, R$ 250,90
+      expect(await linha.getAttribute('tabindex')).toBeNull();
+      expect(await linha.getAttribute('role')).toBeNull();
+      await linha.getByText('Nome não resolvido').click();
+      const gaveta = page.getByRole('dialog');
+      await expect(gaveta.getByRole('heading', { name: 'Contexto do título' })).toBeVisible();
+      await aguardarAnimacao(gaveta);
+      await expect(gaveta).toContainText('Vencimento 05/10/2026');
+      await expect(gaveta).toContainText(/R\$\s*250,90/);
+      await analyze(page, `carteira — gaveta aberta pela linha (${vp.label})`);
+    });
+
+    if (vp.label === 'desktop') {
+      /**
+       * 86e3eq9uy (Parte A): a PÁGINA rola, a tabela não, e o cabeçalho gruda
+       * no topo do `<main>`. Com 20 linhas em 1440×900 a lista transborda a
+       * viewport com folga. E em 1280 a tabela cabe na largura: abaixo de `xl`
+       * o wrapper volta a rolar na horizontal, mas em `xl`+ cortar coluna em
+       * silêncio seria pior que não grudar.
+       */
+      test('a página rola, a tabela não, e o cabeçalho gruda no topo (86e3eq9uy)', async ({
+        page,
+      }) => {
+        tableListsOverflow = true;
+        sessionUser = CLIENT_MANAGER_USER;
+        await page.goto(`/clientes/${CLIENT_ID}/carteira`);
+        await expect(page.getByRole('row')).toHaveCount(21);
+
+        const main = page.locator('main');
+        const regiao = page.getByRole('region', { name: 'Títulos da carteira (rolável)' });
+        // Quem rola é a página: o wrapper da tabela não tem rolagem vertical própria.
+        expect(
+          await regiao.evaluate((el) => el.scrollHeight - el.clientHeight),
+          'o wrapper da tabela não pode ter rolagem vertical própria',
+        ).toBe(0);
+        expect(
+          await main.evaluate((el) => el.scrollHeight - el.clientHeight),
+          'o <main> precisa ter rolagem',
+        ).toBeGreaterThan(0);
+        // Nada cortado na largura, em 1440 e em 1280.
+        const cabeNaLargura = () =>
+          regiao.evaluate((el) => {
+            const table = el.querySelector('table');
+            return table !== null && table.scrollWidth <= el.clientWidth;
+          });
+        expect(await cabeNaLargura(), '1440: a tabela não cabe no wrapper').toBe(true);
+        await page.setViewportSize({ width: 1280, height: 900 });
+        expect(await cabeNaLargura(), '1280: a tabela não cabe no wrapper').toBe(true);
+        await page.setViewportSize(vp.size);
+
+        // Cabeçalho gruda: rolar o <main> 700px e a caixa do cabeçalho fica
+        // colada ao topo da área do <main> (1px de tolerância) e visível.
+        await main.evaluate((el) => el.scrollTo({ top: 700 }));
+        const cabecalho = regiao.locator('thead th').first();
+        await expect(cabecalho).toBeVisible();
+        const topoMain = (await main.boundingBox())?.y ?? -1;
+        const topoCabecalho = (await cabecalho.boundingBox())?.y ?? -100;
+        expect(
+          Math.abs(topoCabecalho - topoMain),
+          'o cabeçalho não grudou no topo do <main>',
+        ).toBeLessThanOrEqual(1);
+        await shot(page, `carteira-rolada-cabecalho-grudado-${slugC}`);
+        await analyze(page, `carteira — rolada com o cabeçalho grudado (${vp.label})`);
+
+        // Paginação alcançável: rolar até o fim a deixa dentro da viewport.
+        await main.evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+        await expect(
+          page.getByRole('navigation', { name: 'Paginação de títulos' }),
+        ).toBeInViewport();
+        await expect(page.getByRole('row').last()).toBeInViewport();
+      });
+    }
 
     test('nunca sincronizada: ação de sincronizar, e NENHUM zero (R3)', async ({ page }) => {
       titlesNeverSynced = true;
@@ -3973,14 +4116,18 @@ for (const vp of VIEWPORTS) {
           await page.keyboard.press('Escape');
           await expect(page.getByRole('dialog')).toHaveCount(0);
         }
-        // §9 (editar dados do cliente, credenciais Omie) é só do admin.
-        await expect(page.getByRole('button', { name: 'Editar cliente' })).toHaveCount(
+        // §9 (editar dados do cliente, credenciais Omie) é só do admin: as ações
+        // vivem no menu "Ações do cliente" (86e3eq9uy), e quem não pode editar
+        // não vê nem o gatilho.
+        await expect(page.getByRole('button', { name: 'Ações do cliente' })).toHaveCount(
           profile.editClient ? 1 : 0,
         );
+        await expect(page.getByRole('button', { name: 'Editar cliente' })).toHaveCount(0);
         // Excluir cliente NÃO aparece para perfil nenhum, nem para quem tem
         // `edit_client` (86e3eqxdt, decisão de produto de 25/09/2026): a saída
         // pela tela é o encerramento; a exclusão segue só na API (LGPD).
         await expect(page.getByRole('button', { name: 'Excluir cliente' })).toHaveCount(0);
+        await expect(page.getByRole('menuitem', { name: 'Excluir cliente' })).toHaveCount(0);
         // Criar conciliação vale para todo papel (matriz: ✅ nas 4 colunas).
         await expect(page.getByRole('button', { name: 'Criar conciliação' })).toBeVisible();
 
@@ -4573,16 +4720,42 @@ for (const vp of VIEWPORTS) {
      * forma nenhuma (botão, item de menu ou texto). A rota `DELETE` segue na API
      * para o apagamento pedido pelo titular (LGPD) — esconder não é defeito.
      */
-    test('excluir cliente não aparece nem para o admin (86e3eqxdt)', async ({ page }) => {
+    test('menu "Ações do cliente": só Editar e Encerrar, nunca Excluir (86e3eqxdt · 86e3eq9uy)', async ({
+      page,
+    }) => {
       await page.goto(`/clientes/${CLIENT_ID}`);
-      await expect(page.getByRole('button', { name: 'Encerrar cliente' })).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Editar cliente' })).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Excluir cliente' })).toHaveCount(0);
+      // Os dois botões soltos viraram um menu (86e3eq9uy): o cabeçalho tem UM
+      // gatilho de texto, e as ações moram dentro dele.
+      await expect(page.getByRole('button', { name: 'Editar cliente' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Encerrar cliente' })).toHaveCount(0);
+      const gatilho = page.getByRole('button', { name: 'Ações do cliente' });
+      await gatilho.click();
+      const menu = page.getByRole('menu');
+      await expect(menu).toBeVisible();
+      await expect(menu.getByRole('menuitem')).toHaveCount(2);
+      await expect(menu.getByRole('menuitem', { name: 'Editar cliente' })).toBeVisible();
+      await expect(menu.getByRole('menuitem', { name: 'Encerrar cliente' })).toBeVisible();
       await expect(page.getByRole('menuitem', { name: 'Excluir cliente' })).toHaveCount(0);
       await expect(page.getByText('Excluir cliente')).toHaveCount(0);
+      await shot(page, `cabecalho-cliente-menu-acoes-${slug}`);
+      // `analyze` com o menu FECHADO (como o `Select`): Escape fecha e devolve o
+      // foco ao gatilho.
+      await page.keyboard.press('Escape');
+      await expect(menu).toBeHidden();
+      await expect(gatilho).toBeFocused();
+      // "Editar cliente" pelo menu: o modal abre depois de o menu fechar, e
+      // fechá-lo devolve o foco ao gatilho (diálogo sem `DialogTrigger`: o
+      // primitivo devolve ao abridor).
+      await gatilho.click();
+      await page.getByRole('menuitem', { name: 'Editar cliente' }).click();
+      const editar = page.getByRole('dialog', { name: 'Editar cliente' });
+      await expect(editar).toBeVisible();
+      await expect(page.getByRole('menu')).toHaveCount(0);
+      await page.keyboard.press('Escape');
+      await expect(editar).toBeHidden();
+      await expect(gatilho).toBeFocused();
       await expect(page.locator('#__next_error__')).toHaveCount(0);
-      await shot(page, `cabecalho-cliente-sem-excluir-${slug}`);
-      await analyze(page, `cabeçalho do cliente sem excluir (${vp.label})`);
+      await analyze(page, `cabeçalho do cliente com o menu de ações (${vp.label})`);
     });
 
     /**
@@ -4595,7 +4768,12 @@ for (const vp of VIEWPORTS) {
       clientClosed = true;
       await page.goto(`/clientes/${CLIENT_ID}`);
       await expect(page.getByText('Encerrado', { exact: true })).toBeVisible();
-      for (const acao of ['Editar cliente', 'Encerrar cliente', 'Excluir cliente']) {
+      for (const acao of [
+        'Ações do cliente',
+        'Editar cliente',
+        'Encerrar cliente',
+        'Excluir cliente',
+      ]) {
         await expect(page.getByRole('button', { name: acao })).toHaveCount(0);
       }
       await expect(page.locator('#__next_error__')).toHaveCount(0);
@@ -4611,8 +4789,20 @@ for (const vp of VIEWPORTS) {
      */
     test('encerrar cliente: alertdialog com confirmação digitada (86e36pm1z)', async ({ page }) => {
       await page.goto(`/clientes/${CLIENT_ID}`);
-      await page.getByRole('button', { name: 'Encerrar cliente' }).click();
+      // Pelo menu (86e3eq9uy): escolher o item fecha o menu e SÓ ENTÃO abre o
+      // diálogo — nunca dois overlays do Radix ao mesmo tempo.
+      const gatilho = page.getByRole('button', { name: 'Ações do cliente' });
+      await gatilho.click();
+      await page.getByRole('menuitem', { name: 'Encerrar cliente' }).click();
       const confirm = page.getByRole('alertdialog', { name: 'Encerrar cliente' });
+      await expect(confirm).toBeVisible();
+      await expect(page.getByRole('menu')).toHaveCount(0);
+      // Cancelar devolve o foco ao gatilho do menu, não ao vazio.
+      await confirm.getByRole('button', { name: 'Cancelar' }).click();
+      await expect(confirm).toBeHidden();
+      await expect(gatilho).toBeFocused();
+      await gatilho.click();
+      await page.getByRole('menuitem', { name: 'Encerrar cliente' }).click();
       await expect(confirm).toBeVisible();
       await aguardarAnimacao(confirm);
       const acao = confirm.getByRole('button', { name: 'Encerrar cliente' });
