@@ -33,16 +33,22 @@
  * segundo request.
  */
 
-import { Archive, ChevronRight, SquarePen } from 'lucide-react';
+import { Archive, ChevronDown, ChevronRight, MoreHorizontal, SquarePen } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { CategoryBadge } from '@/components/features/client-categories/category-badge';
 import { sessionIdFromPathname } from '@/components/features/navigation/nav-items';
 import { sessionCrumbLabel } from '@/components/features/reconciliations/session-label';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useClientDetail } from '@/hooks/use-clients';
 import { useSessionDetail } from '@/hooks/use-reconciliations';
 import { ApiError } from '@/lib/api/client';
@@ -63,6 +69,13 @@ export function ClientShell({ clientId, children }: ClientShellProps) {
   const currentUser = useAuthStore((s) => s.user);
   const [editOpen, setEditOpen] = useState(false);
   const [closeOpen, setCloseOpen] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  // Ação escolhida no menu, aplicada só DEPOIS de o menu fechar e devolver o
+  // foco ao gatilho (`onCloseAutoFocus`): dois overlays do Radix ao mesmo tempo
+  // marcam o fundo com `aria-hidden` (lição da transferência de organização,
+  // v1.37) — e é por o diálogo abrir com o foco já no gatilho que fechá-lo
+  // devolve o foco a "Ações do cliente".
+  const pendingAction = useRef<'edit' | 'close' | null>(null);
 
   // Gating de tenant (R4/FRONT 05.7) ANTES do fetch: um usuário de cliente que
   // abre o deep link de OUTRO tenant não deve nem disparar o request — o
@@ -198,25 +211,63 @@ export function ClientShell({ clientId, children }: ClientShellProps) {
               isFavorite={client.is_favorite}
             />
           </div>
-          {/* Sem "Excluir cliente" de propósito (86e3eqxdt, decisão de produto de
+          {/* As ações num MENU (86e3eq9uy): um gatilho de texto em vez de dois
+              botões no cabeçalho, em todas as páginas do cliente. `modal={false}`
+              como o sino e o seletor de tema: no modo modal o Radix marca o fundo
+              com `aria-hidden` mantendo elementos focáveis (`aria-hidden-focus`).
+              Sem "Excluir cliente" de propósito (86e3eqxdt, decisão de produto de
               25/09/2026): a saída do cliente pela tela é o ENCERRAMENTO com
               retenção. A exclusão definitiva segue na API (`DELETE /clients/{id}`,
               `edit_client`) como caminho do apagamento pedido pelo titular (LGPD,
               CLAUDE.md §4.12) — esconder aqui não é o defeito da §4.9. Encerrado
-              não tem ação nenhuma, então o grupo inteiro some. */}
+              não tem item nenhum, então o gatilho some junto: menu vazio é defeito. */}
           {canEditClient && !isClosed && (
-            <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" onClick={() => setEditOpen(true)}>
-                <SquarePen className="h-4 w-4" aria-hidden="true" />
-                Editar cliente
-              </Button>
-              {/* Encerramento com retenção (86e36pm1z): anonimiza e vira
-                  só-leitura; some quando já encerrado (o servidor daria 409). */}
-              <Button variant="outline" onClick={() => setCloseOpen(true)}>
-                <Archive className="h-4 w-4" aria-hidden="true" />
-                Encerrar cliente
-              </Button>
-            </div>
+            <DropdownMenu open={actionsOpen} onOpenChange={setActionsOpen} modal={false}>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline">
+                  <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+                  Ações do cliente
+                  <ChevronDown className="h-4 w-4" aria-hidden="true" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="w-56"
+                onCloseAutoFocus={() => {
+                  const action = pendingAction.current;
+                  pendingAction.current = null;
+                  if (action === null) return;
+                  // Na TAREFA seguinte: o Radix devolve o foco ao gatilho logo depois
+                  // deste handler, e o diálogo precisa montar com o foco JÁ no
+                  // gatilho para devolvê-lo a ele ao fechar. Aberto no mesmo tick, o
+                  // diálogo registrava o item de menu (já desmontado) e o foco caía
+                  // no vazio.
+                  window.setTimeout(() => {
+                    if (action === 'edit') setEditOpen(true);
+                    if (action === 'close') setCloseOpen(true);
+                  }, 0);
+                }}
+              >
+                <DropdownMenuItem
+                  onSelect={() => {
+                    pendingAction.current = 'edit';
+                  }}
+                >
+                  <SquarePen className="mr-2 h-4 w-4" aria-hidden="true" />
+                  Editar cliente
+                </DropdownMenuItem>
+                {/* Encerramento com retenção (86e36pm1z): anonimiza e vira
+                    só-leitura; some quando já encerrado (o servidor daria 409). */}
+                <DropdownMenuItem
+                  onSelect={() => {
+                    pendingAction.current = 'close';
+                  }}
+                >
+                  <Archive className="mr-2 h-4 w-4" aria-hidden="true" />
+                  Encerrar cliente
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
         </div>
       </header>

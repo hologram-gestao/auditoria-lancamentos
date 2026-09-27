@@ -192,7 +192,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </aside>
         {/* ÚNICO elemento com rolagem — `min-w-0` evita que uma tabela larga
             empurre o shell e reintroduza scroll horizontal na página. */}
-        <main className="min-w-0 flex-1 overflow-y-auto p-6">{children}</main>
+        {/* `--page-scroll-padding` = o `p-6` daqui: é o que `<Table stickyHeader="page">`
+            desconta para o cabeçalho grudar no TOPO da área visível do `<main>`, e não
+            24px abaixo dele, com linhas aparecendo por cima na faixa do padding. */}
+        <main className="min-w-0 flex-1 overflow-y-auto p-6 [--page-scroll-padding:1.5rem]">
+          {children}
+        </main>
       </div>
       {/* Observa a navegação para emitir `autor_navegou_fora` (não renderiza
           nada). Vive no shell porque precisa sobreviver à troca de rota. */}

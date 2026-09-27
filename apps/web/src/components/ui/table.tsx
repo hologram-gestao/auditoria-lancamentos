@@ -25,11 +25,40 @@ export interface TableProps extends React.HTMLAttributes<HTMLTableElement> {
    * mudaria a aparência à toa (ex.: a tabela dentro do modal de troca).
    */
   fill?: boolean;
+  /**
+   * O OUTRO padrão de altura (86e3eq9uy): a tabela tem altura natural, quem
+   * rola é a PÁGINA (o `<main>` do shell) e o cabeçalho gruda no topo dela.
+   * Para tela cujo conteúdo acima da tabela não cabe junto com ela na
+   * viewport (a carteira: cabeçalho, abas, dois cards de totais e filtros
+   * deixavam 2 ou 3 linhas visíveis com `fill`).
+   *
+   * Por que existe uma opção e não "só deixar a página rolar": `position:
+   * sticky` gruda no scroller mais próximo, e este wrapper (`overflow-auto`)
+   * e o `<TableCard>` (`overflow-hidden`) SÃO scrollers — o `th` ficaria preso
+   * neles, que não rolam. Com `stickyHeader="page"`, de `xl` para cima o
+   * wrapper vira `overflow-clip` (corta sem virar scroller; `hidden` também
+   * cria scroller) e o `th` gruda no `<main>`. Abaixo de `xl` fica o
+   * comportamento de sempre: o wrapper rola na horizontal quando a tabela não
+   * cabe e o cabeçalho não gruda — em 1024px a área útil tem ~744px e cortar
+   * coluna em silêncio é pior que não grudar. Em `xl`+ a tabela TEM de caber
+   * na largura (coluna de texto com `whitespace-normal`). Use com
+   * `<TableCard pageScroll>`.
+   */
+  stickyHeader?: 'page';
 }
+
+const STICKY_HEAD =
+  '[&_thead_th]:bg-background [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:shadow-[inset_0_-1px_0_hsl(var(--border))]';
 
 const Table = React.forwardRef<HTMLTableElement, TableProps>(
   (
-    { className, scrollRegionLabel = 'Tabela (rolável horizontalmente)', fill = false, ...props },
+    {
+      className,
+      scrollRegionLabel = 'Tabela (rolável horizontalmente)',
+      fill = false,
+      stickyHeader,
+      ...props
+    },
     ref,
   ) => (
     <ScrollRegion
@@ -40,8 +69,14 @@ const Table = React.forwardRef<HTMLTableElement, TableProps>(
         // O `shadow` desenha a linha do cabeçalho: com `border-collapse:
         // collapse` (preflight do Tailwind) a borda pertence à TABELA, não à
         // célula, e não acompanha o `th` grudado — some ao rolar.
-        fill &&
-          '[&_thead_th]:bg-background min-h-0 [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:shadow-[inset_0_-1px_0_hsl(var(--border))]',
+        fill && cn('min-h-0', STICKY_HEAD),
+        // Só de `xl` para cima: abaixo o wrapper continua scroller horizontal
+        // (e o `sticky` grudaria nele, sem efeito vertical).
+        // `top` negativo do padding do `<main>` (`--page-scroll-padding`, definida no
+        // shell): `sticky top-0` gruda na borda do CONTEÚDO do scroller, 24px abaixo
+        // do topo visível, e as linhas apareceriam por cima na faixa do padding.
+        stickyHeader === 'page' &&
+          '[&_thead_th]:xl:bg-background xl:overflow-clip [&_thead_th]:xl:sticky [&_thead_th]:xl:top-[calc(var(--page-scroll-padding,0px)*-1)] [&_thead_th]:xl:shadow-[inset_0_-1px_0_hsl(var(--border))]',
       )}
       label={scrollRegionLabel}
     >
@@ -70,11 +105,25 @@ Table.displayName = 'Table';
  * `max-h-full` não resolve, o card cresce e quem rola é o `<main>`. É o
  * comportamento mobile de hoje, preservado de propósito.
  */
-const TableCard = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => (
+export interface TableCardProps extends React.HTMLAttributes<HTMLDivElement> {
+  /**
+   * Par de `<Table stickyHeader="page">`: o card recorta com `overflow-clip`
+   * em vez de `overflow-hidden`, porque `hidden` também cria scroller e
+   * prenderia o cabeçalho grudado dentro do card. O canto arredondado
+   * continua cortando a tabela.
+   */
+  pageScroll?: boolean;
+}
+
+const TableCard = React.forwardRef<HTMLDivElement, TableCardProps>(
+  ({ className, pageScroll = false, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn('flex max-h-full flex-col overflow-hidden rounded-lg border', className)}
+      className={cn(
+        'flex max-h-full flex-col rounded-lg border',
+        pageScroll ? 'overflow-clip' : 'overflow-hidden',
+        className,
+      )}
       {...props}
     />
   ),

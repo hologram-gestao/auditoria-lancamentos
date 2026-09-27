@@ -56,6 +56,23 @@ flex-col overflow-hidden`) + `<Table fill>` (`:27`, `:43`). Nunca `overflow` no
   precisam de `min-h-0 flex-1` nos DOIS níveis (validação da S15). Guardas: teste de classe
   em `ui/__tests__/tabs.test.tsx` e a medição do painel inativo no cenário "nunca
   sincronizada" do de-para.
+- **Tabela cujo conteúdo ACIMA dela não cabe junto na viewport** (86e3eq9uy: a carteira,
+  com cabeçalho do cliente, abas, dois cards de totais e filtros) → o OUTRO padrão:
+  `<TableCard pageScroll>` + `<Table stickyHeader="page">`. A seção tem altura natural
+  (sem `h-full`, sem `min-h-0 flex-1`, sem piso), quem rola é o `<main>`, o cabeçalho gruda
+  no topo dele de `xl` para cima e a `PaginationBar` vem DEPOIS da última linha, no fluxo
+  (barra grudada cobre linha). Por que é uma opção e não "deixar a página rolar":
+  `position: sticky` gruda no scroller mais próximo, e tanto o wrapper (`overflow-auto`)
+  quanto o card (`overflow-hidden`) são scrollers — `hidden` também cria scroller; só
+  `overflow-clip` corta sem virar um. Abaixo de `xl` o wrapper volta a rolar na horizontal
+  e o cabeçalho não gruda (em 1024px as colunas não cabem; cortar coluna em silêncio é
+  pior). Em `xl`+ a tabela TEM de caber: coluna de texto com `whitespace-normal`, valor e
+  data com `nowrap`. O `th` gruda com `top` NEGATIVO do padding do `<main>`
+  (`--page-scroll-padding`, definida no `layout.tsx` junto do `p-6`): `top-0` grudaria na
+  borda do CONTEÚDO do scroller, 24px abaixo do topo visível, com linhas passando por
+  cima na faixa do padding. Não misture os dois padrões na mesma tabela. Travas: "a página rola, a
+  tabela não, e o cabeçalho gruda no topo" e a carteira fora do teste "rola dentro da
+  própria área" (`pageScroll` em `TELAS_COM_TABELA`).
 - **Shell**: só o `<main>` rola — `app/(app)/layout.tsx:121` (`h-dvh overflow-hidden`)
   e `:168` (`main … overflow-y-auto`). Proibido `h-screen`/`min-h-screen`/`100vh`.
 - Travas no browser: "a barra de paginação NUNCA cobre um card" (`e2e/a11y-mocked.spec.ts:1081`)
@@ -259,7 +276,7 @@ viewportSize().width` (padrão em `spec:2147-2165` e `:2190-2205`). Antes de med
   `contrasteComposto`, que mistura as camadas até a opaca, com o ponteiro em cima da linha.
   A caixa de aviso `bg-destructive/5` (sem hover, fora de tabela) passa e fica.
   ```bash
-  grep -rnE "bg-destructive/(10|20)\b" apps/web/src/components --include=*.tsx | grep -v "__tests__\|//"   # esperado: só o qualification-cell (hover /20, achado da 86e3dxund, ainda sem correção)
+  grep -rnE "bg-destructive/(10|20)\b" apps/web/src/components --include=*.tsx | grep -v "__tests__\|//"   # esperado: só o qualification-cell — botão SÓ DE ÍCONE (limite WCAG 1.4.11 de 3:1; passa, o mais justo é 3,46:1 no Hologram). Texto sobre fundo com alfa continua proibido.
   ```
   ```bash
   grep -rnE "\b(text|bg|border|ring|from|to|via)-(slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-[0-9]{2,3}\b|\bdark:" apps/web/src/components --include=*.tsx   # esperado: 0
