@@ -5022,6 +5022,12 @@ for (const vp of VIEWPORTS) {
       await expect(
         lista.getByRole('button', { name: 'Remover acesso de Gerente Colaborador' }),
       ).toHaveCount(0);
+      // O "Confirmar" acima dispara o toast de sucesso, e o Sonner entra em
+      // fade: medido no meio da animação, o axe vê a cor MESCLADA do texto
+      // (1,07:1 sobre o overlay, no CI do #227 em 27/09/2026) num par que
+      // estável passa. "Visível não é estável" (v1.13): esperar o toast parar
+      // antes de medir, como os outros cenários com toast já fazem.
+      await aguardarToastEstavel(page);
       await analyze(page, `modal de edição após trocar o responsável (${vp.label})`);
     });
 
