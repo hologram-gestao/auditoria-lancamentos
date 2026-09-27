@@ -6,8 +6,8 @@
  *
  * Cada célula da matriz vira um caso — inclusive **toda célula `❌`**, que é o
  * que a task cobra. O espelho no backend é
- * `apps/api/app/core/authz.py::PERMISSION_MATRIX` (23 permissões × 5 papéis
- * desde a Sprint 12); se um dos dois mudar sozinho, é aqui que a divergência
+ * `apps/api/app/core/authz.py::PERMISSION_MATRIX` (26 permissões × 5 papéis
+ * desde a Sprint 14); se um dos dois mudar sozinho, é aqui que a divergência
  * aparece.
  */
 import { describe, expect, it } from 'vitest';
@@ -309,6 +309,27 @@ const MATRIX: ReadonlyArray<{
     admin: true,
     manager: false,
     clientManager: false,
+    clientOperator: false,
+  },
+  // S14 / R5: ENVIAR o arquivo é de TODOS — mandar a planilha do mês é o dia a
+  // dia de quem opera o cliente, o operador inclusive.
+  {
+    permission: 'upload_client_file',
+    platform: true,
+    admin: true,
+    manager: true,
+    clientManager: true,
+    clientOperator: true,
+  },
+  // S14 / R5: CONFIGURAR o mapeamento sai do `client_operator` e **só dele** —
+  // alterar o mapeamento muda como todos os próximos arquivos serão lidos. É a
+  // única diferença entre as duas linhas novas, e a razão de serem duas.
+  {
+    permission: 'manage_input_mapping',
+    platform: true,
+    admin: true,
+    manager: true,
+    clientManager: true,
     clientOperator: false,
   },
 ];

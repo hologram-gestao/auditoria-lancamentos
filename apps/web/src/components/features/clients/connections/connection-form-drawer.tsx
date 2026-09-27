@@ -21,6 +21,14 @@
  * nome da origem que ocupa o par — resolvido a partir de
  * `details.existingConnectionId` contra a lista que a seção já tem em mãos.
  * Um toast genérico deixaria o usuário adivinhando qual rótulo trocar.
+ *
+ * **Origem SEM credencial (Sprint 14 / R1, `arquivo`).** O tipo escolhido
+ * decide, por `providerRequiresCredentials` (a tabela única do front, espelho
+ * de `requires_credentials` do backend), se os campos de App Key/Secret e o
+ * gate do teste existem: para `arquivo` não há segredo a verificar — a conexão
+ * nasce ativa e o servidor responderia 409 `CAPACIDADE_AUSENTE` ao teste. Na
+ * EDIÇÃO a pergunta é feita à CAPACIDADE da conexão que a API devolveu
+ * (`connectionRequiresCredentials`), nunca ao tipo comparado à mão.
  */
 
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -60,10 +68,13 @@ import { useCreateConnection, useUpdateConnection } from '@/hooks/use-client-con
 import { useTestConnection } from '@/hooks/use-clients';
 import { ApiError } from '@/lib/api/client';
 import {
+  connectionRequiresCredentials,
   DEFAULT_PROVIDER_LABEL,
   EXISTING_CONNECTION_ID_KEY,
   omieCredentials,
   OMIE_PROVIDER_TYPE,
+  PROVIDER_TYPES,
+  providerRequiresCredentials,
 } from '@/lib/api/client-connections';
 import type { ClientConnection } from '@/lib/contracts';
 import {
@@ -75,13 +86,6 @@ import {
 
 import { PasswordInput } from '../password-input';
 import { TestConnectionButton, type TestConnectionState } from '../test-connection-button';
-
-/**
- * Tipos oferecidos pelo seletor. Hoje só o Omie existe no registry do backend
- * (tipo desconhecido é 422) — a lista é um array para o 2º provedor entrar aqui
- * sem virar um `if` na tela.
- */
-const PROVIDER_OPTIONS = [{ value: OMIE_PROVIDER_TYPE, label: 'Omie' }] as const;
 
 interface ConnectionFormDrawerProps {
   open: boolean;
@@ -169,6 +173,10 @@ function CreateDrawer({
   const watchedKey = useWatch({ control: form.control, name: 'app_key' });
   const watchedSecret = useWatch({ control: form.control, name: 'app_secret' });
   const watchedType = useWatch({ control: form.control, name: 'provider_type' });
+  // A tabela única decide: `arquivo` não tem segredo, então os campos e o gate
+  // do teste nem existem para ele (§4.9: o teste responderia 409).
+  const requiresCredentials = providerRequiresCredentials(watchedType);
+  const typeOption = PROVIDER_TYPES.find((option) => option.value === watchedType);
 
   useEffect(() => {
     if (lastTestedRef.current === null) return;
@@ -180,8 +188,8 @@ function CreateDrawer({
   }, [watchedKey, watchedSecret]);
 
   async function handleTest() {
-    const key = form.getValues('app_key').trim();
-    const secret = form.getValues('app_secret').trim();
+    const key = (form.getValues('app_key') ?? '').trim();
+    const secret = (form.getValues('app_secret') ?? '').trim();
     if (!key || !secret) return;
     setTestState({ kind: 'testing' });
     try {
@@ -198,7 +206,8 @@ function CreateDrawer({
   }
 
   async function onSubmit(values: CreateConnectionFormValues) {
-    if (testState.kind !== 'success') {
+    const needsCredentials = providerRequiresCredentials(values.provider_type);
+    if (needsCredentials && testState.kind !== 'success') {
       toast.error('Teste a conexão antes de salvar.');
       return;
     }
@@ -207,12 +216,25 @@ function CreateDrawer({
       await createMutation.mutateAsync({
         provider_type: values.provider_type,
         // Rótulo em branco = deixar o backend usar o padrão do tipo. Mandar
-        // `""` seria 422 (`_clean_label`), e mandar o padrão daqui duplicaria a
+        // `""` seria 400 (`_clean_label`), e mandar o padrão daqui duplicaria a
         // regra de "só na primeira conexão daquele tipo".
         ...(label.length > 0 ? { label } : {}),
-        credentials: omieCredentials(values.app_key.trim(), values.app_secret.trim()),
+        // Credencial só para quem a tem: mandá-la para `arquivo` é 400 de forma
+        // (`assert_credentials_shape`), e omiti-la para o Omie também.
+        ...(needsCredentials
+          ? {
+              credentials: omieCredentials(
+                (values.app_key ?? '').trim(),
+                (values.app_secret ?? '').trim(),
+              ),
+            }
+          : {}),
       });
-      toast.success('Origem conectada.');
+      toast.success(
+        needsCredentials
+          ? 'Origem conectada.'
+          : 'Origem por arquivo conectada. Configure o mapeamento de colunas na aba "Origem por arquivo".',
+      );
       onOpenChange(false);
     } catch (err) {
       const conflict = readLabelConflict(err);
@@ -231,6 +253,7 @@ function CreateDrawer({
   const disabled = isSubmitting || isTesting;
   const canTest =
     !disabled && (watchedKey ?? '').trim().length > 0 && (watchedSecret ?? '').trim().length > 0;
+  const canSubmit = !disabled && (!requiresCredentials || testState.kind === 'success');
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -240,8 +263,9 @@ function CreateDrawer({
             <SheetHeader>
               <SheetTitle>Conectar origem</SheetTitle>
               <SheetDescription>
-                As credenciais são verificadas contra o sistema de origem antes de qualquer
-                gravação, e ficam criptografadas com a chave deste cliente.
+                {requiresCredentials
+                  ? 'As credenciais são verificadas contra o sistema de origem antes de qualquer gravação, e ficam criptografadas com a chave deste cliente.'
+                  : 'A origem por arquivo não tem credencial: a planilha ou o extrato do mês é lido no envio, pelo mapeamento de colunas que você configura depois de conectar.'}
               </SheetDescription>
             </SheetHeader>
 
@@ -259,13 +283,16 @@ function CreateDrawer({
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {PROVIDER_OPTIONS.map((o) => (
+                        {PROVIDER_TYPES.map((o) => (
                           <SelectItem key={o.value} value={o.value}>
                             {o.label}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
+                    {typeOption !== undefined && (
+                      <FormDescription>{typeOption.description}</FormDescription>
+                    )}
                     <FormMessage />
                   </FormItem>
                 )}
@@ -294,47 +321,55 @@ function CreateDrawer({
                 )}
               />
 
-              <FormField
-                control={form.control}
-                name="app_key"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>App Key Omie</FormLabel>
-                    <FormControl>
-                      <PasswordInput
-                        visible={showKey}
-                        onToggle={() => setShowKey((v) => !v)}
-                        disabled={disabled}
-                        autoComplete="off"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              {requiresCredentials && (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="app_key"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>App Key Omie</FormLabel>
+                        <FormControl>
+                          <PasswordInput
+                            visible={showKey}
+                            onToggle={() => setShowKey((v) => !v)}
+                            disabled={disabled}
+                            autoComplete="off"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-              <FormField
-                control={form.control}
-                name="app_secret"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>App Secret Omie</FormLabel>
-                    <FormControl>
-                      <PasswordInput
-                        visible={showSecret}
-                        onToggle={() => setShowSecret((v) => !v)}
-                        disabled={disabled}
-                        autoComplete="off"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                  <FormField
+                    control={form.control}
+                    name="app_secret"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>App Secret Omie</FormLabel>
+                        <FormControl>
+                          <PasswordInput
+                            visible={showSecret}
+                            onToggle={() => setShowSecret((v) => !v)}
+                            disabled={disabled}
+                            autoComplete="off"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-              <TestConnectionButton state={testState} disabled={!canTest} onClick={handleTest} />
+                  <TestConnectionButton
+                    state={testState}
+                    disabled={!canTest}
+                    onClick={handleTest}
+                  />
+                </>
+              )}
             </SheetBody>
 
             {/* Cancelar à ESQUERDA (`justify-between` do SheetFooter). */}
@@ -347,7 +382,7 @@ function CreateDrawer({
               >
                 Cancelar
               </Button>
-              <Button type="submit" disabled={disabled || testState.kind !== 'success'}>
+              <Button type="submit" disabled={!canSubmit}>
                 {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
                 Salvar origem
               </Button>
@@ -373,6 +408,9 @@ function EditDrawer({
   const updateMutation = useUpdateConnection(clientId, connection.id);
   const testMutation = useTestConnection();
   const readLabelConflict = useLabelConflict(connections);
+  // Pela CAPACIDADE que a API devolveu: origem sem `verificar_credencial`
+  // (`arquivo`) não tem o que trocar nem testar — só o rótulo.
+  const hasCredentials = connectionRequiresCredentials(connection);
 
   const [showKey, setShowKey] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
@@ -475,8 +513,9 @@ function EditDrawer({
             <SheetHeader>
               <SheetTitle>Editar origem</SheetTitle>
               <SheetDescription>
-                Renomeie a origem, troque a credencial, ou as duas coisas. Deixar as credenciais em
-                branco mantém as atuais.
+                {hasCredentials
+                  ? 'Renomeie a origem, troque a credencial, ou as duas coisas. Deixar as credenciais em branco mantém as atuais.'
+                  : 'Renomeie a origem. Esta origem não tem credencial: o que ela lê é o arquivo enviado a cada mês.'}
               </SheetDescription>
             </SheetHeader>
 
@@ -495,52 +534,60 @@ function EditDrawer({
                 )}
               />
 
-              <FormField
-                control={form.control}
-                name="app_key"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>App Key Omie</FormLabel>
-                    <FormControl>
-                      <PasswordInput
-                        visible={showKey}
-                        onToggle={() => setShowKey((v) => !v)}
-                        disabled={disabled}
-                        autoComplete="off"
-                        placeholder="••••••••"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              {hasCredentials && (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="app_key"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>App Key Omie</FormLabel>
+                        <FormControl>
+                          <PasswordInput
+                            visible={showKey}
+                            onToggle={() => setShowKey((v) => !v)}
+                            disabled={disabled}
+                            autoComplete="off"
+                            placeholder="••••••••"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-              <FormField
-                control={form.control}
-                name="app_secret"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>App Secret Omie</FormLabel>
-                    <FormControl>
-                      <PasswordInput
-                        visible={showSecret}
-                        onToggle={() => setShowSecret((v) => !v)}
-                        disabled={disabled}
-                        autoComplete="off"
-                        placeholder="••••••••"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      A credencial é trocada por inteiro — informe App Key e App Secret juntos.
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                  <FormField
+                    control={form.control}
+                    name="app_secret"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>App Secret Omie</FormLabel>
+                        <FormControl>
+                          <PasswordInput
+                            visible={showSecret}
+                            onToggle={() => setShowSecret((v) => !v)}
+                            disabled={disabled}
+                            autoComplete="off"
+                            placeholder="••••••••"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          A credencial é trocada por inteiro — informe App Key e App Secret juntos.
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-              <TestConnectionButton state={testState} disabled={!canTest} onClick={handleTest} />
+                  <TestConnectionButton
+                    state={testState}
+                    disabled={!canTest}
+                    onClick={handleTest}
+                  />
+                </>
+              )}
             </SheetBody>
 
             <SheetFooter>

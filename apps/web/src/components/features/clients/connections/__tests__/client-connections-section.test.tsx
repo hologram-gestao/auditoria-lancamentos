@@ -235,6 +235,35 @@ describe('Origens — lista e ações', () => {
   });
 });
 
+describe('Origens — conexão por ARQUIVO (S14 / R1), decidida pela capacidade', () => {
+  it('não oferece "Testar novamente" (o servidor responderia 409) e diz "Sem credencial"', () => {
+    listState.data = [
+      connection(),
+      connection({
+        id: 'conn-arq',
+        provider_type: 'arquivo',
+        label: 'Arquivo',
+        capabilities: ['listar_lancamentos'],
+        accounts_synced_at: null,
+      }),
+    ];
+    render(<ClientConnectionsSection clientId={CLIENT_ID} originStatus="ativa" isClosed={false} />);
+
+    // O Omie continua com o teste; o arquivo não.
+    expect(screen.getByRole('button', { name: 'Testar Omie novamente' })).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Testar Arquivo novamente' }),
+    ).not.toBeInTheDocument();
+    // Editar e remover continuam.
+    expect(screen.getByRole('button', { name: 'Editar Arquivo' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Remover Arquivo' })).toBeVisible();
+    expect(screen.getByText('Sem credencial')).toBeVisible();
+    // "Nunca sincronizado" é sobre CONTAS — a origem por arquivo não as lista.
+    const rows = screen.getAllByRole('row');
+    expect(rows[2]).not.toHaveTextContent('Nunca sincronizado');
+  });
+});
+
 describe('Origens — estados de carga', () => {
   it('loading mostra skeleton em vez de "nenhuma origem"', () => {
     listState.isLoading = true;

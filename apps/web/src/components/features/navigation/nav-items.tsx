@@ -13,6 +13,7 @@ import {
   ArrowRightLeft,
   BookOpen,
   Building2,
+  FileSpreadsheet,
   Landmark,
   LayoutDashboard,
   ListChecks,
@@ -147,11 +148,37 @@ const SETTINGS_ITEMS: ReadonlyArray<{
   },
 ];
 
+export interface ClientNavOptions {
+  /**
+   * S14 (R5): o cliente tem uma conexão do tipo `arquivo`? Decide se a aba
+   * "Origem por arquivo" existe. Vem do detalhe do cliente (`connections`),
+   * decidido por `hasFileConnection` — nunca pelo tipo comparado aqui.
+   */
+  hasFileOrigin?: boolean;
+}
+
+/** Rota da aba "Origem por arquivo" (S14) — a mesma que o link do de-para aponta. */
+export function fileOriginPath(clientId: string, competence?: string | null): string {
+  const base = `/clientes/${clientId}/origem-arquivo`;
+  return competence ? `${base}?competence=${encodeURIComponent(competence)}` : base;
+}
+
+/**
+ * A prévia do de-para de UMA competência (S12: `view=previa` + `competence`,
+ * os dois parâmetros que `client-mapping-screen.tsx` lê da URL). É para onde o
+ * envio do arquivo (S14) manda depois de processar — a competência sozinha não
+ * bastaria: ela só age na aba da prévia.
+ */
+export function mappingPreviewPath(clientId: string, competence: string): string {
+  return `/clientes/${clientId}/de-para?view=previa&competence=${encodeURIComponent(competence)}`;
+}
+
 /** Camada do CLIENTE: as seções internas de `/clientes/{id}/**`. */
 export function clientNavItems(
   user: AuthenticatedUser,
   clientId: string,
   pathname: string,
+  options: ClientNavOptions = {},
 ): NavItem[] {
   const base = `/clientes/${clientId}`;
   const accountsHref = `${base}/contas`;
@@ -161,6 +188,7 @@ export function clientNavItems(
   const chartOfAccountsHref = `${base}/plano-de-contas`;
   const titlesHref = `${base}/carteira`;
   const mappingHref = `${base}/de-para`;
+  const fileOriginHref = fileOriginPath(clientId);
   // "Conciliações" continua ativo dentro do detalhe de uma conciliação — é a
   // mesma área de navegação, só que um nível abaixo (regra herdada do
   // ClientShell, que era o dono desta árvore até a 86e2n39h7).
@@ -175,6 +203,7 @@ export function clientNavItems(
   const isChartOfAccounts = pathname.startsWith(chartOfAccountsHref);
   const isTitles = pathname.startsWith(titlesHref);
   const isMapping = pathname.startsWith(mappingHref);
+  const isFileOrigin = pathname.startsWith(fileOriginHref);
   const isReconciliations =
     !isAccounts &&
     !isDashboard &&
@@ -182,7 +211,8 @@ export function clientNavItems(
     !isGlossary &&
     !isChartOfAccounts &&
     !isTitles &&
-    !isMapping;
+    !isMapping &&
+    !isFileOrigin;
 
   const items: NavItem[] = [
     {
@@ -251,6 +281,20 @@ export function clientNavItems(
     icon: <ArrowRightLeft className="h-4 w-4" aria-hidden="true" />,
     active: isMapping,
   });
+  // S14 (R5): "Origem por arquivo" existe só para o cliente que TEM uma conexão
+  // `arquivo` — é a aba onde o mapeamento se configura e o arquivo do mês é
+  // enviado. Não é gated por papel: LER o mapeamento e a lista de processados é
+  // de todo papel que alcança o cliente (o operador envia o arquivo); quem pede
+  // permissão é CONFIGURAR (`manage_input_mapping`), dentro da tela. A condição
+  // vem do detalhe (`hasFileConnection`), nunca de um `provider_type ===` aqui.
+  if (options.hasFileOrigin === true) {
+    items.push({
+      href: fileOriginHref,
+      label: 'Origem por arquivo',
+      icon: <FileSpreadsheet className="h-4 w-4" aria-hidden="true" />,
+      active: isFileOrigin,
+    });
+  }
   // Matriz: "Usuários" é de quem gere as pessoas DO tenant — gerente do
   // cliente, admin, plataforma e, desde a D2 (86e36ecjp), o gerente da
   // organização nos clientes da CARTEIRA. O "da carteira" não é esta linha: é

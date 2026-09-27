@@ -53,6 +53,7 @@ import type { ListClientMappingParams } from '@/lib/api/client-mapping';
 import { hasPermission, isPlatformScoped } from '@/lib/authz';
 import { isCompetence, localCurrentCompetence } from '@/lib/competence';
 import type { MappingDestination } from '@/lib/contracts';
+import { originIsFileBased } from '@/lib/origin-capabilities';
 import { useAuthStore } from '@/stores/auth';
 
 import { MappingImportSheet } from './mapping-import-sheet';
@@ -144,6 +145,9 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
   const isClosed = client?.closed_at != null;
   const canManage = hasPermission(currentUser, 'manage_client_mapping');
   const canSync = hasPermission(currentUser, 'sync_client_movements');
+  // S14: origem por ARQUIVO — a base vem do envio, não do sync (409
+  // `ORIGEM_POR_ARQUIVO`). Decidido pela capacidade, no helper único.
+  const fileOrigin = originIsFileBased(client?.connections ?? []);
   const hasFilters = situation !== undefined || codeParam !== '';
 
   async function handleExport() {
@@ -311,6 +315,7 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
                 canManage={canManage}
                 isClosed={isClosed}
                 originStatus={client?.origin_status ?? 'ativa'}
+                fileOrigin={fileOrigin}
               />
             </TabsContent>
           </Tabs>

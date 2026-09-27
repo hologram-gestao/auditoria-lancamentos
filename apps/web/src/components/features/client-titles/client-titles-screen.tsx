@@ -95,6 +95,7 @@ import type { ListClientTitlesParams } from '@/lib/api/client-titles';
 import { hasPermission } from '@/lib/authz';
 import type { AgingBucket, ClientTitle, TitleType } from '@/lib/contracts';
 import { formatBRDate, formatBRL, formatCreatedAt } from '@/lib/format';
+import { originCodeFor } from '@/lib/origin-capabilities';
 import { isOriginError, originErrorCode } from '@/lib/origin-state';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth';
@@ -242,12 +243,13 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
 
   const isClosed = clientDetail.data?.closed_at != null;
   const originStatus = clientDetail.data?.origin_status ?? 'ativa';
-  const originReady = originStatus === 'ativa';
-  // O código vem do `origin_status` enquanto não houve clique, e do erro real
-  // do sync depois dele — que pode ser `CAPACIDADE_AUSENTE`, um caso que o
-  // `origin_status` sozinho não distingue (o provedor está ativo e simplesmente
-  // não lista títulos em aberto).
-  const originCode = originErrorCode(originError) ?? (originReady ? null : 'SEM_CONEXAO');
+  // O código vem do detalhe enquanto não houve clique — `origin_status` mais a
+  // CAPACIDADE `listar_titulos_em_aberto` das conexões (S14: a origem por
+  // arquivo não lista títulos, e oferecer o sync seria colher o 409) — e do erro
+  // real do sync depois dele. Um lugar só decide: `originCodeFor`.
+  const originCode =
+    originErrorCode(originError) ??
+    originCodeFor(originStatus, clientDetail.data?.connections, 'listar_titulos_em_aberto');
   const hasOriginBlock = !isClosed && originCode !== null;
 
   // §4.9: mostrar ação que o servidor nega é defeito. Três motivos diferentes

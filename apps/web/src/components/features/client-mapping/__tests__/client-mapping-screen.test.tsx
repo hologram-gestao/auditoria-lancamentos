@@ -135,6 +135,7 @@ const clientDetailState = {
         closed_at: string | null;
         origin_status: string;
         organization: { id: string; name: string };
+        connections?: ClientConnection[];
       }
     | undefined,
 };
@@ -157,6 +158,7 @@ import { ApiError } from '@/lib/api/client';
 import { buildClientMappingQuery, type ListClientMappingParams } from '@/lib/api/client-mapping';
 import type {
   AuthenticatedUser,
+  ClientConnection,
   MappingDestination,
   MappingListItem,
   MappingListResponse,
@@ -851,6 +853,88 @@ describe('ClientMappingScreen — prévia da competência (R0 · R5)', () => {
     render(<ClientMappingScreen clientId={TENANT} />);
     expect(screen.getByText(/ainda não tem base de movimentos/)).toBeVisible();
     expect(screen.queryByText('Não foi possível calcular a prévia')).not.toBeInTheDocument();
+  });
+
+  it('origem por ARQUIVO (S14): sem "Sincronizar competência", com "Enviar arquivo do mês"', () => {
+    currentSearch = 'view=previa&competence=2026-06';
+    clientDetailState.data = {
+      ...clientDetailState.data!,
+      connections: [
+        {
+          id: 'arq-1',
+          provider_type: 'arquivo',
+          label: 'Arquivo',
+          status: 'ativa',
+          last_checked_at: null,
+          accounts_synced_at: null,
+          capabilities: ['listar_lancamentos'],
+        },
+      ],
+    };
+    render(<ClientMappingScreen clientId={TENANT} />);
+    // O servidor responderia 409 `ORIGEM_POR_ARQUIVO`: a ação some (§4.9)…
+    expect(
+      screen.queryByRole('button', { name: /Sincronizar competência/ }),
+    ).not.toBeInTheDocument();
+    // …e no lugar entra o link para a aba de envio, já com a competência da prévia.
+    expect(screen.getByRole('link', { name: /Enviar arquivo do mês/ })).toHaveAttribute(
+      'href',
+      `/clientes/${TENANT}/origem-arquivo?competence=2026-06`,
+    );
+  });
+
+  it('origem por ARQUIVO com base nunca sincronizada: a instrução fala do envio, não do sync', () => {
+    currentSearch = 'view=previa';
+    syncStateQuery.data = {
+      competence: '2026-09',
+      neverSynced: true,
+      syncedAt: null,
+      syncFailedAt: null,
+    };
+    clientDetailState.data = {
+      ...clientDetailState.data!,
+      connections: [
+        {
+          id: 'arq-1',
+          provider_type: 'arquivo',
+          label: 'Arquivo',
+          status: 'ativa',
+          last_checked_at: null,
+          accounts_synced_at: null,
+          capabilities: ['listar_lancamentos'],
+        },
+      ],
+    };
+    render(<ClientMappingScreen clientId={TENANT} />);
+    expect(screen.getByText(/alimentada pelo envio do arquivo do mês/)).toBeVisible();
+    expect(screen.queryByText(/Sincronize a competência/)).not.toBeInTheDocument();
+  });
+
+  it('cliente Omie segue como antes: "Sincronizar competência" e nenhum link de envio (regressão)', () => {
+    currentSearch = 'view=previa';
+    clientDetailState.data = {
+      ...clientDetailState.data!,
+      connections: [
+        {
+          id: 'omie-1',
+          provider_type: 'omie',
+          label: 'Omie',
+          status: 'ativa',
+          last_checked_at: '2026-09-22T12:00:00Z',
+          accounts_synced_at: '2026-09-22T12:00:00Z',
+          capabilities: [
+            'verificar_credencial',
+            'listar_contas',
+            'listar_lancamentos',
+            'escrever',
+            'listar_titulos_em_aberto',
+          ],
+        },
+      ],
+    };
+    render(<ClientMappingScreen clientId={TENANT} />);
+    expect(screen.getByRole('button', { name: /Sincronizar competência/ })).toBeVisible();
+    expect(screen.queryByRole('link', { name: /Enviar arquivo do mês/ })).not.toBeInTheDocument();
   });
 
   it('sincronizar chama o servidor com a competência da tela', async () => {

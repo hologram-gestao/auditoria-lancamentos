@@ -153,6 +153,77 @@ describe('Conectar origem — gate do teste', () => {
   });
 });
 
+describe('Conectar origem por ARQUIVO (S14 / R1) — sem credencial', () => {
+  it('escolher "Arquivo" esconde App Key/Secret e o teste, e Salvar habilita direto', async () => {
+    const user = userEvent.setup();
+    render(
+      <ConnectionFormDrawer
+        open
+        onOpenChange={vi.fn()}
+        clientId={CLIENT_ID}
+        connection={null}
+        connections={[]}
+      />,
+    );
+
+    await user.click(screen.getByRole('combobox', { name: 'Tipo de origem' }));
+    await user.click(screen.getByRole('option', { name: 'Arquivo (planilha ou extrato)' }));
+
+    expect(screen.queryByLabelText('App Key Omie')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('App Secret Omie')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Testar conexão/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Salvar origem' })).toBeEnabled();
+  });
+
+  it('o corpo vai SEM `credentials` (mandar seria 400 de forma)', async () => {
+    const user = userEvent.setup();
+    render(
+      <ConnectionFormDrawer
+        open
+        onOpenChange={vi.fn()}
+        clientId={CLIENT_ID}
+        connection={null}
+        connections={[]}
+      />,
+    );
+
+    await user.click(screen.getByRole('combobox', { name: 'Tipo de origem' }));
+    await user.click(screen.getByRole('option', { name: 'Arquivo (planilha ou extrato)' }));
+    await user.click(screen.getByRole('button', { name: 'Salvar origem' }));
+
+    await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
+    expect(createMock.mock.calls[0]![0]).toEqual({ provider_type: 'arquivo' });
+    expect(testMock).not.toHaveBeenCalled();
+  });
+
+  it('editar uma conexão arquivo (pela CAPACIDADE) só oferece o rótulo', async () => {
+    const user = userEvent.setup();
+    const fileConnection = connection({
+      id: 'conn-arq',
+      provider_type: 'arquivo',
+      label: 'Arquivo',
+      capabilities: ['listar_lancamentos'],
+    });
+    render(
+      <ConnectionFormDrawer
+        open
+        onOpenChange={vi.fn()}
+        clientId={CLIENT_ID}
+        connection={fileConnection}
+        connections={[fileConnection]}
+      />,
+    );
+
+    expect(screen.queryByLabelText('App Key Omie')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Testar conexão/ })).not.toBeInTheDocument();
+    const label = screen.getByLabelText('Rótulo');
+    await user.clear(label);
+    await user.type(label, 'Planilha mensal');
+    await user.click(screen.getByRole('button', { name: 'Salvar alterações' }));
+    await waitFor(() => expect(updateMock).toHaveBeenCalledWith({ label: 'Planilha mensal' }));
+  });
+});
+
 describe('Editar origem', () => {
   it('renomear sem mexer na credencial manda só o rótulo', async () => {
     const user = userEvent.setup();
