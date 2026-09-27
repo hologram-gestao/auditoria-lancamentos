@@ -26,7 +26,13 @@ import respx
 from pydantic import SecretStr
 
 from app.core.config import Settings, get_settings
-from app.core.exceptions import OmieAuthError, OmieFaultError, OmieServerError, OmieTimeoutError
+from app.core.exceptions import (
+    OmieAuthError,
+    OmieFaultError,
+    OmieOfflineError,
+    OmieServerError,
+    OmieTimeoutError,
+)
 from app.integrations.omie.client import OmieClient, OmieCredentials
 from app.integrations.omie.schemas import (
     ContaCorrente,
@@ -534,6 +540,61 @@ class TestCallRetry:
                 module="geral",
                 endpoint="clientes",
                 call_name="ListarClientes",
+                param={"pagina": 1},
+            )
+
+    # Omie em MANUTENÇÃO (caso real de 27/09/2026): `418` + `API OFFLINE` em
+    # todo endpoint. Antes caía no "status inesperado" acima, com a mensagem
+    # genérica "Ocorreu um erro ao acessar o Omie", e a tela não sabia dizer
+    # que o problema era do Omie.
+    @respx.mock
+    async def test_418_api_offline_raises_OmieOfflineError_without_retry(  # noqa: N802
+        self, client: OmieClient
+    ) -> None:
+        route = respx.post(_omie_url("geral", "contacorrente")).mock(
+            return_value=httpx.Response(418, json={"status": "418", "message": "API OFFLINE"})
+        )
+        with pytest.raises(OmieOfflineError) as exc_info:
+            await client.call(
+                module="geral",
+                endpoint="contacorrente",
+                call_name="ListarContasCorrentes",
+                param={"pagina": 1},
+            )
+        assert route.call_count == 1  # manutenção não acaba em 30 s: sem retry
+        assert exc_info.value.status_code == 502
+        assert "fora do ar" in exc_info.value.user_message
+        # É `OmieServerError` também: quem já trata instabilidade trata isto.
+        assert isinstance(exc_info.value, OmieServerError)
+
+    @respx.mock
+    async def test_offline_body_with_5xx_is_offline_not_retryable_5xx(
+        self, client: OmieClient
+    ) -> None:
+        """O mesmo corpo de manutenção com 503 não entra no retry de 5xx."""
+        route = respx.post(_omie_url("geral", "contacorrente")).mock(
+            return_value=httpx.Response(503, json={"status": "503", "message": "api offline"})
+        )
+        with pytest.raises(OmieOfflineError):
+            await client.call(
+                module="geral",
+                endpoint="contacorrente",
+                call_name="ListarContasCorrentes",
+                param={"pagina": 1},
+            )
+        assert route.call_count == 1
+
+    @respx.mock
+    async def test_418_without_offline_body_is_still_offline(self, client: OmieClient) -> None:
+        """O status 418 sozinho basta: a Omie não usa 418 para mais nada."""
+        respx.post(_omie_url("geral", "contacorrente")).mock(
+            return_value=httpx.Response(418, text="<html>manutencao</html>")
+        )
+        with pytest.raises(OmieOfflineError):
+            await client.call(
+                module="geral",
+                endpoint="contacorrente",
+                call_name="ListarContasCorrentes",
                 param={"pagina": 1},
             )
 

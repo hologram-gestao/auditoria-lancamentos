@@ -69,11 +69,17 @@ export function BankAccountsScreen({ clientId }: { clientId: string }) {
 
   // S9 (R7): os três códigos da taxonomia de origem NÃO viram toast — viram
   // estado explicativo com o caminho de saída. Guardar o erro é o que permite
-  // renderizá-lo no lugar da tabela; qualquer outro erro segue no toast.
+  // renderizá-lo no lugar da tabela.
   const [originError, setOriginError] = useState<unknown>(null);
+  // Qualquer OUTRA falha do sync (Omie fora do ar, instabilidade, timeout)
+  // fica na tela, como alerta, até a próxima tentativa: um toast some em
+  // segundos e a pessoa ficava olhando a lista antiga sem saber que o Omie
+  // estava fora (caso real de 27/09/2026, `418 API OFFLINE`).
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   async function handleSync() {
     setOriginError(null);
+    setSyncError(null);
     try {
       await syncMutation.mutateAsync();
       toast.success('Contas extraídas do Omie.');
@@ -82,7 +88,7 @@ export function BankAccountsScreen({ clientId }: { clientId: string }) {
         setOriginError(err);
         return;
       }
-      toast.error(
+      setSyncError(
         err instanceof ApiError ? err.userMessage : 'Não foi possível extrair as contas do Omie.',
       );
     }
@@ -134,23 +140,25 @@ export function BankAccountsScreen({ clientId }: { clientId: string }) {
         <OriginStateBlock code={originCode} clientId={clientId} />
       )}
 
+      {/* A última extração falhou: a lista abaixo (se houver) é a do cache,
+          e o alerta fica até a próxima tentativa. */}
+      {syncError !== null && (
+        <ErrorBanner message={syncError} onRetry={() => void handleSync()} retrying={isSyncing} />
+      )}
+
       <div className="min-h-0 flex-1" aria-busy={detailQuery.isFetching}>
         {detailQuery.isLoading ? (
           <AccountsSkeleton />
         ) : detailQuery.isError ? (
-          <div
-            role="alert"
-            className="bg-destructive/5 border-destructive/30 text-destructive flex flex-col items-start gap-3 rounded-lg border p-4 text-sm sm:flex-row sm:items-center sm:justify-between"
-          >
-            <span>
-              {detailQuery.error instanceof ApiError
+          <ErrorBanner
+            message={
+              detailQuery.error instanceof ApiError
                 ? detailQuery.error.userMessage
-                : 'Não foi possível carregar as contas.'}
-            </span>
-            <Button variant="outline" size="sm" onClick={() => void detailQuery.refetch()}>
-              Tentar novamente
-            </Button>
-          </div>
+                : 'Não foi possível carregar as contas.'
+            }
+            onRetry={() => void detailQuery.refetch()}
+            retrying={detailQuery.isFetching}
+          />
         ) : total === 0 ? (
           <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed p-8 text-center">
             <p className="text-muted-foreground text-sm">
@@ -214,6 +222,35 @@ export function BankAccountsScreen({ clientId }: { clientId: string }) {
         />
       )}
     </section>
+  );
+}
+
+/**
+ * Falha que fica na tela (falha do detalhe OU da última extração), com o
+ * caminho de saída ao lado. `role="alert"` para o leitor anunciar na hora.
+ */
+function ErrorBanner({
+  message,
+  onRetry,
+  retrying,
+}: {
+  message: string;
+  onRetry: () => void;
+  retrying: boolean;
+}) {
+  return (
+    <div
+      role="alert"
+      // Fundo OPACO (`destructive-muted`), nunca `bg-destructive/N`: texto sobre
+      // fundo com alfa compõe com o que está embaixo e não tem par testado
+      // (CLAUDE.md v1.48, skill front-gate §4).
+      className="bg-destructive-muted text-destructive ring-destructive/30 flex flex-col items-start gap-3 rounded-lg p-4 text-sm ring-1 ring-inset sm:flex-row sm:items-center sm:justify-between"
+    >
+      <span>{message}</span>
+      <Button variant="outline" size="sm" onClick={onRetry} disabled={retrying}>
+        Tentar novamente
+      </Button>
+    </div>
   );
 }
 

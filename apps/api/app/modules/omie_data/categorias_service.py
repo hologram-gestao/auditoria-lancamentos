@@ -138,11 +138,11 @@ class OmieCategoriasService:
                 ),
             ) from exc
         except OmieServerError as exc:
-            raise OmieServerError(
+            # Mesma classe do original (`OmieOfflineError` continua "fora do ar")
+            # e `exc.user_message` em vez de texto fixo, pelo mesmo motivo.
+            raise type(exc)(
                 f"5xx do Omie ao listar categorias do cliente {client_id}: {exc.message}",
-                user_message=(
-                    "O Omie está com instabilidade no momento. Tente novamente em instantes."
-                ),
+                user_message=exc.user_message,
             ) from exc
         except OmieFaultError:
             # `faultstring` com HTTP 200 — o modo de falha que mais engana.

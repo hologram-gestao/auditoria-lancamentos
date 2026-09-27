@@ -99,6 +99,12 @@ O `call()` (`:184`) já trata o que a Omie tem de peculiar — não reimplemente
   própria Omie manda (`:314-329`). Qualquer outro código — `5001` "Tag não faz parte da
   estrutura" = NOME DE CAMPO ERRADO, `3102` = tipo/obrigatoriedade — é permanente →
   `OmieFaultError`. 5xx sem header = infra → retry; esgotou → `OmieServerError`.
+- **Omie em MANUTENÇÃO responde `418` + `{"message": "API OFFLINE"}`** em todo endpoint
+  (capturado em 27/09/2026, sem credencial nenhuma: é o teste mais barato de "o Omie
+  está fora?"). `_is_omie_offline` (status 418 OU esse corpo, com qualquer status) →
+  `OmieOfflineError`, subclasse de `OmieServerError`, **sem retry** (manutenção não acaba
+  em 30 s), com "O Omie está fora do ar neste momento". Quem embrulha erro do Omie
+  repassa `exc.user_message` em vez de texto fixo, senão a mensagem vira "instabilidade".
 - **Budget:** 5 tentativas, backoff 1→16 s (`:234-235`). Timeout → `OmieTimeoutError`
   (504). Timeouts: `OMIE_TIMEOUT_SECONDS=15`, `OMIE_TIMEOUT_EXTRATO_SECONDS=60`,
   `OMIE_TEST_CONNECTION_TIMEOUT_SECONDS=10` (`app/core/config.py:150-159`).

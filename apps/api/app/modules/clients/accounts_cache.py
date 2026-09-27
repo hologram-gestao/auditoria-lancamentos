@@ -41,6 +41,7 @@ from app.core.exceptions import (
     AccountsSyncError,
     OmieAuthError,
     OmieFaultError,
+    OmieOfflineError,
     OmieServerError,
     OmieTimeoutError,
 )
@@ -212,12 +213,15 @@ class OmieAccountsCacheService:
                 metadata={"client_id": str(client.id), "cause": "timeout"},
             ) from exc
         except OmieServerError as exc:
+            # `exc.user_message` e não texto fixo: `OmieOfflineError` (subclasse)
+            # já diz "fora do ar", e a instabilidade genérica mantém a de sempre.
             raise AccountsSyncError(
                 f"5xx do Omie ao sincronizar contas do cliente {client.id}: {exc.message}",
-                user_message=(
-                    "O Omie está com instabilidade no momento. Tente novamente em instantes."
-                ),
-                metadata={"client_id": str(client.id), "cause": "server_error"},
+                user_message=exc.user_message,
+                metadata={
+                    "client_id": str(client.id),
+                    "cause": "offline" if isinstance(exc, OmieOfflineError) else "server_error",
+                },
             ) from exc
         except OmieFaultError as exc:
             raise AccountsSyncError(
