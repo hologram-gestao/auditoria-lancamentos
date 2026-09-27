@@ -26,10 +26,10 @@ criado_por}`, gravado com `session_id` na coluna). Quem dedup a por sessão é o
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # O formato da competência tem UMA fonte (a borda HTTP e o sink validam igual).
 # `competence.py` não importa nada do domínio — não cria ciclo.
@@ -178,6 +178,32 @@ class UsageEventName(StrEnum):
     # Baseline **0%**: não existe de-para na plataforma. Alvo ≥ 85% do valor no
     # destino `demonstrativo_contabil` (o único que herda, R7).
     DEPARA_APLICADO = "depara_aplicado"
+    # Sprint 14 (BACK 14.2) — instrumentação da INGESTÃO por arquivo (R1/R2). De
+    # BACKEND, sem `session_id`, fora da dedup por construção: cada envio (aceito
+    # OU recusado) é uma linha. Prova ingestão, não classificação — quem alimenta
+    # a métrica da sprint é o evento seguinte. `motivo` é vocabulário FECHADO (a
+    # MESMA lista dos códigos de recusa tipada da BACK 14.3); nunca conteúdo de
+    # célula, nunca nome de coluna. A linha `rejeitado=true` precisa ser DURÁVEL
+    # antes do `raise` da recusa (o emissor commita, ADR-080-BE).
+    ARQUIVO_PROCESSADO = "arquivo_processado"
+    # Sprint 14 (BACK 14.2, emitido pela materialização da 12.6) — **a métrica
+    # da Sprint 14**. De BACKEND, sem `session_id`, fora da dedup: cada
+    # materialização gera UMA linha por tipo de origem distinto entre os itens
+    # materializados (cliente só-arquivo → `arquivo`; cliente Omie → `omie`).
+    #
+    # Fórmula da leitura D+30 (clientes sem ERP com fechamento na plataforma):
+    #     count(DISTINCT props->>'client_id')
+    #     WHERE event = 'fechamento_produzido'
+    #       AND props->>'tipo_origem' = 'arquivo'
+    #       AND props->>'client_id' IN (<clientes da organização parceira>)
+    # O id da organização é **parâmetro da leitura** (como em `cliente_criado`):
+    # o evento não carrega organização, e sim o cliente — a leitura junta com
+    # `clients.organization_id` na hora.
+    #
+    # Baseline **0**: a ingestão de arquivo existia só como extrato de
+    # conciliação, sem base contábil nem mapeamento salvo. Alvo **≥ 15 clientes
+    # em 60 dias** — previsão declarada do PRD (metade dos ~30 sem sistema).
+    FECHAMENTO_PRODUZIDO = "fechamento_produzido"
 
 
 #: Eventos que o `POST /api/v1/usage-events` aceita. Os de backend ficam de fora
@@ -455,6 +481,76 @@ class DeparaAplicadoProps(_StrictProps):
     valor_nao_mapear_centavos: int = Field(ge=0)
     valor_sem_decisao_centavos: int = Field(ge=0)
     categorias_sem_decisao: int = Field(ge=0)
+
+
+#: Vocabulário FECHADO do motivo de recusa de um arquivo (Sprint 14). É a MESMA
+#: lista dos códigos de recusa tipada que a ingestão (BACK 14.3) levanta, em
+#: minúsculas: `nenhum` é o aceito. `Literal`, e não `str`: motivo é família,
+#: nunca a mensagem — e nunca o nome da coluna divergente nem o texto da célula.
+FileRejectionReason = Literal[
+    "nenhum",
+    "sem_mapeamento",
+    "formato_nao_suportado",
+    "arquivo_invalido",
+    "sinal_nao_declarado",
+    "cabecalho_divergente",
+    "linhas_invalidas",
+    "total_divergente",
+    "arquivo_ja_processado",
+]
+
+
+class ArquivoProcessadoProps(_StrictProps):
+    """`arquivo_processado` (S14 BACK 14.2) — instrumentação da ingestão (R1/R2).
+
+    As **seis** chaves declaradas no Outcome do PRD, e nenhuma a mais. Só IDs,
+    contagens, um booleano e um `Literal`: **nenhum nome de coluna** (nem a que
+    divergiu), **nenhum conteúdo de célula**, nenhum número de linha — o que
+    reconstituiria o arquivo do cliente dentro do sink de métrica. Coluna
+    divergente e linha inválida vão na RESPOSTA tipada da recusa (details), que é
+    onde a pessoa precisa delas.
+
+    `mapeamento_id` é nulo quando a recusa acontece ANTES de haver mapeamento
+    (`sem_mapeamento`, `formato_nao_suportado`, `arquivo_invalido` na inspeção).
+    `linhas` e `colunas_reconhecidas` são o que foi LIDO até a decisão — numa
+    recusa pelo cabeçalho, `linhas` é 0.
+
+    Coerência (validador): aceito ⇔ `motivo == "nenhum"`. Um `rejeitado=true`
+    com `nenhum` (ou o inverso) é o tipo de linha que faz a leitura D+30 contar
+    ingestão que não aconteceu.
+    """
+
+    client_id: UUID
+    mapeamento_id: UUID | None = None
+    linhas: int = Field(ge=0)
+    colunas_reconhecidas: int = Field(ge=0)
+    rejeitado: bool
+    motivo: FileRejectionReason
+
+    @model_validator(mode="after")
+    def _aceito_e_nenhum(self) -> Self:
+        if self.rejeitado == (self.motivo == "nenhum"):
+            raise ValueError(
+                "rejeitado=false exige motivo 'nenhum'; rejeitado=true exige um motivo"
+            )
+        return self
+
+
+class FechamentoProduzidoProps(_StrictProps):
+    """`fechamento_produzido` (S14 BACK 14.2) — **a métrica da Sprint 14**.
+
+    As **três** chaves declaradas no Outcome do PRD, e nenhuma a mais.
+    `tipo_origem` é o TIPO do provedor (`omie`, `arquivo`…) no formato fechado de
+    slug — o MESMO de `destino` em `depara_aplicado`: nome de arquivo, de
+    categoria ou de alvo (espaço, acento, maiúscula, ponto) não passa. Não é
+    `Literal` porque o vocabulário de provedores é do registry (código), e um
+    `Literal` aqui seria uma segunda lista que envelhece. `competencia` é
+    `YYYY-MM` pelo padrão ÚNICO.
+    """
+
+    client_id: UUID
+    tipo_origem: str = Field(pattern=DESTINO_SLUG_PATTERN)
+    competencia: str = Field(pattern=COMPETENCE_PATTERN)
 
 
 class OrganizacaoCriadaProps(_StrictProps):

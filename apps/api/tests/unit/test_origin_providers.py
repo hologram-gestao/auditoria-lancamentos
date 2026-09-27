@@ -94,9 +94,12 @@ class TestRegistry:
         with pytest.raises(ValidationAppError):
             capabilities_for("contabilix")
 
-    def test_o_registry_tem_um_provedor_hoje(self) -> None:
-        """Sem 2º provedor nesta sprint — o objetivo é ele CABER, não existir."""
-        assert supported_provider_types() == (ProviderType.OMIE.value,)
+    def test_o_registry_tem_dois_provedores(self) -> None:
+        """S9 escreveu o contrato para o 2º provedor CABER; S14 (BACK 14.1) o trouxe: `arquivo`."""
+        assert supported_provider_types() == (
+            ProviderType.OMIE.value,
+            ProviderType.ARQUIVO.value,
+        )
 
     def test_credencial_incompleta_e_erro_de_validacao(self, settings: Settings) -> None:
         with pytest.raises(ValidationAppError) as exc:

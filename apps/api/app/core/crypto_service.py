@@ -47,6 +47,14 @@ AAD_CONNECTION_CREDENTIALS = ("client_connections", "credentials_encrypted")
 # Sprint 15 (BACK 15.1) — contexto do título (acordo/antecipação/perda), no
 # molde de `reconciliation_file_entries.user_note_encrypted`. 13º par.
 AAD_TITLE_CONTEXT_TEXT = ("title_contexts", "text_encrypted")
+# Sprint 14 (BACK 14.4) — o rótulo (grafia original da célula) da categoria de
+# origem derivada do ARQUIVO, no molde de `client_glossary_entries.name_encrypted`:
+# nome de categoria é dado do cliente final (§4.5). 14º par.
+AAD_FILE_CATEGORY_LABEL = ("client_file_categories", "label_encrypted")
+# Sprint 14 (BACK 14.3) — a DESCRIÇÃO do lançamento vindo do ARQUIVO, na base de
+# movimentos, no molde de `reconciliation_file_entries.description_encrypted`:
+# texto do cliente final. A linha vinda do Omie continua sem texto livre. 15º par.
+AAD_MOVEMENT_DESCRIPTION = ("client_movements", "description_encrypted")
 
 
 def field_locator(pair: tuple[str, str], pk: str | UUID) -> FieldLocator:

@@ -72,6 +72,20 @@ class ErrorCode(StrEnum):
     ANTERIOR_A_PRIMEIRA_VIGENCIA = "ANTERIOR_A_PRIMEIRA_VIGENCIA"
     PREVIA_DESATUALIZADA = "PREVIA_DESATUALIZADA"
     COBERTURA_PARCIAL_REQUER_CONFIRMACAO = "COBERTURA_PARCIAL_REQUER_CONFIRMACAO"
+    # Sprint 14 — origem por arquivo (BACK 14.3). As recusas do arquivo são tipadas
+    # porque o R5 exige motivo ESPECÍFICO e acionável (coluna divergente, linha
+    # inválida, total que não fecha) — nenhuma cai no 400 genérico. Os quatro
+    # primeiros são ESTADO (409); os cinco seguintes são o CONTEÚDO do arquivo
+    # (422, como `CREDENTIALS_MOVED` e `ALVO_INEXISTENTE`).
+    SEM_MAPEAMENTO = "SEM_MAPEAMENTO"
+    SINAL_NAO_DECLARADO = "SINAL_NAO_DECLARADO"
+    ARQUIVO_JA_PROCESSADO = "ARQUIVO_JA_PROCESSADO"
+    ORIGEM_POR_ARQUIVO = "ORIGEM_POR_ARQUIVO"
+    FORMATO_NAO_SUPORTADO = "FORMATO_NAO_SUPORTADO"
+    ARQUIVO_INVALIDO = "ARQUIVO_INVALIDO"
+    CABECALHO_DIVERGENTE = "CABECALHO_DIVERGENTE"
+    LINHAS_INVALIDAS = "LINHAS_INVALIDAS"
+    TOTAL_DIVERGENTE = "TOTAL_DIVERGENTE"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
@@ -101,7 +115,7 @@ class AppError(Exception):
         *,
         user_message: str | None = None,
         metadata: dict[str, Any] | None = None,
-        details: dict[str, str] | None = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
         self.message: str = message or self.default_user_message
         self.user_message: str = user_message or self.default_user_message
@@ -112,7 +126,10 @@ class AppError(Exception):
         #: nome, razão social ou CNPJ aqui seria vazamento pela porta do erro
         #: (§3.15 — negação não vaza o alvo). Ausente na esmagadora maioria dos
         #: erros; o campo só aparece no corpo quando tem conteúdo.
-        self.details: dict[str, str] = details or {}
+        #: Sprint 14: as recusas de arquivo carregam listas (colunas do cabeçalho
+        #: — estrutura, não PII — e `{line, reason}` de vocabulário fechado);
+        #: NUNCA conteúdo de célula.
+        self.details: dict[str, Any] = details or {}
         super().__init__(self.message)
 
 
@@ -659,6 +676,148 @@ class CannotResetOwnPasswordError(ConflictError):
     default_user_message = (
         "Esta ação redefine a senha de OUTRA pessoa. Para trocar a sua própria senha, "
         "use a troca de senha da sua conta."
+    )
+
+
+# ----------------------------------------------------------------------
+# Sprint 14 (BACK 14.3) — origem por ARQUIVO. Toda recusa é tipada (R5: motivo
+# específico e acionável), e nenhuma carrega conteúdo de célula.
+# ----------------------------------------------------------------------
+
+
+class NoInputMappingError(ConflictError):
+    """409 — o cliente ainda não tem mapeamento de entrada (R1).
+
+    Não é erro do arquivo: é etapa de configuração que ninguém fez. `details.
+    foundColumns` traz as colunas do cabeçalho (estrutura, não PII) para a tela
+    conduzir a criação do mapeamento a partir delas.
+    """
+
+    code = ErrorCode.SEM_MAPEAMENTO
+    default_user_message = (
+        "Este cliente ainda não tem o mapeamento das colunas do arquivo. Configure o "
+        "mapeamento antes de processar."
+    )
+
+
+class SignConventionMissingError(ConflictError):
+    """409 — o mapeamento não declara a convenção de sinal (R1: NUNCA inferir).
+
+    O banco não aceita mapeamento sem convenção (14.1); este erro é defesa em
+    profundidade para o dia em que alguma forma de gravação a deixar passar.
+    """
+
+    code = ErrorCode.SINAL_NAO_DECLARADO
+    default_user_message = (
+        "O mapeamento deste cliente não declara como o arquivo indica débito e crédito. "
+        "Complete o mapeamento antes de processar."
+    )
+
+
+class FileAlreadyProcessedError(ConflictError):
+    """409 — o MESMO arquivo (hash) já foi processado nesta competência (R3).
+
+    A garantia é da UNIQUE `(client_id, competence, file_hash)` no banco, não de
+    uma leitura anterior: duas abas não duplicam os lançamentos.
+    """
+
+    code = ErrorCode.ARQUIVO_JA_PROCESSADO
+    default_user_message = (
+        "Este arquivo já foi processado nesta competência. Para reprocessar, envie o "
+        "arquivo corrigido (com conteúdo diferente)."
+    )
+
+
+class FileOriginSyncNotApplicableError(ConflictError):
+    """409 — sincronizar movimentos de um cliente cuja origem é ARQUIVO.
+
+    A base desse cliente é alimentada pelo envio do arquivo, não por uma ida à
+    origem. Recusado ANTES do ciclo: um `list_entries` vazio marcaria a base
+    inteira como ausente.
+    """
+
+    code = ErrorCode.ORIGEM_POR_ARQUIVO
+    default_user_message = (
+        "A origem deste cliente é por arquivo: a base de movimentos é alimentada pelo "
+        "envio do arquivo, não por sincronização."
+    )
+
+
+class FileFormatNotSupportedError(AppError):
+    """422 — o arquivo não é CSV nem XLSX (PDF, XLS, desconhecido), ou não é o
+    formato que o mapeamento do cliente declara.
+
+    422 e não 400: o corpo da requisição está bem formado; é o CONTEÚDO que não
+    serve, e a mensagem precisa dizer o que enviar (R5).
+    """
+
+    code = ErrorCode.FORMATO_NAO_SUPORTADO
+    status_code = 422
+    default_user_message = (
+        "Este formato não tem colunas para mapear (PDF, XLS ou formato desconhecido). "
+        "Envie o arquivo em CSV ou XLSX."
+    )
+
+
+class FileInvalidError(AppError):
+    """422 — o arquivo não abre ou não itera (zip quebrado, XML truncado, texto fora
+    da codificação declarada, bomba de descompressão, colunas/linhas demais).
+
+    Mensagem FIXA: a exceção original pode carregar o texto da célula, e nada do
+    arquivo vai para a resposta nem para o log (`raise … from None`).
+    """
+
+    code = ErrorCode.ARQUIVO_INVALIDO
+    status_code = 422
+    default_user_message = (
+        "Não foi possível ler o arquivo. Confira se ele está íntegro e no formato, "
+        "delimitador e codificação declarados no mapeamento."
+    )
+
+
+class FileHeaderMismatchError(AppError):
+    """422 — o cabeçalho não tem as colunas do mapeamento (R2).
+
+    `details.missingColumns` nomeia as que faltam e `details.foundColumns` as que
+    existem — nomes de coluna são estrutura, não PII. Recusa ANTES da primeira
+    linha: nunca processamento parcial.
+    """
+
+    code = ErrorCode.CABECALHO_DIVERGENTE
+    status_code = 422
+    default_user_message = (
+        "O cabeçalho do arquivo não tem as colunas do mapeamento. Revise o mapeamento ou "
+        "envie o arquivo com as colunas esperadas."
+    )
+
+
+class FileLinesInvalidError(AppError):
+    """422 — uma ou mais linhas inválidas (R2): valor não numérico, data inválida,
+    campo obrigatório vazio, natureza desconhecida, data fora da competência.
+
+    `details.lines` = `[{line, reason}]` (vocabulário FECHADO, limitado a K) e
+    `details.total`. NUNCA o conteúdo da célula. Recusa o arquivo INTEIRO.
+    """
+
+    code = ErrorCode.LINHAS_INVALIDAS
+    status_code = 422
+    default_user_message = (
+        "O arquivo tem linhas inválidas. Corrija as linhas apontadas e envie de novo — "
+        "nada foi processado."
+    )
+
+
+class FileTotalMismatchError(AppError):
+    """422 — o total informado no envio difere da soma dos valores (R2).
+
+    `details.declaredTotal` e `details.computedTotal`, como texto decimal exato.
+    Mesma disciplina de fechamento da conciliação.
+    """
+
+    code = ErrorCode.TOTAL_DIVERGENTE
+    status_code = 422
+    default_user_message = (
+        "O total informado não confere com a soma dos valores do arquivo. Nada foi processado."
     )
 
 

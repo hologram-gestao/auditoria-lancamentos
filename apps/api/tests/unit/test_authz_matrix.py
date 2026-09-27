@@ -143,6 +143,13 @@ _TABLE: dict[Permission, tuple[bool, bool, bool, bool, bool]] = {
     # S12 (BACK 12.4), tabela do R6 do PRD — células DECIDIDAS lá: o manager
     # (contador parceiro) edita o de-para da carteira; o operador só vê.
     Permission.MANAGE_CLIENT_MAPPING: (True, True, True, True, False),
+    # S14 (BACK 14.1), tabela do R5 do PRD — células DECIDIDAS lá: ENVIAR o
+    # arquivo é de todos (o operador manda a planilha do mês); CONFIGURAR o
+    # mapeamento sai do `client_operator` e só dele (muda como todos os próximos
+    # arquivos serão lidos). Permissões PRÓPRIAS — não reusam
+    # `manage_client_mapping` nem `sync_client_movements` (ADR-067/069-BE).
+    Permission.UPLOAD_CLIENT_FILE: (True, True, True, True, True),
+    Permission.MANAGE_INPUT_MAPPING: (True, True, True, True, False),
 }
 MATRIX_CELLS = [
     (permission, role, expected)

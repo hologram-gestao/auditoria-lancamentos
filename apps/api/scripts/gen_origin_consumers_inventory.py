@@ -163,6 +163,22 @@ CLASSIFICATION: tuple[Entry, ...] = (
         "Verificado em 22/09: nenhuma chamada ao provedor. NÃO converter",
     ),
     Entry(
+        "app/modules/client_file_categories/registry.py",
+        Family.CIFRA_DADO,
+        "cifra o RÓTULO das categorias de origem derivadas do ARQUIVO (S14, BACK 14.4) — "
+        "dado do tenant, no molde do glossário. Nenhuma chamada ao provedor: a origem "
+        "`arquivo` não tem credencial. NÃO converter",
+    ),
+    Entry(
+        "app/modules/client_file_ingestion/service.py",
+        Family.ORIGEM,
+        "ingestão do ARQUIVO do cliente (S14, BACK 14.3): exige conexão `arquivo` ATIVA pela "
+        "taxonomia da S9 (`resolve_origin_connections` + `select_capable_connection`) e "
+        "grava pelo ciclo R0 com um `FileProvider` montado das linhas da request — nunca "
+        "pela conexão (o adaptador vindo dela é vazio). Não toca em credencial nem no "
+        "`OmieClient`; a descrição é cifrada pelo `ClientMovementsSyncService`",
+    ),
+    Entry(
         "app/modules/omie_data/routes.py",
         Family.ORIGEM,
         "categorias e lançamentos: resolve conexão capaz de `listar_lancamentos`",

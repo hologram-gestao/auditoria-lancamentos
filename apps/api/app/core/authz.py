@@ -218,6 +218,20 @@ class Permission(StrEnum):
     #: o alvo aqui pode ser staff de qualquer BPO ou usuário de qualquer cliente,
     #: e a redefinição derruba as sessões do alvo (`users.password_changed_at`).
     RESET_USER_PASSWORD = "reset_user_password"  # noqa: S105 (nome de permissão, não senha)
+    # --- Sprint 14 (BACK 14.1) --------------------------------------------
+    #: ENVIAR o arquivo (planilha/extrato) de um cliente com origem `arquivo`.
+    #: Células DECIDIDAS no PRD (R5): os 5 papéis — enviar o arquivo do mês é o
+    #: dia a dia de quem opera o cliente, inclusive o `client_operator`.
+    UPLOAD_CLIENT_FILE = "upload_client_file"
+    #: CONFIGURAR o mapeamento de entrada (qual coluna é o quê, convenção de
+    #: sinal). Células DECIDIDAS no PRD (R5): todos menos o `client_operator` —
+    #: alterar o mapeamento muda como TODOS os próximos arquivos serão lidos.
+    #: Permissões PRÓPRIAS, não reuso de `manage_client_mapping` nem de
+    #: `sync_client_movements` (ADR-067/069-BE): enviar e configurar são células
+    #: diferentes, e amarrá-las a uma decisão existente faria uma mudança de
+    #: célula arrastar a outra. A LEITURA do mapeamento não pede permissão
+    #: (quem alcança o cliente lê, como o de-para).
+    MANAGE_INPUT_MAPPING = "manage_input_mapping"
 
 
 _EVERYONE: frozenset[UserRole] = frozenset(UserRole)
@@ -260,6 +274,8 @@ _PLATFORM_ONLY: frozenset[UserRole] = frozenset({UserRole.PLATFORM_ADMIN})
 #: | Catálogo do de-para (S12)     | ✅             | ✅ (org)    | ❌             | ❌             | ❌              |
 #: | Editar o de-para (S12)        | ✅             | ✅          | ✅ (carteira)  | ✅             | ❌              |
 #: | Redefinir senha de usuário    | ✅             | ❌          | ❌             | ❌             | ❌              |
+#: | Enviar arquivo (S14)          | ✅             | ✅          | ✅ (carteira)  | ✅             | ✅              |
+#: | Configurar mapeamento (S14)   | ✅             | ✅          | ✅ (carteira)  | ✅             | ❌              |
 PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]] = {
     Permission.RUN_RECONCILIATION: _EVERYONE,
     Permission.REVIEW_EXPORT: _EVERYONE,
@@ -351,6 +367,14 @@ PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]] = {
     # 86e3ewukz: só a plataforma. O admin da PRÓPRIA organização do alvo também é
     # ❌ — a ação é de suporte da plataforma, não de gestão da organização.
     Permission.RESET_USER_PASSWORD: _PLATFORM_ONLY,
+    # S14 (BACK 14.1), células DECIDIDAS no PRD (R5): enviar é de TODOS (o
+    # operador manda a planilha do mês); configurar sai do `client_operator` e
+    # só dele (muda a leitura de todos os próximos arquivos). O "(carteira)" do
+    # manager é `resolve_client_access`, não esta linha.
+    Permission.UPLOAD_CLIENT_FILE: _EVERYONE,
+    Permission.MANAGE_INPUT_MAPPING: frozenset(
+        {UserRole.PLATFORM_ADMIN, UserRole.ADMIN, UserRole.MANAGER, UserRole.CLIENT_MANAGER}
+    ),
 }
 
 

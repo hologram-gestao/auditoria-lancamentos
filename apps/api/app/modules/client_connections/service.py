@@ -21,6 +21,15 @@ conteúdo já morreu por crypto-shredding (§4.12).
 (`AAD_CONNECTION_CREDENTIALS` + pk). A pk entra no AAD, então a linha precisa
 existir ANTES da cifra — daí o `flush` no meio da criação.
 
+**Origem SEM credencial (Sprint 14, `arquivo`).** `requires_credentials(tipo)` é a
+regra única: tipo com credencial sem `credentials` e tipo sem credencial com
+`credentials` são o MESMO 400 genérico de forma (§4.8). Para `arquivo` os passos
+2 e 3 não existem — nada a verificar, nada a cifrar; `credentials_encrypted`/`iv`
+ficam nulos e a conexão nasce `ativa`. A DEK, porém, É provisionada (§4.8, "a DEK
+nasce na primeira conexão"): a BACK 14.3 cifra a descrição de cada linha do
+arquivo com ela, e provisionar aqui — sob o `OpenClientDep` da rota — mantém o
+invariante de que só cliente ABERTO ganha chave.
+
 **A sessão vem do chamador** de propósito: a BACK 09.4 cria cliente e conexão na
 MESMA transação, e um serviço que abrisse sessão própria tornaria isso
 impossível.
@@ -46,11 +55,16 @@ from app.core.crypto_service import (
 from app.core.exceptions import (
     ConnectionLabelAlreadyExistsError,
     NotFoundError,
+    OriginCapabilityMissingError,
     ProviderAuthError,
     ValidationAppError,
 )
 from app.db.models.client_connection import ClientConnection, ConnectionStatus
-from app.integrations.providers.registry import capabilities_for, get_provider
+from app.integrations.providers.registry import (
+    capabilities_for,
+    get_provider,
+    requires_credentials,
+)
 from app.modules.client_connections.legacy_fallback import (
     effective_fallback_enabled,
     resolve_origin_connections,
@@ -67,7 +81,26 @@ if TYPE_CHECKING:
     from app.integrations.providers.base import ProviderCredentials
 
 #: Rótulo sugerido quando o cliente ganha a PRIMEIRA conexão de um tipo.
-_DEFAULT_LABELS: dict[str, str] = {"omie": "Omie"}
+_DEFAULT_LABELS: dict[str, str] = {"omie": "Omie", "arquivo": "Arquivo"}
+
+
+def assert_credentials_shape(provider_type: str, credentials: ProviderCredentials | None) -> None:
+    """Credencial obrigatória para quem a tem, proibida para quem não tem (S14).
+
+    Validação de FORMA: os dois desvios são o 400 genérico (§4.8), não uma
+    exceção tipada — não há instrução a dar além de "o corpo está errado".
+    """
+    needs = requires_credentials(provider_type)
+    if needs and credentials is None:
+        raise ValidationAppError(
+            f"provider {provider_type!r} requires credentials",
+            user_message="Esta origem exige credenciais.",
+        )
+    if not needs and credentials is not None:
+        raise ValidationAppError(
+            f"provider {provider_type!r} does not take credentials",
+            user_message="Esta origem não usa credenciais.",
+        )
 
 
 def default_label_for(provider_type: str) -> str:
@@ -150,17 +183,24 @@ class ClientConnectionService:
         user: CurrentUser,
         provider_type: str,
         label: str | None,
-        credentials: ProviderCredentials,
+        credentials: ProviderCredentials | None,
     ) -> ClientConnectionResponse:
-        """Conecta uma origem ao cliente. Valida no provedor ANTES de persistir."""
-        capabilities_for(provider_type)  # tipo desconhecido → 422, antes de tudo
+        """Conecta uma origem ao cliente. Valida no provedor ANTES de persistir.
+
+        Origem sem credencial (`arquivo`): nada a verificar nem a cifrar — a linha
+        nasce `ativa` com o par cifrado nulo, e a DEK do cliente é provisionada
+        (ver o docstring do módulo).
+        """
+        capabilities_for(provider_type)  # tipo desconhecido → 400, antes de tudo
+        assert_credentials_shape(provider_type, credentials)
         resolved_label = await self._resolve_label(
             client=client, provider_type=provider_type, label=label
         )
         await self._assert_label_free(
             client=client, provider_type=provider_type, label=resolved_label
         )
-        await self._verify_against_provider(provider_type, credentials)
+        if credentials is not None:
+            await self._verify_against_provider(provider_type, credentials)
 
         connection = ClientConnection(
             client_id=client.id,
@@ -179,7 +219,12 @@ class ClientConnectionService:
                 client=client, provider_type=provider_type, label=resolved_label
             ) from exc
 
-        await self._encrypt_into(client, connection, credentials)
+        if credentials is not None:
+            await self._encrypt_into(client, connection, credentials)
+        else:
+            # §4.8: a DEK nasce na primeira conexão — inclusive na que não tem
+            # segredo. A 14.3 cifra a descrição das linhas do arquivo com ela.
+            await provision_client_cipher(client, settings=self._settings)
         await self._db.flush()
         await self._audit(user, client, AccessAction.CONN_CREATE)
         return ClientConnectionResponse.from_connection(connection)
@@ -194,8 +239,20 @@ class ClientConnectionService:
         instabilidade do provedor propagam como 5xx e **não** mudam estado — são
         transitórios, e marcar `erro` por eles faria o usuário reconectar uma
         conexão que está boa.
+
+        Origem sem credencial (`arquivo`, S14): 409 `CAPACIDADE_AUSENTE` — não há
+        o que testar, e a taxonomia da S9 já tem o código para "nada a consertar".
+        Nenhum estado muda e nada é auditado (a ação não aconteceu).
         """
         connection = await self._get_or_404(client, connection_id)
+        if not requires_credentials(connection.provider_type):
+            raise OriginCapabilityMissingError(
+                f"provider {connection.provider_type!r} has no credential to verify",
+                user_message=(
+                    "Esta origem não tem credenciais para testar: a planilha é lida "
+                    "no envio do arquivo."
+                ),
+            )
         credentials = await self._decrypt_credentials(client, connection)
         try:
             await self._verify_against_provider(connection.provider_type, credentials)
@@ -244,6 +301,8 @@ class ClientConnectionService:
             connection.label = label
 
         if credentials is not None:
+            # Origem sem credencial não aceita ganhar uma: mesmo 400 de forma da criação.
+            assert_credentials_shape(connection.provider_type, credentials)
             await self._verify_against_provider(connection.provider_type, credentials)
             await self._encrypt_into(client, connection, credentials)
             connection.status = ConnectionStatus.ATIVA.value

@@ -43,6 +43,10 @@ EXPECTED_AAD_PAIRS = {
     "AAD_CONNECTION_CREDENTIALS": ("client_connections", "credentials_encrypted"),
     # Sprint 15 (BACK 15.1) — contexto do título. 12 → 13.
     "AAD_TITLE_CONTEXT_TEXT": ("title_contexts", "text_encrypted"),
+    # Sprint 14 (BACK 14.4) — rótulo da categoria de origem do arquivo. 13 → 14.
+    "AAD_FILE_CATEGORY_LABEL": ("client_file_categories", "label_encrypted"),
+    # Sprint 14 (BACK 14.3) — descrição do movimento vindo do arquivo. 14 → 15.
+    "AAD_MOVEMENT_DESCRIPTION": ("client_movements", "description_encrypted"),
 }
 
 
@@ -56,7 +60,8 @@ class TestInventarioDeCamposCifrados:
         assert declared == EXPECTED_AAD_PAIRS
 
     def test_a_contagem_bate_com_a_lista_canonica_do_claude_md(self) -> None:
-        assert len(EXPECTED_AAD_PAIRS) == 13
+        """15 desde a BACK 14.3 (`client_movements.description_encrypted`, o 15º par)."""
+        assert len(EXPECTED_AAD_PAIRS) == 15
 
     def test_nenhum_par_tabela_coluna_se_repete(self) -> None:
         """Dois campos com o MESMO AAD tornam o ciphertext de um legível no outro."""

@@ -37,7 +37,7 @@ from app.core.crypto_service import (
     load_client_cipher,
 )
 from app.core.exceptions import ValidationAppError
-from app.integrations.providers.registry import get_provider
+from app.integrations.providers.registry import get_provider, requires_credentials
 from app.modules.client_connections.capability import select_capable_connection
 from app.modules.client_connections.legacy_fallback import (
     is_synthetic,
@@ -82,6 +82,10 @@ async def credentials_for(
     """
     if is_synthetic(connection):
         return await legacy_credentials(client, settings=settings)
+    if not requires_credentials(connection.provider_type):
+        # Origem sem segredo (`arquivo`, S14): mapa vazio é o estado normal, não
+        # defeito. O adaptador ignora credencial.
+        return {}
     if connection.credentials_encrypted is None or connection.credentials_iv is None:
         raise ValidationAppError(
             f"connection {connection.id} has no stored credentials",

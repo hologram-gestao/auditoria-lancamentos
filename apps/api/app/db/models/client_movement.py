@@ -13,15 +13,20 @@ movimento na origem)`, e `source_type` é o TIPO do provedor (`omie` hoje, `arqu
 na Sprint 14) — **nunca** uma FK para `client_connections`. Conexão é removida e
 recriada ao trocar credencial; a base de movimentos (e o de-para que se apoia nela)
 é do CLIENTE e não pode ir junto. Pelo mesmo motivo `source_type` não tem CHECK:
-é o precedente de `ProviderType` (provedor novo entra sem migration). As colunas
-que só o arquivo tem (descrição cifrada, documento) são da Sprint 14, na migration
-dela — aqui não entram.
+é o precedente de `ProviderType` (provedor novo entra sem migration).
 
-**Só CÓDIGO, nunca nome nem texto livre (§4.5).** `category_code`,
+**Só CÓDIGO, nunca nome nem texto livre em claro (§4.5).** `category_code`,
 `supplier_code` e `source_account_id` são identificadores da origem. A descrição
-do lançamento (`cObservacoes` no Omie) fica FORA: é texto livre de terceiro, e é
-exatamente por onde nome de fornecedor entra no banco sem ninguém decidir isso. Por
-consequência nada aqui é cifrado.
+do lançamento (`cObservacoes` no Omie) fica FORA para a origem Omie: é texto livre
+de terceiro, e é exatamente por onde nome de fornecedor entra no banco sem ninguém
+decidir isso.
+
+**As colunas que só o ARQUIVO tem (Sprint 14, BACK 14.3), nuláveis:**
+`description_encrypted`/`description_iv` — a descrição da linha do arquivo, CIFRADA
+com a DEK do cliente (AAD `AAD_MOVEMENT_DESCRIPTION`, IV novo por linha, CHECK do
+par), no molde de `reconciliation_file_entries.description_encrypted`; e `document`,
+o número do documento, EM CLARO — número de documento é identificador (como
+`supplier_code`), não nome (ADR-082-BE). A linha vinda do Omie mantém as três nulas.
 
 **Movimento não se apaga.** Sumiu da origem numa nova sincronização da mesma
 competência, vira `ausente_na_origem` — a linha FICA, no mesmo padrão da carteira
@@ -50,6 +55,7 @@ from sqlalchemy import (
     Index,
     Numeric,
     String,
+    Text,
     UniqueConstraint,
     func,
     text,
@@ -60,6 +66,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 from app.db.models._mixins import TimestampMixin, UUIDPrimaryKeyMixin
+from app.db.models.client import IV_HEX_LENGTH
 
 
 class MovementStatus(StrEnum):
@@ -90,6 +97,21 @@ MAX_MOVEMENT_CATEGORY_CODE_CHARS = 50
 
 #: Teto dos identificadores de fornecedor e de conta na origem, como texto.
 MAX_MOVEMENT_REF_CHARS = 60
+
+#: Teto do número de documento vindo do arquivo (S14). O MESMO da carteira de
+#: títulos (`client_titles.document_number`), de propósito: é o mesmo dado.
+MAX_MOVEMENT_DOCUMENT_CHARS = 60
+
+#: Rótulo do CHECK que mantém o envelope da descrição inteiro (S14): ciphertext e
+#: IV vivem e morrem juntos — molde de `client_connections.credentials_pair`.
+MOVEMENT_DESCRIPTION_PAIR_CK_LABEL = "description_pair"
+MOVEMENT_DESCRIPTION_PAIR_CONSTRAINT = f"ck_client_movements_{MOVEMENT_DESCRIPTION_PAIR_CK_LABEL}"
+
+
+def movement_description_pair_check() -> str:
+    """Predicado SQL do CHECK do par descrição — copiado na migration `d9e4a1b57c26`."""
+    return "(description_encrypted IS NULL) = (description_iv IS NULL)"
+
 
 #: A UNIQUE que torna o ciclo de sincronização idempotente (`ON CONFLICT`) — e não
 #: uma leitura anterior.
@@ -137,6 +159,9 @@ class ClientMovement(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index(IX_CLIENT_MOVEMENT_CLIENT_COMPETENCE, "client_id", "competence"),
         CheckConstraint(text(movement_status_check()), name=MOVEMENT_STATUS_CK_LABEL),
         CheckConstraint(text(MOVEMENT_COMPETENCE_CHECK), name=MOVEMENT_COMPETENCE_CK_LABEL),
+        CheckConstraint(
+            text(movement_description_pair_check()), name=MOVEMENT_DESCRIPTION_PAIR_CK_LABEL
+        ),
     )
 
     #: CASCADE porque a exclusão DEFINITIVA do cliente apaga tudo que pende dele
@@ -204,6 +229,20 @@ class ClientMovement(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
+    )
+
+    # ---- só a origem ARQUIVO preenche (S14, BACK 14.3) ----------------------
+    #: A descrição da linha do arquivo, SEMPRE cifrada com a DEK do cliente e o
+    #: AAD desta linha (`field_locator(AAD_MOVEMENT_DESCRIPTION, id)`). Cifrada
+    #: DEPOIS do upsert: a pk entra no AAD, e um `ON CONFLICT` preserva a pk da
+    #: linha existente — cifrar antes ligaria o texto a um id que nunca existiu.
+    description_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    description_iv: Mapped[str | None] = mapped_column(
+        String(IV_HEX_LENGTH), nullable=True, default=None
+    )
+    #: Número do documento, em claro (identificador, não nome — ADR-082-BE).
+    document: Mapped[str | None] = mapped_column(
+        String(MAX_MOVEMENT_DOCUMENT_CHARS), nullable=True, default=None
     )
 
     def __repr__(self) -> str:

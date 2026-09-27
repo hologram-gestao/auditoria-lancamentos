@@ -347,3 +347,13 @@ ManageMappingCatalogDep = Annotated[
 ManageClientMappingDep = Annotated[
     CurrentUser, Depends(require_client_permission(Permission.MANAGE_CLIENT_MAPPING))
 ]
+# --- Sprint 14 (BACK 14.1): origem por arquivo ------------------------------
+# Os dois são guards AUDITADOS: a negação do papel que alcança o cliente mas não
+# pode a ação vira 1 linha `denied` em `access_audit` (R5: "a mesma permissão
+# governa UI e rota"; o teste nominal do operador prova enviar 200 x configurar 403).
+UploadClientFileDep = Annotated[
+    CurrentUser, Depends(require_client_permission(Permission.UPLOAD_CLIENT_FILE))
+]
+ManageInputMappingDep = Annotated[
+    CurrentUser, Depends(require_client_permission(Permission.MANAGE_INPUT_MAPPING))
+]

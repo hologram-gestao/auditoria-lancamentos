@@ -36,7 +36,9 @@ from app.db.models import (
     Client,
     ClientAssignment,
     ClientChartOfAccount,
+    ClientFileImport,
     ClientGlossaryEntry,
+    ClientInputMapping,
     ClientMovement,
     ClientMovementSync,
     ClientTitle,
@@ -281,6 +283,36 @@ async def _seed_world(db: AsyncSession, *, processing: bool = False) -> _World:
                 synced_at=datetime.now(UTC),
             )
         )
+    # Mapeamento de entrada do arquivo (S14, BACK 14.1): configuração, como as
+    # decisões do de-para — nada cifrado, e cliente encerrado não envia mais
+    # arquivo. Declarado por um usuário DO tenant (o `client_manager`): a FK de
+    # autoria é RESTRICT e o purge não pode tropeçar nela.
+    for cli in (w.cli_a, w.cli_b):
+        db.add(
+            ClientInputMapping(
+                client_id=cli.id,
+                file_format="xlsx",
+                date_column="Data",
+                description_column="Histórico",
+                amount_column="Valor",
+                date_format="dd/mm/yyyy",
+                decimal_separator=",",
+                sign_convention="valor_com_sinal",
+                created_by=tenant_manager.id,
+                updated_by=tenant_manager.id,
+            )
+        )
+        # S14 (BACK 14.3): o registro do arquivo processado — trilha OPERACIONAL,
+        # enviado por um usuário DO tenant (`created_by` RESTRICT, como o mapeamento).
+        db.add(
+            ClientFileImport(
+                client_id=cli.id,
+                competence=date(2026, 6, 1),
+                file_hash=uuid4().hex + uuid4().hex,
+                rows=1,
+                created_by=tenant_manager.id,
+            )
+        )
     db.add(
         AccessAudit(
             user_id=w.admin.id,
@@ -425,8 +457,11 @@ class TestCloseClient:
         ), "a purga é POR TENANT — a carteira do vizinho não pode ser tocada"
 
         # Base de movimentos (S12, R0) e carimbos da competência: somem juntos,
-        # pelo precedente da carteira. O vizinho fica com os dele.
-        for model in (ClientMovement, ClientMovementSync):
+        # pelo precedente da carteira. O vizinho fica com os dele. O mapeamento
+        # de entrada (S14) sai pelo mesmo precedente das decisões do de-para; o
+        # registro dos arquivos processados (S14, BACK 14.3) é trilha operacional
+        # de um cliente que não envia mais arquivo.
+        for model in (ClientMovement, ClientMovementSync, ClientInputMapping, ClientFileImport):
             assert (
                 await _count(db_session, select(func.count(model.id)).where(model.client_id == a))
                 == 0

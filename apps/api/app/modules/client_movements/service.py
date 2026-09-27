@@ -32,8 +32,18 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 
-from app.core.exceptions import ClientClosedError, MovementAccountsUnknownError
+from app.core.crypto_service import (
+    AAD_MOVEMENT_DESCRIPTION,
+    field_locator,
+    provision_client_cipher,
+)
+from app.core.exceptions import (
+    ClientClosedError,
+    FileOriginSyncNotApplicableError,
+    MovementAccountsUnknownError,
+)
 from app.core.logging import get_logger
+from app.db.models.client_connection import ProviderType
 from app.integrations.omie.client_locks import origin_client_locks
 from app.integrations.providers.base import Capability
 from app.modules.client_connections.origin import (
@@ -46,7 +56,7 @@ from app.modules.usage_events.repository import UsageEventRepository
 from app.modules.usage_events.service import UsageEventService
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -156,6 +166,15 @@ class ClientMovementsSyncService:
         connection = await resolve_capable_connection(
             self._db, client, Capability.LISTAR_LANCAMENTOS, settings=self._settings
         )
+        if connection.provider_type == ProviderType.ARQUIVO.value:
+            # S14 (BACK 14.3): a origem por arquivo declara `listar_lancamentos`
+            # (é assim que a ingestão alimenta o ciclo), mas o adaptador vindo da
+            # CONEXÃO é vazio — sincronizar por aqui leria zero linhas e marcaria a
+            # base inteira como ausente. 409 tipado ANTES de tocar o ciclo; nada é
+            # carimbado (é configuração, como os três 409 da S9).
+            raise FileOriginSyncNotApplicableError(
+                f"Cliente {client.id}: origem por arquivo; sincronização não se aplica."
+            )
         try:
             # Renova o cache de contas ANTES de ler (follow-up 86e3f0ux7, item 3):
             # conta nova na origem só entrava na base depois de alguém clicar em
@@ -223,14 +242,46 @@ class ClientMovementsSyncService:
         rows = await self._clients.get_accounts_cache(client.id)
         return [str(row.omie_conta_id) for row in rows]
 
+    async def persist_entries(
+        self,
+        client: Client,
+        competence: date,
+        *,
+        source_type: str,
+        entries: Sequence[tuple[str | None, ProviderEntry]],
+        accounts: Sequence[str] | None,
+        descriptions: Mapping[str, str] | None = None,
+        emit: bool = True,
+    ) -> MovementSyncResult:
+        """A porta PÚBLICA do ciclo R0 para quem já tem as linhas (S14, BACK 14.3).
+
+        A ingestão por arquivo lê o arquivo, monta `ProviderEntry` e grava pelo
+        MESMO `_persist` que o Omie usa — a base não sabe de onde veio a linha.
+        `accounts=None` = sem recorte de conta (a linha de arquivo não tem conta);
+        `descriptions` = `source_movement_id → texto`, cifrado com a DEK depois do
+        upsert; `emit=False` porque a ingestão tem o evento dela
+        (`arquivo_processado`), e `movimentos_sincronizados` é da sincronização.
+        """
+        return await self._persist(
+            client,
+            competence,
+            source_type=source_type,
+            entries=entries,
+            accounts=accounts,
+            descriptions=descriptions,
+            emit=emit,
+        )
+
     async def _persist(
         self,
         client: Client,
         competence: date,
         *,
         source_type: str,
-        entries: Sequence[tuple[str, ProviderEntry]],
-        accounts: Sequence[str],
+        entries: Sequence[tuple[str | None, ProviderEntry]],
+        accounts: Sequence[str] | None,
+        descriptions: Mapping[str, str] | None = None,
+        emit: bool = True,
     ) -> MovementSyncResult:
         """Grava o ciclo inteiro numa transação — e só então carimba o sucesso.
 
@@ -252,6 +303,8 @@ class ClientMovementsSyncService:
                 synced_at=now,
                 accounts_read=accounts,
             )
+            if descriptions:
+                await self._store_descriptions(client, source_type, descriptions)
             await self._repo.mark_sync_succeeded(client.id, competence, at=now)
         except Exception:
             # Falha de BANCO no meio do ciclo (follow-up 86e3f0ux7, item 4). Até
@@ -276,7 +329,7 @@ class ClientMovementsSyncService:
             synced_at=now,
             movimentos=len(rows),
             sem_categoria=sum(1 for row in rows if row["category_code"] is None),
-            contas=len(accounts),
+            contas=len(accounts) if accounts is not None else 0,
             ausentes=outcome.absent,
         )
         log.info(
@@ -293,14 +346,36 @@ class ClientMovementsSyncService:
         # sincronização que deu certo. Emitido só AQUI, no fim de uma sincronização
         # ÍNTEGRA: o caminho de falha (`_fetch`) re-levanta antes, e os 409 nem
         # começam — é isso que garante "falha e 409 não emitem". Sem dedup.
-        await self._usage_events.emit_movimentos_sincronizados(
-            client_id=client.id,
-            competencia=competence,
-            movimentos=result.movimentos,
-            sem_categoria=result.sem_categoria,
-            contas=result.contas,
-        )
+        if emit:
+            await self._usage_events.emit_movimentos_sincronizados(
+                client_id=client.id,
+                competencia=competence,
+                movimentos=result.movimentos,
+                sem_categoria=result.sem_categoria,
+                contas=result.contas,
+            )
         return result
+
+    async def _store_descriptions(
+        self, client: Client, source_type: str, descriptions: Mapping[str, str]
+    ) -> None:
+        """Cifra a descrição de cada linha com a DEK do cliente e o AAD da pk (S14).
+
+        Depois do upsert, porque a pk entra no AAD e o `ON CONFLICT` preserva a pk
+        existente. IV novo por linha (`cipher.encrypt`). O texto nunca vai para log.
+        """
+        cipher = await provision_client_cipher(client, settings=self._settings)
+        ids = await self._repo.ids_by_source(
+            client.id, source_type=source_type, source_ids=list(descriptions)
+        )
+        updates: list[dict[str, Any]] = []
+        for source_id, text in descriptions.items():
+            pk = ids.get(source_id)
+            if pk is None:  # pragma: no cover - a linha acabou de ser gravada
+                continue
+            envelope, iv = cipher.encrypt(text, field_locator(AAD_MOVEMENT_DESCRIPTION, pk))
+            updates.append({"b_id": pk, "b_ct": envelope, "b_iv": iv})
+        await self._repo.set_descriptions(updates)
 
 
 def movement_row(entry: ProviderEntry, *, source_type: str, account: str | None) -> dict[str, Any]:
@@ -325,6 +400,8 @@ def movement_row(entry: ProviderEntry, *, source_type: str, account: str | None)
         "category_code": _code_or_none(entry.category_code),
         "supplier_code": _code_or_none(entry.supplier_code),
         "source_account_id": account,
+        # S14: identificador, em claro (ADR-082-BE). O Omie não preenche.
+        "document": _code_or_none(entry.document_number),
     }
 
 

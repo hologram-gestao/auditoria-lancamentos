@@ -119,7 +119,10 @@ class CreateConnectionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider_type: str = Field(
-        description="Tipo da origem. Hoje só `omie`; tipo desconhecido é 422."
+        description=(
+            "Tipo da origem: `omie` (ERP, com credencial) ou `arquivo` (planilha/extrato "
+            "do cliente, SEM credencial — Sprint 14). Tipo desconhecido é 400."
+        )
     )
     label: str | None = Field(
         default=None,
@@ -127,15 +130,18 @@ class CreateConnectionRequest(BaseModel):
         description=(
             "Como chamar esta origem. Omitir usa o rótulo padrão do tipo quando "
             "o cliente ainda não tem conexão daquele tipo; a partir da segunda, "
-            "é obrigatório. Só-espaços é 422."
+            "é obrigatório. Só-espaços é 400."
         ),
     )
-    credentials: dict[str, SecretStr] = Field(
+    credentials: dict[str, SecretStr] | None = Field(
+        default=None,
         description=(
             "Credenciais do provedor. Para o Omie: `app_key` e `app_secret` — as "
             "chaves aceitas são as do adaptador (`OMIE_CREDENTIAL_KEYS`), em "
-            "snake_case, e chave faltando é 422."
-        )
+            "snake_case, e chave faltando é 400. OBRIGATÓRIO para tipo com "
+            "credencial (`omie`) e PROIBIDO para `arquivo`: os dois desvios são 400 "
+            "`VALIDATION_ERROR` (validação de forma, §4.8)."
+        ),
     )
 
     @field_validator("label")
