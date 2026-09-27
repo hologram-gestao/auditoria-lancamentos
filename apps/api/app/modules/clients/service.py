@@ -532,11 +532,9 @@ class ClientService:
                     ok=False,
                     message="O Omie não respondeu no tempo esperado",
                 )
-            except OmieServerError:
-                return TestConnectionResponse(
-                    ok=False,
-                    message="O Omie está com instabilidade no momento",
-                )
+            except OmieServerError as exc:
+                # Inclui `OmieOfflineError`: "fora do ar" em vez de "instabilidade".
+                return TestConnectionResponse(ok=False, message=exc.user_message)
             except OmieFaultError as exc:
                 return TestConnectionResponse(ok=False, message=exc.user_message)
         return TestConnectionResponse(ok=True, message="Conexão estabelecida com sucesso")

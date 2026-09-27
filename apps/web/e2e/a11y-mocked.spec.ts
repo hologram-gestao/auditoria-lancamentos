@@ -1144,6 +1144,9 @@ let reviewVerdict: string | null = null;
  * anterior proibiu.
  */
 let patchAnomalyFails = false;
+// Omie FORA DO AR ao extrair contas (27/09/2026, `418 API OFFLINE`): o
+// `PATCH /sync-accounts` responde 502 e a tela mostra o alerta que fica.
+let accountsSyncFails = false;
 
 function anomalies() {
   return [
@@ -1771,7 +1774,24 @@ async function fulfillApi(route: Route): Promise<void> {
   if (path === `/api/v1/clients/${OTHER_CLIENT_ID}`) {
     return json({ ...CLIENT_DETAIL, id: OTHER_CLIENT_ID, name: 'Cliente de Outro Tenant' });
   }
-  if (path === `/api/v1/clients/${CLIENT_ID}/sync-accounts`) return json(CLIENT_DETAIL);
+  if (path === `/api/v1/clients/${CLIENT_ID}/sync-accounts`) {
+    if (accountsSyncFails) {
+      // O envelope real da API quando o Omie está fora do ar: `AccountsSyncError`
+      // com o `user_message` do `OmieOfflineError` (é dele que sai o alerta).
+      return route.fulfill({
+        status: 502,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: {
+            code: 'OMIE_SYNC_FAILED',
+            message: 'Omie fora do ar (HTTP 418) em ListarContasCorrentes',
+            userMessage: 'O Omie está fora do ar neste momento. Tente novamente mais tarde.',
+          },
+        }),
+      });
+    }
+    return json(CLIENT_DETAIL);
+  }
   if (path === `/api/v1/clients/${CLIENT_ID}/reconciliations`) {
     const list = listOverflows ? OVERFLOW_SESSIONS : SESSIONS;
     return json({ data: list, pagination: { ...PAGINATION, total: list.length } });
@@ -2083,6 +2103,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   sessionErrorDetail = false;
   reviewVerdict = null;
   patchAnomalyFails = false;
+  accountsSyncFails = false;
   listOverflows = false;
   tableListsOverflow = false;
   // S9: origem ativa é o estado de partida — só o bloco de origem a troca.
@@ -2236,6 +2257,23 @@ for (const vp of VIEWPORTS) {
       await page.goto(`/clientes/${CLIENT_ID}/contas`);
       await expect(page.getByRole('heading', { name: 'Contas Bancárias' })).toBeVisible();
       await analyze(page, `contas bancárias (${vp.label})`);
+    });
+
+    // 27/09/2026: o Omie respondia `418 API OFFLINE` e a tela só dava um toast
+    // genérico, que sumia. Agora a falha da extração é um alerta que fica, com
+    // a mensagem do servidor, e a lista do cache continua legível abaixo dele.
+    test('Contas Bancárias: extração falha e o alerta fica na tela', async ({ page }) => {
+      accountsSyncFails = true;
+      await page.goto(`/clientes/${CLIENT_ID}/contas`);
+      await page.getByRole('button', { name: 'Extrair contas do Omie' }).click();
+      // `hasText`: o anunciador de rota do Next (`__next-route-announcer__`)
+      // também é `role="alert"`, e o `getByRole` sozinho casa os dois.
+      const alerta = page.getByRole('alert').filter({ hasText: 'fora do ar' });
+      await expect(alerta).toContainText('O Omie está fora do ar neste momento.');
+      await expect(alerta.getByRole('button', { name: 'Tentar novamente' })).toBeEnabled();
+      await expect(page.getByRole('table')).toBeVisible();
+      await shot(page, `contas-extracao-falha-${vp.label.replace(/\s+/g, '-')}`);
+      await analyze(page, `contas bancárias com extração falha (${vp.label})`);
     });
 
     test('Gaveta de criação (R2)', async ({ page }) => {

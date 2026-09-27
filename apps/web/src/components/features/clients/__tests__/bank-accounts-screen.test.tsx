@@ -66,6 +66,7 @@ vi.mock('@/hooks/use-clients', () => ({
 // Imports do SUT DEPOIS dos `vi.mock` (as factories fecham sobre variáveis
 // deste módulo — importar no topo as avaliaria antes da inicialização).
 import { BankAccountsScreen } from '@/components/features/clients/bank-accounts-screen';
+import { ApiError } from '@/lib/api/client';
 import { assertNoA11yViolations } from '@/test/a11y';
 
 beforeAll(() => {
@@ -158,17 +159,47 @@ describe('BankAccountsScreen — extrair contas do Omie', () => {
     expect(button).toBeDisabled();
   });
 
-  it('reabilita e avisa em erro', async () => {
+  // A falha do sync deixou de ser toast (some em segundos, e a pessoa ficava
+  // olhando a lista antiga sem saber que o Omie estava fora) e virou alerta
+  // que fica na tela até a próxima tentativa (27/09/2026, `418 API OFFLINE`).
+  it('reabilita e avisa em erro, com alerta que fica na tela', async () => {
     const { toast } = await import('sonner');
     const user = userEvent.setup();
     syncState.mutateAsync = vi.fn().mockRejectedValue(new Error('boom'));
     render(<BankAccountsScreen clientId="c1" />);
     const button = screen.getByRole('button', { name: 'Extrair contas do Omie' });
     await user.click(button);
-    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Não foi possível extrair as contas do Omie.');
+    expect(toast.error).not.toHaveBeenCalled();
     // `isPending` volta a false pelo próprio TanStack; aqui o botão nunca
     // ficou preso num estado terminal de erro.
     expect(button).toBeEnabled();
+    // A lista do cache continua legível abaixo do alerta.
+    expect(screen.getByRole('table')).toBeInTheDocument();
+  });
+
+  it('mostra a mensagem do servidor (Omie fora do ar) e limpa o alerta quando a próxima tentativa dá certo', async () => {
+    const user = userEvent.setup();
+    syncState.mutateAsync = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new ApiError(502, {
+          code: 'OMIE_SYNC_FAILED',
+          message: 'Omie fora do ar',
+          userMessage: 'O Omie está fora do ar neste momento. Tente novamente mais tarde.',
+        }),
+      )
+      .mockResolvedValueOnce(undefined);
+    render(<BankAccountsScreen clientId="c1" />);
+    await user.click(screen.getByRole('button', { name: 'Extrair contas do Omie' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('O Omie está fora do ar neste momento.');
+
+    // "Tentar novamente" do próprio alerta dispara o sync de novo.
+    await user.click(within(alert).getByRole('button', { name: 'Tentar novamente' }));
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    expect(syncState.mutateAsync).toHaveBeenCalledTimes(2);
   });
 });
 

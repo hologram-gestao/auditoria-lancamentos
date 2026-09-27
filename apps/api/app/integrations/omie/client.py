@@ -38,6 +38,7 @@ from tenacity import (
 from app.core.exceptions import (
     OmieAuthError,
     OmieFaultError,
+    OmieOfflineError,
     OmieServerError,
     OmieTimeoutError,
 )
@@ -58,6 +59,33 @@ if TYPE_CHECKING:
     from app.core.config import Settings
 
 log = get_logger(__name__)
+
+# Corpo que a Omie devolve em manutenção, em todo endpoint, com HTTP 418
+# (capturado em 27/09/2026): `{"status": "418", "message": "API OFFLINE"}`.
+_OMIE_OFFLINE_MESSAGE = "API OFFLINE"
+_OMIE_OFFLINE_STATUS = 418
+
+
+def _is_omie_offline(response: httpx.Response) -> bool:
+    """`True` quando a resposta é a página de manutenção da Omie.
+
+    Reconhece pelo status `418` OU pelo corpo com `message == "API OFFLINE"`
+    (o mesmo corpo pode vir com outro status). Corpo que não é JSON, ou JSON
+    que não é objeto, não é manutenção: segue para o tratamento normal.
+    """
+    if response.status_code == _OMIE_OFFLINE_STATUS:
+        return True
+    if response.status_code == 200:
+        return False
+    try:
+        payload = response.json()
+    except ValueError:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    message = payload.get("message")
+    return isinstance(message, str) and message.strip().upper() == _OMIE_OFFLINE_MESSAGE
+
 
 # Substrings (case-insensitive) em `faultstring` que indicam erro de
 # autenticação. Mapeamos para `OmieAuthError` (sem retry) em vez do genérico
@@ -296,6 +324,26 @@ class OmieClient:
         #   - Header presente com qualquer outro código (ex: `5001` "tag
         #     inválida") → erro permanente; propaga a mensagem do header.
         #   - Sem header → infra Omie genuína (retryable).
+        # Omie FORA DO AR (manutenção): `418` + `{"message": "API OFFLINE"}` em
+        # todo endpoint (caso real de 27/09/2026). Não é 5xx, então cairia em
+        # "status inesperado" com mensagem genérica; e retry não ajuda —
+        # manutenção não acaba em 30 s. Vai antes das duas famílias abaixo
+        # porque o mesmo corpo pode vir com 5xx.
+        if _is_omie_offline(response):
+            log.warning(
+                "omie_call_offline",
+                module=module,
+                endpoint=endpoint,
+                call=call_name,
+                status=response.status_code,
+                duration_ms=duration_ms,
+            )
+            raise OmieOfflineError(
+                f"Omie fora do ar (HTTP {response.status_code}) em {call_name} "
+                f"({module}/{endpoint})",
+                metadata={"status": response.status_code},
+            )
+
         if 500 <= response.status_code < 600:
             omie_api_error = response.headers.get("OmieAPI-Error")
             if omie_api_error:
