@@ -161,6 +161,16 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         "usuário de cliente e plataforma = 404",
     ),
     SensitiveEndpoint(
+        "POST",
+        "/api/v1/users/{user_id}/password",
+        ScopeKind.DETAIL_PK,
+        "app/modules/users/routes.py",
+        "ResetUserPasswordDep (só plataforma; admin e gerente de QUALQUER organização, "
+        "inclusive a do alvo, e usuário de cliente = 403 antes de tocar a linha). O alvo é "
+        "por PK em `users` inteira; a própria senha = 409; tenant encerrado = 409 "
+        "(86e3ewukz)",
+    ),
+    SensitiveEndpoint(
         "GET",
         "/api/v1/client-categories",
         ScopeKind.COLLECTION,

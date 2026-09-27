@@ -46,6 +46,7 @@ let lastQueryParams: ListClientUsersParams | undefined;
 const createMock = vi.fn();
 const updateMock = vi.fn();
 const setActiveMock = vi.fn();
+const resetPasswordMock = vi.fn();
 
 // A tela consulta o detalhe do cliente para saber se está ENCERRADO
 // (86e36pm1z) — `undefined` = aberto, as ações de escrita aparecem.
@@ -61,6 +62,16 @@ vi.mock('@/hooks/use-client-users', () => ({
   useCreateClientUser: () => ({ mutateAsync: createMock, isPending: false }),
   useUpdateClientUser: () => ({ mutateAsync: updateMock, isPending: false }),
   useSetClientUserActive: () => ({ mutateAsync: setActiveMock, isPending: false }),
+}));
+
+// A tela importa o hook de redefinição de senha da plataforma (86e3ewukz),
+// que mora no módulo de usuários de STAFF.
+vi.mock('@/hooks/use-users', () => ({
+  useResetUserPassword: () => ({
+    mutateAsync: resetPasswordMock,
+    isPending: false,
+    reset: vi.fn(),
+  }),
 }));
 
 const authState = { user: null as AuthenticatedUser | null };
@@ -253,6 +264,37 @@ describe('ClientUsersScreen — gating por papel', () => {
     });
     render(<ClientUsersScreen clientId={CLIENT_ID} />);
     expect(screen.getByRole('button', { name: 'Novo usuário' })).toBeInTheDocument();
+  });
+
+  it('plataforma vê "Redefinir senha" em cada usuário do cliente, com o mínimo de 10 (86e3ewukz)', async () => {
+    authState.user = actor({
+      id: 'plat',
+      role: 'platform_admin',
+      scope: 'platform',
+      client_id: null,
+    });
+    const ui = userEvent.setup();
+    render(<ClientUsersScreen clientId={CLIENT_ID} />);
+    const botao = screen.getByRole('button', { name: /^Redefinir senha de / });
+    await ui.click(botao);
+    const dialog = await screen.findByRole('alertdialog', { name: 'Redefinir senha' });
+    // Usuário de cliente: mínimo 10, a mesma regra da criação.
+    expect(dialog).toHaveTextContent(/Pelo menos 10 caracteres/);
+    await ui.type(within(dialog).getByLabelText('Senha nova'), 'Nove!2345');
+    await ui.type(within(dialog).getByLabelText('Confirmar senha nova'), 'Nove!2345');
+    await ui.click(within(dialog).getByRole('button', { name: 'Redefinir senha' }));
+    expect(
+      await within(dialog).findByText('A senha precisa ter pelo menos 10 caracteres.'),
+    ).toBeVisible();
+    expect(resetPasswordMock).not.toHaveBeenCalled();
+  });
+
+  it('gerente do cliente e admin da organização NÃO veem "Redefinir senha" (86e3ewukz)', () => {
+    render(<ClientUsersScreen clientId={CLIENT_ID} />);
+    expect(screen.queryByRole('button', { name: /^Redefinir senha de/ })).toBeNull();
+    authState.user = actor({ id: 'adm', role: 'admin', scope: 'system', client_id: null });
+    render(<ClientUsersScreen clientId={CLIENT_ID} />);
+    expect(screen.queryByRole('button', { name: /^Redefinir senha de/ })).toBeNull();
   });
 
   it('admin do sistema administra os usuários do tenant', () => {

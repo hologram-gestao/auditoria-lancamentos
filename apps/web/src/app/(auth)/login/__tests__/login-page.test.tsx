@@ -104,6 +104,24 @@ describe('LoginPage — validação do e-mail (86e2n39eg)', () => {
     expect(loginMock).not.toHaveBeenCalled();
   });
 
+  it('diz o que fazer a quem esqueceu a senha, sem revelar se o e-mail existe (86e2u5140)', async () => {
+    const user = userEvent.setup();
+    render(<LoginPage />);
+    const ajuda = screen.getByTestId('login-help');
+    expect(ajuda).toHaveTextContent(
+      'Esqueceu a senha? Fale com o administrador da sua conta: ele pode redefini-la para você.',
+    );
+    // Sem link de "esqueci minha senha": não há fluxo por e-mail (decisão registrada).
+    expect(screen.queryByRole('link', { name: /senha/i })).toBeNull();
+    // A instrução é a MESMA antes e depois de um login recusado: nada nela
+    // depende de o e-mail estar cadastrado.
+    const antes = ajuda.textContent;
+    await user.type(screen.getByLabelText('E-mail'), 'alguem@exemplo.com');
+    await user.type(screen.getByLabelText('Senha'), 'senha-errada');
+    await user.click(screen.getByRole('button', { name: 'Entrar' }));
+    expect(screen.getByTestId('login-help').textContent).toBe(antes);
+  });
+
   it('credencial errada continua com a mensagem genérica de sempre (§3.9)', async () => {
     loginMock.mockRejectedValue(
       new ApiError(401, {

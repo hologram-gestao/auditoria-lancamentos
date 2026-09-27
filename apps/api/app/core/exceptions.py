@@ -648,6 +648,20 @@ class MappingTargetInUseError(ConflictError):
     )
 
 
+class CannotResetOwnPasswordError(ConflictError):
+    """409 — a plataforma tentou redefinir a PRÓPRIA senha por `/users/{id}/password`.
+
+    A rota de redefinição (86e3ewukz) é o caminho de suporte e emergência, sem a
+    prova da senha atual. Redefinir a própria senha por aqui pularia essa prova
+    (o fluxo da 86e2n39hg, quando existir): orienta em vez de aceitar.
+    """
+
+    default_user_message = (
+        "Esta ação redefine a senha de OUTRA pessoa. Para trocar a sua própria senha, "
+        "use a troca de senha da sua conta."
+    )
+
+
 class OrganizationNotFoundError(NotFoundError):
     """404 — organização inexistente (camada de organizações)."""
 

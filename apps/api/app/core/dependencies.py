@@ -45,7 +45,7 @@ from app.core.exceptions import (
     NotFoundError,
     UnauthorizedError,
 )
-from app.core.security import TOKEN_TYPE_ACCESS, decode_token
+from app.core.security import TOKEN_TYPE_ACCESS, decode_token, token_predates_password_change
 from app.db.models import Client
 from app.db.session import get_db_session
 from app.modules.auth.repository import AuthRepository
@@ -98,6 +98,11 @@ async def get_current_user(
     if ctx is None or not ctx.user.active or ctx.organization_active is False:
         # Mensagem única para os três casos: não vazar se a conta existe, está
         # desativada, ou se a organização inteira foi suspensa.
+        raise UnauthorizedError("Sessão expirou ou usuário inativo.")
+    # 86e3ewukz: senha redefinida pela plataforma derruba as sessões abertas —
+    # token emitido antes de `password_changed_at` é recusado, com a MESMA
+    # mensagem (o front trata 401 UNAUTHORIZED indo para o login).
+    if token_predates_password_change(payload.iat, ctx.user.password_changed_at):
         raise UnauthorizedError("Sessão expirou ou usuário inativo.")
 
     user = ctx.user
@@ -296,6 +301,9 @@ ManageAnomalyTypesDep = Annotated[
     CurrentUser, Depends(require_permission(Permission.MANAGE_ANOMALY_TYPES))
 ]
 ManagePlatformDep = Annotated[CurrentUser, Depends(require_permission(Permission.MANAGE_PLATFORM))]
+ResetUserPasswordDep = Annotated[
+    CurrentUser, Depends(require_permission(Permission.RESET_USER_PASSWORD))
+]
 RunAlertTestDep = Annotated[CurrentUser, Depends(require_permission(Permission.RUN_ALERT_TEST))]
 ManageClientConnectionsDep = Annotated[
     CurrentUser, Depends(require_permission(Permission.MANAGE_CLIENT_CONNECTIONS))

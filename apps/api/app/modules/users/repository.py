@@ -145,6 +145,18 @@ class UserRepository:
         result = await self._session.execute(select(User).where(User.id == user_id))
         return result.scalar_one_or_none()
 
+    async def is_client_closed(self, client_id: UUID) -> bool:
+        """`True` se o tenant do alvo foi ENCERRADO (86e36pm1z): toda escrita é 409.
+
+        Usado pela redefinição de senha (86e3ewukz): o guard de rota é a
+        permissão da plataforma, e o alvo é por PK — não há `OpenClientDep` no
+        caminho, então a regra do encerrado é conferida aqui.
+        """
+        closed_at = (
+            await self._session.execute(select(Client.closed_at).where(Client.id == client_id))
+        ).scalar_one_or_none()
+        return closed_at is not None
+
     async def get_staff_by_id(self, user_id: UUID, *, viewer: CurrentUser) -> StaffRow | None:
         """Usuário de STAFF alvo, **da organização do observador** — anti-IDOR.
 

@@ -97,6 +97,9 @@ _TABLE: dict[Permission, tuple[bool, bool, bool, bool, bool]] = {
     # de uma organização editaria o catálogo que as outras usam.
     Permission.MANAGE_ANOMALY_TYPES: (True, False, False, False, False),
     Permission.MANAGE_PLATFORM: (True, False, False, False, False),
+    # 86e3ewukz: redefinir a senha de qualquer usuário é suporte da PLATAFORMA; o
+    # admin da própria organização do alvo também é ❌.
+    Permission.RESET_USER_PASSWORD: (True, False, False, False, False),
     Permission.RUN_ALERT_TEST: (True, True, False, False, False),
     # S9 (BACK 09.3): conectar/testar/alterar/remover ORIGEM do cliente. O
     # `manager` entra (ele cria cliente e precisa conectar a origem dele — a

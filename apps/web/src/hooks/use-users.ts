@@ -15,10 +15,12 @@ import {
   createUser,
   deactivateUser,
   listUsers,
+  resetUserPassword,
   transferUser,
   updateUser,
   type CreateUserPayload,
   type ListUsersParams,
+  type ResetPasswordPayload,
   type TransferUserPayload,
   type UpdateUserPayload,
   type User,
@@ -94,5 +96,16 @@ export function useTransferUser(id: string) {
       void qc.invalidateQueries({ queryKey: organizationsKeys.all });
       void qc.invalidateQueries({ queryKey: clientsKeys.all });
     },
+  });
+}
+
+/**
+ * Redefinição de senha pela plataforma (86e3ewukz). Não invalida lista nenhuma:
+ * nada do que a tela mostra muda (a senha não é dado de tela), e o efeito é do
+ * lado do alvo (sessões derrubadas).
+ */
+export function useResetUserPassword(id: string) {
+  return useMutation<void, Error, ResetPasswordPayload>({
+    mutationFn: (payload) => resetUserPassword(id, payload),
   });
 }

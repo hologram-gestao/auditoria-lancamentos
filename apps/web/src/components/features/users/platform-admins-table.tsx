@@ -25,8 +25,11 @@
 
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { KeyRound } from 'lucide-react';
 
+import type { ResetPasswordTarget } from '@/components/features/users/reset-password-dialog';
 import { UserStatusBadge } from '@/components/features/users/user-badges';
+import { Button } from '@/components/ui/button';
 import {
   Table,
   TableBody,
@@ -44,11 +47,23 @@ import { usePlatformAdminsList } from '@/hooks/use-organizations';
 // Mesmo desencontro deliberado de `client-managers-section`.
 export const NOME_DA_REGIAO = 'Lista de administradores da plataforma';
 
-const COL_COUNT = 4;
+const COL_COUNT = 5;
 
-export function PlatformAdminsTable() {
+/**
+ * `onResetPassword` (86e3ewukz): a ÚNICA ação da linha, e só para quem tem
+ * `reset_user_password` (quem chama decide; sem a callback, a coluna nem existe).
+ * A própria conta fica de fora: o servidor responde 409 para ela.
+ */
+export function PlatformAdminsTable({
+  currentUserId,
+  onResetPassword,
+}: {
+  currentUserId: string;
+  onResetPassword?: (target: ResetPasswordTarget) => void;
+}) {
   const { data, isLoading, isError } = usePlatformAdminsList();
   const rows = data ?? [];
+  const columnCount = onResetPassword ? COL_COUNT : COL_COUNT - 1;
 
   return (
     <div className="space-y-3">
@@ -69,13 +84,18 @@ export function PlatformAdminsTable() {
               <TableHead>E-mail</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Cadastrado em</TableHead>
+              {onResetPassword && (
+                <TableHead>
+                  <span className="sr-only">Ações</span>
+                </TableHead>
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <TableRow>
                 <TableCell
-                  colSpan={COL_COUNT}
+                  colSpan={columnCount}
                   className="text-muted-foreground py-10 text-center text-sm"
                 >
                   Carregando...
@@ -84,7 +104,7 @@ export function PlatformAdminsTable() {
             ) : isError ? (
               <TableRow>
                 <TableCell
-                  colSpan={COL_COUNT}
+                  colSpan={columnCount}
                   className="text-destructive py-10 text-center text-sm"
                 >
                   Não foi possível carregar os administradores da plataforma.
@@ -93,7 +113,7 @@ export function PlatformAdminsTable() {
             ) : rows.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={COL_COUNT}
+                  colSpan={columnCount}
                   className="text-muted-foreground py-10 text-center text-sm"
                 >
                   Nenhum administrador da plataforma cadastrado.
@@ -116,6 +136,27 @@ export function PlatformAdminsTable() {
                   <TableCell className="text-muted-foreground whitespace-nowrap text-sm">
                     {format(new Date(admin.created_at), "dd 'de' MMM 'de' yyyy", { locale: ptBR })}
                   </TableCell>
+                  {onResetPassword && (
+                    <TableCell className="text-right">
+                      {admin.id !== currentUserId && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() =>
+                            onResetPassword({
+                              id: admin.id,
+                              name: admin.name,
+                              email: admin.email,
+                              scope: 'platform',
+                            })
+                          }
+                          aria-label={`Redefinir senha de ${admin.name}`}
+                        >
+                          <KeyRound className="h-4 w-4" aria-hidden="true" />
+                        </Button>
+                      )}
+                    </TableCell>
+                  )}
                 </TableRow>
               ))
             )}

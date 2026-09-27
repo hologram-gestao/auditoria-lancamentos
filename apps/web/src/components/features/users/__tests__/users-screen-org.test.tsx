@@ -44,6 +44,7 @@ let lastQueryParams: Record<string, unknown> | undefined;
 let lastListEnabled: boolean | undefined;
 const createMock = vi.fn();
 const transferMock = vi.fn();
+const resetPasswordMock = vi.fn();
 
 vi.mock('@/hooks/use-users', () => ({
   useUsersList: (params: Record<string, unknown>, options?: { enabled?: boolean }) => {
@@ -54,6 +55,11 @@ vi.mock('@/hooks/use-users', () => ({
   useCreateUser: () => ({ mutateAsync: createMock, isPending: false, reset: vi.fn() }),
   useUpdateUser: () => ({ mutateAsync: vi.fn(), isPending: false, reset: vi.fn() }),
   useTransferUser: () => ({ mutateAsync: transferMock, isPending: false, reset: vi.fn() }),
+  useResetUserPassword: () => ({
+    mutateAsync: resetPasswordMock,
+    isPending: false,
+    reset: vi.fn(),
+  }),
   useActivateUser: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDeactivateUser: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
@@ -311,6 +317,113 @@ describe('UserRoleBadge — rótulo por papel, não "admin ou o resto"', () => {
   });
 });
 
+describe('Redefinir senha (86e3ewukz) — só a plataforma', () => {
+  beforeEach(() => {
+    resetPasswordMock.mockReset();
+  });
+
+  it('a plataforma vê a ação em cada staff e o diálogo manda só a senha', async () => {
+    authState.user = PLATFORM;
+    resetPasswordMock.mockResolvedValue(undefined);
+    const ui = userEvent.setup();
+    render(<UsersPage />);
+
+    await ui.click(screen.getByRole('button', { name: 'Redefinir senha de Bruna R.' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Redefinir senha' });
+    expect(dialog).toHaveTextContent('Bruna R.');
+    expect(dialog).toHaveTextContent(/desconectada de todos os acessos/);
+    // Staff: mínimo 8.
+    expect(dialog).toHaveTextContent(/Pelo menos 8 caracteres/);
+
+    // Confirmação que não bate: erro no campo, nada enviado.
+    await ui.type(within(dialog).getByLabelText('Senha nova'), 'Senh@Nova#123');
+    await ui.type(within(dialog).getByLabelText('Confirmar senha nova'), 'outra');
+    await ui.click(within(dialog).getByRole('button', { name: 'Redefinir senha' }));
+    expect(await within(dialog).findByText('As senhas não conferem.')).toBeVisible();
+    expect(resetPasswordMock).not.toHaveBeenCalled();
+
+    await ui.clear(within(dialog).getByLabelText('Confirmar senha nova'));
+    await ui.type(within(dialog).getByLabelText('Confirmar senha nova'), 'Senh@Nova#123');
+    await ui.click(within(dialog).getByRole('button', { name: 'Redefinir senha' }));
+    await waitFor(() =>
+      expect(resetPasswordMock).toHaveBeenCalledWith({ password: 'Senh@Nova#123' }),
+    );
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+    expect(toastSuccess).toHaveBeenCalledWith(
+      'Senha redefinida. Os acessos abertos dessa pessoa foram encerrados.',
+    );
+  });
+
+  it('senha curta para staff é barrada no formulário (mínimo 8)', async () => {
+    authState.user = PLATFORM;
+    const ui = userEvent.setup();
+    render(<UsersPage />);
+    await ui.click(screen.getByRole('button', { name: 'Redefinir senha de Bruna R.' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Redefinir senha' });
+    await ui.type(within(dialog).getByLabelText('Senha nova'), '1234567');
+    await ui.type(within(dialog).getByLabelText('Confirmar senha nova'), '1234567');
+    await ui.click(within(dialog).getByRole('button', { name: 'Redefinir senha' }));
+    expect(
+      await within(dialog).findByText('A senha precisa ter pelo menos 8 caracteres.'),
+    ).toBeVisible();
+    expect(resetPasswordMock).not.toHaveBeenCalled();
+  });
+
+  it('o erro do servidor vira toast com a userMessage (409 da própria senha, por exemplo)', async () => {
+    authState.user = PLATFORM;
+    resetPasswordMock.mockRejectedValue(
+      new ApiError(409, {
+        code: 'CONFLICT',
+        message: 'x',
+        userMessage: 'Esta ação redefine a senha de OUTRA pessoa.',
+      }),
+    );
+    const ui = userEvent.setup();
+    render(<UsersPage />);
+    await ui.click(screen.getByRole('button', { name: 'Redefinir senha de Bruna R.' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Redefinir senha' });
+    await ui.type(within(dialog).getByLabelText('Senha nova'), 'Senh@Nova#123');
+    await ui.type(within(dialog).getByLabelText('Confirmar senha nova'), 'Senh@Nova#123');
+    await ui.click(within(dialog).getByRole('button', { name: 'Redefinir senha' }));
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith('Esta ação redefine a senha de OUTRA pessoa.'),
+    );
+    // O diálogo fica aberto para a pessoa ler o erro e decidir.
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+  });
+
+  it('o admin da organização NÃO vê a ação: a célula é só da plataforma', () => {
+    authState.user = ORG_ADMIN;
+    render(<UsersPage />);
+    expect(screen.getByRole('table')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Redefinir senha de/ })).toBeNull();
+  });
+
+  it('na aba da plataforma há a ação em cada par, menos na própria conta', () => {
+    authState.user = PLATFORM;
+    currentSearch = 'tab=plataforma';
+    platformAdminsState.data = [
+      {
+        id: 'plat',
+        name: 'Plataforma',
+        email: 'plataforma@hologram.com.br',
+        active: true,
+        created_at: '2026-09-18T12:00:00Z',
+      },
+      {
+        id: 'plat-2',
+        name: 'Laio S.',
+        email: 'laio@hologramgestao.com',
+        active: false,
+        created_at: '2026-09-18T12:00:00Z',
+      },
+    ];
+    render(<UsersPage />);
+    expect(screen.getByRole('button', { name: 'Redefinir senha de Laio S.' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Redefinir senha de Plataforma' })).toBeNull();
+  });
+});
+
 describe('Transferir de organização (86e3bvbfx) — só a plataforma', () => {
   async function abrirEdicaoDe(ui: ReturnType<typeof userEvent.setup>, nome: string) {
     await ui.click(screen.getByRole('button', { name: `Editar ${nome}` }));
@@ -443,11 +556,13 @@ describe('Administradores da plataforma — aba própria, só para a plataforma 
     expect(within(lista).getByText('Ativo')).toBeVisible();
     // Os dois foram promovidos no mesmo dia: a data aparece duas vezes.
     expect(within(lista).getAllByText('18 de set de 2026')).toHaveLength(2);
-    // SÓ-LEITURA por construção: `PATCH /users/{id}` responde 404 para linha
-    // de plataforma, e promover ou despromover é só pelo script. Nem coluna
-    // de ações, nem "Novo Usuário" nesta aba — botão aqui seria ação que o
-    // servidor nega (§4.9).
-    expect(within(lista).queryAllByRole('button')).toHaveLength(0);
+    // `PATCH /users/{id}` responde 404 para linha de plataforma, e promover ou
+    // despromover é só pelo script: nem editar, nem desativar, nem "Novo
+    // Usuário" nesta aba — botão aqui seria ação que o servidor nega (§4.9). A
+    // ÚNICA ação da linha é redefinir a senha (86e3ewukz), para os pares que
+    // não são a própria conta (aqui os dois: o observador é 'plat', outro id).
+    expect(within(lista).queryAllByRole('button')).toHaveLength(2);
+    expect(within(lista).queryAllByRole('button', { name: /^Redefinir senha de/ })).toHaveLength(2);
     expect(screen.queryByRole('button', { name: 'Novo Usuário' })).not.toBeInTheDocument();
     expect(screen.queryByText('Bruna R.')).not.toBeInTheDocument();
     // A lista de staff não é consultada nesta aba.

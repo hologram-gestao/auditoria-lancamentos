@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 **S0–S19 + Sprints 0–5 do agents-hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **97/97** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **99/99** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
 > **O que cada sprint do agents-hub entregou** (todas na `main`):
 >
@@ -113,7 +113,7 @@
 9. **Nunca** retorne "senha incorreta" ou "email não existe" separadamente no login — resposta genérica "E-mail ou senha incorretos".
 10. **Nunca** faça upload de arquivo para disco. Processar em memória e descartar.
 11. **Nunca** permita que manager veja cliente fora da própria carteira. Sempre validar `client_assignments` — **qualquer** linha `(client_id, user_id)` concede acesso, responsável ou colaborador (§4.13).
-12. **Nunca** confie em token JWT sem revalidar `users.active = true` no DB (middleware) — usuário desativado perde acesso instantaneamente.
+12. **Nunca** confie em token JWT sem revalidar `users.active = true` no DB (middleware) — usuário desativado perde acesso instantaneamente. A mesma leitura confere `users.password_changed_at` (86e3ewukz): token com `iat` anterior à última redefinição de senha pela plataforma é recusado, no access e no refresh — redefinir a senha DERRUBA as sessões abertas do alvo, que entra de novo com a senha nova. Quem for fazer revogação de sessão sem troca de senha (86e3anx4u) reusa essa coluna e esse check.
 13. **Nunca leia, edite ou cite o conteúdo de arquivos `.env`, `.env.local`,
     `.env.production`, `.env.*` ou qualquer outro arquivo que contenha
     segredos reais.** Vale para qualquer ferramenta (Read, Edit, Bash com
@@ -192,7 +192,7 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**98** hoje — o arquivo é a fonte, confira com
+      (**99** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant E cross-org**: a bateria
       (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
@@ -200,7 +200,7 @@
       organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
-      (`PENDING_ENDPOINTS` está vazio: cobertura **98/98**). As 3 rotas do
+      (`PENDING_ENDPOINTS` está vazio: cobertura **99/99**). As 3 rotas do
       **plano de contas** (S10) e as 3 da **carteira de títulos** (S11 — lista,
       agregados e sincronizar) e as 3 da S15 (relatório de recebíveis, leitura e
       registro do contexto do título) entraram como coleção; as 20 da S12 também:
@@ -208,7 +208,8 @@
       catálogo de destinos e alvos (`/mapping-destinations`, por ORGANIZAÇÃO — o
       alvo atacado na bateria é de uma terceira org, porque o operador lê o
       catálogo da própria) e 11 do de-para (`/clients/{id}/mapping/{tipo}/…`), mais
-      a lista de materializações do follow-up 86e3f0ux7. Só
+      a lista de materializações do follow-up 86e3f0ux7, e a redefinição de senha pela
+      plataforma (`POST /users/{id}/password`, 86e3ewukz). Só
       auth, tipos de anomalia, `test-connection`, `alert-test` e as 5 rotas de
       `/organizations` (plataforma, sem dado de cliente) ficam fora, com motivo.
       Essa lista é o denominador da métrica de isolamento — endpoint fora dela é
@@ -391,7 +392,7 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
 9. **Matriz de permissões (Sprint 5 + camada de organizações):** declarativa e
    ÚNICA em `PERMISSION_MATRIX`
    ([apps/api/app/core/authz.py](apps/api/app/core/authz.py)), consultada por
-   `has_permission`; 23 permissões x 5 papéis, transcrita célula a célula em
+   `has_permission`; 24 permissões x 5 papéis, transcrita célula a célula em
    `tests/unit/test_authz_matrix.py`, com um teste que trava **a plataforma em
    toda linha**. No front, o espelho é `apps/web/src/lib/authz.ts` — **um**
    helper, nunca `if (role === ...)` espalhado por componente — com a mesma
@@ -427,6 +428,7 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    | Sincronizar movimentos (S12)    | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
    | Editar o de-para (S12)          | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
    | Catálogo de destinos (escrita)  | ✅             | ✅ (própria org) | ❌                    | ❌             | ❌              |
+   | Redefinir senha de usuário      | ✅             | ❌               | ❌                    | ❌             | ❌              |
 
    **`manage_client_connections` (Sprint 9) inclui o `manager` de propósito**: ele
    cria cliente, e sem a célula o gerente do escritório parceiro cadastraria a
@@ -467,6 +469,14 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    escrevendo nela mudaria o de-para dos outros tenants; a leitura do catálogo é
    de quem pertence à org (ADR-074-BE, decisão do planejador pendente de validação
    humana).
+
+   **Redefinir senha de usuário (86e3ewukz) é só da plataforma, de propósito**: é
+   suporte e emergência (`POST /users/{id}/password`), alcança staff de qualquer
+   organização e usuário de qualquer cliente, e o admin da PRÓPRIA organização do alvo
+   é ❌ — não é gestão da organização, é acesso de suporte. Nunca a própria senha (409
+   tipado: esse é o fluxo da troca da própria senha, 86e2n39hg, que pede a senha atual).
+   O mínimo da senha é o do TIPO do alvo (8 staff, 10 usuário de cliente), das mesmas
+   constantes da criação. Redefinir derruba as sessões abertas do alvo (§3.12).
 
    "(carteira)" e "(própria org)" **não** são células: são `resolve_client_access`
    e os filtros de coleção. **Tipos de anomalia é a única linha só-plataforma
@@ -997,6 +1007,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.54 — 26/09/2026. **A plataforma redefine a senha de qualquer usuário e isso derruba as sessões dele (86e3ewukz), e a tela de login diz o que fazer a quem esqueceu a senha (86e2u5140).** Até aqui não havia caminho nenhum para trocar senha depois do cadastro, nem revogação de sessão: numa conta comprometida, o invasor seguiria dentro por até 7 dias. Nasceram `POST /users/{id}/password` (lista canônica 98 → **99**, com os três atacantes), a permissão `reset_user_password` (matriz 23 → **24**, só plataforma; o admin da própria organização do alvo é ❌ porque é suporte, não gestão), `users.password_changed_at` (migration reversível) e a regra do §3.12: `get_current_user` e o refresh recusam token com `iat` anterior ao carimbo — comparação em segundos inteiros, porque `iat` é inteiro e `<=` recusaria o login feito no mesmo segundo da redefinição. O mínimo da senha é o do TIPO do alvo (8 staff, 10 usuário de cliente), das constantes da criação (`STAFF_MIN_PASSWORD_LENGTH`, `CLIENT_USER_MIN_PASSWORD_LENGTH`); a própria senha é 409 tipado; tenant encerrado é 409; a senha nunca entra em log, resposta nem no evento `senha_redefinida_pela_plataforma` (só IDs e o escopo do alvo). Na tela, a ação "Redefinir senha" (só `reset_user_password`) vive na lista de staff, na aba de administradores da plataforma (que deixou de ser "sem ação nenhuma": esta é a única) e na lista de usuários do cliente, num `AlertDialog` com confirmação e o aviso de que os acessos abertos serão encerrados. Decisões pendentes da task, fechadas como recomendado: outro administrador da plataforma pode ser alvo; a plataforma digita a senha; forçar a troca no próximo login fica para quando a 86e2n39hg existir. O login ganhou a linha "Esqueceu a senha? Fale com o administrador da sua conta", genérica de propósito (§3.9)._
 
 _Versão 1.53 — 26/09/2026. **A carteira deixou de encher a janela: a página rola, a tabela não, e o cabeçalho gruda (86e3eq9uy, fecho do épico 86e3eq9un).** O padrão `<Table fill>` deixava 2 ou 3 linhas visíveis num notebook (cabeçalho do cliente, abas, dois cards de totais e quatro filtros ficavam fixos acima). Nasceu o segundo padrão de altura no primitivo (`<Table stickyHeader="page">` + `<TableCard pageScroll>`), opt-in e só na carteira: altura natural, quem rola é o `<main>`, cabeçalho `sticky` de `xl` para cima, wrapper e card com `overflow-clip` (porque `sticky` gruda no scroller mais próximo e `overflow-hidden` também é scroller), abaixo de `xl` o comportamento de sempre (em 1024px as sete colunas não cabem, e cortar coluna em silêncio é pior que não grudar). Os sete valores de cada card de totais viraram botões que filtram pela URL (tabela `summaryFilterParams`, fonte única; "Em aberto" leva `situation=em_aberto` para o total da paginação bater com o card; ativo = `aria-pressed` + `accent`, com TODO o texto em `accent-foreground` para não criar par sem teste), com desfazer no segundo clique; Situação e Balde saíram da barra (os parâmetros ficam, link antigo funciona e vira etiqueta removível); Tipo virou grupo de botões; linha de sete colunas mais baixa, com "Contexto" visível e clique na linha abrindo a gaveta (sem `tabIndex`/`role` no `<tr>`); "Ações do cliente" virou menu `modal={false}` no shell, só com Editar e Encerrar, com o diálogo aberto em `onCloseAutoFocus` (na tarefa seguinte) para nunca haver dois overlays, e `DialogContent`/`AlertDialogContent` passaram a devolver o foco a quem o tinha ao abrir, capturado por `OpenerCapture`, filho do conteúdo (o Radix devolve só ao `DialogTrigger`, que um diálogo aberto por estado não tem, e `onOpenAutoFocus` nem dispara quando um campo com `autoFocus` já puxou o foco); o `th` grudado desconta o padding do `<main>` por `--page-scroll-padding`; "Atualizado em" ao lado de sincronizar; `DEFAULT_PAGE_SIZE` 50; "aging" saiu do texto visível. Regra na §7 Frontend, na skill `front-gate` §1 e no `.claude/design-system.md`. De quebra, o rodapé da v1.48 e a skill §4 deixaram de tratar o hover da célula de qualificação como achado: botão só de ícone, limite 3:1, passa._
 
