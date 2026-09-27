@@ -815,6 +815,21 @@ class OmieServerError(AppError):
     default_user_message = "O Omie está com instabilidade no momento. Tente novamente em instantes."
 
 
+class OmieOfflineError(OmieServerError):
+    """502 — a API do Omie está FORA DO AR (manutenção), e diz isso.
+
+    Caso real de 27/09/2026: todo endpoint respondia `418` com o corpo
+    `{"status": "418", "message": "API OFFLINE"}`. Não é 5xx, então caía em
+    "status inesperado" (`OmieFaultError`, "Ocorreu um erro ao acessar o Omie")
+    e a tela não sabia dizer que o problema era do Omie. Subclasse de
+    `OmieServerError` de propósito: quem já trata "instabilidade" trata isto
+    também, e quem repassa `exc.user_message` ganha a mensagem certa. Não há
+    retry: fora do ar não passa em 30 s.
+    """
+
+    default_user_message = "O Omie está fora do ar neste momento. Tente novamente mais tarde."
+
+
 class OmieFaultError(AppError):
     """502 — Omie retornou `faultstring` não relacionado a autenticação."""
 
