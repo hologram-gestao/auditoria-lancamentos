@@ -185,6 +185,16 @@ const MATRIX: ReadonlyArray<{
     clientManager: false,
     clientOperator: false,
   },
+  // 86e3ewukz: redefinir a senha de qualquer usuário é suporte da PLATAFORMA; o
+  // admin da própria organização do alvo também é ❌.
+  {
+    permission: 'reset_user_password',
+    platform: true,
+    admin: false,
+    manager: false,
+    clientManager: false,
+    clientOperator: false,
+  },
   {
     permission: 'run_alert_test',
     platform: true,

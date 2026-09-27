@@ -70,6 +70,8 @@ export type SystemUserRole = Schemas['SystemUserRole'];
 export type UserResponse = Schemas['UserResponse'];
 /** Body de `POST /users/{id}/transfer` — só plataforma (86e3bvbfx). */
 export type TransferUserRequest = Schemas['TransferUserRequest'];
+/** Body de `POST /users/{id}/password` (86e3ewukz): só a senha nova; só a plataforma. */
+export type ResetPasswordRequest = Schemas['ResetPasswordRequest'];
 
 // ---------------------------------------------------------------------------
 // Organizações — camada multi-BPO (épico 86e36ec0q)

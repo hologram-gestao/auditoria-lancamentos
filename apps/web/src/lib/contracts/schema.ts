@@ -170,6 +170,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/{user_id}/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Redefine a senha de QUALQUER usuário e derruba as sessões dele (só plataforma).
+         * @description Suporte e emergência (86e3ewukz): staff de qualquer organização, usuário de
+         *     qualquer cliente ou outro administrador da plataforma; nunca a própria senha
+         *     (409). Usuário de cliente encerrado é 409; inexistente, 404. A senha nova
+         *     passa a valer já; todo access e refresh emitidos antes deixam de valer no
+         *     request seguinte (`users.password_changed_at`). Resposta 204 sem corpo: nada
+         *     da senha volta, nem em log nem em evento.
+         */
+        post: operations["reset_user_password_api_v1_users__user_id__password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clients/{client_id}/users": {
         parameters: {
             query?: never;
@@ -4730,6 +4755,24 @@ export interface components {
             user: components["schemas"]["AuthenticatedUser"];
         };
         /**
+         * ResetPasswordRequest
+         * @description Body de POST /api/v1/users/{user_id}/password — só a plataforma.
+         *
+         *     O mínimo aqui é o de STAFF (8); o de usuário de cliente (10) depende do
+         *     ALVO, que o schema não conhece — o serviço aplica
+         *     `CLIENT_USER_MIN_PASSWORD_LENGTH` quando o alvo é `scope='client'`, e a
+         *     recusa é o 400 genérico de validação, como aqui. `extra="forbid"`: campo
+         *     desconhecido é 422, nunca ignorado. A senha só existe em request (nunca em
+         *     response, log ou evento): o redactor do structlog mascara a chave `password`.
+         */
+        ResetPasswordRequest: {
+            /**
+             * Password
+             * @description Senha nova em texto plano. Mínimo de 8 para staff e 10 para usuário de cliente; hash bcrypt (cost ≥12).
+             */
+            password: string;
+        };
+        /**
          * ResolveAnomalyRequest
          * @description Body do PATCH /api/v1/reconciliations/{id}/anomalies/{anomaly_id}.
          *
@@ -5850,6 +5893,41 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["UserResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_user_password_api_v1_users__user_id__password_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

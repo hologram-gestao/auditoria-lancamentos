@@ -30,6 +30,13 @@ if TYPE_CHECKING:
     from app.db.models import User
 
 
+#: Mínimo de senha de STAFF (plataforma e organização). Fonte única: a criação e a
+#: redefinição pela plataforma (86e3ewukz) leem daqui.
+STAFF_MIN_PASSWORD_LENGTH = 8
+#: Teto comum: o bcrypt trunca em 72 bytes; acima disso é só custo de request.
+MAX_PASSWORD_LENGTH = 128
+
+
 class CreateUserRequest(BaseModel):
     """Body de POST /api/v1/users — cria staff da organização."""
 
@@ -37,8 +44,8 @@ class CreateUserRequest(BaseModel):
     email: EmailStr = Field(..., description="E-mail único de login.")
     password: str = Field(
         ...,
-        min_length=8,
-        max_length=128,
+        min_length=STAFF_MIN_PASSWORD_LENGTH,
+        max_length=MAX_PASSWORD_LENGTH,
         description="Senha inicial em texto plano (bcrypt cost ≥12).",
     )
     role: SystemUserRole = Field(..., description="Perfil: admin ou manager.")
@@ -162,7 +169,7 @@ class CreateClientUserRequest(BaseModel):
     password: str = Field(
         ...,
         min_length=CLIENT_USER_MIN_PASSWORD_LENGTH,
-        max_length=128,
+        max_length=MAX_PASSWORD_LENGTH,
         description=(
             f"Senha inicial definida pelo gerente do cliente. Mínimo de "
             f"{CLIENT_USER_MIN_PASSWORD_LENGTH} caracteres; hash bcrypt (cost ≥12)."
@@ -205,3 +212,32 @@ class ClientUserListResponse(BaseModel):
 
     data: list[ClientUserResponse]
     pagination: PaginationMeta
+
+
+# ----------------------------------------------------------------------
+# Redefinição de senha pela PLATAFORMA (86e3ewukz)
+# ----------------------------------------------------------------------
+
+
+class ResetPasswordRequest(BaseModel):
+    """Body de POST /api/v1/users/{user_id}/password — só a plataforma.
+
+    O mínimo aqui é o de STAFF (8); o de usuário de cliente (10) depende do
+    ALVO, que o schema não conhece — o serviço aplica
+    `CLIENT_USER_MIN_PASSWORD_LENGTH` quando o alvo é `scope='client'`, e a
+    recusa é o 400 genérico de validação, como aqui. `extra="forbid"`: campo
+    desconhecido é 422, nunca ignorado. A senha só existe em request (nunca em
+    response, log ou evento): o redactor do structlog mascara a chave `password`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    password: str = Field(
+        ...,
+        min_length=STAFF_MIN_PASSWORD_LENGTH,
+        max_length=MAX_PASSWORD_LENGTH,
+        description=(
+            f"Senha nova em texto plano. Mínimo de {STAFF_MIN_PASSWORD_LENGTH} para staff e "
+            f"{CLIENT_USER_MIN_PASSWORD_LENGTH} para usuário de cliente; hash bcrypt (cost ≥12)."
+        ),
+    )

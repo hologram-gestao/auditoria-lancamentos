@@ -41,10 +41,11 @@ NUNCA armazenar senha em claro nem retornar `password_hash` em response.
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from sqlalchemy import Boolean, CheckConstraint, ForeignKey, String, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, String, text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -154,6 +155,16 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         default=UserRole.MANAGER.value,
     )
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # --- Revogação de sessão (86e3ewukz) -------------------------------------
+    # Carimbo da última redefinição de senha pela plataforma. `get_current_user`
+    # e o refresh recusam token com `iat` anterior a ele: é o que faz a
+    # redefinição EXPULSAR quem já estava dentro (numa conta comprometida, o
+    # invasor seguiria por até 7 dias só com a senha trocada). NULL = nunca
+    # redefinida. Quem for fazer a revogação de sessão sem troca de senha
+    # (86e3anx4u) reusa ESTA coluna e ESTE check — não nasce um segundo.
+    password_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
 
     # --- Tenancy (Sprint 5 / R1) -------------------------------------------
     # `server_default`: usuários criados por caminhos que não passam pelo ORM

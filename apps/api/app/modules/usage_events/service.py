@@ -45,6 +45,7 @@ from app.modules.usage_events.schemas import (
     PlanoContasSincronizadoProps,
     QualificacaoEmitidaProps,
     RecebiveisClassificadosProps,
+    SenhaRedefinidaPelaPlataformaProps,
     UsageEventName,
     UsuarioTransferidoDeOrganizacaoProps,
 )
@@ -549,6 +550,25 @@ class UsageEventService:
             UsageEventName.ORGANIZACAO_DESATIVADA,
             props=OrganizacaoDesativadaProps(
                 organization_id=organization_id, n_usuarios=n_usuarios, n_clientes=n_clientes
+            ).model_dump(mode="json"),
+        )
+
+    async def emit_senha_redefinida_pela_plataforma(
+        self,
+        *,
+        actor_user_id: UUID,
+        target_user_id: UUID,
+        target_scope: str,
+    ) -> bool:
+        """86e3ewukz — a plataforma redefiniu a senha de alguém. Só IDs; sem `session_id`."""
+        return await self.emit(
+            UsageEventName.SENHA_REDEFINIDA_PELA_PLATAFORMA,
+            props=SenhaRedefinidaPelaPlataformaProps.model_validate(
+                {
+                    "actor_user_id": actor_user_id,
+                    "target_user_id": target_user_id,
+                    "target_scope": target_scope,
+                }
             ).model_dump(mode="json"),
         )
 

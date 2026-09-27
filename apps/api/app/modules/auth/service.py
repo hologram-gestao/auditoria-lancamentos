@@ -23,6 +23,7 @@ from app.core.security import (
     create_refresh_token,
     decode_token,
     hash_password,
+    token_predates_password_change,
     verify_password,
 )
 from app.db.models import UserRole, UserScope
@@ -130,6 +131,10 @@ class AuthService:
         if ctx is None or not ctx.user.active or ctx.organization_active is False:
             # User foi deletado/desativado (ou a organização suspensa) depois do
             # refresh ser emitido — bloqueia.
+            raise UnauthorizedError("Sessão expirada. Faça login novamente.")
+        # 86e3ewukz: refresh emitido antes da redefinição de senha não renova
+        # nada — a sessão antiga morre inteira, access e refresh.
+        if token_predates_password_change(payload.iat, ctx.user.password_changed_at):
             raise UnauthorizedError("Sessão expirada. Faça login novamente.")
 
         # Reemite a partir da LINHA atual: se o admin mudou o tenant/escopo/org
