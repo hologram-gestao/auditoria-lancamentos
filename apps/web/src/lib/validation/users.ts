@@ -59,3 +59,25 @@ export const transferUserSchema = z.object({
 });
 
 export type TransferUserFormValues = z.infer<typeof transferUserSchema>;
+
+/**
+ * Redefinição de senha pela plataforma (86e3ewukz). O mínimo é do TIPO do alvo
+ * (8 staff, 10 usuário de cliente), as mesmas regras da criação; a confirmação
+ * é só da tela (o servidor recebe uma senha).
+ */
+export function makeResetPasswordSchema(minLength: number) {
+  return z
+    .object({
+      password: z
+        .string()
+        .min(minLength, `A senha precisa ter pelo menos ${minLength} caracteres.`)
+        .max(128, 'Senha muito longa (máx. 128).'),
+      confirm: z.string(),
+    })
+    .refine((values) => values.password === values.confirm, {
+      message: 'As senhas não conferem.',
+      path: ['confirm'],
+    });
+}
+
+export type ResetPasswordFormValues = z.infer<ReturnType<typeof makeResetPasswordSchema>>;

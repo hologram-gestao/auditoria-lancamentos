@@ -14,7 +14,11 @@
  *   - Senha com toggle de visibilidade (ícone de olho).
  *   - Em sucesso: setUser no Zustand + redireciona para /clientes (server-side via router.replace).
  *   - Em erro: mensagem inline genérica; PT-BR.
- *   - Sem link de "esqueci senha" (admin reseta).
+ *   - Sem link de "esqueci senha" (decisão registrada: não há provedor de e-mail
+ *     decidido, CLAUDE.md §10). Em vez do link, uma linha abaixo do formulário
+ *     diz o que fazer (86e2u5140): falar com o administrador da conta, que pode
+ *     redefinir a senha pela plataforma (86e3ewukz). O texto é GENÉRICO de
+ *     propósito — não confirma cadastro nenhum (§3.9), então vale antes do erro.
  */
 
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -156,6 +160,12 @@ export default function LoginPage() {
             )}
           </form>
         </Form>
+        {/* 86e2u5140: o caminho de recuperação vigente, visível ANTES do erro (o
+            erro é genérico e não ajuda a pessoa a se localizar). Sem revelar se
+            um e-mail existe: a instrução é a mesma para qualquer pessoa. */}
+        <p className="text-muted-foreground mt-6 text-center text-sm" data-testid="login-help">
+          Esqueceu a senha? Fale com o administrador da sua conta: ele pode redefini-la para você.
+        </p>
       </div>
     </div>
   );

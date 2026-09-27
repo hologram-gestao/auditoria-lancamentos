@@ -211,6 +211,13 @@ class Permission(StrEnum):
     #: admin-only: o `manager` do escritório parceiro constrói a carteira e
     #: precisa classificá-la. O `client_operator` VÊ a tela, não edita.
     MANAGE_CLIENT_MAPPING = "manage_client_mapping"
+    # --- 86e3ewukz ---------------------------------------------------------
+    #: Redefinir a senha de QUALQUER usuário (suporte e emergência): só a
+    #: plataforma. Permissão própria, e não `manage_org_users` (que é do admin da
+    #: organização e alcança só o staff dela) nem `manage_platform` (organizações):
+    #: o alvo aqui pode ser staff de qualquer BPO ou usuário de qualquer cliente,
+    #: e a redefinição derruba as sessões do alvo (`users.password_changed_at`).
+    RESET_USER_PASSWORD = "reset_user_password"  # noqa: S105 (nome de permissão, não senha)
 
 
 _EVERYONE: frozenset[UserRole] = frozenset(UserRole)
@@ -252,6 +259,7 @@ _PLATFORM_ONLY: frozenset[UserRole] = frozenset({UserRole.PLATFORM_ADMIN})
 #: | Sincronizar movimentos (S12)  | ✅             | ✅          | ✅ (carteira)  | ✅             | ❌              |
 #: | Catálogo do de-para (S12)     | ✅             | ✅ (org)    | ❌             | ❌             | ❌              |
 #: | Editar o de-para (S12)        | ✅             | ✅          | ✅ (carteira)  | ✅             | ❌              |
+#: | Redefinir senha de usuário    | ✅             | ❌          | ❌             | ❌             | ❌              |
 PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]] = {
     Permission.RUN_RECONCILIATION: _EVERYONE,
     Permission.REVIEW_EXPORT: _EVERYONE,
@@ -340,6 +348,9 @@ PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]] = {
     Permission.MANAGE_CLIENT_MAPPING: frozenset(
         {UserRole.PLATFORM_ADMIN, UserRole.ADMIN, UserRole.MANAGER, UserRole.CLIENT_MANAGER}
     ),
+    # 86e3ewukz: só a plataforma. O admin da PRÓPRIA organização do alvo também é
+    # ❌ — a ação é de suporte da plataforma, não de gestão da organização.
+    Permission.RESET_USER_PASSWORD: _PLATFORM_ONLY,
 }
 
 

@@ -10,6 +10,7 @@ Regras (Doc §8 + CLAUDE.md):
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from uuid import UUID
 
 from app.core.authz import (
@@ -19,18 +20,25 @@ from app.core.authz import (
 )
 from app.core.exceptions import (
     CannotDeactivateSelfError,
+    CannotResetOwnPasswordError,
+    ClientClosedError,
     EmailAlreadyExistsError,
     ForbiddenError,
     NotFoundError,
     OrganizationNotFoundError,
     UserAlreadyInOrganizationError,
     UserIsPrimaryManagerError,
+    ValidationAppError,
 )
 from app.core.security import hash_password
 from app.db.models import ClientUserRole, User, UserRole, UserScope
 from app.modules.usage_events.service import UsageEventService
 from app.modules.users.repository import StaffRow, UserRepository
-from app.modules.users.schemas import PaginationMeta
+from app.modules.users.schemas import (
+    CLIENT_USER_MIN_PASSWORD_LENGTH,
+    STAFF_MIN_PASSWORD_LENGTH,
+    PaginationMeta,
+)
 
 
 def _primary_manager_message(n: int) -> str:
@@ -285,6 +293,64 @@ class UserService:
                 n_notificacoes_removidas=n_notifications,
             )
         return StaffRow(user=user, organization_name=organization.name)
+
+    # ------------------------------ RESET PASSWORD (86e3ewukz) --------
+
+    async def reset_password(
+        self,
+        user_id: UUID,
+        *,
+        viewer: CurrentUser,
+        password: str,
+    ) -> None:
+        """A plataforma redefine a senha de QUALQUER usuário (suporte e emergência).
+
+        O guard da rota é `ResetUserPasswordDep` (só plataforma). Aqui:
+
+        - alvo por PK em `users` inteira — staff de qualquer organização, usuário
+          de qualquer cliente, outro administrador da plataforma; inexistente →
+          404;
+        - a PRÓPRIA senha → 409 tipado: esta rota pula a prova da senha atual, que
+          é o fluxo da troca da própria senha (86e2n39hg);
+        - usuário de cliente ENCERRADO → 409 (`ClientClosedError`, §4.12);
+        - mínimo de senha do TIPO do alvo (8 staff, 10 usuário de cliente), as
+          mesmas constantes da criação; abaixo disso é o 400 genérico;
+        - grava o hash e `password_changed_at`: todo token emitido antes deixa de
+          valer no request seguinte (revogação de sessão — a pessoa entra de
+          novo com a senha nova);
+        - evento `senha_redefinida_pela_plataforma` só com IDs. A senha nunca
+          é logada, devolvida nem persistida em claro.
+        """
+        target = await self._repo.get_by_id(user_id)
+        if target is None:
+            raise NotFoundError("Usuário não encontrado.")
+        if str(target.id) == viewer.id:
+            raise CannotResetOwnPasswordError(
+                f"Plataforma {viewer.id} tentou redefinir a própria senha."
+            )
+        if target.scope == UserScope.CLIENT.value:
+            if target.client_id is not None and await self._repo.is_client_closed(target.client_id):
+                raise ClientClosedError(
+                    f"Cliente {target.client_id} encerrado: usuário {target.id}."
+                )
+            minimum = CLIENT_USER_MIN_PASSWORD_LENGTH
+        else:
+            minimum = STAFF_MIN_PASSWORD_LENGTH
+        if len(password) < minimum:
+            raise ValidationAppError(
+                f"Senha abaixo do mínimo ({minimum}) para o tipo do alvo {target.scope}."
+            )
+
+        target.password_hash = hash_password(password)
+        target.password_changed_at = datetime.now(UTC)
+        await self._repo.add(target)
+
+        if self._usage_events is not None:
+            await self._usage_events.emit_senha_redefinida_pela_plataforma(
+                actor_user_id=UUID(viewer.id),
+                target_user_id=target.id,
+                target_scope=target.scope,
+            )
 
     # ------------------------------ ACTIVATE / DEACTIVATE -------------
 

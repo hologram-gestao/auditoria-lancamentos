@@ -14,10 +14,10 @@
 
 |                                         |                  |
 | --------------------------------------- | ---------------- |
-| Endpoints sensíveis (denominador)       | **98**           |
-| Com caso negativo cross-tenant verde    | **98**           |
+| Endpoints sensíveis (denominador)       | **99**           |
+| Com caso negativo cross-tenant verde    | **99**           |
 | Pendentes (implementação em outra task) | **0**            |
-| Cobertura                               | **98/98 = 100%** |
+| Cobertura                               | **99/99 = 100%** |
 
 ## Lista canônica
 
@@ -35,6 +35,7 @@ Legenda de `tipo`: **coleção** = vaza forjando `client_id` na URL/payload · *
 | `POST`   | `/api/v1/users/{user_id}/activate`                                                   | detalhe (PK) | `app/modules/users/routes.py`                    | ManageOrgUsersDep + get_staff_by_id/scoped_by_organization: AND scope='system' AND organization_id = <org do observador> no próprio SELECT (plataforma: todas); plataforma, usuário de cliente e staff de outra org = 404                                                        | ✅ verde |
 | `POST`   | `/api/v1/users/{user_id}/deactivate`                                                 | detalhe (PK) | `app/modules/users/routes.py`                    | ManageOrgUsersDep + get_staff_by_id/scoped_by_organization: AND scope='system' AND organization_id = <org do observador> no próprio SELECT (plataforma: todas); plataforma, usuário de cliente e staff de outra org = 404                                                        | ✅ verde |
 | `POST`   | `/api/v1/users/{user_id}/transfer`                                                   | detalhe (PK) | `app/modules/users/routes.py`                    | ManagePlatformDep (só plataforma; admin e gerente de QUALQUER organização = 403 antes de tocar a linha) + get_staff_by_id: alvo só staff (scope='system'), usuário de cliente e plataforma = 404                                                                                 | ✅ verde |
+| `POST`   | `/api/v1/users/{user_id}/password`                                                   | detalhe (PK) | `app/modules/users/routes.py`                    | ResetUserPasswordDep (só plataforma; admin e gerente de QUALQUER organização, inclusive a do alvo, e usuário de cliente = 403 antes de tocar a linha). O alvo é por PK em `users` inteira; a própria senha = 409; tenant encerrado = 409 (86e3ewukz)                             | ✅ verde |
 | `GET`    | `/api/v1/client-categories`                                                          | coleção      | `app/modules/client_categories/routes.py`        | StaffDep/ManageClientCategoriesDep + scoped_by_organization no SELECT do catálogo (AND organization_id = <org do observador>; plataforma: todas); alvo por PK de outra organização = 404; a categoria nova nasce na org da LINHA do ator (resolve_organization_for_creation)     | ✅ verde |
 | `POST`   | `/api/v1/client-categories`                                                          | coleção      | `app/modules/client_categories/routes.py`        | StaffDep/ManageClientCategoriesDep + scoped_by_organization no SELECT do catálogo (AND organization_id = <org do observador>; plataforma: todas); alvo por PK de outra organização = 404; a categoria nova nasce na org da LINHA do ator (resolve_organization_for_creation)     | ✅ verde |
 | `PATCH`  | `/api/v1/client-categories/{category_id}`                                            | detalhe (PK) | `app/modules/client_categories/routes.py`        | StaffDep/ManageClientCategoriesDep + scoped_by_organization no SELECT do catálogo (AND organization_id = <org do observador>; plataforma: todas); alvo por PK de outra organização = 404; a categoria nova nasce na org da LINHA do ator (resolve_organization_for_creation)     | ✅ verde |

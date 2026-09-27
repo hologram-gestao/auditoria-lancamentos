@@ -28,8 +28,9 @@ import { ptBR } from 'date-fns/locale';
 import {
   ChevronLeft,
   ChevronRight,
-  PowerOff,
+  KeyRound,
   Power,
+  PowerOff,
   Search,
   SquarePen,
   UserPlus,
@@ -45,6 +46,10 @@ import { CreateUserModal } from '@/components/features/users/create-user-modal';
 import { DeactivateConfirm } from '@/components/features/users/deactivate-confirm';
 import { EditUserModal } from '@/components/features/users/edit-user-modal';
 import { PlatformAdminsTable } from '@/components/features/users/platform-admins-table';
+import {
+  ResetPasswordDialog,
+  type ResetPasswordTarget,
+} from '@/components/features/users/reset-password-dialog';
 import { TransferUserDialog } from '@/components/features/users/transfer-user-dialog';
 import { UserRoleBadge, UserStatusBadge } from '@/components/features/users/user-badges';
 import { AccessDenied } from '@/components/shared/access-denied';
@@ -64,7 +69,7 @@ import { useUrlState } from '@/hooks/use-url-state';
 import { useActivateUser, useUsersList } from '@/hooks/use-users';
 import { ApiError } from '@/lib/api/client';
 import type { User } from '@/lib/api/users';
-import { canManageSystemUsers, homePathFor, isPlatformScoped } from '@/lib/authz';
+import { canManageSystemUsers, hasPermission, homePathFor, isPlatformScoped } from '@/lib/authz';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth';
 
@@ -125,6 +130,10 @@ export default function UsersPage() {
   // Alvo da transferência (86e3bvbfx): estado PRÓPRIO, fora do de edição — o
   // diálogo de editar fecha antes de este abrir (nada de Radix empilhado).
   const [transferring, setTransferring] = useState<User | null>(null);
+  // Redefinição de senha (86e3ewukz): só quem tem a célula vê a ação. Estado
+  // próprio, fora do de edição (nada de Radix empilhado).
+  const canResetPassword = hasPermission(currentUser, 'reset_user_password');
+  const [resetting, setResetting] = useState<ResetPasswordTarget | null>(null);
 
   const activateMutation = useActivateUser();
 
@@ -277,6 +286,23 @@ export default function UsersPage() {
                         >
                           <SquarePen className="h-4 w-4" aria-hidden="true" />
                         </Button>
+                        {canResetPassword && !isSelf && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() =>
+                              setResetting({
+                                id: u.id,
+                                name: u.name,
+                                email: u.email,
+                                scope: 'system',
+                              })
+                            }
+                            aria-label={`Redefinir senha de ${u.name}`}
+                          >
+                            <KeyRound className="h-4 w-4" aria-hidden="true" />
+                          </Button>
+                        )}
                         {!isSelf &&
                           (u.active ? (
                             <Button
@@ -372,7 +398,10 @@ export default function UsersPage() {
             {staffView}
           </TabsContent>
           <TabsContent value="plataforma" className="mt-6">
-            <PlatformAdminsTable />
+            <PlatformAdminsTable
+              currentUserId={currentUser.id}
+              onResetPassword={canResetPassword ? setResetting : undefined}
+            />
           </TabsContent>
         </Tabs>
       ) : (
@@ -392,6 +421,13 @@ export default function UsersPage() {
         onOpenChange={(o) => !o && setTransferring(null)}
         user={transferring}
       />
+      {canResetPassword && (
+        <ResetPasswordDialog
+          open={resetting !== null}
+          onOpenChange={(o) => !o && setResetting(null)}
+          target={resetting}
+        />
+      )}
       <DeactivateConfirm
         open={deactivating !== null}
         onOpenChange={(o) => !o && setDeactivating(null)}

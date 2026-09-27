@@ -7,6 +7,7 @@ Cobre BACK 2.1 do backlog:
     - POST /api/v1/users/{id}/activate            (reativa)
     - POST /api/v1/users/{id}/deactivate          (soft delete)
     - POST /api/v1/users/{id}/transfer              (muda de organização — só plataforma)
+    - POST /api/v1/users/{id}/password              (redefine a senha — só plataforma)
 
 Toda rota exige a permissão `MANAGE_ORG_USERS` da matriz (plataforma e admin da
 organização); manager autenticado recebe 403. A EXCEÇÃO é `transfer`, que exige
@@ -27,15 +28,21 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
-from app.core.dependencies import DbSessionDep, ManageOrgUsersDep, ManagePlatformDep
+from app.core.dependencies import (
+    DbSessionDep,
+    ManageOrgUsersDep,
+    ManagePlatformDep,
+    ResetUserPasswordDep,
+)
 from app.db.models import SystemUserRole, UserRole
 from app.modules.usage_events.repository import UsageEventRepository
 from app.modules.usage_events.service import UsageEventService
 from app.modules.users.repository import StaffRow, UserRepository
 from app.modules.users.schemas import (
     CreateUserRequest,
+    ResetPasswordRequest,
     TransferUserRequest,
     UpdateUserRequest,
     UserListResponse,
@@ -195,3 +202,26 @@ async def transfer_user(
         user_id, viewer=platform, organization_id=payload.organization_id
     )
     return _to_response(row)
+
+
+@router.post(
+    "/{user_id}/password",
+    status_code=204,
+    response_class=Response,
+    summary="Redefine a senha de QUALQUER usuário e derruba as sessões dele (só plataforma).",
+)
+async def reset_user_password(
+    user_id: UUID,
+    payload: ResetPasswordRequest,
+    platform: ResetUserPasswordDep,
+    service: UserServiceDep,
+) -> Response:
+    """Suporte e emergência (86e3ewukz): staff de qualquer organização, usuário de
+    qualquer cliente ou outro administrador da plataforma; nunca a própria senha
+    (409). Usuário de cliente encerrado é 409; inexistente, 404. A senha nova
+    passa a valer já; todo access e refresh emitidos antes deixam de valer no
+    request seguinte (`users.password_changed_at`). Resposta 204 sem corpo: nada
+    da senha volta, nem em log nem em evento.
+    """
+    await service.reset_password(user_id, viewer=platform, password=payload.password)
+    return Response(status_code=204)

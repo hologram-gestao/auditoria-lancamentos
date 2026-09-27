@@ -187,6 +187,9 @@ _BODIES: dict[str, dict[str, Any]] = {
     # 86e3bvbfx — transferência de staff. Body VÁLIDO de propósito (mesmo
     # raciocínio do ADR-012): a organização existe; o que tem de negar é o guard.
     "POST /api/v1/users/{user_id}/transfer": {"organization_id": "{org_b}"},
+    # 86e3ewukz — redefinição de senha pela plataforma. Senha VÁLIDA de propósito
+    # (mesmo raciocínio do ADR-012): quem tem de negar é o guard, não o 400.
+    "POST /api/v1/users/{user_id}/password": {"password": "Senh@Bateria#1234"},
     # 86e36ecnp — rotas que viraram sensíveis a ORGANIZAÇÃO. Bodies válidos de
     # propósito (mesmo raciocínio do ADR-012).
     "POST /api/v1/clients": {

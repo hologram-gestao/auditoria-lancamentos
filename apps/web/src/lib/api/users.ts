@@ -7,7 +7,12 @@
  *   - 409 com `code = CONFLICT` na criação/edição com email duplicado;
  *     `userMessage` já vem em PT-BR ("Este e-mail já está em uso.").
  */
-import type { SystemUserRole, UserResponse, TransferUserRequest } from '@/lib/contracts';
+import type {
+  ResetPasswordRequest,
+  SystemUserRole,
+  TransferUserRequest,
+  UserResponse,
+} from '@/lib/contracts';
 
 import { apiGet, apiPatch, apiPost } from './client';
 
@@ -80,6 +85,7 @@ export interface UpdateUserPayload {
  * O tipo vem do contrato: só a organização de destino, nunca o papel.
  */
 export type TransferUserPayload = TransferUserRequest;
+export type ResetPasswordPayload = ResetPasswordRequest;
 
 function buildQuery(params: ListUsersParams): string {
   const sp = new URLSearchParams();
@@ -130,4 +136,14 @@ export async function transferUser(id: string, payload: TransferUserPayload): Pr
 
 export async function deactivateUser(id: string): Promise<User> {
   return apiPost<User>(`/api/v1/users/${id}/deactivate`);
+}
+
+/**
+ * A plataforma redefine a senha de QUALQUER usuário (86e3ewukz): staff de
+ * qualquer organização, usuário de qualquer cliente ou outro administrador da
+ * plataforma — nunca a própria (409). 204 sem corpo; as sessões abertas do alvo
+ * são derrubadas pelo servidor. Só a plataforma; para o resto é 403.
+ */
+export async function resetUserPassword(id: string, payload: ResetPasswordPayload): Promise<void> {
+  await apiPost<void>(`/api/v1/users/${id}/password`, payload);
 }

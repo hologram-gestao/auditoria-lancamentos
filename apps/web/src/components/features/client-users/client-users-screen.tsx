@@ -20,9 +20,13 @@
  * 403 cru. A autoridade continua sendo o backend.
  */
 
-import { Plus, Power, PowerOff, Search, SquarePen } from 'lucide-react';
+import { KeyRound, Plus, Power, PowerOff, Search, SquarePen } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
+import {
+  ResetPasswordDialog,
+  type ResetPasswordTarget,
+} from '@/components/features/users/reset-password-dialog';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -62,6 +66,10 @@ export function ClientUsersScreen({ clientId }: { clientId: string }) {
   const clientDetail = useClientDetail(clientId);
   const isClosed = clientDetail.data?.closed_at != null;
   const canWrite = canManage && !isClosed;
+  // Redefinição de senha (86e3ewukz): só a plataforma; some com o cliente
+  // encerrado (o servidor responde 409) e para a própria conta.
+  const canResetPassword = hasPermission(currentUser, 'reset_user_password') && !isClosed;
+  const [resetting, setResetting] = useState<ResetPasswordTarget | null>(null);
 
   const url = useUrlState();
   const searchParam = url.get(PARAM.search) ?? '';
@@ -228,6 +236,23 @@ export function ClientUsersScreen({ clientId }: { clientId: string }) {
                               <SquarePen className="h-4 w-4" aria-hidden="true" />
                             </Button>
                           )}
+                          {canResetPassword && user.id !== currentUser.id && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() =>
+                                setResetting({
+                                  id: user.id,
+                                  name: user.name,
+                                  email: user.email,
+                                  scope: 'client',
+                                })
+                              }
+                              aria-label={`Redefinir senha de ${user.name}`}
+                            >
+                              <KeyRound className="h-4 w-4" aria-hidden="true" />
+                            </Button>
+                          )}
                           {/* Ninguém se desativa (o backend devolve 403); a
                               ação some para não oferecer o que será negado. */}
                           {canWrite && user.id !== currentUser.id && (
@@ -290,6 +315,13 @@ export function ClientUsersScreen({ clientId }: { clientId: string }) {
         user={toggling}
         nextActive={toggling ? !toggling.active : false}
       />
+      {canResetPassword && (
+        <ResetPasswordDialog
+          open={resetting !== null}
+          onOpenChange={(open) => !open && setResetting(null)}
+          target={resetting}
+        />
+      )}
     </section>
   );
 }

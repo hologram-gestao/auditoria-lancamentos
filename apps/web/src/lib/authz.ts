@@ -142,7 +142,12 @@ export type Permission =
    * ⚠️ Células decididas pelo planejador do backend (ADR-074-BE), pendentes de
    * validação humana — espelhadas como estão.
    */
-  | 'manage_mapping_catalog';
+  | 'manage_mapping_catalog'
+  /**
+   * 86e3ewukz: redefinir a senha de QUALQUER usuário (suporte e emergência).
+   * Só a plataforma — nem `manage_org_users` (admin da org) nem `manage_platform`.
+   */
+  | 'reset_user_password';
 
 /**
  * A matriz, indexada por PAPEL (e não por permissão) de propósito: assim o
@@ -207,6 +212,8 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'sync_client_movements',
     'manage_client_mapping',
     'manage_mapping_catalog',
+    // 86e3ewukz: só a plataforma redefine senha de terceiros.
+    'reset_user_password',
   ],
   // D3 final (86e36ed1d): `manage_anomaly_types` saiu daqui. A taxonomia de
   // anomalias é uma tabela GLOBAL do produto — o admin de uma organização

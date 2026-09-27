@@ -77,6 +77,9 @@ class UsageEventName(StrEnum):
     # sem `session_id`, fora da dedup: cada transferência é uma linha. Só IDs e
     # contagens do que foi removido — nunca nome de pessoa nem de organização.
     USUARIO_TRANSFERIDO_DE_ORGANIZACAO = "usuario_transferido_de_organizacao"
+    #: 86e3ewukz — a plataforma redefiniu a senha de alguém (suporte/emergência).
+    #: Só IDs e o escopo do alvo; nunca e-mail, nome ou senha. Sem dedup.
+    SENHA_REDEFINIDA_PELA_PLATAFORMA = "senha_redefinida_pela_plataforma"
     # Sprint 9 (BACK 09.4) — **a métrica da sprint**. De BACKEND, sem
     # `session_id`, fora da dedup por construção: cada cadastro é uma linha.
     #
@@ -470,6 +473,19 @@ class OrganizacaoDesativadaProps(_StrictProps):
     organization_id: UUID
     n_usuarios: int = Field(ge=0)
     n_clientes: int = Field(ge=0)
+
+
+class SenhaRedefinidaPelaPlataformaProps(_StrictProps):
+    """`senha_redefinida_pela_plataforma` (86e3ewukz) — trilha da redefinição.
+
+    `actor_user_id` é a plataforma que redefiniu; `target_user_id` e
+    `target_scope` (platform | system | client) dizem quem foi atingido. A senha
+    NUNCA entra aqui (nem hash), nem e-mail ou nome (§3.2, §4.7).
+    """
+
+    actor_user_id: UUID
+    target_user_id: UUID
+    target_scope: Literal["platform", "system", "client"]
 
 
 class UsuarioTransferidoDeOrganizacaoProps(_StrictProps):

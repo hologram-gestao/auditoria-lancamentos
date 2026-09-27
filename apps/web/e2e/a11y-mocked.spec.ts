@@ -1637,6 +1637,13 @@ async function fulfillApi(route: Route): Promise<void> {
   // Transferência de staff (86e3bvbfx): devolve a MESMA pessoa já na
   // organização de destino, como o backend. Só o Carlos é transferível no
   // mock; qualquer outro id cai no 404 genérico do final.
+  // 86e3ewukz — redefinição de senha pela plataforma: 204 sem corpo. O mock
+  // não confere quem chama: a AUTORIZAÇÃO é do backend; o que a tela prova é
+  // que a ação só aparece para quem tem a célula.
+  const redefinirSenha = path.match(/^\/api\/v1\/users\/([^/]+)\/password$/);
+  if (redefinirSenha && route.request().method() === 'POST') {
+    return route.fulfill({ status: 204 });
+  }
   const transferir = path.match(/^\/api\/v1\/users\/([^/]+)\/transfer$/);
   if (transferir && route.request().method() === 'POST') {
     if (transferir[1] !== OTHER_ORG_STAFF.id) {
@@ -2520,6 +2527,40 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByText('Inativo').first()).toBeVisible();
       await shot(page, `client-users-gerente-${vp.label.replace(/\s+/g, '-')}`);
       await analyze(page, `usuários do cliente — gerente (${vp.label})`);
+    });
+
+    /**
+     * 86e3ewukz — "Redefinir senha" na lista do tenant: só para a plataforma. O
+     * gerente do cliente administra os usuários dele e NÃO vê a ação (a célula é
+     * de suporte da plataforma). Para o usuário de cliente o mínimo é 10.
+     */
+    test('redefinir senha: o gerente do cliente NÃO vê a ação (86e3ewukz)', async ({ page }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/usuarios`);
+      await expect(page.getByRole('row', { name: /Joana Prado/ })).toBeVisible();
+      await expect(page.getByRole('button', { name: /^Redefinir senha de/ })).toHaveCount(0);
+    });
+
+    test('redefinir senha: a plataforma vê a ação, com o mínimo de 10 (86e3ewukz)', async ({
+      page,
+    }) => {
+      // Um usuário por cenário: a sessão da tela é lida no primeiro load. O alvo
+      // é o Rui: a Joana carrega o id do usuário da sessão nos mocks, e a ação
+      // some na própria conta (o servidor responde 409 para ela).
+      sessionUser = PLATFORM_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/usuarios`);
+      await page.getByRole('button', { name: 'Redefinir senha de Rui Sales' }).click();
+      const dialogo = page.getByRole('alertdialog', { name: 'Redefinir senha' });
+      await expect(dialogo).toBeVisible();
+      await aguardarAnimacao(dialogo);
+      await expect(dialogo).toContainText('Pelo menos 10 caracteres');
+      await exigirDentroDaViewport(
+        page,
+        dialogo.getByRole('button', { name: 'Redefinir senha' }),
+        `${vp.label}: "Redefinir senha" (usuário do cliente)`,
+      );
+      await shot(page, `client-users-redefinir-senha-${vp.label.replace(/\s+/g, '-')}`);
+      await analyze(page, `redefinir senha de usuário do cliente (${vp.label})`);
     });
 
     test('gaveta de criação: papel restrito e senha com toggle (R5)', async ({ page }) => {
@@ -4555,6 +4596,56 @@ for (const vp of VIEWPORTS) {
     });
 
     /**
+     * 86e3ewukz — a plataforma redefine a senha de qualquer usuário. A ação
+     * (ícone de chave) só existe para quem tem `reset_user_password`; o diálogo
+     * é `alertdialog` com a senha, a confirmação e o aviso de que os acessos
+     * abertos serão encerrados; a ação primária cabe na viewport.
+     */
+    test('usuários: a plataforma redefine a senha de um staff (86e3ewukz)', async ({ page }) => {
+      sessionUser = PLATFORM_USER;
+      await page.goto('/configuracoes/usuarios');
+      await expect(page.getByRole('heading', { name: 'Usuários', level: 1 })).toBeVisible();
+
+      await page.getByRole('button', { name: 'Redefinir senha de Carlos Prospecta' }).click();
+      const dialogo = page.getByRole('alertdialog', { name: 'Redefinir senha' });
+      await expect(dialogo).toBeVisible();
+      await aguardarAnimacao(dialogo);
+      await expect(dialogo).toContainText('Carlos Prospecta');
+      await expect(dialogo).toContainText('desconectada de todos os acessos');
+      await expect(dialogo).toContainText('Pelo menos 8 caracteres');
+      // O foco inicial vai para Cancelar (ritual do AlertDialog), nunca para a ação.
+      await expect(dialogo.getByRole('button', { name: 'Cancelar' })).toBeFocused();
+      const acao = dialogo.getByRole('button', { name: 'Redefinir senha' });
+      await exigirDentroDaViewport(page, acao, `${vp.label}: "Redefinir senha"`);
+      await shot(page, `usuarios-redefinir-senha-${slug}`);
+      await analyze(page, `diálogo de redefinir senha (${vp.label})`);
+
+      // Confirmação que não bate: erro no campo, nada enviado.
+      await dialogo.getByLabel('Senha nova', { exact: true }).fill('Senh@Nova#123');
+      await dialogo.getByLabel('Confirmar senha nova').fill('outra');
+      await acao.click();
+      await expect(dialogo.getByText('As senhas não conferem.')).toBeVisible();
+      await analyze(page, `redefinir senha com erro de confirmação (${vp.label})`);
+
+      await dialogo.getByLabel('Confirmar senha nova').fill('Senh@Nova#123');
+      await acao.click();
+      await expect(page.getByRole('alertdialog')).toHaveCount(0);
+      await expect(page.getByText(/Senha redefinida/)).toBeVisible();
+    });
+
+    test('usuários: o admin da organização NÃO vê a ação de redefinir senha (86e3ewukz)', async ({
+      page,
+    }) => {
+      sessionUser = USER;
+      await page.goto('/configuracoes/usuarios');
+      await expect(page.getByRole('heading', { name: 'Usuários', level: 1 })).toBeVisible();
+      await expect(
+        page.getByRole('cell', { name: 'Gerente Hologram', exact: true }).first(),
+      ).toBeVisible();
+      await expect(page.getByRole('button', { name: /^Redefinir senha de/ })).toHaveCount(0);
+    });
+
+    /**
      * 86e3chrxw — a aba "Administradores da plataforma" da tela de Usuários,
      * a ÚNICA lista de `platform_admin` do produto (`GET /users` filtra
      * `scope='system'` e o `users_count` das organizações não os conta). Só a
@@ -4590,10 +4681,14 @@ for (const vp of VIEWPORTS) {
       await expect(lista.getByText('pedro@hologramgestao.com')).toBeVisible();
       // Desativado continua na lista, marcado: o escopo não sai com o `active`.
       await expect(lista.getByText('Inativo')).toBeVisible();
-      // SÓ-LEITURA: promover e despromover é pelo script, e `PATCH /users/{id}`
-      // de uma linha de plataforma é 404 — nem ação na linha, nem "Novo
-      // Usuário" nesta aba (§4.9).
-      await expect(lista.getByRole('button')).toHaveCount(0);
+      // Promover e despromover é pelo script, e `PATCH /users/{id}` de uma linha
+      // de plataforma é 404 — nem editar, nem desativar, nem "Novo Usuário"
+      // nesta aba (§4.9). A ÚNICA ação da linha é redefinir a senha
+      // (86e3ewukz), para os pares que não são a própria conta.
+      await expect(lista.getByRole('button')).toHaveCount(PLATFORM_ADMINS.length);
+      await expect(lista.getByRole('button', { name: /^Redefinir senha de/ })).toHaveCount(
+        PLATFORM_ADMINS.length,
+      );
       await expect(page.getByRole('button', { name: 'Novo Usuário' })).toHaveCount(0);
       // A tabela rola dentro da própria área: em 390px a linha é mais larga do
       // que a região e passa da borda DELA por desenho (a região é o scroller,
@@ -4927,6 +5022,12 @@ for (const vp of VIEWPORTS) {
       await expect(
         lista.getByRole('button', { name: 'Remover acesso de Gerente Colaborador' }),
       ).toHaveCount(0);
+      // O "Confirmar" acima dispara o toast de sucesso, e o Sonner entra em
+      // fade: medido no meio da animação, o axe vê a cor MESCLADA do texto
+      // (1,07:1 sobre o overlay, no CI do #227 em 27/09/2026) num par que
+      // estável passa. "Visível não é estável" (v1.13): esperar o toast parar
+      // antes de medir, como os outros cenários com toast já fazem.
+      await aguardarToastEstavel(page);
       await analyze(page, `modal de edição após trocar o responsável (${vp.label})`);
     });
 
@@ -4946,6 +5047,12 @@ test('Login (defeito 86e2ggm7r: senha sem nome acessível)', async ({ page, cont
   await page.goto('/login');
   // O input de senha precisa ser alcançável PELO RÓTULO — era o que faltava.
   await expect(page.getByLabel('Senha', { exact: true })).toHaveAttribute('type', 'password');
+  // 86e2u5140: a tela diz o que fazer a quem esqueceu a senha — texto, não link
+  // (não há fluxo por e-mail), genérico (não confirma cadastro, §3.9) e dentro
+  // do card, legível nos três temas (contraste medido pelo axe abaixo).
+  await expect(page.getByTestId('login-help')).toContainText('Esqueceu a senha?');
+  await expect(page.getByRole('link', { name: /senha/i })).toHaveCount(0);
+  await shot(page, 'login-esqueceu-senha');
   await analyze(page, 'login');
 });
 
