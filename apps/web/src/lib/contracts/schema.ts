@@ -569,7 +569,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Lista o plano de contas do cliente — o que a origem classifica, já dentro do produto. Paginado (`page`/`pageSize`, máximo 100), com filtro por situação (`ativa`, `inativa`, `ausente_na_origem`) e por hierarquia (`parentCode`), e **busca por CÓDIGO** (`code`). Não existe busca por nome: o nome não é persistido (é resolvido em runtime pelo mesmo cache da tela de revisão) e vem `null` quando a origem não responde — a lista é servida assim mesmo. `dreCode` nulo significa **sem destino declarado**, que é informação e não pendência: transferências e totalizadoras não têm conta de demonstrativo própria. Plano de contas de outro cliente nunca aparece. */
+        /** Lista o plano de contas do cliente — o que a origem classifica, já dentro do produto. Paginado (`page`/`pageSize`, máximo 100), com filtro por situação (`ativa`, `inativa`, `ausente_na_origem`) e por hierarquia (`parentCode`), e **busca por CÓDIGO** (`code`). Não existe busca por nome: o nome não é persistido (é resolvido em runtime pelo mesmo cache da tela de revisão) e vem `null` quando a origem não responde — a lista é servida assim mesmo. `hasDreCode` e `hasAccountingCode` recortam por destino declarado e por conta contábil (ausentes = sem recorte); não implicam situação: para o total bater com a cobertura, que conta só as ativas, mande `status=ativa` junto. `dreCode` nulo significa **sem destino declarado**, que é informação e não pendência: transferências e totalizadoras não têm conta de demonstrativo própria. Plano de contas de outro cliente nunca aparece. */
         get: operations["list_chart_of_accounts_api_v1_clients__client_id__chart_of_accounts_get"];
         put?: never;
         post?: never;
@@ -7471,6 +7471,10 @@ export interface operations {
                 parentCode?: string | null;
                 /** @description Busca por CÓDIGO (contém). Curingas de `LIKE` são literais. */
                 code?: string | null;
+                /** @description `true` = com conta de demonstrativo; `false` = sem destino declarado. */
+                hasDreCode?: boolean | null;
+                /** @description `true` = com conta contábil; `false` = sem conta contábil. */
+                hasAccountingCode?: boolean | null;
             };
             header?: never;
             path: {

@@ -2670,6 +2670,10 @@ const TELAS_COM_TABELA = [
     // nomes iguais aninhados quebram o `getByRole` no strict mode.
     regiao: 'Categorias do plano de contas (rolável)',
     usuario: (): Record<string, unknown> => CLIENT_MANAGER_USER,
+    // 86e3f55bc: o plano de contas passou ao desenho da carteira (a página
+    // rola, a tabela não). Continua no teste da barra e sai só do de rolagem
+    // interna, que tem cenário próprio no bloco do fim do arquivo.
+    pageScroll: true,
   },
   {
     key: 'carteira',
@@ -5840,5 +5844,184 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByRole('link', { name: 'Enviar arquivo do mês' })).toBeVisible();
       await analyze(page, `de-para — origem por arquivo, base nunca sincronizada (${vp.label})`);
     });
+  });
+}
+
+/**
+ * 86e3f55bc — Plano de contas no desenho da carteira (86e3eq9uy): a PÁGINA
+ * rola, a tabela não e o cabeçalho gruda; os cinco cards de cobertura filtram
+ * pela URL; a situação é grupo de botões; cada filtro ativo vira etiqueta.
+ *
+ * Bloco próprio no FIM do arquivo de propósito: o de-para (86e3f55bd) e as
+ * sprints do hub também mexem neste spec, e cenários novos no meio dos antigos
+ * são o que vira conflito.
+ */
+for (const vp of VIEWPORTS) {
+  const slugPC = vp.label.replace(/\s+/g, '-');
+  test.describe(`Plano de contas no desenho da carteira (86e3f55bc) — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('card "Sem destino declarado" filtra, vira etiqueta e desfaz (Parte B)', async ({
+      page,
+    }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-de-contas`);
+
+      const semDestino = page.getByRole('button', {
+        name: 'Sem destino declarado: 13 categorias. Filtrar a lista',
+      });
+      await expect(semDestino).toHaveAttribute('aria-pressed', 'false');
+      await semDestino.click();
+      // A cobertura conta destino só sobre as ATIVAS: o card leva a situação.
+      await expect(page).toHaveURL(/hasDreCode=false/);
+      await expect(page).toHaveURL(/status=ativa/);
+      await expect(semDestino).toHaveAttribute('aria-pressed', 'true');
+      await expect(
+        page.getByRole('button', { name: 'Remover filtro Sem destino declarado' }),
+      ).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Remover filtro Ativas' })).toBeVisible();
+      // O grupo de Situação acompanha a URL. `exact`: o nome casa por SUBSTRING
+      // e sem caixa, e "Ativas" sem ele acerta também "Inativas".
+      await expect(
+        page
+          .getByRole('group', { name: 'Situação' })
+          .getByRole('button', { name: 'Ativas', exact: true }),
+      ).toHaveAttribute('aria-pressed', 'true');
+      await exigirDentroDaViewport(page, semDestino, `${vp.label}: card "Sem destino declarado"`);
+      await shot(page, `plano-de-contas-filtro-ativo-${slugPC}`);
+      await analyze(page, `plano de contas — card com filtro ativo (${vp.label})`);
+
+      // Segundo clique desfaz os parâmetros do card.
+      await semDestino.click();
+      await expect(page).not.toHaveURL(/hasDreCode=/);
+      await expect(page).not.toHaveURL(/status=/);
+      await expect(semDestino).toHaveAttribute('aria-pressed', 'false');
+      await expect(page.getByRole('button', { name: /^Categorias:/ })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+
+      // Remover a etiqueta tira SÓ aquele parâmetro; a situação fica.
+      await semDestino.click();
+      await expect(page).toHaveURL(/hasDreCode=false/);
+      await page.getByRole('button', { name: 'Remover filtro Sem destino declarado' }).click();
+      await expect(page).not.toHaveURL(/hasDreCode=/);
+      await expect(page).toHaveURL(/status=ativa/);
+      await expect(
+        page.getByRole('button', { name: 'Remover filtro Sem destino declarado' }),
+      ).toHaveCount(0);
+    });
+
+    test('barra compacta: situação como grupo, sem Select, e link antigo com etiquetas (Parte C)', async ({
+      page,
+    }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(
+        `/clientes/${CLIENT_ID}/plano-de-contas?status=inativa&parentCode=1.01&code=2.0`,
+      );
+
+      await expect(page.getByRole('combobox', { name: 'Situação' })).toHaveCount(0);
+      const grupo = page.getByRole('group', { name: 'Situação' });
+      await expect(grupo.getByRole('button', { name: 'Inativas' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+      const etiquetas = page.getByRole('list', { name: 'Filtros ativos' });
+      await expect(etiquetas.getByRole('listitem')).toHaveText([
+        'Inativas',
+        'Filhas de 1.01',
+        'Código 2.0',
+      ]);
+      await expect(page.getByLabel('Buscar por código')).toHaveValue('2.0');
+      await expect(page.getByLabel('Filhas do código')).toHaveValue('1.01');
+      await exigirDentroDaViewport(
+        page,
+        page.getByRole('button', { name: 'Limpar filtros' }),
+        `${vp.label}: "Limpar filtros"`,
+      );
+
+      await grupo.getByRole('button', { name: 'Ausentes na origem' }).click();
+      await expect(page).toHaveURL(/status=ausente_na_origem/);
+      await page.getByRole('button', { name: 'Remover filtro Código 2.0' }).click();
+      await expect(page).not.toHaveURL(/code=2\.0/);
+      await expect(page).toHaveURL(/parentCode=1\.01/);
+      await expect(page.getByLabel('Buscar por código')).toHaveValue('');
+      await shot(page, `plano-de-contas-barra-${slugPC}`);
+      await analyze(page, `plano de contas — barra compacta com etiquetas (${vp.label})`);
+    });
+
+    test('"Atualizado em" ao lado de sincronizar (Parte E)', async ({ page }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-de-contas`);
+      await expect(page.getByTestId('chart-synced-at')).toHaveText(/^Atualizado em 23\/09\/2026/);
+      await exigirDentroDaViewport(
+        page,
+        page.getByRole('button', { name: 'Sincronizar agora' }),
+        `${vp.label}: "Sincronizar agora"`,
+      );
+    });
+
+    if (vp.label === 'desktop') {
+      /**
+       * Parte A: com 20 categorias em 1440×900 a lista transborda a viewport com
+       * folga. A página rola, o wrapper da tabela não; a tabela cabe em 1440 e
+       * em 1280; o cabeçalho gruda no topo do `<main>`; a paginação é alcançável.
+       */
+      test('a página rola, a tabela não, e o cabeçalho gruda no topo (Parte A)', async ({
+        page,
+      }) => {
+        tableListsOverflow = true;
+        sessionUser = CLIENT_MANAGER_USER;
+        await page.goto(`/clientes/${CLIENT_ID}/plano-de-contas`);
+        await expect(page.getByRole('row')).toHaveCount(21);
+
+        const main = page.locator('main');
+        const regiao = page.getByRole('region', {
+          name: 'Categorias do plano de contas (rolável)',
+        });
+        expect(
+          await regiao.evaluate((el) => el.scrollHeight - el.clientHeight),
+          'o wrapper da tabela não pode ter rolagem vertical própria',
+        ).toBe(0);
+        expect(
+          await main.evaluate((el) => el.scrollHeight - el.clientHeight),
+          'o <main> precisa ter rolagem',
+        ).toBeGreaterThan(0);
+        const cabeNaLargura = () =>
+          regiao.evaluate((el) => {
+            const table = el.querySelector('table');
+            return table !== null && table.scrollWidth <= el.clientWidth;
+          });
+        expect(await cabeNaLargura(), '1440: a tabela não cabe no wrapper').toBe(true);
+        await page.setViewportSize({ width: 1280, height: 900 });
+        expect(await cabeNaLargura(), '1280: a tabela não cabe no wrapper').toBe(true);
+        await page.setViewportSize(vp.size);
+
+        // Linha mais baixa (Parte D): sem segunda linha de texto, ~40px.
+        const linhaSimples = page.getByRole('row').nth(1);
+        expect(
+          (await linhaSimples.boundingBox())?.height ?? 999,
+          'linha do plano de contas alta demais',
+        ).toBeLessThanOrEqual(56);
+
+        await main.evaluate((el) => el.scrollTo({ top: 700 }));
+        const cabecalho = regiao.locator('thead th').first();
+        await expect(cabecalho).toBeVisible();
+        const topoMain = (await main.boundingBox())?.y ?? -1;
+        const topoCabecalho = (await cabecalho.boundingBox())?.y ?? -100;
+        expect(
+          Math.abs(topoCabecalho - topoMain),
+          'o cabeçalho não grudou no topo do <main>',
+        ).toBeLessThanOrEqual(1);
+        await shot(page, `plano-de-contas-rolado-cabecalho-grudado-${slugPC}`);
+        await analyze(page, `plano de contas — rolado com o cabeçalho grudado (${vp.label})`);
+
+        await main.evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+        await expect(
+          page.getByRole('navigation', { name: 'Paginação de categorias' }),
+        ).toBeInViewport();
+        await expect(page.getByRole('row').last()).toBeInViewport();
+      });
+    }
   });
 }
