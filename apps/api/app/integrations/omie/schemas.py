@@ -269,12 +269,14 @@ class LancamentoExtrato(BaseModel):
     def signed_amount(self) -> Decimal:
         """Valor com sinal: débito → negativo, crédito → positivo.
 
-        Cobre DUAS convenções reais (fixture de 21/08/2026):
-        - Conta corrente (doc): natureza 'D'/'C' com valor ABSOLUTO — o 'D'
-          é invertido aqui.
-        - Cartão (observado): natureza 'P'/'R' com valor JÁ SINALIZADO
-          (P negativo, R positivo) — cai no `return` direto, sem inverter.
-        Inverter qualquer coisa além de 'D' quebraria o cartão.
+        Cobre DUAS convenções:
+        - A da doc: natureza 'D'/'C' com valor ABSOLUTO — o 'D' é invertido
+          aqui. Nenhuma captura real mostrou essa forma até hoje.
+        - A observada: natureza 'P'/'R' com valor JÁ SINALIZADO (P negativo,
+          R positivo) — cai no `return` direto, sem inverter. Vale para cartão
+          (fixture de 21/08/2026) E para conta corrente (fixture de
+          28/09/2026, 113/113 linhas), apesar de a doc dizer 'D'/'C' para CC.
+        Inverter qualquer coisa além de 'D' quebraria as duas.
         """
         if self.c_natureza == OmieEntryNatureza.DEBITO.value:
             return -self.n_valor_documento
