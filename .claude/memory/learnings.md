@@ -624,3 +624,33 @@ e o follow-up **86e3f0uzh** (`agent-review`) para copiar as regras no
 `.claude/agents/backend.md`, que o sandbox do QA não alcança.
 **Status:** ativo
 
+
+## 2026-09-27 — Sprint 14, rodada 1: integração "escrita e não executada" escondia um 500 em TODO envio de arquivo [escopo: backend | client_movements/repository.py, client_file_ingestion/reader.py · frontend | file-origin/, e2e]
+**Sintoma:** a BACK 14.3 entregou 1793 unitários verdes e o HANDOFF dizia "integração
+NÃO RODOU"; na suíte do QA contra Postgres, 14 testes de ingestão e o cenário ponta a
+ponta caíram em `InvalidRequestError: bulk synchronize of persistent objects not
+supported` — todo `POST …/file-origin/process` com descrição respondia 500. No front, o
+e2e novo nunca tinha rodado (locator ambíguo) e a mudança de capacidade quebrou 2
+cenários antigos da carteira por mock desatualizado.
+**Causa-raiz blameless:** o sandbox dos executores não tinha Docker, e o caminho que
+falha (ORM bulk UPDATE com WHERE) só existe com sessão real: o unitário mocka o
+repositório. O mesmo vale para o gate de a11y: o spec foi escrito contra a imagem mental
+da tela.
+**Correção:** reprovação com a linha exata e a troca de uma linha provada pelo QA
+(Core `update(Modelo.__table__)`), mais os testes de regressão do QA
+(`test_s14_qa_file_origin_cycle.py::TestValorForaDoPadraoRecusaOArquivo`, vermelhos até o
+rework) — rework em andamento.
+**Escopo:** backend (todo UPDATE em lote por pk; todo parse de dinheiro de arquivo de
+terceiro); frontend (todo e2e novo e todo helper que muda a decisão de telas antigas).
+**Encodado em:** `PROJECT.md` → `CLAUDE.md` §7 Backend, bullets "UPDATE em lote por pk é
+Core, não ORM" e "Dinheiro vindo de arquivo de terceiro é validado no formato ESTRITO"
+(v1.55); ADR-041-QA em `.claude/memory/decisions.md`; testes de regressão do QA citados acima.
+**Status:** aberto (rework da S14)
+**Atualização (28/09/2026, rodada 2):** rework entregue (backend 0c7e698, frontend d474749)
+e aprovado por revisão estática + unitários; os testes de regressão do QA entraram na branch do
+backend byte a byte idênticos. O "Encodado em" acima apontava para os bullets v1.55 do primer,
+que NÃO foram aplicados (edição do `PROJECT.md` negada por permissão na sessão do QA; texto
+pronto no `HANDOFF.md`, item 4). O encode que EXISTE é o **ADR-042-QA** em
+`.claude/memory/decisions.md` (as duas regras de backend) e o
+`apps/api/tests/integration/test_s14_qa_file_origin_cycle.py` na branch do backend.
+**Status:** resolvido, com integração e a11y pendentes para a validação humana (Docker desligado)
