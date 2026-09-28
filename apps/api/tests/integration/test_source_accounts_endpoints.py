@@ -6,8 +6,9 @@
 O que este módulo afirma, contra Postgres:
   - a lista traz as contas de origem da base + o slot PADRÃO, pendentes ou associadas;
   - PUT cria e TROCA (upsert, `created`), inclusive no slot padrão (índice parcial);
-    outro cliente 404, sintética 422, `client_manager` lê 200 e escreve 403 com 1
-    `denied`, cliente encerrado 409;
+    outro cliente 404, sintética ou inativada pela reimportação 422, `sourceType` maior
+    que a coluna 400, `client_manager` e `client_operator` leem 200 e escrevem 403 com 1
+    `denied`, cliente encerrado 409 — toda recusa sem gravar;
   - materializar `conta_contabil` com linha de alvo de conta de origem sem conta do banco
     → 409 `CONTA_DO_BANCO_PENDENTE` só com identificadores, e NENHUMA materialização;
   - o item guarda o código do banco; trocar a associação depois não muda a
@@ -263,10 +264,58 @@ class TestAssociacao:
         assert vazia.status_code == 400
         assert await _bindings(db_session, world.client) == []
 
-    async def test_gerente_do_cliente_le_e_nao_escreve(
+    async def test_conta_inativada_pela_reimportacao_e_422_sem_gravar(
         self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
     ) -> None:
-        await _login(client_with_db, world.tenant_manager)
+        sem_700 = b"\n".join(line for line in PLANO.split(b"\n") if not line.startswith(b"700;"))
+        reimport = await client_with_db.post(
+            f"/api/v1/clients/{world.client.id}/accounting-chart/import",
+            files={"file": ("plano.csv", sem_700, "text/csv")},
+        )
+        assert reimport.status_code == 200, reimport.text
+        stmt = (
+            select(ClientAccountingAccount.active)
+            .where(ClientAccountingAccount.id == world.accounts["700"].id)
+            .execution_options(populate_existing=True)
+        )
+        assert (await db_session.execute(stmt)).scalar_one() is False
+
+        inativa = await _bind(client_with_db, world, world.accounts["700"])
+        assert inativa.status_code == 422, inativa.text
+        assert inativa.json()["error"]["code"] == "CONTA_CONTABIL_NAO_LANCAVEL"
+        assert await _bindings(db_session, world.client) == []
+
+    async def test_source_type_maior_que_a_coluna_e_400_sem_gravar(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
+    ) -> None:
+        resp = await client_with_db.put(
+            _url(world),
+            json={
+                "sourceType": "a" * 31,
+                "sourceAccountId": None,
+                "accountingAccountId": str(world.accounts["649"].id),
+            },
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
+        assert await _bindings(db_session, world.client) == []
+
+    @pytest.mark.parametrize("role", [UserRole.CLIENT_MANAGER, UserRole.CLIENT_OPERATOR])
+    async def test_usuario_do_cliente_le_e_nao_escreve(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        world: World,
+        role: UserRole,
+    ) -> None:
+        user = (
+            world.tenant_manager
+            if role is UserRole.CLIENT_MANAGER
+            else await _user(
+                db_session, role=role, scope=UserScope.CLIENT, client_id=world.client.id
+            )
+        )
+        await _login(client_with_db, user)
         assert (await client_with_db.get(_url(world))).status_code == 200
         resp = await _bind(client_with_db, world, world.accounts["649"])
         assert resp.status_code == 403
@@ -274,7 +323,9 @@ class TestAssociacao:
             (
                 await db_session.execute(
                     select(AccessAudit).where(
-                        AccessAudit.action == "denied", AccessAudit.client_id == world.client.id
+                        AccessAudit.action == "denied",
+                        AccessAudit.client_id == world.client.id,
+                        AccessAudit.user_id == user.id,
                     )
                 )
             )

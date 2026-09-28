@@ -12,10 +12,14 @@ import inspect
 import re
 from pathlib import Path
 from types import ModuleType
+from uuid import uuid4
 
+import pytest
+from pydantic import ValidationError
 from sqlalchemy import Index, UniqueConstraint
 
 from app.db.models import (
+    MAX_MOVEMENT_SOURCE_TYPE_CHARS,
     UQ_SOURCE_ACCOUNT_BINDING,
     UQ_SOURCE_ACCOUNT_BINDING_DEFAULT,
     ClientMappingMaterializationItem,
@@ -23,6 +27,7 @@ from app.db.models import (
     default_binding_index_predicate,
 )
 from app.db.models.client_source_account_binding import FK_SOURCE_ACCOUNT_BINDING_ACCOUNT
+from app.modules.client_source_accounts.schemas import SourceAccountBindingRequest
 from app.modules.clients.repository import ClientRepository
 
 _MIGRATION = "a8c4e7d25f19_s16_source_account_bindings.py"
@@ -114,6 +119,30 @@ class TestGarantias:
         items = ClientMappingMaterializationItem.__table__
         assert not items.c.bank_account_code.foreign_keys
         assert items.c.history_present.nullable
+
+
+class TestRequestCabeNaColuna:
+    """O que o schema aceita tem de caber na coluna — senão o INSERT estoura em 500."""
+
+    @staticmethod
+    def _body(source_type: str) -> dict[str, str]:
+        return {"sourceType": source_type, "accountingAccountId": str(uuid4())}
+
+    def test_limite_do_schema_e_o_da_coluna(self) -> None:
+        assert (
+            ClientSourceAccountBinding.__table__.c.source_type.type.length
+            == MAX_MOVEMENT_SOURCE_TYPE_CHARS
+        )
+
+    def test_source_type_de_30_caracteres_passa(self) -> None:
+        value = "a" * MAX_MOVEMENT_SOURCE_TYPE_CHARS
+        assert SourceAccountBindingRequest.model_validate(self._body(value)).source_type == value
+
+    def test_source_type_de_31_caracteres_e_recusado(self) -> None:
+        with pytest.raises(ValidationError):
+            SourceAccountBindingRequest.model_validate(
+                self._body("a" * (MAX_MOVEMENT_SOURCE_TYPE_CHARS + 1))
+            )
 
 
 class TestPurgaEExclusao:

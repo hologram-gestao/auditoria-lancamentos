@@ -7,7 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.db.models.client_movement import MAX_MOVEMENT_REF_CHARS
+from app.db.models.client_movement import MAX_MOVEMENT_REF_CHARS, MAX_MOVEMENT_SOURCE_TYPE_CHARS
 from app.db.models.mapping_catalog import DESTINATION_TYPE_PATTERN
 
 if TYPE_CHECKING:
@@ -83,9 +83,11 @@ class SourceAccountListResponse(BaseModel):
 class SourceAccountBindingRequest(BaseModel):
     """Corpo de `PUT …/source-accounts` — define ou troca a conta do banco."""
 
+    # `max_length` = a coluna (30): o padrão sozinho aceita até 60 e o INSERT estouraria em 500.
     source_type: str = Field(
         alias="sourceType",
         pattern=DESTINATION_TYPE_PATTERN,
+        max_length=MAX_MOVEMENT_SOURCE_TYPE_CHARS,
         description="Tipo do provedor de origem (`omie`, `arquivo`…).",
     )
     source_account_id: str | None = Field(
