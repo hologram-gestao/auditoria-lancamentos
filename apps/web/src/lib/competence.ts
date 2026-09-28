@@ -13,7 +13,12 @@
 
 export const COMPETENCE_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
 
-export function isCompetence(value: string | null | undefined): value is string {
+/**
+ * Aceita `unknown` de propósito: é chamada também sobre `ApiError.details`, que
+ * desde a Sprint 14 carrega valores de tipos variados (listas, números) e por
+ * isso é `Record<string, unknown>`. O predicado estreita para `string`.
+ */
+export function isCompetence(value: unknown): value is string {
   return typeof value === 'string' && COMPETENCE_PATTERN.test(value);
 }
 
@@ -40,10 +45,12 @@ export function isBefore(a: string, b: string): boolean {
 
 /**
  * Lista de competências vinda de `details.competences` dos 409 de vigência
- * (`"2026-06,2026-07"` — o `details` do erro é `Record<string, string>`).
+ * (`"2026-06,2026-07"`). O `details` do erro é `Record<string, unknown>`, então
+ * qualquer coisa que não seja string vira lista vazia — nunca um `.split` num
+ * número.
  */
-export function parseCompetenceList(raw: string | undefined): string[] {
-  if (!raw) return [];
+export function parseCompetenceList(raw: unknown): string[] {
+  if (typeof raw !== 'string' || raw === '') return [];
   return raw
     .split(',')
     .map((item) => item.trim())

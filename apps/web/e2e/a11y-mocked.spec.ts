@@ -438,7 +438,10 @@ const PLATFORM_ADMINS = [
 
 /**
  * A origem do cliente (S9 / R3). `capabilities` é DADO — é por ela que a tela
- * decide se oferece "Lançar no Omie" em vez de descobrir pelo 409.
+ * decide se oferece "Lançar no Omie" em vez de descobrir pelo 409. A lista é a
+ * `OMIE_CAPABILITIES` do adaptador (`omie_adapter.py`), inteira: faltando
+ * `listar_titulos_em_aberto`, a carteira escondia "Sincronizar agora" e os
+ * cenários dela caíam (reprovação da S14).
  */
 const OMIE_CONNECTION = {
   id: '55555555-5555-4555-8555-555555555555',
@@ -447,7 +450,13 @@ const OMIE_CONNECTION = {
   status: 'ativa' as 'ativa' | 'inativa' | 'erro',
   last_checked_at: '2026-09-22T12:00:00Z',
   accounts_synced_at: '2026-09-22T12:00:00Z',
-  capabilities: ['verificar_credencial', 'listar_contas', 'listar_lancamentos', 'escrever'],
+  capabilities: [
+    'verificar_credencial',
+    'listar_contas',
+    'listar_lancamentos',
+    'escrever',
+    'listar_titulos_em_aberto',
+  ],
 };
 
 /**
@@ -463,12 +472,46 @@ let originState: 'ativa' | 'sem_origem' | 'erro' = 'ativa';
  */
 let clientClosed = false;
 
+/**
+ * Sprint 14 (R1 · R5): a origem por ARQUIVO — o primeiro provedor que não é um
+ * ERP. Sem credencial (não declara `verificar_credencial`), sem contas nem
+ * títulos: só `listar_lancamentos`. É pela CAPACIDADE que as telas decidem o
+ * que oferecer (aba "Origem por arquivo" existe; "Sincronizar competência" do
+ * de-para some e vira "Enviar arquivo do mês").
+ */
+const FILE_CONNECTION = {
+  id: '66666666-6666-4666-8666-666666666666',
+  provider_type: 'arquivo',
+  label: 'Arquivo',
+  status: 'ativa' as 'ativa' | 'inativa' | 'erro',
+  last_checked_at: null,
+  accounts_synced_at: null,
+  capabilities: ['listar_lancamentos'],
+};
+
+/**
+ * Com `true`, a ÚNICA origem do cliente é a `FILE_CONNECTION` (cliente sem
+ * sistema). Só o bloco "Origem por arquivo" e o cenário do de-para a ligam —
+ * o default (Omie) mantém as telas anteriores medindo o que mediam.
+ */
+let clientFileOrigin = false;
+
 /** O detalhe do cliente ajustado ao `originState` do cenário. */
 function clientDetailComOrigem(): Record<string, unknown> {
   const aberto = tableListsOverflow
     ? { ...CLIENT_DETAIL, accounts: MANY_ACCOUNTS }
     : { ...CLIENT_DETAIL };
   const base = clientClosed ? { ...aberto, closed_at: '2026-09-20T12:00:00Z' } : aberto;
+  if (originState === 'ativa' && clientFileOrigin) {
+    // Cliente sem sistema: nenhuma conta sincronizada — a base vem do arquivo.
+    return {
+      ...base,
+      accounts: [],
+      accounts_synced_at: null,
+      origin_status: 'ativa',
+      connections: [FILE_CONNECTION],
+    };
+  }
   if (originState === 'ativa') return { ...base, origin_status: 'ativa' };
   if (originState === 'sem_origem') {
     // Sem origem o servidor não fala com o provedor: zero contas, sem carimbo.
@@ -493,8 +536,125 @@ function clientDetailComOrigem(): Record<string, unknown> {
 function conexoesDoCenario(): Record<string, unknown>[] {
   if (originState === 'sem_origem') return [];
   if (originState === 'erro') return [{ ...OMIE_CONNECTION, status: 'erro' }];
-  return [OMIE_CONNECTION];
+  return [clientFileOrigin ? FILE_CONNECTION : OMIE_CONNECTION];
 }
+
+/**
+ * Sprint 14 — mapeamento de entrada e ingestão do arquivo (FRONT 14.5 · 14.6).
+ *
+ * `inputMappingState` troca entre "o cliente já tem mapeamento" (o resumo e o
+ * envio num passo só) e "ainda não tem" (estado vazio + editor). Os nomes de
+ * coluna e a amostra são ESTRUTURA/dado fictício: nada disto é conteúdo real.
+ */
+let inputMappingState: 'salvo' | 'sem' = 'salvo';
+
+/** O desfecho do `POST …/file-origin/process` no cenário. */
+let fileProcessOutcome: 'sucesso' | 'cabecalho' | 'linhas' = 'sucesso';
+
+const INPUT_MAPPING = {
+  id: '77777777-7777-4777-8777-777777777777',
+  fileFormat: 'xlsx',
+  csvDelimiter: null,
+  encoding: null,
+  dateColumn: 'Data',
+  descriptionColumn: 'Histórico',
+  amountColumn: 'Valor',
+  categoryColumn: 'Categoria',
+  categoryMode: 'coluna_categoria',
+  accountColumn: null,
+  documentColumn: 'Documento',
+  dateFormat: 'dd/mm/yyyy',
+  decimalSeparator: ',',
+  signConvention: 'valor_com_sinal',
+  natureColumn: null,
+  debitValue: null,
+  creditValue: null,
+  debitColumn: null,
+  creditColumn: null,
+  createdAt: '2026-09-01T12:00:00Z',
+  updatedAt: '2026-09-20T12:00:00Z',
+};
+
+/** `InspectPayload`: colunas do cabeçalho + amostra das primeiras linhas (só na resposta). */
+function fileInspect(): Record<string, unknown> {
+  return {
+    format: 'xlsx',
+    columns: ['Data', 'Histórico', 'Valor', 'Categoria', 'Documento'],
+    sample: [
+      ['01/08/2026', 'Aluguel do galpão', '-1500,00', 'Ocupação', 'NF 1201'],
+      ['03/08/2026', 'Recebimento cliente A', '4200,00', 'Vendas', 'REC 88'],
+      ['05/08/2026', 'Energia elétrica', '-320,45', 'Utilidades', 'NF 1210'],
+    ],
+    hasMapping: inputMappingState === 'salvo',
+  };
+}
+
+/** `ProcessedPayload`: as contagens do arquivo que entrou inteiro. */
+function fileProcessed(competence: string): Record<string, unknown> {
+  return {
+    importId: '88888888-8888-4888-8888-888888888809',
+    competence,
+    rows: 240,
+    columnsRecognized: 5,
+    categoriesCreated: 3,
+    absent: 0,
+    mappingId: INPUT_MAPPING.id,
+    processedAt: '2026-09-27T12:00:00Z',
+  };
+}
+
+/** `FileImportItem[]`: dois meses processados; o 2º com autor MASCARADO (como o tenant vê). */
+const FILE_IMPORTS = [
+  {
+    id: '88888888-8888-4888-8888-888888888801',
+    competence: '2026-08',
+    rows: 240,
+    fileHash: 'a'.repeat(64),
+    mappingId: INPUT_MAPPING.id,
+    processedAt: '2026-09-05T13:20:00Z',
+    author: { name: SYSTEM_MANAGER_USER.name, email: SYSTEM_MANAGER_USER.email },
+  },
+  {
+    id: '88888888-8888-4888-8888-888888888802',
+    competence: '2026-07',
+    rows: 212,
+    fileHash: 'b'.repeat(64),
+    mappingId: INPUT_MAPPING.id,
+    processedAt: '2026-08-04T10:00:00Z',
+    author: { name: 'Equipe Hologram', email: null },
+  },
+];
+
+/**
+ * As recusas TIPADAS da BACK 14.3 (`core/exceptions.py`, 422 + `code` +
+ * `userMessage` + `details`). Nomes de coluna, números de linha e motivos de
+ * vocabulário fechado — nunca conteúdo de célula.
+ */
+const FILE_REFUSALS: Record<'cabecalho' | 'linhas', Record<string, unknown>> = {
+  cabecalho: {
+    code: 'CABECALHO_DIVERGENTE',
+    message: 'header mismatch',
+    userMessage:
+      'O cabeçalho do arquivo não tem as colunas do mapeamento. Revise o mapeamento ou envie o arquivo com as colunas esperadas.',
+    details: {
+      missingColumns: ['Histórico'],
+      foundColumns: ['Data', 'Descrição', 'Valor', 'Categoria', 'Documento'],
+    },
+  },
+  linhas: {
+    code: 'LINHAS_INVALIDAS',
+    message: 'invalid lines',
+    userMessage:
+      'O arquivo tem linhas inválidas. Corrija as linhas apontadas e envie de novo — nada foi processado.',
+    details: {
+      lines: [
+        { line: 7, reason: 'valor_nao_numerico' },
+        { line: 12, reason: 'data_fora_da_competencia' },
+      ],
+      total: 5,
+    },
+  },
+};
 
 const CLIENT_DETAIL = {
   id: CLIENT_ID,
@@ -1762,6 +1922,43 @@ async function fulfillApi(route: Route): Promise<void> {
   if (path === `/api/v1/clients/${CLIENT_ID}/connections`) {
     return json({ connections: conexoesDoCenario() });
   }
+  // S14 (R1 · R2 · R5): mapeamento de entrada e ingestão do arquivo. Envelopes
+  // de chave ÚNICA (`{ data }`), então `json()` — o `apiGet`/`rawFetch`
+  // desembrulha. `mapping: null` é o estado NORMAL de "sem mapeamento", não 404.
+  if (path === `/api/v1/clients/${CLIENT_ID}/input-mapping`) {
+    if (route.request().method() === 'PUT') {
+      const created = inputMappingState === 'sem';
+      inputMappingState = 'salvo';
+      return json({ mapping: INPUT_MAPPING, created });
+    }
+    return json({ mapping: inputMappingState === 'salvo' ? INPUT_MAPPING : null });
+  }
+  if (path === `/api/v1/clients/${CLIENT_ID}/file-origin/inspect`) {
+    return json(fileInspect());
+  }
+  if (path === `/api/v1/clients/${CLIENT_ID}/file-origin/process`) {
+    if (fileProcessOutcome !== 'sucesso') {
+      return route.fulfill({
+        status: 422,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: FILE_REFUSALS[fileProcessOutcome] }),
+      });
+    }
+    // O multipart não é JSON: a competência vem do corpo cru do form-data.
+    const competence =
+      route
+        .request()
+        .postData()
+        ?.match(/\b(\d{4}-\d{2})\b/)?.[1] ?? '2026-09';
+    return route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ data: fileProcessed(competence) }),
+    });
+  }
+  if (path === `/api/v1/clients/${CLIENT_ID}/file-origin/imports`) {
+    return json(FILE_IMPORTS);
+  }
   if (path === `/api/v1/clients/${CLIENT_ID}`) {
     // As contas bancárias da tela R6 vêm DAQUI (paginação client-side sobre
     // `detail.accounts`), não de uma rota própria. O `origin_status` também:
@@ -2116,6 +2313,11 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   titlesSyncFailed = false;
   // S12: a competência da prévia do de-para está sincronizada, por padrão.
   mappingNeverSynced = false;
+  // S14: a origem é o Omie por padrão; o cliente sem sistema (arquivo), o
+  // mapeamento salvo e o envio bem-sucedido são o ponto de partida do bloco.
+  clientFileOrigin = false;
+  inputMappingState = 'salvo';
+  fileProcessOutcome = 'sucesso';
   await page.route('**/api/v1/**', fulfillApi);
   // O `src/middleware.ts` decide navegação só pela PRESENÇA do cookie
   // `access_token` (a validação real é do backend). Um valor qualquer basta
@@ -3461,9 +3663,17 @@ async function exigirAlturaDaTabela(page: Page, contexto: string) {
  * direita ficava fora da tela — "visível" para o Playwright, ilegível para a
  * pessoa. Hoje ele vive fora do `<table>` (`TableEmpty`), então é medível.
  */
-async function exigirEstadoVazioLegivel(page: Page, texto: string, contexto: string) {
+async function exigirEstadoVazioLegivel(
+  page: Page,
+  texto: string,
+  contexto: string,
+  // Quando a mesma frase aparece em mais de um bloco da tela (a aba de origem
+  // por arquivo diz "sem mapeamento" no mapeamento E no envio), o escopo evita
+  // a violação de strict mode do `getByText`.
+  escopo?: Locator,
+) {
   const largura = page.viewportSize()?.width ?? 0;
-  const caixa = await page.getByText(texto).boundingBox();
+  const caixa = await (escopo ?? page).getByText(texto).boundingBox();
   expect(caixa, `${contexto}: o estado vazio precisa ter caixa`).not.toBeNull();
   expect(caixa?.height ?? 0, `${contexto}: o estado vazio colapsou`).toBeGreaterThan(0);
   expect(caixa?.x ?? -1, `${contexto}: o estado vazio começa fora da tela`).toBeGreaterThanOrEqual(
@@ -5231,6 +5441,404 @@ for (const vp of VIEWPORTS) {
       const linha = page.getByRole('row', { name: /Cliente Exemplo Ltda/ });
       await expect(linha.getByText('Sem origem')).toBeVisible();
       await analyze(page, `lista de clientes com selo de sem origem (${vp.label})`);
+    });
+  });
+}
+
+/**
+ * Sprint 14 / R1 · R5 (FRONT 14.5) — o cliente SEM sistema: origem do tipo
+ * `arquivo`, o mapeamento de colunas salvo por cliente e o editor em gaveta.
+ *
+ * Bloco próprio porque liga `clientFileOrigin` (a única origem do cliente
+ * passa a ser a `FILE_CONNECTION`), e cada cenário escolhe entre "já tem
+ * mapeamento" e "ainda não tem". O que se mede aqui e o jsdom não vê: a aba
+ * no menu do cliente, a gaveta com Cancelar à esquerda e a ação primária
+ * dentro da viewport (padrão 4daefb4), a amostra em tabela rolável dentro da
+ * gaveta, o `AlertDialog` da alteração e o contraste real nos três temas.
+ */
+const XLSX_EXEMPLO = {
+  name: 'agosto.xlsx',
+  mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  buffer: Buffer.from('PK\u0003\u0004e2e'),
+};
+
+for (const vp of VIEWPORTS) {
+  const slugF = vp.label.replace(/\s+/g, '-');
+  test.describe(`Origem por arquivo — mapeamento (FRONT 14.5) — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('aba com mapeamento salvo: resumo campo ← coluna, "Alterar" e a aba no menu', async ({
+      page,
+    }) => {
+      clientFileOrigin = true;
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/origem-arquivo`);
+
+      await expect(
+        page.getByRole('heading', { name: 'Origem por arquivo', level: 2 }),
+      ).toBeVisible();
+      // A aba existe SÓ porque o cliente tem conexão `arquivo` — e é a ativa.
+      // No mobile a navegação do cliente mora no DRAWER (86e2n4pf9): abrir para
+      // medir, e fechar antes do resto (o modal marca o fundo com aria-hidden).
+      if (vp.label !== 'desktop') {
+        await page.getByRole('button', { name: 'Abrir menu de navegação' }).click();
+        await aguardarAnimacao(page.getByRole('dialog', { name: 'Menu' }));
+      }
+      const nav = page.getByRole('navigation', { name: 'Seções do cliente' });
+      await expect(nav.getByRole('link', { name: 'Origem por arquivo' })).toHaveAttribute(
+        'aria-current',
+        'page',
+      );
+      if (vp.label !== 'desktop') {
+        await page.keyboard.press('Escape');
+        await expect(page.getByRole('dialog')).toHaveCount(0);
+      }
+      // O resumo lista campo ← coluna e a convenção de sinal, sem conteúdo de célula.
+      const resumo = page.getByTestId('mapping-summary');
+      await expect(resumo).toBeVisible();
+      await expect(resumo).toContainText('Histórico');
+      await expect(resumo).toContainText('Valor com sinal');
+      await expect(page.getByRole('button', { name: 'Alterar mapeamento' })).toBeVisible();
+      await expect(page.getByTestId('input-mapping-empty')).toHaveCount(0);
+      // A lista de processados também entra no print (autor mascarado incluso).
+      const processados = page.getByTestId('file-imports');
+      await expect(processados.getByRole('row')).toHaveCount(3);
+      await expect(processados.getByText('Equipe Hologram')).toBeVisible();
+      await expect(page.locator('#__next_error__')).toHaveCount(0);
+
+      await shot(page, `origem-arquivo-resumo-${slugF}`);
+      await analyze(page, `origem por arquivo — resumo do mapeamento (${vp.label})`);
+    });
+
+    test('operador do cliente: lê o resumo, envia, e NENHUM botão de configurar (célula ❌)', async ({
+      page,
+    }) => {
+      clientFileOrigin = true;
+      sessionUser = CLIENT_OPERATOR_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/origem-arquivo`);
+
+      await expect(page.getByTestId('mapping-summary')).toBeVisible();
+      // Ação OCULTA, não desabilitada (§4.9): `manage_input_mapping` é ❌ para ele.
+      await expect(page.getByRole('button', { name: /Alterar mapeamento/ })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: /Configurar mapeamento/ })).toHaveCount(0);
+      // ...mas `upload_client_file` é ✅: o envio é dele, com o "Será aplicado".
+      await expect(page.getByTestId('mapping-summary-compact')).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Enviar arquivo' })).toBeVisible();
+
+      await shot(page, `origem-arquivo-operador-${slugF}`);
+      await analyze(page, `origem por arquivo — operador só lê o mapeamento (${vp.label})`);
+    });
+
+    test('sem mapeamento: estado vazio, editor com amostra e Cancelar à esquerda', async ({
+      page,
+    }) => {
+      clientFileOrigin = true;
+      inputMappingState = 'sem';
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/origem-arquivo`);
+
+      const vazio = page.getByTestId('input-mapping-empty');
+      await expect(vazio).toContainText('ainda não tem mapeamento de colunas');
+      await exigirEstadoVazioLegivel(
+        page,
+        'Este cliente ainda não tem mapeamento de colunas',
+        `${vp.label} · sem mapeamento`,
+        vazio,
+      );
+      // O envio repete a frase no próprio bloco (e oferece configurar e enviar).
+      await expect(page.getByTestId('upload-needs-mapping')).toBeVisible();
+      await shot(page, `origem-arquivo-vazio-${slugF}`);
+      await analyze(page, `origem por arquivo — sem mapeamento (${vp.label})`);
+
+      // O editor: escolher um arquivo, inspecionar, ver colunas + amostra.
+      await vazio.getByRole('button', { name: 'Configurar mapeamento', exact: true }).click();
+      const gaveta = page.getByRole('dialog');
+      await expect(gaveta.getByRole('heading', { name: 'Configurar mapeamento' })).toBeVisible();
+      await aguardarAnimacao(gaveta);
+      // Sem colunas ainda, Salvar fica bloqueado e a instrução aparece.
+      await expect(gaveta.getByRole('button', { name: 'Salvar mapeamento' })).toBeDisabled();
+      await gaveta.getByLabel('Arquivo (.csv ou .xlsx)').setInputFiles(XLSX_EXEMPLO);
+      await gaveta.getByRole('button', { name: 'Inspecionar arquivo' }).click();
+
+      const amostra = gaveta.getByTestId('inspection-sample');
+      await expect(amostra).toContainText('5 colunas encontradas');
+      await expect(amostra.getByRole('columnheader', { name: 'Histórico' })).toBeVisible();
+      // A amostra rola DENTRO da gaveta: região focável e rotulada (não
+      // `scrollable-region-focusable`), com altura própria.
+      const regiao = gaveta.getByRole('region', {
+        name: 'Amostra das primeiras linhas do arquivo (rolável)',
+      });
+      await expect(regiao).toHaveAttribute('tabindex', '0');
+      expect((await regiao.boundingBox())?.height ?? 0, 'a amostra colapsou').toBeGreaterThan(40);
+      await expect(gaveta.getByRole('button', { name: 'Salvar mapeamento' })).toBeEnabled();
+
+      // Convenção de sinal: grupo de rádio SEM padrão; escolher uma abre os dependentes.
+      const grupo = gaveta.getByRole('radiogroup', { name: 'Convenção de sinal' });
+      await expect(grupo.getByRole('radio', { checked: true })).toHaveCount(0);
+      await grupo.getByRole('radio', { name: /Coluna de natureza/ }).click();
+      const dependentes = gaveta.getByTestId('sign-dependent-fields');
+      await expect(dependentes.getByLabel('Texto que significa débito')).toBeVisible();
+      await expect(dependentes.getByRole('combobox', { name: 'Coluna: Valor' })).toBeVisible();
+
+      // Cancelar à esquerda e a ação primária DENTRO da viewport (padrão 4daefb4).
+      const cancelar = await gaveta.getByRole('button', { name: 'Cancelar' }).boundingBox();
+      const salvar = gaveta.getByRole('button', { name: 'Salvar mapeamento' });
+      const primaria = await salvar.boundingBox();
+      expect(cancelar?.x ?? 0, 'Cancelar precisa ficar à esquerda da ação primária').toBeLessThan(
+        primaria?.x ?? 0,
+      );
+      await exigirDentroDaViewport(page, salvar, `${vp.label}: "Salvar mapeamento"`);
+      expect(
+        (cancelar?.x ?? 0) + (cancelar?.width ?? 0),
+        'Cancelar do editor de mapeamento cortado pela borda da viewport',
+      ).toBeLessThanOrEqual(vp.size.width);
+
+      await shot(page, `origem-arquivo-editor-${slugF}`);
+      // Os `Select` estão FECHADOS aqui (86e34jd8m): o axe mede a gaveta inteira.
+      await analyze(page, `origem por arquivo — editor com amostra (${vp.label})`);
+
+      // A gaveta abre por ESTADO (sem `SheetTrigger`): Cancelar devolve o foco a
+      // quem a abriu (`OpenerCapture` no `SheetContent`), não ao `body`.
+      await gaveta.getByRole('button', { name: 'Cancelar' }).click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(
+        vazio.getByRole('button', { name: 'Configurar mapeamento', exact: true }),
+      ).toBeFocused();
+    });
+
+    test('alterar mapeamento existente exige o AlertDialog; só grava após confirmar', async ({
+      page,
+    }) => {
+      clientFileOrigin = true;
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/origem-arquivo`);
+
+      await page.getByRole('button', { name: 'Alterar mapeamento' }).click();
+      const gaveta = page.getByRole('dialog');
+      await expect(gaveta.getByRole('heading', { name: 'Alterar mapeamento' })).toBeVisible();
+      await aguardarAnimacao(gaveta);
+      // As colunas do mapeamento salvo já estão nos seletores — sem inspecionar.
+      await expect(gaveta.getByRole('combobox', { name: 'Coluna: Data' })).toContainText('Data');
+      await expect(gaveta.getByRole('radio', { name: /Valor com sinal/ })).toBeChecked();
+
+      let gravou = false;
+      page.on('request', (req) => {
+        if (req.method() === 'PUT' && req.url().includes('/input-mapping')) gravou = true;
+      });
+      await gaveta.getByRole('button', { name: 'Salvar alterações' }).click();
+      const dialogo = page.getByRole('alertdialog');
+      await expect(dialogo).toContainText('Alterar o mapeamento deste cliente?');
+      await expect(dialogo).toContainText(/altera como os próximos arquivos serão lidos/);
+      await aguardarAnimacao(dialogo);
+      expect(gravou, 'o PUT só pode sair DEPOIS da confirmação').toBe(false);
+      const confirmar = dialogo.getByRole('button', { name: 'Confirmar alteração' });
+      await exigirDentroDaViewport(page, confirmar, `${vp.label}: "Confirmar alteração"`);
+
+      await shot(page, `origem-arquivo-confirmar-alteracao-${slugF}`);
+      await analyze(page, `origem por arquivo — confirmar alteração (${vp.label})`);
+
+      await confirmar.click();
+      await expect(
+        page.getByText('Mapeamento alterado. Os próximos arquivos serão lidos com ele.'),
+      ).toBeVisible();
+      await expect.poll(() => gravou).toBe(true);
+      await expect(page.getByRole('alertdialog')).toHaveCount(0);
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      // Salvo, o foco volta ao "Alterar mapeamento" que abriu a gaveta.
+      await expect(page.getByRole('button', { name: 'Alterar mapeamento' })).toBeFocused();
+      await aguardarToastEstavel(page);
+      expect(await measuredContrast(page, TOAST_TITLE)).toBeGreaterThanOrEqual(4.5);
+      await analyze(page, `origem por arquivo — toast de mapeamento alterado (${vp.label})`);
+    });
+
+    test('gaveta de conexão: tipo "Arquivo" sem credencial nem teste; Salvar habilita direto', async ({
+      page,
+    }) => {
+      originState = 'sem_origem';
+      await page.goto(`/clientes/${CLIENT_ID}/painel`);
+
+      await page.getByRole('button', { name: 'Conectar origem' }).first().click();
+      const gaveta = page.getByRole('dialog').filter({ hasText: 'Conectar origem' });
+      await aguardarAnimacao(gaveta);
+      // Omie (padrão): credencial + teste, Salvar bloqueado até testar.
+      await expect(gaveta.getByLabel('App Key Omie')).toBeVisible();
+      await expect(gaveta.getByRole('button', { name: 'Salvar origem' })).toBeDisabled();
+
+      await gaveta.getByRole('combobox', { name: 'Tipo de origem' }).click();
+      await page.getByRole('option', { name: 'Arquivo (planilha ou extrato)' }).click();
+
+      // Pela tabela única (`providerRequiresCredentials`): nada de segredo.
+      await expect(gaveta.getByLabel('App Key Omie')).toHaveCount(0);
+      await expect(gaveta.getByLabel('App Secret Omie')).toHaveCount(0);
+      await expect(gaveta.getByRole('button', { name: /Testar conexão/ })).toHaveCount(0);
+      await expect(gaveta).toContainText('A origem por arquivo não tem credencial');
+      const salvar = gaveta.getByRole('button', { name: 'Salvar origem' });
+      await expect(salvar).toBeEnabled();
+      await exigirDentroDaViewport(page, salvar, `${vp.label}: "Salvar origem" (arquivo)`);
+
+      await shot(page, `conectar-origem-arquivo-${slugF}`);
+      // O `Select` do Radix está fechado de novo (a opção escolhida o fecha).
+      await analyze(page, `gaveta de conectar origem por arquivo (${vp.label})`);
+    });
+  });
+}
+
+/**
+ * Sprint 14 / R2 · R5 (FRONT 14.6) — enviar o arquivo do mês e ver a recusa
+ * com o motivo ESPECÍFICO, nunca um erro genérico. O que se mede aqui e o
+ * jsdom não vê: o toast de sucesso com contraste real, os blocos de recusa em
+ * `destructive-muted` nos três temas (o fundo `-muted` com texto sólido é o
+ * par travado — `bg-destructive/N` seria alfa e o axe devolveria `incomplete`),
+ * a tabela linha × motivo rolável e focável dentro do bloco, e o de-para do
+ * cliente sem sistema trocando "Sincronizar competência" por "Enviar arquivo
+ * do mês" (mostrar ação que o servidor nega com 409 é defeito, §4.9).
+ */
+for (const vp of VIEWPORTS) {
+  const slugE = vp.label.replace(/\s+/g, '-');
+  test.describe(`Origem por arquivo — envio e recusas (FRONT 14.6) — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    /** Escolhe o arquivo na seção de envio (não na gaveta) e clica em Enviar. */
+    async function enviar(page: Page): Promise<void> {
+      const secao = page.getByTestId('file-upload-section');
+      await secao.getByLabel('Arquivo (.csv ou .xlsx)').setInputFiles(XLSX_EXEMPLO);
+      await secao.getByRole('button', { name: 'Enviar arquivo' }).click();
+    }
+
+    test('com mapeamento salvo: "Será aplicado" e o envio é um passo só, com contagens e link', async ({
+      page,
+    }) => {
+      clientFileOrigin = true;
+      sessionUser = CLIENT_OPERATOR_USER;
+      // A competência mora na URL — é o parâmetro que o link do de-para manda.
+      await page.goto(`/clientes/${CLIENT_ID}/origem-arquivo?competence=2026-08`);
+
+      const secao = page.getByTestId('file-upload-section');
+      await expect(secao.getByLabel('Competência')).toHaveValue('2026-08');
+      const aplicado = page.getByTestId('mapping-will-apply');
+      await expect(aplicado).toContainText('Será aplicado');
+      await expect(aplicado).toContainText('Histórico');
+      // Sem editor no caminho: o botão é "Enviar arquivo", não "Configurar…".
+      await expect(secao.getByRole('button', { name: /Configurar mapeamento/ })).toHaveCount(0);
+
+      await enviar(page);
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      const sucesso = page.getByTestId('upload-success');
+      await expect(sucesso).toContainText('Arquivo de Agosto de 2026 processado: 240 linhas');
+      await expect(sucesso).toContainText('3 categorias novas');
+      await expect(
+        sucesso.getByRole('link', { name: /Ver de-para de Agosto de 2026/ }),
+      ).toHaveAttribute('href', `/clientes/${CLIENT_ID}/de-para?view=previa&competence=2026-08`);
+      // O toast de sucesso MEDIDO (não só presente), como nos outros cenários.
+      await expect(page.locator(TOAST_TITLE)).toContainText('processado');
+      await aguardarToastEstavel(page);
+      expect(await measuredContrast(page, TOAST_TITLE)).toBeGreaterThanOrEqual(4.5);
+
+      await shot(page, `origem-arquivo-envio-sucesso-${slugE}`);
+      await analyze(page, `origem por arquivo — envio com sucesso + toast (${vp.label})`);
+    });
+
+    test('CABECALHO_DIVERGENTE: colunas ausentes NOMEADAS, encontradas, e "Revisar mapeamento"', async ({
+      page,
+    }) => {
+      clientFileOrigin = true;
+      fileProcessOutcome = 'cabecalho';
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/origem-arquivo?competence=2026-08`);
+
+      await enviar(page);
+      const recusa = page.locator('[data-refusal-code="CABECALHO_DIVERGENTE"]');
+      await expect(recusa).toBeVisible();
+      await expect(recusa).toHaveAttribute('role', 'alert');
+      await expect(recusa).toContainText('O cabeçalho do arquivo não bate com o mapeamento');
+      await expect(recusa.getByRole('list', { name: /ausentes no arquivo/ })).toContainText(
+        'Histórico',
+      );
+      await expect(recusa.getByRole('list', { name: /encontradas no arquivo/ })).toContainText(
+        'Descrição',
+      );
+      // Nenhum toast genérico: a recusa é ESTADO na tela.
+      await expect(page.locator('[data-sonner-toast]')).toHaveCount(0);
+      // Texto sólido sobre `destructive-muted`: contraste medido, não só "axe verde".
+      expect(await measuredContrast(page, '[data-refusal-code] > p')).toBeGreaterThanOrEqual(4.5);
+      const revisar = recusa.getByRole('button', { name: 'Revisar mapeamento' });
+      await exigirDentroDaViewport(page, revisar, `${vp.label}: "Revisar mapeamento"`);
+
+      await shot(page, `origem-arquivo-recusa-cabecalho-${slugE}`);
+      await analyze(page, `origem por arquivo — recusa por cabeçalho (${vp.label})`);
+
+      // A ação de correção abre o editor do mapeamento EXISTENTE.
+      await revisar.click();
+      await expect(
+        page.getByRole('dialog').getByRole('heading', { name: 'Alterar mapeamento' }),
+      ).toBeVisible();
+    });
+
+    test('LINHAS_INVALIDAS: tabela linha × motivo em PT-BR, "mostrando K de N", rolável e focável', async ({
+      page,
+    }) => {
+      clientFileOrigin = true;
+      fileProcessOutcome = 'linhas';
+      sessionUser = CLIENT_OPERATOR_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/origem-arquivo?competence=2026-08`);
+
+      await enviar(page);
+      const recusa = page.locator('[data-refusal-code="LINHAS_INVALIDAS"]');
+      await expect(recusa).toBeVisible();
+      await expect(recusa).toContainText('nada foi processado');
+      await expect(recusa.getByRole('row')).toHaveCount(3); // cabeçalho + 2
+      await expect(recusa.getByRole('row').nth(1)).toContainText('7');
+      await expect(recusa.getByRole('row').nth(1)).toContainText('Valor não numérico');
+      await expect(recusa.getByRole('row').nth(2)).toContainText(
+        'Data fora da competência informada',
+      );
+      const contagem = recusa.getByTestId('invalid-lines-count');
+      await expect(contagem).toHaveText('Mostrando 2 de 5 linhas inválidas.');
+      await exigirDentroDaViewport(page, contagem, `${vp.label}: contagem das linhas inválidas`);
+      // A tabela rola DENTRO do bloco: região focável e rotulada.
+      const regiao = recusa.getByRole('region', {
+        name: 'Linhas inválidas do arquivo (rolável)',
+      });
+      await expect(regiao).toHaveAttribute('tabindex', '0');
+      expect(
+        (await regiao.boundingBox())?.height ?? 0,
+        'a tabela de linhas colapsou',
+      ).toBeGreaterThan(40);
+      // O operador não configura: a recusa explica sem botão de mapeamento.
+      await expect(recusa.getByRole('button', { name: /mapeamento/ })).toHaveCount(0);
+
+      await shot(page, `origem-arquivo-recusa-linhas-${slugE}`);
+      await analyze(page, `origem por arquivo — recusa por linhas inválidas (${vp.label})`);
+    });
+
+    test('de-para do cliente sem sistema: "Enviar arquivo do mês" no lugar de "Sincronizar"', async ({
+      page,
+    }) => {
+      clientFileOrigin = true;
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/de-para?view=previa&competence=2026-06`);
+
+      await expect(page.getByTestId('mapping-preview')).toBeVisible();
+      // O servidor responderia 409 `ORIGEM_POR_ARQUIVO`: a ação some (§4.9)...
+      await expect(page.getByRole('button', { name: /Sincronizar competência/ })).toHaveCount(0);
+      // ...e no lugar entra o link para o envio, já com a competência da prévia.
+      const enviarLink = page.getByRole('link', { name: 'Enviar arquivo do mês' });
+      await expect(enviarLink).toHaveAttribute(
+        'href',
+        `/clientes/${CLIENT_ID}/origem-arquivo?competence=2026-06`,
+      );
+      await exigirDentroDaViewport(page, enviarLink, `${vp.label}: "Enviar arquivo do mês"`);
+      await shot(page, `de-para-origem-arquivo-${slugE}`);
+      await analyze(page, `de-para — cliente com origem por arquivo (${vp.label})`);
+
+      // Base nunca sincronizada: a instrução fala do ENVIO, não de sincronizar.
+      mappingNeverSynced = true;
+      await page.goto(`/clientes/${CLIENT_ID}/de-para?view=previa&competence=2026-06`);
+      await expect(page.getByText('Junho de 2026 ainda não tem base de movimentos')).toBeVisible();
+      await expect(page.getByText(/alimentada pelo envio do arquivo do mês/)).toBeVisible();
+      await expect(page.getByRole('button', { name: /Sincronizar competência/ })).toHaveCount(0);
+      await expect(page.getByRole('link', { name: 'Enviar arquivo do mês' })).toBeVisible();
+      await analyze(page, `de-para — origem por arquivo, base nunca sincronizada (${vp.label})`);
     });
   });
 }

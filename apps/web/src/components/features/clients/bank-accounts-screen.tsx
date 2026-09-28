@@ -42,6 +42,7 @@ import { useClientDetail, useSyncAccounts } from '@/hooks/use-clients';
 import { readPositiveInt, useUrlState } from '@/hooks/use-url-state';
 import { ApiError } from '@/lib/api/client';
 import { formatOmieAccountType, formatSyncedAt } from '@/lib/format';
+import { originCodeFor } from '@/lib/origin-capabilities';
 import { isOriginError, originErrorCode } from '@/lib/origin-state';
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -101,14 +102,14 @@ export function BankAccountsScreen({ clientId }: { clientId: string }) {
   // S9 (R4/R7): sem origem ATIVA o detalhe responde 200 com zero contas, e o
   // sync responderia 409. Oferecer "Extrair contas" aqui seria oferecer o que o
   // servidor nega (§4.9) — o lugar de agir é a seção de origens, no painel.
-  // O código vem do `origin_status` do detalhe se ainda não houve clique, e do
-  // erro real do sync depois dele (que pode ser `CAPACIDADE_AUSENTE`, um caso
-  // que o `origin_status` sozinho não distingue).
+  // O código vem do detalhe (`origin_status` + a CAPACIDADE `listar_contas`
+  // das conexões — a origem por arquivo não lista contas, S14) enquanto não
+  // houve clique, e do erro real do sync depois dele. Um lugar só decide:
+  // `originCodeFor` (`lib/origin-capabilities.ts`).
   const originStatus = detailQuery.data?.origin_status ?? 'sem_origem';
-  const originReady = isClosed || originStatus === 'ativa';
   const originCode =
     originErrorCode(originError) ??
-    (originReady ? null : originStatus === 'sem_origem' ? 'SEM_CONEXAO' : 'ORIGEM_COM_ERRO');
+    (isClosed ? null : originCodeFor(originStatus, detailQuery.data?.connections, 'listar_contas'));
 
   return (
     <section aria-labelledby="accounts-heading" className="flex h-full flex-col gap-4">

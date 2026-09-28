@@ -24,10 +24,19 @@
  * sincronizada só fala em "botão acima" quando o botão existe.
  */
 
-import { AlertTriangle, CheckCircle2, Layers, Loader2, RefreshCw } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  FileSpreadsheet,
+  Layers,
+  Loader2,
+  RefreshCw,
+} from 'lucide-react';
+import Link from 'next/link';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
+import { fileOriginPath } from '@/components/features/navigation/nav-items';
 import { AuthorLabel } from '@/components/features/reconciliations/author-label';
 import { OriginStateBlock } from '@/components/shared/origin-state-notice';
 import {
@@ -76,9 +85,10 @@ import { cn } from '@/lib/utils';
 
 /**
  * Por que a pessoa não pode (ou pode) sincronizar daqui — decide a instrução da
- * base nunca sincronizada. "botão acima" só quando o botão EXISTE.
+ * base nunca sincronizada. "botão acima" só quando o botão EXISTE. `file` (S14):
+ * a base deste cliente é alimentada pelo ENVIO do arquivo, não por sincronização.
  */
-type SyncHint = 'button' | 'origin' | 'closed' | 'no_permission';
+type SyncHint = 'button' | 'origin' | 'closed' | 'no_permission' | 'file' | 'file_no_permission';
 
 const baseBadge =
   'inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset';
@@ -89,9 +99,18 @@ interface MappingPreviewPanelProps {
   competence: string;
   onCompetenceChange: (competence: string) => void;
   canSync: boolean;
+  /** `upload_client_file` — gateia o link "Enviar arquivo do mês" (§4.9). */
+  canUpload: boolean;
   canManage: boolean;
   isClosed: boolean;
   originStatus: OriginStatus;
+  /**
+   * S14 (FRONT 14.6): a origem capaz de listar lançamentos é do tipo `arquivo`
+   * (`originIsFileBased`, decidido pela CAPACIDADE no helper único). O servidor
+   * responderia 409 `ORIGEM_POR_ARQUIVO` ao sync — mostrar a ação é defeito
+   * (§4.9); no lugar entra "Enviar arquivo do mês".
+   */
+  fileOrigin?: boolean;
 }
 
 export function MappingPreviewPanel({
@@ -100,9 +119,11 @@ export function MappingPreviewPanel({
   competence,
   onCompetenceChange,
   canSync,
+  canUpload,
   canManage,
   isClosed,
   originStatus,
+  fileOrigin = false,
 }: MappingPreviewPanelProps) {
   const validCompetence = isCompetence(competence) ? competence : '';
   const stateQuery = useMovementsSyncState(clientId, validCompetence);
@@ -119,14 +140,22 @@ export function MappingPreviewPanel({
   // do `origin_status` antes do clique e do erro real depois dele.
   const originCode =
     originErrorCode(originError) ?? (originStatus === 'ativa' ? null : 'SEM_CONEXAO');
-  const showSyncAction = canSync && !isClosed && originCode === null;
+  const showSyncAction = canSync && !isClosed && originCode === null && !fileOrigin;
+  // O link para o envio é de quem PODE enviar (`upload_client_file`, pelo
+  // helper — hoje os cinco papéis o têm, mas a célula decide, não a suposição),
+  // com o cliente aberto e a origem ativa.
+  const showUploadLink = fileOrigin && canUpload && !isClosed && originCode === null;
   const syncHint: SyncHint = isClosed
     ? 'closed'
-    : !canSync
-      ? 'no_permission'
-      : originCode !== null
-        ? 'origin'
-        : 'button';
+    : fileOrigin
+      ? canUpload
+        ? 'file'
+        : 'file_no_permission'
+      : !canSync
+        ? 'no_permission'
+        : originCode !== null
+          ? 'origin'
+          : 'button';
 
   async function handleSync() {
     if (!validCompetence) return;
@@ -162,6 +191,17 @@ export function MappingPreviewPanel({
     </Button>
   );
 
+  // S14: cliente cuja origem é ARQUIVO — a base é alimentada pelo envio. O link
+  // leva à aba "Origem por arquivo" já com a competência da prévia.
+  const uploadLink = (
+    <Button asChild>
+      <Link href={fileOriginPath(clientId, validCompetence || null)}>
+        <FileSpreadsheet className="h-4 w-4" aria-hidden="true" />
+        Enviar arquivo do mês
+      </Link>
+    </Button>
+  );
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -191,6 +231,7 @@ export function MappingPreviewPanel({
             <BaseStateText query={stateQuery} onRetry={() => void stateQuery.refetch()} />
           </div>
           {showSyncAction && syncButton}
+          {showUploadLink && uploadLink}
         </div>
         {!isClosed && originCode !== null && canSync && (
           <OriginStateBlock code={originCode} clientId={clientId} variant="inline" />
@@ -281,6 +322,9 @@ const NEVER_SYNCED_HINTS: Record<SyncHint, string> = {
     'A prévia é calculada sobre os movimentos da competência. Com o cliente encerrado, a sincronização não está disponível.',
   no_permission:
     'A prévia é calculada sobre os movimentos da competência. Peça a alguém da equipe com acesso de sincronização para sincronizá-la.',
+  file: 'A base deste cliente é alimentada pelo envio do arquivo do mês (aba "Origem por arquivo", botão acima). Envie o arquivo desta competência para a prévia ser calculada.',
+  file_no_permission:
+    'A base deste cliente é alimentada pelo envio do arquivo do mês. Peça a alguém da equipe com acesso de envio para enviar o arquivo desta competência.',
 };
 
 function NeverSyncedInstruction({

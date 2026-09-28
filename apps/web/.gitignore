@@ -12,3 +12,9 @@ a11y-report*.json
 # Screenshots de conferência visual do gate (`E2E_SHOTS=1`, uma pasta por
 # tema). Artefato de execução, nunca entra em commit — como o relatório acima.
 a11y-shots/
+
+# `node_modules` SEM barra: a regra da raiz (`node_modules/`) só casa diretório, e
+# no worktree de agent `apps/web/node_modules` é um LINK simbólico para o do
+# checkout principal — com barra ele escapava e entrou num commit (Sprint 14,
+# reprovação do QA: link para caminho que não existe no CI).
+node_modules
