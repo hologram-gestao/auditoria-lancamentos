@@ -4133,6 +4133,8 @@ export interface components {
              * @description Competência (servidor) em que a vigente foi resolvida.
              */
             competence: string;
+            /** @description Contagem por situação sobre o universo inteiro do destino na competência corrente — a mesma em qualquer página e filtro. */
+            counts: components["schemas"]["MappingSituationCountsResponse"];
         };
         /** MappingPreviewEnvelope */
         MappingPreviewEnvelope: {
@@ -4178,6 +4180,24 @@ export interface components {
              * @description Última versão materializada (0 = nenhuma).
              */
             latestVersion: number;
+        };
+        /**
+         * MappingSituationCountsResponse
+         * @description As quatro situações sobre o universo INTEIRO do destino (86e3f55bd).
+         *
+         *     Independem de `page`, `situation` e `code`: `total` = soma das quatro.
+         */
+        MappingSituationCountsResponse: {
+            /** Total */
+            total: number;
+            /** Herdada */
+            herdada: number;
+            /** Confirmada */
+            confirmada: number;
+            /** Naomapear */
+            naoMapear: number;
+            /** Semdecisao */
+            semDecisao: number;
         };
         /**
          * MappingTargetBatchCreate

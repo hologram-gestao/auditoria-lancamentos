@@ -12,6 +12,13 @@
  * é resolvido em runtime e nunca persistido (§4.5, decidido na Sprint 10):
  * oferecer busca por nome exigiria gravá-lo.
  *
+ * **Contadores que filtram e barra compacta (86e3f55bd).** O recorte por
+ * situação vem dos contadores do topo (`counts` do envelope, universo inteiro);
+ * o `Select` de situação saiu. Cada filtro ativo vira etiqueta removível, e link
+ * antigo com `situation`/`code` continua abrindo o mesmo recorte. A página rola
+ * e a tabela não (`stickyHeader="page"`), e clicar na linha abre a gaveta de
+ * decisão para quem edita.
+ *
  * **Gating.** Ler é de quem alcança o cliente (o operador inclusive). Editar,
  * confirmar herdadas em lote e "Iniciar de-para" pedem `manage_client_mapping`
  * — as ações ficam OCULTAS para quem não a tem (nunca desabilitadas), e cliente
@@ -19,7 +26,7 @@
  * do LOTE só existem no destino que herda (R7).
  */
 
-import { CheckCheck, Loader2, Pencil, Search, Sprout } from 'lucide-react';
+import { CheckCheck, Loader2, Pencil, Search, Sprout, X } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -28,13 +35,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PaginationBar } from '@/components/ui/pagination-bar';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -55,6 +55,7 @@ import type {
   MappingSituation,
 } from '@/lib/contracts';
 import { formatReferenceMonth } from '@/lib/format';
+import { cn } from '@/lib/utils';
 
 import {
   MAPPING_SITUATION_FILTER_LABELS,
@@ -62,10 +63,15 @@ import {
   MappingSituationBadge,
 } from './client-mapping-badges';
 import { MappingDecisionSheet } from './mapping-decision-sheet';
+import {
+  isMappingCountActive,
+  mappingCountFilterSituation,
+  MappingSituationCountsBlock,
+  MappingSituationCountsSkeleton,
+  type MappingCountKey,
+} from './mapping-situation-counts';
 import { VigenciaActionDialog } from './vigencia-action-dialog';
 
-/** O Radix não aceita `''` como valor de item — `all` é o "sem filtro". */
-const ALL = 'all';
 export const SITUATION_FILTERS: readonly MappingSituation[] = [
   'herdada',
   'confirmada',
@@ -100,6 +106,8 @@ interface MappingListPanelProps {
   onCodeInputChange: (value: string) => void;
   onSituationChange: (value: MappingSituation | null) => void;
   onClearFilters: () => void;
+  /** Remove SÓ o recorte por código (etiqueta): limpa o campo e a URL juntos. */
+  onClearCode: () => void;
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
   page: number;
@@ -120,6 +128,7 @@ export function MappingListPanel({
   onCodeInputChange,
   onSituationChange,
   onClearFilters,
+  onClearCode,
   onPageChange,
   onPageSizeChange,
   page,
@@ -139,8 +148,35 @@ export function MappingListPanel({
   const inherits = destination.type === INHERITING_DESTINATION_TYPE;
   const columnCount = showWriteActions ? 5 : 4;
 
+  const counts = listQuery.data?.counts;
+  const activeSituation = situation ?? null;
+
+  /**
+   * Clique num contador: aplica a situação da tabela
+   * `mappingCountFilterSituation`; clicar no que já está ativo desfaz. O código
+   * não é do contador: fica.
+   */
+  function handleCountSelect(key: MappingCountKey) {
+    onSituationChange(
+      isMappingCountActive(activeSituation, key) ? null : mappingCountFilterSituation(key),
+    );
+  }
+
+  // Etiquetas removíveis: uma por parâmetro, remover limpa SÓ aquele.
+  const activeChips: { key: string; label: string; onRemove: () => void }[] = [];
+  if (situation !== undefined) {
+    activeChips.push({
+      key: 'situation',
+      label: MAPPING_SITUATION_FILTER_LABELS[situation],
+      onRemove: () => onSituationChange(null),
+    });
+  }
+  if (codeFilter !== '') {
+    activeChips.push({ key: 'code', label: `Código ${codeFilter}`, onRemove: onClearCode });
+  }
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div className="flex flex-col gap-4">
       {destination.targetsCount === 0 && (
         <div
           role="status"
@@ -155,9 +191,25 @@ export function MappingListPanel({
         </div>
       )}
 
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
-        <div className="min-w-0 flex-1 space-y-1.5">
-          <Label htmlFor="mapping-code-search">Buscar por código da categoria</Label>
+      {/* Contadores ANTES da barra: são o recorte por situação (Parte B). */}
+      {listQuery.isLoading ? (
+        <MappingSituationCountsSkeleton />
+      ) : counts !== undefined ? (
+        <MappingSituationCountsBlock
+          counts={counts}
+          active={activeSituation}
+          onSelect={handleCountSelect}
+        />
+      ) : null}
+
+      {/* Barra compacta (Parte C): numa linha de `xl` para cima, com as ações do
+          lote à direita. O rótulo do campo é `sr-only` (o nome acessível segue o
+          mesmo); a ajuda visível é curta e a descrição completa vai no leitor. */}
+      <div className="flex flex-col gap-3 xl:flex-row xl:flex-wrap xl:items-center">
+        <div className="xl:w-72">
+          <Label htmlFor="mapping-code-search" className="sr-only">
+            Buscar por código da categoria
+          </Label>
           <div className="relative">
             <Search
               className="text-muted-foreground absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
@@ -168,50 +220,58 @@ export function MappingListPanel({
               value={codeInput}
               maxLength={MAX_CODE_CHARS}
               onChange={(e) => onCodeInputChange(e.target.value)}
-              placeholder="Ex.: 2.01"
-              className="pl-9"
+              placeholder="Buscar por código"
+              className="pl-9 pr-28"
               aria-describedby="mapping-code-search-help"
             />
+            <span
+              aria-hidden="true"
+              className="text-muted-foreground pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs"
+            >
+              só pelo código
+            </span>
           </div>
-          <p id="mapping-code-search-help" className="text-muted-foreground text-xs">
+          <p id="mapping-code-search-help" className="sr-only">
             A busca é só pelo código (começando por). O nome vem da origem na hora e não é
             pesquisável.
           </p>
         </div>
 
-        <div className="space-y-1.5 lg:w-56">
-          <Label htmlFor="mapping-situation-filter">Situação</Label>
-          <Select
-            value={situation ?? ALL}
-            onValueChange={(value) =>
-              onSituationChange(value === ALL ? null : (value as MappingSituation))
-            }
-          >
-            <SelectTrigger id="mapping-situation-filter" className="w-full">
-              <SelectValue placeholder="Todas as situações" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>Todas as situações</SelectItem>
-              {SITUATION_FILTERS.map((value) => (
-                <SelectItem key={value} value={value}>
-                  {MAPPING_SITUATION_FILTER_LABELS[value]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
+        {/* Etiquetas e "Limpar filtros" andam juntos: quando não cabem na linha,
+            descem como um bloco, e o botão nunca fica sozinho. */}
         {hasFilters && (
-          <Button type="button" variant="outline" onClick={onClearFilters}>
-            Limpar filtros
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {activeChips.length > 0 && (
+              <ul aria-label="Filtros ativos" className="flex flex-wrap items-center gap-2">
+                {activeChips.map((chip) => (
+                  <li
+                    key={chip.key}
+                    className="bg-accent text-accent-foreground ring-border inline-flex items-center gap-1 rounded-full py-0.5 pl-2.5 pr-1 text-xs font-medium ring-1 ring-inset"
+                  >
+                    {chip.label}
+                    <button
+                      type="button"
+                      aria-label={`Remover filtro ${chip.label}`}
+                      onClick={chip.onRemove}
+                      className="hover:bg-background/60 focus-visible:ring-ring inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2"
+                    >
+                      <X className="h-3 w-3" aria-hidden="true" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <Button type="button" variant="outline" size="sm" onClick={onClearFilters}>
+              Limpar filtros
+            </Button>
+          </div>
         )}
 
         {/* As duas ações do lote só existem onde há herança (R7): nos outros
             destinos não há herdada para confirmar, e o botão abria um diálogo
             com "Confirmar" desabilitado (validação humana da S12). */}
         {showWriteActions && inherits && (
-          <div className="flex flex-wrap gap-2 lg:ml-auto">
+          <div className="flex flex-wrap gap-2 xl:ml-auto">
             <InheritAction
               clientId={clientId}
               destination={destination}
@@ -228,15 +288,20 @@ export function MappingListPanel({
         )}
       </div>
 
-      {/* Mesmo piso da Carteira (S11/S15): abaixo de `lg` a tabela tem altura
-          natural e quem rola é o `<main>`; de `lg` para cima ela rola dentro da
-          própria área. Sem o piso, filtros empilhados colapsam a tabela a 0px. */}
-      <div className="min-h-[24rem] flex-1 lg:min-h-[8rem]" aria-busy={listQuery.isFetching}>
+      {/* Altura NATURAL (86e3f55bd): sem piso nem `flex-1`. A tabela cresce com
+          as linhas e quem rola é o `<main>`; o cabeçalho gruda no topo dele de
+          `xl` para cima (`stickyHeader="page"`). */}
+      <div aria-busy={listQuery.isFetching}>
         {listQuery.isError ? (
           <ListErrorState error={listQuery.error} onRetry={() => void listQuery.refetch()} />
         ) : (
-          <TableCard>
-            <Table fill scrollRegionLabel="Categorias do de-para (rolável)">
+          <TableCard pageScroll>
+            <Table
+              stickyHeader="page"
+              scrollRegionLabel="Categorias do de-para (rolável)"
+              // Linha mais baixa (Parte D), como na carteira.
+              className="[&_td]:py-2 [&_th]:h-10"
+            >
               <TableHeader>
                 <TableRow>
                   <TableHead>Categoria</TableHead>
@@ -287,6 +352,8 @@ export function MappingListPanel({
         )}
       </div>
 
+      {/* No fluxo, depois da última linha — nunca grudada no rodapé: barra
+          grudada cobre linha durante a rolagem (86e2uca1d). */}
       {!listQuery.isError && (
         <PaginationBar
           page={pagination?.page ?? page}
@@ -316,6 +383,14 @@ export function MappingListPanel({
   );
 }
 
+/**
+ * Uma linha do de-para (Parte D da 86e3f55bd): mais baixa, e clicar em qualquer
+ * ponto dela abre a gaveta de decisão para quem edita. O caminho de TECLADO
+ * continua sendo o botão da coluna Ações: nada de `tabIndex`, `role` nem
+ * `onKeyDown` no `<tr>` (interativo aninhado reprova no axe). O botão para a
+ * propagação para não abrir a gaveta duas vezes. Para quem só lê, a linha não é
+ * clicável.
+ */
 function MappingRow({
   item,
   showEdit,
@@ -326,8 +401,10 @@ function MappingRow({
   onEdit: () => void;
 }) {
   return (
-    <TableRow>
-      <TableCell className="min-w-48">
+    <TableRow className={cn(showEdit && 'cursor-pointer')} onClick={showEdit ? onEdit : undefined}>
+      {/* Categoria e Decisão quebram linha: em `xl`+ a tabela precisa caber na
+          largura (o wrapper deixa de rolar). A vigência segue `nowrap`. */}
+      <TableCell className="min-w-40 whitespace-normal">
         <span className="block font-medium tabular-nums">{item.categoryCode}</span>
         {item.categoryNameResolved && item.categoryName ? (
           <span className="text-muted-foreground block text-xs">{item.categoryName}</span>
@@ -346,7 +423,7 @@ function MappingRow({
           )}
         </div>
       </TableCell>
-      <TableCell className="min-w-40">
+      <TableCell className="min-w-40 whitespace-normal">
         <DecisionCell item={item} />
       </TableCell>
       <TableCell className="whitespace-nowrap">
@@ -358,7 +435,10 @@ function MappingRow({
             type="button"
             variant="ghost"
             size="sm"
-            onClick={onEdit}
+            onClick={(event) => {
+              event.stopPropagation();
+              onEdit();
+            }}
             aria-label={`${item.decision ? 'Alterar' : 'Decidir'} a categoria ${item.categoryCode}`}
           >
             <Pencil className="h-4 w-4" aria-hidden="true" />
