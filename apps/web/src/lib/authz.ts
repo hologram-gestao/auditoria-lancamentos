@@ -147,14 +147,31 @@ export type Permission =
    * 86e3ewukz: redefinir a senha de QUALQUER usuário (suporte e emergência).
    * Só a plataforma — nem `manage_org_users` (admin da org) nem `manage_platform`.
    */
-  | 'reset_user_password';
+  | 'reset_user_password'
+  /**
+   * Sprint 14 (R5 — BACK 14.1): ENVIAR o arquivo (planilha/extrato) de um
+   * cliente com origem `arquivo`. Células DECIDIDAS no PRD: os 5 papéis —
+   * mandar a planilha do mês é o dia a dia de quem opera o cliente, o
+   * `client_operator` inclusive.
+   */
+  | 'upload_client_file'
+  /**
+   * Sprint 14 (R5 — BACK 14.1): CONFIGURAR o mapeamento de entrada (qual
+   * coluna é o quê, convenção de sinal). Todos menos o `client_operator`:
+   * alterar o mapeamento muda como TODOS os próximos arquivos serão lidos.
+   * Permissão PRÓPRIA (não reuso de `manage_client_mapping` nem de
+   * `sync_client_movements`): enviar e configurar são células diferentes. A
+   * LEITURA do mapeamento não pede permissão — o operador precisa ver o resumo
+   * do que será aplicado antes de enviar.
+   */
+  | 'manage_input_mapping';
 
 /**
  * A matriz, indexada por PAPEL (e não por permissão) de propósito: assim o
  * `Record<UserRole, ...>` obriga a lista a cobrir todo papel do contrato.
  *
  * Transcrita célula a célula de `apps/api/app/core/authz.py::PERMISSION_MATRIX`
- * (23 permissões × 5 papéis desde a Sprint 12) e travada em `__tests__/authz.test.ts`.
+ * (26 permissões × 5 papéis desde a Sprint 14) e travada em `__tests__/authz.test.ts`.
  *
  * | Ação                          | platform_admin | admin | manager | client_manager | client_operator |
  * | ----------------------------- | -------------- | ----- | ------- | -------------- | --------------- |
@@ -181,6 +198,9 @@ export type Permission =
  * | Sincronizar movimentos (S12)  | ✅             | ✅    | ✅ (carteira) | ✅       | ❌              |
  * | Editar o de-para (S12)        | ✅             | ✅    | ✅ (carteira) | ✅       | ❌              |
  * | Catálogo do de-para (S12)     | ✅             | ✅ (org) | ❌   | ❌             | ❌              |
+ * | Redefinir senha de usuário    | ✅             | ❌    | ❌      | ❌             | ❌              |
+ * | Enviar arquivo (S14)          | ✅             | ✅    | ✅ (carteira) | ✅       | ✅              |
+ * | Configurar mapeamento (S14)   | ✅             | ✅    | ✅ (carteira) | ✅       | ❌              |
  *
  * "(carteira)" e "(própria org)" **não são células**: são `resolve_client_access`
  * e os filtros de coleção, no servidor. A célula diz se o papel pode a AÇÃO.
@@ -214,6 +234,8 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'manage_mapping_catalog',
     // 86e3ewukz: só a plataforma redefine senha de terceiros.
     'reset_user_password',
+    'upload_client_file',
+    'manage_input_mapping',
   ],
   // D3 final (86e36ed1d): `manage_anomaly_types` saiu daqui. A taxonomia de
   // anomalias é uma tabela GLOBAL do produto — o admin de uma organização
@@ -242,6 +264,8 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     // S12: o catálogo de destinos/alvos é configuração da ORGANIZAÇÃO — escreve
     // quem a administra (o "(org)" é o filtro do servidor, não a célula).
     'manage_mapping_catalog',
+    'upload_client_file',
+    'manage_input_mapping',
   ],
   // O gerente da organização enxerga outros tenants apenas dentro da carteira —
   // quem sabe a carteira é o backend (`client_assignments`), ver `canAccessClient`.
@@ -269,6 +293,10 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     // S12 (R6): a armadilha que o PRD fechou — o contador parceiro (manager)
     // classifica a carteira que ele mesmo constrói. Sem catálogo: esse é da org.
     'manage_client_mapping',
+    // S14 (R5): o gerente ENVIA e CONFIGURA o mapeamento dos clientes da carteira
+    // — é ele quem faz a configuração inicial de quem não tem sistema.
+    'upload_client_file',
+    'manage_input_mapping',
   ],
   client_manager: [
     'run_reconciliation',
@@ -284,11 +312,14 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'manage_title_context',
     'sync_client_movements',
     'manage_client_mapping',
+    'upload_client_file',
+    'manage_input_mapping',
   ],
   // S10 (R4) e S11 (R5): o operador LÊ o plano de contas e a carteira, e **não**
   // sincroniza nenhum dos dois — são os únicos ❌ das duas linhas de
   // sincronizar. Sincronizar é uma ida à origem do cliente, e o operador é quem
-  // mais abre tela.
+  // mais abre tela. S14 (R5): ele ENVIA o arquivo do mês (é o dia a dia dele) e
+  // NÃO configura o mapeamento — o único ❌ das duas linhas novas.
   client_operator: [
     'run_reconciliation',
     'review_export',
@@ -296,6 +327,7 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'view_client_chart_of_accounts',
     'view_client_receivables',
     'view_title_context',
+    'upload_client_file',
   ],
 };
 

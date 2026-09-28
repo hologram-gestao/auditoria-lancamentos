@@ -29,12 +29,14 @@ from app.modules.reconciliations.tenant_scope import audit_session_tenant_miss
 from app.modules.usage_events.omie_rejection import classify_omie_rejection
 from app.modules.usage_events.repository import UsageEventRepository
 from app.modules.usage_events.schemas import (
+    ArquivoProcessadoProps,
     CarteiraSincronizadaProps,
     ClienteCriadoProps,
     ClienteEncerradoProps,
     ClienteExcluidoProps,
     ContextoTituloRegistradoProps,
     DeparaAplicadoProps,
+    FechamentoProduzidoProps,
     FlagRevisadoProps,
     GlossarioEditadoProps,
     MovimentosSincronizadosProps,
@@ -59,6 +61,7 @@ if TYPE_CHECKING:
 
     from app.modules.usage_events.schemas import (
         AutorNavegouForaRequest,
+        FileRejectionReason,
         NotificacaoEntregueRequest,
         OmieRejectionCode,
         QualificationVerdict,
@@ -529,6 +532,79 @@ class UsageEventService:
                 valor_nao_mapear_centavos=decimal_to_cents(valor_nao_mapear),
                 valor_sem_decisao_centavos=decimal_to_cents(valor_sem_decisao),
                 categorias_sem_decisao=categorias_sem_decisao,
+            ),
+        )
+        if props is None:
+            return False
+        return await self.emit(event, props=props)
+
+    async def emit_arquivo_processado(
+        self,
+        *,
+        client_id: UUID,
+        mapeamento_id: UUID | None,
+        linhas: int,
+        colunas_reconhecidas: int,
+        rejeitado: bool,
+        motivo: FileRejectionReason,
+    ) -> bool:
+        """S14 BACK 14.2 — instrumentação da ingestão por arquivo. Sem `session_id`.
+
+        Uma linha por ENVIO, aceito ou recusado (sem dedup: o mesmo cliente manda
+        vários arquivos). O ponto de chamada é a ingestão (BACK 14.3). Props no
+        caminho fail-soft: no aceito, o emissor roda DEPOIS do commit da base.
+
+        **O caso da recusa é o especial.** A 14.3 levanta o `AppError` logo
+        depois, e o `rollback()` do `get_db_session` apagaria a linha
+        (ADR-019-QA). Por isso, com `rejeitado=True`, o emissor COMMITA a sessão
+        antes de devolver — a mesma barreira de durabilidade de `test_connection`.
+        Na recusa nada de negócio foi escrito ainda (a ordem de checagens da 14.3
+        garante), então o commit persiste só a métrica. `motivo` é a família da
+        recusa, nunca a coluna divergente nem o texto da célula.
+        """
+        event = UsageEventName.ARQUIVO_PROCESSADO
+        props = self._props_or_none(
+            event,
+            lambda: ArquivoProcessadoProps(
+                client_id=client_id,
+                mapeamento_id=mapeamento_id,
+                linhas=linhas,
+                colunas_reconhecidas=colunas_reconhecidas,
+                rejeitado=rejeitado,
+                motivo=motivo,
+            ),
+        )
+        if props is None:
+            return False
+        inserted = await self.emit(event, props=props)
+        if inserted and rejeitado:
+            try:
+                await self._repo.commit()
+            except Exception:
+                # Sem `exc_info`: instrumentação com defeito não vira vazamento.
+                logger.warning("usage_event_commit_failed", usage_event=event.value)
+                return False
+        return inserted
+
+    async def emit_fechamento_produzido(
+        self, *, client_id: UUID, tipo_origem: str, competencia: date
+    ) -> bool:
+        """S14 — **a métrica da Sprint 14**. Sem `session_id`, sem dedup.
+
+        O ponto de chamada é a MATERIALIZAÇÃO do de-para (12.6), depois do commit,
+        ao lado de `depara_aplicado`: UMA linha por tipo de origem distinto entre
+        os itens materializados. Falha e 409 não emitem (estrutural: o emissor só
+        roda depois do commit). Props no caminho fail-soft — a materialização já
+        foi gravada quando este emissor roda; `tipo_origem` fora do formato de slug
+        vira warning, nunca 500.
+        """
+        event = UsageEventName.FECHAMENTO_PRODUZIDO
+        props = self._props_or_none(
+            event,
+            lambda: FechamentoProduzidoProps(
+                client_id=client_id,
+                tipo_origem=tipo_origem,
+                competencia=format_competence(competencia),
             ),
         )
         if props is None:

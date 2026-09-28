@@ -251,6 +251,38 @@ class TestErros:
         assert resp.json()["error"]["code"] == "SEM_CONEXAO"
         assert await _eventos(db_session, sem_origem.id) == []
 
+    @respx.mock
+    async def test_cliente_omie_nao_vira_misto_e_segue_sincronizando(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
+    ) -> None:
+        """S14 (retrabalho da 14.1, ADR-083-BE): cliente Omie + conexão arquivo.
+
+        Antes, a conexão `arquivo` entrava, "arquivo" < "omie" na ordem do
+        repositório, a seleção por capacidade escolhia o arquivo e ESTE sync
+        respondia 409 `ORIGEM_POR_ARQUIVO` para um cliente que tem Omie. O
+        cliente do `world` é Omie pela janela de conversão (credencial nas
+        colunas antigas) — a sintetizada também conta como origem.
+        """
+        from app.db.models import ClientConnection
+
+        await _login(client_with_db, world.admin)
+        recusada = await client_with_db.post(
+            f"/api/v1/clients/{world.client.id}/connections", json={"provider_type": "arquivo"}
+        )
+        assert recusada.status_code == 409, recusada.text
+        assert recusada.json()["error"]["code"] == "ORIGEM_JA_CONECTADA"
+        linhas = await db_session.execute(
+            select(func.count(ClientConnection.id)).where(
+                ClientConnection.client_id == world.client.id
+            )
+        )
+        assert linhas.scalar_one() == 0
+
+        respx.post(OMIE_EXTRATO_URL).mock(return_value=_extrato([_mov(1)]))
+        resp = await client_with_db.post(_sync_url(world.client), json={"competence": "2026-06"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["data"]["movimentos"] == 1
+
     @pytest.mark.parametrize("competencia", ["2026-13", "06/2026", "2026-6", "junho"])
     async def test_competencia_malformada_e_400_no_corpo(
         self, client_with_db: AsyncClient, world: World, competencia: str

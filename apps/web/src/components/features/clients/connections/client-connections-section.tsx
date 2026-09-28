@@ -38,10 +38,14 @@ import {
 } from '@/components/ui/table';
 import { useClientConnections, useTestStoredConnection } from '@/hooks/use-client-connections';
 import { ApiError } from '@/lib/api/client';
-import { DEFAULT_PROVIDER_LABEL } from '@/lib/api/client-connections';
+import {
+  connectionRequiresCredentials,
+  DEFAULT_PROVIDER_LABEL,
+} from '@/lib/api/client-connections';
 import { hasPermission } from '@/lib/authz';
 import type { ClientConnection, OriginStatus } from '@/lib/contracts';
 import { formatLastCheckedAt, formatSyncedAt } from '@/lib/format';
+import { connectionDeclares } from '@/lib/origin-capabilities';
 import { ORIGIN_STATUS_COPY } from '@/lib/origin-state';
 import { useAuthStore } from '@/stores/auth';
 
@@ -193,9 +197,14 @@ export function ClientConnectionsSection({
                     <TableRow key={connection.id}>
                       <TableCell className="font-medium">
                         {connection.label}
-                        <span className="text-muted-foreground block text-xs">
-                          {formatSyncedAt(connection.accounts_synced_at)}
-                        </span>
+                        {/* "Sincronizado há X" é sobre CONTAS: origem que não as
+                            lista (`arquivo`) não ganha a linha — "Nunca
+                            sincronizado" ali leria como pendência. */}
+                        {connectionDeclares(connection, 'listar_contas') && (
+                          <span className="text-muted-foreground block text-xs">
+                            {formatSyncedAt(connection.accounts_synced_at)}
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell className="text-muted-foreground whitespace-nowrap">
                         {DEFAULT_PROVIDER_LABEL[connection.provider_type] ??
@@ -205,24 +214,32 @@ export function ClientConnectionsSection({
                         <ConnectionStatusBadge status={connection.status} />
                       </TableCell>
                       <TableCell className="text-muted-foreground whitespace-nowrap text-sm">
-                        {formatLastCheckedAt(connection.last_checked_at)}
+                        {connectionRequiresCredentials(connection)
+                          ? formatLastCheckedAt(connection.last_checked_at)
+                          : 'Sem credencial'}
                       </TableCell>
                       {canManage && (
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => void handleTest(connection)}
-                              disabled={testingId !== null}
-                              aria-label={`Testar ${connection.label} novamente`}
-                            >
-                              {testingId === connection.id ? (
-                                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                              ) : (
-                                <RefreshCw className="h-4 w-4" aria-hidden="true" />
-                              )}
-                            </Button>
+                            {/* "Testar novamente" só para quem TEM credencial
+                                (capacidade `verificar_credencial`): para a
+                                origem por arquivo o servidor responde 409
+                                `CAPACIDADE_AUSENTE`, e oferecer é defeito (§4.9). */}
+                            {connectionRequiresCredentials(connection) && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => void handleTest(connection)}
+                                disabled={testingId !== null}
+                                aria-label={`Testar ${connection.label} novamente`}
+                              >
+                                {testingId === connection.id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                                ) : (
+                                  <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                                )}
+                              </Button>
+                            )}
                             <Button
                               variant="ghost"
                               size="icon"

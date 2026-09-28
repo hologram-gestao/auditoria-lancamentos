@@ -861,6 +861,55 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         "app/modules/client_mapping/routes.py",
         f"{_VIA_CLIENT_PATH}; versões lidas por client_id, autor por author_for_viewer",
     ),
+    # ------------------------- mapeamento de entrada do arquivo (S14, BACK 14.1 — R1/R5)
+    # Nome de coluna é estrutura, não PII — mas o mapeamento descreve COMO o
+    # cliente sem ERP organiza a contabilidade dele, e a escrita muda como todos
+    # os próximos arquivos serão lidos.
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/input-mapping",
+        ScopeKind.COLLECTION,
+        "app/modules/client_input_mappings/routes.py",
+        f"{_VIA_CLIENT_PATH}; o mapeamento é lido por client_id na própria query "
+        "(ausente = 200 com mapping null, nunca 404)",
+    ),
+    SensitiveEndpoint(
+        "PUT",
+        "/api/v1/clients/{client_id}/input-mapping",
+        ScopeKind.COLLECTION,
+        "app/modules/client_input_mappings/routes.py",
+        f"{_VIA_CLIENT_PATH} + OpenClientDep + ManageInputMappingDep (guard auditado); "
+        "upsert ON CONFLICT (client_id) com o client_id do path validado; cliente "
+        "encerrado = 409",
+    ),
+    # ------------------------- origem por arquivo (S14, BACK 14.3 — R1/R2/R3)
+    # O arquivo do cliente é o EXTRATO dele (valores, datas, descrições, categorias):
+    # a inspeção devolve uma amostra das células, o processamento grava a base de
+    # movimentos e a lista expõe quem enviou o quê.
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients/{client_id}/file-origin/inspect",
+        ScopeKind.COLLECTION,
+        "app/modules/client_file_ingestion/routes.py",
+        f"{_VIA_CLIENT_PATH} + UploadClientFileDep (guard auditado); conexão arquivo "
+        "resolvida pelas conexões DO cliente; nada persistido",
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients/{client_id}/file-origin/process",
+        ScopeKind.COLLECTION,
+        "app/modules/client_file_ingestion/routes.py",
+        f"{_VIA_CLIENT_PATH} + OpenClientDep + UploadClientFileDep (guard auditado); "
+        "mapeamento, categorias, registro e movimentos gravados com o client_id do path "
+        "validado; cliente encerrado = 409",
+    ),
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/file-origin/imports",
+        ScopeKind.COLLECTION,
+        "app/modules/client_file_ingestion/routes.py",
+        f"{_VIA_CLIENT_PATH}; registros lidos por client_id, autor por author_for_viewer",
+    ),
 )
 
 #: Endpoints do denominador que AINDA não têm o mecanismo no código. Ficam na

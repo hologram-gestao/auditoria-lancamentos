@@ -1548,3 +1548,380 @@ class TestPlanoDeContasRoundTrip:
         # cadeia que leva ao head. Sem isto, "convergiu no head" passaria verde
         # mesmo se a migration do plano de contas tivesse saído da linhagem.
         assert CHART_OF_ACCOUNTS_REV in _revisions_in_chain(alembic_cfg)
+
+
+# ----------------------------------------------------------------------
+# Sprint 14 (BACK 14.1) — mapeamento de entrada do arquivo do cliente
+# ----------------------------------------------------------------------
+
+PRE_INPUT_MAPPING_REV = "a7c2e9f31b58"
+INPUT_MAPPING_REV = "b4c8e2d71f95"
+
+_INSERT_INPUT_MAPPING = (
+    "INSERT INTO client_input_mappings "
+    "(id, client_id, file_format, csv_delimiter, encoding, date_column, description_column, "
+    "amount_column, category_column, date_format, decimal_separator, sign_convention, "
+    "nature_column, debit_value, credit_value, debit_column, credit_column, "
+    "created_by, updated_by, created_at, updated_at) "
+    "VALUES (gen_random_uuid(), :cid, :fmt, :delim, :enc, 'Data', 'Histórico', "
+    ":amount, :category, 'dd/mm/yyyy', ',', :sign, :nature, :dv, :cv, :dc, :cc, "
+    ":uid, :uid, now(), now())"
+)
+
+_VALID_INPUT_MAPPING: dict[str, object] = {
+    "fmt": "csv",
+    "delim": ";",
+    "enc": "utf-8",
+    "amount": "Valor",
+    "category": "Categoria",
+    "sign": "valor_com_sinal",
+    "nature": None,
+    "dv": None,
+    "cv": None,
+    "dc": None,
+    "cc": None,
+}
+
+
+def _creator_of(url: str, client_id: str) -> str:
+    return str(_scalar(url, "SELECT created_by FROM clients WHERE id = :cid", cid=client_id))
+
+
+def _insert_mapping(url: str, client_id: str, **overrides: object) -> None:
+    params = {**_VALID_INPUT_MAPPING, **overrides}
+    _execute(url, _INSERT_INPUT_MAPPING, cid=client_id, uid=_creator_of(url, client_id), **params)
+
+
+class TestMapeamentoDeEntradaRoundTrip:
+    """BACK 14.1 — a migration do mapeamento de entrada sobe, desce e sobe."""
+
+    def test_upgrade_cria_tabela_colunas_e_garantias(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+
+        assert _table_exists(url, "client_input_mappings")
+        assert (
+            _columns(
+                url,
+                "client_input_mappings",
+                "id",
+                "client_id",
+                "file_format",
+                "csv_delimiter",
+                "encoding",
+                "date_column",
+                "description_column",
+                "amount_column",
+                "category_column",
+                "category_mode",
+                "account_column",
+                "document_column",
+                "date_format",
+                "decimal_separator",
+                "sign_convention",
+                "nature_column",
+                "debit_value",
+                "credit_value",
+                "debit_column",
+                "credit_column",
+                "created_by",
+                "updated_by",
+                "created_at",
+                "updated_at",
+            )
+            == 24
+        )
+        # E NENHUMA coluna além dessas: a lista acima é o inventário inteiro.
+        assert (
+            _scalar(
+                url,
+                "SELECT count(*) FROM information_schema.columns "
+                "WHERE table_name = 'client_input_mappings'",
+            )
+            == 24
+        )
+        # Nada cifrado: nome de coluna é estrutura, não PII.
+        assert (
+            _scalar(
+                url,
+                "SELECT count(*) FROM information_schema.columns WHERE "
+                "table_name = 'client_input_mappings' AND "
+                "(column_name LIKE '%_encrypted' OR column_name LIKE '%_iv')",
+            )
+            == 0
+        )
+        for name in (
+            "uq_client_input_mappings_client_id",
+            "ck_client_input_mappings_sign_convention",
+            "ck_client_input_mappings_sign_coherent",
+            "ck_client_input_mappings_csv_coherent",
+            "ck_client_input_mappings_category_coherent",
+            "fk_client_input_mappings_client_id_clients",
+            "fk_client_input_mappings_created_by_users",
+        ):
+            assert _scalar(url, _CONSTRAINT_COUNT, name=name) == 1, name
+
+    def test_um_por_cliente_e_coerencia_sao_do_banco(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+
+        _insert_mapping(url, client_id)
+        assert (
+            _scalar(
+                url,
+                "SELECT count(*) FROM client_input_mappings "
+                "WHERE category_mode = 'coluna_categoria'",
+            )
+            == 1
+        ), "o modo de categoria nasce `coluna_categoria` pelo default do banco"
+
+        # UNIQUE(client_id): o segundo mapeamento do MESMO cliente é recusado.
+        with pytest.raises(sa.exc.IntegrityError):
+            _insert_mapping(url, client_id)
+
+        outro = _seed_client_row(url)
+        # Convenção de sinal fora do vocabulário.
+        with pytest.raises(sa.exc.IntegrityError):
+            _insert_mapping(url, outro, sign="inferir")
+        # `coluna_natureza` sem os literais: o CHECK de coerência recusa.
+        with pytest.raises(sa.exc.IntegrityError):
+            _insert_mapping(url, outro, sign="coluna_natureza", nature="D/C")
+        # CSV sem delimitador: o CHECK `csv_coherent` recusa.
+        with pytest.raises(sa.exc.IntegrityError):
+            _insert_mapping(url, outro, delim=None)
+        # `colunas_separadas` válida: sem coluna de valor, com as duas colunas.
+        _insert_mapping(
+            url, outro, sign="colunas_separadas", amount=None, dc="Débito", cc="Crédito"
+        )
+        assert _scalar(url, "SELECT count(*) FROM client_input_mappings") == 2
+
+    def test_exclusao_do_cliente_leva_o_mapeamento(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        """`ondelete=CASCADE` declarado — a FK não pode TRAVAR a exclusão do cliente."""
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        _insert_mapping(url, client_id)
+
+        _execute(url, "DELETE FROM clients WHERE id = :cid", cid=client_id)
+
+        assert _scalar(url, "SELECT count(*) FROM client_input_mappings") == 0
+
+    def test_downgrade_e_real_e_o_ciclo_converge(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        _insert_mapping(url, client_id)
+
+        command.downgrade(alembic_cfg, PRE_INPUT_MAPPING_REV)
+        assert not _table_exists(url, "client_input_mappings")
+        assert _scalar(url, "SELECT count(*) FROM clients") == 1
+
+        for _ in range(2):
+            command.upgrade(alembic_cfg, "head")
+            command.downgrade(alembic_cfg, PRE_INPUT_MAPPING_REV)
+
+        command.upgrade(alembic_cfg, "head")
+        assert _table_exists(url, "client_input_mappings")
+        assert _scalar(url, "SELECT version_num FROM alembic_version") == _head_revision(
+            alembic_cfg
+        )
+        assert INPUT_MAPPING_REV in _revisions_in_chain(alembic_cfg)
+
+
+# ----------------------------------------------------------------------
+# Sprint 14 (BACK 14.3) — as colunas do arquivo na base e o registro dos arquivos
+# ----------------------------------------------------------------------
+
+PRE_FILE_IMPORTS_REV = "c7d3f8a24e61"
+FILE_IMPORTS_REV = "d9e4a1b57c26"
+
+_INSERT_FILE_MOVEMENT = (
+    "INSERT INTO client_movements (id, client_id, source_type, source_movement_id, "
+    "competence, movement_date, amount, description_encrypted, description_iv, document) "
+    "VALUES (gen_random_uuid(), :cid, 'arquivo', :mid, '2026-06-01', '2026-06-10', -100.00, "
+    ":ct, :iv, :doc)"
+)
+
+_INSERT_FILE_IMPORT = (
+    "INSERT INTO client_file_imports (id, client_id, competence, file_hash, mapping_id, "
+    "rows, created_by) VALUES (gen_random_uuid(), :cid, :comp, :hash, :mapping, 3, :uid)"
+)
+
+
+def _insert_file_import(
+    url: str,
+    client_id: str,
+    *,
+    competence: str = "2026-06-01",
+    file_hash: str = "a" * 64,
+    mapping_id: str | None = None,
+) -> None:
+    _execute(
+        url,
+        _INSERT_FILE_IMPORT,
+        cid=client_id,
+        comp=competence,
+        hash=file_hash,
+        mapping=mapping_id,
+        uid=_creator_of(url, client_id),
+    )
+
+
+class TestArquivoNaBaseEImportsRoundTrip:
+    """BACK 14.3 — a migration das colunas do arquivo e do registro sobe, desce e sobe."""
+
+    def test_upgrade_acrescenta_as_colunas_cria_a_tabela_e_as_garantias(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+
+        assert (
+            _columns(url, "client_movements", "description_encrypted", "description_iv", "document")
+            == 3
+        )
+        assert _table_exists(url, "client_file_imports")
+        assert (
+            _columns(
+                url,
+                "client_file_imports",
+                "id",
+                "client_id",
+                "competence",
+                "file_hash",
+                "mapping_id",
+                "rows",
+                "created_by",
+                "processed_at",
+            )
+            == 8
+        )
+        # Nenhum nome de arquivo, nenhum conteúdo: só o hash identifica o conteúdo.
+        assert (
+            _scalar(
+                url,
+                "SELECT count(*) FROM information_schema.columns WHERE "
+                "table_name = 'client_file_imports' AND "
+                "(column_name LIKE '%name%' OR column_name LIKE '%content%')",
+            )
+            == 0
+        )
+        for name in (
+            "ck_client_movements_description_pair",
+            "uq_client_file_imports_client_id_competence_file_hash",
+            "ck_client_file_imports_competence_first_day",
+            "fk_client_file_imports_client_id_clients",
+            "fk_client_file_imports_mapping_id_client_input_mappings",
+            "fk_client_file_imports_created_by_users",
+        ):
+            assert _scalar(url, _CONSTRAINT_COUNT, name=name) == 1, name
+
+    def test_o_par_da_descricao_vive_e_morre_junto(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+
+        # A linha do Omie: as três nulas.
+        _execute(url, _INSERT_FILE_MOVEMENT, cid=client_id, mid="1", ct=None, iv=None, doc=None)
+        # A linha do arquivo: cifrada com IV, documento em claro.
+        _execute(
+            url,
+            _INSERT_FILE_MOVEMENT,
+            cid=client_id,
+            mid="2",
+            ct="v1:k1:00",
+            iv="0" * 24,
+            doc="NF 77",
+        )
+        # Ciphertext sem IV (ou o inverso): o CHECK do par recusa.
+        with pytest.raises(sa.exc.IntegrityError):
+            _execute(
+                url, _INSERT_FILE_MOVEMENT, cid=client_id, mid="3", ct="v1:k1:00", iv=None, doc=None
+            )
+        with pytest.raises(sa.exc.IntegrityError):
+            _execute(
+                url, _INSERT_FILE_MOVEMENT, cid=client_id, mid="4", ct=None, iv="0" * 24, doc=None
+            )
+        assert _scalar(url, "SELECT count(*) FROM client_movements") == 2
+
+    def test_o_409_do_reenvio_e_a_unique_e_a_competencia_e_o_dia_1(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+
+        _insert_file_import(url, client_id)
+        # O MESMO conteúdo na MESMA competência: a UNIQUE decide, no banco.
+        with pytest.raises(sa.exc.IntegrityError):
+            _insert_file_import(url, client_id)
+        # Conteúdo diferente na mesma competência (arquivo corrigido): entra.
+        _insert_file_import(url, client_id, file_hash="b" * 64)
+        # O mesmo conteúdo em OUTRA competência: entra.
+        _insert_file_import(url, client_id, competence="2026-07-01")
+        # Competência que não é o dia 1: o CHECK recusa.
+        with pytest.raises(sa.exc.IntegrityError):
+            _insert_file_import(url, client_id, competence="2026-08-15", file_hash="c" * 64)
+        assert _scalar(url, "SELECT count(*) FROM client_file_imports") == 3
+
+    def test_mapeamento_apagado_vira_nulo_e_cliente_apagado_leva_os_registros(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        _insert_mapping(url, client_id)
+        mapping_id = str(
+            _scalar(
+                url, "SELECT id FROM client_input_mappings WHERE client_id = :cid", cid=client_id
+            )
+        )
+        _insert_file_import(url, client_id, mapping_id=mapping_id)
+
+        # `SET NULL`: o registro sobrevive ao mapeamento (é trilha do que foi aplicado).
+        _execute(url, "DELETE FROM client_input_mappings WHERE id = :mid", mid=mapping_id)
+        assert _scalar(url, "SELECT mapping_id FROM client_file_imports") is None
+        # `CASCADE`: a exclusão do cliente leva o registro — a FK não trava a exclusão.
+        _execute(url, "DELETE FROM clients WHERE id = :cid", cid=client_id)
+        assert _scalar(url, "SELECT count(*) FROM client_file_imports") == 0
+
+    def test_downgrade_e_real_e_o_ciclo_converge(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        _insert_file_import(url, client_id)
+        _execute(url, _INSERT_FILE_MOVEMENT, cid=client_id, mid="1", ct=None, iv=None, doc="NF 1")
+
+        command.downgrade(alembic_cfg, PRE_FILE_IMPORTS_REV)
+        assert not _table_exists(url, "client_file_imports")
+        assert (
+            _columns(url, "client_movements", "description_encrypted", "description_iv", "document")
+            == 0
+        )
+        # Os movimentos em si FICAM (perde-se só descrição e documento).
+        assert _scalar(url, "SELECT count(*) FROM client_movements") == 1
+        assert _scalar(url, _CONSTRAINT_COUNT, name="ck_client_movements_description_pair") == 0
+
+        for _ in range(2):
+            command.upgrade(alembic_cfg, "head")
+            command.downgrade(alembic_cfg, PRE_FILE_IMPORTS_REV)
+
+        command.upgrade(alembic_cfg, "head")
+        assert _table_exists(url, "client_file_imports")
+        assert _scalar(url, "SELECT version_num FROM alembic_version") == _head_revision(
+            alembic_cfg
+        )
+        assert FILE_IMPORTS_REV in _revisions_in_chain(alembic_cfg)

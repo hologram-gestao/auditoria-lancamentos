@@ -73,9 +73,16 @@ class ProviderType(StrEnum):
 
     Sem CHECK no banco de propósito (ver docstring do módulo): provedor novo
     entra aqui e nos schemas da borda, sem migration.
+
+    `arquivo` (Sprint 14, BACK 14.1) é o primeiro provedor que não é um ERP: a
+    planilha/extrato que o cliente manda, lida pelo mapeamento de entrada dele
+    (`client_input_mappings`). Conexão desse tipo NÃO tem credencial —
+    `credentials_encrypted`/`credentials_iv` ficam nulos, e é para isso que as
+    duas colunas nasceram nuláveis na S9.
     """
 
     OMIE = "omie"
+    ARQUIVO = "arquivo"
 
 
 class ConnectionStatus(StrEnum):

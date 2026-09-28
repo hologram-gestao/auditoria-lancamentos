@@ -46,6 +46,7 @@ import {
   type ReconciliationStatusFilterValue,
   type ReconciliationsListParams,
 } from '@/lib/api/clients';
+import { originCodeFor } from '@/lib/origin-capabilities';
 import type { OriginErrorCode } from '@/lib/origin-state';
 import { currentMonth } from '@/lib/validation/reconciliations';
 import { usePendingCreations } from '@/stores/pending-creations';
@@ -114,13 +115,13 @@ export function ReconciliationsList({
   // de origem quando não há conexão capaz. A LISTAGEM continua 200 (o histórico
   // é dado nosso), então a tela mostra o histórico E o estado — e não oferece
   // "Criar conciliação", que o servidor negaria (§4.9).
+  // S14: uma conciliação é conta + mês, e a conta vem da origem que LISTA
+  // CONTAS — a origem por arquivo não lista (`CAPACIDADE_AUSENTE`), então o
+  // botão some pela capacidade, no helper único.
   const originStatus = clientDetail.data?.origin_status ?? 'ativa';
-  const originCode: OriginErrorCode | null =
-    isClosed || originStatus === 'ativa'
-      ? null
-      : originStatus === 'sem_origem'
-        ? 'SEM_CONEXAO'
-        : 'ORIGEM_COM_ERRO';
+  const originCode: OriginErrorCode | null = isClosed
+    ? null
+    : originCodeFor(originStatus, clientDetail.data?.connections, 'listar_contas');
   const canCreate = !isClosed && originCode === null;
 
   const accountLookup = useMemo(() => {

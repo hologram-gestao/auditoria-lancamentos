@@ -10,7 +10,9 @@
  *   ação primária à direita (`justify-between`).
  *
  * Construída sobre o mesmo `@radix-ui/react-dialog` do `ui/dialog` — o Radix
- * entrega foco preso, `Esc`, `aria-modal` e restauração de foco de graça.
+ * entrega foco preso, `Esc` e `aria-modal` de graça. A restauração de foco do
+ * Radix só conhece o `SheetTrigger`; a devolução ao abridor de gaveta aberta por
+ * estado vem do `OpenerCapture`, igual ao `ui/dialog`.
  */
 
 import * as DialogPrimitive from '@radix-ui/react-dialog';
@@ -18,6 +20,7 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { X } from 'lucide-react';
 import * as React from 'react';
 
+import { OpenerCapture, returnFocusToOpener } from '@/components/ui/opener-capture';
 import { cn } from '@/lib/utils';
 
 const Sheet = DialogPrimitive.Root;
@@ -55,24 +58,39 @@ const sheetVariants = cva(
 );
 
 interface SheetContentProps
-  extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>,
+  extends
+    React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>,
     VariantProps<typeof sheetVariants> {}
 
 const SheetContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   SheetContentProps
->(({ side = 'right', className, children, ...props }, ref) => (
-  <SheetPortal>
-    <SheetOverlay />
-    <DialogPrimitive.Content ref={ref} className={cn(sheetVariants({ side }), className)} {...props}>
-      {children}
-      <DialogPrimitive.Close className="ring-offset-background focus:ring-ring absolute right-4 top-4 cursor-pointer rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:pointer-events-none">
-        <X className="h-4 w-4" aria-hidden="true" />
-        <span className="sr-only">Fechar</span>
-      </DialogPrimitive.Close>
-    </DialogPrimitive.Content>
-  </SheetPortal>
-));
+>(({ side = 'right', className, children, onCloseAutoFocus, ...props }, ref) => {
+  // Devolve o foco a quem o tinha ao abrir (ver `OpenerCapture`): gaveta aberta
+  // por estado (sem `SheetTrigger`) deixava o foco cair no vazio ao fechar.
+  const openerRef = React.useRef<HTMLElement | null>(null);
+  return (
+    <SheetPortal>
+      <SheetOverlay />
+      <DialogPrimitive.Content
+        ref={ref}
+        className={cn(sheetVariants({ side }), className)}
+        onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event);
+          returnFocusToOpener(openerRef, event);
+        }}
+        {...props}
+      >
+        <OpenerCapture target={openerRef} />
+        {children}
+        <DialogPrimitive.Close className="ring-offset-background focus:ring-ring absolute right-4 top-4 cursor-pointer rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:pointer-events-none">
+          <X className="h-4 w-4" aria-hidden="true" />
+          <span className="sr-only">Fechar</span>
+        </DialogPrimitive.Close>
+      </DialogPrimitive.Content>
+    </SheetPortal>
+  );
+});
 SheetContent.displayName = DialogPrimitive.Content.displayName;
 
 /** Header FIXO — não rola com o conteúdo. */

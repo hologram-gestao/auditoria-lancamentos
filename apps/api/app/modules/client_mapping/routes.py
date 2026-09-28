@@ -48,6 +48,7 @@ from app.db.models.mapping_catalog import DESTINATION_TYPE_PATTERN
 from app.integrations.omie.categorias_cache import OmieCategoriasCache
 from app.modules.client_chart_of_accounts.repository import ClientChartOfAccountsRepository
 from app.modules.client_chart_of_accounts.service import ChartOfAccountsSyncService
+from app.modules.client_file_categories.registry import FileCategoryRegistry
 from app.modules.client_mapping.listing import ClientMappingListService, NamedRow
 from app.modules.client_mapping.materialization import ClientMappingApplyService
 from app.modules.client_mapping.portability import (
@@ -147,6 +148,8 @@ def _get_list_service(
         decisions=decisions,
         catalog=MappingCatalogRepository(db),
         names=names,
+        # S14 (BACK 14.4): o rótulo das categorias derivadas do arquivo.
+        file_names=FileCategoryRegistry(db, settings=settings),
     )
 
 

@@ -40,6 +40,8 @@ from app.modules.auth import routes as auth_routes
 from app.modules.client_categories import routes as client_categories_routes
 from app.modules.client_chart_of_accounts import routes as client_chart_of_accounts_routes
 from app.modules.client_connections import routes as client_connections_routes
+from app.modules.client_file_ingestion import routes as client_file_ingestion_routes
+from app.modules.client_input_mappings import routes as client_input_mappings_routes
 from app.modules.client_mapping import routes as client_mapping_routes
 from app.modules.client_movements import routes as client_movements_routes
 from app.modules.client_titles import routes as client_titles_routes
@@ -312,6 +314,8 @@ def create_app() -> FastAPI:
     app.include_router(client_users_routes.router)
     app.include_router(clients_routes.router)
     app.include_router(client_connections_routes.router)
+    app.include_router(client_input_mappings_routes.router)
+    app.include_router(client_file_ingestion_routes.router)
     app.include_router(client_chart_of_accounts_routes.router)
     app.include_router(client_titles_routes.router)
     app.include_router(client_movements_routes.router)

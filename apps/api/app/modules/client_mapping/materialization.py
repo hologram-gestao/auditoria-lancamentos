@@ -19,7 +19,9 @@ ela é justamente o que mostra à pessoa por onde começar.
 **Materialização:** versão N+1, nunca sobrescreve (não há `UPDATE`/`DELETE` de
 materialização no sistema). Cobertura parcial exige `confirm_partial_coverage` e fica
 registrada NO PRÓPRIO registro imutável (autor, data, valor pendente). Depois do
-commit, emite `depara_aplicado` pelo emissor da 12.2, com os centavos do resultado.
+commit, emite `depara_aplicado` pelo emissor da 12.2, com os centavos do resultado —
+e, desde a S14 (BACK 14.2), `fechamento_produzido` por tipo de origem materializado:
+é o evento que alimenta a métrica "clientes sem ERP com fechamento na plataforma".
 """
 
 from __future__ import annotations
@@ -267,6 +269,15 @@ class ClientMappingApplyService:
             valor_sem_decisao=pending.amount,
             categorias_sem_decisao=len(result.undecided_categories),
         )
+        # S14 (BACK 14.2) — a métrica da Sprint 14: UMA linha por tipo de origem
+        # distinto entre os itens materializados (cliente só-arquivo → `arquivo`;
+        # cliente Omie → `omie`). Também depois do commit e fail-soft: a métrica
+        # nunca derruba a materialização já gravada. Ordenado para o log e o
+        # teste serem determinísticos.
+        for source_type in sorted({item.source_type for item in result.items}):
+            await self._usage_events.emit_fechamento_produzido(
+                client_id=client.id, tipo_origem=source_type, competencia=competence
+            )
         return MaterializationOutcome(
             id=materialization.id,
             version=version,
