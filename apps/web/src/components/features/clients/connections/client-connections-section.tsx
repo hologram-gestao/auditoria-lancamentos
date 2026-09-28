@@ -45,7 +45,7 @@ import {
 import { hasPermission } from '@/lib/authz';
 import type { ClientConnection, OriginStatus } from '@/lib/contracts';
 import { formatLastCheckedAt, formatSyncedAt } from '@/lib/format';
-import { connectionSupports } from '@/lib/origin-capabilities';
+import { connectionDeclares } from '@/lib/origin-capabilities';
 import { ORIGIN_STATUS_COPY } from '@/lib/origin-state';
 import { useAuthStore } from '@/stores/auth';
 
@@ -200,7 +200,7 @@ export function ClientConnectionsSection({
                         {/* "Sincronizado há X" é sobre CONTAS: origem que não as
                             lista (`arquivo`) não ganha a linha — "Nunca
                             sincronizado" ali leria como pendência. */}
-                        {connectionSupports(connection, 'listar_contas') && (
+                        {connectionDeclares(connection, 'listar_contas') && (
                           <span className="text-muted-foreground block text-xs">
                             {formatSyncedAt(connection.accounts_synced_at)}
                           </span>

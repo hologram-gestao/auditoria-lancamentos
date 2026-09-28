@@ -13,7 +13,11 @@
  *   - com mapeamento, o envio vai direto (competência + arquivo + total em
  *     centavos → decimal), sem abrir o editor; o sucesso mostra as contagens e
  *     o link para a prévia do de-para da competência;
- *   - sem mapeamento, o envio CONDUZ ao editor já inspecionando o arquivo;
+ *   - sem mapeamento, o envio CONDUZ ao editor já inspecionando o arquivo e,
+ *     salvo o mapeamento, o envio PROSSEGUE com o mesmo arquivo;
+ *   - mapeamento que não se sabe se existe (GET falhou, detalhe carregando)
+ *     nunca vira "sem mapeamento": erro/carregando, sem envio nem editor;
+ *   - a gaveta devolve o foco a quem a abriu (Cancelar e salvar);
  *   - cada código de recusa da BACK 14.3 tem renderização própria com o
  *     motivo específico; código desconhecido → toast genérico;
  *   - editor: alterar mapeamento existente exige `AlertDialog`; criar não; a
@@ -407,10 +411,23 @@ describe('Envio — com mapeamento é um passo só (R1 · R5)', () => {
   });
 });
 
+/** Escolhe a coluna de um campo no `Select` do editor (Radix, lista em portal). */
+async function pickColumn(
+  user: ReturnType<typeof userEvent.setup>,
+  drawer: HTMLElement,
+  field: string,
+  column: string,
+) {
+  await user.click(within(drawer).getByRole('combobox', { name: `Coluna: ${field}` }));
+  await user.click(await screen.findByRole('option', { name: column }));
+}
+
 describe('Envio sem mapeamento conduz ao editor (R1)', () => {
-  it('abre o editor já inspecionando o arquivo escolhido, e Salvar chama o PUT sem diálogo', async () => {
+  it('abre o editor já inspecionando o arquivo, Salvar grava sem diálogo e o envio PROSSEGUE', async () => {
     const user = userEvent.setup();
     mappingState.data = { mapping: null };
+    currentSearch = 'competence=2026-09';
+    saveState.mutateAsync = vi.fn().mockResolvedValue({ mapping: MAPPING, created: true });
     render(<FileOriginScreen clientId={CLIENT_ID} />);
 
     const file = await uploadFile(user);
@@ -427,6 +444,141 @@ describe('Envio sem mapeamento conduz ao editor (R1)', () => {
     expect(sample).toHaveTextContent('4 colunas encontradas');
     expect(within(sample).getByRole('columnheader', { name: 'Histórico' })).toBeVisible();
     expect(processState.mutateAsync).not.toHaveBeenCalled();
+
+    // Declara o mapeamento com as colunas do inspect e salva.
+    await pickColumn(user, drawer, 'Data', 'Data');
+    await pickColumn(user, drawer, 'Descrição', 'Histórico');
+    // A coluna do valor é dependente da convenção: aparece depois de escolhê-la.
+    await user.click(within(drawer).getByRole('radio', { name: /Valor com sinal/ }));
+    await pickColumn(user, drawer, 'Valor', 'Valor');
+    await user.click(within(drawer).getByRole('button', { name: 'Salvar mapeamento' }));
+
+    // Criar não pede confirmação: o PUT sai direto...
+    await waitFor(() => expect(saveState.mutateAsync).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(saveState.mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dateColumn: 'Data',
+        descriptionColumn: 'Histórico',
+        amountColumn: 'Valor',
+        signConvention: 'valor_com_sinal',
+      }),
+    );
+    // ...e, salvo o mapeamento, o envio segue com o MESMO arquivo e competência,
+    // sem a pessoa clicar em Enviar de novo.
+    await waitFor(() => expect(processState.mutateAsync).toHaveBeenCalledTimes(1));
+    expect(processState.mutateAsync).toHaveBeenCalledWith({
+      file,
+      competence: '2026-09',
+      declaredTotal: null,
+    });
+    expect(await screen.findByTestId('upload-success')).toHaveTextContent(/240 linhas/);
+    expect(toast.success).toHaveBeenCalledWith(
+      expect.stringMatching(/processado: 240 linhas/),
+      expect.anything(),
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('abrir o editor pelo estado vazio e salvar NÃO dispara envio nenhum', async () => {
+    const user = userEvent.setup();
+    mappingState.data = { mapping: null };
+    saveState.mutateAsync = vi.fn().mockResolvedValue({ mapping: MAPPING, created: true });
+    render(<FileOriginScreen clientId={CLIENT_ID} />);
+
+    await user.click(screen.getByRole('button', { name: 'Configurar mapeamento' }));
+    const drawer = await screen.findByRole('dialog');
+    await user.upload(within(drawer).getByLabelText('Arquivo (.csv ou .xlsx)'), xlsxFile());
+    await user.click(within(drawer).getByRole('button', { name: 'Inspecionar arquivo' }));
+    await within(drawer).findByTestId('inspection-sample');
+    await pickColumn(user, drawer, 'Data', 'Data');
+    await pickColumn(user, drawer, 'Descrição', 'Histórico');
+    // A coluna do valor é dependente da convenção: aparece depois de escolhê-la.
+    await user.click(within(drawer).getByRole('radio', { name: /Valor com sinal/ }));
+    await pickColumn(user, drawer, 'Valor', 'Valor');
+    await user.click(within(drawer).getByRole('button', { name: 'Salvar mapeamento' }));
+
+    await waitFor(() => expect(saveState.mutateAsync).toHaveBeenCalledTimes(1));
+    expect(processState.mutateAsync).not.toHaveBeenCalled();
+  });
+});
+
+describe('Mapeamento que NÃO se sabe se existe — nunca vira "sem mapeamento" (R5)', () => {
+  it('GET do mapeamento falhou: erro com "Tentar novamente", sem envio nem editor', async () => {
+    const user = userEvent.setup();
+    mappingState.data = undefined;
+    mappingState.isError = true;
+    mappingState.error = new ApiError(500, {
+      code: 'INTERNAL_ERROR',
+      message: 'x',
+      userMessage: 'Erro inesperado.',
+    });
+    render(<FileOriginScreen clientId={CLIENT_ID} />);
+
+    // O PUT SUBSTITUI o mapeamento: tratar a falha como vazio abriria o editor
+    // de CRIAÇÃO e gravaria por cima do existente sem o AlertDialog.
+    expect(screen.queryByTestId('input-mapping-empty')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('upload-needs-mapping')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Configurar mapeamento/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Enviar arquivo' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('upload-mapping-error')).toHaveTextContent(
+      /Não foi possível carregar o mapeamento/,
+    );
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    const retries = screen.getAllByRole('button', { name: 'Tentar novamente' });
+    await user.click(retries[0]!);
+    expect(mappingState.refetch).toHaveBeenCalled();
+  });
+
+  it('refetch em segundo plano que falha (dado antigo em cache) também é erro', () => {
+    mappingState.data = { mapping: MAPPING };
+    mappingState.isError = true;
+    render(<FileOriginScreen clientId={CLIENT_ID} />);
+    expect(screen.queryByRole('button', { name: /Alterar mapeamento/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Enviar arquivo' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('upload-mapping-error')).toBeVisible();
+  });
+
+  it('detalhe do cliente ainda carregando (query do mapeamento desligada): carregando, sem ação', () => {
+    clientDetailState.data = undefined;
+    mappingState.data = undefined;
+    render(<FileOriginScreen clientId={CLIENT_ID} />);
+    expect(screen.queryByTestId('input-mapping-empty')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Configurar mapeamento/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Enviar/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('Editor — foco devolvido a quem abriu (OpenerCapture)', () => {
+  it('Cancelar devolve o foco ao "Configurar mapeamento"', async () => {
+    const user = userEvent.setup();
+    mappingState.data = { mapping: null };
+    render(<FileOriginScreen clientId={CLIENT_ID} />);
+
+    const opener = screen.getByRole('button', { name: 'Configurar mapeamento' });
+    await user.click(opener);
+    const drawer = await screen.findByRole('dialog');
+    await user.click(within(drawer).getByRole('button', { name: 'Cancelar' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(opener).toHaveFocus();
+  });
+
+  it('salvar uma alteração devolve o foco ao "Alterar mapeamento"', async () => {
+    const user = userEvent.setup();
+    saveState.mutateAsync = vi.fn().mockResolvedValue({ mapping: MAPPING, created: false });
+    render(<FileOriginScreen clientId={CLIENT_ID} />);
+
+    const opener = screen.getByRole('button', { name: 'Alterar mapeamento' });
+    await user.click(opener);
+    const drawer = await screen.findByRole('dialog');
+    await user.click(within(drawer).getByRole('button', { name: 'Salvar alterações' }));
+    const confirm = await screen.findByRole('alertdialog');
+    await user.click(within(confirm).getByRole('button', { name: 'Confirmar alteração' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(opener).toHaveFocus());
   });
 });
 

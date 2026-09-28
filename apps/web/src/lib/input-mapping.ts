@@ -247,10 +247,15 @@ function orNull(value: string): string | null {
  * guardado esse valor de quando a pessoa experimentou a outra convenção. CSV
  * leva delimitador e codificação; XLSX manda os dois `null`.
  *
- * Pré-condição: `signConvention !== ''` (o schema Zod garante).
+ * Pré-condição: `signConvention !== ''` (o schema Zod garante). Sem ela, LANÇA:
+ * sinal presumido é o que o PRD proíbe, e cair num padrão aqui faria o arquivo
+ * ser lido com uma convenção que ninguém declarou.
  */
 export function toInputMappingRequest(values: InputMappingFormValues): InputMappingRequest {
-  const signConvention = values.signConvention === '' ? 'valor_com_sinal' : values.signConvention;
+  const signConvention = values.signConvention;
+  if (signConvention === '') {
+    throw new Error('Convenção de sinal não declarada: o mapeamento não pode ser gravado sem ela.');
+  }
   const isCsv = values.fileFormat === 'csv';
   const usesAmount = signConvention !== 'colunas_separadas';
   const usesNature = signConvention === 'coluna_natureza';

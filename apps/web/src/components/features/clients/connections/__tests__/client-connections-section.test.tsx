@@ -262,6 +262,17 @@ describe('Origens — conexão por ARQUIVO (S14 / R1), decidida pela capacidade'
     const rows = screen.getAllByRole('row');
     expect(rows[2]).not.toHaveTextContent('Nunca sincronizado');
   });
+
+  it('Omie em ERRO continua com "Sincronizado há X": o tipo declara, o status não apaga o histórico', () => {
+    listState.data = [
+      connection({ status: 'erro', accounts_synced_at: null }),
+      connection({ id: 'conn-2', label: 'Omie filial', status: 'inativa' }),
+    ];
+    render(<ClientConnectionsSection clientId={CLIENT_ID} originStatus="erro" isClosed={false} />);
+    const rows = screen.getAllByRole('row');
+    expect(rows[1]).toHaveTextContent('Nunca sincronizado');
+    expect(rows[2]).toHaveTextContent(/Sincronizad/);
+  });
 });
 
 describe('Origens — estados de carga', () => {

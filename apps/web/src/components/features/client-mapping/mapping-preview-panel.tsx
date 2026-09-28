@@ -88,7 +88,7 @@ import { cn } from '@/lib/utils';
  * base nunca sincronizada. "botão acima" só quando o botão EXISTE. `file` (S14):
  * a base deste cliente é alimentada pelo ENVIO do arquivo, não por sincronização.
  */
-type SyncHint = 'button' | 'origin' | 'closed' | 'no_permission' | 'file';
+type SyncHint = 'button' | 'origin' | 'closed' | 'no_permission' | 'file' | 'file_no_permission';
 
 const baseBadge =
   'inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset';
@@ -99,6 +99,8 @@ interface MappingPreviewPanelProps {
   competence: string;
   onCompetenceChange: (competence: string) => void;
   canSync: boolean;
+  /** `upload_client_file` — gateia o link "Enviar arquivo do mês" (§4.9). */
+  canUpload: boolean;
   canManage: boolean;
   isClosed: boolean;
   originStatus: OriginStatus;
@@ -117,6 +119,7 @@ export function MappingPreviewPanel({
   competence,
   onCompetenceChange,
   canSync,
+  canUpload,
   canManage,
   isClosed,
   originStatus,
@@ -138,13 +141,16 @@ export function MappingPreviewPanel({
   const originCode =
     originErrorCode(originError) ?? (originStatus === 'ativa' ? null : 'SEM_CONEXAO');
   const showSyncAction = canSync && !isClosed && originCode === null && !fileOrigin;
-  // O link para o envio é de quem PODE enviar — e `upload_client_file` é dos
-  // cinco papéis, então a pergunta que sobra é "cliente aberto e origem ativa".
-  const showUploadLink = fileOrigin && !isClosed && originCode === null;
+  // O link para o envio é de quem PODE enviar (`upload_client_file`, pelo
+  // helper — hoje os cinco papéis o têm, mas a célula decide, não a suposição),
+  // com o cliente aberto e a origem ativa.
+  const showUploadLink = fileOrigin && canUpload && !isClosed && originCode === null;
   const syncHint: SyncHint = isClosed
     ? 'closed'
     : fileOrigin
-      ? 'file'
+      ? canUpload
+        ? 'file'
+        : 'file_no_permission'
       : !canSync
         ? 'no_permission'
         : originCode !== null
@@ -317,6 +323,8 @@ const NEVER_SYNCED_HINTS: Record<SyncHint, string> = {
   no_permission:
     'A prévia é calculada sobre os movimentos da competência. Peça a alguém da equipe com acesso de sincronização para sincronizá-la.',
   file: 'A base deste cliente é alimentada pelo envio do arquivo do mês (aba "Origem por arquivo", botão acima). Envie o arquivo desta competência para a prévia ser calculada.',
+  file_no_permission:
+    'A base deste cliente é alimentada pelo envio do arquivo do mês. Peça a alguém da equipe com acesso de envio para enviar o arquivo desta competência.',
 };
 
 function NeverSyncedInstruction({

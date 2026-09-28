@@ -151,11 +151,26 @@ vi.mock('@/stores/auth', () => ({
     selector(authState),
 }));
 
+// Permissões NEGADAS à força, por cima da matriz real: `upload_client_file` é dos
+// cinco papéis, e só assim o teste prova que o link do envio pergunta ao helper
+// (§4.9) em vez de supor a célula.
+const deniedPermissions = new Set<string>();
+
+vi.mock('@/lib/authz', async (importOriginal) => {
+  const actual = await importOriginal<typeof AuthzModule>();
+  return {
+    ...actual,
+    hasPermission: (...args: Parameters<typeof actual.hasPermission>) =>
+      !deniedPermissions.has(args[1]) && actual.hasPermission(...args),
+  };
+});
+
 // Imports do SUT DEPOIS dos `vi.mock` (as factories fecham sobre variáveis
 // deste módulo; importar antes as avaliaria na TDZ).
 import { ClientMappingScreen } from '@/components/features/client-mapping/client-mapping-screen';
 import { ApiError } from '@/lib/api/client';
 import { buildClientMappingQuery, type ListClientMappingParams } from '@/lib/api/client-mapping';
+import type * as AuthzModule from '@/lib/authz';
 import type {
   AuthenticatedUser,
   ClientConnection,
@@ -280,6 +295,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   currentSearch = '';
+  deniedPermissions.clear();
   replaceMock.mockClear();
   lastListParams = undefined;
   previewEnabled = undefined;
@@ -908,6 +924,37 @@ describe('ClientMappingScreen — prévia da competência (R0 · R5)', () => {
     render(<ClientMappingScreen clientId={TENANT} />);
     expect(screen.getByText(/alimentada pelo envio do arquivo do mês/)).toBeVisible();
     expect(screen.queryByText(/Sincronize a competência/)).not.toBeInTheDocument();
+  });
+
+  it('origem por ARQUIVO sem `upload_client_file`: nem o link de envio, e a instrução diz a quem pedir', () => {
+    deniedPermissions.add('upload_client_file');
+    currentSearch = 'view=previa';
+    syncStateQuery.data = {
+      competence: '2026-09',
+      neverSynced: true,
+      syncedAt: null,
+      syncFailedAt: null,
+    };
+    clientDetailState.data = {
+      ...clientDetailState.data!,
+      connections: [
+        {
+          id: 'arq-1',
+          provider_type: 'arquivo',
+          label: 'Arquivo',
+          status: 'ativa',
+          last_checked_at: null,
+          accounts_synced_at: null,
+          capabilities: ['listar_lancamentos'],
+        },
+      ],
+    };
+    render(<ClientMappingScreen clientId={TENANT} />);
+    expect(screen.queryByRole('link', { name: /Enviar arquivo do mês/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Sincronizar competência/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/Peça a alguém da equipe com acesso de envio/)).toBeVisible();
   });
 
   it('cliente Omie segue como antes: "Sincronizar competência" e nenhum link de envio (regressão)', () => {

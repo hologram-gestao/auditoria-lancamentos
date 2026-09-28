@@ -141,6 +141,12 @@ describe('inputMappingFormSchema — as regras do backend, uma a uma', () => {
 });
 
 describe('toInputMappingRequest — só os campos da convenção vão ao servidor', () => {
+  it('sem convenção de sinal LANÇA em vez de presumir uma (sinal não se infere)', () => {
+    expect(() => toInputMappingRequest(values({ signConvention: '' }))).toThrow(
+      /Convenção de sinal não declarada/,
+    );
+  });
+
   it('valor_com_sinal zera natureza e colunas separadas, mesmo que o formulário as tenha', () => {
     const body = toInputMappingRequest(
       values({ natureColumn: 'Tipo', debitValue: 'D', debitColumn: 'Saída' }),

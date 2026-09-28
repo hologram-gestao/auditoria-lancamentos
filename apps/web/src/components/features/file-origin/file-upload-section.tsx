@@ -60,8 +60,11 @@ type Outcome =
 
 interface FileUploadSectionProps {
   clientId: string;
-  /** `null` = sem mapeamento salvo; `undefined` = ainda carregando. */
+  /** `null` = sem mapeamento salvo; `undefined` = não sabemos (carregando ou GET falhou). */
   mapping: InputMapping | null | undefined;
+  /** O GET do mapeamento falhou: erro com "Tentar novamente", nunca "sem mapeamento". */
+  mappingFailed: boolean;
+  onRetryMapping: () => void;
   /** `upload_client_file` E cliente aberto. */
   canUpload: boolean;
   /** `manage_input_mapping` E cliente aberto — decide o botão de configurar. */
@@ -71,8 +74,12 @@ interface FileUploadSectionProps {
   originCode: OriginErrorCode | null;
   competence: string;
   onCompetenceChange: (competence: string) => void;
-  /** Sem mapeamento: abre o editor já com o arquivo escolhido. */
-  onConfigureMapping: (file: File | null) => void;
+  /**
+   * Abre o editor já com o arquivo escolhido (sem mapeamento, ou "Revisar
+   * mapeamento" de uma recusa); `afterSave` processa esse arquivo assim que o
+   * mapeamento for salvo — o envio prossegue sem pedir o arquivo de novo.
+   */
+  onConfigureMapping: (file: File | null, afterSave: () => void) => void;
   /** Âncora da lista de processados, para a recusa `ARQUIVO_JA_PROCESSADO`. */
   importsHref: string;
 }
@@ -80,6 +87,8 @@ interface FileUploadSectionProps {
 export function FileUploadSection({
   clientId,
   mapping,
+  mappingFailed,
+  onRetryMapping,
   canUpload,
   canManage,
   isClosed,
@@ -103,14 +112,25 @@ export function FileUploadSection({
   const isPending = processMutation.isPending;
   const canAct = canUpload && originCode === null;
 
-  async function onSubmit(values: FileUploadFormValues) {
+  // Processa com o formulário ATUAL, revalidado — é o que roda depois que o
+  // editor salva o mapeamento (a competência e o arquivo seguem os escolhidos).
+  const processCurrent = () => void form.handleSubmit(processFile)();
+
+  function onSubmit(values: FileUploadFormValues) {
     if (!(values.file instanceof File)) return;
+    // Sem saber se há mapeamento, nada sai daqui (o botão nem aparece).
+    if (mapping === undefined) return;
     if (!hasMapping) {
       // Sem mapeamento não há o que aplicar: o editor abre com o arquivo em
-      // mãos e, salvo o mapeamento, a pessoa volta e clica em Enviar.
-      onConfigureMapping(values.file);
+      // mãos e, salvo o mapeamento, o envio prossegue sozinho.
+      onConfigureMapping(values.file, processCurrent);
       return;
     }
+    void processFile(values);
+  }
+
+  async function processFile(values: FileUploadFormValues) {
+    if (!(values.file instanceof File)) return;
     setOutcome(null);
     try {
       const result = await processMutation.mutateAsync({
@@ -245,7 +265,21 @@ export function FileUploadSection({
               />
             </div>
 
-            {mapping === undefined ? (
+            {mapping === undefined && mappingFailed ? (
+              <div
+                role="alert"
+                data-testid="upload-mapping-error"
+                className="bg-destructive-muted text-destructive space-y-2 rounded-lg p-3 text-sm"
+              >
+                <p>
+                  Não foi possível carregar o mapeamento de colunas, e sem ele não dá para saber
+                  como ler o arquivo. O envio fica indisponível até o mapeamento carregar.
+                </p>
+                <Button type="button" variant="outline" size="sm" onClick={onRetryMapping}>
+                  Tentar novamente
+                </Button>
+              </div>
+            ) : mapping === undefined ? (
               <div className="bg-muted h-16 animate-pulse rounded-lg" aria-hidden="true" />
             ) : hasMapping ? (
               <div
@@ -270,8 +304,8 @@ export function FileUploadSection({
               </div>
             )}
 
-            {(hasMapping || canManage) && (
-              <Button type="submit" disabled={isPending || mapping === undefined || !canAct}>
+            {mapping !== undefined && (hasMapping || canManage) && (
+              <Button type="submit" disabled={isPending || !canAct}>
                 {isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                 ) : hasMapping ? (
@@ -295,7 +329,11 @@ export function FileUploadSection({
         <FileRefusalNotice
           error={outcome.error}
           clientId={clientId}
-          onReviewMapping={canManage ? () => onConfigureMapping(form.getValues('file')) : undefined}
+          onReviewMapping={
+            canManage && mapping !== undefined
+              ? () => onConfigureMapping(form.getValues('file'), processCurrent)
+              : undefined
+          }
           importsHref={importsHref}
         />
       )}

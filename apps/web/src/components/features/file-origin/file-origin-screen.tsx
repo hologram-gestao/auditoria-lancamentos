@@ -48,6 +48,11 @@ interface EditorState {
   open: boolean;
   /** Arquivo que o envio já tinha em mãos — a gaveta inspeciona ele direto. */
   seedFile: File | null;
+  /**
+   * O que fazer depois de salvar, quando a gaveta abriu PELO ENVIO: processar o
+   * arquivo que já estava escolhido — salvo o mapeamento, o envio prossegue.
+   */
+  afterSave: (() => void) | null;
   /** Remount por `key` a cada abertura: o formulário nasce limpo. */
   key: number;
 }
@@ -63,7 +68,12 @@ export function FileOriginScreen({ clientId }: { clientId: string }) {
   const hasFileOrigin = fileConnection !== null;
 
   const mappingQuery = useInputMapping(clientId, { enabled: hasFileOrigin });
-  const [editor, setEditor] = useState<EditorState>({ open: false, seedFile: null, key: 0 });
+  const [editor, setEditor] = useState<EditorState>({
+    open: false,
+    seedFile: null,
+    afterSave: null,
+    key: 0,
+  });
 
   const competenceParam = get(PARAM.competence);
   const competence = isCompetence(competenceParam) ? competenceParam : localCurrentCompetence();
@@ -77,11 +87,19 @@ export function FileOriginScreen({ clientId }: { clientId: string }) {
   // `ORIGEM_COM_ERRO` ao envio — o estado explica, a ação não aparece.
   const originCode: OriginErrorCode | null =
     fileConnection !== null && fileConnection.status !== 'ativa' ? 'ORIGEM_COM_ERRO' : null;
-  // `undefined` enquanto carrega; `null` = sem mapeamento (estado normal).
-  const mapping = mappingQuery.data === undefined ? undefined : (mappingQuery.data.mapping ?? null);
+  // `null` = sem mapeamento (estado normal); `undefined` = NÃO SABEMOS — carregando,
+  // detalhe do cliente ainda sem resposta (query desligada) ou GET que falhou.
+  // "Não sabemos" nunca pode virar "não tem": o PUT SUBSTITUI o mapeamento, e
+  // tratar a falha como vazio abria o editor de criação sem o AlertDialog.
+  const mapping =
+    mappingQuery.data !== undefined && !mappingQuery.isError
+      ? (mappingQuery.data.mapping ?? null)
+      : undefined;
+  const mappingLoading = mapping === undefined && !mappingQuery.isError;
 
-  function openEditor(seedFile: File | null = null) {
-    setEditor((prev) => ({ open: true, seedFile, key: prev.key + 1 }));
+  function openEditor(seedFile: File | null = null, afterSave: (() => void) | null = null) {
+    if (mapping === undefined) return;
+    setEditor((prev) => ({ open: true, seedFile, afterSave, key: prev.key + 1 }));
   }
 
   return (
@@ -105,7 +123,7 @@ export function FileOriginScreen({ clientId }: { clientId: string }) {
         <>
           <InputMappingSection
             mapping={mapping}
-            isLoading={mappingQuery.isLoading}
+            isLoading={mappingLoading}
             isError={mappingQuery.isError}
             error={mappingQuery.error}
             onRetry={() => void mappingQuery.refetch()}
@@ -116,7 +134,9 @@ export function FileOriginScreen({ clientId }: { clientId: string }) {
 
           <FileUploadSection
             clientId={clientId}
-            mapping={mappingQuery.isError ? null : mapping}
+            mapping={mapping}
+            mappingFailed={mappingQuery.isError}
+            onRetryMapping={() => void mappingQuery.refetch()}
             canUpload={canUpload}
             canManage={canManage}
             isClosed={isClosed}
@@ -125,22 +145,24 @@ export function FileOriginScreen({ clientId }: { clientId: string }) {
             onCompetenceChange={(next) =>
               setMany({ [PARAM.competence]: isCompetence(next) ? next : null })
             }
-            onConfigureMapping={(file) => openEditor(file)}
+            onConfigureMapping={(file, afterSave) => openEditor(file, afterSave)}
             importsHref={`${fileOriginPath(clientId)}#${FILE_IMPORTS_ANCHOR}`}
           />
 
           <FileImportsTable clientId={clientId} />
 
-          {/* A gaveta só existe para quem configura — remount por `key` a cada
-              abertura para o estado nascer limpo (mapeamento atual ou vazio). */}
-          {canManage && (
+          {/* A gaveta só existe para quem configura E quando se SABE se há
+              mapeamento — sem isso "alterar" viraria "criar", sem confirmação.
+              Remount por `key` a cada abertura para o estado nascer limpo. */}
+          {canManage && mapping !== undefined && (
             <InputMappingEditorDrawer
               key={editor.key}
               open={editor.open}
               onOpenChange={(open) => setEditor((prev) => ({ ...prev, open }))}
               clientId={clientId}
-              mapping={mapping ?? null}
+              mapping={mapping}
               seedFile={editor.seedFile}
+              onSaved={() => editor.afterSave?.()}
             />
           )}
         </>

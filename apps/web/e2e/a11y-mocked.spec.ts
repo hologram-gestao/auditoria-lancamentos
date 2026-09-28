@@ -438,7 +438,10 @@ const PLATFORM_ADMINS = [
 
 /**
  * A origem do cliente (S9 / R3). `capabilities` é DADO — é por ela que a tela
- * decide se oferece "Lançar no Omie" em vez de descobrir pelo 409.
+ * decide se oferece "Lançar no Omie" em vez de descobrir pelo 409. A lista é a
+ * `OMIE_CAPABILITIES` do adaptador (`omie_adapter.py`), inteira: faltando
+ * `listar_titulos_em_aberto`, a carteira escondia "Sincronizar agora" e os
+ * cenários dela caíam (reprovação da S14).
  */
 const OMIE_CONNECTION = {
   id: '55555555-5555-4555-8555-555555555555',
@@ -447,7 +450,13 @@ const OMIE_CONNECTION = {
   status: 'ativa' as 'ativa' | 'inativa' | 'erro',
   last_checked_at: '2026-09-22T12:00:00Z',
   accounts_synced_at: '2026-09-22T12:00:00Z',
-  capabilities: ['verificar_credencial', 'listar_contas', 'listar_lancamentos', 'escrever'],
+  capabilities: [
+    'verificar_credencial',
+    'listar_contas',
+    'listar_lancamentos',
+    'escrever',
+    'listar_titulos_em_aberto',
+  ],
 };
 
 /**
@@ -3654,9 +3663,17 @@ async function exigirAlturaDaTabela(page: Page, contexto: string) {
  * direita ficava fora da tela — "visível" para o Playwright, ilegível para a
  * pessoa. Hoje ele vive fora do `<table>` (`TableEmpty`), então é medível.
  */
-async function exigirEstadoVazioLegivel(page: Page, texto: string, contexto: string) {
+async function exigirEstadoVazioLegivel(
+  page: Page,
+  texto: string,
+  contexto: string,
+  // Quando a mesma frase aparece em mais de um bloco da tela (a aba de origem
+  // por arquivo diz "sem mapeamento" no mapeamento E no envio), o escopo evita
+  // a violação de strict mode do `getByText`.
+  escopo?: Locator,
+) {
   const largura = page.viewportSize()?.width ?? 0;
-  const caixa = await page.getByText(texto).boundingBox();
+  const caixa = await (escopo ?? page).getByText(texto).boundingBox();
   expect(caixa, `${contexto}: o estado vazio precisa ter caixa`).not.toBeNull();
   expect(caixa?.height ?? 0, `${contexto}: o estado vazio colapsou`).toBeGreaterThan(0);
   expect(caixa?.x ?? -1, `${contexto}: o estado vazio começa fora da tela`).toBeGreaterThanOrEqual(
@@ -5461,11 +5478,21 @@ for (const vp of VIEWPORTS) {
         page.getByRole('heading', { name: 'Origem por arquivo', level: 2 }),
       ).toBeVisible();
       // A aba existe SÓ porque o cliente tem conexão `arquivo` — e é a ativa.
+      // No mobile a navegação do cliente mora no DRAWER (86e2n4pf9): abrir para
+      // medir, e fechar antes do resto (o modal marca o fundo com aria-hidden).
+      if (vp.label !== 'desktop') {
+        await page.getByRole('button', { name: 'Abrir menu de navegação' }).click();
+        await aguardarAnimacao(page.getByRole('dialog', { name: 'Menu' }));
+      }
       const nav = page.getByRole('navigation', { name: 'Seções do cliente' });
       await expect(nav.getByRole('link', { name: 'Origem por arquivo' })).toHaveAttribute(
         'aria-current',
         'page',
       );
+      if (vp.label !== 'desktop') {
+        await page.keyboard.press('Escape');
+        await expect(page.getByRole('dialog')).toHaveCount(0);
+      }
       // O resumo lista campo ← coluna e a convenção de sinal, sem conteúdo de célula.
       const resumo = page.getByTestId('mapping-summary');
       await expect(resumo).toBeVisible();
@@ -5516,7 +5543,10 @@ for (const vp of VIEWPORTS) {
         page,
         'Este cliente ainda não tem mapeamento de colunas',
         `${vp.label} · sem mapeamento`,
+        vazio,
       );
+      // O envio repete a frase no próprio bloco (e oferece configurar e enviar).
+      await expect(page.getByTestId('upload-needs-mapping')).toBeVisible();
       await shot(page, `origem-arquivo-vazio-${slugF}`);
       await analyze(page, `origem por arquivo — sem mapeamento (${vp.label})`);
 
@@ -5566,6 +5596,14 @@ for (const vp of VIEWPORTS) {
       await shot(page, `origem-arquivo-editor-${slugF}`);
       // Os `Select` estão FECHADOS aqui (86e34jd8m): o axe mede a gaveta inteira.
       await analyze(page, `origem por arquivo — editor com amostra (${vp.label})`);
+
+      // A gaveta abre por ESTADO (sem `SheetTrigger`): Cancelar devolve o foco a
+      // quem a abriu (`OpenerCapture` no `SheetContent`), não ao `body`.
+      await gaveta.getByRole('button', { name: 'Cancelar' }).click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(
+        vazio.getByRole('button', { name: 'Configurar mapeamento', exact: true }),
+      ).toBeFocused();
     });
 
     test('alterar mapeamento existente exige o AlertDialog; só grava após confirmar', async ({
@@ -5606,6 +5644,8 @@ for (const vp of VIEWPORTS) {
       await expect.poll(() => gravou).toBe(true);
       await expect(page.getByRole('alertdialog')).toHaveCount(0);
       await expect(page.getByRole('dialog')).toHaveCount(0);
+      // Salvo, o foco volta ao "Alterar mapeamento" que abriu a gaveta.
+      await expect(page.getByRole('button', { name: 'Alterar mapeamento' })).toBeFocused();
       await aguardarToastEstavel(page);
       expect(await measuredContrast(page, TOAST_TITLE)).toBeGreaterThanOrEqual(4.5);
       await analyze(page, `origem por arquivo — toast de mapeamento alterado (${vp.label})`);

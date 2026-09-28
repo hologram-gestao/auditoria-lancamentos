@@ -145,6 +145,7 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
   const isClosed = client?.closed_at != null;
   const canManage = hasPermission(currentUser, 'manage_client_mapping');
   const canSync = hasPermission(currentUser, 'sync_client_movements');
+  const canUpload = hasPermission(currentUser, 'upload_client_file');
   // S14: origem por ARQUIVO — a base vem do envio, não do sync (409
   // `ORIGEM_POR_ARQUIVO`). Decidido pela capacidade, no helper único.
   const fileOrigin = originIsFileBased(client?.connections ?? []);
@@ -312,6 +313,7 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
                   setMany({ [PARAM.competence]: next === serverCompetence ? null : next })
                 }
                 canSync={canSync}
+                canUpload={canUpload}
                 canManage={canManage}
                 isClosed={isClosed}
                 originStatus={client?.origin_status ?? 'ativa'}

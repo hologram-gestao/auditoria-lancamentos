@@ -25,6 +25,18 @@ import type { OriginErrorCode } from '@/lib/origin-state';
 
 type ConnectionLike = Pick<ClientConnection, 'provider_type' | 'status' | 'capabilities'>;
 
+/**
+ * O TIPO da conexão declara a capacidade, esteja ela ativa ou não? Para o que
+ * DESCREVE a conexão (a linha "Sincronizado há X" de uma Omie em erro continua
+ * verdadeira), não para oferecer ação — ação usa `connectionSupports`.
+ */
+export function connectionDeclares(
+  connection: Pick<ClientConnection, 'capabilities'>,
+  capability: ProviderCapability,
+): boolean {
+  return connection.capabilities.includes(capability);
+}
+
 /** A conexão, sozinha, é capaz disso? (ativa **e** o tipo declara) — `connection_supports`. */
 export function connectionSupports(
   connection: ConnectionLike,
