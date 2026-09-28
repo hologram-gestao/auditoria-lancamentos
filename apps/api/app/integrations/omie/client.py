@@ -21,8 +21,9 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from datetime import date
+from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -85,6 +86,32 @@ def _is_omie_offline(response: httpx.Response) -> bool:
         return False
     message = payload.get("message")
     return isinstance(message, str) and message.strip().upper() == _OMIE_OFFLINE_MESSAGE
+
+
+def is_extrato_summary_row(raw: Mapping[str, Any]) -> bool:
+    """`True` para a linha-resumo de saldo que a Omie mistura no `listaMovimentos`.
+
+    Não é lançamento: é o saldo do dia ("SALDO ANTERIOR", "SALDO"). Duas formas
+    reais, e o traço comum a ambas é **sem `cNatureza` e com valor zero**:
+
+    - cartão (fixture 21/08/2026) e caso Austral (20/05/2026): também SEM
+      `nCodLancamento`;
+    - conta corrente (fixture 28/09/2026, Laticínio): COM `nCodLancamento` — um
+      contador 1, 2, 3…, uma linha por dia. Olhar só o `nCodLancamento` deixava
+      esta passar, e o parse derrubava a conciliação inteira.
+
+    Linha sem natureza e COM valor não é a forma observada e NÃO é descartada:
+    segue para o `model_validate` e falha alto. Descartá-la em silêncio poderia
+    sumir com um lançamento real da conciliação.
+    """
+    if raw.get("nCodLancamento") is None:
+        return True
+    if raw.get("cNatureza"):
+        return False
+    try:
+        return Decimal(str(raw.get("nValorDocumento"))) == 0
+    except InvalidOperation:
+        return False
 
 
 # Substrings (case-insensitive) em `faultstring` que indicam erro de
@@ -714,13 +741,10 @@ class OmieClient:
         raw_items: list[dict[str, Any]] = resp.get("listaMovimentos") or []
         # Omie inclui linhas-resumo de saldo (ex: "SALDO ANTERIOR",
         # "SALDO POSTERIOR") no `listaMovimentos`. Essas linhas NÃO são
-        # lançamentos — vêm sem `nCodLancamento`, sem `cNatureza` e sem
-        # `cSituacao`, com `nValorDocumento=0` e `cDesCliente="SALDO ..."`.
-        # Se passarem pelo `model_validate`, viram 3 erros de "Field
-        # required" e o job inteiro morre. Filtramos antes do parse —
-        # caso real observado em 20/05/2026 com cliente Austral (extrato
-        # de março/2026, 36 linhas no array, ~2 delas de saldo).
-        lancamentos = [it for it in raw_items if it.get("nCodLancamento") is not None]
+        # lançamentos. Se passarem pelo `model_validate`, o parse levanta e o
+        # job inteiro morre. Filtramos antes do parse — as formas reais e o
+        # porquê do critério estão em `is_extrato_summary_row`.
+        lancamentos = [it for it in raw_items if not is_extrato_summary_row(it)]
         summary_rows_skipped = len(raw_items) - len(lancamentos)
         # Sinal forte de bug: todos os items foram descartados pelo filtro.
         # Possibilidades:
