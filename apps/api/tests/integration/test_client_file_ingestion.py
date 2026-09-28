@@ -20,7 +20,7 @@ afirma a ORDEM das recusas e das escritas, sem banco):
     distinto; célula vazia é o buraco de ingestão; o segundo mês não toca o mapeamento;
   - encerrado → 409 em inspect e process; operador envia (201); sincronizar cliente
     só-arquivo → 409 `ORIGEM_POR_ARQUIVO` sem marcar nada ausente;
-  - nenhum conteúdo de célula nem nome de coluna em `caplog` ou em `usage_events`.
+  - nenhum conteúdo de célula nem nome de coluna em log (`caplog` + structlog) ou em `usage_events`.
 
 O cross-tenant e o cross-org das três rotas rodam na bateria dos três atacantes
 (`test_sensitive_endpoints.py`), que lê a lista canônica.
@@ -42,6 +42,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from openpyxl import Workbook
 from sqlalchemy import select
+from structlog.testing import capture_logs
 
 from app.core.config import get_settings
 from app.core.crypto import CryptoError
@@ -193,6 +194,9 @@ async def world(db_session: AsyncSession) -> World:
                 client_id=client.id, provider_type=ProviderType.ARQUIVO.value, label="Arquivo"
             )
         )
+        # O `POST /connections` do `arquivo` provisiona a DEK (14.1, §4.8); o
+        # registry de categorias só a CARREGA (retrabalho da 14.4).
+        await provision_client_cipher(client, settings=get_settings())
     w.mapping = _mapping(w.client, w.admin)
     db_session.add(w.mapping)
     db_session.add(
@@ -242,11 +246,19 @@ async def client_with_request_rollback(db_session: AsyncSession) -> AsyncGenerat
 
 @pytest.fixture(autouse=True)
 def _nada_de_celula_no_log(caplog: pytest.LogCaptureFixture) -> Any:
-    """Guardrail da sprint: nenhum conteúdo de célula nem nome de coluna em log."""
+    """Guardrail da sprint: nenhum conteúdo de célula nem nome de coluna em log.
+
+    Os DOIS canais: `caplog` (stdlib — o handler de 500 e as libs) e
+    `capture_logs` (structlog, que a app usa e que o `caplog` não enxerga depois
+    que ela configura o structlog). Só com o `caplog`, este guard passava sem
+    medir nada.
+    """
     caplog.set_level(logging.INFO)
-    yield
+    with capture_logs() as events:
+        yield
+    dumped = caplog.text + json.dumps(events, ensure_ascii=False, default=str)
     for forbidden in (SECRET_DESCRIPTION, SECRET_CATEGORY, "Histórico", "Categoria"):
-        assert forbidden not in caplog.text, f"`{forbidden}` vazou para o log"
+        assert forbidden not in dumped, f"`{forbidden}` vazou para o log"
 
 
 async def _login(http: AsyncClient, user: User) -> None:

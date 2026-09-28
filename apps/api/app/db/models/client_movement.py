@@ -102,6 +102,13 @@ MAX_MOVEMENT_REF_CHARS = 60
 #: títulos (`client_titles.document_number`), de propósito: é o mesmo dado.
 MAX_MOVEMENT_DOCUMENT_CHARS = 60
 
+#: Precisão e escala do valor (`Numeric(14,2)`, como todo dinheiro do sistema,
+#: §3.4). Nomeadas porque a ingestão do arquivo (S14) recusa ANTES do upsert o
+#: valor que não cabe — o teto `10^(precisão-escala)` sai daqui, não de um número
+#: digitado de novo em outro lugar.
+MOVEMENT_AMOUNT_PRECISION = 14
+MOVEMENT_AMOUNT_SCALE = 2
+
 #: Rótulo do CHECK que mantém o envelope da descrição inteiro (S14): ciphertext e
 #: IV vivem e morrem juntos — molde de `client_connections.credentials_pair`.
 MOVEMENT_DESCRIPTION_PAIR_CK_LABEL = "description_pair"
@@ -194,7 +201,9 @@ class ClientMovement(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     #: Valor COM SINAL (débito negativo, crédito positivo) — a convenção de
     #: natureza do provedor morre no adaptador. `Numeric(14,2)` como todo dinheiro
     #: do sistema (§3.4), nunca `float`.
-    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(
+        Numeric(MOVEMENT_AMOUNT_PRECISION, MOVEMENT_AMOUNT_SCALE), nullable=False
+    )
 
     #: Código da categoria na origem. NULO é estado legítimo e contado: é o "sem
     #: categoria de origem" do R3 (buraco de ingestão, distinto de "sem decisão").

@@ -37,11 +37,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from app.core.crypto import CryptoError
 from app.core.crypto_service import (
     AAD_FILE_CATEGORY_LABEL,
     field_locator,
     load_client_cipher,
-    provision_client_cipher,
 )
 from app.core.logging import get_logger
 from app.db.models.client_file_category import ClientFileCategory, new_file_category_code
@@ -114,13 +114,18 @@ class FileCategoryRegistry:
 
         Cria na transação do chamador (flush, sem commit). Os códigos novos são
         aleatórios (`arq-<hex>`), sem relação com o texto do rótulo (R4).
-        `provision_client_cipher` e não `load_`: a 14.1 já provisionou a DEK na
-        conexão `arquivo`, mas um cliente que ganhou a conexão pelo caminho legado
-        pode chegar aqui sem ela — e escrever exige poder cifrar.
+        `load_client_cipher` e NÃO `provision_`: a DEK nasce no `POST /connections`
+        do `arquivo` (14.1), e o `Client` daqui foi carregado ANTES do advisory
+        lock da ingestão — provisionar sobre ele deixaria dois envios simultâneos
+        gerarem DEKs diferentes (landmine da cripto: perda de dado). Sem DEK,
+        falha ALTO (`CryptoError`) ANTES de qualquer escrita, em vez de inventar
+        uma chave.
         """
         if not labels:
             return {}
-        cipher = await provision_client_cipher(client, settings=self._settings)
+        if client.dek_wrapped is None:
+            raise CryptoError(f"client {client.id} has no DEK; file categories cannot be written")
+        cipher = await load_client_cipher(client, settings=self._settings)
         existing = self._decrypt_all(client.id, cipher, await self._repo.list_for_client(client.id))
         known, missing = split_labels(
             {label: code for code, label in existing.names.items()}, sorted(labels)

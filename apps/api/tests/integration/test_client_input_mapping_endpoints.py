@@ -22,6 +22,7 @@ O cross-tenant e o cross-org das duas rotas rodam na bateria dos três atacantes
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -213,6 +214,7 @@ class TestEscrita:
         primeiro = await client_with_db.put(_url(world.client), json=_csv_payload())
         assert primeiro.status_code == 200, primeiro.text
         first_id = primeiro.json()["data"]["mapping"]["id"]
+        first_updated_at = datetime.fromisoformat(primeiro.json()["data"]["mapping"]["updatedAt"])
 
         # Outro autor, outra convenção: o mapeamento inteiro é SUBSTITUÍDO.
         await _login(client_with_db, world.tenant_manager)
@@ -231,6 +233,10 @@ class TestEscrita:
         assert data["mapping"]["id"] == first_id
         assert data["mapping"]["signConvention"] == "coluna_natureza"
         assert data["mapping"]["natureColumn"] == "D/C"
+        # O upsert não passa pelo `onupdate` do mixin: sem o `updated_at`
+        # explícito no `set_`, o "Atualizado em" ficava no valor da criação.
+        assert datetime.fromisoformat(data["mapping"]["updatedAt"]) > first_updated_at
+        assert data["mapping"]["createdAt"] == primeiro.json()["data"]["mapping"]["createdAt"]
 
         rows = await _rows(db_session, world.client.id)
         assert len(rows) == 1

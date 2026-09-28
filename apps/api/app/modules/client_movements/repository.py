@@ -13,10 +13,10 @@ encerramento do cliente inteiro, e ele mora na lista declarada de
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
-from sqlalchemy import CursorResult, String, all_, any_, bindparam, func, select, update
+from sqlalchemy import CursorResult, String, Table, all_, any_, bindparam, func, select, update
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -223,14 +223,22 @@ class ClientMovementsRepository:
     async def set_descriptions(self, updates: Sequence[dict[str, Any]]) -> None:
         """Grava `(description_encrypted, description_iv)` por pk, em lote (S14).
 
-        Cada item: `{"b_id": pk, "b_ct": envelope, "b_iv": iv}`. Só a origem
-        arquivo chega aqui; a linha do Omie nunca ganha descrição.
+        Cada item: `{"b_client": cliente, "b_id": pk, "b_ct": envelope, "b_iv": iv}`.
+        Só a origem arquivo chega aqui; a linha do Omie nunca ganha descrição.
+
+        ⚠️ UPDATE de **Core** (`ClientMovement.__table__`), nunca `update(ClientMovement)`:
+        o ORM com LISTA de parâmetros vira "bulk UPDATE by primary key", e com WHERE
+        além da pk o SQLAlchemy levanta SEMPRE `InvalidRequestError: bulk synchronize
+        of persistent objects not supported…` — todo arquivo com descrição dava 500
+        (só a integração contra Postgres pegou; o unitário usa repositório falso).
+        Em Core é um `executemany` simples, e o `client_id` fica no WHERE (§3.15).
         """
         if not updates:
             return
+        table = cast(Table, ClientMovement.__table__)
         stmt = (
-            update(ClientMovement)
-            .where(ClientMovement.id == bindparam("b_id"))
+            update(table)
+            .where(table.c.client_id == bindparam("b_client"), table.c.id == bindparam("b_id"))
             .values(description_encrypted=bindparam("b_ct"), description_iv=bindparam("b_iv"))
         )
         await self._session.execute(stmt, list(updates))

@@ -21,6 +21,7 @@ import io
 import zipfile
 from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -39,8 +40,10 @@ from app.db.models.client_input_mapping import (
     InputFileFormat,
     SignConvention,
 )
+from app.db.models.client_movement import MOVEMENT_AMOUNT_PRECISION, MOVEMENT_AMOUNT_SCALE
 from app.modules.client_file_ingestion import reader
 from app.modules.client_file_ingestion.reader import (
+    MAX_AMOUNT_ABS,
     MAX_CATEGORY_LABEL_CHARS,
     MAX_DESCRIPTION_CHARS,
     MAX_FILE_COLUMNS,
@@ -423,7 +426,16 @@ class TestValor:
             ("R$ 1.234,56", DecimalSeparator.COMMA, "1234.56"),
             ("R$\u00a01.234,56", DecimalSeparator.COMMA, "1234.56"),
             ("(100,00)", DecimalSeparator.COMMA, "-100.00"),
+            ("1.500", DecimalSeparator.COMMA, "1500.00"),  # milhar em grupo de 3
+            ("1500,5", DecimalSeparator.COMMA, "1500.50"),
+            ("12.345.678,90", DecimalSeparator.COMMA, "12345678.90"),
+            (
+                "999.999.999.999,99",
+                DecimalSeparator.COMMA,
+                "999999999999.99",
+            ),  # o teto menos 1 centavo
             ("1,234.56", DecimalSeparator.DOT, "1234.56"),
+            ("-1500.5", DecimalSeparator.DOT, "-1500.50"),
             ("100", DecimalSeparator.DOT, "100.00"),
             ("0,5", DecimalSeparator.COMMA, "0.50"),
             (100, DecimalSeparator.COMMA, "100.00"),
@@ -451,15 +463,95 @@ class TestValor:
             (True, DecimalSeparator.DOT),
             (None, DecimalSeparator.DOT),
             (date(2026, 6, 1), DecimalSeparator.DOT),
+            # Retrabalho da 14.3 (QA 86e3f6r4x): os três que davam 500 ou dinheiro errado.
+            ("1E+30", DecimalSeparator.COMMA),  # quantize → InvalidOperation → 500
+            ("1E+30", DecimalSeparator.DOT),
+            ("12345678901234,00", DecimalSeparator.COMMA),  # CNPJ: estourava Numeric(14,2)
+            ("1000000000000", DecimalSeparator.DOT),  # exatamente o teto (10^12)
+            ("-1000000000000,00", DecimalSeparator.COMMA),
+            ("1500.50", DecimalSeparator.COMMA),  # virava 150050 e o arquivo era ACEITO
+            ("1.5", DecimalSeparator.COMMA),  # milhar sem grupo de 3
+            ("1.50", DecimalSeparator.COMMA),
+            ("1500,50", DecimalSeparator.DOT),  # o espelho sob ponto
+            ("1,5", DecimalSeparator.DOT),
+            ("1.234.5", DecimalSeparator.COMMA),
+            ("1,5,0", DecimalSeparator.COMMA),
+            ("--10,00", DecimalSeparator.COMMA),
+            ("10,00-", DecimalSeparator.COMMA),
+            ("0x10", DecimalSeparator.DOT),
+            ("1_000", DecimalSeparator.DOT),
         ],
     )
     def test_fora_do_padrao_e_erro(self, value: Any, sep: DecimalSeparator) -> None:
         with pytest.raises(ValueError):  # noqa: PT011 - a mensagem é interna
             parse_amount(value, sep)
 
-    def test_o_separador_errado_nao_e_adivinhado(self) -> None:
-        """`1,50` lido com separador `.` vira 150 — é o mapeamento que decide, não o leitor."""
-        assert parse_amount("1,50", DecimalSeparator.DOT) == Decimal("150.00")
+    @pytest.mark.parametrize("value", [1e30, 10**12, Decimal("1E+12"), -(10**13)])
+    def test_numero_acima_do_teto_da_coluna_e_erro(self, value: Any) -> None:
+        """Célula NUMÉRICA do XLSX também passa pelo teto: `Numeric(14,2)` não cabe."""
+        with pytest.raises(ValueError):  # noqa: PT011 - a mensagem é interna
+            parse_amount(value, DecimalSeparator.COMMA)
+
+    def test_o_teto_e_derivado_da_coluna(self) -> None:
+        assert Decimal(10) ** (MOVEMENT_AMOUNT_PRECISION - MOVEMENT_AMOUNT_SCALE) == MAX_AMOUNT_ABS
+        assert Decimal("1000000000000") == MAX_AMOUNT_ABS
+
+    def test_o_separador_errado_nao_e_adivinhado_nem_consertado(self) -> None:
+        """`1,50` com separador `.` declarado NÃO vira 150: fora do formato é linha inválida.
+
+        Antes do retrabalho, o leitor tirava o separador "de milhar" sem conferir o
+        grupo de 3 e aceitava — dinheiro errado entrando calado (R2).
+        """
+        with pytest.raises(ValueError):  # noqa: PT011 - a mensagem é interna
+            parse_amount("1,50", DecimalSeparator.DOT)
+
+    def test_so_levanta_value_error_e_sem_contexto(self) -> None:
+        """Quem chama só converte `ValueError` em motivo; nada do decimal escapa."""
+        with pytest.raises(ValueError) as exc:  # noqa: PT011 - a mensagem é interna
+            parse_amount("1E+30", DecimalSeparator.DOT)
+        assert exc.value.__cause__ is None
+        assert "1E+30" not in str(exc.value)
+
+
+class TestFixturesDoQa:
+    """As fixtures sintéticas do QA da S14 (`tests/fixtures/file_origin/`) pelo leitor.
+
+    Espelho SEM banco de `test_s14_qa_file_origin_cycle.py::TestValorForaDoPadrao…`:
+    a integração prova o 422 e a contagem inalterada; aqui se prova, em qualquer
+    ambiente, que a linha 4 é a ÚNICA recusada e pelo motivo fechado — e que os
+    arquivos originais fecham os totais que o QA declara.
+    """
+
+    FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "file_origin"
+    AGO_INI = date(2026, 8, 1)
+    AGO_FIM = date(2026, 8, 31)
+
+    def _convert(self, content: bytes, start: date, end: date) -> Any:
+        table = read_table(content, CSV_OPTIONS)
+        return convert_lines(table, _spec(document_column="Documento"), start=start, end=end)
+
+    @pytest.mark.parametrize(
+        ("name", "start", "end", "total"),
+        [
+            ("extrato_2026_07.csv", date(2026, 7, 1), date(2026, 7, 31), "1772.18"),
+            ("extrato_2026_08.csv", date(2026, 8, 1), date(2026, 8, 31), "-2710.42"),
+        ],
+    )
+    def test_os_arquivos_do_qa_fecham_o_total(
+        self, name: str, start: date, end: date, total: str
+    ) -> None:
+        lines, problems = self._convert((self.FIXTURES / name).read_bytes(), start, end)
+        assert problems == []
+        assert sum(line.amount for line in lines) == Decimal(total)
+
+    @pytest.mark.parametrize("cell", ["1E+30", "12345678901234,00", "1500.50"])
+    def test_valor_fora_do_padrao_recusa_so_a_linha_4(self, cell: str) -> None:
+        content = (self.FIXTURES / "extrato_2026_08.csv").read_bytes()
+        assert content.count(b"-398,12") == 1
+        _, problems = self._convert(
+            content.replace(b"-398,12", cell.encode()), self.AGO_INI, self.AGO_FIM
+        )
+        assert problems == [LineProblem(line=4, reason="valor_nao_numerico")]
 
 
 class TestSinal:

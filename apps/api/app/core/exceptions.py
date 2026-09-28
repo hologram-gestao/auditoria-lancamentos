@@ -81,6 +81,8 @@ class ErrorCode(StrEnum):
     SINAL_NAO_DECLARADO = "SINAL_NAO_DECLARADO"
     ARQUIVO_JA_PROCESSADO = "ARQUIVO_JA_PROCESSADO"
     ORIGEM_POR_ARQUIVO = "ORIGEM_POR_ARQUIVO"
+    #: BACK 14.1 (retrabalho): um cliente tem UM tipo de origem de lançamentos.
+    ORIGEM_JA_CONECTADA = "ORIGEM_JA_CONECTADA"
     FORMATO_NAO_SUPORTADO = "FORMATO_NAO_SUPORTADO"
     ARQUIVO_INVALIDO = "ARQUIVO_INVALIDO"
     CABECALHO_DIVERGENTE = "CABECALHO_DIVERGENTE"
@@ -401,6 +403,23 @@ class ConnectionLabelAlreadyExistsError(ConflictError):
     default_user_message = (
         "Já existe uma origem deste tipo com este rótulo neste cliente. "
         "Use outro rótulo ou edite a conexão existente."
+    )
+
+
+class OriginAlreadyConnectedError(ConflictError):
+    """409 — o cliente já tem origem de lançamentos de OUTRO tipo (S14, BACK 14.1).
+
+    Um cliente tem UM tipo de origem de lançamentos (ADR-083-BE). Com Omie e
+    arquivo ativos juntos, a seleção por capacidade escolheria uma das duas pela
+    ordem do `SELECT` e o outro caminho quebraria calado (sync recusado num
+    cliente Omie, conciliação sem cliente Omie). Trocar de origem é remover a
+    existente e conectar a nova. `details` carrega só IDs e o tipo (§3.15).
+    """
+
+    code = ErrorCode.ORIGEM_JA_CONECTADA
+    default_user_message = (
+        "Este cliente já tem uma origem de lançamentos de outro tipo. Para trocar, "
+        "remova a conexão existente e conecte a nova."
     )
 
 

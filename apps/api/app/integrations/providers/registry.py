@@ -46,6 +46,14 @@ _CAPABILITIES_BY_TYPE: dict[str, frozenset[Capability]] = {
 }
 
 
+#: Os tipos cujo adaptador expõe o `OmieClient` cru (`raw_client`) — o que a
+#: conciliação, a revisão, a exportação, o plano de contas e os dados do Omie
+#: consomem (fluxo verificado contra fixture real, ver `client_connections/origin.py`).
+#: Provedor novo com client compatível entra aqui também. `arquivo` NÃO entra:
+#: ele só alimenta a base de movimentos (S14, ADR-083-BE).
+_ORIGIN_CLIENT_TYPES: frozenset[str] = frozenset({ProviderType.OMIE.value})
+
+
 def _known(provider_type: str) -> str:
     if provider_type not in _PROVIDERS:
         raise ValidationAppError(
@@ -87,6 +95,15 @@ def requires_credentials(provider_type: str) -> bool:
     origem, se a ausência de ciphertext é estado normal ou defeito.
     """
     return Capability.VERIFICAR_CREDENCIAL in capabilities_for(provider_type)
+
+
+def offers_origin_client(provider_type: str) -> bool:
+    """O adaptador deste tipo expõe o client cru do ERP? (S14, ADR-083-BE)
+
+    Pergunta de TIPO, sem credencial: é o que deixa a criação da conciliação
+    recusar cliente só-arquivo ANTES de gravar a sessão, sem decifrar nada.
+    """
+    return _known(provider_type) in _ORIGIN_CLIENT_TYPES
 
 
 def supported_provider_types() -> tuple[str, ...]:

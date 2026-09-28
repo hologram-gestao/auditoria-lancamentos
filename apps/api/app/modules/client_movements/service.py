@@ -374,7 +374,7 @@ class ClientMovementsSyncService:
             if pk is None:  # pragma: no cover - a linha acabou de ser gravada
                 continue
             envelope, iv = cipher.encrypt(text, field_locator(AAD_MOVEMENT_DESCRIPTION, pk))
-            updates.append({"b_id": pk, "b_ct": envelope, "b_iv": iv})
+            updates.append({"b_client": client.id, "b_id": pk, "b_ct": envelope, "b_iv": iv})
         await self._repo.set_descriptions(updates)
 
 

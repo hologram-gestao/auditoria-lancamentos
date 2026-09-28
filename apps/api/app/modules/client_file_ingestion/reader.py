@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -45,7 +46,12 @@ from app.db.models.client_input_mapping import (
     InputFileFormat,
     SignConvention,
 )
-from app.db.models.client_movement import MAX_MOVEMENT_DOCUMENT_CHARS, MAX_MOVEMENT_REF_CHARS
+from app.db.models.client_movement import (
+    MAX_MOVEMENT_DOCUMENT_CHARS,
+    MAX_MOVEMENT_REF_CHARS,
+    MOVEMENT_AMOUNT_PRECISION,
+    MOVEMENT_AMOUNT_SCALE,
+)
 from app.utils.magic_bytes import FileType, detect_file_type
 
 if TYPE_CHECKING:
@@ -99,6 +105,18 @@ _STRPTIME: dict[InputDateFormat, str] = {
 }
 
 _CENT = Decimal("0.01")
+
+#: Teto de |valor|, DERIVADO da coluna (`client_movements.amount`, `Numeric(14,2)`):
+#: 10^(14-2). Derivado e não digitado — mudar a precisão da coluna muda o teto aqui.
+MAX_AMOUNT_ABS = Decimal(10) ** (MOVEMENT_AMOUNT_PRECISION - MOVEMENT_AMOUNT_SCALE)
+
+#: Formato ESTRITO do valor em texto por separador declarado (depois de tirar `R$`,
+#: espaços e parênteses): inteiro puro OU milhar em grupos de 3 no separador oposto,
+#: e até 2 casas no declarado. Tudo o mais é linha inválida — nunca "consertado".
+_AMOUNT_TEXT_PATTERNS: dict[DecimalSeparator, re.Pattern[str]] = {
+    DecimalSeparator.COMMA: re.compile(r"-?(?:\d{1,3}(?:\.\d{3})+|\d+)(?:,\d{1,2})?"),
+    DecimalSeparator.DOT: re.compile(r"-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?"),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -408,8 +426,17 @@ def parse_date(value: Any, fmt: InputDateFormat) -> date:
 def parse_amount(value: Any, sep: DecimalSeparator) -> Decimal:
     """Valor pelo SEPARADOR DECLARADO. Nunca `float` no caminho de dinheiro (§3.4).
 
-    Aceita `R$`, espaços, milhar no separador oposto e parênteses como negativo.
-    Mais de duas casas é recusado (arredondar em silêncio mudaria o valor).
+    Texto: aceita `R$`, espaços, sinal `-` à esquerda e parênteses como negativo;
+    o resto tem de casar com o formato ESTRITO da convenção (`_AMOUNT_TEXT_PATTERNS`):
+    milhar só em grupos de 3 no separador oposto, no máximo 2 casas. Fora disso é
+    `ValueError` — `1500.50` com vírgula declarada NÃO vira `150050` (retrabalho da
+    14.3: aceitava e gravava R$ 150.050,00 calado), `1E+30` e `1.5` também não.
+    Número (célula numérica do XLSX): mais de duas casas é recusado (arredondar em
+    silêncio mudaria o valor). Os dois caminhos passam pelo teto da coluna
+    (`MAX_AMOUNT_ABS`): o que não cabe em `Numeric(14,2)` estouraria no upsert
+    como `DataError` → 500, com os parâmetros do INSERT (células) no log.
+
+    Só levanta `ValueError` — quem chama converte em `valor_nao_numerico`.
     """
     if isinstance(value, bool):
         raise ValueError("booleano")
@@ -420,6 +447,8 @@ def parse_amount(value: Any, sep: DecimalSeparator) -> Decimal:
         negative = text.startswith("(") and text.endswith(")")
         if negative:
             text = text[1:-1]
+        if not _AMOUNT_TEXT_PATTERNS[sep].fullmatch(text):
+            raise ValueError("fora do formato do separador declarado")
         if sep is DecimalSeparator.COMMA:
             text = text.replace(".", "").replace(",", ".")
         else:
@@ -430,11 +459,15 @@ def parse_amount(value: Any, sep: DecimalSeparator) -> Decimal:
         raise ValueError("valor não é texto nem número")
     try:
         amount = Decimal(text)
-    except InvalidOperation as exc:
-        raise ValueError("não numérico") from exc
-    if not amount.is_finite():
-        raise ValueError("não finito")
-    quantized = amount.quantize(_CENT)
+        if not amount.is_finite():
+            raise ValueError("não finito")
+        if abs(amount) >= MAX_AMOUNT_ABS:
+            raise ValueError("acima do teto da coluna")
+        quantized = amount.quantize(_CENT)
+    except InvalidOperation:
+        # `from None`: a exceção do decimal não carrega a célula hoje, mas o
+        # contrato do leitor é que NENHUMA falha de célula leve contexto adiante.
+        raise ValueError("não numérico") from None
     if quantized != amount:
         raise ValueError("mais de duas casas")
     return quantized

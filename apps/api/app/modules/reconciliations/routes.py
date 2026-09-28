@@ -64,6 +64,7 @@ from app.integrations.anthropic.client import AnthropicClient
 from app.integrations.omie.client import OmieClient
 from app.integrations.providers.base import Capability
 from app.modules.client_connections.origin import (
+    assert_offers_origin_client,
     build_origin_client,
     resolve_capable_connection,
 )
@@ -373,7 +374,12 @@ async def create_reconciliation(
     # o 409 da taxonomia sai AQUI — antes de gravar sessão e arquivos. Criar a
     # sessão e descobrir no job seria deixar lixo no banco e um erro tardio na
     # tela de processamento.
-    await resolve_capable_connection(db, client, Capability.LISTAR_LANCAMENTOS, settings=settings)
+    # S14 (ADR-083-BE): cliente só-arquivo lista lançamentos, mas não tem o client
+    # do ERP que o job usa — o mesmo 409 sai aqui, e não no job.
+    origin = await resolve_capable_connection(
+        db, client, Capability.LISTAR_LANCAMENTOS, settings=settings
+    )
+    assert_offers_origin_client(origin.provider_type)
 
     # Provisiona a DEK do cliente (gera+embrulha se legado) e cifra as descrições
     # dos file_entries no envelope corrente + AAD. O `client` está anexado a `db`,

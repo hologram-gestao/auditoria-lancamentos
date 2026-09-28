@@ -7,7 +7,7 @@ O que este módulo afirma:
   - `Aluguel`, `aluguel` e `Aluguél` são TRÊS categorias (nenhum caminho funde);
   - o rótulo persiste só cifrado (o `SELECT` não contém o texto); decifrar com a DEK
     de OUTRO cliente falha; falha de decifragem devolve `[indecifrável]` +
-    `categoryNameResolved=false` no de-para, e o caplog só tem IDs;
+    `categoryNameResolved=false` no de-para, e o log (structlog) só tem IDs;
   - `UNIQUE(client_id, code)` provada no banco;
   - com um movimento `(arquivo, code)` na base, `GET /clients/{id}/mapping/{tipo}`
     lista a linha com `sourceType='arquivo'`, `sem_decisao`, nome = grafia original
@@ -20,7 +20,6 @@ O que este módulo afirma:
 from __future__ import annotations
 
 import io
-import logging
 from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -30,10 +29,16 @@ import pytest
 from openpyxl import Workbook
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
+from structlog.testing import capture_logs
 
 from app.core.config import get_settings
 from app.core.crypto import CryptoError
-from app.core.crypto_service import AAD_FILE_CATEGORY_LABEL, field_locator, load_client_cipher
+from app.core.crypto_service import (
+    AAD_FILE_CATEGORY_LABEL,
+    field_locator,
+    load_client_cipher,
+    provision_client_cipher,
+)
 from app.core.security import hash_password
 from app.db.models import (
     HOLOGRAM_ORGANIZATION_ID,
@@ -97,6 +102,12 @@ async def world(db_session: AsyncSession) -> World:
     w.client_b = Client(name="Cliente B sem ERP", active=True, created_by=w.admin.id)
     db_session.add_all([w.client_a, w.client_b])
     await db_session.flush()
+    # A DEK nasce no `POST /connections` do `arquivo` (14.1) — o registry só a
+    # CARREGA (retrabalho da 14.4: provisionar sobre um `Client` lido antes do
+    # lock daria DEKs diferentes a dois envios simultâneos).
+    for client in (w.client_a, w.client_b):
+        await provision_client_cipher(client, settings=get_settings())
+    await db_session.flush()
     w.destination = (
         await db_session.execute(
             select(MappingDestination).where(
@@ -147,9 +158,20 @@ class TestResolveCodes:
             assert label.lower() not in code.lower()
         rows = await _rows(db_session, world.client_a.id)
         assert len(rows) == 2
-        # A DEK nasceu com a primeira categoria (cliente sem conexão no seed).
-        await db_session.refresh(world.client_a)
-        assert world.client_a.dek_wrapped is not None
+
+    async def test_cliente_sem_dek_falha_alto_e_nao_inventa_chave(
+        self, db_session: AsyncSession, world: World
+    ) -> None:
+        """O registry NÃO provisiona DEK: sem ela, `CryptoError` e nada gravado."""
+        sem_dek = Client(name="Cliente sem DEK", active=True, created_by=world.admin.id)
+        db_session.add(sem_dek)
+        await db_session.flush()
+
+        with pytest.raises(CryptoError):
+            await _registry(db_session).resolve_codes(sem_dek, {"Aluguel"})
+        await db_session.refresh(sem_dek)
+        assert sem_dek.dek_wrapped is None
+        assert await _rows(db_session, sem_dek.id) == []
 
     async def test_o_mesmo_rotulo_devolve_o_mesmo_codigo_sem_criar_linha(
         self, db_session: AsyncSession, world: World
@@ -184,9 +206,11 @@ class TestResolveCodes:
     async def test_vazio_nao_toca_o_banco_nem_a_dek(
         self, db_session: AsyncSession, world: World
     ) -> None:
+        dek_antes = world.client_a.dek_wrapped
         assert await _registry(db_session).resolve_codes(world.client_a, set()) == {}
         await db_session.refresh(world.client_a)
-        assert world.client_a.dek_wrapped is None
+        assert world.client_a.dek_wrapped == dek_antes
+        assert await _rows(db_session, world.client_a.id) == []
 
 
 class TestRotuloSoCifrado:
@@ -225,7 +249,7 @@ class TestRotuloSoCifrado:
             )
 
     async def test_falha_de_decifragem_e_indecifravel_com_log_so_de_ids(
-        self, db_session: AsyncSession, world: World, caplog: pytest.LogCaptureFixture
+        self, db_session: AsyncSession, world: World
     ) -> None:
         registry = _registry(db_session)
         codes = await registry.resolve_codes(world.client_a, {SECRET_LABEL})
@@ -234,15 +258,21 @@ class TestRotuloSoCifrado:
         row.label_encrypted = row.label_encrypted[:-8] + "00000000"
         await db_session.flush()
 
-        with caplog.at_level(logging.WARNING):
+        # `capture_logs` e não `caplog`: o warning sai pelo structlog, e o
+        # `caplog` fica VAZIO depois que a app configura o structlog (na suíte
+        # completa o `assert ... in caplog.text` quebrava; as negativas passariam
+        # sem medir nada).
+        with capture_logs() as logs:
             resolved = await registry.resolve_names(world.client_a)
         code = codes[SECRET_LABEL]
         assert resolved.names[code] == "[indecifrável]"
         assert code in resolved.failed
-        assert "file_category_decrypt_failed" in caplog.text
-        assert str(row.id) in caplog.text
-        assert SECRET_LABEL not in caplog.text
-        assert "Aluguel" not in caplog.text
+        (entry,) = [e for e in logs if e["event"] == "file_category_decrypt_failed"]
+        assert entry["category_id"] == str(row.id)
+        assert entry["client_id"] == str(world.client_a.id)
+        assert entry["log_level"] == "warning"
+        assert SECRET_LABEL not in repr(logs)
+        assert "Aluguel" not in repr(logs)
 
     async def test_unique_por_cliente_e_codigo_e_do_banco(
         self, db_session: AsyncSession, world: World

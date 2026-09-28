@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import literal_column, select
+from sqlalchemy import func, literal_column, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.models.client_input_mapping import UQ_CLIENT_INPUT_MAPPING_CLIENT, ClientInputMapping
@@ -47,7 +47,12 @@ class ClientInputMappingRepository:
             "updated_by": author_id,
             **values,
         }
-        update_values = {"updated_by": author_id, **values}
+        # O `onupdate` do `TimestampMixin` NÃO vale para `ON CONFLICT DO UPDATE`:
+        # sem esta coluna explícita, substituir o mapeamento deixaria o
+        # "Atualizado em" da tela no valor da criação. `clock_timestamp()` e não
+        # `now()`: o `now()` é o início da TRANSAÇÃO, e duas substituições na
+        # mesma transação gravariam o mesmo instante.
+        update_values = {"updated_by": author_id, "updated_at": func.clock_timestamp(), **values}
         stmt: Any = (
             pg_insert(ClientInputMapping)
             .values(**insert_values)

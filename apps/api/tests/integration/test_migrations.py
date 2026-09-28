@@ -1606,6 +1606,7 @@ class TestMapeamentoDeEntradaRoundTrip:
             _columns(
                 url,
                 "client_input_mappings",
+                "id",
                 "client_id",
                 "file_format",
                 "csv_delimiter",
@@ -1627,8 +1628,19 @@ class TestMapeamentoDeEntradaRoundTrip:
                 "credit_column",
                 "created_by",
                 "updated_by",
+                "created_at",
+                "updated_at",
             )
-            == 22
+            == 24
+        )
+        # E NENHUMA coluna além dessas: a lista acima é o inventário inteiro.
+        assert (
+            _scalar(
+                url,
+                "SELECT count(*) FROM information_schema.columns "
+                "WHERE table_name = 'client_input_mappings'",
+            )
+            == 24
         )
         # Nada cifrado: nome de coluna é estrutura, não PII.
         assert (

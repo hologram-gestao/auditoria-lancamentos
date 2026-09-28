@@ -55,11 +55,13 @@ from app.core.crypto_service import (
 from app.core.exceptions import (
     ConnectionLabelAlreadyExistsError,
     NotFoundError,
+    OriginAlreadyConnectedError,
     OriginCapabilityMissingError,
     ProviderAuthError,
     ValidationAppError,
 )
 from app.db.models.client_connection import ClientConnection, ConnectionStatus
+from app.integrations.providers.base import Capability
 from app.integrations.providers.registry import (
     capabilities_for,
     get_provider,
@@ -193,6 +195,7 @@ class ClientConnectionService:
         """
         capabilities_for(provider_type)  # tipo desconhecido → 400, antes de tudo
         assert_credentials_shape(provider_type, credentials)
+        await self._assert_single_movement_origin(client=client, provider_type=provider_type)
         resolved_label = await self._resolve_label(
             client=client, provider_type=provider_type, label=label
         )
@@ -329,6 +332,35 @@ class ClientConnectionService:
         await self._audit(user, client, AccessAction.CONN_DELETE)
 
     # ------------------------------------------------------------------ apoio
+
+    async def _assert_single_movement_origin(self, *, client: Client, provider_type: str) -> None:
+        """Um cliente tem UM tipo de origem de lançamentos (S14, ADR-083-BE).
+
+        Recusa (409 `ORIGEM_JA_CONECTADA`) conectar um tipo que lista lançamentos
+        quando o cliente já tem conexão de OUTRO tipo que também lista — em
+        QUALQUER estado: uma Omie em `erro` reconectada depois tornaria o cliente
+        misto sem passar por aqui. Duas conexões do MESMO tipo (rótulos
+        diferentes) seguem valendo, como na S9. A sintetizada da janela de
+        conversão conta (`resolve_origin_connections`): cliente legado É Omie.
+
+        Sob lock por cliente até o commit: sem ele, dois POSTs simultâneos
+        passariam os dois no `SELECT` (check-then-insert).
+        """
+        if Capability.LISTAR_LANCAMENTOS not in capabilities_for(provider_type):
+            return
+        await self._repo.lock_client_origins(client.id)
+        existing = await resolve_origin_connections(self._db, client, settings=self._settings)
+        for connection in existing:
+            if connection.provider_type == provider_type:
+                continue
+            if Capability.LISTAR_LANCAMENTOS in capabilities_for(connection.provider_type):
+                raise OriginAlreadyConnectedError(
+                    f"client {client.id} already has a {connection.provider_type!r} origin",
+                    details={
+                        "existingConnectionId": str(connection.id),
+                        "existingProviderType": connection.provider_type,
+                    },
+                )
 
     async def _resolve_label(self, *, client: Client, provider_type: str, label: str | None) -> str:
         """Rótulo do payload, ou o padrão do tipo na PRIMEIRA conexão daquele tipo.

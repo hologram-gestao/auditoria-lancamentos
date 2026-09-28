@@ -194,7 +194,7 @@ async def _seed_world(db: AsyncSession, *, processing: bool = False) -> _World:
         scope=UserScope.CLIENT,
         client_id=w.cli_a.id,
     )
-    await _seed_user(
+    other_tenant_operator = await _seed_user(
         db,
         email=OTHER_TENANT_USER_EMAIL,
         role=UserRole.CLIENT_OPERATOR,
@@ -285,9 +285,18 @@ async def _seed_world(db: AsyncSession, *, processing: bool = False) -> _World:
         )
     # Mapeamento de entrada do arquivo (S14, BACK 14.1): configuração, como as
     # decisões do de-para — nada cifrado, e cliente encerrado não envia mais
-    # arquivo. Declarado por um usuário DO tenant (o `client_manager`): a FK de
-    # autoria é RESTRICT e o purge não pode tropeçar nela.
+    # arquivo. A FK de autoria é RESTRICT e o purge não pode tropeçar nela: no
+    # tenant A o autor é o `client_manager` DE A (apagado na exclusão, depois do
+    # mapeamento); no B, só quem a API deixaria escrever lá — o staff declara o
+    # mapeamento e o operador DE B envia o arquivo. Autoria cruzada entre
+    # tenants (o seed antigo punha o gerente de A no B) não existe pela API e
+    # fazia o DELETE de A tropeçar na FK do B.
+    authors = {
+        w.cli_a.id: (tenant_manager.id, tenant_manager.id),
+        w.cli_b.id: (w.admin.id, other_tenant_operator.id),
+    }
     for cli in (w.cli_a, w.cli_b):
+        mapping_author, import_author = authors[cli.id]
         db.add(
             ClientInputMapping(
                 client_id=cli.id,
@@ -298,8 +307,8 @@ async def _seed_world(db: AsyncSession, *, processing: bool = False) -> _World:
                 date_format="dd/mm/yyyy",
                 decimal_separator=",",
                 sign_convention="valor_com_sinal",
-                created_by=tenant_manager.id,
-                updated_by=tenant_manager.id,
+                created_by=mapping_author,
+                updated_by=mapping_author,
             )
         )
         # S14 (BACK 14.3): o registro do arquivo processado — trilha OPERACIONAL,
@@ -310,7 +319,7 @@ async def _seed_world(db: AsyncSession, *, processing: bool = False) -> _World:
                 competence=date(2026, 6, 1),
                 file_hash=uuid4().hex + uuid4().hex,
                 rows=1,
-                created_by=tenant_manager.id,
+                created_by=import_author,
             )
         )
     db.add(
