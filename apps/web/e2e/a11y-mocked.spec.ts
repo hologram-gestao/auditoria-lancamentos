@@ -1080,6 +1080,26 @@ const MAPPING_ITEMS = [
   }),
 ];
 
+/**
+ * 86e3f55bd: as contagens por situação do envelope da lista, sobre o universo
+ * INTEIRO do destino (servidor). Maiores que a página de propósito: é o que
+ * prova, em browser, que os contadores não vêm das linhas exibidas.
+ */
+const MAPPING_COUNTS = { total: 60, herdada: 20, confirmada: 12, naoMapear: 10, semDecisao: 18 };
+
+/** 20 linhas (86e3f55bd), no molde de MANY_CLIENT_TITLES: transborda 1440×900 com folga. */
+const MANY_MAPPING_ITEMS = Array.from({ length: 20 }, (_, i) =>
+  mappingItem({
+    categoryCode: `2.02.${String(i).padStart(2, '0')}`,
+    categoryName: `Categoria ${String(i).padStart(2, '0')} do de-para`,
+    situation: i % 3 === 0 ? 'sem_decisao' : 'herdada',
+    decision: i % 3 === 0 ? null : 'alvo',
+    targetCode: i % 3 === 0 ? null : '3.1',
+    targetName: i % 3 === 0 ? null : 'Despesas administrativas',
+    effectiveFrom: i % 3 === 0 ? null : '2026-09',
+  }),
+);
+
 /** Com `true`, a competência da prévia NUNCA foi sincronizada. */
 let mappingNeverSynced = false;
 
@@ -1596,9 +1616,15 @@ async function fulfillApi(route: Route): Promise<void> {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          data: MAPPING_ITEMS,
-          pagination: { page: 1, pageSize: 20, total: MAPPING_ITEMS.length, totalPages: 1 },
+          data: tableListsOverflow ? MANY_MAPPING_ITEMS : MAPPING_ITEMS,
+          pagination: {
+            page: 1,
+            pageSize: 50,
+            total: tableListsOverflow ? MANY_MAPPING_ITEMS.length : MAPPING_ITEMS.length,
+            totalPages: 1,
+          },
           competence: '2026-09',
+          counts: MAPPING_COUNTS,
         }),
       });
     }
@@ -2670,6 +2696,10 @@ const TELAS_COM_TABELA = [
     // nomes iguais aninhados quebram o `getByRole` no strict mode.
     regiao: 'Categorias do plano de contas (rolável)',
     usuario: (): Record<string, unknown> => CLIENT_MANAGER_USER,
+    // 86e3f55bc: o plano de contas passou ao desenho da carteira (a página
+    // rola, a tabela não). Continua no teste da barra e sai só do de rolagem
+    // interna, que tem cenário próprio no bloco do fim do arquivo.
+    pageScroll: true,
   },
   {
     key: 'carteira',
@@ -2684,6 +2714,17 @@ const TELAS_COM_TABELA = [
     // (`<Table stickyHeader="page">`). Ela continua no teste da barra (a barra
     // vem depois da tabela, no fluxo, e nunca cobre linha) e sai só do teste de
     // rolagem interna — que tem um cenário próprio adiante.
+    pageScroll: true,
+  },
+  {
+    key: 'de-para',
+    titulo: 'De-para',
+    rota: `/clientes/${CLIENT_ID}/de-para`,
+    regiao: 'Categorias do de-para (rolável)',
+    usuario: (): Record<string, unknown> => SYSTEM_MANAGER_USER,
+    // 86e3f55bd: a aba Decisões passou ao desenho da carteira (a página rola, a
+    // tabela não); entra só no teste da barra, e a geometria da página que rola
+    // tem cenário próprio no bloco do fim do arquivo.
     pageScroll: true,
   },
 ] as const;
@@ -4155,9 +4196,16 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByRole('button', { name: /Confirmar herdadas/ })).toBeVisible();
       await expect(page.getByRole('button', { name: /Importar/ })).toBeVisible();
 
+      // 86e3f55bd SUBSTITUI a medida antiga ("a área da tabela > 80px", do
+      // padrão em que a tabela rolava por dentro): agora a região tem altura de
+      // conteúdo e não rola na vertical; quem rola é a página.
       const regiao = page.getByRole('region', { name: 'Categorias do de-para (rolável)' });
       const caixa = await regiao.boundingBox();
       expect(caixa?.height ?? 0, `${vp.label}: a área da tabela colapsou`).toBeGreaterThan(80);
+      expect(
+        await regiao.evaluate((el) => el.scrollHeight - el.clientHeight),
+        `${vp.label}: a tabela do de-para não pode ter rolagem vertical própria`,
+      ).toBe(0);
       await expect(page.locator('#__next_error__')).toHaveCount(0);
 
       await shot(page, `de-para-lista-${slugD}`);
@@ -5840,5 +5888,320 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByRole('link', { name: 'Enviar arquivo do mês' })).toBeVisible();
       await analyze(page, `de-para — origem por arquivo, base nunca sincronizada (${vp.label})`);
     });
+  });
+}
+
+/**
+ * 86e3f55bc — Plano de contas no desenho da carteira (86e3eq9uy): a PÁGINA
+ * rola, a tabela não e o cabeçalho gruda; os cinco cards de cobertura filtram
+ * pela URL; a situação é grupo de botões; cada filtro ativo vira etiqueta.
+ *
+ * Bloco próprio no FIM do arquivo de propósito: o de-para (86e3f55bd) e as
+ * sprints do hub também mexem neste spec, e cenários novos no meio dos antigos
+ * são o que vira conflito.
+ */
+for (const vp of VIEWPORTS) {
+  const slugPC = vp.label.replace(/\s+/g, '-');
+  test.describe(`Plano de contas no desenho da carteira (86e3f55bc) — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('card "Sem destino declarado" filtra, vira etiqueta e desfaz (Parte B)', async ({
+      page,
+    }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-de-contas`);
+
+      const semDestino = page.getByRole('button', {
+        name: 'Sem destino declarado: 13 categorias. Filtrar a lista',
+      });
+      await expect(semDestino).toHaveAttribute('aria-pressed', 'false');
+      await semDestino.click();
+      // A cobertura conta destino só sobre as ATIVAS: o card leva a situação.
+      await expect(page).toHaveURL(/hasDreCode=false/);
+      await expect(page).toHaveURL(/status=ativa/);
+      await expect(semDestino).toHaveAttribute('aria-pressed', 'true');
+      await expect(
+        page.getByRole('button', { name: 'Remover filtro Sem destino declarado' }),
+      ).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Remover filtro Ativas' })).toBeVisible();
+      // O grupo de Situação acompanha a URL. `exact`: o nome casa por SUBSTRING
+      // e sem caixa, e "Ativas" sem ele acerta também "Inativas".
+      await expect(
+        page
+          .getByRole('group', { name: 'Situação' })
+          .getByRole('button', { name: 'Ativas', exact: true }),
+      ).toHaveAttribute('aria-pressed', 'true');
+      await exigirDentroDaViewport(page, semDestino, `${vp.label}: card "Sem destino declarado"`);
+      await shot(page, `plano-de-contas-filtro-ativo-${slugPC}`);
+      await analyze(page, `plano de contas — card com filtro ativo (${vp.label})`);
+
+      // Segundo clique desfaz os parâmetros do card.
+      await semDestino.click();
+      await expect(page).not.toHaveURL(/hasDreCode=/);
+      await expect(page).not.toHaveURL(/status=/);
+      await expect(semDestino).toHaveAttribute('aria-pressed', 'false');
+      await expect(page.getByRole('button', { name: /^Categorias:/ })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+
+      // Remover a etiqueta tira SÓ aquele parâmetro; a situação fica.
+      await semDestino.click();
+      await expect(page).toHaveURL(/hasDreCode=false/);
+      await page.getByRole('button', { name: 'Remover filtro Sem destino declarado' }).click();
+      await expect(page).not.toHaveURL(/hasDreCode=/);
+      await expect(page).toHaveURL(/status=ativa/);
+      await expect(
+        page.getByRole('button', { name: 'Remover filtro Sem destino declarado' }),
+      ).toHaveCount(0);
+    });
+
+    test('barra compacta: situação como grupo, sem Select, e link antigo com etiquetas (Parte C)', async ({
+      page,
+    }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(
+        `/clientes/${CLIENT_ID}/plano-de-contas?status=inativa&parentCode=1.01&code=2.0`,
+      );
+
+      await expect(page.getByRole('combobox', { name: 'Situação' })).toHaveCount(0);
+      const grupo = page.getByRole('group', { name: 'Situação' });
+      await expect(grupo.getByRole('button', { name: 'Inativas' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+      const etiquetas = page.getByRole('list', { name: 'Filtros ativos' });
+      await expect(etiquetas.getByRole('listitem')).toHaveText([
+        'Inativas',
+        'Filhas de 1.01',
+        'Código 2.0',
+      ]);
+      await expect(page.getByLabel('Buscar por código')).toHaveValue('2.0');
+      await expect(page.getByLabel('Filhas do código')).toHaveValue('1.01');
+      await exigirDentroDaViewport(
+        page,
+        page.getByRole('button', { name: 'Limpar filtros' }),
+        `${vp.label}: "Limpar filtros"`,
+      );
+
+      await grupo.getByRole('button', { name: 'Ausentes na origem' }).click();
+      await expect(page).toHaveURL(/status=ausente_na_origem/);
+      await page.getByRole('button', { name: 'Remover filtro Código 2.0' }).click();
+      await expect(page).not.toHaveURL(/code=2\.0/);
+      await expect(page).toHaveURL(/parentCode=1\.01/);
+      await expect(page.getByLabel('Buscar por código')).toHaveValue('');
+      await shot(page, `plano-de-contas-barra-${slugPC}`);
+      await analyze(page, `plano de contas — barra compacta com etiquetas (${vp.label})`);
+    });
+
+    test('"Atualizado em" ao lado de sincronizar (Parte E)', async ({ page }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-de-contas`);
+      await expect(page.getByTestId('chart-synced-at')).toHaveText(/^Atualizado em 23\/09\/2026/);
+      await exigirDentroDaViewport(
+        page,
+        page.getByRole('button', { name: 'Sincronizar agora' }),
+        `${vp.label}: "Sincronizar agora"`,
+      );
+    });
+
+    if (vp.label === 'desktop') {
+      /**
+       * Parte A: com 20 categorias em 1440×900 a lista transborda a viewport com
+       * folga. A página rola, o wrapper da tabela não; a tabela cabe em 1440 e
+       * em 1280; o cabeçalho gruda no topo do `<main>`; a paginação é alcançável.
+       */
+      test('a página rola, a tabela não, e o cabeçalho gruda no topo (Parte A)', async ({
+        page,
+      }) => {
+        tableListsOverflow = true;
+        sessionUser = CLIENT_MANAGER_USER;
+        await page.goto(`/clientes/${CLIENT_ID}/plano-de-contas`);
+        await expect(page.getByRole('row')).toHaveCount(21);
+
+        const main = page.locator('main');
+        const regiao = page.getByRole('region', {
+          name: 'Categorias do plano de contas (rolável)',
+        });
+        expect(
+          await regiao.evaluate((el) => el.scrollHeight - el.clientHeight),
+          'o wrapper da tabela não pode ter rolagem vertical própria',
+        ).toBe(0);
+        expect(
+          await main.evaluate((el) => el.scrollHeight - el.clientHeight),
+          'o <main> precisa ter rolagem',
+        ).toBeGreaterThan(0);
+        const cabeNaLargura = () =>
+          regiao.evaluate((el) => {
+            const table = el.querySelector('table');
+            return table !== null && table.scrollWidth <= el.clientWidth;
+          });
+        expect(await cabeNaLargura(), '1440: a tabela não cabe no wrapper').toBe(true);
+        await page.setViewportSize({ width: 1280, height: 900 });
+        expect(await cabeNaLargura(), '1280: a tabela não cabe no wrapper').toBe(true);
+        await page.setViewportSize(vp.size);
+
+        // Linha mais baixa (Parte D): sem segunda linha de texto, ~40px.
+        const linhaSimples = page.getByRole('row').nth(1);
+        expect(
+          (await linhaSimples.boundingBox())?.height ?? 999,
+          'linha do plano de contas alta demais',
+        ).toBeLessThanOrEqual(56);
+
+        await main.evaluate((el) => el.scrollTo({ top: 700 }));
+        const cabecalho = regiao.locator('thead th').first();
+        await expect(cabecalho).toBeVisible();
+        const topoMain = (await main.boundingBox())?.y ?? -1;
+        const topoCabecalho = (await cabecalho.boundingBox())?.y ?? -100;
+        expect(
+          Math.abs(topoCabecalho - topoMain),
+          'o cabeçalho não grudou no topo do <main>',
+        ).toBeLessThanOrEqual(1);
+        await shot(page, `plano-de-contas-rolado-cabecalho-grudado-${slugPC}`);
+        await analyze(page, `plano de contas — rolado com o cabeçalho grudado (${vp.label})`);
+
+        await main.evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+        await expect(
+          page.getByRole('navigation', { name: 'Paginação de categorias' }),
+        ).toBeInViewport();
+        await expect(page.getByRole('row').last()).toBeInViewport();
+      });
+    }
+  });
+}
+
+/**
+ * 86e3f55bd — De-para (aba Decisões) no desenho da carteira: contadores por
+ * situação que filtram pela URL, barra compacta com etiquetas, a página rola e a
+ * tabela não, e clicar na linha abre a gaveta de decisão para quem edita.
+ */
+for (const vp of VIEWPORTS) {
+  const slugDP = vp.label.replace(/\s+/g, '-');
+  test.describe(`De-para no desenho da carteira (86e3f55bd) — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('contador "Sem decisão" filtra, vira etiqueta e desfaz (Parte B)', async ({ page }) => {
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/de-para`);
+
+      // Os números são do envelope (universo), não das 4 linhas da página.
+      for (const [rotulo, valor] of [
+        ['Categorias', '60'],
+        ['Herdadas da origem', '20'],
+        ['Confirmadas', '12'],
+        ['Não mapear', '10'],
+        ['Sem decisão', '18'],
+      ] as const) {
+        const termo = page.locator('dt', { hasText: new RegExp(`^${rotulo}$`) });
+        await expect(termo).toHaveCount(1);
+        await expect(termo.locator('xpath=following-sibling::dd[1]')).toContainText(valor);
+      }
+      await expect(page.getByRole('combobox', { name: 'Situação' })).toHaveCount(0);
+
+      const semDecisao = page.getByRole('button', {
+        name: 'Sem decisão: 18 categorias. Filtrar a lista',
+      });
+      await expect(semDecisao).toHaveAttribute('aria-pressed', 'false');
+      await semDecisao.click();
+      await expect(page).toHaveURL(/situation=sem_decisao/);
+      await expect(semDecisao).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.getByRole('button', { name: 'Remover filtro Sem decisão' })).toBeVisible();
+      await exigirDentroDaViewport(page, semDecisao, `${vp.label}: contador "Sem decisão"`);
+      await shot(page, `de-para-filtro-ativo-${slugDP}`);
+      await analyze(page, `de-para — contador com filtro ativo (${vp.label})`);
+
+      await semDecisao.click();
+      await expect(page).not.toHaveURL(/situation=/);
+      await expect(semDecisao).toHaveAttribute('aria-pressed', 'false');
+
+      // Link antigo com situação e código abre com as duas etiquetas; remover a
+      // do código tira só ela.
+      await page.goto(`/clientes/${CLIENT_ID}/de-para?situation=herdada&code=2.01`);
+      const etiquetas = page.getByRole('list', { name: 'Filtros ativos' });
+      await expect(etiquetas.getByRole('listitem')).toHaveText([
+        'Herdadas da origem',
+        'Código 2.01',
+      ]);
+      await page.getByRole('button', { name: 'Remover filtro Código 2.01' }).click();
+      await expect(page).not.toHaveURL(/code=/);
+      await expect(page).toHaveURL(/situation=herdada/);
+      await expect(page.getByLabel('Buscar por código da categoria')).toHaveValue('');
+    });
+
+    test('clicar na linha abre a gaveta de decisão do item certo (Parte D)', async ({ page }) => {
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/de-para`);
+
+      const linha = page.getByRole('row').nth(4); // 1.04.02, sem decisão
+      expect(await linha.getAttribute('tabindex')).toBeNull();
+      expect(await linha.getAttribute('role')).toBeNull();
+      await linha.getByText('Nome indisponível agora').click();
+      const gaveta = page.getByRole('dialog');
+      await expect(gaveta.getByRole('heading', { name: 'Decisão do de-para' })).toBeVisible();
+      await aguardarAnimacao(gaveta);
+      await expect(gaveta).toContainText('1.04.02');
+      await analyze(page, `de-para — gaveta aberta pela linha (${vp.label})`);
+    });
+
+    test('operador: a linha não abre gaveta nenhuma (Parte D)', async ({ page }) => {
+      sessionUser = CLIENT_OPERATOR_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/de-para`);
+      await page.getByRole('row').nth(1).getByText('Aluguel').click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+    });
+
+    if (vp.label === 'desktop') {
+      /**
+       * Parte A: com 20 categorias em 1440×900 a lista transborda a viewport. A
+       * página rola, o wrapper da tabela não; a tabela cabe em 1440 e em 1280; o
+       * cabeçalho gruda no topo do `<main>`; a paginação é alcançável.
+       */
+      test('a página rola, a tabela não, e o cabeçalho gruda no topo (Parte A)', async ({
+        page,
+      }) => {
+        tableListsOverflow = true;
+        sessionUser = SYSTEM_MANAGER_USER;
+        await page.goto(`/clientes/${CLIENT_ID}/de-para`);
+        await expect(page.getByRole('row')).toHaveCount(21);
+
+        const main = page.locator('main');
+        const regiao = page.getByRole('region', { name: 'Categorias do de-para (rolável)' });
+        expect(
+          await regiao.evaluate((el) => el.scrollHeight - el.clientHeight),
+          'o wrapper da tabela não pode ter rolagem vertical própria',
+        ).toBe(0);
+        expect(
+          await main.evaluate((el) => el.scrollHeight - el.clientHeight),
+          'o <main> precisa ter rolagem',
+        ).toBeGreaterThan(0);
+        const cabeNaLargura = () =>
+          regiao.evaluate((el) => {
+            const table = el.querySelector('table');
+            return table !== null && table.scrollWidth <= el.clientWidth;
+          });
+        expect(await cabeNaLargura(), '1440: a tabela não cabe no wrapper').toBe(true);
+        await page.setViewportSize({ width: 1280, height: 900 });
+        expect(await cabeNaLargura(), '1280: a tabela não cabe no wrapper').toBe(true);
+        await page.setViewportSize(vp.size);
+
+        await main.evaluate((el) => el.scrollTo({ top: 700 }));
+        const cabecalho = regiao.locator('thead th').first();
+        await expect(cabecalho).toBeVisible();
+        const topoMain = (await main.boundingBox())?.y ?? -1;
+        const topoCabecalho = (await cabecalho.boundingBox())?.y ?? -100;
+        expect(
+          Math.abs(topoCabecalho - topoMain),
+          'o cabeçalho não grudou no topo do <main>',
+        ).toBeLessThanOrEqual(1);
+        await shot(page, `de-para-rolado-cabecalho-grudado-${slugDP}`);
+        await analyze(page, `de-para — rolado com o cabeçalho grudado (${vp.label})`);
+
+        await main.evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+        await expect(
+          page.getByRole('navigation', { name: 'Paginação de categorias' }),
+        ).toBeInViewport();
+        await expect(page.getByRole('row').last()).toBeInViewport();
+      });
+    }
   });
 }

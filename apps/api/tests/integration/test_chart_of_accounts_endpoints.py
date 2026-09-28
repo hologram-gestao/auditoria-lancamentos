@@ -417,6 +417,129 @@ class TestListaFiltrosEBusca:
 
 
 @pytest.mark.integration
+class TestRecortesDosCardsDeCobertura:
+    """`hasDreCode` e `hasAccountingCode` (86e3f55bc): os cards viram filtros.
+
+    O critério de aceite é de NÚMERO: clicar num card e ler no total da paginação
+    o mesmo valor do card. A cobertura conta destino e conta contábil só sobre
+    as ATIVAS, e a fixture real tem 4 inativas com destino declarado — por isso
+    o card manda `status=ativa` junto, e o recorte sozinho dá outro número.
+    """
+
+    async def _total(self, client_with_db: AsyncClient, world: World, **params: str) -> int:
+        resp = await client_with_db.get(_base(world), params={"pageSize": "100", **params})
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        total = body["pagination"]["total"]
+        assert isinstance(total, int)
+        assert len(body["data"]) == total, "com pageSize 100 a fixture cabe numa página"
+        return total
+
+    @respx.mock
+    async def test_cada_card_bate_com_o_total_da_lista(
+        self, client_with_db: AsyncClient, world: World
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        await _sync_fixture(client_with_db, world)
+        cobertura = (await client_with_db.get(f"{_base(world)}/coverage")).json()["data"]
+
+        assert await self._total(client_with_db, world) == cobertura["total"]
+        assert await self._total(client_with_db, world, status="ativa") == cobertura["ativas"]
+        assert (
+            await self._total(client_with_db, world, status="ativa", hasDreCode="true")
+            == cobertura["comDestino"]
+            == FIXTURE_COM_DESTINO
+        )
+        assert (
+            await self._total(client_with_db, world, status="ativa", hasDreCode="false")
+            == cobertura["semDestino"]
+            == FIXTURE_SEM_DESTINO
+        )
+        assert (
+            await self._total(client_with_db, world, status="ativa", hasAccountingCode="true")
+            == cobertura["comContaContabil"]
+            == FIXTURE_COM_CONTA_CONTABIL
+        )
+
+    @respx.mock
+    async def test_recorte_sozinho_nao_implica_situacao(
+        self, client_with_db: AsyncClient, world: World
+    ) -> None:
+        """Sem `status`, o recorte vale para o plano inteiro (37 e 6 na fixture).
+
+        Se o servidor juntasse `status=ativa` por conta própria, o link com só
+        `hasDreCode=true` mostraria 33 e a etiqueta "Ativas" não existiria para
+        explicar o porquê.
+        """
+        await _login(client_with_db, world.admin)
+        await _sync_fixture(client_with_db, world)
+
+        com_destino = await self._total(client_with_db, world, hasDreCode="true")
+        sem_destino = await self._total(client_with_db, world, hasDreCode="false")
+        com_contabil = await self._total(client_with_db, world, hasAccountingCode="true")
+        sem_contabil = await self._total(client_with_db, world, hasAccountingCode="false")
+
+        assert com_destino == 37
+        assert com_destino + sem_destino == FIXTURE_TOTAL
+        assert com_contabil == 6
+        assert com_contabil + sem_contabil == FIXTURE_TOTAL
+
+    @respx.mock
+    async def test_cada_linha_respeita_o_recorte_combinado_com_status(
+        self, client_with_db: AsyncClient, world: World
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        await _sync_fixture(client_with_db, world)
+
+        inativas_com_destino = await client_with_db.get(
+            _base(world), params={"status": "inativa", "hasDreCode": "true", "pageSize": 100}
+        )
+        itens = inativas_com_destino.json()["data"]
+        assert itens, "a fixture tem inativas com destino declarado"
+        assert all(i["status"] == "inativa" and i["dreCode"] is not None for i in itens)
+
+        sem_destino = await client_with_db.get(
+            _base(world), params={"status": "ativa", "hasDreCode": "false", "pageSize": 100}
+        )
+        assert all(
+            i["status"] == "ativa" and i["dreCode"] is None for i in sem_destino.json()["data"]
+        )
+
+        com_contabil = await client_with_db.get(
+            _base(world),
+            params={"hasAccountingCode": "true", "hasDreCode": "true", "pageSize": 100},
+        )
+        assert all(
+            i["contaContabilCode"] is not None and i["dreCode"] is not None
+            for i in com_contabil.json()["data"]
+        )
+
+    @respx.mock
+    async def test_recorte_combina_com_a_paginacao(
+        self, client_with_db: AsyncClient, world: World
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        await _sync_fixture(client_with_db, world)
+
+        resp = await client_with_db.get(
+            _base(world), params={"status": "ativa", "hasDreCode": "true", "pageSize": 10}
+        )
+        body = resp.json()
+        assert len(body["data"]) == 10
+        assert body["pagination"]["total"] == FIXTURE_COM_DESTINO
+        assert body["pagination"]["totalPages"] == 4  # ceil(33 / 10)
+
+    @respx.mock
+    async def test_booleano_invalido_e_400_da_validacao(
+        self, client_with_db: AsyncClient, world: World
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        resp = await client_with_db.get(_base(world), params={"hasDreCode": "talvez"})
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.integration
 class TestNomeVemDoCacheEmRuntime:
     @respx.mock
     async def test_nome_e_resolvido_e_nao_persistido(

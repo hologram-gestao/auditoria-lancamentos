@@ -191,6 +191,75 @@ class TestLista:
         invalida = await client_with_db.get(_base(world), params={"situation": "pendente"})
         assert invalida.status_code == 400
 
+    async def test_contagens_do_envelope_sao_do_universo_inteiro(
+        self, client_with_db: AsyncClient, world: World
+    ) -> None:
+        """`counts` (86e3f55bd): estável sob paginação e filtro, e bate com o total.
+
+        É o critério de aceite dos contadores que filtram: clicar num deles e ler
+        no total da paginação o mesmo número. E `total` = soma das quatro.
+        """
+        await _login(client_with_db, world.admin)
+        await client_with_db.post(f"{_base(world)}/inherit", json={})
+        await client_with_db.post(
+            f"{_base(world)}/decisions", json={"categoryCode": "2.02", "decision": "nao_mapear"}
+        )
+        await client_with_db.post(
+            f"{_base(world)}/decisions",
+            json={"categoryCode": "2.03", "decision": "alvo", "targetCode": "1.02"},
+        )
+
+        esperado = {
+            "total": 6,
+            "herdada": 1,
+            "confirmada": 1,
+            "naoMapear": 1,
+            "semDecisao": 3,
+        }
+        recortes: list[dict[str, Any]] = [
+            {},
+            {"page": 2, "pageSize": 2},
+            {"situation": "sem_decisao"},
+            {"situation": "herdada", "pageSize": 1},
+            {"code": "3."},
+            {"code": "nada-casa"},
+        ]
+        for params in recortes:
+            resp = await client_with_db.get(_base(world), params=params)
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["counts"] == esperado, params
+
+        counts = esperado
+        assert counts["total"] == sum(
+            counts[k] for k in ("herdada", "confirmada", "naoMapear", "semDecisao")
+        )
+        # E cada contador bate com o total da lista recortada pela situação dele.
+        for situacao, chave in (
+            ("herdada", "herdada"),
+            ("confirmada", "confirmada"),
+            ("nao_mapear", "naoMapear"),
+            ("sem_decisao", "semDecisao"),
+        ):
+            resp = await client_with_db.get(_base(world), params={"situation": situacao})
+            assert resp.json()["pagination"]["total"] == esperado[chave], situacao
+
+    async def test_contagens_do_universo_vazio_sao_zero(
+        self, client_with_db: AsyncClient, world: World
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        resp = await client_with_db.get(f"/api/v1/clients/{world.client.id}/mapping/fluxo_de_caixa")
+        assert resp.status_code == 200, resp.text
+        counts = resp.json()["counts"]
+        # O universo não depende do destino (é o do cliente); sem decisão nenhuma
+        # neste destino, as seis categorias estão "sem decisão".
+        assert counts == {
+            "total": 6,
+            "herdada": 0,
+            "confirmada": 0,
+            "naoMapear": 0,
+            "semDecisao": 6,
+        }
+
     async def test_busca_por_codigo_e_nome_nao_encontra(
         self, client_with_db: AsyncClient, world: World
     ) -> None:

@@ -106,7 +106,11 @@ ServiceDep = Annotated[ChartOfAccountsSyncService, Depends(_get_service)]
         "hierarquia (`parentCode`), e **busca por CÓDIGO** (`code`). Não existe "
         "busca por nome: o nome não é persistido (é resolvido em runtime pelo "
         "mesmo cache da tela de revisão) e vem `null` quando a origem não "
-        "responde — a lista é servida assim mesmo. `dreCode` nulo significa "
+        "responde — a lista é servida assim mesmo. `hasDreCode` e "
+        "`hasAccountingCode` recortam por destino declarado e por conta contábil "
+        "(ausentes = sem recorte); não implicam situação: para o total bater com "
+        "a cobertura, que conta só as ativas, mande `status=ativa` junto. "
+        "`dreCode` nulo significa "
         "**sem destino declarado**, que é informação e não pendência: "
         "transferências e totalizadoras não têm conta de demonstrativo própria. "
         "Plano de contas de outro cliente nunca aparece."
@@ -141,12 +145,28 @@ async def list_chart_of_accounts(
             description="Busca por CÓDIGO (contém). Curingas de `LIKE` são literais.",
         ),
     ] = None,
+    has_dre_code: Annotated[
+        bool | None,
+        Query(
+            alias="hasDreCode",
+            description="`true` = com conta de demonstrativo; `false` = sem destino declarado.",
+        ),
+    ] = None,
+    has_accounting_code: Annotated[
+        bool | None,
+        Query(
+            alias="hasAccountingCode",
+            description="`true` = com conta contábil; `false` = sem conta contábil.",
+        ),
+    ] = None,
 ) -> ChartOfAccountsListResponse:
     rows, total = await repository.list_for_client(
         client.id,
         status=status,
         parent_code=parent_code,
         code_contains=code,
+        has_dre_code=has_dre_code,
+        has_accounting_code=has_accounting_code,
         limit=page_size,
         offset=(page - 1) * page_size,
     )

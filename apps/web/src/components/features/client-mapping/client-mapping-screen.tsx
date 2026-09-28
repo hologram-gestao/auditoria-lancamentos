@@ -21,6 +21,11 @@
  * desabilitada); a autoridade continua sendo o servidor. Nenhum `role ===`
  * aqui: tudo passa por `lib/authz.ts`.
  *
+ * **A página rola, a tabela não** (86e3f55bd, o desenho da carteira na
+ * 86e3eq9uy): a seção tem altura natural, quem rola é o `<main>` do shell e o
+ * cabeçalho da tabela da aba Decisões gruda no topo dele (`stickyHeader="page"`,
+ * de `xl` para cima). O recorte por situação vem dos contadores do topo da aba.
+ *
  * **O que esta tela NÃO faz:** não soma (cobertura e as quatro situações vêm do
  * servidor), não busca por nome (nome de categoria não é persistido, §4.5) e
  * não inventa destino: os destinos são o catálogo da organização DO CLIENTE.
@@ -76,7 +81,8 @@ const PARAM = {
 
 const DEFAULT_VIEW = 'decisoes';
 const VIEW_VALUES = ['decisoes', 'previa'] as const;
-const DEFAULT_PAGE_SIZE = 20;
+/** Com a página rolando (86e3f55bd), 20 era pouco; o teto de 100 do servidor não muda. */
+export const DEFAULT_PAGE_SIZE = 50;
 
 export function ClientMappingScreen({ clientId }: { clientId: string }) {
   const currentUser = useAuthStore((s) => s.user);
@@ -113,13 +119,16 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
   const situation = readEnum(get(PARAM.situation), SITUATION_FILTERS);
   const codeParam = get(PARAM.code) ?? '';
 
-  // Busca: estado local + debounce → URL (cada tecla não vira request).
+  // Busca: estado local + debounce → URL (cada tecla não vira request). Só
+  // escreve quando o debounce ASSENTOU (`debounced === input`): limpar o campo
+  // (etiqueta removida, "Limpar filtros") zera a URL na hora, e sem esta guarda o
+  // termo antigo, ainda no debounce, voltava para a URL por 300ms.
   const [codeInput, setCodeInput] = useState(codeParam);
   const debouncedCode = useDebouncedValue(codeInput, 300);
   useEffect(() => {
-    if (debouncedCode === codeParam) return;
+    if (debouncedCode !== codeInput || debouncedCode === codeParam) return;
     setMany({ [PARAM.code]: debouncedCode || null, [PARAM.page]: null });
-  }, [debouncedCode, codeParam, setMany]);
+  }, [debouncedCode, codeInput, codeParam, setMany]);
 
   const listParams: ListClientMappingParams = {
     page,
@@ -170,8 +179,13 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
     setMany({ [PARAM.situation]: null, [PARAM.code]: null, [PARAM.page]: null });
   }
 
+  function clearCode() {
+    setCodeInput('');
+    setMany({ [PARAM.code]: null, [PARAM.page]: null });
+  }
+
   return (
-    <section aria-labelledby="client-mapping-heading" className="flex h-full flex-col gap-4">
+    <section aria-labelledby="client-mapping-heading" className="flex flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
           <h2 id="client-mapping-heading" className="text-lg font-semibold">
@@ -269,16 +283,18 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
             onValueChange={(value) =>
               setMany({ [PARAM.view]: value === DEFAULT_VIEW ? null : value })
             }
-            // `min-h-0` nos dois níveis (Tabs e TabsContent): sem ele a cadeia de
-            // altura para aqui e a tabela deixa de rolar na própria área (86e2uca1d).
-            className="flex min-h-0 flex-1 flex-col gap-4"
+            // Altura NATURAL (86e3f55bd): sem `min-h-0 flex-1` nos dois níveis. A
+            // cadeia de altura existia para a tabela rolar na própria área; agora
+            // quem rola é o `<main>`. O painel inativo continua escondido pelo
+            // primitivo (`data-[state=inactive]:hidden`, validação da S12).
+            className="flex flex-col gap-4"
           >
             <TabsList className="self-start">
               <TabsTrigger value="decisoes">Decisões</TabsTrigger>
               <TabsTrigger value="previa">Prévia da competência</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="decisoes" className="mt-0 flex min-h-0 flex-1 flex-col">
+            <TabsContent value="decisoes" className="mt-0 flex flex-col">
               <MappingListPanel
                 clientId={clientId}
                 destination={destination}
@@ -291,6 +307,7 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
                   setMany({ [PARAM.situation]: value, [PARAM.page]: null })
                 }
                 onClearFilters={clearFilters}
+                onClearCode={clearCode}
                 onPageChange={(next) => setMany({ [PARAM.page]: String(next) })}
                 onPageSizeChange={(next) =>
                   setMany({ [PARAM.pageSize]: String(next), [PARAM.page]: null })

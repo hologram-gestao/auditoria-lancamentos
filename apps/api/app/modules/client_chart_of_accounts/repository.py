@@ -74,6 +74,8 @@ class ClientChartOfAccountsRepository:
         status: str | None = None,
         parent_code: str | None = None,
         code_contains: str | None = None,
+        has_dre_code: bool | None = None,
+        has_accounting_code: bool | None = None,
         limit: int,
         offset: int,
     ) -> tuple[list[ClientChartOfAccount], int]:
@@ -83,6 +85,11 @@ class ClientChartOfAccountsRepository:
         (§4.5) e um `ILIKE` sobre a descrição exigiria persisti-lo. Os curingas
         do `LIKE` são escapados — termo com `%` procura o caractere, não
         "qualquer coisa".
+
+        `has_dre_code` e `has_accounting_code` (86e3f55bc) são os recortes dos
+        cards de cobertura: `None` = sem recorte. Eles NÃO implicam `status`: a
+        cobertura conta destino só sobre as ATIVAS, então é a tela que manda
+        `status=ativa` junto quando quer que o total bata com o card.
         """
         stmt = self._base_query(client_id)
         if status is not None:
@@ -92,6 +99,12 @@ class ClientChartOfAccountsRepository:
         if code_contains:
             pattern = "%" + _escape_like(code_contains) + "%"
             stmt = stmt.where(ClientChartOfAccount.category_code.ilike(pattern, escape="\\"))
+        if has_dre_code is not None:
+            dre = ClientChartOfAccount.dre_code
+            stmt = stmt.where(dre.is_not(None) if has_dre_code else dre.is_(None))
+        if has_accounting_code is not None:
+            contabil = ClientChartOfAccount.conta_contabil_code
+            stmt = stmt.where(contabil.is_not(None) if has_accounting_code else contabil.is_(None))
 
         total_stmt = select(func.count()).select_from(stmt.order_by(None).subquery())
         total = (await self._session.execute(total_stmt)).scalar_one()

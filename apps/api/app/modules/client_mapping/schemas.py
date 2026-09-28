@@ -303,10 +303,31 @@ class MappingListItem(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class MappingSituationCountsResponse(BaseModel):
+    """As quatro situações sobre o universo INTEIRO do destino (86e3f55bd).
+
+    Independem de `page`, `situation` e `code`: `total` = soma das quatro.
+    """
+
+    total: int
+    herdada: int
+    confirmada: int
+    nao_mapear: int = Field(alias="naoMapear")
+    sem_decisao: int = Field(alias="semDecisao")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class MappingListResponse(BaseModel):
     data: list[MappingListItem]
     pagination: PaginationMeta
     competence: str = Field(description="Competência (servidor) em que a vigente foi resolvida.")
+    counts: MappingSituationCountsResponse = Field(
+        description=(
+            "Contagem por situação sobre o universo inteiro do destino na competência "
+            "corrente — a mesma em qualquer página e filtro."
+        )
+    )
 
 
 class ImportRejectedLine(BaseModel):
