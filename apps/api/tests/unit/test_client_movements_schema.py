@@ -47,6 +47,10 @@ from app.modules.clients.repository import ClientRepository
 _MIGRATION = "d3a8f5c21e47_s12_client_movements.py"
 _VERSIONS = Path(__file__).resolve().parents[2] / "alembic" / "versions"
 
+#: As colunas que a Sprint 14 (BACK 14.3) acrescentou à base — só a origem ARQUIVO
+#: as preenche. Entram pela migration `d9e4a1b57c26`, não pela da S12.
+_S14_FILE_COLUMNS = frozenset({"description_encrypted", "description_iv", "document"})
+
 #: Qualquer coluna cujo nome sugira NOME/DESCRIÇÃO/TEXTO LIVRE. §4.5: a descrição
 #: do lançamento (`cObservacoes` no Omie) ecoa nome de fornecedor.
 _FORBIDDEN_NAME_LIKE_COLUMNS = (
@@ -121,6 +125,9 @@ class TestModeloEMigrationBatem:
             for column in table.c:
                 if column.name in {"created_at", "updated_at"}:
                     assert "*_timestamps()" in block
+                    continue
+                if column.name in _S14_FILE_COLUMNS:
+                    # Acrescentadas pela migration da S14 (`d9e4a1b57c26`), não por esta.
                     continue
                 assert f'"{column.name}"' in block, column.name
 
@@ -229,8 +236,9 @@ class TestModeloDeclaraAsGarantias:
     def test_colunas_sao_codigos_valores_e_situacao(self) -> None:
         """O inventário fechado da tabela — coluna nova entra aqui conscientemente.
 
-        As colunas que só o arquivo tem (descrição cifrada, documento) são da
-        Sprint 14, na migration dela.
+        As três colunas que só o arquivo tem (descrição CIFRADA + IV, documento) são
+        da Sprint 14 (BACK 14.3), na migration `d9e4a1b57c26`; o drift delas com a
+        migration é de `test_client_file_import_schema.py`.
         """
         assert set(ClientMovement.__table__.c.keys()) == {
             "id",
@@ -247,7 +255,18 @@ class TestModeloDeclaraAsGarantias:
             "last_synced_at",
             "created_at",
             "updated_at",
+            # S14 (BACK 14.3) — só a origem ARQUIVO preenche; nuláveis.
+            "description_encrypted",
+            "description_iv",
+            "document",
         }
+
+    def test_as_colunas_do_arquivo_sao_nulaveis_e_a_migration_da_s12_nao_as_cria(self) -> None:
+        """A linha do Omie fica com as três nulas; a S12 continua sem texto livre."""
+        source = (_VERSIONS / _MIGRATION).read_text(encoding="utf-8")
+        for name in ("description_encrypted", "description_iv", "document"):
+            assert ClientMovement.__table__.c[name].nullable is True, name
+            assert f'"{name}"' not in source, f"{name} pertence à migration da S14"
 
     def test_dinheiro_e_numeric_14_2_nunca_float(self) -> None:
         amount = ClientMovement.__table__.c.amount

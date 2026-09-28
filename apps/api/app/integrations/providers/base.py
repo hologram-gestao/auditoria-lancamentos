@@ -113,6 +113,10 @@ class ProviderEntry(BaseModel):
     status: str | None = None
     category_code: str | None = None
     supplier_code: str | None = None
+    #: Sprint 14 — o número do documento, quando a origem o traz (a coluna de
+    #: documento do arquivo). O Omie não preenche no extrato. Identificador, não
+    #: nome: persiste em claro na base de movimentos (ADR-082-BE).
+    document_number: str | None = None
 
 
 class ProviderOpenTitle(BaseModel):

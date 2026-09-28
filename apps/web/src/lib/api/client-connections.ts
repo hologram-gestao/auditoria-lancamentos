@@ -27,16 +27,81 @@ import type {
 import { apiDelete, apiGet, apiPatch, apiPost } from './client';
 
 /**
- * Tipo da origem. Hoje o registry do backend só resolve `omie` — tipo
- * desconhecido é 422. A constante existe para a tela não digitar a string solta
- * em quatro lugares; quando o 2º provedor chegar, o seletor nasce aqui.
+ * Tipos de origem que o registry do backend resolve (`supported_provider_types`)
+ * — tipo desconhecido é 400. As constantes existem para a tela não digitar a
+ * string solta em quatro lugares.
  */
 export const OMIE_PROVIDER_TYPE = 'omie';
+/**
+ * Sprint 14 (R1): o primeiro provedor que não é um ERP — a planilha/extrato
+ * que o cliente manda, lida pelo mapeamento de colunas dele. Nasce SEM
+ * credencial (o adaptador não declara `verificar_credencial`).
+ */
+export const FILE_PROVIDER_TYPE = 'arquivo';
 
-/** Rótulo padrão do tipo, espelho de `_DEFAULT_LABELS` (`service.py:67`). */
+export interface ProviderTypeOption {
+  value: string;
+  label: string;
+  /** Uma frase para o seletor: o que a pessoa está conectando. */
+  description: string;
+  /**
+   * Espelho de `requires_credentials(tipo)` do backend (`providers/registry.py`):
+   * lá é derivado da capacidade `verificar_credencial` do adaptador; aqui, na
+   * CRIAÇÃO, a conexão ainda não existe para perguntar à capacidade — então a
+   * tabela declara, num lugar só. Para uma conexão EXISTENTE a pergunta certa é
+   * `connectionRequiresCredentials`, pela capacidade que a API devolveu.
+   */
+  requiresCredentials: boolean;
+}
+
+/**
+ * O seletor da gaveta de conexão — a ÚNICA lista de tipos do front. Provedor
+ * novo entra aqui e no backend; nenhum `if (provider_type === …)` na tela.
+ */
+export const PROVIDER_TYPES: readonly ProviderTypeOption[] = [
+  {
+    value: OMIE_PROVIDER_TYPE,
+    label: 'Omie',
+    description: 'ERP com credencial (App Key e App Secret), verificada antes de salvar.',
+    requiresCredentials: true,
+  },
+  {
+    value: FILE_PROVIDER_TYPE,
+    label: 'Arquivo (planilha ou extrato)',
+    description:
+      'Sem credencial: a planilha do mês é lida no envio, pelo mapeamento de colunas do cliente.',
+    requiresCredentials: false,
+  },
+];
+
+/** Rótulo padrão do tipo, espelho de `_DEFAULT_LABELS` (`client_connections/service.py`). */
 export const DEFAULT_PROVIDER_LABEL: Record<string, string> = {
   [OMIE_PROVIDER_TYPE]: 'Omie',
+  [FILE_PROVIDER_TYPE]: 'Arquivo',
 };
+
+/**
+ * Este TIPO guarda um segredo? Tipo fora da tabela devolve `true`: pedir uma
+ * credencial que o servidor recusa é um 400 visível; deixar de pedir uma que
+ * ele exige seria um formulário que nunca salva.
+ */
+export function providerRequiresCredentials(providerType: string): boolean {
+  return (
+    PROVIDER_TYPES.find((option) => option.value === providerType)?.requiresCredentials ?? true
+  );
+}
+
+/**
+ * Esta CONEXÃO tem credencial para testar/trocar? Pela capacidade que a API
+ * devolveu — o mesmo predicado do servidor (`requires_credentials`): quem sabe
+ * VERIFICAR credencial tem credencial. Para `arquivo` é `false`, e é por isso
+ * que "Testar novamente" e os campos de App Key/Secret somem.
+ */
+export function connectionRequiresCredentials(
+  connection: Pick<ClientConnection, 'capabilities'>,
+): boolean {
+  return connection.capabilities.includes('verificar_credencial');
+}
 
 /**
  * Chaves de credencial que o adaptador do Omie aceita

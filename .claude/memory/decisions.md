@@ -5745,3 +5745,655 @@ novo; rodada 1: 384 × 3 temas, unexpected=0).
 **Fica para a validação humana** (igual à rodada 1): as decisões do planejador listadas no
 ADR-039-QA e a S-1, ASSUMIDA e NÃO TESTADA. Follow-ups: 86e3f0ux7, 86e3f0uxb, 86e3f0uzh.
 
+
+<!-- Sprint 14 — consolidado pelo QA (86e3f6r4x) a partir dos worktrees do backend e do frontend -->
+
+---
+
+## ADR-079-BE — O provedor `arquivo` é um adaptador VAZIO sem credencial, e o mapeamento de entrada é configuração com coerência no banco (Sprint 14 / BACK 14.1)
+
+**Data:** 2026-09-27 · **Status:** ativo · **Escopo:** `integrations/providers/file_adapter.py`,
+`registry.py` (`requires_credentials`), `modules/client_connections/` (schemas, service, origin),
+`db/models/client_input_mapping.py`, migration `b4c8e2d71f95`, `modules/client_input_mappings/`,
+`Permission.UPLOAD_CLIENT_FILE`/`MANAGE_INPUT_MAPPING`, lista canônica 99 → 101
+
+**`FileProvider` não abre arquivo: recebe `ProviderEntry` em memória e devolve.** O contrato da
+S9 exige `list_entries`; o arquivo só existe na request de upload (14.3). Então o adaptador é o
+consumidor da leitura, não o leitor: a 14.3 converte as linhas pelo mapeamento e alimenta o MESMO
+`_persist` do R0 pelo adaptador — a base não sabe de onde veio a linha. `get_provider('arquivo')`
+devolve um adaptador VAZIO (a factory ignora credencial e HTTP), o que obriga a 14.3 a barrar o
+`POST /movements/sync` de cliente só-arquivo ANTES do ciclo (409 `ORIGEM_POR_ARQUIVO`), senão
+"zero linhas" marcaria a base como ausente. Capacidades = só `LISTAR_LANCAMENTOS`: sem
+`LISTAR_CONTAS` de propósito (o cache de contas receberia `[]` como resposta), sem
+`VERIFICAR_CREDENCIAL` (não há o que testar), sem `ESCREVER` (fora de escopo global).
+
+**"Este tipo exige credencial?" é UMA regra, derivada da capacidade:**
+`requires_credentials(tipo) = VERIFICAR_CREDENCIAL in capabilities_for(tipo)`. Consumida na
+criação e no PATCH da conexão (`omie` sem `credentials` e `arquivo` com `credentials` são o MESMO
+400 genérico de forma, §4.8), no `/test` (`arquivo` → 409 `CAPACIDADE_AUSENTE`, nada muda, nada
+é auditado) e em `credentials_for` (mapa vazio é estado normal, não defeito). A conexão `arquivo`
+nasce `ativa` com o par cifrado nulo — as colunas nasceram nuláveis na S9 para isto — e **a DEK é
+provisionada mesmo sem segredo** (`provision_client_cipher` sob `OpenClientDep`): a 14.3 cifra a
+descrição das linhas com ela, e "a DEK nasce na primeira conexão" (§4.8) continua valendo.
+
+**`client_input_mappings`: um por cliente, upsert `ON CONFLICT (client_id)`, coerência no CHECK.**
+Configuração (não vigência): a substituição é decidida pela UNIQUE, não por leitura anterior;
+`xmax = 0` no `RETURNING` separa "criou" de "substituiu" sem segunda consulta. Todo vocabulário é
+`StrEnum` + CHECK copiado (drift test); três CHECKs de coerência espelham o validador Pydantic:
+CSV exige delimitador+codificação DECLARADOS (nunca `Sniffer`), `classificacao_livre` exige a
+coluna, e convenção de sinal x campos. **Decisão que diverge do texto da task:** a coluna de
+valor é NULÁVEL — em `colunas_separadas` "a coluna de valor" não existe (o par débito/crédito é
+o valor), e um `NOT NULL` obrigaria a gravar uma coluna que o leitor ignoraria. `sign_convention`
+é `NOT NULL`: o banco não aceita mapeamento sem convenção (o `SINAL_NAO_DECLARADO` da 14.3 fica
+como defesa em profundidade). Delimitador sem tabulação: o caractere literal no predicado do CHECK
+é invisível na revisão. Formatos de data são vocabulário fechado, não `strftime` livre (um `%m/%d`
+no lugar de `%d/%m` troca dia e mês em silêncio em 12 de cada 31 dias).
+
+**Autoria RESTRICT e a ordem da exclusão.** `created_by`/`updated_by` → `users` RESTRICT
+(precedente ADR-074-BE): `delete_client_cascade` apaga o mapeamento ANTES dos usuários do tenant
+(teste de fonte + integração com autor `client_manager`). Encerramento purga
+(`close_client_purge`): é configuração, nada cifrado, cliente encerrado não envia mais arquivo.
+
+**Duas permissões PRÓPRIAS (R5 do PRD):** `upload_client_file` = os 5 papéis;
+`manage_input_mapping` = todos menos `client_operator`. Não reusam `manage_client_mapping` nem
+`sync_client_movements` (ADR-067/069-BE). Guards AUDITADOS (`require_client_permission`): a
+negação do operador no PUT vira 1 `denied`. A LEITURA do mapeamento não pede permissão
+(`AccessibleClientDep`) e **ausente é 200 com `mapping` nulo, nunca 404** (404 é o código
+anti-enumeração). `UploadClientFileDep` fica pronto para as rotas da 14.3.
+
+**Lista canônica 99 → 101**, matriz 24 → 26, doc regenerada (`101/101`). O `schema.ts` do front
+NÃO foi regenerado (fora do gitPaths, ADR-070-BE) — a FRONT 14.5 regenera.
+
+⚠️ **Integração ESCRITA e NÃO EXECUTADA:** o sandbox nega o socket do Docker
+(`PermissionError: Operation not permitted` ao abrir `/var/run/docker.sock`; `docker ps` falha) e
+não há Postgres em 5432/5433 nem binário local. Os testes novos foram COLETADOS (394 no
+subconjunto) e pulam com `Docker indisponível`. Migration validada em `--sql` nos dois sentidos.
+
+---
+
+## ADR-080-BE — `arquivo_processado` commita antes do `raise`; `fechamento_produzido` é uma linha por tipo de origem materializado (Sprint 14 / BACK 14.2)
+
+**Data:** 2026-09-27 · **Status:** ativo · **Escopo:** `modules/usage_events/` (schemas, service,
+repository), `modules/client_mapping/materialization.py`, guardrail
+`tests/unit/test_usage_event_schemas.py`
+
+**A fórmula D+30 da Sprint 14** (comentário no enum): `count(DISTINCT props->>'client_id')
+WHERE event = 'fechamento_produzido' AND props->>'tipo_origem' = 'arquivo'`, restrito aos
+clientes da organização parceira por JOIN com `clients.organization_id` (parâmetro da leitura,
+como em `cliente_criado`). Baseline 0; alvo ≥ 15 clientes em 60 dias (previsão declarada do PRD).
+O primeiro evento (`arquivo_processado`) prova INGESTÃO; só o segundo prova CLASSIFICAÇÃO — sem
+ele a métrica não existe.
+
+**`fechamento_produzido` é emitido pela materialização (12.6), depois do commit, ao lado de
+`depara_aplicado`: UMA linha por `source_type` distinto entre os itens materializados**
+(`sorted({item.source_type})`). Cliente só-arquivo → `arquivo`; cliente Omie → `omie`; cliente
+que trocou de origem na mesma competência → duas linhas. Dentro do fail-soft (`_props_or_none` +
+`emit`): a métrica nunca derruba a materialização já gravada. Falha e 409 não emitem —
+estrutural, o emissor só roda depois do commit. `tipo_origem` é `str` com o formato fechado de
+slug (o MESMO de `destino`), não `Literal`: o vocabulário de provedores é do registry.
+
+**`arquivo_processado` na RECUSA tem caminho DURÁVEL: o emissor commita a sessão** antes de
+devolver (`UsageEventRepository.commit`). A 14.3 levanta o `AppError` logo depois, e o
+`get_db_session` de produção responde a exceção com `rollback()` — sem a barreira a linha
+`rejeitado=true` sumiria (ADR-019-QA) e a leitura contaria só os aceitos. Mesmo molde de
+`test_connection` (S9) e de `mark_sync_failed` (ADR-065-BE). Na recusa nada de negócio foi
+escrito ainda (ordem de checagens da 14.3), então o commit persiste só a métrica; commit que
+falha vira warning + `False`. O aceito NÃO commita por conta própria (roda depois do commit da
+base; o request commita no fim). O teste de integração prova as duas coisas sob a política real:
+emite → `rollback()` → a recusa sobrevive, o aceito não.
+
+**`motivo` é `Literal` FECHADO** = `nenhum` + os 8 códigos de recusa tipada que a 14.3 levanta,
+em minúsculas — uma fonte; nunca nome de coluna, número de linha ou conteúdo de célula (isso vai
+nos `details` da resposta tipada, não no sink). Validador: aceito ⇔ `nenhum`. `mapeamento_id` é
+nulo quando a recusa vem antes de haver mapeamento.
+
+**O guardrail anti-PII passou a aceitar `str` COM `pattern` e `Optional[escalar seguro]`** — e
+os quatro modelos da S12/S14 entraram na lista `_PROPS_MODELS`. Antes, os props da S12 (com
+`competencia`/`destino` de formato fechado) ficavam FORA do guardrail (ADR-073-BE); agora o
+próprio guardrail codifica a regra "str só com pattern", com teste de mutação (`str` livre
+reprova). Dedup: os dois eventos fora de `DEDUPED_EVENT_NAMES` (nenhuma migration) e fora de
+`CLIENT_EMITTED_EVENTS` (POST do browser → 422/400).
+
+⚠️ Integração (`tests/integration/test_usage_events_sprint14.py`: contagem de linhas por tipo de
+origem, 409 sem emissão, durabilidade da recusa) ESCRITA e NÃO EXECUTADA — socket do Docker
+negado pelo sandbox (ver ADR-079-BE).
+
+---
+
+## ADR-081-BE — Categoria de arquivo: código aleatório estável, rótulo cifrado, casamento byte a byte em memória (Sprint 14 / BACK 14.4)
+
+**Data:** 2026-09-27 · **Status:** ativo · **Escopo:** `db/models/client_file_category.py`,
+migration `c7d3f8a24e61`, `modules/client_file_categories/` (repository, registry),
+`client_mapping/listing.py` (`file_names`), `core/crypto_service.AAD_FILE_CATEGORY_LABEL` (14º par)
+
+**Onde o registry mora:** módulo próprio `modules/client_file_categories/` (não dentro da
+ingestão da 14.3): a leitura do de-para (12.5) e a ingestão (14.3) consomem o MESMO serviço, e
+um deles importando o outro criaria dependência do de-para na ingestão.
+
+**`code = "arq-" + 12 hex aleatórios`, gerado na primeira ocorrência e NUNCA derivado do
+rótulo.** Hash do rótulo faria "corrigir um acento no mês seguinte" virar categoria nova e perder
+a decisão anterior — exatamente o que o R4 proíbe. O prefixo diz a origem sem consulta e nunca
+colide com código do Omie/plano de contas. Teto = `MAX_MOVEMENT_CATEGORY_CODE_CHARS` (é o mesmo
+código que a base grava). `UNIQUE(client_id, code)` no banco; sem `updated_at` (append-only).
+
+**Rótulo = grafia ORIGINAL da célula, cifrado com a DEK do cliente** (§4.5; precedente do
+glossário), AAD por linha, CHECK do par ciphertext/IV (molde de `client_connections`). **Sem
+hash de lookup**: o casamento é em memória — carrega as linhas do cliente (dezenas/centenas, a
+escala que a ADR-076-BE já aceita), decifra e compara por igualdade de `str`, byte a byte
+(`split_labels`, função pura): `Aluguel`, `aluguel` e `Aluguél` são três códigos. Criar HMAC com
+pepper seria mecanismo novo para um problema que não existe nessa escala.
+
+**Criação na transação do chamador** (flush, sem commit): a 14.3 grava os movimentos com os
+códigos devolvidos, e uma categoria criada numa transação que falha seria código órfão. A
+serialização por cliente é do chamador (`pg_advisory_xact_lock` na 14.3); a UNIQUE protege o
+código, não o rótulo (por desenho, ciphertext com IV novo não é comparável). `resolve_codes` usa
+`provision_client_cipher` (escrever exige poder cifrar; a DEK já nasce na conexão `arquivo`, mas
+o caminho legado pode chegar sem ela); `resolve_names` usa `load_client_cipher` (só leitura —
+cliente encerrado continua legível, com `[indecifrável]`).
+
+**Falha de decifragem = `[indecifrável]` + warning só com IDs** (`file_category_decrypt_failed`,
+client_id e category_id), nunca célula vazia. Na leitura do de-para o nome sai como o marcador e
+`categoryNameResolved=false` (a tela sabe que não é rótulo). Na escrita, uma linha indecifrável
+não casa e a grafia ganha código novo — só acontece após crypto-shredding (encerramento), e
+cliente encerrado não processa arquivo.
+
+**`listing.py` ganhou `file_names: FileCategoryNameResolver | None`** (Protocol; produção =
+`FileCategoryRegistry`, montado na rota com `settings`): linha `arquivo` recebe o rótulo; sem
+registry montado (testes) ou registry fora do ar, sai o código com `resolved=false` — fail-soft
+como o plano de contas. O registry só é consultado se houver linha `arquivo` na página. A
+"marcação derivada do arquivo" é o próprio `source_type` da linha (contrato e coluna
+`tipo_origem` da exportação) — nenhuma coluna nova. Herança segue só do `demonstrativo_contabil`
+via `dre_code` (o arquivo não tem): `POST /inherit` cria 0 para arquivo. A importação de planilha
+aceita `(arquivo, code)` porque o universo já as inclui (nenhuma mudança em `portability.py`).
+
+**Inventário de consumidores de origem:** `registry.py` entrou como `CIFRA_DADO` (toca
+`load_client_cipher`/`provision_client_cipher`, nenhuma chamada a provedor), doc regenerada.
+**AAD 13 → 14** (`("client_file_categories", "label_encrypted")`); a 15ª é da 14.3. ⚠️ A §4.1
+do primer (`CLAUDE.md`) precisa ganhar os dois pares novos — fora do gitPaths do backend, o QA
+materializa. Sem rota nova: lista canônica segue 101.
+
+⚠️ Integração (`tests/integration/test_client_file_categories.py`: criação, mesmo rótulo, três
+grafias, acento no mês seguinte, cifra/decifra, DEK de outro cliente, indecifrável + caplog,
+UNIQUE, cross-tenant, de-para lista/herança/importação, encerramento, exclusão) ESCRITA e NÃO
+EXECUTADA — Docker negado (ver ADR-079-BE). Migration validada em `--sql` nos dois sentidos.
+
+## ADR-082-BE — Ingestão do arquivo: identidade da LINHA, documento em claro, descrição cifrada pela pk, arquivo corrigido nunca apaga (Sprint 14 / BACK 14.3)
+
+**Data:** 2026-09-27 · **Status:** ativo · **Escopo:** migration `d9e4a1b57c26` (3 colunas em
+`client_movements` + `client_file_imports`), `modules/client_file_ingestion/` (reader, service,
+repository, routes, schemas), `client_movements/service.py` (`persist_entries`, `_store_descriptions`,
+409 `ORIGEM_POR_ARQUIVO`), `client_movements/repository.py` (`accounts_read=None`, `ids_by_source`,
+`set_descriptions`), `core/exceptions.py` (9 códigos), `core/crypto_service.AAD_MOVEMENT_DESCRIPTION`
+(15º par), lista canônica 101 → 104.
+
+**O R3 não cria segunda entidade.** A migration ACRESCENTA a `client_movements` três colunas nuláveis
+(`description_encrypted`, `description_iv`, `document`) e cria só `client_file_imports`. A linha do
+Omie fica com as três nulas. O drift test da S12 (`test_client_movements_schema`) passou a IGNORAR
+essas três colunas na migration `d3a8f5c21e47` e a afirmar que elas não estão lá; o drift delas é de
+`test_client_file_import_schema`.
+
+**Identidade da linha = `<16 hex do sha256 do arquivo>:<número da linha no arquivo>`**, nunca o
+conteúdo: duas linhas idênticas são dois movimentos (provado no unitário e na integração). O número
+é o da LINHA FÍSICA (cabeçalho = 1; linha vazia conta e é pulada), o mesmo que a pessoa vê na
+planilha e o mesmo que sai em `details.lines` da recusa. Consequência aceita: o **arquivo corrigido**
+(hash diferente) na mesma competência tem identidades novas — pelo ciclo R0 TODAS as linhas do
+arquivo anterior viram `ausente_na_origem` e as novas ficam `presente` (`absent` na resposta), e
+nada é apagado ("nunca apaga" da S12). Não há tentativa de casar linha antiga com nova: seria
+inferência sobre conteúdo, e o de-para decide por categoria, não por linha.
+
+**Documento em CLARO** (`client_movements.document`, teto = `MAX_TITLE_DOCUMENT_CHARS`, é o mesmo
+dado): número de documento é identificador, como `supplier_code`/`category_code` (§4.5 — código não é
+nome). **Descrição SÓ cifrada** (`AAD_MOVEMENT_DESCRIPTION`, IV novo por linha) — e cifrada DEPOIS
+do upsert, por dentro do `ClientMovementsSyncService` (`_store_descriptions`): a pk entra no AAD e o
+`ON CONFLICT` do ciclo preserva a pk da linha existente; cifrar antes ligaria o texto a um id que
+nunca existiu. Um lugar só cifra a descrição (o serviço da base), não a ingestão.
+
+**A ingestão entra pelo MESMO ciclo `_persist` do R0** via a porta pública `persist_entries(...,
+source_type='arquivo', accounts=None, descriptions=…, emit=False)`. `accounts=None` é semântica nova
+do repositório: "sem recorte de conta" (o arquivo é o realizado completo do mês; a linha não tem
+conta) — lista VAZIA continua sendo "nenhuma conta lida, nada é marcado". `emit=False` porque a
+ingestão tem o evento dela (`arquivo_processado`); `movimentos_sincronizados` é da sincronização.
+`FileProvider(entries).list_entries()` é chamado de verdade (recorte por período honrado) para o
+provedor ser "mais um adaptador", não um caminho paralelo.
+
+**`POST /movements/sync` em cliente cuja conexão capaz é `arquivo` → 409 `ORIGEM_POR_ARQUIVO`
+ANTES de renovar contas ou tocar o ciclo** (nada carimbado, nenhum evento): o adaptador vindo da
+conexão é vazio e um `list_entries` vazio marcaria a base inteira como ausente.
+
+**Ordem das recusas é regra** (R2: inteiro ou nada): encerrado → conexão `arquivo` ativa (taxonomia
+S9; conexão capaz `omie` com uma `arquivo` ativa ao lado passa) → mapeamento (409 `SEM_MAPEAMENTO`
+com `details.foundColumns`) → sinal (409 `SINAL_NAO_DECLARADO`, defesa em profundidade: o banco já
+exige) → formato do mapeamento (422 `FORMATO_NAO_SUPORTADO`, PDF/XLS com mensagem acionável) → hash
+(409 `ARQUIVO_JA_PROCESSADO`, leitura amigável) → cabeçalho ANTES da 1ª linha (422
+`CABECALHO_DIVERGENTE`, `missingColumns`/`foundColumns`; provado com zero células processadas) →
+todas as linhas (422 `LINHAS_INVALIDAS`, `lines=[{line, reason}]` limitado a 50 + `total`, vocabulário
+fechado com `campo_longo_demais` a mais do PRD, porque código longo é recusado, nunca truncado) →
+total (422 `TOTAL_DIVERGENTE`, `Decimal` exato) → UMA transação sob `pg_advisory_xact_lock(hashtext
+(client_id))` (keyspace de 1 argumento, não cruza com o lock de 2 argumentos do de-para): registro
+(SAVEPOINT; violação da UNIQUE lida pelo NOME → o mesmo 409, é o caso da corrida entre duas abas) →
+categorias (registry 14.4, só se houver rótulo) → ciclo R0 → commit → `arquivo_processado{rejeitado=
+false}` fail-soft. **409 = ESTADO da configuração; 422 = CONTEÚDO do arquivo** (precedente
+`CREDENTIALS_MOVED`); forma (competência, total) = 400 genérico. `AppError.details` passou a
+`dict[str, Any]` para carregar listas (estrutura, nunca célula).
+
+**Toda recusa emite exatamente 1 `arquivo_processado{rejeitado=true, motivo}` pelo caminho
+DURÁVEL da 14.2** (commit antes do `raise`; provado sob a política REAL de rollback na integração)
+e não escreve nada — nem lock, nem registro. `colunas_reconhecidas` na recusa é o que dá para
+afirmar naquele passo (colunas do cabeçalho sem mapeamento; mapeadas − ausentes no cabeçalho
+divergente).
+
+**Limites declarados no leitor** (`reader.py`): 10.000 linhas de dados, 20.000 percorridas (vazias
+inclusive), 64 colunas, zip ≤ 60 MiB descomprimido e razão ≤ 100× por entrada (conferido ANTES do
+openpyxl), bytes pelo `Settings.max_upload_bytes` em streaming na rota; parse em `run_in_threadpool`;
+qualquer exceção de abertura/iteração vira `ARQUIVO_INVALIDO` com mensagem fixa e `from None`.
+`limit=0` é "só o cabeçalho" e não retém linha nenhuma (o unitário pegou uma linha retida). O único
+pré-processamento de célula é `strip()` — documentado porque é o que o casamento byte a byte do
+registry assume. Delimitador/codificação da inspeção SEM mapeamento: `;` + `utf-8-sig` (o que o
+Excel brasileiro exporta), declarados, nunca farejados; o pedido pode escolher outro do vocabulário.
+
+**`categories_created` = rótulos DESTE arquivo que o cliente ainda não tinha** (o unitário pegou a
+fórmula `len(codes) − total_existente`, que zerava quando o cliente já tinha mais categorias que o
+arquivo). Sem coluna de categoria (ou todas vazias) o registry nem é consultado.
+
+**Inspeção de cliente encerrado é 409 no SERVIÇO** (a rota lê com `AccessibleClientDep` para o
+histórico continuar legível). **`client_file_imports` entra em `close_client_purge`** (trilha
+operacional de quem não envia mais) e sai ANTES dos usuários em `delete_client_cascade`
+(`created_by` RESTRICT — o operador do tenant envia). `mapping_id` é `SET NULL`.
+
+**Lista canônica 101 → 104** (bateria multipart: `files` + `data` válidos, ADR-012), doc regenerada;
+inventário de consumidores de origem ganhou `client_file_ingestion/service.py` como `ORIGEM`; AAD
+14 → 15 (o teste da 14.4 passou a afirmar posição 14 e total 15). ⚠️ §4.1 do primer precisa dos
+dois pares (14.4 e 14.3) — fora do gitPaths do backend, o QA materializa.
+
+⚠️ Integração (`test_client_file_ingestion.py` 24 testes, `test_migrations.py::
+TestArquivoMovimentosEImportsRoundTrip` 5, bateria dos 3 atacantes nas 3 rotas, purga em
+`test_client_close`/`test_client_delete`) ESCRITA, COLETADA (410 no subconjunto) e NÃO EXECUTADA —
+socket do Docker negado (`nobody:nogroup 660`) e sem Postgres em 5432/5433. Migration renderizada em
+`--sql` nos dois sentidos.
+
+---
+
+## ADR-042-FE — Origem por arquivo: a tela pergunta pela CAPACIDADE, e o tipo só é comparado num helper (Sprint 14 / FRONT 14.5)
+
+**Data:** 2026-09-27 · **Status:** ativo · **Escopo:** `lib/origin-capabilities.ts`, `lib/api/client-connections.ts`, gaveta de conexões, menu do cliente
+
+- **`arquivo` é o primeiro provedor que não faz TUDO** (não lista contas nem títulos, não
+  verifica credencial, não escreve). Cada tela que perguntasse `provider_type === 'arquivo'`
+  repetiria a tabela de capacidades do adaptador à mão. A regra fica em
+  `lib/origin-capabilities.ts`: `connectionSupports`/`selectCapableConnection`/
+  `originHasCapability` (o mesmo predicado do servidor, ativa E declara) e três
+  derivados — `fileConnectionOf` (ÚNICO lugar que compara o tipo), `hasFileConnection`
+  (a aba «Origem por arquivo» existe? — em qualquer estado, porque é nela que o mapeamento
+  se configura) e `originIsFileBased` (a conexão que atende `listar_lancamentos` é
+  `arquivo` → o sync do de-para responderia 409 `ORIGEM_POR_ARQUIVO`). Grep de
+  `provider_type ===` fora do helper: vazio.
+- **Criação × conexão existente decidem credencial por fontes diferentes.** Na CRIAÇÃO a
+  conexão ainda não existe para perguntar à capacidade, então a tabela única
+  `PROVIDER_TYPES` (`lib/api/client-connections.ts`) declara `requiresCredentials` por tipo
+  — espelho de `requires_credentials(tipo)` do registry. Para uma conexão EXISTENTE a
+  pergunta é `connectionRequiresCredentials` = declara `verificar_credencial`. É por isso
+  que «Testar novamente» e a troca de App Key/Secret somem para `arquivo` sem `if` de tipo.
+- **Sem credencial, sem gate de teste:** o Zod da criação exige App Key/Secret só quando
+  `providerRequiresCredentials(tipo)`; o corpo do POST vai SEM `credentials` (mandar seria
+  400 de forma, `assert_credentials_shape`). Salvar habilita direto.
+- **A aba não é gated por papel.** LER o mapeamento e a lista de processados é de todo papel
+  que alcança o cliente (o operador precisa ver o que será aplicado antes de enviar); quem
+  pede permissão é CONFIGURAR (`manage_input_mapping`) e ENVIAR (`upload_client_file`),
+  dentro da tela. `nav-items.tsx` recebe `hasFileOrigin` do detalhe (mesmo cache do shell).
+
+---
+
+## ADR-043-FE — Editor de mapeamento: dois passos, convenção de sinal sem padrão, confirmação só ao ALTERAR (Sprint 14 / FRONT 14.5)
+
+**Data:** 2026-09-27 · **Status:** ativo · **Escopo:** `components/features/file-origin/input-mapping-editor-drawer.tsx`, `lib/input-mapping.ts`, `lib/validation/input-mapping.ts`
+
+- **Passo 1 inspeciona, passo 2 mapeia.** Os seletores de coluna só existem com colunas:
+  as INSPECIONADAS (`POST …/file-origin/inspect`, amostra só na resposta) mais as já
+  escolhidas — assim ALTERAR um mapeamento salvo não exige inspecionar de novo, e
+  inspecionar um arquivo novo só acrescenta opções. Sem coluna nenhuma, Salvar fica
+  bloqueado e a instrução aparece no lugar.
+- **CSV sem mapeamento: delimitador e codificação são DECLARADOS antes de inspecionar**
+  (o servidor não fareja). Com mapeamento salvo o servidor usa o dele. O formato do
+  mapeamento nasce do `format` DETECTADO pelo contêiner; para CSV os campos de
+  delimitador/codificação do mapeamento nascem com o que acabou de funcionar na inspeção.
+- **Convenção de sinal é `radiogroup` SEM opção pré-marcada.** O PRD proíbe inferir sinal;
+  um padrão seria inferência com outro nome. Os campos dependentes seguem a escolha
+  (`valor_com_sinal` → Valor; `coluna_natureza` → Valor + Natureza + literais D/C;
+  `colunas_separadas` → Débito + Crédito) e `toInputMappingRequest` só manda os da
+  convenção escolhida — o corpo é `extra="forbid"`.
+- **`AlertDialog` só quando JÁ existe mapeamento** («altera como os próximos arquivos serão
+  lidos»); criar grava direto. Quem grava é o caller depois do OK. Remount por `key` a cada
+  abertura: o formulário nasce do mapeamento atual ou vazio.
+- **400 genérico → mensagem PRÓPRIA** («confira a convenção de sinal e os campos que ela
+  exige»), porque o servidor não ecoa campo (§4.8); nunca o `message` interno. 409 de
+  encerrado sai com o `userMessage` tipado.
+- **`Select` do Radix não aceita item `""`:** o «Nenhuma» das colunas opcionais viaja com
+  o marcador `__none__` e volta a `''` no formulário.
+
+---
+
+## ADR-044-FE — `ApiError.details` passa a `Record<string, unknown>`; `apiPutJson` para o recurso que se SUBSTITUI inteiro (Sprint 14 / FRONT 14.5)
+
+**Data:** 2026-09-27 · **Status:** ativo · **Escopo:** `lib/api/client.ts`, `lib/competence.ts`, `lib/file-origin-errors.ts`
+
+- As recusas de arquivo trazem LISTAS em `details` (`missingColumns`, `foundColumns`,
+  `lines: [{line, reason}]`, `total`), então o `Record<string, string>` do ADR-039-FE não
+  serve mais. O tipo virou `unknown` por valor; quem lê ESTREITA com leitor tipado
+  (`readFileRefusal`), nunca com cast. `isCompetence`/`parseCompetenceList` aceitam
+  `unknown` — o `.split` num número não acontece mais por construção. Nenhum call site
+  quebrou (tsc).
+- **`apiPutJson(path, body)`** — helper próprio, e não `apiPut` com corpo opcional, para o
+  método e a presença do corpo continuarem visíveis no call site (o `tsc` pega a troca por
+  `apiPatch`/`apiPost`, que o servidor responderia com 405). Primeiro uso: o mapeamento de
+  entrada (um por cliente; `PUT` cria ou troca).
+
+---
+
+## ADR-045-FE — Contrato da S14 conferido com diff 0 SEM API de pé: `app.openapi()` do worktree do backend com o venv do checkout principal (Sprint 14 / FRONT 14.5)
+
+**Data:** 2026-09-27 · **Status:** ativo · **Escopo:** verificação do contrato
+
+O `gen:types` do `package.json` aponta para `http://localhost:8000/openapi.json` — exige a
+API rodando com Postgres. O caminho que funcionou no sandbox, sem rede e sem banco:
+
+```bash
+# o .venv do worktree agent-backend estava SEM slowapi (py3.14); o do checkout principal (py3.12) tem tudo
+cd .worktrees/agent-backend/apps/api && env PYTHONPATH=$PWD DATABASE_URL=… <chaves fake do ci.yml> PYTHONDONTWRITEBYTECODE=1 \
+  /home/phaos93/auditoria-lancamentos/apps/api/.venv/bin/python <script que faz json.dump(app.openapi())> saida.json
+apps/web/node_modules/.bin/openapi-typescript saida.json -o saida.ts && diff saida.ts apps/web/src/lib/contracts/schema.ts | wc -l   # 0
+```
+
+`app.openapi()` não abre conexão com o banco; as chaves fake são as do CI (skill `gate`).
+O script e as saídas vivem em `apps/web/test-results/` (ignorado). Resultado em 27/09:
+**0 linhas de diff** contra `sprint-14/backend@80a5276`.
+
+---
+
+## ADR-046-FE — O gate de a11y da S14 NÃO rodou em browser (Docker negado pelo sandbox); duas falhas herdadas do checkpoint eram de TESTE (Sprint 14 / FRONT 14.5)
+
+**Data:** 2026-09-27 · **Status:** ativo · **Escopo:** verificação da entrega
+
+Mesma situação do ADR-041-FE: `docker ps` sai 1 (`~/.docker/config.json: permission
+denied`) e o Chromium do host não sobe. **Feito:** cinco cenários novos em
+`e2e/a11y-mocked.spec.ts` (bloco «Origem por arquivo — mapeamento (FRONT 14.5)»), com
+medida de borda nas ações primárias (`exigirDentroDaViewport`), altura e `tabindex` da
+região da amostra, `page.on('request')` provando que o PUT só sai DEPOIS do
+`AlertDialog`, e `measuredContrast` no toast; fixtures e rotas no `fulfillApi`; `tsc`
+e `eslint` verdes sobre o spec. **Fica devendo, e não pode ser dado por medido:** axe nos
+três temas em browser real e os PNGs desktop/390px — os cenários rodaram ZERO vezes.
+
+As duas falhas que o checkpoint da sessão anterior deixou eram de teste, não de produto:
+(1) `mapping-summary` aparecia duas vezes na tela (seção + card «Será aplicado») e o
+`getByTestId` reprovava por múltiplos — o card compacto agora é `mapping-summary-compact`;
+(2) o mock de módulo do `sonner` não era limpo entre testes e o `toast.error` do cenário
+do 400 vazava para «SEM_CONEXAO não é toast» — `mockClear` no `beforeEach`. Suíte inteira:
+857/857.
+
+---
+
+## ADR-047-FE — Recusa de arquivo é ESTADO na tela, ramificado por `code`; só código desconhecido vira toast (Sprint 14 / FRONT 14.6)
+
+**Data:** 2026-09-27 · **Status:** ativo · **Escopo:** `lib/file-origin-errors.ts`, `components/features/file-origin/file-refusal-notice.tsx`, `file-upload-section.tsx`
+
+- **Leitor tipado antes da tela.** `readFileRefusal(error)` recebe o `error` cru da
+  mutation e devolve uma união discriminada por `code` (os 8 da BACK 14.3), estreitando
+  `details` valor a valor (`readStringList`, `readLines`, `readString`) — o que não tipa é
+  DESCARTADO, nunca exibido. Assim a regra "nenhum conteúdo de célula na tela" fica no leitor,
+  não em cada ramo. Motivo de linha fora do vocabulário fechado sai cru (backend mais novo
+  que o front não derruba a linha).
+- **Um componente, um ramo por código**, com a ação de correção certa: revisar/configurar
+  o mapeamento (só quem tem `manage_input_mapping`; o operador lê a instrução de pedir a
+  alguém), ver a lista de processados (âncora `#arquivos-processados`), ou só o
+  `userMessage` tipado quando ele já é a instrução (`FORMATO_NAO_SUPORTADO`,
+  `ARQUIVO_INVALIDO`). Os 409 da taxonomia de origem (S9) caem no `OriginStateNotice` de
+  sempre. O toast genérico fica para o ÚNICO caso em que é aceitável: código fora das duas
+  listas.
+- **`role="alert"` + `destructive-muted`.** É uma recusa, não uma etapa; o fundo `-muted`
+  com texto sólido é o par travado por `theme-contrast.test.ts` (86e3dxund) — o e2e ainda
+  mede o contraste do bloco com `measuredContrast`.
+- **Sucesso também é estado**: além do toast (que some em 4 s), o bloco `upload-success`
+  fica na tela com as contagens e o link da prévia do de-para daquela competência.
+
+---
+
+## ADR-048-FE — Envio do mês: competência na URL, total em CENTAVOS no estado, e o de-para do cliente arquivo aponta para o envio (Sprint 14 / FRONT 14.6)
+
+**Data:** 2026-09-27 · **Status:** ativo · **Escopo:** `file-upload-section.tsx`, `lib/money-input.ts`, `lib/validation/file-origin.ts`, `client-mapping/mapping-preview-panel.tsx`, `navigation/nav-items.tsx`
+
+- **`?competence=` na aba** é o contrato entre as duas telas: `fileOriginPath(clientId,
+  competence)` (de-para → envio) e `mappingPreviewPath(clientId, competence)` (envio →
+  prévia, com `view=previa` — sem ele a competência sozinha não age, porque só a aba da
+  prévia a lê). As duas funções vivem em `nav-items.tsx` para nenhuma tela montar a URL à mão.
+- **«Total do arquivo» guarda string de centavos** (`centsFromTyped` → `formatCentsForInput`
+  na exibição → `centsToDecimalString` na borda, `1234.56`). O servidor valida a forma do
+  total e da competência com o 400 genérico (§4.8), então o Zod do envio confere os dois
+  ANTES, com mensagem; a extensão é só conveniência (PDF é recusado no servidor com motivo).
+- **Sem mapeamento, o envio CONDUZ ao editor** com o arquivo em mãos (`seedFile` inspecionado
+  uma vez ao abrir; ref para não repetir), em vez de recusar: o segundo mês é um passo só, o
+  primeiro é dois na mesma tela.
+- **De-para do cliente sem sistema:** `originIsFileBased(connections)` (capacidade
+  `listar_lancamentos` atendida por `arquivo`) esconde «Sincronizar competência» — o servidor
+  responderia 409 `ORIGEM_POR_ARQUIVO` — e põe «Enviar arquivo do mês» com a competência da
+  prévia; `SyncHint` ganhou a variante `file` para a base nunca sincronizada falar do envio, e
+  não de um botão que não existe. Cliente Omie inalterado (teste de regressão).
+- **Gate de a11y em browser NÃO rodou** (mesmo bloqueio do ADR-046-FE); quatro cenários novos
+  no spec com toast e bloco de recusa MEDIDOS, esperando quem tenha Docker.
+
+## ADR-041-QA — Sprint 14, rodada 1: 1 de 6 aprovada; a integração e o gate de a11y rodaram de verdade e acharam o 500 de todo envio de arquivo (QA 86e3f6r4x, 27/09/2026)
+
+**Contexto:** backend (80a5276) e frontend (44c76fc) entregaram com integração e a11y
+declarados "escritos e NÃO executados" (sandbox sem Docker). Nesta sessão o QA tinha
+Docker: suíte completa em container contra o `auditoria-postgres` (receita
+`docker run --network host` + `TEST_DATABASE_URL`, banco `adl_pytest_s14`) e o gate de
+a11y com build + servidor + suíte num container `playwright:v1.59.1-noble`.
+
+**Decisão (vereditos):**
+- BACK 14.2 (86e3f6r4n) → DONE: enum fechado, whitelist, emissores, recusa durável e o
+  teste que conta linhas, verdes; o cenário do QA contou 1 `fechamento_produzido
+  {tipo_origem='arquivo'}` por competência materializada.
+- BACK 14.3 (86e3f6r4t) → FAILED: `set_descriptions` (ORM bulk UPDATE com WHERE) levanta
+  em TODO envio → 500; `1E+30` e CNPJ na coluna de valor → 500; `1500.50` sob vírgula
+  decimal aceito como R$ 150.050,00.
+- BACK 14.1 (86e3f6r4m) → FAILED: cliente com Omie e arquivo escolhe a conexão arquivo
+  (`"arquivo" < "omie"`); `updated_at` congelado no upsert do mapeamento; 2 testes
+  vermelhos (drift 21≠22 em test_migrations; seed com autoria cruzada em test_client_close).
+- BACK 14.4 (86e3f6r4r) → FAILED só por teste: caplog não vê structlog (usar
+  `capture_logs`). Mutação «code = hash(rótulo)» provada vermelha pelo teste cross-tenant.
+- FRONT 14.5 (86e3f6r4u) → FAILED: `apps/web/node_modules` (link) commitado; foco não
+  volta ao abridor da gaveta; GET do mapeamento com erro vira "sem mapeamento" e o
+  salvar pula a confirmação; e2e novo nunca rodou (locator ambíguo, 390px); mock Omie do
+  e2e sem `listar_titulos_em_aberto` derrubou 2 cenários da carteira.
+- FRONT 14.6 (86e3f6r4v) → FAILED: `onSaved` não ligado (o envio não prossegue após
+  salvar o mapeamento) e gate de a11y vermelho (12/13/12 unexpected nos 3 temas).
+
+**Evidência:** suíte completa na branch do backend 17 failed, 3325 passed (36m46s);
+cenário do QA `tests/integration/test_s14_qa_file_origin_cycle.py` 0/9 na branch, 10/13
+com a troca de uma linha em `set_descriptions` (os 3 vermelhos restantes são os testes
+de regressão de valor, de propósito); mutações: remover `on_header` deixa vermelho
+`[cabecalho]` do QA + 3 do backend; hash do rótulo deixa vermelho o cross-tenant (o do
+acento segue verde — prova estabilidade, não origem). Fixture SINTÉTICA
+(`tests/fixtures/file_origin/`); a rodada com arquivo real anonimizado é da validação
+humana. Contrato (gen:types diff 0) não regenerado pelo QA: `schema.ts` conferido campo a
+campo contra os schemas Pydantic pela revisão, sem divergência.
+
+**Consequência:** o primer (PROJECT.md, v1.55) já descreve a S14 com os números da
+branch (104 endpoints, 26 permissões, 15 AAD) e ganhou duas regras na §7 Backend; a
+rodada 2 confere se o retrabalho mudou algum fato.
+
+---
+
+## ADR-083-BE — Um cliente, UM tipo de origem de lançamentos; só-arquivo não tem client do ERP (Sprint 14 / retrabalho BACK 14.1)
+
+**Contexto (reprovação do QA 86e3f6r4x).** Cliente com Omie E arquivo ativos: o repositório ordena
+por `(provider_type, label)`, "arquivo" < "omie", e `select_capable_connection(LISTAR_LANCAMENTOS)`
+escolhia o ARQUIVO. `POST /movements/sync` respondia 409 `ORIGEM_POR_ARQUIVO` num cliente Omie;
+conciliação, revisão, export e plano de contas caíam no 400 "no Omie-compatible client" marcado
+`pragma: no cover`. E cliente SÓ-arquivo passava pelo portão de `POST /reconciliations`, gravava a
+sessão e só falhava no job.
+
+**Decisão — opção (a) do QA.** `create_connection` recusa com **409 `ORIGEM_JA_CONECTADA`**
+(`OriginAlreadyConnectedError`, `details` = `existingConnectionId` + `existingProviderType`, sem
+nome) conectar um tipo que lista lançamentos quando o cliente já tem conexão de OUTRO tipo que
+também lista, **em qualquer estado** (uma Omie em `erro` reconectada pelo PATCH tornaria o cliente
+misto sem passar pela criação — o PATCH nunca muda o tipo). A sintetizada da janela de conversão
+conta (`resolve_origin_connections`): cliente legado É Omie. Mesmo tipo com rótulo diferente segue
+valendo (S9). Trocar de origem = DELETE da existente + POST da nova. Check-then-insert sob
+`pg_advisory_xact_lock(hashtext('client_connections'), hashtext(client))` (chave de DOIS inteiros
+para não colidir com o lock de um inteiro da ingestão).
+
+Rejeitada a (b) (seleção ignorar adaptador sem client cru + sync escolher a origem que sincroniza):
+espalharia "qual origem" por cada consumidor, e o de-para / a base de movimentos misturariam
+`source_type` de duas origens ativas na mesma competência sem ninguém ter decidido isso.
+
+**Só-arquivo nos consumidores do Omie.** `registry.offers_origin_client(tipo)` (frozenset
+`_ORIGIN_CLIENT_TYPES = {omie}`, pergunta de TIPO, sem credencial) + `origin.assert_offers_origin_client`
+→ **409 `CAPACIDADE_AUSENTE`** com instrução ("a origem deste cliente é por arquivo…"). Chamado:
+no portão de `POST /reconciliations` (ANTES de provisionar DEK e gravar sessão); em
+`build_origin_client`/`client_from_credentials` (antes de decifrar — substitui o 400 genérico, que
+agora seria alcançável); e no `_fetch` do plano de contas ANTES do `try` (senão o 409 cairia no
+`except` e carimbaria `sync_failed_at` — "a origem falhou" seria mentira).
+
+**`client_input_mappings.updated_at` no upsert.** O `onupdate` do `TimestampMixin` não vale para
+`ON CONFLICT DO UPDATE`: o `set_` grava `updated_at = clock_timestamp()` (não `now()`, que é o início
+da transação — duas substituições na mesma transação gravariam o mesmo instante e o teste não
+distinguiria). O teste do 2º PUT afirma `updatedAt` maior e `createdAt` igual.
+
+**Testes corrigidos.** `test_migrations::TestMapeamentoDeEntradaRoundTrip` listava 21 colunas e
+esperava 22 — faltavam `id`, `created_at`, `updated_at`; agora 24 nomes E contagem total da tabela
+= 24 (a lista é o inventário inteiro). `test_client_close._seed_world` punha o `client_manager` de A
+como autor do mapeamento/import do B (autoria cruzada que a API não permite) e o DELETE de A
+tropeçava na FK RESTRICT do B: agora B é do staff (mapeamento) e do operador DE B (import).
+
+⚠️ Integração escrita e NÃO executada neste sandbox (socket do Docker negado, interop do WSL
+também: `UtilConnectUnix socket failed`).
+
+---
+
+## ADR-084-BE — Log de teste pelo structlog; o registry de categorias CARREGA a DEK, nunca provisiona (Sprint 14 / retrabalho BACK 14.4)
+
+**Contexto (reprovação do QA 86e3f6r4x).** `test_client_file_categories::…indecifravel_com_log_so_de_ids`
+ficava vermelho na suíte completa: `caplog.text` vazio. O warning sai pelo structlog, e o `caplog`
+não o enxerga depois que a app configura o structlog. O guard autouse `_nada_de_celula_no_log` de
+`test_client_file_ingestion.py` tinha o mesmo furo: passava sem medir nada.
+
+**Decisão.** Asserção de log de app = `structlog.testing.capture_logs` (precedente
+`test_access_audit_actor.py`). O teste do indecifrável afirma o evento pelo NOME, `category_id` = id
+da linha, `client_id`, nível `warning`, e que o rótulo não aparece em `repr(logs)`. O guard da
+ingestão mede os DOIS canais (`caplog.text` + `json.dumps(capture_logs)`), como o guard do QA.
+Conferido: nenhuma mensagem de `AppError` da ingestão (o handler loga `message` e `metadata`) leva
+nome de coluna ou célula, só IDs e contagens.
+
+**`FileCategoryRegistry.resolve_codes` usa `load_client_cipher`** (item menor do QA): o `Client`
+chega carregado ANTES do advisory lock da ingestão, e `provision_` sobre ele deixaria dois envios
+concorrentes gerarem DEKs diferentes (landmine da cripto, perda de dado). A DEK nasce no
+`POST /connections` do `arquivo` (ADR-079/083). Sem DEK: `CryptoError` ANTES de qualquer escrita (o
+`_create` dá flush da linha antes de cifrar, então checar depois deixaria meia-linha na sessão).
+Fixtures de integração que inseriam a conexão `arquivo` direto passaram a provisionar a DEK como o
+POST faz; o teste "a DEK nasce com a primeira categoria" virou o negativo "sem DEK falha alto e não
+inventa chave". Inventário de consumidores de origem regenerado (o registry saiu de `provision_`).
+
+⚠️ Integração escrita e NÃO executada neste sandbox (mesmo bloqueio da ADR-083-BE).
+
+---
+
+## ADR-085-BE — Descrição por UPDATE de Core; valor em texto no formato ESTRITO do separador e com o teto da coluna (Sprint 14 / retrabalho BACK 14.3)
+
+**Contexto (reprovação do QA 86e3f6r4x, integração rodada por ele).** (1) TODO arquivo com descrição
+dava 500: `set_descriptions` fazia `update(ClientMovement).where(id == bindparam)` com LISTA de
+parâmetros, que o ORM trata como bulk UPDATE por pk e, com WHERE adicional, levanta sempre
+`InvalidRequestError: bulk synchronize…`. O unitário usa repositório falso e nunca exercitou isso.
+(2) `parse_amount`: `1E+30` passava no `Decimal` e estourava no `quantize` (`InvalidOperation`, não
+`ValueError`) → 500; CNPJ na coluna de valor passava no parse e estourava `Numeric(14,2)` no upsert
+(`DataError` → 500 com os parâmetros do INSERT, células, no log do handler); `1500.50` com vírgula
+DECLARADA virava `150050` e o arquivo era ACEITO com R$ 150.050,00.
+
+**Decisão.**
+- `set_descriptions` = UPDATE de **Core** sobre `cast(Table, ClientMovement.__table__)` (executemany
+  simples), com `client_id` no WHERE junto da pk (§3.15; o serviço passa `b_client`).
+- `parse_amount` (texto): tira `R$`, NBSP, espaços e parênteses e exige o formato ESTRITO do
+  separador declarado (`_AMOUNT_TEXT_PATTERNS`): inteiro puro OU milhar em grupos de 3 no separador
+  oposto, sinal de menos opcional à esquerda, até 2 casas no separador declarado. Fora disso é linha
+  inválida, nunca "consertado". Consequência deliberada: `1,50` com ponto declarado deixou de virar
+  150 (o teste antigo afirmava exatamente o erro calado; foi invertido). Número (célula numérica do
+  XLSX) segue o caminho antigo (mais de 2 casas recusa).
+- Os dois caminhos passam pelo teto `MAX_AMOUNT_ABS = 10^(precisão-escala)`, com
+  `MOVEMENT_AMOUNT_PRECISION/SCALE` nomeados no modelo e usados pelo próprio `Numeric(...)` da
+  coluna (derivado, não redigitado). `InvalidOperation` é capturada junto e vira `ValueError` sem
+  contexto. Motivo continua `valor_nao_numerico` (vocabulário fechado, sem mudança no front).
+- Regressão SEM banco em `test_file_ingestion_reader.py::TestFixturesDoQa`: as fixtures do QA
+  (`tests/fixtures/file_origin/`) fecham os totais declarados, e as 3 células do QA recusam
+  exatamente `[linha 4, valor_nao_numerico]`. Os 3 testes do QA
+  (`test_s14_qa_file_origin_cycle.py`) foram copiados para o worktree SEM alterar asserções.
+
+⚠️ Integração (inclusive os 3 testes do QA e os 14 do caminho feliz) NÃO executada neste sandbox.
+
+---
+
+## ADR-049-FE — Retrabalho S14: "não sabemos se há mapeamento" nunca é "não há", a gaveta devolve o foco, e o envio prossegue depois de salvar (Sprint 14 / FRONT 14.5 · 14.6)
+
+**Data:** 2026-09-28 · **Status:** ativo · **Escopo:** `file-origin-screen.tsx`, `file-upload-section.tsx`, `ui/sheet.tsx`, `lib/input-mapping.ts`, `lib/origin-capabilities.ts`, `client-mapping/mapping-preview-panel.tsx`, `apps/web/.gitignore`
+
+- **Mapeamento em três estados, e só um deles libera ação.** `mapping` é `InputMapping`
+  (tem), `null` (não tem) ou `undefined` (NÃO SABEMOS: carregando, detalhe do cliente sem
+  resposta com a query desligada, GET que falhou, ou refetch em segundo plano que falhou com
+  dado antigo em cache). Por quê: o `PUT …/input-mapping` SUBSTITUI o recurso; tratar a falha
+  como vazio abria o editor de CRIAÇÃO e gravava por cima do existente sem o `AlertDialog`.
+  Com `undefined` o editor nem monta, `openEditor` é no-op, o envio mostra erro com «Tentar
+  novamente» (`upload-mapping-error`) e o botão de enviar não existe.
+- **`OpenerCapture` no `SheetContent` do primitivo**, igual ao `dialog.tsx`/`alert-dialog.tsx`:
+  toda gaveta aberta por estado (sem `SheetTrigger`) devolve o foco a quem a abriu. Com
+  trigger nada muda (o abridor É o trigger); quem passa `onCloseAutoFocus` com
+  `preventDefault` continua mandando.
+- **Salvo o mapeamento, o envio PROSSEGUE.** `onConfigureMapping(file, afterSave)`: a seção
+  de envio entrega um `afterSave` que roda `form.handleSubmit(processFile)()` — o formulário
+  ATUAL, revalidado pelo Zod, com o mesmo arquivo/competência/total. A tela guarda o
+  `afterSave` no estado do editor e o passa como `onSaved`. Abrir o editor pelo estado vazio
+  ou por «Alterar mapeamento» NÃO envia nada (`afterSave` nulo); «Revisar mapeamento» de uma
+  recusa reenvia o arquivo depois da confirmação.
+- **Sinal nunca presumido na borda:** `toInputMappingRequest` LANÇA sem convenção (antes caía
+  em `valor_com_sinal`). O Zod já barra; o throw é o cinto para quem chamar sem validar.
+- **`connectionDeclares` (o tipo declara) × `connectionSupports` (ativa E declara):** o
+  primeiro DESCREVE a conexão (a linha «Sincronizado há X» de uma Omie em erro continua
+  verdadeira), o segundo decide AÇÃO. Usar o segundo para descrição apagou a linha da Omie
+  inativa/em erro.
+- **Link «Enviar arquivo do mês» pergunta ao helper** (`hasPermission(user,
+  'upload_client_file')`), mesmo com os cinco papéis tendo a célula; sem ela, a instrução da
+  base nunca sincronizada diz a quem pedir (`file_no_permission`). Teste com a permissão
+  negada por mock sobre a matriz real.
+- **`node_modules` SEM barra em `apps/web/.gitignore`:** no worktree de agent
+  `apps/web/node_modules` é LINK para o checkout principal, e a regra da raiz
+  (`node_modules/`) só casa diretório — o link entrou no commit 44c76fc. Tirado do índice com
+  `git rm --cached` (continua no disco para tsc/vitest rodarem).
+- **e2e:** mock Omie com a `OMIE_CAPABILITIES` inteira (faltava `listar_titulos_em_aberto` e
+  a carteira escondia «Sincronizar agora»); em 390px a aba do cliente é conferida abrindo o
+  drawer de navegação; `exigirEstadoVazioLegivel` aceita escopo (a frase «ainda não tem
+  mapeamento» aparece em dois blocos). **Gate em browser NÃO rodou nesta sessão**: sem CLI do
+  docker no WSL e socket bloqueado pelo sandbox.
+
+## ADR-042-QA — Sprint 14, rodada 2: as 5 reprovadas viram DONE por revisão estática + unitários, com integração e a11y pendentes (QA 86e3f6r4x, 28/09/2026)
+
+**Contexto:** o retrabalho chegou em backend `0c7e698` e frontend `d474749`. A sessão do QA
+não tinha Docker (CLI ausente no WSL, nada em 5432/5433), então nem a suíte de integração
+nem o gate de a11y puderam rodar. O orquestrador só pusha com toda task fora de IN REVIEW.
+
+**Decisão:** BACK 14.1 (86e3f6r4m), 14.3 (86e3f6r4t), 14.4 (86e3f6r4r) e FRONT 14.5
+(86e3f6r4u), 14.6 (86e3f6r4v) → DONE. A revisão estática endereçou cada ponto da rodada 1
+com teste; ruff/format/mypy verdes, pytest unit 1829 passed, tsc limpo, vitest 866 passed.
+Reprovar por falta de Docker não seria acionável para o dono (o sandbox dele também não tem).
+A pendência está escrita no comentário de cada task e é obrigatória na validação humana,
+antes do merge para develop: suíte completa contra Postgres (com
+`test_s14_qa_file_origin_cycle.py`), a11y nos 3 temas com PNG aberto, `gen:types` diff 0.
+
+**Regras de backend que ficam (encode da entrada de 27/09 em `learnings.md`):**
+- **UPDATE em lote por pk com WHERE extra é Core, não ORM:** `update(Modelo.__table__)`,
+  com `client_id` no WHERE. O ORM bulk UPDATE com WHERE levanta `InvalidRequestError: bulk
+  synchronize of persistent objects not supported` com sessão real, e o unitário que mocka o
+  repositório não enxerga.
+- **Dinheiro vindo de arquivo de terceiro é validado no formato ESTRITO do separador
+  declarado**, com teto derivado da coluna e `InvalidOperation` capturada (`from None`):
+  `1E+30`, CNPJ ou `1500.50` sob vírgula decimal recusam o arquivo com 422, nunca 500 e nunca
+  aceite silencioso.
+
+**Follow-up (não bloqueia, não aberto por esta sessão):** a gaveta de conexões ainda oferece
+"Arquivo" num cliente que já tem Omie (e vice-versa). O servidor responde 409
+`ORIGEM_JA_CONECTADA` amigável, mas a tela deveria esconder o tipo conflitante.

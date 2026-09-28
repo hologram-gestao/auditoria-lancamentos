@@ -643,6 +643,207 @@ class TestAlterarERemover:
         assert recriada.json()["data"]["id"] != connection_id
 
 
+class TestOrigemArquivo:
+    """Sprint 14 (BACK 14.1): o provedor `arquivo` — conexão SEM credencial."""
+
+    async def test_arquivo_sem_credencial_nasce_ativa_e_provisiona_a_dek(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        w = await _seed_world(db_session)
+        assert w.client.dek_wrapped is None
+        assert await _login_as(client_with_db, ADMIN_EMAIL) == 200
+
+        resp = await client_with_db.post(_base(w.client.id), json={"provider_type": "arquivo"})
+        assert resp.status_code == 201, resp.text
+        data = resp.json()["data"]
+        assert data["provider_type"] == "arquivo"
+        assert data["label"] == "Arquivo"
+        assert data["status"] == "ativa"
+        # Nominal de propósito: é o que a resposta promete ao front (o botão
+        # "Testar conexão" some pela capacidade).
+        assert data["capabilities"] == ["listar_lancamentos"]
+
+        connection = (await _connections_of(db_session, w.client.id))[0]
+        assert connection.credentials_encrypted is None
+        assert connection.credentials_iv is None
+
+        # §4.8: a DEK nasce na primeira conexão — inclusive na que não tem segredo.
+        await db_session.refresh(w.client)
+        assert w.client.dek_wrapped is not None
+
+        # O estado de origem do cliente deriva `ativa`.
+        detail = await client_with_db.get(f"/api/v1/clients/{w.client.id}")
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["origin_status"] == "ativa"
+
+    async def test_arquivo_com_credencial_e_400_generico(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        w = await _seed_world(db_session)
+        assert await _login_as(client_with_db, ADMIN_EMAIL) == 200
+        resp = await client_with_db.post(
+            _base(w.client.id),
+            json={"provider_type": "arquivo", "credentials": DEMO_CREDENTIALS},
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
+        assert await _connections_of(db_session, w.client.id) == []
+        await db_session.refresh(w.client)
+        assert w.client.dek_wrapped is None
+
+    async def test_omie_sem_credencial_e_400_generico(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        w = await _seed_world(db_session)
+        assert await _login_as(client_with_db, ADMIN_EMAIL) == 200
+        resp = await client_with_db.post(_base(w.client.id), json={"provider_type": "omie"})
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
+        assert await _connections_of(db_session, w.client.id) == []
+
+    async def test_testar_conexao_arquivo_e_409_capacidade_ausente(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        w = await _seed_world(db_session)
+        assert await _login_as(client_with_db, ADMIN_EMAIL) == 200
+        criada = await client_with_db.post(_base(w.client.id), json={"provider_type": "arquivo"})
+        assert criada.status_code == 201, criada.text
+        connection_id = criada.json()["data"]["id"]
+
+        resp = await client_with_db.post(f"{_base(w.client.id)}/{connection_id}/test")
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["error"]["code"] == "CAPACIDADE_AUSENTE"
+
+        # Nada mudou e nada foi auditado como teste: a ação não aconteceu.
+        connection = (await _connections_of(db_session, w.client.id))[0]
+        await db_session.refresh(connection)
+        assert connection.status == ConnectionStatus.ATIVA.value
+        assert [a.action for a in await _audited_conn_actions(db_session, w.client.id)] == [
+            "conn_create"
+        ]
+
+    async def test_patch_de_arquivo_com_credencial_e_400(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        w = await _seed_world(db_session)
+        assert await _login_as(client_with_db, ADMIN_EMAIL) == 200
+        criada = await client_with_db.post(_base(w.client.id), json={"provider_type": "arquivo"})
+        connection_id = criada.json()["data"]["id"]
+
+        resp = await client_with_db.patch(
+            f"{_base(w.client.id)}/{connection_id}", json={"credentials": DEMO_CREDENTIALS}
+        )
+        assert resp.status_code == 400, resp.text
+        connection = (await _connections_of(db_session, w.client.id))[0]
+        await db_session.refresh(connection)
+        assert connection.credentials_encrypted is None
+
+        renomeada = await client_with_db.patch(
+            f"{_base(w.client.id)}/{connection_id}", json={"label": "Planilha mensal"}
+        )
+        assert renomeada.status_code == 200, renomeada.text
+        assert renomeada.json()["data"]["label"] == "Planilha mensal"
+
+
+class TestUmaOrigemDeLancamentos:
+    """Retrabalho da 14.1 (ADR-083-BE): um cliente tem UM tipo de origem de lançamentos.
+
+    Misto (Omie + arquivo) fazia a seleção por capacidade escolher o arquivo pela
+    ordem `(provider_type, label)` — sync recusado num cliente Omie, conciliação
+    e plano de contas sem client do Omie.
+    """
+
+    async def test_omie_depois_arquivo_e_409_e_nada_grava(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        w = await _seed_world(db_session)
+        assert await _login_as(client_with_db, ADMIN_EMAIL) == 200
+        omie = await client_with_db.post(
+            _base(w.client.id), json={"provider_type": "omie", "credentials": DEMO_CREDENTIALS}
+        )
+        assert omie.status_code == 201, omie.text
+
+        resp = await client_with_db.post(_base(w.client.id), json={"provider_type": "arquivo"})
+        assert resp.status_code == 409, resp.text
+        body = resp.json()["error"]
+        assert body["code"] == "ORIGEM_JA_CONECTADA"
+        assert body["details"] == {
+            "existingConnectionId": omie.json()["data"]["id"],
+            "existingProviderType": "omie",
+        }
+        assert "Padaria" not in json.dumps(body)
+        assert [c.provider_type for c in await _connections_of(db_session, w.client.id)] == ["omie"]
+        assert [a.action for a in await _audited_conn_actions(db_session, w.client.id)] == [
+            "conn_create"
+        ]
+
+    async def test_arquivo_depois_omie_e_409(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        w = await _seed_world(db_session)
+        assert await _login_as(client_with_db, ADMIN_EMAIL) == 200
+        arquivo = await client_with_db.post(_base(w.client.id), json={"provider_type": "arquivo"})
+        assert arquivo.status_code == 201, arquivo.text
+
+        resp = await client_with_db.post(
+            _base(w.client.id), json={"provider_type": "omie", "credentials": DEMO_CREDENTIALS}
+        )
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["error"]["code"] == "ORIGEM_JA_CONECTADA"
+        assert resp.json()["error"]["details"]["existingProviderType"] == "arquivo"
+        assert len(await _connections_of(db_session, w.client.id)) == 1
+
+    async def test_omie_em_erro_tambem_bloqueia(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Qualquer estado conta: reconectar a Omie depois tornaria o cliente misto
+        sem passar pela criação."""
+        w = await _seed_world(db_session)
+        db_session.add(
+            ClientConnection(
+                client_id=w.client.id,
+                provider_type="omie",
+                label="Omie",
+                status=ConnectionStatus.ERRO.value,
+            )
+        )
+        await db_session.flush()
+        assert await _login_as(client_with_db, ADMIN_EMAIL) == 200
+
+        resp = await client_with_db.post(_base(w.client.id), json={"provider_type": "arquivo"})
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["error"]["code"] == "ORIGEM_JA_CONECTADA"
+
+    async def test_trocar_de_origem_e_remover_e_conectar(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        w = await _seed_world(db_session)
+        assert await _login_as(client_with_db, ADMIN_EMAIL) == 200
+        omie = await client_with_db.post(
+            _base(w.client.id), json={"provider_type": "omie", "credentials": DEMO_CREDENTIALS}
+        )
+        assert omie.status_code == 201, omie.text
+        apagada = await client_with_db.delete(f"{_base(w.client.id)}/{omie.json()['data']['id']}")
+        assert apagada.status_code == 200, apagada.text
+
+        resp = await client_with_db.post(_base(w.client.id), json={"provider_type": "arquivo"})
+        assert resp.status_code == 201, resp.text
+
+    async def test_segunda_arquivo_com_outro_rotulo_segue_valendo(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """A regra é por TIPO: duas do mesmo tipo seguem como na S9."""
+        w = await _seed_world(db_session)
+        assert await _login_as(client_with_db, ADMIN_EMAIL) == 200
+        primeira = await client_with_db.post(
+            _base(w.client.id), json={"provider_type": "arquivo", "label": "Matriz"}
+        )
+        segunda = await client_with_db.post(
+            _base(w.client.id), json={"provider_type": "arquivo", "label": "Filial"}
+        )
+        assert (primeira.status_code, segunda.status_code) == (201, 201), segunda.text
+
+
 class TestPermissaoETenant:
     async def test_operador_do_cliente_recebe_403_e_nada_e_criado(
         self, client_with_db: AsyncClient, db_session: AsyncSession

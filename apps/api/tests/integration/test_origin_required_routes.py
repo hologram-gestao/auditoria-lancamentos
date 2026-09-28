@@ -317,6 +317,100 @@ class TestCapacidadeAusente:
         assert resp.json()["error"]["code"] == "CAPACIDADE_AUSENTE"
 
 
+class TestClienteSoArquivo:
+    """S14 (retrabalho da 14.1, ADR-083-BE): origem `arquivo` e os consumidores do Omie.
+
+    `arquivo` declara `listar_lancamentos` (alimenta a base de movimentos), então
+    passa pela seleção por capacidade — mas não tem o client do ERP. Antes, a
+    criação da conciliação passava pelo portão, gravava a sessão e só falhava no
+    job; as outras rotas caíam num 400 genérico marcado `pragma: no cover`.
+    """
+
+    async def _cliente_so_arquivo(self, db: AsyncSession) -> tuple[User, Client]:
+        admin = await _seed_admin(db)
+        client = await _seed_client_sem_origem(db, admin)
+        db.add(
+            ClientConnection(
+                client_id=client.id,
+                provider_type=ProviderType.ARQUIVO.value,
+                label="Arquivo",
+                status=ConnectionStatus.ATIVA.value,
+            )
+        )
+        await db.flush()
+        return admin, client
+
+    async def test_criacao_de_conciliacao_e_409_antes_de_gravar_a_sessao(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        _, client = await self._cliente_so_arquivo(db_session)
+        assert await _login(client_with_db) == 200
+        antes = int(
+            (await db_session.execute(select(func.count(ReconciliationSession.id)))).scalar_one()
+        )
+
+        # Payload VÁLIDO: o 409 tem de vir do portão de origem, não da forma.
+        resp = await client_with_db.post(
+            "/api/v1/reconciliations",
+            json={
+                "client_id": str(client.id),
+                "omie_conta_id": 42,
+                "reference_month": "2026-04-01",
+                "date_tolerance_days": 3,
+                "file_hash": uuid4().hex + uuid4().hex,
+                "statement": {
+                    "bank_name": "Sicredi",
+                    "account_type": "checking",
+                    "period_start": "2026-04-01",
+                    "period_end": "2026-04-30",
+                    "opening_balance": "1000.00",
+                    "closing_balance": "900.00",
+                    "transactions": [
+                        {
+                            "date": "2026-04-02",
+                            "description": "Pagamento",
+                            "amount": "-100.00",
+                            "balance": "900.00",
+                        }
+                    ],
+                },
+            },
+        )
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["error"]["code"] == "CAPACIDADE_AUSENTE"
+        depois = int(
+            (await db_session.execute(select(func.count(ReconciliationSession.id)))).scalar_one()
+        )
+        assert depois == antes
+
+    async def test_sync_do_plano_de_contas_e_409_nao_400(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        _, client = await self._cliente_so_arquivo(db_session)
+        assert await _login(client_with_db) == 200
+
+        resp = await client_with_db.post(f"/api/v1/clients/{client.id}/chart-of-accounts/sync")
+        _assert_origin_409(resp)
+        assert resp.json()["error"]["code"] == "CAPACIDADE_AUSENTE"
+
+    async def test_revisao_e_export_de_sessao_antiga_sao_409(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Cliente que TROCOU de Omie para arquivo e tem conciliação antiga."""
+        admin, client = await self._cliente_so_arquivo(db_session)
+        sess = await _seed_session(db_session, client, admin)
+        assert await _login(client_with_db) == 200
+
+        disponiveis = await client_with_db.get(
+            f"/api/v1/reconciliations/{sess.id}/available-omie-entries"
+        )
+        _assert_origin_409(disponiveis)
+        assert disponiveis.json()["error"]["code"] == "CAPACIDADE_AUSENTE"
+        export = await client_with_db.post(f"/api/v1/reconciliations/{sess.id}/export")
+        _assert_origin_409(export)
+        assert export.json()["error"]["code"] == "CAPACIDADE_AUSENTE"
+
+
 class TestDetalheEhExcecao:
     async def test_detalhe_responde_200_sem_origem(
         self, client_with_db: AsyncClient, db_session: AsyncSession

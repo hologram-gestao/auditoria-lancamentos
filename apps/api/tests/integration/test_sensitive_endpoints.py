@@ -243,6 +243,35 @@ _BODIES: dict[str, dict[str, Any]] = {
         "competence": "2026-06",
         "previewToken": "0" * 64,
     },
+    # S14 (BACK 14.1) — mapeamento de entrada. Body VÁLIDO de propósito (ADR-012):
+    # um 400 de forma passaria sem nunca tocar a autorização.
+    "PUT /api/v1/clients/{client_id}/input-mapping": {
+        "fileFormat": "csv",
+        "csvDelimiter": ";",
+        "encoding": "utf-8",
+        "dateColumn": "Data",
+        "descriptionColumn": "Histórico",
+        "amountColumn": "Valor",
+        "dateFormat": "dd/mm/yyyy",
+        "decimalSeparator": ",",
+        "signConvention": "valor_com_sinal",
+    },
+}
+
+#: Upload VÁLIDO de propósito (ADR-012) para as rotas multipart da origem por
+#: arquivo (S14, BACK 14.3): um 400 de forma passaria sem nunca tocar a
+#: autorização. O conteúdo é anódino — o cliente alvo nem tem conexão `arquivo`,
+#: e quem tem de negar primeiro é o guard de tenant/organização sobre `client_id`.
+_CSV_DA_BATERIA = b"Data;Historico;Valor\n01/06/2026;bateria;-1,00\n"
+_MULTIPART: dict[str, tuple[dict[str, tuple[str, bytes, str]], dict[str, str]]] = {
+    "POST /api/v1/clients/{client_id}/file-origin/inspect": (
+        {"file": ("extrato.csv", _CSV_DA_BATERIA, "text/csv")},
+        {},
+    ),
+    "POST /api/v1/clients/{client_id}/file-origin/process": (
+        {"file": ("extrato.csv", _CSV_DA_BATERIA, "text/csv")},
+        {"competence": "2026-06"},
+    ),
 }
 
 #: Query string mínima por endpoint.
@@ -515,7 +544,14 @@ async def test_cross_tenant_por_endpoint(
     if raw_body is not None:
         body = _substitute_deep(raw_body, ctx)
 
-    resp = await client_with_db.request(endpoint.method, url, params=params or None, json=body)
+    multipart = _MULTIPART.get(endpoint.key)
+    if multipart is not None:
+        files, form = multipart
+        resp = await client_with_db.request(
+            endpoint.method, url, params=params or None, files=files, data=form or None
+        )
+    else:
+        resp = await client_with_db.request(endpoint.method, url, params=params or None, json=body)
 
     # Nunca vaza dado do tenant alvo nem do staff alheio — a asserção que vale para TODOS.
     assert SECRET_NAME_B not in resp.text, f"{endpoint.key} vazou dado do tenant B"

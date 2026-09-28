@@ -97,6 +97,18 @@ class UsageEventRepository:
             result = await self._session.execute(stmt)
             return len(result.scalars().all())
 
+    async def commit(self) -> None:
+        """Barreira de durabilidade para o evento que precede um `raise` (S14).
+
+        O `arquivo_processado` de uma RECUSA é gravado e, logo depois, o serviço
+        levanta o `AppError` que vira o 4xx — e o `get_db_session` de produção
+        responde a exceção com `rollback()`, que apagaria a linha (ADR-019-QA).
+        Mesmo molde de `test_connection` (marcação de erro + auditoria) e de
+        `mark_sync_failed` (ADR-065-BE): commit ANTES do raise. Quem decide
+        chamar é o emissor; o repositório só expõe a barreira.
+        """
+        await self._session.commit()
+
     async def get_session_client_id(self, session_id: UUID, *, user: CurrentUser) -> UUID | None:
         """`client_id` da sessão ATIVA, ou `None` se não existe/foi descartada.
 

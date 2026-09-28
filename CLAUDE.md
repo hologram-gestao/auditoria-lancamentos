@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 **S0–S19 + Sprints 0–5 do agents-hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **99/99** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **104/104** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
 > **O que cada sprint do agents-hub entregou** (todas na `main`):
 >
@@ -192,7 +192,7 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**99** hoje — o arquivo é a fonte, confira com
+      (**104** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant E cross-org**: a bateria
       (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
@@ -200,7 +200,7 @@
       organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
-      (`PENDING_ENDPOINTS` está vazio: cobertura **99/99**). As 3 rotas do
+      (`PENDING_ENDPOINTS` está vazio: cobertura **104/104**). As 3 rotas do
       **plano de contas** (S10) e as 3 da **carteira de títulos** (S11 — lista,
       agregados e sincronizar) e as 3 da S15 (relatório de recebíveis, leitura e
       registro do contexto do título) entraram como coleção; as 20 da S12 também:
@@ -209,7 +209,10 @@
       alvo atacado na bateria é de uma terceira org, porque o operador lê o
       catálogo da própria) e 11 do de-para (`/clients/{id}/mapping/{tipo}/…`), mais
       a lista de materializações do follow-up 86e3f0ux7, e a redefinição de senha pela
-      plataforma (`POST /users/{id}/password`, 86e3ewukz). Só
+      plataforma (`POST /users/{id}/password`, 86e3ewukz). As 5 da S14 (origem
+      por arquivo) também são coleção: leitura e escrita do mapeamento de entrada
+      (`GET`/`PUT /clients/{id}/input-mapping`) e as três do envio
+      (`POST /clients/{id}/file-origin/inspect` e `/process`, `GET …/imports`). Só
       auth, tipos de anomalia, `test-connection`, `alert-test` e as 5 rotas de
       `/organizations` (plataforma, sem dado de cliente) ficam fora, com motivo.
       Essa lista é o denominador da métrica de isolamento — endpoint fora dela é
@@ -280,7 +283,7 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    `[indecifrável]` + métrica `decrypt_failed` (não célula silenciosamente
    vazia sem sinal).
    **A fonte ÚNICA da lista são as constantes de AAD declaradas em
-   [apps/api/app/core/crypto_service.py](apps/api/app/core/crypto_service.py)** (13
+   [apps/api/app/core/crypto_service.py](apps/api/app/core/crypto_service.py)** (15
    hoje) — campo cifrado novo entra lá E aqui, na mesma entrega. Os pares
    (tabela, coluna) do AAD são **congelados**: renomear um invalida a decifragem de
    tudo que já foi gravado com ele. Campos:
@@ -301,6 +304,14 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    - `title_contexts.text_encrypted` (Sprint 15) — o texto livre do contexto do
      título (acordo, nota a cancelar, cobrança suspensa…), no molde do
      `user_note_encrypted`: é PII em potencial e nasce cifrado com a DEK do cliente.
+   - `client_file_categories.label_encrypted` (Sprint 14) — a grafia ORIGINAL da
+     categoria como veio na célula do arquivo do cliente sem ERP, no molde do
+     `client_glossary_entries.name_encrypted`: nome de categoria é dado do cliente
+     final (§4.5). O código da categoria é derivado e fica em claro.
+   - `client_movements.description_encrypted` (Sprint 14) — a descrição do
+     lançamento vindo do ARQUIVO, na base de movimentos. A linha vinda do Omie
+     continua sem texto livre (a base da S12 é só códigos); só a origem por
+     arquivo traz descrição, e ela nasce cifrada com a DEK do cliente.
 2. **IV novo a cada operação** (12 bytes aleatórios). Nunca reutilize.
 3. **Valores monetários em claro** (campos `amount`, `balance`) — são números sem identificação, sem valor isolado.
 4. **Datas em claro** (`transaction_date`, `reference_month`) — necessárias para SQL ordering/filtering.
@@ -372,6 +383,33 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
      construído à mão fora dele é defeito — foi assim que o "Testar conexão" da gaveta
      saía para a rede com a credencial de demonstração enquanto `POST /connections`
      com a mesma credencial nascia `ativa` (validação humana da S9, 23/09/2026).
+   - **Origem por ARQUIVO (Sprint 14): provedor `arquivo`, sem credencial.** É um
+     adaptador VAZIO (`integrations/providers/file_adapter.py`): quem lê é o envio
+     (`POST …/file-origin/process`), que converte as linhas pelo **mapeamento de
+     entrada** (`client_input_mappings`, um por cliente, coerência em CHECK no banco)
+     e grava na MESMA base de movimentos da S12 com `source_type=arquivo`.
+     Capacidades: **só `listar_lancamentos`** — sem `listar_contas` (o cache de contas
+     receberia `[]` como resposta), sem `verificar_credencial` (não há o que testar;
+     `/test` é 409 `CAPACIDADE_AUSENTE`), sem escrita. "Este tipo exige credencial?" é
+     UMA regra derivada da capacidade (`requires_credentials` em `registry.py`): `omie`
+     sem credencial e `arquivo` com credencial são o mesmo 400 genérico. A conexão
+     `arquivo` nasce `ativa` com o par cifrado nulo, e **a DEK é provisionada mesmo
+     sem segredo**, na criação da conexão: "a DEK nasce na primeira conexão" continua
+     valendo, e a descrição das linhas do arquivo é cifrada com ela (§4.1).
+   - **Um cliente, UM tipo de origem de lançamentos** (ADR-083-BE). Conectar um tipo
+     que lista lançamentos num cliente que já tem conexão de OUTRO tipo que também
+     lista (em qualquer estado, e a sintetizada do fallback legado conta) é 409
+     `ORIGEM_JA_CONECTADA`, sob `pg_advisory_xact_lock` por cliente; trocar de origem é
+     DELETE da existente + POST da nova. Sem isso a ordem alfabética (`arquivo` <
+     `omie`) fazia o cliente Omie virar "por arquivo" na seleção de conexão. Cliente
+     só-arquivo nos consumidores do Omie (conciliação, plano de contas,
+     `build_origin_client`) é 409 `CAPACIDADE_AUSENTE` ANTES de gravar qualquer coisa
+     (`assert_offers_origin_client`); `POST /movements/sync` nele é 409
+     `ORIGEM_POR_ARQUIVO` (sincronizar um adaptador vazio marcaria a base inteira como
+     ausente). As recusas do arquivo (`CABECALHO_DIVERGENTE`, `LINHAS_INVALIDAS`,
+     `TOTAL_DIVERGENTE`, `FORMATO_NAO_SUPORTADO`, `ARQUIVO_INVALIDO`) são 422 tipados
+     e não gravam movimento nenhum; o mesmo arquivo duas vezes é 409
+     `ARQUIVO_JA_PROCESSADO`.
    - **Credencial no `PATCH /clients/{id}` é 422 `CREDENTIALS_MOVED`**, um `AppError`
      próprio cuja `userMessage` aponta as rotas de conexão. Não é validador Pydantic:
      `ValueError` de validador vira o **400 `VALIDATION_ERROR` genérico** do handler
@@ -392,7 +430,7 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
 9. **Matriz de permissões (Sprint 5 + camada de organizações):** declarativa e
    ÚNICA em `PERMISSION_MATRIX`
    ([apps/api/app/core/authz.py](apps/api/app/core/authz.py)), consultada por
-   `has_permission`; 24 permissões x 5 papéis, transcrita célula a célula em
+   `has_permission`; 26 permissões x 5 papéis, transcrita célula a célula em
    `tests/unit/test_authz_matrix.py`, com um teste que trava **a plataforma em
    toda linha**. No front, o espelho é `apps/web/src/lib/authz.ts` — **um**
    helper, nunca `if (role === ...)` espalhado por componente — com a mesma
@@ -429,6 +467,8 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    | Editar o de-para (S12)          | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
    | Catálogo de destinos (escrita)  | ✅             | ✅ (própria org) | ❌                    | ❌             | ❌              |
    | Redefinir senha de usuário      | ✅             | ❌               | ❌                    | ❌             | ❌              |
+   | Enviar arquivo do cliente (S14) | ✅             | ✅               | ✅ (carteira)         | ✅             | ✅              |
+   | Configurar mapeamento (S14)     | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
 
    **`manage_client_connections` (Sprint 9) inclui o `manager` de propósito**: ele
    cria cliente, e sem a célula o gerente do escritório parceiro cadastraria a
@@ -477,6 +517,18 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    tipado: esse é o fluxo da troca da própria senha, 86e2n39hg, que pede a senha atual).
    O mínimo da senha é o do TIPO do alvo (8 staff, 10 usuário de cliente), das mesmas
    constantes da criação. Redefinir derruba as sessões abertas do alvo (§3.12).
+
+   **As duas da Sprint 14 (origem por arquivo) também são próprias.**
+   `upload_client_file` é dos 5 papéis: mandar a planilha do mês é o dia a dia de
+   quem opera o cliente, inclusive o `client_operator`. `manage_input_mapping` sai
+   do `client_operator` e só dele: o mapeamento decide como TODOS os próximos
+   arquivos serão lidos (qual coluna é valor, qual é categoria, qual a convenção de
+   sinal). Nenhuma reusa `manage_client_mapping` nem `sync_client_movements`:
+   enviar e configurar são células diferentes, e amarrá-las a uma decisão existente
+   faria a mudança de uma arrastar a outra (ADR-079-BE). A LEITURA do mapeamento e
+   da lista de importações não pede permissão (`AccessibleClientDep`), como o de-para.
+   O par de teste é o mesmo desenho da S10: o operador envia 200 e configura 403
+   (com linha `denied` em `access_audit`).
 
    "(carteira)" e "(própria org)" **não** são células: são `resolve_client_access`
    e os filtros de coleção. **Tipos de anomalia é a única linha só-plataforma
@@ -532,7 +584,12 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
       explicitamente no purge; a **base de movimentos** e as **decisões do de-para**
       (S12) saem também (são configuração/insumo), mas as **materializações do
       de-para FICAM**, só-leitura — são "o que aconteceu", com itens em snapshot de
-      códigos e valores, sem FK para a base (ADR-074-BE);
+      códigos e valores, sem FK para a base (ADR-074-BE); da origem por arquivo
+      (S14) saem o **mapeamento de entrada**, as **categorias do arquivo** (o
+      rótulo cifrado já morreu com a DEK, como o glossário) e o **registro das
+      importações** (os movimentos que elas geraram já saem com a base) —
+      mapeamento e importações têm autoria RESTRICT para `users`, então a exclusão
+      definitiva os apaga ANTES dos usuários do tenant;
       conciliações, valores, datas,
       categoria e carteira FICAM, só-leitura.
     - **Encerrado é TERMINAL**: cliente que volta é cadastro novo. Toda escrita
@@ -688,6 +745,16 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
 - **Teste de integração que não rodou não é verde.** Sem Postgres no sandbox, o HANDOFF diz
   "escrito e NÃO executado" e o QA roda (receita no ADR-032-QA). Releitura em teste async:
   `execution_options(populate_existing=True)` ou `refresh(obj)`, nunca `expire_all()`.
+- **UPDATE em lote por pk com WHERE extra é Core, não ORM** (Sprint 14, ADR-042-QA):
+  `update(Modelo.__table__)` com `client_id` no WHERE. O ORM bulk UPDATE com WHERE levanta
+  `InvalidRequestError: bulk synchronize of persistent objects not supported` com sessão
+  real, e o unitário que mocka o repositório não enxerga: foi um 500 em TODO envio de arquivo.
+- **Dinheiro vindo de arquivo de terceiro é validado no formato ESTRITO do separador
+  declarado**, com teto derivado da coluna e `InvalidOperation` capturada `from None`:
+  `1E+30`, CNPJ ou `1500.50` sob vírgula decimal recusam o arquivo com 422, nunca 500 e
+  nunca aceite silencioso (o `1500.50` virava R$ 150.050,00).
+- **Log da aplicação se afirma com `structlog.testing.capture_logs`, não com `caplog`**: o
+  `caplog` não vê o structlog, e o teste "nada de PII no log" passa vazio.
 
 ### Frontend
 
@@ -785,21 +852,22 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
 Rodadas pelo orquestrador multi-agente; o escopo de cada uma vive no **Doc do
 ClickUp**, não no repo. `make sprints` lista o estado.
 
-| Sprint | Foco                                       | Deixou no código                                                                                                                                                           |
-| ------ | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **0**  | Estabilização                              | —                                                                                                                                                                          |
-| **1**  | Fatura de cartão + conta aplicação         | `account_type`, `DATE_DIVERGENCE_RANGE`                                                                                                                                    |
-| **2**  | Parsing sem perda silenciosa               | CSV grande, XLSX completo                                                                                                                                                  |
-| **3**  | Cripto por cliente, auditoria, alerta      | `clients.dek_wrapped`, `access_audit`, `core/kms.py`                                                                                                                       |
-| **4**  | Lista, gaveta, multi-arquivo, notificações | `reconciliation_files`, `usage_events`, `notifications`                                                                                                                    |
-| **5**  | Multi-tenancy e papéis de cliente          | `users.scope`/`client_id`, `core/authz.py`, `core/sensitive_endpoints.py`                                                                                                  |
-| **6**  | Glossário e classificação por cliente      | `client_glossary_entries`, `clients.glossary_version`, `review_verdict`                                                                                                    |
-| **7**  | Lançamento de faturas no Omie              | `reconciliation_omie_postings`, `omie_posting/`, `OMIE_POSTING_ENABLED`                                                                                                    |
-| **9**  | Cliente sem sistema e conexões plugáveis   | `client_connections`, `integrations/providers/`, `legacy_fallback.py`                                                                                                      |
-| **10** | Plano de contas do cliente                 | `client_chart_of_accounts`, `modules/client_chart_of_accounts/`, `clients.chart_of_accounts_synced_at`                                                                     |
-| **11** | Carteira de títulos em aberto              | `client_titles`, `modules/client_titles/`, `clients.titles_synced_at`/`titles_sync_failed_at`                                                                              |
-| **12** | De-para multi-destino                      | `client_movements`/`client_movement_syncs`, `mapping_destinations`/`mapping_targets`, `client_mapping_decisions`, `client_mapping_materializations(_items)`, aba "De-para" |
-| **15** | Contexto do título: acordo × inadimplência | `title_contexts`, rotas `/titles/{id}/context` e `/titles/receivables-report`, aba "Relatório de recebíveis"                                                               |
+| Sprint | Foco                                       | Deixou no código                                                                                                                                                                      |
+| ------ | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **0**  | Estabilização                              | —                                                                                                                                                                                     |
+| **1**  | Fatura de cartão + conta aplicação         | `account_type`, `DATE_DIVERGENCE_RANGE`                                                                                                                                               |
+| **2**  | Parsing sem perda silenciosa               | CSV grande, XLSX completo                                                                                                                                                             |
+| **3**  | Cripto por cliente, auditoria, alerta      | `clients.dek_wrapped`, `access_audit`, `core/kms.py`                                                                                                                                  |
+| **4**  | Lista, gaveta, multi-arquivo, notificações | `reconciliation_files`, `usage_events`, `notifications`                                                                                                                               |
+| **5**  | Multi-tenancy e papéis de cliente          | `users.scope`/`client_id`, `core/authz.py`, `core/sensitive_endpoints.py`                                                                                                             |
+| **6**  | Glossário e classificação por cliente      | `client_glossary_entries`, `clients.glossary_version`, `review_verdict`                                                                                                               |
+| **7**  | Lançamento de faturas no Omie              | `reconciliation_omie_postings`, `omie_posting/`, `OMIE_POSTING_ENABLED`                                                                                                               |
+| **9**  | Cliente sem sistema e conexões plugáveis   | `client_connections`, `integrations/providers/`, `legacy_fallback.py`                                                                                                                 |
+| **10** | Plano de contas do cliente                 | `client_chart_of_accounts`, `modules/client_chart_of_accounts/`, `clients.chart_of_accounts_synced_at`                                                                                |
+| **11** | Carteira de títulos em aberto              | `client_titles`, `modules/client_titles/`, `clients.titles_synced_at`/`titles_sync_failed_at`                                                                                         |
+| **12** | De-para multi-destino                      | `client_movements`/`client_movement_syncs`, `mapping_destinations`/`mapping_targets`, `client_mapping_decisions`, `client_mapping_materializations(_items)`, aba "De-para"            |
+| **14** | Origem por arquivo (cliente sem ERP)       | provedor `arquivo` (`file_adapter.py`), `client_input_mappings`, `client_file_categories`, `client_file_imports`, `client_movements.description_encrypted`, rota "Origem por arquivo" |
+| **15** | Contexto do título: acordo × inadimplência | `title_contexts`, rotas `/titles/{id}/context` e `/titles/receivables-report`, aba "Relatório de recebíveis"                                                                          |
 
 **A Sprint 12 (de-para multi-destino)** criou a peça central da plataforma: a decisão
 `(cliente, tipo de origem, categoria, destino) → alvo`, em que a MESMA categoria vai para
@@ -807,7 +875,8 @@ destinos diferentes (ex.: transferência entre contas próprias é `nao_mapear` 
 demonstrativo e alvo real no fluxo de caixa). O que vale como lei, não como detalhe:
 
 - **a base é `client_movements` (R0)**, agnóstica de origem e só com CÓDIGOS (nenhum nome
-  nem texto livre), sincronizada por competência (`POST /clients/{id}/movements/sync`),
+  nem texto livre; a exceção é a linha vinda de ARQUIVO na S14, que traz a descrição
+  cifrada com a DEK do cliente, §4.1), sincronizada por competência (`POST /clients/{id}/movements/sync`),
   num ciclo que nunca apaga (`ausente_na_origem`); o de-para NUNCA lê as divergências da
   conciliação nem a origem ao vivo. A S14 alimenta a MESMA tabela com `source_type=arquivo`;
 - **`tipo de origem` é o tipo do provedor**, nunca FK de conexão: recriar a conexão não
@@ -829,6 +898,37 @@ seguem **13** (nenhum campo cifrado nasceu: a base só guarda códigos). O QA re
 das 7 tasks na rodada 1 (testes de integração nunca rodados e quatro caminhos para 500,
 ADR-039-QA) e aprovou as 7 na re-revisão de 26/09, com a suíte completa contra Postgres
 verde (2898 passed; ADR-040-QA). As lições viraram regra na §7 Backend.
+
+**A Sprint 14 (origem por arquivo)** atende o cliente que NÃO tem ERP: a planilha ou o
+extrato do mês entra pela tela "Origem por arquivo", é lido por um **mapeamento de
+entrada** declarado uma vez (qual coluna é data, descrição, valor e categoria; formato;
+convenção de sinal, nunca inferida) e vira linhas da MESMA base de movimentos da S12, com
+`source_type=arquivo`. A partir dali o cliente arquivo passa pelo de-para e pela
+materialização sem nenhum caminho especial. O que vale como lei:
+
+- **o arquivo entra INTEIRO ou não entra**: cabeçalho que não bate, linha inválida ou
+  total declarado divergente são 422 tipados, com o motivo acionável na resposta (colunas
+  ausentes, linha × motivo de vocabulário fechado, nunca a célula) e nenhum movimento
+  gravado; o mesmo arquivo na mesma competência é 409; um arquivo CORRIGIDO na mesma
+  competência substitui, e as linhas do anterior viram `ausente_na_origem`;
+- **a categoria de origem do arquivo é a grafia da célula**, cifrada
+  (`client_file_categories`), com código derivado e estável por cliente: `Despesas
+Bancárias` e `Despesas bancárias` são DUAS categorias, de propósito: a ingestão não
+  funde grafias, e cada uma recebe a própria decisão no de-para;
+- **um cliente, um tipo de origem de lançamentos** (§4.8), e as telas escondem pela
+  CAPACIDADE (`lib/origin-capabilities.ts`), nunca por `provider_type === 'arquivo'`;
+- a métrica é `fechamento_produzido{tipo_origem}` (uma linha por competência
+  materializada) e a instrumentação da ingestão é `arquivo_processado` (seis chaves, só
+  IDs, contagens e um motivo fechado; nunca nome de coluna nem conteúdo de célula).
+
+Números deste primer: endpoints sensíveis 99 → **104**, matriz 24 → **26**, pares de AAD
+13 → **15**. O QA reprovou 5 das 6 tasks na rodada 1 (um 500 em TODO envio de arquivo,
+invisível ao unitário; ADR-041-QA) e aprovou na rodada 2 SEM Docker, por revisão estática
+e unitários (ADR-042-QA). A validação humana (86e3fcp76, 28/09/2026) rodou fora do sandbox
+o que faltava: suíte completa contra Postgres, gate de a11y nos três temas, contrato,
+ciclo das migrations e o cenário de ponta a ponta pela API e pela tela, e o produto
+passou (3402 verdes contra Postgres, 448 por tema no a11y, 73 verificações de API). O que
+ela corrigiu foi o primer, apagado pelo commit do QA como na S15.
 
 ✅ **A Sprint 15 (contexto do título) foi validada em 24/09/2026 à noite** (PR #203
 da sprint, correções da validação em `fix/S15-validation-findings`). Ela pendura no
@@ -1008,6 +1108,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.56 — 28/09/2026. **A Sprint 14 (origem por arquivo) entrou no primer, e o primer foi restaurado no PR dela.** O commit do QA (`fe7c4bc`) levou o `CLAUDE.md` do worktree, que é o prompt do papel QA, por cima do primer (+80/−1110 no PR #231), a mesma falha da Sprint 15; e as edições que o QA disse ter feito no `PROJECT.md` nunca existiram (a sessão dele teve a edição negada, o texto ficou no `HANDOFF.md`). A validação humana (86e3fcp76) restaurou o primer da `develop` e aplicou à mão: §3.15 com a lista canônica em **104** (as 5 rotas do mapeamento de entrada e do envio), §4.1 com os pares de AAD em **15** (`client_file_categories.label_encrypted`, `client_movements.description_encrypted`), §4.8 com a origem `arquivo` (adaptador vazio, sem credencial, só `listar_lancamentos`, DEK provisionada na criação da conexão) e a regra "um cliente, um tipo de origem de lançamentos" (409 `ORIGEM_JA_CONECTADA`; só-arquivo nos consumidores do Omie é 409 `CAPACIDADE_AUSENTE` antes de gravar), §4.9 com a matriz em **26** (`upload_client_file` para os 5 papéis, `manage_input_mapping` sem o `client_operator`, e por que são próprias), §4.12 com o purge do mapeamento, das categorias do arquivo e das importações, três regras na §7 Backend (UPDATE em lote com WHERE extra é Core; dinheiro de arquivo de terceiro no formato estrito do separador; log se afirma com `capture_logs`), e a linha e o parágrafo da S14 na §8. Todo número foi conferido por comando no HEAD da branch. O resto da validação rodou fora do sandbox e passou: pytest completo com `--cov` contra Postgres (3402 passed, os 3 ambientais de alerting, 87%), a11y nos três temas (448 cada, depois de repetir o Hologram sozinho: na primeira rodada, com a máquina em load 30, 6 cenários ANTIGOS estouraram `newPage`), contrato com diff 0, ciclo das 3 migrations num banco limpo, e o cenário de ponta a ponta pela API (73 verificações) e pela tela. **Regra que fica:** rodada de a11y e suíte do backend ao mesmo tempo, na mesma máquina, produz falha de timeout que parece regressão; confira a carga antes de ler o vermelho, e repita sozinho antes de concluir qualquer coisa._
 
 _Versão 1.55 — 28/09/2026. **A linha de saldo do extrato tem DUAS formas, e a conta corrente usa a natureza `P`/`R` do cartão.** Cinco conciliações do Laticínio (BB CC, janeiro/2026) caíram em `INTERNAL_ERROR` com o mesmo `ValidationError`: na conta corrente a Omie devolve a linha "SALDO ANTERIOR"/"SALDO" COM `nCodLancamento` — um contador 1, 2, 3…, não um ID —, e o filtro de `listar_extrato` só descartava linha SEM `nCodLancamento` (forma do cartão e do caso Austral). "Tentar novamente" não resolvia: a Omie devolve sempre a mesma linha. O critério virou `is_extrato_summary_row` (sem `cNatureza` e valor zero), único, usado por produção e pelo gate de fixtures; linha sem natureza e COM valor segue falhando alto, porque descartá-la calada sumiria com um lançamento real. A captura (só leitura, 28/09) entrou anonimizada como `listar_extrato_conta_corrente.response.json` e mostrou a segunda descoberta: a conta CORRENTE também vem `P`/`R` com valor já sinalizado (113/113), e não `D`/`C` absoluto como a doc diz — o `signed_amount` já estava certo, a §5 e a skill `omie` estavam erradas. A correção vale para os quatro consumidores do extrato (processamento, cache da revisão, sync de movimentos da S12, reconciliação do posting)._
 

@@ -450,7 +450,7 @@ export interface paths {
         /** Lista as origens de dado conectadas ao cliente (0..N). Visível a todo papel com acesso ao cliente — inclusive o operador, que precisa ver se a origem está ativa antes de rodar uma conciliação. Cada item traz `capabilities`, o que aquele tipo de origem sabe fazer (verificar credencial, listar contas, listar lançamentos, escrever) — é por esse campo que a tela decide o que oferecer, em vez de tentar e receber 409. Nenhuma credencial aparece na resposta, nem mascarada. Origem de outro cliente nunca aparece. */
         get: operations["list_connections_api_v1_clients__client_id__connections_get"];
         put?: never;
-        /** Conecta uma origem ao cliente. Requer a permissão `manage_client_connections` (plataforma, admin ou gerente da carteira) — papéis de cliente recebem 403, e cliente encerrado recebe 409. A credencial é **verificada contra o provedor ANTES de qualquer escrita**: recusada, nenhuma linha nasce. Aceita mais de uma origem do mesmo tipo no mesmo cliente, distinguidas pelo `label`; omitir o rótulo usa o padrão do tipo apenas na primeira conexão daquele tipo. Tipo e rótulo já existentes devolvem 409 com `details.existingConnectionId`. Rótulo vazio e tipo desconhecido são 422. */
+        /** Conecta uma origem ao cliente. Requer a permissão `manage_client_connections` (plataforma, admin ou gerente da carteira) — papéis de cliente recebem 403, e cliente encerrado recebe 409. A credencial é **verificada contra o provedor ANTES de qualquer escrita**: recusada, nenhuma linha nasce. Aceita mais de uma origem do mesmo tipo no mesmo cliente, distinguidas pelo `label`; omitir o rótulo usa o padrão do tipo apenas na primeira conexão daquele tipo. Tipo e rótulo já existentes devolvem 409 com `details.existingConnectionId`. Rótulo vazio e tipo desconhecido são 400. Tipo `arquivo` (Sprint 14: a planilha/extrato do cliente) NÃO leva `credentials` — a conexão nasce ativa sem segredo e a DEK do cliente é provisionada; `arquivo` com credencial e `omie` sem credencial são 400 `VALIDATION_ERROR`. */
         post: operations["create_connection_api_v1_clients__client_id__connections_post"];
         delete?: never;
         options?: never;
@@ -467,7 +467,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Reverifica a credencial JÁ GRAVADA desta origem contra o provedor. Requer a permissão `manage_client_connections`; cliente encerrado recebe 409. Sucesso marca a conexão como ativa e carimba a verificação; credencial recusada marca como `erro` **sem apagar a credencial** (recusada não é perdida — basta atualizar). Provedor fora do ar ou lento devolve 5xx e não muda o estado da conexão: é transitório. Origem de outro cliente devolve 404. */
+        /** Reverifica a credencial JÁ GRAVADA desta origem contra o provedor. Requer a permissão `manage_client_connections`; cliente encerrado recebe 409. Sucesso marca a conexão como ativa e carimba a verificação; credencial recusada marca como `erro` **sem apagar a credencial** (recusada não é perdida — basta atualizar). Provedor fora do ar ou lento devolve 5xx e não muda o estado da conexão: é transitório. Origem sem credencial (`arquivo`) devolve 409 `CAPACIDADE_AUSENTE`: não há o que testar. Origem de outro cliente devolve 404. */
         post: operations["test_connection_api_v1_clients__client_id__connections__connection_id__test_post"];
         delete?: never;
         options?: never;
@@ -491,6 +491,75 @@ export interface paths {
         head?: never;
         /** Renomeia a origem e/ou troca as credenciais dela. Requer a permissão `manage_client_connections`; cliente encerrado recebe 409. Os dois campos são independentes: dá para renomear sem mexer na credencial e vice-versa, mas o corpo vazio é 422. Credencial nova é verificada contra o provedor antes de substituir a antiga — recusada, nada muda. Rótulo que colida com outra origem do mesmo tipo devolve 409 com `details.existingConnectionId`. Origem de outro cliente devolve 404. */
         patch: operations["update_connection_api_v1_clients__client_id__connections__connection_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/input-mapping": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** O mapeamento de entrada do arquivo deste cliente — qual coluna é data, descrição, valor, categoria, conta e documento, o formato (CSV/XLSX), o delimitador e a codificação do CSV, o formato de data, o separador decimal e a convenção de sinal. Visível a todo papel com acesso ao cliente, inclusive o operador (ele precisa ver o resumo do que será aplicado antes de enviar). Cliente sem mapeamento responde 200 com `mapping: null` — é estado normal, e a tela conduz a criação a partir dele; nunca 404. Cliente encerrado continua legível. */
+        get: operations["get_input_mapping_api_v1_clients__client_id__input_mapping_get"];
+        /** Declara ou SUBSTITUI o mapeamento de entrada do cliente (um por cliente; configuração, não vigência — alterá-lo muda como TODOS os próximos arquivos serão lidos, e a tela pede confirmação explícita). Requer a permissão `manage_input_mapping` (plataforma, admin, gerente da carteira e gerente do cliente; o operador do cliente recebe 403 e a negação fica na trilha). Tudo é DECLARADO, nada é inferido: a convenção de sinal é obrigatória, e os campos exigidos por cada convenção (`valor_com_sinal`: só a coluna de valor; `coluna_natureza`: coluna de valor + coluna de natureza + literais de débito e crédito; `colunas_separadas`: colunas de débito e de crédito, SEM coluna de valor) são verificados na borda e no banco. CSV exige delimitador e codificação; XLSX não os aceita. Forma inválida: 400 `VALIDATION_ERROR`. Cliente encerrado: 409. `created` diz se o cliente não tinha mapeamento (`true`) ou se o anterior foi substituído (`false`). */
+        put: operations["put_input_mapping_api_v1_clients__client_id__input_mapping_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/file-origin/inspect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Inspeciona o arquivo (CSV ou XLSX) de um cliente com origem por arquivo: devolve o formato detectado, as colunas do cabeçalho e uma amostra das primeiras linhas, para a pessoa confirmar o mapeamento salvo ou criar um. NADA é persistido nem logado — a amostra só existe nesta resposta. Requer a permissão `upload_client_file` (os 5 papéis) e conexão `arquivo` ativa (409 `SEM_CONEXAO`, `ORIGEM_COM_ERRO` ou `CAPACIDADE_AUSENTE`). Sem mapeamento salvo, o CSV é lido com `csvDelimiter`/`encoding` do pedido (padrão `;` e `utf-8-sig`) — declarados, nunca farejados. PDF e XLS: 422 `FORMATO_NAO_SUPORTADO`; arquivo que não abre: 422 `ARQUIVO_INVALIDO`. */
+        post: operations["inspect_file_api_v1_clients__client_id__file_origin_inspect_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/file-origin/process": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Processa o arquivo do mês de um cliente com origem por arquivo, aplicando o mapeamento salvo SEM interação: cada linha vira um movimento da base (`source_type=arquivo`, competência informada), com a descrição cifrada pela chave do cliente e a categoria de origem registrada (grafia preservada). Ou o arquivo entra INTEIRO, ou nada entra. Requer `upload_client_file` (os 5 papéis); cliente encerrado: 409. Recusas, na ordem: conexão arquivo (409 da taxonomia), 409 `SEM_MAPEAMENTO` (com `details.foundColumns`), 409 `SINAL_NAO_DECLARADO`, 422 `FORMATO_NAO_SUPORTADO`, 409 `ARQUIVO_JA_PROCESSADO` (mesmo arquivo na mesma competência — UNIQUE no banco), 422 `CABECALHO_DIVERGENTE` (antes de ler a 1ª linha; `details.missingColumns`/`foundColumns`), 422 `LINHAS_INVALIDAS` (`details.lines=[{line, reason}]`, motivo de vocabulário fechado, nunca a célula), 422 `TOTAL_DIVERGENTE` (quando `declaredTotal` vier e diferir da soma com sinal), 422 `ARQUIVO_INVALIDO` (não abre/não itera, mensagem fixa). Arquivo corrigido (conteúdo diferente) na mesma competência é aceito: as linhas do anterior viram `ausente_na_origem`. Competência (`YYYY-MM`) e total malformados: 400. */
+        post: operations["process_file_api_v1_clients__client_id__file_origin_process_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/file-origin/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista os arquivos processados do cliente (todas as competências ou uma, com `?competence=YYYY-MM`): competência, linhas que viraram movimento, hash do conteúdo, data e autor (mascarado por escopo — usuário de cliente vê 'Equipe' para autor de staff). Não pede permissão além de alcançar o cliente; cliente encerrado continua legível. Competência malformada: 400. */
+        get: operations["list_file_imports_api_v1_clients__client_id__file_origin_imports_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/clients/{client_id}/chart-of-accounts": {
@@ -2105,6 +2174,16 @@ export interface components {
              */
             confirmRetroactive: boolean;
         };
+        /** Body_inspect_file_api_v1_clients__client_id__file_origin_inspect_post */
+        Body_inspect_file_api_v1_clients__client_id__file_origin_inspect_post: {
+            /**
+             * File
+             * @description CSV ou XLSX.
+             */
+            file: string;
+            csvDelimiter?: components["schemas"]["CsvDelimiter"] | null;
+            encoding?: components["schemas"]["InputEncoding"] | null;
+        };
         /** Body_parse_statement_api_v1_reconciliations_parse_post */
         Body_parse_statement_api_v1_reconciliations_parse_post: {
             /**
@@ -2132,6 +2211,24 @@ export interface components {
              */
             effectiveFrom?: string | null;
         };
+        /** Body_process_file_api_v1_clients__client_id__file_origin_process_post */
+        Body_process_file_api_v1_clients__client_id__file_origin_process_post: {
+            /**
+             * File
+             * @description CSV ou XLSX no formato do mapeamento.
+             */
+            file: string;
+            /**
+             * Competence
+             * @description Competência do arquivo, `YYYY-MM`.
+             */
+            competence: string;
+            /**
+             * Declaredtotal
+             * @description Total informado pela pessoa (soma algébrica dos valores com sinal, até 2 casas, vírgula ou ponto). Se vier e diferir da soma do arquivo, o envio é recusado — mesma disciplina de fechamento da conciliação.
+             */
+            declaredTotal?: string | null;
+        };
         /**
          * Capability
          * @description O que uma origem sabe fazer — enum FECHADO.
@@ -2142,6 +2239,18 @@ export interface components {
          * @enum {string}
          */
         Capability: "verificar_credencial" | "listar_contas" | "listar_lancamentos" | "escrever" | "listar_titulos_em_aberto";
+        /**
+         * CategoryMode
+         * @description De onde sai a categoria de origem — fonte ÚNICA do CHECK `category_mode`.
+         *
+         *     `coluna_categoria`: a coluna apontada JÁ é a categoria do cliente.
+         *     `classificacao_livre`: a coluna apontada é texto de classificação livre (R4 —
+         *     "arquivo sem coluna de categoria não fica sem saída"): cada valor distinto vira
+         *     uma categoria de origem. O registry (14.4) é agnóstico a este modo; quem
+         *     escolhe a coluna é este mapeamento, quem lê é o 14.3.
+         * @enum {string}
+         */
+        CategoryMode: "coluna_categoria" | "classificacao_livre";
         /**
          * ChartOfAccountEntryResponse
          * @description Uma linha do plano de contas, como a API a devolve.
@@ -2994,21 +3103,21 @@ export interface components {
         CreateConnectionRequest: {
             /**
              * Provider Type
-             * @description Tipo da origem. Hoje só `omie`; tipo desconhecido é 422.
+             * @description Tipo da origem: `omie` (ERP, com credencial) ou `arquivo` (planilha/extrato do cliente, SEM credencial — Sprint 14). Tipo desconhecido é 400.
              */
             provider_type: string;
             /**
              * Label
-             * @description Como chamar esta origem. Omitir usa o rótulo padrão do tipo quando o cliente ainda não tem conexão daquele tipo; a partir da segunda, é obrigatório. Só-espaços é 422.
+             * @description Como chamar esta origem. Omitir usa o rótulo padrão do tipo quando o cliente ainda não tem conexão daquele tipo; a partir da segunda, é obrigatório. Só-espaços é 400.
              */
             label?: string | null;
             /**
              * Credentials
-             * @description Credenciais do provedor. Para o Omie: `app_key` e `app_secret` — as chaves aceitas são as do adaptador (`OMIE_CREDENTIAL_KEYS`), em snake_case, e chave faltando é 422.
+             * @description Credenciais do provedor. Para o Omie: `app_key` e `app_secret` — as chaves aceitas são as do adaptador (`OMIE_CREDENTIAL_KEYS`), em snake_case, e chave faltando é 400. OBRIGATÓRIO para tipo com credencial (`omie`) e PROIBIDO para `arquivo`: os dois desvios são 400 `VALIDATION_ERROR` (validação de forma, §4.8).
              */
-            credentials: {
+            credentials?: {
                 [key: string]: string;
-            };
+            } | null;
         };
         /**
          * CreateGlossaryEntryRequest
@@ -3129,6 +3238,21 @@ export interface components {
              */
             organization_id?: string | null;
         };
+        /**
+         * CsvDelimiter
+         * @description Delimitador do CSV, DECLARADO (nunca farejado) — fonte ÚNICA do CHECK.
+         *
+         *     Sem tabulação de propósito: o caractere literal dentro do predicado do CHECK
+         *     é invisível na revisão e frágil na cópia para a migration.
+         * @enum {string}
+         */
+        CsvDelimiter: ";" | "," | "|";
+        /**
+         * DecimalSeparator
+         * @description Separador decimal DECLARADO — fonte ÚNICA do CHECK `decimal_separator`.
+         * @enum {string}
+         */
+        DecimalSeparator: "," | ".";
         /**
          * DecisionBatchRequest
          * @description Corpo de `POST …/decisions/batch` — várias decisões, mesma vigência, atômico.
@@ -3375,6 +3499,36 @@ export interface components {
             data: components["schemas"]["ListedFileEntry"][];
             pagination: components["schemas"]["PaginationMeta"];
         };
+        /** FileImportItem */
+        FileImportItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Competence */
+            competence: string;
+            /** Rows */
+            rows: number;
+            /**
+             * Filehash
+             * @description SHA-256 do conteúdo (hex).
+             */
+            fileHash: string;
+            /** Mappingid */
+            mappingId?: string | null;
+            /**
+             * Processedat
+             * Format: date-time
+             */
+            processedAt: string;
+            author: components["schemas"]["SessionAuthor"];
+        };
+        /** FileImportListResponse */
+        FileImportListResponse: {
+            /** Data */
+            data: components["schemas"]["FileImportItem"][];
+        };
         /**
          * GlossaryDeletedPayload
          * @description Conteúdo do envelope do DELETE: o que sobrou depois da remoção.
@@ -3570,6 +3724,220 @@ export interface components {
              * @description Contas de demonstrativo sem alvo no catálogo — nunca criadas implicitamente.
              */
             missingTargetCodes: string[];
+        };
+        /**
+         * InputDateFormat
+         * @description Formatos de data DECLARADOS — fonte ÚNICA do CHECK `date_format`.
+         *
+         *     Vocabulário fechado, não `strftime` livre: um padrão arbitrário vindo do
+         *     cliente da API é superfície para erro silencioso (um `%m/%d` onde se queria
+         *     `%d/%m` troca dia e mês sem falhar em 12 de cada 31 dias). O leitor (14.3)
+         *     traduz cada membro para o padrão `strptime` correspondente num lugar só.
+         * @enum {string}
+         */
+        InputDateFormat: "dd/mm/yyyy" | "dd-mm-yyyy" | "yyyy-mm-dd" | "dd/mm/yy";
+        /**
+         * InputEncoding
+         * @description Codificação do CSV, DECLARADA (nunca farejada) — fonte ÚNICA do CHECK.
+         *
+         *     Os nomes são os codecs do Python (`codecs.lookup`), para o leitor passar o
+         *     valor direto ao `TextIOWrapper` sem tabela de tradução.
+         * @enum {string}
+         */
+        InputEncoding: "utf-8" | "utf-8-sig" | "latin-1" | "cp1252";
+        /**
+         * InputFileFormat
+         * @description Formatos aceitos — fonte ÚNICA do CHECK `file_format`.
+         *
+         *     PDF fica fora de propósito: não tem coluna para mapear (R1). O 14.3 recusa
+         *     PDF com motivo acionável (`FORMATO_NAO_SUPORTADO`), não com este CHECK.
+         * @enum {string}
+         */
+        InputFileFormat: "csv" | "xlsx";
+        /**
+         * InputMappingEnvelope
+         * @description Body de `GET …/input-mapping`.
+         */
+        InputMappingEnvelope: {
+            data: components["schemas"]["InputMappingPayload"];
+        };
+        /**
+         * InputMappingPayload
+         * @description `{mapping: <mapeamento> | null}` — ausente é `null` com 200, NUNCA 404.
+         *
+         *     404 é o código anti-enumeração do tenant (§3.15); "este cliente ainda não tem
+         *     mapeamento" é estado normal e a tela conduz a criação a partir dele.
+         */
+        InputMappingPayload: {
+            mapping?: components["schemas"]["InputMappingResponse"] | null;
+        };
+        /**
+         * InputMappingRequest
+         * @description Corpo de `PUT /api/v1/clients/{client_id}/input-mapping`.
+         *
+         *     `extra="forbid"`: campo desconhecido é erro — um `client_id` no body nunca
+         *     decide tenant (quem decide é a rota).
+         */
+        InputMappingRequest: {
+            /** @description `csv` ou `xlsx`. PDF não tem coluna para mapear. */
+            fileFormat: components["schemas"]["InputFileFormat"];
+            /** @description Só CSV — DECLARADO, nunca farejado. Obrigatório em `csv`, proibido em `xlsx`. */
+            csvDelimiter?: components["schemas"]["CsvDelimiter"] | null;
+            /** @description Só CSV — codificação DECLARADA. Obrigatória em `csv`, proibida em `xlsx`. */
+            encoding?: components["schemas"]["InputEncoding"] | null;
+            /** Datecolumn */
+            dateColumn: string;
+            /** Descriptioncolumn */
+            descriptionColumn: string;
+            /**
+             * Amountcolumn
+             * @description Coluna do valor. Obrigatória em `valor_com_sinal` e `coluna_natureza`; AUSENTE em `colunas_separadas` (o valor é o par débito/crédito).
+             */
+            amountColumn?: string | null;
+            /**
+             * Categorycolumn
+             * @description Coluna da categoria de origem. Ausente = arquivo sem categoria: toda linha nasce «sem categoria de origem» e o de-para conta o buraco.
+             */
+            categoryColumn?: string | null;
+            /**
+             * @description `coluna_categoria` (a coluna JÁ é a categoria) ou `classificacao_livre` (cada valor distinto da coluna vira uma categoria de origem — R4).
+             * @default coluna_categoria
+             */
+            categoryMode: components["schemas"]["CategoryMode"];
+            /** Accountcolumn */
+            accountColumn?: string | null;
+            /** Documentcolumn */
+            documentColumn?: string | null;
+            dateFormat: components["schemas"]["InputDateFormat"];
+            decimalSeparator: components["schemas"]["DecimalSeparator"];
+            /** @description Como o arquivo diz débito e crédito. NUNCA inferida: sem ela o mapeamento é recusado (400). */
+            signConvention: components["schemas"]["SignConvention"];
+            /** Naturecolumn */
+            natureColumn?: string | null;
+            /**
+             * Debitvalue
+             * @description `coluna_natureza`: o literal que significa débito (ex.: `D`).
+             */
+            debitValue?: string | null;
+            /**
+             * Creditvalue
+             * @description `coluna_natureza`: o literal que significa crédito (ex.: `C`).
+             */
+            creditValue?: string | null;
+            /** Debitcolumn */
+            debitColumn?: string | null;
+            /** Creditcolumn */
+            creditColumn?: string | null;
+        };
+        /**
+         * InputMappingResponse
+         * @description O mapeamento salvo, como a API o devolve.
+         */
+        InputMappingResponse: {
+            /** @description `csv` ou `xlsx`. PDF não tem coluna para mapear. */
+            fileFormat: components["schemas"]["InputFileFormat"];
+            /** @description Só CSV — DECLARADO, nunca farejado. Obrigatório em `csv`, proibido em `xlsx`. */
+            csvDelimiter?: components["schemas"]["CsvDelimiter"] | null;
+            /** @description Só CSV — codificação DECLARADA. Obrigatória em `csv`, proibida em `xlsx`. */
+            encoding?: components["schemas"]["InputEncoding"] | null;
+            /** Datecolumn */
+            dateColumn: string;
+            /** Descriptioncolumn */
+            descriptionColumn: string;
+            /**
+             * Amountcolumn
+             * @description Coluna do valor. Obrigatória em `valor_com_sinal` e `coluna_natureza`; AUSENTE em `colunas_separadas` (o valor é o par débito/crédito).
+             */
+            amountColumn?: string | null;
+            /**
+             * Categorycolumn
+             * @description Coluna da categoria de origem. Ausente = arquivo sem categoria: toda linha nasce «sem categoria de origem» e o de-para conta o buraco.
+             */
+            categoryColumn?: string | null;
+            /**
+             * @description `coluna_categoria` (a coluna JÁ é a categoria) ou `classificacao_livre` (cada valor distinto da coluna vira uma categoria de origem — R4).
+             * @default coluna_categoria
+             */
+            categoryMode: components["schemas"]["CategoryMode"];
+            /** Accountcolumn */
+            accountColumn?: string | null;
+            /** Documentcolumn */
+            documentColumn?: string | null;
+            dateFormat: components["schemas"]["InputDateFormat"];
+            decimalSeparator: components["schemas"]["DecimalSeparator"];
+            /** @description Como o arquivo diz débito e crédito. NUNCA inferida: sem ela o mapeamento é recusado (400). */
+            signConvention: components["schemas"]["SignConvention"];
+            /** Naturecolumn */
+            natureColumn?: string | null;
+            /**
+             * Debitvalue
+             * @description `coluna_natureza`: o literal que significa débito (ex.: `D`).
+             */
+            debitValue?: string | null;
+            /**
+             * Creditvalue
+             * @description `coluna_natureza`: o literal que significa crédito (ex.: `C`).
+             */
+            creditValue?: string | null;
+            /** Debitcolumn */
+            debitColumn?: string | null;
+            /** Creditcolumn */
+            creditColumn?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
+        /**
+         * InputMappingWriteEnvelope
+         * @description Body de `PUT …/input-mapping`.
+         */
+        InputMappingWriteEnvelope: {
+            data: components["schemas"]["InputMappingWritePayload"];
+        };
+        /** InputMappingWritePayload */
+        InputMappingWritePayload: {
+            mapping: components["schemas"]["InputMappingResponse"];
+            /**
+             * Created
+             * @description `true` = o cliente não tinha mapeamento; `false` = o anterior foi SUBSTITUÍDO.
+             */
+            created: boolean;
+        };
+        /** InspectEnvelope */
+        InspectEnvelope: {
+            data: components["schemas"]["InspectPayload"];
+        };
+        /** InspectPayload */
+        InspectPayload: {
+            /** @description Formato DETECTADO pelo contêiner (csv/xlsx). */
+            format: components["schemas"]["InputFileFormat"];
+            /**
+             * Columns
+             * @description Os nomes das colunas do cabeçalho, na ordem.
+             */
+            columns: string[];
+            /**
+             * Sample
+             * @description As primeiras linhas, como texto — só na resposta, nunca persistidas nem logadas.
+             */
+            sample: string[][];
+            /**
+             * Hasmapping
+             * @description `true` = o cliente já tem mapeamento salvo (a tela mostra o resumo).
+             */
+            hasMapping: boolean;
         };
         /**
          * ListedFileEntry
@@ -4536,6 +4904,50 @@ export interface components {
             /** Data */
             data: components["schemas"]["PlatformAdminItem"][];
         };
+        /** ProcessedEnvelope */
+        ProcessedEnvelope: {
+            data: components["schemas"]["ProcessedPayload"];
+        };
+        /** ProcessedPayload */
+        ProcessedPayload: {
+            /**
+             * Importid
+             * Format: uuid
+             */
+            importId: string;
+            /** Competence */
+            competence: string;
+            /**
+             * Rows
+             * @description Linhas do arquivo que viraram movimento.
+             */
+            rows: number;
+            /**
+             * Columnsrecognized
+             * @description Colunas do mapeamento encontradas.
+             */
+            columnsRecognized: number;
+            /**
+             * Categoriescreated
+             * @description Categorias de origem NOVAS registradas a partir deste arquivo (R4).
+             */
+            categoriesCreated: number;
+            /**
+             * Absent
+             * @description Movimentos de arquivos anteriores da MESMA competência que este arquivo não trouxe — marcados `ausente_na_origem`, nunca apagados.
+             */
+            absent: number;
+            /**
+             * Mappingid
+             * Format: uuid
+             */
+            mappingId: string;
+            /**
+             * Processedat
+             * Format: date-time
+             */
+            processedAt: string;
+        };
         /**
          * ReceivablesGroupResponse
          * @description Os agregados de UM grupo (inadimplência OU vencido-com-contexto) de UM
@@ -5014,6 +5426,20 @@ export interface components {
         SessionStatusResponse: {
             data: components["schemas"]["SessionStatusPayload"];
         };
+        /**
+         * SignConvention
+         * @description Como o arquivo diz o que é débito e o que é crédito — fonte ÚNICA do CHECK.
+         *
+         *     `valor_com_sinal`: a coluna de valor já vem negativa para saída.
+         *     `coluna_natureza`: uma coluna carrega um literal (`D`/`C`, `Débito`/`Crédito`…)
+         *     e o mapeamento declara QUAIS literais são débito e crédito.
+         *     `colunas_separadas`: débito e crédito vêm em colunas distintas, sem sinal.
+         *
+         *     **Nunca inferido** (invariante do PRD): sem convenção declarada, o arquivo não
+         *     processa.
+         * @enum {string}
+         */
+        SignConvention: "valor_com_sinal" | "coluna_natureza" | "colunas_separadas";
         /** SituationTotalResponse */
         SituationTotalResponse: {
             /**
@@ -6839,6 +7265,186 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClientConnectionEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_input_mapping_api_v1_clients__client_id__input_mapping_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InputMappingEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_input_mapping_api_v1_clients__client_id__input_mapping_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InputMappingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InputMappingWriteEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inspect_file_api_v1_clients__client_id__file_origin_inspect_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_inspect_file_api_v1_clients__client_id__file_origin_inspect_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InspectEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    process_file_api_v1_clients__client_id__file_origin_process_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_process_file_api_v1_clients__client_id__file_origin_process_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProcessedEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_file_imports_api_v1_clients__client_id__file_origin_imports_get: {
+        parameters: {
+            query?: {
+                /** @description Filtro opcional, `YYYY-MM`. */
+                competence?: string | null;
+            };
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileImportListResponse"];
                 };
             };
             /** @description Validation Error */

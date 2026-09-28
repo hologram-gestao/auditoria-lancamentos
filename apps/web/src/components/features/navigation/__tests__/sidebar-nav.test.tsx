@@ -19,7 +19,18 @@ vi.mock('next/navigation', () => ({
 }));
 
 const detailState = {
-  data: undefined as { name: string } | undefined,
+  data: undefined as
+    | {
+        name: string;
+        connections?: Array<{
+          id: string;
+          provider_type: string;
+          label: string;
+          status: 'ativa' | 'inativa' | 'erro';
+          capabilities: string[];
+        }>;
+      }
+    | undefined,
   isLoading: false,
   isError: false,
 };
@@ -241,6 +252,52 @@ describe('SidebarNav — camada do cliente', () => {
       'Carteira',
       'De-para',
     ]);
+  });
+
+  it('"Origem por arquivo" (S14) só existe para o cliente com conexão `arquivo`', () => {
+    currentPathname = '/clientes/c1/origem-arquivo';
+    detailState.data = {
+      name: 'Cliente Exemplo Ltda',
+      connections: [
+        {
+          id: 'arq-1',
+          provider_type: 'arquivo',
+          label: 'Arquivo',
+          status: 'ativa',
+          capabilities: ['listar_lancamentos'],
+        },
+      ],
+    };
+    render(<SidebarNav user={CLIENT_OPERATOR} />);
+
+    const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
+    // O operador vê a aba: LER o mapeamento e ENVIAR o arquivo são dele.
+    const item = within(nav).getByRole('link', { name: 'Origem por arquivo' });
+    expect(item).toHaveAttribute('href', '/clientes/c1/origem-arquivo');
+    // Rota nova entrou na negação do fallback: "Conciliações" não fica ativo junto.
+    expect(item).toHaveAttribute('aria-current', 'page');
+    expect(within(nav).getByRole('link', { name: 'Conciliações' })).not.toHaveAttribute(
+      'aria-current',
+    );
+  });
+
+  it('sem conexão `arquivo` a aba não aparece (nem para o admin)', () => {
+    currentPathname = '/clientes/c1';
+    detailState.data = {
+      name: 'Cliente Exemplo Ltda',
+      connections: [
+        {
+          id: 'omie-1',
+          provider_type: 'omie',
+          label: 'Omie',
+          status: 'ativa',
+          capabilities: ['verificar_credencial', 'listar_contas', 'listar_lancamentos'],
+        },
+      ],
+    };
+    render(<SidebarNav user={ADMIN} />);
+    const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
+    expect(within(nav).queryByRole('link', { name: 'Origem por arquivo' })).not.toBeInTheDocument();
   });
 
   it('a rota do de-para não deixa "Conciliações" ativo junto', () => {

@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import CursorResult, delete, select, update
+from sqlalchemy import CursorResult, delete, select, text, update
 
 from app.db.models.client_connection import ClientConnection, ConnectionStatus
 
@@ -76,6 +76,20 @@ class ClientConnectionRepository:
             ClientConnection.provider_type == provider_type,
         )
         return len((await self._session.execute(stmt)).scalars().all())
+
+    async def lock_client_origins(self, client_id: UUID) -> None:
+        """Serializa a criação de conexões do MESMO cliente até o fim da transação.
+
+        "Não há origem de outro tipo" é check-then-insert: sem o lock, um POST de
+        Omie e um de arquivo simultâneos passariam os dois no `SELECT` e o cliente
+        ficaria misto. Chave de DOIS inteiros (`client_connections`, cliente) para
+        não colidir com o lock de um inteiro da ingestão do arquivo.
+        """
+        await self._session.execute(
+            text(
+                "SELECT pg_advisory_xact_lock(hashtext('client_connections'), hashtext(:client))"
+            ).bindparams(client=str(client_id))
+        )
 
     async def add(self, connection: ClientConnection) -> None:
         """Insere e dá flush — a pk precisa existir para compor o AAD (§4.1)."""

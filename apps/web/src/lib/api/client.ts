@@ -32,11 +32,17 @@ export interface ApiErrorBody {
    * chave só aparece no corpo quando tem conteúdo, e carrega **só IDs**: nome,
    * razão social ou CNPJ aqui seria vazamento pela porta do erro (§3.15).
    *
-   * Hoje o único produtor é o 409 de rótulo repetido de conexão, com
+   * O primeiro produtor foi o 409 de rótulo repetido de conexão, com
    * `existingConnectionId` — é o que permite a gaveta levar o usuário até a
    * origem que já ocupa o par, em vez de o front parsear `message`.
+   *
+   * Sprint 14: as recusas de arquivo carregam LISTAS (`missingColumns`,
+   * `foundColumns` — nomes de coluna são estrutura, não PII — e
+   * `lines: [{line, reason}]`, motivo de vocabulário fechado), por isso o valor
+   * é `unknown` e não mais `string`. Quem lê estreita com um leitor tipado
+   * (`lib/file-origin-errors.ts`), nunca com cast.
    */
-  details?: Record<string, string>;
+  details?: Record<string, unknown>;
 }
 
 export class ApiError extends Error {
@@ -44,7 +50,7 @@ export class ApiError extends Error {
   readonly userMessage: string;
   readonly status: number;
   /** Ver `ApiErrorBody.details`. `{}` quando o servidor não mandou nada. */
-  readonly details: Record<string, string>;
+  readonly details: Record<string, unknown>;
 
   constructor(status: number, body: ApiErrorBody) {
     super(body.message);
@@ -272,6 +278,21 @@ export async function apiDelete<T>(path: string, options: FetchOptions = {}): Pr
  */
 export async function apiPut<T>(path: string, options: FetchOptions = {}): Promise<T> {
   return rawFetch<T>(path, { method: 'PUT' }, options);
+}
+
+/**
+ * PUT COM corpo JSON — para recursos que o contrato SUBSTITUI inteiros (ex.: o
+ * mapeamento de entrada do arquivo, Sprint 14: um por cliente, `PUT` cria ou
+ * troca). Helper próprio, e não um `apiPut` com corpo opcional, para o método
+ * e a presença do corpo continuarem visíveis no call site — o `tsc` é quem
+ * pega a troca por `apiPatch`/`apiPost`, que o servidor responderia com 405.
+ */
+export async function apiPutJson<T>(
+  path: string,
+  body: unknown,
+  options: FetchOptions = {},
+): Promise<T> {
+  return rawFetch<T>(path, { method: 'PUT', body: JSON.stringify(body) }, options);
 }
 
 /**

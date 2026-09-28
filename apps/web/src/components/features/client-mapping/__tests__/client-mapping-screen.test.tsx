@@ -135,6 +135,7 @@ const clientDetailState = {
         closed_at: string | null;
         origin_status: string;
         organization: { id: string; name: string };
+        connections?: ClientConnection[];
       }
     | undefined,
 };
@@ -150,13 +151,29 @@ vi.mock('@/stores/auth', () => ({
     selector(authState),
 }));
 
+// Permissões NEGADAS à força, por cima da matriz real: `upload_client_file` é dos
+// cinco papéis, e só assim o teste prova que o link do envio pergunta ao helper
+// (§4.9) em vez de supor a célula.
+const deniedPermissions = new Set<string>();
+
+vi.mock('@/lib/authz', async (importOriginal) => {
+  const actual = await importOriginal<typeof AuthzModule>();
+  return {
+    ...actual,
+    hasPermission: (...args: Parameters<typeof actual.hasPermission>) =>
+      !deniedPermissions.has(args[1]) && actual.hasPermission(...args),
+  };
+});
+
 // Imports do SUT DEPOIS dos `vi.mock` (as factories fecham sobre variáveis
 // deste módulo; importar antes as avaliaria na TDZ).
 import { ClientMappingScreen } from '@/components/features/client-mapping/client-mapping-screen';
 import { ApiError } from '@/lib/api/client';
 import { buildClientMappingQuery, type ListClientMappingParams } from '@/lib/api/client-mapping';
+import type * as AuthzModule from '@/lib/authz';
 import type {
   AuthenticatedUser,
+  ClientConnection,
   MappingDestination,
   MappingListItem,
   MappingListResponse,
@@ -278,6 +295,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   currentSearch = '';
+  deniedPermissions.clear();
   replaceMock.mockClear();
   lastListParams = undefined;
   previewEnabled = undefined;
@@ -851,6 +869,119 @@ describe('ClientMappingScreen — prévia da competência (R0 · R5)', () => {
     render(<ClientMappingScreen clientId={TENANT} />);
     expect(screen.getByText(/ainda não tem base de movimentos/)).toBeVisible();
     expect(screen.queryByText('Não foi possível calcular a prévia')).not.toBeInTheDocument();
+  });
+
+  it('origem por ARQUIVO (S14): sem "Sincronizar competência", com "Enviar arquivo do mês"', () => {
+    currentSearch = 'view=previa&competence=2026-06';
+    clientDetailState.data = {
+      ...clientDetailState.data!,
+      connections: [
+        {
+          id: 'arq-1',
+          provider_type: 'arquivo',
+          label: 'Arquivo',
+          status: 'ativa',
+          last_checked_at: null,
+          accounts_synced_at: null,
+          capabilities: ['listar_lancamentos'],
+        },
+      ],
+    };
+    render(<ClientMappingScreen clientId={TENANT} />);
+    // O servidor responderia 409 `ORIGEM_POR_ARQUIVO`: a ação some (§4.9)…
+    expect(
+      screen.queryByRole('button', { name: /Sincronizar competência/ }),
+    ).not.toBeInTheDocument();
+    // …e no lugar entra o link para a aba de envio, já com a competência da prévia.
+    expect(screen.getByRole('link', { name: /Enviar arquivo do mês/ })).toHaveAttribute(
+      'href',
+      `/clientes/${TENANT}/origem-arquivo?competence=2026-06`,
+    );
+  });
+
+  it('origem por ARQUIVO com base nunca sincronizada: a instrução fala do envio, não do sync', () => {
+    currentSearch = 'view=previa';
+    syncStateQuery.data = {
+      competence: '2026-09',
+      neverSynced: true,
+      syncedAt: null,
+      syncFailedAt: null,
+    };
+    clientDetailState.data = {
+      ...clientDetailState.data!,
+      connections: [
+        {
+          id: 'arq-1',
+          provider_type: 'arquivo',
+          label: 'Arquivo',
+          status: 'ativa',
+          last_checked_at: null,
+          accounts_synced_at: null,
+          capabilities: ['listar_lancamentos'],
+        },
+      ],
+    };
+    render(<ClientMappingScreen clientId={TENANT} />);
+    expect(screen.getByText(/alimentada pelo envio do arquivo do mês/)).toBeVisible();
+    expect(screen.queryByText(/Sincronize a competência/)).not.toBeInTheDocument();
+  });
+
+  it('origem por ARQUIVO sem `upload_client_file`: nem o link de envio, e a instrução diz a quem pedir', () => {
+    deniedPermissions.add('upload_client_file');
+    currentSearch = 'view=previa';
+    syncStateQuery.data = {
+      competence: '2026-09',
+      neverSynced: true,
+      syncedAt: null,
+      syncFailedAt: null,
+    };
+    clientDetailState.data = {
+      ...clientDetailState.data!,
+      connections: [
+        {
+          id: 'arq-1',
+          provider_type: 'arquivo',
+          label: 'Arquivo',
+          status: 'ativa',
+          last_checked_at: null,
+          accounts_synced_at: null,
+          capabilities: ['listar_lancamentos'],
+        },
+      ],
+    };
+    render(<ClientMappingScreen clientId={TENANT} />);
+    expect(screen.queryByRole('link', { name: /Enviar arquivo do mês/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Sincronizar competência/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/Peça a alguém da equipe com acesso de envio/)).toBeVisible();
+  });
+
+  it('cliente Omie segue como antes: "Sincronizar competência" e nenhum link de envio (regressão)', () => {
+    currentSearch = 'view=previa';
+    clientDetailState.data = {
+      ...clientDetailState.data!,
+      connections: [
+        {
+          id: 'omie-1',
+          provider_type: 'omie',
+          label: 'Omie',
+          status: 'ativa',
+          last_checked_at: '2026-09-22T12:00:00Z',
+          accounts_synced_at: '2026-09-22T12:00:00Z',
+          capabilities: [
+            'verificar_credencial',
+            'listar_contas',
+            'listar_lancamentos',
+            'escrever',
+            'listar_titulos_em_aberto',
+          ],
+        },
+      ],
+    };
+    render(<ClientMappingScreen clientId={TENANT} />);
+    expect(screen.getByRole('button', { name: /Sincronizar competência/ })).toBeVisible();
+    expect(screen.queryByRole('link', { name: /Enviar arquivo do mês/ })).not.toBeInTheDocument();
   });
 
   it('sincronizar chama o servidor com a competência da tela', async () => {

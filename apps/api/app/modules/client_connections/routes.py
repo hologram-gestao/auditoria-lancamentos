@@ -94,7 +94,10 @@ async def list_connections(
         "no mesmo cliente, distinguidas pelo `label`; omitir o rótulo usa o "
         "padrão do tipo apenas na primeira conexão daquele tipo. Tipo e rótulo "
         "já existentes devolvem 409 com `details.existingConnectionId`. Rótulo "
-        "vazio e tipo desconhecido são 422."
+        "vazio e tipo desconhecido são 400. Tipo `arquivo` (Sprint 14: a "
+        "planilha/extrato do cliente) NÃO leva `credentials` — a conexão nasce "
+        "ativa sem segredo e a DEK do cliente é provisionada; `arquivo` com "
+        "credencial e `omie` sem credencial são 400 `VALIDATION_ERROR`."
     ),
 )
 async def create_connection(
@@ -122,7 +125,9 @@ async def create_connection(
         "verificação; credencial recusada marca como `erro` **sem apagar a "
         "credencial** (recusada não é perdida — basta atualizar). Provedor fora "
         "do ar ou lento devolve 5xx e não muda o estado da conexão: é "
-        "transitório. Origem de outro cliente devolve 404."
+        "transitório. Origem sem credencial (`arquivo`) devolve 409 "
+        "`CAPACIDADE_AUSENTE`: não há o que testar. Origem de outro cliente "
+        "devolve 404."
     ),
 )
 async def test_connection(

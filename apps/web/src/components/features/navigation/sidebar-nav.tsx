@@ -33,6 +33,7 @@ import { Fragment } from 'react';
 import { useClientDetail } from '@/hooks/use-clients';
 import { canAccessClient, canSeeSystemArea } from '@/lib/authz';
 import type { AuthenticatedUser } from '@/lib/contracts';
+import { hasFileConnection } from '@/lib/origin-capabilities';
 import { cn } from '@/lib/utils';
 
 import { clientIdFromPathname, clientNavItems, globalNavSections } from './nav-items';
@@ -88,6 +89,9 @@ export function SidebarNav({ user, onNavigate }: SidebarNavProps) {
   // "Cliente" órfão leria como defeito; o menu continua funcional e o Voltar
   // é a rota de escape.
   const clientName = detailQuery.data?.name;
+  // S14: a aba "Origem por arquivo" só existe para quem tem conexão `arquivo` —
+  // decidido pelo detalhe (mesmo cache do shell), num helper só.
+  const hasFileOrigin = hasFileConnection(detailQuery.data?.connections ?? []);
 
   return (
     <nav aria-label="Seções do cliente" className="flex flex-col gap-1">
@@ -113,7 +117,7 @@ export function SidebarNav({ user, onNavigate }: SidebarNavProps) {
           )}
         </div>
       )}
-      {clientNavItems(user, clientId, pathname).map((item) => (
+      {clientNavItems(user, clientId, pathname, { hasFileOrigin }).map((item) => (
         <NavLink
           key={item.href}
           href={item.href}

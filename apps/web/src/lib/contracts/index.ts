@@ -478,6 +478,63 @@ export type MappingImportRejectedLine = Schemas['ImportRejectedLine'];
 export type MappingImportRejectReason = Schemas['ImportRejectedLine']['reason'];
 
 // ---------------------------------------------------------------------------
+// Origem por ARQUIVO — mapeamento de entrada e ingestão (Sprint 14 — BACK 14.1 · 14.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * O mapeamento de entrada salvo do cliente: qual coluna do arquivo é data,
+ * descrição, valor, categoria, conta e documento, mais o formato, o delimitador
+ * e a codificação do CSV, o formato de data, o separador decimal e a convenção
+ * de sinal. UM por cliente (configuração, não vigência).
+ *
+ * ⚠️ **camelCase** (`fileFormat`, `dateColumn`, `signConvention`…): o backend
+ * declara `alias=` campo a campo. Os nomes de coluna são ESTRUTURA do arquivo,
+ * nunca conteúdo de célula.
+ */
+export type InputMapping = Schemas['InputMappingResponse'];
+/** Body de `PUT /clients/{id}/input-mapping` — `extra="forbid"` no servidor. */
+export type InputMappingRequest = Schemas['InputMappingRequest'];
+/**
+ * `{ data: { mapping } }` — chave ÚNICA, então o `apiGet` entrega `{ mapping }`.
+ * `mapping: null` é estado NORMAL (cliente sem mapeamento), nunca 404.
+ */
+export type InputMappingPayload = Schemas['InputMappingPayload'];
+/** `{ mapping, created }` — `created=false` quer dizer que o anterior foi SUBSTITUÍDO. */
+export type InputMappingWritePayload = Schemas['InputMappingWritePayload'];
+/** `csv` | `xlsx` — enum FECHADO (PDF não tem coluna para mapear). */
+export type InputFileFormat = Schemas['InputFileFormat'];
+/** `;` | `,` | `|` — DECLARADO, nunca farejado. */
+export type CsvDelimiter = Schemas['CsvDelimiter'];
+/** Codificação do CSV, DECLARADA — os nomes são os codecs do Python. */
+export type InputEncoding = Schemas['InputEncoding'];
+/** Formatos de data DECLARADOS — vocabulário fechado, não `strftime` livre. */
+export type InputDateFormat = Schemas['InputDateFormat'];
+/** `,` | `.` */
+export type DecimalSeparator = Schemas['DecimalSeparator'];
+/** `valor_com_sinal` | `coluna_natureza` | `colunas_separadas` — NUNCA inferida. */
+export type SignConvention = Schemas['SignConvention'];
+/** `coluna_categoria` | `classificacao_livre` (R4: cada valor distinto vira categoria). */
+export type CategoryMode = Schemas['CategoryMode'];
+/**
+ * Resposta da inspeção do arquivo: formato detectado, colunas do cabeçalho e a
+ * AMOSTRA das primeiras linhas — que só existe nesta resposta (nunca persiste
+ * nem vai para log) — e `hasMapping`.
+ */
+export type FileInspectResult = Schemas['InspectPayload'];
+/** Resultado do processamento: contagens (linhas, categorias novas, ausentes) e ids. */
+export type FileProcessResult = Schemas['ProcessedPayload'];
+/** Um arquivo processado, na lista: competência, linhas, hash, data e autor (mascarado). */
+export type FileImportItem = Schemas['FileImportItem'];
+/** `{ data: [...] }` — chave ÚNICA: o `apiGet` já entrega o array. */
+export type FileImportListResponse = Schemas['FileImportListResponse'];
+/** Campos do multipart de `POST …/file-origin/inspect` (`file`, `csvDelimiter`, `encoding`). */
+export type InspectFileBody =
+  Schemas['Body_inspect_file_api_v1_clients__client_id__file_origin_inspect_post'];
+/** Campos do multipart de `POST …/file-origin/process` (`file`, `competence`, `declaredTotal`). */
+export type ProcessFileBody =
+  Schemas['Body_process_file_api_v1_clients__client_id__file_origin_process_post'];
+
+// ---------------------------------------------------------------------------
 // Lançamento no Omie (Sprint 7 / R1 · R2 · R5 — BACK 07.3 · 07.4)
 // ---------------------------------------------------------------------------
 
