@@ -28,6 +28,7 @@ from typing import Any
 
 import pytest
 
+from app.integrations.omie.client import is_extrato_summary_row
 from app.integrations.omie.schemas import (
     CategoriaOmie,
     ContaCorrente,
@@ -99,12 +100,48 @@ class TestOmieRealFixtures:
         # Não são lançamentos; produção as filtra ANTES do parse
         # (`omie/client.listar_extrato`, caso Austral 20/05/2026) e a fixture
         # real da captura de 21/08/2026 confirma que elas existem. O gate
-        # valida o schema das linhas que produção de fato parseia.
-        lancamentos = [raw for raw in items if raw.get("nCodLancamento") is not None]
+        # valida o schema das linhas que produção de fato parseia — com o
+        # MESMO predicado de produção, para os dois não divergirem.
+        lancamentos = [raw for raw in items if not is_extrato_summary_row(raw)]
         assert lancamentos, "fixture de extrato sem nenhum lançamento de verdade — recapture"
         # Se a resposta real divergir do schema, model_validate LEVANTA → FALHA.
         for raw in lancamentos:
             LancamentoExtrato.model_validate(raw)
+
+    def test_listar_extrato_conta_corrente_matches_schema(self) -> None:
+        """Conta CORRENTE real (BB, captura de 28/09/2026, anonimizada).
+
+        Duas diferenças contra a fixture do cartão, e as duas derrubaram ou
+        poderiam derrubar produção:
+
+        - as linhas de saldo trazem `nCodLancamento` — um CONTADOR 1, 2, 3…,
+          não um ID —, então o filtro antigo ("sem `nCodLancamento`") as
+          deixava passar e o parse morria por falta de `cNatureza`
+          (5 sessões em erro no Laticínio, 28/09/2026);
+        - a natureza é `P`/`R` com valor JÁ sinalizado, como no cartão — não
+          `D`/`C` com valor absoluto, como a doc diz para conta corrente.
+        """
+        resp = _load_response("listar_extrato_conta_corrente")
+        if resp is None:
+            pytest.skip(_CAPTURE_HINT)
+        assert resp["cCodTipo"] == "CC"
+        items = resp["listaMovimentos"]
+
+        resumo = [raw for raw in items if is_extrato_summary_row(raw)]
+        lancamentos = [raw for raw in items if not is_extrato_summary_row(raw)]
+        assert len(resumo) == 12
+        assert all(raw.get("nCodLancamento") is not None for raw in resumo), (
+            "a forma que motivou o predicado é linha de saldo COM nCodLancamento"
+        )
+        assert len(lancamentos) == 113
+
+        parsed = [LancamentoExtrato.model_validate(raw) for raw in lancamentos]
+        for entry in parsed:
+            if entry.c_natureza == "P":
+                assert entry.signed_amount < 0
+            else:
+                assert entry.c_natureza == "R"
+                assert entry.signed_amount > 0
 
     def test_listar_extrato_has_no_pagination(self) -> None:
         resp = _load_response("listar_extrato")
