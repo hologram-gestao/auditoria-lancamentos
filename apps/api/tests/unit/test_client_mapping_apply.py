@@ -259,6 +259,13 @@ class _Events:
         self.ledger.events.append(kwargs)
         return True
 
+    async def emit_fechamento_produzido(self, **kwargs: Any) -> bool:
+        # S14 (BACK 14.2): uma chamada por tipo de origem materializado, DEPOIS
+        # do commit e depois de `depara_aplicado`.
+        self.ledger.calls.append(f"fechamento:{kwargs['tipo_origem']}")
+        self.ledger.events.append(kwargs)
+        return True
+
 
 def _service(
     *,
@@ -370,8 +377,10 @@ class TestMaterializacao:
             author=user,
         )
         # `lock` primeiro (follow-up 86e3f0ux7, item 5): a prévia é recalculada já
-        # sob o lock transacional de (cliente, destino), antes do INSERT.
-        assert ledger.calls == ["lock", "insert", "commit", "emit"]
+        # sob o lock transacional de (cliente, destino), antes do INSERT. Os dois
+        # eventos vêm DEPOIS do commit (S14: `fechamento_produzido` por tipo de
+        # origem — a base de teste é toda `omie`).
+        assert ledger.calls == ["lock", "insert", "commit", "emit", "fechamento:omie"]
         assert outcome.version == 2
         mat, items = ledger.inserted[0]
         assert mat.version == 2
@@ -381,12 +390,13 @@ class TestMaterializacao:
         assert mat.input_hash == preview.token
         assert len(items) == 6
         assert {d["categoryCode"] for d in mat.decisions_used} == {"2.01", "3.01"}
-        (evento,) = ledger.events
+        evento, fechamento = ledger.events
         assert evento["destino"] == "demonstrativo_contabil"
         assert evento["valor_com_decisao"] == Decimal("180.00")
         assert evento["valor_nao_mapear"] == Decimal("30.00")
         assert evento["valor_sem_decisao"] == Decimal("25.00")
         assert evento["categorias_sem_decisao"] == 2
+        assert fechamento == {"client_id": client.id, "tipo_origem": "omie", "competencia": JUN}
 
     async def test_cobertura_total_nao_exige_confirmacao(self) -> None:
         movs = [_Mv("1", Decimal("-10.00"), "2.01"), _Mv("2", Decimal("-1.00"), None)]
@@ -401,7 +411,7 @@ class TestMaterializacao:
             author=_user(),
         )
         assert outcome.partial_coverage_confirmed is False
-        assert ledger.calls == ["lock", "insert", "commit", "emit"]
+        assert ledger.calls == ["lock", "insert", "commit", "emit", "fechamento:omie"]
 
     async def test_cliente_encerrado_e_409(self) -> None:
         service, ledger = _service()

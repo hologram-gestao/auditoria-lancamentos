@@ -45,7 +45,10 @@ from app.db.models import (
     ClientCategory,
     ClientChartOfAccount,
     ClientConnection,
+    ClientFileCategory,
+    ClientFileImport,
     ClientGlossaryEntry,
+    ClientInputMapping,
     ClientMappingDecision,
     ClientMappingMaterialization,
     ClientMovement,
@@ -545,6 +548,13 @@ class ClientRepository:
         await s.execute(
             delete(ClientMappingDecision).where(ClientMappingDecision.client_id == client.id)
         )
+        # S14 (BACK 14.1): o mapeamento de entrada tem `created_by`/`updated_by`
+        # RESTRICT para `users` — um `client_manager` que o declarou travaria o
+        # passo seguinte. Sai antes dos usuários, pelo mesmo motivo do de-para.
+        await s.execute(delete(ClientInputMapping).where(ClientInputMapping.client_id == client.id))
+        # S14 (BACK 14.3): o registro dos arquivos processados também tem `created_by`
+        # RESTRICT (o operador do tenant envia o arquivo) — sai antes dos usuários.
+        await s.execute(delete(ClientFileImport).where(ClientFileImport.client_id == client.id))
         await s.execute(
             delete(User).where(User.client_id == client.id, User.scope == UserScope.CLIENT.value)
         )
@@ -602,6 +612,13 @@ class ClientRepository:
         plano de contas), e cliente encerrado não classifica mais nada. As
         materializações e seus itens FICAM, só-leitura: são "o que aconteceu", o
         que a Sprint 13 transformou (ou vai transformar) em arquivo contábil.
+
+        O **mapeamento de entrada do arquivo** (S14, BACK 14.1) sai pelo MESMO
+        precedente das decisões do de-para: é configuração (como o cliente sem
+        ERP organiza a planilha dele), nada nele é cifrado, e cliente encerrado
+        não envia mais arquivo. A exclusão definitiva o leva por CASCADE. As
+        **categorias de origem do arquivo** (S14, BACK 14.4) saem junto: o rótulo
+        cifrado já morreu com a DEK (como o glossário) e o código é configuração.
         """
         s = self._session
         await s.execute(
@@ -618,6 +635,15 @@ class ClientRepository:
         await s.execute(
             delete(ClientMappingDecision).where(ClientMappingDecision.client_id == client_id)
         )
+        await s.execute(delete(ClientInputMapping).where(ClientInputMapping.client_id == client_id))
+        # S14 (BACK 14.4): as categorias de origem do arquivo. O rótulo é cifrado —
+        # já morreu com a DEK, como o glossário — e o código é configuração de um
+        # cliente que não envia mais arquivo. Explícito, pelo precedente.
+        await s.execute(delete(ClientFileCategory).where(ClientFileCategory.client_id == client_id))
+        # S14 (BACK 14.3): o registro dos arquivos processados — trilha OPERACIONAL
+        # de um cliente que não envia mais arquivo; os movimentos que ele gerou já
+        # saem com a base (acima). Antes do mapeamento? Não importa: a FK é SET NULL.
+        await s.execute(delete(ClientFileImport).where(ClientFileImport.client_id == client_id))
         await s.execute(delete(OmieAccountCache).where(OmieAccountCache.client_id == client_id))
         await s.execute(delete(Notification).where(Notification.client_id == client_id))
         await s.execute(delete(UserClientFavorite).where(UserClientFavorite.client_id == client_id))

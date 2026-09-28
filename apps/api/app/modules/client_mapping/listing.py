@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from app.db.models import Client
     from app.db.models.mapping_catalog import MappingDestination
     from app.modules.client_chart_of_accounts.schemas import ResolvedNames
+    from app.modules.client_file_categories.registry import ResolvedFileCategoryNames
     from app.modules.client_mapping.repository import ClientMappingRepository
     from app.modules.client_mapping.service import ClientMappingDecisionService, DecisionView
     from app.modules.mapping_catalog.repository import MappingCatalogRepository
@@ -44,6 +45,12 @@ class CategoryNameResolver(Protocol):
     """O acessor de nome de categoria — na produção, `ChartOfAccountsSyncService`."""
 
     async def resolve_names(self, client: Client) -> ResolvedNames: ...
+
+
+class FileCategoryNameResolver(Protocol):
+    """O acessor de rótulo das categorias de ARQUIVO — na produção, `FileCategoryRegistry` (S14)."""
+
+    async def resolve_names(self, client: Client) -> ResolvedFileCategoryNames: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,11 +96,16 @@ class ClientMappingListService:
         decisions: ClientMappingDecisionService,
         catalog: MappingCatalogRepository,
         names: CategoryNameResolver,
+        file_names: FileCategoryNameResolver | None = None,
     ) -> None:
         self._repo = repository
         self._decisions = decisions
         self._catalog = catalog
         self._names = names
+        # S14 (BACK 14.4): o rótulo das categorias `arquivo`. Opcional para quem
+        # monta a leitura sem registry (testes) — sem ele, a linha de arquivo sai
+        # com o código e `categoryNameResolved=false`, como qualquer origem muda.
+        self._file_names = file_names
 
     async def universe(
         self, client: Client, destination: MappingDestination, competence: date
@@ -153,28 +165,56 @@ class ClientMappingListService:
     async def with_names(
         self, client: Client, destination: MappingDestination, rows: list[MappingRow]
     ) -> list[NamedRow]:
-        """Nomes da categoria (origem, fail-soft) e do alvo (catálogo da organização)."""
+        """Nomes da categoria (origem, fail-soft) e do alvo (catálogo da organização).
+
+        Duas fontes de nome, uma por tipo de origem: o plano de contas (Omie, cache
+        de 6 h) e o registry de categorias do ARQUIVO (S14 — rótulo cifrado com a
+        DEK do cliente, decifrado na leitura). A "marcação derivada do arquivo" é o
+        próprio `source_type` da linha; não existe coluna nova.
+        """
         category_names = await self._category_names(client, rows)
+        file_names = await self._file_category_names(client, rows)
         targets = await self._catalog.get_targets_by_codes(
             destination.id, {r.target_code for r in rows if r.target_code}
         )
         named: list[NamedRow] = []
         for row in rows:
-            name = (
-                category_names.get(row.category_code)
-                if row.source_type == CHART_SOURCE_TYPE
-                else None
-            )
+            name: str | None = None
+            resolved = False
+            if row.source_type == CHART_SOURCE_TYPE:
+                name = category_names.get(row.category_code)
+                resolved = name is not None
+            elif row.source_type == ProviderType.ARQUIVO.value:
+                name = file_names.names.get(row.category_code)
+                # `[indecifrável]` sai como nome e `resolved=false`: a tela mostra o
+                # marcador, não o código, e sabe que não é um rótulo.
+                resolved = name is not None and row.category_code not in file_names.failed
             target = targets.get(row.target_code) if row.target_code else None
             named.append(
                 NamedRow(
                     row=row,
                     category_name=name,
-                    category_name_resolved=name is not None,
+                    category_name_resolved=resolved,
                     target_name=target.name if target else None,
                 )
             )
         return named
+
+    async def _file_category_names(
+        self, client: Client, rows: list[MappingRow]
+    ) -> ResolvedFileCategoryNames:
+        from app.modules.client_file_categories.registry import ResolvedFileCategoryNames
+
+        if self._file_names is None or not any(
+            r.source_type == ProviderType.ARQUIVO.value for r in rows
+        ):
+            return ResolvedFileCategoryNames()
+        try:
+            return await self._file_names.resolve_names(client)
+        except Exception:
+            # Fail-soft como o plano de contas: a linha sai com o código. Só IDs.
+            log.warning("client_mapping_file_category_names_unavailable", client_id=str(client.id))
+            return ResolvedFileCategoryNames()
 
     async def _category_names(self, client: Client, rows: list[MappingRow]) -> dict[str, str]:
         if not any(r.source_type == ProviderType.OMIE.value for r in rows):

@@ -36,8 +36,12 @@ from app.core.crypto_service import (
     field_locator,
     load_client_cipher,
 )
-from app.core.exceptions import ValidationAppError
-from app.integrations.providers.registry import get_provider
+from app.core.exceptions import OriginCapabilityMissingError, ValidationAppError
+from app.integrations.providers.registry import (
+    get_provider,
+    offers_origin_client,
+    requires_credentials,
+)
 from app.modules.client_connections.capability import select_capable_connection
 from app.modules.client_connections.legacy_fallback import (
     is_synthetic,
@@ -82,6 +86,10 @@ async def credentials_for(
     """
     if is_synthetic(connection):
         return await legacy_credentials(client, settings=settings)
+    if not requires_credentials(connection.provider_type):
+        # Origem sem segredo (`arquivo`, S14): mapa vazio é o estado normal, não
+        # defeito. O adaptador ignora credencial.
+        return {}
     if connection.credentials_encrypted is None or connection.credentials_iv is None:
         raise ValidationAppError(
             f"connection {connection.id} has no stored credentials",
@@ -109,6 +117,33 @@ async def build_origin_provider(
     return get_provider(connection.provider_type, credentials, settings, http_client=http_client)
 
 
+def assert_offers_origin_client(provider_type: str) -> None:
+    """409 `CAPACIDADE_AUSENTE` se a origem não tem o client do ERP (S14, ADR-083-BE).
+
+    Cliente só-arquivo LISTA lançamentos (alimenta a base de movimentos), mas não
+    tem extrato, títulos nem categorias do Omie para a conciliação e as telas que
+    dependem dela. É estado da configuração, não entrada inválida — 409 da
+    taxonomia da S9 com a instrução, nunca o 400 genérico.
+    """
+    if not offers_origin_client(provider_type):
+        raise OriginCapabilityMissingError(
+            f"provider {provider_type!r} has no Omie-compatible client",
+            user_message=(
+                "A origem deste cliente é por arquivo: conciliação e dados do ERP "
+                "não estão disponíveis para ela."
+            ),
+        )
+
+
+def _raw_client_of(provider: OriginProvider, provider_type: str) -> OmieClient:
+    raw: OmieClient | None = getattr(provider, "raw_client", None)
+    if raw is None:  # pragma: no cover - `offers_origin_client` recusa antes
+        raise OriginCapabilityMissingError(
+            f"provider {provider_type!r} has no Omie-compatible client",
+        )
+    return raw
+
+
 async def build_origin_client(
     client: Client,
     connection: ClientConnection,
@@ -123,16 +158,11 @@ async def build_origin_client(
     neutros sem necessidade. O adaptador continua sendo quem constrói — o que
     muda é que a credencial vem da CONEXÃO, não das colunas de `clients`.
     """
+    assert_offers_origin_client(connection.provider_type)
     provider = await build_origin_provider(
         client, connection, settings=settings, http_client=http_client
     )
-    raw: OmieClient | None = getattr(provider, "raw_client", None)
-    if raw is None:  # pragma: no cover - só um provedor hoje
-        raise ValidationAppError(
-            f"provider {connection.provider_type!r} has no Omie-compatible client",
-            user_message="Esta origem não oferece esta operação.",
-        )
-    return raw
+    return _raw_client_of(provider, connection.provider_type)
 
 
 def client_from_credentials(
@@ -150,14 +180,9 @@ def client_from_credentials(
     `ProviderCredentials` (que é `SecretStr`, não texto) evita tanto o
     `DetachedInstanceError` quanto uma segunda ida ao KMS.
     """
+    assert_offers_origin_client(provider_type)
     provider = get_provider(provider_type, credentials, settings, http_client=http_client)
-    raw: OmieClient | None = getattr(provider, "raw_client", None)
-    if raw is None:  # pragma: no cover - só um provedor hoje
-        raise ValidationAppError(
-            f"provider {provider_type!r} has no Omie-compatible client",
-            user_message="Esta origem não oferece esta operação.",
-        )
-    return raw
+    return _raw_client_of(provider, provider_type)
 
 
 async def build_capable_client(
@@ -178,6 +203,7 @@ async def build_capable_client(
 
 
 __all__ = [
+    "assert_offers_origin_client",
     "build_capable_client",
     "build_origin_client",
     "build_origin_provider",

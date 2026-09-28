@@ -36,7 +36,9 @@ from app.db.models import (
     Client,
     ClientAssignment,
     ClientChartOfAccount,
+    ClientFileImport,
     ClientGlossaryEntry,
+    ClientInputMapping,
     ClientMovement,
     ClientMovementSync,
     ClientTitle,
@@ -192,7 +194,7 @@ async def _seed_world(db: AsyncSession, *, processing: bool = False) -> _World:
         scope=UserScope.CLIENT,
         client_id=w.cli_a.id,
     )
-    await _seed_user(
+    other_tenant_operator = await _seed_user(
         db,
         email=OTHER_TENANT_USER_EMAIL,
         role=UserRole.CLIENT_OPERATOR,
@@ -279,6 +281,45 @@ async def _seed_world(db: AsyncSession, *, processing: bool = False) -> _World:
                 client_id=cli.id,
                 competence=date(2026, 6, 1),
                 synced_at=datetime.now(UTC),
+            )
+        )
+    # Mapeamento de entrada do arquivo (S14, BACK 14.1): configuração, como as
+    # decisões do de-para — nada cifrado, e cliente encerrado não envia mais
+    # arquivo. A FK de autoria é RESTRICT e o purge não pode tropeçar nela: no
+    # tenant A o autor é o `client_manager` DE A (apagado na exclusão, depois do
+    # mapeamento); no B, só quem a API deixaria escrever lá — o staff declara o
+    # mapeamento e o operador DE B envia o arquivo. Autoria cruzada entre
+    # tenants (o seed antigo punha o gerente de A no B) não existe pela API e
+    # fazia o DELETE de A tropeçar na FK do B.
+    authors = {
+        w.cli_a.id: (tenant_manager.id, tenant_manager.id),
+        w.cli_b.id: (w.admin.id, other_tenant_operator.id),
+    }
+    for cli in (w.cli_a, w.cli_b):
+        mapping_author, import_author = authors[cli.id]
+        db.add(
+            ClientInputMapping(
+                client_id=cli.id,
+                file_format="xlsx",
+                date_column="Data",
+                description_column="Histórico",
+                amount_column="Valor",
+                date_format="dd/mm/yyyy",
+                decimal_separator=",",
+                sign_convention="valor_com_sinal",
+                created_by=mapping_author,
+                updated_by=mapping_author,
+            )
+        )
+        # S14 (BACK 14.3): o registro do arquivo processado — trilha OPERACIONAL,
+        # enviado por um usuário DO tenant (`created_by` RESTRICT, como o mapeamento).
+        db.add(
+            ClientFileImport(
+                client_id=cli.id,
+                competence=date(2026, 6, 1),
+                file_hash=uuid4().hex + uuid4().hex,
+                rows=1,
+                created_by=import_author,
             )
         )
     db.add(
@@ -425,8 +466,11 @@ class TestCloseClient:
         ), "a purga é POR TENANT — a carteira do vizinho não pode ser tocada"
 
         # Base de movimentos (S12, R0) e carimbos da competência: somem juntos,
-        # pelo precedente da carteira. O vizinho fica com os dele.
-        for model in (ClientMovement, ClientMovementSync):
+        # pelo precedente da carteira. O vizinho fica com os dele. O mapeamento
+        # de entrada (S14) sai pelo mesmo precedente das decisões do de-para; o
+        # registro dos arquivos processados (S14, BACK 14.3) é trilha operacional
+        # de um cliente que não envia mais arquivo.
+        for model in (ClientMovement, ClientMovementSync, ClientInputMapping, ClientFileImport):
             assert (
                 await _count(db_session, select(func.count(model.id)).where(model.client_id == a))
                 == 0

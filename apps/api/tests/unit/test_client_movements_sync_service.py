@@ -23,15 +23,17 @@ from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
 import respx
 
 from app.core.config import get_settings
+from app.core.crypto_service import AAD_MOVEMENT_DESCRIPTION, field_locator, load_client_cipher
 from app.core.exceptions import (
     ClientClosedError,
+    FileOriginSyncNotApplicableError,
     MovementAccountsUnknownError,
     NoOriginConnectionError,
     OmieFaultError,
@@ -73,6 +75,8 @@ class _Ledger:
     calls: list[str] = field(default_factory=list)
     cycles: list[dict[str, Any]] = field(default_factory=list)
     events: list[dict[str, Any]] = field(default_factory=list)
+    #: S14: as descrições cifradas que o ciclo gravaria por pk (`{b_id, b_ct, b_iv}`).
+    descriptions: list[dict[str, Any]] = field(default_factory=list)
     #: Quantas vezes o cache de contas foi renovado (fora de `calls` de propósito:
     #: os testes de ordem das escritas não são sobre a leitura das contas).
     refreshes: int = 0
@@ -125,7 +129,7 @@ class _Repo:
         competence: date,
         rows: list[dict[str, Any]],
         synced_at: datetime,
-        accounts_read: list[str],
+        accounts_read: list[str] | None,
     ) -> MovementCycleOutcome:
         self._ledger.calls.append("reconcile_cycle")
         if self._fail_cycle:
@@ -135,10 +139,21 @@ class _Repo:
                 "source_type": source_type,
                 "competence": competence,
                 "rows": list(rows),
-                "accounts_read": list(accounts_read),
+                # `None` (S14, origem arquivo) = sem recorte de conta; fica `None`.
+                "accounts_read": list(accounts_read) if accounts_read is not None else None,
             }
         )
         return MovementCycleOutcome(upserted=len(rows), absent=0)
+
+    async def ids_by_source(
+        self, client_id: object, *, source_type: str, source_ids: list[str]
+    ) -> dict[str, UUID]:
+        self._ledger.calls.append("ids_by_source")
+        return {sid: uuid4() for sid in source_ids}
+
+    async def set_descriptions(self, updates: list[dict[str, Any]]) -> None:
+        self._ledger.calls.append("set_descriptions")
+        self._ledger.descriptions.extend(updates)
 
     async def mark_sync_succeeded(
         self, client_id: object, competence: date, *, at: datetime
@@ -233,7 +248,9 @@ def _wire(
     async def _resolve(*_args: Any, **_kwargs: Any) -> SimpleNamespace:
         if connection_error is not None:
             raise connection_error
-        return SimpleNamespace(accounts_synced_at=accounts_synced_at)
+        return SimpleNamespace(
+            accounts_synced_at=accounts_synced_at, provider_type=provider.provider_type
+        )
 
     async def _build(*_args: Any, **_kwargs: Any) -> Any:
         return provider
@@ -296,7 +313,22 @@ class TestLinhaSoCodigos:
             "category_code": "2.04.94",
             "supplier_code": "2624256082",
             "source_account_id": "777",
+            # S14: o Omie não preenche documento; a linha do arquivo pode.
+            "document": None,
         }
+
+    def test_documento_do_arquivo_vai_em_claro_e_vazio_vira_nulo(self) -> None:
+        """Identificador, não nome (ADR-082-BE) — mesmo tratamento de `supplier_code`."""
+        entry = ProviderEntry(
+            external_id="abc:2",
+            entry_date=date(2026, 6, 5),
+            amount=Decimal("-1.00"),
+            description="x",
+            document_number="NF 77",
+        )
+        assert movement_row(entry, source_type="arquivo", account=None)["document"] == "NF 77"
+        vazio = entry.model_copy(update={"document_number": "  "})
+        assert movement_row(vazio, source_type="arquivo", account=None)["document"] is None
 
     @pytest.mark.parametrize("vazio", [None, "", "   "])
     def test_categoria_vazia_vira_nulo(self, vazio: str | None) -> None:
@@ -436,6 +468,114 @@ class TestFalhaCarimbaComCommit:
         assert exc.value.status_code == 409
         assert ledger.calls == []
         assert provider.probe["chamadas"] == 0
+
+    async def test_origem_por_arquivo_e_409_antes_de_tocar_o_ciclo(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """S14 (BACK 14.3): o adaptador `arquivo` vindo da CONEXÃO é vazio — sincronizar
+        por aqui leria zero linhas e marcaria a base inteira como ausente. 409 tipado,
+        nada carimbado, nenhuma leitura, nenhum evento."""
+        provider = _Provider({"111": [_entry("1")]})
+        provider.provider_type = "arquivo"
+        service, ledger = _wire(monkeypatch, provider, accounts=[111])
+        with pytest.raises(FileOriginSyncNotApplicableError) as exc:
+            await service.sync(_client(), JUNHO)
+        assert exc.value.status_code == 409
+        assert exc.value.code.value == "ORIGEM_POR_ARQUIVO"
+        assert "arquivo" in exc.value.user_message
+        assert ledger.calls == []
+        assert ledger.refreshes == 0
+        assert provider.probe["chamadas"] == 0
+
+
+# ---------------------------------------------------------------------------
+# A porta pública do ciclo para a ingestão por arquivo (S14, BACK 14.3)
+# ---------------------------------------------------------------------------
+
+
+class TestPersistEntriesDoArquivo:
+    async def test_grava_pelo_mesmo_ciclo_sem_recorte_de_conta_e_sem_o_evento_de_sync(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        service, ledger = _wire(monkeypatch, _Provider(), accounts=[])
+        entries = [(None, _entry("ab:2", supplier=None)), ("12345", _entry("ab:3", category=None))]
+
+        result = await service.persist_entries(
+            _client(), JUNHO, source_type="arquivo", entries=entries, accounts=None, emit=False
+        )
+
+        assert ledger.calls == ["reconcile_cycle", "mark_ok"]
+        assert "emit" not in ledger.calls, "`movimentos_sincronizados` é da sincronização"
+        (cycle,) = ledger.cycles
+        assert cycle["source_type"] == "arquivo"
+        assert cycle["accounts_read"] is None
+        por_id = {row["source_movement_id"]: row for row in cycle["rows"]}
+        assert por_id["ab:2"]["source_account_id"] is None
+        assert por_id["ab:3"]["source_account_id"] == "12345"
+        assert (result.movimentos, result.sem_categoria, result.contas) == (2, 1, 0)
+
+    async def test_descricoes_sao_cifradas_com_a_dek_do_cliente_e_o_aad_da_pk(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Depois do upsert (a pk entra no AAD), IV novo por linha, nunca o texto em log."""
+        service, ledger = _wire(monkeypatch, _Provider(), accounts=[])
+        client = _client()
+        entries = [(None, _entry("ab:2")), (None, _entry("ab:3"))]
+        descriptions = {"ab:2": "PAGTO ACME SEGREDO", "ab:3": "PAGTO ACME SEGREDO"}
+
+        await service.persist_entries(
+            client,
+            JUNHO,
+            source_type="arquivo",
+            entries=entries,
+            accounts=None,
+            descriptions=descriptions,
+            emit=False,
+        )
+
+        assert ledger.calls == ["reconcile_cycle", "ids_by_source", "set_descriptions", "mark_ok"]
+        assert client.dek_wrapped is not None, "a DEK é provisionada para cifrar"
+        assert len(ledger.descriptions) == 2
+        ivs = {u["b_iv"] for u in ledger.descriptions}
+        assert len(ivs) == 2, "IV novo por linha"
+        cipher = await load_client_cipher(client, settings=get_settings())
+        for update in ledger.descriptions:
+            assert "SEGREDO" not in update["b_ct"]
+            plain = cipher.decrypt(
+                update["b_ct"],
+                update["b_iv"],
+                field_locator(AAD_MOVEMENT_DESCRIPTION, update["b_id"]),
+            )
+            assert plain == "PAGTO ACME SEGREDO"
+
+    async def test_sem_descricoes_nao_toca_a_cripto(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        service, ledger = _wire(monkeypatch, _Provider(), accounts=[])
+        client = _client()
+        await service.persist_entries(
+            client,
+            JUNHO,
+            source_type="arquivo",
+            entries=[],
+            accounts=None,
+            descriptions={},
+            emit=False,
+        )
+        assert "ids_by_source" not in ledger.calls
+        assert client.dek_wrapped is None
+
+    async def test_falha_de_banco_faz_rollback_carimba_e_re_levanta_tambem_aqui(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        service, ledger = _wire(monkeypatch, _Provider(), accounts=[], repo_fails=True)
+        with pytest.raises(RuntimeError):
+            await service.persist_entries(
+                _client(),
+                JUNHO,
+                source_type="arquivo",
+                entries=[(None, _entry("ab:2"))],
+                accounts=None,
+            )
+        assert ledger.calls == ["reconcile_cycle", "rollback", "mark_failed", "commit"]
 
 
 # ---------------------------------------------------------------------------

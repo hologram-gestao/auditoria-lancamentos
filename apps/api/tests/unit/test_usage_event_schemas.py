@@ -9,13 +9,14 @@ falha — a promessa vira invariante testada, não comentário.
 from __future__ import annotations
 
 import importlib.util
+import types
 import typing
 from pathlib import Path
 from typing import Any, Literal, get_args, get_origin
 from uuid import UUID
 
 import pytest
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from app.db.models.usage_event import (
     DEDUPED_EVENT_NAMES,
@@ -24,12 +25,16 @@ from app.db.models.usage_event import (
 from app.modules.reconciliations.qualification.schemas import SemanticStatus
 from app.modules.usage_events.schemas import (
     CLIENT_EMITTED_EVENTS,
+    ArquivoProcessadoProps,
     AutorNavegouForaProps,
     AutorNavegouForaRequest,
     CarteiraSincronizadaProps,
     ContextoTituloRegistradoProps,
+    DeparaAplicadoProps,
+    FechamentoProduzidoProps,
     FlagRevisadoProps,
     GlossarioEditadoProps,
+    MovimentosSincronizadosProps,
     NotificacaoEntregueProps,
     NotificacaoEntregueRequest,
     PlanoContasSincronizadoProps,
@@ -52,12 +57,39 @@ _PROPS_MODELS: list[type[BaseModel]] = [
     GlossarioEditadoProps,
     ContextoTituloRegistradoProps,
     RecebiveisClassificadosProps,
+    # S12 e S14: entram no guardrail desde a BACK 14.2 — os campos `str` deles são
+    # de FORMATO FECHADO (`pattern`), o único `str` que o guardrail aceita.
+    MovimentosSincronizadosProps,
+    DeparaAplicadoProps,
+    ArquivoProcessadoProps,
+    FechamentoProduzidoProps,
 ]
 
 #: Tipos que NÃO carregam texto livre. `bool`/`int` são grandezas, `Literal` é
 #: enum fechado e `UUID` é identificador opaco — nenhum deles comporta nome,
 #: CNPJ, descrição de lançamento ou motivo da IA.
 _PII_SAFE_SCALARS = (int, bool, UUID)
+
+
+def _has_closed_pattern(field: Any) -> bool:
+    """`str` só passa com `pattern` (ADR-073-BE): competência `YYYY-MM` e slug
+    minúsculo não comportam nome, descrição nem conteúdo de célula."""
+    return any(getattr(meta, "pattern", None) for meta in field.metadata)
+
+
+def _is_pii_safe(annotation: Any, field: Any) -> bool:
+    if annotation in _PII_SAFE_SCALARS:
+        return True
+    origin = get_origin(annotation)
+    if origin is Literal or origin is typing.Literal:
+        return True
+    if origin is types.UnionType or origin is typing.Union:
+        # `UUID | None`: o opcional de um escalar seguro continua seguro.
+        return all(
+            arg is type(None) or arg in _PII_SAFE_SCALARS or get_origin(arg) is Literal
+            for arg in get_args(annotation)
+        )
+    return annotation is str and _has_closed_pattern(field)
 
 
 def _valid(event: str, props: dict[str, Any]) -> dict[str, Any]:
@@ -151,12 +183,22 @@ class TestWhitelistDeProps:
         """
         for name, field in model.model_fields.items():
             annotation = field.annotation
-            origin = get_origin(annotation)
-            is_literal = origin is Literal or origin is typing.Literal
-            assert annotation in _PII_SAFE_SCALARS or is_literal, (
+            assert _is_pii_safe(annotation, field), (
                 f"{model.__name__}.{name} aceita tipo livre ({annotation!r}) — "
                 "campo de texto no sink é porta de entrada de PII."
             )
+
+    def test_o_guardrail_recusa_str_sem_pattern(self) -> None:
+        """Mutação do próprio guardrail: um `str` livre tem de reprovar."""
+
+        class _Livre(BaseModel):
+            nome: str
+
+        class _Fechado(BaseModel):
+            slug: str = Field(pattern=r"^[a-z]+$")
+
+        assert not _is_pii_safe(str, _Livre.model_fields["nome"])
+        assert _is_pii_safe(str, _Fechado.model_fields["slug"])
 
 
 class TestEventosDaSprint6:

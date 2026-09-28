@@ -34,6 +34,7 @@ from app.core.logging import get_logger
 from app.integrations.providers.base import Capability
 from app.modules.client_chart_of_accounts.schemas import ResolvedNames, chart_of_accounts_row
 from app.modules.client_connections.origin import (
+    assert_offers_origin_client,
     build_origin_client,
     resolve_capable_connection,
 )
@@ -194,6 +195,9 @@ class ChartOfAccountsSyncService:
         connection = await resolve_capable_connection(
             self._db, client, Capability.LISTAR_LANCAMENTOS, settings=self._settings
         )
+        # Só-arquivo (S14, ADR-083-BE): o 409 sai aqui, fora do `except` abaixo —
+        # não foi a origem que falhou, e o carimbo de falha mentiria na tela.
+        assert_offers_origin_client(connection.provider_type)
 
         async def build_client() -> OmieClient:
             """Só chamada no MISS do cache — em staging/prod o unwrap da DEK é

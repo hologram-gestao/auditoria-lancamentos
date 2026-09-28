@@ -13,10 +13,10 @@ encerramento do cliente inteiro, e ele mora na lista declarada de
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
-from sqlalchemy import CursorResult, String, all_, any_, bindparam, func, select, update
+from sqlalchemy import CursorResult, String, Table, all_, any_, bindparam, func, select, update
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -130,7 +130,7 @@ class ClientMovementsRepository:
         competence: date,
         rows: Sequence[dict[str, Any]],
         synced_at: datetime,
-        accounts_read: Sequence[str],
+        accounts_read: Sequence[str] | None,
     ) -> MovementCycleOutcome:
         """Aplica UM ciclo: atualiza o que mudou, insere o novo e marca quem saiu.
 
@@ -141,6 +141,11 @@ class ClientMovementsRepository:
         `rows` precisa chegar DEDUPLICADO por `source_movement_id` (o serviço faz
         isso): o mesmo par duas vezes no MESMO comando é erro do Postgres
         (`ON CONFLICT DO UPDATE command cannot affect row a second time`).
+
+        `accounts_read=None` (S14, origem ARQUIVO) = o ciclo cobre a competência
+        inteira sem recorte de conta: a linha de arquivo não tem conta, e o arquivo
+        é o realizado completo do mês. Lista VAZIA continua significando "nenhuma
+        conta lida, nada é marcado".
         """
         upserted = await self._upsert_many(client_id, rows, synced_at=synced_at)
         absent = await self._mark_absent(
@@ -184,6 +189,9 @@ class ClientMovementsRepository:
                     "category_code": stmt.excluded.category_code,
                     "supplier_code": stmt.excluded.supplier_code,
                     "source_account_id": stmt.excluded.source_account_id,
+                    # S14: o documento acompanha a linha; a descrição cifrada NÃO
+                    # entra aqui (é gravada depois, pela pk — ver `set_descriptions`).
+                    "document": stmt.excluded.document,
                     "status": MovementStatus.PRESENTE.value,
                     "last_synced_at": stmt.excluded.last_synced_at,
                     "updated_at": func.now(),
@@ -192,6 +200,49 @@ class ClientMovementsRepository:
             await self._session.execute(stmt)
         return len(payload)
 
+    async def ids_by_source(
+        self, client_id: UUID, *, source_type: str, source_ids: Sequence[str]
+    ) -> dict[str, UUID]:
+        """`source_movement_id → id` das linhas DESTE cliente e tipo (S14).
+
+        A descrição do arquivo é cifrada com a pk no AAD, e o `ON CONFLICT` do
+        upsert preserva a pk da linha existente: só depois do upsert se sabe qual
+        pk cada linha tem. Um parâmetro de array, como em `_mark_absent`.
+        """
+        if not source_ids:
+            return {}
+        wanted = bindparam("wanted", value=list(source_ids), type_=ARRAY(String()))
+        stmt = select(ClientMovement.id, ClientMovement.source_movement_id).where(
+            ClientMovement.client_id == client_id,
+            ClientMovement.source_type == source_type,
+            ClientMovement.source_movement_id == any_(wanted),
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return {row.source_movement_id: row.id for row in rows}
+
+    async def set_descriptions(self, updates: Sequence[dict[str, Any]]) -> None:
+        """Grava `(description_encrypted, description_iv)` por pk, em lote (S14).
+
+        Cada item: `{"b_client": cliente, "b_id": pk, "b_ct": envelope, "b_iv": iv}`.
+        Só a origem arquivo chega aqui; a linha do Omie nunca ganha descrição.
+
+        ⚠️ UPDATE de **Core** (`ClientMovement.__table__`), nunca `update(ClientMovement)`:
+        o ORM com LISTA de parâmetros vira "bulk UPDATE by primary key", e com WHERE
+        além da pk o SQLAlchemy levanta SEMPRE `InvalidRequestError: bulk synchronize
+        of persistent objects not supported…` — todo arquivo com descrição dava 500
+        (só a integração contra Postgres pegou; o unitário usa repositório falso).
+        Em Core é um `executemany` simples, e o `client_id` fica no WHERE (§3.15).
+        """
+        if not updates:
+            return
+        table = cast(Table, ClientMovement.__table__)
+        stmt = (
+            update(table)
+            .where(table.c.client_id == bindparam("b_client"), table.c.id == bindparam("b_id"))
+            .values(description_encrypted=bindparam("b_ct"), description_iv=bindparam("b_iv"))
+        )
+        await self._session.execute(stmt, list(updates))
+
     async def _mark_absent(
         self,
         client_id: UUID,
@@ -199,7 +250,7 @@ class ClientMovementsRepository:
         source_type: str,
         competence: date,
         keep_source_ids: Sequence[str],
-        accounts_read: Sequence[str],
+        accounts_read: Sequence[str] | None,
     ) -> int:
         """Marca `ausente_na_origem` quem não veio nesta passada. **Nunca apaga.**
 
@@ -220,11 +271,13 @@ class ClientMovementsRepository:
 
         `last_synced_at` NÃO é tocado: ele diz quando a linha foi vista pela
         origem pela última vez, e ela não foi.
+
+        `accounts_read=None` (origem ARQUIVO, S14): sem recorte de conta — toda
+        linha `presente` do (cliente, tipo, competência) que não veio é ausente.
         """
-        if not accounts_read:
+        if accounts_read is not None and not accounts_read:
             return 0
         keep = bindparam("keep_source_ids", value=list(keep_source_ids), type_=ARRAY(String()))
-        read = bindparam("accounts_read", value=list(accounts_read), type_=ARRAY(String()))
         stmt = (
             update(ClientMovement)
             .where(
@@ -233,10 +286,12 @@ class ClientMovementsRepository:
                 ClientMovement.competence == competence,
                 ClientMovement.status == MovementStatus.PRESENTE.value,
                 ClientMovement.source_movement_id != all_(keep),
-                ClientMovement.source_account_id == any_(read),
             )
             .values(status=MovementStatus.AUSENTE_NA_ORIGEM.value, updated_at=func.now())
         )
+        if accounts_read is not None:
+            read = bindparam("accounts_read", value=list(accounts_read), type_=ARRAY(String()))
+            stmt = stmt.where(ClientMovement.source_account_id == any_(read))
         result = await self._session.execute(stmt)
         # UPDATE devolve CursorResult (com rowcount); o narrow é para o mypy.
         if not isinstance(result, CursorResult):  # pragma: no cover

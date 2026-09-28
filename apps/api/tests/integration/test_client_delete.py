@@ -32,6 +32,8 @@ from app.db.models import (
     ClientAssignment,
     ClientChartOfAccount,
     ClientConnection,
+    ClientFileImport,
+    ClientInputMapping,
     ClientMovement,
     ClientMovementSync,
     Notification,
@@ -236,6 +238,37 @@ async def _seed_world(db: AsyncSession, *, processing: bool = False) -> _World:
         )
     )
     db.add(ClientMovementSync(client_id=w.cli_a.id, competence=date(2026, 4, 1)))
+    # S14 (BACK 14.1): o mapeamento de entrada, declarado por um usuário DO
+    # tenant. A FK de autoria é RESTRICT — é o que obriga `delete_client_cascade`
+    # a apagá-lo ANTES dos usuários (mesma armadilha do de-para, ADR-074-BE).
+    db.add(
+        ClientInputMapping(
+            client_id=w.cli_a.id,
+            file_format="csv",
+            csv_delimiter=";",
+            encoding="utf-8",
+            date_column="Data",
+            description_column="Histórico",
+            amount_column="Valor",
+            date_format="dd/mm/yyyy",
+            decimal_separator=",",
+            sign_convention="valor_com_sinal",
+            created_by=tenant_manager.id,
+            updated_by=tenant_manager.id,
+        )
+    )
+    # S14 (BACK 14.3): o registro do arquivo processado, enviado por um usuário DO
+    # tenant — outra FK de autoria RESTRICT que `delete_client_cascade` apaga
+    # ANTES dos usuários.
+    db.add(
+        ClientFileImport(
+            client_id=w.cli_a.id,
+            competence=date(2026, 4, 1),
+            file_hash=uuid4().hex + uuid4().hex,
+            rows=1,
+            created_by=tenant_manager.id,
+        )
+    )
     db.add(
         AccessAudit(
             user_id=w.admin.id,
@@ -321,8 +354,10 @@ class TestDeleteClient:
             )
             == 0
         )
-        # A base de movimentos (S12) e os carimbos dela também, pelo CASCADE.
-        for model in (ClientMovement, ClientMovementSync):
+        # A base de movimentos (S12) e os carimbos dela também, pelo CASCADE; o
+        # mapeamento de entrada e o registro dos arquivos (S14) pelo DELETE
+        # explícito antes dos usuários.
+        for model in (ClientMovement, ClientMovementSync, ClientInputMapping, ClientFileImport):
             assert (
                 await _count(db_session, select(func.count(model.id)).where(model.client_id == a))
                 == 0
