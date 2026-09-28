@@ -24,6 +24,13 @@
  * — as ações ficam OCULTAS para quem não a tem (nunca desabilitadas), e cliente
  * encerrado também as esconde, com o motivo dito na tela (§4.12). As duas ações
  * do LOTE só existem no destino que herda (R7).
+ *
+ * **Destino `conta_contabil` (S16 — FRONT 16.6).** A decisão aponta uma conta do
+ * plano contábil DO CLIENTE e leva um histórico padrão: a coluna Decisão mostra
+ * código e nome da conta, entra a coluna "Histórico padrão" (truncado, dica
+ * acessível), a decisão LEGADA do catálogo ganha o selo "Refazer no plano do
+ * cliente" e a ação "Refazer", e a gaveta é a `AccountingDecisionSheet`. Nos
+ * outros destinos nada disso existe — `isAccountingDestination` é o único corte.
  */
 
 import { CheckCheck, Loader2, Pencil, Search, Sprout, X } from 'lucide-react';
@@ -31,6 +38,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
+import { accountingChartPath } from '@/components/features/navigation/nav-items';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -45,6 +53,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { useAccountingChartList } from '@/hooks/use-client-accounting-chart';
 import { useConfirmInheritedDecisions, useInheritMapping } from '@/hooks/use-client-mapping';
 import { ApiError } from '@/lib/api/client';
 import type {
@@ -57,6 +66,12 @@ import type {
 import { formatReferenceMonth } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
+import { AccountingDecisionSheet } from './accounting-decision-sheet';
+import {
+  isAccountingDestination,
+  LegacyRedoBadge,
+  TruncatedHistory,
+} from './accounting-destination';
 import {
   MAPPING_SITUATION_FILTER_LABELS,
   MappingDivergenceIndicator,
@@ -146,7 +161,8 @@ export function MappingListPanel({
   // escrita não existem na tela.
   const showWriteActions = canManage && !isClosed;
   const inherits = destination.type === INHERITING_DESTINATION_TYPE;
-  const columnCount = showWriteActions ? 5 : 4;
+  const accounting = isAccountingDestination(destination.type);
+  const columnCount = (showWriteActions ? 5 : 4) + (accounting ? 1 : 0);
 
   const counts = listQuery.data?.counts;
   const activeSituation = situation ?? null;
@@ -177,7 +193,11 @@ export function MappingListPanel({
 
   return (
     <div className="flex flex-col gap-4">
-      {destination.targetsCount === 0 && (
+      {/* No `conta_contabil` o alvo vem do plano do CLIENTE, não do catálogo:
+          o aviso de catálogo vazio não se aplica — o que importa é ter plano. */}
+      {accounting && <AccountingPlanNotice clientId={clientId} />}
+
+      {!accounting && destination.targetsCount === 0 && (
         <div
           role="status"
           className="bg-warning-muted text-warning ring-warning/30 space-y-1 rounded-lg p-4 text-sm ring-1 ring-inset"
@@ -307,6 +327,7 @@ export function MappingListPanel({
                   <TableHead>Categoria</TableHead>
                   <TableHead>Situação</TableHead>
                   <TableHead>Decisão</TableHead>
+                  {accounting && <TableHead>Histórico padrão</TableHead>}
                   <TableHead className="whitespace-nowrap">Vigente desde</TableHead>
                   {showWriteActions && (
                     <TableHead>
@@ -323,6 +344,7 @@ export function MappingListPanel({
                     <MappingRow
                       key={`${item.sourceType}:${item.categoryCode}`}
                       item={item}
+                      accounting={accounting}
                       showEdit={showWriteActions}
                       onEdit={() => setEditing(item)}
                     />
@@ -367,7 +389,19 @@ export function MappingListPanel({
         />
       )}
 
-      {showWriteActions && (
+      {showWriteActions && accounting && (
+        <AccountingDecisionSheet
+          open={editing !== null}
+          onOpenChange={(next) => {
+            if (!next) setEditing(null);
+          }}
+          clientId={clientId}
+          destination={destination}
+          item={editing}
+          serverCompetence={serverCompetence}
+        />
+      )}
+      {showWriteActions && !accounting && (
         <MappingDecisionSheet
           open={editing !== null}
           onOpenChange={(next) => {
@@ -393,13 +427,17 @@ export function MappingListPanel({
  */
 function MappingRow({
   item,
+  accounting,
   showEdit,
   onEdit,
 }: {
   item: MappingListItem;
+  accounting: boolean;
   showEdit: boolean;
   onEdit: () => void;
 }) {
+  const legacy = accounting && item.requiresRedo;
+  const actionLabel = legacy ? 'Refazer' : item.decision ? 'Alterar' : 'Decidir';
   return (
     <TableRow className={cn(showEdit && 'cursor-pointer')} onClick={showEdit ? onEdit : undefined}>
       {/* Categoria e Decisão quebram linha: em `xl`+ a tabela precisa caber na
@@ -424,8 +462,17 @@ function MappingRow({
         </div>
       </TableCell>
       <TableCell className="min-w-40 whitespace-normal">
-        <DecisionCell item={item} />
+        {accounting ? <AccountingDecisionCell item={item} /> : <DecisionCell item={item} />}
       </TableCell>
+      {accounting && (
+        <TableCell className="max-w-56">
+          {item.decision === 'alvo' && !item.requiresRedo ? (
+            <TruncatedHistory history={item.history} />
+          ) : (
+            <span className="text-muted-foreground text-sm">—</span>
+          )}
+        </TableCell>
+      )}
       <TableCell className="whitespace-nowrap">
         {item.effectiveFrom ? formatReferenceMonth(item.effectiveFrom) : '—'}
       </TableCell>
@@ -439,10 +486,10 @@ function MappingRow({
               event.stopPropagation();
               onEdit();
             }}
-            aria-label={`${item.decision ? 'Alterar' : 'Decidir'} a categoria ${item.categoryCode}`}
+            aria-label={`${actionLabel} a categoria ${item.categoryCode}`}
           >
             <Pencil className="h-4 w-4" aria-hidden="true" />
-            {item.decision ? 'Alterar' : 'Decidir'}
+            {actionLabel}
           </Button>
         </TableCell>
       )}
@@ -465,6 +512,67 @@ function DecisionCell({ item }: { item: MappingListItem }) {
     );
   }
   return <span className="text-muted-foreground">Aguardando decisão</span>;
+}
+
+/**
+ * A decisão no `conta_contabil` (S16): a conta do plano do CLIENTE (código e
+ * nome), ou a decisão LEGADA do catálogo — só-leitura, com o selo de refazer.
+ */
+function AccountingDecisionCell({ item }: { item: MappingListItem }) {
+  if (item.decision === 'nao_mapear') {
+    return <span className="text-muted-foreground">Fica fora deste destino</span>;
+  }
+  if (item.requiresRedo) {
+    return (
+      <div className="space-y-1">
+        {item.targetCode && (
+          <span className="text-muted-foreground block text-xs tabular-nums">
+            Catálogo: {item.targetCode}
+            {item.targetName ? ` — ${item.targetName}` : ''}
+          </span>
+        )}
+        <LegacyRedoBadge />
+      </div>
+    );
+  }
+  if (item.decision === 'alvo' && item.accountingAccountCode) {
+    return (
+      <>
+        <span className="block tabular-nums">{item.accountingAccountCode}</span>
+        {item.accountingAccountName && (
+          <span className="text-muted-foreground block text-xs">{item.accountingAccountName}</span>
+        )}
+      </>
+    );
+  }
+  return <span className="text-muted-foreground">Aguardando decisão</span>;
+}
+
+/**
+ * Cliente SEM plano contábil no destino `conta_contabil`: não há conta para
+ * escolher. Orienta a importar em "Plano contábil" (a importação é daquela
+ * tela e pede outra permissão — aqui só o caminho). Some com plano, e some
+ * enquanto a sonda carrega ou falha (sem certeza, não se afirma "sem plano").
+ */
+function AccountingPlanNotice({ clientId }: { clientId: string }) {
+  const probe = useAccountingChartList(clientId, { page: 1, pageSize: 1 });
+  if (probe.data?.pagination.total !== 0) return null;
+  return (
+    <div
+      role="status"
+      data-testid="mapping-accounting-no-plan"
+      className="bg-info-muted text-info ring-info/30 space-y-2 rounded-lg p-4 text-sm ring-1 ring-inset"
+    >
+      <p className="font-medium">Este cliente ainda não tem plano contábil</p>
+      <p>
+        Neste destino a conta de cada categoria vem do plano contábil do cliente. Importe o plano
+        para decidir; enquanto isso, só &quot;Não mapear&quot; é possível.
+      </p>
+      <Button asChild variant="outline" size="sm">
+        <Link href={accountingChartPath(clientId)}>Ir para Plano contábil</Link>
+      </Button>
+    </div>
+  );
 }
 
 function SkeletonRows({ columnCount }: { columnCount: number }) {

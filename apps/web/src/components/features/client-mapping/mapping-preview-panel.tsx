@@ -19,6 +19,13 @@
  *      versões materializadas da competência, só-leitura, lidas da rota de
  *      materializações (quando, quem, cobertura e o selo de cobertura parcial).
  *
+ * **Destino `conta_contabil` (S16 — FRONT 16.6).** Entra a seção "Partida
+ * contábil" (`AccountingPreviewSection`: completude agregada, contas de origem
+ * sem conta do banco, conta e histórico por categoria), a completude de cada
+ * versão materializada, e o 409 `CONTA_DO_BANCO_PENDENTE` da materialização vira
+ * ESTADO com as contas pendentes e o caminho para associar — nunca toast. Os
+ * outros destinos não mudam.
+ *
  * Follow-up 86e3f0uxb: o estado da base que falha tem "Tentar novamente" (antes
  * a prévia nunca rodava e não havia saída), e a instrução da base nunca
  * sincronizada só fala em "botão acima" quando o botão existe.
@@ -74,6 +81,7 @@ import { isCompetence } from '@/lib/competence';
 import type {
   MappingDestination,
   MappingPreview,
+  PendingSourceAccount,
   MappingSituationTotal,
   MaterializationSummary,
   MovementsSyncState,
@@ -82,6 +90,13 @@ import type {
 import { formatBRL, formatCreatedAt, formatPercent, formatReferenceMonth } from '@/lib/format';
 import { isOriginError, originErrorCode } from '@/lib/origin-state';
 import { cn } from '@/lib/utils';
+
+import {
+  isAccountingDestination,
+  PendingSourceAccountsNotice,
+  readBankAccountPending,
+} from './accounting-destination';
+import { AccountingPreviewSection } from './accounting-preview-section';
 
 /**
  * Por que a pessoa não pode (ou pode) sincronizar daqui — decide a instrução da
@@ -433,7 +448,11 @@ function PreviewContent({
   onStale: () => void;
 }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // 409 `CONTA_DO_BANCO_PENDENTE` da última tentativa de materializar: ESTADO na
+  // tela, com as contas do `details` (só identificadores). Limpa ao tentar de novo.
+  const [bankPending, setBankPending] = useState<PendingSourceAccount[] | null>(null);
   const undecided = preview.undecidedCategories;
+  const accounting = isAccountingDestination(destination.type);
 
   return (
     <div className="flex flex-col gap-4" data-testid="mapping-preview">
@@ -446,7 +465,13 @@ function PreviewContent({
             Prévia de {formatReferenceMonth(preview.competence)} em {destination.name}
           </h3>
           {canMaterialize && (
-            <Button type="button" onClick={() => setConfirmOpen(true)}>
+            <Button
+              type="button"
+              onClick={() => {
+                setBankPending(null);
+                setConfirmOpen(true);
+              }}
+            >
               <Layers className="h-4 w-4" aria-hidden="true" />
               Materializar
             </Button>
@@ -485,6 +510,12 @@ function PreviewContent({
           ))}
         </dl>
       </section>
+
+      {bankPending !== null && (
+        <PendingSourceAccountsNotice clientId={clientId} accounts={bankPending} refused />
+      )}
+
+      {accounting && <AccountingPreviewSection clientId={clientId} preview={preview} />}
 
       <section aria-labelledby="mapping-undecided-heading" className="space-y-2">
         <h3 id="mapping-undecided-heading" className="text-sm font-semibold">
@@ -535,6 +566,11 @@ function PreviewContent({
           destination={destination}
           preview={preview}
           onStale={onStale}
+          onBankPending={(accounts) => {
+            setBankPending(accounts);
+            // A prévia volta a ser lida: ela também lista as pendentes.
+            onStale();
+          }}
         />
       )}
     </div>
@@ -643,6 +679,16 @@ function MaterializedVersions({
                   <span className="whitespace-nowrap tabular-nums">
                     Cobertura {item.coveragePct === null ? '—' : formatPercent(item.coveragePct)}
                   </span>
+                  {/* S16: só o `conta_contabil` traz; `pct` nulo = sem linha com
+                      conta, e aparece como "—", nunca como 0%. */}
+                  {item.partidaCompleteness != null && (
+                    <span className="whitespace-nowrap tabular-nums">
+                      Partida completa{' '}
+                      {item.partidaCompleteness.pct == null
+                        ? '—'
+                        : formatPercent(item.partidaCompleteness.pct)}
+                    </span>
+                  )}
                 </div>
               </li>
             ))}
@@ -669,6 +715,7 @@ function MaterializeDialog({
   destination,
   preview,
   onStale,
+  onBankPending,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -676,6 +723,8 @@ function MaterializeDialog({
   destination: MappingDestination;
   preview: MappingPreview;
   onStale: () => void;
+  /** S16: o 409 `CONTA_DO_BANCO_PENDENTE` vira estado na prévia, com as contas. */
+  onBankPending: (accounts: PendingSourceAccount[]) => void;
 }) {
   const materializeMutation = useMaterializeMapping(clientId, destination.type);
   const [acceptPartial, setAcceptPartial] = useState(false);
@@ -708,6 +757,13 @@ function MaterializeDialog({
         setAcceptPartial(false);
         onOpenChange(false);
         onStale();
+        return;
+      }
+      const bankPending = readBankAccountPending(err);
+      if (bankPending !== null) {
+        setAcceptPartial(false);
+        onOpenChange(false);
+        onBankPending(bankPending);
         return;
       }
       toast.error(err instanceof ApiError ? err.userMessage : 'Não foi possível materializar.');

@@ -656,6 +656,234 @@ const FILE_REFUSALS: Record<'cabecalho' | 'linhas', Record<string, unknown>> = {
   },
 };
 
+/**
+ * Sprint 16 (FRONT 16.5) — o plano contábil do cliente (sistema de DESTINO).
+ * Estado MUTÁVEL, resetado no `beforeEach`: plano presente por padrão; o
+ * cenário "sem plano" e o desfecho da importação são trocados por teste.
+ */
+let accountingChartEmpty = false;
+let accountingImportOutcome: 'sucesso' | 'linhas' = 'sucesso';
+
+function accountingAccount(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 'acc-649',
+    code: '649',
+    classification: '1.1.1.02.001',
+    name: 'Banco conta movimento',
+    nameResolved: true,
+    type: 'analitica',
+    active: true,
+    postable: true,
+    updatedAt: '2026-09-28T10:00:00Z',
+    ...over,
+  };
+}
+
+const ACCOUNTING_ACCOUNTS = [
+  accountingAccount({
+    id: 'acc-10',
+    code: '10',
+    classification: '1.1',
+    name: 'Ativo circulante',
+    type: 'sintetica',
+    postable: false,
+  }),
+  accountingAccount(),
+  accountingAccount({
+    id: 'acc-662',
+    code: '662',
+    classification: '1.1.2.01.004',
+    name: 'Aluguéis a receber - Inquilino D',
+  }),
+  accountingAccount({
+    id: 'acc-5101',
+    code: '5101',
+    classification: '3.1.01.01.001',
+    name: 'Receita de aluguéis',
+  }),
+  accountingAccount({
+    id: 'acc-700',
+    code: '700',
+    classification: '4.1.01',
+    name: 'Despesas bancárias (conta antiga)',
+    active: false,
+    postable: false,
+  }),
+];
+
+/** Contas de origem: uma Omie associada, uma Omie PENDENTE e o slot padrão pendente. */
+const SOURCE_ACCOUNTS = [
+  {
+    sourceType: 'omie',
+    sourceAccountId: '11',
+    isDefault: false,
+    pending: false,
+    bankAccount: {
+      id: 'acc-649',
+      code: '649',
+      name: 'Banco conta movimento',
+      nameResolved: true,
+      postable: true,
+    },
+  },
+  { sourceType: 'omie', sourceAccountId: '10', isDefault: false, pending: true, bankAccount: null },
+  {
+    sourceType: 'arquivo',
+    sourceAccountId: null,
+    isDefault: true,
+    pending: true,
+    bankAccount: null,
+  },
+];
+
+const ACCOUNTING_IMPORT_REFUSAL = {
+  code: 'LINHAS_INVALIDAS',
+  message: 'invalid lines',
+  userMessage:
+    'A planilha do plano contábil tem linhas inválidas. Corrija as linhas apontadas e importe de novo — nada foi gravado.',
+  details: {
+    lines: [
+      { line: 4, reason: 'codigo_repetido' },
+      { line: 9, reason: 'tipo_invalido' },
+      { line: 15, reason: 'nome_vazio' },
+    ],
+    total: 3,
+  },
+};
+
+/**
+ * Sprint 16 (FRONT 16.6) — o destino `conta_contabil` no de-para. Entra no
+ * catálogo SÓ quando o cenário liga (`mappingAccountingDestination`): os
+ * cenários antigos contam e escolhem destinos, e um terceiro mudaria o que eles
+ * medem. O 409 da conta do banco pendente também é ligado por cenário.
+ */
+let mappingAccountingDestination = false;
+let mappingBankPending = false;
+
+const ACCOUNTING_MAPPING_DESTINATION = {
+  id: 'dddddddd-0000-4000-8000-000000000003',
+  type: 'conta_contabil',
+  name: 'Conta contábil',
+  active: true,
+  organizationId: ORGANIZATION_ID,
+  targetsCount: 0,
+};
+
+const HISTORICO_LONGO =
+  'Pagamento de aluguel do imóvel da sede administrativa conforme contrato de locação vigente';
+
+function accountingMappingItem(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    sourceType: 'omie',
+    categoryCode: '2.01.01',
+    categoryName: 'Aluguel',
+    categoryNameResolved: true,
+    situation: 'confirmada',
+    decision: 'alvo',
+    targetCode: null,
+    targetName: null,
+    effectiveFrom: '2026-09',
+    divergent: false,
+    originDreCode: null,
+    accountingAccountId: 'acc-5101',
+    accountingAccountCode: '5101',
+    accountingAccountName: 'Receita de aluguéis',
+    history: HISTORICO_LONGO,
+    requiresRedo: false,
+    ...over,
+  };
+}
+
+const ACCOUNTING_MAPPING_ITEMS = [
+  accountingMappingItem(),
+  accountingMappingItem({
+    categoryCode: '2.01.02',
+    categoryName: 'Energia',
+    targetCode: '3.2',
+    targetName: 'Utilidades',
+    accountingAccountId: null,
+    accountingAccountCode: null,
+    accountingAccountName: null,
+    history: null,
+    requiresRedo: true,
+  }),
+  accountingMappingItem({
+    categoryCode: '1.09.01',
+    categoryName: 'Transferência entre contas',
+    decision: 'nao_mapear',
+    situation: 'nao_mapear',
+    accountingAccountId: null,
+    accountingAccountCode: null,
+    accountingAccountName: null,
+    history: null,
+  }),
+];
+
+function accountingMappingPreview(competence: string): Record<string, unknown> {
+  return {
+    ...mappingPreview(competence),
+    destination: 'conta_contabil',
+    undecidedCategories: [],
+    situations: {
+      alvo: { amount: '12000.00', count: 6 },
+      naoMapear: { amount: '800.00', count: 2 },
+      semDecisao: { amount: '0.00', count: 0 },
+      semCategoria: { amount: '0.00', count: 0 },
+    },
+    coveragePct: '100.0',
+    naoMapearPct: '6.2',
+    partidaCompleteness: { completeAmount: '9000.00', targetAmount: '12000.00', pct: '75.00' },
+    pendingSourceAccounts: [{ sourceType: 'omie', sourceAccountId: '10' }],
+    accountingCategories: [
+      {
+        sourceType: 'omie',
+        categoryCode: '2.01.01',
+        amount: '9000.00',
+        count: 3,
+        accountingAccountId: 'acc-5101',
+        accountingAccountCode: '5101',
+        accountingAccountName: 'Receita de aluguéis',
+        history: HISTORICO_LONGO,
+        historyMissing: false,
+        requiresRedo: false,
+        completeAmount: '9000.00',
+        completeCount: 3,
+        pendingSourceAccounts: [],
+      },
+      {
+        sourceType: 'omie',
+        categoryCode: '2.01.03',
+        amount: '2500.00',
+        count: 2,
+        accountingAccountId: 'acc-662',
+        accountingAccountCode: '662',
+        accountingAccountName: 'Aluguéis a receber - Inquilino D',
+        history: null,
+        historyMissing: true,
+        requiresRedo: false,
+        completeAmount: '0.00',
+        completeCount: 0,
+        pendingSourceAccounts: [{ sourceType: 'omie', sourceAccountId: '10' }],
+      },
+      {
+        sourceType: 'omie',
+        categoryCode: '2.01.02',
+        amount: '500.00',
+        count: 1,
+        accountingAccountId: null,
+        accountingAccountCode: null,
+        accountingAccountName: null,
+        history: null,
+        historyMissing: true,
+        requiresRedo: true,
+        completeAmount: '0.00',
+        completeCount: 0,
+        pendingSourceAccounts: [],
+      },
+    ],
+  };
+}
+
 const CLIENT_DETAIL = {
   id: CLIENT_ID,
   // Fixture fictícia de propósito: nome de cliente real não entra em arquivo
@@ -1561,10 +1789,87 @@ async function fulfillApi(route: Route): Promise<void> {
       }),
     });
   }
+  // Plano contábil do cliente (S16/FRONT 16.5). A lista é o par REAL
+  // `{ data, pagination }` — `fulfill` cru, não `json()`. Filtra no mock pelo
+  // que a tela manda (tipo, situação e prefixo de código), para o seletor de
+  // conta receber só analíticas ativas como o servidor faria.
+  if (path === `/api/v1/clients/${CLIENT_ID}/accounting-chart/import`) {
+    if (accountingImportOutcome === 'linhas') {
+      return route.fulfill({
+        status: 422,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: ACCOUNTING_IMPORT_REFUSAL }),
+      });
+    }
+    accountingChartEmpty = false;
+    return json({ contas: 5, contasNovas: 5, contasInativadas: 0 });
+  }
+  if (path === `/api/v1/clients/${CLIENT_ID}/accounting-chart`) {
+    const tipo = url.searchParams.get('type');
+    const situacao = url.searchParams.get('status');
+    const codigo = url.searchParams.get('code') ?? '';
+    const pageSize = Number(url.searchParams.get('pageSize') ?? '50');
+    const contas = accountingChartEmpty
+      ? []
+      : ACCOUNTING_ACCOUNTS.filter(
+          (a) =>
+            (tipo === null || a.type === tipo) &&
+            (situacao === null || a.active === (situacao === 'ativa')) &&
+            String(a.code).startsWith(codigo),
+        );
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: contas.slice(0, pageSize),
+        pagination: {
+          page: 1,
+          pageSize,
+          total: contas.length,
+          totalPages: contas.length === 0 ? 0 : Math.ceil(contas.length / pageSize),
+        },
+      }),
+    });
+  }
+  if (path === `/api/v1/clients/${CLIENT_ID}/source-accounts`) {
+    if (route.request().method() === 'PUT') {
+      const body = route.request().postDataJSON() as {
+        sourceType: string;
+        sourceAccountId: string | null;
+        accountingAccountId: string;
+      };
+      const conta = ACCOUNTING_ACCOUNTS.find((a) => a.id === body.accountingAccountId);
+      return json({
+        entry: {
+          sourceType: body.sourceType,
+          sourceAccountId: body.sourceAccountId,
+          isDefault: body.sourceAccountId === null,
+          pending: false,
+          bankAccount: conta
+            ? {
+                id: conta.id,
+                code: conta.code,
+                name: conta.name,
+                nameResolved: true,
+                postable: true,
+              }
+            : null,
+        },
+        created: true,
+      });
+    }
+    return json(accountingChartEmpty ? [] : SOURCE_ACCOUNTS);
+  }
   // De-para (S12/R0·R5·R6). Catálogo da organização: `{ data: [...] }` com
   // chave ÚNICA (o `apiGet` desembrulha); alvos e lista do de-para são pares
   // `{ data, pagination[, competence] }` REAIS — `fulfill` cru, não `json()`.
-  if (path === '/api/v1/mapping-destinations') return json(MAPPING_DESTINATIONS);
+  if (path === '/api/v1/mapping-destinations') {
+    return json(
+      mappingAccountingDestination
+        ? [...MAPPING_DESTINATIONS, ACCOUNTING_MAPPING_DESTINATION]
+        : MAPPING_DESTINATIONS,
+    );
+  }
   if (/^\/api\/v1\/mapping-destinations\/[^/]+\/targets$/.test(path)) {
     return route.fulfill({
       status: 200,
@@ -1596,6 +1901,51 @@ async function fulfillApi(route: Route): Promise<void> {
   );
   if (deParaRota) {
     const sub = deParaRota[2] ?? '';
+    // S16: o destino `conta_contabil` tem prévia, lista e recusa próprias.
+    if (deParaRota[1] === 'conta_contabil') {
+      if (sub === '/preview') {
+        return json(accountingMappingPreview(url.searchParams.get('competence') ?? '2026-09'));
+      }
+      if (sub === '/materializations' && route.request().method() === 'POST') {
+        if (mappingBankPending) {
+          return route.fulfill({
+            status: 409,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              error: {
+                code: 'CONTA_DO_BANCO_PENDENTE',
+                message: 'bank account pending',
+                userMessage:
+                  'Há movimentos de contas de origem sem a conta contábil do banco associada. Associe a conta do banco de cada uma e aplique de novo.',
+                details: {
+                  pendingSourceAccounts: [
+                    { sourceType: 'omie', sourceAccountId: '10' },
+                    { sourceType: 'arquivo', sourceAccountId: null },
+                  ],
+                },
+              },
+            }),
+          });
+        }
+      }
+      if (sub === '') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: ACCOUNTING_MAPPING_ITEMS,
+            pagination: {
+              page: 1,
+              pageSize: 50,
+              total: ACCOUNTING_MAPPING_ITEMS.length,
+              totalPages: 1,
+            },
+            competence: '2026-09',
+            counts: { total: 3, herdada: 0, confirmada: 2, naoMapear: 1, semDecisao: 0 },
+          }),
+        });
+      }
+    }
     if (sub === '/preview') {
       return json(mappingPreview(url.searchParams.get('competence') ?? '2026-09'));
     }
@@ -2344,6 +2694,11 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   clientFileOrigin = false;
   inputMappingState = 'salvo';
   fileProcessOutcome = 'sucesso';
+  // S16: o cliente TEM plano contábil e a importação dá certo, por padrão.
+  accountingChartEmpty = false;
+  accountingImportOutcome = 'sucesso';
+  mappingAccountingDestination = false;
+  mappingBankPending = false;
   await page.route('**/api/v1/**', fulfillApi);
   // O `src/middleware.ts` decide navegação só pela PRESENÇA do cookie
   // `access_token` (a validação real é do backend). Um valor qualquer basta
@@ -6203,5 +6558,309 @@ for (const vp of VIEWPORTS) {
         await expect(page.getByRole('row').last()).toBeInViewport();
       });
     }
+  });
+}
+
+/**
+ * Sprint 16 / FRONT 16.5 — tela "Plano contábil" do cliente (o plano do
+ * sistema contábil de DESTINO) nos três temas e nos dois viewports: lista com
+ * plano, lista vazia com o modelo documentado, gaveta de importação com recusa
+ * e a seção da conta do banco com a gaveta de associar.
+ *
+ * Bloco próprio no FIM do arquivo, pelo motivo do bloco 86e3f55bc: cenários
+ * novos no meio dos antigos são o que vira conflito.
+ */
+const PLANILHA_PLANO = {
+  name: 'plano.csv',
+  mimeType: 'text/csv',
+  buffer: Buffer.from('codigo_reduzido;nome;tipo\n649;Banco;analitica\n'),
+};
+
+for (const vp of VIEWPORTS) {
+  const slugPC16 = vp.label.replace(/\s+/g, '-');
+  test.describe(`Plano contábil do cliente (FRONT 16.5) — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('lista com plano: colunas, badges, busca só por código e a ação no topo', async ({
+      page,
+    }) => {
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+
+      await expect(page.getByRole('heading', { name: 'Plano contábil', level: 2 })).toBeVisible();
+      const regiao = page.getByRole('region', { name: 'Contas do plano contábil (rolável)' });
+      await expect(regiao.getByRole('row')).toHaveCount(ACCOUNTING_ACCOUNTS.length + 1);
+      await expect(
+        regiao.getByRole('cell', { name: 'Banco conta movimento', exact: true }),
+      ).toBeVisible();
+      await expect(page.getByLabel('Buscar por código')).toBeVisible();
+      // Nenhum campo de busca por nome: o nome é cifrado.
+      await expect(page.getByLabel(/buscar por nome/i)).toHaveCount(0);
+      const reimportar = page.getByRole('button', { name: 'Reimportar planilha' });
+      await exigirDentroDaViewport(page, reimportar, `${vp.label}: "Reimportar planilha"`);
+
+      await shot(page, `plano-contabil-lista-${slugPC16}`);
+      await analyze(page, `plano contábil — lista com plano (${vp.label})`);
+    });
+
+    test('lista vazia: o modelo da planilha documentado e Importar só para quem pode', async ({
+      page,
+    }) => {
+      accountingChartEmpty = true;
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+
+      const vazio = page.getByTestId('accounting-chart-empty');
+      await expect(vazio).toContainText('Este cliente ainda não tem plano contábil');
+      for (const coluna of ['codigo_reduzido', 'nome', 'tipo', 'classificacao']) {
+        await expect(vazio.getByText(coluna, { exact: true }).first()).toBeVisible();
+      }
+      await expect(vazio.getByText(/649;Banco conta movimento;analitica/)).toBeVisible();
+      const importar = page.getByRole('button', { name: 'Importar planilha' });
+      await expect(importar).toHaveCount(1);
+      await exigirDentroDaViewport(page, importar, `${vp.label}: "Importar planilha"`);
+      await exigirDentroDaViewport(
+        page,
+        vazio.getByText('Este cliente ainda não tem plano contábil'),
+        `${vp.label}: estado vazio do plano contábil`,
+      );
+      await shot(page, `plano-contabil-vazio-${slugPC16}`);
+      await analyze(page, `plano contábil — sem plano (${vp.label})`);
+
+      // O operador lê a mesma explicação, sem o botão.
+      sessionUser = CLIENT_OPERATOR_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+      await expect(page.getByTestId('accounting-chart-empty')).toBeVisible();
+      await expect(page.getByRole('button', { name: /importar/i })).toHaveCount(0);
+      await analyze(page, `plano contábil — sem plano, operador (${vp.label})`);
+    });
+
+    test('gaveta de importação: recusa LINHAS_INVALIDAS como estado linha × motivo', async ({
+      page,
+    }) => {
+      accountingChartEmpty = true;
+      accountingImportOutcome = 'linhas';
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+
+      await page.getByRole('button', { name: 'Importar planilha' }).click();
+      const gaveta = page.getByRole('dialog');
+      await aguardarAnimacao(gaveta);
+      await expect(gaveta.getByRole('heading', { name: 'Modelo da planilha' })).toBeVisible();
+      await gaveta.getByLabel('Planilha (.csv ou .xlsx)').setInputFiles(PLANILHA_PLANO);
+      await gaveta.getByRole('button', { name: 'Importar', exact: true }).click();
+
+      const recusa = gaveta.locator('[data-refusal-code="LINHAS_INVALIDAS"]');
+      await expect(recusa).toBeVisible();
+      await expect(recusa).toContainText('nada foi importado');
+      await expect(recusa.getByRole('row')).toHaveCount(4); // cabeçalho + 3
+      await expect(recusa.getByRole('row').nth(1)).toContainText('Código reduzido repetido');
+      await expect(page.locator('[data-sonner-toast]')).toHaveCount(0);
+      expect(await measuredContrast(page, '[data-refusal-code] > p')).toBeGreaterThanOrEqual(4.5);
+      const importar = gaveta.getByRole('button', { name: 'Importar', exact: true });
+      await exigirDentroDaViewport(page, importar, `${vp.label}: "Importar" da gaveta`);
+
+      await shot(page, `plano-contabil-importacao-recusa-${slugPC16}`);
+      await analyze(page, `plano contábil — gaveta com recusa (${vp.label})`);
+
+      // Cancelar devolve o foco a quem abriu a gaveta.
+      await gaveta.getByRole('button', { name: 'Cancelar' }).click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Importar planilha' })).toBeFocused();
+    });
+
+    test('reimportação pede confirmação ANTES de enviar', async ({ page }) => {
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+
+      await page.getByRole('button', { name: 'Reimportar planilha' }).click();
+      const gaveta = page.getByRole('dialog');
+      await aguardarAnimacao(gaveta);
+      await gaveta.getByLabel('Planilha (.csv ou .xlsx)').setInputFiles(PLANILHA_PLANO);
+      await gaveta.getByRole('button', { name: 'Reimportar', exact: true }).click();
+      await expect(gaveta.getByTestId('accounting-chart-reimport-warning')).toHaveAttribute(
+        'role',
+        'alert',
+      );
+      const confirmar = gaveta.getByRole('button', { name: 'Confirmar reimportação' });
+      await exigirDentroDaViewport(page, confirmar, `${vp.label}: "Confirmar reimportação"`);
+      await shot(page, `plano-contabil-reimportacao-confirmar-${slugPC16}`);
+      await analyze(page, `plano contábil — confirmação de reimportação (${vp.label})`);
+
+      await confirmar.click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(page.getByTestId('accounting-chart-import-success')).toContainText(
+        'Plano contábil importado: 5 contas, 5 novas, 0 inativadas.',
+      );
+      await aguardarToastEstavel(page);
+      expect(await measuredContrast(page, TOAST_TITLE)).toBeGreaterThanOrEqual(4.5);
+    });
+
+    test('conta do banco: pendentes em destaque e a gaveta de associar só com analíticas ativas', async ({
+      page,
+    }) => {
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+
+      const secao = page.getByTestId('bank-accounts-section');
+      await secao.scrollIntoViewIfNeeded();
+      // Nome da conta Omie pelo cache de contas do cliente (nCodCC 11 e 10).
+      await expect(secao.getByText('Conta Corrente Bradesco')).toBeVisible();
+      await expect(secao.getByText('Cartão Itaú')).toBeVisible();
+      await expect(secao.getByText('Conta padrão (arquivo sem coluna de conta)')).toBeVisible();
+      await expect(secao.getByText('Pendente', { exact: true })).toHaveCount(2);
+      await expect(secao.getByTestId('bank-accounts-pending')).toContainText(
+        '2 contas de origem sem conta do banco.',
+      );
+      await shot(page, `plano-contabil-conta-do-banco-${slugPC16}`);
+      await analyze(page, `plano contábil — seção da conta do banco (${vp.label})`);
+
+      await secao.getByRole('button', { name: /Associar conta do banco de Cartão Itaú/ }).click();
+      const gaveta = page.getByRole('dialog');
+      await aguardarAnimacao(gaveta);
+      await gaveta.getByRole('button', { name: 'Conta contábil do banco' }).click();
+      const lista = page.getByRole('listbox', { name: 'Conta contábil do banco' });
+      // Só analíticas ATIVAS: a sintética (10) e a inativa (700) não aparecem.
+      await expect(lista.getByRole('option')).toHaveCount(3);
+      await expect(lista.getByRole('option', { name: /^10 / })).toHaveCount(0);
+      await expect(lista.getByRole('option', { name: /^700 / })).toHaveCount(0);
+      await lista.getByRole('option', { name: '649 — Banco conta movimento' }).click();
+      await expect(lista).toHaveCount(0);
+      const salvar = gaveta.getByRole('button', { name: 'Salvar' });
+      await exigirDentroDaViewport(page, salvar, `${vp.label}: "Salvar" da conta do banco`);
+      await shot(page, `plano-contabil-associar-banco-${slugPC16}`);
+      await analyze(page, `plano contábil — gaveta da conta do banco (${vp.label})`);
+
+      await salvar.click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(page.locator(TOAST_TITLE)).toContainText('Conta do banco associada.');
+    });
+
+    test('operador do cliente lê a conta do banco, sem importar nem associar', async ({ page }) => {
+      sessionUser = CLIENT_OPERATOR_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+
+      await expect(
+        page.getByRole('region', { name: 'Contas do plano contábil (rolável)' }),
+      ).toBeVisible();
+      await expect(page.getByRole('button', { name: /importar/i })).toHaveCount(0);
+      const secao = page.getByTestId('bank-accounts-section');
+      await expect(secao.getByRole('button', { name: /Associar|Trocar/ })).toHaveCount(0);
+      await expect(secao.getByText(/Peça a alguém do escritório/)).toBeVisible();
+      await analyze(page, `plano contábil — operador (${vp.label})`);
+    });
+  });
+}
+
+/**
+ * Sprint 16 / FRONT 16.6 — o de-para no destino `conta_contabil`: o editor com
+ * a conta do plano do cliente e o histórico padrão, a prévia com a partida
+ * (histórico com dica acessível, completude, contas de origem pendentes) e o
+ * estado do 409 `CONTA_DO_BANCO_PENDENTE`. Nos três temas e nos dois viewports.
+ */
+for (const vp of VIEWPORTS) {
+  const slugDC = vp.label.replace(/\s+/g, '-');
+  test.describe(`De-para no destino Conta contábil (FRONT 16.6) — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('editor: conta do plano do cliente, histórico com contador e legado para refazer', async ({
+      page,
+    }) => {
+      mappingAccountingDestination = true;
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/de-para?destination=conta_contabil`);
+
+      // Importar a planilha some neste destino; exportar fica.
+      await expect(page.getByRole('button', { name: 'Exportar' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Importar', exact: true })).toHaveCount(0);
+      await expect(page.getByRole('columnheader', { name: 'Histórico padrão' })).toBeVisible();
+      await expect(page.getByTestId('mapping-legacy-badge').first()).toContainText(
+        'Refazer no plano do cliente',
+      );
+      await shot(page, `de-para-conta-contabil-lista-${slugDC}`);
+      await analyze(page, `de-para conta contábil — lista com legado e histórico (${vp.label})`);
+
+      await page.getByRole('button', { name: 'Alterar a categoria 2.01.01' }).click();
+      const gaveta = page.getByRole('dialog');
+      await aguardarAnimacao(gaveta);
+      await expect(
+        gaveta.getByRole('button', { name: /Conta do plano contábil do cliente: 5101/ }),
+      ).toBeVisible();
+      const historico = gaveta.getByLabel('Histórico padrão');
+      await expect(historico).toHaveValue(HISTORICO_LONGO);
+      await expect(gaveta.getByTestId('history-counter')).toHaveText(
+        `${HISTORICO_LONGO.length}/500`,
+      );
+      await expect(gaveta.getByText(/cria uma vigência nova/).first()).toBeVisible();
+      const gravar = gaveta.getByRole('button', { name: 'Gravar decisão' });
+      await exigirDentroDaViewport(page, gravar, `${vp.label}: "Gravar decisão"`);
+      await shot(page, `de-para-conta-contabil-editor-${slugDC}`);
+      await analyze(page, `de-para conta contábil — editor com histórico (${vp.label})`);
+
+      // Acima do limite: erro de validação no campo, sem request.
+      await historico.fill('x'.repeat(501));
+      await expect(gaveta.getByTestId('history-counter')).toHaveText('501/500');
+      await gravar.click();
+      await expect(
+        gaveta.getByText('O histórico padrão tem no máximo 500 caracteres.'),
+      ).toBeVisible();
+      await analyze(page, `de-para conta contábil — histórico acima do limite (${vp.label})`);
+    });
+
+    test('prévia: partida por categoria, completude e contas de origem pendentes', async ({
+      page,
+    }) => {
+      mappingAccountingDestination = true;
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(
+        `/clientes/${CLIENT_ID}/de-para?destination=conta_contabil&view=previa&competence=2026-06`,
+      );
+
+      const secao = page.getByTestId('mapping-accounting-preview');
+      await expect(secao).toBeVisible();
+      await expect(secao.getByTestId('partida-completeness')).toContainText('75%');
+      const pendentes = secao.getByTestId('bank-pending-notice');
+      await expect(pendentes).toContainText('Cartão Itaú');
+      await expect(
+        pendentes.getByRole('link', { name: /Associar conta do banco/ }),
+      ).toHaveAttribute('href', `/clientes/${CLIENT_ID}/plano-contabil#conta-do-banco`);
+      // Histórico truncado: a íntegra está no nome acessível (dica), sem `title`.
+      const dica = secao.getByRole('img', { name: `Histórico padrão: ${HISTORICO_LONGO}` });
+      await expect(dica).toHaveAttribute('tabindex', '0');
+      expect(await dica.getAttribute('title')).toBeNull();
+      await dica.focus();
+      await expect(page.getByRole('tooltip')).toContainText(HISTORICO_LONGO);
+      await shot(page, `de-para-conta-contabil-previa-${slugDC}`);
+      await analyze(page, `de-para conta contábil — prévia com partida (${vp.label})`);
+    });
+
+    test('409 CONTA_DO_BANCO_PENDENTE vira estado com as contas e o caminho', async ({ page }) => {
+      mappingAccountingDestination = true;
+      mappingBankPending = true;
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(
+        `/clientes/${CLIENT_ID}/de-para?destination=conta_contabil&view=previa&competence=2026-06`,
+      );
+
+      await page.getByRole('button', { name: 'Materializar' }).click();
+      const dialogo = page.getByRole('alertdialog');
+      await dialogo.getByRole('button', { name: /Materializar versão/ }).click();
+
+      const recusa = page.getByTestId('bank-pending-refusal');
+      await expect(recusa).toBeVisible();
+      await expect(recusa).toHaveAttribute('role', 'alert');
+      await expect(recusa).toContainText('nada foi gravado');
+      const lista = recusa.getByRole('list', { name: 'Contas de origem sem conta do banco' });
+      await expect(lista.getByRole('listitem')).toHaveCount(2);
+      await expect(lista).toContainText('Conta padrão (arquivo sem coluna de conta)');
+      await expect(page.locator('[data-sonner-toast]')).toHaveCount(0);
+      const associar = recusa.getByRole('link', { name: /Associar conta do banco/ });
+      await exigirDentroDaViewport(page, associar, `${vp.label}: "Associar conta do banco"`);
+      expect(
+        await measuredContrast(page, '[data-testid="bank-pending-refusal"] > p'),
+      ).toBeGreaterThanOrEqual(4.5);
+      await shot(page, `de-para-conta-contabil-409-${slugDC}`);
+      await analyze(page, `de-para conta contábil — 409 da conta do banco (${vp.label})`);
+    });
   });
 }

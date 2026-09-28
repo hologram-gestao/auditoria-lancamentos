@@ -164,14 +164,23 @@ export type Permission =
    * LEITURA do mapeamento não pede permissão — o operador precisa ver o resumo
    * do que será aplicado antes de enviar.
    */
-  | 'manage_input_mapping';
+  | 'manage_input_mapping'
+  /**
+   * Sprint 16 (BACK 16.1 · 16.3): IMPORTAR o plano de contas CONTÁBIL do
+   * cliente (o do sistema de destino, não o da origem da S10) e associar a
+   * conta contábil do BANCO a cada conta de origem. Configuração do ESCRITÓRIO:
+   * as células de `manage_client_connections` (staff). ⚠️ O `client_manager`
+   * fora é decisão do planejador do backend (ADR-086-BE), pendente de validação
+   * humana — espelhada como está. A LEITURA do plano não pede permissão.
+   */
+  | 'manage_client_accounting_chart';
 
 /**
  * A matriz, indexada por PAPEL (e não por permissão) de propósito: assim o
  * `Record<UserRole, ...>` obriga a lista a cobrir todo papel do contrato.
  *
  * Transcrita célula a célula de `apps/api/app/core/authz.py::PERMISSION_MATRIX`
- * (26 permissões × 5 papéis desde a Sprint 14) e travada em `__tests__/authz.test.ts`.
+ * (27 permissões × 5 papéis desde a Sprint 16) e travada em `__tests__/authz.test.ts`.
  *
  * | Ação                          | platform_admin | admin | manager | client_manager | client_operator |
  * | ----------------------------- | -------------- | ----- | ------- | -------------- | --------------- |
@@ -201,6 +210,7 @@ export type Permission =
  * | Redefinir senha de usuário    | ✅             | ❌    | ❌      | ❌             | ❌              |
  * | Enviar arquivo (S14)          | ✅             | ✅    | ✅ (carteira) | ✅       | ✅              |
  * | Configurar mapeamento (S14)   | ✅             | ✅    | ✅ (carteira) | ✅       | ❌              |
+ * | Plano contábil (S16)          | ✅             | ✅    | ✅ (carteira) | ❌       | ❌              |
  *
  * "(carteira)" e "(própria org)" **não são células**: são `resolve_client_access`
  * e os filtros de coleção, no servidor. A célula diz se o papel pode a AÇÃO.
@@ -236,6 +246,7 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'reset_user_password',
     'upload_client_file',
     'manage_input_mapping',
+    'manage_client_accounting_chart',
   ],
   // D3 final (86e36ed1d): `manage_anomaly_types` saiu daqui. A taxonomia de
   // anomalias é uma tabela GLOBAL do produto — o admin de uma organização
@@ -266,6 +277,7 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'manage_mapping_catalog',
     'upload_client_file',
     'manage_input_mapping',
+    'manage_client_accounting_chart',
   ],
   // O gerente da organização enxerga outros tenants apenas dentro da carteira —
   // quem sabe a carteira é o backend (`client_assignments`), ver `canAccessClient`.
@@ -297,6 +309,9 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     // — é ele quem faz a configuração inicial de quem não tem sistema.
     'upload_client_file',
     'manage_input_mapping',
+    // S16: o plano contábil é configuração do escritório — o gerente importa e
+    // associa a conta do banco dos clientes da carteira (ADR-086-BE).
+    'manage_client_accounting_chart',
   ],
   client_manager: [
     'run_reconciliation',
