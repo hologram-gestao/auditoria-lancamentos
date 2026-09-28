@@ -23,9 +23,9 @@ grep não bater, o código andou: releia o arquivo, não confie na linha.
 ## Passo 1 — Fonte da verdade é a resposta REAL, não a doc
 
 Todo nome de endpoint, envelope e campo que entra no código vem de uma fixture
-capturada da API real em `apps/api/tests/fixtures/omie/` (15 arquivos: 5 leituras com
+capturada da API real em `apps/api/tests/fixtures/omie/` (17 arquivos: 6 leituras com
 `request`+`response`, 4 da escrita, README). O gate `tests/unit/test_omie_fixtures.py`
-roda os DTOs contra elas e FALHA na divergência — 11 testes, e hoje nenhum skipa.
+roda os DTOs contra elas e FALHA na divergência — 14 testes, e hoje nenhum skipa.
 
 A doc interna (`Docs/documentation/6. Integração com API do Omie-20260424133624.md`) e
 a doc oficial (`https://app.omie.com.br/api/v1/<module>/<endpoint>/`) servem para achar
@@ -36,7 +36,7 @@ Antes de declarar ou usar um campo, procure-o na fixture do endpoint:
 
 ```bash
 grep -c '"<campo>"' apps/api/tests/fixtures/omie/<endpoint>.response.json   # 0 = NÃO existe na resposta real
-cd apps/api && uv run --extra dev pytest tests/unit/test_omie_fixtures.py -q --no-cov   # esperado: 11 passed
+cd apps/api && uv run --extra dev pytest tests/unit/test_omie_fixtures.py -q --no-cov   # esperado: 14 passed
 ```
 
 Envelopes reais (chave do array): `listaMovimentos` (ListarExtrato),
@@ -162,24 +162,31 @@ grep -n "_TITULO_STATUS_TO_CANONICAL" -A 3 apps/api/app/modules/reconciliations/
 
 ## Passo 6 — Sinal, tipo de conta e linhas de saldo
 
-- **Extrato de conta corrente (doc):** `nValorDocumento` absoluto + `cNatureza` `'D'`
-  (negativo) / `'C'` (positivo).
-- **Extrato de CARTÃO (fixture real 21/08/2026, `cCodTipo='CR'`):** natureza `'P'`/`'R'`
-  com valor JÁ sinalizado (79 `P`, 1 `R` na fixture). `LancamentoExtrato.signed_amount`
-  (`schemas.py:269-281`) inverte SÓ `'D'` — inverter qualquer outra natureza quebra o
-  cartão (CLAUDE.md §5.6).
+- **A doc diz** que conta corrente vem com `nValorDocumento` absoluto + `cNatureza`
+  `'D'` (negativo) / `'C'` (positivo). **Nenhuma captura real mostrou isso.**
+- **O que as capturas mostram, nos DOIS tipos de conta:** natureza `'P'`/`'R'` com valor
+  JÁ sinalizado (P negativo, R positivo). Cartão (`listar_extrato.response.json`,
+  21/08/2026, `cCodTipo='CR'`: 79 `P`, 1 `R`) e conta corrente
+  (`listar_extrato_conta_corrente.response.json`, BB, 28/09/2026, `cCodTipo='CC'`: 52 `P`,
+  61 `R`, sinal certo em 113/113). `LancamentoExtrato.signed_amount` inverte SÓ `'D'` —
+  inverter qualquer outra natureza quebra as duas (CLAUDE.md §5.6).
 - **Títulos:** o sinal é convenção do ADL, não da Omie — pagar = `-abs(valor)`
   (`omie_fetch.py:194-195`), receber = positivo.
 - **Tipo de conta** (`tipo_conta_corrente`): `CC` conta corrente, `CR` cartão, **`CA` =
   Conta Aplicação, NÃO cartão** (`OmieAccountType`, `schemas.py:58-60`; o PRD erra
   isso).
-- **Linhas de saldo:** `listaMovimentos` mistura linhas-resumo sem
-  `nCodLancamento`/`cNatureza`/`cSituacao` (32 das 112 linhas da fixture).
-  `listar_extrato` filtra ANTES do parse (`client.py:675`); qualquer consumidor novo do
-  array cru precisa do mesmo filtro.
+- **Linhas de saldo:** `listaMovimentos` mistura linhas-resumo de saldo ("SALDO
+  ANTERIOR", "SALDO"), uma por dia, em DUAS formas reais: no cartão vêm SEM
+  `nCodLancamento` (32 das 112 linhas); na conta corrente vêm COM `nCodLancamento` — um
+  CONTADOR 1, 2, 3…, não um ID (12 das 125). O traço comum é **sem `cNatureza` e valor
+  zero**: é o critério de `is_extrato_summary_row` (`client.py`), que `listar_extrato`
+  aplica ANTES do parse e o gate de fixtures reusa. Filtrar só por "sem
+  `nCodLancamento`" derrubou 5 conciliações do Laticínio em 28/09/2026. Linha sem
+  natureza e COM valor não é descartada: falha alto. Qualquer consumidor novo do array
+  cru usa o MESMO predicado.
 
 ```bash
-grep -o '"cNatureza": "[A-Z]"' apps/api/tests/fixtures/omie/listar_extrato.response.json | sort | uniq -c   # cartão: só P/R
+grep -o '"cNatureza": "[A-Z]"' apps/api/tests/fixtures/omie/listar_extrato*.response.json | sort | uniq -c   # só P/R, cartão e CC
 grep -n "def signed_amount" -A 12 apps/api/app/integrations/omie/schemas.py
 ```
 
@@ -263,7 +270,7 @@ grep -n "estorno_nao_verificado\|_require_credit_card\|inconclusive" apps/api/ap
   assume NÃO conta.
 
 ```bash
-cd apps/api && uv run --extra dev pytest tests/unit/test_omie_client.py tests/unit/test_omie_fixtures.py -q --no-cov   # 45 passed em 10/09/2026
+cd apps/api && uv run --extra dev pytest tests/unit/test_omie_client.py tests/unit/test_omie_fixtures.py -q --no-cov   # 54 passed em 28/09/2026
 ```
 
 ## Pontos em aberto — não redescubra, feche com captura
