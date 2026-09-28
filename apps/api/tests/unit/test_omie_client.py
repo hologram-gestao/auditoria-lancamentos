@@ -16,14 +16,16 @@ Cobertura:
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 import respx
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from app.core.config import Settings, get_settings
 from app.core.exceptions import (
@@ -210,6 +212,20 @@ class TestSchemas:
 def _omie_url(module: str, endpoint: str) -> str:
     """URL canônica esperada pelo client."""
     return f"https://app.omie.com.br/api/v1/{module}/{endpoint}/"
+
+
+_CONTA_CORRENTE_EXTRATO_FIXTURE = (
+    Path(__file__).resolve().parent.parent
+    / "fixtures"
+    / "omie"
+    / "listar_extrato_conta_corrente.response.json"
+)
+
+
+def _conta_corrente_extrato_fixture() -> dict[str, Any]:
+    """Resposta REAL (anonimizada) do ListarExtrato de conta corrente, 28/09/2026."""
+    payload: dict[str, Any] = json.loads(_CONTA_CORRENTE_EXTRATO_FIXTURE.read_text("utf-8"))
+    return payload
 
 
 class TestCallSuccess:
@@ -817,6 +833,100 @@ class TestListarExtrato:
         assert len(items) == 1  # só o lançamento real, 2 linhas de saldo descartadas
         assert items[0].n_cod_lancamento == 99
         assert items[0].signed_amount == Decimal("-250.00")
+
+    @respx.mock
+    async def test_listar_extrato_filters_saldo_rows_that_carry_a_counter_id(
+        self, client: OmieClient
+    ) -> None:
+        """Regressão (Laticínio, 28/09/2026): em conta corrente a Omie devolve a
+        linha de saldo COM `nCodLancamento` — um contador 1, 2, 3…, uma por dia.
+        O filtro "sem `nCodLancamento`" a deixava passar, o parse morria por falta
+        de `cNatureza` e a conciliação virava INTERNAL_ERROR (retry não resolve:
+        a Omie devolve a mesma linha)."""
+        respx.post(_omie_url("financas", "extrato")).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "listaMovimentos": [
+                        {
+                            "nCodLancamento": 1,
+                            "cDesCliente": "SALDO ANTERIOR",
+                            "dDataLancamento": "29/12/2025",
+                            "nSaldo": -1008.07,
+                            "nSaldoPrev": -1033.62,
+                            "nValorDocumento": 0,
+                        },
+                        {
+                            "nCodLancamento": 8812345678,
+                            "cNatureza": "P",
+                            "dDataLancamento": "02/01/2026",
+                            "nValorDocumento": -250.0,
+                            "cSituacao": "Conciliado",
+                        },
+                        {
+                            "nCodLancamento": 2,
+                            "cDesCliente": "SALDO",
+                            "dDataLancamento": "02/01/2026",
+                            "nSaldo": -1258.07,
+                            "nSaldoPrev": -1283.62,
+                            "nValorDocumento": 0,
+                        },
+                    ]
+                },
+            )
+        )
+        items = await client.listar_extrato(
+            n_cod_cc=42,
+            data_inicial=date(2025, 12, 29),
+            data_final=date(2026, 1, 2),
+        )
+        assert [it.n_cod_lancamento for it in items] == [8812345678]
+        assert items[0].signed_amount == Decimal("-250.0")
+
+    @respx.mock
+    async def test_listar_extrato_parses_real_conta_corrente_fixture(
+        self, client: OmieClient
+    ) -> None:
+        """A resposta REAL (anonimizada) que derrubou produção passa inteira pelo
+        `listar_extrato`: 125 linhas, 12 de saldo descartadas, 113 lançamentos."""
+        respx.post(_omie_url("financas", "extrato")).mock(
+            return_value=httpx.Response(200, json=_conta_corrente_extrato_fixture())
+        )
+        items = await client.listar_extrato(
+            n_cod_cc=1234567890,
+            data_inicial=date(2025, 12, 30),
+            data_final=date(2026, 1, 9),
+        )
+        assert len(items) == 113
+
+    @respx.mock
+    async def test_listar_extrato_keeps_failing_on_row_without_natureza_but_with_value(
+        self, client: OmieClient
+    ) -> None:
+        """O filtro de saldo NÃO é "sem `cNatureza`" sozinho: uma linha sem natureza
+        e com VALOR não é a forma de saldo observada, e descartá-la em silêncio
+        poderia sumir com um lançamento real da conciliação. Ela continua
+        falhando alto — erro visível é melhor que conciliação errada calada."""
+        respx.post(_omie_url("financas", "extrato")).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "listaMovimentos": [
+                        {
+                            "nCodLancamento": 77,
+                            "dDataLancamento": "02/01/2026",
+                            "nValorDocumento": -99.9,
+                        },
+                    ]
+                },
+            )
+        )
+        with pytest.raises(ValidationError):
+            await client.listar_extrato(
+                n_cod_cc=42,
+                data_inicial=date(2026, 1, 1),
+                data_final=date(2026, 1, 31),
+            )
 
     @respx.mock
     async def test_listar_extrato_uses_dedicated_timeout(self, client: OmieClient) -> None:
