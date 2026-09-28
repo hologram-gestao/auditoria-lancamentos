@@ -37,8 +37,8 @@ function basePath(clientId: string): string {
 
 /**
  * `page`/`pageSize` vão SEMPRE, mesmo nos defaults (regra do papel: param
- * condicional é o que gera 422 na carga inicial). `status`, `parentCode` e
- * `code` são omitidos quando vazios — mandar `status=` vazio não é "sem
+ * condicional é o que gera 422 na carga inicial). `status`, `parentCode`,
+ * `code`, `hasDreCode` e `hasAccountingCode` são omitidos quando vazios — mandar `status=` vazio não é "sem
  * filtro", é um valor fora do `Literal` do servidor, que responde 422.
  */
 function buildQuery(params: ListChartOfAccountsParams): string {
@@ -48,6 +48,12 @@ function buildQuery(params: ListChartOfAccountsParams): string {
   if (params.status) sp.set('status', params.status);
   if (params.parentCode) sp.set('parentCode', params.parentCode);
   if (params.code) sp.set('code', params.code);
+  // Booleanos (86e3f55bc): `false` é um recorte ("sem destino declarado"), não
+  // "sem filtro" — por isso o teste é contra `null`/`undefined`, nunca truthy.
+  if (params.hasDreCode != null) sp.set('hasDreCode', String(params.hasDreCode));
+  if (params.hasAccountingCode != null) {
+    sp.set('hasAccountingCode', String(params.hasAccountingCode));
+  }
   return sp.toString();
 }
 

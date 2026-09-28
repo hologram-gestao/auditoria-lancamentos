@@ -27,6 +27,11 @@
  *     sincronizada mostra a instrução (e nem pede a prévia); materializar com
  *     valor sem decisão exige a confirmação extra;
  *   - a importação mostra a prévia com as linhas recusadas antes de aplicar;
+ *   - (86e3f55bd) os contadores por situação vêm do envelope e filtram pela URL
+ *     (ativo exato, `aria-pressed`, desfazer), o `Select` de situação saiu, os
+ *     filtros ativos viram etiquetas removíveis, a página rola e a tabela não,
+ *     50 por página, e clicar na linha abre a gaveta do item certo para quem
+ *     edita (e nada para o operador);
  *   - axe-core sem `critical`/`serious`.
  */
 import { render, screen, waitFor, within } from '@testing-library/react';
@@ -167,7 +172,15 @@ vi.mock('@/lib/authz', async (importOriginal) => {
 
 // Imports do SUT DEPOIS dos `vi.mock` (as factories fecham sobre variáveis
 // deste módulo; importar antes as avaliaria na TDZ).
-import { ClientMappingScreen } from '@/components/features/client-mapping/client-mapping-screen';
+import {
+  ClientMappingScreen,
+  DEFAULT_PAGE_SIZE,
+} from '@/components/features/client-mapping/client-mapping-screen';
+import {
+  isMappingCountActive,
+  mappingCountFilterSituation,
+  type MappingCountKey,
+} from '@/components/features/client-mapping/mapping-situation-counts';
 import { ApiError } from '@/lib/api/client';
 import { buildClientMappingQuery, type ListClientMappingParams } from '@/lib/api/client-mapping';
 import type * as AuthzModule from '@/lib/authz';
@@ -349,6 +362,9 @@ beforeEach(() => {
     ],
     pagination: { page: 1, pageSize: 20, total: 4, totalPages: 1 },
     competence: '2026-09',
+    // O universo INTEIRO do destino (servidor): maior que a página de 4 linhas
+    // de propósito, para provar que os contadores não vêm da página.
+    counts: { total: 60, herdada: 20, confirmada: 12, naoMapear: 10, semDecisao: 18 },
   };
   listState.isLoading = false;
   listState.isError = false;
@@ -513,12 +529,14 @@ describe('ClientMappingScreen — destino padrão', () => {
 });
 
 describe('ClientMappingScreen — lista, filtros e busca (R6)', () => {
+  // 86e3f55bd: o `pageSize` padrão foi de 20 para 50 (a página rola agora);
+  // os dois testes abaixo mudaram de propósito só nesse número.
   it('filtro e busca vão ao SERVIDOR, com page/pageSize sempre presentes', () => {
     currentSearch = 'situation=herdada&code=2.01';
     render(<ClientMappingScreen clientId={TENANT} />);
-    expect(lastListParams).toEqual({ page: 1, pageSize: 20, situation: 'herdada', code: '2.01' });
+    expect(lastListParams).toEqual({ page: 1, pageSize: 50, situation: 'herdada', code: '2.01' });
     expect(buildClientMappingQuery(lastListParams!)).toBe(
-      'page=1&pageSize=20&situation=herdada&code=2.01',
+      'page=1&pageSize=50&situation=herdada&code=2.01',
     );
   });
 
@@ -526,7 +544,7 @@ describe('ClientMappingScreen — lista, filtros e busca (R6)', () => {
     currentSearch = 'situation=qualquer';
     render(<ClientMappingScreen clientId={TENANT} />);
     expect(lastListParams?.situation).toBeNull();
-    expect(buildClientMappingQuery(lastListParams!)).toBe('page=1&pageSize=20');
+    expect(buildClientMappingQuery(lastListParams!)).toBe('page=1&pageSize=50');
   });
 
   it('a busca é rotulada "por código" e diz que o nome não é pesquisável', () => {
@@ -583,6 +601,151 @@ describe('ClientMappingScreen — lista, filtros e busca (R6)', () => {
     render(<ClientMappingScreen clientId={TENANT} />);
     expect(screen.getByRole('alert')).toHaveTextContent('Não foi possível carregar o de-para');
     expect(screen.getByRole('button', { name: 'Tentar novamente' })).toBeVisible();
+  });
+});
+
+describe('ClientMappingScreen — contadores que filtram (86e3f55bd)', () => {
+  it('a tabela contador → situação, e o ativo é exato', () => {
+    expect(mappingCountFilterSituation('total')).toBeNull();
+    const keys: MappingCountKey[] = ['total', 'herdada', 'confirmada', 'nao_mapear', 'sem_decisao'];
+    for (const key of keys) {
+      if (key !== 'total') expect(mappingCountFilterSituation(key)).toBe(key);
+      const situacao = mappingCountFilterSituation(key);
+      expect(keys.filter((k) => isMappingCountActive(situacao, k))).toEqual([key]);
+    }
+  });
+
+  it('os cinco contadores vêm do envelope (universo), não da página', () => {
+    render(<ClientMappingScreen clientId={TENANT} />);
+    const esperado: Array<[string, string]> = [
+      ['Categorias', '60'],
+      ['Herdadas da origem', '20'],
+      ['Confirmadas', '12'],
+      ['Não mapear', '10'],
+      ['Sem decisão', '18'],
+    ];
+    for (const [rotulo, valor] of esperado) {
+      const termo = screen.getByText(rotulo, { selector: 'dt' });
+      expect(termo.parentElement).toHaveTextContent(valor);
+    }
+    expect(
+      screen.getByText(/^Contagens do destino inteiro, na competência corrente/),
+    ).toBeVisible();
+  });
+
+  it('botão no <dd>, nome com rótulo + valor, e aria-pressed pelo recorte da URL', () => {
+    currentSearch = 'situation=sem_decisao';
+    render(<ClientMappingScreen clientId={TENANT} />);
+    const semDecisao = screen.getByRole('button', {
+      name: 'Sem decisão: 18 categorias. Filtrar a lista',
+    });
+    expect(semDecisao.closest('dd')).not.toBeNull();
+    expect(semDecisao).toHaveAttribute('aria-pressed', 'true');
+    expect(semDecisao).toHaveClass('bg-accent', 'text-accent-foreground', 'ring-2');
+    expect(screen.getByRole('button', { name: /^Categorias:/ })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+
+  it('clicar aplica a situação e zera a página; o código fica', async () => {
+    const user = userEvent.setup();
+    currentSearch = 'page=3&code=2.01';
+    render(<ClientMappingScreen clientId={TENANT} />);
+    await user.click(screen.getByRole('button', { name: /^Herdadas da origem:/ }));
+    const url = String(replaceMock.mock.calls.at(-1)?.[0]);
+    expect(url).toContain('situation=herdada');
+    expect(url).toContain('code=2.01');
+    expect(url).not.toContain('page=3');
+  });
+
+  it('segundo clique desfaz; "Categorias" limpa a situação', async () => {
+    const user = userEvent.setup();
+    currentSearch = 'situation=confirmada';
+    render(<ClientMappingScreen clientId={TENANT} />);
+    await user.click(screen.getByRole('button', { name: /^Confirmadas:/ }));
+    expect(String(replaceMock.mock.calls.at(-1)?.[0])).not.toContain('situation=');
+    await user.click(screen.getByRole('button', { name: /^Categorias:/ }));
+    expect(String(replaceMock.mock.calls.at(-1)?.[0])).not.toContain('situation=');
+  });
+
+  it('o Select de situação saiu da barra', () => {
+    render(<ClientMappingScreen clientId={TENANT} />);
+    expect(screen.queryByLabelText('Situação')).toBeNull();
+    expect(screen.queryByRole('combobox', { name: 'Situação' })).toBeNull();
+  });
+
+  it('etiquetas removíveis: uma por parâmetro, remover limpa só aquele', async () => {
+    const user = userEvent.setup();
+    currentSearch = 'situation=sem_decisao&code=2.01&page=2';
+    render(<ClientMappingScreen clientId={TENANT} />);
+    const lista = screen.getByRole('list', { name: 'Filtros ativos' });
+    expect(
+      within(lista)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual(['Sem decisão', 'Código 2.01']);
+
+    await user.click(screen.getByRole('button', { name: 'Remover filtro Código 2.01' }));
+    const url = String(replaceMock.mock.calls.at(-1)?.[0]);
+    expect(url).not.toContain('code=');
+    expect(url).toContain('situation=sem_decisao');
+    expect(url).not.toContain('page=2');
+    expect(screen.getByLabelText('Buscar por código da categoria')).toHaveValue('');
+  });
+
+  it('a página rola e a tabela não: sem fill, cabeçalho grudado na rolagem da página', () => {
+    render(<ClientMappingScreen clientId={TENANT} />);
+    const region = screen.getByRole('region', { name: 'Categorias do de-para (rolável)' });
+    expect(region).toHaveClass('overflow-auto', 'xl:overflow-clip');
+    expect(region).not.toHaveClass('min-h-0');
+    expect(region.className).toContain('[&_thead_th]:xl:sticky');
+    const card = region.parentElement;
+    expect(card).toHaveClass('overflow-clip');
+    const area = region.closest('[aria-busy]');
+    expect(area).not.toHaveClass('flex-1', 'min-h-[24rem]', 'lg:min-h-[8rem]');
+    expect(region.closest('section')).not.toHaveClass('h-full');
+    const barra = screen.getByRole('navigation', { name: 'Paginação de categorias' });
+    expect(region).not.toContainElement(barra);
+    expect(region.compareDocumentPosition(barra) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('50 categorias por página por padrão', () => {
+    render(<ClientMappingScreen clientId={TENANT} />);
+    expect(DEFAULT_PAGE_SIZE).toBe(50);
+    expect(lastListParams).toMatchObject({ pageSize: 50 });
+  });
+
+  it('clicar na linha abre a gaveta do item certo para quem edita (sem tabIndex/role)', async () => {
+    const user = userEvent.setup();
+    render(<ClientMappingScreen clientId={TENANT} />);
+    const linha = screen.getAllByRole('row')[4]!; // 1.04.02, sem decisão
+    expect(linha).not.toHaveAttribute('tabindex');
+    expect(linha).not.toHaveAttribute('role', 'button');
+    expect(linha).toHaveClass('cursor-pointer');
+
+    await user.click(within(linha).getByText('Nome indisponível agora'));
+    const gaveta = await screen.findByRole('dialog');
+    expect(within(gaveta).getByRole('heading', { name: 'Decisão do de-para' })).toBeVisible();
+    expect(gaveta).toHaveTextContent('1.04.02');
+    expect(gaveta).not.toHaveTextContent('2.01.01');
+  });
+
+  it('o botão da coluna não abre a gaveta duas vezes', async () => {
+    const user = userEvent.setup();
+    render(<ClientMappingScreen clientId={TENANT} />);
+    await user.click(screen.getByRole('button', { name: 'Alterar a categoria 2.01.01' }));
+    expect(await screen.findAllByRole('dialog')).toHaveLength(1);
+  });
+
+  it('para o operador a linha não é clicável e nada abre', async () => {
+    const user = userEvent.setup();
+    authState.user = clientOperator;
+    render(<ClientMappingScreen clientId={TENANT} />);
+    const linha = screen.getAllByRole('row')[1]!;
+    expect(linha).not.toHaveClass('cursor-pointer');
+    await user.click(within(linha).getByText('Aluguel'));
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 });
 

@@ -13,6 +13,11 @@
  *     hierarquia, e busca por CÓDIGO — e **não existe** busca por nome na UI;
  *   - `client_operator` LÊ mas **não** vê a ação de sincronizar (oculta, não
  *     desabilitada); `client_manager` vê;
+ *   - os cinco cards filtram pela URL (tabela `coverageFilterParams`, ativo
+ *     exato, `aria-pressed`, desfazer), Situação é grupo de botões e cada
+ *     filtro ativo vira etiqueta removível (86e3f55bc);
+ *   - a página rola e a tabela não (classes do padrão `stickyHeader="page"`),
+ *     50 por página, "Atualizado em" (86e3f55bc);
  *   - estado vazio de "nunca sincronizou" com a ação de sincronizar; falha da
  *     última tentativa mostra a data da última BEM-SUCEDIDA;
  *   - cliente encerrado: ação indisponível **com o motivo**;
@@ -85,7 +90,15 @@ vi.mock('@/stores/auth', () => ({
 
 // Imports do SUT DEPOIS dos `vi.mock` (as factories fecham sobre variáveis
 // deste módulo; importar antes as avaliaria na TDZ).
-import { ChartOfAccountsScreen } from '@/components/features/chart-of-accounts/chart-of-accounts-screen';
+import {
+  coverageFilterParams,
+  isCoverageFilterActive,
+  type CoverageFilterKey,
+} from '@/components/features/chart-of-accounts/chart-of-accounts-coverage';
+import {
+  ChartOfAccountsScreen,
+  DEFAULT_PAGE_SIZE,
+} from '@/components/features/chart-of-accounts/chart-of-accounts-screen';
 import type { ListChartOfAccountsParams } from '@/lib/api/client-chart-of-accounts';
 import type {
   AuthenticatedUser,
@@ -256,15 +269,45 @@ describe('ChartOfAccountsScreen — lista', () => {
     expect(screen.getByText('Nome não disponível')).toBeVisible();
   });
 
-  it('a tabela é o scroller vertical da área, e a barra de paginação fica fora', () => {
+  /**
+   * 86e3f55bc (Parte A) SUBSTITUI o teste antigo "a tabela é o scroller
+   * vertical da área" (`overflow-auto` + `min-h-0` na região): agora a página
+   * rola e a tabela não, como na carteira. O jsdom não faz layout, então o que
+   * se trava aqui são as classes que decidem o desenho; a geometria é do e2e.
+   */
+  it('a página rola e a tabela não: sem fill, cabeçalho grudado na rolagem da página', () => {
     render(<ChartOfAccountsScreen clientId="c1" />);
     const region = screen.getByRole('region', {
       name: 'Categorias do plano de contas (rolável)',
     });
-    expect(region).toHaveClass('overflow-auto', 'min-h-0');
-    expect(region).not.toContainElement(
-      screen.getByRole('navigation', { name: 'Paginação de categorias' }),
-    );
+    expect(region).toHaveClass('overflow-auto', 'xl:overflow-clip');
+    expect(region).not.toHaveClass('min-h-0');
+    expect(region.className).toContain('[&_thead_th]:xl:sticky');
+    const card = region.parentElement;
+    expect(card).toHaveClass('overflow-clip');
+    expect(card).not.toHaveClass('overflow-hidden');
+    const area = region.closest('[aria-busy]');
+    expect(area).not.toHaveClass('min-h-0', 'flex-1');
+    expect(region.closest('section')).not.toHaveClass('h-full');
+    // A paginação vem DEPOIS da tabela, no fluxo, fora da região.
+    const barra = screen.getByRole('navigation', { name: 'Paginação de categorias' });
+    expect(region).not.toContainElement(barra);
+    expect(region.compareDocumentPosition(barra) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('50 categorias por página por padrão (com a página rolando, 20 era pouco)', () => {
+    render(<ChartOfAccountsScreen clientId="c1" />);
+    expect(DEFAULT_PAGE_SIZE).toBe(50);
+    expect(lastQueryParams).toMatchObject({ pageSize: 50 });
+  });
+
+  it('nome e conta de demonstrativo quebram linha; os códigos não', () => {
+    render(<ChartOfAccountsScreen clientId="c1" />);
+    const cells = within(screen.getAllByRole('row')[1]!).getAllByRole('cell');
+    expect(cells[0]).toHaveClass('whitespace-nowrap');
+    expect(cells[1]).toHaveClass('whitespace-normal');
+    expect(cells[2]).toHaveClass('whitespace-normal');
+    expect(cells[3]).toHaveClass('whitespace-nowrap');
   });
 
   it('lê page e pageSize da URL e os manda SEMPRE para o servidor', () => {
@@ -306,6 +349,53 @@ describe('ChartOfAccountsScreen — filtros e busca (R3)', () => {
     expect(screen.getByLabelText('Filhas do código')).toHaveValue('1.01');
   });
 
+  /**
+   * 86e3f55bc (Parte C) SUBSTITUI o `Select` de Situação: grupo de quatro
+   * botões com `aria-pressed`. O `getByLabelText('Situação')` antigo casava o
+   * gatilho do Select; agora o nome é do `role="group"`.
+   */
+  it('Situação é um grupo de quatro botões, sem Select', async () => {
+    const user = userEvent.setup();
+    currentSearch = 'status=inativa&page=3';
+    render(<ChartOfAccountsScreen clientId="c1" />);
+
+    // O único `combobox` da tela é o "itens por página" da paginação.
+    expect(screen.queryByRole('combobox', { name: 'Situação' })).toBeNull();
+    const grupo = screen.getByRole('group', { name: 'Situação' });
+    const botoes = within(grupo).getAllByRole('button');
+    expect(botoes.map((b) => b.textContent)).toEqual([
+      'Todas',
+      'Ativas',
+      'Inativas',
+      'Ausentes na origem',
+    ]);
+    expect(within(grupo).getByRole('button', { name: 'Inativas' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(within(grupo).getByRole('button', { name: 'Todas' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+
+    await user.click(within(grupo).getByRole('button', { name: 'Ausentes na origem' }));
+    const url = String(replaceMock.mock.calls.at(-1)?.[0]);
+    expect(url).toContain('status=ausente_na_origem');
+    expect(url).not.toContain('page=3');
+  });
+
+  it('os dois recortes novos da URL chegam ao servidor como booleanos', () => {
+    currentSearch = 'hasDreCode=false&hasAccountingCode=true';
+    render(<ChartOfAccountsScreen clientId="c1" />);
+    expect(lastQueryParams).toMatchObject({ hasDreCode: false, hasAccountingCode: true });
+  });
+
+  it('recorte booleano com lixo na URL degrada para "sem filtro"', () => {
+    currentSearch = 'hasDreCode=talvez';
+    render(<ChartOfAccountsScreen clientId="c1" />);
+    expect(lastQueryParams?.hasDreCode).toBeNull();
+  });
+
   it('situação fora do vocabulário do servidor degrada para "sem filtro"', () => {
     // URL editada à mão não pode virar 422 na carga inicial.
     currentSearch = 'status=qualquer-coisa';
@@ -313,9 +403,9 @@ describe('ChartOfAccountsScreen — filtros e busca (R3)', () => {
     expect(lastQueryParams?.status).toBeNull();
   });
 
-  it('"Limpar filtros" derruba os três de uma vez', async () => {
+  it('"Limpar filtros" derruba todos de uma vez', async () => {
     const user = userEvent.setup();
-    currentSearch = 'status=ativa&code=1.01&parentCode=1';
+    currentSearch = 'status=ativa&code=1.01&parentCode=1&hasDreCode=true&hasAccountingCode=true';
     render(<ChartOfAccountsScreen clientId="c1" />);
 
     await user.click(screen.getByRole('button', { name: 'Limpar filtros' }));
@@ -323,6 +413,206 @@ describe('ChartOfAccountsScreen — filtros e busca (R3)', () => {
     expect(url).not.toContain('status=');
     expect(url).not.toContain('code=');
     expect(url).not.toContain('parentCode=');
+    expect(url).not.toContain('hasDreCode=');
+    expect(url).not.toContain('hasAccountingCode=');
+  });
+});
+
+describe('ChartOfAccountsScreen — cards de cobertura que filtram (86e3f55bc)', () => {
+  it('a tabela de mapeamento card → parâmetros', () => {
+    expect(coverageFilterParams('total')).toEqual({
+      status: null,
+      hasDreCode: null,
+      hasAccountingCode: null,
+    });
+    expect(coverageFilterParams('ativas')).toEqual({
+      status: 'ativa',
+      hasDreCode: null,
+      hasAccountingCode: null,
+    });
+    // As três contagens de destino são sobre as ATIVAS: o card leva a situação
+    // junto, senão o total da lista passaria do número do card.
+    expect(coverageFilterParams('comDestino')).toEqual({
+      status: 'ativa',
+      hasDreCode: true,
+      hasAccountingCode: null,
+    });
+    expect(coverageFilterParams('semDestino')).toEqual({
+      status: 'ativa',
+      hasDreCode: false,
+      hasAccountingCode: null,
+    });
+    expect(coverageFilterParams('comContaContabil')).toEqual({
+      status: 'ativa',
+      hasDreCode: null,
+      hasAccountingCode: true,
+    });
+  });
+
+  it('ativo é EXATO: um parâmetro a mais ou a menos apaga o botão', () => {
+    const keys: CoverageFilterKey[] = [
+      'total',
+      'ativas',
+      'comDestino',
+      'semDestino',
+      'comContaContabil',
+    ];
+    for (const key of keys) {
+      const params = coverageFilterParams(key);
+      // Só o próprio card acende com os parâmetros dele.
+      expect(keys.filter((k) => isCoverageFilterActive(params, k))).toEqual([key]);
+    }
+    // `hasDreCode=true` sem `status` não é o card "Com destino".
+    expect(
+      isCoverageFilterActive(
+        { status: null, hasDreCode: true, hasAccountingCode: null },
+        'comDestino',
+      ),
+    ).toBe(false);
+  });
+
+  it('botão dentro do <dd>, com nome de rótulo + valor e aria-pressed', () => {
+    currentSearch = 'status=ativa&hasDreCode=false';
+    render(<ChartOfAccountsScreen clientId="c1" />);
+
+    const semDestino = screen.getByRole('button', {
+      name: 'Sem destino declarado: 13 categorias. Filtrar a lista',
+    });
+    expect(semDestino.closest('dd')).not.toBeNull();
+    expect(semDestino).toHaveAttribute('aria-pressed', 'true');
+    // Ativo = anel + accent, e o texto de apoio deixa o `muted` para o
+    // `accent-foreground` herdado (par travado no theme-contrast).
+    expect(semDestino).toHaveClass('bg-accent', 'text-accent-foreground', 'ring-2');
+    expect(semDestino.querySelector('.text-muted-foreground')).toBeNull();
+    for (const outro of ['Categorias', 'Ativas', 'Com destino', 'Com conta contábil']) {
+      expect(screen.getByRole('button', { name: new RegExp(`^${outro}:`) })).toHaveAttribute(
+        'aria-pressed',
+        'false',
+      );
+    }
+  });
+
+  it('clicar aplica o recorte da tabela e zera a página', async () => {
+    const user = userEvent.setup();
+    currentSearch = 'page=4&code=1';
+    render(<ChartOfAccountsScreen clientId="c1" />);
+
+    await user.click(screen.getByRole('button', { name: /^Com destino:/ }));
+    const url = String(replaceMock.mock.calls.at(-1)?.[0]);
+    expect(url).toContain('status=ativa');
+    expect(url).toContain('hasDreCode=true');
+    expect(url).not.toContain('hasAccountingCode=');
+    expect(url).not.toContain('page=4');
+    // Código e hierarquia não são do card: ficam.
+    expect(url).toContain('code=1');
+  });
+
+  it('segundo clique desfaz os três parâmetros', async () => {
+    const user = userEvent.setup();
+    currentSearch = 'status=ativa&hasAccountingCode=true';
+    render(<ChartOfAccountsScreen clientId="c1" />);
+
+    const botao = screen.getByRole('button', { name: /^Com conta contábil:/ });
+    expect(botao).toHaveAttribute('aria-pressed', 'true');
+    await user.click(botao);
+    const url = String(replaceMock.mock.calls.at(-1)?.[0]);
+    expect(url).not.toContain('status=');
+    expect(url).not.toContain('hasAccountingCode=');
+    expect(url).not.toContain('hasDreCode=');
+  });
+
+  it('sem recorte, "Categorias" é o card ativo', () => {
+    render(<ChartOfAccountsScreen clientId="c1" />);
+    expect(screen.getByRole('button', { name: /^Categorias:/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('a nota diz que as contagens são do plano inteiro, com a data de referência', () => {
+    render(<ChartOfAccountsScreen clientId="c1" />);
+    expect(
+      screen.getByText(/^Contagens do plano de contas inteiro, com referência em 23\/09\/2026/),
+    ).toBeVisible();
+  });
+});
+
+describe('ChartOfAccountsScreen — etiquetas removíveis (86e3f55bc)', () => {
+  it('uma etiqueta por parâmetro, e link antigo também as mostra', () => {
+    currentSearch = 'status=ativa&hasDreCode=false&parentCode=1.01&code=2.0';
+    render(<ChartOfAccountsScreen clientId="c1" />);
+    const lista = screen.getByRole('list', { name: 'Filtros ativos' });
+    expect(
+      within(lista)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual(['Ativas', 'Sem destino declarado', 'Filhas de 1.01', 'Código 2.0']);
+  });
+
+  it('remover uma etiqueta limpa SÓ aquele parâmetro e zera a página', async () => {
+    const user = userEvent.setup();
+    currentSearch = 'status=ativa&hasDreCode=false&parentCode=1.01&page=2';
+    render(<ChartOfAccountsScreen clientId="c1" />);
+
+    await user.click(screen.getByRole('button', { name: 'Remover filtro Sem destino declarado' }));
+    const url = String(replaceMock.mock.calls.at(-1)?.[0]);
+    expect(url).not.toContain('hasDreCode=');
+    expect(url).toContain('status=ativa');
+    expect(url).toContain('parentCode=1.01');
+    expect(url).not.toContain('page=2');
+  });
+
+  it('remover a etiqueta de código esvazia o campo também', async () => {
+    const user = userEvent.setup();
+    currentSearch = 'code=2.0';
+    render(<ChartOfAccountsScreen clientId="c1" />);
+    expect(screen.getByLabelText('Buscar por código')).toHaveValue('2.0');
+
+    await user.click(screen.getByRole('button', { name: 'Remover filtro Código 2.0' }));
+    expect(screen.getByLabelText('Buscar por código')).toHaveValue('');
+    expect(String(replaceMock.mock.calls.at(-1)?.[0])).not.toContain('code=');
+  });
+
+  it('sem filtro nenhum, não há lista de etiquetas', () => {
+    render(<ChartOfAccountsScreen clientId="c1" />);
+    expect(screen.queryByRole('list', { name: 'Filtros ativos' })).toBeNull();
+  });
+});
+
+describe('ChartOfAccountsScreen — "Atualizado em" (86e3f55bc)', () => {
+  it('mostra a última sincronização íntegra para todo leitor', () => {
+    authState.user = clientOperator;
+    render(<ChartOfAccountsScreen clientId="c1" />);
+    expect(screen.getByTestId('chart-synced-at')).toHaveTextContent(/Atualizado em 23\/09\/2026/);
+  });
+
+  it('some enquanto a cobertura carrega e quando nunca sincronizou', () => {
+    coverageState.isLoading = true;
+    coverageState.data = undefined;
+    const { unmount } = render(<ChartOfAccountsScreen clientId="c1" />);
+    expect(screen.queryByTestId('chart-synced-at')).toBeNull();
+    unmount();
+
+    coverageState.isLoading = false;
+    coverageState.data = coverage({
+      total: 0,
+      ativas: 0,
+      comDestino: 0,
+      semDestino: 0,
+      comContaContabil: 0,
+      syncedAt: null,
+    });
+    render(<ChartOfAccountsScreen clientId="c1" />);
+    expect(screen.queryByTestId('chart-synced-at')).toBeNull();
+  });
+
+  it('com a última tentativa falhada, segue com a data da última íntegra', () => {
+    coverageState.data = coverage({
+      syncedAt: '2026-09-20T12:30:00Z',
+      syncFailedAt: '2026-09-23T09:00:00Z',
+    });
+    render(<ChartOfAccountsScreen clientId="c1" />);
+    expect(screen.getByTestId('chart-synced-at')).toHaveTextContent(/Atualizado em 20\/09\/2026/);
   });
 });
 

@@ -79,6 +79,7 @@ from app.modules.client_mapping.schemas import (
     MappingListResponse,
     MappingPreviewEnvelope,
     MappingPreviewResponse,
+    MappingSituationCountsResponse,
     MappingSituationName,
     MaterializationEnvelope,
     MaterializationListEnvelope,
@@ -364,7 +365,7 @@ async def list_client_mapping(
         Query(max_length=MAX_MOVEMENT_CATEGORY_CODE_CHARS, description="Código começando por."),
     ] = None,
 ) -> MappingListResponse:
-    rows, total, competence = await service.page(
+    rows, total, competence, counts = await service.page_and_counts(
         client,
         destination_type,
         situation=situation,
@@ -381,6 +382,13 @@ async def list_client_mapping(
             total_pages=(total + page_size - 1) // page_size,
         ),
         competence=format_competence(competence),
+        counts=MappingSituationCountsResponse(
+            total=counts.total,
+            herdada=counts.herdada,
+            confirmada=counts.confirmada,
+            nao_mapear=counts.nao_mapear,
+            sem_decisao=counts.sem_decisao,
+        ),
     )
 
 

@@ -17,6 +17,7 @@ resolve_names`, cache de 6 h), fail-soft: origem fora do ar devolve o código co
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Protocol
 
@@ -75,6 +76,35 @@ class NamedRow:
     category_name: str | None
     category_name_resolved: bool
     target_name: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class SituationCounts:
+    """As quatro situações contadas sobre o universo INTEIRO do destino (86e3f55bd).
+
+    Contadas sobre a MESMA lista que `page` filtra, na mesma competência, antes
+    de qualquer recorte: é o que faz "clicar em Sem decisão" devolver no total
+    da paginação o número do contador. A situação não é coluna (sai de
+    `resolve_vigente`); um `GROUP BY` em SQL seria uma segunda implementação da
+    vigência, e a lista já está carregada inteira aqui — contar custa zero query.
+    """
+
+    total: int
+    herdada: int
+    confirmada: int
+    nao_mapear: int
+    sem_decisao: int
+
+    @classmethod
+    def of(cls, rows: list[MappingRow]) -> SituationCounts:
+        by_situation = Counter(row.situation for row in rows)
+        return cls(
+            total=len(rows),
+            herdada=by_situation["herdada"],
+            confirmada=by_situation["confirmada"],
+            nao_mapear=by_situation["nao_mapear"],
+            sem_decisao=by_situation["sem_decisao"],
+        )
 
 
 def situation_of(view: DecisionView | None) -> MappingSituation:
@@ -147,9 +177,37 @@ class ClientMappingListService:
         today: date | None = None,
     ) -> tuple[list[NamedRow], int, date]:
         """Página filtrada NO SERVIDOR, com os nomes resolvidos só para ela."""
+        named, total, competence, _counts = await self.page_and_counts(
+            client,
+            destination_type,
+            situation=situation,
+            code_prefix=code_prefix,
+            page=page,
+            page_size=page_size,
+            today=today,
+        )
+        return named, total, competence
+
+    async def page_and_counts(
+        self,
+        client: Client,
+        destination_type: str,
+        *,
+        situation: MappingSituation | None,
+        code_prefix: str | None,
+        page: int,
+        page_size: int,
+        today: date | None = None,
+    ) -> tuple[list[NamedRow], int, date, SituationCounts]:
+        """A página e as contagens por situação, de UMA carga do universo.
+
+        As contagens saem ANTES de qualquer filtro: independem de página, situação
+        e código, e são as mesmas em qualquer recorte da lista.
+        """
         destination = await self._decisions.resolve_destination(client, destination_type)
         competence = current_competence(today)
         rows = await self.universe(client, destination, competence)
+        counts = SituationCounts.of(rows)
         if situation is not None:
             rows = [r for r in rows if r.situation == situation]
         if code_prefix:
@@ -160,6 +218,7 @@ class ClientMappingListService:
             await self.with_names(client, destination, rows[start : start + page_size]),
             total,
             competence,
+            counts,
         )
 
     async def with_names(
