@@ -66,6 +66,9 @@ def _decision_row(decision: ClientMappingDecision) -> dict[str, Any]:
         "origin": decision.origin,
         "effective_from": decision.effective_from,
         "author_id": decision.author_id,
+        "accounting_account_id": decision.accounting_account_id,
+        "history_encrypted": decision.history_encrypted,
+        "history_iv": decision.history_iv,
     }
 
 
@@ -244,6 +247,35 @@ class ClientMappingRepository:
         )
         rows = (await self._session.execute(stmt)).all()
         return [(row[0], row[1]) for row in rows]
+
+    async def list_items(
+        self, client_id: UUID, materialization_id: UUID
+    ) -> list[ClientMappingMaterializationItem]:
+        """Os itens de UMA materialização, com `client_id` no WHERE (§3.15), ordem total."""
+        stmt = (
+            select(ClientMappingMaterializationItem)
+            .where(
+                ClientMappingMaterializationItem.client_id == client_id,
+                ClientMappingMaterializationItem.materialization_id == materialization_id,
+            )
+            .order_by(
+                ClientMappingMaterializationItem.source_type,
+                ClientMappingMaterializationItem.source_movement_id,
+            )
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def items_for_materializations(
+        self, client_id: UUID, materialization_ids: Sequence[UUID]
+    ) -> list[ClientMappingMaterializationItem]:
+        """Os itens de VÁRIAS materializações (a completude da listagem), com `client_id`."""
+        if not materialization_ids:
+            return []
+        stmt = select(ClientMappingMaterializationItem).where(
+            ClientMappingMaterializationItem.client_id == client_id,
+            ClientMappingMaterializationItem.materialization_id.in_(list(materialization_ids)),
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
 
     async def latest_version(self, client_id: UUID, destination_id: UUID, competence: date) -> int:
         """A maior versão materializada de (cliente, destino, competência); 0 = nenhuma."""

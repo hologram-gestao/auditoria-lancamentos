@@ -44,6 +44,7 @@ from app.modules.usage_events.schemas import (
     OmieLancamentoRejeitadoProps,
     OrganizacaoCriadaProps,
     OrganizacaoDesativadaProps,
+    PlanoContabilImportadoProps,
     PlanoContasSincronizadoProps,
     QualificacaoEmitidaProps,
     RecebiveisClassificadosProps,
@@ -605,6 +606,29 @@ class UsageEventService:
                 client_id=client_id,
                 tipo_origem=tipo_origem,
                 competencia=format_competence(competencia),
+            ),
+        )
+        if props is None:
+            return False
+        return await self.emit(event, props=props)
+
+    async def emit_plano_contabil_importado(
+        self, *, client_id: UUID, contas: int, contas_novas: int, contas_inativadas: int
+    ) -> bool:
+        """S16 — a importação do plano contábil deu certo. Sem `session_id`, sem dedup.
+
+        O ponto de chamada é `AccountingChartService.import_sheet` (16.1), DEPOIS do
+        commit: recusa 422 não emite (estrutural). Props no caminho fail-soft — a
+        importação já foi gravada; prop inválida vira warning, nunca 500.
+        """
+        event = UsageEventName.PLANO_CONTABIL_IMPORTADO
+        props = self._props_or_none(
+            event,
+            lambda: PlanoContabilImportadoProps(
+                client_id=client_id,
+                contas=contas,
+                contas_novas=contas_novas,
+                contas_inativadas=contas_inativadas,
             ),
         )
         if props is None:

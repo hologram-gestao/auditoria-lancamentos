@@ -17,8 +17,10 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.db.models import MaterializedSituation
+from app.db.models.client_mapping import MAX_DECISION_HISTORY_CHARS
 from app.db.models.client_movement import MAX_MOVEMENT_CATEGORY_CODE_CHARS
 from app.db.models.mapping_catalog import DESTINATION_TYPE_PATTERN, MAX_TARGET_CODE_CHARS
+from app.modules.client_mapping.accounting import normalize_history
 from app.modules.client_mapping.apply import _pct
 from app.modules.client_movements.competence import (
     COMPETENCE_PATTERN,
@@ -29,9 +31,16 @@ from app.modules.reconciliations.schemas import SessionAuthor
 from app.modules.users.schemas import PaginationMeta
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from app.db.models import ClientMappingMaterialization
     from app.modules.client_mapping.apply import SituationTotal
-    from app.modules.client_mapping.materialization import MappingPreview, MaterializationOutcome
+    from app.modules.client_mapping.completeness import PartidaCompleteness
+    from app.modules.client_mapping.materialization import (
+        AccountingCategoryLine,
+        MappingPreview,
+        MaterializationOutcome,
+    )
     from app.modules.client_mapping.portability import ImportPlan
     from app.modules.client_mapping.service import (
         DecisionView,
@@ -98,6 +107,27 @@ class DecisionItemRequest(BaseModel):
         pattern=DESTINATION_TYPE_PATTERN,
         description="Tipo do provedor de origem da categoria (`omie`, `arquivo`…).",
     )
+    accounting_account_id: UUID | None = Field(
+        default=None,
+        alias="accountingAccountId",
+        description=(
+            "S16 — SÓ no destino `conta_contabil`: a conta ANALÍTICA e ATIVA do plano "
+            "contábil do próprio cliente (`GET …/accounting-chart?type=analitica&"
+            "status=ativa`), no lugar de `targetCode`. Conta de outro cliente: 404; "
+            "sintética ou inativa: 422 `CONTA_CONTABIL_NAO_LANCAVEL`; `targetCode` no "
+            "`conta_contabil`: 422 `ALVO_EXIGE_PLANO_CONTABIL`; conta do plano em outro "
+            "destino: 422 `CONTA_CONTABIL_FORA_DO_DESTINO`."
+        ),
+    )
+    history: str | None = Field(
+        default=None,
+        description=(
+            "S16 — histórico padrão da linha no arquivo contábil (texto fixo por decisão), "
+            f"até {MAX_DECISION_HISTORY_CHARS} caracteres depois de aparar as pontas; vazio "
+            "= sem histórico. Só acompanha `accountingAccountId`. Cifrado com a chave do "
+            "cliente; mudar o texto é vigência NOVA. Acima do limite: 400."
+        ),
+    )
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
@@ -106,12 +136,25 @@ class DecisionItemRequest(BaseModel):
     def _clean_category(cls, value: str) -> str:
         return _no_spaces(value)
 
+    @field_validator("history")
+    @classmethod
+    def _clean_history(cls, value: str | None) -> str | None:
+        # Forma: 400 genérico (o handler não ecoa o valor). Nunca truncado.
+        cleaned = normalize_history(value)
+        if cleaned is not None and len(cleaned) > MAX_DECISION_HISTORY_CHARS:
+            raise ValueError("histórico acima do limite")
+        return cleaned
+
     @model_validator(mode="after")
     def _target_matches_decision(self) -> Self:
-        if self.decision == "alvo" and not self.target_code:
-            raise ValueError("alvo exige targetCode")
-        if self.decision == "nao_mapear" and self.target_code:
-            raise ValueError("nao_mapear não aceita targetCode")
+        has_catalog = bool(self.target_code)
+        has_account = self.accounting_account_id is not None
+        if self.decision == "alvo" and has_catalog == has_account:
+            raise ValueError("alvo exige targetCode OU accountingAccountId (um dos dois)")
+        if self.decision == "nao_mapear" and (has_catalog or has_account):
+            raise ValueError("nao_mapear não aceita alvo")
+        if self.history is not None and not has_account:
+            raise ValueError("history só acompanha accountingAccountId")
         return self
 
 
@@ -248,6 +291,27 @@ class DecisionViewResponse(BaseModel):
         )
     )
     origin_dre_code: str | None = Field(default=None, alias="originDreCode")
+    accounting_account_id: UUID | None = Field(
+        default=None,
+        alias="accountingAccountId",
+        description="S16 — `conta_contabil`: a conta do plano do cliente da vigência.",
+    )
+    history: str | None = Field(
+        default=None,
+        description=(
+            "S16 — `conta_contabil`: o histórico padrão da vigência, decifrado na leitura "
+            "(`null` = sem histórico; `[indecifrável]` = a chave do cliente não o abre)."
+        ),
+    )
+    requires_redo: bool = Field(
+        default=False,
+        alias="requiresRedo",
+        description=(
+            "S16 — decisão de alvo em `conta_contabil` apontando o CATÁLOGO da organização "
+            "(anterior ao plano do cliente). Segue legível e sem conversão automática; "
+            "precisa ser REFEITA escolhendo uma conta do plano do cliente."
+        ),
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -262,6 +326,9 @@ class DecisionViewResponse(BaseModel):
             effective_from=format_competence(view.effective_from),
             divergent=view.divergent,
             origin_dre_code=view.origin_dre_code,
+            accounting_account_id=view.accounting_account_id,
+            history=view.history,
+            requires_redo=view.legacy_catalog_target,
         )
 
 
@@ -299,6 +366,31 @@ class MappingListItem(BaseModel):
     effective_from: str | None = Field(default=None, alias="effectiveFrom")
     divergent: bool
     origin_dre_code: str | None = Field(default=None, alias="originDreCode")
+    accounting_account_id: UUID | None = Field(
+        default=None,
+        alias="accountingAccountId",
+        description="S16 — `conta_contabil`: a conta do plano do cliente da vigente.",
+    )
+    accounting_account_code: str | None = Field(
+        default=None, alias="accountingAccountCode", description="S16 — código reduzido."
+    )
+    accounting_account_name: str | None = Field(
+        default=None,
+        alias="accountingAccountName",
+        description="S16 — nome da conta, decifrado na leitura (nunca persistido em claro).",
+    )
+    history: str | None = Field(
+        default=None,
+        description="S16 — histórico padrão da vigente, decifrado (`null` = sem histórico).",
+    )
+    requires_redo: bool = Field(
+        default=False,
+        alias="requiresRedo",
+        description=(
+            "S16 — decisão legada do catálogo da organização em `conta_contabil`: refazer "
+            "escolhendo uma conta do plano do cliente."
+        ),
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -432,6 +524,119 @@ class UndecidedCategoryResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class PartidaCompletenessResponse(BaseModel):
+    """S16 (16.4) — a completude de partida: a métrica da sprint, por materialização.
+
+    Σ|valor| das linhas com PARTIDA COMPLETA (conta do plano + conta do banco +
+    histórico) ÷ Σ|valor| das linhas com alvo. Os três números vêm juntos para a conta
+    ser conferível. `pct` nulo = nenhuma linha com alvo (nunca "0%" com cara de
+    resultado).
+    """
+
+    complete_amount: Decimal = Field(alias="completeAmount")
+    target_amount: Decimal = Field(alias="targetAmount")
+    pct: Decimal | None = Field(
+        default=None, description="Percentual quantizado a 0,01; `null` sem linha com alvo."
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def of(cls, value: PartidaCompleteness | None) -> PartidaCompletenessResponse | None:
+        if value is None:
+            return None
+        return cls(
+            complete_amount=value.complete_amount,
+            target_amount=value.target_amount,
+            pct=value.pct,
+        )
+
+
+class PendingSourceAccountResponse(BaseModel):
+    """S16 (16.3) — uma conta de origem SEM conta do banco (só identificadores)."""
+
+    source_type: str = Field(alias="sourceType")
+    source_account_id: str | None = Field(
+        default=None,
+        alias="sourceAccountId",
+        description="`null` = o slot da CONTA PADRÃO (linhas sem conta de origem).",
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def of(cls, keys: Iterable[tuple[str, str | None]]) -> list[PendingSourceAccountResponse]:
+        return [cls(source_type=t, source_account_id=a) for t, a in keys]
+
+
+class AccountingCategoryResponse(BaseModel):
+    """S16 — uma categoria com ALVO no destino `conta_contabil`, na prévia."""
+
+    source_type: str = Field(alias="sourceType")
+    category_code: str = Field(alias="categoryCode")
+    amount: Decimal = Field(description="Σ|valor| dos movimentos da categoria (BRL).")
+    count: int = Field(ge=0)
+    accounting_account_id: UUID | None = Field(default=None, alias="accountingAccountId")
+    accounting_account_code: str | None = Field(
+        default=None, alias="accountingAccountCode", description="Código reduzido da conta."
+    )
+    accounting_account_name: str | None = Field(
+        default=None,
+        alias="accountingAccountName",
+        description="Nome da conta, decifrado na leitura (nunca guardado na materialização).",
+    )
+    history: str | None = Field(
+        default=None, description="Histórico padrão decifrado (`null` = sem histórico)."
+    )
+    history_missing: bool = Field(
+        alias="historyMissing",
+        description=(
+            "A decisão não tem histórico: a linha fica INCOMPLETA (sinalizada; nesta sprint "
+            "não bloqueia a materialização — quem bloqueia o arquivo é a Sprint 13)."
+        ),
+    )
+    requires_redo: bool = Field(
+        alias="requiresRedo",
+        description=(
+            "Decisão LEGADA apontando o catálogo da organização: conta como incompleta e "
+            "precisa ser refeita para o plano do cliente."
+        ),
+    )
+    complete_amount: Decimal = Field(
+        alias="completeAmount",
+        description=(
+            "S16 (16.3) — Σ|valor| das linhas da categoria com PARTIDA COMPLETA: conta do "
+            "plano, conta do banco resolvida e histórico presente (um predicado só)."
+        ),
+    )
+    complete_count: int = Field(ge=0, alias="completeCount")
+    pending_source_accounts: list[PendingSourceAccountResponse] = Field(
+        alias="pendingSourceAccounts",
+        description="S16 (16.3) — contas de origem das linhas da categoria sem conta do banco.",
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def build(cls, line: AccountingCategoryLine) -> AccountingCategoryResponse:
+        account = line.account
+        return cls(
+            source_type=line.source_type,
+            category_code=line.category_code,
+            amount=line.amount,
+            count=line.count,
+            accounting_account_id=account.id if account else None,
+            accounting_account_code=account.code if account else None,
+            accounting_account_name=account.name if account else None,
+            history=line.history,
+            history_missing=line.history_missing,
+            requires_redo=line.legacy_catalog_target,
+            complete_amount=line.complete_amount,
+            complete_count=line.complete_count,
+            pending_source_accounts=PendingSourceAccountResponse.of(line.pending_source_accounts),
+        )
+
+
 class BaseStateResponse(BaseModel):
     synced_at: datetime | None = Field(default=None, alias="syncedAt")
     sync_failed_at: datetime | None = Field(default=None, alias="syncFailedAt")
@@ -470,6 +675,33 @@ class MappingPreviewResponse(BaseModel):
     latest_version: int = Field(
         alias="latestVersion", description="Última versão materializada (0 = nenhuma)."
     )
+    partida_completeness: PartidaCompletenessResponse | None = Field(
+        default=None,
+        alias="partidaCompleteness",
+        description=(
+            "S16 (16.4) — SÓ no `conta_contabil` (`null` nos outros): a completude de "
+            "partida desta prévia — a MESMA conta que a materialização guardará."
+        ),
+    )
+    pending_source_accounts: list[PendingSourceAccountResponse] | None = Field(
+        default=None,
+        alias="pendingSourceAccounts",
+        description=(
+            "S16 (16.3) — SÓ no `conta_contabil` (`null` nos outros): as contas de origem "
+            "das linhas com alvo SEM conta contábil do banco. Com qualquer uma, a "
+            "materialização é 409 `CONTA_DO_BANCO_PENDENTE` — associe em "
+            "`/clients/{id}/source-accounts`."
+        ),
+    )
+    accounting_categories: list[AccountingCategoryResponse] | None = Field(
+        default=None,
+        alias="accountingCategories",
+        description=(
+            "S16 — SÓ no destino `conta_contabil` (`null` nos outros): por categoria com "
+            "alvo, a conta do plano do cliente (código e nome), o histórico padrão, se "
+            "falta histórico e se a decisão é legada do catálogo."
+        ),
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -507,6 +739,17 @@ class MappingPreviewResponse(BaseModel):
             ],
             preview_token=preview.token,
             latest_version=preview.latest_version,
+            accounting_categories=(
+                [AccountingCategoryResponse.build(line) for line in preview.accounting_lines]
+                if preview.accounting_lines is not None
+                else None
+            ),
+            pending_source_accounts=(
+                PendingSourceAccountResponse.of(preview.pending_source_accounts)
+                if preview.pending_source_accounts is not None
+                else None
+            ),
+            partida_completeness=PartidaCompletenessResponse.of(preview.partida_completeness),
         )
 
 
@@ -545,6 +788,14 @@ class MaterializationResponse(BaseModel):
     version: int
     created_at: datetime = Field(alias="createdAt")
     partial_coverage_confirmed: bool = Field(alias="partialCoverageConfirmed")
+    partida_completeness: PartidaCompletenessResponse | None = Field(
+        default=None,
+        alias="partidaCompleteness",
+        description=(
+            "S16 (16.4) — a completude de partida da versão gravada (só `conta_contabil`; "
+            "`null` nos outros). O snapshot é imutável: o número nunca muda."
+        ),
+    )
     preview: MappingPreviewResponse
 
     model_config = ConfigDict(populate_by_name=True)
@@ -556,6 +807,9 @@ class MaterializationResponse(BaseModel):
             version=outcome.version,
             created_at=outcome.created_at,
             partial_coverage_confirmed=outcome.partial_coverage_confirmed,
+            partida_completeness=PartidaCompletenessResponse.of(
+                outcome.preview.partida_completeness
+            ),
             preview=MappingPreviewResponse.build(outcome.preview),
         )
 
@@ -601,11 +855,22 @@ class MaterializationSummaryResponse(BaseModel):
     decisions_used: int = Field(
         alias="decisionsUsed", description="Quantas vigências a versão usou (snapshot)."
     )
+    partida_completeness: PartidaCompletenessResponse | None = Field(
+        default=None,
+        alias="partidaCompleteness",
+        description=(
+            "S16 (16.4) — completude de partida da versão, calculada sobre o SNAPSHOT dos "
+            "itens (imutável). Só no `conta_contabil`; `null` nos outros destinos."
+        ),
+    )
     model_config = ConfigDict(populate_by_name=True)
 
     @classmethod
     def build(
-        cls, row: ClientMappingMaterialization, author: SessionAuthor
+        cls,
+        row: ClientMappingMaterialization,
+        author: SessionAuthor,
+        completeness: PartidaCompleteness | None = None,
     ) -> MaterializationSummaryResponse:
         decided = row.mapped_amount + row.not_mapped_amount
         return cls(
@@ -626,6 +891,7 @@ class MaterializationSummaryResponse(BaseModel):
             uncategorized_count=row.uncategorized_count,
             undecided_categories=row.undecided_categories,
             decisions_used=len(row.decisions_used),
+            partida_completeness=PartidaCompletenessResponse.of(completeness),
         )
 
 

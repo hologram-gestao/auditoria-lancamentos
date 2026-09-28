@@ -204,6 +204,17 @@ class UsageEventName(StrEnum):
     # conciliação, sem base contábil nem mapeamento salvo. Alvo **≥ 15 clientes
     # em 60 dias** — previsão declarada do PRD (metade dos ~30 sem sistema).
     FECHAMENTO_PRODUZIDO = "fechamento_produzido"
+    # Sprint 16 (BACK 16.4, emitido pela importação do plano contábil da 16.1) —
+    # instrumentação do R1. De BACKEND, sem `session_id`, fora da dedup: cada
+    # importação BEM-SUCEDIDA é uma linha, DEPOIS do commit (a recusa 422 não
+    # emite). Só o id do cliente e contagens: NUNCA código nem nome de conta.
+    #
+    # Leitura (quantos clientes têm plano importado, e quanto ele muda):
+    #     count(DISTINCT props->>'client_id') WHERE event = 'plano_contabil_importado'
+    #     sum((props->>'contas_inativadas')::int) … (contas que sumiram das planilhas)
+    # A métrica da SPRINT (completude de partida) NÃO é evento: sai da própria
+    # materialização por consulta (ver HANDOFF, BACK 16.4).
+    PLANO_CONTABIL_IMPORTADO = "plano_contabil_importado"
 
 
 #: Eventos que o `POST /api/v1/usage-events` aceita. Os de backend ficam de fora
@@ -551,6 +562,20 @@ class FechamentoProduzidoProps(_StrictProps):
     client_id: UUID
     tipo_origem: str = Field(pattern=DESTINO_SLUG_PATTERN)
     competencia: str = Field(pattern=COMPETENCE_PATTERN)
+
+
+class PlanoContabilImportadoProps(_StrictProps):
+    """`plano_contabil_importado` (S16 BACK 16.4) — as QUATRO chaves do PRD, nenhuma a mais.
+
+    Só o id do cliente e contagens (`contas` na planilha, `contas_novas` que o cliente
+    não tinha, `contas_inativadas` que eram ativas e sumiram). Nenhum `str`: código e
+    nome de conta não têm onde caber (o guardrail anti-PII trava).
+    """
+
+    client_id: UUID
+    contas: int = Field(ge=0)
+    contas_novas: int = Field(ge=0)
+    contas_inativadas: int = Field(ge=0)
 
 
 class OrganizacaoCriadaProps(_StrictProps):

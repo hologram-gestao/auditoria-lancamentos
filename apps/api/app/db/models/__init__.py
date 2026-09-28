@@ -8,6 +8,18 @@ from app.db.base import Base
 from app.db.models.access_audit import AccessAudit
 from app.db.models.anomaly_type import AnomalySeverity, AnomalyType
 from app.db.models.client import IV_HEX_LENGTH, Client
+from app.db.models.client_accounting_account import (
+    ACCOUNTING_ACCOUNT_NAME_PAIR_CONSTRAINT,
+    ACCOUNTING_ACCOUNT_TYPE_CONSTRAINT,
+    MAX_ACCOUNTING_ACCOUNT_CLASSIFICATION_CHARS,
+    MAX_ACCOUNTING_ACCOUNT_CODE_CHARS,
+    MAX_ACCOUNTING_ACCOUNT_NAME_CHARS,
+    UQ_ACCOUNTING_ACCOUNT_CLIENT_CODE,
+    AccountingAccountType,
+    ClientAccountingAccount,
+    accounting_account_name_pair_check,
+    accounting_account_type_check,
+)
 from app.db.models.client_assignment import (
     UQ_CLIENT_ASSIGNMENT_CLIENT_USER,
     UQ_CLIENT_ASSIGNMENT_PRIMARY,
@@ -107,6 +119,12 @@ from app.db.models.client_movement import (
     movement_status_check,
 )
 from app.db.models.client_movement_sync import UQ_CLIENT_MOVEMENT_SYNC, ClientMovementSync
+from app.db.models.client_source_account_binding import (
+    UQ_SOURCE_ACCOUNT_BINDING,
+    UQ_SOURCE_ACCOUNT_BINDING_DEFAULT,
+    ClientSourceAccountBinding,
+    default_binding_index_predicate,
+)
 from app.db.models.client_title import (
     CLOSED_TITLE_STATUSES,
     IX_CLIENT_TITLE_CLIENT_DUE_DATE,
@@ -123,6 +141,7 @@ from app.db.models.client_title import (
     title_type_check,
 )
 from app.db.models.mapping_catalog import (
+    ACCOUNTING_DESTINATION_TYPE,
     DEFAULT_DESTINATION_TYPES,
     INHERITING_DESTINATION_TYPE,
     MappingDestination,
@@ -188,6 +207,9 @@ from app.db.models.user import (
 from app.db.models.user_client_favorite import UQ_USER_CLIENT_FAVORITE, UserClientFavorite
 
 __all__ = [
+    "ACCOUNTING_ACCOUNT_NAME_PAIR_CONSTRAINT",
+    "ACCOUNTING_ACCOUNT_TYPE_CONSTRAINT",
+    "ACCOUNTING_DESTINATION_TYPE",
     "CHART_OF_ACCOUNTS_STATUS_CONSTRAINT",
     "CLIENT_ROLES",
     "CLOSED_TITLE_STATUSES",
@@ -214,6 +236,9 @@ __all__ = [
     "IX_CLIENT_MOVEMENT_CLIENT_COMPETENCE",
     "IX_CLIENT_TITLE_CLIENT_DUE_DATE",
     "IX_TITLE_CONTEXT_TITLE_ID_CREATED_AT",
+    "MAX_ACCOUNTING_ACCOUNT_CLASSIFICATION_CHARS",
+    "MAX_ACCOUNTING_ACCOUNT_CODE_CHARS",
+    "MAX_ACCOUNTING_ACCOUNT_NAME_CHARS",
     "MAX_ACCOUNT_CODE_CHARS",
     "MAX_CATEGORY_NAME_CHARS",
     "MAX_CODE_CHARS",
@@ -243,6 +268,7 @@ __all__ = [
     "TITLE_CONTEXT_TYPE_CONSTRAINT",
     "TITLE_STATUS_CONSTRAINT",
     "TITLE_TYPE_CONSTRAINT",
+    "UQ_ACCOUNTING_ACCOUNT_CLIENT_CODE",
     "UQ_CHART_OF_ACCOUNTS_CLIENT_CODE",
     "UQ_CLIENT_ASSIGNMENT_CLIENT_USER",
     "UQ_CLIENT_ASSIGNMENT_PRIMARY",
@@ -255,8 +281,11 @@ __all__ = [
     "UQ_CLIENT_MOVEMENT_SYNC",
     "UQ_CLIENT_TITLE_CLIENT_EXTERNAL_ID",
     "UQ_ORGANIZATION_NAME",
+    "UQ_SOURCE_ACCOUNT_BINDING",
+    "UQ_SOURCE_ACCOUNT_BINDING_DEFAULT",
     "UQ_USER_CLIENT_FAVORITE",
     "AccessAudit",
+    "AccountingAccountType",
     "AnomalyDetectedBy",
     "AnomalyReviewVerdict",
     "AnomalySeverity",
@@ -265,6 +294,7 @@ __all__ = [
     "CategoryMode",
     "ChartOfAccountsStatus",
     "Client",
+    "ClientAccountingAccount",
     "ClientAssignment",
     "ClientCategory",
     "ClientCategoryTone",
@@ -279,6 +309,7 @@ __all__ = [
     "ClientMappingMaterializationItem",
     "ClientMovement",
     "ClientMovementSync",
+    "ClientSourceAccountBinding",
     "ClientTitle",
     "ClientUserRole",
     "ConnectionStatus",
@@ -325,9 +356,12 @@ __all__ = [
     "UserClientFavorite",
     "UserRole",
     "UserScope",
+    "accounting_account_name_pair_check",
+    "accounting_account_type_check",
     "chart_of_accounts_status_check",
     "connection_credentials_pair_check",
     "connection_status_check",
+    "default_binding_index_predicate",
     "file_category_label_pair_check",
     "movement_description_pair_check",
     "movement_status_check",
