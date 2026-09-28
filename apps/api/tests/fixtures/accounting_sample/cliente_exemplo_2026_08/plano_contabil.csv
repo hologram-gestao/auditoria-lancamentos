@@ -1,0 +1,21 @@
+codigo_reduzido;nome;tipo
+178;IRRF a recolher;analitica
+179;PIS a recolher;analitica
+180;COFINS a recolher;analitica
+182;CSRF a recolher;analitica
+365;Despesas legais e judiciais;analitica
+536;Escritorio virtual;analitica
+542;Tarifas bancarias;analitica
+549;Servicos de e-mail e internet;analitica
+551;Honorarios contabeis;analitica
+576;Honorarios advocaticios;analitica
+649;Banco conta movimento;analitica
+650;Rendimentos de aplicacoes financeiras;analitica
+651;Alugueis a receber - Inquilino A;analitica
+652;Alugueis a receber - Inquilino B;analitica
+653;Alugueis a receber - Inquilino C;analitica
+662;Alugueis a receber - Inquilino D;analitica
+670;Agua e esgoto - condominio;analitica
+671;Energia eletrica - condominio;analitica
+681;Mutuos concedidos - Pessoa X;analitica
+692;Alugueis a receber - Inquilino F;analitica
