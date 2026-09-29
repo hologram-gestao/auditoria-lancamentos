@@ -35,12 +35,18 @@ from sqlalchemy import func, select
 from structlog.testing import capture_logs
 
 from app.core.config import get_settings
-from app.core.crypto_service import new_client_dek
+from app.core.crypto_service import (
+    AAD_FILE_CATEGORY_LABEL,
+    field_locator,
+    load_client_cipher,
+    new_client_dek,
+)
 from app.core.security import hash_password
 from app.db.models import (
     HOLOGRAM_ORGANIZATION_ID,
     Client,
     ClientAccountingAccount,
+    ClientFileCategory,
     ClientMappingDecision,
     ClientMappingMaterializationItem,
     ClientMovement,
@@ -116,6 +122,25 @@ async def _import_plan(http: AsyncClient, client: Client, content: bytes = PLANO
         files={"file": ("plano.csv", content, "text/csv")},
     )
     assert resp.status_code == 200, resp.text
+
+
+async def _seed_file_category_label(
+    db: AsyncSession, client: Client, *, code: str, label: str
+) -> None:
+    """Rótulo cifrado com `code` ESCOLHIDO (86e3fxqqh) — `registry.resolve_codes`
+    gera código aleatório, então o teste que precisa casar com o `category_code`
+    já semeado em `ClientMovement` grava a linha direto, com a MESMA cifra
+    (`AAD_FILE_CATEGORY_LABEL`, pk da linha) que o registry usaria.
+    """
+    row_id = uuid4()
+    cipher = await load_client_cipher(client, settings=get_settings())
+    envelope, iv = cipher.encrypt(label, field_locator(AAD_FILE_CATEGORY_LABEL, row_id))
+    db.add(
+        ClientFileCategory(
+            id=row_id, client_id=client.id, code=code, label_encrypted=envelope, label_iv=iv
+        )
+    )
+    await db.flush()
 
 
 async def _accounts(db: AsyncSession, client: Client) -> dict[str, ClientAccountingAccount]:
@@ -376,6 +401,11 @@ class TestPreviaEMaterializacao:
     async def test_snapshot_imutavel_e_historico_lido_pela_vigencia(
         self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
     ) -> None:
+        # 86e3fxqqh: "aluguel-d" tem rótulo registrado (nome resolvido); "tarifa"
+        # não — prova as DUAS pontas da mesma resolução na MESMA prévia.
+        await _seed_file_category_label(
+            db_session, world.client, code="aluguel-d", label="Aluguel do escritório"
+        )
         conta = world.accounts["662"]
         ok = await _decide(
             client_with_db,
@@ -403,6 +433,11 @@ class TestPreviaEMaterializacao:
         assert linhas["aluguel-d"]["history"] == HIST_1
         assert linhas["aluguel-d"]["historyMissing"] is False
         assert linhas["tarifa"]["historyMissing"] is True  # sinalizada, não bloqueia
+        # 86e3fxqqh: nome embaixo do código, pela MESMA resolução da lista.
+        assert linhas["aluguel-d"]["categoryName"] == "Aluguel do escritório"
+        assert linhas["aluguel-d"]["categoryNameResolved"] is True
+        assert linhas["tarifa"]["categoryName"] is None
+        assert linhas["tarifa"]["categoryNameResolved"] is False
         mat = await client_with_db.post(
             f"{_base(world)}/materializations",
             json={
@@ -720,7 +755,12 @@ class TestPortabilidade:
         assert resp.status_code == 200, resp.text
         body = resp.json()["data"]
         assert body["rejected"] == [
-            {"line": 2, "categoryCode": "aluguel-d", "targetCode": "662", "reason": "historico_muito_longo"}
+            {
+                "line": 2,
+                "categoryCode": "aluguel-d",
+                "targetCode": "662",
+                "reason": "historico_muito_longo",
+            }
         ]
         # a linha válida do MESMO lote segue — recusa é POR LINHA, não do arquivo.
         assert body["created"] == 1

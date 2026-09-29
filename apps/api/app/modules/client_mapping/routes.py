@@ -465,13 +465,26 @@ async def export_client_mapping(
 
 
 def _get_apply_service(
-    db: DbSessionDep, decisions: DecisionServiceDep
+    request: Request, db: DbSessionDep, settings: SettingsDep, decisions: DecisionServiceDep
 ) -> ClientMappingApplyService:
+    """A aplicação/prévia — o nome de categoria da "Partida contábil" (86e3fxqqh)
+    usa os MESMOS coletores de `_get_list_service`: o cache de nomes vive em
+    `app.state` (por processo), então instanciar aqui de novo não duplica cache.
+    """
+    cache: OmieCategoriasCache = request.app.state.omie_categorias_cache
+    names = ChartOfAccountsSyncService(
+        db,
+        repository=ClientChartOfAccountsRepository(db),
+        categorias_service=OmieCategoriasService(cache),
+        settings=settings,
+    )
     return ClientMappingApplyService(
         db,
         repository=ClientMappingRepository(db),
         movements=ClientMovementsRepository(db),
         decisions=decisions,
+        names=names,
+        file_names=FileCategoryRegistry(db, settings=settings),
     )
 
 

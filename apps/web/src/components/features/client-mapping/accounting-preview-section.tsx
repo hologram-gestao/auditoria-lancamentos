@@ -154,8 +154,15 @@ function CategoryRow({ category }: { category: AccountingCategoryPreview }) {
       : false;
   return (
     <TableRow>
-      <TableCell className="whitespace-nowrap font-medium tabular-nums">
-        {category.categoryCode}
+      {/* 86e3fxqqh: nome embaixo do código, pela MESMA resolução (e o MESMO texto de
+          fallback) da coluna Categoria na lista de decisões (mapping-list-panel.tsx). */}
+      <TableCell className="min-w-40 whitespace-normal">
+        <span className="block font-medium tabular-nums">{category.categoryCode}</span>
+        {category.categoryNameResolved && category.categoryName ? (
+          <span className="text-muted-foreground block text-xs">{category.categoryName}</span>
+        ) : (
+          <span className="text-muted-foreground block text-xs">Nome indisponível agora</span>
+        )}
       </TableCell>
       <TableCell className="min-w-40 whitespace-normal">
         {category.requiresRedo ? (

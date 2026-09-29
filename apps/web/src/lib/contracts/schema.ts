@@ -1946,6 +1946,17 @@ export interface components {
             /** Categorycode */
             categoryCode: string;
             /**
+             * Categoryname
+             * @description 86e3fxqqh — nome da categoria, pela MESMA resolução da lista de decisões (`null` = origem fora do ar ou sem decifrar; a tela mostra só o código).
+             */
+            categoryName?: string | null;
+            /**
+             * Categorynameresolved
+             * @description `false` com `categoryName` nulo OU com o marcador `[indecifrável]`.
+             * @default false
+             */
+            categoryNameResolved: boolean;
+            /**
              * Amount
              * @description Σ|valor| dos movimentos da categoria (BRL).
              */
