@@ -222,7 +222,7 @@ function NoFileOrigin({
           {state === 'encerrado'
             ? 'Este cliente foi encerrado'
             : state === 'outra-origem'
-              ? `Os lançamentos deste cliente vêm de ${ledgerLabel}`
+              ? `Os lançamentos deste cliente vêm da origem ${ledgerLabel}`
               : 'Este cliente ainda não recebe arquivos'}
         </p>
         <p className="text-muted-foreground text-sm">

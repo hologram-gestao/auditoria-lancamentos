@@ -803,6 +803,16 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
     handler de 500 loga `exc_info`); custo limitado ANTES de iterar (tamanho
     descomprimido, colunas, linhas PERCORRIDAS, vazias inclusive); parse síncrono via
     `run_in_threadpool`; código longo é recusado, nunca truncado;
+  - **recusa de arquivo de terceiro nomeia o VOCABULÁRIO NOSSO e conta o resto**
+    (86e3fvffy): o `details` de uma recusa pode listar coluna do modelo, coluna do
+    mapeamento, número de linha e motivo fechado — tudo que a plataforma já conhece —,
+    e o que veio do ARQUIVO sai como CONTAGEM (`foundColumnCount`,
+    `unexpectedColumnCount`). "Nome de coluna é estrutura, não PII" é falso quando o
+    arquivo vem SEM cabeçalho: aí a linha 1 é dado, e devolvê-la ecoa nome de conta ou
+    descrição de lançamento — que nascem cifrados (§4.1/§4.5). Filtrar por heurística
+    ("parece cabeçalho": sem dígito, curto) não resolve, porque nome de conta passa no
+    teste. A exceção é `SEM_MAPEAMENTO`, onde mostrar as colunas É a função da resposta
+    (a tela constrói o mapeamento a partir delas) — exceção declarada, não esquecimento;
   - UNIQUE que a corrida alcança (duplo clique, duas abas): `ON CONFLICT DO NOTHING` para
     ação idempotente, SAVEPOINT + nome da constraint → 409 para escrita. Checar antes de
     inserir não protege nada sob concorrência.
@@ -873,6 +883,14 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   posição.
 - **Gate de a11y verde NÃO prova layout.** O axe mede semântica e contraste, não
   transbordo: toda task de UI termina com o screenshot desktop e 390px aberto e conferido.
+- **Item de menu cuja LEITURA não pede permissão não se esconde por estado de dado**
+  (86e3fqnc9). Esconder a aba "Origem por arquivo" de quem ainda não tinha a conexão
+  deixou o recurso invisível para exatamente quem precisava descobri-lo, e não era a
+  regra da §4.9: a rota é `AccessibleClientDep`, ninguém seria negado ao abri-la. Ação
+  que o servidor nega continua oculta — mas isso se decide DENTRO da tela, por estado, e
+  a tela explica o que é o recurso, por que ele não está disponível ali e quem pode
+  liberar. Quem some do menu é o que a MATRIZ nega, nunca o que o dado do cliente ainda
+  não tem.
 - **Dois padrões de altura para tabela, e a tela escolhe um** (86e3eq9uy): `<Table fill>`
   dentro de `<TableCard>` quando a tabela é o que enche a janela (a tabela rola por
   dentro); `<Table stickyHeader="page">` + `<TableCard pageScroll>` quando o conteúdo acima
@@ -1293,6 +1311,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.62 — 29/09/2026. **Dois follow-ups em aberto de sprints anteriores foram pagos: a recusa de cabeçalho não ecoa mais a planilha, e a aba "Origem por arquivo" parou de ser invisível.** **86e3fvffy (achado do QA da S16, não bloqueante)** — as duas checagens de cabeçalho devolviam a linha 1 do arquivo CRUA em `details` (`foundColumns`, mais `unexpectedColumns`/`repeatedColumns` no plano contábil). Numa planilha enviada SEM cabeçalho a linha 1 é DADO, então o 422 passava a conter nome de conta (S16) ou descrição de lançamento (S14) — o que a §4.1 manda cifrar e a §4.5 manda nunca devolver. Agora `details` só nomeia o vocabulário NOSSO (colunas do modelo, colunas do mapeamento, e a repetição quando a coluna repetida é do modelo) e o que veio do arquivo vira contagem (`foundColumnCount`, `unexpectedColumnCount`); a tela troca a lista de "colunas encontradas" pelo diagnóstico que ela de fato entregava ("a planilha tem N colunas, M fora do modelo. Confira se a linha 1 é o cabeçalho"). A opção de filtrar por heurística ("parece cabeçalho") foi recusada pelo Pedro: nome de conta passa no teste. `SEM_MAPEAMENTO` mantém `foundColumns` como exceção DECLARADA — mostrar as colunas é a função daquela resposta. Regra nova na §7 Backend. **86e3fqnc9 (follow-up da validação da S14)** — o item "Origem por arquivo" só aparecia para o cliente que JÁ tinha conexão `arquivo`, e o resultado era um recurso invisível: quem opera não descobria que dá para atender cliente sem ERP mandando a planilha do mês. Esconder nunca foi regra da §4.9 (ler a aba é `AccessibleClientDep`, ninguém seria negado); o que o servidor nega é CONECTAR. A aba passou a ser sempre listada e a TELA explica três estados — encerrado, origem de outro tipo já conectada (conectar seria 409 `ORIGEM_JA_CONECTADA`, então não há botão) e sem origem nenhuma —, com "peça ao administrador" para quem não tem `manage_client_connections`. Qual origem está no caminho é decidido pela CAPACIDADE (`listar_lancamentos`), nunca por `provider_type === 'omie'`. "Conectar origem por arquivo" leva ao painel com a gaveta já aberta no tipo Arquivo (`?conectar=<tipo>`, lido uma vez e apagado da URL). Regra nova na §7 Frontend. Endpoints sensíveis (**116**), matriz (**29**) e pares de AAD (**17**) não mudaram: nenhuma rota nem permissão nova._
 
 _Versão 1.61 — 29/09/2026. **O topo das telas do cliente encolheu (épico 86e3fr9pd, feedback do Lucas em 28/09).** O `ClientShell` perdeu o cabeçalho inteiro: breadcrumb, nome do cliente, selos de status e categoria, favorito e o menu "Ações do cliente". A task pedia o nome da página no lugar do nome do cliente, mas toda tela já tinha o próprio título logo abaixo, e o Pedro decidiu (29/09) que o título da TELA vira o `<h1>` e o shell não repete nada; o detalhe da conciliação já tinha o dele ("Conta · Mês"). Editar e Encerrar foram para a linha da lista de clientes (o ícone de encerrar entrou ANTES de o menu sair, para o encerramento nunca ficar sem botão), e o cliente encerrado ganhou o aviso de somente leitura que o selo dava. `sessionIdFromPathname` e `sessionCrumbLabel` ficaram sem uso e saíram. Carteira, de-para e plano de contas ganharam a moldura única de totais recolhíveis (`collapsible-summary.tsx`), e a carteira e o de-para passaram a ter abas, filtros e ações numa linha só. O "Novo Cliente" esconde App Key e App Secret atrás do switch "Conectar com o Omie", desligado por padrão, e desligar limpa a credencial. Duas regras novas na §7 Frontend. Endpoints sensíveis, matriz e pares de AAD não mudaram: só front._
 

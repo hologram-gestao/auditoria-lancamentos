@@ -6202,7 +6202,7 @@ for (const vp of VIEWPORTS) {
       await expect(vazio).toHaveAttribute('data-state', 'outra-origem');
       await exigirEstadoVazioLegivel(
         page,
-        'Os lançamentos deste cliente vêm de Omie',
+        'Os lançamentos deste cliente vêm da origem Omie',
         `${vp.label} · aba de arquivo num cliente Omie`,
         vazio,
       );
@@ -6519,7 +6519,7 @@ for (const vp of VIEWPORTS) {
       await analyze(page, `origem por arquivo — envio com sucesso + toast (${vp.label})`);
     });
 
-    test('CABECALHO_DIVERGENTE: colunas ausentes NOMEADAS, encontradas, e "Revisar mapeamento"', async ({
+    test('CABECALHO_DIVERGENTE: ausentes NOMEADAS, encontradas CONTADAS, e "Revisar mapeamento"', async ({
       page,
     }) => {
       clientFileOrigin = true;
@@ -6535,9 +6535,10 @@ for (const vp of VIEWPORTS) {
       await expect(recusa.getByRole('list', { name: /ausentes no arquivo/ })).toContainText(
         'Histórico',
       );
-      await expect(recusa.getByRole('list', { name: /encontradas no arquivo/ })).toContainText(
-        'Descrição',
-      );
+      // 86e3fvffy: a lista de "colunas encontradas" virou CONTAGEM — o nome
+      // vinha cru do arquivo, e num arquivo sem cabeçalho a linha 1 é dado.
+      await expect(recusa.getByRole('list', { name: /encontradas no arquivo/ })).toHaveCount(0);
+      await expect(recusa.getByTestId('file-header-counts')).toContainText('5 colunas');
       // Nenhum toast genérico: a recusa é ESTADO na tela.
       await expect(page.locator('[data-sonner-toast]')).toHaveCount(0);
       // Texto sólido sobre `destructive-muted`: contraste medido, não só "axe verde".

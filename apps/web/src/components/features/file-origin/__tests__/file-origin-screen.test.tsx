@@ -336,7 +336,7 @@ describe('Mapeamento — estados e gating (R1 · R5)', () => {
     render(<FileOriginScreen clientId={CLIENT_ID} />);
     const empty = screen.getByTestId('no-file-origin');
     expect(empty).toHaveAttribute('data-state', 'outra-origem');
-    expect(empty).toHaveTextContent('Os lançamentos deste cliente vêm de Omie');
+    expect(empty).toHaveTextContent('Os lançamentos deste cliente vêm da origem Omie');
     expect(empty).toHaveTextContent('um tipo de origem de lançamentos só');
     // Conectar arquivo aqui é 409 `ORIGEM_JA_CONECTADA`: nada de botão (§4.9).
     expect(screen.queryByRole('link', { name: /Conectar origem/ })).not.toBeInTheDocument();
