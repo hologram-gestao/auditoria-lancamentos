@@ -60,6 +60,8 @@ const listState: ListState = {
 };
 /** Total do plano SEM filtro — o que a sonda de 1 linha responde. */
 let planTotal = 0;
+/** A sonda ainda não respondeu (a lista pode ter chegado antes). */
+let probeLoading = false;
 const importState = { mutateAsync: vi.fn(), isPending: false };
 const sourceState = {
   data: [] as SourceAccountEntry[],
@@ -73,6 +75,7 @@ const bindingState = { mutateAsync: vi.fn(), isPending: false };
 vi.mock('@/hooks/use-client-accounting-chart', () => ({
   useAccountingChartList: (_clientId: string, params: ListAccountingChartParams) => {
     if (params.pageSize === 1) {
+      if (probeLoading) return { data: undefined, isLoading: true };
       return {
         data: {
           data: [],
@@ -202,6 +205,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   currentSearch = '';
+  probeLoading = false;
   authState.user = manager;
   clientDetailState.data = {
     closed_at: null,
@@ -378,6 +382,17 @@ describe('sem plano', () => {
     }
     expect(within(empty).getByText(/649;Banco conta movimento;analitica/)).toBeInTheDocument();
     // Um botão só na tela: sem plano ele mora no estado vazio.
+    expect(screen.getAllByRole('button', { name: 'Importar planilha' })).toHaveLength(1);
+  });
+
+  it('lista vazia chega ANTES da sonda: continua um botão só', () => {
+    // Corrida real do e2e (hologram, 390px): com a sonda pendente, `noPlan`
+    // ainda é falso e o topo repetia o botão do estado vazio.
+    withoutPlan();
+    probeLoading = true;
+    render(<AccountingChartScreen clientId="c1" />);
+
+    expect(screen.getByTestId('accounting-chart-empty')).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Importar planilha' })).toHaveLength(1);
   });
 
