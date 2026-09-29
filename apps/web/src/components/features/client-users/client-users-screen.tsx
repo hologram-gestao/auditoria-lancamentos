@@ -136,9 +136,9 @@ export function ClientUsersScreen({ clientId }: { clientId: string }) {
     <section aria-labelledby="client-users-heading" className="flex h-full flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
-          <h2 id="client-users-heading" className="text-lg font-semibold">
+          <h1 id="client-users-heading" className="text-xl font-semibold">
             Usuários
-          </h2>
+          </h1>
           <p className="text-muted-foreground text-sm">
             Pessoas deste cliente que acessam o sistema. Elas enxergam apenas este cliente.
           </p>

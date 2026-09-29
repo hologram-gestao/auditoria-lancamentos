@@ -376,13 +376,23 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
 
   return (
     <section aria-labelledby="client-titles-heading" className="flex flex-col gap-4">
-      <div className="space-y-1">
-        <h2 id="client-titles-heading" className="text-lg font-semibold">
-          Carteira
-        </h2>
-        <p className="text-muted-foreground text-sm">
-          Títulos a pagar e a receber em aberto, de todas as contas e sem recorte de mês.
-        </p>
+      {/* A data da última sincronização mora à direita do título (86e3fr9qz): na
+          linha das abas ela empurrava o "Sincronizar agora" para a linha de baixo
+          em 1280px. Continua só na aba Carteira, como antes. */}
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
+        <div className="space-y-1">
+          <h1 id="client-titles-heading" className="text-xl font-semibold">
+            Carteira
+          </h1>
+          <p className="text-muted-foreground text-sm">
+            Títulos a pagar e a receber em aberto, de todas as contas e sem recorte de mês.
+          </p>
+        </div>
+        {showCarteiraHeaderActions && syncedAtLabel !== null && (
+          <p className="text-muted-foreground text-sm" data-testid="titles-synced-at">
+            {syncedAtLabel}
+          </p>
+        )}
       </div>
 
       {/* Sprint 15 (FRONT 15.2): "Relatório de recebíveis" é aba DENTRO desta
@@ -396,31 +406,164 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
         onValueChange={(value) => setMany({ [PARAM.view]: value === DEFAULT_VIEW ? null : value })}
         className="flex flex-col gap-4"
       >
-        {/* Parte G: a lista de abas à esquerda e, na MESMA linha à direita, a
-            data da última sincronização e a ação (ou o motivo de ela não
-            existir), só na aba Carteira. */}
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        {/* Totais EM CIMA, antes da linha das abas (86e3fr9qz, pedido do Lucas):
+            o atraso por faixa é a pergunta que a reunião faz, e quem opera precisa
+            dele antes de percorrer as linhas. Recolhível; cada valor filtra a
+            lista (Parte B). Só na aba Carteira: o relatório tem os grupos dele. */}
+        {view === DEFAULT_VIEW &&
+          (summaryQuery.isLoading ? (
+            <ClientTitlesSummarySkeleton />
+          ) : summary !== undefined && !neverSynced ? (
+            <ClientTitlesSummaryBlock
+              summary={summary}
+              active={activeFilters}
+              onSelect={handleSummarySelect}
+            />
+          ) : null)}
+
+        {/* Uma linha só (86e3fr9qz): as abas, os filtros da Carteira e, à direita,
+            a ação de sincronizar (ou o motivo de ela não existir). Quebra em mais
+            linhas quando não cabe, sem cortar nada. O app usa a fonte do sistema,
+            então a largura muda de máquina para máquina: a ordenação é estreita e
+            o espaçamento horizontal é curto para sobrar folga em 1280px. */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-3">
           <TabsList className="self-start">
             <TabsTrigger value="carteira">Carteira</TabsTrigger>
             <TabsTrigger value="relatorio">Relatório de recebíveis</TabsTrigger>
           </TabsList>
           {showCarteiraHeaderActions && (
-            <div className="flex flex-wrap items-center gap-3">
-              {syncedAtLabel !== null && (
-                <p className="text-muted-foreground text-sm" data-testid="titles-synced-at">
-                  {syncedAtLabel}
-                </p>
+            <>
+              {/* Grupo de botões, não `Select`: três opções cabem numa linha e não
+                  escondem o estado atrás de um clique. Não há `ToggleGroup` em
+                  `components/ui/` e não se cria primitivo novo para isso. */}
+              <div
+                role="group"
+                aria-label="Tipo"
+                className="bg-background inline-flex self-start rounded-md border p-0.5"
+              >
+                {(
+                  [
+                    { value: null, label: 'Todos' },
+                    ...TYPE_FILTERS.map((value) => ({ value, label: TYPE_FILTER_LABELS[value] })),
+                  ] as { value: TitleType | null; label: string }[]
+                ).map((option) => {
+                  const pressed = (titleType ?? null) === option.value;
+                  return (
+                    <Button
+                      key={option.label}
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-pressed={pressed}
+                      className={cn('h-8', pressed && 'bg-accent text-accent-foreground')}
+                      onClick={() =>
+                        setMany({
+                          [PARAM.type]: option.value,
+                          [PARAM.page]: null,
+                        })
+                      }
+                    >
+                      {option.label}
+                    </Button>
+                  );
+                })}
+              </div>
+
+              <div className="w-full sm:w-56">
+                {/* Nome acessível "Ordenar por" (o e2e usa `getByLabel`); o rótulo
+                    visível mora dentro do gatilho, como no mockup. */}
+                <Label htmlFor="titles-sort" className="sr-only">
+                  Ordenar por
+                </Label>
+                <Select
+                  value={`${sortBy}:${sortOrder}`}
+                  onValueChange={(value) => {
+                    const option = SORT_OPTIONS.find((item) => item.value === value);
+                    if (!option) return;
+                    setMany({
+                      [PARAM.sortBy]: option.sortBy,
+                      [PARAM.sortOrder]: option.sortOrder,
+                      [PARAM.page]: null,
+                    });
+                  }}
+                >
+                  <SelectTrigger id="titles-sort" className="w-full">
+                    {/* Sem `flex`/`gap` aqui: o gatilho aplica `line-clamp-1` ao filho
+                        (`display: -webkit-box`), que engole o `gap`; o espaço é do texto. */}
+                    <span className="min-w-0">
+                      <span className="text-muted-foreground">Ordenar: </span>
+                      <SelectValue />
+                    </span>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SORT_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Sprint 15 (FRONT 15.1): a fila de trabalho de quem registra contexto —
+                  aplicado NO SERVIDOR (`hasNoContext=true`), nunca filtro client-side. */}
+              {canViewTitleContext && (
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="titles-has-no-context-filter"
+                    checked={hasNoContext}
+                    onCheckedChange={(checked) =>
+                      setMany({
+                        [PARAM.hasNoContext]: checked ? 'true' : null,
+                        [PARAM.page]: null,
+                      })
+                    }
+                    aria-label="Mostrar só vencidos sem contexto registrado"
+                  />
+                  <Label htmlFor="titles-has-no-context-filter" className="cursor-pointer text-sm">
+                    Vencidos sem contexto
+                  </Label>
+                </div>
               )}
-              {showSyncAction && syncButton}
-              {/* Encerrado é só-leitura: a ação some COM o motivo, em vez de sumir
-                  em silêncio e deixar a pessoa procurando o botão (§4.12). */}
-              {canSync && isClosed && (
-                <p className="text-muted-foreground max-w-xs text-sm">
-                  Cliente encerrado: a sincronização está indisponível. A carteira já sincronizada
-                  continua disponível para leitura.
-                </p>
+
+              {activeChips.length > 0 && (
+                <ul aria-label="Filtros ativos" className="flex flex-wrap items-center gap-2">
+                  {activeChips.map((chip) => (
+                    <li
+                      key={chip.key}
+                      className="bg-accent text-accent-foreground ring-border inline-flex items-center gap-1 rounded-full py-0.5 pl-2.5 pr-1 text-xs font-medium ring-1 ring-inset"
+                    >
+                      {chip.label}
+                      <button
+                        type="button"
+                        aria-label={`Remover filtro ${chip.label}`}
+                        onClick={chip.onRemove}
+                        className="hover:bg-background/60 focus-visible:ring-ring inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2"
+                      >
+                        <X className="h-3 w-3" aria-hidden="true" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               )}
-            </div>
+
+              {hasFilters && (
+                <Button type="button" variant="outline" size="sm" onClick={clearFilters}>
+                  Limpar filtros
+                </Button>
+              )}
+              <div className="flex flex-wrap items-center gap-3 xl:ml-auto">
+                {showSyncAction && syncButton}
+                {/* Encerrado é só-leitura: a ação some COM o motivo, em vez de sumir
+                    em silêncio e deixar a pessoa procurando o botão (§4.12). */}
+                {canSync && isClosed && (
+                  <p className="text-muted-foreground max-w-xs text-sm">
+                    Cliente encerrado: a sincronização está indisponível. A carteira já sincronizada
+                    continua disponível para leitura.
+                  </p>
+                )}
+              </div>
+            </>
           )}
         </div>
 
@@ -429,19 +572,6 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
         </TabsContent>
 
         <TabsContent value="carteira" className="mt-0 flex flex-col gap-4">
-          {/* Totais ANTES da lista: o atraso por faixa é a pergunta que a reunião
-              faz, e quem opera precisa dele antes de percorrer as linhas. Cada
-              valor filtra a lista (Parte B). */}
-          {summaryQuery.isLoading ? (
-            <ClientTitlesSummarySkeleton />
-          ) : summary !== undefined && !neverSynced ? (
-            <ClientTitlesSummaryBlock
-              summary={summary}
-              active={activeFilters}
-              onSelect={handleSummarySelect}
-            />
-          ) : null}
-
           {/* R3: "a última tentativa falhou" mostra os agregados da última ÍNTEGRA
               com a data dela — sem isso, a pessoa não sabe se está olhando a
               posição de ontem ou a de três meses atrás. */}
@@ -463,131 +593,6 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
           {hasOriginBlock && originCode !== null && (
             <OriginStateBlock code={originCode} clientId={clientId} />
           )}
-
-          {/* Parte C: barra compacta — numa linha só de `xl` para cima. Situação e
-              balde saíram daqui (vêm dos cards); os parâmetros continuam na URL e
-              aparecem como etiquetas removíveis. */}
-          <div className="flex flex-col gap-3 xl:flex-row xl:flex-wrap xl:items-center">
-            {/* Grupo de botões, não `Select`: três opções cabem numa linha e não
-                escondem o estado atrás de um clique. Não há `ToggleGroup` em
-                `components/ui/` e não se cria primitivo novo para isso. */}
-            <div
-              role="group"
-              aria-label="Tipo"
-              className="bg-background inline-flex self-start rounded-md border p-0.5"
-            >
-              {(
-                [
-                  { value: null, label: 'Todos' },
-                  ...TYPE_FILTERS.map((value) => ({ value, label: TYPE_FILTER_LABELS[value] })),
-                ] as { value: TitleType | null; label: string }[]
-              ).map((option) => {
-                const pressed = (titleType ?? null) === option.value;
-                return (
-                  <Button
-                    key={option.label}
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    aria-pressed={pressed}
-                    className={cn('h-8', pressed && 'bg-accent text-accent-foreground')}
-                    onClick={() =>
-                      setMany({
-                        [PARAM.type]: option.value,
-                        [PARAM.page]: null,
-                      })
-                    }
-                  >
-                    {option.label}
-                  </Button>
-                );
-              })}
-            </div>
-
-            <div className="xl:w-64">
-              {/* Nome acessível "Ordenar por" (o e2e usa `getByLabel`); o rótulo
-                  visível mora dentro do gatilho, como no mockup. */}
-              <Label htmlFor="titles-sort" className="sr-only">
-                Ordenar por
-              </Label>
-              <Select
-                value={`${sortBy}:${sortOrder}`}
-                onValueChange={(value) => {
-                  const option = SORT_OPTIONS.find((item) => item.value === value);
-                  if (!option) return;
-                  setMany({
-                    [PARAM.sortBy]: option.sortBy,
-                    [PARAM.sortOrder]: option.sortOrder,
-                    [PARAM.page]: null,
-                  });
-                }}
-              >
-                <SelectTrigger id="titles-sort" className="w-full">
-                  {/* Sem `flex`/`gap` aqui: o gatilho aplica `line-clamp-1` ao filho
-                      (`display: -webkit-box`), que engole o `gap`; o espaço é do texto. */}
-                  <span className="min-w-0">
-                    <span className="text-muted-foreground">Ordenar: </span>
-                    <SelectValue />
-                  </span>
-                </SelectTrigger>
-                <SelectContent>
-                  {SORT_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Sprint 15 (FRONT 15.1): a fila de trabalho de quem registra contexto —
-                aplicado NO SERVIDOR (`hasNoContext=true`), nunca filtro client-side. */}
-            {canViewTitleContext && (
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="titles-has-no-context-filter"
-                  checked={hasNoContext}
-                  onCheckedChange={(checked) =>
-                    setMany({
-                      [PARAM.hasNoContext]: checked ? 'true' : null,
-                      [PARAM.page]: null,
-                    })
-                  }
-                  aria-label="Mostrar só vencidos sem contexto registrado"
-                />
-                <Label htmlFor="titles-has-no-context-filter" className="cursor-pointer text-sm">
-                  Vencidos sem contexto
-                </Label>
-              </div>
-            )}
-
-            {activeChips.length > 0 && (
-              <ul aria-label="Filtros ativos" className="flex flex-wrap items-center gap-2">
-                {activeChips.map((chip) => (
-                  <li
-                    key={chip.key}
-                    className="bg-accent text-accent-foreground ring-border inline-flex items-center gap-1 rounded-full py-0.5 pl-2.5 pr-1 text-xs font-medium ring-1 ring-inset"
-                  >
-                    {chip.label}
-                    <button
-                      type="button"
-                      aria-label={`Remover filtro ${chip.label}`}
-                      onClick={chip.onRemove}
-                      className="hover:bg-background/60 focus-visible:ring-ring inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2"
-                    >
-                      <X className="h-3 w-3" aria-hidden="true" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {hasFilters && (
-              <Button type="button" variant="outline" size="sm" onClick={clearFilters}>
-                Limpar filtros
-              </Button>
-            )}
-          </div>
 
           {/* Altura NATURAL (86e3eq9uy): sem `min-h-0 flex-1`, sem piso. A tabela
               cresce com as linhas e quem rola é o `<main>`; o cabeçalho gruda no

@@ -12,28 +12,41 @@ O que este módulo afirma (critérios de aceite da 16.2):
   - mudar conta/histórico entre a prévia e a confirmação → 409 `PREVIA_DESATUALIZADA`;
   - decisão legada do catálogo em `conta_contabil`: legível, marcada `requiresRedo`,
     incompleta na prévia, não bloqueia;
-  - portabilidade: importar em `conta_contabil` 422; exportar 200;
+  - portabilidade (86e3fxqqe): exportar e reimportar em `conta_contabil` preserva
+    conta e histórico (ida e volta, sem duplicar decisão); conta inexistente ou
+    sintética na planilha recusa o LOTE INTEIRO com 422
+    `CONTAS_DA_PLANILHA_INVALIDAS` (`details.lines`), nada gravado, mesmo com
+    linhas válidas no meio; histórico acima do limite recusa só a linha
+    (`historico_muito_longo`), o lote segue;
   - o histórico nunca aparece em log nem no evento `depara_aplicado`.
 """
 
 from __future__ import annotations
 
+import io
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 import pytest
+from openpyxl import Workbook, load_workbook
 from sqlalchemy import func, select
 from structlog.testing import capture_logs
 
 from app.core.config import get_settings
-from app.core.crypto_service import new_client_dek
+from app.core.crypto_service import (
+    AAD_FILE_CATEGORY_LABEL,
+    field_locator,
+    load_client_cipher,
+    new_client_dek,
+)
 from app.core.security import hash_password
 from app.db.models import (
     HOLOGRAM_ORGANIZATION_ID,
     Client,
     ClientAccountingAccount,
+    ClientFileCategory,
     ClientMappingDecision,
     ClientMappingMaterializationItem,
     ClientMovement,
@@ -48,6 +61,7 @@ from app.db.models import (
 )
 from app.modules.client_mapping.accounting import AccountingDecisionSupport
 from app.modules.client_mapping.materialization import ClientMappingApplyService
+from app.modules.client_mapping.portability import EXPORT_COLUMNS
 from app.modules.client_mapping.repository import ClientMappingRepository
 from app.modules.client_mapping.service import ClientMappingDecisionService
 from app.modules.client_mapping.vigencia import add_months
@@ -108,6 +122,25 @@ async def _import_plan(http: AsyncClient, client: Client, content: bytes = PLANO
         files={"file": ("plano.csv", content, "text/csv")},
     )
     assert resp.status_code == 200, resp.text
+
+
+async def _seed_file_category_label(
+    db: AsyncSession, client: Client, *, code: str, label: str
+) -> None:
+    """Rótulo cifrado com `code` ESCOLHIDO (86e3fxqqh) — `registry.resolve_codes`
+    gera código aleatório, então o teste que precisa casar com o `category_code`
+    já semeado em `ClientMovement` grava a linha direto, com a MESMA cifra
+    (`AAD_FILE_CATEGORY_LABEL`, pk da linha) que o registry usaria.
+    """
+    row_id = uuid4()
+    cipher = await load_client_cipher(client, settings=get_settings())
+    envelope, iv = cipher.encrypt(label, field_locator(AAD_FILE_CATEGORY_LABEL, row_id))
+    db.add(
+        ClientFileCategory(
+            id=row_id, client_id=client.id, code=code, label_encrypted=envelope, label_iv=iv
+        )
+    )
+    await db.flush()
 
 
 async def _accounts(db: AsyncSession, client: Client) -> dict[str, ClientAccountingAccount]:
@@ -172,6 +205,23 @@ async def world(db_session: AsyncSession, client_with_db: AsyncClient) -> World:
     )
     assert bank.status_code == 200, bank.text
     return w
+
+
+def _xlsx_rows(rows: list[tuple[str, str, str, str, str]]) -> bytes:
+    """Planilha mínima no formato exportado (86e3fxqqe): `(tipo_origem,
+    codigo_categoria, decisao, codigo_alvo, historico)` por linha; as demais
+    colunas (nome, destino, origem, vigência) ficam em branco — o import as
+    ignora ou aceita ausentes.
+    """
+    wb = Workbook()
+    ws = wb.active
+    assert ws is not None
+    ws.append(list(EXPORT_COLUMNS))
+    for source_type, category_code, decision, target_code, history in rows:
+        ws.append([source_type, category_code, "", "", decision, target_code, "", history, "", ""])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
 
 def _base(w: World, kind: str = "conta_contabil") -> str:
@@ -351,6 +401,11 @@ class TestPreviaEMaterializacao:
     async def test_snapshot_imutavel_e_historico_lido_pela_vigencia(
         self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
     ) -> None:
+        # 86e3fxqqh: "aluguel-d" tem rótulo registrado (nome resolvido); "tarifa"
+        # não — prova as DUAS pontas da mesma resolução na MESMA prévia.
+        await _seed_file_category_label(
+            db_session, world.client, code="aluguel-d", label="Aluguel do escritório"
+        )
         conta = world.accounts["662"]
         ok = await _decide(
             client_with_db,
@@ -378,6 +433,11 @@ class TestPreviaEMaterializacao:
         assert linhas["aluguel-d"]["history"] == HIST_1
         assert linhas["aluguel-d"]["historyMissing"] is False
         assert linhas["tarifa"]["historyMissing"] is True  # sinalizada, não bloqueia
+        # 86e3fxqqh: nome embaixo do código, pela MESMA resolução da lista.
+        assert linhas["aluguel-d"]["categoryName"] == "Aluguel do escritório"
+        assert linhas["aluguel-d"]["categoryNameResolved"] is True
+        assert linhas["tarifa"]["categoryName"] is None
+        assert linhas["tarifa"]["categoryNameResolved"] is False
         mat = await client_with_db.post(
             f"{_base(world)}/materializations",
             json={
@@ -595,8 +655,8 @@ class TestPreviaEMaterializacao:
 
 
 class TestPortabilidade:
-    async def test_importar_em_conta_contabil_e_422_e_exportar_segue(
-        self, client_with_db: AsyncClient, world: World
+    async def test_ida_e_volta_preserva_conta_e_historico_sem_duplicar_decisao(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
     ) -> None:
         await _decide(
             client_with_db,
@@ -606,16 +666,117 @@ class TestPortabilidade:
             accountingAccountId=str(world.accounts["662"].id),
             history=HIST_1,
         )
+        assert await _decision_count(db_session, world) == 1
+
         export = await client_with_db.get(f"{_base(world)}/export")
         assert export.status_code == 200, export.text
+        wb = load_workbook(io.BytesIO(export.content))
+        ws = wb.active
+        assert ws is not None
+        header = [c.value for c in next(ws.iter_rows(max_row=1))]
+        assert "historico" in header
+        row = [c.value for c in next(ws.iter_rows(min_row=2, max_row=2))]
+        assert row[header.index("codigo_alvo")] == "662"
+        assert row[header.index("historico")] == HIST_1
+
+        # A MESMA conta e o MESMO histórico já vigentes: prévia e aplicação não
+        # criam nem alteram nada — "ida e volta não muda nada" (R6/16.2).
+        preview_resp = await client_with_db.post(
+            f"{_base(world)}/import/preview",
+            files={"file": ("de-para.xlsx", export.content, "application/octet-stream")},
+        )
+        assert preview_resp.status_code == 200, preview_resp.text
+        preview = preview_resp.json()["data"]
+        assert (preview["created"], preview["altered"], len(preview["rejected"])) == (0, 0, 0)
+
+        apply_resp = await client_with_db.post(
+            f"{_base(world)}/import",
+            files={"file": ("de-para.xlsx", export.content, "application/octet-stream")},
+            data={"confirm": "true"},
+        )
+        assert apply_resp.status_code == 200, apply_resp.text
+        applied = apply_resp.json()["data"]["preview"]
+        assert (applied["created"], applied["altered"], len(applied["rejected"])) == (0, 0, 0)
+
+        assert await _decision_count(db_session, world) == 1
+
+    async def test_conta_inexistente_recusa_a_planilha_inteira_mesmo_com_linha_valida(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
+    ) -> None:
+        content = _xlsx_rows(
+            [
+                ("arquivo", "aluguel-d", "alvo", "662", ""),  # válida
+                ("arquivo", "tarifa", "alvo", "999999-nao-existe", ""),  # inválida
+            ]
+        )
+        before = await _decision_count(db_session, world)
         for path in ("import/preview", "import"):
             resp = await client_with_db.post(
                 f"{_base(world)}/{path}",
-                files={"file": ("de-para.xlsx", export.content, "application/octet-stream")},
+                files={"file": ("de-para.xlsx", content, "application/octet-stream")},
                 data={"confirm": "true"},
             )
             assert resp.status_code == 422, resp.text
-            assert resp.json()["error"]["code"] == "IMPORTACAO_INDISPONIVEL_NO_DESTINO"
+            error = resp.json()["error"]
+            assert error["code"] == "CONTAS_DA_PLANILHA_INVALIDAS"
+            assert error["details"]["total"] == 1
+            assert error["details"]["lines"] == [{"line": 3, "reason": "conta_inexistente"}]
+        # nem a linha VÁLIDA (662) foi gravada — a planilha é tudo ou nada.
+        assert await _decision_count(db_session, world) == before
+
+    async def test_conta_sintetica_tambem_recusa_a_planilha_inteira(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
+    ) -> None:
+        # "10" é `sintetica` no PLANO da fixture (não recebe decisão nova).
+        content = _xlsx_rows([("arquivo", "tarifa", "alvo", "10", "")])
+        before = await _decision_count(db_session, world)
+        resp = await client_with_db.post(
+            f"{_base(world)}/import/preview",
+            files={"file": ("de-para.xlsx", content, "application/octet-stream")},
+        )
+        assert resp.status_code == 422, resp.text
+        details = resp.json()["error"]["details"]
+        assert details["lines"] == [{"line": 2, "reason": "sintetica"}]
+        assert await _decision_count(db_session, world) == before
+
+    async def test_historico_muito_longo_na_planilha_recusa_so_a_linha(
+        self, client_with_db: AsyncClient, world: World
+    ) -> None:
+        content = _xlsx_rows(
+            [
+                ("arquivo", "aluguel-d", "alvo", "662", "x" * 501),
+                ("arquivo", "tarifa", "alvo", "542", HIST_2),  # válida, no mesmo lote
+            ]
+        )
+        resp = await client_with_db.post(
+            f"{_base(world)}/import/preview",
+            files={"file": ("de-para.xlsx", content, "application/octet-stream")},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()["data"]
+        assert body["rejected"] == [
+            {
+                "line": 2,
+                "categoryCode": "aluguel-d",
+                "targetCode": "662",
+                "reason": "historico_muito_longo",
+            }
+        ]
+        # a linha válida do MESMO lote segue — recusa é POR LINHA, não do arquivo.
+        assert body["created"] == 1
+
+    async def test_historico_nunca_vai_para_log_na_previa_da_importacao(
+        self, client_with_db: AsyncClient, world: World
+    ) -> None:
+        content = _xlsx_rows([("arquivo", "aluguel-d", "alvo", "662", HIST_1)])
+        with capture_logs() as logs:
+            resp = await client_with_db.post(
+                f"{_base(world)}/import/preview",
+                files={"file": ("de-para.xlsx", content, "application/octet-stream")},
+            )
+        assert resp.status_code == 200, resp.text
+        assert HIST_1 not in resp.text
+        assert HIST_1 not in repr(logs)
 
     async def test_outros_destinos_seguem_importando(
         self, client_with_db: AsyncClient, world: World

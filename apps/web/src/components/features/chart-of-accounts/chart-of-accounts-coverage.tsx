@@ -27,6 +27,7 @@
  * conjunto — e o leitor de tela anuncia o par junto. O botão vive DENTRO do
  * `<dd>`; um `<p>` solto ao lado do `<dd>` reprova no axe (`definition-list`).
  */
+import { CollapsibleSummary, SummaryInline } from '@/components/shared/collapsible-summary';
 import type { ChartOfAccountsCoverage, ChartOfAccountsStatus } from '@/lib/contracts';
 import { formatCreatedAt } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -132,10 +133,31 @@ export function ChartOfAccountsCoverageBlock({
   /** Clique num valor: quem chama aplica (ou desfaz) o recorte na URL. */
   onSelect: (key: CoverageFilterKey) => void;
 }) {
+  const items = stats(coverage);
   return (
-    <div className="space-y-2">
+    <CollapsibleSummary
+      storageKey="plano-de-contas"
+      collapsed={
+        <SummaryInline
+          items={items.map((stat) => ({
+            key: stat.key,
+            value: stat.value,
+            label: stat.label.toLowerCase(),
+          }))}
+        />
+      }
+      footnote={
+        <>
+          Contagens do plano de contas inteiro
+          {coverage.syncedAt != null
+            ? `, com referência em ${formatCreatedAt(coverage.syncedAt)}`
+            : ''}
+          . Clique num valor para filtrar a lista.
+        </>
+      }
+    >
       <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-        {stats(coverage).map((stat) => {
+        {items.map((stat) => {
           const isActive = isCoverageFilterActive(active, stat.key);
           return (
             // A `<div>` entre o `<dl>` e o par é permitida; um `<p>` solto ao lado
@@ -169,14 +191,7 @@ export function ChartOfAccountsCoverageBlock({
           );
         })}
       </dl>
-      <p className="text-muted-foreground text-xs">
-        Contagens do plano de contas inteiro
-        {coverage.syncedAt != null
-          ? `, com referência em ${formatCreatedAt(coverage.syncedAt)}`
-          : ''}
-        . Clique num valor para filtrar a lista.
-      </p>
-    </div>
+    </CollapsibleSummary>
   );
 }
 

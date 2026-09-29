@@ -822,6 +822,35 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   nunca aceite silencioso (o `1500.50` virava R$ 150.050,00).
 - **Log da aplicação se afirma com `structlog.testing.capture_logs`, não com `caplog`**: o
   `caplog` não vê o structlog, e o teste "nada de PII no log" passa vazio.
+- **A resposta HTTP só sai depois do `commit()` — sempre, em toda rota, por um middleware
+  ÚNICO, nunca por commit espalhado** (86e3fxqqa): `get_db_session` faz `commit()` no
+  pós-`yield`, e o FastAPI instalado só fecha esse `AsyncExitStack` **depois** de
+  `await response(...)` já ter despachado a resposta (confirmado lendo
+  `fastapi/routing.py::request_response` do pacote instalado — nunca suponha isso de
+  memória, a versão pode mudar o mecanismo). Sem tratamento, o cliente vê sucesso antes do
+  dado existir — 45 de 100 criações medidas em servidor real. A
+  `CommitBeforeResponseMiddleware` (`app/core/response_ordering.py`) comita **dentro do
+  `send`, ao ver o `http.response.start`**: é o instante exato entre "resposta pronta" e
+  "primeiro byte no socket". A session chega até lá por `request.state.db_session`,
+  publicada pelo próprio `get_db_session` — que também a ZERA no `finally`, senão a
+  resposta de ERRO (montada depois do teardown ter dado rollback) faria o middleware
+  comitar uma session revertida.
+  ⚠️ **Não bufferize a resposta inteira para conseguir a mesma ordem** — foi a primeira
+  tentativa desta task e ela **segura a resposta até a BackgroundTask terminar**: o
+  Starlette roda `await self.background()` DENTRO de `Response.__call__`, depois dos
+  `send`. Nos 4 endpoints de conciliação isso é o cliente esperando o processamento
+  inteiro (teto de `RECONCILIATION_TIMEOUT_SECONDS`, 900 s) em vez do 201. Medido: 3,00 s
+  contra 0,00 s numa task que dorme 3 s. **Nenhum teste da suíte pega isso sozinho** —
+  todos substituem `_schedule_reconciliation_processing` por um stub; por isso existe o
+  cenário com BackgroundTask REAL em `tests/integration/test_response_ordering.py`. As
+  outras duas alternativas também não servem: `BaseHTTPMiddleware` retorna do `call_next()`
+  no primeiro chunk (estreita a corrida, não elimina) e `APIRoute` customizada exigiria
+  `route_class=` em CADA `APIRouter()` dos módulos, porque `include_router()` sempre recria
+  a rota com `route_class_override=type(route)`.
+  Provar qualquer coisa disso em teste exige **servidor uvicorn real**:
+  `httpx.ASGITransport` roda a app inteira numa única coroutine e não reproduz a corrida
+  nem sem middleware nenhum — só um socket de verdade separa "bytes no cliente" de "o
+  resto da coroutine do servidor continua".
 
 ### Frontend
 
@@ -851,6 +880,15 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   para cima, a paginação vem depois da última linha, nunca grudada). `position: sticky`
   gruda no scroller mais próximo, e `overflow-hidden` também é scroller: por isso o
   segundo padrão recorta com `overflow-clip`.
+- **Tela dentro do cliente traz o PRÓPRIO `<h1>`** (86e3fr9q3): o `ClientShell` não tem
+  cabeçalho (sem breadcrumb, nome do cliente, selos nem menu de ações; o nome está no menu
+  lateral, e Editar e Encerrar moram na linha da lista de clientes). Tela nova sob
+  `/clientes/[id]` começa com o `<h1>` dela; um título no shell repetiria o da tela logo
+  abaixo. Cliente encerrado ganha o aviso "Cliente encerrado: somente leitura" do shell.
+- **Totais que filtram são recolhíveis pela mesma moldura** (86e3fr9qz):
+  `components/shared/collapsible-summary.tsx`, com estado por tela no `localStorage`
+  (try/catch, sem armazenamento abre aberto) e o conteúdo recolhido montado com `hidden`.
+  Tela nova com cards de totais usa ela, nunca um "ocultar" próprio.
 
 ### API
 
@@ -1255,6 +1293,10 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.61 — 29/09/2026. **O topo das telas do cliente encolheu (épico 86e3fr9pd, feedback do Lucas em 28/09).** O `ClientShell` perdeu o cabeçalho inteiro: breadcrumb, nome do cliente, selos de status e categoria, favorito e o menu "Ações do cliente". A task pedia o nome da página no lugar do nome do cliente, mas toda tela já tinha o próprio título logo abaixo, e o Pedro decidiu (29/09) que o título da TELA vira o `<h1>` e o shell não repete nada; o detalhe da conciliação já tinha o dele ("Conta · Mês"). Editar e Encerrar foram para a linha da lista de clientes (o ícone de encerrar entrou ANTES de o menu sair, para o encerramento nunca ficar sem botão), e o cliente encerrado ganhou o aviso de somente leitura que o selo dava. `sessionIdFromPathname` e `sessionCrumbLabel` ficaram sem uso e saíram. Carteira, de-para e plano de contas ganharam a moldura única de totais recolhíveis (`collapsible-summary.tsx`), e a carteira e o de-para passaram a ter abas, filtros e ações numa linha só. O "Novo Cliente" esconde App Key e App Secret atrás do switch "Conectar com o Omie", desligado por padrão, e desligar limpa a credencial. Duas regras novas na §7 Frontend. Endpoints sensíveis, matriz e pares de AAD não mudaram: só front._
+
+_Versão 1.60 — 29/09/2026. **As 3 subtasks abertas do épico de follow-ups da Sprint 16 (86e3fxqq7) foram entregues num PR só, fora do sandbox dos agents.** A 4ª (desbloquear a S13) já estava `done` desde a v1.59. **86e3fxqqa — a resposta antes do commit, achado desde a v1.57, está CORRIGIDA**: `CommitBeforeResponseMiddleware` (`app/core/response_ordering.py`, novo §7 Backend) comita dentro do `send`, no `http.response.start`, então nenhum byte sai antes do `commit()` — em toda rota, sem tocar em nenhum `routes.py`. Medido em servidor uvicorn real: 45/100 leituras imediatas sem o dado antes, 0/100 depois (`httpx.ASGITransport` não reproduz a corrida: roda a app inteira numa coroutine só). **A primeira versão desta correção bufferizava a resposta inteira e foi REPROVADA na revisão**: o Starlette roda `await self.background()` dentro de `Response.__call__`, então o buffer segurava a resposta até a BackgroundTask acabar — 3,00 s contra 0,00 s numa task de 3 s, e até 900 s nos 4 endpoints de conciliação. Nenhum teste pegava: todos stubam `_schedule_reconciliation_processing`. Agora existe um cenário com BackgroundTask REAL, que reprova contra a versão bufferizada. **86e3fxqqe — a portabilidade do de-para (Sprint 12) volta a importar no destino `conta_contabil`**: a planilha ganhou a coluna `historico`, resolvida pela MESMA cifra/decifra da decisão manual (`accounting.py`); conta inexistente, sintética ou inativa recusa a planilha INTEIRA (`CONTAS_DA_PLANILHA_INVALIDAS`, molde da `FileLinesInvalidError` da S14) — histórico acima do limite recusa só a linha. `MappingImportUnavailableError`/`IMPORTACAO_INDISPONIVEL_NO_DESTINO` saíram do código. **86e3fxqqh — a prévia "Partida contábil" mostra o nome da categoria**, pela mesma resolução da lista de decisões: `resolve_category_names` saiu de método privado de `ClientMappingListService` para função do módulo `listing.py`, chamada agora também por `ClientMappingApplyService` — as duas telas não podem mais divergir porque são a MESMA chamada. Vitest **1021** (o total, já com os novos), contrato com diff só do esperado (`categoryName`/`categoryNameResolved` e o texto das rotas de import). Pares de AAD, endpoints sensíveis e matriz de permissões **não mudaram** — nenhuma rota nem permissão nova, só comportamento de rotas e campos existentes._
 
 _Versão 1.59 — 29/09/2026. **A Sprint 13 (exportador para sistema contábil) entrou no primer, e o primer foi restaurado pela QUARTA vez.** O commit do QA (`1012e8e`) levou o `CLAUDE.md` do worktree (o prompt do papel, 87 linhas) por cima das 1311 do primer, e a edição do `PROJECT.md` foi negada na sessão dele; o patch ficou no `HANDOFF.md` e a validação humana (86e3fypch) o aplicou com cada número conferido por comando: §3.15 com as 8 rotas novas (108 → **116**) e `GET /export-layout-templates` fora com motivo; §4.9 com `generate_accounting_file` e `manage_export_layouts` (27 → **29**) e o porquê de `review_export` não servir; §4.12 com as gerações (ficam no encerramento, saem antes das materializações na exclusão definitiva); §8 com a linha e o parágrafo da S13. Pares de AAD seguem **17**. As 4 decisões do planejador da sprint (quem lê layouts, quem lista gerações, o `<N>` do nome do arquivo e as casas decimais) foram validadas pelo Pedro e mantidas. A causa desta vez foi dupla: o `AGENT_PATHS_QA` alcança o `CLAUDE.md` do worktree, e o hub semeou os `PROJECT.md` de uma `develop` LOCAL sem a S16. O hub passou a semear do commit de onde o worktree saiu, a tirar o `CLAUDE.md` do worktree de todo commit e a recusar primer que encolhe ou perde a última `_Versão` (86e3fyjan, repositório `agents-hub`); a skill `sprint-preflight` exige a `develop` local igual à do origin. A validação rodou o que o QA não pôde: pytest completo contra Postgres em Python 3.12 (3920 passed, 0 failed), ciclo das 2 migrations, contrato com diff 0, vitest 1020, a11y 558 por tema nos três temas, 102 verificações pela API (o arquivo gerado da amostra é o CSV real do escritório byte a byte) e prints desktop e 390px. No mesmo PR entraram os dois outros follow-ups do QA: prefixo do valor e cabeçalho de coluna que começam com `= + - @` são 422 (`FORMULA_PREFIXES` virou fonte única, na definição do layout), e três estados do front (diálogo de layout que não resetava, recusa velha na tela depois de materializar de novo, diálogo do modelo fechando com o POST em andamento). A resposta antes do commit (86e3fxqqa) apareceu de novo, duas vezes, no cenário pela API._
 

@@ -134,6 +134,18 @@ vi.mock('@/hooks/use-client-mapping', () => ({
   useApplyMappingImport: () => importApplyState,
 }));
 
+// S16: `AccountingPlanNotice` (lista) e `AccountingDecisionSheet` (gaveta) usam
+// esta sonda incondicionalmente quando o destino é `conta_contabil` — sem o
+// mock, `useQuery` explode por falta de `QueryClientProvider` (este arquivo
+// não envolve `render()` num provider de verdade, como os outros hooks acima).
+// `total: 1` = "tem plano": nenhum teste aqui afirma o aviso "sem plano".
+vi.mock('@/hooks/use-client-accounting-chart', () => ({
+  useAccountingChartList: () => ({
+    data: { data: [], pagination: { page: 1, pageSize: 1, total: 1 } },
+    isLoading: false,
+  }),
+}));
+
 const clientDetailState = {
   data: undefined as
     | {
@@ -491,6 +503,20 @@ describe('ClientMappingScreen — gating por papel (R6)', () => {
     ).toBeVisible();
     expect(screen.queryByRole('button', { name: /Importar/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Confirmar herdadas/ })).not.toBeInTheDocument();
+  });
+
+  it('"Importar" também existe no destino Conta contábil (86e3fxqqe)', () => {
+    // Até a task 86e3fxqqe, a S16 escondia o botão de propósito nesse destino
+    // (a planilha não levava o histórico cifrado). Agora a importação leva a
+    // coluna e a ação volta a existir, gatilhada só por `manage_client_mapping`
+    // — a MESMA permissão de qualquer outro destino, sem célula própria.
+    destinationsState.data = [
+      destination({ id: 'd-conta', type: 'conta_contabil', name: 'Conta contábil' }),
+      destination(),
+    ];
+    currentSearch = 'destination=conta_contabil';
+    render(<ClientMappingScreen clientId={TENANT} />);
+    expect(screen.getByRole('button', { name: /Importar/ })).toBeVisible();
   });
 });
 

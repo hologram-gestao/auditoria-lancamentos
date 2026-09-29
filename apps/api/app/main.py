@@ -30,6 +30,7 @@ from app.core.dependencies import DbSessionDep
 from app.core.exceptions import AppError, ErrorCode, RateLimitedError, to_error_response
 from app.core.logging import get_logger, sanitize_validation_errors, setup_logging
 from app.core.rate_limit import limiter
+from app.core.response_ordering import CommitBeforeResponseMiddleware
 from app.db.session import close_db, init_db
 from app.integrations.anthropic.model_limits import validate_parse_output_config
 from app.integrations.omie.categorias_cache import OmieCategoriasCache
@@ -286,10 +287,17 @@ def create_app() -> FastAPI:
     # Starlette aplica middlewares em ordem REVERSA de `add_middleware` — o
     # último adicionado é o mais externo (primeiro a tocar a request).
     # Ordem desejada (do externo pro interno):
-    #   CORS  → SecurityHeaders → TrustedHost → CorrelationId → handler
+    #   CORS → SecurityHeaders → TrustedHost → CorrelationId →
+    #   CommitBeforeResponse → handler
     # Por isso adicionamos do mais interno para o mais externo abaixo. CORS
     # por último é convenção do FastAPI: garante que preflight OPTIONS
     # responda corretamente antes de qualquer outro middleware tocar.
+    #
+    # `CommitBeforeResponseMiddleware` é o MAIS interno de propósito (86e3fxqqa,
+    # CLAUDE.md §7 Backend): precisa envolver só o roteamento/dependências,
+    # sem interferir em CORS, security headers ou correlation ID — ver o
+    # docstring de `app/core/response_ordering.py` para o porquê.
+    app.add_middleware(CommitBeforeResponseMiddleware)
     app.add_middleware(CorrelationIdMiddleware)
     app.add_middleware(
         TrustedHostMiddleware,

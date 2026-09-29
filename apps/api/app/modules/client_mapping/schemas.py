@@ -435,6 +435,7 @@ class ImportRejectedLine(BaseModel):
         "destino_diferente",
         "linha_repetida",
         "conflito_na_vigencia",
+        "historico_muito_longo",
     ]
 
     model_config = ConfigDict(populate_by_name=True)
@@ -574,6 +575,20 @@ class AccountingCategoryResponse(BaseModel):
 
     source_type: str = Field(alias="sourceType")
     category_code: str = Field(alias="categoryCode")
+    category_name: str | None = Field(
+        default=None,
+        alias="categoryName",
+        description=(
+            "86e3fxqqh — nome da categoria, pela MESMA resolução da lista de "
+            "decisões (`null` = origem fora do ar ou sem decifrar; a tela mostra só "
+            "o código)."
+        ),
+    )
+    category_name_resolved: bool = Field(
+        default=False,
+        alias="categoryNameResolved",
+        description="`false` com `categoryName` nulo OU com o marcador `[indecifrável]`.",
+    )
     amount: Decimal = Field(description="Σ|valor| dos movimentos da categoria (BRL).")
     count: int = Field(ge=0)
     accounting_account_id: UUID | None = Field(default=None, alias="accountingAccountId")
@@ -623,6 +638,8 @@ class AccountingCategoryResponse(BaseModel):
         return cls(
             source_type=line.source_type,
             category_code=line.category_code,
+            category_name=line.category_name,
+            category_name_resolved=line.category_name_resolved,
             amount=line.amount,
             count=line.count,
             accounting_account_id=account.id if account else None,

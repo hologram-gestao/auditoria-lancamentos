@@ -33,13 +33,15 @@ from openpyxl import Workbook, load_workbook
 from starlette.concurrency import run_in_threadpool
 
 from app.core.exceptions import (
+    MappingImportAccountsInvalidError,
     MappingImportRequiresConfirmationError,
-    MappingImportUnavailableError,
     ValidationAppError,
 )
 from app.db.models import ACCOUNTING_DESTINATION_TYPE, DecisionOrigin, DecisionType
+from app.db.models.client_mapping import MAX_DECISION_HISTORY_CHARS
 from app.db.models.client_movement import MAX_MOVEMENT_CATEGORY_CODE_CHARS
 from app.db.models.mapping_catalog import MAX_TARGET_CODE_CHARS
+from app.modules.client_mapping.accounting import normalize_history
 from app.modules.client_mapping.service import CHART_SOURCE_TYPE, DecisionInput
 from app.modules.client_movements.competence import current_competence, format_competence
 from app.modules.reconciliations.export.workbook import neutralize_formula_injection
@@ -47,6 +49,7 @@ from app.modules.reconciliations.export.workbook import neutralize_formula_injec
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import date
+    from uuid import UUID
 
     from app.core.authz import CurrentUser
     from app.db.models import Client
@@ -81,8 +84,14 @@ MAX_IMPORT_COMPRESSION_RATIO = 100
 #: Assinatura de todo `.xlsx` (é um ZIP).
 XLSX_MAGIC = b"PK\x03\x04"
 
+#: Teto de linhas reportadas com conta inválida (86e3fxqqe) — molde de
+#: `MAX_INVALID_LINES_REPORTED` da S14 (`client_file_ingestion/reader.py`): a
+#: resposta não cresce sem limite, `details.total` diz o total real.
+MAX_INVALID_ACCOUNT_LINES = 50
+
 #: Colunas da planilha, na ordem. As CHAVES (casamento) são as de código; as de
-#: nome são só leitura humana e a importação as ignora.
+#: nome são só leitura humana e a importação as ignora. `COL_HISTORY` só se
+#: aplica ao destino `conta_contabil` (86e3fxqqe) — vazia nos demais.
 COL_SOURCE = "tipo_origem"
 COL_CATEGORY = "codigo_categoria"
 COL_CATEGORY_NAME = "nome_categoria"
@@ -90,6 +99,7 @@ COL_DESTINATION = "destino"
 COL_DECISION = "decisao"
 COL_TARGET = "codigo_alvo"
 COL_TARGET_NAME = "nome_alvo"
+COL_HISTORY = "historico"
 COL_ORIGIN = "origem"
 COL_EFFECTIVE = "vigencia_inicio"
 EXPORT_COLUMNS = (
@@ -100,6 +110,7 @@ EXPORT_COLUMNS = (
     COL_DECISION,
     COL_TARGET,
     COL_TARGET_NAME,
+    COL_HISTORY,
     COL_ORIGIN,
     COL_EFFECTIVE,
 )
@@ -116,6 +127,7 @@ type RejectionReason = Literal[
     "destino_diferente",
     "linha_repetida",
     "conflito_na_vigencia",
+    "historico_muito_longo",
 ]
 
 
@@ -129,6 +141,9 @@ class ImportLine:
     destination: str
     decision: str
     target_code: str
+    #: Histórico padrão — só lido/usado no destino `conta_contabil` (86e3fxqqe);
+    #: texto CRU da célula, normalizado (`normalize_history`) na classificação.
+    history: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +200,9 @@ def build_export_workbook(destination: MappingDestination, rows: Sequence[NamedR
                 # S16: no `conta_contabil` o alvo é a conta do plano do CLIENTE.
                 row.target_code or (named.account.code if named.account else ""),
                 named.target_name or (named.account.name if named.account else ""),
+                # 86e3fxqqe: histórico já vem decifrado por `universe()`/`with_names`
+                # (`row.history`) — só existe em `conta_contabil`.
+                row.history or "",
                 row.situation if row.situation in {"herdada", "confirmada"} else "",
                 format_competence(row.effective_from) if row.effective_from else "",
             ]
@@ -312,6 +330,7 @@ def _read_lines(wb: Any) -> list[ImportLine]:
                 destination=get(values, COL_DESTINATION),
                 decision=get(values, COL_DECISION).lower(),
                 target_code=get(values, COL_TARGET),
+                history=get(values, COL_HISTORY),
             )
         )
     return lines
@@ -328,14 +347,25 @@ def plan_import(
     destination: MappingDestination,
     universe: set[tuple[str, str]],
     active_target_codes: set[str],
-    vigentes: dict[tuple[str, str], tuple[str, str | None, str, date]],
+    vigentes: dict[tuple[str, str], tuple[str, str | None, str, date, UUID | None, str | None]],
     effective_from: date,
+    resolved_accounts: dict[str, UUID] | None = None,
 ) -> ImportPlan:
     """Classifica cada linha. PURA: toda a informação chega por parâmetro.
 
-    `vigentes`: chave → (tipo de decisão, código do alvo, origem, início) da decisão
-    vigente em `effective_from`.
+    `vigentes`: chave → (tipo de decisão, código do alvo do catálogo, origem,
+    início, conta do plano do cliente, histórico decifrado) da decisão vigente em
+    `effective_from` — os dois últimos só têm valor em `conta_contabil`.
+
+    `resolved_accounts`: `codigo_alvo` → `accounting_account_id`, só em
+    `conta_contabil` (86e3fxqqe) — já validado ANTES de chamar esta função
+    (`ClientMappingPortabilityService.plan`, via `classify_target_codes`): toda
+    linha com decisão `alvo` aqui dentro tem o código garantido resolvível, então
+    esta função não recusa por conta inexistente/sintética/inativa — isso já
+    teria recusado a planilha INTEIRA antes de chegar aqui.
     """
+    accounting = destination.destination_type == ACCOUNTING_DESTINATION_TYPE
+    resolved_accounts = resolved_accounts or {}
     plan = ImportPlan(effective_from=effective_from)
     seen: set[tuple[str, str]] = set()
 
@@ -376,24 +406,44 @@ def plan_import(
         if key not in universe:
             reject(line, "categoria_inexistente")
             continue
-        if decision_type is DecisionType.ALVO and line.target_code not in active_target_codes:
+        if (
+            not accounting
+            and decision_type is DecisionType.ALVO
+            and line.target_code not in active_target_codes
+        ):
             reject(line, "alvo_inexistente")
+            continue
+        history = normalize_history(line.history) if accounting else None
+        if history is not None and len(history) > MAX_DECISION_HISTORY_CHARS:
+            reject(line, "historico_muito_longo")
             continue
 
         item = DecisionInput(
             category_code=line.category_code,
             decision_type=decision_type,
-            target_code=line.target_code or None,
+            target_code=None if accounting else (line.target_code or None),
             source_type=line.source_type,
+            accounting_account_id=(
+                resolved_accounts.get(line.target_code)
+                if accounting and decision_type is DecisionType.ALVO
+                else None
+            ),
+            history=history if decision_type is DecisionType.ALVO else None,
         )
         current = vigentes.get(key)
         if current is None:
             plan.created.append(item)
             continue
-        cur_type, cur_target, cur_origin, cur_start = current
-        same_effect = cur_type == decision_type.value and (
-            decision_type is DecisionType.NAO_MAPEAR or cur_target == item.target_code
-        )
+        cur_type, cur_target, cur_origin, cur_start, cur_account, cur_history = current
+        if accounting:
+            same_effect = cur_type == decision_type.value and (
+                decision_type is DecisionType.NAO_MAPEAR
+                or (cur_account == item.accounting_account_id and cur_history == item.history)
+            )
+        else:
+            same_effect = cur_type == decision_type.value and (
+                decision_type is DecisionType.NAO_MAPEAR or cur_target == item.target_code
+            )
         if same_effect and cur_origin == DecisionOrigin.CONFIRMADA.value:
             plan.ignored += 1
             continue
@@ -419,7 +469,7 @@ class ImportContext:
     destination: MappingDestination
     universe: set[tuple[str, str]]
     active_target_codes: set[str]
-    vigentes: dict[tuple[str, str], tuple[str, str | None, str, date]]
+    vigentes: dict[tuple[str, str], tuple[str, str | None, str, date, UUID | None, str | None]]
     effective_from: date
 
 
@@ -475,39 +525,69 @@ class ClientMappingPortabilityService:
     ) -> ImportPlan:
         """A PRÉVIA: valida o arquivo, lê em memória e classifica. Não grava nada."""
         destination = await self._decisions.resolve_destination(client, destination_type)
-        if destination.destination_type == ACCOUNTING_DESTINATION_TYPE:
-            # S16 (BACK 16.2, ADR-087-BE): a planilha não leva o histórico cifrado, e
-            # reimportá-la criaria vigência nova SEM histórico — apagando-o calado.
-            # Recusado ANTES de ler o arquivo; exportar segue funcionando.
-            raise MappingImportUnavailableError(
-                f"importação de planilha recusada no destino {destination.destination_type}"
-            )
+        accounting = destination.destination_type == ACCOUNTING_DESTINATION_TYPE
         validate_import_file(filename, content)
         # Parse é CPU síncrona (zip + XML): fora do event loop.
         lines = await run_in_threadpool(parse_import, content)
         start = default_effective_from(effective_from, today)
         rows = await self._listing.universe(client, destination, start)
-        # Código maior que a coluna não existe no catálogo: nem vai à consulta (e o
-        # plano o recusa como `alvo_inexistente`).
-        targets = await self._catalog.get_targets_by_codes(
-            destination.id,
-            {
-                line.target_code
+
+        active_target_codes: set[str] = set()
+        resolved_accounts: dict[str, UUID] = {}
+        if accounting:
+            # S16 follow-up (86e3fxqqe): o alvo é a conta do plano do CLIENTE, pelo
+            # código reduzido — resolvida e validada ANTES de classificar qualquer
+            # linha (conta inexistente/sintética/inativa recusa a planilha INTEIRA,
+            # molde S14; nunca um "pula essa linha e segue").
+            codes_by_line = [
+                (line.line, line.target_code)
                 for line in lines
-                if line.target_code and len(line.target_code) <= MAX_TARGET_CODE_CHARS
-            },
-        )
+                if line.decision == DecisionType.ALVO.value and line.target_code
+            ]
+            resolved_accounts, invalid = await self._decisions.accounting.classify_target_codes(
+                client, codes_by_line
+            )
+            if invalid:
+                raise MappingImportAccountsInvalidError(
+                    f"Cliente {client.id}: {len(invalid)} linha(s) com conta do plano "
+                    "contábil inválida.",
+                    details={
+                        "lines": invalid[:MAX_INVALID_ACCOUNT_LINES],
+                        "total": len(invalid),
+                    },
+                )
+        else:
+            # Código maior que a coluna não existe no catálogo: nem vai à consulta (e
+            # o plano o recusa como `alvo_inexistente`).
+            targets = await self._catalog.get_targets_by_codes(
+                destination.id,
+                {
+                    line.target_code
+                    for line in lines
+                    if line.target_code and len(line.target_code) <= MAX_TARGET_CODE_CHARS
+                },
+            )
+            active_target_codes = {code for code, target in targets.items() if target.active}
+
         vigentes = await self._decisions.vigentes(client, destination, start)
         return plan_import(
             lines,
             destination=destination,
             universe={(r.source_type, r.category_code) for r in rows},
-            active_target_codes={code for code, target in targets.items() if target.active},
+            active_target_codes=active_target_codes,
             vigentes={
-                key: (v.decision_type, v.target_code, v.origin, v.effective_from)
+                key: (
+                    v.decision_type,
+                    v.target_code,
+                    v.origin,
+                    v.effective_from,
+                    v.accounting_account_id,
+                    v.history,
+                )
                 for key, v in vigentes.items()
             },
             effective_from=start,
+            resolved_accounts=resolved_accounts,
         )
 
     async def apply(

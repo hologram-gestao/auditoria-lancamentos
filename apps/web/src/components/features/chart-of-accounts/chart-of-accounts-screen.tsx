@@ -342,9 +342,9 @@ export function ChartOfAccountsScreen({ clientId }: { clientId: string }) {
     <section aria-labelledby="chart-of-accounts-heading" className="flex flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
-          <h2 id="chart-of-accounts-heading" className="text-lg font-semibold">
+          <h1 id="chart-of-accounts-heading" className="text-xl font-semibold">
             Plano de Contas
-          </h2>
+          </h1>
           <p className="text-muted-foreground text-sm">
             A classificação que a origem deste cliente já tem. A conta de demonstrativo vinculada a
             cada categoria é o que o de-para aproveita pronto.

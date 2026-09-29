@@ -156,9 +156,9 @@ export function ReconciliationsList({
   return (
     <section aria-labelledby="reconciliations-heading" className="flex h-full flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 id="reconciliations-heading" className="text-lg font-semibold">
+        <h1 id="reconciliations-heading" className="text-xl font-semibold">
           Conciliações
-        </h2>
+        </h1>
         {canCreate && (
           <Button type="button" onClick={onCreateClick}>
             <Plus className="h-4 w-4" aria-hidden="true" />

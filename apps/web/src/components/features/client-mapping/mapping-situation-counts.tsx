@@ -16,6 +16,7 @@
  * `<dl>` com o botão DENTRO do `<dd>`: um `<p>` solto ao lado do `<dd>` reprova
  * no axe (`definition-list`).
  */
+import { CollapsibleSummary, SummaryInline } from '@/components/shared/collapsible-summary';
 import type { MappingListResponse, MappingSituation } from '@/lib/contracts';
 import { cn } from '@/lib/utils';
 
@@ -91,10 +92,23 @@ export function MappingSituationCountsBlock({
   /** Clique num valor: quem chama aplica (ou desfaz) o recorte na URL. */
   onSelect: (key: MappingCountKey) => void;
 }) {
+  const items = stats(counts);
   return (
-    <div className="space-y-2">
+    <CollapsibleSummary
+      storageKey="de-para"
+      collapsed={
+        <SummaryInline
+          items={items.map((stat) => ({
+            key: stat.key,
+            value: stat.value,
+            label: stat.label.toLowerCase(),
+          }))}
+        />
+      }
+      footnote="Contagens do destino inteiro, na competência corrente. Clique num valor para filtrar a lista."
+    >
       <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-        {stats(counts).map((stat) => {
+        {items.map((stat) => {
           const isActive = isMappingCountActive(active, stat.key);
           return (
             <div key={stat.key} className="bg-card rounded-lg border p-1.5">
@@ -125,11 +139,7 @@ export function MappingSituationCountsBlock({
           );
         })}
       </dl>
-      <p className="text-muted-foreground text-xs">
-        Contagens do destino inteiro, na competência corrente. Clique num valor para filtrar a
-        lista.
-      </p>
-    </div>
+    </CollapsibleSummary>
   );
 }
 

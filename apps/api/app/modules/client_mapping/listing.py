@@ -28,6 +28,7 @@ from app.modules.client_mapping.service import CHART_SOURCE_TYPE
 from app.modules.client_movements.competence import current_competence
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from datetime import date
 
     from app.db.models import Client
@@ -54,6 +55,62 @@ class FileCategoryNameResolver(Protocol):
     """O acessor de rótulo das categorias de ARQUIVO — na produção, `FileCategoryRegistry` (S14)."""
 
     async def resolve_names(self, client: Client) -> ResolvedFileCategoryNames: ...
+
+
+async def resolve_category_names(
+    names: CategoryNameResolver,
+    file_names: FileCategoryNameResolver | None,
+    client: Client,
+    entries: Sequence[tuple[str, str]],
+) -> dict[tuple[str, str], tuple[str | None, bool]]:
+    """Nome de categoria por `(tipo de origem, código)` — FONTE ÚNICA (86e3fxqqh).
+
+    Duas fontes, uma por tipo de origem: o plano de contas (Omie, cache de 6 h,
+    via `names.resolve_names`) e o registry de categorias do ARQUIVO (S14 —
+    rótulo cifrado com a DEK do cliente, decifrado na leitura). Fail-soft: origem
+    fora do ar ou sem decifrar devolve `(None, False)` — a tela mostra o código,
+    nunca um erro. `entries` pode repetir chaves (o chamador não precisa filtrar).
+
+    Usada pela lista do de-para (`ClientMappingListService.with_names`) E pela
+    prévia do destino `conta_contabil` (`ClientMappingApplyService._accounting_lines`)
+    — as duas telas mostram exatamente o mesmo nome pro mesmo código porque
+    chamam a MESMA função, não duas implementações do mesmo cálculo.
+    """
+    from app.modules.client_file_categories.registry import ResolvedFileCategoryNames
+
+    omie_names: dict[str, str] = {}
+    if any(source == CHART_SOURCE_TYPE for source, _ in entries):
+        try:
+            resolved = await names.resolve_names(client)
+            omie_names = dict(resolved.categories)
+        except Exception:
+            log.info("client_mapping_category_names_unavailable", client_id=str(client.id))
+
+    file_names_result = ResolvedFileCategoryNames()
+    if file_names is not None and any(
+        source == ProviderType.ARQUIVO.value for source, _ in entries
+    ):
+        try:
+            file_names_result = await file_names.resolve_names(client)
+        except Exception:
+            # Fail-soft como o plano de contas: a linha sai com o código. Só IDs.
+            log.warning("client_mapping_file_category_names_unavailable", client_id=str(client.id))
+
+    result: dict[tuple[str, str], tuple[str | None, bool]] = {}
+    for source_type, category_code in entries:
+        key = (source_type, category_code)
+        if source_type == CHART_SOURCE_TYPE:
+            name = omie_names.get(category_code)
+            result[key] = (name, name is not None)
+        elif source_type == ProviderType.ARQUIVO.value:
+            name = file_names_result.names.get(category_code)
+            # `[indecifrável]` sai como nome e `resolved=false`: a tela mostra o
+            # marcador, não o código, e sabe que não é um rótulo.
+            resolved_ok = name is not None and category_code not in file_names_result.failed
+            result[key] = (name, resolved_ok)
+        else:
+            result[key] = (None, False)
+    return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,13 +302,15 @@ class ClientMappingListService:
     ) -> list[NamedRow]:
         """Nomes da categoria (origem, fail-soft) e do alvo (catálogo da organização).
 
-        Duas fontes de nome, uma por tipo de origem: o plano de contas (Omie, cache
-        de 6 h) e o registry de categorias do ARQUIVO (S14 — rótulo cifrado com a
-        DEK do cliente, decifrado na leitura). A "marcação derivada do arquivo" é o
-        próprio `source_type` da linha; não existe coluna nova.
+        A resolução de nome de categoria é `resolve_category_names` (função do
+        módulo, não método daqui) — a MESMA que a prévia do `conta_contabil`
+        (`materialization.py::_accounting_lines`) usa pra mostrar nome embaixo do
+        código na tabela "Partida contábil" (86e3fxqqh): um lugar só decide como um
+        código de categoria vira nome, então as duas telas nunca podem divergir.
         """
-        category_names = await self._category_names(client, rows)
-        file_names = await self._file_category_names(client, rows)
+        names = await resolve_category_names(
+            self._names, self._file_names, client, [(r.source_type, r.category_code) for r in rows]
+        )
         targets = await self._catalog.get_targets_by_codes(
             destination.id, {r.target_code for r in rows if r.target_code}
         )
@@ -265,16 +324,7 @@ class ClientMappingListService:
         )
         named: list[NamedRow] = []
         for row in rows:
-            name: str | None = None
-            resolved = False
-            if row.source_type == CHART_SOURCE_TYPE:
-                name = category_names.get(row.category_code)
-                resolved = name is not None
-            elif row.source_type == ProviderType.ARQUIVO.value:
-                name = file_names.names.get(row.category_code)
-                # `[indecifrável]` sai como nome e `resolved=false`: a tela mostra o
-                # marcador, não o código, e sabe que não é um rótulo.
-                resolved = name is not None and row.category_code not in file_names.failed
+            name, resolved = names.get((row.source_type, row.category_code), (None, False))
             target = targets.get(row.target_code) if row.target_code else None
             named.append(
                 NamedRow(
@@ -288,22 +338,6 @@ class ClientMappingListService:
                 )
             )
         return named
-
-    async def _file_category_names(
-        self, client: Client, rows: list[MappingRow]
-    ) -> ResolvedFileCategoryNames:
-        from app.modules.client_file_categories.registry import ResolvedFileCategoryNames
-
-        if self._file_names is None or not any(
-            r.source_type == ProviderType.ARQUIVO.value for r in rows
-        ):
-            return ResolvedFileCategoryNames()
-        try:
-            return await self._file_names.resolve_names(client)
-        except Exception:
-            # Fail-soft como o plano de contas: a linha sai com o código. Só IDs.
-            log.warning("client_mapping_file_category_names_unavailable", client_id=str(client.id))
-            return ResolvedFileCategoryNames()
 
     async def _category_names(self, client: Client, rows: list[MappingRow]) -> dict[str, str]:
         if not any(r.source_type == ProviderType.OMIE.value for r in rows):

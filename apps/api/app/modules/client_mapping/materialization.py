@@ -66,6 +66,7 @@ from app.db.models import (
 )
 from app.modules.client_mapping.apply import AppliedItem, ApplyResult, apply_mapping
 from app.modules.client_mapping.completeness import PartidaCompleteness, partida_completeness
+from app.modules.client_mapping.listing import resolve_category_names
 from app.modules.client_mapping.partida import BindingKey, pending_source_accounts
 from app.modules.client_mapping.service import is_legacy_catalog_target
 from app.modules.client_mapping.vigencia import DecisionKey, earliest_start, resolve_vigentes
@@ -83,6 +84,7 @@ if TYPE_CHECKING:
     from app.db.models import Client, ClientMappingDecision, User
     from app.db.models.mapping_catalog import MappingDestination
     from app.modules.client_accounting_chart.service import AccountRef
+    from app.modules.client_mapping.listing import CategoryNameResolver, FileCategoryNameResolver
     from app.modules.client_mapping.repository import ClientMappingRepository
     from app.modules.client_mapping.service import ClientMappingDecisionService
     from app.modules.client_movements.repository import (
@@ -114,6 +116,11 @@ class AccountingCategoryLine:
     complete_amount: Decimal = Decimal("0.00")
     complete_count: int = 0
     pending_source_accounts: tuple[BindingKey, ...] = ()
+    #: 86e3fxqqh: nome da categoria, pela MESMA resolução da lista de decisões
+    #: (`resolve_category_names`) — `None` = fora do ar ou sem decifrar, a tabela
+    #: mostra só o código, como a lista já faz.
+    category_name: str | None = None
+    category_name_resolved: bool = False
 
     @property
     def history_missing(self) -> bool:
@@ -169,11 +176,19 @@ class ClientMappingApplyService:
         movements: ClientMovementsRepository,
         decisions: ClientMappingDecisionService,
         usage_events: UsageEventService | None = None,
+        # 86e3fxqqh: nome de categoria na prévia do `conta_contabil`, pela MESMA
+        # resolução da lista (`resolve_category_names`). Opcionais: sem eles, a
+        # prévia sai sem nome — nunca 500 — porque nenhum teste/uso hoje precisa
+        # deles fora do destino `conta_contabil` (o único que os consome).
+        names: CategoryNameResolver | None = None,
+        file_names: FileCategoryNameResolver | None = None,
     ) -> None:
         self._db = db
         self._repo = repository
         self._movements = movements
         self._decisions = decisions
+        self._names = names
+        self._file_names = file_names
         # O emissor que já existe (12.2) — o default é emitir.
         self._usage_events = usage_events or UsageEventService(UsageEventRepository(db))
 
@@ -284,10 +299,19 @@ class ClientMappingApplyService:
                 complete[key] = (done + abs(item.amount), done_count + 1)
         decided = [vigentes[key] for key in totals]
         histories = (await self._decisions.accounting.decrypt_histories(client, decided)).texts
+        # 86e3fxqqh: nome da categoria embaixo do código, pela MESMA resolução da
+        # lista de decisões (`resolve_category_names`) — `None` sem os coletores
+        # (uso fora do `conta_contabil`, hoje só em testes que não os passam).
+        names = (
+            await resolve_category_names(self._names, self._file_names, client, sorted(totals))
+            if self._names is not None
+            else {}
+        )
         lines: list[AccountingCategoryLine] = []
         for key in sorted(totals):
             decision = vigentes[key]
             account_id = decision.accounting_account_id
+            name, name_resolved = names.get(key, (None, False))
             lines.append(
                 AccountingCategoryLine(
                     source_type=key[0],
@@ -297,6 +321,8 @@ class ClientMappingApplyService:
                     decision_id=decision.id,
                     account=accounts.get(account_id) if account_id is not None else None,
                     history=histories.get(decision.id),
+                    category_name=name,
+                    category_name_resolved=name_resolved,
                     legacy_catalog_target=is_legacy_catalog_target(decision, accounting=True),
                     complete_amount=complete.get(key, (Decimal("0.00"), 0))[0],
                     complete_count=complete.get(key, (Decimal("0.00"), 0))[1],

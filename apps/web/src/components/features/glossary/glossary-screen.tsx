@@ -104,9 +104,9 @@ export function GlossaryScreen({ clientId }: { clientId: string }) {
     <section aria-labelledby="glossary-heading" className="flex h-full flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
-          <h2 id="glossary-heading" className="text-lg font-semibold">
+          <h1 id="glossary-heading" className="text-xl font-semibold">
             Glossário
-          </h2>
+          </h1>
           <p className="text-muted-foreground text-sm">
             {canManage
               ? 'O vocabulário contábil deste cliente. A análise de classificação usa estas entradas como referência.'
