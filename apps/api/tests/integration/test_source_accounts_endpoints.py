@@ -273,12 +273,17 @@ class TestAssociacao:
             files={"file": ("plano.csv", sem_700, "text/csv")},
         )
         assert reimport.status_code == 200, reimport.text
+        # A reimportação inativa por UPDATE em lote do Core, que não toca o identity map;
+        # este teste divide UMA sessão com a API, e a `ClientAccountingAccount` da 700 já
+        # carregada pelo `world` seguiria com `active=True` para o validador. Selecionar a
+        # ENTIDADE com `populate_existing` repovoa a instância (em produção cada request
+        # tem sessão própria e lê do banco). Selecionar só a coluna não repovoa nada.
         stmt = (
-            select(ClientAccountingAccount.active)
+            select(ClientAccountingAccount)
             .where(ClientAccountingAccount.id == world.accounts["700"].id)
             .execution_options(populate_existing=True)
         )
-        assert (await db_session.execute(stmt)).scalar_one() is False
+        assert (await db_session.execute(stmt)).scalar_one().active is False
 
         inativa = await _bind(client_with_db, world, world.accounts["700"])
         assert inativa.status_code == 422, inativa.text
