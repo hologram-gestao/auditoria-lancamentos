@@ -910,6 +910,44 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         "app/modules/client_file_ingestion/routes.py",
         f"{_VIA_CLIENT_PATH}; registros lidos por client_id, autor por author_for_viewer",
     ),
+    # ------------------- plano de contas CONTÁBIL do cliente (S16, BACK 16.1 — R1)
+    # As contas do sistema contábil de destino DO cliente: o nome (cifrado) carrega
+    # inquilino, pessoa física e fornecedor.
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/accounting-chart",
+        ScopeKind.COLLECTION,
+        "app/modules/client_accounting_chart/routes.py",
+        f"{_VIA_CLIENT_PATH}; toda query do plano filtra client_id no próprio SELECT; "
+        "nome decifrado com a DEK do cliente do path",
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients/{client_id}/accounting-chart/import",
+        ScopeKind.COLLECTION,
+        "app/modules/client_accounting_chart/routes.py",
+        f"{_VIA_CLIENT_PATH} + OpenClientDep + ManageClientAccountingChartDep (guard "
+        "auditado); contas gravadas e inativadas com o client_id do path validado, sob "
+        "trava por cliente; cliente encerrado = 409",
+    ),
+    # ------------- conta contábil do BANCO de cada conta de origem (S16, BACK 16.3 — R3)
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/source-accounts",
+        ScopeKind.COLLECTION,
+        "app/modules/client_source_accounts/routes.py",
+        f"{_VIA_CLIENT_PATH}; associações, base de movimentos e conexões lidas por "
+        "client_id; o JOIN com o plano carrega client_id dos dois lados",
+    ),
+    SensitiveEndpoint(
+        "PUT",
+        "/api/v1/clients/{client_id}/source-accounts",
+        ScopeKind.COLLECTION,
+        "app/modules/client_source_accounts/routes.py",
+        f"{_VIA_CLIENT_PATH} + OpenClientDep + ManageClientAccountingChartDep (guard "
+        "auditado); a conta do banco passa pelo validador único (SELECT com client_id do "
+        "path: outro cliente = 404); upsert ON CONFLICT com o client_id validado",
+    ),
 )
 
 #: Endpoints do denominador que AINDA não têm o mecanismo no código. Ficam na

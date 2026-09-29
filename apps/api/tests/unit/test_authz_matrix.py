@@ -150,7 +150,19 @@ _TABLE: dict[Permission, tuple[bool, bool, bool, bool, bool]] = {
     # `manage_client_mapping` nem `sync_client_movements` (ADR-067/069-BE).
     Permission.UPLOAD_CLIENT_FILE: (True, True, True, True, True),
     Permission.MANAGE_INPUT_MAPPING: (True, True, True, True, False),
+    # S16 (BACK 16.1), tabela do R5 do PRD: importar o plano contábil (e associar
+    # a conta do banco, 16.3) é configuração do ESCRITÓRIO no sistema contábil —
+    # staff só. O ❌ do `client_manager` é decisão do planejador pendente de
+    # validação humana (ADR-086-BE). 26 → 27 permissões.
+    Permission.MANAGE_CLIENT_ACCOUNTING_CHART: (True, True, True, False, False),
 }
+
+
+def test_a_matriz_tem_27_permissoes() -> None:
+    """A contagem da §4.9 do primer (26 → 27 na BACK 16.1). Mudou? O primer muda junto."""
+    assert len(Permission) == 27
+
+
 MATRIX_CELLS = [
     (permission, role, expected)
     for permission, row in _TABLE.items()

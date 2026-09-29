@@ -13,6 +13,7 @@ import {
   ArrowRightLeft,
   BookOpen,
   Building2,
+  Calculator,
   FileSpreadsheet,
   Landmark,
   LayoutDashboard,
@@ -164,6 +165,17 @@ export function fileOriginPath(clientId: string, competence?: string | null): st
 }
 
 /**
+ * Rota da tela "Plano contábil" (S16) — o plano do sistema contábil de DESTINO,
+ * distinto do "Plano de Contas" da origem (S10). `section=conta-do-banco` leva
+ * direto à seção da conta do banco: é para onde o de-para manda quando a
+ * materialização em `conta_contabil` fica sem um lado da partida.
+ */
+export function accountingChartPath(clientId: string, section?: 'conta-do-banco'): string {
+  const base = `/clientes/${clientId}/plano-contabil`;
+  return section ? `${base}#${section}` : base;
+}
+
+/**
  * A prévia do de-para de UMA competência (S12: `view=previa` + `competence`,
  * os dois parâmetros que `client-mapping-screen.tsx` lê da URL). É para onde o
  * envio do arquivo (S14) manda depois de processar — a competência sozinha não
@@ -186,6 +198,7 @@ export function clientNavItems(
   const usersHref = `${base}/usuarios`;
   const glossaryHref = `${base}/glossario`;
   const chartOfAccountsHref = `${base}/plano-de-contas`;
+  const accountingChartHref = accountingChartPath(clientId);
   const titlesHref = `${base}/carteira`;
   const mappingHref = `${base}/de-para`;
   const fileOriginHref = fileOriginPath(clientId);
@@ -201,6 +214,7 @@ export function clientNavItems(
   const isUsers = pathname.startsWith(usersHref);
   const isGlossary = pathname.startsWith(glossaryHref);
   const isChartOfAccounts = pathname.startsWith(chartOfAccountsHref);
+  const isAccountingChart = pathname.startsWith(accountingChartHref);
   const isTitles = pathname.startsWith(titlesHref);
   const isMapping = pathname.startsWith(mappingHref);
   const isFileOrigin = pathname.startsWith(fileOriginHref);
@@ -210,6 +224,7 @@ export function clientNavItems(
     !isUsers &&
     !isGlossary &&
     !isChartOfAccounts &&
+    !isAccountingChart &&
     !isTitles &&
     !isMapping &&
     !isFileOrigin;
@@ -256,6 +271,17 @@ export function clientNavItems(
       active: isChartOfAccounts,
     });
   }
+  // S16 (R1): "Plano contábil" — o plano do sistema contábil de DESTINO, ao lado
+  // do "Plano de Contas" da origem (nomes distintos de propósito). NÃO é gated,
+  // pela regra do De-para: a LEITURA é `AccessibleClientDep` no backend, sem
+  // permissão própria. Quem pede permissão (`manage_client_accounting_chart`) é
+  // importar e associar a conta do banco, dentro da tela.
+  items.push({
+    href: accountingChartHref,
+    label: 'Plano contábil',
+    icon: <Calculator className="h-4 w-4" aria-hidden="true" />,
+    active: isAccountingChart,
+  });
   // S11 (R5): "Carteira" pela MESMA regra do Plano de Contas. A célula de LER é
   // ✅ nos cinco papéis hoje, então na prática todo mundo com acesso ao cliente
   // vê o item — o que o gating garante é que, no dia em que a célula fechar

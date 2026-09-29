@@ -170,6 +170,20 @@ CLASSIFICATION: tuple[Entry, ...] = (
         "`arquivo` não tem credencial. NÃO converter",
     ),
     Entry(
+        "app/modules/client_accounting_chart/service.py",
+        Family.CIFRA_DADO,
+        "cifra o NOME das contas do plano contábil do cliente (S16, BACK 16.1) — dado do "
+        "tenant, no molde do glossário. Plano entra por PLANILHA, nunca pela origem: "
+        "nenhuma chamada ao provedor. NÃO converter",
+    ),
+    Entry(
+        "app/modules/client_mapping/accounting.py",
+        Family.CIFRA_DADO,
+        "cifra/decifra o HISTÓRICO PADRÃO da decisão do de-para no destino `conta_contabil` "
+        "e decifra o nome da conta do plano (S16, BACK 16.2) — dado do tenant. `load_` "
+        "sempre (nunca provisiona). Nenhuma chamada ao provedor. NÃO converter",
+    ),
+    Entry(
         "app/modules/client_file_ingestion/service.py",
         Family.ORIGEM,
         "ingestão do ARQUIVO do cliente (S14, BACK 14.3): exige conexão `arquivo` ATIVA pela "

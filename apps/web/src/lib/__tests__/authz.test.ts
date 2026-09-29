@@ -6,8 +6,8 @@
  *
  * Cada célula da matriz vira um caso — inclusive **toda célula `❌`**, que é o
  * que a task cobra. O espelho no backend é
- * `apps/api/app/core/authz.py::PERMISSION_MATRIX` (26 permissões × 5 papéis
- * desde a Sprint 14); se um dos dois mudar sozinho, é aqui que a divergência
+ * `apps/api/app/core/authz.py::PERMISSION_MATRIX` (27 permissões × 5 papéis
+ * desde a Sprint 16); se um dos dois mudar sozinho, é aqui que a divergência
  * aparece.
  */
 import { describe, expect, it } from 'vitest';
@@ -330,6 +330,17 @@ const MATRIX: ReadonlyArray<{
     admin: true,
     manager: true,
     clientManager: true,
+    clientOperator: false,
+  },
+  // S16 / BACK 16.1: o plano contábil (importar e associar a conta do banco) é
+  // configuração do ESCRITÓRIO — staff, as células de `manage_client_connections`.
+  // O `client_manager` fora é decisão do planejador (ADR-086-BE).
+  {
+    permission: 'manage_client_accounting_chart',
+    platform: true,
+    admin: true,
+    manager: true,
+    clientManager: false,
     clientOperator: false,
   },
 ];

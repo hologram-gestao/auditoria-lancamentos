@@ -21,6 +21,16 @@ linha com `effective_from` posterior; a anterior vale até o mês anterior. Nunc
 reaplicar cria versão N+1. Os ITENS guardam SNAPSHOT de códigos e valores, sem FK
 para `client_movements` nem para a decisão: o encerramento purga a base e as
 decisões (configuração), e a materialização — "o que aconteceu" — FICA intacta.
+
+**Destino `conta_contabil` (Sprint 16, BACK 16.2).** Nele, e só nele, o alvo é uma
+conta do PLANO CONTÁBIL DO CLIENTE (`accounting_account_id` → `client_accounting_accounts`),
+não o catálogo da organização, e a decisão carrega o HISTÓRICO PADRÃO cifrado com a
+DEK do cliente. O banco garante "alvo = catálogo XOR conta do plano" quando a decisão
+é de alvo; "conta do plano só em `conta_contabil`, catálogo só nos outros" é regra do
+SERVIÇO, porque o tipo do destino mora em outra tabela (ADR-087-BE). O item da
+materialização guarda o CÓDIGO REDUZIDO em coluna própria (catálogo e plano são
+namespaces que colidem) e o id da vigência que decidiu a linha — é por ele que o
+histórico daquela materialização é lido, nunca pela vigência ATUAL.
 """
 
 from __future__ import annotations
@@ -40,6 +50,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Text,
     UniqueConstraint,
     func,
     text,
@@ -51,6 +62,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 from app.db.models._mixins import UUIDPrimaryKeyMixin
+from app.db.models.client import IV_HEX_LENGTH
+from app.db.models.client_accounting_account import MAX_ACCOUNTING_ACCOUNT_CODE_CHARS
 from app.db.models.client_movement import (
     MAX_MOVEMENT_CATEGORY_CODE_CHARS,
     MAX_MOVEMENT_REF_CHARS,
@@ -58,6 +71,13 @@ from app.db.models.client_movement import (
     MAX_MOVEMENT_SOURCE_TYPE_CHARS,
 )
 from app.db.models.mapping_catalog import MAX_DESTINATION_TYPE_CHARS, MAX_TARGET_CODE_CHARS
+
+#: Teto do HISTÓRICO PADRÃO da decisão em `conta_contabil` (S16, BACK 16.2), em
+#: caracteres, depois de aparar as pontas. Constante PRÓPRIA, com o MESMO valor do
+#: teto de texto livre da S14 (`client_file_ingestion.reader.MAX_DESCRIPTION_CHARS`
+#: = 500, a descrição do lançamento): o histórico é o texto que substitui a descrição
+#: na linha do arquivo contábil. Acima disso é 400 genérico (forma), nunca truncado.
+MAX_DECISION_HISTORY_CHARS = 500
 
 
 class DecisionType(StrEnum):
@@ -112,15 +132,24 @@ def materialized_situation_check() -> str:
     return _in_check("situation", MaterializedSituation)
 
 
-#: `alvo` exige o alvo; `nao_mapear` o proíbe. Garantido no BANCO, não só no serviço.
+#: `alvo` exige UM alvo — do catálogo (`target_id`) OU do plano contábil do cliente
+#: (`accounting_account_id`, S16), nunca os dois; `nao_mapear` proíbe os dois.
+#: Garantido no BANCO, não só no serviço. Qual dos dois vale em qual destino é regra
+#: do SERVIÇO (o tipo do destino mora em outra tabela — ADR-087-BE).
 DECISION_TARGET_COHERENT_CHECK = (
-    "(decision_type = 'alvo' AND target_id IS NOT NULL) "
-    "OR (decision_type = 'nao_mapear' AND target_id IS NULL)"
+    "(decision_type = 'alvo' AND (target_id IS NOT NULL) <> (accounting_account_id IS NOT NULL)) "
+    "OR (decision_type = 'nao_mapear' AND target_id IS NULL AND accounting_account_id IS NULL)"
 )
-#: O item com situação `alvo` carrega o código do alvo; os outros três, não.
+#: O histórico (cifrado) vive e morre com o IV, e só acompanha conta do plano (S16).
+DECISION_HISTORY_COHERENT_CHECK = (
+    "((history_encrypted IS NULL) = (history_iv IS NULL)) "
+    "AND (history_encrypted IS NULL OR accounting_account_id IS NOT NULL)"
+)
+#: O item com situação `alvo` carrega UM código: o do catálogo OU o reduzido da conta
+#: do plano (S16); os outros três, nenhum.
 ITEM_TARGET_COHERENT_CHECK = (
-    "(situation = 'alvo' AND target_code IS NOT NULL) "
-    "OR (situation <> 'alvo' AND target_code IS NULL)"
+    "(situation = 'alvo' AND (target_code IS NOT NULL) <> (accounting_account_code IS NOT NULL)) "
+    "OR (situation <> 'alvo' AND target_code IS NULL AND accounting_account_code IS NULL)"
 )
 #: Competência/vigência sempre no dia 1 — mesmo CHECK de `client_movements`.
 DECISION_EFFECTIVE_FROM_CHECK = "EXTRACT(DAY FROM effective_from) = 1"
@@ -147,6 +176,7 @@ FK_MATERIALIZATION_ITEM_MATERIALIZATION = (
 DECISION_TYPE_CK_LABEL = "decision_type"
 DECISION_ORIGIN_CK_LABEL = "origin"
 DECISION_TARGET_CK_LABEL = "decision_target_coherent"
+DECISION_HISTORY_CK_LABEL = "history_coherent"
 DECISION_EFFECTIVE_FROM_CK_LABEL = "effective_from_first_day"
 MATERIALIZATION_COMPETENCE_CK_LABEL = "competence_first_day"
 MATERIALIZATION_VERSION_CK_LABEL = "version_positive"
@@ -154,6 +184,11 @@ ITEM_SITUATION_CK_LABEL = "situation"
 ITEM_TARGET_CK_LABEL = "item_target_coherent"
 
 DECISION_TARGET_CONSTRAINT = f"ck_client_mapping_decisions_{DECISION_TARGET_CK_LABEL}"
+DECISION_HISTORY_CONSTRAINT = f"ck_client_mapping_decisions_{DECISION_HISTORY_CK_LABEL}"
+ITEM_TARGET_CONSTRAINT = f"ck_client_mapping_materialization_items_{ITEM_TARGET_CK_LABEL}"
+#: FK da decisão para a conta do plano contábil — nome EXPLÍCITO (a convenção daria 81).
+FK_DECISION_ACCOUNTING_ACCOUNT = "fk_client_mapping_decisions_accounting_account_id"
+IX_DECISION_ACCOUNTING_ACCOUNT = "ix_client_mapping_decisions_accounting_account_id"
 
 
 class ClientMappingDecision(UUIDPrimaryKeyMixin, Base):
@@ -171,7 +206,9 @@ class ClientMappingDecision(UUIDPrimaryKeyMixin, Base):
         Index(IX_CLIENT_MAPPING_DECISION_CLIENT_DESTINATION, "client_id", "destination_id"),
         CheckConstraint(text(decision_type_check()), name=DECISION_TYPE_CK_LABEL),
         CheckConstraint(text(decision_origin_check()), name=DECISION_ORIGIN_CK_LABEL),
+        Index(IX_DECISION_ACCOUNTING_ACCOUNT, "accounting_account_id"),
         CheckConstraint(text(DECISION_TARGET_COHERENT_CHECK), name=DECISION_TARGET_CK_LABEL),
+        CheckConstraint(text(DECISION_HISTORY_COHERENT_CHECK), name=DECISION_HISTORY_CK_LABEL),
         CheckConstraint(text(DECISION_EFFECTIVE_FROM_CHECK), name=DECISION_EFFECTIVE_FROM_CK_LABEL),
     )
 
@@ -201,6 +238,24 @@ class ClientMappingDecision(UUIDPrimaryKeyMixin, Base):
         ForeignKey("mapping_targets.id", ondelete="RESTRICT"),
         nullable=True,
         default=None,
+    )
+    #: S16 (BACK 16.2): no destino `conta_contabil`, o alvo é uma conta do plano
+    #: contábil DO CLIENTE (XOR `target_id`, CHECK). Sem `ondelete` (NO ACTION): conta
+    #: com decisão não se apaga sozinha — e as contas nunca são apagadas, só
+    #: inativadas —, mas o CASCADE do cliente leva as duas no mesmo comando.
+    accounting_account_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("client_accounting_accounts.id", name=FK_DECISION_ACCOUNTING_ACCOUNT),
+        nullable=True,
+        default=None,
+    )
+    #: S16 (BACK 16.2): o HISTÓRICO PADRÃO da linha no arquivo contábil, SEMPRE
+    #: cifrado com a DEK do cliente (`AAD_DECISION_HISTORY`, AAD pela pk da decisão).
+    #: Faz parte da vigência: mudar o texto é vigência NOVA. Nulo = sem histórico (a
+    #: prévia sinaliza a linha como incompleta).
+    history_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    history_iv: Mapped[str | None] = mapped_column(
+        String(IV_HEX_LENGTH), nullable=True, default=None
     )
     #: Valor de `DecisionOrigin`, travado por CHECK.
     origin: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -344,3 +399,30 @@ class ClientMappingMaterializationItem(UUIDPrimaryKeyMixin, Base):
     decision_effective_from: Mapped[date | None] = mapped_column(
         SQLDate, nullable=True, default=None
     )
+    #: S16 (BACK 16.2): o CÓDIGO REDUZIDO da conta do plano contábil do cliente
+    #: (snapshot) quando o destino é `conta_contabil`. Coluna PRÓPRIA — não reusa
+    #: `target_code`: catálogo e plano são namespaces que colidem. O NOME da conta
+    #: nunca é guardado aqui: é resolvido na leitura.
+    accounting_account_code: Mapped[str | None] = mapped_column(
+        String(MAX_ACCOUNTING_ACCOUNT_CODE_CHARS), nullable=True, default=None
+    )
+    #: S16 (BACK 16.2): o id da vigência que decidiu a linha, SEM FK (como todo o
+    #: snapshot: o encerramento purga as decisões e o item fica). O histórico da
+    #: linha é lido POR ELE — a vigência é imutável —, nunca pela vigência atual.
+    #: ⚠️ Em destino com herança, a herdada pode ser resolvida no lugar (ADR-075-BE):
+    #: lá o id identifica a linha, e o efeito congelado é o dos códigos acima.
+    decision_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), nullable=True, default=None
+    )
+    #: S16 (BACK 16.3): o CÓDIGO da conta do BANCO no plano do cliente, resolvido pela
+    #: associação da conta de origem NA HORA de materializar (snapshot): trocar a
+    #: associação depois não muda esta linha. Com o sinal do valor e a conta decidida,
+    #: é o que dá débito e crédito (`client_mapping.partida.derive_partida`).
+    bank_account_code: Mapped[str | None] = mapped_column(
+        String(MAX_ACCOUNTING_ACCOUNT_CODE_CHARS), nullable=True, default=None
+    )
+    #: S16 (BACK 16.3): a vigência que decidiu a linha tinha histórico? Snapshot do
+    #: predicado de "partida completa" — o texto é lido pela vigência (`decision_id`),
+    #: mas a COMPLETUDE de uma materialização não pode mudar se a decisão for purgada
+    #: no encerramento. Nulo fora do destino `conta_contabil`.
+    history_present: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)

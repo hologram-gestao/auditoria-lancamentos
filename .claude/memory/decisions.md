@@ -6397,3 +6397,376 @@ antes do merge para develop: suíte completa contra Postgres (com
 **Follow-up (não bloqueia, não aberto por esta sessão):** a gaveta de conexões ainda oferece
 "Arquivo" num cliente que já tem Omie (e vice-versa). O servidor responde 409
 `ORIGEM_JA_CONECTADA` amigável, mas a tela deveria esconder o tipo conflitante.
+
+---
+
+## ADR-086-BE — Plano de contas CONTÁBIL do cliente: modelo de planilha próprio, limites, e o `client_manager` fora da importação (Sprint 16 / BACK 16.1)
+
+**Data:** 2026-09-28 · **Status:** ativo (decisões (a) e (d) PENDENTES de validação humana) ·
+**Escopo:** `db/models/client_accounting_account.py`, migration `e3a7c1f95b40`,
+`modules/client_accounting_chart/` (sheet, repository, service, schemas, routes),
+`core/crypto_service.AAD_ACCOUNTING_ACCOUNT_NAME` (16º par), `Permission.MANAGE_CLIENT_ACCOUNTING_CHART`,
+`ErrorCode.CONTA_CONTABIL_NAO_LANCAVEL`, lista canônica 104 → 106, matriz 26 → 27.
+
+**Entidade própria, por CLIENTE.** `client_accounting_accounts` (módulo `client_accounting_chart`) não colide
+com `client_chart_of_accounts` (plano da ORIGEM, S10) nem com `client_categories` (catálogo da org). Código
+reduzido em CLARO (vai no arquivo da S13), classificação opcional em claro, NOME cifrado com a DEK do cliente
+(AAD por linha, CHECK do par, molde de `client_file_categories`), `account_type` com CHECK do `StrEnum`,
+`active`, autoria `created_by`/`updated_by` RESTRICT. `UNIQUE(client_id, code)`; sem índice próprio em
+`client_id` — a UNIQUE começa por ele e serve toda busca por cliente (precedente ADR-081-BE).
+
+**(a) Modelo de planilha da plataforma — decisão do planejador, pendente de validação humana.** CSV UTF-8
+(`utf-8-sig`, aceita o BOM do Excel) com `;`, ou XLSX (1ª aba); tipo pelo CONTEÚDO (`detect_format` da S14).
+Cabeçalho `codigo_reduzido;nome;tipo` + opcional `classificacao`, casado por NOME aparado e sem distinção de
+caixa, em qualquer ordem. **Coluna desconhecida ou repetida RECUSA** (`CABECALHO_DIVERGENTE` com
+`missingColumns`/`unexpectedColumns`/`repeatedColumns`): ignorá-la faria `nome da conta` sumir em silêncio e a
+recusa vir como `nome_vazio` em toda linha. `tipo` casa sem acento/caixa (`Analítica` vale); `A`/`S` do export
+nativo NÃO (S-1: o export é convertido para o modelo). Documentado na rota (OpenAPI) e em
+`apps/api/docs/plano-contabil-modelo-de-planilha.md`.
+
+**(b) Limites (constantes no modelo e no leitor).** Código ≤ 20 (sistemas contábeis usam código numérico curto;
+amostra 3 dígitos, Domínio até 7) e com forma `[0-9A-Za-z]([0-9A-Za-z.-]*[0-9A-Za-z])?` — nada de `;`, aspas ou
+espaço, porque o código vai CRU no arquivo da S13 (`codigo_invalido`). Nome ≤ 200 = `MAX_CATEGORY_LABEL_CHARS`
+da S14 (nome de conta é rótulo). Classificação ≤ 40. Linhas/colunas/zip: os limites do leitor da S14
+(`MAX_FILE_ROWS` 10.000, percorridas 20.000, 64 colunas, zip 60 MiB/100×), bytes por `max_upload_bytes`.
+Longo é RECUSADO, nunca truncado. Vocabulário fechado: `codigo_vazio`, `codigo_longo`, `codigo_invalido`,
+`codigo_repetido` (marca a 2ª ocorrência em diante), `nome_vazio`, `nome_longo`, `tipo_invalido`,
+`classificacao_longa`. Planilha sem conta = `ARQUIVO_INVALIDO` com `details.reason=sem_contas` (reusa o
+vocabulário da S14 em vez de um código novo; na reimportação ela inativaria o plano inteiro).
+
+**(c) Tudo ou nada e reimportação.** Parse+validação inteira em `run_in_threadpool` ANTES de qualquer escrita;
+só então `pg_advisory_xact_lock(hashtext('client_accounting_accounts'), hashtext(client))` (dois inteiros, não
+cruza com o lock de um inteiro da ingestão nem com o `(cliente, destino)` do de-para), INSERT/UPDATE em lote de
+**Core** (`client_id` no WHERE, `updated_at = clock_timestamp()`), e `deactivate_absent` = UPDATE das ATIVAS
+fora da planilha com `RETURNING` (conta só quem passou a inativa nesta importação). Nunca DELETE. Conta que
+volta reativa. O serviço COMMITA (e não o fim do request): a 16.4 emite `plano_contabil_importado` depois do
+commit, fail-soft.
+
+**DEK.** Cliente sem origem não tem DEK (§4.8) e o escritório pode importar o plano antes de conectar. O
+`Client` da rota foi carregado ANTES da trava; provisionar sobre ele deixaria duas importações simultâneas
+gerarem DEKs diferentes (ADR-084-BE). Se `dek_wrapped` é nulo, a linha é RELIDA `FOR UPDATE` com
+`populate_existing` depois da trava e só então `provision_client_cipher`. ⚠️ Protege importação × importação;
+um provisionamento concorrente por OUTRO caminho (glossário, conexão) segue sendo o landmine conhecido.
+
+**Validador ÚNICO** `AccountingChartService.require_postable_account(client_id, account_id)` (consumido por
+16.2 e 16.3): `SELECT` com `client_id` no WHERE → miss = 404 `AccountingAccountNotFoundError` (outro cliente e
+inexistente são a mesma resposta); `not_postable_reason` (função pura, sintética antes de inativa) → 422
+`CONTA_CONTABIL_NAO_LANCAVEL` com `details={accountId, reason}`. A lista expõe `postable` pela MESMA função.
+
+**(d) `manage_client_accounting_chart` = `_STAFF` — decisão do planejador, pendente de validação humana.**
+Plataforma ✅, admin ✅, manager ✅ (carteira), `client_manager` ❌, `client_operator` ❌: o plano contábil é
+configuração do ESCRITÓRIO (como `manage_client_connections`). Permissão própria (precedente S10/S11). Guard
+AUDITADO (`require_client_permission`): `client_manager` lê 200 e importa 403 com 1 `denied`. Leitura sem
+permissão (`AccessibleClientDep`). Se o produto quiser que o cliente mantenha o próprio plano, é trocar a
+célula (e o `lib/authz.ts` do front).
+
+**Encerramento/exclusão.** `close_client_purge` apaga o plano EXPLICITAMENTE (o nome morre com a DEK, o código
+em claro não), DEPOIS das decisões do de-para (a 16.2 aponta decisão → conta). `delete_client_cascade` apaga o
+plano depois das decisões e ANTES dos usuários do tenant (autoria RESTRICT). Testes de fonte da ordem.
+
+**Leitura.** Nome decifrado com `load_client_cipher` (não provisiona); falha → `[indecifrável]` +
+`nameResolved=false` + warning `accounting_account_decrypt_failed` só com IDs. Busca por PREFIXO de código
+(curingas de `LIKE` literais), filtros `type`/`status` (`Literal`/enum → 400 genérico), ordem `(code, id)`.
+Log da importação: `accounting_chart_imported` só com client_id e contagens (teste com `capture_logs`).
+
+⚠️ Integração (`tests/integration/test_accounting_chart_endpoints.py`, `test_migrations.py::
+TestPlanoContabilRoundTrip`, bateria dos 3 atacantes nas 2 rotas) ESCRITA, COLETADA e NÃO EXECUTADA — socket
+do Docker negado pelo sandbox (`PermissionError: Operation not permitted`). Migration renderizada em `--sql` nos
+dois sentidos.
+
+---
+
+## ADR-087-BE — De-para em `conta_contabil` aponta o plano do CLIENTE, histórico cifrado na vigência; três decisões do planejador (Sprint 16 / BACK 16.2)
+
+**Data:** 2026-09-28 · **Status:** ativo (decisões (a), (b) e (c) PENDENTES de validação humana) ·
+**Escopo:** `db/models/client_mapping.py`, `mapping_catalog.ACCOUNTING_DESTINATION_TYPE`, migration
+`f5b8d2e61c37`, `modules/client_mapping/` (accounting.py novo, service, apply, materialization, listing,
+schemas, routes, portability), `core/crypto_service.AAD_DECISION_HISTORY` (17º par), 3 `ErrorCode` novos.
+
+**Modelo.** A decisão ganha `accounting_account_id` (FK para `client_accounting_accounts`, sem `ondelete` =
+NO ACTION: conta nunca é apagada, só inativada; o CASCADE do cliente leva as duas no mesmo comando; índice
+próprio) e `history_encrypted` + `history_iv`. CHECK `decision_target_coherent` trocado: `alvo` exige
+`(target_id IS NOT NULL) <> (accounting_account_id IS NOT NULL)`; `nao_mapear` proíbe os dois. CHECK novo
+`history_coherent`: par ciphertext/IV vive e morre junto E histórico só com conta do plano. O item da
+materialização ganha `accounting_account_code` (coluna PRÓPRIA — catálogo e plano são namespaces que
+colidem, a lição da S10; `target_code` não é reusado) e `decision_id` (SEM FK, como todo o snapshot); CHECK
+`item_target_coherent` trocado para catálogo XOR plano na situação `alvo`. Nomes de CHECK passados como
+LABEL no `op.drop_constraint`/`create_check_constraint` (a convenção prefixa; precedente `3e8f1a6c9d24`).
+Downgrade REAL com guarda `DO $$ … RAISE` se houver decisão com conta ou item com código dela — nunca apaga.
+O drift da S12 (`test_client_mapping_schema.py`) passou a provar a cadeia em dois elos (S12 = o que a S16
+restaura; modelo = o que a S16 cria) e o teste de "item sem `decision_id`" virou "item sem FK para decisão"
+(a lei era a FK; o nome da coluna era o proxy — a 16.2 pede a coluna, sem FK).
+
+**(a) Coerência no SERVIÇO, não no banco — decisão do planejador.** "Conta do plano só em `conta_contabil`,
+catálogo só nos outros" depende do TIPO do destino, que mora em `mapping_destinations`; um CHECK não enxerga
+outra tabela e um trigger seria mecanismo novo. O banco garante XOR; o serviço (`_check_target_namespace`,
+ANTES da consulta ao catálogo) responde 422 `ALVO_EXIGE_PLANO_CONTABIL` (catálogo em `conta_contabil`) e 422
+`CONTA_CONTABIL_FORA_DO_DESTINO` (conta do plano em outro destino). A conta passa pelo validador ÚNICO da 16.1
+em lote (`require_postable_accounts`, mesma regra, uma query): outro cliente 404, sintética/inativa 422.
+
+**Histórico.** Texto livre, pontas aparadas por UMA função (`normalize_history`, usada na borda e na
+comparação), vazio = sem histórico, limite `MAX_DECISION_HISTORY_CHARS = 500` — constante PRÓPRIA com o valor
+do teto de texto livre da S14 (`reader.MAX_DESCRIPTION_CHARS`, a descrição do lançamento, que é o que o
+histórico substitui na linha do arquivo); teste trava a igualdade. Acima: 400 `VALIDATION_ERROR` (forma,
+validador Pydantic; o handler não ecoa o valor). Borda: `alvo` exige `targetCode` XOR `accountingAccountId`;
+`history` só com `accountingAccountId` (400). Cifra com a DEK do cliente, AAD pela pk da DECISÃO (gerada no
+serviço antes do INSERT), `load_client_cipher` (nunca `provision_`: decisão com conta exige plano importado, e
+a importação já provisionou a DEK — ADR-084-BE). **Vigência:** `_same_effect` compara conta + TEXTO decifrado
+do histórico: mesmo pedido = no-op; trocar a conta OU só o histórico = vigência NOVA; não existe UPDATE de
+decisão além do `resolve_inherited` da S12 (teste de fonte) — e herdada só existe no `demonstrativo_contabil`.
+
+**Snapshot e leitura.** `apply_mapping` recebe `accounting_code_of` e grava no item o código reduzido e o
+`decision_id` da vigente; os dois entram no `fingerprint` (conta ou histórico mudou entre prévia e confirmação
+→ 409 `PREVIA_DESATUALIZADA`; para os outros destinos o hash muda de forma mas não de conteúdo — prévias
+abertas na virada do deploy recebem 409 e são refeitas). `decisions_used` ganhou `accountingAccountCode`. O
+histórico de uma materialização é lido POR ELA (`ClientMappingApplyService.materialized_lines` →
+`AccountingDecisionSupport.item_histories`: SELECT das decisões pelos ids COM `client_id` no WHERE,
+decifra), nunca pela vigência atual; decisão purgada (encerramento) → `None`, decifragem falha →
+`[indecifrável]`, nunca 500. O nome da conta NUNCA vai ao snapshot: `accounts_by_id` decifra na leitura.
+
+**(b) Legado conta como INCOMPLETO e não bloqueia — decisão do planejador.** Decisão de alvo em
+`conta_contabil` apontando o catálogo (anterior à 16.2) segue legível, sem conversão (namespaces diferentes),
+marcada por UMA função (`is_legacy_catalog_target`) como `requiresRedo` na lista, no histórico e na prévia
+(`accountingCategories[].requiresRedo`, sem conta). Não bloqueia a materialização nesta sprint; uma vigência
+nova com conta do plano a substitui normalmente. Nenhuma escrita altera a legada.
+
+**Prévia.** `MappingPreviewResponse.accountingCategories` (só em `conta_contabil`; `null` nos outros): por
+categoria com alvo, Σ|valor|, contagem, conta (id, código, nome decifrado), histórico decifrado,
+`historyMissing` (sinalizado, não bloqueia) e `requiresRedo`. A completude/partida (16.3/16.4) estende isto.
+
+**(c) Portabilidade recusada em `conta_contabil` — decisão do planejador.** Importar (prévia e aplicação) nesse
+destino é 422 `IMPORTACAO_INDISPONIVEL_NO_DESTINO` ANTES de ler o arquivo: a planilha não leva o histórico
+cifrado, e reimportá-la criaria vigência nova sem histórico, apagando-o em silêncio. Exportar segue (a coluna
+`codigo_alvo`/`nome_alvo` sai com a conta do plano nesse destino). Os outros destinos não mudam (teste).
+
+**Log/evento.** Histórico nunca em log (`DecisionInput`, `MappingRow` e `AccountingCategoryLine` têm `repr`
+sem o texto; mensagens de `AppError` só com códigos/IDs), nem em `depara_aplicado` (inalterado), nem em erro.
+
+⚠️ Integração (`tests/integration/test_client_mapping_accounting_endpoints.py`, `test_migrations.py::
+TestDeParaContaContabilRoundTrip`) ESCRITA, COLETADA e NÃO EXECUTADA — socket do Docker negado pelo sandbox.
+Migration renderizada em `--sql` nos dois sentidos.
+
+---
+
+## ADR-088-BE — Conta do BANCO por conta de origem, partida pelo sinal e bloqueio da materialização; duas decisões do planejador (Sprint 16 / BACK 16.3)
+
+**Data:** 2026-09-28 · **Status:** ativo (decisões (a) e (b) PENDENTES de validação humana) ·
+**Escopo:** `db/models/client_source_account_binding.py`, migration `a8c4e7d25f19`,
+`modules/client_source_accounts/` (repository, service, schemas, routes), `modules/client_mapping/partida.py`
+(novo, PURO), `apply.py`, `materialization.py`, `accounting.py`, `schemas.py`, `ErrorCode.CONTA_DO_BANCO_PENDENTE`,
+lista canônica 106 → 108.
+
+**Tabela `client_source_account_bindings`:** `(client_id, source_type, source_account_id) → accounting_account_id`
+(FK para o plano, NO ACTION; autoria RESTRICT). `source_account_id` NULO = o SLOT DA CONTA PADRÃO do tipo de
+origem. Duas garantias no banco: UNIQUE das contas explícitas e índice único PARCIAL
+`uq_client_source_account_bindings_default (client_id, source_type) WHERE source_account_id IS NULL`
+(predicado copiado na migration; teste compara as fontes — precedente `uq_client_assignments_primary`). Padrão
+POR TIPO de origem (não por cliente) porque a chave inteira é por tipo e um cliente tem um tipo de origem de
+lançamentos (ADR-083-BE). Configuração MUTÁVEL: UPSERT com `ON CONFLICT` (constraint para conta explícita;
+`index_elements` + `index_where` para o slot), `updated_at = clock_timestamp()`, `xmax = 0` → `created`.
+Validação pela MESMA regra da 16.1 (`require_postable_account`: outro cliente 404; sintética/inativa 422).
+Associação apontando conta que DEPOIS foi inativada continua resolvendo (como as decisões existentes); a
+leitura mostra `postable=false`. Purga no encerramento e na exclusão definitiva ANTES do plano e dos usuários.
+
+**Rotas:** `GET`/`PUT /api/v1/clients/{id}/source-accounts` — leitura `AccessibleClientDep`; escrita
+`OpenClientDep` + `ManageClientAccountingChartDep` (guard auditado). A leitura lista as contas de origem
+distintas da base (inclusive conta nula), as associadas e o slot padrão dos tipos que podem ter linha sem conta
+(`arquivo` por conexão, ou quem já tem linha sem conta/associação padrão); cada uma com a conta do banco (código
++ nome decifrado na leitura) ou `pending`.
+
+**(a) A conta PADRÃO cobre só linha SEM conta de origem — decisão do planejador.** `partida.resolve_bank_code`:
+explícita por conta → senão, SE a linha não tem conta de origem, a padrão do tipo → senão PENDENTE. Conta Omie
+esquecida nunca cai na padrão em silêncio (partida com banco errado é pior que 409). Provado no unitário.
+
+**(b) Só linha com ALVO bloqueia — decisão do planejador.** `nao_mapear`, sem decisão e sem categoria não vão
+para o arquivo e não bloqueiam. Materialização em `conta_contabil` com linha de alvo sem banco → 409
+`CONTA_DO_BANCO_PENDENTE` com `details.pendingSourceAccounts=[{sourceType, sourceAccountId}]` (só
+identificadores), NADA gravado; ordem: token (409 `PREVIA_DESATUALIZADA`) → banco pendente → cobertura parcial.
+Os outros destinos não carregam associação (item com `bank_account_code`/`history_present` nulos; regressão).
+
+**Partida PURA (`partida.py`), o que a Sprint 13 reusa:** `derive_partida(valor ASSINADO, decidida, banco)`:
+valor > 0 → débito banco / crédito decidida; valor < 0 → débito decidida / crédito banco; zero → `None` (não é
+lançamento). Nunca pelo texto. Teste sobre as 32 linhas de `extrato_cliente.csv` + `decisoes_depara.csv` + `649`
+padrão: débito e crédito batem 32/32 com `lancamentos_esperados.csv` (Latin-1, CRLF), e o histórico fixo por
+decisão bate 32/32 com a coluna 5 (S-2 confirmada na amostra).
+
+**Predicado ÚNICO `is_partida_completa`** (alvo + conta do plano + banco + histórico presente; legado do catálogo
+é incompleto por não ter conta do plano) — `AppliedItem.partida_completa` delega a ele e a prévia só SOMA quem
+ele aprova; teste de fonte proíbe a mesma conjunção em outro módulo. A 16.4 o reusa sobre o SNAPSHOT: por isso o
+item ganhou `history_present` (a vigência tinha histórico?) além de `bank_account_code` — a completude de uma
+materialização não pode mudar quando o encerramento purga as decisões.
+
+**Snapshot e token:** `apply_mapping(bank_bindings=…, history_present_of=…)` grava no item o código do banco e a
+presença do histórico; `bank_account_code` entra no `fingerprint` (trocar a associação entre prévia e
+confirmação → 409). Trocar a associação DEPOIS não muda materialização (teste de integração).
+
+**Prévia:** `pendingSourceAccounts` no agregado (só `conta_contabil`, `null` nos outros) e, por categoria,
+`completeAmount`/`completeCount`/`pendingSourceAccounts`.
+
+⚠️ Integração (`tests/integration/test_source_accounts_endpoints.py`, `test_migrations.py::
+TestContaDoBancoRoundTrip`, bateria dos 3 atacantes nas 2 rotas novas) ESCRITA, COLETADA e NÃO EXECUTADA —
+socket do Docker negado pelo sandbox. Migration renderizada em `--sql` nos dois sentidos.
+
+---
+
+## ADR-089-BE — Outcome da Sprint 16: `plano_contabil_importado` depois do commit e a completude de partida por CONSULTA ao snapshot (Sprint 16 / BACK 16.4)
+
+**Data:** 2026-09-28 · **Status:** ativo · **Escopo:** `usage_events` (enum, `PlanoContabilImportadoProps`,
+`emit_plano_contabil_importado`), `client_accounting_chart/service.py`, `client_mapping/completeness.py` (novo,
+PURO), `materialization.py`, `schemas.py`, `routes.py`, guardrail `test_usage_event_schemas.py`.
+
+**Evento `plano_contabil_importado`:** as QUATRO chaves do PRD (`client_id`, `contas`, `contas_novas`,
+`contas_inativadas`), nenhum `str` (código e nome de conta não têm onde caber; o modelo entrou no guardrail
+anti-PII). De backend, sem `session_id`, fora de `DEDUPED_EVENT_NAMES` (allow-list: nenhuma migration) e fora de
+`CLIENT_EMITTED_EVENTS`. Emitido por `AccountingChartService.import_sheet` DEPOIS do `commit` (a 16.1 já
+commitava no serviço por isso): recusa 422 não emite (estrutural: o parse falha antes). Props em
+`_props_or_none`; além disso a chamada é guardada por `try/except` com warning só de id
+(`plano_contabil_importado_emit_failed`) — a importação já foi confirmada ao banco quando o emissor roda.
+
+**Completude de partida SEM evento:** `completeness.partida_completeness(lines)` = Σ|valor| das linhas com
+PARTIDA COMPLETA ÷ Σ|valor| das linhas com ALVO; o predicado é o ÚNICO da 16.3 (`is_partida_completa`) e o
+percentual é o `_pct` da S12 (`Decimal`, 0,01 HALF_EVEN, denominador zero → `None`, nunca "0%"). Teste de fonte
+trava o reuso. A MESMA função serve à prévia (itens calculados) e às materializações (itens do SNAPSHOT); como o
+snapshot guarda `history_present` e `bank_account_code` (16.3), o número de uma materialização nunca muda, nem
+depois de o encerramento purgar as decisões (teste de integração).
+
+**Onde aparece** (`partidaCompleteness = {completeAmount, targetAmount, pct}`, `null` fora do `conta_contabil`):
+prévia; resposta do `POST …/materializations` (a da versão gravada); listagem `GET …/materializations`
+(`completeness_by_materialization`: UMA query dos itens do lote, `client_id` no WHERE, agregação pela função
+pura). Não há rota nova de leitura de uma materialização: a leitura é a resposta da materialização + a lista.
+
+**Consulta da métrica em produção:** espelho SQL da função (no HANDOFF, BACK 16.4), por `materialization_id`,
+só `destination_type = 'conta_contabil'`. A API usa a função, nunca o SQL.
+
+**Prova do alvo (100% na amostra MSFG):** `test_usage_events_sprint16.py::TestPontaAPontaComAAmostra` importa o
+plano real anonimizado, grava os 32 movimentos de agosto (sem conta de origem), as 23 decisões com histórico e o
+banco `649` padrão, e afirma `pct == 100.00`, Σ|valor| = 53.570,99 e, linha a linha, data, débito, crédito, valor
+absoluto e histórico iguais a `lancamentos_esperados.csv`.
+
+⚠️ Integração (`tests/integration/test_usage_events_sprint16.py`) ESCRITA, COLETADA e NÃO EXECUTADA — socket do
+Docker negado pelo sandbox. O mesmo 32/32 foi provado sem banco em `tests/unit/test_client_mapping_partida.py`.
+
+---
+
+## ADR-050-FE — "Plano contábil" é tela PRÓPRIA; ler é de todos, importar e associar pedem a permissão nova, e o seletor de conta é UM componente (Sprint 16 / FRONT 16.5)
+
+**Data:** 2026-09-28 · **Status:** ativo · **Escopo:** `apps/web` — plano contábil do cliente e conta do banco
+
+- **Rota `/clientes/{id}/plano-contabil`, item "Plano contábil" no menu do cliente SEM gate**
+  (regra do De-para/Glossário): a leitura do backend é `AccessibleClientDep`, não há permissão
+  de ler. Nome distinto de "Plano de Contas" (S10, origem). `accountingChartPath(clientId,
+  'conta-do-banco')` em `nav-items.tsx` é o link que o de-para (16.6) usa para mandar à seção.
+- **`manage_client_accounting_chart`** entrou em `lib/authz.ts` (27 × 5) com as células do
+  backend: plataforma, admin, gerente ✅; `client_manager` e `client_operator` ❌ (decisão do
+  planejador, ADR-086-BE, espelhada como está). Esconde Importar/Reimportar e Associar/Trocar.
+- **"Tem plano?" é uma sonda** (`page=1&pageSize=1` sem filtro) e não a lista filtrada: filtro
+  sem resultado não é "sem plano". Sem plano, a barra de filtros e a paginação somem e o
+  estado vazio documenta o MODELO (colunas + exemplo, transcritos de
+  `apps/api/docs/plano-contabil-modelo-de-planilha.md`) com o único botão Importar da tela.
+- **Reimportação confirma DENTRO da gaveta**, num 2º passo do rodapé ("Confirmar
+  reimportação"/"Voltar"), e não num `AlertDialog` empilhado (dois modais do Radix = fundo
+  `aria-hidden` e o de cima fora do teclado).
+- **Recusa 422 da importação tem leitor PRÓPRIO** (`lib/accounting-chart-errors.ts`), não mais
+  um `case` em `file-origin-errors.ts`: os `code` são os mesmos da S14, mas o `details` e a
+  instrução são outros (faltam/sobram/repetem contra o MODELO; 8 motivos de linha próprios).
+  Só código desconhecido cai em toast (ADR-047-FE).
+- **`AccountingAccountCombobox`** (`features/accounting-chart/`) é o ÚNICO seletor de conta do
+  plano: pede `type=analitica&status=ativa&pageSize=100` e busca por PREFIXO de código no
+  servidor (nome cifrado não é buscável). O `ui/combobox` ganhou props OPCIONAIS
+  (`onSearchChange`, `selectedLabel`, `listHint`, `id`, `aria-describedby`, `aria-invalid`) —
+  os chamadores antigos não mudam. O 422 `CONTA_CONTABIL_NAO_LANCAVEL` vira mensagem do CAMPO
+  (`readNotPostableMessage`, ligada por `aria-describedby`), nunca toast.
+- **Conta de origem Omie aparece pelo NOME** do cache L1 (`clientDetail.accounts`,
+  `omie_conta_id` → `name`), senão pelo identificador; o slot padrão só aparece quando o
+  SERVIDOR o devolve (a regra "tipo que pode ter linha sem conta" é do backend,
+  `_TYPES_WITH_DEFAULT_SLOT`). Tipo comparado só em `source-account-label.ts` (ADR-042-FE).
+
+---
+
+## ADR-051-FE — Contrato da S16: o FastAPI renomeou `BankAccountResponse` e o alias absorveu (Sprint 16 / FRONT 16.5)
+
+**Data:** 2026-09-28 · **Status:** ativo — **follow-up de backend sugerido** · **Escopo:** `lib/contracts`
+
+`schema.ts` regenerado SEM API de pé (receita do ADR-045-FE): `app.openapi()` do worktree do
+backend (`c80c8d5`) com o venv 3.12 do agent de backend
+(`~/.cache/adl-s16-venv312`) e as chaves fake do CI → `openapi-typescript 7.13.0` → +610
+linhas. O backend passou a ter DOIS schemas chamados `BankAccountResponse` (a conta Omie de
+`clients` e a conta contábil do banco de `client_source_accounts`), e o FastAPI desambigua
+qualificando os dois pelo módulo (`app__modules__clients__schemas__BankAccountResponse`). O
+alias `BankAccountResponse` de `lib/contracts/index.ts` passou a apontar para o nome
+qualificado — nenhum consumidor mudou. **Sugestão ao backend:** renomear o novo para
+`SourceBankAccountResponse` (nome único → `schema.ts` volta a ter `BankAccountResponse` limpo).
+O fixture `item()` de `client-mapping-screen.test.tsx` ganhou `requiresRedo: false` (campo
+novo e obrigatório de `MappingListItem`).
+
+---
+
+## ADR-052-FE — De-para no `conta_contabil`: gaveta PRÓPRIA, histórico com teto documentado e o 409 da conta do banco como estado (Sprint 16 / FRONT 16.6)
+
+**Data:** 2026-09-28 · **Status:** ativo · **Escopo:** `components/features/client-mapping/`
+
+- **Um corte só:** `isAccountingDestination()` em `accounting-destination.tsx` é o ÚNICO lugar
+  que compara o tipo (`'conta_contabil'`), como o `INHERITING_DESTINATION_TYPE`. Tudo o que é
+  S16 na tela passa por ele; nos outros destinos a lista, a gaveta e a prévia são as da S12
+  (testes de regressão em `client-mapping-accounting.test.tsx`).
+- **Gaveta própria** (`AccountingDecisionSheet`), não um ramo em `MappingDecisionSheet`: a
+  lista escolhe qual montar. Cada `if` de destino dentro da gaveta da S12 seria um lugar a mais
+  para ela deixar de ser idêntica. O alvo é o `AccountingAccountCombobox` (ADR-050-FE) e o
+  payload leva `accountingAccountId` + `history` — nunca `targetCode`.
+- **Teto do histórico = 500, DOCUMENTADO no contrato** (descrição de `history` em
+  `DecisionWriteRequest`; `MAX_DECISION_HISTORY_CHARS` do backend). O OpenAPI não traz
+  `maxLength` para o campo, então a constante `MAPPING_HISTORY_MAX_CHARS` cita a doc. Zod mede
+  o texto APARADO (como o servidor); o 400 do servidor vira erro do campo histórico; o 422
+  `CONTA_CONTABIL_NAO_LANCAVEL` e o 404 viram erro do campo conta.
+- **Legado** (`requiresRedo`): só-leitura na lista (código do catálogo + selo "Refazer no plano
+  do cliente"), ação "Refazer" que abre a gaveta com a decisão do catálogo no topo e a conta
+  em branco; gravar cria a vigência nova.
+- **Sem plano:** a lista mostra o aviso com link para "Plano contábil" e a gaveta troca o
+  seletor pelo mesmo estado, com "Gravar" travado para `alvo`. Nenhum botão de importar no
+  de-para (importar é da outra tela e pede outra permissão).
+- **Prévia:** seção "Partida contábil" (`accounting-preview-section.tsx`) com a completude
+  agregada (`pct` nulo = "—" e dito, nunca 0%), as contas de origem pendentes em destaque com
+  link `accountingChartPath(id, 'conta-do-banco')`, e por categoria conta, histórico truncado
+  (dica acessível `role="img"` + `aria-label` + `tabIndex`, sem `title`) e o que a deixa
+  incompleta. Cada versão materializada mostra "Partida completa X%" quando o servidor manda.
+- **409 `CONTA_DO_BANCO_PENDENTE` é ESTADO:** o diálogo fecha, a prévia mostra
+  `PendingSourceAccountsNotice refused` (`role="alert"`) com as contas do `details` (nomes Omie
+  pelo cache de contas) e o caminho para associar; a prévia é relida. `PREVIA_DESATUALIZADA`
+  segue o fluxo da S12.
+- **Portabilidade:** "Importar" some no `conta_contabil` (o servidor recusa com 422
+  `IMPORTACAO_INDISPONIVEL_NO_DESTINO`); "Exportar" continua.
+- **e2e:** o destino `conta_contabil` só entra no catálogo mockado quando o cenário liga
+  `mappingAccountingDestination` — os cenários antigos contam e escolhem destinos.
+
+## ADR-053-FE — Aviso que orienta ação ramifica por PERMISSÃO e por ENCERRAMENTO, em motivos separados (Sprint 16 / retrabalho FRONT 16.5 e 16.6)
+
+Reprovação do QA: os avisos de pendência mandavam o leitor fazer o que a matriz nega
+("Importe o plano…" para `client_manager`/`client_operator`) ou davam o motivo errado
+("peça ao escritório" para o admin de cliente ENCERRADO, fundindo "sem permissão" e
+"encerrado" num `canEdit` só).
+
+- **Dois fatos, nunca um booleano fundido:** quem mostra orientação recebe `canManage`
+  (`manage_client_accounting_chart`) e `isClosed` separados. O booleano "pode agir"
+  (`canManage && !isClosed`) só decide se o BOTÃO aparece; o TEXTO precisa do motivo.
+- **Precedência do texto (Conta do banco, FRONT 16.5):** encerrado → "Cliente encerrado: a
+  associação não pode mais ser alterada." (vale com ou sem plano: encerrado também não
+  importa, como o `NoPlanState` já dizia); sem plano → com permissão "Importe o plano
+  contábil para poder associar.", sem permissão "O plano contábil do cliente ainda não foi
+  importado pelo escritório."; com plano, aberto, sem permissão → "Peça a quem administra o
+  plano contábil no escritório para associar."
+- **Regra geral:** texto com VERBO DE AÇÃO ("Importe", "Associe") só para quem tem a
+  permissão da ação; os demais leem um texto informativo. Teste por perfil nos dois ramos.
+- **Chave React sobre dado CRU do backend leva a posição** (`${index}:${column}`): o
+  `foundColumns` da recusa `CABECALHO_DIVERGENTE` repete nomes justamente no caso de coluna
+  repetida.
+- **No de-para (FRONT 16.6):** `ClientMappingScreen` calcula `canManageChart`
+  (`manage_client_accounting_chart`) ao lado do `canManage` (`manage_client_mapping`) e o
+  repassa, com `isClosed`, à lista, à prévia, à seção "Partida contábil" e à gaveta. O
+  `client_manager` decide e MATERIALIZA (tem `manage_client_mapping`), então alcança o 409
+  `CONTA_DO_BANCO_PENDENTE`, mas não associa: `PendingSourceAccountsNotice` mostra a lista a
+  todos, e o verbo "Associe" + o botão "Associar conta do banco" só a quem pode associar
+  (permissão e cliente aberto); sem permissão, "Peça a quem administra o plano contábil do
+  cliente no escritório para associar a conta do banco."; encerrado, o texto de encerrado.
+  `AccountingPlanNotice` (lista) e o estado "sem plano" da `AccountingDecisionSheet` (esta não
+  estava na reprovação, mas tinha o mesmo "Importe o plano" para o `client_manager`) trocam o
+  verbo por texto informativo e o link por "Ver Plano contábil".

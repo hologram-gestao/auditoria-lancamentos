@@ -1,0 +1,3 @@
+# O CSV esperado é comparado byte a byte (Latin-1 + CRLF, como o sistema contábil
+# recebe). Sem isto o `* text=auto eol=lf` da raiz converteria o CRLF para LF.
+cliente_exemplo_2026_08/lancamentos_esperados.csv -text

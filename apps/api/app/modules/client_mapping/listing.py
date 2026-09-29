@@ -20,6 +20,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Protocol
+from uuid import UUID
 
 from app.core.logging import get_logger
 from app.db.models import DecisionOrigin, DecisionType, ProviderType
@@ -31,6 +32,7 @@ if TYPE_CHECKING:
 
     from app.db.models import Client
     from app.db.models.mapping_catalog import MappingDestination
+    from app.modules.client_accounting_chart.service import AccountRef
     from app.modules.client_chart_of_accounts.schemas import ResolvedNames
     from app.modules.client_file_categories.registry import ResolvedFileCategoryNames
     from app.modules.client_mapping.repository import ClientMappingRepository
@@ -66,6 +68,18 @@ class MappingRow:
     effective_from: date | None
     divergent: bool
     origin_dre_code: str | None
+    #: S16 (destino `conta_contabil`): conta do plano do cliente, histórico decifrado
+    #: e a marca de decisão legada do catálogo.
+    accounting_account_id: UUID | None = None
+    history: str | None = None
+    requires_redo: bool = False
+
+    def __repr__(self) -> str:
+        # O histórico é texto do cliente: nunca num repr que acabe em log.
+        return (
+            f"<MappingRow {self.source_type}:{self.category_code} {self.situation} "
+            f"target={self.target_code!r} account={self.accounting_account_id}>"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +90,8 @@ class NamedRow:
     category_name: str | None
     category_name_resolved: bool
     target_name: str | None
+    #: S16: código e nome (decifrado) da conta do plano do cliente.
+    account: AccountRef | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +177,9 @@ class ClientMappingListService:
                     effective_from=view.effective_from if view else None,
                     divergent=view.divergent if view else False,
                     origin_dre_code=view.origin_dre_code if view else None,
+                    accounting_account_id=view.accounting_account_id if view else None,
+                    history=view.history if view else None,
+                    requires_redo=view.legacy_catalog_target if view else False,
                 )
             )
         return rows
@@ -236,6 +255,14 @@ class ClientMappingListService:
         targets = await self._catalog.get_targets_by_codes(
             destination.id, {r.target_code for r in rows if r.target_code}
         )
+        # S16: a conta do plano do cliente (código + nome decifrado NA LEITURA).
+        accounts = (
+            await self._decisions.accounting.accounts_by_id(
+                client, (r.accounting_account_id for r in rows)
+            )
+            if any(r.accounting_account_id for r in rows)
+            else {}
+        )
         named: list[NamedRow] = []
         for row in rows:
             name: str | None = None
@@ -255,6 +282,9 @@ class ClientMappingListService:
                     category_name=name,
                     category_name_resolved=resolved,
                     target_name=target.name if target else None,
+                    account=accounts.get(row.accounting_account_id)
+                    if row.accounting_account_id
+                    else None,
                 )
             )
         return named

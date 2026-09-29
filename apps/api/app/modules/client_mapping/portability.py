@@ -32,8 +32,12 @@ from typing import TYPE_CHECKING, Any, Literal
 from openpyxl import Workbook, load_workbook
 from starlette.concurrency import run_in_threadpool
 
-from app.core.exceptions import MappingImportRequiresConfirmationError, ValidationAppError
-from app.db.models import DecisionOrigin, DecisionType
+from app.core.exceptions import (
+    MappingImportRequiresConfirmationError,
+    MappingImportUnavailableError,
+    ValidationAppError,
+)
+from app.db.models import ACCOUNTING_DESTINATION_TYPE, DecisionOrigin, DecisionType
 from app.db.models.client_movement import MAX_MOVEMENT_CATEGORY_CODE_CHARS
 from app.db.models.mapping_catalog import MAX_TARGET_CODE_CHARS
 from app.modules.client_mapping.service import CHART_SOURCE_TYPE, DecisionInput
@@ -178,8 +182,9 @@ def build_export_workbook(destination: MappingDestination, rows: Sequence[NamedR
                 named.category_name or "",
                 destination.destination_type,
                 row.decision_type or "",
-                row.target_code or "",
-                named.target_name or "",
+                # S16: no `conta_contabil` o alvo é a conta do plano do CLIENTE.
+                row.target_code or (named.account.code if named.account else ""),
+                named.target_name or (named.account.name if named.account else ""),
                 row.situation if row.situation in {"herdada", "confirmada"} else "",
                 format_competence(row.effective_from) if row.effective_from else "",
             ]
@@ -469,10 +474,17 @@ class ClientMappingPortabilityService:
         today: date | None = None,
     ) -> ImportPlan:
         """A PRÉVIA: valida o arquivo, lê em memória e classifica. Não grava nada."""
+        destination = await self._decisions.resolve_destination(client, destination_type)
+        if destination.destination_type == ACCOUNTING_DESTINATION_TYPE:
+            # S16 (BACK 16.2, ADR-087-BE): a planilha não leva o histórico cifrado, e
+            # reimportá-la criaria vigência nova SEM histórico — apagando-o calado.
+            # Recusado ANTES de ler o arquivo; exportar segue funcionando.
+            raise MappingImportUnavailableError(
+                f"importação de planilha recusada no destino {destination.destination_type}"
+            )
         validate_import_file(filename, content)
         # Parse é CPU síncrona (zip + XML): fora do event loop.
         lines = await run_in_threadpool(parse_import, content)
-        destination = await self._decisions.resolve_destination(client, destination_type)
         start = default_effective_from(effective_from, today)
         rows = await self._listing.universe(client, destination, start)
         # Código maior que a coluna não existe no catálogo: nem vai à consulta (e o

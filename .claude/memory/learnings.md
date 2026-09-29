@@ -654,3 +654,35 @@ pronto no `HANDOFF.md`, item 4). O encode que EXISTE é o **ADR-042-QA** em
 `.claude/memory/decisions.md` (as duas regras de backend) e o
 `apps/api/tests/integration/test_s14_qa_file_origin_cycle.py` na branch do backend.
 **Status:** resolvido, com integração e a11y pendentes para a validação humana (Docker desligado)
+
+## 2026-09-28 — Sprint 16, rodada 1: duas regras JÁ escritas no primer voltaram a falhar [escopo: backend | client_source_accounts/schemas.py · frontend | client-mapping/accounting-destination.tsx, mapping-list-panel.tsx, accounting-decision-sheet.tsx, accounting-chart/bank-accounts-section.tsx, accounting-chart-refusal-notice.tsx]
+**Sintoma:** (1) BACK 16.3: `PUT /clients/{id}/source-accounts` aceitava `sourceType` de 31 a 60
+caracteres (`pattern=DESTINATION_TYPE_PATTERN`), a coluna é `String(30)` e o INSERT estourava em
+500. (2) FRONT 16.5/16.6: o aviso de conta do banco pendente (prévia e 409) oferecia "Associar
+conta do banco" a todo perfil; o aviso sem plano mandava "Importe o plano" a quem não pode
+importar; o staff num cliente encerrado lia "Peça a alguém do escritório"; e a lista de colunas
+da recusa `CABECALHO_DIVERGENTE` usava `key={column}` sobre um dado cru que repete nomes.
+**Causa-raiz blameless:** (1) o padrão foi reusado de outro campo (`destination_type`, 60) para
+uma coluna de outro tamanho; o unitário valida a forma e a integração nunca mandava o valor
+limite. (2) o gate foi posto nas ações da tela dona (Plano contábil) e conferido lá; o aviso é
+componente de OUTRA tela (de-para) que aponta para a ação, e o texto foi escrito para quem
+resolve. "Sem permissão" e "encerrado" viajavam fundidos num `canEdit` só, então o texto não
+tinha como dizer o motivo certo.
+**Correção:** rework #1 aprovado. Backend 579e0e4: `max_length=MAX_MOVEMENT_SOURCE_TYPE_CHARS`
+e `TestRequestCabeNaColuna` (amarra o schema ao `length` da coluna), mais integração de conta
+inativada 422, `sourceType` 31 → 400 e `client_operator` 403. Frontend e7ecaff: `canManage` e
+`isClosed` separados, verbo de ação e botão só com `manage_client_accounting_chart` e cliente
+aberto, texto informativo para os demais e texto de encerrado para o encerrado (inclusive na
+gaveta de decisão, que não estava na reprovação), chave `${index}:${column}`, e vitest por perfil
+nos dois contextos (prévia e 409) e no aviso sem plano.
+**Escopo:** backend (todo `pattern`/`max_length` copiado de outro campo: confira contra a coluna
+de destino); frontend (todo aviso ou CTA que aponta para ação de OUTRA tela, e toda chave React
+sobre lista vinda crua do backend).
+**Encodado em:** `PROJECT.md` → `CLAUDE.md` §7 Backend, "Falha esperada nunca é 500 … o padrão
+tem de recusar o que o construtor não aceita", e §7 Frontend, "mostrar ação que o servidor nega é
+defeito" (as duas JÁ existiam; o reforço específico, "limite do schema = constante da coluna" e
+"aviso de outra tela passa pelo mesmo gate, com motivo separado", está pronto no `HANDOFF.md`
+porque a edição do `PROJECT.md` foi negada nesta sessão); **ADR-053-FE** em
+`.claude/memory/decisions.md`; os testes `test_client_source_account_binding_schema.py::TestRequestCabeNaColuna`
+e `client-mapping-accounting.test.tsx` › "avisos por perfil" nas branches dos executores.
+**Status:** ativo

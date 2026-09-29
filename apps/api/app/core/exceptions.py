@@ -88,6 +88,21 @@ class ErrorCode(StrEnum):
     CABECALHO_DIVERGENTE = "CABECALHO_DIVERGENTE"
     LINHAS_INVALIDAS = "LINHAS_INVALIDAS"
     TOTAL_DIVERGENTE = "TOTAL_DIVERGENTE"
+    # Sprint 16 — plano de contas contábil do cliente (BACK 16.1). A importação reusa
+    # o vocabulário de recusa de arquivo da S14 (acima); este é o do VALIDADOR ÚNICO
+    # de conta: sintética ou inativa não recebe decisão nova (422, conteúdo do
+    # pedido, com `details.reason` fechado).
+    CONTA_CONTABIL_NAO_LANCAVEL = "CONTA_CONTABIL_NAO_LANCAVEL"
+    # Sprint 16 (BACK 16.2) — o de-para no destino `conta_contabil` aponta para o
+    # plano do CLIENTE, e só ele: catálogo da org nesse destino, conta do plano em
+    # outro destino e a importação da planilha nesse destino são recusas tipadas.
+    ALVO_EXIGE_PLANO_CONTABIL = "ALVO_EXIGE_PLANO_CONTABIL"
+    CONTA_CONTABIL_FORA_DO_DESTINO = "CONTA_CONTABIL_FORA_DO_DESTINO"
+    IMPORTACAO_INDISPONIVEL_NO_DESTINO = "IMPORTACAO_INDISPONIVEL_NO_DESTINO"
+    #: BACK 16.3: linha com alvo em `conta_contabil` vinda de conta de origem SEM conta
+    #: contábil do banco — a partida ficaria sem um dos lados. 409 (estado da
+    #: configuração, não conteúdo do pedido), `details` só com identificadores.
+    CONTA_DO_BANCO_PENDENTE = "CONTA_DO_BANCO_PENDENTE"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
@@ -837,6 +852,103 @@ class FileTotalMismatchError(AppError):
     status_code = 422
     default_user_message = (
         "O total informado não confere com a soma dos valores do arquivo. Nada foi processado."
+    )
+
+
+# ----------------------------------------------------------------------
+# Sprint 16 (BACK 16.1) — plano de contas contábil do cliente (o sistema
+# contábil de DESTINO, não o plano da origem da S10).
+# ----------------------------------------------------------------------
+
+
+class AccountingAccountNotFoundError(NotFoundError):
+    """404 — a conta não existe NO PLANO DESTE CLIENTE.
+
+    Conta de outro cliente e conta inexistente são a MESMA resposta: o `SELECT`
+    carrega `client_id` no próprio `WHERE`, então a linha alheia nem é carregada
+    (anti-enumeração, §3.15). O corpo não nomeia nada.
+    """
+
+    default_user_message = "Conta contábil não encontrada no plano deste cliente."
+
+
+class AccountingAccountNotPostableError(AppError):
+    """422 — a conta existe no plano do cliente, mas não recebe lançamento.
+
+    Sintética (só agrupa) ou inativa (sumiu da última planilha importada). As
+    decisões que já apontam para ela continuam valendo; só a decisão NOVA é
+    recusada. `details.reason` ∈ {`sintetica`, `inativa`} e `details.accountId`
+    (só IDs e vocabulário fechado — o nome é cifrado e nunca vai no erro).
+    """
+
+    code = ErrorCode.CONTA_CONTABIL_NAO_LANCAVEL
+    status_code = 422
+    default_user_message = (
+        "Esta conta não recebe lançamento: escolha uma conta analítica e ativa do plano "
+        "contábil do cliente."
+    )
+
+
+class CatalogTargetInAccountingDestinationError(AppError):
+    """422 — alvo do CATÁLOGO da organização numa decisão do destino `conta_contabil`.
+
+    Nesse destino o alvo é uma conta do plano contábil DO CLIENTE (`accountingAccountId`):
+    o `662` do catálogo e o `662` do plano do cliente são namespaces diferentes, e
+    nenhuma conversão é feita (Sprint 16, BACK 16.2).
+    """
+
+    code = ErrorCode.ALVO_EXIGE_PLANO_CONTABIL
+    status_code = 422
+    default_user_message = (
+        "No destino Conta contábil a decisão aponta para uma conta do plano contábil do "
+        "cliente, não para o catálogo da organização. Escolha a conta no plano do cliente."
+    )
+
+
+class AccountingAccountOutsideDestinationError(AppError):
+    """422 — conta do plano contábil do cliente numa decisão de OUTRO destino.
+
+    Os outros destinos seguem no catálogo da organização (`targetCode`); só o
+    `conta_contabil` aceita conta do plano (Sprint 16, BACK 16.2).
+    """
+
+    code = ErrorCode.CONTA_CONTABIL_FORA_DO_DESTINO
+    status_code = 422
+    default_user_message = (
+        "Conta do plano contábil do cliente só pode ser alvo no destino Conta contábil. "
+        "Neste destino, escolha um alvo do catálogo da organização."
+    )
+
+
+class MappingImportUnavailableError(AppError):
+    """422 — importar a planilha do de-para no destino `conta_contabil` (Sprint 16).
+
+    A planilha não leva o histórico cifrado; reimportá-la criaria vigência nova SEM
+    histórico e o apagaria em silêncio. Nesta sprint a importação nesse destino é
+    recusada e orienta usar a tela; exportar segue funcionando (ADR-087-BE).
+    """
+
+    code = ErrorCode.IMPORTACAO_INDISPONIVEL_NO_DESTINO
+    status_code = 422
+    default_user_message = (
+        "A importação por planilha não está disponível no destino Conta contábil: ela "
+        "apagaria o histórico padrão das decisões. Faça as alterações pela tela do de-para."
+    )
+
+
+class BankAccountPendingError(ConflictError):
+    """409 — materializar `conta_contabil` com linha de alvo sem conta do BANCO (S16, 16.3).
+
+    Partida sem um dos lados não entra: a materialização é recusada INTEIRA, nada é
+    gravado. `details.pendingSourceAccounts` = `[{sourceType, sourceAccountId}]` (só
+    identificadores; `sourceAccountId` nulo = o slot da conta PADRÃO), para a tela
+    levar a pessoa a associar a conta do banco de cada uma.
+    """
+
+    code = ErrorCode.CONTA_DO_BANCO_PENDENTE
+    default_user_message = (
+        "Há movimentos de contas de origem sem a conta contábil do banco associada. "
+        "Associe a conta do banco de cada uma e aplique de novo."
     )
 
 
