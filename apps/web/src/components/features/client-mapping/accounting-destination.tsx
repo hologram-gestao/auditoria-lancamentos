@@ -128,18 +128,34 @@ export function readBankAccountPending(error: unknown): PendingSourceAccount[] |
  * Duas entradas: a prévia (aviso antes de materializar) e o 409 da
  * materialização (recusa, `role="alert"`). Nomes pelo cache de contas do Omie
  * quando existem; senão o identificador. Nunca toast.
+ *
+ * A lista é de todos; o verbo "Associe" e o botão são só de quem pode associar
+ * (`manage_client_accounting_chart`, cliente aberto). O `client_manager` chega
+ * aqui pelo 409 (materializa com `manage_client_mapping`) e lê a quem pedir;
+ * o encerrado lê o motivo real (ADR-053-FE).
  */
 export function PendingSourceAccountsNotice({
   clientId,
   accounts,
+  canManageChart,
+  isClosed,
   refused = false,
 }: {
   clientId: string;
   accounts: readonly PendingSourceAccount[];
+  /** `manage_client_accounting_chart`. */
+  canManageChart: boolean;
+  isClosed: boolean;
   /** `true` = veio do 409 (nada foi gravado); `false` = aviso da prévia. */
   refused?: boolean;
 }) {
   const omieNames = useOmieAccountNames(clientId);
+  const canAssociate = canManageChart && !isClosed;
+  const guidance = canAssociate
+    ? 'Associe a conta do banco de cada uma em Plano contábil › Conta do banco.'
+    : isClosed
+      ? 'Cliente encerrado: a associação não pode mais ser alterada.'
+      : 'Peça a quem administra o plano contábil do cliente no escritório para associar a conta do banco.';
   return (
     <div
       role={refused ? 'alert' : 'status'}
@@ -163,8 +179,7 @@ export function PendingSourceAccountsNotice({
       </p>
       <p>
         Sem a conta do banco a partida fica sem um dos lados, e a materialização neste destino é
-        recusada enquanto houver linha com conta vinda delas. Associe a conta do banco de cada uma
-        em Plano contábil › Conta do banco.
+        recusada enquanto houver linha com conta vinda delas. {guidance}
       </p>
       {accounts.length > 0 && (
         <ul aria-label="Contas de origem sem conta do banco" className="space-y-1">
@@ -181,12 +196,14 @@ export function PendingSourceAccountsNotice({
           ))}
         </ul>
       )}
-      <Button asChild variant="outline" size="sm">
-        <Link href={accountingChartPath(clientId, 'conta-do-banco')}>
-          Associar conta do banco
-          <ArrowRight className="h-4 w-4" aria-hidden="true" />
-        </Link>
-      </Button>
+      {canAssociate && (
+        <Button asChild variant="outline" size="sm">
+          <Link href={accountingChartPath(clientId, 'conta-do-banco')}>
+            Associar conta do banco
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </Link>
+        </Button>
+      )}
     </div>
   );
 }

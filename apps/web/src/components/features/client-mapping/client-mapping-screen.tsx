@@ -154,6 +154,9 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
 
   const isClosed = client?.closed_at != null;
   const canManage = hasPermission(currentUser, 'manage_client_mapping');
+  // Importar o plano e associar a conta do banco (S16): é OUTRA permissão, e os
+  // avisos do destino `conta_contabil` só mandam agir quem a tem.
+  const canManageChart = hasPermission(currentUser, 'manage_client_accounting_chart');
   const canSync = hasPermission(currentUser, 'sync_client_movements');
   const canUpload = hasPermission(currentUser, 'upload_client_file');
   // S14: origem por ARQUIVO — a base vem do envio, não do sync (409
@@ -322,6 +325,7 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
                 hasFilters={hasFilters}
                 serverCompetence={serverCompetence}
                 canManage={canManage}
+                canManageChart={canManageChart}
                 isClosed={isClosed}
               />
             </TabsContent>
@@ -337,6 +341,7 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
                 canSync={canSync}
                 canUpload={canUpload}
                 canManage={canManage}
+                canManageChart={canManageChart}
                 isClosed={isClosed}
                 originStatus={client?.origin_status ?? 'ativa'}
                 fileOrigin={fileOrigin}

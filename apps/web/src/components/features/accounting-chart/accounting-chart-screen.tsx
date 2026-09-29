@@ -350,7 +350,12 @@ export function AccountingChartScreen({ clientId }: { clientId: string }) {
         />
       )}
 
-      <BankAccountsSection clientId={clientId} canEdit={canManage && !isClosed} hasPlan={hasPlan} />
+      <BankAccountsSection
+        clientId={clientId}
+        canManage={canManage}
+        isClosed={isClosed}
+        hasPlan={hasPlan}
+      />
 
       {showImport && (
         <AccountingChartImportSheet

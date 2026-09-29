@@ -46,9 +46,14 @@ const baseBadge =
 export function AccountingPreviewSection({
   clientId,
   preview,
+  canManageChart,
+  isClosed,
 }: {
   clientId: string;
   preview: MappingPreview;
+  /** `manage_client_accounting_chart` — gateia o "Associar" das pendentes. */
+  canManageChart: boolean;
+  isClosed: boolean;
 }) {
   const categories = preview.accountingCategories ?? [];
   const pending = preview.pendingSourceAccounts ?? [];
@@ -72,7 +77,14 @@ export function AccountingPreviewSection({
         <PartidaCompletenessBlock completeness={preview.partidaCompleteness} />
       )}
 
-      {pending.length > 0 && <PendingSourceAccountsNotice clientId={clientId} accounts={pending} />}
+      {pending.length > 0 && (
+        <PendingSourceAccountsNotice
+          clientId={clientId}
+          accounts={pending}
+          canManageChart={canManageChart}
+          isClosed={isClosed}
+        />
+      )}
 
       {categories.length === 0 ? (
         <p className="text-muted-foreground text-sm">

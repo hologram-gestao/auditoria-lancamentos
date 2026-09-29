@@ -99,6 +99,12 @@ interface AccountingDecisionSheetProps {
   item: MappingListItem | null;
   /** Competência corrente do SERVIDOR — o padrão do início da vigência. */
   serverCompetence: string;
+  /**
+   * `manage_client_accounting_chart`. A gaveta abre com `manage_client_mapping`
+   * (o `client_manager` a tem), mas importar o plano é de outra permissão: sem
+   * ela, o estado "sem plano" não manda importar (ADR-053-FE).
+   */
+  canManageChart: boolean;
 }
 
 function defaultsFor(
@@ -124,6 +130,7 @@ export function AccountingDecisionSheet({
   destination,
   item,
   serverCompetence,
+  canManageChart,
 }: AccountingDecisionSheetProps) {
   // "Tem plano?": sonda de 1 linha, sem filtro (o mesmo critério da tela do plano).
   const planProbe = useAccountingChartList(clientId, { page: 1, pageSize: 1 }, { enabled: open });
@@ -323,13 +330,16 @@ export function AccountingDecisionSheet({
                   >
                     <p className="font-medium">Este cliente ainda não tem plano contábil</p>
                     <p>
-                      No destino {destination.name} a conta vem do plano contábil do cliente.
-                      Importe o plano em &quot;Plano contábil&quot; (quem tem acesso de configuração
-                      do escritório) e volte para decidir — enquanto isso, só &quot;Não mapear&quot;
-                      é possível.
+                      No destino {destination.name} a conta vem do plano contábil do cliente.{' '}
+                      {canManageChart
+                        ? 'Importe o plano em "Plano contábil" e volte para decidir'
+                        : 'O plano é importado pelo escritório'}{' '}
+                      — enquanto isso, só &quot;Não mapear&quot; é possível.
                     </p>
                     <Button asChild variant="outline" size="sm">
-                      <Link href={accountingChartPath(clientId)}>Ir para Plano contábil</Link>
+                      <Link href={accountingChartPath(clientId)}>
+                        {canManageChart ? 'Ir para Plano contábil' : 'Ver Plano contábil'}
+                      </Link>
                     </Button>
                   </div>
                 ) : (

@@ -285,19 +285,39 @@ describe('gating por capacidade (manage_client_accounting_chart)', () => {
     expect(
       within(section).queryByRole('button', { name: /Associar|Trocar/ }),
     ).not.toBeInTheDocument();
-    expect(within(section).getByText(/Peça a alguém do escritório/)).toBeInTheDocument();
-  });
-
-  it('cliente encerrado: importar some COM o motivo, e a lista segue legível', () => {
-    clientDetailState.data = { closed_at: '2026-09-01T00:00:00Z', accounts: [] };
-    render(<AccountingChartScreen clientId="c1" />);
-
-    expect(screen.queryByRole('button', { name: /importar/i })).not.toBeInTheDocument();
     expect(
-      screen.getByText(/Cliente encerrado: a importação está indisponível/),
+      within(section).getByText(
+        /Peça a quem administra o plano contábil no escritório para associar/,
+      ),
     ).toBeInTheDocument();
-    expect(screen.getByRole('cell', { name: 'Banco conta movimento' })).toBeInTheDocument();
   });
+
+  it.each([
+    ['admin', admin],
+    ['gerente da organização', manager],
+  ])(
+    'cliente encerrado (%s): importar some COM o motivo, a conta do banco diz que é o encerramento, sem Associar/Trocar',
+    (_label, user) => {
+      authState.user = user;
+      clientDetailState.data = { closed_at: '2026-09-01T00:00:00Z', accounts: [] };
+      render(<AccountingChartScreen clientId="c1" />);
+
+      expect(screen.queryByRole('button', { name: /importar/i })).not.toBeInTheDocument();
+      expect(
+        screen.getByText(/Cliente encerrado: a importação está indisponível/),
+      ).toBeInTheDocument();
+      expect(screen.getByRole('cell', { name: 'Banco conta movimento' })).toBeInTheDocument();
+
+      const section = screen.getByTestId('bank-accounts-section');
+      expect(
+        within(section).queryByRole('button', { name: /Associar|Trocar/ }),
+      ).not.toBeInTheDocument();
+      expect(within(section).getByTestId('bank-accounts-pending')).toHaveTextContent(
+        'Cliente encerrado: a associação não pode mais ser alterada.',
+      );
+      expect(within(section).queryByText(/Peça a/)).not.toBeInTheDocument();
+    },
+  );
 });
 
 describe('lista', () => {
@@ -503,6 +523,40 @@ describe('importação', () => {
     expect(toastError).not.toHaveBeenCalled();
   });
 
+  it('CABECALHO_DIVERGENTE por coluna REPETIDA lista cada coluna encontrada, inclusive a repetida', async () => {
+    withoutPlan();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    importState.mutateAsync = vi.fn().mockRejectedValue(
+      refusal('CABECALHO_DIVERGENTE', {
+        missingColumns: [],
+        unexpectedColumns: [],
+        repeatedColumns: ['nome'],
+        // O backend devolve as colunas CRUAS: o nome repetido aparece duas vezes.
+        foundColumns: ['codigo_reduzido', 'nome', 'nome', 'tipo'],
+      }),
+    );
+    render(<AccountingChartScreen clientId="c1" />);
+    const { user, dialog } = await openAndPick(/Importar planilha/);
+    await user.click(within(dialog).getByRole('button', { name: 'Importar' }));
+
+    const notice = await within(dialog).findByRole('alert');
+    expect(within(notice).getByRole('list', { name: 'Colunas repetidas' })).toHaveTextContent(
+      'nome',
+    );
+    const found = within(notice).getByRole('list', { name: 'Colunas encontradas na planilha' });
+    expect(
+      within(found)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent),
+    ).toEqual(['codigo_reduzido', 'nome', 'nome', 'tipo']);
+    // Chave duplicada o React só denuncia no console; nenhum aviso dele aqui.
+    const duplicateKeyWarnings = consoleError.mock.calls.filter((call) =>
+      call.some((arg) => String(arg).includes('same key')),
+    );
+    expect(duplicateKeyWarnings).toEqual([]);
+    consoleError.mockRestore();
+  });
+
   it('ARQUIVO_INVALIDO sem contas explica o caso; código desconhecido é o único toast', async () => {
     withoutPlan();
     importState.mutateAsync = vi
@@ -606,5 +660,20 @@ describe('conta do banco', () => {
     expect(
       within(section).getByText(/Importe o plano contábil para poder associar/),
     ).toBeInTheDocument();
+  });
+
+  it.each([
+    ['gerente do cliente', clientManager],
+    ['operador do cliente', clientOperator],
+  ])('sem plano, %s não recebe a instrução de importar (a matriz nega)', (_label, user) => {
+    authState.user = user;
+    withoutPlan();
+    render(<AccountingChartScreen clientId="c1" />);
+    const section = screen.getByTestId('bank-accounts-section');
+    expect(within(section).queryByRole('button', { name: /Associar/ })).not.toBeInTheDocument();
+    expect(within(section).queryByText(/Importe/)).not.toBeInTheDocument();
+    expect(within(section).getByTestId('bank-accounts-pending')).toHaveTextContent(
+      'O plano contábil do cliente ainda não foi importado pelo escritório.',
+    );
   });
 });

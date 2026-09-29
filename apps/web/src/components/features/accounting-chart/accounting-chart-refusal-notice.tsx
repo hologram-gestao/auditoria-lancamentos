@@ -148,9 +148,11 @@ function ColumnList({
     <div className="space-y-1">
       <p className="text-xs font-medium">{heading}</p>
       <ul aria-label={heading} className="flex flex-wrap gap-1.5">
-        {columns.map((column) => (
+        {/* O backend devolve as colunas CRUAS: na recusa por coluna repetida o
+            nome se repete, então a chave leva a posição. */}
+        {columns.map((column, index) => (
           <li
-            key={column}
+            key={`${index}:${column}`}
             className={
               emphasized
                 ? 'bg-background text-destructive ring-destructive/30 rounded px-2 py-0.5 font-mono text-xs font-semibold ring-1 ring-inset'

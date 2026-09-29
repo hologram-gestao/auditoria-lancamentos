@@ -117,6 +117,8 @@ interface MappingPreviewPanelProps {
   /** `upload_client_file` — gateia o link "Enviar arquivo do mês" (§4.9). */
   canUpload: boolean;
   canManage: boolean;
+  /** `manage_client_accounting_chart` — só quem a tem é mandado associar a conta do banco. */
+  canManageChart: boolean;
   isClosed: boolean;
   originStatus: OriginStatus;
   /**
@@ -136,6 +138,7 @@ export function MappingPreviewPanel({
   canSync,
   canUpload,
   canManage,
+  canManageChart,
   isClosed,
   originStatus,
   fileOrigin = false,
@@ -276,6 +279,8 @@ export function MappingPreviewPanel({
           destination={destination}
           preview={previewQuery.data}
           canMaterialize={canManage && !isClosed}
+          canManageChart={canManageChart}
+          isClosed={isClosed}
           onStale={() => void previewQuery.refetch()}
         />
       ) : null}
@@ -439,12 +444,16 @@ function PreviewContent({
   destination,
   preview,
   canMaterialize,
+  canManageChart,
+  isClosed,
   onStale,
 }: {
   clientId: string;
   destination: MappingDestination;
   preview: MappingPreview;
   canMaterialize: boolean;
+  canManageChart: boolean;
+  isClosed: boolean;
   onStale: () => void;
 }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -512,10 +521,23 @@ function PreviewContent({
       </section>
 
       {bankPending !== null && (
-        <PendingSourceAccountsNotice clientId={clientId} accounts={bankPending} refused />
+        <PendingSourceAccountsNotice
+          clientId={clientId}
+          accounts={bankPending}
+          canManageChart={canManageChart}
+          isClosed={isClosed}
+          refused
+        />
       )}
 
-      {accounting && <AccountingPreviewSection clientId={clientId} preview={preview} />}
+      {accounting && (
+        <AccountingPreviewSection
+          clientId={clientId}
+          preview={preview}
+          canManageChart={canManageChart}
+          isClosed={isClosed}
+        />
+      )}
 
       <section aria-labelledby="mapping-undecided-heading" className="space-y-2">
         <h3 id="mapping-undecided-heading" className="text-sm font-semibold">

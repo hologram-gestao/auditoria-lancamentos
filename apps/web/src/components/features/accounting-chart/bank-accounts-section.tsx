@@ -51,8 +51,10 @@ const baseBadge =
 
 interface BankAccountsSectionProps {
   clientId: string;
-  /** `manage_client_accounting_chart` E cliente aberto. */
-  canEdit: boolean;
+  /** `manage_client_accounting_chart`. */
+  canManage: boolean;
+  /** Cliente encerrado: ninguém altera a associação (o servidor responde 409). */
+  isClosed: boolean;
   /** O cliente já tem plano contábil? Sem plano, não há conta para escolher. */
   hasPlan: boolean;
 }
@@ -61,7 +63,31 @@ function entryKey(entry: SourceAccountEntry): string {
   return `${entry.sourceType}:${entry.sourceAccountId ?? '__default__'}`;
 }
 
-export function BankAccountsSection({ clientId, canEdit, hasPlan }: BankAccountsSectionProps) {
+/**
+ * O que a pessoa pode fazer com a pendência. "Sem permissão" e "encerrado" são
+ * motivos DIFERENTES: mandar quem é do escritório "pedir ao escritório" é falso,
+ * e mandar quem não pode importar "importar" oferece uma ação que a matriz nega.
+ */
+function pendingGuidance({
+  canManage,
+  isClosed,
+  hasPlan,
+}: Omit<BankAccountsSectionProps, 'clientId'>): string {
+  if (isClosed) return 'Cliente encerrado: a associação não pode mais ser alterada.';
+  if (!hasPlan) {
+    return canManage
+      ? 'Importe o plano contábil para poder associar.'
+      : 'O plano contábil do cliente ainda não foi importado pelo escritório.';
+  }
+  return canManage ? '' : 'Peça a quem administra o plano contábil no escritório para associar.';
+}
+
+export function BankAccountsSection({
+  clientId,
+  canManage,
+  isClosed,
+  hasPlan,
+}: BankAccountsSectionProps) {
   const query = useSourceAccounts(clientId);
   const [editing, setEditing] = useState<SourceAccountEntry | null>(null);
   const [editKey, setEditKey] = useState(0);
@@ -70,7 +96,8 @@ export function BankAccountsSection({ clientId, canEdit, hasPlan }: BankAccounts
 
   const entries = query.data ?? [];
   const pendingCount = entries.filter((entry) => entry.pending).length;
-  const showActions = canEdit && hasPlan;
+  const showActions = canManage && !isClosed && hasPlan;
+  const guidance = pendingGuidance({ canManage, isClosed, hasPlan });
 
   function openEditor(entry: SourceAccountEntry) {
     setEditKey((k) => k + 1);
@@ -106,8 +133,7 @@ export function BankAccountsSection({ clientId, canEdit, hasPlan }: BankAccounts
             {pendingCount === 1
               ? '1 conta de origem sem conta do banco.'
               : `${pendingCount} contas de origem sem conta do banco.`}
-            {!hasPlan && ' Importe o plano contábil para poder associar.'}
-            {hasPlan && !canEdit && ' Peça a alguém do escritório para associar.'}
+            {guidance !== '' && ` ${guidance}`}
           </span>
         </p>
       )}

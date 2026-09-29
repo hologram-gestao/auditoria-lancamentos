@@ -6746,7 +6746,9 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByRole('button', { name: /importar/i })).toHaveCount(0);
       const secao = page.getByTestId('bank-accounts-section');
       await expect(secao.getByRole('button', { name: /Associar|Trocar/ })).toHaveCount(0);
-      await expect(secao.getByText(/Peça a alguém do escritório/)).toBeVisible();
+      await expect(
+        secao.getByText(/Peça a quem administra o plano contábil no escritório/),
+      ).toBeVisible();
       await analyze(page, `plano contábil — operador (${vp.label})`);
     });
   });

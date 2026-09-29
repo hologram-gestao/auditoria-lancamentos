@@ -130,6 +130,8 @@ interface MappingListPanelProps {
   hasFilters: boolean;
   serverCompetence: string;
   canManage: boolean;
+  /** `manage_client_accounting_chart` — só quem a tem é mandado importar o plano. */
+  canManageChart: boolean;
   isClosed: boolean;
 }
 
@@ -151,6 +153,7 @@ export function MappingListPanel({
   hasFilters,
   serverCompetence,
   canManage,
+  canManageChart,
   isClosed,
 }: MappingListPanelProps) {
   const [editing, setEditing] = useState<MappingListItem | null>(null);
@@ -195,7 +198,13 @@ export function MappingListPanel({
     <div className="flex flex-col gap-4">
       {/* No `conta_contabil` o alvo vem do plano do CLIENTE, não do catálogo:
           o aviso de catálogo vazio não se aplica — o que importa é ter plano. */}
-      {accounting && <AccountingPlanNotice clientId={clientId} />}
+      {accounting && (
+        <AccountingPlanNotice
+          clientId={clientId}
+          canManageChart={canManageChart}
+          isClosed={isClosed}
+        />
+      )}
 
       {!accounting && destination.targetsCount === 0 && (
         <div
@@ -399,6 +408,7 @@ export function MappingListPanel({
           destination={destination}
           item={editing}
           serverCompetence={serverCompetence}
+          canManageChart={canManageChart}
         />
       )}
       {showWriteActions && !accounting && (
@@ -550,13 +560,24 @@ function AccountingDecisionCell({ item }: { item: MappingListItem }) {
 
 /**
  * Cliente SEM plano contábil no destino `conta_contabil`: não há conta para
- * escolher. Orienta a importar em "Plano contábil" (a importação é daquela
- * tela e pede outra permissão — aqui só o caminho). Some com plano, e some
- * enquanto a sonda carrega ou falha (sem certeza, não se afirma "sem plano").
+ * escolher. Quem pode importar (`manage_client_accounting_chart`, cliente
+ * aberto) é orientado a importar em "Plano contábil"; os demais leem só o
+ * porquê, com um link de LEITURA — nunca um verbo de ação que a matriz nega
+ * (ADR-053-FE). Some com plano, e some enquanto a sonda carrega ou falha (sem
+ * certeza, não se afirma "sem plano").
  */
-function AccountingPlanNotice({ clientId }: { clientId: string }) {
+function AccountingPlanNotice({
+  clientId,
+  canManageChart,
+  isClosed,
+}: {
+  clientId: string;
+  canManageChart: boolean;
+  isClosed: boolean;
+}) {
   const probe = useAccountingChartList(clientId, { page: 1, pageSize: 1 });
   if (probe.data?.pagination.total !== 0) return null;
+  const canImport = canManageChart && !isClosed;
   return (
     <div
       role="status"
@@ -565,11 +586,16 @@ function AccountingPlanNotice({ clientId }: { clientId: string }) {
     >
       <p className="font-medium">Este cliente ainda não tem plano contábil</p>
       <p>
-        Neste destino a conta de cada categoria vem do plano contábil do cliente. Importe o plano
-        para decidir; enquanto isso, só &quot;Não mapear&quot; é possível.
+        {canImport
+          ? 'Neste destino a conta de cada categoria vem do plano contábil do cliente. Importe o plano para decidir; enquanto isso, só "Não mapear" é possível.'
+          : isClosed
+            ? 'Este destino depende do plano contábil do cliente, que não foi importado antes do encerramento.'
+            : 'Este destino depende do plano contábil do cliente, que é importado pelo escritório. Enquanto isso, só "Não mapear" é possível.'}
       </p>
       <Button asChild variant="outline" size="sm">
-        <Link href={accountingChartPath(clientId)}>Ir para Plano contábil</Link>
+        <Link href={accountingChartPath(clientId)}>
+          {canImport ? 'Ir para Plano contábil' : 'Ver Plano contábil'}
+        </Link>
       </Button>
     </div>
   );

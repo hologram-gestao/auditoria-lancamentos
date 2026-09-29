@@ -179,6 +179,20 @@ const manager: AuthenticatedUser = {
   organization_id: ORG,
   organization_name: 'Hologram',
 };
+const admin: AuthenticatedUser = { ...manager, id: 'a', role: 'admin' };
+// Os dois papéis do cliente NÃO têm `manage_client_accounting_chart`; o
+// gerente do cliente tem `manage_client_mapping` (decide e materializa).
+const clientManager: AuthenticatedUser = {
+  id: 'cm',
+  email: 'gerente@cliente.com.br',
+  name: 'Gerente do Cliente',
+  role: 'client_manager',
+  scope: 'client',
+  client_id: TENANT,
+  organization_id: ORG,
+  organization_name: 'Hologram',
+};
+const clientOperator: AuthenticatedUser = { ...clientManager, id: 'co', role: 'client_operator' };
 
 const DEMONSTRATIVO: MappingDestination = {
   id: 'd-dre',
@@ -675,6 +689,144 @@ describe('prévia no conta_contabil', () => {
     expect(screen.getByTestId('mapping-preview')).toBeInTheDocument();
     expect(screen.queryByTestId('mapping-accounting-preview')).not.toBeInTheDocument();
     expect(screen.queryByTestId('bank-pending-notice')).not.toBeInTheDocument();
+  });
+});
+
+describe('avisos por perfil — só manda agir quem tem manage_client_accounting_chart', () => {
+  const COM_PERMISSAO = [
+    ['admin', admin],
+    ['gerente da organização', manager],
+  ] as const;
+  const SEM_PERMISSAO = [
+    ['gerente do cliente', clientManager],
+    ['operador do cliente', clientOperator],
+  ] as const;
+
+  function rejectWithBankPending() {
+    materializeState.mutateAsync = vi.fn().mockRejectedValue(
+      new ApiError(409, {
+        code: 'CONTA_DO_BANCO_PENDENTE',
+        message: 'x',
+        userMessage: 'Há movimentos de contas de origem sem a conta contábil do banco associada.',
+        details: { pendingSourceAccounts: [{ sourceType: 'omie', sourceAccountId: '4455' }] },
+      }),
+    );
+  }
+
+  async function materialize() {
+    const user = userEvent.setup();
+    render(<ClientMappingScreen clientId={TENANT} />);
+    await user.click(screen.getByRole('button', { name: /Materializar/ }));
+    const dialogo = await screen.findByRole('alertdialog');
+    await user.click(within(dialogo).getByRole('button', { name: 'Materializar versão 2' }));
+    return screen.findByTestId('bank-pending-refusal');
+  }
+
+  describe('prévia: contas de origem pendentes', () => {
+    beforeEach(() => {
+      currentSearch = 'destination=conta_contabil&view=previa&competence=2026-06';
+    });
+
+    it.each(COM_PERMISSAO)('%s vê o verbo "Associe" e o botão', (_label, user) => {
+      authState.user = user;
+      render(<ClientMappingScreen clientId={TENANT} />);
+      const pendentes = screen.getByTestId('bank-pending-notice');
+      expect(pendentes).toHaveTextContent(/Associe a conta do banco de cada uma/);
+      expect(
+        within(pendentes).getByRole('link', { name: /Associar conta do banco/ }),
+      ).toBeInTheDocument();
+    });
+
+    it.each(SEM_PERMISSAO)('%s vê a lista, sem o botão nem "Associe"', (_label, user) => {
+      authState.user = user;
+      render(<ClientMappingScreen clientId={TENANT} />);
+      const pendentes = screen.getByTestId('bank-pending-notice');
+      expect(pendentes).toHaveTextContent('Itaú — Conta movimento');
+      expect(pendentes).not.toHaveTextContent(/Associe/);
+      expect(pendentes).toHaveTextContent(
+        'Peça a quem administra o plano contábil do cliente no escritório para associar a conta do banco.',
+      );
+      expect(within(pendentes).queryByRole('link', { name: /Associar/ })).not.toBeInTheDocument();
+    });
+
+    it('cliente encerrado: o admin lê o motivo real, sem o botão', () => {
+      authState.user = admin;
+      clientDetailState.data = {
+        closed_at: '2026-09-01T00:00:00Z',
+        origin_status: 'ativa',
+        organization: { id: ORG, name: 'Hologram' },
+        accounts: [{ omie_conta_id: 4455, name: 'Itaú — Conta movimento' }],
+      };
+      render(<ClientMappingScreen clientId={TENANT} />);
+      const pendentes = screen.getByTestId('bank-pending-notice');
+      expect(pendentes).toHaveTextContent(
+        'Cliente encerrado: a associação não pode mais ser alterada.',
+      );
+      expect(pendentes).not.toHaveTextContent(/Associe|Peça a/);
+      expect(within(pendentes).queryByRole('link', { name: /Associar/ })).not.toBeInTheDocument();
+    });
+
+    it.each(COM_PERMISSAO)('recusa 409 para %s: com o botão e o verbo', async (_label, user) => {
+      authState.user = user;
+      rejectWithBankPending();
+      const recusa = await materialize();
+      expect(recusa).toHaveTextContent(/Associe a conta do banco/);
+      expect(
+        within(recusa).getByRole('link', { name: /Associar conta do banco/ }),
+      ).toBeInTheDocument();
+    });
+
+    it('recusa 409 para o gerente do cliente (materializa, mas não associa): sem o botão nem "Associe"', async () => {
+      authState.user = clientManager;
+      rejectWithBankPending();
+      const recusa = await materialize();
+      expect(recusa).toHaveTextContent('Itaú — Conta movimento');
+      expect(recusa).not.toHaveTextContent(/Associe/);
+      expect(recusa).toHaveTextContent(/Peça a quem administra o plano contábil/);
+      expect(within(recusa).queryByRole('link', { name: /Associar/ })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('lista: cliente sem plano', () => {
+    beforeEach(() => {
+      planTotal = 0;
+    });
+
+    it.each(COM_PERMISSAO)('%s é orientado a importar', (_label, user) => {
+      authState.user = user;
+      render(<ClientMappingScreen clientId={TENANT} />);
+      const aviso = screen.getByTestId('mapping-accounting-no-plan');
+      expect(aviso).toHaveTextContent(/Importe o plano para decidir/);
+      expect(
+        within(aviso).getByRole('link', { name: 'Ir para Plano contábil' }),
+      ).toBeInTheDocument();
+    });
+
+    it.each(SEM_PERMISSAO)(
+      '%s lê o porquê, com link de leitura e sem "Importe"',
+      (_label, user) => {
+        authState.user = user;
+        render(<ClientMappingScreen clientId={TENANT} />);
+        const aviso = screen.getByTestId('mapping-accounting-no-plan');
+        expect(aviso).not.toHaveTextContent(/Importe/);
+        expect(aviso).toHaveTextContent(/que é importado pelo escritório/);
+        expect(within(aviso).getByRole('link', { name: 'Ver Plano contábil' })).toHaveAttribute(
+          'href',
+          `/clientes/${TENANT}/plano-contabil`,
+        );
+      },
+    );
+
+    it('a gaveta do gerente do cliente também não manda importar', async () => {
+      authState.user = clientManager;
+      const { dialog } = await openDecision('Alterar a categoria 2.01.01');
+      const semPlano = within(dialog).getByTestId('accounting-no-plan');
+      expect(semPlano).not.toHaveTextContent(/Importe/);
+      expect(semPlano).toHaveTextContent(/O plano é importado pelo escritório/);
+      expect(
+        within(semPlano).getByRole('link', { name: 'Ver Plano contábil' }),
+      ).toBeInTheDocument();
+    });
   });
 });
 
