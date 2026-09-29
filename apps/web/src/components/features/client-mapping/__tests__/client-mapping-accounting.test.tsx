@@ -301,6 +301,8 @@ function preview(overrides: Partial<MappingPreview> = {}): MappingPreview {
       {
         sourceType: 'omie',
         categoryCode: '2.01.01',
+        categoryName: 'Aluguel',
+        categoryNameResolved: true,
         amount: '600.00',
         count: 2,
         accountingAccountId: 'acc-5101',
@@ -316,6 +318,9 @@ function preview(overrides: Partial<MappingPreview> = {}): MappingPreview {
       {
         sourceType: 'omie',
         categoryCode: '2.01.03',
+        // 86e3fxqqh: origem fora do ar (ou sem decifrar) — sem nome, como a lista.
+        categoryName: null,
+        categoryNameResolved: false,
         amount: '300.00',
         count: 1,
         accountingAccountId: 'acc-5102',
@@ -331,6 +336,8 @@ function preview(overrides: Partial<MappingPreview> = {}): MappingPreview {
       {
         sourceType: 'omie',
         categoryCode: '2.01.02',
+        categoryName: 'Tarifas bancárias',
+        categoryNameResolved: true,
         amount: '100.00',
         count: 1,
         accountingAccountId: null,
@@ -576,10 +583,10 @@ describe('cliente sem plano contábil', () => {
 });
 
 describe('portabilidade', () => {
-  it('conta_contabil: Importar some, Exportar fica', () => {
+  it('conta_contabil: Importar e Exportar (86e3fxqqe — a planilha agora leva conta e histórico)', () => {
     render(<ClientMappingScreen clientId={TENANT} />);
     expect(screen.getByRole('button', { name: 'Exportar' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Importar' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Importar' })).toBeInTheDocument();
   });
 
   it('REGRESSÃO — demonstrativo: Importar e Exportar', () => {
@@ -606,6 +613,8 @@ describe('prévia no conta_contabil', () => {
 
     const linhaCompleta = within(secao).getByRole('row', { name: /2\.01\.01/ });
     expect(within(linhaCompleta).getByText('Completa')).toBeInTheDocument();
+    // 86e3fxqqh: nome embaixo do código, como a lista de decisões.
+    expect(within(linhaCompleta).getByText('Aluguel')).toBeInTheDocument();
     const dica = within(linhaCompleta).getByRole('img', { name: /^Histórico padrão: Pagamento/ });
     expect(dica).toHaveAttribute('tabindex', '0');
     expect(dica).not.toHaveAttribute('title');
@@ -613,8 +622,11 @@ describe('prévia no conta_contabil', () => {
     const linhaIncompleta = within(secao).getByRole('row', { name: /2\.01\.03/ });
     expect(within(linhaIncompleta).getByText('Falta histórico')).toBeInTheDocument();
     expect(within(linhaIncompleta).getByText('Conta do banco pendente')).toBeInTheDocument();
+    // Origem fora do ar (ou sem decifrar): o mesmo texto de fallback da lista.
+    expect(within(linhaIncompleta).getByText('Nome indisponível agora')).toBeInTheDocument();
     const linhaLegado = within(secao).getByRole('row', { name: /2\.01\.02/ });
     expect(within(linhaLegado).getByTestId('mapping-legacy-badge')).toBeInTheDocument();
+    expect(within(linhaLegado).getByText('Tarifas bancárias')).toBeInTheDocument();
 
     const pendentes = within(secao).getByTestId('bank-pending-notice');
     expect(pendentes).toHaveTextContent('Itaú — Conta movimento');

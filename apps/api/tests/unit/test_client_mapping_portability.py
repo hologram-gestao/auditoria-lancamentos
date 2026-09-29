@@ -326,6 +326,7 @@ class TestExportacao:
             "alvo",
             "1.01",
             "Receita Bruta",
+            None,  # histórico: só existe em conta_contabil (86e3fxqqe)
             "confirmada",
             "2026-06",
         ]
@@ -523,9 +524,9 @@ class TestPlano:
                 _line(6, "2.05", ""),  # sem decisão na planilha → ignorada
             ],
             vigentes={
-                ("omie", "2.02"): ("alvo", "1.01", "confirmada", JUN),
-                ("omie", "2.03"): ("nao_mapear", None, "confirmada", JUN),
-                ("omie", "2.04"): ("alvo", "1.01", "herdada", JUN),
+                ("omie", "2.02"): ("alvo", "1.01", "confirmada", JUN, None, None),
+                ("omie", "2.03"): ("nao_mapear", None, "confirmada", JUN, None, None),
+                ("omie", "2.04"): ("alvo", "1.01", "herdada", JUN, None, None),
             },
         )
         assert [i.category_code for i in plan.created] == ["2.01"]
@@ -561,7 +562,7 @@ class TestPlano:
     def test_confirmada_diferente_na_mesma_vigencia_e_recusada_na_previa(self) -> None:
         plan = self._plan(
             [_line(2, "2.01", "alvo", "1.02")],
-            vigentes={("omie", "2.01"): ("alvo", "1.01", "confirmada", SET)},
+            vigentes={("omie", "2.01"): ("alvo", "1.01", "confirmada", SET, None, None)},
         )
         assert [r.reason for r in plan.rejected] == ["conflito_na_vigencia"]
         assert plan.to_write == []
@@ -621,7 +622,9 @@ class TestPlano:
             )
         ]
         lines = parse_import(build_export_workbook(destination, rows))
-        plan = self._plan(lines, vigentes={("omie", "2.01"): ("alvo", "1.01", "confirmada", JUN)})
+        plan = self._plan(
+            lines, vigentes={("omie", "2.01"): ("alvo", "1.01", "confirmada", JUN, None, None)}
+        )
         assert (len(plan.created), len(plan.altered), plan.ignored) == (0, 0, 1)
 
 

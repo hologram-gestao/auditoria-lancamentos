@@ -147,4 +147,6 @@ export const IMPORT_REJECT_REASON_LABELS: Record<MappingImportRejectReason, stri
   destino_diferente: 'Linha de outro destino',
   linha_repetida: 'Categoria repetida na planilha',
   conflito_na_vigencia: 'Conflito com decisão da mesma vigência',
+  // 86e3fxqqe: só existe no destino Conta contábil (histórico acima do limite).
+  historico_muito_longo: 'Histórico acima do limite de caracteres',
 };

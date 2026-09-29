@@ -32,6 +32,7 @@ from app.modules.client_accounting_chart.service import (
     ACCOUNTING_ACCOUNT_UNDECIPHERABLE,
     AccountingChartService,
     AccountRef,
+    not_postable_reason,
 )
 from app.modules.client_source_accounts.repository import SourceAccountBindingRepository
 
@@ -192,3 +193,42 @@ class AccountingDecisionSupport:
         snapshot, e conta de outro cliente não é carregada (`client_id` no WHERE).
         """
         return await self._chart.account_refs(client, account_ids)
+
+    async def accounts_by_code(
+        self, client: Client, codes: Iterable[str]
+    ) -> dict[str, ClientAccountingAccount]:
+        """As contas do cliente pelo código reduzido (86e3fxqqe: a portabilidade do
+        de-para resolve `codigo_alvo` da planilha por aqui, antes de validar
+        postabilidade com `require_accounts`)."""
+        return await self._chart.accounts_by_code(client.id, codes)
+
+    async def classify_target_codes(
+        self, client: Client, codes_by_line: Iterable[tuple[int, str]]
+    ) -> tuple[dict[str, UUID], list[dict[str, int | str]]]:
+        """Resolve `codigo_alvo` → `accounting_account_id`, linha a linha
+        (86e3fxqqe — portabilidade do de-para no destino `conta_contabil`).
+
+        Devolve `(código → id resolvido, [{line, reason}] dos que não resolveram)`
+        — `line` como INT (molde de `FileLinesInvalidError.details.lines` da S14,
+        `client_file_ingestion/reader.py::LineProblem`); `reason` no MESMO
+        vocabulário de `not_postable_reason` (`sintetica`/`inativa`) mais
+        `conta_inexistente` (código que o cliente não tem). Quem chama decide o
+        que fazer com a lista de inválidos; hoje é a portabilidade, que recusa a
+        planilha INTEIRA (molde S14) — resolver conta é erro contábil, não uma
+        lacuna que se completa depois.
+        """
+        pairs = list(codes_by_line)
+        accounts = await self.accounts_by_code(client, {code for _, code in pairs})
+        resolved: dict[str, UUID] = {}
+        invalid: list[dict[str, int | str]] = []
+        for line_number, code in pairs:
+            account = accounts.get(code)
+            if account is None:
+                invalid.append({"line": line_number, "reason": "conta_inexistente"})
+                continue
+            reason = not_postable_reason(account)
+            if reason is not None:
+                invalid.append({"line": line_number, "reason": reason})
+                continue
+            resolved[code] = account.id
+        return resolved, invalid
