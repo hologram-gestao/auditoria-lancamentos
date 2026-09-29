@@ -511,6 +511,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clients/{client_id}/accounting-chart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista o plano de contas CONTÁBIL do cliente (o do sistema contábil de destino, não o plano da origem): código reduzido, classificação, nome (decifrado na leitura), tipo (`analitica`/`sintetica`), situação e se a conta pode receber decisão nova (`postable` = analítica e ativa). Paginado (`page`/`pageSize`, máximo 100), ordenado por código, com busca por PREFIXO de código (`code`; o nome é cifrado e não é buscável) e filtros `type` e `status` (`ativa`/`inativa`) — `type=analitica&status=ativa` é o seletor de conta do de-para. Visível a todo papel com acesso ao cliente; cliente encerrado continua legível (nomes saem `[indecifrável]`). Plano de outro cliente nunca aparece. */
+        get: operations["list_accounting_chart_api_v1_clients__client_id__accounting_chart_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/accounting-chart/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Importa (ou reimporta) o plano de contas contábil do cliente a partir de uma planilha no MODELO DA PLATAFORMA — tudo ou nada. Modelo: CSV UTF-8 separado por `;` ou XLSX (primeira aba), cabeçalho na linha 1 com as colunas `codigo_reduzido`, `nome` e `tipo` (obrigatórias) e `classificacao` (opcional), em qualquer ordem e sem outras colunas; `tipo` é `analitica` ou `sintetica`; código reduzido com letras, dígitos, `.` e `-` (até 20), nome até 200 caracteres, classificação até 40. Exemplo: `codigo_reduzido;nome;tipo` / `649;Banco conta movimento;analitica`. A reimportação casa por código: conta nova entra, conta existente atualiza nome, tipo e classificação (e volta a ativa), conta que sumiu da planilha vira INATIVA — nunca é apagada. Responde as contagens `contas`, `contasNovas`, `contasInativadas`. O nome é cifrado com a chave do cliente. Requer `manage_client_accounting_chart` (plataforma, admin e gerente da carteira; usuários do cliente recebem 403 e a negação fica na trilha). Cliente encerrado: 409. Recusas, todas 422 e sem gravar nada: `FORMATO_NAO_SUPORTADO` (não é CSV nem XLSX pelo CONTEÚDO), `ARQUIVO_INVALIDO` (não abre, ou planilha sem nenhuma conta com `details.reason=sem_contas`), `CABECALHO_DIVERGENTE` (`details.missingColumns`/`unexpectedColumns`/`repeatedColumns`/`foundColumns`) e `LINHAS_INVALIDAS` (`details.lines=[{line, reason}]` com `reason` ∈ `codigo_vazio`, `codigo_longo`, `codigo_invalido`, `codigo_repetido`, `nome_vazio`, `nome_longo`, `tipo_invalido`, `classificacao_longa`, e `details.total`) — a resposta nunca traz o conteúdo de uma célula. */
+        post: operations["import_accounting_chart_api_v1_clients__client_id__accounting_chart_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/source-accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** As contas de ORIGEM do cliente e a conta contábil do BANCO de cada uma (o lado fixo da partida no arquivo contábil): as contas distintas da base de movimentos, as já associadas e o slot da CONTA PADRÃO (`sourceAccountId: null`) — que cobre só as linhas SEM conta de origem, como o arquivo sem coluna de conta. Cada uma traz a conta do plano contábil associada (código e nome decifrado na leitura) ou `pending: true`. Conta de origem sem associação NUNCA cai na padrão: a materialização no destino `conta_contabil` é recusada (409) enquanto houver linha com alvo vinda dela. Visível a todo papel com acesso ao cliente; cliente encerrado continua legível. */
+        get: operations["list_source_accounts_api_v1_clients__client_id__source_accounts_get"];
+        /** Define ou TROCA a conta contábil do banco de uma conta de origem (ou do slot da conta padrão, com `sourceAccountId` nulo): uma conta ANALÍTICA e ATIVA do plano contábil do próprio cliente. É configuração (upsert): trocar NÃO altera materialização já feita — o código do banco de cada linha fica no snapshot. Conta de outro cliente: 404; sintética ou inativa: 422 `CONTA_CONTABIL_NAO_LANCAVEL`. Requer `manage_client_accounting_chart` (plataforma, admin e gerente da carteira; usuários do cliente recebem 403 e a negação fica na trilha). Cliente encerrado: 409. Forma inválida: 400. */
+        put: operations["put_source_account_api_v1_clients__client_id__source_accounts_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clients/{client_id}/file-origin/inspect": {
         parameters: {
             query?: never;
@@ -813,7 +865,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Grava UMA decisão de de-para (categoria → alvo do catálogo ou `nao_mapear`) com vigência a partir de `effectiveFrom` (padrão: competência corrente). Append-only: alterar cria vigência nova; a anterior vale até o mês anterior. Alvo inexistente/inativo: 422 `ALVO_INEXISTENTE` nomeando o código. Destino não configurado: 409 `DESTINO_NAO_CONFIGURADO`. Decisão confirmada já existente na mesma vigência: 409 `DECISAO_DUPLICADA`. Início retroativo: 409 `COMPETENCIA_MATERIALIZADA` se atingir competência materializada; senão 409 `RETROATIVA_REQUER_CONFIRMACAO` até `confirmRetroactive=true`. Requer `manage_client_mapping`; cliente encerrado: 409. */
+        /** Grava UMA decisão de de-para (categoria → alvo do catálogo ou `nao_mapear`) com vigência a partir de `effectiveFrom` (padrão: competência corrente). Append-only: alterar cria vigência nova; a anterior vale até o mês anterior. Alvo inexistente/inativo: 422 `ALVO_INEXISTENTE` nomeando o código. Destino não configurado: 409 `DESTINO_NAO_CONFIGURADO`. Decisão confirmada já existente na mesma vigência: 409 `DECISAO_DUPLICADA`. Início retroativo: 409 `COMPETENCIA_MATERIALIZADA` se atingir competência materializada; senão 409 `RETROATIVA_REQUER_CONFIRMACAO` até `confirmRetroactive=true`. Requer `manage_client_mapping`; cliente encerrado: 409. No destino `conta_contabil` (S16) o alvo é uma conta ANALÍTICA e ATIVA do plano contábil do próprio cliente (`accountingAccountId`, nunca `targetCode`: 422 `ALVO_EXIGE_PLANO_CONTABIL`), com `history` opcional (histórico padrão, até 500 caracteres, cifrado; acima do limite 400). Conta de outro cliente 404; sintética ou inativa 422 `CONTA_CONTABIL_NAO_LANCAVEL`; conta do plano em outro destino 422 `CONTA_CONTABIL_FORA_DO_DESTINO`. Trocar a conta ou só o histórico é vigência NOVA. */
         post: operations["write_decision_api_v1_clients__client_id__mapping__destination_type__decisions_post"];
         delete?: never;
         options?: never;
@@ -930,7 +982,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** PRÉVIA da aplicação do de-para na competência (`YYYY-MM`): sobre a base de movimentos PRESENTES, de todas as contas, as QUATRO situações (alvo, `nao_mapear`, sem decisão, sem categoria de origem) em valor e quantidade, a cobertura (Σ|valor| com decisão ÷ Σ|valor| com categoria — 'sem categoria' fica fora) e a contra-métrica `naoMapearPct`, as categorias sem decisão por |valor| decrescente e o estado da base. Determinística e sem IA. Não sincroniza. Erros, nesta ordem: competência nunca sincronizada 409 `BASE_NAO_SINCRONIZADA`; sem movimento 409 `SEM_MOVIMENTOS`; destino não configurado 409 `DESTINO_NAO_CONFIGURADO`; anterior à primeira vigência 409 `ANTERIOR_A_PRIMEIRA_VIGENCIA` (`details.earliestCompetence`). Leitura de quem alcança o cliente. */
+        /** PRÉVIA da aplicação do de-para na competência (`YYYY-MM`): sobre a base de movimentos PRESENTES, de todas as contas, as QUATRO situações (alvo, `nao_mapear`, sem decisão, sem categoria de origem) em valor e quantidade, a cobertura (Σ|valor| com decisão ÷ Σ|valor| com categoria — 'sem categoria' fica fora) e a contra-métrica `naoMapearPct`, as categorias sem decisão por |valor| decrescente e o estado da base. Determinística e sem IA. Não sincroniza. Erros, nesta ordem: competência nunca sincronizada 409 `BASE_NAO_SINCRONIZADA`; sem movimento 409 `SEM_MOVIMENTOS`; destino não configurado 409 `DESTINO_NAO_CONFIGURADO`; anterior à primeira vigência 409 `ANTERIOR_A_PRIMEIRA_VIGENCIA` (`details.earliestCompetence`). Leitura de quem alcança o cliente. No destino `conta_contabil` (S16) traz ainda, por categoria com alvo, a conta do plano do cliente, o histórico padrão, a partida completa e as contas de origem sem conta do BANCO (`pendingSourceAccounts`). */
         get: operations["preview_client_mapping_api_v1_clients__client_id__mapping__destination_type__preview_get"];
         put?: never;
         post?: never;
@@ -947,10 +999,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** As VERSÕES materializadas do destino, mais recentes primeiro: competência, versão, quando, quem (autor enxuto e mascarado por escopo), se foi confirmada com cobertura parcial, os totais por situação e a cobertura — a mesma conta da prévia. `competence` (`YYYY-MM`) recorta uma competência; ausente, todas. Só o cabeçalho da versão, nunca os itens. Leitura de quem alcança o cliente. */
+        /** As VERSÕES materializadas do destino, mais recentes primeiro: competência, versão, quando, quem (autor enxuto e mascarado por escopo), se foi confirmada com cobertura parcial, os totais por situação e a cobertura — a mesma conta da prévia. `competence` (`YYYY-MM`) recorta uma competência; ausente, todas. Só o cabeçalho da versão, nunca os itens. Leitura de quem alcança o cliente. No destino `conta_contabil` (S16) cada versão traz `partidaCompleteness` (Σ|valor| com partida completa ÷ Σ|valor| com alvo, sobre o snapshot imutável); `null` nos outros. */
         get: operations["list_client_mapping_materializations_api_v1_clients__client_id__mapping__destination_type__materializations_get"];
         put?: never;
-        /** MATERIALIZA a prévia confirmada: recalcula no servidor e só grava se o `previewToken` bater (senão 409 `PREVIA_DESATUALIZADA` — gere a prévia de novo). Havendo valor sem decisão exige `confirmPartialCoverage=true` (409 `COBERTURA_PARCIAL_REQUER_CONFIRMACAO`), e a confirmação fica no próprio registro. Cria a versão N+1 — imutável; reaplicar nunca sobrescreve e não existe rota que altere ou apague materialização. Emite a métrica `depara_aplicado`. Requer `manage_client_mapping`; cliente encerrado: 409. */
+        /** MATERIALIZA a prévia confirmada: recalcula no servidor e só grava se o `previewToken` bater (senão 409 `PREVIA_DESATUALIZADA` — gere a prévia de novo). Havendo valor sem decisão exige `confirmPartialCoverage=true` (409 `COBERTURA_PARCIAL_REQUER_CONFIRMACAO`), e a confirmação fica no próprio registro. Cria a versão N+1 — imutável; reaplicar nunca sobrescreve e não existe rota que altere ou apague materialização. Emite a métrica `depara_aplicado`. Requer `manage_client_mapping`; cliente encerrado: 409. No destino `conta_contabil` (S16), linha com alvo vinda de conta de origem sem conta contábil do banco: 409 `CONTA_DO_BANCO_PENDENTE` com `details.pendingSourceAccounts` (só identificadores), nada gravado; o código da conta do banco de cada linha fica no snapshot. */
         post: operations["materialize_client_mapping_api_v1_clients__client_id__mapping__destination_type__materializations_post"];
         delete?: never;
         options?: never;
@@ -967,7 +1019,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** PRÉVIA da importação da planilha exportada — NÃO grava nada. Casa por CÓDIGO (a coluna de nome é ignorada). Devolve criadas / alteradas / ignoradas e as linhas recusadas com o motivo (categoria ou alvo inexistente, decisão inválida…); a linha recusada não derruba o lote. Arquivo .xlsx, até 2 MB e 2.000 linhas. Requer `manage_client_mapping`. */
+        /** PRÉVIA da importação da planilha exportada — NÃO grava nada. Casa por CÓDIGO (a coluna de nome é ignorada). Devolve criadas / alteradas / ignoradas e as linhas recusadas com o motivo (categoria ou alvo inexistente, decisão inválida…); a linha recusada não derruba o lote. Arquivo .xlsx, até 2 MB e 2.000 linhas. Requer `manage_client_mapping`. No destino `conta_contabil` a importação é recusada com 422 `IMPORTACAO_INDISPONIVEL_NO_DESTINO` (a planilha não leva o histórico cifrado): use a tela; exportar segue disponível. */
         post: operations["preview_client_mapping_import_api_v1_clients__client_id__mapping__destination_type__import_preview_post"];
         delete?: never;
         options?: never;
@@ -984,7 +1036,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** APLICA a importação — exige `confirm=true` (sem ele: 409, a prévia é obrigatória). Recalcula a prévia no servidor e grava TODAS as linhas válidas de uma vez (atômico), como vigência nova a partir de `effectiveFrom` (padrão: competência corrente) — nunca sobrescreve a vigente. Início retroativo segue as regras da escrita de decisão (`confirmRetroactive`). Requer `manage_client_mapping`; cliente encerrado: 409. */
+        /** APLICA a importação — exige `confirm=true` (sem ele: 409, a prévia é obrigatória). Recalcula a prévia no servidor e grava TODAS as linhas válidas de uma vez (atômico), como vigência nova a partir de `effectiveFrom` (padrão: competência corrente) — nunca sobrescreve a vigente. Início retroativo segue as regras da escrita de decisão (`confirmRetroactive`). Requer `manage_client_mapping`; cliente encerrado: 409. No destino `conta_contabil`: 422 `IMPORTACAO_INDISPONIVEL_NO_DESTINO` (use a tela). */
         post: operations["apply_client_mapping_import_api_v1_clients__client_id__mapping__destination_type__import_post"];
         delete?: never;
         options?: never;
@@ -1705,6 +1757,130 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AccountingAccountResponse
+         * @description Uma conta do plano contábil, como a API a devolve.
+         */
+        AccountingAccountResponse: {
+            /**
+             * Id
+             * Format: uuid
+             * @description Identificador da conta (o alvo da decisão do de-para).
+             */
+            id: string;
+            /**
+             * Code
+             * @description Código reduzido — o que vai no arquivo contábil.
+             */
+            code: string;
+            /**
+             * Classification
+             * @description Classificação hierárquica, quando a planilha trouxe.
+             */
+            classification?: string | null;
+            /**
+             * Name
+             * @description Nome da conta, decifrado na leitura. `[indecifrável]` quando a chave do cliente não o abre (cliente encerrado) — ver `nameResolved`.
+             */
+            name: string;
+            /**
+             * Nameresolved
+             * @description `false` = o nome não decifrou e `name` é o marcador `[indecifrável]`.
+             */
+            nameResolved: boolean;
+            /** @description `analitica` recebe lançamento; `sintetica` só agrupa. */
+            type: components["schemas"]["AccountingAccountType"];
+            /**
+             * Active
+             * @description `false` = a conta sumiu da última planilha importada. Continua existindo (decisões podem apontar para ela), mas não recebe decisão nova.
+             */
+            active: boolean;
+            /**
+             * Postable
+             * @description Pode receber decisão NOVA do de-para ou virar conta do banco: analítica E ativa. É o filtro do seletor de conta.
+             */
+            postable: boolean;
+            /**
+             * Updatedat
+             * Format: date-time
+             * @description Última importação que a tocou.
+             */
+            updatedAt: string;
+        };
+        /**
+         * AccountingAccountType
+         * @description Tipo da conta no plano contábil — fonte ÚNICA do CHECK `account_type`.
+         *
+         *     `analitica` recebe lançamento; `sintetica` só agrupa (totaliza as filhas) e
+         *     NUNCA recebe decisão do de-para nem vira conta do banco.
+         * @enum {string}
+         */
+        AccountingAccountType: "analitica" | "sintetica";
+        /**
+         * AccountingCategoryResponse
+         * @description S16 — uma categoria com ALVO no destino `conta_contabil`, na prévia.
+         */
+        AccountingCategoryResponse: {
+            /** Sourcetype */
+            sourceType: string;
+            /** Categorycode */
+            categoryCode: string;
+            /**
+             * Amount
+             * @description Σ|valor| dos movimentos da categoria (BRL).
+             */
+            amount: string;
+            /** Count */
+            count: number;
+            /** Accountingaccountid */
+            accountingAccountId?: string | null;
+            /**
+             * Accountingaccountcode
+             * @description Código reduzido da conta.
+             */
+            accountingAccountCode?: string | null;
+            /**
+             * Accountingaccountname
+             * @description Nome da conta, decifrado na leitura (nunca guardado na materialização).
+             */
+            accountingAccountName?: string | null;
+            /**
+             * History
+             * @description Histórico padrão decifrado (`null` = sem histórico).
+             */
+            history?: string | null;
+            /**
+             * Historymissing
+             * @description A decisão não tem histórico: a linha fica INCOMPLETA (sinalizada; nesta sprint não bloqueia a materialização — quem bloqueia o arquivo é a Sprint 13).
+             */
+            historyMissing: boolean;
+            /**
+             * Requiresredo
+             * @description Decisão LEGADA apontando o catálogo da organização: conta como incompleta e precisa ser refeita para o plano do cliente.
+             */
+            requiresRedo: boolean;
+            /**
+             * Completeamount
+             * @description S16 (16.3) — Σ|valor| das linhas da categoria com PARTIDA COMPLETA: conta do plano, conta do banco resolvida e histórico presente (um predicado só).
+             */
+            completeAmount: string;
+            /** Completecount */
+            completeCount: number;
+            /**
+             * Pendingsourceaccounts
+             * @description S16 (16.3) — contas de origem das linhas da categoria sem conta do banco.
+             */
+            pendingSourceAccounts: components["schemas"]["PendingSourceAccountResponse"][];
+        };
+        /**
+         * AccountingChartListResponse
+         * @description Body de `GET /clients/{client_id}/accounting-chart`.
+         */
+        AccountingChartListResponse: {
+            /** Data */
+            data: components["schemas"]["AccountingAccountResponse"][];
+            pagination: components["schemas"]["PaginationMeta"];
+        };
+        /**
          * AddClientManagerRequest
          * @description Body de POST /api/v1/clients/{id}/managers — concede ACESSO a um gerente.
          */
@@ -2106,43 +2282,6 @@ export interface components {
             /** Status */
             status: string;
         };
-        /**
-         * BankAccountResponse
-         * @description Conta corrente Omie do cache L1 — exposta na tela de detalhe do cliente.
-         *
-         *     `account_type` é o código de 2 letras devolvido pela Omie em
-         *     `tipo_conta_corrente` — `'CC'` (Conta Corrente), `'CR'` (Cartão de
-         *     Crédito), `'CA'` (Conta Aplicação), entre outros. Mantemos `str` em
-         *     vez de enum no response (memória `feedback_pydantic`): se o Omie
-         *     introduzir um novo tipo, a tela continua funcionando mesmo antes do
-         *     backend reconhecê-lo formalmente.
-         */
-        BankAccountResponse: {
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /**
-             * Omie Conta Id
-             * @description nCodCC do Omie (BigInteger).
-             */
-            omie_conta_id: number;
-            /** Name */
-            name: string;
-            /** Bank Name */
-            bank_name: string;
-            /**
-             * Account Type
-             * @description Código Omie: 'CC' (corrente), 'CR' (cartão), 'CA' (aplicação), etc.
-             */
-            account_type: string;
-            /**
-             * Synced At
-             * Format: date-time
-             */
-            synced_at: string;
-        };
         /** BaseStateResponse */
         BaseStateResponse: {
             /** Syncedat */
@@ -2173,6 +2312,14 @@ export interface components {
              * @default false
              */
             confirmRetroactive: boolean;
+        };
+        /** Body_import_accounting_chart_api_v1_clients__client_id__accounting_chart_import_post */
+        Body_import_accounting_chart_api_v1_clients__client_id__accounting_chart_import_post: {
+            /**
+             * File
+             * @description CSV (`;`, UTF-8) ou XLSX no modelo.
+             */
+            file: string;
         };
         /** Body_inspect_file_api_v1_clients__client_id__file_origin_inspect_post */
         Body_inspect_file_api_v1_clients__client_id__file_origin_inspect_post: {
@@ -2251,6 +2398,34 @@ export interface components {
          * @enum {string}
          */
         CategoryMode: "coluna_categoria" | "classificacao_livre";
+        /**
+         * ChartImportEnvelope
+         * @description Body de `POST /clients/{client_id}/accounting-chart/import`.
+         */
+        ChartImportEnvelope: {
+            data: components["schemas"]["ChartImportPayload"];
+        };
+        /**
+         * ChartImportPayload
+         * @description As contagens da importação — só números, nunca código nem nome de conta.
+         */
+        ChartImportPayload: {
+            /**
+             * Contas
+             * @description Contas na planilha importada.
+             */
+            contas: number;
+            /**
+             * Contasnovas
+             * @description Contas que o cliente ainda não tinha.
+             */
+            contasNovas: number;
+            /**
+             * Contasinativadas
+             * @description Contas que estavam ativas e não vieram nesta planilha: passaram a inativas (nunca são apagadas).
+             */
+            contasInativadas: number;
+        };
         /**
          * ChartOfAccountEntryResponse
          * @description Uma linha do plano de contas, como a API a devolve.
@@ -2657,7 +2832,7 @@ export interface components {
              */
             origin_status: components["schemas"]["OriginStatus"];
             /** Accounts */
-            accounts?: components["schemas"]["BankAccountResponse"][];
+            accounts?: components["schemas"]["app__modules__clients__schemas__BankAccountResponse"][];
             /** Accounts Synced At */
             accounts_synced_at?: string | null;
             /**
@@ -3297,6 +3472,16 @@ export interface components {
              * @default omie
              */
             sourceType: string;
+            /**
+             * Accountingaccountid
+             * @description S16 — SÓ no destino `conta_contabil`: a conta ANALÍTICA e ATIVA do plano contábil do próprio cliente (`GET …/accounting-chart?type=analitica&status=ativa`), no lugar de `targetCode`. Conta de outro cliente: 404; sintética ou inativa: 422 `CONTA_CONTABIL_NAO_LANCAVEL`; `targetCode` no `conta_contabil`: 422 `ALVO_EXIGE_PLANO_CONTABIL`; conta do plano em outro destino: 422 `CONTA_CONTABIL_FORA_DO_DESTINO`.
+             */
+            accountingAccountId?: string | null;
+            /**
+             * History
+             * @description S16 — histórico padrão da linha no arquivo contábil (texto fixo por decisão), até 500 caracteres depois de aparar as pontas; vazio = sem histórico. Só acompanha `accountingAccountId`. Cifrado com a chave do cliente; mudar o texto é vigência NOVA. Acima do limite: 400.
+             */
+            history?: string | null;
         };
         /** DecisionViewResponse */
         DecisionViewResponse: {
@@ -3325,6 +3510,22 @@ export interface components {
             divergent: boolean;
             /** Origindrecode */
             originDreCode?: string | null;
+            /**
+             * Accountingaccountid
+             * @description S16 — `conta_contabil`: a conta do plano do cliente da vigência.
+             */
+            accountingAccountId?: string | null;
+            /**
+             * History
+             * @description S16 — `conta_contabil`: o histórico padrão da vigência, decifrado na leitura (`null` = sem histórico; `[indecifrável]` = a chave do cliente não o abre).
+             */
+            history?: string | null;
+            /**
+             * Requiresredo
+             * @description S16 — decisão de alvo em `conta_contabil` apontando o CATÁLOGO da organização (anterior ao plano do cliente). Segue legível e sem conversão automática; precisa ser REFEITA escolhendo uma conta do plano do cliente.
+             * @default false
+             */
+            requiresRedo: boolean;
         };
         /** DecisionWriteEnvelope */
         DecisionWriteEnvelope: {
@@ -3361,6 +3562,16 @@ export interface components {
              * @default omie
              */
             sourceType: string;
+            /**
+             * Accountingaccountid
+             * @description S16 — SÓ no destino `conta_contabil`: a conta ANALÍTICA e ATIVA do plano contábil do próprio cliente (`GET …/accounting-chart?type=analitica&status=ativa`), no lugar de `targetCode`. Conta de outro cliente: 404; sintética ou inativa: 422 `CONTA_CONTABIL_NAO_LANCAVEL`; `targetCode` no `conta_contabil`: 422 `ALVO_EXIGE_PLANO_CONTABIL`; conta do plano em outro destino: 422 `CONTA_CONTABIL_FORA_DO_DESTINO`.
+             */
+            accountingAccountId?: string | null;
+            /**
+             * History
+             * @description S16 — histórico padrão da linha no arquivo contábil (texto fixo por decisão), até 500 caracteres depois de aparar as pontas; vazio = sem histórico. Só acompanha `accountingAccountId`. Cifrado com a chave do cliente; mudar o texto é vigência NOVA. Acima do limite: 400.
+             */
+            history?: string | null;
         };
         /** DecisionWriteResponse */
         DecisionWriteResponse: {
@@ -4122,6 +4333,32 @@ export interface components {
             divergent: boolean;
             /** Origindrecode */
             originDreCode?: string | null;
+            /**
+             * Accountingaccountid
+             * @description S16 — `conta_contabil`: a conta do plano do cliente da vigente.
+             */
+            accountingAccountId?: string | null;
+            /**
+             * Accountingaccountcode
+             * @description S16 — código reduzido.
+             */
+            accountingAccountCode?: string | null;
+            /**
+             * Accountingaccountname
+             * @description S16 — nome da conta, decifrado na leitura (nunca persistido em claro).
+             */
+            accountingAccountName?: string | null;
+            /**
+             * History
+             * @description S16 — histórico padrão da vigente, decifrado (`null` = sem histórico).
+             */
+            history?: string | null;
+            /**
+             * Requiresredo
+             * @description S16 — decisão legada do catálogo da organização em `conta_contabil`: refazer escolhendo uma conta do plano do cliente.
+             * @default false
+             */
+            requiresRedo: boolean;
         };
         /** MappingListResponse */
         MappingListResponse: {
@@ -4180,6 +4417,18 @@ export interface components {
              * @description Última versão materializada (0 = nenhuma).
              */
             latestVersion: number;
+            /** @description S16 (16.4) — SÓ no `conta_contabil` (`null` nos outros): a completude de partida desta prévia — a MESMA conta que a materialização guardará. */
+            partidaCompleteness?: components["schemas"]["PartidaCompletenessResponse"] | null;
+            /**
+             * Pendingsourceaccounts
+             * @description S16 (16.3) — SÓ no `conta_contabil` (`null` nos outros): as contas de origem das linhas com alvo SEM conta contábil do banco. Com qualquer uma, a materialização é 409 `CONTA_DO_BANCO_PENDENTE` — associe em `/clients/{id}/source-accounts`.
+             */
+            pendingSourceAccounts?: components["schemas"]["PendingSourceAccountResponse"][] | null;
+            /**
+             * Accountingcategories
+             * @description S16 — SÓ no destino `conta_contabil` (`null` nos outros): por categoria com alvo, a conta do plano do cliente (código e nome), o histórico padrão, se falta histórico e se a decisão é legada do catálogo.
+             */
+            accountingCategories?: components["schemas"]["AccountingCategoryResponse"][] | null;
         };
         /**
          * MappingSituationCountsResponse
@@ -4350,6 +4599,8 @@ export interface components {
             createdAt: string;
             /** Partialcoverageconfirmed */
             partialCoverageConfirmed: boolean;
+            /** @description S16 (16.4) — a completude de partida da versão gravada (só `conta_contabil`; `null` nos outros). O snapshot é imutável: o número nunca muda. */
+            partidaCompleteness?: components["schemas"]["PartidaCompletenessResponse"] | null;
             preview: components["schemas"]["MappingPreviewResponse"];
         };
         /**
@@ -4413,6 +4664,8 @@ export interface components {
              * @description Quantas vigências a versão usou (snapshot).
              */
             decisionsUsed: number;
+            /** @description S16 (16.4) — completude de partida da versão, calculada sobre o SNAPSHOT dos itens (imutável). Só no `conta_contabil`; `null` nos outros destinos. */
+            partidaCompleteness?: components["schemas"]["PartidaCompletenessResponse"] | null;
         };
         /**
          * MovementsSyncEnvelope
@@ -4884,6 +5137,39 @@ export interface components {
             checksum: components["schemas"]["ChecksumResult"];
             /** File Hash */
             file_hash: string;
+        };
+        /**
+         * PartidaCompletenessResponse
+         * @description S16 (16.4) — a completude de partida: a métrica da sprint, por materialização.
+         *
+         *     Σ|valor| das linhas com PARTIDA COMPLETA (conta do plano + conta do banco +
+         *     histórico) ÷ Σ|valor| das linhas com alvo. Os três números vêm juntos para a conta
+         *     ser conferível. `pct` nulo = nenhuma linha com alvo (nunca "0%" com cara de
+         *     resultado).
+         */
+        PartidaCompletenessResponse: {
+            /** Completeamount */
+            completeAmount: string;
+            /** Targetamount */
+            targetAmount: string;
+            /**
+             * Pct
+             * @description Percentual quantizado a 0,01; `null` sem linha com alvo.
+             */
+            pct?: string | null;
+        };
+        /**
+         * PendingSourceAccountResponse
+         * @description S16 (16.3) — uma conta de origem SEM conta do banco (só identificadores).
+         */
+        PendingSourceAccountResponse: {
+            /** Sourcetype */
+            sourceType: string;
+            /**
+             * Sourceaccountid
+             * @description `null` = o slot da CONTA PADRÃO (linhas sem conta de origem).
+             */
+            sourceAccountId?: string | null;
         };
         /**
          * PlatformAdminItem
@@ -5481,6 +5767,70 @@ export interface components {
             /** @description Movimentos sem categoria de origem: FORA do denominador da cobertura. */
             semCategoria: components["schemas"]["SituationTotalResponse"];
         };
+        /** SourceAccountBindingEnvelope */
+        SourceAccountBindingEnvelope: {
+            data: components["schemas"]["SourceAccountBindingPayload"];
+        };
+        /** SourceAccountBindingPayload */
+        SourceAccountBindingPayload: {
+            entry: components["schemas"]["SourceAccountEntryResponse"];
+            /**
+             * Created
+             * @description `true` = a associação não existia; `false` = foi trocada.
+             */
+            created: boolean;
+        };
+        /**
+         * SourceAccountBindingRequest
+         * @description Corpo de `PUT …/source-accounts` — define ou troca a conta do banco.
+         */
+        SourceAccountBindingRequest: {
+            /**
+             * Sourcetype
+             * @description Tipo do provedor de origem (`omie`, `arquivo`…).
+             */
+            sourceType: string;
+            /**
+             * Sourceaccountid
+             * @description A conta de origem; ausente/`null` = o slot da CONTA PADRÃO do tipo.
+             */
+            sourceAccountId?: string | null;
+            /**
+             * Accountingaccountid
+             * Format: uuid
+             * @description A conta ANALÍTICA e ATIVA do plano contábil do cliente que é o banco.
+             */
+            accountingAccountId: string;
+        };
+        /** SourceAccountEntryResponse */
+        SourceAccountEntryResponse: {
+            /**
+             * Sourcetype
+             * @description Tipo do provedor (`omie`, `arquivo`).
+             */
+            sourceType: string;
+            /**
+             * Sourceaccountid
+             * @description A conta de origem como a base a grava. `null` = o slot da CONTA PADRÃO.
+             */
+            sourceAccountId?: string | null;
+            /**
+             * Isdefault
+             * @description Slot da conta PADRÃO: cobre só as linhas SEM conta de origem (o arquivo sem coluna de conta). Conta de origem sem associação NUNCA cai nela.
+             */
+            isDefault: boolean;
+            /**
+             * Pending
+             * @description Sem conta do banco associada.
+             */
+            pending: boolean;
+            bankAccount?: components["schemas"]["app__modules__client_source_accounts__schemas__BankAccountResponse"] | null;
+        };
+        /** SourceAccountListResponse */
+        SourceAccountListResponse: {
+            /** Data */
+            data: components["schemas"]["SourceAccountEntryResponse"][];
+        };
         /** SyntheticAlertResponse */
         SyntheticAlertResponse: {
             data: components["schemas"]["SyntheticAlertResult"];
@@ -6021,6 +6371,71 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /**
+         * BankAccountResponse
+         * @description A conta do banco no plano contábil do cliente — código e nome da leitura.
+         */
+        app__modules__client_source_accounts__schemas__BankAccountResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Code
+             * @description Código reduzido (o que vai no arquivo contábil).
+             */
+            code: string;
+            /**
+             * Name
+             * @description Nome decifrado na leitura; `[indecifrável]` se a chave não abre.
+             */
+            name: string;
+            /** Nameresolved */
+            nameResolved: boolean;
+            /**
+             * Postable
+             * @description Analítica e ativa HOJE. `false` = a conta foi inativada depois da associação (a associação segue valendo; trocar exige conta analítica e ativa).
+             */
+            postable: boolean;
+        };
+        /**
+         * BankAccountResponse
+         * @description Conta corrente Omie do cache L1 — exposta na tela de detalhe do cliente.
+         *
+         *     `account_type` é o código de 2 letras devolvido pela Omie em
+         *     `tipo_conta_corrente` — `'CC'` (Conta Corrente), `'CR'` (Cartão de
+         *     Crédito), `'CA'` (Conta Aplicação), entre outros. Mantemos `str` em
+         *     vez de enum no response (memória `feedback_pydantic`): se o Omie
+         *     introduzir um novo tipo, a tela continua funcionando mesmo antes do
+         *     backend reconhecê-lo formalmente.
+         */
+        app__modules__clients__schemas__BankAccountResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Omie Conta Id
+             * @description nCodCC do Omie (BigInteger).
+             */
+            omie_conta_id: number;
+            /** Name */
+            name: string;
+            /** Bank Name */
+            bank_name: string;
+            /**
+             * Account Type
+             * @description Código Omie: 'CC' (corrente), 'CR' (cartão), 'CA' (aplicação), etc.
+             */
+            account_type: string;
+            /**
+             * Synced At
+             * Format: date-time
+             */
+            synced_at: string;
         };
     };
     responses: never;
@@ -7355,6 +7770,157 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InputMappingWriteEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_accounting_chart_api_v1_clients__client_id__accounting_chart_get: {
+        parameters: {
+            query?: {
+                /** @description Página, a partir de 1. */
+                page?: number;
+                /** @description Itens por página (máx. 100). */
+                pageSize?: number;
+                /** @description Busca por PREFIXO do código reduzido. Curingas de `LIKE` são literais. */
+                code?: string | null;
+                /** @description `analitica` ou `sintetica`. Ausente = os dois. */
+                type?: components["schemas"]["AccountingAccountType"] | null;
+                /** @description `ativa` ou `inativa`. Ausente = as duas. */
+                status?: ("ativa" | "inativa") | null;
+            };
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountingChartListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_accounting_chart_api_v1_clients__client_id__accounting_chart_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_import_accounting_chart_api_v1_clients__client_id__accounting_chart_import_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChartImportEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_source_accounts_api_v1_clients__client_id__source_accounts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceAccountListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_source_account_api_v1_clients__client_id__source_accounts_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SourceAccountBindingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceAccountBindingEnvelope"];
                 };
             };
             /** @description Validation Error */

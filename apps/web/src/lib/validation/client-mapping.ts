@@ -4,6 +4,8 @@
  *
  * A validação aqui é UX; a autoridade é o servidor. As regras espelhadas:
  *   - `alvo` EXIGE `targetCode`; `nao_mapear` NÃO aceita (validador do modelo);
+ *   - no destino `conta_contabil` (S16) o alvo é `accountingAccountId` e o
+ *     histórico padrão tem até `MAPPING_HISTORY_MAX_CHARS` (aparado);
  *   - competência `YYYY-MM` (`COMPETENCE_PATTERN` do backend);
  *   - importação: `.xlsx` de até 2 MB (`MAX_IMPORT_BYTES`), a mesma frase do
  *     `userMessage` do servidor para o arquivo inválido.
@@ -52,6 +54,50 @@ export const mappingDecisionFormSchema = z
   });
 
 export type MappingDecisionFormValues = z.infer<typeof mappingDecisionFormSchema>;
+
+/**
+ * Teto do histórico padrão (S16, destino `conta_contabil`): **500 caracteres
+ * depois de aparar as pontas** — `MAX_DECISION_HISTORY_CHARS` do backend,
+ * DOCUMENTADO no contrato (descrição de `history` em `DecisionWriteRequest`). O
+ * OpenAPI não carrega `maxLength` para o campo, então o número vem da doc do
+ * contrato, não de um palpite do front. Acima dele o servidor responde 400.
+ */
+export const MAPPING_HISTORY_MAX_CHARS = 500;
+
+export const HISTORY_TOO_LONG_MESSAGE = `O histórico padrão tem no máximo ${MAPPING_HISTORY_MAX_CHARS} caracteres.`;
+
+/**
+ * Decisão no destino `conta_contabil` (S16): o alvo é uma conta do plano do
+ * CLIENTE (`accountingAccountId`, nunca `targetCode`) e a decisão leva o
+ * histórico padrão (opcional). `nao_mapear` não leva conta nem histórico.
+ */
+export const mappingAccountingDecisionFormSchema = z
+  .object({
+    decision: mappingDecisionTypeSchema,
+    accountingAccountId: z.string(),
+    history: z.string(),
+    effectiveFrom: competenceSchema,
+  })
+  .superRefine((values, ctx) => {
+    if (values.decision === 'alvo' && values.accountingAccountId === '') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['accountingAccountId'],
+        message: 'Escolha uma conta do plano contábil do cliente ou marque "Não mapear".',
+      });
+    }
+    if (values.history.trim().length > MAPPING_HISTORY_MAX_CHARS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['history'],
+        message: HISTORY_TOO_LONG_MESSAGE,
+      });
+    }
+  });
+
+export type MappingAccountingDecisionFormValues = z.infer<
+  typeof mappingAccountingDecisionFormSchema
+>;
 
 export const mappingVigenciaFormSchema = z.object({ effectiveFrom: competenceSchema });
 

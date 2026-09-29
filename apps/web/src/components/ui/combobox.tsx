@@ -55,6 +55,24 @@ export interface ComboboxProps {
   /** Lista ainda carregando: o gatilho mostra spinner e não abre. */
   loading?: boolean;
   className?: string;
+  /**
+   * Busca no SERVIDOR (S16): recebe cada termo digitado — quem chama refaz a
+   * query e troca `options`. O filtro local continua valendo sobre o que
+   * chegou (código e rótulo), então o termo nunca some da lista que o casou.
+   */
+  onSearchChange?: (query: string) => void;
+  /**
+   * Rótulo do valor escolhido quando ele NÃO está em `options` — com busca no
+   * servidor, a página atual pode não conter a opção já selecionada.
+   */
+  selectedLabel?: string | null;
+  /** Linha de apoio sob a lista (ex.: "mostrando as 100 primeiras — refine a busca"). */
+  listHint?: string | null;
+  /** `id` do gatilho, para um `<Label htmlFor>` ou `aria-describedby` externo. */
+  id?: string;
+  /** Liga o gatilho a uma mensagem de erro/ajuda (ex.: o 422 do campo). */
+  'aria-describedby'?: string;
+  'aria-invalid'?: boolean;
 }
 
 /** Ignora acento e caixa — "servicos" acha "Serviços". */
@@ -76,6 +94,12 @@ export function Combobox({
   disabled = false,
   loading = false,
   className,
+  onSearchChange,
+  selectedLabel = null,
+  listHint = null,
+  id,
+  'aria-describedby': ariaDescribedBy,
+  'aria-invalid': ariaInvalid,
 }: ComboboxProps) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
@@ -84,7 +108,9 @@ export function Combobox({
   const optionId = (index: number) => `${listId}-option-${index}`;
   const listRef = React.useRef<HTMLUListElement>(null);
 
-  const selected = options.find((o) => o.value === value) ?? null;
+  const selected =
+    options.find((o) => o.value === value) ??
+    (value !== null && selectedLabel ? { value, label: selectedLabel } : null);
 
   const filtered = React.useMemo(() => {
     const q = normalize(query.trim());
@@ -112,6 +138,7 @@ export function Combobox({
     onValueChange(option.value);
     setOpen(false);
     setQuery('');
+    onSearchChange?.('');
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>): void {
@@ -146,11 +173,17 @@ export function Combobox({
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        if (!next) setQuery('');
+        if (!next) {
+          setQuery('');
+          onSearchChange?.('');
+        }
       }}
     >
       <PopoverTrigger
         type="button"
+        id={id}
+        aria-describedby={ariaDescribedBy}
+        aria-invalid={ariaInvalid}
         disabled={disabled || loading}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -191,7 +224,10 @@ export function Combobox({
             aria-activedescendant={filtered.length > 0 ? optionId(activeIndex) : undefined}
             aria-label={`${label} — buscar`}
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              onSearchChange?.(e.target.value);
+            }}
             onKeyDown={handleKeyDown}
             placeholder={searchPlaceholder}
             className="placeholder:text-muted-foreground h-9 w-full bg-transparent text-sm outline-none"
@@ -227,13 +263,17 @@ export function Combobox({
               )}
             >
               <Check
-                className={cn('h-4 w-4 shrink-0', option.value === value ? 'opacity-100' : 'opacity-0')}
+                className={cn(
+                  'h-4 w-4 shrink-0',
+                  option.value === value ? 'opacity-100' : 'opacity-0',
+                )}
                 aria-hidden="true"
               />
               <span className="truncate">{option.label}</span>
             </li>
           ))}
         </ul>
+        {listHint && <p className="text-muted-foreground border-t px-3 py-2 text-xs">{listHint}</p>}
       </PopoverContent>
     </Popover>
   );

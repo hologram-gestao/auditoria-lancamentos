@@ -246,6 +246,8 @@ function item(overrides: Partial<MappingListItem> = {}): MappingListItem {
     effectiveFrom: '2026-09',
     divergent: false,
     originDreCode: '3.1',
+    // S16: campo novo do contrato (sempre presente; `true` só em legado do `conta_contabil`).
+    requiresRedo: false,
     ...overrides,
   };
 }

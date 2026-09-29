@@ -233,25 +233,38 @@ describe('SidebarNav — camada do cliente', () => {
     expect(within(nav).getByText('Cliente Exemplo Ltda')).toBeInTheDocument();
   });
 
-  it('operador do cliente: sem Voltar e sem Usuários — 7 seções', () => {
+  it('operador do cliente: sem Voltar e sem Usuários — 8 seções', () => {
     currentPathname = '/clientes/c1';
     render(<SidebarNav user={CLIENT_OPERATOR} />);
 
     const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
     const links = within(nav).getAllByRole('link');
-    // "Plano de Contas" entrou na S10, "Carteira" na S11 e "De-para" na S12:
-    // LER é de todo papel que alcança o cliente nos três casos (o operador
-    // inclusive). Quem some para ele é a ESCRITA — sincronizar, editar o
-    // de-para —, dentro de cada tela, não o item de menu.
+    // "Plano de Contas" entrou na S10, "Carteira" na S11, "De-para" na S12 e
+    // "Plano contábil" na S16: LER é de todo papel que alcança o cliente nos
+    // quatro casos (o operador inclusive). Quem some para ele é a ESCRITA —
+    // sincronizar, editar o de-para, importar o plano —, dentro de cada tela.
     expect(links.map((l) => l.textContent)).toEqual([
       'Conciliações',
       'Contas Bancárias',
       'Painel',
       'Glossário',
       'Plano de Contas',
+      'Plano contábil',
       'Carteira',
       'De-para',
     ]);
+  });
+
+  it('"Plano contábil" (S16) fica ativo na própria rota, sem marcar "Plano de Contas" nem "Conciliações"', () => {
+    currentPathname = '/clientes/c1/plano-contabil';
+    render(<SidebarNav user={CLIENT_OPERATOR} />);
+
+    const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
+    const current = within(nav)
+      .getAllByRole('link')
+      .filter((link) => link.getAttribute('aria-current') === 'page')
+      .map((link) => link.textContent);
+    expect(current).toEqual(['Plano contábil']);
   });
 
   it('"Origem por arquivo" (S14) só existe para o cliente com conexão `arquivo`', () => {
