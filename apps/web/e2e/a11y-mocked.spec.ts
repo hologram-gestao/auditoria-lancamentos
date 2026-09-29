@@ -7079,6 +7079,9 @@ for (const vp of VIEWPORTS) {
       // Print ANTES do `focus()` abaixo: focar a dica rola a tabela na
       // horizontal até a coluna Histórico, e a coluna Categoria sai de quadro
       // justamente a 390px, onde ela é a que precisa de conferência visual.
+      // `scrollIntoViewIfNeeded` porque quem rola é o `<main>`: sem ele o
+      // `fullPage` pega o topo da página e a tabela nem aparece no PNG.
+      await secao.scrollIntoViewIfNeeded();
       await shot(page, `de-para-conta-contabil-previa-categoria-${slugDC}`);
       // Histórico truncado: a íntegra está no nome acessível (dica), sem `title`.
       const dica = secao.getByRole('img', { name: `Histórico padrão: ${HISTORICO_LONGO}` });
