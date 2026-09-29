@@ -96,6 +96,11 @@ import {
   PendingSourceAccountsNotice,
   readBankAccountPending,
 } from './accounting-destination';
+import {
+  AccountingFileGeneratorProvider,
+  AccountingFileSection,
+  GenerateVersionButton,
+} from './accounting-file-section';
 import { AccountingPreviewSection } from './accounting-preview-section';
 
 /**
@@ -128,6 +133,20 @@ interface MappingPreviewPanelProps {
    * (§4.9); no lugar entra "Enviar arquivo do mês".
    */
   fileOrigin?: boolean;
+  /**
+   * S13 (FRONT 13.6): `generate_accounting_file` — a seção "Arquivo contábil"
+   * (gerar, histórico, baixar) existe só com ela e só no `conta_contabil`.
+   */
+  canGenerateFile?: boolean;
+  /** `manage_export_layouts` — decide o texto do estado "sem layout". */
+  canManageLayouts?: boolean;
+  /**
+   * A organização do cliente, SÓ para a plataforma (lê os layouts de todas; o
+   * layout precisa ser da organização do cliente). Staff: `null`.
+   */
+  layoutsOrganizationId?: string | null;
+  /** Leva à lista de decisões filtrada pela categoria recusada. */
+  onReviewCategory?: (categoryCode: string) => void;
 }
 
 export function MappingPreviewPanel({
@@ -142,8 +161,13 @@ export function MappingPreviewPanel({
   isClosed,
   originStatus,
   fileOrigin = false,
+  canGenerateFile = false,
+  canManageLayouts = false,
+  layoutsOrganizationId = null,
+  onReviewCategory = () => undefined,
 }: MappingPreviewPanelProps) {
   const validCompetence = isCompetence(competence) ? competence : '';
+  const showAccountingFile = canGenerateFile && isAccountingDestination(destination.type);
   const stateQuery = useMovementsSyncState(clientId, validCompetence);
   const neverSynced = stateQuery.data?.neverSynced === true;
   // Nunca pedir a prévia de uma base que nunca foi sincronizada: o servidor
@@ -220,7 +244,7 @@ export function MappingPreviewPanel({
     </Button>
   );
 
-  return (
+  const body = (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <div className="space-y-1.5 sm:w-56">
@@ -284,7 +308,36 @@ export function MappingPreviewPanel({
           onStale={() => void previewQuery.refetch()}
         />
       ) : null}
+
+      {/* S13: fora do bloco da prévia de propósito — o histórico de gerações
+          (e o motivo, no cliente encerrado) aparece mesmo quando a prévia não
+          pôde ser calculada. */}
+      {showAccountingFile && validCompetence !== '' && (
+        <AccountingFileSection
+          clientId={clientId}
+          competence={validCompetence}
+          isClosed={isClosed}
+          canManageLayouts={canManageLayouts}
+          canEditMapping={canManage}
+          onReviewCategory={onReviewCategory}
+        />
+      )}
     </div>
+  );
+
+  return showAccountingFile ? (
+    <AccountingFileGeneratorProvider
+      clientId={clientId}
+      destinationType={destination.type}
+      competence={validCompetence}
+      layoutsOrganizationId={layoutsOrganizationId}
+      enabled
+      isClosed={isClosed}
+    >
+      {body}
+    </AccountingFileGeneratorProvider>
+  ) : (
+    body
   );
 }
 
@@ -711,6 +764,9 @@ function MaterializedVersions({
                         : formatPercent(item.partidaCompleteness.pct)}
                     </span>
                   )}
+                  {/* S13: gerar o arquivo DESTA versão (a da prévia gera a mais recente).
+                      Fora do provider (sem permissão, outro destino) não renderiza. */}
+                  <GenerateVersionButton materializationId={item.id} version={item.version} />
                 </div>
               </li>
             ))}

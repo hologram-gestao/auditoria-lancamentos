@@ -137,6 +137,11 @@ describe('SidebarNav — camada global', () => {
     // taxonomia é global do produto e só a plataforma a edita. O item e a rota
     // somem JUNTOS — os dois consultam `manage_anomaly_types`.
     expect(within(nav).queryByRole('link', { name: 'Tipos de Anomalia' })).not.toBeInTheDocument();
+    // S13 (R3): layouts de exportação são configuração da organização — o admin vê.
+    expect(within(nav).getByRole('link', { name: 'Layouts de exportação' })).toHaveAttribute(
+      'href',
+      '/configuracoes/layouts-exportacao',
+    );
     await assertNoA11yViolations(container);
   });
 
@@ -152,6 +157,7 @@ describe('SidebarNav — camada global', () => {
     expect(within(nav).getByRole('link', { name: 'Usuários' })).toBeInTheDocument();
     expect(within(nav).getByRole('link', { name: 'Categorias de Cliente' })).toBeInTheDocument();
     expect(within(nav).getByRole('link', { name: 'Tipos de Anomalia' })).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: 'Layouts de exportação' })).toBeInTheDocument();
     expect(within(nav).getByRole('link', { name: 'Clientes' })).toBeInTheDocument();
     await assertNoA11yViolations(container);
   });
@@ -163,6 +169,21 @@ describe('SidebarNav — camada global', () => {
     expect(within(nav).getByRole('link', { name: 'Clientes' })).toBeInTheDocument();
     expect(within(nav).queryByText('Configurações')).not.toBeInTheDocument();
     expect(within(nav).queryByRole('link', { name: 'Usuários' })).not.toBeInTheDocument();
+    // S13: o gerente GERA o arquivo contábil, mas não administra os layouts.
+    expect(
+      within(nav).queryByRole('link', { name: 'Layouts de exportação' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('usuários do cliente não veem "Layouts de exportação" (S13)', () => {
+    for (const user of [CLIENT_MANAGER, CLIENT_OPERATOR]) {
+      const { unmount } = render(<SidebarNav user={user} />);
+      const nav = screen.getByRole('navigation', { name: 'Navegação principal' });
+      expect(
+        within(nav).queryByRole('link', { name: 'Layouts de exportação' }),
+      ).not.toBeInTheDocument();
+      unmount();
+    }
   });
 
   it('tenant em deep link de OUTRO tenant degrada para a camada global dele', () => {

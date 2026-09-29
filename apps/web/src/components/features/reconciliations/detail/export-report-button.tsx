@@ -21,6 +21,7 @@ import { OriginStateBlock } from '@/components/shared/origin-state-notice';
 import { Button } from '@/components/ui/button';
 import { useExportReconciliation } from '@/hooks/use-reconciliations';
 import { ApiError, NetworkError } from '@/lib/api/client';
+import { triggerBrowserDownload } from '@/lib/download';
 import { originErrorCode, type OriginErrorCode } from '@/lib/origin-state';
 
 interface ExportReportButtonProps {
@@ -85,22 +86,6 @@ export function ExportReportButton({
       )}
     </Button>
   );
-}
-
-/**
- * Cria um link temporário e dispara o `click()` — padrão idiomático para
- * download de blob. `URL.revokeObjectURL` no fim libera a memória (Chrome e
- * Firefox seguram a referência indefinidamente sem o revoke).
- */
-function triggerBrowserDownload(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
 }
 
 /** Reusa o `userMessage` do backend (já em PT-BR) quando existe. */
