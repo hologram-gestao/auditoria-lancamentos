@@ -822,6 +822,30 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   nunca aceite silencioso (o `1500.50` virava R$ 150.050,00).
 - **Log da aplicação se afirma com `structlog.testing.capture_logs`, não com `caplog`**: o
   `caplog` não vê o structlog, e o teste "nada de PII no log" passa vazio.
+- **A resposta HTTP só sai depois do `commit()` — sempre, em toda rota, por um middleware
+  ÚNICO, nunca por commit espalhado** (86e3fxqqa): `get_db_session` faz `commit()` no
+  pós-`yield`, e o FastAPI instalado só fecha esse `AsyncExitStack` **depois** de
+  `await response(...)` já ter despachado a resposta (confirmado lendo
+  `fastapi/routing.py::request_response` do pacote instalado — nunca suponha isso de
+  memória, a versão pode mudar o mecanismo). Sem tratamento, o cliente vê sucesso antes do
+  dado existir — medido em até 14 de 15 criações na validação da Sprint 16.
+  `CommitBeforeResponseMiddleware` (`app/core/response_ordering.py`), o middleware mais
+  INTERNO da pilha (ver `main.py::create_app`), resolve: é ASGI puro, não
+  `BaseHTTPMiddleware` — o `call_next()` deste último já retorna no primeiro chunk via um
+  `anyio.create_memory_object_stream()` sem buffer, então o commit ainda corre concorrente
+  com o envio, só com uma folga menor (não elimina a corrida, testado). Um middleware puro
+  não abre task concorrente: `await self.app(...)` só retorna quando TUDO abaixo —
+  dependências, exit stack, commit incluso — já terminou; por isso ele bufferiza as
+  mensagens ASGI da resposta e só as repassa ao `send` real depois disso. Se o commit
+  falhar, nada foi enviado ainda, e a exceção sobe limpa até o `ServerErrorMiddleware`. A
+  alternativa "óbvia" — uma `APIRoute` customizada — não funciona sem tocar TODO
+  `routes.py` do projeto: `APIRouter.include_router()` sempre recria a rota com
+  `route_class_override=type(route)`, ignorando o `route_class` do router de destino.
+  Provar isso em teste exige servidor uvicorn real
+  (`tests/integration/test_response_ordering.py`): `httpx.ASGITransport` roda a app
+  inteira numa única coroutine e não reproduz a corrida nem sem o middleware — só um
+  servidor real, com socket de verdade, separa "bytes no cliente" de "o resto da
+  coroutine do servidor continua".
 
 ### Frontend
 
@@ -1255,6 +1279,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.60 — 29/09/2026. **As 3 subtasks abertas do épico de follow-ups da Sprint 16 (86e3fxqq7) foram entregues num PR só, fora do sandbox dos agents.** A 4ª (desbloquear a S13) já estava `done` desde a v1.59. **86e3fxqqa — a resposta antes do commit, achado desde a v1.57, está CORRIGIDA**: `CommitBeforeResponseMiddleware` (`app/core/response_ordering.py`, novo §7 Backend) garante que nenhum byte da resposta sai antes do `commit()` de `get_db_session`, em toda rota, sem tocar em nenhum `routes.py`. A prova exigiu servidor uvicorn real — `httpx.ASGITransport` roda a app inteira numa coroutine só e não reproduz a corrida (confirmado tentando: 0/100 falhas com o middleware, ~35/100 sem ele, no mesmo teste). **86e3fxqqe — a portabilidade do de-para (Sprint 12) volta a importar no destino `conta_contabil`**: a planilha ganhou a coluna `historico`, resolvida pela MESMA cifra/decifra da decisão manual (`accounting.py`); conta inexistente, sintética ou inativa recusa a planilha INTEIRA (`CONTAS_DA_PLANILHA_INVALIDAS`, molde da `FileLinesInvalidError` da S14) — histórico acima do limite recusa só a linha. `MappingImportUnavailableError`/`IMPORTACAO_INDISPONIVEL_NO_DESTINO` saíram do código. **86e3fxqqh — a prévia "Partida contábil" mostra o nome da categoria**, pela mesma resolução da lista de decisões: `resolve_category_names` saiu de método privado de `ClientMappingListService` para função do módulo `listing.py`, chamada agora também por `ClientMappingApplyService` — as duas telas não podem mais divergir porque são a MESMA chamada. Suíte completa contra Postgres verde, vitest 1024 (1021 + 3), contrato com diff 0 (só a `categoryName`/`categoryNameResolved` novas e o texto das rotas de import). Pares de AAD, endpoints sensíveis e matriz de permissões **não mudaram** — nenhuma rota nem permissão nova, só comportamento de rotas e campos existentes._
 
 _Versão 1.59 — 29/09/2026. **A Sprint 13 (exportador para sistema contábil) entrou no primer, e o primer foi restaurado pela QUARTA vez.** O commit do QA (`1012e8e`) levou o `CLAUDE.md` do worktree (o prompt do papel, 87 linhas) por cima das 1311 do primer, e a edição do `PROJECT.md` foi negada na sessão dele; o patch ficou no `HANDOFF.md` e a validação humana (86e3fypch) o aplicou com cada número conferido por comando: §3.15 com as 8 rotas novas (108 → **116**) e `GET /export-layout-templates` fora com motivo; §4.9 com `generate_accounting_file` e `manage_export_layouts` (27 → **29**) e o porquê de `review_export` não servir; §4.12 com as gerações (ficam no encerramento, saem antes das materializações na exclusão definitiva); §8 com a linha e o parágrafo da S13. Pares de AAD seguem **17**. As 4 decisões do planejador da sprint (quem lê layouts, quem lista gerações, o `<N>` do nome do arquivo e as casas decimais) foram validadas pelo Pedro e mantidas. A causa desta vez foi dupla: o `AGENT_PATHS_QA` alcança o `CLAUDE.md` do worktree, e o hub semeou os `PROJECT.md` de uma `develop` LOCAL sem a S16. O hub passou a semear do commit de onde o worktree saiu, a tirar o `CLAUDE.md` do worktree de todo commit e a recusar primer que encolhe ou perde a última `_Versão` (86e3fyjan, repositório `agents-hub`); a skill `sprint-preflight` exige a `develop` local igual à do origin. A validação rodou o que o QA não pôde: pytest completo contra Postgres em Python 3.12 (3920 passed, 0 failed), ciclo das 2 migrations, contrato com diff 0, vitest 1020, a11y 558 por tema nos três temas, 102 verificações pela API (o arquivo gerado da amostra é o CSV real do escritório byte a byte) e prints desktop e 390px. No mesmo PR entraram os dois outros follow-ups do QA: prefixo do valor e cabeçalho de coluna que começam com `= + - @` são 422 (`FORMULA_PREFIXES` virou fonte única, na definição do layout), e três estados do front (diálogo de layout que não resetava, recusa velha na tela depois de materializar de novo, diálogo do modelo fechando com o POST em andamento). A resposta antes do commit (86e3fxqqa) apareceu de novo, duas vezes, no cenário pela API._
 
