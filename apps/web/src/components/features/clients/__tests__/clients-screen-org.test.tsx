@@ -262,3 +262,34 @@ describe('Clientes — "Novo Cliente" é decidido pela matriz', () => {
     expect(container).toBeEmptyDOMElement();
   });
 });
+
+describe('Clientes — encerrar pela lista (86e3fr9qj)', () => {
+  it('admin vê "Encerrar" no cliente aberto e o ícone abre o diálogo de encerramento', async () => {
+    authState.user = ORG_ADMIN;
+    render(<ClientesPage />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Encerrar Cliente Exemplo Ltda' }));
+
+    expect(
+      await screen.findByRole('alertdialog', { name: 'Encerrar cliente' }),
+    ).toBeInTheDocument();
+  });
+
+  it('cliente já encerrado não oferece a ação (o servidor daria 409)', () => {
+    authState.user = ORG_ADMIN;
+    listState.data = {
+      data: [client({ closed_at: '2026-09-10T12:00:00Z', name: 'Cliente encerrado #abc12345' })],
+      pagination: { page: 1, pageSize: 20, total: 1, totalPages: 1 },
+    };
+    render(<ClientesPage />);
+
+    expect(screen.queryByRole('button', { name: /^Encerrar / })).not.toBeInTheDocument();
+  });
+
+  it('gerente não vê a ação: encerrar é edit_client', () => {
+    authState.user = ORG_MANAGER;
+    render(<ClientesPage />);
+
+    expect(screen.queryByRole('button', { name: /^Encerrar / })).not.toBeInTheDocument();
+  });
+});
