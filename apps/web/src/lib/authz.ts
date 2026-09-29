@@ -173,14 +173,28 @@ export type Permission =
    * fora é decisão do planejador do backend (ADR-086-BE), pendente de validação
    * humana — espelhada como está. A LEITURA do plano não pede permissão.
    */
-  | 'manage_client_accounting_chart';
+  | 'manage_client_accounting_chart'
+  /**
+   * Sprint 13 (R3 — BACK 13.2): GERAR, listar e BAIXAR o arquivo contábil de um
+   * cliente. Células DECIDIDAS no PRD: staff. Permissão PRÓPRIA, e NÃO
+   * `review_export` (dos cinco papéis): o arquivo é artefato de trabalho do
+   * escritório, e reusá-la deixaria o `client_operator` baixá-lo. Também LÊ os
+   * layouts da organização — quem gera escolhe o layout (ADR-091-BE).
+   */
+  | 'generate_accounting_file'
+  /**
+   * Sprint 13 (R3 — BACK 13.2): ADMINISTRAR os layouts de exportação da
+   * ORGANIZAÇÃO (criar, versionar, criar a partir do modelo). Plataforma e admin:
+   * uma versão nova muda o arquivo de TODOS os clientes da organização.
+   */
+  | 'manage_export_layouts';
 
 /**
  * A matriz, indexada por PAPEL (e não por permissão) de propósito: assim o
  * `Record<UserRole, ...>` obriga a lista a cobrir todo papel do contrato.
  *
  * Transcrita célula a célula de `apps/api/app/core/authz.py::PERMISSION_MATRIX`
- * (27 permissões × 5 papéis desde a Sprint 16) e travada em `__tests__/authz.test.ts`.
+ * (29 permissões × 5 papéis desde a Sprint 13) e travada em `__tests__/authz.test.ts`.
  *
  * | Ação                          | platform_admin | admin | manager | client_manager | client_operator |
  * | ----------------------------- | -------------- | ----- | ------- | -------------- | --------------- |
@@ -211,6 +225,8 @@ export type Permission =
  * | Enviar arquivo (S14)          | ✅             | ✅    | ✅ (carteira) | ✅       | ✅              |
  * | Configurar mapeamento (S14)   | ✅             | ✅    | ✅ (carteira) | ✅       | ❌              |
  * | Plano contábil (S16)          | ✅             | ✅    | ✅ (carteira) | ❌       | ❌              |
+ * | Gerar arquivo contábil (S13)  | ✅             | ✅    | ✅ (carteira) | ❌       | ❌              |
+ * | Layouts de exportação (S13)   | ✅             | ✅ (org) | ❌   | ❌             | ❌              |
  *
  * "(carteira)" e "(própria org)" **não são células**: são `resolve_client_access`
  * e os filtros de coleção, no servidor. A célula diz se o papel pode a AÇÃO.
@@ -247,6 +263,8 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'upload_client_file',
     'manage_input_mapping',
     'manage_client_accounting_chart',
+    'generate_accounting_file',
+    'manage_export_layouts',
   ],
   // D3 final (86e36ed1d): `manage_anomaly_types` saiu daqui. A taxonomia de
   // anomalias é uma tabela GLOBAL do produto — o admin de uma organização
@@ -278,6 +296,10 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     'upload_client_file',
     'manage_input_mapping',
     'manage_client_accounting_chart',
+    // S13: gera o arquivo contábil E administra os layouts da própria organização
+    // (o "(org)" é o filtro do servidor, não a célula).
+    'generate_accounting_file',
+    'manage_export_layouts',
   ],
   // O gerente da organização enxerga outros tenants apenas dentro da carteira —
   // quem sabe a carteira é o backend (`client_assignments`), ver `canAccessClient`.
@@ -312,6 +334,9 @@ const PERMISSION_MATRIX: Record<UserRole, readonly Permission[]> = {
     // S16: o plano contábil é configuração do escritório — o gerente importa e
     // associa a conta do banco dos clientes da carteira (ADR-086-BE).
     'manage_client_accounting_chart',
+    // S13: o gerente GERA e baixa o arquivo contábil dos clientes da carteira;
+    // os layouts são configuração da organização, e esses ele não administra.
+    'generate_accounting_file',
   ],
   client_manager: [
     'run_reconciliation',

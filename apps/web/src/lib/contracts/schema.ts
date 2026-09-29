@@ -1044,6 +1044,127 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/export-layout-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Modelos de layout declarados no código (hoje: Domínio, lançamentos contábeis em CSV), com a definição completa. Sem dado de organização nem de cliente. Requer `manage_export_layouts` ou `generate_accounting_file`. */
+        get: operations["list_export_layout_templates_api_v1_export_layout_templates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/export-layouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista os layouts de exportação da organização de quem pede (a plataforma vê todas; `organizationId` restringe), com a última versão. Requer `manage_export_layouts` ou `generate_accounting_file`. */
+        get: operations["list_export_layouts_api_v1_export_layouts_get"];
+        put?: never;
+        /** Cria um layout (versão 1) na organização do ator (a plataforma escolhe, obrigatório). Campo fora do vocabulário, parâmetro inválido ou codificação desconhecida: 422 `LAYOUT_INVALIDO` com `details.field`, nada gravado. Nome repetido na organização: 409. Requer `manage_export_layouts`. */
+        post: operations["create_export_layout_api_v1_export_layouts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/export-layouts/from-template": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cria o layout da organização a partir de um modelo do código numa ação só (`templateKey`; nome opcional, padrão o do modelo). Modelo inexistente: 404; nome repetido: 409. Requer `manage_export_layouts`. */
+        post: operations["create_export_layout_from_template_api_v1_export_layouts_from_template_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/export-layouts/{layout_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Um layout com TODAS as versões (da mais nova para a mais antiga), só leitura. 404 fora da própria organização. Requer `manage_export_layouts` ou `generate_accounting_file`. */
+        get: operations["get_export_layout_api_v1_export_layouts__layout_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/export-layouts/{layout_id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Grava a versão N+1 do layout — as anteriores ficam intactas e consultáveis (um arquivo já gerado continua explicável pela versão que o gerou). 422 como na criação; 404 fora da própria organização; 409 se a organização estiver suspensa. Requer `manage_export_layouts`. */
+        post: operations["create_export_layout_version_api_v1_export_layouts__layout_id__versions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/accounting-files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Histórico de gerações do arquivo contábil do cliente (só metadados, mais recentes primeiro; `competence` filtra; paginado com `page`/`pageSize`, máximo 100). Legível também com o cliente encerrado. Requer `generate_accounting_file`. */
+        get: operations["list_accounting_files_api_v1_clients__client_id__accounting_files_get"];
+        put?: never;
+        /** Gera o arquivo contábil da competência no layout escolhido (da organização do cliente; outra org = 404). Padrão: a ÚLTIMA materialização do destino Conta contábil; `materializationId` gera uma versão anterior. Registra a geração (só metadados + SHA-256, nunca o conteúdo) e a trilha `export`. Recusas 409: sem materialização (`ARQUIVO_SEM_MATERIALIZACAO`, nunca materializa sozinho) e as do gerador (`ARQUIVO_DESTINO_INVALIDO`, `ARQUIVO_COBERTURA_PARCIAL`, `ARQUIVO_PARTIDA_INCOMPLETA`, `ARQUIVO_PARTICAO_NAO_FECHA`, `ARQUIVO_TEXTO_NAO_CABE`, com os códigos das categorias em `details`). Cliente encerrado: 409. Requer `generate_accounting_file`. */
+        post: operations["generate_accounting_file_api_v1_clients__client_id__accounting_files_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/accounting-files/{generation_id}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Baixa o arquivo de uma geração: REGENERA a partir da materialização e da versão de layout registradas e confere o SHA-256. Bate → o arquivo (`lancamentos_<AAAA-MM>_v<versão da materialização>.csv`, `Content-Type` com o charset do layout) e a trilha `export`. Não bate → 409 `ARQUIVO_DIVERGENTE` e alerta, nunca um arquivo diferente. Cliente encerrado: 409. Requer `generate_accounting_file`. */
+        get: operations["download_accounting_file_api_v1_clients__client_id__accounting_files__generation_id__download_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clients/{client_id}/glossary": {
         parameters: {
             query?: never;
@@ -1880,6 +2001,74 @@ export interface components {
             data: components["schemas"]["AccountingAccountResponse"][];
             pagination: components["schemas"]["PaginationMeta"];
         };
+        /** AccountingFileGenerationEnvelope */
+        AccountingFileGenerationEnvelope: {
+            data: components["schemas"]["AccountingFileGenerationItem"];
+        };
+        /**
+         * AccountingFileGenerationItem
+         * @description Uma geração registrada — só metadados.
+         */
+        AccountingFileGenerationItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Competence
+             * @description `YYYY-MM`.
+             */
+            competence: string;
+            /**
+             * Materializationid
+             * Format: uuid
+             */
+            materializationId: string;
+            /** Materializationversion */
+            materializationVersion: number;
+            /**
+             * Layoutid
+             * Format: uuid
+             */
+            layoutId: string;
+            /** Layoutname */
+            layoutName: string;
+            /** Layoutversion */
+            layoutVersion: number;
+            /**
+             * Lines
+             * @description Linhas do arquivo.
+             */
+            lines: number;
+            /**
+             * Totalamount
+             * @description Σ|valor| das linhas do arquivo (em reais).
+             */
+            totalAmount: string;
+            /**
+             * Sha256
+             * @description SHA-256 do conteúdo (o download confere contra ele).
+             */
+            sha256: string;
+            /**
+             * Filename
+             * @description Nome do arquivo no download.
+             */
+            fileName: string;
+            author: components["schemas"]["SessionAuthor"];
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
+        /** AccountingFileGenerationListResponse */
+        AccountingFileGenerationListResponse: {
+            /** Data */
+            data: components["schemas"]["AccountingFileGenerationItem"][];
+            pagination: components["schemas"]["PaginationMeta"];
+        };
         /**
          * AddClientManagerRequest
          * @description Body de POST /api/v1/clients/{id}/managers — concede ACESSO a um gerente.
@@ -1954,6 +2143,30 @@ export interface components {
             qtdAVencer: number;
             /** Qtdvencido */
             qtdVencido: number;
+        };
+        /** AmountFormatPayload */
+        AmountFormatPayload: {
+            /**
+             * Prefix
+             * @description Prefixo do valor (ex.: `R$ `).
+             * @default
+             */
+            prefix: string;
+            /**
+             * Thousandsseparator
+             * @description Separador de milhar (vazio = sem).
+             */
+            thousandsSeparator: string;
+            /**
+             * Decimalseparator
+             * @description Separador decimal.
+             */
+            decimalSeparator: string;
+            /**
+             * Decimalplaces
+             * @description Casas decimais (2 a 4).
+             */
+            decimalPlaces: number;
         };
         /**
          * AnomalyItem
@@ -3602,6 +3815,163 @@ export interface components {
             duplicate: boolean;
         };
         /**
+         * ExportLayoutCreate
+         * @description Cria um layout (versão 1) na organização do ator (a plataforma escolhe).
+         */
+        ExportLayoutCreate: {
+            /** Name */
+            name: string;
+            /**
+             * Targetsystem
+             * @description Sistema contábil alvo, em texto (ex.: "Domínio").
+             */
+            targetSystem: string;
+            /**
+             * Organizationid
+             * @description Organização dona. Obrigatória para a plataforma; o admin omite (usa a própria) ou repete a própria — outra é 403.
+             */
+            organizationId?: string | null;
+            definition: components["schemas"]["LayoutDefinitionPayload"];
+        };
+        /** ExportLayoutDetail */
+        ExportLayoutDetail: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Targetsystem */
+            targetSystem: string;
+            /**
+             * Organizationid
+             * Format: uuid
+             */
+            organizationId: string;
+            /** Latestversion */
+            latestVersion: number;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+            /**
+             * Versions
+             * @description Todas as versões, da mais nova para a mais antiga (só leitura).
+             */
+            versions: components["schemas"]["ExportLayoutVersionItem"][];
+        };
+        /** ExportLayoutEnvelope */
+        ExportLayoutEnvelope: {
+            data: components["schemas"]["ExportLayoutDetail"];
+        };
+        /**
+         * ExportLayoutFromTemplate
+         * @description Cria o layout da organização a partir de um modelo do código, numa ação só.
+         */
+        ExportLayoutFromTemplate: {
+            /**
+             * Templatekey
+             * @description Chave do modelo (`GET /export-layout-templates`).
+             */
+            templateKey: string;
+            /**
+             * Name
+             * @description Nome do layout; omitido = o nome do modelo.
+             */
+            name?: string | null;
+            /**
+             * Organizationid
+             * @description Obrigatória para a plataforma; o admin omite ou repete a própria.
+             */
+            organizationId?: string | null;
+        };
+        /** ExportLayoutItem */
+        ExportLayoutItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Targetsystem */
+            targetSystem: string;
+            /**
+             * Organizationid
+             * Format: uuid
+             */
+            organizationId: string;
+            /** Latestversion */
+            latestVersion: number;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
+        /** ExportLayoutListResponse */
+        ExportLayoutListResponse: {
+            /** Data */
+            data: components["schemas"]["ExportLayoutItem"][];
+        };
+        /** ExportLayoutTemplateItem */
+        ExportLayoutTemplateItem: {
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+            /** Targetsystem */
+            targetSystem: string;
+            /** Description */
+            description: string;
+            /** Definition */
+            definition: {
+                [key: string]: unknown;
+            };
+        };
+        /** ExportLayoutTemplateListResponse */
+        ExportLayoutTemplateListResponse: {
+            /** Data */
+            data: components["schemas"]["ExportLayoutTemplateItem"][];
+        };
+        /**
+         * ExportLayoutVersionCreate
+         * @description Nova versão (N+1) do layout — a anterior fica intacta e consultável.
+         */
+        ExportLayoutVersionCreate: {
+            definition: components["schemas"]["LayoutDefinitionPayload"];
+        };
+        /** ExportLayoutVersionItem */
+        ExportLayoutVersionItem: {
+            /** Version */
+            version: number;
+            /**
+             * Definition
+             * @description A definição canônica desta versão (mesma forma do pedido).
+             */
+            definition: {
+                [key: string]: unknown;
+            };
+            author: components["schemas"]["SessionAuthor"];
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
+        /**
          * ExtractedStatement
          * @description Resultado final da extração — payload do tool_use validado.
          */
@@ -3739,6 +4109,28 @@ export interface components {
         FileImportListResponse: {
             /** Data */
             data: components["schemas"]["FileImportItem"][];
+        };
+        /**
+         * GenerateAccountingFileRequest
+         * @description Corpo de `POST /clients/{id}/accounting-files`.
+         */
+        GenerateAccountingFileRequest: {
+            /**
+             * Layoutid
+             * Format: uuid
+             * @description Layout da organização do cliente.
+             */
+            layoutId: string;
+            /**
+             * Competence
+             * @description `YYYY-MM`.
+             */
+            competence: string;
+            /**
+             * Materializationid
+             * @description Gera uma versão ANTERIOR explicitamente. Omitido = a ÚLTIMA materialização do destino Conta contábil na competência.
+             */
+            materializationId?: string | null;
         };
         /**
          * GlossaryDeletedPayload
@@ -4149,6 +4541,56 @@ export interface components {
              * @description `true` = o cliente já tem mapeamento salvo (a tela mostra o resumo).
              */
             hasMapping: boolean;
+        };
+        /** LayoutColumnPayload */
+        LayoutColumnPayload: {
+            /**
+             * Field
+             * @description Campo de origem da coluna. Vocabulário fechado: `data`, `conta_debito`, `conta_credito`, `valor`, `historico`, `competencia`, `codigo_categoria_origem`.
+             */
+            field: string;
+            /**
+             * Header
+             * @description Rótulo da coluna no cabeçalho (só com `hasHeader`); nulo = nome do campo.
+             */
+            header?: string | null;
+        };
+        /**
+         * LayoutDefinitionPayload
+         * @description A definição do arquivo. O valor sai SEMPRE absoluto (o sinal vira a partida).
+         */
+        LayoutDefinitionPayload: {
+            /**
+             * Columns
+             * @description Colunas, na ordem do arquivo.
+             */
+            columns: components["schemas"]["LayoutColumnPayload"][];
+            /**
+             * Separator
+             * @description Separador de colunas.
+             */
+            separator: string;
+            /**
+             * Hasheader
+             * @description Primeira linha com os rótulos.
+             */
+            hasHeader: boolean;
+            /**
+             * Encoding
+             * @description Codificação do arquivo (ex.: `latin-1`).
+             */
+            encoding: string;
+            /**
+             * Lineending
+             * @description `crlf` ou `lf` — escrita também depois da última linha.
+             */
+            lineEnding: string;
+            /**
+             * Dateformat
+             * @description Formato da data com `dd`, `mm` e `aaaa`/`aa` (ex.: `dd/mm/aaaa`).
+             */
+            dateFormat: string;
+            amountFormat: components["schemas"]["AmountFormatPayload"];
         };
         /**
          * ListedFileEntry
@@ -9165,6 +9607,320 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ImportApplyEnvelope"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_export_layout_templates_api_v1_export_layout_templates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportLayoutTemplateListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_export_layouts_api_v1_export_layouts_get: {
+        parameters: {
+            query?: {
+                /** @description Plataforma: restringe a uma organização. Staff: só a própria. */
+                organizationId?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportLayoutListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_export_layout_api_v1_export_layouts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExportLayoutCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportLayoutEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_export_layout_from_template_api_v1_export_layouts_from_template_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExportLayoutFromTemplate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportLayoutEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_export_layout_api_v1_export_layouts__layout_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                layout_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportLayoutEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_export_layout_version_api_v1_export_layouts__layout_id__versions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                layout_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExportLayoutVersionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportLayoutEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_accounting_files_api_v1_clients__client_id__accounting_files_get: {
+        parameters: {
+            query?: {
+                /** @description `YYYY-MM`. */
+                competence?: string | null;
+                /** @description Página, a partir de 1. */
+                page?: number;
+                /** @description Itens por página (máx. 100). */
+                pageSize?: number;
+            };
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountingFileGenerationListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_accounting_file_api_v1_clients__client_id__accounting_files_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GenerateAccountingFileRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountingFileGenerationEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_accounting_file_api_v1_clients__client_id__accounting_files__generation_id__download_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                generation_id: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
