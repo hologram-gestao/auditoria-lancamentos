@@ -19,19 +19,27 @@ conciliação, nunca leitura ao vivo da origem.
 **Cobertura:** numerador Σ|valor| (`alvo` + `nao_mapear`); denominador Σ|valor| com
 categoria (`alvo` + `nao_mapear` + `sem_decisao`). Denominador zero → percentual
 `None` (nunca divisão por zero, nunca um "0%" que pareça resultado).
+
+**Destino `conta_contabil` (S16, BACK 16.2):** o item guarda, além do código do
+catálogo, o CÓDIGO REDUZIDO da conta do plano do cliente (`accounting_code_of`) e o id
+da VIGÊNCIA que decidiu a linha (`decision_id`) — é por ela que o histórico daquela
+materialização é lido. Os dois entram no `fingerprint`: mudar a conta ou o histórico
+(vigência nova = id novo) entre a prévia e a confirmação invalida a prévia.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Protocol
+from uuid import UUID
 
 from app.db.models import DecisionType, MaterializedSituation, MovementStatus
+from app.modules.client_mapping.partida import BindingKey, is_partida_completa, resolve_bank_code
 from app.modules.client_mapping.vigencia import DecisionKey, resolve_vigentes
 
 ZERO = Decimal("0.00")
@@ -57,6 +65,8 @@ class MovementLike(Protocol):
 
 class DecisionLike(Protocol):
     @property
+    def id(self) -> UUID: ...
+    @property
     def source_type(self) -> str: ...
     @property
     def category_code(self) -> str: ...
@@ -79,6 +89,20 @@ class AppliedItem:
     situation: MaterializedSituation
     target_code: str | None
     decision_effective_from: date | None
+    #: S16: código reduzido da conta do plano do cliente (destino `conta_contabil`).
+    accounting_account_code: str | None = None
+    #: S16: a vigência que decidiu a linha (nula em `sem_decisao`/`sem_categoria`).
+    decision_id: UUID | None = None
+    #: S16 (16.3): código da conta do BANCO (associação da conta de origem), nulo se
+    #: pendente ou fora do destino `conta_contabil`.
+    bank_account_code: str | None = None
+    #: S16 (16.3): a vigência tinha histórico? Nulo fora do `conta_contabil`.
+    history_present: bool | None = None
+
+    @property
+    def partida_completa(self) -> bool:
+        """O predicado ÚNICO (`partida.is_partida_completa`) — nunca um segundo cálculo."""
+        return is_partida_completa(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +129,7 @@ class UsedDecision:
     decision_type: str
     target_code: str | None
     effective_from: date
+    accounting_account_code: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +187,12 @@ class ApplyResult:
                     i.situation.value,
                     i.target_code,
                     i.decision_effective_from.isoformat() if i.decision_effective_from else None,
+                    # S16: a conta do plano e a VIGÊNCIA (histórico) da linha.
+                    i.accounting_account_code,
+                    str(i.decision_id) if i.decision_id else None,
+                    # S16 (16.3): a conta do BANCO — trocar a associação entre a prévia
+                    # e a confirmação invalida a prévia.
+                    i.bank_account_code,
                 ]
                 for i in self.items
             ],
@@ -172,6 +203,7 @@ class ApplyResult:
                     d.decision_type,
                     d.target_code,
                     d.effective_from.isoformat(),
+                    d.accounting_account_code,
                 ]
                 for d in self.used_decisions
             ],
@@ -192,14 +224,24 @@ def apply_mapping[D: DecisionLike](
     competence: date,
     *,
     target_code_of: dict[DecisionKey, str | None],
+    accounting_code_of: dict[DecisionKey, str | None] | None = None,
+    bank_bindings: Mapping[BindingKey, str] | None = None,
+    history_present_of: dict[DecisionKey, bool] | None = None,
 ) -> ApplyResult:
     """Aplica as vigências da `competence` aos movimentos PRESENTES. PURA.
 
     `decisions` é o conjunto COMPLETO de vigências do cliente no destino; a vigente
     de cada chave NESTA competência sai de `resolve_vigentes` (12.4) — nunca a mais
     recente. `target_code_of` traz o CÓDIGO do alvo de cada chave vigente (o
-    chamador resolve os ids do banco; aqui não há I/O).
+    chamador resolve os ids do banco; aqui não há I/O); `accounting_code_of`, no
+    destino `conta_contabil`, o código reduzido da conta do plano do cliente;
+    `bank_bindings` (S16, 16.3), as associações conta de origem → conta do banco, que
+    `partida.resolve_bank_code` aplica a CADA linha; `history_present_of`, se a
+    vigente de cada chave tem histórico. Os dois últimos só no `conta_contabil`
+    (ausentes = nulos no item, como nos outros destinos).
     """
+    accounting_codes = accounting_code_of or {}
+    histories_present = history_present_of or {}
     vigentes = resolve_vigentes(decisions, competence)
 
     items: list[AppliedItem] = []
@@ -212,6 +254,9 @@ def apply_mapping[D: DecisionLike](
         if mv.status != MovementStatus.PRESENTE.value:
             continue
         target_code: str | None = None
+        accounting_code: str | None = None
+        decision_id: UUID | None = None
+        history_present: bool | None = None
         effective: date | None = None
         if mv.category_code is None:
             situation = MaterializedSituation.SEM_CATEGORIA
@@ -224,17 +269,22 @@ def apply_mapping[D: DecisionLike](
                 undecided[key] = (amount + abs(mv.amount), count + 1)
             else:
                 effective = vigente.effective_from
+                decision_id = vigente.id
                 if vigente.decision_type == DecisionType.NAO_MAPEAR.value:
                     situation = MaterializedSituation.NAO_MAPEAR
                 else:
                     situation = MaterializedSituation.ALVO
                     target_code = target_code_of.get(key)
+                    accounting_code = accounting_codes.get(key)
+                    if history_present_of is not None:
+                        history_present = histories_present.get(key, False)
                 used[key] = UsedDecision(
                     source_type=key[0],
                     category_code=key[1],
                     decision_type=vigente.decision_type,
                     target_code=target_code,
                     effective_from=vigente.effective_from,
+                    accounting_account_code=accounting_code,
                 )
         totals_amount[situation] += abs(mv.amount)
         totals_count[situation] += 1
@@ -249,6 +299,14 @@ def apply_mapping[D: DecisionLike](
                 situation=situation,
                 target_code=target_code,
                 decision_effective_from=effective,
+                accounting_account_code=accounting_code,
+                decision_id=decision_id,
+                bank_account_code=(
+                    resolve_bank_code(mv.source_type, mv.source_account_id, bank_bindings)
+                    if bank_bindings is not None
+                    else None
+                ),
+                history_present=history_present,
             )
         )
 

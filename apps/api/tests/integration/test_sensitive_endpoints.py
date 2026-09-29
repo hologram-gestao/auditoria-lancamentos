@@ -245,6 +245,13 @@ _BODIES: dict[str, dict[str, Any]] = {
     },
     # S14 (BACK 14.1) — mapeamento de entrada. Body VÁLIDO de propósito (ADR-012):
     # um 400 de forma passaria sem nunca tocar a autorização.
+    # S16 (BACK 16.3) — conta do banco. Body VÁLIDO na forma (ADR-012): a negação vem
+    # pelo `client_id`, antes de o `accountingAccountId` (aleatório) ser consultado.
+    "PUT /api/v1/clients/{client_id}/source-accounts": {
+        "sourceType": "arquivo",
+        "sourceAccountId": None,
+        "accountingAccountId": "{uuid}",
+    },
     "PUT /api/v1/clients/{client_id}/input-mapping": {
         "fileFormat": "csv",
         "csvDelimiter": ";",
@@ -263,6 +270,7 @@ _BODIES: dict[str, dict[str, Any]] = {
 #: autorização. O conteúdo é anódino — o cliente alvo nem tem conexão `arquivo`,
 #: e quem tem de negar primeiro é o guard de tenant/organização sobre `client_id`.
 _CSV_DA_BATERIA = b"Data;Historico;Valor\n01/06/2026;bateria;-1,00\n"
+_PLANO_DA_BATERIA = b"codigo_reduzido;nome;tipo\n649;Conta da bateria;analitica\n"
 _MULTIPART: dict[str, tuple[dict[str, tuple[str, bytes, str]], dict[str, str]]] = {
     "POST /api/v1/clients/{client_id}/file-origin/inspect": (
         {"file": ("extrato.csv", _CSV_DA_BATERIA, "text/csv")},
@@ -271,6 +279,12 @@ _MULTIPART: dict[str, tuple[dict[str, tuple[str, bytes, str]], dict[str, str]]] 
     "POST /api/v1/clients/{client_id}/file-origin/process": (
         {"file": ("extrato.csv", _CSV_DA_BATERIA, "text/csv")},
         {"competence": "2026-06"},
+    ),
+    # S16 (BACK 16.1): planilha do plano contábil VÁLIDA no modelo — um 422 de
+    # conteúdo passaria sem tocar a autorização (ADR-012).
+    "POST /api/v1/clients/{client_id}/accounting-chart/import": (
+        {"file": ("plano.csv", _PLANO_DA_BATERIA, "text/csv")},
+        {},
     ),
 }
 

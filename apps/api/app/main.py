@@ -37,6 +37,7 @@ from app.integrations.omie.clientes_cache import OmieClientesCache
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache
 from app.modules.anomaly_types import routes as anomaly_types_routes
 from app.modules.auth import routes as auth_routes
+from app.modules.client_accounting_chart import routes as client_accounting_chart_routes
 from app.modules.client_categories import routes as client_categories_routes
 from app.modules.client_chart_of_accounts import routes as client_chart_of_accounts_routes
 from app.modules.client_connections import routes as client_connections_routes
@@ -44,6 +45,7 @@ from app.modules.client_file_ingestion import routes as client_file_ingestion_ro
 from app.modules.client_input_mappings import routes as client_input_mappings_routes
 from app.modules.client_mapping import routes as client_mapping_routes
 from app.modules.client_movements import routes as client_movements_routes
+from app.modules.client_source_accounts import routes as client_source_accounts_routes
 from app.modules.client_titles import routes as client_titles_routes
 from app.modules.clients import routes as clients_routes
 from app.modules.glossary import routes as glossary_routes
@@ -315,6 +317,8 @@ def create_app() -> FastAPI:
     app.include_router(clients_routes.router)
     app.include_router(client_connections_routes.router)
     app.include_router(client_input_mappings_routes.router)
+    app.include_router(client_accounting_chart_routes.router)
+    app.include_router(client_source_accounts_routes.router)
     app.include_router(client_file_ingestion_routes.router)
     app.include_router(client_chart_of_accounts_routes.router)
     app.include_router(client_titles_routes.router)

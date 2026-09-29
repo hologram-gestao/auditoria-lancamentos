@@ -54,6 +54,12 @@ DEFAULT_DESTINATION_TYPES: tuple[tuple[str, str], ...] = (
 #: outro. Os outros quatro abrem sem decisão.
 INHERITING_DESTINATION_TYPE = "demonstrativo_contabil"
 
+#: O ÚNICO tipo cujo alvo é uma conta do PLANO CONTÁBIL DO CLIENTE (Sprint 16, BACK
+#: 16.2), e não um código do catálogo da organização: o `662` de um cliente é outra
+#: conta no plano de outro. A decisão neste destino aponta `accounting_account_id` e
+#: carrega o histórico padrão cifrado; os outros quatro seguem no catálogo.
+ACCOUNTING_DESTINATION_TYPE = "conta_contabil"
+
 MAX_DESTINATION_TYPE_CHARS = 60
 MAX_DESTINATION_NAME_CHARS = 120
 MAX_TARGET_CODE_CHARS = 50

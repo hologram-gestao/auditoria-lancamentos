@@ -50,6 +50,19 @@ _TABLES = (
 )
 
 
+_S16_MIGRATION = "f5b8d2e61c37_s16_mapping_accounting_target.py"
+
+
+def _load_s16_migration() -> ModuleType:
+    path = _VERSIONS / _S16_MIGRATION
+    spec = importlib.util.spec_from_file_location("_migration_f5b8d2e61c37", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _load_migration() -> ModuleType:
     path = _VERSIONS / _MIGRATION
     spec = importlib.util.spec_from_file_location("_migration_e6b2c9d47f13", path)
@@ -71,8 +84,15 @@ class TestModeloEMigrationBatem:
         assert cm.decision_type_check() == mig._CK_DECISION_TYPE
         assert cm.decision_origin_check() == mig._CK_ORIGIN
         assert cm.materialized_situation_check() == mig._CK_SITUATION
-        assert cm.DECISION_TARGET_COHERENT_CHECK == mig._CK_DECISION_TARGET
-        assert cm.ITEM_TARGET_COHERENT_CHECK == mig._CK_ITEM_TARGET
+        # S16 (BACK 16.2): os dois CHECKs de coerência de alvo foram TROCADOS pela
+        # `f5b8d2e61c37` (catálogo XOR plano do cliente). A cadeia se prova em dois
+        # elos: o que a S12 criou é o que a S16 restaura no downgrade, e o modelo é o
+        # que a S16 cria (`test_client_mapping_accounting_schema.py`).
+        s16 = _load_s16_migration()
+        assert mig._CK_DECISION_TARGET == s16._CK_DECISION_TARGET_S12
+        assert mig._CK_ITEM_TARGET == s16._CK_ITEM_TARGET_S12
+        assert cm.DECISION_TARGET_COHERENT_CHECK == s16._CK_DECISION_TARGET
+        assert cm.ITEM_TARGET_COHERENT_CHECK == s16._CK_ITEM_TARGET
         assert cm.DECISION_EFFECTIVE_FROM_CHECK == mig._CK_EFFECTIVE_FROM
         assert cm.MATERIALIZATION_COMPETENCE_CHECK == mig._CK_COMPETENCE
         assert cm.MATERIALIZATION_VERSION_CHECK == mig._CK_VERSION
@@ -101,19 +121,27 @@ class TestModeloEMigrationBatem:
         assert tuple(_load_migration()._DEFAULT_DESTINATIONS) == DEFAULT_DESTINATION_TYPES
 
     def test_ddl_do_modelo_usa_os_nomes_que_a_migration_cria(self) -> None:
-        """Todo nome de constraint/índice que o modelo gera aparece na migration."""
-        source = (_VERSIONS / _MIGRATION).read_text(encoding="utf-8")
-        mig = _load_migration()
+        """Todo nome de constraint/índice que o modelo gera aparece nas migrations.
+
+        A S12 criou o schema; a S16 (`f5b8d2e61c37`) acrescentou a conta do plano, o
+        histórico e o snapshot do item — as duas juntas são a fonte.
+        """
+        source = (_VERSIONS / _MIGRATION).read_text(encoding="utf-8") + (
+            _VERSIONS / _S16_MIGRATION
+        ).read_text(encoding="utf-8")
+        migs = (_load_migration(), _load_s16_migration())
         literais = {
-            value for name, value in vars(mig).items() if name.startswith(("_UQ", "_IX", "_FK"))
+            value
+            for mig in migs
+            for name, value in vars(mig).items()
+            if name.startswith(("_UQ", "_IX", "_FK"))
         }
+        labels = {v for mig in migs for k, v in vars(mig).items() if k.endswith("_LABEL")}
         for model in _TABLES:
             for name in _constraint_names(model):
                 if name.startswith("ck_"):
                     label = name.removeprefix(f"ck_{model.__tablename__}_")  # type: ignore[attr-defined]
-                    assert f'"{label}"' in source or label in {
-                        v for k, v in vars(mig).items() if k.endswith("_LABEL")
-                    }, name
+                    assert f'"{label}"' in source or label in labels, name
                     continue
                 if name.startswith("pk_"):
                     assert f'"{name}"' in source, name
@@ -206,7 +234,11 @@ class TestLeisDoPrd:
         assert referenciadas == {"client_mapping_materializations", "clients"}
         colunas = set(ClientMappingMaterializationItem.__table__.c.keys())
         assert {"source_movement_id", "category_code", "target_code", "amount"} <= colunas
-        assert "decision_id" not in colunas
+        # S16 (BACK 16.2): o item guarda o id da VIGÊNCIA (`decision_id`) para ler o
+        # histórico da materialização — e continua SEM FK para a decisão (o conjunto
+        # `referenciadas` acima é a garantia): o encerramento purga as decisões e o
+        # item fica.
+        assert not ClientMappingMaterializationItem.__table__.c.decision_id.foreign_keys
         assert "movement_id" not in colunas
 
     def test_materializacao_unica_por_cliente_destino_competencia_versao(self) -> None:

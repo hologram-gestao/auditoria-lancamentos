@@ -15,10 +15,10 @@
 
 | | |
 | --- | --- |
-| Endpoints sensíveis (denominador) | **104** |
-| Com caso negativo cross-tenant verde | **104** |
+| Endpoints sensíveis (denominador) | **108** |
+| Com caso negativo cross-tenant verde | **108** |
 | Pendentes (implementação em outra task) | **0** |
-| Cobertura | **104/104 = 100%** |
+| Cobertura | **108/108 = 100%** |
 
 ## Lista canônica
 
@@ -130,6 +130,10 @@ Legenda de `tipo`: **coleção** = vaza forjando `client_id` na URL/payload · *
 | `POST` | `/api/v1/clients/{client_id}/file-origin/inspect` | coleção | `app/modules/client_file_ingestion/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + UploadClientFileDep (guard auditado); conexão arquivo resolvida pelas conexões DO cliente; nada persistido | ✅ verde |
 | `POST` | `/api/v1/clients/{client_id}/file-origin/process` | coleção | `app/modules/client_file_ingestion/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + OpenClientDep + UploadClientFileDep (guard auditado); mapeamento, categorias, registro e movimentos gravados com o client_id do path validado; cliente encerrado = 409 | ✅ verde |
 | `GET` | `/api/v1/clients/{client_id}/file-origin/imports` | coleção | `app/modules/client_file_ingestion/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); registros lidos por client_id, autor por author_for_viewer | ✅ verde |
+| `GET` | `/api/v1/clients/{client_id}/accounting-chart` | coleção | `app/modules/client_accounting_chart/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); toda query do plano filtra client_id no próprio SELECT; nome decifrado com a DEK do cliente do path | ✅ verde |
+| `POST` | `/api/v1/clients/{client_id}/accounting-chart/import` | coleção | `app/modules/client_accounting_chart/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + OpenClientDep + ManageClientAccountingChartDep (guard auditado); contas gravadas e inativadas com o client_id do path validado, sob trava por cliente; cliente encerrado = 409 | ✅ verde |
+| `GET` | `/api/v1/clients/{client_id}/source-accounts` | coleção | `app/modules/client_source_accounts/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); associações, base de movimentos e conexões lidas por client_id; o JOIN com o plano carrega client_id dos dois lados | ✅ verde |
+| `PUT` | `/api/v1/clients/{client_id}/source-accounts` | coleção | `app/modules/client_source_accounts/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + OpenClientDep + ManageClientAccountingChartDep (guard auditado); a conta do banco passa pelo validador único (SELECT com client_id do path: outro cliente = 404); upsert ON CONFLICT com o client_id validado | ✅ verde |
 
 ## Rotas `/api/v1` fora do denominador
 
