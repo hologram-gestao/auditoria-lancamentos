@@ -295,7 +295,9 @@ describe('Anomalias — acessibilidade', () => {
       anomaly({ id: 'a2', review_verdict: 'procedente' }),
       anomaly({ id: 'a3', review_verdict: 'improcedente' }),
     ]);
-    const { container } = render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} canPostToOmie />);
+    const { container } = render(
+      <AnomaliesTab sessionId={SESSION_ID} isCard={false} canPostToOmie />,
+    );
     await assertNoA11yViolations(container);
   });
 });

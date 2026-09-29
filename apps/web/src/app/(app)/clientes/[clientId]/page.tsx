@@ -12,11 +12,7 @@ import { Suspense } from 'react';
 
 import { ReconciliationsScreen } from '@/components/features/reconciliations/list/reconciliations-screen';
 
-export default function ClientReconciliationsPage({
-  params,
-}: {
-  params: { clientId: string };
-}) {
+export default function ClientReconciliationsPage({ params }: { params: { clientId: string } }) {
   return (
     <Suspense fallback={<ListFallback />}>
       <ReconciliationsScreen clientId={params.clientId} />

@@ -109,9 +109,13 @@ function StatusIcon({ status }: { status: UploadStatus }) {
       return <CopyX className="text-warning mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />;
     case 'error':
     case 'invalid':
-      return <AlertCircle className="text-destructive mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />;
+      return (
+        <AlertCircle className="text-destructive mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+      );
     case 'queued':
-      return <FileText className="text-muted-foreground mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />;
+      return (
+        <FileText className="text-muted-foreground mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+      );
     default:
       return (
         <Loader2

@@ -77,7 +77,13 @@ function statement() {
     opening_balance: '0.00',
     closing_balance: '100.00',
     transactions: [
-      { date: '2026-06-10', description: 'Compra', amount: '-100.00', balance: null, is_payment: false },
+      {
+        date: '2026-06-10',
+        description: 'Compra',
+        amount: '-100.00',
+        balance: null,
+        is_payment: false,
+      },
     ],
   };
 }
@@ -355,7 +361,9 @@ describe('Gaveta — confirmação', () => {
     });
     await user.click(attach);
 
-    await waitFor(() => expect(attachSessionFilesMock).toHaveBeenCalledWith('s-existente', expect.any(Array)));
+    await waitFor(() =>
+      expect(attachSessionFilesMock).toHaveBeenCalledWith('s-existente', expect.any(Array)),
+    );
     expect(onCreated).toHaveBeenCalledWith({ sessionId: 's-existente', totalFiles: 3 });
   });
 });
