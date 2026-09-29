@@ -158,6 +158,19 @@ async def world(db_session: AsyncSession, client_with_db: AsyncClient) -> World:
     await _import_plan(client_with_db, w.other)
     w.accounts = await _accounts(db_session, w.client)
     w.other_account = (await _accounts(db_session, w.other))["662"]
+    # BACK 16.3: materializar em `conta_contabil` exige o lado do banco de toda linha com
+    # alvo. Os movimentos daqui vêm de arquivo SEM conta de origem, então caem na conta
+    # padrão do cliente — associada à 649, como na amostra. Sem isto, os testes da 16.2
+    # que materializam recebem o 409 `CONTA_DO_BANCO_PENDENTE` da task seguinte.
+    bank = await client_with_db.put(
+        f"/api/v1/clients/{w.client.id}/source-accounts",
+        json={
+            "sourceType": "arquivo",
+            "sourceAccountId": None,
+            "accountingAccountId": str(w.accounts["649"].id),
+        },
+    )
+    assert bank.status_code == 200, bank.text
     return w
 
 
