@@ -23,12 +23,12 @@ pnpm --filter @auditoria/web exec playwright install chromium
 
 ## Variáveis
 
-| Variável         | Default                 | Para quê                                            |
-| ---------------- | ----------------------- | --------------------------------------------------- |
-| `E2E_BASE_URL`   | `http://localhost:3000` | origem do Next                                       |
-| `E2E_EMAIL`      | admin do seed           | login                                                |
-| `E2E_PASSWORD`   | —                       | **obrigatório**; sem ele os testes são `skip`        |
-| `E2E_CLIENT_ID`  | —                       | **obrigatório**; UUID de cliente com ≥ 1 conciliação |
+| Variável        | Default                 | Para quê                                             |
+| --------------- | ----------------------- | ---------------------------------------------------- |
+| `E2E_BASE_URL`  | `http://localhost:3000` | origem do Next                                       |
+| `E2E_EMAIL`     | admin do seed           | login                                                |
+| `E2E_PASSWORD`  | —                       | **obrigatório**; sem ele os testes são `skip`        |
+| `E2E_CLIENT_ID` | —                       | **obrigatório**; UUID de cliente com ≥ 1 conciliação |
 
 Sem `E2E_PASSWORD`/`E2E_CLIENT_ID` a suíte faz `test.skip` em vez de falhar —
 o objetivo é não quebrar quem roda `pnpm e2e` sem ambiente montado.

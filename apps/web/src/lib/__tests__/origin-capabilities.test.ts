@@ -15,6 +15,7 @@ import type { ClientConnection } from '@/lib/contracts';
 import {
   connectionSupports,
   fileConnectionOf,
+  connectableProviderTypes,
   hasFileConnection,
   originCodeFor,
   originHasCapability,
@@ -119,5 +120,41 @@ describe('originCodeFor — a taxonomia em três, na ordem do diagnóstico', () 
     expect(originCodeFor('ativa', [], 'listar_contas')).toBeNull();
     // Ativa no status, mas só inativas na lista — o status do servidor manda.
     expect(originCodeFor('ativa', [omie({ status: 'inativa' })], 'listar_contas')).toBeNull();
+  });
+});
+
+describe('connectableProviderTypes — o que a gaveta pode oferecer (86e3g9u3w)', () => {
+  const OPCOES = [
+    { value: 'omie', listsLedger: true },
+    { value: 'arquivo', listsLedger: true },
+    // Provedor hipotético que NÃO lista lançamentos: nunca é escondido.
+    { value: 'so-titulos', listsLedger: false },
+  ];
+
+  it('sem conexão nenhuma, oferece tudo', () => {
+    expect(connectableProviderTypes(OPCOES, []).map((o) => o.value)).toEqual([
+      'omie',
+      'arquivo',
+      'so-titulos',
+    ]);
+  });
+
+  it('com Omie, some o outro tipo que lista — o servidor responderia 409', () => {
+    expect(connectableProviderTypes(OPCOES, [omie()]).map((o) => o.value)).toEqual([
+      'omie',
+      'so-titulos',
+    ]);
+  });
+
+  it('a trava do servidor não olha status: Omie em erro esconde igual', () => {
+    const emErro = connectableProviderTypes(OPCOES, [omie({ status: 'erro' })]);
+    expect(emErro.map((o) => o.value)).toEqual(['omie', 'so-titulos']);
+  });
+
+  it('com Arquivo, some o Omie e o Arquivo fica (segunda conexão do MESMO tipo é ok)', () => {
+    expect(connectableProviderTypes(OPCOES, [arquivo()]).map((o) => o.value)).toEqual([
+      'arquivo',
+      'so-titulos',
+    ]);
   });
 });

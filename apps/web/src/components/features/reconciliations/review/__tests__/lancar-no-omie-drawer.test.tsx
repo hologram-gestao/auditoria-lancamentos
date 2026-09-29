@@ -97,7 +97,11 @@ function renderDrawer(entries: FileEntryItem[] = DUAS, onPosted = vi.fn()) {
 }
 
 /** Abre o combobox indicado pelo nome acessível e escolhe a opção pelo texto. */
-async function escolherCategoria(ui: ReturnType<typeof userEvent.setup>, gatilho: RegExp, opcao: RegExp) {
+async function escolherCategoria(
+  ui: ReturnType<typeof userEvent.setup>,
+  gatilho: RegExp,
+  opcao: RegExp,
+) {
   await ui.click(screen.getByRole('button', { name: gatilho }));
   const listbox = await screen.findByRole('listbox');
   await ui.click(within(listbox).getByRole('option', { name: opcao }));
@@ -295,7 +299,9 @@ describe('Acessibilidade', () => {
     await ui.keyboard('{Enter}');
 
     expect(
-      screen.getByRole('button', { name: /Categoria da compra de.*2\.02\.02 · Serviços de software/ }),
+      screen.getByRole('button', {
+        name: /Categoria da compra de.*2\.02\.02 · Serviços de software/,
+      }),
     ).toBeInTheDocument();
   });
 });
