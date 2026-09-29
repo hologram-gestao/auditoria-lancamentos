@@ -52,6 +52,16 @@ export interface ProviderTypeOption {
    * `connectionRequiresCredentials`, pela capacidade que a API devolveu.
    */
   requiresCredentials: boolean;
+  /**
+   * Este tipo LISTA LANÇAMENTOS (`Capability.LISTAR_LANCAMENTOS`)? Mesma razão do
+   * `requiresCredentials`: na CRIAÇÃO a conexão ainda não existe, então não há
+   * capacidade a consultar e a tabela declara. É o que permite à gaveta não
+   * oferecer um tipo que o servidor recusaria com 409 `ORIGEM_JA_CONECTADA` —
+   * um cliente tem um tipo de origem de lançamentos só (§4.8, ADR-083-BE).
+   *
+   * Provedor novo entra aqui E no backend, como o resto desta tabela.
+   */
+  listsLedger: boolean;
 }
 
 /**
@@ -64,6 +74,7 @@ export const PROVIDER_TYPES: readonly ProviderTypeOption[] = [
     label: 'Omie',
     description: 'ERP com credencial (App Key e App Secret), verificada antes de salvar.',
     requiresCredentials: true,
+    listsLedger: true,
   },
   {
     value: FILE_PROVIDER_TYPE,
@@ -71,6 +82,7 @@ export const PROVIDER_TYPES: readonly ProviderTypeOption[] = [
     description:
       'Sem credencial: a planilha do mês é lida no envio, pelo mapeamento de colunas do cliente.',
     requiresCredentials: false,
+    listsLedger: true,
   },
 ];
 

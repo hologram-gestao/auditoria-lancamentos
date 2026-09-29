@@ -77,6 +77,7 @@ import {
   providerRequiresCredentials,
 } from '@/lib/api/client-connections';
 import type { ClientConnection } from '@/lib/contracts';
+import { connectableProviderTypes } from '@/lib/origin-capabilities';
 import {
   createConnectionSchema,
   updateConnectionSchema,
@@ -150,6 +151,20 @@ function useLabelConflict(connections: readonly ClientConnection[]) {
 // Conectar
 // ---------------------------------------------------------------------------
 
+/**
+ * O tipo com que o formulário de CONECTAR nasce: o pedido pela URL (`?conectar=`)
+ * quando ele é oferecível neste cliente, senão o primeiro oferecível. Nunca um
+ * valor fora da lista — o select ficaria vazio e o schema recusaria no submit.
+ */
+function seedableProviderType(
+  requested: string | null,
+  connections: readonly ClientConnection[],
+): string {
+  const options = connectableProviderTypes(PROVIDER_TYPES, connections);
+  const wanted = options.find((o) => o.value === requested);
+  return wanted?.value ?? options[0]?.value ?? OMIE_PROVIDER_TYPE;
+}
+
 function CreateDrawer({
   open,
   onOpenChange,
@@ -173,9 +188,9 @@ function CreateDrawer({
     defaultValues: {
       // Só um tipo CONHECIDO entra: `?conectar=` vem da URL, e um valor
       // inventado deixaria o select num estado que o schema recusa no submit.
-      provider_type: PROVIDER_TYPES.some((option) => option.value === initialProviderType)
-        ? (initialProviderType as string)
-        : OMIE_PROVIDER_TYPE,
+      // O tipo semeado pela URL (`?conectar=`) só vale se ELE for oferecível
+      // aqui; senão o select nasceria num valor que nem está na lista.
+      provider_type: seedableProviderType(initialProviderType, connections),
       label: '',
       app_key: '',
       app_secret: '',
@@ -190,6 +205,10 @@ function CreateDrawer({
   // do teste nem existem para ele (§4.9: o teste responderia 409).
   const requiresCredentials = providerRequiresCredentials(watchedType);
   const typeOption = PROVIDER_TYPES.find((option) => option.value === watchedType);
+  // 86e3g9u3w: só os tipos que o servidor aceitaria neste cliente. Um cliente
+  // tem um tipo de origem de lançamentos só (§4.8): oferecer o outro é oferecer
+  // um 409 `ORIGEM_JA_CONECTADA` depois do formulário inteiro preenchido.
+  const typeOptions = connectableProviderTypes(PROVIDER_TYPES, connections);
 
   useEffect(() => {
     if (lastTestedRef.current === null) return;
@@ -296,7 +315,7 @@ function CreateDrawer({
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {PROVIDER_TYPES.map((o) => (
+                        {typeOptions.map((o) => (
                           <SelectItem key={o.value} value={o.value}>
                             {o.label}
                           </SelectItem>

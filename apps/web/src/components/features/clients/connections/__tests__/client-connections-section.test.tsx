@@ -353,6 +353,53 @@ describe('Origens — `?conectar=<tipo>` abre a gaveta no tipo pedido (86e3fqnc9
   });
 });
 
+describe('Origens — a gaveta não oferece tipo que o servidor recusaria (86e3g9u3w)', () => {
+  it('cliente com Omie: "Arquivo" some do seletor (seria 409 ORIGEM_JA_CONECTADA)', async () => {
+    searchParams = 'conectar=arquivo';
+    listState.data = [connection()];
+    const user = userEvent.setup();
+    render(<ClientConnectionsSection clientId={CLIENT_ID} originStatus="ativa" isClosed={false} />);
+    const drawer = await screen.findByRole('dialog');
+    const combo = within(drawer).getByRole('combobox', { name: /Tipo/ });
+    // O `?conectar=arquivo` pedia um tipo que não é oferecível aqui: cai no
+    // primeiro disponível em vez de semear um valor fora da lista.
+    expect(combo).toHaveTextContent('Omie');
+    await user.click(combo);
+    const opcoes = within(await screen.findByRole('listbox'))
+      .getAllByRole('option')
+      .map((o) => o.textContent);
+    expect(opcoes).toEqual(['Omie']);
+  });
+
+  it('cliente sem origem: os dois tipos continuam oferecidos', async () => {
+    listState.data = [];
+    const user = userEvent.setup();
+    render(
+      <ClientConnectionsSection clientId={CLIENT_ID} originStatus="sem_origem" isClosed={false} />,
+    );
+    await user.click(screen.getAllByRole('button', { name: /Conectar/ })[0]!);
+    const drawer = await screen.findByRole('dialog');
+    await user.click(within(drawer).getByRole('combobox', { name: /Tipo/ }));
+    const opcoes = within(await screen.findByRole('listbox'))
+      .getAllByRole('option')
+      .map((o) => o.textContent);
+    expect(opcoes).toEqual(['Omie', 'Arquivo (planilha ou extrato)']);
+  });
+
+  it('a trava do servidor não olha status: Omie EM ERRO esconde o Arquivo igual', async () => {
+    listState.data = [connection({ status: 'erro' })];
+    const user = userEvent.setup();
+    render(<ClientConnectionsSection clientId={CLIENT_ID} originStatus="erro" isClosed={false} />);
+    await user.click(screen.getAllByRole('button', { name: /Conectar/ })[0]!);
+    const drawer = await screen.findByRole('dialog');
+    await user.click(within(drawer).getByRole('combobox', { name: /Tipo/ }));
+    const opcoes = within(await screen.findByRole('listbox'))
+      .getAllByRole('option')
+      .map((o) => o.textContent);
+    expect(opcoes).toEqual(['Omie']);
+  });
+});
+
 describe('Origens — acessibilidade', () => {
   it('não tem violações critical/serious do axe-core', async () => {
     const { container } = render(
