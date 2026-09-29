@@ -1019,7 +1019,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** PRÉVIA da importação da planilha exportada — NÃO grava nada. Casa por CÓDIGO (a coluna de nome é ignorada). Devolve criadas / alteradas / ignoradas e as linhas recusadas com o motivo (categoria ou alvo inexistente, decisão inválida…); a linha recusada não derruba o lote. Arquivo .xlsx, até 2 MB e 2.000 linhas. Requer `manage_client_mapping`. No destino `conta_contabil` a importação é recusada com 422 `IMPORTACAO_INDISPONIVEL_NO_DESTINO` (a planilha não leva o histórico cifrado): use a tela; exportar segue disponível. */
+        /** PRÉVIA da importação da planilha exportada — NÃO grava nada. Casa por CÓDIGO (a coluna de nome é ignorada). Devolve criadas / alteradas / ignoradas e as linhas recusadas com o motivo (categoria ou alvo inexistente, decisão inválida…); a linha recusada não derruba o lote. Arquivo .xlsx, até 2 MB e 2.000 linhas. Requer `manage_client_mapping`. No destino `conta_contabil` o `codigo_alvo` é o código reduzido do plano do CLIENTE e a coluna `historico` leva o histórico padrão; conta inexistente, sintética ou inativa recusa a planilha INTEIRA com 422 `CONTAS_DA_PLANILHA_INVALIDAS` (`details.lines`/`details.total`), nada gravado (86e3fxqqe). */
         post: operations["preview_client_mapping_import_api_v1_clients__client_id__mapping__destination_type__import_preview_post"];
         delete?: never;
         options?: never;
@@ -1036,7 +1036,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** APLICA a importação — exige `confirm=true` (sem ele: 409, a prévia é obrigatória). Recalcula a prévia no servidor e grava TODAS as linhas válidas de uma vez (atômico), como vigência nova a partir de `effectiveFrom` (padrão: competência corrente) — nunca sobrescreve a vigente. Início retroativo segue as regras da escrita de decisão (`confirmRetroactive`). Requer `manage_client_mapping`; cliente encerrado: 409. No destino `conta_contabil`: 422 `IMPORTACAO_INDISPONIVEL_NO_DESTINO` (use a tela). */
+        /** APLICA a importação — exige `confirm=true` (sem ele: 409, a prévia é obrigatória). Recalcula a prévia no servidor e grava TODAS as linhas válidas de uma vez (atômico), como vigência nova a partir de `effectiveFrom` (padrão: competência corrente) — nunca sobrescreve a vigente. Início retroativo segue as regras da escrita de decisão (`confirmRetroactive`). Requer `manage_client_mapping`; cliente encerrado: 409. No destino `conta_contabil`, a mesma recusa 422 `CONTAS_DA_PLANILHA_INVALIDAS` da prévia se a planilha mudou entre as duas chamadas. */
         post: operations["apply_client_mapping_import_api_v1_clients__client_id__mapping__destination_type__import_post"];
         delete?: never;
         options?: never;
@@ -4278,7 +4278,7 @@ export interface components {
              * Reason
              * @enum {string}
              */
-            reason: "categoria_inexistente" | "alvo_inexistente" | "decisao_invalida" | "alvo_ausente" | "alvo_nao_permitido" | "destino_diferente" | "linha_repetida" | "conflito_na_vigencia";
+            reason: "categoria_inexistente" | "alvo_inexistente" | "decisao_invalida" | "alvo_ausente" | "alvo_nao_permitido" | "destino_diferente" | "linha_repetida" | "conflito_na_vigencia" | "historico_muito_longo";
         };
         /** InheritEnvelope */
         InheritEnvelope: {

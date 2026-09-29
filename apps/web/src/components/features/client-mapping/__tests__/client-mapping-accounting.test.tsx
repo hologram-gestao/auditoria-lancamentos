@@ -576,10 +576,10 @@ describe('cliente sem plano contábil', () => {
 });
 
 describe('portabilidade', () => {
-  it('conta_contabil: Importar some, Exportar fica', () => {
+  it('conta_contabil: Importar e Exportar (86e3fxqqe — a planilha agora leva conta e histórico)', () => {
     render(<ClientMappingScreen clientId={TENANT} />);
     expect(screen.getByRole('button', { name: 'Exportar' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Importar' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Importar' })).toBeInTheDocument();
   });
 
   it('REGRESSÃO — demonstrativo: Importar e Exportar', () => {

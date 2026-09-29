@@ -184,6 +184,22 @@ class AccountingChartService:
             for a in accounts
         }
 
+    async def accounts_by_code(
+        self, client_id: UUID, codes: Iterable[str]
+    ) -> dict[str, ClientAccountingAccount]:
+        """As contas do cliente pelo código reduzido — SÓ encontra, não valida
+        postabilidade (`require_postable_account(s)` segue sendo o validador único).
+
+        Usado pela portabilidade do de-para (86e3fxqqe) pra resolver `codigo_alvo`
+        da planilha no destino `conta_contabil`: a planilha carrega o código, não o
+        `UUID` da conta.
+        """
+        wanted = {c for c in codes if c}
+        if not wanted:
+            return {}
+        accounts = await self._repo.get_by_codes(client_id, wanted)
+        return {a.code: a for a in accounts}
+
     # ------------------------------------------------------------- validador único
 
     async def require_postable_account(

@@ -98,7 +98,10 @@ class ErrorCode(StrEnum):
     # outro destino e a importação da planilha nesse destino são recusas tipadas.
     ALVO_EXIGE_PLANO_CONTABIL = "ALVO_EXIGE_PLANO_CONTABIL"
     CONTA_CONTABIL_FORA_DO_DESTINO = "CONTA_CONTABIL_FORA_DO_DESTINO"
-    IMPORTACAO_INDISPONIVEL_NO_DESTINO = "IMPORTACAO_INDISPONIVEL_NO_DESTINO"
+    #: Follow-up 86e3fxqqe: a planilha do de-para no destino `conta_contabil`
+    #: referencia conta do plano do cliente que não existe, é sintética ou está
+    #: inativa. Recusa a planilha INTEIRA — molde de `LINHAS_INVALIDAS` da S14.
+    CONTAS_DA_PLANILHA_INVALIDAS = "CONTAS_DA_PLANILHA_INVALIDAS"
     #: BACK 16.3: linha com alvo em `conta_contabil` vinda de conta de origem SEM conta
     #: contábil do banco — a partida ficaria sem um dos lados. 409 (estado da
     #: configuração, não conteúdo do pedido), `details` só com identificadores.
@@ -938,19 +941,25 @@ class AccountingAccountOutsideDestinationError(AppError):
     )
 
 
-class MappingImportUnavailableError(AppError):
-    """422 — importar a planilha do de-para no destino `conta_contabil` (Sprint 16).
+class MappingImportAccountsInvalidError(AppError):
+    """422 — a planilha do de-para no destino `conta_contabil` referencia conta do
+    plano do cliente que não existe, é sintética ou está inativa (follow-up
+    86e3fxqqe — a S16 bloqueava a importação inteira nesse destino; ADR-087-BE).
 
-    A planilha não leva o histórico cifrado; reimportá-la criaria vigência nova SEM
-    histórico e o apagaria em silêncio. Nesta sprint a importação nesse destino é
-    recusada e orienta usar a tela; exportar segue funcionando (ADR-087-BE).
+    Recusa a planilha INTEIRA, nada é gravado (molde de `FileLinesInvalidError` da
+    S14): resolver a conta do lançamento é diferente de "categoria sem decisão" —
+    postar no lugar errado é erro contábil, não uma lacuna que se completa depois.
+    `details.lines` = `[{line, reason}]` (vocabulário FECHADO: `conta_inexistente`
+    | `sintetica` | `inativa`, o MESMO de `not_postable_reason`) e `details.total`
+    — nunca o código da célula além do necessário pra identificar a linha.
     """
 
-    code = ErrorCode.IMPORTACAO_INDISPONIVEL_NO_DESTINO
+    code = ErrorCode.CONTAS_DA_PLANILHA_INVALIDAS
     status_code = 422
     default_user_message = (
-        "A importação por planilha não está disponível no destino Conta contábil: ela "
-        "apagaria o histórico padrão das decisões. Faça as alterações pela tela do de-para."
+        "A planilha referencia contas do plano contábil do cliente que não existem, "
+        "são sintéticas ou estão inativas. Corrija as linhas indicadas e envie de "
+        "novo — nada foi processado."
     )
 
 

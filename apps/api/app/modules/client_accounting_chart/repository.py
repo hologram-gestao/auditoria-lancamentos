@@ -73,6 +73,21 @@ class AccountingChartRepository:
         stmt = self._base_query(client_id).order_by(ClientAccountingAccount.code)
         return list((await self._session.execute(stmt)).scalars().all())
 
+    async def get_by_codes(
+        self, client_id: UUID, codes: Collection[str]
+    ) -> list[ClientAccountingAccount]:
+        """As contas pelo código reduzido, SÓ as do cliente (`UNIQUE(client_id, code)`
+        garante no máximo uma por código — código de outro cliente não casa nada).
+
+        Usado pela portabilidade do de-para (86e3fxqqe) pra resolver `codigo_alvo`
+        da planilha no destino `conta_contabil`; `require_postable_accounts` segue
+        sendo o validador único de POSTABILIDADE — esta função só encontra a conta.
+        """
+        if not codes:
+            return []
+        stmt = self._base_query(client_id).where(ClientAccountingAccount.code.in_(codes))
+        return list((await self._session.execute(stmt)).scalars().all())
+
     async def list_page(
         self,
         client_id: UUID,

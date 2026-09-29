@@ -62,7 +62,6 @@ import { triggerBrowserDownload } from '@/lib/download';
 import { originIsFileBased } from '@/lib/origin-capabilities';
 import { useAuthStore } from '@/stores/auth';
 
-import { isAccountingDestination } from './accounting-destination';
 import { MappingImportSheet } from './mapping-import-sheet';
 import {
   INHERITING_DESTINATION_TYPE,
@@ -168,10 +167,6 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
   // `ORIGEM_POR_ARQUIVO`). Decidido pela capacidade, no helper único.
   const fileOrigin = originIsFileBased(client?.connections ?? []);
   const hasFilters = situation !== undefined || codeParam !== '';
-  // S16 (BACK 16.2): no `conta_contabil` importar a planilha do de-para é 422
-  // `IMPORTACAO_INDISPONIVEL_NO_DESTINO` — ela não leva o histórico cifrado e
-  // reimportá-la o apagaria. A ação some nesse destino; EXPORTAR continua.
-  const importAvailable = destination !== null && !isAccountingDestination(destination.type);
 
   async function handleExport() {
     try {
@@ -237,7 +232,7 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
               )}
               {exportMutation.isPending ? 'Exportando…' : 'Exportar'}
             </Button>
-            {canManage && !isClosed && importAvailable && (
+            {canManage && !isClosed && (
               <Button type="button" variant="secondary" onClick={() => setImportOpen(true)}>
                 <Upload className="h-4 w-4" aria-hidden="true" />
                 Importar
@@ -371,7 +366,7 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
             </TabsContent>
           </Tabs>
 
-          {canManage && !isClosed && importAvailable && (
+          {canManage && !isClosed && (
             <MappingImportSheet
               open={importOpen}
               onOpenChange={setImportOpen}

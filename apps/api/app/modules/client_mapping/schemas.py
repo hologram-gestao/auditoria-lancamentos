@@ -435,6 +435,7 @@ class ImportRejectedLine(BaseModel):
         "destino_diferente",
         "linha_repetida",
         "conflito_na_vigencia",
+        "historico_muito_longo",
     ]
 
     model_config = ConfigDict(populate_by_name=True)
