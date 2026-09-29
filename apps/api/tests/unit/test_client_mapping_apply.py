@@ -396,6 +396,9 @@ class TestMaterializacao:
         assert evento["valor_nao_mapear"] == Decimal("30.00")
         assert evento["valor_sem_decisao"] == Decimal("25.00")
         assert evento["categorias_sem_decisao"] == 2
+        # S13 (BACK 13.1): o id da LINHA criada — é por ele que a métrica casa com
+        # `arquivo_contabil_gerado`.
+        assert evento["materializacao_id"] == mat.id == outcome.id
         assert fechamento == {"client_id": client.id, "tipo_origem": "omie", "competencia": JUN}
 
     async def test_cobertura_total_nao_exige_confirmacao(self) -> None:

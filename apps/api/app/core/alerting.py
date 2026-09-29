@@ -76,6 +76,11 @@ class AlertCode(StrEnum):
     # quebra), mas a intenção e o estado divergiram — e isso precisa de gente
     # olhando. **Plantão, nunca o canal do sintético.**
     LEGACY_FALLBACK = "legacy_fallback"
+    # S13 (BACK 13.4): o download regenerou o arquivo contábil e o SHA-256 não bateu
+    # com o registrado na geração — o arquivo NÃO é entregue. Materialização e layout
+    # são imutáveis, então divergir é defeito (ou dado adulterado): gente olhando.
+    # Nasce no canal de PLANTÃO (§3.14), nunca no do sintético. Só IDs na mensagem.
+    ACCOUNTING_FILE_DIVERGENT = "accounting_file_divergent"
     SYNTHETIC = "synthetic"
 
 

@@ -2282,3 +2282,111 @@ class TestContaDoBancoRoundTrip:
             alembic_cfg
         )
         assert SOURCE_BINDINGS_REV in _revisions_in_chain(alembic_cfg)
+
+
+# ----------------------------------------------------------------------
+# Sprint 13 (BACK 13.2) — layouts de exportação por organização, versionados
+# ----------------------------------------------------------------------
+
+EXPORT_LAYOUTS_REV = "b3d9e5f17a20"
+
+_INSERT_LAYOUT = (
+    "INSERT INTO export_layouts (id, organization_id, name, target_system, created_by) "
+    "VALUES (:lid, (SELECT organization_id FROM clients WHERE id = :cid), :name, 'Domínio', :uid)"
+)
+_INSERT_LAYOUT_VERSION = (
+    "INSERT INTO export_layout_versions (id, layout_id, version, definition, author_id) "
+    "VALUES (gen_random_uuid(), :lid, :v, CAST('{}' AS jsonb), :uid)"
+)
+
+
+class TestLayoutsDeExportacaoRoundTrip:
+    """BACK 13.2 — layouts e versões sobem, descem e sobem; as garantias são do banco."""
+
+    def test_unicidade_e_versao_positiva_sao_do_banco(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        uid = _creator_of(url, client_id)
+        layout_id = str(uuid4())
+        _execute(url, _INSERT_LAYOUT, lid=layout_id, cid=client_id, name="Domínio", uid=uid)
+        # Mesmo nome na mesma organização: a UNIQUE recusa.
+        with pytest.raises(sa.exc.IntegrityError):
+            _execute(url, _INSERT_LAYOUT, lid=str(uuid4()), cid=client_id, name="Domínio", uid=uid)
+        _execute(url, _INSERT_LAYOUT_VERSION, lid=layout_id, v=1, uid=uid)
+        with pytest.raises(sa.exc.IntegrityError):
+            _execute(url, _INSERT_LAYOUT_VERSION, lid=layout_id, v=1, uid=uid)
+        with pytest.raises(sa.exc.IntegrityError):
+            _execute(url, _INSERT_LAYOUT_VERSION, lid=layout_id, v=0, uid=uid)
+        _execute(url, _INSERT_LAYOUT_VERSION, lid=layout_id, v=2, uid=uid)
+        assert _scalar(url, "SELECT count(*) FROM export_layout_versions") == 2
+        assert (
+            _scalar(
+                url,
+                "SELECT count(*) FROM pg_constraint WHERE conname = "
+                "'ck_export_layout_versions_version_positive'",
+            )
+            == 1
+        )
+
+    def test_downgrade_e_real_e_o_ciclo_converge(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        uid = _creator_of(url, client_id)
+        layout_id = str(uuid4())
+        _execute(url, _INSERT_LAYOUT, lid=layout_id, cid=client_id, name="Domínio", uid=uid)
+        _execute(url, _INSERT_LAYOUT_VERSION, lid=layout_id, v=1, uid=uid)
+        command.downgrade(alembic_cfg, SOURCE_BINDINGS_REV)
+        assert not _table_exists(url, "export_layout_versions")
+        assert not _table_exists(url, "export_layouts")
+        for _ in range(2):
+            command.upgrade(alembic_cfg, "head")
+            command.downgrade(alembic_cfg, SOURCE_BINDINGS_REV)
+        command.upgrade(alembic_cfg, "head")
+        assert _scalar(url, "SELECT version_num FROM alembic_version") == _head_revision(
+            alembic_cfg
+        )
+        assert EXPORT_LAYOUTS_REV in _revisions_in_chain(alembic_cfg)
+
+
+# ----------------------------------------------------------------------
+# Sprint 13 (BACK 13.4) — registro das gerações do arquivo contábil
+# ----------------------------------------------------------------------
+
+ACCOUNTING_FILES_REV = "c7e2a9d4b816"
+
+_GENERATION_CONSTRAINTS = (
+    "SELECT count(*) FROM pg_constraint WHERE conname IN ("
+    "'fk_accounting_file_generations_layout_version', "
+    "'fk_accounting_file_generations_materialization', "
+    "'ck_accounting_file_generations_sha256_hex', "
+    "'ck_accounting_file_generations_competence_first_day')"
+)
+
+
+class TestGeracoesDoArquivoContabilRoundTrip:
+    """BACK 13.4 — a tabela de gerações sobe, desce e sobe; o downgrade é real."""
+
+    def test_sobe_com_checks_e_fk_composta_e_o_ciclo_converge(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        assert _table_exists(url, "accounting_file_generations")
+        assert _scalar(url, _GENERATION_CONSTRAINTS) == 4
+        command.downgrade(alembic_cfg, EXPORT_LAYOUTS_REV)
+        assert not _table_exists(url, "accounting_file_generations")
+        assert _table_exists(url, "export_layouts")
+        for _ in range(2):
+            command.upgrade(alembic_cfg, "head")
+            command.downgrade(alembic_cfg, EXPORT_LAYOUTS_REV)
+        command.upgrade(alembic_cfg, "head")
+        assert _scalar(url, "SELECT version_num FROM alembic_version") == _head_revision(
+            alembic_cfg
+        )
+        assert ACCOUNTING_FILES_REV in _revisions_in_chain(alembic_cfg)

@@ -243,6 +243,25 @@ class Permission(StrEnum):
     #: quiser que o cliente mantenha o próprio plano, é trocar a célula. A LEITURA
     #: do plano não pede permissão (`AccessibleClientDep`, como o de-para).
     MANAGE_CLIENT_ACCOUNTING_CHART = "manage_client_accounting_chart"
+    # --- Sprint 13 (BACK 13.2) --------------------------------------------
+    #: GERAR, listar e BAIXAR o arquivo contábil de um cliente (lançamentos para o
+    #: sistema contábil de destino). Células DECIDIDAS no PRD (R3): staff — o
+    #: "(carteira)" do manager é `resolve_client_access`. Permissão PRÓPRIA, e NÃO
+    #: `review_export`: aquela é dos cinco papéis (o operador exporta a
+    #: conciliação), e reusá-la deixaria o `client_operator` baixar o arquivo que o
+    #: escritório sobe na contabilidade do cliente — artefato de trabalho do
+    #: escritório, não do cliente. Mesmo desenho das S10/S12/S14: duas perguntas
+    #: diferentes não se amarram a uma decisão só. Também LÊ os layouts da
+    #: organização (o gerente escolhe o layout ao gerar — decisão do planejador,
+    #: ADR-091-BE).
+    GENERATE_ACCOUNTING_FILE = "generate_accounting_file"
+    #: ADMINISTRAR os layouts de exportação da ORGANIZAÇÃO (criar, versionar, criar
+    #: a partir do modelo). Células DECIDIDAS no PRD (R3): plataforma e admin — é
+    #: configuração da organização (como `manage_mapping_catalog`), e uma versão
+    #: nova muda o arquivo de TODOS os clientes dela. Permissão própria pelo
+    #: precedente S10/S12: não reusa `manage_mapping_catalog`, cujas células
+    #: coincidem hoje por outra pergunta.
+    MANAGE_EXPORT_LAYOUTS = "manage_export_layouts"
 
 
 _EVERYONE: frozenset[UserRole] = frozenset(UserRole)
@@ -288,6 +307,8 @@ _PLATFORM_ONLY: frozenset[UserRole] = frozenset({UserRole.PLATFORM_ADMIN})
 #: | Enviar arquivo (S14)          | ✅             | ✅          | ✅ (carteira)  | ✅             | ✅              |
 #: | Configurar mapeamento (S14)   | ✅             | ✅          | ✅ (carteira)  | ✅             | ❌              |
 #: | Plano contábil (S16)          | ✅             | ✅          | ✅ (carteira)  | ❌             | ❌              |
+#: | Gerar arquivo contábil (S13)  | ✅             | ✅          | ✅ (carteira)  | ❌             | ❌              |
+#: | Layouts de exportação (S13)   | ✅             | ✅ (org)    | ❌             | ❌             | ❌              |
 PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]] = {
     Permission.RUN_RECONCILIATION: _EVERYONE,
     Permission.REVIEW_EXPORT: _EVERYONE,
@@ -391,6 +412,11 @@ PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]] = {
     # `client_manager` pendente de validação humana (ADR-086-BE). Staff, como
     # `manage_client_connections`: o plano contábil é configuração do escritório.
     Permission.MANAGE_CLIENT_ACCOUNTING_CHART: _STAFF,
+    # S13 (BACK 13.2), células DECIDIDAS no PRD (R3). Gerar/baixar: staff (o
+    # "(carteira)" do manager é `resolve_client_access`); NÃO é `review_export`.
+    Permission.GENERATE_ACCOUNTING_FILE: _STAFF,
+    # Layouts: configuração da organização — plataforma e admin (a própria org).
+    Permission.MANAGE_EXPORT_LAYOUTS: _ADMINS,
 }
 
 

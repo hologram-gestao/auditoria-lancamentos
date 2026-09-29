@@ -35,6 +35,8 @@ from app.core.sensitive_endpoints import (
 from app.db.models import (
     Client,
     ClientCategory,
+    ExportLayout,
+    ExportLayoutVersion,
     MappingDestination,
     MappingTarget,
     Notification,
@@ -48,6 +50,7 @@ from app.db.models import (
     UserScope,
 )
 from app.main import app as fastapi_app
+from app.modules.export_layouts.definition import DOMINIO_TEMPLATE
 
 if TYPE_CHECKING:
     from httpx import AsyncClient
@@ -68,6 +71,9 @@ SECRET_CATEGORY_A = "Categoria Sigilosa da Hologram"
 #: inclusive o usuário de cliente —, então o alvo da bateria tem de ser de uma
 #: organização a que NENHUM dos três atacantes pertence.
 SECRET_TARGET_C = "Alvo Sigiloso do Escritorio C"
+#: Nome de um LAYOUT de exportação da mesma terceira organização (S13, BACK 13.2): o
+#: layout é configuração da organização, e nenhum dos três atacantes pertence à C.
+SECRET_LAYOUT_C = "Layout Sigiloso do Escritorio C"
 
 
 def _hex64(seed: str) -> str:
@@ -225,6 +231,26 @@ _BODIES: dict[str, dict[str, Any]] = {
     },
     "PATCH /api/v1/mapping-destinations/{destination_id}/targets/{target_id}": {
         "name": "Sequestrado"
+    },
+    # S13 (BACK 13.2) — layouts de exportação. Bodies VÁLIDOS (ADR-012): a definição é
+    # a do modelo Domínio, que passa na validação — quem tem de negar é o guard/alcance.
+    "POST /api/v1/export-layouts": {
+        "name": "Layout da bateria",
+        "targetSystem": "Domínio",
+        "definition": DOMINIO_TEMPLATE.definition.to_json(),
+    },
+    "POST /api/v1/export-layouts/from-template": {
+        "templateKey": "dominio_lancamentos_csv",
+        "name": "Layout da bateria",
+    },
+    "POST /api/v1/export-layouts/{layout_id}/versions": {
+        "definition": DOMINIO_TEMPLATE.definition.to_json(),
+    },
+    # S13 (BACK 13.4) — gerar o arquivo contábil. Body VÁLIDO na forma (ADR-012): a
+    # negação vem pelo `client_id`, antes de o layout (aleatório) ser consultado.
+    "POST /api/v1/clients/{client_id}/accounting-files": {
+        "layoutId": "{uuid}",
+        "competence": "2026-06",
     },
     # S12 (BACK 12.4) — decisões do de-para. Bodies VÁLIDOS (ADR-012).
     "POST /api/v1/clients/{client_id}/mapping/{destination_type}/decisions": {
@@ -399,6 +425,23 @@ async def tenants(db_session: AsyncSession) -> dict[str, Any]:
     target_c = MappingTarget(destination_id=destination_c.id, code="1.01", name=SECRET_TARGET_C)
     db_session.add(target_c)
     await db_session.flush()
+    layout_c = ExportLayout(
+        organization_id=org_c.id,
+        name=SECRET_LAYOUT_C,
+        target_system="Domínio",
+        created_by=platform.id,
+    )
+    db_session.add(layout_c)
+    await db_session.flush()
+    db_session.add(
+        ExportLayoutVersion(
+            layout_id=layout_c.id,
+            version=1,
+            definition=DOMINIO_TEMPLATE.definition.to_json(),
+            author_id=platform.id,
+        )
+    )
+    await db_session.flush()
     cli_a = await _seed_client(db_session, creator=admin, name="Austral Lista")
     cli_b = await _seed_client(db_session, creator=admin, name=SECRET_NAME_B)
     # Categoria da Hologram (org pelo `server_default`): alvo do catálogo por org.
@@ -466,6 +509,7 @@ async def tenants(db_session: AsyncSession) -> dict[str, Any]:
         "notif_b": notif_b,
         "destination_c": destination_c,
         "target_c": target_c,
+        "layout_c": layout_c,
     }
 
 
@@ -548,6 +592,10 @@ async def test_cross_tenant_por_endpoint(
         # organização do cliente — a negação vem antes, pelo `client_id`.
         "destination_type": "demonstrativo_contabil",
         "target_id": str(tenants["target_c"].id),
+        # S13 (BACK 13.4): a rota nega pelo `client_id` ANTES de buscar a geração.
+        "generation_id": str(uuid4()),
+        # S13 (BACK 13.2): layout de exportação da TERCEIRA organização.
+        "layout_id": str(tenants["layout_c"].id),
         "uuid": str(uuid4()),
     }
 
@@ -572,6 +620,7 @@ async def test_cross_tenant_por_endpoint(
     assert SECRET_STAFF_A not in resp.text, f"{endpoint.key} vazou staff da Hologram"
     assert SECRET_CATEGORY_A not in resp.text, f"{endpoint.key} vazou o catálogo da Hologram"
     assert SECRET_TARGET_C not in resp.text, f"{endpoint.key} vazou o catálogo do de-para"
+    assert SECRET_LAYOUT_C not in resp.text, f"{endpoint.key} vazou o layout de outra org"
 
     if endpoint.kind is ScopeKind.COLLECTION and "{" not in endpoint.path:
         # Coleções globais (notificações) respondem 200 com a lista vazia de B.

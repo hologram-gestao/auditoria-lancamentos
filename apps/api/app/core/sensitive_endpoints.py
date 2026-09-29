@@ -79,6 +79,13 @@ _VIA_CLIENT_MAPPING_WRITE = (
     "ManageClientMappingDep (guard auditado); destino resolvido na org DO CLIENTE; "
     "toda query de decisão filtra client_id"
 )
+_VIA_EXPORT_LAYOUT_ORG = (
+    "ReadExportLayoutsDep/ManageExportLayoutsDep (guard de organização: usuário de cliente "
+    "= 403 com linha denied) + scoped_by_organization no SELECT do layout (AND "
+    "organization_id = <org da LINHA do observador>; plataforma: todas); layout de outra "
+    "organização = 404; o layout novo nasce na org da LINHA do ator "
+    "(resolve_organization_for_creation)"
+)
 _VIA_CLIENT_PATH = (
     "AccessibleClientDep -> require_client_access -> resolve_client_access "
     "(o client_id do path só passa se for o tenant da linha)"
@@ -930,6 +937,72 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         "auditado); contas gravadas e inativadas com o client_id do path validado, sob "
         "trava por cliente; cliente encerrado = 409",
     ),
+    # ------------- arquivo contábil do cliente (S13, BACK 13.4 — R3)
+    # Gerar, listar e baixar: o arquivo leva o histórico do cliente final.
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients/{client_id}/accounting-files",
+        ScopeKind.COLLECTION,
+        "app/modules/accounting_files/routes.py",
+        f"{_VIA_CLIENT_PATH} + GenerateAccountingFileDep (guard auditado) + OpenClientDep; "
+        "layout só da organização DO CLIENTE (outra org = 404); materialização carregada com "
+        "client_id no WHERE; geração gravada com o client_id do path validado",
+    ),
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/accounting-files",
+        ScopeKind.COLLECTION,
+        "app/modules/accounting_files/routes.py",
+        f"{_VIA_CLIENT_PATH} + GenerateAccountingFileDep (guard auditado); gerações lidas "
+        "por client_id no próprio SELECT; autor por author_for_viewer",
+    ),
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/accounting-files/{generation_id}/download",
+        ScopeKind.DETAIL_PK,
+        "app/modules/accounting_files/routes.py",
+        f"{_VIA_CLIENT_PATH} + GenerateAccountingFileDep (guard auditado) + OpenClientDep; "
+        "geração por PK com AND client_id no SELECT (outro cliente = 404); regenera e "
+        "confere o SHA-256",
+    ),
+    # ------------- layouts de exportação do arquivo contábil (S13, BACK 13.2 — R1)
+    # Configuração da ORGANIZAÇÃO: o alvo atacado na bateria é um layout de uma TERCEIRA
+    # organização (como o catálogo do de-para da S12).
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/export-layouts",
+        ScopeKind.COLLECTION,
+        "app/modules/export_layouts/routes.py",
+        _VIA_EXPORT_LAYOUT_ORG,
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/export-layouts",
+        ScopeKind.COLLECTION,
+        "app/modules/export_layouts/routes.py",
+        _VIA_EXPORT_LAYOUT_ORG,
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/export-layouts/from-template",
+        ScopeKind.COLLECTION,
+        "app/modules/export_layouts/routes.py",
+        _VIA_EXPORT_LAYOUT_ORG,
+    ),
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/export-layouts/{layout_id}",
+        ScopeKind.DETAIL_PK,
+        "app/modules/export_layouts/routes.py",
+        _VIA_EXPORT_LAYOUT_ORG,
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/export-layouts/{layout_id}/versions",
+        ScopeKind.DETAIL_PK,
+        "app/modules/export_layouts/routes.py",
+        _VIA_EXPORT_LAYOUT_ORG + "; SELECT ... FOR UPDATE já restrito ao alcance",
+    ),
     # ------------- conta contábil do BANCO de cada conta de origem (S16, BACK 16.3 — R3)
     SensitiveEndpoint(
         "GET",
@@ -974,6 +1047,7 @@ NON_TENANT_ENDPOINTS: dict[str, str] = {
     "PATCH /api/v1/anomaly-types/{type_id}": "taxonomia global; escrita só da plataforma",
     "DELETE /api/v1/anomaly-types/{type_id}": "taxonomia global; escrita só da plataforma",
     "POST /api/v1/clients/test-connection": "valida credenciais enviadas no body; nada persistido",
+    "GET /api/v1/export-layout-templates": "modelos de layout declarados no CÓDIGO (dado de código, igual para todas as organizações); sem dado de cliente nem de org",
     "POST /api/v1/system/alert-test": "diagnóstico de alerting; plataforma ou admin (RUN_ALERT_TEST)",
     "GET /api/v1/organizations": "administração da plataforma (ManagePlatformDep); sem dado de cliente",
     "POST /api/v1/organizations": "administração da plataforma (ManagePlatformDep)",
