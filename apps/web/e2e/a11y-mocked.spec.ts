@@ -4974,13 +4974,15 @@ for (const vp of VIEWPORTS) {
       // e o `flex-1` o fazia crescer na sobra da coluna — 209px de vão entre as
       // abas e "Competência" em 1440×900, com o axe verde. A guarda é geométrica:
       // o painel inativo não ocupa altura, e o campo vem logo abaixo das abas.
+      // Desde a 86e3fr9qz as abas dividem uma LINHA com o destino e Exportar/
+      // Importar, que em 390px quebra em várias: o vão se mede do fim da linha.
       const painelInativo = page.locator('[role="tabpanel"][data-state="inactive"]');
       await expect(painelInativo).toHaveCount(1);
       expect(
         (await painelInativo.boundingBox())?.height ?? 0,
         `${vp.label}: o painel inativo ocupa altura`,
       ).toBe(0);
-      const abas = await page.getByRole('tablist').boundingBox();
+      const abas = await page.getByRole('tablist').locator('xpath=..').boundingBox();
       const competencia = await page.getByLabel('Competência', { exact: true }).boundingBox();
       expect(abas, 'faixa de abas sem caixa').not.toBeNull();
       expect(competencia, 'campo de competência sem caixa').not.toBeNull();

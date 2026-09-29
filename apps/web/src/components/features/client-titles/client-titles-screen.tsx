@@ -376,13 +376,23 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
 
   return (
     <section aria-labelledby="client-titles-heading" className="flex flex-col gap-4">
-      <div className="space-y-1">
-        <h1 id="client-titles-heading" className="text-xl font-semibold">
-          Carteira
-        </h1>
-        <p className="text-muted-foreground text-sm">
-          Títulos a pagar e a receber em aberto, de todas as contas e sem recorte de mês.
-        </p>
+      {/* A data da última sincronização mora à direita do título (86e3fr9qz): na
+          linha das abas ela empurrava o "Sincronizar agora" para a linha de baixo
+          em 1280px. Continua só na aba Carteira, como antes. */}
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
+        <div className="space-y-1">
+          <h1 id="client-titles-heading" className="text-xl font-semibold">
+            Carteira
+          </h1>
+          <p className="text-muted-foreground text-sm">
+            Títulos a pagar e a receber em aberto, de todas as contas e sem recorte de mês.
+          </p>
+        </div>
+        {showCarteiraHeaderActions && syncedAtLabel !== null && (
+          <p className="text-muted-foreground text-sm" data-testid="titles-synced-at">
+            {syncedAtLabel}
+          </p>
+        )}
       </div>
 
       {/* Sprint 15 (FRONT 15.2): "Relatório de recebíveis" é aba DENTRO desta
@@ -412,8 +422,8 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
           ) : null)}
 
         {/* Uma linha só (86e3fr9qz): as abas, os filtros da Carteira e, à direita,
-            a data da última sincronização com a ação (ou o motivo de ela não
-            existir). Quebra em mais linhas quando não cabe, sem cortar nada. */}
+            a ação de sincronizar (ou o motivo de ela não existir). Quebra em mais
+            linhas quando não cabe, sem cortar nada. */}
         <div className="flex flex-wrap items-center gap-3">
           <TabsList className="self-start">
             <TabsTrigger value="carteira">Carteira</TabsTrigger>
@@ -541,11 +551,6 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
                 </Button>
               )}
               <div className="flex flex-wrap items-center gap-3 xl:ml-auto">
-                {syncedAtLabel !== null && (
-                  <p className="text-muted-foreground text-sm" data-testid="titles-synced-at">
-                    {syncedAtLabel}
-                  </p>
-                )}
                 {showSyncAction && syncButton}
                 {/* Encerrado é só-leitura: a ação some COM o motivo, em vez de sumir
                     em silêncio e deixar a pessoa procurando o botão (§4.12). */}
