@@ -155,12 +155,25 @@ _TABLE: dict[Permission, tuple[bool, bool, bool, bool, bool]] = {
     # staff só. O ❌ do `client_manager` é decisão do planejador pendente de
     # validação humana (ADR-086-BE). 26 → 27 permissões.
     Permission.MANAGE_CLIENT_ACCOUNTING_CHART: (True, True, True, False, False),
+    # S13 (BACK 13.2), tabela do R3 do PRD — células DECIDIDAS lá. GERAR e baixar o
+    # arquivo contábil é trabalho do escritório: staff (o "(carteira)" do manager é
+    # `resolve_client_access`); os papéis de cliente ficam de fora. NÃO reusa
+    # `review_export` (de todos: deixaria o operador do cliente baixar o arquivo).
+    Permission.GENERATE_ACCOUNTING_FILE: (True, True, True, False, False),
+    # ADMINISTRAR layouts de exportação é configuração da ORGANIZAÇÃO: plataforma e
+    # admin; o manager escolhe o layout ao gerar, mas não o cria. 27 → 29 permissões.
+    Permission.MANAGE_EXPORT_LAYOUTS: (True, True, False, False, False),
 }
 
 
-def test_a_matriz_tem_27_permissoes() -> None:
-    """A contagem da §4.9 do primer (26 → 27 na BACK 16.1). Mudou? O primer muda junto."""
-    assert len(Permission) == 27
+def test_a_matriz_tem_29_permissoes() -> None:
+    """A contagem da §4.9 do primer (27 → 29 na BACK 13.2). Mudou? O primer muda junto."""
+    assert len(Permission) == 29
+
+
+def test_review_export_continua_de_todos() -> None:
+    """S13: as duas permissões do arquivo contábil são NOVAS; `review_export` intocada."""
+    assert PERMISSION_MATRIX[Permission.REVIEW_EXPORT] == frozenset(UserRole)
 
 
 MATRIX_CELLS = [

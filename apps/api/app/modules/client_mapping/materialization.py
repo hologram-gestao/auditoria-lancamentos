@@ -485,6 +485,8 @@ class ClientMappingApplyService:
             client_id=client.id,
             destino=preview.destination.destination_type,
             competencia=competence,
+            # S13 (BACK 13.1): a chave que casa com `arquivo_contabil_gerado`.
+            materializacao_id=materialization.id,
             valor_com_decisao=result.numerator,
             valor_nao_mapear=result.totals[MaterializedSituation.NAO_MAPEAR].amount,
             valor_sem_decisao=pending.amount,

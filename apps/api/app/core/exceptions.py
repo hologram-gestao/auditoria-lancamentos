@@ -103,6 +103,24 @@ class ErrorCode(StrEnum):
     #: contábil do banco — a partida ficaria sem um dos lados. 409 (estado da
     #: configuração, não conteúdo do pedido), `details` só com identificadores.
     CONTA_DO_BANCO_PENDENTE = "CONTA_DO_BANCO_PENDENTE"
+    # Sprint 13 (BACK 13.2) — layout de exportação. A definição que não se sustenta
+    # (campo fora do vocabulário, parâmetro inválido, codificação desconhecida) é 422
+    # NOMEANDO o campo em `details.field`; a FORMA do JSON segue o 400 genérico.
+    LAYOUT_INVALIDO = "LAYOUT_INVALIDO"
+    LAYOUT_NOME_DUPLICADO = "LAYOUT_NOME_DUPLICADO"
+    # Sprint 13 (BACK 13.3) — recusas da GERAÇÃO do arquivo contábil. Todas 409 (estado
+    # da materialização/configuração, não forma do pedido), levantadas ANTES de montar
+    # qualquer byte, e `details` só com CÓDIGOS (categoria de origem, parcelas em
+    # número) — nunca histórico, descrição ou nome (§4.5).
+    ARQUIVO_DESTINO_INVALIDO = "ARQUIVO_DESTINO_INVALIDO"
+    ARQUIVO_COBERTURA_PARCIAL = "ARQUIVO_COBERTURA_PARCIAL"
+    ARQUIVO_PARTIDA_INCOMPLETA = "ARQUIVO_PARTIDA_INCOMPLETA"
+    ARQUIVO_PARTICAO_NAO_FECHA = "ARQUIVO_PARTICAO_NAO_FECHA"
+    ARQUIVO_TEXTO_NAO_CABE = "ARQUIVO_TEXTO_NAO_CABE"
+    # Sprint 13 (BACK 13.4) — entrega: competência sem materialização no destino, e o
+    # download cujo conteúdo regenerado não bate com o SHA-256 registrado.
+    ARQUIVO_SEM_MATERIALIZACAO = "ARQUIVO_SEM_MATERIALIZACAO"
+    ARQUIVO_DIVERGENTE = "ARQUIVO_DIVERGENTE"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
@@ -949,6 +967,124 @@ class BankAccountPendingError(ConflictError):
     default_user_message = (
         "Há movimentos de contas de origem sem a conta contábil do banco associada. "
         "Associe a conta do banco de cada uma e aplique de novo."
+    )
+
+
+class ExportLayoutDefinitionError(AppError):
+    """422 — a definição do layout de exportação não se sustenta (S13, BACK 13.2).
+
+    Campo de origem fora do vocabulário fechado, parâmetro inválido (separador vazio
+    ou igual ao decimal, casas fora da faixa, formato de data desconhecido) ou
+    codificação que o Python não conhece. `details.field` NOMEIA o campo pelo caminho
+    do JSON (`columns[2].field`, `amountFormat.decimalPlaces`, `encoding`) para a tela
+    apontar onde corrigir. Não é validador Pydantic: `ValueError` de validador vira o
+    400 genérico, que não nomeia nada (§4.8). Nada é gravado.
+    """
+
+    code = ErrorCode.LAYOUT_INVALIDO
+    status_code = 422
+    default_user_message = "A definição do layout tem um campo inválido."
+
+
+class ExportLayoutNameAlreadyExistsError(ConflictError):
+    """409 — já existe um layout com este nome na organização (S13, BACK 13.2)."""
+
+    code = ErrorCode.LAYOUT_NOME_DUPLICADO
+    default_user_message = "Já existe um layout com este nome nesta organização."
+
+
+class AccountingFileWrongDestinationError(ConflictError):
+    """409 — a materialização não é do destino `conta_contabil` (S13, BACK 13.3)."""
+
+    code = ErrorCode.ARQUIVO_DESTINO_INVALIDO
+    default_user_message = (
+        "O arquivo contábil só é gerado a partir de uma aplicação do de-para no destino "
+        "Conta contábil."
+    )
+
+
+class AccountingFilePartialCoverageError(ConflictError):
+    """409 — a materialização foi confirmada com COBERTURA PARCIAL (S13, BACK 13.3).
+
+    Para a contabilidade do cliente final, cobertura parcial não passa: o arquivo sairia
+    sem parte dos lançamentos. `details.categoryCodes` = os CÓDIGOS das categorias sem
+    decisão (nunca o nome).
+    """
+
+    code = ErrorCode.ARQUIVO_COBERTURA_PARCIAL
+    default_user_message = (
+        "Esta aplicação do de-para tem categorias sem decisão. Decida todas as categorias "
+        "e aplique de novo antes de gerar o arquivo."
+    )
+
+
+class AccountingFileIncompletePartidaError(ConflictError):
+    """409 — completude de partida abaixo de 100% (S13, BACK 13.3).
+
+    Linha com conta decidida sem histórico, sem conta do banco, com decisão legada ou com
+    o histórico que não pode mais ser lido. `details.categoryCodes` = os CÓDIGOS.
+    """
+
+    code = ErrorCode.ARQUIVO_PARTIDA_INCOMPLETA
+    default_user_message = (
+        "Há categorias com a partida incompleta (sem histórico, sem conta do banco ou com "
+        "decisão antiga). Complete o de-para e aplique de novo."
+    )
+
+
+class AccountingFilePartitionError(ConflictError):
+    """409 — a identidade de partição da materialização não fecha (S13, BACK 13.3).
+
+    Σ|valor| com conta + `nao_mapear` + sem decisão + sem categoria ≠ Σ|valor| da
+    competência. `details` leva as parcelas (números, nunca texto).
+    """
+
+    code = ErrorCode.ARQUIVO_PARTICAO_NAO_FECHA
+    default_user_message = (
+        "Os totais desta aplicação do de-para não fecham com o total da competência. "
+        "Aplique o de-para de novo; se persistir, fale com o suporte."
+    )
+
+
+class AccountingFileTextDoesNotFitError(ConflictError):
+    """409 — algum texto não cabe no formato do layout (S13, BACK 13.3).
+
+    Caractere fora da codificação, o separador de colunas, quebra de linha ou início com
+    `=`, `+`, `-` ou `@`. NUNCA se substitui, escapa, trunca ou prefixa: o arquivo entra
+    na contabilidade do cliente. `details.categories` = `[{categoryCode, field, reason}]`
+    com `reason` de vocabulário fechado — o texto em si nunca sai.
+    """
+
+    code = ErrorCode.ARQUIVO_TEXTO_NAO_CABE
+    default_user_message = (
+        "Há históricos que não cabem no formato do arquivo. Edite o histórico das "
+        "categorias indicadas e aplique o de-para de novo."
+    )
+
+
+class AccountingFileNoMaterializationError(ConflictError):
+    """409 — a competência não tem materialização no destino `conta_contabil` (S13, 13.4).
+
+    Nunca se materializa implicitamente: a pessoa confirma a prévia do de-para primeiro.
+    """
+
+    code = ErrorCode.ARQUIVO_SEM_MATERIALIZACAO
+    default_user_message = (
+        "Esta competência ainda não tem o de-para aplicado no destino Conta contábil. "
+        "Confira a prévia e aplique o de-para antes de gerar o arquivo."
+    )
+
+
+class AccountingFileDivergentError(ConflictError):
+    """409 — o arquivo regenerado no download não bate com o SHA-256 registrado (S13, 13.4).
+
+    Nunca se entrega um arquivo diferente do que foi gerado: a divergência vai ao plantão.
+    """
+
+    code = ErrorCode.ARQUIVO_DIVERGENTE
+    default_user_message = (
+        "Não foi possível reproduzir este arquivo exatamente como foi gerado. A equipe "
+        "foi avisada; gere o arquivo de novo."
     )
 
 

@@ -15,10 +15,10 @@
 
 | | |
 | --- | --- |
-| Endpoints sensíveis (denominador) | **108** |
-| Com caso negativo cross-tenant verde | **108** |
+| Endpoints sensíveis (denominador) | **116** |
+| Com caso negativo cross-tenant verde | **116** |
 | Pendentes (implementação em outra task) | **0** |
-| Cobertura | **108/108 = 100%** |
+| Cobertura | **116/116 = 100%** |
 
 ## Lista canônica
 
@@ -132,6 +132,14 @@ Legenda de `tipo`: **coleção** = vaza forjando `client_id` na URL/payload · *
 | `GET` | `/api/v1/clients/{client_id}/file-origin/imports` | coleção | `app/modules/client_file_ingestion/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); registros lidos por client_id, autor por author_for_viewer | ✅ verde |
 | `GET` | `/api/v1/clients/{client_id}/accounting-chart` | coleção | `app/modules/client_accounting_chart/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); toda query do plano filtra client_id no próprio SELECT; nome decifrado com a DEK do cliente do path | ✅ verde |
 | `POST` | `/api/v1/clients/{client_id}/accounting-chart/import` | coleção | `app/modules/client_accounting_chart/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + OpenClientDep + ManageClientAccountingChartDep (guard auditado); contas gravadas e inativadas com o client_id do path validado, sob trava por cliente; cliente encerrado = 409 | ✅ verde |
+| `POST` | `/api/v1/clients/{client_id}/accounting-files` | coleção | `app/modules/accounting_files/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + GenerateAccountingFileDep (guard auditado) + OpenClientDep; layout só da organização DO CLIENTE (outra org = 404); materialização carregada com client_id no WHERE; geração gravada com o client_id do path validado | ✅ verde |
+| `GET` | `/api/v1/clients/{client_id}/accounting-files` | coleção | `app/modules/accounting_files/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + GenerateAccountingFileDep (guard auditado); gerações lidas por client_id no próprio SELECT; autor por author_for_viewer | ✅ verde |
+| `GET` | `/api/v1/clients/{client_id}/accounting-files/{generation_id}/download` | detalhe (PK) | `app/modules/accounting_files/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + GenerateAccountingFileDep (guard auditado) + OpenClientDep; geração por PK com AND client_id no SELECT (outro cliente = 404); regenera e confere o SHA-256 | ✅ verde |
+| `GET` | `/api/v1/export-layouts` | coleção | `app/modules/export_layouts/routes.py` | ReadExportLayoutsDep/ManageExportLayoutsDep (guard de organização: usuário de cliente = 403 com linha denied) + scoped_by_organization no SELECT do layout (AND organization_id = <org da LINHA do observador>; plataforma: todas); layout de outra organização = 404; o layout novo nasce na org da LINHA do ator (resolve_organization_for_creation) | ✅ verde |
+| `POST` | `/api/v1/export-layouts` | coleção | `app/modules/export_layouts/routes.py` | ReadExportLayoutsDep/ManageExportLayoutsDep (guard de organização: usuário de cliente = 403 com linha denied) + scoped_by_organization no SELECT do layout (AND organization_id = <org da LINHA do observador>; plataforma: todas); layout de outra organização = 404; o layout novo nasce na org da LINHA do ator (resolve_organization_for_creation) | ✅ verde |
+| `POST` | `/api/v1/export-layouts/from-template` | coleção | `app/modules/export_layouts/routes.py` | ReadExportLayoutsDep/ManageExportLayoutsDep (guard de organização: usuário de cliente = 403 com linha denied) + scoped_by_organization no SELECT do layout (AND organization_id = <org da LINHA do observador>; plataforma: todas); layout de outra organização = 404; o layout novo nasce na org da LINHA do ator (resolve_organization_for_creation) | ✅ verde |
+| `GET` | `/api/v1/export-layouts/{layout_id}` | detalhe (PK) | `app/modules/export_layouts/routes.py` | ReadExportLayoutsDep/ManageExportLayoutsDep (guard de organização: usuário de cliente = 403 com linha denied) + scoped_by_organization no SELECT do layout (AND organization_id = <org da LINHA do observador>; plataforma: todas); layout de outra organização = 404; o layout novo nasce na org da LINHA do ator (resolve_organization_for_creation) | ✅ verde |
+| `POST` | `/api/v1/export-layouts/{layout_id}/versions` | detalhe (PK) | `app/modules/export_layouts/routes.py` | ReadExportLayoutsDep/ManageExportLayoutsDep (guard de organização: usuário de cliente = 403 com linha denied) + scoped_by_organization no SELECT do layout (AND organization_id = <org da LINHA do observador>; plataforma: todas); layout de outra organização = 404; o layout novo nasce na org da LINHA do ator (resolve_organization_for_creation); SELECT ... FOR UPDATE já restrito ao alcance | ✅ verde |
 | `GET` | `/api/v1/clients/{client_id}/source-accounts` | coleção | `app/modules/client_source_accounts/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); associações, base de movimentos e conexões lidas por client_id; o JOIN com o plano carrega client_id dos dois lados | ✅ verde |
 | `PUT` | `/api/v1/clients/{client_id}/source-accounts` | coleção | `app/modules/client_source_accounts/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + OpenClientDep + ManageClientAccountingChartDep (guard auditado); a conta do banco passa pelo validador único (SELECT com client_id do path: outro cliente = 404); upsert ON CONFLICT com o client_id validado | ✅ verde |
 
@@ -143,6 +151,7 @@ Não carregam dado escopável a um cliente. Registradas explicitamente para que 
 | --- | --- |
 | `DELETE /api/v1/anomaly-types/{type_id}` | taxonomia global; escrita só da plataforma |
 | `GET /api/v1/anomaly-types` | taxonomia global do produto; sem dado de cliente nem de org |
+| `GET /api/v1/export-layout-templates` | modelos de layout declarados no CÓDIGO (dado de código, igual para todas as organizações); sem dado de cliente nem de org |
 | `GET /api/v1/organizations` | administração da plataforma (ManagePlatformDep); sem dado de cliente |
 | `GET /api/v1/organizations/platform-admins` | administração da plataforma (ManagePlatformDep); só quem tem scope=platform, sem organização nem cliente |
 | `GET /api/v1/organizations/{organization_id}` | administração da plataforma (ManagePlatformDep) |

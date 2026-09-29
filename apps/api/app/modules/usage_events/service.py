@@ -29,6 +29,7 @@ from app.modules.reconciliations.tenant_scope import audit_session_tenant_miss
 from app.modules.usage_events.omie_rejection import classify_omie_rejection
 from app.modules.usage_events.repository import UsageEventRepository
 from app.modules.usage_events.schemas import (
+    ArquivoContabilGeradoProps,
     ArquivoProcessadoProps,
     CarteiraSincronizadaProps,
     ClienteCriadoProps,
@@ -507,6 +508,7 @@ class UsageEventService:
         client_id: UUID,
         destino: str,
         competencia: date,
+        materializacao_id: UUID,
         valor_com_decisao: Decimal,
         valor_nao_mapear: Decimal,
         valor_sem_decisao: Decimal,
@@ -521,6 +523,9 @@ class UsageEventService:
         destino, nunca nome de alvo ou de categoria (`DeparaAplicadoProps`
         recusa o formato). Props montadas no caminho fail-soft: a materialização
         já foi commitada quando este emissor roda.
+
+        `materializacao_id` (S13, BACK 13.1) é o id da materialização recém-criada:
+        a métrica da S13 casa este evento com `arquivo_contabil_gerado` por ele.
         """
         event = UsageEventName.DEPARA_APLICADO
         props = self._props_or_none(
@@ -529,6 +534,7 @@ class UsageEventService:
                 client_id=client_id,
                 destino=destino,
                 competencia=format_competence(competencia),
+                materializacao_id=materializacao_id,
                 valor_com_decisao_centavos=decimal_to_cents(valor_com_decisao),
                 valor_nao_mapear_centavos=decimal_to_cents(valor_nao_mapear),
                 valor_sem_decisao_centavos=decimal_to_cents(valor_sem_decisao),
@@ -629,6 +635,46 @@ class UsageEventService:
                 contas=contas,
                 contas_novas=contas_novas,
                 contas_inativadas=contas_inativadas,
+            ),
+        )
+        if props is None:
+            return False
+        return await self.emit(event, props=props)
+
+    async def emit_arquivo_contabil_gerado(
+        self,
+        *,
+        client_id: UUID,
+        destino: str,
+        competencia: date,
+        materializacao_id: UUID,
+        layout_id: UUID,
+        layout_versao: int,
+        linhas: int,
+        valor_total: Decimal,
+    ) -> bool:
+        """S13 — **a métrica da Sprint 13**: um arquivo contábil foi gerado. Sem `session_id`.
+
+        O ponto de chamada é a geração do arquivo (BACK 13.4), DEPOIS do commit do
+        registro da geração: recusa 409 não emite (estrutural). **Sem dedup**: cada
+        geração é uma linha, inclusive a 2ª da mesma materialização (a leitura usa a
+        primeira). `valor_total` chega em `Decimal` (Σ|valor| das linhas do arquivo)
+        e vira CENTAVOS por `decimal_to_cents`, sem `float`. Props no caminho
+        fail-soft: a geração já foi gravada quando este emissor roda, e prop inválida
+        vira warning (só o nome do evento), nunca 500.
+        """
+        event = UsageEventName.ARQUIVO_CONTABIL_GERADO
+        props = self._props_or_none(
+            event,
+            lambda: ArquivoContabilGeradoProps(
+                client_id=client_id,
+                destino=destino,
+                competencia=format_competence(competencia),
+                materializacao_id=materializacao_id,
+                layout_id=layout_id,
+                layout_versao=layout_versao,
+                linhas=linhas,
+                valor_total_centavos=decimal_to_cents(valor_total),
             ),
         )
         if props is None:
