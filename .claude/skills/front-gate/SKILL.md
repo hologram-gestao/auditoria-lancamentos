@@ -101,7 +101,7 @@ backend E ação oculta na tela).
   cru na tela); `organizationLabel` (`:273`, "Plataforma" ou o nome da organização).
 - Copie de: `components/features/navigation/nav-items.tsx:97` (Configurações item a item
   pela matriz) e `:201`, `client-users/client-users-screen.tsx:59`,
-  `clients/client-shell.tsx:119,125`, `glossary/glossary-screen.tsx:68`. Deep link negado
+  `app/(app)/clientes/page.tsx:150` (Editar e Encerrar da linha, `edit_client`), `glossary/glossary-screen.tsx:68`. Deep link negado
   degrada para `components/shared/access-denied.tsx` (mensagem + caminho de volta), nunca
   tela branca.
 - `role ===` fora do helper só para RÓTULO/badge ou filtro de dados — hoje **4**

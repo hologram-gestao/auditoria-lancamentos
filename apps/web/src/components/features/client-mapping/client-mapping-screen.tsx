@@ -207,39 +207,14 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
 
   return (
     <section aria-labelledby="client-mapping-heading" className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-1">
-          <h2 id="client-mapping-heading" className="text-lg font-semibold">
-            De-para
-          </h2>
-          <p className="text-muted-foreground text-sm">
-            Para onde cada categoria de origem vai em cada destino. A mesma categoria pode ter
-            decisões diferentes em destinos diferentes.
-          </p>
-        </div>
-        {destination !== null && (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void handleExport()}
-              disabled={exportMutation.isPending}
-            >
-              {exportMutation.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <Download className="h-4 w-4" aria-hidden="true" />
-              )}
-              {exportMutation.isPending ? 'Exportando…' : 'Exportar'}
-            </Button>
-            {canManage && !isClosed && (
-              <Button type="button" variant="secondary" onClick={() => setImportOpen(true)}>
-                <Upload className="h-4 w-4" aria-hidden="true" />
-                Importar
-              </Button>
-            )}
-          </div>
-        )}
+      <div className="space-y-1">
+        <h1 id="client-mapping-heading" className="text-xl font-semibold">
+          De-para
+        </h1>
+        <p className="text-muted-foreground text-sm">
+          Para onde cada categoria de origem vai em cada destino. A mesma categoria pode ter
+          decisões diferentes em destinos diferentes.
+        </p>
       </div>
 
       {canManage && isClosed && (
@@ -275,30 +250,6 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
         </div>
       ) : (
         <>
-          <div className="space-y-1.5 sm:w-80">
-            <Label htmlFor="mapping-destination">Destino</Label>
-            <Select
-              value={destination.type}
-              onValueChange={(value) =>
-                setMany({
-                  [PARAM.destination]: value,
-                  [PARAM.page]: null,
-                })
-              }
-            >
-              <SelectTrigger id="mapping-destination" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {destinations.map((item) => (
-                  <SelectItem key={item.id} value={item.type}>
-                    {item.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
           <Tabs
             value={view}
             onValueChange={(value) =>
@@ -310,10 +261,59 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
             // primitivo (`data-[state=inactive]:hidden`, validação da S12).
             className="flex flex-col gap-4"
           >
-            <TabsList className="self-start">
-              <TabsTrigger value="decisoes">Decisões</TabsTrigger>
-              <TabsTrigger value="previa">Prévia da competência</TabsTrigger>
-            </TabsList>
+            {/* Uma linha só (86e3fr9qz, pedido do Lucas): as abas, o destino e, à
+                direita, Exportar e Importar. Quebra em mais linhas quando não
+                cabe, sem cortar nada. */}
+            <div className="flex flex-wrap items-center gap-3">
+              <TabsList className="self-start">
+                <TabsTrigger value="decisoes">Decisões</TabsTrigger>
+                <TabsTrigger value="previa">Prévia da competência</TabsTrigger>
+              </TabsList>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="mapping-destination">Destino</Label>
+                <Select
+                  value={destination.type}
+                  onValueChange={(value) =>
+                    setMany({
+                      [PARAM.destination]: value,
+                      [PARAM.page]: null,
+                    })
+                  }
+                >
+                  <SelectTrigger id="mapping-destination" className="w-56 sm:w-64">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {destinations.map((item) => (
+                      <SelectItem key={item.id} value={item.type}>
+                        {item.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 xl:ml-auto">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void handleExport()}
+                  disabled={exportMutation.isPending}
+                >
+                  {exportMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Download className="h-4 w-4" aria-hidden="true" />
+                  )}
+                  {exportMutation.isPending ? 'Exportando…' : 'Exportar'}
+                </Button>
+                {canManage && !isClosed && (
+                  <Button type="button" variant="secondary" onClick={() => setImportOpen(true)}>
+                    <Upload className="h-4 w-4" aria-hidden="true" />
+                    Importar
+                  </Button>
+                )}
+              </div>
+            </div>
 
             <TabsContent value="decisoes" className="mt-0 flex flex-col">
               <MappingListPanel

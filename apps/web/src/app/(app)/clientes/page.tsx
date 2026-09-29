@@ -32,12 +32,13 @@
 
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, Eye, Plus, Search, SquarePen } from 'lucide-react';
+import { Archive, ChevronLeft, ChevronRight, Eye, Plus, Search, SquarePen } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
 import { CategoryBadge } from '@/components/features/client-categories/category-badge';
 import { ClientStatusBadge } from '@/components/features/clients/client-status-badge';
+import { CloseClientDialog } from '@/components/features/clients/close-client-dialog';
 import { OriginStatusBadge } from '@/components/features/clients/connections/connection-badges';
 import { CreateClientModal } from '@/components/features/clients/create-client-modal';
 import { EditClientModal } from '@/components/features/clients/edit-client-modal';
@@ -64,6 +65,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useClientCategories } from '@/hooks/use-client-categories';
 import { useClientsList } from '@/hooks/use-clients';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
@@ -95,6 +97,12 @@ export default function ClientesPage() {
   const [pageSize, setPageSize] = useState<PageSize>(20);
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<Client | null>(null);
+  // Encerrar pela LISTA (86e3fr9qj): a saída do cliente pela tela mora aqui
+  // desde que o menu "Ações do cliente" saiu do cabeçalho (86e3fr9q3). O alvo
+  // fica guardado separado do `open` para o diálogo fechar com animação e
+  // devolver o foco ao ícone (OpenerCapture) antes de desmontar.
+  const [closing, setClosing] = useState<Client | null>(null);
+  const [closeOpen, setCloseOpen] = useState(false);
   // 'all' = sem filtro (o Select do Radix não aceita '' como valor).
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   // Filtro por organização (86e36ed1d) — só a plataforma o vê; para o staff o
@@ -237,7 +245,7 @@ export default function ClientesPage() {
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Conciliações</TableHead>
               <TableHead>Cadastrado em</TableHead>
-              <TableHead className="w-28 text-right">Ações</TableHead>
+              <TableHead className="w-40 text-right">Ações</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -350,6 +358,31 @@ export default function ClientesPage() {
                           <SquarePen className="h-4 w-4" aria-hidden="true" />
                         </Button>
                       )}
+                      {/* Encerrar com retenção (86e36pm1z) pela lista: mesma regra que
+                          vivia no menu do cabeçalho — `edit_client` e cliente ainda
+                          aberto (encerrado é terminal, o servidor daria 409). */}
+                      {isAdmin && c.closed_at == null && (
+                        <TooltipProvider delayDuration={150}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => {
+                                  setClosing(c);
+                                  setCloseOpen(true);
+                                }}
+                                aria-label={`Encerrar ${c.name}`}
+                              >
+                                <Archive className="h-4 w-4" aria-hidden="true" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="text-xs leading-snug">
+                              Encerrar cliente: vira histórico só-leitura
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -412,6 +445,9 @@ export default function ClientesPage() {
         onOpenChange={(o) => !o && setEditing(null)}
         client={editing}
       />
+      {closing !== null && (
+        <CloseClientDialog open={closeOpen} onOpenChange={setCloseOpen} client={closing} />
+      )}
     </div>
   );
 }

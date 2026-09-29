@@ -10,7 +10,10 @@
  *
  *   1. nome (+ organização/categoria) bastam: **Salvar habilitado sem teste**,
  *      e o cliente nasce em "sem origem conectada";
- *   2. a credencial vive numa seção OPCIONAL, "Conectar uma origem agora";
+ *   2. a credencial vive numa seção OPCIONAL, "Conectar uma origem agora",
+ *      atrás do switch "Conectar com o Omie" (86e3fr9r6, feedback do Lucas em
+ *      28/09/2026): com os campos sempre abertos o bloco parecia obrigatório.
+ *      Desligado por padrão; desligar limpa App Key e App Secret;
  *   3. preencheu QUALQUER um dos dois campos → o gate do "Testar conexão"
  *      volta a valer, como sempre valeu;
  *   4. editar key/secret depois do teste invalida o sucesso e exige novo teste.
@@ -54,6 +57,7 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { ScrollRegion } from '@/components/ui/scroll-region';
 import {
   Select,
@@ -62,6 +66,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { useClientCategories } from '@/hooks/use-client-categories';
 import { useCreateClient, useTestConnection } from '@/hooks/use-clients';
 import { ApiError } from '@/lib/api/client';
@@ -80,6 +85,8 @@ interface CreateClientModalProps {
 export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps) {
   const [showKey, setShowKey] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
+  // 86e3fr9r6: os campos da credencial só aparecem com o switch ligado.
+  const [connectOmie, setConnectOmie] = useState(false);
   const [testState, setTestState] = useState<TestConnectionState>({ kind: 'idle' });
   // Última dupla submetida ao test (sucesso OU falha). Ao editar key/secret
   // o useEffect compara contra esse ref e volta a idle. Manter num ref evita
@@ -151,6 +158,7 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
   useEffect(() => {
     if (!open) {
       form.reset();
+      setConnectOmie(false);
       setShowKey(false);
       setShowSecret(false);
       setTestState({ kind: 'idle' });
@@ -172,6 +180,19 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
       setTestState({ kind: 'idle' });
     }
   }, [watchedKey, watchedSecret]);
+
+  // Desligar o switch LIMPA a credencial: o cliente volta a nascer sem origem,
+  // e nada digitado fica escondido atrás do switch para sair no POST.
+  function handleConnectOmieChange(checked: boolean) {
+    setConnectOmie(checked);
+    if (checked) return;
+    form.setValue('omie_app_key', '');
+    form.setValue('omie_app_secret', '');
+    setShowKey(false);
+    setShowSecret(false);
+    setTestState({ kind: 'idle' });
+    lastTestedRef.current = null;
+  }
 
   async function handleTest() {
     const key = form.getValues('omie_app_key').trim();
@@ -199,7 +220,7 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
   async function onSubmit(values: CreateClientFormValues) {
     const key = (values.omie_app_key ?? '').trim();
     const secret = (values.omie_app_secret ?? '').trim();
-    const wantsOrigin = key.length > 0 || secret.length > 0;
+    const wantsOrigin = connectOmie && (key.length > 0 || secret.length > 0);
     if (wantsOrigin && testState.kind !== 'success') {
       // UX guard — não deveria atingir esse caminho com o botão disabled, mas
       // o submit por Enter passa por aqui.
@@ -373,61 +394,82 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
               {canManageConnections && (
                 <fieldset className="space-y-4 rounded-lg border p-4">
                   <legend className="px-1 text-sm font-medium">Conectar uma origem agora</legend>
-                  <p className="text-muted-foreground text-sm">
-                    Opcional. Sem credencial o cliente é criado do mesmo jeito e abre em &quot;sem
-                    origem conectada&quot; — dá para conectar depois, na tela dele.
-                  </p>
+                  <div className="flex items-start gap-3">
+                    <Switch
+                      id="create-client-connect-omie"
+                      checked={connectOmie}
+                      onCheckedChange={handleConnectOmieChange}
+                      disabled={inputsDisabled}
+                      aria-describedby="create-client-connect-omie-hint"
+                    />
+                    <div className="space-y-0.5">
+                      <Label htmlFor="create-client-connect-omie" className="cursor-pointer">
+                        Conectar com o Omie
+                      </Label>
+                      <p
+                        id="create-client-connect-omie-hint"
+                        className="text-muted-foreground text-sm"
+                      >
+                        Opcional. Desligado, o cliente é criado sem origem conectada, e dá para
+                        conectar depois, na tela dele.
+                      </p>
+                    </div>
+                  </div>
 
-                  <FormField
-                    control={form.control}
-                    name="omie_app_key"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>App Key Omie</FormLabel>
-                        <FormControl>
-                          <PasswordInput
-                            visible={showKey}
-                            onToggle={() => setShowKey((v) => !v)}
-                            disabled={inputsDisabled}
-                            autoComplete="off"
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                  {connectOmie && (
+                    <>
+                      <FormField
+                        control={form.control}
+                        name="omie_app_key"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>App Key Omie</FormLabel>
+                            <FormControl>
+                              <PasswordInput
+                                visible={showKey}
+                                onToggle={() => setShowKey((v) => !v)}
+                                disabled={inputsDisabled}
+                                autoComplete="off"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
 
-                  <FormField
-                    control={form.control}
-                    name="omie_app_secret"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>App Secret Omie</FormLabel>
-                        <FormControl>
-                          <PasswordInput
-                            visible={showSecret}
-                            onToggle={() => setShowSecret((v) => !v)}
-                            disabled={inputsDisabled}
-                            autoComplete="off"
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                      <FormField
+                        control={form.control}
+                        name="omie_app_secret"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>App Secret Omie</FormLabel>
+                            <FormControl>
+                              <PasswordInput
+                                visible={showSecret}
+                                onToggle={() => setShowSecret((v) => !v)}
+                                disabled={inputsDisabled}
+                                autoComplete="off"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
 
-                  <TestConnectionButton
-                    state={testState}
-                    disabled={!canTest}
-                    onClick={handleTest}
-                  />
+                      <TestConnectionButton
+                        state={testState}
+                        disabled={!canTest}
+                        onClick={handleTest}
+                      />
 
-                  {credentialsTouched && testState.kind !== 'success' && (
-                    <p className="text-muted-foreground text-sm">
-                      Com credencial preenchida, o teste é obrigatório antes de salvar.
-                    </p>
+                      {credentialsTouched && testState.kind !== 'success' && (
+                        <p className="text-muted-foreground text-sm">
+                          Com credencial preenchida, o teste é obrigatório antes de salvar.
+                        </p>
+                      )}
+                    </>
                   )}
                 </fieldset>
               )}

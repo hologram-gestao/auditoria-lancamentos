@@ -105,9 +105,9 @@ export function FileOriginScreen({ clientId }: { clientId: string }) {
   return (
     <section aria-labelledby="file-origin-heading" className="flex flex-col gap-4">
       <div className="space-y-1">
-        <h2 id="file-origin-heading" className="text-lg font-semibold">
+        <h1 id="file-origin-heading" className="text-xl font-semibold">
           Origem por arquivo
-        </h2>
+        </h1>
         <p className="text-muted-foreground text-sm">
           A planilha ou o extrato que este cliente manda todo mês, lido pelo mapeamento de colunas
           dele. As linhas viram a base de movimentos que o de-para classifica.

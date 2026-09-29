@@ -880,6 +880,15 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   para cima, a paginação vem depois da última linha, nunca grudada). `position: sticky`
   gruda no scroller mais próximo, e `overflow-hidden` também é scroller: por isso o
   segundo padrão recorta com `overflow-clip`.
+- **Tela dentro do cliente traz o PRÓPRIO `<h1>`** (86e3fr9q3): o `ClientShell` não tem
+  cabeçalho (sem breadcrumb, nome do cliente, selos nem menu de ações; o nome está no menu
+  lateral, e Editar e Encerrar moram na linha da lista de clientes). Tela nova sob
+  `/clientes/[id]` começa com o `<h1>` dela; um título no shell repetiria o da tela logo
+  abaixo. Cliente encerrado ganha o aviso "Cliente encerrado: somente leitura" do shell.
+- **Totais que filtram são recolhíveis pela mesma moldura** (86e3fr9qz):
+  `components/shared/collapsible-summary.tsx`, com estado por tela no `localStorage`
+  (try/catch, sem armazenamento abre aberto) e o conteúdo recolhido montado com `hidden`.
+  Tela nova com cards de totais usa ela, nunca um "ocultar" próprio.
 
 ### API
 
@@ -1284,6 +1293,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.61 — 29/09/2026. **O topo das telas do cliente encolheu (épico 86e3fr9pd, feedback do Lucas em 28/09).** O `ClientShell` perdeu o cabeçalho inteiro: breadcrumb, nome do cliente, selos de status e categoria, favorito e o menu "Ações do cliente". A task pedia o nome da página no lugar do nome do cliente, mas toda tela já tinha o próprio título logo abaixo, e o Pedro decidiu (29/09) que o título da TELA vira o `<h1>` e o shell não repete nada; o detalhe da conciliação já tinha o dele ("Conta · Mês"). Editar e Encerrar foram para a linha da lista de clientes (o ícone de encerrar entrou ANTES de o menu sair, para o encerramento nunca ficar sem botão), e o cliente encerrado ganhou o aviso de somente leitura que o selo dava. `sessionIdFromPathname` e `sessionCrumbLabel` ficaram sem uso e saíram. Carteira, de-para e plano de contas ganharam a moldura única de totais recolhíveis (`collapsible-summary.tsx`), e a carteira e o de-para passaram a ter abas, filtros e ações numa linha só. O "Novo Cliente" esconde App Key e App Secret atrás do switch "Conectar com o Omie", desligado por padrão, e desligar limpa a credencial. Duas regras novas na §7 Frontend. Endpoints sensíveis, matriz e pares de AAD não mudaram: só front._
 
 _Versão 1.60 — 29/09/2026. **As 3 subtasks abertas do épico de follow-ups da Sprint 16 (86e3fxqq7) foram entregues num PR só, fora do sandbox dos agents.** A 4ª (desbloquear a S13) já estava `done` desde a v1.59. **86e3fxqqa — a resposta antes do commit, achado desde a v1.57, está CORRIGIDA**: `CommitBeforeResponseMiddleware` (`app/core/response_ordering.py`, novo §7 Backend) comita dentro do `send`, no `http.response.start`, então nenhum byte sai antes do `commit()` — em toda rota, sem tocar em nenhum `routes.py`. Medido em servidor uvicorn real: 45/100 leituras imediatas sem o dado antes, 0/100 depois (`httpx.ASGITransport` não reproduz a corrida: roda a app inteira numa coroutine só). **A primeira versão desta correção bufferizava a resposta inteira e foi REPROVADA na revisão**: o Starlette roda `await self.background()` dentro de `Response.__call__`, então o buffer segurava a resposta até a BackgroundTask acabar — 3,00 s contra 0,00 s numa task de 3 s, e até 900 s nos 4 endpoints de conciliação. Nenhum teste pegava: todos stubam `_schedule_reconciliation_processing`. Agora existe um cenário com BackgroundTask REAL, que reprova contra a versão bufferizada. **86e3fxqqe — a portabilidade do de-para (Sprint 12) volta a importar no destino `conta_contabil`**: a planilha ganhou a coluna `historico`, resolvida pela MESMA cifra/decifra da decisão manual (`accounting.py`); conta inexistente, sintética ou inativa recusa a planilha INTEIRA (`CONTAS_DA_PLANILHA_INVALIDAS`, molde da `FileLinesInvalidError` da S14) — histórico acima do limite recusa só a linha. `MappingImportUnavailableError`/`IMPORTACAO_INDISPONIVEL_NO_DESTINO` saíram do código. **86e3fxqqh — a prévia "Partida contábil" mostra o nome da categoria**, pela mesma resolução da lista de decisões: `resolve_category_names` saiu de método privado de `ClientMappingListService` para função do módulo `listing.py`, chamada agora também por `ClientMappingApplyService` — as duas telas não podem mais divergir porque são a MESMA chamada. Vitest **1021** (o total, já com os novos), contrato com diff só do esperado (`categoryName`/`categoryNameResolved` e o texto das rotas de import). Pares de AAD, endpoints sensíveis e matriz de permissões **não mudaram** — nenhuma rota nem permissão nova, só comportamento de rotas e campos existentes._
 
