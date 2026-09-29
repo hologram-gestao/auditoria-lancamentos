@@ -23,7 +23,7 @@
  */
 
 import { Loader2, Plus, RefreshCw, SquarePen, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -37,6 +37,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useClientConnections, useTestStoredConnection } from '@/hooks/use-client-connections';
+import { useUrlState } from '@/hooks/use-url-state';
 import { ApiError } from '@/lib/api/client';
 import {
   connectionRequiresCredentials,
@@ -46,7 +47,7 @@ import { hasPermission } from '@/lib/authz';
 import type { ClientConnection, OriginStatus } from '@/lib/contracts';
 import { formatLastCheckedAt, formatSyncedAt } from '@/lib/format';
 import { connectionDeclares } from '@/lib/origin-capabilities';
-import { ORIGIN_STATUS_COPY } from '@/lib/origin-state';
+import { CONNECT_PARAM, ORIGIN_STATUS_COPY } from '@/lib/origin-state';
 import { useAuthStore } from '@/stores/auth';
 
 import { ConnectionStatusBadge } from './connection-badges';
@@ -74,6 +75,13 @@ export function ClientConnectionsSection({
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<ClientConnection | null>(null);
+  // `?conectar=<tipo>`: outra tela mandou abrir a gaveta já no tipo que falta lá
+  // (a aba "Origem por arquivo"). Lido UMA vez e apagado da URL — senão o
+  // refresh, o voltar do navegador e o fechar-e-reabrir da gaveta a reabririam.
+  const { get, clear } = useUrlState();
+  const requestedType = get(CONNECT_PARAM);
+  const [seedType, setSeedType] = useState<string | null>(null);
+  const consumedConnectParam = useRef(false);
   const [deleting, setDeleting] = useState<ClientConnection | null>(null);
   // Qual linha está testando — o spinner precisa ficar no botão clicado, e não
   // em todos: `mutation.isPending` sozinho acenderia a coluna inteira.
@@ -86,10 +94,23 @@ export function ClientConnectionsSection({
   // uma coluna permanentemente vazia.
   const columnCount = canManage ? 5 : 4;
 
-  function openCreate() {
+  function openCreate(providerType: string | null = null) {
     setEditing(null);
+    setSeedType(providerType);
     setFormOpen(true);
   }
+
+  useEffect(() => {
+    if (requestedType === null || consumedConnectParam.current) return;
+    consumedConnectParam.current = true;
+    clear([CONNECT_PARAM]);
+    // Quem não escreve não recebe a gaveta (ela nem é montada): o parâmetro sai
+    // da URL do mesmo jeito e a pessoa fica na seção, lendo o estado da origem.
+    if (canManage) openCreate(requestedType);
+    // `openCreate` e `canManage` mudam a cada render/permissão; o guard do ref
+    // é o que garante "uma vez só", não a lista de dependências.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedType, canManage, clear]);
 
   function openEdit(connection: ClientConnection) {
     setEditing(connection);
@@ -127,7 +148,7 @@ export function ClientConnectionsSection({
           </p>
         </div>
         {canManage && (
-          <Button type="button" onClick={openCreate}>
+          <Button type="button" onClick={() => openCreate()}>
             <Plus className="h-4 w-4" aria-hidden="true" />
             Conectar origem
           </Button>
@@ -148,7 +169,7 @@ export function ClientConnectionsSection({
         <p className="text-sm font-medium">{statusCopy.title}</p>
         <p className="text-muted-foreground text-sm">{statusCopy.description}</p>
         {canManage && statusCopy.actionLabel !== null && (
-          <Button type="button" variant="outline" size="sm" onClick={openCreate}>
+          <Button type="button" variant="outline" size="sm" onClick={() => openCreate()}>
             {statusCopy.actionLabel}
           </Button>
         )}
@@ -189,7 +210,7 @@ export function ClientConnectionsSection({
                 ) : connections.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={columnCount} className="py-12">
-                      <EmptyState canManage={canManage} onConnect={openCreate} />
+                      <EmptyState canManage={canManage} onConnect={() => openCreate()} />
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -275,12 +296,13 @@ export function ClientConnectionsSection({
           {/* Remount por `key`: abrir "editar" depois de "conectar" (ou trocar
               de origem) precisa nascer com o formulário limpo. */}
           <ConnectionFormDrawer
-            key={editing?.id ?? 'new'}
+            key={`${editing?.id ?? 'new'}:${seedType ?? ''}`}
             open={formOpen}
             onOpenChange={setFormOpen}
             clientId={clientId}
             connection={editing}
             connections={connections}
+            initialProviderType={seedType}
           />
           <ConnectionDeleteConfirm
             open={deleting !== null}

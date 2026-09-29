@@ -13,10 +13,14 @@
  *      "Será aplicado" e as recusas com motivo específico.
  *   3. **Arquivos processados** — a lista, com autor mascarado pelo servidor.
  *
- * A aba só faz sentido para o cliente que TEM conexão `arquivo` (é assim que o
- * menu a mostra); num deep link sem ela, explica e leva ao painel. A
- * competência do envio mora na URL (`?competence=`): é o parâmetro que o link
- * "Enviar arquivo do mês" do de-para manda.
+ * A aba é listada para TODO cliente desde o follow-up 86e3fqnc9 — antes ela só
+ * existia para quem já tinha conexão `arquivo`, e o recurso ficava invisível
+ * para quem precisava descobri-lo. Quem explica o estado é esta tela
+ * (`NoFileOrigin`), em três casos distintos: sem origem nenhuma (dá para
+ * conectar), origem de OUTRO tipo já conectada (não dá — um cliente, um tipo de
+ * origem de lançamentos, §4.8) e cliente encerrado. A competência do envio mora
+ * na URL (`?competence=`): é o parâmetro que o link "Enviar arquivo do mês" do
+ * de-para manda.
  *
  * Gating (§4.9): ler é de quem alcança o cliente; enviar é
  * `upload_client_file` (os 5 papéis); configurar é `manage_input_mapping`
@@ -30,10 +34,11 @@ import { Button } from '@/components/ui/button';
 import { useInputMapping } from '@/hooks/use-client-file-origin';
 import { useClientDetail } from '@/hooks/use-clients';
 import { useUrlState } from '@/hooks/use-url-state';
+import { DEFAULT_PROVIDER_LABEL, FILE_PROVIDER_TYPE } from '@/lib/api/client-connections';
 import { hasPermission } from '@/lib/authz';
 import { isCompetence, localCurrentCompetence } from '@/lib/competence';
 import type { ClientConnection } from '@/lib/contracts';
-import { fileConnectionOf } from '@/lib/origin-capabilities';
+import { fileConnectionOf, selectCapableConnection } from '@/lib/origin-capabilities';
 import { originFixPath, type OriginErrorCode } from '@/lib/origin-state';
 import { useAuthStore } from '@/stores/auth';
 
@@ -117,6 +122,12 @@ export function FileOriginScreen({ clientId }: { clientId: string }) {
       {client !== undefined && !hasFileOrigin ? (
         <NoFileOrigin
           clientId={clientId}
+          isClosed={isClosed}
+          // A origem que JÁ lista lançamentos neste cliente, se houver: com ela
+          // conectar arquivo é 409 `ORIGEM_JA_CONECTADA` (§4.8), então a tela
+          // explica em vez de oferecer. Pela CAPACIDADE, nunca por
+          // `provider_type === 'omie'` — o terceiro provedor entra sem tocar aqui.
+          ledgerConnection={selectCapableConnection(connections, 'listar_lancamentos')}
           canConnect={hasPermission(currentUser, 'manage_client_connections') && !isClosed}
         />
       ) : (
@@ -172,26 +183,73 @@ export function FileOriginScreen({ clientId }: { clientId: string }) {
 }
 
 /**
- * Deep link na aba de um cliente sem conexão `arquivo`: explica e leva ao
- * painel, onde a origem se conecta (mesmo caminho da taxonomia de origem).
+ * O cliente não tem conexão `arquivo`: a aba existe para TODOS (86e3fqnc9),
+ * então este estado é o que a maioria dos clientes vê. Ele tem duas obrigações:
+ * dizer o que é a origem por arquivo — é assim que quem opera descobre que dá
+ * para atender cliente sem ERP — e dizer por que ela não está disponível AQUI,
+ * com a ação certa para o papel de quem lê.
+ *
+ * Três casos, e a ordem importa: encerrado vence tudo (toda escrita é 409,
+ * §4.12); origem que já lista lançamentos vem depois (conectar seria 409
+ * `ORIGEM_JA_CONECTADA`, então não há botão — §4.9); sobra o cliente sem
+ * origem, o único onde conectar faz sentido.
  */
-function NoFileOrigin({ clientId, canConnect }: { clientId: string; canConnect: boolean }) {
+function NoFileOrigin({
+  clientId,
+  isClosed,
+  ledgerConnection,
+  canConnect,
+}: {
+  clientId: string;
+  isClosed: boolean;
+  ledgerConnection: ClientConnection | null;
+  canConnect: boolean;
+}) {
+  const state = isClosed ? 'encerrado' : ledgerConnection !== null ? 'outra-origem' : 'sem-origem';
+  const ledgerLabel =
+    ledgerConnection === null
+      ? ''
+      : (DEFAULT_PROVIDER_LABEL[ledgerConnection.provider_type] ?? ledgerConnection.provider_type);
   return (
     <div
       role="status"
       data-testid="no-file-origin"
+      data-state={state}
       className="bg-card flex flex-col items-center gap-4 rounded-lg border border-dashed p-8 text-center"
     >
-      <div className="space-y-1.5">
-        <p className="text-sm font-medium">Este cliente não tem origem por arquivo</p>
+      <div className="mx-auto max-w-prose space-y-1.5">
+        <p className="text-sm font-medium">
+          {state === 'encerrado'
+            ? 'Este cliente foi encerrado'
+            : state === 'outra-origem'
+              ? `Os lançamentos deste cliente vêm de ${ledgerLabel}`
+              : 'Este cliente ainda não recebe arquivos'}
+        </p>
         <p className="text-muted-foreground text-sm">
-          Para enviar planilhas ou extratos, conecte uma origem do tipo &quot;Arquivo&quot; no
-          painel do cliente.
+          A origem por arquivo atende o cliente que não tem sistema contábil: a planilha ou o
+          extrato do mês é lido por um mapeamento de colunas configurado uma vez e vira a base de
+          movimentos que o de-para classifica.
+        </p>
+        <p className="text-muted-foreground text-sm">
+          {state === 'encerrado'
+            ? 'Cliente encerrado é só leitura: não é possível conectar uma origem nem enviar arquivos.'
+            : state === 'outra-origem'
+              ? `Cada cliente tem um tipo de origem de lançamentos só. Para passar a receber arquivos, a conexão ${ledgerLabel} precisa ser removida antes, no painel do cliente.`
+              : canConnect
+                ? 'Para começar, conecte uma origem do tipo "Arquivo".'
+                : 'Para começar, uma origem do tipo "Arquivo" precisa ser conectada. Peça ao administrador ou ao gerente responsável pela conta.'}
         </p>
       </div>
-      {canConnect && (
+      {state === 'sem-origem' && canConnect && (
         <Button asChild variant="outline">
-          <a href={originFixPath(clientId)}>Conectar origem</a>
+          {/* Leva ao painel com a gaveta já aberta no tipo Arquivo: quem clica
+              aqui está justamente atrás dessa origem. */}
+          <a href={originFixPath(clientId, FILE_PROVIDER_TYPE)}>Conectar origem por arquivo</a>
+        </Button>
+      )}
+      {state === 'outra-origem' && (
+        <Button asChild variant="outline">
+          <a href={originFixPath(clientId)}>Ver origem do cliente</a>
         </Button>
       )}
     </div>

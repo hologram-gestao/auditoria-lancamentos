@@ -95,6 +95,12 @@ interface ConnectionFormDrawerProps {
   connection: ClientConnection | null;
   /** Lista atual — usada só para nomear a origem que ocupa o par no 409. */
   connections: readonly ClientConnection[];
+  /**
+   * Tipo já escolhido ao abrir para CONECTAR, quando quem mandou abrir sabe
+   * qual origem falta (a aba "Origem por arquivo" manda `arquivo`). Sem ele o
+   * formulário nasce no padrão. Ignorado ao EDITAR: lá o tipo é o da conexão.
+   */
+  initialProviderType?: string | null;
 }
 
 export function ConnectionFormDrawer({
@@ -103,6 +109,7 @@ export function ConnectionFormDrawer({
   clientId,
   connection,
   connections,
+  initialProviderType = null,
 }: ConnectionFormDrawerProps) {
   return connection === null ? (
     <CreateDrawer
@@ -110,6 +117,7 @@ export function ConnectionFormDrawer({
       onOpenChange={onOpenChange}
       clientId={clientId}
       connections={connections}
+      initialProviderType={initialProviderType}
     />
   ) : (
     <EditDrawer
@@ -147,6 +155,7 @@ function CreateDrawer({
   onOpenChange,
   clientId,
   connections,
+  initialProviderType = null,
 }: Omit<ConnectionFormDrawerProps, 'connection'>) {
   const createMutation = useCreateConnection(clientId);
   const testMutation = useTestConnection();
@@ -162,7 +171,11 @@ function CreateDrawer({
   const form = useForm<CreateConnectionFormValues>({
     resolver: zodResolver(createConnectionSchema),
     defaultValues: {
-      provider_type: OMIE_PROVIDER_TYPE,
+      // Só um tipo CONHECIDO entra: `?conectar=` vem da URL, e um valor
+      // inventado deixaria o select num estado que o schema recusa no submit.
+      provider_type: PROVIDER_TYPES.some((option) => option.value === initialProviderType)
+        ? (initialProviderType as string)
+        : OMIE_PROVIDER_TYPE,
       label: '',
       app_key: '',
       app_secret: '',
