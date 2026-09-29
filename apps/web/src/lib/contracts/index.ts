@@ -635,3 +635,42 @@ export type NotificacaoEntregueRequest = Schemas['NotificacaoEntregueRequest'];
 /** O body é um union discriminado por `event` — o `tsc` cobra o par certo. */
 export type UsageEventRequest = AutorNavegouForaRequest | NotificacaoEntregueRequest;
 export type UsageEventPayload = Schemas['UsageEventPayload'];
+
+// ---------------------------------------------------------------------------
+// Sprint 13 — layouts de exportação e arquivo contábil
+// ---------------------------------------------------------------------------
+
+/** Linha da lista de layouts da organização (a última versão, sem as versões). */
+export type ExportLayoutItem = Schemas['ExportLayoutItem'];
+export type ExportLayoutListResponse = Schemas['ExportLayoutListResponse'];
+/** Um layout com TODAS as versões (da mais nova para a mais antiga), só leitura. */
+export type ExportLayoutDetail = Schemas['ExportLayoutDetail'];
+export type ExportLayoutVersionItem = Schemas['ExportLayoutVersionItem'];
+/** Modelo declarado no código (hoje só o Domínio). */
+export type ExportLayoutTemplateItem = Schemas['ExportLayoutTemplateItem'];
+export type ExportLayoutFromTemplate = Schemas['ExportLayoutFromTemplate'];
+/**
+ * A forma da definição. Na LEITURA ela chega como `{ [key]: unknown }`
+ * (`ExportLayoutVersionItem.definition`): quem lê estreita com o leitor tipado de
+ * `lib/export-layout-definition.ts`, nunca com cast.
+ */
+export type LayoutDefinitionPayload = Schemas['LayoutDefinitionPayload'];
+export type LayoutColumnPayload = Schemas['LayoutColumnPayload'];
+export type AmountFormatPayload = Schemas['AmountFormatPayload'];
+/** Query real de `GET /export-layouts` (`organizationId`, só a plataforma recorta). */
+export type ListExportLayoutsQuery = NonNullable<
+  paths['/api/v1/export-layouts']['get']['parameters']['query']
+>;
+
+/**
+ * Uma geração do arquivo contábil — só METADADOS (o conteúdo nunca persiste).
+ * `totalAmount` é Decimal em string (reais); `author` já vem mascarado.
+ */
+export type AccountingFileGenerationItem = Schemas['AccountingFileGenerationItem'];
+/** `{ data, pagination }` — DUAS chaves: o auto-unwrap não dispara. */
+export type AccountingFileGenerationListResponse = Schemas['AccountingFileGenerationListResponse'];
+export type GenerateAccountingFileRequest = Schemas['GenerateAccountingFileRequest'];
+/** Query real de `GET /clients/{id}/accounting-files`. */
+export type ListAccountingFilesQuery = NonNullable<
+  paths['/api/v1/clients/{client_id}/accounting-files']['get']['parameters']['query']
+>;

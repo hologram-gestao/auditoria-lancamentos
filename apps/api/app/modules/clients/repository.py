@@ -40,6 +40,7 @@ from app.core.authz import CurrentUser, reach_filter
 from app.db.models import (
     UQ_CLIENT_ASSIGNMENT_CLIENT_USER,
     UQ_USER_CLIENT_FAVORITE,
+    AccountingFileGeneration,
     Client,
     ClientAccountingAccount,
     ClientAssignment,
@@ -539,6 +540,12 @@ class ClientRepository:
         await s.execute(
             delete(ReconciliationSession).where(ReconciliationSession.client_id == client.id)
         )
+        # S13 (BACK 13.4): as GERAÇÕES do arquivo contábil apontam a materialização
+        # (RESTRICT) e têm autor RESTRICT — saem ANTES das materializações e dos
+        # usuários. No ENCERRAMENTO elas ficam (são "o que aconteceu", só metadados).
+        await s.execute(
+            delete(AccountingFileGeneration).where(AccountingFileGeneration.client_id == client.id)
+        )
         # S12 (BACK 12.3): o de-para tem `author_id` RESTRICT para `users` — um
         # usuário DO tenant que decidiu ou materializou travaria o passo seguinte.
         # Saem antes dos usuários (os itens da materialização vão pelo CASCADE).
@@ -638,6 +645,12 @@ class ClientRepository:
         O **plano de contas contábil** (S16, BACK 16.1) sai pelo precedente do
         glossário: o nome é cifrado (morreu com a DEK), mas o código reduzido em
         claro sobreviveria a ela — e é configuração de quem não lança mais.
+
+        As **gerações do arquivo contábil** (S13, BACK 13.4) FICAM, como as
+        materializações que elas apontam: são "o que aconteceu" e só guardam
+        metadados (autor, data, linhas, total, SHA-256 — nunca o conteúdo). O
+        histórico segue listável; gerar e baixar de novo é 409 (a DEK morreu e o
+        histórico da vigência deixou de ser legível).
         """
         s = self._session
         await s.execute(

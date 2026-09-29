@@ -35,6 +35,7 @@ from app.integrations.anthropic.model_limits import validate_parse_output_config
 from app.integrations.omie.categorias_cache import OmieCategoriasCache
 from app.integrations.omie.clientes_cache import OmieClientesCache
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache
+from app.modules.accounting_files import routes as accounting_files_routes
 from app.modules.anomaly_types import routes as anomaly_types_routes
 from app.modules.auth import routes as auth_routes
 from app.modules.client_accounting_chart import routes as client_accounting_chart_routes
@@ -48,6 +49,7 @@ from app.modules.client_movements import routes as client_movements_routes
 from app.modules.client_source_accounts import routes as client_source_accounts_routes
 from app.modules.client_titles import routes as client_titles_routes
 from app.modules.clients import routes as clients_routes
+from app.modules.export_layouts import routes as export_layouts_routes
 from app.modules.glossary import routes as glossary_routes
 from app.modules.mapping_catalog import routes as mapping_catalog_routes
 from app.modules.notifications import routes as notifications_routes
@@ -325,6 +327,8 @@ def create_app() -> FastAPI:
     app.include_router(client_movements_routes.router)
     app.include_router(mapping_catalog_routes.router)
     app.include_router(client_mapping_routes.router)
+    app.include_router(export_layouts_routes.router)
+    app.include_router(accounting_files_routes.router)
     app.include_router(glossary_routes.router)
     app.include_router(reconciliations_routes.router)
     app.include_router(review_routes.router)

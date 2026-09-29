@@ -6,8 +6,8 @@
  *
  * Cada célula da matriz vira um caso — inclusive **toda célula `❌`**, que é o
  * que a task cobra. O espelho no backend é
- * `apps/api/app/core/authz.py::PERMISSION_MATRIX` (27 permissões × 5 papéis
- * desde a Sprint 16); se um dos dois mudar sozinho, é aqui que a divergência
+ * `apps/api/app/core/authz.py::PERMISSION_MATRIX` (29 permissões × 5 papéis
+ * desde a Sprint 13); se um dos dois mudar sozinho, é aqui que a divergência
  * aparece.
  */
 import { describe, expect, it } from 'vitest';
@@ -340,6 +340,26 @@ const MATRIX: ReadonlyArray<{
     platform: true,
     admin: true,
     manager: true,
+    clientManager: false,
+    clientOperator: false,
+  },
+  // S13 / R3: GERAR e baixar o arquivo contábil é do staff. NÃO é `review_export`
+  // (dos cinco papéis): o arquivo é artefato do escritório, e o cliente final
+  // (`client_manager` e `client_operator`) fica fora.
+  {
+    permission: 'generate_accounting_file',
+    platform: true,
+    admin: true,
+    manager: true,
+    clientManager: false,
+    clientOperator: false,
+  },
+  // S13 / R3: os layouts são configuração da ORGANIZAÇÃO — plataforma e admin.
+  {
+    permission: 'manage_export_layouts',
+    platform: true,
+    admin: true,
+    manager: false,
     clientManager: false,
     clientOperator: false,
   },

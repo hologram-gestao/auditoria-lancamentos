@@ -282,7 +282,7 @@ class TestMaterializacao:
         eventos = await _events(db_session, world)
         assert len(eventos) == 2
         for evento in eventos:
-            assert evento.props == {
+            assert {k: v for k, v in evento.props.items() if k != "materializacao_id"} == {
                 "client_id": str(world.client.id),
                 "destino": "demonstrativo_contabil",
                 "competencia": "2026-06",
@@ -291,6 +291,20 @@ class TestMaterializacao:
                 "valor_sem_decisao_centavos": 2000,
                 "categorias_sem_decisao": 1,
             }
+        # S13 (BACK 13.1): cada linha carrega o id da SUA materialização — o que a
+        # métrica da S13 usa para casar com `arquivo_contabil_gerado`.
+        ids_gravados = {
+            str(m_id)
+            for m_id in (
+                await db_session.execute(
+                    select(ClientMappingMaterialization.id).where(
+                        ClientMappingMaterialization.client_id == world.client.id
+                    )
+                )
+            ).scalars()
+        }
+        assert sorted(e.props["materializacao_id"] for e in eventos) == sorted(ids_gravados)
+        assert {v1.json()["data"]["id"], v2.json()["data"]["id"]} == ids_gravados
 
     async def test_token_desatualizado_e_parcial_sem_confirmacao_nao_emitem(
         self, client_with_db: AsyncClient, db_session: AsyncSession, world: World

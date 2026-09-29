@@ -277,6 +277,49 @@ def require_client_permission(
     return _guard
 
 
+def require_org_permission(
+    *permissions: Permission,
+) -> Callable[[CurrentUser, AsyncSession], Awaitable[CurrentUser]]:
+    """Guard de permissão para CONFIGURAÇÃO DA ORGANIZAÇÃO (sem `client_id` na rota).
+
+    Passa quem tem QUALQUER uma das permissões (a matriz decide; nunca `if role ==`).
+    O alcance (qual organização) é da camada de dados (`scoped_by_organization`),
+    não daqui. Criado na S13 (BACK 13.2) para os layouts de exportação: a leitura
+    aceita `manage_export_layouts` OU `generate_accounting_file` (o gerente escolhe
+    o layout ao gerar), a escrita só a primeira.
+
+    **A negação de um USUÁRIO DE CLIENTE vira 1 linha `denied` em `access_audit`**
+    (§3.15), com `commit=True` antes do 403 (a request termina em erro e o
+    `get_db_session` daria ROLLBACK — até aqui só houve `SELECT`). O `client_id` da
+    linha é o tenant DO PRÓPRIO ATOR: a rota não tem cliente alvo, e a coluna é
+    `NOT NULL` — a linha diz "o usuário do tenant X tentou a configuração da
+    organização", e `user_scope`/`actor_client_id` a distinguem de uma negação
+    cross-tenant. Staff negado (o `manager` escrevendo layout) recebe o 403 sem
+    linha: não há tenant nenhum a registrar (ADR-091-BE). Só IDs, nada no corpo.
+    """
+
+    async def _guard(user: CurrentUserDep, db: DbSessionDep) -> CurrentUser:
+        if any(has_permission(user, permission) for permission in permissions):
+            return user
+        if user.is_client_scoped and user.client_id is not None:
+            await record_access(
+                db,
+                user_id=UUID(user.id),
+                client_id=user.client_id,
+                action=AccessAction.DENIED,
+                user_scope=user.scope,
+                actor_client_id=user.client_id,
+                actor_organization_id=user.organization_id,
+                commit=True,
+            )
+        raise ForbiddenError(
+            f"Papel {user.role} não tem nenhuma de {[p.value for p in permissions]}.",
+            user_message="Você não tem permissão para esta ação.",
+        )
+
+    return _guard
+
+
 # Guards prontos por permissão da matriz (§4 do PRD). Rotas importam estes —
 # assim a matriz é o único lugar que decide quem pode o quê.
 RunReconciliationDep = Annotated[
@@ -363,4 +406,24 @@ ManageInputMappingDep = Annotated[
 # importa 403).
 ManageClientAccountingChartDep = Annotated[
     CurrentUser, Depends(require_client_permission(Permission.MANAGE_CLIENT_ACCOUNTING_CHART))
+]
+# --- Sprint 13 (BACK 13.2 / 13.4): layouts de exportação e arquivo contábil ----
+# Layouts são configuração da ORGANIZAÇÃO (sem `client_id`): guard de organização,
+# que audita a negação do usuário de cliente. LER aceita as duas permissões (o
+# gerente escolhe o layout ao gerar — decisão do planejador, ADR-091-BE).
+ManageExportLayoutsDep = Annotated[
+    CurrentUser, Depends(require_org_permission(Permission.MANAGE_EXPORT_LAYOUTS))
+]
+ReadExportLayoutsDep = Annotated[
+    CurrentUser,
+    Depends(
+        require_org_permission(
+            Permission.MANAGE_EXPORT_LAYOUTS, Permission.GENERATE_ACCOUNTING_FILE
+        )
+    ),
+]
+# Gerar, listar e baixar o arquivo contábil: guard AUDITADO por cliente (o alcance
+# vem antes, por `AccessibleClientDep`; a negação do papel vira linha `denied`).
+GenerateAccountingFileDep = Annotated[
+    CurrentUser, Depends(require_client_permission(Permission.GENERATE_ACCOUNTING_FILE))
 ]

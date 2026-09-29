@@ -686,3 +686,27 @@ porque a edição do `PROJECT.md` foi negada nesta sessão); **ADR-053-FE** em
 `.claude/memory/decisions.md`; os testes `test_client_source_account_binding_schema.py::TestRequestCabeNaColuna`
 e `client-mapping-accounting.test.tsx` › "avisos por perfil" nas branches dos executores.
 **Status:** ativo
+
+## 2026-09-29 — Sprint 13: o hub semeou o primer (PROJECT.md) de uma ref `develop` LOCAL anterior à S16 [escopo: hub/orquestração | PROJECT.md dos 4 worktrees, prompt do QA]
+**Sintoma:** o `PROJECT.md` dos worktrees backend, frontend, infra e QA era idêntico a
+`develop:CLAUDE.md` local (786479a, 1222 linhas: lista canônica 104, matriz 26, AAD 15, sem a
+Sprint 16), enquanto a base real da sprint era `ee621fb` (= `origin/develop`, 1311 linhas, 108 /
+27 / 17). O prompt do QA mandou revisar `develop..HEAD`, o que traria os commits da S16 junto.
+**Causa-raiz blameless:** o hub ramifica os worktrees de um commit (aqui `ee621fb`), mas semeia o
+primer e monta os comandos de revisão pela ref `develop` LOCAL, que não foi atualizada depois do
+merge da S16. O `sprint-preflight` compara `origin/develop` com `origin/main`, e nada compara a ref
+local com a remota. Como o commit do QA copia o `PROJECT.md` para o `CLAUDE.md` versionado, o
+primer da S16 seria apagado pela quarta vez (S14, S15 e S16 já tinham perdido o primer assim).
+**Correção:** o QA restaurou o próprio `PROJECT.md` a partir de `ee621fb:CLAUDE.md` antes de
+qualquer edição (diff vazio contra a base conferido com `diff -q`), revisou contra `ee621fb` e não
+contra `develop`, e registrou o patch do primer da S13 no `HANDOFF.md` (a edição do `PROJECT.md`
+pela ferramenta foi negada). Os `PROJECT.md` dos executores seguem velhos e INTOCADOS: antes do
+merge, conferir `git diff --stat ee621fb..<integração> -- CLAUDE.md` (não pode encolher).
+**Escopo:** toda sprint do hub depois de um merge direto na `origin/develop` sem `git fetch` + ff
+da ref local.
+**Encodado em:** follow-up **86e3fyjan** (tag `agent-review`, no ClickUp: preflight exige
+`develop` local == `origin/develop`; orquestrador semeia e monta `BASE..HEAD` do commit de
+ramificação; recusa commitar `PROJECT.md` menor que o primer da base) e **ADR-043-QA** em
+`.claude/memory/decisions.md`. Não coube na sprint: `orchestrate.js` e a skill `sprint-preflight`
+estão fora do alcance de escrita do QA.
+**Status:** ativo

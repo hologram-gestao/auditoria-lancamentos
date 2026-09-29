@@ -760,6 +760,111 @@ const ACCOUNTING_IMPORT_REFUSAL = {
 let mappingAccountingDestination = false;
 let mappingBankPending = false;
 
+/**
+ * Sprint 13 (FRONT 13.5): layouts de exportação da organização. `null` = a
+ * organização ainda não tem layout (estado vazio). O POST do modelo acrescenta
+ * aqui, para a lista refletir no refetch.
+ */
+const DOMINIO_LAYOUT_DEFINITION = {
+  columns: ['data', 'conta_debito', 'conta_credito', 'valor', 'historico'].map((field) => ({
+    field,
+    header: null,
+  })),
+  separator: ';',
+  hasHeader: false,
+  encoding: 'latin-1',
+  lineEnding: 'crlf',
+  dateFormat: 'dd/mm/aaaa',
+  amountFormat: { prefix: 'R$ ', thousandsSeparator: '.', decimalSeparator: ',', decimalPlaces: 2 },
+};
+const DOMINIO_TEMPLATE = {
+  key: 'dominio_lancamentos_csv',
+  name: 'Domínio: lançamentos contábeis (CSV)',
+  targetSystem: 'Domínio',
+  description:
+    'Importador de lançamentos contábeis (partidas simples) do Domínio: data, conta débito, conta crédito, valor com R$ e histórico, separados por ponto e vírgula, sem cabeçalho, em Latin-1.',
+  definition: DOMINIO_LAYOUT_DEFINITION,
+};
+function exportLayout(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 'cccccccc-1300-4000-8000-000000000001',
+    name: 'Domínio: lançamentos contábeis (CSV)',
+    targetSystem: 'Domínio',
+    organizationId: ORGANIZATION_ID,
+    latestVersion: 2,
+    createdAt: '2026-09-20T12:00:00Z',
+    updatedAt: '2026-09-28T12:00:00Z',
+    ...over,
+  };
+}
+function exportLayoutsIniciais(): Record<string, unknown>[] {
+  return [
+    exportLayout(),
+    exportLayout({
+      id: 'cccccccc-1300-4000-8000-000000000002',
+      name: 'Domínio — filial com nome de layout comprido para testar a quebra',
+      organizationId: OTHER_ORGANIZATION_ID,
+      latestVersion: 1,
+    }),
+  ];
+}
+let exportLayouts: Record<string, unknown>[] = exportLayoutsIniciais();
+
+/**
+ * Sprint 13 (FRONT 13.6): o arquivo contábil no de-para. `accountingFiles` é o
+ * histórico da competência (o POST de gerar acrescenta); o desfecho do POST e
+ * do download é escolhido por cenário.
+ */
+function accountingFileGeneration(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 'dddddddd-1300-4000-8000-000000000001',
+    competence: '2026-06',
+    materializationId: 'ffffffff-0000-4000-8000-000000000002',
+    materializationVersion: 2,
+    layoutId: 'cccccccc-1300-4000-8000-000000000001',
+    layoutName: 'Domínio: lançamentos contábeis (CSV)',
+    layoutVersion: 2,
+    lines: 32,
+    totalAmount: '154321.87',
+    sha256: 'a'.repeat(64),
+    fileName: 'lancamentos_2026-06_v2.csv',
+    author: { name: 'Bruna Gerente', email: 'bruna@hologram.com.br' },
+    createdAt: '2026-09-28T15:00:00Z',
+    ...over,
+  };
+}
+const ACCOUNTING_FILE_REFUSALS: Record<string, Record<string, unknown> | undefined> = {
+  sucesso: undefined,
+  texto: {
+    code: 'ARQUIVO_TEXTO_NAO_CABE',
+    message: 'text does not fit',
+    userMessage:
+      'O histórico destas categorias tem caractere que o arquivo não aceita (fora da codificação, o separador, quebra de linha ou início com =, +, - ou @): 2.01.01, 2.01.03. Edite o histórico e aplique o de-para de novo.',
+    details: {
+      categories: [
+        { categoryCode: '2.01.01', field: 'historico', reason: 'contem_separador' },
+        { categoryCode: '2.01.03', field: 'historico', reason: 'fora_da_codificacao' },
+      ],
+    },
+  },
+  particao: {
+    code: 'ARQUIVO_PARTICAO_NAO_FECHA',
+    message: 'partition',
+    userMessage:
+      'Os totais desta aplicação do de-para não fecham com o total da competência. Aplique o de-para de novo; se persistir, fale com o suporte.',
+    details: {
+      competenceAmount: '711853.90',
+      withAccountAmount: '682413.90',
+      notMappedAmount: '15320.00',
+      undecidedAmount: '14000.00',
+      uncategorizedAmount: '0.00',
+    },
+  },
+};
+let accountingFiles: Record<string, unknown>[] = [accountingFileGeneration()];
+let accountingFileOutcome: 'sucesso' | 'texto' | 'particao' = 'sucesso';
+let accountingFileDivergent = false;
+
 const ACCOUNTING_MAPPING_DESTINATION = {
   id: 'dddddddd-0000-4000-8000-000000000003',
   type: 'conta_contabil',
@@ -2473,6 +2578,125 @@ async function fulfillApi(route: Route): Promise<void> {
       })),
     );
   }
+  // Sprint 13 (FRONT 13.5): layouts de exportação. Rotas LITERAIS antes do
+  // `{layout_id}` (como no FastAPI). Lista e detalhe são envelope de chave
+  // única (`json()`); a lista NÃO é paginada.
+  if (path === '/api/v1/export-layout-templates') return json([DOMINIO_TEMPLATE]);
+  if (path === '/api/v1/export-layouts/from-template') {
+    const body = route.request().postDataJSON() as {
+      name?: string | null;
+      organizationId?: string | null;
+    } | null;
+    const created = exportLayout({
+      id: `cccccccc-1300-4000-8000-00000000010${exportLayouts.length}`,
+      name: body?.name ?? DOMINIO_TEMPLATE.name,
+      organizationId: body?.organizationId ?? ORGANIZATION_ID,
+      latestVersion: 1,
+    });
+    exportLayouts = [...exportLayouts, created];
+    return route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ data: { ...created, versions: [] } }),
+    });
+  }
+  if (path === '/api/v1/export-layouts') {
+    const org = url.searchParams.get('organizationId');
+    const visiveis =
+      sessionUser === PLATFORM_USER
+        ? exportLayouts
+        : exportLayouts.filter((l) => l.organizationId === ORGANIZATION_ID);
+    return json(org === null ? visiveis : visiveis.filter((l) => l.organizationId === org));
+  }
+  if (path.startsWith('/api/v1/export-layouts/')) {
+    const id = path.split('/').pop();
+    const alvo = exportLayouts.find((l) => l.id === id) ?? exportLayout();
+    return json({
+      ...alvo,
+      versions: [
+        {
+          version: 2,
+          definition: { ...DOMINIO_LAYOUT_DEFINITION, hasHeader: true },
+          author: { name: 'Ana Admin', email: 'admin@hologram.com.br' },
+          createdAt: '2026-09-28T12:00:00Z',
+        },
+        {
+          version: 1,
+          definition: DOMINIO_LAYOUT_DEFINITION,
+          author: { name: 'Equipe Hologram', email: null },
+          createdAt: '2026-09-20T12:00:00Z',
+        },
+      ].filter((v) => v.version <= Number(alvo.latestVersion)),
+    });
+  }
+  // Sprint 13 (FRONT 13.6): arquivo contábil. A lista é o par REAL
+  // `{ data, pagination }` — `fulfill` cru, não `json()`. Gerar acrescenta ao
+  // histórico (o refetch mostra); as recusas são 409 com o `details` do backend.
+  if (path === `/api/v1/clients/${CLIENT_ID}/accounting-files`) {
+    if (route.request().method() === 'POST') {
+      const recusa = ACCOUNTING_FILE_REFUSALS[accountingFileOutcome];
+      if (recusa) {
+        return route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: recusa }),
+        });
+      }
+      const body = route.request().postDataJSON() as {
+        layoutId?: string;
+        materializationId?: string | null;
+      } | null;
+      const gerada = accountingFileGeneration({
+        id: `dddddddd-1300-4000-8000-00000000010${accountingFiles.length}`,
+        layoutId: body?.layoutId,
+        ...(body?.materializationId === 'ffffffff-0000-4000-8000-000000000001'
+          ? { materializationVersion: 1, fileName: 'lancamentos_2026-06_v1.csv' }
+          : {}),
+        createdAt: '2026-09-29T10:00:00Z',
+      });
+      accountingFiles = [gerada, ...accountingFiles];
+      return route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: gerada }),
+      });
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: accountingFiles,
+        pagination: {
+          page: 1,
+          pageSize: 100,
+          total: accountingFiles.length,
+          totalPages: accountingFiles.length === 0 ? 0 : 1,
+        },
+      }),
+    });
+  }
+  if (new RegExp(`^/api/v1/clients/${CLIENT_ID}/accounting-files/[^/]+/download$`).test(path)) {
+    if (accountingFileDivergent) {
+      return route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: {
+            code: 'ARQUIVO_DIVERGENTE',
+            message: 'sha mismatch',
+            userMessage:
+              'Não foi possível reproduzir este arquivo exatamente como foi gerado. A equipe foi avisada; gere o arquivo de novo.',
+          },
+        }),
+      });
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: 'text/csv; charset=latin-1',
+      headers: { 'Content-Disposition': 'attachment; filename="lancamentos_2026-06_v2.csv"' },
+      body: '05/08/2026;649;662;R$ 5.466,87;RECEBIMENTO REF. ALUGUEL\r\n',
+    });
+  }
   if (path.startsWith('/api/v1/usage-events')) return json({ recorded: true });
   // Listas das abas de revisão (movimentações / Omie / anomalias) e o resto.
   return json({ data: [], pagination: { page: 1, pageSize: 20, total: 0, totalPages: 0 } });
@@ -2699,6 +2923,12 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   accountingImportOutcome = 'sucesso';
   mappingAccountingDestination = false;
   mappingBankPending = false;
+  // S13: a organização tem dois layouts, por padrão.
+  exportLayouts = exportLayoutsIniciais();
+  // S13 (13.6): uma geração no histórico; gerar e baixar dão certo, por padrão.
+  accountingFiles = [accountingFileGeneration()];
+  accountingFileOutcome = 'sucesso';
+  accountingFileDivergent = false;
   await page.route('**/api/v1/**', fulfillApi);
   // O `src/middleware.ts` decide navegação só pela PRESENÇA do cookie
   // `access_token` (a validação real é do backend). Um valor qualquer basta
@@ -6863,6 +7093,289 @@ for (const vp of VIEWPORTS) {
       ).toBeGreaterThanOrEqual(4.5);
       await shot(page, `de-para-conta-contabil-409-${slugDC}`);
       await analyze(page, `de-para conta contábil — 409 da conta do banco (${vp.label})`);
+    });
+  });
+}
+
+/**
+ * Sprint 13 (FRONT 13.5) — Layouts de exportação em Configurações: lista,
+ * vazio, versões só leitura e "Criar a partir do modelo Domínio". Bloco próprio
+ * no FIM do arquivo (mesma regra dos blocos acima: cenário novo no meio dos
+ * antigos vira conflito).
+ */
+for (const vp of VIEWPORTS) {
+  const slugEL = vp.label.replace(/\s+/g, '-');
+  test.describe(`Layouts de exportação (FRONT 13.5) — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('admin: lista, versões só leitura na gaveta', async ({ page }) => {
+      await page.goto('/configuracoes/layouts-exportacao');
+
+      await expect(page.getByRole('heading', { name: 'Layouts de exportação' })).toBeVisible();
+      // O admin vê só a própria organização: sem coluna nem filtro.
+      await expect(page.getByRole('columnheader', { name: 'Organização' })).toHaveCount(0);
+      await expect(page.getByRole('cell', { name: 'v2', exact: true })).toBeVisible();
+      await exigirDentroDaViewport(
+        page,
+        page.getByRole('button', { name: 'Criar a partir do modelo Domínio' }),
+        `${vp.label}: "Criar a partir do modelo Domínio"`,
+      );
+      await shot(page, `layouts-exportacao-lista-${slugEL}`);
+      await analyze(page, `layouts de exportação — lista (${vp.label})`);
+
+      await page.getByRole('button', { name: /^Ver versões de Domínio: lançamentos/ }).click();
+      const gaveta = page.getByRole('dialog');
+      await aguardarAnimacao(gaveta);
+      const v1 = gaveta.getByRole('region', { name: 'Versão 1' });
+      await expect(v1).toContainText('ponto e vírgula (;)');
+      await expect(v1).toContainText('Latin-1 (ISO-8859-1)');
+      await expect(v1).toContainText('R$ 1.234,50');
+      await expect(gaveta.getByRole('region', { name: /Versão 2/ })).toContainText('atual');
+      await expect(gaveta.getByRole('textbox')).toHaveCount(0);
+      await exigirDentroDaViewport(
+        page,
+        gaveta.getByRole('button', { name: 'Fechar', exact: true }).last(),
+        `${vp.label}: "Fechar" da gaveta de versões`,
+      );
+      await shot(page, `layouts-exportacao-versoes-${slugEL}`);
+      await analyze(page, `layouts de exportação — gaveta de versões (${vp.label})`);
+    });
+
+    test('vazio: "Nenhum layout ainda" e o diálogo do modelo Domínio', async ({ page }) => {
+      exportLayouts = [];
+      await page.goto('/configuracoes/layouts-exportacao');
+
+      await expect(page.getByText('Nenhum layout ainda')).toBeVisible();
+      await exigirEstadoVazioLegivel(page, 'Nenhum layout ainda', `${vp.label}: vazio de layouts`);
+      await shot(page, `layouts-exportacao-vazio-${slugEL}`);
+      await analyze(page, `layouts de exportação — vazio (${vp.label})`);
+
+      const abrir = page.getByRole('button', { name: 'Criar a partir do modelo Domínio' }).last();
+      await abrir.click();
+      const dialogo = page.getByRole('dialog');
+      await aguardarAnimacao(dialogo);
+      await expect(dialogo).toContainText('Importador de lançamentos contábeis');
+      const criar = dialogo.getByRole('button', { name: 'Criar layout' });
+      await exigirDentroDaViewport(page, criar, `${vp.label}: "Criar layout"`);
+      await shot(page, `layouts-exportacao-dialogo-${slugEL}`);
+      await analyze(page, `layouts de exportação — diálogo do modelo (${vp.label})`);
+
+      await criar.click();
+      await expect(dialogo).toBeHidden();
+      await expect(page.getByRole('cell', { name: 'v1', exact: true })).toBeVisible();
+    });
+
+    test('plataforma: coluna e filtro de organização; criar exige a organização', async ({
+      page,
+    }) => {
+      sessionUser = PLATFORM_USER;
+      await page.goto('/configuracoes/layouts-exportacao');
+
+      await expect(page.getByRole('columnheader', { name: 'Organização' })).toBeVisible();
+      await expect(page.getByRole('cell', { name: OTHER_ORGANIZATION_NAME })).toBeVisible();
+      await page.getByRole('combobox', { name: 'Filtrar por organização' }).click();
+      await page.getByRole('option', { name: ORGANIZATION_NAME, exact: true }).click();
+      await expect(page).toHaveURL(new RegExp(`organizacao=${ORGANIZATION_ID}`));
+      await expect(page.getByRole('cell', { name: OTHER_ORGANIZATION_NAME })).toHaveCount(0);
+      await shot(page, `layouts-exportacao-plataforma-${slugEL}`);
+      await analyze(page, `layouts de exportação — plataforma filtrada (${vp.label})`);
+
+      await page.getByRole('button', { name: 'Criar a partir do modelo Domínio' }).first().click();
+      const dialogo = page.getByRole('dialog');
+      await aguardarAnimacao(dialogo);
+      await dialogo.getByRole('button', { name: 'Criar layout' }).click();
+      await expect(dialogo.getByText('Escolha a organização de destino.')).toBeVisible();
+      await analyze(page, `layouts de exportação — organização obrigatória (${vp.label})`);
+      // Organização suspensa não aparece para criar (o servidor recusaria).
+      await dialogo.getByRole('combobox', { name: 'Organização do layout' }).click();
+      await expect(page.getByRole('option', { name: /Prospecta/ })).toHaveCount(0);
+      await page.getByRole('option', { name: ORGANIZATION_NAME }).click();
+    });
+
+    test('gerente da organização: sem item de menu e deep link negado', async ({ page }) => {
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto('/configuracoes/layouts-exportacao');
+      await expect(page.getByText(/restritos ao administrador da organização/)).toBeVisible();
+      await expect(page.getByRole('link', { name: 'Layouts de exportação' })).toHaveCount(0);
+      await analyze(page, `layouts de exportação — acesso negado (${vp.label})`);
+    });
+  });
+}
+
+/**
+ * Sprint 13 (FRONT 13.6) — "Gerar arquivo" e o histórico de gerações na prévia
+ * do de-para no destino Conta contábil: ação e diálogo, recusa como estado,
+ * histórico com download e o cliente encerrado.
+ */
+for (const vp of VIEWPORTS) {
+  const slugAF = vp.label.replace(/\s+/g, '-');
+  const PREVIA_CONTA = `/clientes/${CLIENT_ID}/de-para?destination=conta_contabil&view=previa&competence=2026-06`;
+  test.describe(`Arquivo contábil no de-para (FRONT 13.6) — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('ação, histórico e download (um layout: gera direto)', async ({ page }) => {
+      mappingAccountingDestination = true;
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(PREVIA_CONTA);
+
+      const secao = page.getByTestId('accounting-file-section');
+      await expect(secao).toBeVisible();
+      await expect(secao).toContainText('Layout: Domínio: lançamentos contábeis (CSV)');
+      const gerar = secao.getByRole('button', { name: 'Gerar arquivo', exact: true });
+      await exigirDentroDaViewport(page, gerar, `${vp.label}: "Gerar arquivo"`);
+      const linha = secao.getByRole('row').nth(1);
+      await expect(linha).toContainText('Versão 2');
+      await expect(linha).toContainText(/R\$\s*154\.321,87/);
+      await exigirDentroDaViewport(
+        page,
+        page.getByRole('button', { name: 'Gerar arquivo da versão 1' }),
+        `${vp.label}: "Gerar arquivo" da versão 1`,
+      );
+      await shot(page, `arquivo-contabil-historico-${slugAF}`);
+      await analyze(page, `arquivo contábil — seção e histórico (${vp.label})`);
+
+      await gerar.click();
+      await expect(secao.getByRole('row')).toHaveCount(3); // cabeçalho + 2 gerações
+      await expect(page.getByTestId('accounting-file-refusal')).toHaveCount(0);
+
+      const download = page.waitForEvent('download');
+      await secao
+        .getByRole('button', { name: /^Baixar lancamentos_2026-06_v2\.csv/ })
+        .first()
+        .click();
+      expect((await download).suggestedFilename()).toBe('lancamentos_2026-06_v2.csv');
+    });
+
+    test('mais de um layout: diálogo com o seletor', async ({ page }) => {
+      mappingAccountingDestination = true;
+      sessionUser = SYSTEM_MANAGER_USER;
+      exportLayouts = [
+        ...exportLayoutsIniciais(),
+        exportLayout({ id: 'cccccccc-1300-4000-8000-000000000003', name: 'Domínio — matriz' }),
+      ];
+      await page.goto(PREVIA_CONTA);
+
+      const secao = page.getByTestId('accounting-file-section');
+      await expect(secao).toContainText('você escolhe qual ao gerar');
+      await page.getByRole('button', { name: 'Gerar arquivo da versão 1' }).click();
+      const dialogo = page.getByRole('dialog');
+      await aguardarAnimacao(dialogo);
+      await expect(dialogo).toContainText('a partir da versão 1');
+      const confirmar = dialogo.getByRole('button', { name: 'Gerar arquivo' });
+      await exigirDentroDaViewport(page, confirmar, `${vp.label}: "Gerar arquivo" do diálogo`);
+      await confirmar.click();
+      await expect(dialogo.getByText('Escolha o layout do arquivo.')).toBeVisible();
+      await shot(page, `arquivo-contabil-dialogo-${slugAF}`);
+      await analyze(page, `arquivo contábil — diálogo de layout (${vp.label})`);
+
+      await dialogo.getByRole('combobox', { name: 'Layout do arquivo' }).click();
+      await page.getByRole('option', { name: /Domínio — matriz/ }).click();
+      await confirmar.click();
+      await expect(dialogo).toBeHidden();
+      await expect(secao.getByRole('row').nth(1)).toContainText('Versão 1');
+    });
+
+    test('recusa 409 vira estado com as categorias e o caminho', async ({ page }) => {
+      mappingAccountingDestination = true;
+      sessionUser = SYSTEM_MANAGER_USER;
+      accountingFileOutcome = 'texto';
+      await page.goto(PREVIA_CONTA);
+
+      const secao = page.getByTestId('accounting-file-section');
+      await secao.getByRole('button', { name: 'Gerar arquivo', exact: true }).click();
+      const recusa = page.getByTestId('accounting-file-refusal');
+      await expect(recusa).toBeVisible();
+      await expect(recusa).toHaveAttribute('data-refusal-code', 'ARQUIVO_TEXTO_NAO_CABE');
+      await expect(recusa.getByRole('list', { name: 'Textos que não cabem' })).toContainText(
+        '2.01.03: Histórico tem caractere que a codificação do arquivo não aceita',
+      );
+      await expect(page.locator('[data-sonner-toast]')).toHaveCount(0);
+      expect(
+        await measuredContrast(page, '[data-testid="accounting-file-refusal"] > p'),
+      ).toBeGreaterThanOrEqual(4.5);
+      const corrigir = recusa.getByRole('button', {
+        name: 'Corrigir a categoria 2.01.03 na lista de decisões',
+      });
+      await exigirDentroDaViewport(page, corrigir, `${vp.label}: "Corrigir 2.01.03"`);
+      await corrigir.hover();
+      await shot(page, `arquivo-contabil-recusa-${slugAF}`);
+      await analyze(page, `arquivo contábil — recusa por texto (${vp.label})`);
+
+      await corrigir.click();
+      await expect(page).toHaveURL(/code=2\.01\.03/);
+      await expect(page).not.toHaveURL(/view=previa/);
+    });
+
+    test('partição que não fecha mostra as parcelas', async ({ page }) => {
+      mappingAccountingDestination = true;
+      sessionUser = SYSTEM_MANAGER_USER;
+      accountingFileOutcome = 'particao';
+      await page.goto(PREVIA_CONTA);
+
+      await page
+        .getByTestId('accounting-file-section')
+        .getByRole('button', { name: 'Gerar arquivo', exact: true })
+        .click();
+      const parcelas = page.getByLabel('Parcelas da competência');
+      await expect(parcelas).toContainText('Total da competência');
+      await expect(parcelas).toContainText(/R\$\s*711\.853,90/);
+      await analyze(page, `arquivo contábil — partição que não fecha (${vp.label})`);
+    });
+
+    test('download com SHA divergente é erro claro', async ({ page }) => {
+      mappingAccountingDestination = true;
+      sessionUser = SYSTEM_MANAGER_USER;
+      accountingFileDivergent = true;
+      await page.goto(PREVIA_CONTA);
+
+      await page
+        .getByTestId('accounting-file-section')
+        .getByRole('button', { name: /^Baixar / })
+        .click();
+      const erro = page.getByTestId('accounting-file-download-error');
+      await expect(erro).toContainText('não pôde ser reproduzido exatamente como foi gerado');
+      await analyze(page, `arquivo contábil — download divergente (${vp.label})`);
+    });
+
+    test('vazio, sem layout e cliente encerrado', async ({ page }) => {
+      mappingAccountingDestination = true;
+      sessionUser = USER;
+      accountingFiles = [];
+      exportLayouts = [];
+      await page.goto(PREVIA_CONTA);
+
+      const secao = page.getByTestId('accounting-file-section');
+      await expect(secao).toContainText('Nenhum arquivo gerado nesta competência');
+      await exigirEstadoVazioLegivel(
+        page,
+        'Nenhum arquivo gerado nesta competência',
+        `${vp.label}: vazio de gerações`,
+      );
+      await expect(
+        page.getByTestId('accounting-file-no-layout').getByRole('link', {
+          name: /Ir para Layouts de exportação/,
+        }),
+      ).toBeVisible();
+      await shot(page, `arquivo-contabil-sem-layout-${slugAF}`);
+      await analyze(page, `arquivo contábil — vazio e sem layout (${vp.label})`);
+
+      clientClosed = true;
+      accountingFiles = [accountingFileGeneration()];
+      await page.goto(PREVIA_CONTA);
+      await expect(page.getByTestId('accounting-file-closed')).toBeVisible();
+      await expect(page.getByRole('button', { name: /Gerar arquivo/ })).toHaveCount(0);
+      await expect(secao.getByRole('button', { name: /^Baixar/ })).toHaveCount(0);
+      await expect(secao.getByRole('row').nth(1)).toContainText('Versão 2');
+      await analyze(page, `arquivo contábil — cliente encerrado (${vp.label})`);
+    });
+
+    test('gerente do cliente não vê a seção', async ({ page }) => {
+      mappingAccountingDestination = true;
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(PREVIA_CONTA);
+      await expect(page.getByTestId('mapping-preview')).toBeVisible();
+      await expect(page.getByTestId('accounting-file-section')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: /Gerar arquivo/ })).toHaveCount(0);
     });
   });
 }

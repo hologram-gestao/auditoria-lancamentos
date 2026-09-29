@@ -177,6 +177,9 @@ class UsageEventName(StrEnum):
     #
     # Baseline **0%**: não existe de-para na plataforma. Alvo ≥ 85% do valor no
     # destino `demonstrativo_contabil` (o único que herda, R7).
+    #
+    # Desde a Sprint 13 (BACK 13.1) carrega `materializacao_id` — é a chave que a
+    # métrica da S13 usa para casar com `arquivo_contabil_gerado` (ver abaixo).
     DEPARA_APLICADO = "depara_aplicado"
     # Sprint 14 (BACK 14.2) — instrumentação da INGESTÃO por arquivo (R1/R2). De
     # BACKEND, sem `session_id`, fora da dedup por construção: cada envio (aceito
@@ -215,6 +218,21 @@ class UsageEventName(StrEnum):
     # A métrica da SPRINT (completude de partida) NÃO é evento: sai da própria
     # materialização por consulta (ver HANDOFF, BACK 16.4).
     PLANO_CONTABIL_IMPORTADO = "plano_contabil_importado"
+    # Sprint 13 (BACK 13.1, emitido pela geração do arquivo contábil da 13.4) —
+    # **a métrica da Sprint 13**. De BACKEND, sem `session_id`, fora da dedup:
+    # cada geração (inclusive a segunda da mesma materialização) é uma linha.
+    #
+    # Fórmula da leitura D+30 (tempo entre materializar e gerar o arquivo):
+    #     mediana de (arquivo_contabil_gerado.created_at
+    #                 - depara_aplicado.created_at)
+    #     casados por props->>'materializacao_id'
+    # usando a PRIMEIRA geração de cada materialização. Só entram materializações
+    # posteriores ao deploy da S13: `depara_aplicado` antigo não tem a chave (sem
+    # backfill) e fica fora do casamento por construção.
+    #
+    # Baseline **~15 min por cliente** (autorrelato do contador parceiro em
+    # 02/09/2026, não cronometrado). Alvo **≤ 2 min**.
+    ARQUIVO_CONTABIL_GERADO = "arquivo_contabil_gerado"
 
 
 #: Eventos que o `POST /api/v1/usage-events` aceita. Os de backend ficam de fora
@@ -480,6 +498,13 @@ class DeparaAplicadoProps(_StrictProps):
     `nao_mapear` (decisão tomada é decisão, R2); `valor_nao_mapear_centavos` é a
     contra-métrica, SUBCONJUNTO do anterior. `valor_sem_decisao_centavos` é o
     pendente. O que não tem categoria de origem não entra em nenhum dos três (R3).
+
+    `materializacao_id` (S13, BACK 13.1) é o id da linha de
+    `client_mapping_materializations` recém-criada: é por ele que a métrica da S13
+    casa este evento com `arquivo_contabil_gerado`. **Sem backfill**: os eventos
+    gravados antes do deploy da S13 não têm a chave, e a leitura D+30 considera só
+    materializações posteriores a ele (o casamento por `materializacao_id` já as
+    exclui por construção).
     """
 
     client_id: UUID
@@ -488,10 +513,35 @@ class DeparaAplicadoProps(_StrictProps):
     #: 86e3f0ux7 (item 6): sem ela a leitura D+30 do Outcome POR COMPETÊNCIA era
     #: impossível — o PRD listou as seis chaves e esqueceu o eixo do tempo.
     competencia: str = Field(pattern=COMPETENCE_PATTERN)
+    materializacao_id: UUID
     valor_com_decisao_centavos: int = Field(ge=0)
     valor_nao_mapear_centavos: int = Field(ge=0)
     valor_sem_decisao_centavos: int = Field(ge=0)
     categorias_sem_decisao: int = Field(ge=0)
+
+
+class ArquivoContabilGeradoProps(_StrictProps):
+    """`arquivo_contabil_gerado` (S13 BACK 13.1) — **a métrica da Sprint 13**.
+
+    As **oito** chaves do Outcome do PRD, e nenhuma a mais. Só IDs, números e dois
+    `str` de formato FECHADO (`destino` é o slug do tipo, `competencia` é `YYYY-MM`):
+    **nenhum nome de layout, de cliente, de categoria nem histórico** — o arquivo
+    carrega o histórico do cliente final, e o sink de métrica é o lugar do sistema
+    com menos proteção.
+
+    `layout_versao` é a versão da configuração de layout que gerou o arquivo;
+    `linhas` é a quantidade de linhas do arquivo; `valor_total_centavos` é Σ|valor|
+    das linhas do arquivo em CENTAVOS (`int`, §3.4 — nunca `Decimal`/float no sink).
+    """
+
+    client_id: UUID
+    destino: str = Field(pattern=DESTINO_SLUG_PATTERN)
+    competencia: str = Field(pattern=COMPETENCE_PATTERN)
+    materializacao_id: UUID
+    layout_id: UUID
+    layout_versao: int = Field(ge=1)
+    linhas: int = Field(ge=0)
+    valor_total_centavos: int = Field(ge=0)
 
 
 #: Vocabulário FECHADO do motivo de recusa de um arquivo (Sprint 14). É a MESMA
