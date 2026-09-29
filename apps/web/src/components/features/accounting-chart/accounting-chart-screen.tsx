@@ -146,6 +146,11 @@ export function AccountingChartScreen({ clientId }: { clientId: string }) {
   const showImport = canManage && !isClosed;
 
   const hasFilters = codeParam !== '' || type !== undefined || status !== undefined;
+  // A lista e a sonda são queries independentes: se a lista chega vazia antes
+  // da sonda, `noPlan` ainda é falso e o topo e o estado vazio mostrariam o
+  // botão ao mesmo tempo. O topo pergunta ao estado vazio, não só à sonda.
+  const showsNoPlanState =
+    !listQuery.isError && !listQuery.isLoading && rows.length === 0 && !(hasFilters && !noPlan);
 
   function openImport() {
     setImportKey((k) => k + 1);
@@ -184,7 +189,7 @@ export function AccountingChartScreen({ clientId }: { clientId: string }) {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {/* Sem plano, o botão mora no estado vazio, junto do modelo — um só na tela. */}
-          {showImport && !noPlan && importButton}
+          {showImport && !noPlan && !showsNoPlanState && importButton}
           {canManage && isClosed && (
             <p className="text-muted-foreground max-w-xs text-sm">
               Cliente encerrado: a importação está indisponível. O plano já importado continua
