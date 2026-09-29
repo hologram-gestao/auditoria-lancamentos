@@ -4401,15 +4401,20 @@ for (const vp of VIEWPORTS) {
       await expect(sincronizar).toBeVisible();
 
       if (vp.label === 'desktop') {
+        // O totalizador fica ACIMA da linha das abas.
+        const totais = await page.getByRole('region', { name: 'A receber' }).boundingBox();
+        expect(totais?.y ?? 0).toBeLessThan((await abas.boundingBox())?.y ?? 0);
+        // Linha ÚNICA medida em 1440px: o app usa a fonte do sistema e, em 1280px,
+        // caber ou quebrar depende da largura dela (no runner da CI faltavam ~33px).
+        // Quebrar é permitido; cortar não (medido abaixo, no viewport do teste).
+        await page.setViewportSize({ width: 1440, height: vp.size.height });
         const a = await abas.boundingBox();
         const b = await sincronizar.boundingBox();
         expect(
           Math.abs((a?.y ?? 0) + (a?.height ?? 0) / 2 - ((b?.y ?? 0) + (b?.height ?? 0) / 2)),
-          'abas e "Sincronizar agora" precisam dividir a mesma linha',
+          'em 1440px, abas e "Sincronizar agora" precisam dividir a mesma linha',
         ).toBeLessThan(12);
-        // O totalizador fica ACIMA da linha das abas.
-        const totais = await page.getByRole('region', { name: 'A receber' }).boundingBox();
-        expect(totais?.y ?? 0).toBeLessThan(a?.y ?? 0);
+        await page.setViewportSize(vp.size);
       }
       for (const alvo of [abas, sincronizar]) {
         const caixa = await alvo.boundingBox();
@@ -4849,12 +4854,16 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByLabel('Destino')).toBeVisible();
       await expect(exportar).toBeVisible();
       if (vp.label === 'desktop') {
+        // Mesmo critério da carteira: linha única medida em 1440px, porque a
+        // largura do texto depende da fonte do sistema.
+        await page.setViewportSize({ width: 1440, height: vp.size.height });
         const a = await abas.boundingBox();
         const b = await exportar.boundingBox();
         expect(
           Math.abs((a?.y ?? 0) + (a?.height ?? 0) / 2 - ((b?.y ?? 0) + (b?.height ?? 0) / 2)),
-          'abas e "Exportar" precisam dividir a mesma linha',
+          'em 1440px, abas e "Exportar" precisam dividir a mesma linha',
         ).toBeLessThan(12);
+        await page.setViewportSize(vp.size);
       }
       for (const alvo of [abas, exportar, page.getByRole('button', { name: /Importar/ })]) {
         const caixa = await alvo.boundingBox();

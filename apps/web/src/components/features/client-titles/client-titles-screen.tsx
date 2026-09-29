@@ -423,8 +423,10 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
 
         {/* Uma linha só (86e3fr9qz): as abas, os filtros da Carteira e, à direita,
             a ação de sincronizar (ou o motivo de ela não existir). Quebra em mais
-            linhas quando não cabe, sem cortar nada. */}
-        <div className="flex flex-wrap items-center gap-3">
+            linhas quando não cabe, sem cortar nada. O app usa a fonte do sistema,
+            então a largura muda de máquina para máquina: a ordenação é estreita e
+            o espaçamento horizontal é curto para sobrar folga em 1280px. */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-3">
           <TabsList className="self-start">
             <TabsTrigger value="carteira">Carteira</TabsTrigger>
             <TabsTrigger value="relatorio">Relatório de recebíveis</TabsTrigger>
@@ -467,7 +469,7 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
                 })}
               </div>
 
-              <div className="w-full sm:w-64">
+              <div className="w-full sm:w-56">
                 {/* Nome acessível "Ordenar por" (o e2e usa `getByLabel`); o rótulo
                     visível mora dentro do gatilho, como no mockup. */}
                 <Label htmlFor="titles-sort" className="sr-only">
