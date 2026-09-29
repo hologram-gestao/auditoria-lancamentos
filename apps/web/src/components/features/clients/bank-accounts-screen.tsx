@@ -115,9 +115,9 @@ export function BankAccountsScreen({ clientId }: { clientId: string }) {
     <section aria-labelledby="accounts-heading" className="flex h-full flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="space-y-0.5">
-          <h2 id="accounts-heading" className="text-lg font-semibold">
+          <h1 id="accounts-heading" className="text-xl font-semibold">
             Contas Bancárias
-          </h2>
+          </h1>
           <p className="text-muted-foreground text-xs" aria-live="polite">
             {formatSyncedAt(detailQuery.data?.accounts_synced_at)}
           </p>

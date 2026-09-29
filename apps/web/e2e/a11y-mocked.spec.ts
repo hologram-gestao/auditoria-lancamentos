@@ -2973,7 +2973,7 @@ for (const vp of VIEWPORTS) {
     test('a barra de paginação NUNCA cobre um card (86e2u4nxg)', async ({ page }) => {
       listOverflows = true;
       await page.goto(`/clientes/${CLIENT_ID}`);
-      await expect(page.getByRole('heading', { name: 'Conciliações', level: 2 })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Conciliações', level: 1 })).toBeVisible();
       const bar = page.getByRole('navigation', { name: 'Paginação de conciliações' });
       await expect(bar).toBeVisible();
       await shot(page, `lista-conciliacoes-transbordo-${vp.label.replace(/\s+/g, '-')}`);
@@ -3032,38 +3032,16 @@ for (const vp of VIEWPORTS) {
         page.getByRole('region', { name: 'Totalizadores da conciliação' }),
       ).toBeVisible();
 
-      // 86e2u513w — a trilha mostra o caminho ATÉ a conciliação: o cliente
-      // vira link (a volta explícita para a lista) e o aria-current fica na
-      // página realmente atual, não no cliente.
-      const trilha = page.getByRole('navigation', { name: 'Breadcrumb' });
-      const clienteCrumb = trilha.getByRole('link', { name: 'Cliente Exemplo Ltda' });
-      await expect(clienteCrumb).toBeVisible();
-      await expect(trilha.locator('[aria-current="page"]')).toHaveText(
-        'Cartão Itaú · Junho de 2026',
-      );
-      await analyze(page, `detalhe da conciliação (${vp.label})`);
-      await shot(page, `breadcrumb-detalhe-${vp.label.replace(/\s+/g, '-')}`);
-
-      // O clique no nível do cliente NAVEGA para a lista de conciliações.
-      await clienteCrumb.click();
-      await expect(page).toHaveURL(new RegExp(`/clientes/${CLIENT_ID}$`));
+      // 86e3fr9q3 — sem breadcrumb: o título da página é o h1 da própria tela,
+      // "Conta · Mês", e o shell não repete o nome do cliente. A volta para a
+      // lista é o item "Conciliações" do menu lateral.
       await expect(
-        page.getByRole('navigation', { name: 'Breadcrumb' }).getByText('Cliente Exemplo Ltda'),
-      ).toHaveAttribute('aria-current', 'page');
-    });
-
-    test('trilha do detalhe para usuário de tenant: sem elo "Clientes" (86e2u513w)', async ({
-      page,
-    }) => {
-      sessionUser = CLIENT_OPERATOR_USER;
-      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}`);
-      const trilha = page.getByRole('navigation', { name: 'Breadcrumb' });
-      await expect(trilha.locator('[aria-current="page"]')).toHaveText(
-        'Cartão Itaú · Junho de 2026',
-      );
-      // A trilha do tenant começa no próprio cliente — sem rota que o servidor nega.
-      await expect(trilha.getByRole('link', { name: 'Clientes', exact: true })).toHaveCount(0);
-      await expect(trilha.getByRole('link', { name: 'Cliente Exemplo Ltda' })).toBeVisible();
+        page.getByRole('heading', { level: 1, name: 'Cartão Itaú · Junho de 2026' }),
+      ).toBeVisible();
+      await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
+      await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toHaveCount(0);
+      await analyze(page, `detalhe da conciliação (${vp.label})`);
+      await shot(page, `detalhe-conciliacao-${vp.label.replace(/\s+/g, '-')}`);
     });
 
     test('Contas Bancárias (R6)', async ({ page }) => {
@@ -3325,7 +3303,7 @@ for (const vp of VIEWPORTS) {
         tableListsOverflow = true;
         sessionUser = tela.usuario();
         await page.goto(tela.rota);
-        await expect(page.getByRole('heading', { name: tela.titulo, level: 2 })).toBeVisible();
+        await expect(page.getByRole('heading', { name: tela.titulo, level: 1 })).toBeVisible();
         await expect(page.getByRole('navigation', { name: /^Paginação de/ })).toBeVisible();
         await shot(page, `tabela-${tela.key}-transbordo-${vp.label.replace(/\s+/g, '-')}`);
 
@@ -3387,7 +3365,7 @@ for (const vp of VIEWPORTS) {
       sessionUser = CLIENT_MANAGER_USER;
       await page.goto(`/clientes/${CLIENT_ID}/usuarios`);
 
-      await expect(page.getByRole('heading', { name: 'Usuários', level: 2 })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Usuários', level: 1 })).toBeVisible();
       await expect(page.getByRole('row', { name: /Joana Prado/ })).toBeVisible();
       await expect(page.getByText('Operador do cliente').first()).toBeVisible();
       await expect(page.getByText('Inativo').first()).toBeVisible();
@@ -3488,7 +3466,7 @@ for (const vp of VIEWPORTS) {
       sessionUser = SYSTEM_MANAGER_USER;
       await page.goto(`/clientes/${CLIENT_ID}/usuarios`);
 
-      await expect(page.getByRole('heading', { name: 'Usuários', level: 2 })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Usuários', level: 1 })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Novo usuário' })).toBeVisible();
 
       // No mobile a navegação do cliente mora no DRAWER (86e2n4pf9): sem abrir,
@@ -4046,7 +4024,7 @@ for (const vp of VIEWPORTS) {
       sessionUser = CLIENT_MANAGER_USER;
       await page.goto(`/clientes/${CLIENT_ID}/glossario`);
 
-      await expect(page.getByRole('heading', { name: 'Glossário', level: 2 })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Glossário', level: 1 })).toBeVisible();
       await expect(page.getByRole('row', { name: /Taxas bancárias/ })).toBeVisible();
       await expect(page.getByText('Regra de auditoria').first()).toBeVisible();
       await expect(page.getByText('Fornecedor típico').first()).toBeVisible();
@@ -4099,7 +4077,7 @@ for (const vp of VIEWPORTS) {
       await page.goto(`/clientes/${CLIENT_ID}/glossario`);
 
       // A rota NÃO é negada para ele — o glossário é referência na revisão.
-      await expect(page.getByRole('heading', { name: 'Glossário', level: 2 })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Glossário', level: 1 })).toBeVisible();
       await expect(page.getByRole('row', { name: /Taxas bancárias/ })).toBeVisible();
       await expect(
         page.getByRole('heading', { name: 'Você não tem acesso a esta página' }),
@@ -4141,7 +4119,7 @@ for (const vp of VIEWPORTS) {
       sessionUser = CLIENT_MANAGER_USER;
       await page.goto(`/clientes/${CLIENT_ID}/plano-de-contas`);
 
-      await expect(page.getByRole('heading', { name: 'Plano de Contas', level: 2 })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Plano de Contas', level: 1 })).toBeVisible();
 
       // As cinco contagens, cada uma no seu PAR — e todas vindas da rota de
       // cobertura: a página lista 2 linhas e o bloco continua dizendo 50.
@@ -4199,7 +4177,7 @@ for (const vp of VIEWPORTS) {
       await page.goto(`/clientes/${CLIENT_ID}/plano-de-contas`);
 
       // A rota NÃO é negada para ele: ler é ✅ nos cinco papéis.
-      await expect(page.getByRole('heading', { name: 'Plano de Contas', level: 2 })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Plano de Contas', level: 1 })).toBeVisible();
       await expect(page.getByRole('cell', { name: 'BPO Controller - RB' })).toBeVisible();
       await expect(
         page.getByRole('heading', { name: 'Você não tem acesso a esta página' }),
@@ -4359,7 +4337,7 @@ for (const vp of VIEWPORTS) {
       sessionUser = CLIENT_MANAGER_USER;
       await page.goto(`/clientes/${CLIENT_ID}/carteira`);
 
-      await expect(page.getByRole('heading', { name: 'Carteira', level: 2 })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Carteira', level: 1 })).toBeVisible();
 
       // Os dois tipos são blocos separados: somá-los num total único daria o
       // número que não serve para decisão nenhuma.
@@ -4615,7 +4593,7 @@ for (const vp of VIEWPORTS) {
       await page.goto(`/clientes/${CLIENT_ID}/carteira`);
 
       // A rota NÃO é negada para ele: ler é ✅ nos cinco papéis.
-      await expect(page.getByRole('heading', { name: 'Carteira', level: 2 })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Carteira', level: 1 })).toBeVisible();
       await expect(page.getByRole('cell', { name: /Padaria Aurora Ltda/ })).toBeVisible();
       await expect(
         page.getByRole('heading', { name: 'Você não tem acesso a esta página' }),
@@ -4766,7 +4744,7 @@ for (const vp of VIEWPORTS) {
       sessionUser = SYSTEM_MANAGER_USER;
       await page.goto(`/clientes/${CLIENT_ID}/de-para`);
 
-      await expect(page.getByRole('heading', { name: 'De-para', level: 2 })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'De-para', level: 1 })).toBeVisible();
       await expect(page.getByRole('row')).toHaveCount(5); // cabeçalho + 4 categorias
       // `getByText` exato e não `getByRole('cell')`: o nome da célula soma o
       // selo de divergência e deixaria de casar (o `getByRole` casa por substring).
@@ -4801,7 +4779,7 @@ for (const vp of VIEWPORTS) {
       sessionUser = CLIENT_OPERATOR_USER;
       await page.goto(`/clientes/${CLIENT_ID}/de-para`);
 
-      await expect(page.getByRole('heading', { name: 'De-para', level: 2 })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'De-para', level: 1 })).toBeVisible();
       await expect(page.getByRole('row')).toHaveCount(5);
       // Ação OCULTA, não desabilitada (§4.9).
       await expect(
@@ -4978,9 +4956,8 @@ const PROFILES = [
     user: () => PLATFORM_USER,
     systemArea: true,
     clientUsers: true,
-    editClient: true,
   },
-  { key: 'admin', user: () => USER, systemArea: true, clientUsers: true, editClient: true },
+  { key: 'admin', user: () => USER, systemArea: true, clientUsers: true },
   {
     // D2 (86e36ecjp, já na main): o gerente da organização passou a gerir os
     // usuários dos clientes da CARTEIRA — "Usuários" aparece para ele.
@@ -4988,21 +4965,18 @@ const PROFILES = [
     user: () => SYSTEM_MANAGER_USER,
     systemArea: true,
     clientUsers: true,
-    editClient: false,
   },
   {
     key: 'gerente-cliente',
     user: () => CLIENT_MANAGER_USER,
     systemArea: false,
     clientUsers: true,
-    editClient: false,
   },
   {
     key: 'operador-cliente',
     user: () => CLIENT_OPERATOR_USER,
     systemArea: false,
     clientUsers: false,
-    editClient: false,
   },
 ] as const;
 
@@ -5015,7 +4989,7 @@ for (const vp of VIEWPORTS) {
       test(`${profile.key}: navegação e ações conforme a matriz (R4)`, async ({ page }) => {
         sessionUser = profile.user();
         await page.goto(`/clientes/${CLIENT_ID}`);
-        await expect(page.getByRole('heading', { name: 'Conciliações', level: 2 })).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Conciliações', level: 1 })).toBeVisible();
 
         // No mobile a navegação do cliente mora no DRAWER (86e2n4pf9): abrir
         // para medir — o `getByRole` só enxerga a navegação visível.
@@ -5038,12 +5012,10 @@ for (const vp of VIEWPORTS) {
           await page.keyboard.press('Escape');
           await expect(page.getByRole('dialog')).toHaveCount(0);
         }
-        // §9 (editar dados do cliente, credenciais Omie) é só do admin: as ações
-        // vivem no menu "Ações do cliente" (86e3eq9uy), e quem não pode editar
-        // não vê nem o gatilho.
-        await expect(page.getByRole('button', { name: 'Ações do cliente' })).toHaveCount(
-          profile.editClient ? 1 : 0,
-        );
+        // 86e3fr9q3 — o cabeçalho do cliente não tem mais ação nenhuma, para
+        // perfil nenhum: Editar e Encerrar moram na linha da lista de clientes
+        // (86e3fr9qj), onde a regra de `edit_client` continua valendo.
+        await expect(page.getByRole('button', { name: 'Ações do cliente' })).toHaveCount(0);
         await expect(page.getByRole('button', { name: 'Editar cliente' })).toHaveCount(0);
         // Excluir cliente NÃO aparece para perfil nenhum, nem para quem tem
         // `edit_client` (86e3eqxdt, decisão de produto de 25/09/2026): a saída
@@ -5690,60 +5662,46 @@ for (const vp of VIEWPORTS) {
     });
 
     /**
-     * 86e3eqxdt — a exclusão definitiva SAIU da tela (decisão de produto de
-     * 25/09/2026). O admin é o perfil que mais importa aqui: é o único que via o
-     * botão. Ele continua com Editar e Encerrar; "Excluir cliente" não existe em
-     * forma nenhuma (botão, item de menu ou texto). A rota `DELETE` segue na API
-     * para o apagamento pedido pelo titular (LGPD) — esconder não é defeito.
+     * 86e3fr9q3 + 86e3fr9qj — as ações do cliente saíram do cabeçalho e foram
+     * para a LINHA da lista de clientes: Ver, Editar e Encerrar. "Excluir
+     * cliente" continua fora da tela em qualquer forma (86e3eqxdt, decisão de
+     * produto de 25/09/2026): a rota `DELETE` segue na API só para o apagamento
+     * LGPD. O cabeçalho do cliente não tem ação nenhuma.
      */
-    test('menu "Ações do cliente": só Editar e Encerrar, nunca Excluir (86e3eqxdt · 86e3eq9uy)', async ({
+    test('lista de clientes: Editar e Encerrar na linha, nunca Excluir (86e3fr9qj · 86e3eqxdt)', async ({
       page,
     }) => {
-      await page.goto(`/clientes/${CLIENT_ID}`);
-      // Os dois botões soltos viraram um menu (86e3eq9uy): o cabeçalho tem UM
-      // gatilho de texto, e as ações moram dentro dele.
-      await expect(page.getByRole('button', { name: 'Editar cliente' })).toHaveCount(0);
-      await expect(page.getByRole('button', { name: 'Encerrar cliente' })).toHaveCount(0);
-      const gatilho = page.getByRole('button', { name: 'Ações do cliente' });
-      await gatilho.click();
-      const menu = page.getByRole('menu');
-      await expect(menu).toBeVisible();
-      await expect(menu.getByRole('menuitem')).toHaveCount(2);
-      await expect(menu.getByRole('menuitem', { name: 'Editar cliente' })).toBeVisible();
-      await expect(menu.getByRole('menuitem', { name: 'Encerrar cliente' })).toBeVisible();
-      await expect(page.getByRole('menuitem', { name: 'Excluir cliente' })).toHaveCount(0);
+      await page.goto('/clientes');
+      const encerrar = page.getByRole('button', { name: 'Encerrar Cliente Exemplo Ltda' });
+      await expect(page.getByRole('button', { name: 'Editar Cliente Exemplo Ltda' })).toBeVisible();
+      await expect(encerrar).toBeVisible();
       await expect(page.getByText('Excluir cliente')).toHaveCount(0);
-      await shot(page, `cabecalho-cliente-menu-acoes-${slug}`);
-      // `analyze` com o menu FECHADO (como o `Select`): Escape fecha e devolve o
-      // foco ao gatilho.
-      await page.keyboard.press('Escape');
-      await expect(menu).toBeHidden();
-      await expect(gatilho).toBeFocused();
-      // "Editar cliente" pelo menu: o modal abre depois de o menu fechar, e
-      // fechá-lo devolve o foco ao gatilho (diálogo sem `DialogTrigger`: o
-      // primitivo devolve ao abridor).
-      await gatilho.click();
-      await page.getByRole('menuitem', { name: 'Editar cliente' }).click();
-      const editar = page.getByRole('dialog', { name: 'Editar cliente' });
-      await expect(editar).toBeVisible();
-      await expect(page.getByRole('menu')).toHaveCount(0);
-      await page.keyboard.press('Escape');
-      await expect(editar).toBeHidden();
-      await expect(gatilho).toBeFocused();
+      await expect(page.getByRole('button', { name: /^Excluir / })).toHaveCount(0);
+      // O ícone só tem nome acessível; a explicação aparece no tooltip (nunca `title`).
+      await encerrar.hover();
+      await expect(page.getByRole('tooltip')).toContainText('Encerrar cliente');
+      await shot(page, `lista-clientes-acoes-${slug}`);
+      await analyze(page, `lista de clientes com as ações da linha (${vp.label})`);
+
+      await page.goto(`/clientes/${CLIENT_ID}`);
+      await expect(page.getByRole('heading', { level: 1, name: 'Conciliações' })).toBeVisible();
+      for (const acao of ['Ações do cliente', 'Editar cliente', 'Encerrar cliente']) {
+        await expect(page.getByRole('button', { name: acao })).toHaveCount(0);
+      }
       await expect(page.locator('#__next_error__')).toHaveCount(0);
-      await analyze(page, `cabeçalho do cliente com o menu de ações (${vp.label})`);
     });
 
     /**
-     * 86e3eqxdt — cliente ENCERRADO não tem ação nenhuma no cabeçalho: editar e
-     * encerrar já sumiam (o servidor daria 409, §4.12), e o Excluir, que era o
-     * único que sobrava, saiu da tela. O grupo de ações some inteiro, em vez de
-     * deixar um contêiner vazio.
+     * 86e3fr9q3 — cliente ENCERRADO: sem o selo no cabeçalho, quem explica o
+     * só-leitura é o aviso no topo do conteúdo. Nenhuma ação aparece (o
+     * servidor daria 409, §4.12).
      */
-    test('cliente encerrado: cabeçalho sem nenhuma ação (86e3eqxdt)', async ({ page }) => {
+    test('cliente encerrado: aviso de somente leitura e nenhuma ação (86e3fr9q3)', async ({
+      page,
+    }) => {
       clientClosed = true;
       await page.goto(`/clientes/${CLIENT_ID}`);
-      await expect(page.getByText('Encerrado', { exact: true })).toBeVisible();
+      await expect(page.getByText('Cliente encerrado: somente leitura')).toBeVisible();
       for (const acao of [
         'Ações do cliente',
         'Editar cliente',
@@ -5753,32 +5711,29 @@ for (const vp of VIEWPORTS) {
         await expect(page.getByRole('button', { name: acao })).toHaveCount(0);
       }
       await expect(page.locator('#__next_error__')).toHaveCount(0);
-      await shot(page, `cabecalho-cliente-encerrado-${slug}`);
-      await analyze(page, `cabeçalho do cliente encerrado (${vp.label})`);
+      await shot(page, `cliente-encerrado-aviso-${slug}`);
+      await analyze(page, `cliente encerrado com o aviso (${vp.label})`);
     });
 
     /**
      * 86e36pm1z — encerramento com retenção: ritual de ação irreversível
-     * (`alertdialog` + confirmação DIGITADA), e o sucesso NÃO navega — o
-     * cliente continua existindo, só-leitura. Medido nos dois viewports com o
-     * diálogo montado; a ação não pode passar da borda da viewport.
+     * (`alertdialog` + confirmação DIGITADA), aberto pelo ícone da linha da
+     * lista (86e3fr9qj). Cancelar devolve o foco ao ícone. Medido nos dois
+     * viewports com o diálogo montado; a ação não pode passar da borda.
      */
-    test('encerrar cliente: alertdialog com confirmação digitada (86e36pm1z)', async ({ page }) => {
-      await page.goto(`/clientes/${CLIENT_ID}`);
-      // Pelo menu (86e3eq9uy): escolher o item fecha o menu e SÓ ENTÃO abre o
-      // diálogo — nunca dois overlays do Radix ao mesmo tempo.
-      const gatilho = page.getByRole('button', { name: 'Ações do cliente' });
-      await gatilho.click();
-      await page.getByRole('menuitem', { name: 'Encerrar cliente' }).click();
+    test('encerrar cliente pela lista: alertdialog com confirmação digitada (86e36pm1z · 86e3fr9qj)', async ({
+      page,
+    }) => {
+      await page.goto('/clientes');
+      const icone = page.getByRole('button', { name: 'Encerrar Cliente Exemplo Ltda' });
+      await icone.click();
       const confirm = page.getByRole('alertdialog', { name: 'Encerrar cliente' });
       await expect(confirm).toBeVisible();
-      await expect(page.getByRole('menu')).toHaveCount(0);
-      // Cancelar devolve o foco ao gatilho do menu, não ao vazio.
+      // Cancelar devolve o foco ao ícone que abriu, não ao vazio.
       await confirm.getByRole('button', { name: 'Cancelar' }).click();
       await expect(confirm).toBeHidden();
-      await expect(gatilho).toBeFocused();
-      await gatilho.click();
-      await page.getByRole('menuitem', { name: 'Encerrar cliente' }).click();
+      await expect(icone).toBeFocused();
+      await icone.click();
       await expect(confirm).toBeVisible();
       await aguardarAnimacao(confirm);
       const acao = confirm.getByRole('button', { name: 'Encerrar cliente' });
@@ -5916,7 +5871,7 @@ for (const vp of VIEWPORTS) {
       sessionUser = CLIENT_OPERATOR_USER;
       await page.goto('/clientes');
       await page.waitForURL(`**/clientes/${CLIENT_ID}`);
-      await expect(page.getByRole('heading', { name: 'Conciliações', level: 2 })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Conciliações', level: 1 })).toBeVisible();
     });
   });
 }
@@ -6108,7 +6063,7 @@ for (const vp of VIEWPORTS) {
       await page.goto(`/clientes/${CLIENT_ID}/origem-arquivo`);
 
       await expect(
-        page.getByRole('heading', { name: 'Origem por arquivo', level: 2 }),
+        page.getByRole('heading', { name: 'Origem por arquivo', level: 1 }),
       ).toBeVisible();
       // A aba existe SÓ porque o cliente tem conexão `arquivo` — e é a ativa.
       // No mobile a navegação do cliente mora no DRAWER (86e2n4pf9): abrir para
@@ -6817,7 +6772,7 @@ for (const vp of VIEWPORTS) {
       sessionUser = SYSTEM_MANAGER_USER;
       await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
 
-      await expect(page.getByRole('heading', { name: 'Plano contábil', level: 2 })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Plano contábil', level: 1 })).toBeVisible();
       const regiao = page.getByRole('region', { name: 'Contas do plano contábil (rolável)' });
       await expect(regiao.getByRole('row')).toHaveCount(ACCOUNTING_ACCOUNTS.length + 1);
       await expect(

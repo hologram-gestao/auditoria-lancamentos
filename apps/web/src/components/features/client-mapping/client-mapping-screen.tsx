@@ -209,9 +209,9 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
     <section aria-labelledby="client-mapping-heading" className="flex flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
-          <h2 id="client-mapping-heading" className="text-lg font-semibold">
+          <h1 id="client-mapping-heading" className="text-xl font-semibold">
             De-para
-          </h2>
+          </h1>
           <p className="text-muted-foreground text-sm">
             Para onde cada categoria de origem vai em cada destino. A mesma categoria pode ter
             decisões diferentes em destinos diferentes.

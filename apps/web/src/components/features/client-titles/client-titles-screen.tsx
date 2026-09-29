@@ -377,9 +377,9 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
   return (
     <section aria-labelledby="client-titles-heading" className="flex flex-col gap-4">
       <div className="space-y-1">
-        <h2 id="client-titles-heading" className="text-lg font-semibold">
+        <h1 id="client-titles-heading" className="text-xl font-semibold">
           Carteira
-        </h2>
+        </h1>
         <p className="text-muted-foreground text-sm">
           Títulos a pagar e a receber em aberto, de todas as contas e sem recorte de mês.
         </p>

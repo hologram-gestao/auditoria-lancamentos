@@ -6,20 +6,21 @@
  * Antes, "Contas Bancárias" e "Histórico de Conciliações" eram duas seções
  * empilhadas na mesma página. A reunião de 07/07 pediu que virassem dois
  * DESTINOS distintos, com a Lista de Conciliações promovida a tela principal.
- * Este componente é a moldura comum: breadcrumb + nome do cliente + ações.
+ * Este componente é a moldura comum a todas as páginas do cliente.
  *
- * Navegação (86e2n39h7 + 86e2n4pf9): o menu do cliente NÃO mora mais aqui.
- * De `md` para cima ele está no `<aside>` do shell (`SidebarNav`, em camadas);
- * abaixo de `md`, no drawer do hambúrguer (`MobileNavDrawer`) — que renderiza
- * o mesmo `SidebarNav`. Os chips provisórios que viveram aqui entre as duas
- * tasks foram removidos. A árvore é uma só (`features/navigation/nav-items`).
+ * Sem cabeçalho próprio (86e3fr9q3, feedback do Lucas em 28/09/2026): o
+ * breadcrumb, o nome do cliente, os selos (status, categoria), o favorito e o
+ * menu "Ações do cliente" saíram para a lista subir. O nome do cliente já está
+ * no menu lateral; status, categoria e favorito ficam na lista de clientes; e
+ * Editar/Encerrar moram na linha da lista (86e3fr9qj). O título de cada página
+ * é o h1 da PRÓPRIA tela (Carteira, De-para, "Conta · Mês" no detalhe da
+ * conciliação...): um título aqui repetiria o dela logo abaixo. A volta de uma
+ * conciliação para a lista é o item "Conciliações" do menu lateral.
  *
- * O breadcrumb CONTINUA (decisão de 23/08/2026): ele mostra profundidade; o
- * "Voltar para clientes" do sidebar troca de camada. Dentro de uma conciliação
- * (86e2u513w) a trilha ganha o nível dela — derivado do pathname + cache do
- * `useSessionDetail`, nunca registrado pela tela filha — e o nome do cliente
- * vira link: é a volta explícita para a lista. O `aria-current` fica sempre na
- * página realmente atual.
+ * Navegação (86e2n39h7 + 86e2n4pf9): o menu do cliente mora no `<aside>` do
+ * shell (`SidebarNav`, em camadas) de `md` para cima e no drawer do hambúrguer
+ * (`MobileNavDrawer`) abaixo disso. A árvore é uma só
+ * (`features/navigation/nav-items`).
  *
  * Layout (design-system):
  *   - o shell externo (`(app)/layout.tsx`) já é `h-dvh` e só o `<main>` rola;
@@ -33,32 +34,15 @@
  * segundo request.
  */
 
-import { Archive, ChevronDown, ChevronRight, MoreHorizontal, SquarePen } from 'lucide-react';
+import { Archive } from 'lucide-react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { useRef, useState } from 'react';
 
-import { CategoryBadge } from '@/components/features/client-categories/category-badge';
-import { sessionIdFromPathname } from '@/components/features/navigation/nav-items';
-import { sessionCrumbLabel } from '@/components/features/reconciliations/session-label';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { useClientDetail } from '@/hooks/use-clients';
-import { useSessionDetail } from '@/hooks/use-reconciliations';
 import { ApiError } from '@/lib/api/client';
-import { canAccessClient, canSeeSystemArea, hasPermission, homePathFor } from '@/lib/authz';
+import { canAccessClient, homePathFor } from '@/lib/authz';
 import { useAuthStore } from '@/stores/auth';
-
-import { ClientStatusBadge } from './client-status-badge';
-import { CloseClientDialog } from './close-client-dialog';
-import { EditClientModal } from './edit-client-modal';
-import { FavoriteToggle } from './favorite-toggle';
 
 interface ClientShellProps {
   clientId: string;
@@ -67,15 +51,6 @@ interface ClientShellProps {
 
 export function ClientShell({ clientId, children }: ClientShellProps) {
   const currentUser = useAuthStore((s) => s.user);
-  const [editOpen, setEditOpen] = useState(false);
-  const [closeOpen, setCloseOpen] = useState(false);
-  const [actionsOpen, setActionsOpen] = useState(false);
-  // Ação escolhida no menu, aplicada só DEPOIS de o menu fechar e devolver o
-  // foco ao gatilho (`onCloseAutoFocus`): dois overlays do Radix ao mesmo tempo
-  // marcam o fundo com `aria-hidden` (lição da transferência de organização,
-  // v1.37) — e é por o diálogo abrir com o foco já no gatilho que fechá-lo
-  // devolve o foco a "Ações do cliente".
-  const pendingAction = useRef<'edit' | 'close' | null>(null);
 
   // Gating de tenant (R4/FRONT 05.7) ANTES do fetch: um usuário de cliente que
   // abre o deep link de OUTRO tenant não deve nem disparar o request — o
@@ -85,13 +60,6 @@ export function ClientShell({ clientId, children }: ClientShellProps) {
   // e quem nega é o backend — aí sim a tela degrada pela resposta.
   const canAccess = canAccessClient(currentUser, clientId);
   const detailQuery = useClientDetail(clientId, { enabled: canAccess });
-  // Nível da SESSÃO no breadcrumb (86e2u513w): derivado 100% do pathname, como
-  // a camada do sidebar — a tela filha não registra nada. O hook é o MESMO da
-  // tela de detalhe, então o TanStack serve do cache, sem segundo request.
-  // Hooks ANTES dos early returns (rules of hooks); `enabled` barra o vazio.
-  const pathname = usePathname();
-  const sessionId = sessionIdFromPathname(pathname);
-  const sessionQuery = useSessionDetail(sessionId ?? '');
 
   if (currentUser !== null && !canAccess) {
     return (
@@ -125,163 +93,25 @@ export function ClientShell({ clientId, children }: ClientShellProps) {
   const client = detailQuery.data;
   if (!client || currentUser === null) return null;
 
-  // §9 é do admin do sistema. Nenhum papel de cliente edita os dados do próprio
-  // cliente (credenciais Omie moram aí) — e o gerente do sistema também não.
-  const canEditClient = hasPermission(currentUser, 'edit_client');
-  // 86e36pm1z — encerrado é só-leitura: o servidor nega toda escrita com 409,
-  // então as ações de editar/encerrar somem (§4.9).
+  // 86e36pm1z — encerrado é só-leitura: o servidor nega toda escrita com 409.
+  // Com o selo fora do cabeçalho, este aviso é o que explica por que as ações
+  // sumiram das telas.
   const isClosed = client.closed_at != null;
-  // O elo "Clientes" do breadcrumb aponta para a lista GLOBAL. Para usuário de
-  // tenant esse destino é negado: o breadcrumb começa no próprio cliente.
-  const showClientsCrumb = canSeeSystemArea(currentUser);
-  // Dentro de uma conciliação a trilha ganha o nível dela e o cliente vira
-  // LINK (a volta explícita para a lista). Erro na carga da sessão não some
-  // com o nível: rótulo genérico mantém o caminho de volta visível — quem
-  // explica o erro é a tela filha.
-  const inSession = sessionId !== null;
-  let sessionCrumb: string | undefined;
-  if (inSession) {
-    if (sessionQuery.data !== undefined) {
-      sessionCrumb = sessionCrumbLabel(sessionQuery.data, client.accounts ?? []);
-    } else if (sessionQuery.isError) {
-      sessionCrumb = 'Conciliação';
-    }
-  }
 
   return (
-    <div className="flex h-full flex-col gap-6">
-      <header className="space-y-3">
-        <nav aria-label="Breadcrumb" className="text-muted-foreground text-sm">
-          <ol className="flex items-center gap-1.5">
-            {showClientsCrumb && (
-              <>
-                <li>
-                  <Link href="/clientes" className="hover:text-foreground hover:underline">
-                    Clientes
-                  </Link>
-                </li>
-                <li aria-hidden="true">
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </li>
-              </>
-            )}
-            {inSession ? (
-              <>
-                <li className="min-w-0">
-                  <Link
-                    href={`/clientes/${clientId}`}
-                    className="hover:text-foreground block truncate hover:underline"
-                  >
-                    {client.name}
-                  </Link>
-                </li>
-                <li aria-hidden="true">
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </li>
-                <li className="text-foreground truncate font-medium" aria-current="page">
-                  {sessionCrumb ?? (
-                    <>
-                      <span
-                        className="bg-muted inline-block h-3 w-28 animate-pulse rounded"
-                        aria-hidden="true"
-                      />
-                      <span className="sr-only">Carregando conciliação…</span>
-                    </>
-                  )}
-                </li>
-              </>
-            ) : (
-              <li className="text-foreground truncate font-medium" aria-current="page">
-                {client.name}
-              </li>
-            )}
-          </ol>
-        </nav>
-
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold">{client.name}</h1>
-            <ClientStatusBadge active={client.active} closedAt={client.closed_at} />
-            {client.category && (
-              <CategoryBadge name={client.category.name} tone={client.category.tone} />
-            )}
-            <FavoriteToggle
-              clientId={client.id}
-              clientName={client.name}
-              isFavorite={client.is_favorite}
-            />
-          </div>
-          {/* As ações num MENU (86e3eq9uy): um gatilho de texto em vez de dois
-              botões no cabeçalho, em todas as páginas do cliente. `modal={false}`
-              como o sino e o seletor de tema: no modo modal o Radix marca o fundo
-              com `aria-hidden` mantendo elementos focáveis (`aria-hidden-focus`).
-              Sem "Excluir cliente" de propósito (86e3eqxdt, decisão de produto de
-              25/09/2026): a saída do cliente pela tela é o ENCERRAMENTO com
-              retenção. A exclusão definitiva segue na API (`DELETE /clients/{id}`,
-              `edit_client`) como caminho do apagamento pedido pelo titular (LGPD,
-              CLAUDE.md §4.12) — esconder aqui não é o defeito da §4.9. Encerrado
-              não tem item nenhum, então o gatilho some junto: menu vazio é defeito. */}
-          {canEditClient && !isClosed && (
-            <DropdownMenu open={actionsOpen} onOpenChange={setActionsOpen} modal={false}>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline">
-                  <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
-                  Ações do cliente
-                  <ChevronDown className="h-4 w-4" aria-hidden="true" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="end"
-                className="w-56"
-                onCloseAutoFocus={() => {
-                  const action = pendingAction.current;
-                  pendingAction.current = null;
-                  if (action === null) return;
-                  // Na TAREFA seguinte: o Radix devolve o foco ao gatilho logo depois
-                  // deste handler, e o diálogo precisa montar com o foco JÁ no
-                  // gatilho para devolvê-lo a ele ao fechar. Aberto no mesmo tick, o
-                  // diálogo registrava o item de menu (já desmontado) e o foco caía
-                  // no vazio.
-                  window.setTimeout(() => {
-                    if (action === 'edit') setEditOpen(true);
-                    if (action === 'close') setCloseOpen(true);
-                  }, 0);
-                }}
-              >
-                <DropdownMenuItem
-                  onSelect={() => {
-                    pendingAction.current = 'edit';
-                  }}
-                >
-                  <SquarePen className="mr-2 h-4 w-4" aria-hidden="true" />
-                  Editar cliente
-                </DropdownMenuItem>
-                {/* Encerramento com retenção (86e36pm1z): anonimiza e vira
-                    só-leitura; some quando já encerrado (o servidor daria 409). */}
-                <DropdownMenuItem
-                  onSelect={() => {
-                    pendingAction.current = 'close';
-                  }}
-                >
-                  <Archive className="mr-2 h-4 w-4" aria-hidden="true" />
-                  Encerrar cliente
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-        </div>
-      </header>
+    <div className="flex h-full flex-col gap-4">
+      {isClosed && (
+        <p className="bg-muted text-muted-foreground flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+          <Archive className="h-4 w-4 shrink-0" aria-hidden="true" />
+          Cliente encerrado: somente leitura
+        </p>
+      )}
 
       {/* `min-h-0` (ADR-007): sem ele o item flex cresce até a altura do
           conteúdo e as regiões internas (TableCard/ScrollRegion) nunca rolam —
           a barra de paginação voltaria a cobrir linhas (86e2u4nxg/86e2uca1d,
           pego pelo gate quando o layout virou coluna). */}
       <div className="min-h-0 min-w-0 flex-1">{children}</div>
-
-      <EditClientModal open={editOpen} onOpenChange={setEditOpen} client={client} />
-      {canEditClient && !isClosed && (
-        <CloseClientDialog open={closeOpen} onOpenChange={setCloseOpen} client={client} />
-      )}
     </div>
   );
 }
@@ -289,13 +119,7 @@ export function ClientShell({ clientId, children }: ClientShellProps) {
 function ClientShellSkeleton() {
   return (
     <div role="status" className="space-y-6" aria-busy="true" aria-label="Carregando cliente">
-      <div className="space-y-3">
-        <div className="bg-muted h-3 w-32 animate-pulse rounded" />
-        <div className="flex items-center gap-3">
-          <div className="bg-muted h-7 w-64 animate-pulse rounded" />
-          <div className="bg-muted h-5 w-16 animate-pulse rounded-full" />
-        </div>
-      </div>
+      <div className="bg-muted h-6 w-48 animate-pulse rounded" />
       <div className="flex flex-col gap-6">
         <div className="flex-1 space-y-3">
           {Array.from({ length: 3 }).map((_, i) => (

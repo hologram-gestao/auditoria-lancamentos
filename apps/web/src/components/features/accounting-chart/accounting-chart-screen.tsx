@@ -178,9 +178,9 @@ export function AccountingChartScreen({ clientId }: { clientId: string }) {
     <section aria-labelledby="accounting-chart-heading" className="flex flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
-          <h2 id="accounting-chart-heading" className="text-lg font-semibold">
+          <h1 id="accounting-chart-heading" className="text-xl font-semibold">
             Plano contábil
-          </h2>
+          </h1>
           <p className="text-muted-foreground max-w-3xl text-sm">
             O plano de contas do sistema contábil onde o escritório lança — diferente do Plano de
             Contas da origem. É dele que o de-para escolhe a conta de cada categoria e a conta do
