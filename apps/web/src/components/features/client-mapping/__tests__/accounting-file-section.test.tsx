@@ -477,6 +477,31 @@ describe('gerar — escolha do layout', () => {
     );
   });
 
+  it('reabrir o diálogo não traz o layout escolhido na geração anterior', async () => {
+    // 86e3fyjbm (1): o formulário ficava montado com a escolha anterior, e o
+    // próximo "Gerar arquivo" passava sem ninguém escolher o layout.
+    layoutsState.data = [LAYOUT_DOMINIO, LAYOUT_FILIAL];
+    const user = userEvent.setup();
+    render(<ClientMappingScreen clientId={TENANT} />);
+
+    await user.click(within(section()).getByRole('button', { name: 'Gerar arquivo' }));
+    let dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('combobox', { name: 'Layout do arquivo' }));
+    await user.click(await screen.findByRole('option', { name: 'Domínio filial (v2)' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Gerar arquivo' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(generateState.mutateAsync).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole('button', { name: 'Gerar arquivo da versão 1' }));
+    dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('combobox', { name: 'Layout do arquivo' })).toHaveTextContent(
+      'Selecione o layout',
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Gerar arquivo' }));
+    expect(await within(dialog).findByText('Escolha o layout do arquivo.')).toBeVisible();
+    expect(generateState.mutateAsync).toHaveBeenCalledTimes(1);
+  });
+
   it('nenhum layout, admin: estado com o link para Configurações', () => {
     authState.user = admin;
     layoutsState.data = [];
@@ -613,6 +638,32 @@ describe('recusas 409 como ESTADO, nunca toast', () => {
     const { state } = await generateAndGetRefusal();
     expect(state).toHaveAttribute('data-refusal-code', code);
     expect(state).toHaveTextContent(message);
+  });
+
+  it('materializar de novo tira da tela a recusa das versões anteriores', async () => {
+    // 86e3fyjbm (2): a recusa ficava até um novo clique em "Gerar", mesmo depois
+    // de a pessoa corrigir as categorias e materializar a versão seguinte.
+    generateState.mutateAsync = vi.fn().mockRejectedValue(
+      refusal('ARQUIVO_PARTIDA_INCOMPLETA', 'Complete a partida das categorias.', {
+        categoryCodes: ['2.01.07'],
+      }),
+    );
+    const user = userEvent.setup();
+    const { rerender } = render(<ClientMappingScreen clientId={TENANT} />);
+    await user.click(within(section()).getByRole('button', { name: 'Gerar arquivo' }));
+    expect(await screen.findByTestId('accounting-file-refusal')).toBeInTheDocument();
+
+    // Mesma lista (um refetch qualquer): a recusa continua valendo.
+    materializationsState.data = [...materializationsState.data];
+    rerender(<ClientMappingScreen clientId={TENANT} />);
+    expect(screen.getByTestId('accounting-file-refusal')).toBeInTheDocument();
+
+    materializationsState.data = [
+      materialization({ id: 'mat-3', version: 3, createdAt: '2026-09-28T14:30:00Z' }),
+      ...materializationsState.data,
+    ];
+    rerender(<ClientMappingScreen clientId={TENANT} />);
+    expect(screen.queryByTestId('accounting-file-refusal')).not.toBeInTheDocument();
   });
 
   it('a recusa da versão diz qual versão foi recusada', async () => {

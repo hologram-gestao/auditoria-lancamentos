@@ -48,6 +48,12 @@ MAX_LINE_ENDING_CHARS = 10
 #: silenciosa, que o gerador nunca faz. Mais casas só completam com zeros (exato).
 MIN_DECIMAL_PLACES = 2
 MAX_DECIMAL_PLACES = 4
+#: Caracteres que, no INÍCIO de uma célula, planilhas interpretam como fórmula. Fonte
+#: ÚNICA: o gerador (13.3) recusa o texto do DADO que começa com um deles, e a definição
+#: recusa o texto do LAYOUT que abre célula (prefixo do valor, cabeçalho de coluna). Com
+#: prefixo `=`, TODA célula de valor do arquivo viraria fórmula no Excel; com `-`, o valor
+#: absoluto pareceria negativo.
+FORMULA_PREFIXES = ("=", "+", "-", "@")
 
 
 class LayoutField(StrEnum):
@@ -254,6 +260,12 @@ def _check_amount_format(raw: dict[str, Any], separator: str, encoding: str) -> 
         raise _invalid(
             "amountFormat.prefix", "O prefixo do valor não pode conter o separador de colunas."
         )
+    if prefix.startswith(FORMULA_PREFIXES):
+        raise _invalid(
+            "amountFormat.prefix",
+            "O prefixo do valor não pode começar com =, +, - ou @: planilhas leem a célula "
+            "como fórmula.",
+        )
     for name, text in (
         ("amountFormat.prefix", prefix),
         ("amountFormat.thousandsSeparator", thousands),
@@ -296,6 +308,12 @@ def _check_columns(
                     f"columns[{index}].header",
                     f"O cabeçalho da coluna {index + 1} tem quebra de linha, o separador ou "
                     "caractere fora da codificação do layout.",
+                )
+            if header.startswith(FORMULA_PREFIXES):
+                raise _invalid(
+                    f"columns[{index}].header",
+                    f"O cabeçalho da coluna {index + 1} não pode começar com =, +, - ou @: "
+                    "planilhas leem a célula como fórmula.",
                 )
         columns.append(LayoutColumn(field=field, header=header))
     if not columns:

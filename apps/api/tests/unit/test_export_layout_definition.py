@@ -16,8 +16,10 @@ from typing import Any
 import pytest
 
 from app.core.exceptions import ExportLayoutDefinitionError
+from app.modules.accounting_files import generator
 from app.modules.export_layouts.definition import (
     DOMINIO_TEMPLATE,
+    FORMULA_PREFIXES,
     TEMPLATES,
     LayoutField,
     LineEnding,
@@ -199,6 +201,32 @@ class TestParametrosInvalidos:
         raw = _raw(hasHeader=True)
         raw["columns"][0]["header"] = header
         assert _field_of(raw) == "columns[0].header"
+
+    @pytest.mark.parametrize("prefix", ["=", "=R$ ", "+R$ ", "- ", "@x"])
+    def test_prefixo_comecando_com_formula(self, prefix: str) -> None:
+        """Com `=` TODA célula de valor do arquivo vira fórmula; com `-`, o valor absoluto
+        parece negativo (86e3fyjcc)."""
+        assert _field_of(_amount(prefix=prefix)) == "amountFormat.prefix"
+
+    @pytest.mark.parametrize("header", ["=HYPERLINK(1)", "+Valor", "-Débito", "@Conta"])
+    def test_cabecalho_comecando_com_formula_nomeia_a_coluna(self, header: str) -> None:
+        raw = _raw(hasHeader=True)
+        raw["columns"][2]["header"] = header
+        assert _field_of(raw) == "columns[2].header"
+
+    @pytest.mark.parametrize("text", ["R$ ", "BRL ", "Valor-", "Conta @"])
+    def test_formula_so_no_inicio_recusa(self, text: str) -> None:
+        """O caractere no meio ou no fim não abre fórmula: o modelo Domínio usa `R$ `."""
+        raw = _amount(prefix=text)
+        raw["hasHeader"] = True
+        raw["columns"][2]["header"] = text
+        definition = parse_definition(raw)
+        assert definition.amount_format.prefix == text
+        assert definition.columns[2].header == text
+
+    def test_o_gerador_usa_a_mesma_lista(self) -> None:
+        """Uma fonte só: dado e layout recusados pelo MESMO critério."""
+        assert generator.FORMULA_PREFIXES is FORMULA_PREFIXES
 
     def test_sem_colunas(self) -> None:
         assert _field_of(_raw(columns=[])) == "columns"
