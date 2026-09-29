@@ -128,10 +128,41 @@ describe('Novo cliente — SEM origem (R4)', () => {
     expect(payload).not.toHaveProperty('omie_app_secret');
   });
 
-  it('a seção de origem é opcional e diz isso', () => {
+  it('a seção de origem é opcional e diz isso: switch DESLIGADO e campos escondidos (86e3fr9r6)', () => {
     render(<CreateClientModal open onOpenChange={vi.fn()} />);
     expect(screen.getByText('Conectar uma origem agora')).toBeVisible();
-    expect(screen.getByText(/Sem credencial o cliente é criado do mesmo jeito/)).toBeVisible();
+    expect(screen.getByText(/Desligado, o cliente é criado sem origem conectada/)).toBeVisible();
+    // Campos sempre abertos pareciam obrigatórios (feedback do Lucas, 28/09).
+    expect(screen.getByRole('switch', { name: 'Conectar com o Omie' })).not.toBeChecked();
+    expect(screen.queryByLabelText('App Key Omie')).toBeNull();
+    expect(screen.queryByLabelText('App Secret Omie')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Testar conexão/ })).toBeNull();
+  });
+
+  it('desligar o switch LIMPA a credencial e o cliente volta a nascer sem origem (86e3fr9r6)', async () => {
+    const user = userEvent.setup();
+    render(<CreateClientModal open onOpenChange={vi.fn()} />);
+
+    await user.type(screen.getByLabelText('Nome do cliente'), 'Padaria do Bairro');
+    const toggle = screen.getByRole('switch', { name: 'Conectar com o Omie' });
+    await user.click(toggle);
+    await user.type(screen.getByLabelText('App Key Omie'), 'chave');
+    await user.type(screen.getByLabelText('App Secret Omie'), 'segredo');
+    // Com credencial o gate do teste vale: Salvar travado.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Salvar' })).toBeDisabled());
+
+    await user.click(toggle);
+    expect(screen.queryByLabelText('App Key Omie')).toBeNull();
+    const salvar = screen.getByRole('button', { name: 'Salvar' });
+    await waitFor(() => expect(salvar).toBeEnabled());
+    await user.click(salvar);
+
+    await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
+    expect(createMock.mock.calls[0]![0]).toEqual({ name: 'Padaria do Bairro' });
+
+    // Religar não traz de volta o que foi digitado.
+    await user.click(toggle);
+    expect(screen.getByLabelText('App Key Omie')).toHaveValue('');
   });
 
   it('quem não gere conexões não vê a seção de origem (R5)', () => {
@@ -147,6 +178,7 @@ describe('Novo cliente — COM origem, o gate do teste continua valendo (R4)', (
     render(<CreateClientModal open onOpenChange={vi.fn()} />);
 
     await user.type(screen.getByLabelText('Nome do cliente'), 'Cliente com Omie');
+    await user.click(screen.getByRole('switch', { name: 'Conectar com o Omie' }));
     await user.type(screen.getByLabelText('App Key Omie'), 'chave');
     await user.type(screen.getByLabelText('App Secret Omie'), 'segredo');
 
@@ -171,6 +203,7 @@ describe('Novo cliente — COM origem, o gate do teste continua valendo (R4)', (
     render(<CreateClientModal open onOpenChange={vi.fn()} />);
 
     await user.type(screen.getByLabelText('Nome do cliente'), 'Cliente com Omie');
+    await user.click(screen.getByRole('switch', { name: 'Conectar com o Omie' }));
     await user.type(screen.getByLabelText('App Key Omie'), 'chave');
     await user.type(screen.getByLabelText('App Secret Omie'), 'segredo');
     await user.click(screen.getByRole('button', { name: /Testar conexão/ }));
@@ -184,6 +217,7 @@ describe('Novo cliente — COM origem, o gate do teste continua valendo (R4)', (
     render(<CreateClientModal open onOpenChange={vi.fn()} />);
 
     await user.type(screen.getByLabelText('Nome do cliente'), 'Cliente pela metade');
+    await user.click(screen.getByRole('switch', { name: 'Conectar com o Omie' }));
     await user.type(screen.getByLabelText('App Key Omie'), 'só-a-chave');
     // Sem secret: o botão de teste nem habilita, e o submit por Enter reprova.
     expect(screen.getByRole('button', { name: /Testar conexão/ })).toBeDisabled();

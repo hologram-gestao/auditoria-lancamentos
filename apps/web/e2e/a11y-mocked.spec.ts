@@ -5436,6 +5436,20 @@ for (const vp of VIEWPORTS) {
       await aguardarAnimacao(dialog);
       await expect(dialog.getByRole('combobox', { name: 'Organização do cliente' })).toHaveCount(0);
       await analyze(page, `novo cliente sem seletor de organização (${vp.label})`);
+
+      // 86e3fr9r6 — a credencial fica atrás do switch "Conectar com o Omie":
+      // desligado por padrão (campos sempre abertos pareciam obrigatórios).
+      const conectar = dialog.getByRole('switch', { name: 'Conectar com o Omie' });
+      await expect(conectar).not.toBeChecked();
+      await expect(dialog.getByLabel('App Key Omie')).toHaveCount(0);
+      await conectar.click();
+      await expect(dialog.getByLabel('App Key Omie')).toBeVisible();
+      await expect(dialog.getByLabel('App Secret Omie')).toBeVisible();
+      // Com a seção aberta, o "Salvar" continua dentro da viewport (o miolo rola).
+      const salvar = dialog.getByRole('button', { name: 'Salvar' });
+      await expect(salvar).toBeInViewport();
+      await shot(page, `novo-cliente-omie-ligado-${slug}`);
+      await analyze(page, `novo cliente com o switch do Omie ligado (${vp.label})`);
     });
 
     test('usuários: coluna e filtro de organização para a plataforma (86e36ed1d)', async ({
