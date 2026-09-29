@@ -103,6 +103,13 @@ class ReconciliationSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             unique=True,
             postgresql_where=text("deleted_at IS NULL"),
         ),
+        # O nome é DECLARADO porque o banco tem este, abreviado, desde a
+        # `d1e8a4b9f2c5` (86e3g9v0j). Com `index=True` na coluna o modelo pediria
+        # o nome padrão (`ix_reconciliation_sessions_deleted_at`) e o `alembic
+        # check` acusaria drift para sempre — um DROP + CREATE que ninguém quer
+        # num índice em uso, para trocar só a grafia. `ix_recon_*` é o estilo da
+        # casa (`ix_recon_file_entry_session_omie_unique`).
+        Index("ix_recon_sessions_deleted_at", "deleted_at"),
     )
 
     client_id: Mapped[UUID] = mapped_column(
@@ -166,10 +173,10 @@ class ReconciliationSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # NULL` — o índice de idempotência também é parcial pra liberar a
     # tupla quando a sessão é descartada (criar uma nova com o mesmo
     # arquivo passa a ser possível).
+    # O índice desta coluna está nomeado em `__table_args__` (não por `index=True`).
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
-        index=True,
     )
 
     # Saldos calculados ao final do processamento
