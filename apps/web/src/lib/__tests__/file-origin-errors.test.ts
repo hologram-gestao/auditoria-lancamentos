@@ -18,20 +18,29 @@ function apiError(status: number, code: string, details?: Record<string, unknown
 }
 
 describe('readFileRefusal', () => {
-  it('CABECALHO_DIVERGENTE traz as colunas ausentes e as encontradas', () => {
+  it('CABECALHO_DIVERGENTE traz as colunas ausentes e a CONTAGEM das encontradas', () => {
     const refusal = readFileRefusal(
       apiError(422, 'CABECALHO_DIVERGENTE', {
         missingColumns: ['Histórico', 'Valor'],
-        foundColumns: ['Data', 'Descrição', 'Valor', 42],
+        foundColumnCount: 3,
       }),
     );
     expect(refusal).toEqual({
       code: 'CABECALHO_DIVERGENTE',
       userMessage: 'msg CABECALHO_DIVERGENTE',
       missingColumns: ['Histórico', 'Valor'],
-      // O que não é string é descartado, nunca renderizado.
-      foundColumns: ['Data', 'Descrição', 'Valor'],
+      foundColumnCount: 3,
     });
+  });
+
+  it('CABECALHO_DIVERGENTE: contagem ausente ou inválida vira 0, nunca NaN na tela', () => {
+    const refusal = readFileRefusal(
+      apiError(422, 'CABECALHO_DIVERGENTE', {
+        missingColumns: ['Histórico'],
+        foundColumnCount: 'três',
+      }),
+    );
+    expect(refusal).toMatchObject({ foundColumnCount: 0 });
   });
 
   it('LINHAS_INVALIDAS traz linha × motivo e o total (o servidor recorta em K)', () => {

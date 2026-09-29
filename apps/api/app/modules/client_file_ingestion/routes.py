@@ -145,7 +145,7 @@ async def inspect_file(
         "409 `SEM_MAPEAMENTO` (com `details.foundColumns`), 409 `SINAL_NAO_DECLARADO`, "
         "422 `FORMATO_NAO_SUPORTADO`, 409 `ARQUIVO_JA_PROCESSADO` (mesmo arquivo na mesma "
         "competência — UNIQUE no banco), 422 `CABECALHO_DIVERGENTE` (antes de ler a 1ª "
-        "linha; `details.missingColumns`/`foundColumns`), 422 `LINHAS_INVALIDAS` "
+        "linha; `details.missingColumns` — as do MAPEAMENTO — e `details.foundColumnCount`), 422 `LINHAS_INVALIDAS` "
         "(`details.lines=[{line, reason}]`, motivo de vocabulário fechado, nunca a célula), "
         "422 `TOTAL_DIVERGENTE` (quando `declaredTotal` vier e diferir da soma com sinal), "
         "422 `ARQUIVO_INVALIDO` (não abre/não itera, mensagem fixa). Arquivo corrigido "

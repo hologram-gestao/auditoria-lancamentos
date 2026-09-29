@@ -833,9 +833,12 @@ class FileInvalidError(AppError):
 class FileHeaderMismatchError(AppError):
     """422 — o cabeçalho não tem as colunas do mapeamento (R2).
 
-    `details.missingColumns` nomeia as que faltam e `details.foundColumns` as que
-    existem — nomes de coluna são estrutura, não PII. Recusa ANTES da primeira
-    linha: nunca processamento parcial.
+    `details.missingColumns` nomeia as que faltam — as do MAPEAMENTO, ou as do
+    modelo no plano contábil: vocabulário NOSSO, nunca texto do arquivo — e
+    `details.foundColumnCount` diz quantas o arquivo trazia. O cabeçalho lido
+    nunca volta como texto: arquivo enviado SEM cabeçalho tem dado na linha 1, e
+    ecoá-la devolveria a descrição do lançamento ou o nome da conta, que são do
+    cliente final (§4.5). Recusa ANTES da primeira linha: nunca parcial.
     """
 
     code = ErrorCode.CABECALHO_DIVERGENTE

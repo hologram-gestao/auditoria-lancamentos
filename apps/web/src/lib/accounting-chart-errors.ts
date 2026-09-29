@@ -61,10 +61,17 @@ export type AccountingChartRefusal =
   | {
       code: 'CABECALHO_DIVERGENTE';
       userMessage: string;
+      /** Obrigatórias ausentes — nomes do MODELO, não da planilha. */
       missingColumns: string[];
-      unexpectedColumns: string[];
+      /** Repetidas que são do modelo (`nome;nome`); o resto vira contagem. */
       repeatedColumns: string[];
-      foundColumns: string[];
+      /**
+       * Quantas colunas fora do modelo a planilha trazia, e quantas ao todo.
+       * São CONTAGENS de propósito: planilha sem cabeçalho tem dado na linha 1,
+       * e o servidor não devolve texto vindo do arquivo (§4.5).
+       */
+      unexpectedColumnCount: number;
+      foundColumnCount: number;
     }
   | {
       code: 'LINHAS_INVALIDAS';
@@ -77,6 +84,10 @@ export type AccountingChartRefusal =
 function readStringList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === 'string');
+}
+
+function readCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 function readLines(value: unknown): AccountingInvalidLine[] {
@@ -106,9 +117,9 @@ export function readAccountingChartRefusal(error: unknown): AccountingChartRefus
         code,
         userMessage,
         missingColumns: readStringList(details.missingColumns),
-        unexpectedColumns: readStringList(details.unexpectedColumns),
         repeatedColumns: readStringList(details.repeatedColumns),
-        foundColumns: readStringList(details.foundColumns),
+        unexpectedColumnCount: readCount(details.unexpectedColumnCount),
+        foundColumnCount: readCount(details.foundColumnCount),
       };
     case 'LINHAS_INVALIDAS': {
       const lines = readLines(details.lines);

@@ -389,7 +389,7 @@ class TestRecusasNaOrdem:
             await _process(service, _csv(ROWS, header))
         assert exc.value.status_code == 422
         assert exc.value.code.value == "CABECALHO_DIVERGENTE"
-        assert exc.value.details == {"missingColumns": ["Histórico"], "foundColumns": header}
+        assert exc.value.details == {"missingColumns": ["Histórico"], "foundColumnCount": 5}
         assert processadas["celulas"] == 0
         assert SEGREDO not in str(exc.value)
         _assert_only_refused(ledger, "cabecalho_divergente", linhas=0, colunas_reconhecidas=4)

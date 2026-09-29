@@ -356,17 +356,15 @@ class TestCabecalhoAntesDaPrimeiraLinha:
 
         def _check(columns: list[str]) -> None:
             raise FileHeaderMismatchError(
-                "coluna ausente", details={"missingColumns": ["Histórico"], "foundColumns": columns}
+                "coluna ausente",
+                details={"missingColumns": ["Histórico"], "foundColumnCount": len(columns)},
             )
 
         content = _csv([["Data", "Descrição", "Valor"], ["01/06/2026", SEGREDO, "-1,00"]])
         with pytest.raises(FileHeaderMismatchError) as exc:
             read_table(content, CSV_OPTIONS, on_header=_check)
         assert processadas["celulas"] == 0
-        assert exc.value.details == {
-            "missingColumns": ["Histórico"],
-            "foundColumns": ["Data", "Descrição", "Valor"],
-        }
+        assert exc.value.details == {"missingColumns": ["Histórico"], "foundColumnCount": 3}
         assert SEGREDO not in str(exc.value)
 
     def test_app_error_atravessa_e_o_resto_vira_arquivo_invalido(self) -> None:

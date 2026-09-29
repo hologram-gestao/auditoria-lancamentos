@@ -6,8 +6,11 @@
  *
  * Ramificado por `code` (`lib/accounting-chart-errors.ts`), no padrão do
  * `FileRefusalNotice` da S14 (ADR-047-FE):
- *   - `CABECALHO_DIVERGENTE` → colunas que FALTAM, que SOBRAM e que se REPETEM,
- *     nomeadas, e as encontradas — contra o modelo documentado logo acima;
+ *   - `CABECALHO_DIVERGENTE` → as colunas que FALTAM e as que se REPETEM,
+ *     nomeadas (são do MODELO), mais quantas colunas a planilha tinha e quantas
+ *     estavam fora do modelo — contra o modelo documentado logo acima. O nome de
+ *     coluna que veio do ARQUIVO não aparece: numa planilha enviada sem
+ *     cabeçalho a linha 1 é dado, e o servidor não devolve texto dela (§4.5);
  *   - `LINHAS_INVALIDAS` → tabela linha × motivo em português e "mostrando K de
  *     N" quando o servidor recortou;
  *   - `FORMATO_NAO_SUPORTADO` / `ARQUIVO_INVALIDO` → o `userMessage` tipado do
@@ -76,14 +79,12 @@ function RefusalBody({ refusal }: { refusal: AccountingChartRefusal }) {
               columns={refusal.missingColumns}
               emphasized
             />
-            <ColumnList
-              heading="Colunas fora do modelo"
-              columns={refusal.unexpectedColumns}
-              emphasized
-            />
             <ColumnList heading="Colunas repetidas" columns={refusal.repeatedColumns} emphasized />
-            <ColumnList heading="Colunas encontradas na planilha" columns={refusal.foundColumns} />
           </div>
+          <HeaderCounts
+            found={refusal.foundColumnCount}
+            unexpected={refusal.unexpectedColumnCount}
+          />
         </div>
       );
     case 'LINHAS_INVALIDAS':
@@ -130,6 +131,23 @@ function RefusalBody({ refusal }: { refusal: AccountingChartRefusal }) {
       // A mensagem TIPADA do servidor é a instrução (o que enviar).
       return <p>{refusal.userMessage}</p>;
   }
+}
+
+/**
+ * O tamanho do cabeçalho lido, em números. Substitui a lista de "colunas
+ * encontradas": os nomes vinham crus do arquivo, e numa planilha sem cabeçalho
+ * a linha 1 é dado do cliente. A dica sobre a linha 1 é o que aquela lista
+ * realmente entregava — o diagnóstico, sem o conteúdo.
+ */
+function HeaderCounts({ found, unexpected }: { found: number; unexpected: number }) {
+  if (found === 0) return null;
+  return (
+    <p className="text-xs" data-testid="accounting-header-counts">
+      {`A planilha tem ${found} ${found === 1 ? 'coluna' : 'colunas'}`}
+      {unexpected > 0 ? `, ${unexpected} fora do modelo. ` : '. '}
+      Confira se a linha 1 é o cabeçalho e não a primeira conta.
+    </p>
+  );
 }
 
 function ColumnList({
