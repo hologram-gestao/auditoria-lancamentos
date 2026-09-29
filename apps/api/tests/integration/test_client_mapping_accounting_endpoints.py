@@ -207,18 +207,25 @@ async def world(db_session: AsyncSession, client_with_db: AsyncClient) -> World:
     return w
 
 
-def _xlsx_rows(rows: list[tuple[str, str, str, str, str]]) -> bytes:
+def _xlsx_rows(rows: list[tuple[str, str, str, str, str]], destino: str = "") -> bytes:
     """Planilha mínima no formato exportado (86e3fxqqe): `(tipo_origem,
     codigo_categoria, decisao, codigo_alvo, historico)` por linha; as demais
-    colunas (nome, destino, origem, vigência) ficam em branco — o import as
-    ignora ou aceita ausentes.
+    colunas (nome, origem, vigência) ficam em branco — o import as ignora ou
+    aceita ausentes.
+
+    `destino` preenche a coluna homônima em TODAS as linhas (86e3g3dg3): é o que
+    uma planilha exportada de outro destino traz, e o caminho que trocava o motivo
+    da recusa. Em branco (o padrão) a linha vale para o destino que recebe o
+    arquivo, como antes.
     """
     wb = Workbook()
     ws = wb.active
     assert ws is not None
     ws.append(list(EXPORT_COLUMNS))
     for source_type, category_code, decision, target_code, history in rows:
-        ws.append([source_type, category_code, "", "", decision, target_code, "", history, "", ""])
+        ws.append(
+            [source_type, category_code, "", destino, decision, target_code, "", history, "", ""]
+        )
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -722,6 +729,65 @@ class TestPortabilidade:
             assert error["details"]["total"] == 1
             assert error["details"]["lines"] == [{"line": 3, "reason": "conta_inexistente"}]
         # nem a linha VÁLIDA (662) foi gravada — a planilha é tudo ou nada.
+        assert await _decision_count(db_session, world) == before
+
+    async def test_planilha_de_outro_destino_recusa_por_linha_e_nao_como_conta_invalida(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
+    ) -> None:
+        """86e3g3dg3: arquivo errado é `destino_diferente`, não conta inválida.
+
+        Os códigos de alvo de `fluxo_de_caixa` são do catálogo da ORGANIZAÇÃO e não
+        existem no plano contábil do cliente. Antes, a pré-validação de contas os
+        cobrava mesmo assim e o lote inteiro morria em 422
+        `CONTAS_DA_PLANILHA_INVALIDAS` — recusa certa, motivo que mandava a pessoa
+        conferir o plano de contas em vez de conferir o arquivo que ela subiu.
+        """
+        content = _xlsx_rows(
+            [
+                ("arquivo", "aluguel-d", "alvo", "3.1.01", ""),
+                ("arquivo", "tarifa", "alvo", "3.1.02", ""),
+            ],
+            destino="fluxo_de_caixa",
+        )
+        before = await _decision_count(db_session, world)
+        resp = await client_with_db.post(
+            f"{_base(world)}/import/preview",
+            files={"file": ("de-para.xlsx", content, "application/octet-stream")},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()["data"]
+        assert (body["created"], body["altered"]) == (0, 0)
+        assert [(r["line"], r["reason"]) for r in body["rejected"]] == [
+            (2, "destino_diferente"),
+            (3, "destino_diferente"),
+        ]
+        # Continua sem gravar nada: o que muda é o MOTIVO, não o desfecho.
+        assert await _decision_count(db_session, world) == before
+
+    async def test_conta_invalida_continua_422_quando_o_destino_e_o_desta_planilha(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
+    ) -> None:
+        """Regressão da 86e3fxqqe: o recorte por destino não afrouxa a validação.
+
+        Com `destino=conta_contabil` declarado na planilha, a conta inexistente tem
+        de derrubar o lote inteiro como antes.
+        """
+        content = _xlsx_rows(
+            [
+                ("arquivo", "aluguel-d", "alvo", "662", ""),
+                ("arquivo", "tarifa", "alvo", "999999-nao-existe", ""),
+            ],
+            destino="conta_contabil",
+        )
+        before = await _decision_count(db_session, world)
+        resp = await client_with_db.post(
+            f"{_base(world)}/import/preview",
+            files={"file": ("de-para.xlsx", content, "application/octet-stream")},
+        )
+        assert resp.status_code == 422, resp.text
+        error = resp.json()["error"]
+        assert error["code"] == "CONTAS_DA_PLANILHA_INVALIDAS"
+        assert error["details"]["lines"] == [{"line": 3, "reason": "conta_inexistente"}]
         assert await _decision_count(db_session, world) == before
 
     async def test_conta_sintetica_tambem_recusa_a_planilha_inteira(

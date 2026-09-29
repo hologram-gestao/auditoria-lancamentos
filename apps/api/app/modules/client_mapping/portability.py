@@ -539,10 +539,18 @@ class ClientMappingPortabilityService:
             # código reduzido — resolvida e validada ANTES de classificar qualquer
             # linha (conta inexistente/sintética/inativa recusa a planilha INTEIRA,
             # molde S14; nunca um "pula essa linha e segue").
+            # O recorte por destino é o MESMO do laço do `plan_import` que rejeita
+            # com `destino_diferente` (86e3g3dg3). Sem ele, uma planilha exportada
+            # de OUTRO destino tinha os códigos dela cobrados contra o plano
+            # contábil e o lote inteiro virava `CONTAS_DA_PLANILHA_INVALIDAS`:
+            # recusa certa, motivo enganoso — a pessoa subiu o arquivo errado, não
+            # contas erradas. Linha sem destino declarado vale para este destino.
             codes_by_line = [
                 (line.line, line.target_code)
                 for line in lines
-                if line.decision == DecisionType.ALVO.value and line.target_code
+                if line.decision == DecisionType.ALVO.value
+                and line.target_code
+                and (not line.destination or line.destination == destination.destination_type)
             ]
             resolved_accounts, invalid = await self._decisions.accounting.classify_target_codes(
                 client, codes_by_line
