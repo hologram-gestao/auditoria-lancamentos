@@ -6,8 +6,16 @@ FastAPI dependency, e o FastAPI instalado só fecha esse `AsyncExitStack`
 DEPOIS de a resposta já ter sido despachada (ver o docstring de
 `app/core/response_ordering.py` para a análise do fonte). Sem a
 `CommitBeforeResponseMiddleware`, o cliente recebia sucesso antes do dado
-estar durável no banco — em até 14 de 15 criações, segundo a sonda da
-validação humana da Sprint 16 (CLAUDE.md v1.57).
+estar durável no banco — 45 de 100 criações neste mesmo teste, e 14 de 15 na
+sonda da validação humana da Sprint 16 (CLAUDE.md v1.57).
+
+**O terceiro caso deste módulo é o que reprovou a primeira tentativa desta
+task**: um middleware que bufferizava a resposta inteira também zerava as
+leituras ausentes, mas segurava a resposta até a BackgroundTask terminar (o
+Starlette roda `await self.background()` dentro de `Response.__call__`). Nos 4
+endpoints de conciliação isso seria o cliente esperando o processamento inteiro
+— teto de 900 s — em vez do 201. Nenhum outro teste da suíte pega isso: todos
+substituem `_schedule_reconciliation_processing` por um stub.
 
 ⚠️ **Por que este teste sobe um servidor uvicorn REAL, em vez de usar
 `httpx.ASGITransport`** (o padrão do resto da suíte, via `client`/
@@ -35,6 +43,7 @@ from __future__ import annotations
 
 import asyncio
 import socket
+import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
@@ -42,7 +51,7 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 import uvicorn
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, BackgroundTasks, FastAPI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -51,6 +60,7 @@ from app.core.dependencies import DbSessionDep
 from app.core.response_ordering import CommitBeforeResponseMiddleware
 from app.db.models import Organization
 from app.db.session import close_db, init_db
+from app.main import CorrelationIdMiddleware, SecurityHeadersMiddleware
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -68,7 +78,14 @@ def _build_probe_app() -> FastAPI:
     que mantém o teste focado só na ordem commit-antes-da-resposta.
     """
     probe_app = FastAPI()
+    # A MESMA pilha de `main.py::create_app`, na mesma ordem: o commit é o mais
+    # INTERNO e os dois `BaseHTTPMiddleware` ficam por fora. Sem eles o teste
+    # provaria o middleware isolado, não como ele roda em produção — e é
+    # justamente o `BaseHTTPMiddleware` (que reempacota o `send` num stream
+    # anyio) o vizinho capaz de mudar a ordem de entrega dos bytes.
     probe_app.add_middleware(CommitBeforeResponseMiddleware)
+    probe_app.add_middleware(CorrelationIdMiddleware)
+    probe_app.add_middleware(SecurityHeadersMiddleware, is_production=False)
     router = APIRouter()
 
     @router.post("/organizations")
@@ -78,8 +95,32 @@ def _build_probe_app() -> FastAPI:
         await db.flush()
         return {"id": str(org.id)}
 
+    @router.post("/with-background", status_code=202)
+    async def with_background(
+        background_tasks: BackgroundTasks, db: DbSessionDep, name: str
+    ) -> dict[str, str]:
+        """O molde de `POST /reconciliations`: grava e agenda um trabalho longo.
+
+        A BackgroundTask REAL roda aqui (nenhum stub) — é o que faltava na
+        primeira tentativa desta task.
+        """
+        org = Organization(name=name, active=True)
+        db.add(org)
+        await db.flush()
+        background_tasks.add_task(_slow_background_job)
+        return {"id": str(org.id)}
+
     probe_app.include_router(router)
     return probe_app
+
+
+#: Quanto a BackgroundTask "demora". Precisa ser MUITO maior que o tempo de um
+#: request local para a medição distinguir as duas coisas sem flakiness.
+BACKGROUND_SECONDS = 3.0
+
+
+async def _slow_background_job() -> None:
+    await asyncio.sleep(BACKGROUND_SECONDS)
 
 
 def _free_port() -> int:
@@ -99,7 +140,9 @@ async def _run_real_server(app: FastAPI) -> AsyncGenerator[str, None]:
     server = uvicorn.Server(config)
     serve_task = asyncio.create_task(server.serve())
     try:
-        while not server.started:
+        # `uvicorn.Server` expõe só o booleano `started`, sem `asyncio.Event`
+        # para aguardar — por isso o polling (ASYNC110 não se aplica aqui).
+        while not server.started:  # noqa: ASYNC110
             await asyncio.sleep(0.005)
         yield f"http://127.0.0.1:{port}"
     finally:
@@ -122,12 +165,11 @@ async def _real_db_session_global(db_url: str) -> AsyncGenerator[None, None]:
         await close_db()
 
 
+@pytest.mark.usefixtures("_real_db_session_global")
 class TestLeituraImediataAposCriar:
     """Critério de aceite: 100/100 leituras enxergam o dado recém-criado."""
 
-    async def test_conexao_nova_sempre_ve_o_dado_recem_criado(
-        self, _real_db_session_global: None, db_engine: AsyncEngine
-    ) -> None:
+    async def test_conexao_nova_sempre_ve_o_dado_recem_criado(self, db_engine: AsyncEngine) -> None:
         app = _build_probe_app()
         ausencias: list[str] = []
 
@@ -156,6 +198,7 @@ class TestLeituraImediataAposCriar:
         )
 
 
+@pytest.mark.usefixtures("_real_db_session_global")
 class TestFalhaNoCommitViraErro:
     """Critério de aceite: falha no commit() nunca vira sucesso, e nada é
     gravado.
@@ -163,7 +206,6 @@ class TestFalhaNoCommitViraErro:
 
     async def test_commit_falhando_devolve_erro_e_nao_grava_nada(
         self,
-        _real_db_session_global: None,
         db_engine: AsyncEngine,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -192,3 +234,41 @@ class TestFalhaNoCommitViraErro:
                 "a linha foi gravada mesmo com commit() falhando — a resposta de erro "
                 "não pode conviver com escrita persistida"
             )
+
+
+@pytest.mark.usefixtures("_real_db_session_global")
+class TestRespostaNaoEsperaBackgroundTask:
+    """O que reprovou a 1ª tentativa desta task (buffer da resposta inteira).
+
+    O Starlette roda `await self.background()` DENTRO de `Response.__call__`,
+    depois dos `send` e antes de a coroutine do app retornar. Qualquer solução
+    que segure os bytes até o app terminar segura a resposta até a
+    BackgroundTask acabar — nos 4 endpoints de conciliação, até 900 s.
+    """
+
+    async def test_resposta_chega_antes_da_background_terminar(
+        self, db_engine: AsyncEngine
+    ) -> None:
+        app = _build_probe_app()
+        marker = f"probe-bg-{uuid.uuid4().hex}"
+
+        async with (
+            _run_real_server(app) as base_url,
+            httpx.AsyncClient(base_url=base_url, timeout=BACKGROUND_SECONDS * 5) as ac,
+        ):
+            started = time.perf_counter()
+            resp = await ac.post("/with-background", params={"name": marker})
+            elapsed = time.perf_counter() - started
+
+            assert resp.status_code == 202, resp.text
+            assert elapsed < BACKGROUND_SECONDS / 2, (
+                f"a resposta demorou {elapsed:.2f}s com uma BackgroundTask de "
+                f"{BACKGROUND_SECONDS}s — ela está esperando a task terminar"
+            )
+
+            # E o commit continua garantido: o dado já está visível de outra conexão.
+            async with db_engine.connect() as conn:
+                row = await conn.execute(select(Organization.id).where(Organization.name == marker))
+                assert row.first() is not None, (
+                    "a resposta chegou antes do commit no caminho com BackgroundTask"
+                )

@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from starlette.requests import Request
 
 if TYPE_CHECKING:
     from app.core.config import Settings
@@ -77,16 +78,23 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
     return _session_factory
 
 
-async def get_db_session() -> AsyncIterator[AsyncSession]:
+async def get_db_session(request: Request) -> AsyncIterator[AsyncSession]:
     """Async generator de AsyncSession para uso em `Depends()`.
 
     Política de transação por request:
-        - Cada request abre uma session nova.
-        - Se o handler retornar com sucesso, `commit()` persiste qualquer
-          mudança pendente. Para handlers de leitura pura, commit é no-op.
+        - Cada request abre uma session nova, publicada em
+          `request.state.db_session` para a `CommitBeforeResponseMiddleware`
+          (86e3fxqqa) comitar ANTES do primeiro byte da resposta — este
+          `commit()` aqui embaixo roda só DEPOIS de a resposta ter saído (é o
+          FastAPI fechando o `AsyncExitStack`), então sozinho ele não garante
+          nada ao cliente; fica como rede de segurança (no-op quando o
+          middleware já comitou) e para caminhos fora da pilha HTTP.
         - Se levantar exceção (validação, erro de domínio, exception genérica),
           `rollback()` desfaz tudo e a exceção segue para o exception_handler
           global, que converte em resposta JSON.
+        - O `finally` ZERA `request.state.db_session`: no caminho de erro o
+          teardown roda ANTES de o handler global montar a resposta, e sem isso
+          o middleware comitaria uma session já revertida ao despachar o erro.
 
     Sem o `commit()` aqui, escritas via `flush()` no repositório sumiam ao final
     do request — o teste de integração não pega isso porque usa transação
@@ -94,9 +102,12 @@ async def get_db_session() -> AsyncIterator[AsyncSession]:
     """
     session_factory = get_session_factory()
     async with session_factory() as session:
+        request.state.db_session = session
         try:
             yield session
             await session.commit()
         except Exception:
             await session.rollback()
             raise
+        finally:
+            request.state.db_session = None

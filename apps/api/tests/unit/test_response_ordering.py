@@ -1,16 +1,17 @@
 """Unit test isolado (sem DB) para `CommitBeforeResponseMiddleware` (86e3fxqqa).
 
-Prova o mecanismo em si, na camada mais barata: o middleware só encaminha
-mensagens ASGI ao `send` real DEPOIS que o app envolvido (dependências com
-`yield` incluídas) tiver terminado por completo — nunca antes, nem em caso
-de exceção. A prova end-to-end contra Postgres real (leitura imediata por
-conexão nova, falha de commit vira erro) está em
-`tests/integration/test_response_ordering.py`.
+Prova o mecanismo na camada mais barata: o commit acontece no
+`http.response.start`, ANTES de a mensagem ser encaminhada ao `send` real, e a
+mensagem seguinte não repete o commit. A prova end-to-end contra Postgres
+(leitura imediata por conexão nova, falha de commit vira erro, resposta que NÃO
+espera a BackgroundTask) está em `tests/integration/test_response_ordering.py`.
 """
 
 from __future__ import annotations
 
 from typing import Any
+
+import pytest
 
 from app.core.response_ordering import CommitBeforeResponseMiddleware
 
@@ -19,86 +20,149 @@ async def _noop_receive() -> dict[str, Any]:
     return {"type": "http.disconnect"}
 
 
-async def test_so_encaminha_ao_send_real_depois_do_app_terminar() -> None:
-    """Simula o commit() do pós-yield rodando DEPOIS do app já ter enviado a
-    resposta pro `send` interno — e prova que o `send` REAL só vê algo
-    depois que essa etapa (representada por `ordem.append(...)` no fim do
-    app) já aconteceu.
-    """
-    ordem: list[str] = []
+class _FakeSession:
+    """Session mínima: registra os commits numa lista de ordem compartilhada."""
 
-    async def inner_app(scope: dict[str, Any], receive: Any, send: Any) -> None:
-        await send({"type": "http.response.start", "status": 200, "headers": []})
-        await send({"type": "http.response.body", "body": b"ok", "more_body": False})
-        # Representa o `request_stack.__aexit__()` do FastAPI, onde o
-        # `commit()` do pós-yield de `get_db_session` roda de verdade.
-        ordem.append("exit_stack_fechou_commit_incluso")
+    def __init__(self, ordem: list[str]) -> None:
+        self._ordem = ordem
+        self.commits = 0
 
-    middleware = CommitBeforeResponseMiddleware(inner_app)
-
-    async def real_send(message: dict[str, Any]) -> None:
-        ordem.append(f"send_real:{message['type']}")
-
-    await middleware({"type": "http"}, _noop_receive, real_send)
-
-    assert ordem == [
-        "exit_stack_fechou_commit_incluso",
-        "send_real:http.response.start",
-        "send_real:http.response.body",
-    ]
+    async def commit(self) -> None:
+        self.commits += 1
+        self._ordem.append("commit")
 
 
-async def test_excecao_no_app_nunca_encaminha_nada_ao_send_real() -> None:
-    """Se o `commit()` falhar (exceção durante o fechamento do exit stack, já
-    depois do app ter "enviado" a resposta de sucesso pro `send` interno), o
-    `send` real nunca recebe nada — é isso que impede o cliente de ver um
-    2xx que na verdade não foi persistido.
-    """
-
-    async def inner_app_falha(scope: dict[str, Any], receive: Any, send: Any) -> None:
-        await send({"type": "http.response.start", "status": 200, "headers": []})
-        await send({"type": "http.response.body", "body": b"ok", "more_body": False})
+class _FailingSession(_FakeSession):
+    async def commit(self) -> None:
+        self.commits += 1
         raise RuntimeError("commit simulado falhando")
 
-    middleware = CommitBeforeResponseMiddleware(inner_app_falha)
-    enviados: list[dict[str, Any]] = []
 
-    async def real_send(message: dict[str, Any]) -> None:
-        enviados.append(message)
-
-    try:
-        await middleware({"type": "http"}, _noop_receive, real_send)
-    except RuntimeError as exc:
-        assert str(exc) == "commit simulado falhando"
-    else:
-        raise AssertionError("esperava RuntimeError propagando do app")
-
-    assert enviados == [], "nada deveria ter chegado ao send real"
+def _scope(session: object | None) -> dict[str, Any]:
+    """Scope HTTP com a session publicada como `get_db_session` publica."""
+    state: dict[str, Any] = {}
+    if session is not None:
+        state["db_session"] = session
+    return {"type": "http", "state": state}
 
 
-async def test_websocket_e_outros_scopes_passam_direto_sem_buffer() -> None:
-    """WebSocket não é bufferizado — quebraria tempo real. Guard defensivo:
-    esta API não expõe WebSocket hoje, mas o middleware não deve assumir
-    isso silenciosamente.
-    """
-    chamadas: list[tuple[str, ...]] = []
+async def test_comita_antes_de_encaminhar_o_response_start() -> None:
+    ordem: list[str] = []
+    session = _FakeSession(ordem)
 
     async def inner_app(scope: dict[str, Any], receive: Any, send: Any) -> None:
-        chamadas.append((scope["type"],))
-        await send({"type": "probe"})
+        await send({"type": "http.response.start", "status": 201, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok", "more_body": False})
+        # Representa a BackgroundTask: roda DEPOIS dos sends, dentro do app.
+        ordem.append("background")
 
-    middleware = CommitBeforeResponseMiddleware(inner_app)
+    async def real_send(message: dict[str, Any]) -> None:
+        ordem.append(f"send:{message['type']}")
+
+    await CommitBeforeResponseMiddleware(inner_app)(_scope(session), _noop_receive, real_send)
+
+    assert ordem == [
+        "commit",
+        "send:http.response.start",
+        "send:http.response.body",
+        "background",
+    ]
+    assert session.commits == 1
+
+
+async def test_a_resposta_nao_espera_o_que_vier_depois_dos_sends() -> None:
+    """O commit entra ENTRE a resposta pronta e o 1º byte — e nada mais.
+
+    É o que separa esta versão da primeira tentativa (bufferizar tudo até o app
+    terminar), que segurava a resposta até a BackgroundTask acabar.
+    """
+    ordem: list[str] = []
+    session = _FakeSession(ordem)
+
+    async def inner_app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+        await send({"type": "http.response.start", "status": 202, "headers": []})
+        await send({"type": "http.response.body", "body": b"", "more_body": False})
+        ordem.append("background_lenta")
+
+    async def real_send(message: dict[str, Any]) -> None:
+        if message["type"] == "http.response.body":
+            ordem.append("cliente_recebeu")
+
+    await CommitBeforeResponseMiddleware(inner_app)(_scope(session), _noop_receive, real_send)
+
+    assert ordem.index("cliente_recebeu") < ordem.index("background_lenta")
+
+
+async def test_rota_sem_session_no_state_nao_comita_nada() -> None:
+    enviados: list[dict[str, Any]] = []
+
+    async def inner_app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+
+    async def real_send(message: dict[str, Any]) -> None:
+        enviados.append(message)
+
+    await CommitBeforeResponseMiddleware(inner_app)(_scope(None), _noop_receive, real_send)
+
+    assert [m["type"] for m in enviados] == ["http.response.start"]
+
+
+async def test_commit_que_falha_nao_encaminha_nenhum_byte() -> None:
+    """A exceção sobe ANTES do `send` real: o 2xx montado nunca chega ao cliente."""
+    ordem: list[str] = []
+    session = _FailingSession(ordem)
+    enviados: list[dict[str, Any]] = []
+
+    async def inner_app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+        await send({"type": "http.response.start", "status": 201, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok", "more_body": False})
+
+    async def real_send(message: dict[str, Any]) -> None:
+        enviados.append(message)
+
+    with pytest.raises(RuntimeError, match="commit simulado falhando"):
+        await CommitBeforeResponseMiddleware(inner_app)(_scope(session), _noop_receive, real_send)
+
+    assert enviados == [], "nada pode ter chegado ao send real"
+
+
+async def test_uma_tentativa_de_commit_por_request() -> None:
+    """Resposta de erro despachada depois de um commit falho não tenta de novo."""
+    ordem: list[str] = []
+    session = _FailingSession(ordem)
+
+    async def inner_app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+        try:
+            await send({"type": "http.response.start", "status": 201, "headers": []})
+        except RuntimeError:
+            # O handler global montando a resposta de erro no mesmo request.
+            await send({"type": "http.response.start", "status": 500, "headers": []})
+            await send({"type": "http.response.body", "body": b"erro", "more_body": False})
 
     enviados: list[dict[str, Any]] = []
 
     async def real_send(message: dict[str, Any]) -> None:
         enviados.append(message)
 
-    await middleware({"type": "websocket"}, _noop_receive, real_send)
+    await CommitBeforeResponseMiddleware(inner_app)(_scope(session), _noop_receive, real_send)
 
-    assert chamadas == [("websocket",)]
-    # Passou direto: o `real_send` recebeu a mensagem IMEDIATAMENTE, sem
-    # passar pelo buffer (não há como observar isso via timing num teste
-    # determinístico, então a prova é indireta: chegou, e só há uma
-    # chamada a `inner_app`, sem nenhuma camada de buffer no meio).
+    assert session.commits == 1
+    assert [m.get("status") for m in enviados if m["type"] == "http.response.start"] == [500]
+
+
+async def test_websocket_e_outros_scopes_passam_direto() -> None:
+    chamadas: list[str] = []
+
+    async def inner_app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+        chamadas.append(scope["type"])
+        await send({"type": "probe"})
+
+    enviados: list[dict[str, Any]] = []
+
+    async def real_send(message: dict[str, Any]) -> None:
+        enviados.append(message)
+
+    await CommitBeforeResponseMiddleware(inner_app)({"type": "websocket"}, _noop_receive, real_send)
+
+    assert chamadas == ["websocket"]
     assert enviados == [{"type": "probe"}]
