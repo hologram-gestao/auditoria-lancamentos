@@ -37,6 +37,7 @@ from app.modules.usage_events.schemas import (
     MovimentosSincronizadosProps,
     NotificacaoEntregueProps,
     NotificacaoEntregueRequest,
+    PlanoContabilImportadoProps,
     PlanoContasSincronizadoProps,
     QualificacaoEmitidaProps,
     QualificationVerdict,
@@ -63,6 +64,8 @@ _PROPS_MODELS: list[type[BaseModel]] = [
     DeparaAplicadoProps,
     ArquivoProcessadoProps,
     FechamentoProduzidoProps,
+    # S16 (BACK 16.4): só id e contagens — nenhum `str`.
+    PlanoContabilImportadoProps,
 ]
 
 #: Tipos que NÃO carregam texto livre. `bool`/`int` são grandezas, `Literal` é

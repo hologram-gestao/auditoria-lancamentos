@@ -1925,3 +1925,360 @@ class TestArquivoNaBaseEImportsRoundTrip:
             alembic_cfg
         )
         assert FILE_IMPORTS_REV in _revisions_in_chain(alembic_cfg)
+
+
+# ----------------------------------------------------------------------
+# Sprint 16 (BACK 16.1) — o plano de contas CONTÁBIL do cliente
+# ----------------------------------------------------------------------
+
+PRE_ACCOUNTING_CHART_REV = "d9e4a1b57c26"
+ACCOUNTING_CHART_REV = "e3a7c1f95b40"
+
+_INSERT_ACCOUNTING_ACCOUNT = (
+    "INSERT INTO client_accounting_accounts (id, client_id, code, name_encrypted, name_iv, "
+    "account_type, created_by, updated_by) VALUES (gen_random_uuid(), :cid, :code, :ct, :iv, "
+    ":type, :uid, :uid)"
+)
+
+
+def _insert_accounting_account(
+    url: str,
+    client_id: str,
+    *,
+    code: str = "649",
+    ct: str | None = "v1:k1:00",
+    iv: str | None = "0" * 24,
+    account_type: str = "analitica",
+) -> None:
+    _execute(
+        url,
+        _INSERT_ACCOUNTING_ACCOUNT,
+        cid=client_id,
+        code=code,
+        ct=ct,
+        iv=iv,
+        type=account_type,
+        uid=_creator_of(url, client_id),
+    )
+
+
+class TestPlanoContabilRoundTrip:
+    """BACK 16.1 — a migration do plano contábil sobe, desce e sobe."""
+
+    def test_upgrade_cria_tabela_colunas_e_garantias(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+
+        assert _table_exists(url, "client_accounting_accounts")
+        columns = (
+            "id",
+            "client_id",
+            "code",
+            "classification",
+            "name_encrypted",
+            "name_iv",
+            "account_type",
+            "active",
+            "created_by",
+            "updated_by",
+            "created_at",
+            "updated_at",
+        )
+        assert _columns(url, "client_accounting_accounts", *columns) == len(columns)
+        assert _scalar(
+            url,
+            "SELECT count(*) FROM information_schema.columns "
+            "WHERE table_name = 'client_accounting_accounts'",
+        ) == len(columns), "a lista acima é o inventário inteiro: nenhum nome em claro"
+        for name in (
+            "uq_client_accounting_accounts_client_id_code",
+            "ck_client_accounting_accounts_name_pair",
+            "ck_client_accounting_accounts_account_type",
+            "fk_client_accounting_accounts_client_id_clients",
+            "fk_client_accounting_accounts_created_by_users",
+            "fk_client_accounting_accounts_updated_by_users",
+        ):
+            assert _scalar(url, _CONSTRAINT_COUNT, name=name) == 1, name
+
+    def test_unicidade_tipo_e_par_do_nome_sao_do_banco(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+
+        _insert_accounting_account(url, client_id)
+        assert _scalar(url, "SELECT active FROM client_accounting_accounts") is True, (
+            "a conta nasce ativa pelo default do banco"
+        )
+        # UNIQUE(client_id, code): o mesmo código no MESMO cliente é recusado.
+        with pytest.raises(sa.exc.IntegrityError):
+            _insert_accounting_account(url, client_id)
+        # O mesmo código em OUTRO cliente entra: o plano é por cliente.
+        _insert_accounting_account(url, _seed_client_row(url))
+        # Tipo fora do vocabulário.
+        with pytest.raises(sa.exc.IntegrityError):
+            _insert_accounting_account(url, client_id, code="650", account_type="totalizadora")
+        # Nome sem IV: o NOT NULL/CHECK do par recusa.
+        with pytest.raises(sa.exc.IntegrityError):
+            _insert_accounting_account(url, client_id, code="651", iv=None)
+        assert _scalar(url, "SELECT count(*) FROM client_accounting_accounts") == 2
+
+    def test_exclusao_do_cliente_leva_o_plano(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        _insert_accounting_account(url, client_id)
+
+        _execute(url, "DELETE FROM clients WHERE id = :cid", cid=client_id)
+
+        assert _scalar(url, "SELECT count(*) FROM client_accounting_accounts") == 0
+
+    def test_downgrade_e_real_e_o_ciclo_converge(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        _insert_accounting_account(url, client_id)
+
+        command.downgrade(alembic_cfg, PRE_ACCOUNTING_CHART_REV)
+        assert not _table_exists(url, "client_accounting_accounts")
+        assert _scalar(url, "SELECT count(*) FROM clients") == 1
+
+        for _ in range(2):
+            command.upgrade(alembic_cfg, "head")
+            command.downgrade(alembic_cfg, PRE_ACCOUNTING_CHART_REV)
+
+        command.upgrade(alembic_cfg, "head")
+        assert _table_exists(url, "client_accounting_accounts")
+        assert _scalar(url, "SELECT version_num FROM alembic_version") == _head_revision(
+            alembic_cfg
+        )
+        assert ACCOUNTING_CHART_REV in _revisions_in_chain(alembic_cfg)
+
+
+# ----------------------------------------------------------------------
+# Sprint 16 (BACK 16.2) — o de-para em `conta_contabil` aponta o plano do cliente
+# ----------------------------------------------------------------------
+
+MAPPING_ACCOUNTING_REV = "f5b8d2e61c37"
+
+_INSERT_ACCOUNTING_DECISION = (
+    "INSERT INTO client_mapping_decisions (id, client_id, source_type, category_code, "
+    "destination_id, decision_type, target_id, accounting_account_id, history_encrypted, "
+    "history_iv, origin, effective_from, author_id) VALUES (gen_random_uuid(), :cid, "
+    "'arquivo', :cat, (SELECT id FROM mapping_destinations WHERE destination_type = "
+    "'conta_contabil' LIMIT 1), 'alvo', NULL, :acc, :ct, :iv, 'confirmada', '2026-06-01', "
+    ":uid)"
+)
+
+
+def _accounting_account_id(url: str, client_id: str) -> str:
+    _insert_accounting_account(url, client_id, code="662")
+    return str(
+        _scalar(
+            url,
+            "SELECT id FROM client_accounting_accounts WHERE client_id = :cid AND code = '662'",
+            cid=client_id,
+        )
+    )
+
+
+class TestDeParaContaContabilRoundTrip:
+    """BACK 16.2 — a migration da conta do plano no de-para sobe, desce (com guarda) e sobe."""
+
+    def test_upgrade_cria_colunas_e_troca_os_checks(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        assert (
+            _columns(
+                url,
+                "client_mapping_decisions",
+                "accounting_account_id",
+                "history_encrypted",
+                "history_iv",
+            )
+            == 3
+        )
+        assert (
+            _columns(
+                url,
+                "client_mapping_materialization_items",
+                "accounting_account_code",
+                "decision_id",
+            )
+            == 2
+        )
+        for name in (
+            "ck_client_mapping_decisions_decision_target_coherent",
+            "ck_client_mapping_decisions_history_coherent",
+            "ck_client_mapping_materialization_items_item_target_coherent",
+            "fk_client_mapping_decisions_accounting_account_id",
+        ):
+            assert _scalar(url, _CONSTRAINT_COUNT, name=name) == 1, name
+
+    def test_o_banco_garante_catalogo_xor_plano_e_o_par_do_historico(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        account_id = _accounting_account_id(url, client_id)
+        uid = _creator_of(url, client_id)
+
+        _execute(
+            url,
+            _INSERT_ACCOUNTING_DECISION,
+            cid=client_id,
+            cat="a",
+            acc=account_id,
+            ct="v1:k1:00",
+            iv="0" * 24,
+            uid=uid,
+        )
+        # Alvo sem nenhum dos dois: recusado.
+        with pytest.raises(sa.exc.IntegrityError):
+            _execute(
+                url,
+                _INSERT_ACCOUNTING_DECISION,
+                cid=client_id,
+                cat="b",
+                acc=None,
+                ct=None,
+                iv=None,
+                uid=uid,
+            )
+        # Histórico sem IV: recusado.
+        with pytest.raises(sa.exc.IntegrityError):
+            _execute(
+                url,
+                _INSERT_ACCOUNTING_DECISION,
+                cid=client_id,
+                cat="c",
+                acc=account_id,
+                ct="v1:k1:00",
+                iv=None,
+                uid=uid,
+            )
+        assert _scalar(url, "SELECT count(*) FROM client_mapping_decisions") == 1
+
+    def test_downgrade_aborta_com_decisao_no_plano_e_o_ciclo_converge_sem_ela(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        account_id = _accounting_account_id(url, client_id)
+        _execute(
+            url,
+            _INSERT_ACCOUNTING_DECISION,
+            cid=client_id,
+            cat="a",
+            acc=account_id,
+            ct=None,
+            iv=None,
+            uid=_creator_of(url, client_id),
+        )
+        with pytest.raises(sa.exc.DBAPIError, match="Downgrade bloqueado"):
+            command.downgrade(alembic_cfg, ACCOUNTING_CHART_REV)
+        assert _scalar(url, "SELECT count(*) FROM client_mapping_decisions") == 1
+
+        _execute(url, "DELETE FROM client_mapping_decisions")
+        command.downgrade(alembic_cfg, ACCOUNTING_CHART_REV)
+        assert (
+            _columns(url, "client_mapping_decisions", "accounting_account_id", "history_encrypted")
+            == 0
+        )
+        for _ in range(2):
+            command.upgrade(alembic_cfg, "head")
+            command.downgrade(alembic_cfg, ACCOUNTING_CHART_REV)
+        command.upgrade(alembic_cfg, "head")
+        assert _scalar(url, "SELECT version_num FROM alembic_version") == _head_revision(
+            alembic_cfg
+        )
+        assert MAPPING_ACCOUNTING_REV in _revisions_in_chain(alembic_cfg)
+
+
+# ----------------------------------------------------------------------
+# Sprint 16 (BACK 16.3) — a conta do banco de cada conta de origem
+# ----------------------------------------------------------------------
+
+SOURCE_BINDINGS_REV = "a8c4e7d25f19"
+
+_INSERT_BINDING = (
+    "INSERT INTO client_source_account_bindings (id, client_id, source_type, source_account_id, "
+    "accounting_account_id, created_by, updated_by) VALUES (gen_random_uuid(), :cid, 'arquivo', "
+    ":src, :acc, :uid, :uid)"
+)
+
+
+class TestContaDoBancoRoundTrip:
+    """BACK 16.3 — associação e snapshot do banco sobem, descem e sobem."""
+
+    def test_slot_padrao_e_contas_explicitas_sao_unicos_no_banco(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        account_id = _accounting_account_id(url, client_id)
+        uid = _creator_of(url, client_id)
+
+        _execute(url, _INSERT_BINDING, cid=client_id, src=None, acc=account_id, uid=uid)
+        # Segundo slot PADRÃO do mesmo tipo: o índice único PARCIAL recusa.
+        with pytest.raises(sa.exc.IntegrityError):
+            _execute(url, _INSERT_BINDING, cid=client_id, src=None, acc=account_id, uid=uid)
+        _execute(url, _INSERT_BINDING, cid=client_id, src="cc-1", acc=account_id, uid=uid)
+        with pytest.raises(sa.exc.IntegrityError):
+            _execute(url, _INSERT_BINDING, cid=client_id, src="cc-1", acc=account_id, uid=uid)
+        _execute(url, _INSERT_BINDING, cid=client_id, src="cc-2", acc=account_id, uid=uid)
+        assert _scalar(url, "SELECT count(*) FROM client_source_account_bindings") == 3
+        assert (
+            _scalar(
+                url,
+                "SELECT count(*) FROM pg_indexes WHERE indexname = "
+                "'uq_client_source_account_bindings_default' AND indexdef LIKE "
+                "'%WHERE (source_account_id IS NULL)%'",
+            )
+            == 1
+        )
+        assert (
+            _columns(
+                url, "client_mapping_materialization_items", "bank_account_code", "history_present"
+            )
+            == 2
+        )
+
+    def test_downgrade_e_real_e_o_ciclo_converge(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        account_id = _accounting_account_id(url, client_id)
+        _execute(
+            url,
+            _INSERT_BINDING,
+            cid=client_id,
+            src=None,
+            acc=account_id,
+            uid=_creator_of(url, client_id),
+        )
+        command.downgrade(alembic_cfg, MAPPING_ACCOUNTING_REV)
+        assert not _table_exists(url, "client_source_account_bindings")
+        assert _columns(url, "client_mapping_materialization_items", "bank_account_code") == 0
+        for _ in range(2):
+            command.upgrade(alembic_cfg, "head")
+            command.downgrade(alembic_cfg, MAPPING_ACCOUNTING_REV)
+        command.upgrade(alembic_cfg, "head")
+        assert _scalar(url, "SELECT version_num FROM alembic_version") == _head_revision(
+            alembic_cfg
+        )
+        assert SOURCE_BINDINGS_REV in _revisions_in_chain(alembic_cfg)

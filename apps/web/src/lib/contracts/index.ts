@@ -119,7 +119,13 @@ export type ListClientUsersQuery = NonNullable<
 export type ClientResponse = Schemas['ClientResponse'];
 export type ClientDetailResponse = Schemas['ClientDetailResponse'];
 export type ClientListResponse = Schemas['ClientListResponse'];
-export type BankAccountResponse = Schemas['BankAccountResponse'];
+/**
+ * Conta corrente Omie do cache L1. ⚠️ Desde a S16 o gerador qualifica o nome
+ * pelo módulo (`app__modules__clients__…`): o backend ganhou um SEGUNDO
+ * `BankAccountResponse` (a conta contábil do banco, em `client_source_accounts`)
+ * e o FastAPI desambigua os dois assim. O alias segue com o nome de sempre.
+ */
+export type BankAccountResponse = Schemas['app__modules__clients__schemas__BankAccountResponse'];
 export type ManagerSummary = Schemas['ManagerSummary'];
 /** Categoria do cliente como sai na lista/detalhe (86e34jd8m); `null` = sem categoria. */
 export type ClientCategorySummary = Schemas['ClientCategorySummary'];
@@ -469,6 +475,14 @@ export type MaterializationResult = Schemas['MaterializationResponse'];
  * parcial. Os itens são a leitura da Sprint 13.
  */
 export type MaterializationSummary = Schemas['MaterializationSummaryResponse'];
+/**
+ * S16 (16.4) — completude de partida: Σ|valor| com partida completa ÷ Σ|valor|
+ * com alvo, com os dois números para a conta ser conferível. `pct` nulo = sem
+ * linha com alvo (nunca exibir como 0%). Só no `conta_contabil`.
+ */
+export type PartidaCompleteness = Schemas['PartidaCompletenessResponse'];
+/** S16 — uma categoria com alvo na prévia do `conta_contabil`: conta, histórico e partida. */
+export type AccountingCategoryPreview = Schemas['AccountingCategoryResponse'];
 
 /** Prévia da importação: criadas · alteradas · ignoradas + recusadas com motivo. */
 export type MappingImportPreview = Schemas['ImportPreviewResponse'];
@@ -533,6 +547,47 @@ export type InspectFileBody =
 /** Campos do multipart de `POST …/file-origin/process` (`file`, `competence`, `declaredTotal`). */
 export type ProcessFileBody =
   Schemas['Body_process_file_api_v1_clients__client_id__file_origin_process_post'];
+
+// ---------------------------------------------------------------------------
+// Plano de contas CONTÁBIL do cliente + conta do banco (Sprint 16 — BACK 16.1 · 16.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Uma conta do plano do sistema contábil de DESTINO (não o plano da origem da
+ * S10): código reduzido, classificação, nome decifrado (`nameResolved=false` =
+ * `[indecifrável]`), tipo, situação e `postable` (analítica E ativa — o filtro
+ * de todo seletor de conta).
+ */
+export type AccountingAccount = Schemas['AccountingAccountResponse'];
+/** `analitica` | `sintetica` — enum FECHADO. */
+export type AccountingAccountType = Schemas['AccountingAccountType'];
+/** `{ data, pagination }` — DUAS chaves: o `apiGet` entrega o par inteiro. */
+export type AccountingChartListResponse = Schemas['AccountingChartListResponse'];
+/** Query real de `GET …/accounting-chart` (`page`, `pageSize`, `code`, `type`, `status`). */
+export type ListAccountingChartQuery = NonNullable<
+  paths['/api/v1/clients/{client_id}/accounting-chart']['get']['parameters']['query']
+>;
+/** `ativa` | `inativa` — o `Literal` do filtro de situação. */
+export type AccountingAccountStatusFilter = NonNullable<ListAccountingChartQuery['status']>;
+/** `{ data: {contas, contasNovas, contasInativadas} }` — chave ÚNICA: chega desempacotado. */
+export type AccountingChartImportResult = Schemas['ChartImportPayload'];
+
+/**
+ * Uma conta de ORIGEM (ou o slot da conta PADRÃO, `sourceAccountId: null`) com
+ * a conta contábil do banco associada ou `pending: true`.
+ */
+export type SourceAccountEntry = Schemas['SourceAccountEntryResponse'];
+/** A conta do banco associada: código, nome decifrado e se ainda é lançável. */
+export type SourceBankAccount =
+  Schemas['app__modules__client_source_accounts__schemas__BankAccountResponse'];
+/** `{ data: [...] }` — chave ÚNICA: o `apiGet` já entrega o array. */
+export type SourceAccountListResponse = Schemas['SourceAccountListResponse'];
+/** Body de `PUT …/source-accounts` — define ou troca a conta do banco. */
+export type SourceAccountBindingRequest = Schemas['SourceAccountBindingRequest'];
+/** `{ entry, created }` — `created=false` = a associação foi TROCADA. */
+export type SourceAccountBindingPayload = Schemas['SourceAccountBindingPayload'];
+/** Conta de origem SEM conta do banco (só identificadores) — prévia e 409 do de-para. */
+export type PendingSourceAccount = Schemas['PendingSourceAccountResponse'];
 
 // ---------------------------------------------------------------------------
 // Lançamento no Omie (Sprint 7 / R1 · R2 · R5 — BACK 07.3 · 07.4)

@@ -26,9 +26,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from app.core.exceptions import (
+    AccountingAccountOutsideDestinationError,
+    CatalogTargetInAccountingDestinationError,
     ClientClosedError,
     MappingDecisionDuplicateError,
     MappingDestinationNotConfiguredError,
@@ -37,6 +39,7 @@ from app.core.exceptions import (
     ValidationAppError,
 )
 from app.db.models import (
+    ACCOUNTING_DESTINATION_TYPE,
     INHERITING_DESTINATION_TYPE,
     ClientMappingDecision,
     DecisionOrigin,
@@ -59,6 +62,7 @@ if TYPE_CHECKING:
     from app.core.authz import CurrentUser
     from app.db.models import Client
     from app.db.models.mapping_catalog import MappingDestination
+    from app.modules.client_mapping.accounting import AccountingDecisionSupport
     from app.modules.client_mapping.repository import ClientMappingRepository
     from app.modules.mapping_catalog.repository import MappingCatalogRepository
     from app.modules.mapping_catalog.service import MappingCatalogService
@@ -76,12 +80,28 @@ INHERIT_STATE_NOT_INHERITING = "destino_sem_heranca"
 
 @dataclass(frozen=True, slots=True)
 class DecisionInput:
-    """Uma decisão pedida — já validada na forma pela borda."""
+    """Uma decisão pedida — já validada na forma pela borda.
+
+    `alvo` traz `target_code` (catálogo da organização) OU `accounting_account_id`
+    (plano contábil do cliente, só no destino `conta_contabil` — S16); `history` é o
+    histórico padrão, já normalizado (`normalize_history`), e só acompanha a conta.
+    """
 
     category_code: str
     decision_type: DecisionType
     target_code: str | None
     source_type: str = CHART_SOURCE_TYPE
+    accounting_account_id: UUID | None = None
+    history: str | None = None
+
+    def __repr__(self) -> str:
+        # O histórico é texto do cliente: nunca num repr que acabe em log.
+        return (
+            f"DecisionInput(category_code={self.category_code!r}, "
+            f"decision_type={self.decision_type.value!r}, target_code={self.target_code!r}, "
+            f"accounting_account_id={self.accounting_account_id}, "
+            f"history={'<set>' if self.history else None})"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +148,14 @@ class DecisionView:
     #: decisão vigente diz (R7). A pessoa decide; nada é reescrito.
     divergent: bool = False
     origin_dre_code: str | None = None
+    #: S16 (BACK 16.2), destino `conta_contabil`: a conta do plano do cliente e o
+    #: histórico padrão DECIFRADO na leitura (`None` = sem histórico).
+    accounting_account_id: UUID | None = None
+    history: str | None = None
+    #: S16: decisão de ALVO em `conta_contabil` apontando o CATÁLOGO da organização
+    #: (anterior à 16.2). Segue legível, sem conversão automática, e precisa ser
+    #: REFEITA para o plano do cliente — conta como incompleta na prévia.
+    legacy_catalog_target: bool = False
 
 
 class ClientMappingDecisionService:
@@ -137,10 +165,20 @@ class ClientMappingDecisionService:
         *,
         catalog: MappingCatalogRepository,
         catalog_service: MappingCatalogService,
+        accounting: AccountingDecisionSupport | None = None,
     ) -> None:
         self._repo = repository
         self._catalog = catalog
         self._catalog_service = catalog_service
+        # S16: só o destino `conta_contabil` precisa (plano do cliente + histórico).
+        self._accounting = accounting
+
+    @property
+    def accounting(self) -> AccountingDecisionSupport:
+        """O apoio do destino `conta_contabil` — montado pela rota (plano + cifra)."""
+        if self._accounting is None:  # pragma: no cover - defeito de montagem
+            raise RuntimeError("ClientMappingDecisionService sem AccountingDecisionSupport")
+        return self._accounting
 
     # ------------------------------ destino ---------------------------
 
@@ -199,6 +237,10 @@ class ClientMappingDecisionService:
                 + ".",
             )
 
+        # S16 (BACK 16.2): qual ALVO vale em qual destino é regra do SERVIÇO (o tipo
+        # do destino mora em outra tabela; o banco só garante catálogo XOR plano).
+        accounting = destination.destination_type == ACCOUNTING_DESTINATION_TYPE
+        _check_target_namespace(inputs, accounting=accounting)
         targets = await self._catalog_service.require_targets(
             destination,
             [
@@ -207,11 +249,23 @@ class ClientMappingDecisionService:
                 if i.decision_type is DecisionType.ALVO and i.target_code
             ],
         )
+        account_ids = [i.accounting_account_id for i in inputs if i.accounting_account_id]
+        if account_ids:
+            # O validador ÚNICO da 16.1: outro cliente 404, sintética/inativa 422.
+            await self.accounting.require_accounts(client, account_ids)
         existing = await self._repo.list_decisions(
             client.id, destination.id, category_codes=[i.category_code for i in inputs]
         )
         by_key = _group_by_key(existing)
         target_codes = await self._repo.target_codes(d.target_id for d in existing if d.target_id)
+        # "Mesmo efeito" em `conta_contabil` inclui o TEXTO do histórico: decifrado
+        # só para comparar, nunca logado.
+        histories = (
+            (await self.accounting.decrypt_histories(client, existing)).texts if accounting else {}
+        )
+        cipher = (
+            await self.accounting.write_cipher(client) if any(i.history for i in inputs) else None
+        )
 
         to_insert: list[ClientMappingDecision] = []
         to_resolve: list[tuple[ClientMappingDecision, DecisionInput]] = []
@@ -222,7 +276,7 @@ class ClientMappingDecisionService:
             at_start = next((d for d in key_rows if d.effective_from == start), None)
             if at_start is not None:
                 if at_start.origin == DecisionOrigin.CONFIRMADA.value:
-                    if _same_effect(at_start, item, target_codes):
+                    if _same_effect(at_start, item, target_codes, histories):
                         unchanged += 1
                     else:
                         duplicates.append(item.category_code)
@@ -233,26 +287,32 @@ class ClientMappingDecisionService:
             if (
                 vigente is not None
                 and vigente.origin == DecisionOrigin.CONFIRMADA.value
-                and _same_effect(vigente, item, target_codes)
+                and _same_effect(vigente, item, target_codes, histories)
                 and next_start_after(key_rows, start) is None
             ):
                 unchanged += 1
                 continue
-            to_insert.append(
-                ClientMappingDecision(
-                    client_id=client.id,
-                    source_type=item.source_type,
-                    category_code=item.category_code,
-                    destination_id=destination.id,
-                    decision_type=item.decision_type.value,
-                    target_id=targets[item.target_code].id
-                    if item.decision_type is DecisionType.ALVO and item.target_code
-                    else None,
-                    origin=DecisionOrigin.CONFIRMADA.value,
-                    effective_from=start,
-                    author_id=UUID(author.id),
-                )
+            # A pk nasce AQUI: o histórico é cifrado com ela no AAD, antes do INSERT.
+            decision = ClientMappingDecision(
+                id=uuid4(),
+                client_id=client.id,
+                source_type=item.source_type,
+                category_code=item.category_code,
+                destination_id=destination.id,
+                decision_type=item.decision_type.value,
+                target_id=targets[item.target_code].id
+                if item.decision_type is DecisionType.ALVO and item.target_code
+                else None,
+                accounting_account_id=item.accounting_account_id,
+                origin=DecisionOrigin.CONFIRMADA.value,
+                effective_from=start,
+                author_id=UUID(author.id),
             )
+            if item.history is not None and cipher is not None:
+                envelope, iv = self.accounting.encrypt_history(cipher, decision.id, item.history)
+                decision.history_encrypted = envelope
+                decision.history_iv = iv
+            to_insert.append(decision)
 
         if duplicates:
             raise _duplicate_error(start, duplicates)
@@ -442,8 +502,21 @@ class ClientMappingDecisionService:
             if destination.destination_type == INHERITING_DESTINATION_TYPE
             else {}
         )
+        accounting = destination.destination_type == ACCOUNTING_DESTINATION_TYPE
+        histories = (
+            (await self.accounting.decrypt_histories(client, vigentes.values())).texts
+            if accounting
+            else {}
+        )
         return {
-            key: _view(decision, codes, dre_codes=dre_codes, inheriting=bool(dre_codes))
+            key: _view(
+                decision,
+                codes,
+                dre_codes=dre_codes,
+                inheriting=bool(dre_codes),
+                accounting=accounting,
+                histories=histories,
+            )
             for key, decision in vigentes.items()
         }
 
@@ -460,7 +533,21 @@ class ClientMappingDecisionService:
             if d.source_type == source_type
         ]
         codes = await self._repo.target_codes(d.target_id for d in decisions if d.target_id)
-        return [_view(d, codes, dre_codes={}, inheriting=False) for d in decisions]
+        accounting = destination.destination_type == ACCOUNTING_DESTINATION_TYPE
+        histories = (
+            (await self.accounting.decrypt_histories(client, decisions)).texts if accounting else {}
+        )
+        return [
+            _view(
+                d,
+                codes,
+                dre_codes={},
+                inheriting=False,
+                accounting=accounting,
+                histories=histories,
+            )
+            for d in decisions
+        ]
 
     # ------------------------------ internals -------------------------
 
@@ -540,13 +627,45 @@ def _group_by_key(
     return grouped
 
 
+def _check_target_namespace(inputs: Sequence[DecisionInput], *, accounting: bool) -> None:
+    """Qual alvo vale em qual destino (S16, BACK 16.2) — regra do SERVIÇO (ADR-087-BE).
+
+    No `conta_contabil`, alvo é conta do plano do CLIENTE: código de catálogo → 422
+    `ALVO_EXIGE_PLANO_CONTABIL`. Nos outros destinos, conta do plano → 422
+    `CONTA_CONTABIL_FORA_DO_DESTINO`. Roda ANTES da consulta ao catálogo, para o
+    catálogo no destino errado não virar um `ALVO_INEXISTENTE` que não orienta.
+    """
+    for item in inputs:
+        if accounting and item.decision_type is DecisionType.ALVO and item.target_code:
+            raise CatalogTargetInAccountingDestinationError(
+                f"alvo de catálogo em conta_contabil (categoria {item.category_code})"
+            )
+        if not accounting and item.accounting_account_id is not None:
+            raise AccountingAccountOutsideDestinationError(
+                f"conta do plano fora de conta_contabil (categoria {item.category_code})"
+            )
+
+
 def _same_effect(
-    decision: ClientMappingDecision, item: DecisionInput, target_codes: dict[UUID, str]
+    decision: ClientMappingDecision,
+    item: DecisionInput,
+    target_codes: dict[UUID, str],
+    histories: dict[UUID, str] | None = None,
 ) -> bool:
+    """A decisão existente diz o MESMO que o pedido? (No-op em vez de vigência nova.)
+
+    Em `conta_contabil` o efeito é conta + TEXTO do histórico: trocar só o histórico
+    é vigência nova (R4), nunca `UPDATE`.
+    """
     if decision.decision_type != item.decision_type.value:
         return False
     if item.decision_type is DecisionType.NAO_MAPEAR:
         return True
+    if item.accounting_account_id is not None:
+        return (
+            decision.accounting_account_id == item.accounting_account_id
+            and (histories or {}).get(decision.id) == item.history
+        )
     return (
         decision.target_id is not None and target_codes.get(decision.target_id) == item.target_code
     )
@@ -558,6 +677,8 @@ def _view(
     *,
     dre_codes: dict[str, str | None],
     inheriting: bool,
+    accounting: bool = False,
+    histories: dict[UUID, str] | None = None,
 ) -> DecisionView:
     target_code = codes.get(decision.target_id) if decision.target_id else None
     origin_dre: str | None = None
@@ -575,4 +696,19 @@ def _view(
         created_at=decision.created_at,
         divergent=divergent,
         origin_dre_code=origin_dre,
+        accounting_account_id=decision.accounting_account_id,
+        history=(histories or {}).get(decision.id),
+        legacy_catalog_target=is_legacy_catalog_target(decision, accounting=accounting),
+    )
+
+
+def is_legacy_catalog_target(decision: ClientMappingDecision, *, accounting: bool) -> bool:
+    """Decisão de ALVO em `conta_contabil` apontando o catálogo (anterior à S16).
+
+    UM lugar decide: a leitura marca (`requiresRedo`), a prévia conta como incompleta.
+    """
+    return (
+        accounting
+        and decision.decision_type == DecisionType.ALVO.value
+        and decision.target_id is not None
     )

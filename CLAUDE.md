@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 **S0–S19 + Sprints 0–5 do agents-hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **104/104** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **108/108** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
 > **O que cada sprint do agents-hub entregou** (todas na `main`):
 >
@@ -192,7 +192,7 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**104** hoje — o arquivo é a fonte, confira com
+      (**108** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant E cross-org**: a bateria
       (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
@@ -200,7 +200,7 @@
       organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
-      (`PENDING_ENDPOINTS` está vazio: cobertura **104/104**). As 3 rotas do
+      (`PENDING_ENDPOINTS` está vazio: cobertura **108/108**). As 3 rotas do
       **plano de contas** (S10) e as 3 da **carteira de títulos** (S11 — lista,
       agregados e sincronizar) e as 3 da S15 (relatório de recebíveis, leitura e
       registro do contexto do título) entraram como coleção; as 20 da S12 também:
@@ -212,7 +212,11 @@
       plataforma (`POST /users/{id}/password`, 86e3ewukz). As 5 da S14 (origem
       por arquivo) também são coleção: leitura e escrita do mapeamento de entrada
       (`GET`/`PUT /clients/{id}/input-mapping`) e as três do envio
-      (`POST /clients/{id}/file-origin/inspect` e `/process`, `GET …/imports`). Só
+      (`POST /clients/{id}/file-origin/inspect` e `/process`, `GET …/imports`). As 4
+      da S16 também: leitura e importação do plano contábil do cliente
+      (`GET /clients/{id}/accounting-chart`, `POST …/accounting-chart/import`) e
+      leitura e escrita da conta do banco por conta de origem
+      (`GET`/`PUT /clients/{id}/source-accounts`). Só
       auth, tipos de anomalia, `test-connection`, `alert-test` e as 5 rotas de
       `/organizations` (plataforma, sem dado de cliente) ficam fora, com motivo.
       Essa lista é o denominador da métrica de isolamento — endpoint fora dela é
@@ -283,7 +287,7 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    `[indecifrável]` + métrica `decrypt_failed` (não célula silenciosamente
    vazia sem sinal).
    **A fonte ÚNICA da lista são as constantes de AAD declaradas em
-   [apps/api/app/core/crypto_service.py](apps/api/app/core/crypto_service.py)** (15
+   [apps/api/app/core/crypto_service.py](apps/api/app/core/crypto_service.py)** (17
    hoje) — campo cifrado novo entra lá E aqui, na mesma entrega. Os pares
    (tabela, coluna) do AAD são **congelados**: renomear um invalida a decifragem de
    tudo que já foi gravado com ele. Campos:
@@ -312,6 +316,14 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
      lançamento vindo do ARQUIVO, na base de movimentos. A linha vinda do Omie
      continua sem texto livre (a base da S12 é só códigos); só a origem por
      arquivo traz descrição, e ela nasce cifrada com a DEK do cliente.
+   - `client_accounting_accounts.name_encrypted` (Sprint 16) — o nome da conta do
+     plano contábil do cliente (o plano do sistema contábil de DESTINO): conta
+     com nome de inquilino, sócio ou fornecedor é dado do cliente final (§4.5). O
+     código reduzido, que é o que vai no arquivo, fica em claro.
+   - `client_mapping_decisions.history_encrypted` (Sprint 16) — o histórico
+     padrão da decisão no destino `conta_contabil`, texto livre escrito pelo
+     escritório. O AAD usa a pk da DECISÃO (append-only): trocar o histórico é
+     uma vigência nova, nunca UPDATE sobre o texto cifrado.
 2. **IV novo a cada operação** (12 bytes aleatórios). Nunca reutilize.
 3. **Valores monetários em claro** (campos `amount`, `balance`) — são números sem identificação, sem valor isolado.
 4. **Datas em claro** (`transaction_date`, `reference_month`) — necessárias para SQL ordering/filtering.
@@ -430,7 +442,7 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
 9. **Matriz de permissões (Sprint 5 + camada de organizações):** declarativa e
    ÚNICA em `PERMISSION_MATRIX`
    ([apps/api/app/core/authz.py](apps/api/app/core/authz.py)), consultada por
-   `has_permission`; 26 permissões x 5 papéis, transcrita célula a célula em
+   `has_permission`; 27 permissões x 5 papéis, transcrita célula a célula em
    `tests/unit/test_authz_matrix.py`, com um teste que trava **a plataforma em
    toda linha**. No front, o espelho é `apps/web/src/lib/authz.ts` — **um**
    helper, nunca `if (role === ...)` espalhado por componente — com a mesma
@@ -469,6 +481,7 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    | Redefinir senha de usuário      | ✅             | ❌               | ❌                    | ❌             | ❌              |
    | Enviar arquivo do cliente (S14) | ✅             | ✅               | ✅ (carteira)         | ✅             | ✅              |
    | Configurar mapeamento (S14)     | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
+   | Plano contábil do cliente (S16) | ✅             | ✅               | ✅ (carteira)         | ❌             | ❌              |
 
    **`manage_client_connections` (Sprint 9) inclui o `manager` de propósito**: ele
    cria cliente, e sem a célula o gerente do escritório parceiro cadastraria a
@@ -530,6 +543,17 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    O par de teste é o mesmo desenho da S10: o operador envia 200 e configura 403
    (com linha `denied` em `access_audit`).
 
+   **`manage_client_accounting_chart` (Sprint 16) é do STAFF** (`_STAFF`: plataforma,
+   admin e gerente na carteira): importar o plano contábil do cliente e associar a
+   conta contábil de cada conta de origem (o lado do banco na partida) é configuração
+   do ESCRITÓRIO no sistema contábil de destino, como as conexões de origem da S9. Os
+   dois papéis de cliente ficam de fora, e o `client_manager` também, ao contrário do
+   de-para: quem escolhe a conta e o histórico de cada categoria continua sendo
+   `manage_client_mapping`, que inclui o `client_manager`. A LEITURA do plano e da
+   associação é `AccessibleClientDep`. O par de teste é o da S10: `client_manager` LÊ
+   200 e importa ou associa 403, com linha `denied`. A exclusão do `client_manager` é
+   decisão do planejador pendente de validação humana.
+
    "(carteira)" e "(própria org)" **não** são células: são `resolve_client_access`
    e os filtros de coleção. **Tipos de anomalia é a única linha só-plataforma
    além de "Gerir organizações"**: a taxonomia é uma tabela GLOBAL do produto, e
@@ -589,7 +613,15 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
       rótulo cifrado já morreu com a DEK, como o glossário) e o **registro das
       importações** (os movimentos que elas geraram já saem com a base) —
       mapeamento e importações têm autoria RESTRICT para `users`, então a exclusão
-      definitiva os apaga ANTES dos usuários do tenant;
+      definitiva os apaga ANTES dos usuários do tenant; da Sprint 16 saem a
+      **associação da conta do banco** (`client_source_account_bindings`) e depois o
+      **plano contábil do cliente** (`client_accounting_accounts`), nessa ordem
+      (a associação aponta para o plano), depois das decisões do de-para e antes dos
+      usuários (autoria RESTRICT), no purge e na exclusão definitiva. Nas
+      materializações retidas, o **histórico** de cada item é lido pela vigência que o
+      decidiu: com as decisões purgadas e a DEK destruída, ele passa a ler vazio (ou
+      `[indecifrável]`), nunca 500, e o código da conta e o do banco, que estão em
+      claro no snapshot, continuam;
       conciliações, valores, datas,
       categoria e carteira FICAM, só-leitura.
     - **Encerrado é TERMINAL**: cliente que volta é cadastro novo. Toda escrita
@@ -728,7 +760,11 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   pelo QA, nenhum por teste sequencial):
   - validar a FORMA não basta: o padrão tem de recusar o que o construtor não aceita
     (`COMPETENCE_PATTERN` aceitava `0000` e `date(0, …)` estourava). Teste de ida e volta
-    `format(parse(x)) == x` para tudo que o padrão aceita;
+    `format(parse(x)) == x` para tudo que o padrão aceita. E o limite do schema é o da
+    COLUNA de destino: `pattern` reusado de outro campo traz o tamanho do outro campo (S16:
+    `DESTINATION_TYPE_PATTERN` aceita 60, `source_type` é `String(30)` → 500). Todo `str`
+    que vai para coluna `String(n)` leva `max_length=<constante da coluna>`, com teste que
+    amarra os dois;
   - props de métrica montadas DEPOIS de um commit de negócio ficam dentro do fail-soft
     (`UsageEventService._props_or_none`): a métrica nunca derruba a escrita já gravada;
   - arquivo de terceiro (planilha, zip, XML): QUALQUER falha de abertura OU de iteração
@@ -770,6 +806,11 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   sempre `react-hook-form + zod`.** Tabela acima de 100 linhas é virtualizada.
 - **A UI não é barreira de segurança** (§4.9) — mas mostrar ação que o servidor nega é
   defeito: cada ❌ da matriz precisa de bloqueio no backend **e** de ação oculta na tela.
+  **Aviso de OUTRA tela que aponta para a ação passa pelo mesmo gate** (S16, ADR-053-FE):
+  texto com verbo de ação ("Importe", "Associe") e o botão só para quem tem a permissão;
+  os demais leem um texto informativo. Quem orienta recebe a permissão e o encerramento
+  SEPARADOS, porque o motivo muda o texto. Chave React sobre lista crua do backend leva a
+  posição.
 - **Gate de a11y verde NÃO prova layout.** O axe mede semântica e contraste, não
   transbordo: toda task de UI termina com o screenshot desktop e 390px aberto e conferido.
 - **Dois padrões de altura para tabela, e a tela escolhe um** (86e3eq9uy): `<Table fill>`
@@ -868,6 +909,7 @@ ClickUp**, não no repo. `make sprints` lista o estado.
 | **12** | De-para multi-destino                      | `client_movements`/`client_movement_syncs`, `mapping_destinations`/`mapping_targets`, `client_mapping_decisions`, `client_mapping_materializations(_items)`, aba "De-para"            |
 | **14** | Origem por arquivo (cliente sem ERP)       | provedor `arquivo` (`file_adapter.py`), `client_input_mappings`, `client_file_categories`, `client_file_imports`, `client_movements.description_encrypted`, rota "Origem por arquivo" |
 | **15** | Contexto do título: acordo × inadimplência | `title_contexts`, rotas `/titles/{id}/context` e `/titles/receivables-report`, aba "Relatório de recebíveis"                                                                          |
+| **16** | Plano contábil do cliente e partida        | `client_accounting_accounts`, `client_source_account_bindings`, `history_encrypted`, snapshot com conta, banco e vigência, tela "Plano contábil"                                      |
 
 **A Sprint 12 (de-para multi-destino)** criou a peça central da plataforma: a decisão
 `(cliente, tipo de origem, categoria, destino) → alvo`, em que a MESMA categoria vai para
@@ -929,6 +971,48 @@ o que faltava: suíte completa contra Postgres, gate de a11y nos três temas, co
 ciclo das migrations e o cenário de ponta a ponta pela API e pela tela, e o produto
 passou (3402 verdes contra Postgres, 448 por tema no a11y, 73 verificações de API). O que
 ela corrigiu foi o primer, apagado pelo commit do QA como na S15.
+
+**A Sprint 16 (plano contábil do cliente e partida completa)** prepara a Sprint 13: ela
+deixa na materialização do de-para TUDO o que uma linha do arquivo contábil precisa (data,
+conta de débito, conta de crédito, valor e histórico), provado contra uma amostra REAL
+anonimizada de um escritório parceiro (`apps/api/tests/fixtures/accounting_sample/`: 32
+movimentos, o CSV que o sistema contábil importa, Latin-1 + CRLF travado como `-text`). O
+que vale como lei:
+
+- **o plano contábil do cliente (`client_accounting_accounts`) NÃO é o plano da origem**
+  (`client_chart_of_accounts`, S10): é o plano do sistema contábil de DESTINO, por cliente,
+  importado por planilha no modelo da plataforma (`codigo_reduzido;nome;tipo[;classificacao]`),
+  tudo ou nada; reimportar casa por código e a conta que some vira inativa, nunca apagada;
+  nome cifrado, código reduzido em claro;
+- **no destino `conta_contabil`, e só nele, o alvo é conta ANALÍTICA e ATIVA do plano do
+  próprio cliente** (`accounting_account_id`, validador único `require_postable_account`:
+  outro cliente 404, sintética ou inativa 422); o catálogo da organização é recusado nesse
+  destino (os códigos de cada cliente colidem entre si) e a decisão legada fica legível,
+  marcada para refazer; a decisão carrega o **histórico padrão** cifrado, e trocar conta ou
+  histórico é vigência nova;
+- **a partida sai do SINAL**, nunca do texto (`partida.derive_partida`): entrada debita o
+  banco e credita a conta decidida, saída o contrário; o lado do banco vem da associação
+  conta de origem → conta contábil (`client_source_account_bindings`, com a conta PADRÃO
+  para arquivo sem coluna de conta); linha com alvo sem banco resolvível bloqueia a
+  materialização com 409 `CONTA_DO_BANCO_PENDENTE`;
+- **o snapshot da materialização guarda o código da conta, o do banco e a vigência**
+  (`decision_id`): o histórico é lido pela vigência, nunca pela atual, então reimportar o
+  plano, trocar o histórico ou trocar o banco não muda o que já foi materializado;
+- a métrica é a **completude de partida** (Σ|valor| com débito, crédito e histórico ÷
+  Σ|valor| com alvo), por consulta ao snapshot; `plano_contabil_importado` leva só
+  contagens. Nenhum arquivo contábil é gerado: isso é da Sprint 13.
+
+Números deste primer: endpoints sensíveis 104 → **108**, matriz 26 → **27**, pares de AAD
+15 → **17**. O QA reprovou 3 das 7 tasks na rodada 1 (um 500 por `sourceType` maior que a
+coluna e avisos de outra tela oferecendo ação a quem não pode) e aprovou na rodada 2 SEM
+Docker. A validação humana (86e3fw419, 28/09/2026) rodou o resto: suíte completa contra
+Postgres (3622 testes; as 5 falhas eram de TESTE nunca executado, corrigidas), ciclo das 3
+migrations, contrato com diff 0, gate de a11y nos três temas (514 cenários por tema), o cenário pela API (50
+verificações; a única vermelha era a corrida descrita abaixo) e pela tela, e restaurou o primer, apagado pelo commit do QA pela terceira
+vez. Ela também mediu um defeito ANTERIOR à sprint e de toda a API: a resposta sai antes do
+commit da `get_db_session` (em 14 de 15 criações o `201` chegou antes do dado), o que fez a
+tela ler estado velho e, uma vez, deixou uma escrita passar pela trava de cliente encerrado
+logo depois do `204` do encerramento.
 
 ✅ **A Sprint 15 (contexto do título) foi validada em 24/09/2026 à noite** (PR #203
 da sprint, correções da validação em `fix/S15-validation-findings`). Ela pendura no
@@ -1108,6 +1192,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.57 — 28/09/2026. **A Sprint 16 (plano contábil do cliente e partida completa) entrou no primer, e o primer foi restaurado pela TERCEIRA vez.** O commit do QA levou o `CLAUDE.md` do worktree (o prompt do papel QA, 10.755 bytes) por cima do primer (162.607 bytes na develop), como nas S14 e S15; e a edição do `PROJECT.md` foi negada na sessão dele, com o texto deixado no `HANDOFF.md`. A validação humana (86e3fw419) restaurou da `develop` e aplicou à mão, com cada número conferido por comando no HEAD da branch: nota do topo e §3.15 com a lista canônica em **108** (as 4 rotas do plano contábil e da conta do banco), §4.1 com os pares de AAD em **17** (`client_accounting_accounts.name_encrypted`, `client_mapping_decisions.history_encrypted`), §4.9 com a matriz em **27** (`manage_client_accounting_chart`, do staff, e por que o `client_manager` fica de fora ao contrário do de-para), §4.12 com o purge da associação e do plano e a leitura do histórico de materialização retida (vazio ou `[indecifrável]`, nunca 500), dois reforços de regra que o QA pediu (§7 Backend: o limite do schema é o da COLUNA de destino, `max_length` com teste que amarra os dois; §7 Frontend: aviso de outra tela que aponta para a ação passa pelo mesmo gate), e a linha e o parágrafo da S16 na §8. O resto da validação rodou fora do sandbox: pytest completo contra Postgres em Python 3.12, como o CI (3622 passed, 0 failed), ciclo das 3 migrations, contrato com diff 0, vitest 962, a11y 514 por tema nos três temas, 50 verificações pela API e 9 prints pela tela. As 5 falhas da primeira rodada da suíte eram de TESTE nunca executado (fixture sem a conta do banco que a 16.3 passou a exigir; releitura de coluna que não repovoa a entidade da sessão compartilhada), com o produto provado certo pela API real. **Achado que fica, anterior à sprint e de toda a API:** a resposta sai antes do `commit()` da `get_db_session`, medido (14 de 15 criações com o `201` antes do dado, leitura velha na tela depois de salvar, e uma escrita que passou pela trava de cliente encerrado 76 ms depois do `204`); a correção muda a política de transação da API inteira e é decisão do Pedro._
 
 _Versão 1.56 — 28/09/2026. **A Sprint 14 (origem por arquivo) entrou no primer, e o primer foi restaurado no PR dela.** O commit do QA (`fe7c4bc`) levou o `CLAUDE.md` do worktree, que é o prompt do papel QA, por cima do primer (+80/−1110 no PR #231), a mesma falha da Sprint 15; e as edições que o QA disse ter feito no `PROJECT.md` nunca existiram (a sessão dele teve a edição negada, o texto ficou no `HANDOFF.md`). A validação humana (86e3fcp76) restaurou o primer da `develop` e aplicou à mão: §3.15 com a lista canônica em **104** (as 5 rotas do mapeamento de entrada e do envio), §4.1 com os pares de AAD em **15** (`client_file_categories.label_encrypted`, `client_movements.description_encrypted`), §4.8 com a origem `arquivo` (adaptador vazio, sem credencial, só `listar_lancamentos`, DEK provisionada na criação da conexão) e a regra "um cliente, um tipo de origem de lançamentos" (409 `ORIGEM_JA_CONECTADA`; só-arquivo nos consumidores do Omie é 409 `CAPACIDADE_AUSENTE` antes de gravar), §4.9 com a matriz em **26** (`upload_client_file` para os 5 papéis, `manage_input_mapping` sem o `client_operator`, e por que são próprias), §4.12 com o purge do mapeamento, das categorias do arquivo e das importações, três regras na §7 Backend (UPDATE em lote com WHERE extra é Core; dinheiro de arquivo de terceiro no formato estrito do separador; log se afirma com `capture_logs`), e a linha e o parágrafo da S14 na §8. Todo número foi conferido por comando no HEAD da branch. O resto da validação rodou fora do sandbox e passou: pytest completo com `--cov` contra Postgres (3402 passed, os 3 ambientais de alerting, 87%), a11y nos três temas (448 cada, depois de repetir o Hologram sozinho: na primeira rodada, com a máquina em load 30, 6 cenários ANTIGOS estouraram `newPage`), contrato com diff 0, ciclo das 3 migrations num banco limpo, e o cenário de ponta a ponta pela API (73 verificações) e pela tela. **Regra que fica:** rodada de a11y e suíte do backend ao mesmo tempo, na mesma máquina, produz falha de timeout que parece regressão; confira a carga antes de ler o vermelho, e repita sozinho antes de concluir qualquer coisa._
 

@@ -55,6 +55,16 @@ AAD_FILE_CATEGORY_LABEL = ("client_file_categories", "label_encrypted")
 # movimentos, no molde de `reconciliation_file_entries.description_encrypted`:
 # texto do cliente final. A linha vinda do Omie continua sem texto livre. 15º par.
 AAD_MOVEMENT_DESCRIPTION = ("client_movements", "description_encrypted")
+# Sprint 16 (BACK 16.1) — o NOME da conta do plano contábil do cliente (o sistema
+# contábil de DESTINO), no molde de `client_glossary_entries.name_encrypted`: nome
+# de conta carrega inquilino, pessoa física e fornecedor (§4.5). O código reduzido
+# fica em claro — é o que vai no arquivo. 16º par.
+AAD_ACCOUNTING_ACCOUNT_NAME = ("client_accounting_accounts", "name_encrypted")
+# Sprint 16 (BACK 16.2) — o HISTÓRICO PADRÃO da decisão do de-para no destino
+# `conta_contabil` (o texto que vai na linha do arquivo contábil), no molde de
+# `title_contexts.text_encrypted`: texto livre do escritório que carrega inquilino,
+# NF e conta bancária do cliente (§4.5). AAD pela pk da DECISÃO (a vigência). 17º par.
+AAD_DECISION_HISTORY = ("client_mapping_decisions", "history_encrypted")
 
 
 def field_locator(pair: tuple[str, str], pk: str | UUID) -> FieldLocator:

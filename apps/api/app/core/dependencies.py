@@ -357,3 +357,10 @@ UploadClientFileDep = Annotated[
 ManageInputMappingDep = Annotated[
     CurrentUser, Depends(require_client_permission(Permission.MANAGE_INPUT_MAPPING))
 ]
+# --- Sprint 16 (BACK 16.1): plano de contas contábil do cliente --------------
+# Guard AUDITADO: o `client_manager` alcança o cliente mas não importa o plano —
+# a negação vira 1 linha `denied` em `access_audit` (par de teste da S10: lê 200,
+# importa 403).
+ManageClientAccountingChartDep = Annotated[
+    CurrentUser, Depends(require_client_permission(Permission.MANAGE_CLIENT_ACCOUNTING_CHART))
+]

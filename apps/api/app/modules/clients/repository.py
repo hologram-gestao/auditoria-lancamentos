@@ -41,6 +41,7 @@ from app.db.models import (
     UQ_CLIENT_ASSIGNMENT_CLIENT_USER,
     UQ_USER_CLIENT_FAVORITE,
     Client,
+    ClientAccountingAccount,
     ClientAssignment,
     ClientCategory,
     ClientChartOfAccount,
@@ -53,6 +54,7 @@ from app.db.models import (
     ClientMappingMaterialization,
     ClientMovement,
     ClientMovementSync,
+    ClientSourceAccountBinding,
     ClientTitle,
     ConnectionStatus,
     Notification,
@@ -555,6 +557,19 @@ class ClientRepository:
         # S14 (BACK 14.3): o registro dos arquivos processados também tem `created_by`
         # RESTRICT (o operador do tenant envia o arquivo) — sai antes dos usuários.
         await s.execute(delete(ClientFileImport).where(ClientFileImport.client_id == client.id))
+        # S16 (BACK 16.3): a conta do banco de cada conta de origem — aponta para o
+        # plano (FK) e tem autoria RESTRICT: sai ANTES do plano e dos usuários.
+        await s.execute(
+            delete(ClientSourceAccountBinding).where(
+                ClientSourceAccountBinding.client_id == client.id
+            )
+        )
+        # S16 (BACK 16.1): o plano contábil tem `created_by`/`updated_by` RESTRICT para
+        # `users` — quem importou pode ser usuário do tenant. Sai antes dos usuários, e
+        # DEPOIS das decisões do de-para (acima), que apontam para as contas (16.2).
+        await s.execute(
+            delete(ClientAccountingAccount).where(ClientAccountingAccount.client_id == client.id)
+        )
         await s.execute(
             delete(User).where(User.client_id == client.id, User.scope == UserScope.CLIENT.value)
         )
@@ -619,6 +634,10 @@ class ClientRepository:
         não envia mais arquivo. A exclusão definitiva o leva por CASCADE. As
         **categorias de origem do arquivo** (S14, BACK 14.4) saem junto: o rótulo
         cifrado já morreu com a DEK (como o glossário) e o código é configuração.
+
+        O **plano de contas contábil** (S16, BACK 16.1) sai pelo precedente do
+        glossário: o nome é cifrado (morreu com a DEK), mas o código reduzido em
+        claro sobreviveria a ela — e é configuração de quem não lança mais.
         """
         s = self._session
         await s.execute(
@@ -644,6 +663,19 @@ class ClientRepository:
         # de um cliente que não envia mais arquivo; os movimentos que ele gerou já
         # saem com a base (acima). Antes do mapeamento? Não importa: a FK é SET NULL.
         await s.execute(delete(ClientFileImport).where(ClientFileImport.client_id == client_id))
+        # S16 (BACK 16.1): o plano de contas CONTÁBIL do cliente, EXPLICITAMENTE, como o
+        # glossário: o nome é cifrado e já morreu com a DEK, mas o código reduzido fica
+        # em claro e sobreviveria — e é configuração de um cliente que não lança mais.
+        # Depois das decisões do de-para (acima), que apontam para as contas (16.2), e da
+        # conta do banco das contas de origem (16.3, configuração que aponta o plano).
+        await s.execute(
+            delete(ClientSourceAccountBinding).where(
+                ClientSourceAccountBinding.client_id == client_id
+            )
+        )
+        await s.execute(
+            delete(ClientAccountingAccount).where(ClientAccountingAccount.client_id == client_id)
+        )
         await s.execute(delete(OmieAccountCache).where(OmieAccountCache.client_id == client_id))
         await s.execute(delete(Notification).where(Notification.client_id == client_id))
         await s.execute(delete(UserClientFavorite).where(UserClientFavorite.client_id == client_id))

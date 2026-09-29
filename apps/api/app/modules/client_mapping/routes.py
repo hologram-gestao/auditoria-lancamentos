@@ -49,6 +49,7 @@ from app.integrations.omie.categorias_cache import OmieCategoriasCache
 from app.modules.client_chart_of_accounts.repository import ClientChartOfAccountsRepository
 from app.modules.client_chart_of_accounts.service import ChartOfAccountsSyncService
 from app.modules.client_file_categories.registry import FileCategoryRegistry
+from app.modules.client_mapping.accounting import AccountingDecisionSupport
 from app.modules.client_mapping.listing import ClientMappingListService, NamedRow
 from app.modules.client_mapping.materialization import ClientMappingApplyService
 from app.modules.client_mapping.portability import (
@@ -117,12 +118,14 @@ DestinationTypePath = Annotated[
 ]
 
 
-def _get_decision_service(db: DbSessionDep) -> ClientMappingDecisionService:
+def _get_decision_service(db: DbSessionDep, settings: SettingsDep) -> ClientMappingDecisionService:
     catalog = MappingCatalogRepository(db)
     return ClientMappingDecisionService(
         ClientMappingRepository(db),
         catalog=catalog,
         catalog_service=MappingCatalogService(catalog),
+        # S16 (BACK 16.2): o destino `conta_contabil` — plano do cliente + histórico.
+        accounting=AccountingDecisionSupport(db, settings=settings),
     )
 
 
@@ -176,6 +179,8 @@ def _to_input(item: DecisionItemRequest) -> DecisionInput:
         decision_type=DecisionType(item.decision),
         target_code=item.target_code,
         source_type=item.source_type,
+        accounting_account_id=item.accounting_account_id,
+        history=item.history,
     )
 
 
@@ -190,7 +195,14 @@ def _to_input(item: DecisionItemRequest) -> DecisionInput:
         "existente na mesma vigência: 409 `DECISAO_DUPLICADA`. Início retroativo: 409 "
         "`COMPETENCIA_MATERIALIZADA` se atingir competência materializada; senão 409 "
         "`RETROATIVA_REQUER_CONFIRMACAO` até `confirmRetroactive=true`. Requer "
-        "`manage_client_mapping`; cliente encerrado: 409."
+        "`manage_client_mapping`; cliente encerrado: 409. No destino `conta_contabil` "
+        "(S16) o alvo é uma conta ANALÍTICA e ATIVA do plano contábil do próprio "
+        "cliente (`accountingAccountId`, nunca `targetCode`: 422 "
+        "`ALVO_EXIGE_PLANO_CONTABIL`), com `history` opcional (histórico padrão, até 500 "
+        "caracteres, cifrado; acima do limite 400). Conta de outro cliente 404; "
+        "sintética ou inativa 422 `CONTA_CONTABIL_NAO_LANCAVEL`; conta do plano em "
+        "outro destino 422 `CONTA_CONTABIL_FORA_DO_DESTINO`. Trocar a conta ou só o "
+        "histórico é vigência NOVA."
     ),
 )
 async def write_decision(
@@ -406,6 +418,11 @@ def _list_item(named: NamedRow) -> MappingListItem:
         effective_from=format_competence(row.effective_from) if row.effective_from else None,
         divergent=row.divergent,
         origin_dre_code=row.origin_dre_code,
+        accounting_account_id=row.accounting_account_id,
+        accounting_account_code=named.account.code if named.account else None,
+        accounting_account_name=named.account.name if named.account else None,
+        history=row.history,
+        requires_redo=row.requires_redo,
     )
 
 
@@ -474,7 +491,9 @@ ApplyServiceDep = Annotated[ClientMappingApplyService, Depends(_get_apply_servic
         "`BASE_NAO_SINCRONIZADA`; sem movimento 409 `SEM_MOVIMENTOS`; destino não "
         "configurado 409 `DESTINO_NAO_CONFIGURADO`; anterior à primeira vigência 409 "
         "`ANTERIOR_A_PRIMEIRA_VIGENCIA` (`details.earliestCompetence`). Leitura de "
-        "quem alcança o cliente."
+        "quem alcança o cliente. No destino `conta_contabil` (S16) traz ainda, por "
+        "categoria com alvo, a conta do plano do cliente, o histórico padrão, a partida "
+        "completa e as contas de origem sem conta do BANCO (`pendingSourceAccounts`)."
     ),
 )
 async def preview_client_mapping(
@@ -496,7 +515,10 @@ async def preview_client_mapping(
         "versão, quando, quem (autor enxuto e mascarado por escopo), se foi confirmada "
         "com cobertura parcial, os totais por situação e a cobertura — a mesma conta da "
         "prévia. `competence` (`YYYY-MM`) recorta uma competência; ausente, todas. Só o "
-        "cabeçalho da versão, nunca os itens. Leitura de quem alcança o cliente."
+        "cabeçalho da versão, nunca os itens. Leitura de quem alcança o cliente. No "
+        "destino `conta_contabil` (S16) cada versão traz `partidaCompleteness` (Σ|valor| "
+        "com partida completa ÷ Σ|valor| com alvo, sobre o snapshot imutável); `null` "
+        "nos outros."
     ),
 )
 async def list_client_mapping_materializations(
@@ -513,9 +535,14 @@ async def list_client_mapping_materializations(
         destination_type,
         competence=parse_competence(competence) if competence else None,
     )
+    # S16 (16.4): a completude de partida de cada versão do `conta_contabil`, pelo
+    # snapshot e pela função pura única (nos outros destinos, `null`).
+    completeness = await service.completeness_by_materialization(client, (r for r, _ in rows))
     return MaterializationListEnvelope(
         data=[
-            MaterializationSummaryResponse.build(row, author_for_viewer(author, viewer))
+            MaterializationSummaryResponse.build(
+                row, author_for_viewer(author, viewer), completeness.get(row.id)
+            )
             for row, author in rows
         ]
     )
@@ -531,7 +558,11 @@ async def list_client_mapping_materializations(
         "`COBERTURA_PARCIAL_REQUER_CONFIRMACAO`), e a confirmação fica no próprio "
         "registro. Cria a versão N+1 — imutável; reaplicar nunca sobrescreve e não "
         "existe rota que altere ou apague materialização. Emite a métrica "
-        "`depara_aplicado`. Requer `manage_client_mapping`; cliente encerrado: 409."
+        "`depara_aplicado`. Requer `manage_client_mapping`; cliente encerrado: 409. No "
+        "destino `conta_contabil` (S16), linha com alvo vinda de conta de origem sem conta "
+        "contábil do banco: 409 `CONTA_DO_BANCO_PENDENTE` com "
+        "`details.pendingSourceAccounts` (só identificadores), nada gravado; o código da "
+        "conta do banco de cada linha fica no snapshot."
     ),
 )
 async def materialize_client_mapping(
@@ -568,7 +599,9 @@ async def _read_import(request: Request, file: UploadFile) -> bytes:
         "(a coluna de nome é ignorada). Devolve criadas / alteradas / ignoradas e as "
         "linhas recusadas com o motivo (categoria ou alvo inexistente, decisão "
         "inválida…); a linha recusada não derruba o lote. Arquivo .xlsx, até 2 MB e "
-        "2.000 linhas. Requer `manage_client_mapping`."
+        "2.000 linhas. Requer `manage_client_mapping`. No destino `conta_contabil` a "
+        "importação é recusada com 422 `IMPORTACAO_INDISPONIVEL_NO_DESTINO` (a planilha "
+        "não leva o histórico cifrado): use a tela; exportar segue disponível."
     ),
 )
 async def preview_client_mapping_import(
@@ -602,7 +635,8 @@ async def preview_client_mapping_import(
         "de uma vez (atômico), como vigência nova a partir de `effectiveFrom` (padrão: "
         "competência corrente) — nunca sobrescreve a vigente. Início retroativo segue "
         "as regras da escrita de decisão (`confirmRetroactive`). Requer "
-        "`manage_client_mapping`; cliente encerrado: 409."
+        "`manage_client_mapping`; cliente encerrado: 409. No destino `conta_contabil`: "
+        "422 `IMPORTACAO_INDISPONIVEL_NO_DESTINO` (use a tela)."
     ),
 )
 async def apply_client_mapping_import(

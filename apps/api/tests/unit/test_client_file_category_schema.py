@@ -161,4 +161,6 @@ class TestPurgaEInventarioDeAad:
         )
         declared = [n for n in vars(crypto_service) if n.startswith("AAD_")]
         assert declared.index("AAD_FILE_CATEGORY_LABEL") == 13
-        assert len(declared) == 15
+        # Cresce a cada sprint que cifra campo novo; a contagem canônica é a de
+        # `test_crypto_service.py` (16 desde a BACK 16.1).
+        assert len(declared) >= 15

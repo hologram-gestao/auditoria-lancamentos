@@ -232,6 +232,17 @@ class Permission(StrEnum):
     #: célula arrastar a outra. A LEITURA do mapeamento não pede permissão
     #: (quem alcança o cliente lê, como o de-para).
     MANAGE_INPUT_MAPPING = "manage_input_mapping"
+    # --- Sprint 16 (BACK 16.1) --------------------------------------------
+    #: IMPORTAR o plano de contas CONTÁBIL do cliente (o do sistema de destino) e,
+    #: a partir da 16.3, associar a conta contábil do banco. É configuração do
+    #: ESCRITÓRIO no sistema contábil, como a conexão de origem (S9): mesmas
+    #: células de `manage_client_connections` (staff; o "(carteira)" do manager é
+    #: `resolve_client_access`), e permissão PRÓPRIA pelo precedente S10/S11.
+    #: ⚠️ DECISÃO DO PLANEJADOR, pendente de validação humana (ADR-086-BE): o
+    #: `client_manager` fica de fora porque o plano é do escritório; se o produto
+    #: quiser que o cliente mantenha o próprio plano, é trocar a célula. A LEITURA
+    #: do plano não pede permissão (`AccessibleClientDep`, como o de-para).
+    MANAGE_CLIENT_ACCOUNTING_CHART = "manage_client_accounting_chart"
 
 
 _EVERYONE: frozenset[UserRole] = frozenset(UserRole)
@@ -276,6 +287,7 @@ _PLATFORM_ONLY: frozenset[UserRole] = frozenset({UserRole.PLATFORM_ADMIN})
 #: | Redefinir senha de usuário    | ✅             | ❌          | ❌             | ❌             | ❌              |
 #: | Enviar arquivo (S14)          | ✅             | ✅          | ✅ (carteira)  | ✅             | ✅              |
 #: | Configurar mapeamento (S14)   | ✅             | ✅          | ✅ (carteira)  | ✅             | ❌              |
+#: | Plano contábil (S16)          | ✅             | ✅          | ✅ (carteira)  | ❌             | ❌              |
 PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]] = {
     Permission.RUN_RECONCILIATION: _EVERYONE,
     Permission.REVIEW_EXPORT: _EVERYONE,
@@ -375,6 +387,10 @@ PERMISSION_MATRIX: dict[Permission, frozenset[UserRole]] = {
     Permission.MANAGE_INPUT_MAPPING: frozenset(
         {UserRole.PLATFORM_ADMIN, UserRole.ADMIN, UserRole.MANAGER, UserRole.CLIENT_MANAGER}
     ),
+    # S16 (BACK 16.1), células do PRD (R5) — decisão do PLANEJADOR sobre o
+    # `client_manager` pendente de validação humana (ADR-086-BE). Staff, como
+    # `manage_client_connections`: o plano contábil é configuração do escritório.
+    Permission.MANAGE_CLIENT_ACCOUNTING_CHART: _STAFF,
 }
 
 
