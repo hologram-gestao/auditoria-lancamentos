@@ -17,7 +17,7 @@
  *     genérico) e o nome repetido marca o campo;
  *   - as versões abrem na gaveta, só leitura, com os parâmetros legíveis.
  */
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -53,6 +53,8 @@ const templatesState = {
   isSuccess: true,
 };
 const createMock = vi.fn();
+// O POST do "criar a partir do modelo" em andamento (86e3fyjbm, item 3).
+const createState = { isPending: false };
 
 vi.mock('@/hooks/use-export-layouts', () => ({
   useExportLayouts: (organizationId: string | null, options?: { enabled?: boolean }) => {
@@ -64,7 +66,7 @@ vi.mock('@/hooks/use-export-layouts', () => ({
   useExportLayoutTemplates: () => templatesState,
   useCreateExportLayoutFromTemplate: () => ({
     mutateAsync: createMock,
-    isPending: false,
+    isPending: createState.isPending,
     reset: vi.fn(),
   }),
 }));
@@ -206,6 +208,7 @@ beforeEach(() => {
   currentSearch = '';
   replaceMock.mockReset();
   createMock.mockReset().mockResolvedValue({ ...layout(), versions: [] });
+  createState.isPending = false;
   toastSuccess.mockReset();
   toastError.mockReset();
   lastListOrganization = undefined;
@@ -424,6 +427,37 @@ describe('Layouts de exportação — criar a partir do modelo (admin)', () => {
       'Não foi possível carregar o modelo Domínio',
     );
     expect(within(dialog).getByRole('button', { name: 'Criar layout' })).toBeDisabled();
+  });
+});
+
+describe('Layouts de exportação — diálogo do modelo com a criação em andamento', () => {
+  // 86e3fyjbm (3): Esc ou clique fora fechavam o diálogo com o POST ainda sem
+  // resposta, e o erro dele não tinha mais onde aparecer.
+  it('sem criação em andamento, Esc fecha o diálogo', async () => {
+    authState.user = ORG_ADMIN;
+    const ui = userEvent.setup();
+    render(<ExportLayoutsPage />);
+
+    await ui.click(screen.getAllByRole('button', { name: 'Criar a partir do modelo Domínio' })[0]!);
+    await screen.findByRole('dialog');
+    await ui.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('com a criação em andamento, nem Esc nem clique fora fecham o diálogo', async () => {
+    authState.user = ORG_ADMIN;
+    createState.isPending = true;
+    const ui = userEvent.setup();
+    render(<ExportLayoutsPage />);
+
+    await ui.click(screen.getAllByRole('button', { name: 'Criar a partir do modelo Domínio' })[0]!);
+    const dialog = await screen.findByRole('dialog');
+    await ui.keyboard('{Escape}');
+    expect(screen.getByRole('dialog')).toBe(dialog);
+
+    // Clique fora: o Radix fecha no pointerdown fora do conteúdo.
+    fireEvent.pointerDown(document.body);
+    expect(screen.getByRole('dialog')).toBe(dialog);
   });
 });
 

@@ -135,7 +135,9 @@ export function ExportLayoutFromTemplateDialog({
   const templateUnavailable = templatesQuery.isError || (templatesQuery.isSuccess && !template);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    // Com o POST em andamento, Esc e clique fora não fecham: o diálogo sumiria com
+    // a criação ainda sem resposta, e o erro dela não teria onde aparecer.
+    <Dialog open={open} onOpenChange={(next) => !isSubmitting && onOpenChange(next)}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Criar a partir do modelo Domínio</DialogTitle>

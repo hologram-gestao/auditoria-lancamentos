@@ -133,6 +133,10 @@ export function useAccountingFileGenerator({
     enabled: canAct && competence !== '',
   });
   const hasMaterialization = (materializationsQuery.data ?? []).length > 0;
+  // Identidade das versões materializadas da competência: a recusa foi sobre ESTAS
+  // versões, e uma nova (a pessoa corrigiu as categorias e materializou de novo)
+  // torna a recusa antiga falsa.
+  const materializationsKey = (materializationsQuery.data ?? []).map((m) => m.id).join(',');
   const generateMutation = useGenerateAccountingFile(clientId);
   const [pendingTarget, setPendingTarget] = useState<GenerationTarget | null>(null);
   // O alvo do diálogo NÃO é limpo ao fechar (só `dialogOpen` muda): o diálogo
@@ -142,10 +146,12 @@ export function useAccountingFileGenerator({
     materializationId: null,
     version: null,
   });
-  // A recusa é da competência em que aconteceu: trocar de competência não pode
-  // deixar na tela a recusa de outra.
+  // A recusa é da competência e das versões materializadas em que aconteceu:
+  // trocar de competência, ou materializar de novo, não pode deixar na tela uma
+  // recusa que não vale mais.
   const [refusal, setRefusal] = useState<{
     competence: string;
+    materializationsKey: string;
     target: GenerationTarget;
     value: AccountingFileRefusal;
   } | null>(null);
@@ -164,7 +170,12 @@ export function useAccountingFileGenerator({
       );
       return true;
     } catch (err) {
-      setRefusal({ competence, target, value: readAccountingFileRefusal(err) });
+      setRefusal({
+        competence,
+        materializationsKey,
+        target,
+        value: readAccountingFileRefusal(err),
+      });
       return false;
     } finally {
       setPendingTarget(null);
@@ -198,7 +209,10 @@ export function useAccountingFileGenerator({
     dialogOpen,
     dialogTarget,
     setDialogOpen,
-    refusal: refusal?.competence === competence ? refusal : null,
+    refusal:
+      refusal?.competence === competence && refusal.materializationsKey === materializationsKey
+        ? refusal
+        : null,
   };
 }
 
@@ -737,6 +751,15 @@ function GenerateAccountingFileDialog({
     resolver: zodResolver(generateSchema),
     defaultValues: { layoutId: '' },
   });
+
+  // O diálogo fica montado entre uma geração e outra: sem o reset, o próximo
+  // "Gerar arquivo" (de qualquer versão) abriria com o layout da anterior já
+  // escolhido, e a escolha passaria sem ninguém a fazer.
+  useEffect(() => {
+    if (open) form.reset({ layoutId: '' });
+    // form é estável; rodar só quando abrir.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   async function onSubmit(values: GenerateFormValues) {
     // Sucesso OU recusa fecham o diálogo: a recusa é estado NA SEÇÃO, com o que
