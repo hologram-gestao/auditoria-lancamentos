@@ -627,8 +627,8 @@ const FILE_IMPORTS = [
 
 /**
  * As recusas TIPADAS da BACK 14.3 (`core/exceptions.py`, 422 + `code` +
- * `userMessage` + `details`). Nomes de coluna, números de linha e motivos de
- * vocabulário fechado — nunca conteúdo de célula.
+ * `userMessage` + `details`). Colunas do MAPEAMENTO, contagens, números de linha
+ * e motivos de vocabulário fechado — nunca texto vindo do arquivo.
  */
 const FILE_REFUSALS: Record<'cabecalho' | 'linhas', Record<string, unknown>> = {
   cabecalho: {
@@ -638,7 +638,7 @@ const FILE_REFUSALS: Record<'cabecalho' | 'linhas', Record<string, unknown>> = {
       'O cabeçalho do arquivo não tem as colunas do mapeamento. Revise o mapeamento ou envie o arquivo com as colunas esperadas.',
     details: {
       missingColumns: ['Histórico'],
-      foundColumns: ['Data', 'Descrição', 'Valor', 'Categoria', 'Documento'],
+      foundColumnCount: 5,
     },
   },
   linhas: {
@@ -6174,6 +6174,80 @@ for (const vp of VIEWPORTS) {
   test.describe(`Origem por arquivo — mapeamento (FRONT 14.5) — ${vp.label}`, () => {
     test.use({ viewport: vp.size });
 
+    // 86e3fqnc9: a aba passou a existir para TODO cliente, então estes dois
+    // cenários são o que a maioria das telas mostra. O que só o browser prova:
+    // a aba no menu de um cliente SEM origem por arquivo, e o estado explicativo
+    // legível (sem transbordo) nos três temas e nas duas larguras.
+    test('cliente com Omie: a aba existe, explica a origem atual e não oferece conectar', async ({
+      page,
+    }) => {
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/origem-arquivo`);
+
+      if (vp.label !== 'desktop') {
+        await page.getByRole('button', { name: 'Abrir menu de navegação' }).click();
+        await aguardarAnimacao(page.getByRole('dialog', { name: 'Menu' }));
+      }
+      const nav = page.getByRole('navigation', { name: 'Seções do cliente' });
+      await expect(nav.getByRole('link', { name: 'Origem por arquivo' })).toHaveAttribute(
+        'aria-current',
+        'page',
+      );
+      if (vp.label !== 'desktop') {
+        await page.keyboard.press('Escape');
+        await expect(page.getByRole('dialog')).toHaveCount(0);
+      }
+
+      const vazio = page.getByTestId('no-file-origin');
+      await expect(vazio).toHaveAttribute('data-state', 'outra-origem');
+      await exigirEstadoVazioLegivel(
+        page,
+        'Os lançamentos deste cliente vêm da origem Omie',
+        `${vp.label} · aba de arquivo num cliente Omie`,
+        vazio,
+      );
+      // Conectar arquivo aqui seria 409 `ORIGEM_JA_CONECTADA` (§4.9: ação que o
+      // servidor nega não aparece).
+      await expect(page.getByRole('link', { name: /Conectar origem/ })).toHaveCount(0);
+      await expect(page.getByRole('link', { name: 'Ver origem do cliente' })).toBeVisible();
+      await expect(page.getByTestId('file-upload-section')).toHaveCount(0);
+
+      await shot(page, `origem-arquivo-cliente-omie-${slugF}`);
+      await analyze(page, `origem por arquivo — cliente com Omie (${vp.label})`);
+    });
+
+    test('cliente sem origem: explica o recurso e leva à gaveta já no tipo Arquivo', async ({
+      page,
+    }) => {
+      originState = 'sem_origem';
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/origem-arquivo`);
+
+      const vazio = page.getByTestId('no-file-origin');
+      await expect(vazio).toHaveAttribute('data-state', 'sem-origem');
+      await exigirEstadoVazioLegivel(
+        page,
+        'Este cliente ainda não recebe arquivos',
+        `${vp.label} · aba de arquivo sem origem`,
+        vazio,
+      );
+      const conectar = page.getByRole('link', { name: 'Conectar origem por arquivo' });
+      await expect(conectar).toHaveAttribute(
+        'href',
+        `/clientes/${CLIENT_ID}/painel?conectar=arquivo`,
+      );
+
+      await shot(page, `origem-arquivo-sem-origem-${slugF}`);
+      await analyze(page, `origem por arquivo — cliente sem origem (${vp.label})`);
+
+      // O link entrega o que promete: o painel abre a gaveta já no tipo Arquivo.
+      await conectar.click();
+      const gaveta = page.getByRole('dialog');
+      await aguardarAnimacao(gaveta);
+      await expect(gaveta.getByRole('combobox', { name: /Tipo/ })).toContainText('Arquivo');
+      await analyze(page, `painel — gaveta aberta no tipo Arquivo (${vp.label})`);
+    });
+
     test('aba com mapeamento salvo: resumo campo ← coluna, "Alterar" e a aba no menu', async ({
       page,
     }) => {
@@ -6445,7 +6519,7 @@ for (const vp of VIEWPORTS) {
       await analyze(page, `origem por arquivo — envio com sucesso + toast (${vp.label})`);
     });
 
-    test('CABECALHO_DIVERGENTE: colunas ausentes NOMEADAS, encontradas, e "Revisar mapeamento"', async ({
+    test('CABECALHO_DIVERGENTE: ausentes NOMEADAS, encontradas CONTADAS, e "Revisar mapeamento"', async ({
       page,
     }) => {
       clientFileOrigin = true;
@@ -6461,9 +6535,10 @@ for (const vp of VIEWPORTS) {
       await expect(recusa.getByRole('list', { name: /ausentes no arquivo/ })).toContainText(
         'Histórico',
       );
-      await expect(recusa.getByRole('list', { name: /encontradas no arquivo/ })).toContainText(
-        'Descrição',
-      );
+      // 86e3fvffy: a lista de "colunas encontradas" virou CONTAGEM — o nome
+      // vinha cru do arquivo, e num arquivo sem cabeçalho a linha 1 é dado.
+      await expect(recusa.getByRole('list', { name: /encontradas no arquivo/ })).toHaveCount(0);
+      await expect(recusa.getByTestId('file-header-counts')).toContainText('5 colunas');
       // Nenhum toast genérico: a recusa é ESTADO na tela.
       await expect(page.locator('[data-sonner-toast]')).toHaveCount(0);
       // Texto sólido sobre `destructive-muted`: contraste medido, não só "axe verde".

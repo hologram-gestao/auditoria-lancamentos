@@ -137,8 +137,13 @@ def check_header(columns: Sequence[str]) -> None:
 
     Coluna desconhecida também recusa (e não é ignorada): `Nome ` digitado como
     `Nome da conta` sumiria em silêncio e a importação falharia adiante com
-    `nome_vazio` em TODA linha — o motivo certo é o cabeçalho. `details` traz só
-    nomes de COLUNA (estrutura, não PII), como a S14.
+    `nome_vazio` em TODA linha — o motivo certo é o cabeçalho.
+
+    ⚠️ `details` só NOMEIA coluna do nosso vocabulário (as constantes do modelo).
+    Planilha enviada sem cabeçalho tem DADO na linha 1, e devolvê-la crua ecoava
+    o nome da conta — que é do cliente final e nasce cifrado (§4.1/§4.5). O que
+    veio da planilha e não é do modelo sai como CONTAGEM, nunca como texto: é
+    seguro por construção, sem heurística de "parece cabeçalho" para revisar.
     """
     normalized = [_normalized_header(c) for c in columns]
     allowed = set(REQUIRED_COLUMNS) | set(OPTIONAL_COLUMNS)
@@ -152,9 +157,12 @@ def check_header(columns: Sequence[str]) -> None:
             user_message=_HEADER_MESSAGE,
             details={
                 "missingColumns": missing,
-                "unexpectedColumns": unexpected,
-                "repeatedColumns": repeated,
-                "foundColumns": list(columns),
+                # Só a repetição de coluna DO MODELO é nomeada: `nome;nome` é o
+                # erro que quem enviou conserta lendo o nome. Repetição de dado
+                # (planilha sem cabeçalho) entra na contagem de inesperadas.
+                "repeatedColumns": [c for c in repeated if c in allowed],
+                "unexpectedColumnCount": len(unexpected),
+                "foundColumnCount": len(columns),
                 "expectedColumns": [*REQUIRED_COLUMNS, *OPTIONAL_COLUMNS],
             },
         )

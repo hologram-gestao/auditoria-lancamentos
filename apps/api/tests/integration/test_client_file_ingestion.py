@@ -595,8 +595,21 @@ class TestRecusasSemProcessamentoParcial:
         assert resp.status_code == 422, resp.text
         error = _error(resp)
         assert error["code"] == "CABECALHO_DIVERGENTE"
-        assert error["details"] == {"missingColumns": ["Histórico"], "foundColumns": header}
+        assert error["details"] == {"missingColumns": ["Histórico"], "foundColumnCount": 5}
         assert SECRET_DESCRIPTION not in resp.text
+        await _assert_nothing_processed(db_session, world.client, "cabecalho_divergente")
+
+    async def test_arquivo_sem_cabecalho_nao_ecoa_a_linha_1(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
+    ) -> None:
+        """Sem cabeçalho, a linha 1 é lançamento — e a descrição é do cliente (86e3fvffy)."""
+        await _login(client_with_db, world.admin)
+        resp = await _process(client_with_db, world.client, _csv(ROWS[1:], ROWS[0]))
+        assert resp.status_code == 422, resp.text
+        error = _error(resp)
+        assert error["code"] == "CABECALHO_DIVERGENTE"
+        assert SECRET_DESCRIPTION not in resp.text
+        assert error["details"]["foundColumnCount"] == len(HEADER)
         await _assert_nothing_processed(db_session, world.client, "cabecalho_divergente")
 
     async def test_linhas_invalidas_com_numero_e_motivo_sem_a_celula(

@@ -325,21 +325,61 @@ describe('Mapeamento — estados e gating (R1 · R5)', () => {
     ).toBeVisible();
   });
 
-  it('deep link num cliente sem conexão arquivo explica e leva ao painel', () => {
+  // 86e3fqnc9: a aba é listada para TODO cliente, então estes três estados são o
+  // que a maioria vê. Cada um explica o recurso, o porquê daqui e a ação certa.
+  it('cliente com Omie: explica que a origem é outra e NÃO oferece conectar (409)', () => {
     clientDetailState.data = {
       closed_at: null,
       origin_status: 'ativa',
       connections: [OMIE_CONNECTION],
     };
     render(<FileOriginScreen clientId={CLIENT_ID} />);
-    expect(screen.getByTestId('no-file-origin')).toHaveTextContent(
-      'Este cliente não tem origem por arquivo',
-    );
-    expect(screen.getByRole('link', { name: 'Conectar origem' })).toHaveAttribute(
+    const empty = screen.getByTestId('no-file-origin');
+    expect(empty).toHaveAttribute('data-state', 'outra-origem');
+    expect(empty).toHaveTextContent('Os lançamentos deste cliente vêm da origem Omie');
+    expect(empty).toHaveTextContent('um tipo de origem de lançamentos só');
+    // Conectar arquivo aqui é 409 `ORIGEM_JA_CONECTADA`: nada de botão (§4.9).
+    expect(screen.queryByRole('link', { name: /Conectar origem/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Ver origem do cliente' })).toHaveAttribute(
       'href',
       `/clientes/${CLIENT_ID}/painel`,
     );
     expect(screen.queryByTestId('file-upload-section')).not.toBeInTheDocument();
+  });
+
+  it('cliente sem origem nenhuma: explica o recurso e abre a gaveta já no tipo Arquivo', () => {
+    clientDetailState.data = { closed_at: null, origin_status: 'sem_origem', connections: [] };
+    render(<FileOriginScreen clientId={CLIENT_ID} />);
+    const empty = screen.getByTestId('no-file-origin');
+    expect(empty).toHaveAttribute('data-state', 'sem-origem');
+    expect(empty).toHaveTextContent('não tem sistema contábil');
+    expect(screen.getByRole('link', { name: 'Conectar origem por arquivo' })).toHaveAttribute(
+      'href',
+      `/clientes/${CLIENT_ID}/painel?conectar=arquivo`,
+    );
+  });
+
+  it('sem origem e sem `manage_client_connections`: diz a quem pedir, sem botão', () => {
+    authState.user = clientOperator;
+    clientDetailState.data = { closed_at: null, origin_status: 'sem_origem', connections: [] };
+    render(<FileOriginScreen clientId={CLIENT_ID} />);
+    const empty = screen.getByTestId('no-file-origin');
+    expect(empty).toHaveAttribute('data-state', 'sem-origem');
+    expect(empty).toHaveTextContent('Peça ao administrador ou ao gerente responsável');
+    expect(screen.queryByRole('link', { name: /Conectar origem/ })).not.toBeInTheDocument();
+  });
+
+  it('cliente encerrado e sem origem por arquivo: explica o encerramento, sem ação', () => {
+    clientDetailState.data = {
+      closed_at: '2026-09-01T00:00:00Z',
+      origin_status: 'sem_origem',
+      connections: [],
+    };
+    render(<FileOriginScreen clientId={CLIENT_ID} />);
+    const empty = screen.getByTestId('no-file-origin');
+    expect(empty).toHaveAttribute('data-state', 'encerrado');
+    expect(empty).toHaveTextContent('Este cliente foi encerrado');
+    expect(screen.queryByRole('link', { name: /Conectar origem/ })).not.toBeInTheDocument();
   });
 
   it('conexão arquivo fora do ar: o envio mostra o estado da origem, não o botão', () => {
@@ -709,14 +749,17 @@ describe('Recusas — cada código com o motivo específico (R2 · R5)', () => {
     await submitWithRefusal(
       refusal(422, 'CABECALHO_DIVERGENTE', {
         missingColumns: ['Histórico'],
-        foundColumns: ['Data', 'Descrição', 'Valor'],
+        foundColumnCount: 3,
       }),
       user,
     );
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveAttribute('data-refusal-code', 'CABECALHO_DIVERGENTE');
     expect(within(alert).getByRole('list', { name: /ausentes/ })).toHaveTextContent('Histórico');
-    expect(within(alert).getByRole('list', { name: /encontradas/ })).toHaveTextContent('Descrição');
+    // A contagem substitui a lista de colunas encontradas: o nome vinha CRU do
+    // arquivo, e num arquivo sem cabeçalho a linha 1 é lançamento (86e3fvffy).
+    expect(within(alert).getByTestId('file-header-counts')).toHaveTextContent('3 colunas');
+    expect(within(alert).queryByRole('list', { name: /encontradas/ })).toBeNull();
     await user.click(within(alert).getByRole('button', { name: 'Revisar mapeamento' }));
     expect(await screen.findByRole('dialog')).toHaveTextContent('Alterar mapeamento');
   });
