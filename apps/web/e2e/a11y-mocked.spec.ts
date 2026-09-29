@@ -943,6 +943,9 @@ function accountingMappingPreview(competence: string): Record<string, unknown> {
       {
         sourceType: 'omie',
         categoryCode: '2.01.01',
+        // 86e3fxqqh: nome resolvido, embaixo do código, como na lista de decisões.
+        categoryName: 'Aluguel de imóveis',
+        categoryNameResolved: true,
         amount: '9000.00',
         count: 3,
         accountingAccountId: 'acc-5101',
@@ -958,6 +961,8 @@ function accountingMappingPreview(competence: string): Record<string, unknown> {
       {
         sourceType: 'omie',
         categoryCode: '2.01.03',
+        categoryName: 'Tarifas bancárias e encargos de cobrança',
+        categoryNameResolved: true,
         amount: '2500.00',
         count: 2,
         accountingAccountId: 'acc-662',
@@ -973,6 +978,10 @@ function accountingMappingPreview(competence: string): Record<string, unknown> {
       {
         sourceType: 'omie',
         categoryCode: '2.01.02',
+        // Origem fora do ar (ou rótulo sem decifrar): cai no MESMO texto de
+        // fallback da lista de decisões.
+        categoryName: null,
+        categoryNameResolved: false,
         amount: '500.00',
         count: 1,
         accountingAccountId: null,
@@ -7002,9 +7011,12 @@ for (const vp of VIEWPORTS) {
       sessionUser = SYSTEM_MANAGER_USER;
       await page.goto(`/clientes/${CLIENT_ID}/de-para?destination=conta_contabil`);
 
-      // Importar a planilha some neste destino; exportar fica.
+      // 86e3fxqqe: importar VOLTOU a este destino (a planilha passou a levar a
+      // coluna de histórico). Até a S16 este teste exigia o contrário —
+      // `toHaveCount(0)` —, e era a única cobertura que ainda afirmava a regra
+      // velha depois que o vitest foi atualizado.
       await expect(page.getByRole('button', { name: 'Exportar' })).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Importar', exact: true })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Importar', exact: true })).toBeVisible();
       await expect(page.getByRole('columnheader', { name: 'Histórico padrão' })).toBeVisible();
       await expect(page.getByTestId('mapping-legacy-badge').first()).toContainText(
         'Refazer no plano do cliente',
@@ -7056,6 +7068,18 @@ for (const vp of VIEWPORTS) {
       await expect(
         pendentes.getByRole('link', { name: /Associar conta do banco/ }),
       ).toHaveAttribute('href', `/clientes/${CLIENT_ID}/plano-contabil#conta-do-banco`);
+      // 86e3fxqqh: a categoria mostra CÓDIGO e NOME, como a lista de decisões —
+      // e cai no mesmo texto de fallback quando a origem não resolveu o nome.
+      await expect(secao.getByRole('row', { name: /2\.01\.01/ })).toContainText(
+        'Aluguel de imóveis',
+      );
+      await expect(secao.getByRole('row', { name: /2\.01\.02/ })).toContainText(
+        'Nome indisponível agora',
+      );
+      // Print ANTES do `focus()` abaixo: focar a dica rola a tabela na
+      // horizontal até a coluna Histórico, e a coluna Categoria sai de quadro
+      // justamente a 390px, onde ela é a que precisa de conferência visual.
+      await shot(page, `de-para-conta-contabil-previa-categoria-${slugDC}`);
       // Histórico truncado: a íntegra está no nome acessível (dica), sem `title`.
       const dica = secao.getByRole('img', { name: `Histórico padrão: ${HISTORICO_LONGO}` });
       await expect(dica).toHaveAttribute('tabindex', '0');
