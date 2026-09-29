@@ -29,6 +29,7 @@
  * permitida; um `<p>` solto ao lado do `<dd>` **não** é (axe `definition-list`,
  * SERIOUS).
  */
+import { CollapsibleSummary, SummaryInline } from '@/components/shared/collapsible-summary';
 import type { AgingBucket, AgingTotals, TitleType } from '@/lib/contracts';
 import { formatBRDate, formatBRL } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -153,7 +154,7 @@ function FilterValueButton({
       aria-label={label}
       onClick={onClick}
       className={cn(
-        'focus-visible:ring-ring hover:ring-ring block w-full cursor-pointer rounded-md px-2 py-1.5 text-left transition-colors hover:ring-1 focus-visible:outline-none focus-visible:ring-2',
+        'focus-visible:ring-ring hover:ring-ring block w-full cursor-pointer rounded-md px-2 py-1 text-left transition-colors hover:ring-1 focus-visible:outline-none focus-visible:ring-2',
         active && 'bg-accent text-accent-foreground ring-ring ring-2',
         className,
       )}
@@ -189,7 +190,7 @@ function TotalsCard({
   ] as const;
 
   return (
-    <section aria-labelledby={headingId} className="bg-card space-y-2 rounded-lg border p-3">
+    <section aria-labelledby={headingId} className="bg-card space-y-1.5 rounded-lg border p-2.5">
       <h3 id={headingId} className="text-sm font-semibold">
         {typeLabel}
       </h3>
@@ -219,7 +220,7 @@ function TotalsCard({
                   <span
                     data-summary="total"
                     className={cn(
-                      'block whitespace-nowrap text-lg font-semibold tabular-nums',
+                      'block whitespace-nowrap text-base font-semibold tabular-nums',
                       !isActive && row.tone,
                     )}
                   >
@@ -235,7 +236,7 @@ function TotalsCard({
         })}
       </dl>
 
-      <dl className="grid grid-cols-2 gap-1 border-t pt-2 sm:grid-cols-4">
+      <dl className="grid grid-cols-2 gap-1 border-t pt-1.5 sm:grid-cols-4">
         {OVERDUE_BUCKETS.map((bucket) => {
           const isActive = isSummaryFilterActive(active, titleType, bucket);
           return (
@@ -283,7 +284,35 @@ export function ClientTitlesSummaryBlock({
   onSelect: (titleType: TitleType, key: SummaryFilterKey) => void;
 }) {
   return (
-    <div className="space-y-2">
+    <CollapsibleSummary
+      storageKey="carteira"
+      // Recolhido, a receber e a pagar continuam à vista (pedido do Lucas).
+      collapsed={
+        <SummaryInline
+          items={[
+            {
+              key: 'a_receber',
+              value: formatBRL(summary.aReceber.totalEmAberto),
+              label: 'a receber em aberto',
+            },
+            {
+              key: 'a_pagar',
+              value: formatBRL(summary.aPagar.totalEmAberto),
+              label: 'a pagar em aberto',
+            },
+          ]}
+        />
+      }
+      // A data de referência é do SERVIDOR. Recalcular o atraso com o relógio do
+      // navegador poria o mesmo título em baldes diferentes para pessoas em fusos
+      // diferentes — dizer de quando é o corte evita a dúvida.
+      footnote={
+        <>
+          Atraso calculado sobre a carteira inteira, com referência em{' '}
+          {formatBRDate(summary.referenceDate)}. Clique num valor para filtrar a lista.
+        </>
+      }
+    >
       <div className="grid gap-3 lg:grid-cols-2">
         {/* A receber primeiro: é a dor que originou a sprint (inadimplência). */}
         <TotalsCard
@@ -301,14 +330,7 @@ export function ClientTitlesSummaryBlock({
           onSelect={onSelect}
         />
       </div>
-      {/* A data de referência é do SERVIDOR. Recalcular o atraso com o relógio do
-          navegador poria o mesmo título em baldes diferentes para pessoas em
-          fusos diferentes — dizer de quando é o corte evita a dúvida. */}
-      <p className="text-muted-foreground text-xs">
-        Atraso calculado sobre a carteira inteira, com referência em{' '}
-        {formatBRDate(summary.referenceDate)}. Clique num valor para filtrar a lista.
-      </p>
-    </div>
+    </CollapsibleSummary>
   );
 }
 

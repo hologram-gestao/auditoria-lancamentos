@@ -4375,6 +4375,56 @@ for (const vp of VIEWPORTS) {
       await analyze(page, `carteira — agregados e aging (${vp.label})`);
     });
 
+    /**
+     * 86e3fr9qz — o topo enxuto: totalizador EM CIMA e recolhível, e as abas, os
+     * filtros e a ação de sincronizar numa linha só (desktop). Recolhido, a
+     * receber e a pagar continuam à vista, e a escolha sobrevive ao recarregar.
+     * Em 390px a linha quebra sem nada sair da viewport.
+     */
+    test('totalizador recolhível e abas + filtros + sincronizar numa linha (86e3fr9qz)', async ({
+      page,
+    }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/carteira`);
+      const abas = page.getByRole('tablist');
+      const sincronizar = page.getByRole('button', { name: 'Sincronizar agora' });
+      await expect(abas).toBeVisible();
+      await expect(sincronizar).toBeVisible();
+
+      if (vp.label === 'desktop') {
+        const a = await abas.boundingBox();
+        const b = await sincronizar.boundingBox();
+        expect(
+          Math.abs((a?.y ?? 0) + (a?.height ?? 0) / 2 - ((b?.y ?? 0) + (b?.height ?? 0) / 2)),
+          'abas e "Sincronizar agora" precisam dividir a mesma linha',
+        ).toBeLessThan(12);
+        // O totalizador fica ACIMA da linha das abas.
+        const totais = await page.getByRole('region', { name: 'A receber' }).boundingBox();
+        expect(totais?.y ?? 0).toBeLessThan(a?.y ?? 0);
+      }
+      for (const alvo of [abas, sincronizar]) {
+        const caixa = await alvo.boundingBox();
+        expect((caixa?.x ?? 0) + (caixa?.width ?? 0), 'cortado pela borda').toBeLessThanOrEqual(
+          vp.size.width,
+        );
+      }
+      await shot(page, `carteira-linha-unica-${slugC}`);
+
+      await page.getByRole('button', { name: 'Ocultar totais' }).click();
+      await expect(page.getByRole('region', { name: 'A receber' })).toBeHidden();
+      const linha = page.getByTestId('summary-collapsed');
+      await expect(linha).toContainText(/R\$\s*107\.413,10 a receber em aberto/);
+      await expect(linha).toContainText('a pagar em aberto');
+      await shot(page, `carteira-totais-recolhidos-${slugC}`);
+      await analyze(page, `carteira — totais recolhidos (${vp.label})`);
+
+      // A escolha é lembrada por tela no navegador.
+      await page.reload();
+      await expect(page.getByRole('button', { name: 'Mostrar totais' })).toBeVisible();
+      await page.getByRole('button', { name: 'Mostrar totais' }).click();
+      await expect(page.getByRole('region', { name: 'A receber' })).toBeVisible();
+    });
+
     test('nome não resolvido mostra o CÓDIGO marcado, nunca vazio (R4)', async ({ page }) => {
       sessionUser = CLIENT_MANAGER_USER;
       await page.goto(`/clientes/${CLIENT_ID}/carteira`);
@@ -4773,6 +4823,41 @@ for (const vp of VIEWPORTS) {
 
       await shot(page, `de-para-lista-${slugD}`);
       await analyze(page, `de-para — lista com edição (${vp.label})`);
+    });
+
+    /**
+     * 86e3fr9qz — as abas, o destino, Exportar e Importar numa linha só
+     * (desktop), e os contadores recolhíveis como na carteira.
+     */
+    test('abas + destino + exportar/importar numa linha e contadores recolhíveis (86e3fr9qz)', async ({
+      page,
+    }) => {
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/de-para`);
+      const abas = page.getByRole('tablist');
+      const exportar = page.getByRole('button', { name: 'Exportar' });
+      await expect(abas).toBeVisible();
+      await expect(page.getByLabel('Destino')).toBeVisible();
+      await expect(exportar).toBeVisible();
+      if (vp.label === 'desktop') {
+        const a = await abas.boundingBox();
+        const b = await exportar.boundingBox();
+        expect(
+          Math.abs((a?.y ?? 0) + (a?.height ?? 0) / 2 - ((b?.y ?? 0) + (b?.height ?? 0) / 2)),
+          'abas e "Exportar" precisam dividir a mesma linha',
+        ).toBeLessThan(12);
+      }
+      for (const alvo of [abas, exportar, page.getByRole('button', { name: /Importar/ })]) {
+        const caixa = await alvo.boundingBox();
+        expect((caixa?.x ?? 0) + (caixa?.width ?? 0), 'cortado pela borda').toBeLessThanOrEqual(
+          vp.size.width,
+        );
+      }
+      await shot(page, `de-para-linha-unica-${vp.label.replace(/\s+/g, '-')}`);
+
+      await page.getByRole('button', { name: 'Ocultar totais' }).click();
+      await expect(page.getByTestId('summary-collapsed')).toContainText('sem decisão');
+      await analyze(page, `de-para — contadores recolhidos (${vp.label})`);
     });
 
     test('operador do cliente: lista só-leitura, sem nenhuma ação de escrita', async ({ page }) => {
