@@ -254,16 +254,18 @@ describe('SidebarNav — camada do cliente', () => {
     expect(within(nav).getByText('Cliente Exemplo Ltda')).toBeInTheDocument();
   });
 
-  it('operador do cliente: sem Voltar e sem Usuários — 8 seções', () => {
+  it('operador do cliente: sem Voltar e sem Usuários — 9 seções', () => {
     currentPathname = '/clientes/c1';
     render(<SidebarNav user={CLIENT_OPERATOR} />);
 
     const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
     const links = within(nav).getAllByRole('link');
-    // "Plano de Contas" entrou na S10, "Carteira" na S11, "De-para" na S12 e
-    // "Plano contábil" na S16: LER é de todo papel que alcança o cliente nos
-    // quatro casos (o operador inclusive). Quem some para ele é a ESCRITA —
-    // sincronizar, editar o de-para, importar o plano —, dentro de cada tela.
+    // "Plano de Contas" entrou na S10, "Carteira" na S11, "De-para" na S12,
+    // "Plano contábil" na S16 e "Origem por arquivo" (que era condicional)
+    // virou fixa no follow-up 86e3fqnc9: LER é de todo papel que alcança o
+    // cliente nos cinco casos (o operador inclusive — ele ENVIA o arquivo).
+    // Quem some para ele é a ESCRITA — sincronizar, editar o de-para, importar
+    // o plano, configurar o mapeamento —, dentro de cada tela.
     expect(links.map((l) => l.textContent)).toEqual([
       'Conciliações',
       'Contas Bancárias',
@@ -273,6 +275,7 @@ describe('SidebarNav — camada do cliente', () => {
       'Plano contábil',
       'Carteira',
       'De-para',
+      'Origem por arquivo',
     ]);
   });
 
@@ -288,7 +291,7 @@ describe('SidebarNav — camada do cliente', () => {
     expect(current).toEqual(['Plano contábil']);
   });
 
-  it('"Origem por arquivo" (S14) só existe para o cliente com conexão `arquivo`', () => {
+  it('"Origem por arquivo" (S14) aparece para o cliente com conexão `arquivo`', () => {
     currentPathname = '/clientes/c1/origem-arquivo';
     detailState.data = {
       name: 'Cliente Exemplo Ltda',
@@ -315,7 +318,11 @@ describe('SidebarNav — camada do cliente', () => {
     );
   });
 
-  it('sem conexão `arquivo` a aba não aparece (nem para o admin)', () => {
+  it('a aba aparece TAMBÉM sem conexão `arquivo` — quem explica o estado é a tela', () => {
+    // 86e3fqnc9: antes a aba sumia, e o recurso ficava invisível para quem
+    // precisava descobri-lo. LER a aba não pede permissão (`AccessibleClientDep`),
+    // então esconder aqui não era regra de §4.9 — o que o servidor negaria é
+    // CONECTAR, e disso a tela cuida.
     currentPathname = '/clientes/c1';
     detailState.data = {
       name: 'Cliente Exemplo Ltda',
@@ -331,7 +338,18 @@ describe('SidebarNav — camada do cliente', () => {
     };
     render(<SidebarNav user={ADMIN} />);
     const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
-    expect(within(nav).queryByRole('link', { name: 'Origem por arquivo' })).not.toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: 'Origem por arquivo' })).toHaveAttribute(
+      'href',
+      '/clientes/c1/origem-arquivo',
+    );
+  });
+
+  it('a aba aparece para o cliente SEM origem nenhuma, e para o operador', () => {
+    currentPathname = '/clientes/c1';
+    detailState.data = { name: 'Cliente Exemplo Ltda', connections: [] };
+    render(<SidebarNav user={CLIENT_OPERATOR} />);
+    const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
+    expect(within(nav).getByRole('link', { name: 'Origem por arquivo' })).toBeInTheDocument();
   });
 
   it('a rota do de-para não deixa "Conciliações" ativo junto', () => {

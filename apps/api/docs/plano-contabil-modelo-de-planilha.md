@@ -9,10 +9,10 @@ contas da origem da Sprint 10 (`/chart-of-accounts`, categorias do Omie).
 
 ## Endpoints
 
-| Método | Rota | Quem | O quê |
-| --- | --- | --- | --- |
-| `GET` | `/api/v1/clients/{client_id}/accounting-chart` | quem alcança o cliente | lista paginada (`page`, `pageSize` ≤ 100), busca por prefixo de código (`code`), filtros `type` (`analitica`/`sintetica`) e `status` (`ativa`/`inativa`) |
-| `POST` | `/api/v1/clients/{client_id}/accounting-chart/import` | `manage_client_accounting_chart` (plataforma, admin, gerente da carteira) | importa ou reimporta a planilha, tudo ou nada; cliente encerrado = 409 |
+| Método | Rota                                                  | Quem                                                                      | O quê                                                                                                                                                    |
+| ------ | ----------------------------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/api/v1/clients/{client_id}/accounting-chart`        | quem alcança o cliente                                                    | lista paginada (`page`, `pageSize` ≤ 100), busca por prefixo de código (`code`), filtros `type` (`analitica`/`sintetica`) e `status` (`ativa`/`inativa`) |
+| `POST` | `/api/v1/clients/{client_id}/accounting-chart/import` | `manage_client_accounting_chart` (plataforma, admin, gerente da carteira) | importa ou reimporta a planilha, tudo ou nada; cliente encerrado = 409                                                                                   |
 
 ## O modelo
 
@@ -21,12 +21,12 @@ contas da origem da Sprint 10 (`/chart-of-accounts`, categorias do Omie).
 - **Cabeçalho na linha 1.** Colunas casadas pelo nome (espaços nas pontas e maiúsculas
   ignorados), em qualquer ordem, **sem outras colunas**:
 
-| Coluna | Obrigatória | Regra |
-| --- | --- | --- |
-| `codigo_reduzido` | sim | o código que vai no arquivo contábil; letras, dígitos, `.` e `-` (sem espaço nem `;`), até 20 caracteres, **único** na planilha |
-| `nome` | sim | até 200 caracteres; gravado **cifrado** com a chave do cliente |
-| `tipo` | sim | `analitica` (recebe lançamento) ou `sintetica` (só agrupa); maiúscula e acento indiferentes (`Analítica` vale) |
-| `classificacao` | não | a classificação hierárquica (`1.1.1.02.001`), até 40 caracteres |
+| Coluna            | Obrigatória | Regra                                                                                                                           |
+| ----------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `codigo_reduzido` | sim         | o código que vai no arquivo contábil; letras, dígitos, `.` e `-` (sem espaço nem `;`), até 20 caracteres, **único** na planilha |
+| `nome`            | sim         | até 200 caracteres; gravado **cifrado** com a chave do cliente                                                                  |
+| `tipo`            | sim         | `analitica` (recebe lançamento) ou `sintetica` (só agrupa); maiúscula e acento indiferentes (`Analítica` vale)                  |
+| `classificacao`   | não         | a classificação hierárquica (`1.1.1.02.001`), até 40 caracteres                                                                 |
 
 - Linha totalmente vazia é pulada. Pelo menos **uma** conta é obrigatória.
 
@@ -52,13 +52,13 @@ Resposta: `{"data": {"contas": N, "contasNovas": N, "contasInativadas": N}}` —
 
 ## Recusas (todas 422, nenhuma grava nada, nenhuma devolve conteúdo de célula)
 
-| `error.code` | Quando | `error.details` |
-| --- | --- | --- |
-| `FORMATO_NAO_SUPORTADO` | não é CSV nem XLSX pelo conteúdo (PDF, XLS, texto sem estrutura) | — |
-| `ARQUIVO_INVALIDO` | não abre ou não itera (zip quebrado, fora de UTF-8, limites de tamanho/linhas/colunas) | — |
-| `ARQUIVO_INVALIDO` | a planilha não tem nenhuma conta | `{"reason": "sem_contas"}` |
-| `CABECALHO_DIVERGENTE` | falta coluna obrigatória, sobra coluna desconhecida ou coluna repetida | `missingColumns`, `unexpectedColumns`, `repeatedColumns`, `foundColumns`, `expectedColumns` |
-| `LINHAS_INVALIDAS` | uma ou mais linhas inválidas (todas listadas de uma vez, até 50) | `lines: [{line, reason}]`, `total` |
+| `error.code`            | Quando                                                                                 | `error.details`                                                                                                        |
+| ----------------------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `FORMATO_NAO_SUPORTADO` | não é CSV nem XLSX pelo conteúdo (PDF, XLS, texto sem estrutura)                       | —                                                                                                                      |
+| `ARQUIVO_INVALIDO`      | não abre ou não itera (zip quebrado, fora de UTF-8, limites de tamanho/linhas/colunas) | —                                                                                                                      |
+| `ARQUIVO_INVALIDO`      | a planilha não tem nenhuma conta                                                       | `{"reason": "sem_contas"}`                                                                                             |
+| `CABECALHO_DIVERGENTE`  | falta coluna obrigatória, sobra coluna desconhecida ou coluna repetida                 | `missingColumns`, `repeatedColumns` e `expectedColumns` (nomes do MODELO), `unexpectedColumnCount`, `foundColumnCount` |
+| `LINHAS_INVALIDAS`      | uma ou mais linhas inválidas (todas listadas de uma vez, até 50)                       | `lines: [{line, reason}]`, `total`                                                                                     |
 
 `reason` ∈ `codigo_vazio`, `codigo_longo`, `codigo_invalido`, `codigo_repetido`, `nome_vazio`,
 `nome_longo`, `tipo_invalido`, `classificacao_longa`. `line` é a linha física da planilha

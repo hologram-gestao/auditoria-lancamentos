@@ -203,14 +203,41 @@ class TestRecusasSemGravarNada:
         assert exc.status_code == 422
         assert exc.code is ErrorCode.CABECALHO_DIVERGENTE
         assert exc.details["missingColumns"] == ["codigo_reduzido", "nome"]
-        assert exc.details["unexpectedColumns"] == ["codigo", "nome da conta"]
+        assert exc.details["unexpectedColumnCount"] == 2
+        assert exc.details["foundColumnCount"] == 3
         assert exc.details["expectedColumns"] == [*REQUIRED_COLUMNS, "classificacao"]
+        # O que veio da planilha só sai como contagem: nem o nome da conta, nem o
+        # nome da COLUNA que o cliente digitou.
+        assert "nome da conta" not in _body(exc)
         assert _SECRET_NAME not in _body(exc)
 
     def test_coluna_repetida_no_cabecalho(self) -> None:
         with pytest.raises(FileHeaderMismatchError) as excinfo:
             parse_chart_sheet(_csv("codigo_reduzido;nome;tipo;Nome", "649;Banco;analitica;x"))
         assert excinfo.value.details["repeatedColumns"] == ["nome"]
+
+    def test_planilha_sem_cabecalho_nao_ecoa_a_linha_1_na_recusa(self) -> None:
+        """A linha 1 de uma planilha sem cabeçalho é DADO (86e3fvffy).
+
+        O nome da conta é do cliente final e nasce cifrado (§4.1): devolvê-lo em
+        `details` era ecoá-lo para fora. Aqui o corpo inteiro da recusa não pode
+        conter nada que veio da planilha.
+        """
+        with pytest.raises(FileHeaderMismatchError) as excinfo:
+            parse_chart_sheet(
+                _csv(f"662;{_SECRET_NAME};analitica", f"663;{_SECRET_NAME} II;analitica")
+            )
+        exc = excinfo.value
+        body = _body(exc)
+        assert _SECRET_NAME not in body
+        assert "662" not in body
+        assert "analitica" not in body
+        # O que sobra é o diagnóstico: faltam as 3 obrigatórias, e a planilha
+        # trazia 3 colunas, todas fora do modelo.
+        assert exc.details["missingColumns"] == list(REQUIRED_COLUMNS)
+        assert exc.details["repeatedColumns"] == []
+        assert exc.details["unexpectedColumnCount"] == 3
+        assert exc.details["foundColumnCount"] == 3
 
     def test_planilha_sem_nenhuma_conta_e_recusada(self) -> None:
         """Na reimportação, uma planilha vazia inativaria o plano INTEIRO."""

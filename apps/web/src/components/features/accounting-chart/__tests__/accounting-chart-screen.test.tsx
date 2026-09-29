@@ -511,14 +511,14 @@ describe('importação', () => {
     expect(toastError).not.toHaveBeenCalled();
   });
 
-  it('CABECALHO_DIVERGENTE nomeia o que falta, o que sobra e o que repete', async () => {
+  it('CABECALHO_DIVERGENTE nomeia o que falta e CONTA o que veio da planilha', async () => {
     withoutPlan();
     importState.mutateAsync = vi.fn().mockRejectedValue(
       refusal('CABECALHO_DIVERGENTE', {
         missingColumns: ['tipo'],
-        unexpectedColumns: ['saldo'],
         repeatedColumns: [],
-        foundColumns: ['codigo_reduzido', 'nome', 'saldo'],
+        unexpectedColumnCount: 1,
+        foundColumnCount: 3,
       }),
     );
     render(<AccountingChartScreen clientId="c1" />);
@@ -529,25 +529,32 @@ describe('importação', () => {
     expect(
       within(notice).getByRole('list', { name: 'Colunas obrigatórias que faltam' }),
     ).toHaveTextContent('tipo');
-    expect(within(notice).getByRole('list', { name: 'Colunas fora do modelo' })).toHaveTextContent(
-      'saldo',
+    // O nome da coluna que veio da PLANILHA não é exibido: numa planilha sem
+    // cabeçalho a linha 1 é conta do cliente (86e3fvffy). Só a contagem sai.
+    expect(within(notice).getByTestId('accounting-header-counts')).toHaveTextContent(
+      'A planilha tem 3 colunas, 1 fora do modelo.',
     );
+    expect(
+      within(notice).queryByRole('list', { name: 'Colunas fora do modelo' }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(notice).queryByRole('list', { name: 'Colunas encontradas na planilha' }),
+    ).not.toBeInTheDocument();
     expect(
       within(notice).queryByRole('list', { name: 'Colunas repetidas' }),
     ).not.toBeInTheDocument();
     expect(toastError).not.toHaveBeenCalled();
   });
 
-  it('CABECALHO_DIVERGENTE por coluna REPETIDA lista cada coluna encontrada, inclusive a repetida', async () => {
+  it('CABECALHO_DIVERGENTE por coluna REPETIDA nomeia a repetida (é do modelo)', async () => {
     withoutPlan();
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     importState.mutateAsync = vi.fn().mockRejectedValue(
       refusal('CABECALHO_DIVERGENTE', {
         missingColumns: [],
-        unexpectedColumns: [],
         repeatedColumns: ['nome'],
-        // O backend devolve as colunas CRUAS: o nome repetido aparece duas vezes.
-        foundColumns: ['codigo_reduzido', 'nome', 'nome', 'tipo'],
+        unexpectedColumnCount: 0,
+        foundColumnCount: 4,
       }),
     );
     render(<AccountingChartScreen clientId="c1" />);
@@ -555,15 +562,13 @@ describe('importação', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Importar' }));
 
     const notice = await within(dialog).findByRole('alert');
+    // `nome` é nome do MODELO, não texto da planilha: pode ser exibido.
     expect(within(notice).getByRole('list', { name: 'Colunas repetidas' })).toHaveTextContent(
       'nome',
     );
-    const found = within(notice).getByRole('list', { name: 'Colunas encontradas na planilha' });
-    expect(
-      within(found)
-        .getAllByRole('listitem')
-        .map((item) => item.textContent),
-    ).toEqual(['codigo_reduzido', 'nome', 'nome', 'tipo']);
+    expect(within(notice).getByTestId('accounting-header-counts')).toHaveTextContent(
+      'A planilha tem 4 colunas.',
+    );
     // Chave duplicada o React só denuncia no console; nenhum aviso dele aqui.
     const duplicateKeyWarnings = consoleError.mock.calls.filter((call) =>
       call.some((arg) => String(arg).includes('same key')),

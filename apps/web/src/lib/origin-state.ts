@@ -112,9 +112,21 @@ export const ORIGIN_STATUS_COPY: Record<
 };
 
 /**
+ * O parâmetro que o painel lê para já abrir a gaveta de conexão no tipo pedido.
+ * Quem manda é uma tela que sabe QUAL origem falta (hoje a "Origem por
+ * arquivo"); o painel abre, escolhe o tipo e limpa o parâmetro da URL, para o
+ * refresh não reabrir a gaveta.
+ */
+export const CONNECT_PARAM = 'conectar';
+
+/**
  * Para onde o usuário vai resolver — o painel do cliente, que é a tela onde a
  * origem se conecta (e a única que responde 200 sem origem, por decisão do R6).
+ *
+ * `providerType` é opcional: sem ele o painel só abre (o caller genérico não
+ * sabe qual origem falta); com ele, a gaveta já nasce no tipo certo.
  */
-export function originFixPath(clientId: string): string {
-  return `/clientes/${clientId}/painel`;
+export function originFixPath(clientId: string, providerType?: string): string {
+  const base = `/clientes/${clientId}/painel`;
+  return providerType ? `${base}?${CONNECT_PARAM}=${encodeURIComponent(providerType)}` : base;
 }

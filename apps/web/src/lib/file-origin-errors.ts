@@ -65,8 +65,14 @@ export type FileRefusal =
   | {
       code: 'CABECALHO_DIVERGENTE';
       userMessage: string;
+      /** As colunas do MAPEAMENTO que faltam — nunca texto vindo do arquivo. */
       missingColumns: string[];
-      foundColumns: string[];
+      /**
+       * Quantas colunas o cabeçalho lido tinha. É contagem de propósito: arquivo
+       * enviado sem cabeçalho tem dado na linha 1, e o servidor não devolve
+       * texto vindo do arquivo (§4.5).
+       */
+      foundColumnCount: number;
     }
   | {
       code: 'LINHAS_INVALIDAS';
@@ -122,7 +128,10 @@ export function readFileRefusal(error: unknown): FileRefusal | null {
         code,
         userMessage,
         missingColumns: readStringList(details.missingColumns),
-        foundColumns: readStringList(details.foundColumns),
+        foundColumnCount:
+          typeof details.foundColumnCount === 'number' && details.foundColumnCount > 0
+            ? details.foundColumnCount
+            : 0,
       };
     case 'LINHAS_INVALIDAS': {
       const lines = readLines(details.lines);

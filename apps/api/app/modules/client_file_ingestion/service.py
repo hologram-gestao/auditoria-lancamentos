@@ -238,14 +238,16 @@ class FileIngestionService:
                 read_table, content, options, on_header=self._header_checker(spec)
             )
         except FileHeaderMismatchError as exc:
-            found = exc.details.get("foundColumns", [])
+            # A métrica quer quantas colunas do mapeamento o arquivo TINHA; o
+            # cabeçalho lido só existe como contagem (nada de texto de célula).
+            found_count = exc.details.get("foundColumnCount", 0)
             missing = exc.details.get("missingColumns", [])
             await self._refuse(
                 client,
                 exc,
                 motivo="cabecalho_divergente",
                 mapping_id=mapping.id,
-                colunas=len(found) - len(missing) if found else 0,
+                colunas=max(found_count - len(missing), 0) if found_count else 0,
             )
         except AppError as exc:
             await self._refuse(client, exc, motivo="arquivo_invalido", mapping_id=mapping.id)
@@ -493,14 +495,20 @@ class FileIngestionService:
 
     @staticmethod
     def _header_checker(spec: MappingSpec) -> Callable[[list[str]], None]:
-        """Toda coluna mapeada precisa existir no cabeçalho — ANTES da primeira linha."""
+        """Toda coluna mapeada precisa existir no cabeçalho — ANTES da primeira linha.
+
+        ⚠️ `details` nomeia só as colunas DO MAPEAMENTO (configuração do escritório).
+        O cabeçalho lido sai como CONTAGEM: num arquivo enviado sem cabeçalho a
+        linha 1 é dado, e devolvê-la crua ecoava a descrição do lançamento, que é
+        do cliente final e nasce cifrada (§4.1/§4.5).
+        """
 
         def _check(columns: list[str]) -> None:
             missing = [name for name in spec.mapped_columns if name not in columns]
             if missing:
                 raise FileHeaderMismatchError(
                     f"{len(missing)} coluna(s) do mapeamento ausente(s) no cabeçalho.",
-                    details={"missingColumns": missing, "foundColumns": columns},
+                    details={"missingColumns": missing, "foundColumnCount": len(columns)},
                 )
 
         return _check

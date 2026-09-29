@@ -8,7 +8,13 @@
 import { render, screen, within } from '@testing-library/react';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
+// O painel monta a seção de conexões, que lê `?conectar=` pelo `useUrlState`
+// (86e3fqnc9) — daí `usePathname`/`useSearchParams` no mock.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => '/clientes/c1/painel',
+  useSearchParams: () => new URLSearchParams(''),
+}));
 
 const detailState = {
   data: undefined as Record<string, unknown> | undefined,

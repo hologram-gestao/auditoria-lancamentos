@@ -109,14 +109,18 @@ function RefusalBody({
       return (
         <div className="space-y-3">
           <p>{refusal.userMessage}</p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <ColumnList
-              heading="Colunas do mapeamento ausentes no arquivo"
-              columns={refusal.missingColumns}
-              emphasized
-            />
-            <ColumnList heading="Colunas encontradas no arquivo" columns={refusal.foundColumns} />
-          </div>
+          <ColumnList
+            heading="Colunas do mapeamento ausentes no arquivo"
+            columns={refusal.missingColumns}
+            emphasized
+          />
+          {refusal.foundColumnCount > 0 && (
+            <p className="text-xs" data-testid="file-header-counts">
+              {`O arquivo tem ${refusal.foundColumnCount} ${
+                refusal.foundColumnCount === 1 ? 'coluna' : 'colunas'
+              }. Confira se a linha 1 é o cabeçalho e não o primeiro lançamento.`}
+            </p>
+          )}
           {onReviewMapping && <ReviewMappingButton onClick={onReviewMapping} />}
         </div>
       );

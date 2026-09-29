@@ -20,10 +20,14 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// A querystring é regravável por teste: `?conectar=<tipo>` manda a gaveta abrir
+// já no tipo que outra tela sabe que falta (86e3fqnc9).
+let searchParams = '';
+const routerReplace = vi.fn();
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+  useRouter: () => ({ replace: routerReplace, push: vi.fn() }),
   usePathname: () => '/clientes/c1/painel',
-  useSearchParams: () => new URLSearchParams(''),
+  useSearchParams: () => new URLSearchParams(searchParams),
 }));
 
 const listState = {
@@ -102,6 +106,8 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  searchParams = '';
+  routerReplace.mockReset();
   listState.data = [connection()];
   listState.isLoading = false;
   listState.isFetching = false;
@@ -301,6 +307,49 @@ describe('Origens — estados de carga', () => {
     );
     expect(screen.getByText('Nenhuma origem conectada')).toBeVisible();
     expect(screen.queryByRole('button', { name: /Conectar/ })).toBeNull();
+  });
+});
+
+describe('Origens — `?conectar=<tipo>` abre a gaveta no tipo pedido (86e3fqnc9)', () => {
+  it('abre a gaveta com o tipo já escolhido e limpa o parâmetro da URL', async () => {
+    searchParams = 'conectar=arquivo';
+    listState.data = [];
+    render(
+      <ClientConnectionsSection clientId={CLIENT_ID} originStatus="sem_origem" isClosed={false} />,
+    );
+    const drawer = await screen.findByRole('dialog');
+    expect(within(drawer).getByRole('combobox', { name: /Tipo/ })).toHaveTextContent('Arquivo');
+    // O parâmetro sai da URL: senão o refresh e o voltar reabririam a gaveta.
+    expect(routerReplace).toHaveBeenCalledWith('/clientes/c1/painel', { scroll: false });
+  });
+
+  it('sem o parâmetro a gaveta fica fechada', () => {
+    listState.data = [];
+    render(
+      <ClientConnectionsSection clientId={CLIENT_ID} originStatus="sem_origem" isClosed={false} />,
+    );
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('quem não pode gerir conexões não recebe gaveta nenhuma, e a URL é limpa igual', () => {
+    searchParams = 'conectar=arquivo';
+    listState.data = [];
+    authState.user = actor({ role: 'client_operator', scope: 'client', client_id: CLIENT_ID });
+    render(
+      <ClientConnectionsSection clientId={CLIENT_ID} originStatus="sem_origem" isClosed={false} />,
+    );
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(routerReplace).toHaveBeenCalledWith('/clientes/c1/painel', { scroll: false });
+  });
+
+  it('tipo desconhecido na URL cai no padrão, nunca num valor que o schema recusa', async () => {
+    searchParams = 'conectar=inventado';
+    listState.data = [];
+    render(
+      <ClientConnectionsSection clientId={CLIENT_ID} originStatus="sem_origem" isClosed={false} />,
+    );
+    const drawer = await screen.findByRole('dialog');
+    expect(within(drawer).getByRole('combobox', { name: /Tipo/ })).toHaveTextContent('Omie');
   });
 });
 

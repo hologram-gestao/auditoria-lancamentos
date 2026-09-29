@@ -147,15 +147,6 @@ const SETTINGS_ITEMS: ReadonlyArray<{
   },
 ];
 
-export interface ClientNavOptions {
-  /**
-   * S14 (R5): o cliente tem uma conexão do tipo `arquivo`? Decide se a aba
-   * "Origem por arquivo" existe. Vem do detalhe do cliente (`connections`),
-   * decidido por `hasFileConnection` — nunca pelo tipo comparado aqui.
-   */
-  hasFileOrigin?: boolean;
-}
-
 /** Rota da aba "Origem por arquivo" (S14) — a mesma que o link do de-para aponta. */
 export function fileOriginPath(clientId: string, competence?: string | null): string {
   const base = `/clientes/${clientId}/origem-arquivo`;
@@ -188,7 +179,6 @@ export function clientNavItems(
   user: AuthenticatedUser,
   clientId: string,
   pathname: string,
-  options: ClientNavOptions = {},
 ): NavItem[] {
   const base = `/clientes/${clientId}`;
   const accountsHref = `${base}/contas`;
@@ -305,20 +295,20 @@ export function clientNavItems(
     icon: <ArrowRightLeft className="h-4 w-4" aria-hidden="true" />,
     active: isMapping,
   });
-  // S14 (R5): "Origem por arquivo" existe só para o cliente que TEM uma conexão
-  // `arquivo` — é a aba onde o mapeamento se configura e o arquivo do mês é
-  // enviado. Não é gated por papel: LER o mapeamento e a lista de processados é
-  // de todo papel que alcança o cliente (o operador envia o arquivo); quem pede
-  // permissão é CONFIGURAR (`manage_input_mapping`), dentro da tela. A condição
-  // vem do detalhe (`hasFileConnection`), nunca de um `provider_type ===` aqui.
-  if (options.hasFileOrigin === true) {
-    items.push({
-      href: fileOriginHref,
-      label: 'Origem por arquivo',
-      icon: <FileSpreadsheet className="h-4 w-4" aria-hidden="true" />,
-      active: isFileOrigin,
-    });
-  }
+  // S14 (R5), revisto no follow-up 86e3fqnc9: "Origem por arquivo" é SEMPRE
+  // listada. Antes ela só existia para o cliente que já tinha conexão
+  // `arquivo`, e o resultado era um recurso invisível: quem opera não descobria
+  // que dá para atender cliente sem ERP mandando a planilha do mês. Quem
+  // explica o estado — sem origem, com Omie, encerrado — é a TELA, que também
+  // decide a ação pela permissão. Esconder aqui não é regra de §4.9: LER a aba
+  // não pede permissão nenhuma (a rota é `AccessibleClientDep`), e o que o
+  // servidor negaria é CONECTAR, que a tela já esconde de quem não pode.
+  items.push({
+    href: fileOriginHref,
+    label: 'Origem por arquivo',
+    icon: <FileSpreadsheet className="h-4 w-4" aria-hidden="true" />,
+    active: isFileOrigin,
+  });
   // Matriz: "Usuários" é de quem gere as pessoas DO tenant — gerente do
   // cliente, admin, plataforma e, desde a D2 (86e36ecjp), o gerente da
   // organização nos clientes da CARTEIRA. O "da carteira" não é esta linha: é
