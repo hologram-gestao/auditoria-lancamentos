@@ -63,15 +63,17 @@ from app.modules.client_mapping.accounting import HISTORY_UNDECIPHERABLE
 from app.modules.client_mapping.completeness import partida_completeness
 from app.modules.client_mapping.partida import Partida, derive_partida, is_partida_completa
 from app.modules.client_movements.competence import format_competence
-from app.modules.export_layouts.definition import AmountFormat, LayoutDefinition, LayoutField
+from app.modules.export_layouts.definition import (
+    FORMULA_PREFIXES,
+    AmountFormat,
+    LayoutDefinition,
+    LayoutField,
+)
 
 _ZERO = Decimal("0.00")
 _HUNDRED = Decimal("100")
 _ALVO = MaterializedSituation.ALVO.value
 _SEM_DECISAO = MaterializedSituation.SEM_DECISAO.value
-
-#: Caracteres que, no INÍCIO de uma célula, planilhas interpretam como fórmula.
-FORMULA_PREFIXES = ("=", "+", "-", "@")
 
 #: Campos cujo conteúdo é TEXTO vindo do dado (checados na recusa "e"). Data e valor são
 #: formatados pelo gerador a partir do layout, já validado na 13.2.
