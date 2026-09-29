@@ -551,8 +551,9 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    de-para: quem escolhe a conta e o histórico de cada categoria continua sendo
    `manage_client_mapping`, que inclui o `client_manager`. A LEITURA do plano e da
    associação é `AccessibleClientDep`. O par de teste é o da S10: `client_manager` LÊ
-   200 e importa ou associa 403, com linha `denied`. A exclusão do `client_manager` é
-   decisão do planejador pendente de validação humana.
+   200 e importa ou associa 403, com linha `denied`. A exclusão do `client_manager` foi
+   decisão do planejador, validada pelo Pedro em 29/09/2026 junto com as outras cinco
+   da sprint, todas mantidas (registro na página da Sprint 16 do doc Sprints).
 
    "(carteira)" e "(própria org)" **não** são células: são `resolve_client_access`
    e os filtros de coleção. **Tipos de anomalia é a única linha só-plataforma
@@ -1192,6 +1193,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.58 — 29/09/2026. **As 6 decisões do planejador da Sprint 16 foram validadas pelo Pedro e todas mantidas**, e a §4.9 deixou de chamar a exclusão do `client_manager` de pendente. As outras cinco não estavam no primer: modelo de planilha próprio para o plano contábil (o export nativo do Domínio fica para um futuro talvez, por não ter colunas documentadas), decisão legada do catálogo em `conta_contabil` incompleta sem bloquear, importação de de-para por planilha recusada nesse destino até a planilha levar o histórico (86e3fxqqe), conta padrão do banco só para linha sem conta de origem, e bloqueio por falta de banco só em linha com conta decidida. O registro fica na página da Sprint 16; os follow-ups da validação, no épico 86e3fxqq7._
 
 _Versão 1.57 — 28/09/2026. **A Sprint 16 (plano contábil do cliente e partida completa) entrou no primer, e o primer foi restaurado pela TERCEIRA vez.** O commit do QA levou o `CLAUDE.md` do worktree (o prompt do papel QA, 10.755 bytes) por cima do primer (162.607 bytes na develop), como nas S14 e S15; e a edição do `PROJECT.md` foi negada na sessão dele, com o texto deixado no `HANDOFF.md`. A validação humana (86e3fw419) restaurou da `develop` e aplicou à mão, com cada número conferido por comando no HEAD da branch: nota do topo e §3.15 com a lista canônica em **108** (as 4 rotas do plano contábil e da conta do banco), §4.1 com os pares de AAD em **17** (`client_accounting_accounts.name_encrypted`, `client_mapping_decisions.history_encrypted`), §4.9 com a matriz em **27** (`manage_client_accounting_chart`, do staff, e por que o `client_manager` fica de fora ao contrário do de-para), §4.12 com o purge da associação e do plano e a leitura do histórico de materialização retida (vazio ou `[indecifrável]`, nunca 500), dois reforços de regra que o QA pediu (§7 Backend: o limite do schema é o da COLUNA de destino, `max_length` com teste que amarra os dois; §7 Frontend: aviso de outra tela que aponta para a ação passa pelo mesmo gate), e a linha e o parágrafo da S16 na §8. O resto da validação rodou fora do sandbox: pytest completo contra Postgres em Python 3.12, como o CI (3622 passed, 0 failed), ciclo das 3 migrations, contrato com diff 0, vitest 962, a11y 514 por tema nos três temas, 50 verificações pela API e 9 prints pela tela. As 5 falhas da primeira rodada da suíte eram de TESTE nunca executado (fixture sem a conta do banco que a 16.3 passou a exigir; releitura de coluna que não repovoa a entidade da sessão compartilhada), com o produto provado certo pela API real. **Achado que fica, anterior à sprint e de toda a API:** a resposta sai antes do `commit()` da `get_db_session`, medido (14 de 15 criações com o `201` antes do dado, leitura velha na tela depois de salvar, e uma escrita que passou pela trava de cliente encerrado 76 ms depois do `204`); a correção muda a política de transação da API inteira e é decisão do Pedro._
 
