@@ -6473,6 +6473,9 @@ for (const vp of VIEWPORTS) {
       await expect(vazio.getByRole('link', { name: 'Ir para Origem por arquivo' })).toBeVisible();
       await expect(page.getByRole('link', { name: /Criar conciliação/ })).toHaveCount(0);
 
+      // Quem rola é o `<main>`, então `fullPage` sozinho fotografa o TOPO da
+      // página e o estado vazio nem sai do PNG a 390px (lição da 86e3fxqqh).
+      await vazio.scrollIntoViewIfNeeded();
       await shot(page, `painel-sem-conciliacoes-arquivo-${slugF}`);
       await analyze(page, `painel — sem conciliações, cliente por arquivo (${vp.label})`);
     });
