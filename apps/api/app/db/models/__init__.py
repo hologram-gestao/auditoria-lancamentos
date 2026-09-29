@@ -6,6 +6,10 @@ todos para autogenerate (`alembic revision --autogenerate`).
 
 from app.db.base import Base
 from app.db.models.access_audit import AccessAudit
+from app.db.models.accounting_file_generation import (
+    ACCOUNTING_FILE_GENERATION_CHECKS,
+    AccountingFileGeneration,
+)
 from app.db.models.anomaly_type import AnomalySeverity, AnomalyType
 from app.db.models.client import IV_HEX_LENGTH, Client
 from app.db.models.client_accounting_account import (
@@ -140,6 +144,12 @@ from app.db.models.client_title import (
     title_status_check,
     title_type_check,
 )
+from app.db.models.export_layout import (
+    UQ_EXPORT_LAYOUT_ORG_NAME,
+    UQ_EXPORT_LAYOUT_VERSION,
+    ExportLayout,
+    ExportLayoutVersion,
+)
 from app.db.models.mapping_catalog import (
     ACCOUNTING_DESTINATION_TYPE,
     DEFAULT_DESTINATION_TYPES,
@@ -210,6 +220,7 @@ __all__ = [
     "ACCOUNTING_ACCOUNT_NAME_PAIR_CONSTRAINT",
     "ACCOUNTING_ACCOUNT_TYPE_CONSTRAINT",
     "ACCOUNTING_DESTINATION_TYPE",
+    "ACCOUNTING_FILE_GENERATION_CHECKS",
     "CHART_OF_ACCOUNTS_STATUS_CONSTRAINT",
     "CLIENT_ROLES",
     "CLOSED_TITLE_STATUSES",
@@ -280,12 +291,15 @@ __all__ = [
     "UQ_CLIENT_MOVEMENT_SOURCE",
     "UQ_CLIENT_MOVEMENT_SYNC",
     "UQ_CLIENT_TITLE_CLIENT_EXTERNAL_ID",
+    "UQ_EXPORT_LAYOUT_ORG_NAME",
+    "UQ_EXPORT_LAYOUT_VERSION",
     "UQ_ORGANIZATION_NAME",
     "UQ_SOURCE_ACCOUNT_BINDING",
     "UQ_SOURCE_ACCOUNT_BINDING_DEFAULT",
     "UQ_USER_CLIENT_FAVORITE",
     "AccessAudit",
     "AccountingAccountType",
+    "AccountingFileGeneration",
     "AnomalyDetectedBy",
     "AnomalyReviewVerdict",
     "AnomalySeverity",
@@ -317,6 +331,8 @@ __all__ = [
     "DecimalSeparator",
     "DecisionOrigin",
     "DecisionType",
+    "ExportLayout",
+    "ExportLayoutVersion",
     "FileEntrySituation",
     "FileEntryUserAction",
     "GlossaryEntryKind",

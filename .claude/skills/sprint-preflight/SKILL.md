@@ -75,6 +75,26 @@ fazer quando o `diff` mostra arquivos — aí sincronize antes de ramificar (`ma
 base-sync`, ou `merge --ff-only origin/main`). Contar commits assustaria à toa em todo
 pré-voo feito depois de uma promoção.
 
+### E a `develop` LOCAL é a mesma do origin?
+
+Aqui o teste é o COMMIT, não o conteúdo: a ref local tem de apontar para o mesmo commit
+do `origin/develop`.
+
+```bash
+git rev-parse develop origin/develop           # esperado: as DUAS linhas iguais
+git checkout develop && git merge --ff-only origin/develop   # conserto, se diferirem
+```
+
+Na Sprint 13 (29/09/2026) a `develop` local estava em `786479a`, antes da Sprint 16,
+enquanto os worktrees nasceram do `origin/develop` (`ee621fb`). Até a correção do hub
+(86e3fyjan, `forkPoint` no `orchestrate.js`), o `PROJECT.md` dos quatro agents era copiado
+da árvore do checkout e o QA revisava `develop..HEAD`. Os executores leram um primer sem
+a S16, o QA recebeu os commits da S16 como se fossem da sprint, e o commit dele levou o
+prompt do papel por cima do primer, pela quarta vez. Com o hub corrigido, a sprint parte
+do origin de qualquer jeito, e o `make doctor` avisa quando as duas refs diferem. Alinhe
+mesmo assim: `git diff develop` no checkout principal segue mentindo enquanto a ref local
+estiver atrasada.
+
 ## Passo 2 — Docker ligado, e peça AGORA
 
 Testcontainers, Postgres local, `pnpm infra:up` e Playwright dependem dele. Peça para
@@ -195,6 +215,10 @@ node --test ~/agents-hub/test/orchestrate.test.js 2>&1 | tail -3   # a suíte do
 1. `package.json` da raiz de volta ao normal (passo 3), nas duas pontas.
 2. `git -C <repo> diff --name-only <base>..HEAD` — o que a sprint realmente commitou
    bate com o que as tasks pediam? Arquivo de raiz não entra (passo 6).
+   **E o primer não pode encolher:** `git diff --stat origin/develop...origin/<sprint>/integration -- CLAUDE.md`
+   com deleções em massa (ex.: `+80/-1304`) é o prompt do QA por cima do primer. O hub
+   recusa isso desde a 86e3fyjan; se aparecer, restaure da `develop` e aplique à mão o
+   patch que o QA deixou no `HANDOFF.md` dele.
 3. O `✅` chegou ao título da página no doc? Se não, `make sprints` vai oferecer a
    sprint feita como próxima na rodada seguinte — corrija o título.
 4. Memória e `CLAUDE.md` atualizados na mesma entrega; o que precisa sobreviver vai

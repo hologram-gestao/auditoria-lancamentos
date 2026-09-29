@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 **S0–S19 + Sprints 0–5 do agents-hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **108/108** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **116/116** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
 > **O que cada sprint do agents-hub entregou** (todas na `main`):
 >
@@ -192,7 +192,7 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**108** hoje — o arquivo é a fonte, confira com
+      (**116** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant E cross-org**: a bateria
       (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
@@ -200,7 +200,7 @@
       organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
-      (`PENDING_ENDPOINTS` está vazio: cobertura **108/108**). As 3 rotas do
+      (`PENDING_ENDPOINTS` está vazio: cobertura **116/116**). As 3 rotas do
       **plano de contas** (S10) e as 3 da **carteira de títulos** (S11 — lista,
       agregados e sincronizar) e as 3 da S15 (relatório de recebíveis, leitura e
       registro do contexto do título) entraram como coleção; as 20 da S12 também:
@@ -216,9 +216,16 @@
       da S16 também: leitura e importação do plano contábil do cliente
       (`GET /clients/{id}/accounting-chart`, `POST …/accounting-chart/import`) e
       leitura e escrita da conta do banco por conta de origem
-      (`GET`/`PUT /clients/{id}/source-accounts`). Só
-      auth, tipos de anomalia, `test-connection`, `alert-test` e as 5 rotas de
-      `/organizations` (plataforma, sem dado de cliente) ficam fora, com motivo.
+      (`GET`/`PUT /clients/{id}/source-accounts`). As 8 da S13 (arquivo contábil)
+      também: gerar, listar e baixar
+      (`POST`/`GET /clients/{id}/accounting-files`,
+      `GET …/accounting-files/{generation_id}/download`) e as 5 dos layouts de
+      exportação (`GET`/`POST /export-layouts`, `POST /export-layouts/from-template`,
+      `GET /export-layouts/{id}`, `POST /export-layouts/{id}/versions`), estas por
+      ORGANIZAÇÃO como o catálogo da S12 (alvo da bateria numa terceira org). Só
+      auth, tipos de anomalia, `test-connection`, `alert-test`, as 5 rotas de
+      `/organizations` (plataforma, sem dado de cliente) e `GET /export-layout-templates`
+      (modelos declarados no código, iguais para toda organização) ficam fora, com motivo.
       Essa lista é o denominador da métrica de isolamento — endpoint fora dela é
       buraco que ninguém mede.
     - **Identidade de usuário em response é ENXUTA e mascarada por escopo**
@@ -442,7 +449,7 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
 9. **Matriz de permissões (Sprint 5 + camada de organizações):** declarativa e
    ÚNICA em `PERMISSION_MATRIX`
    ([apps/api/app/core/authz.py](apps/api/app/core/authz.py)), consultada por
-   `has_permission`; 27 permissões x 5 papéis, transcrita célula a célula em
+   `has_permission`; 29 permissões x 5 papéis, transcrita célula a célula em
    `tests/unit/test_authz_matrix.py`, com um teste que trava **a plataforma em
    toda linha**. No front, o espelho é `apps/web/src/lib/authz.ts` — **um**
    helper, nunca `if (role === ...)` espalhado por componente — com a mesma
@@ -450,38 +457,41 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    fontes divergindo é o que esse teste existe para pegar. A seção
    **Configurações** do menu é montada item a item pela matriz
    (`nav-items.tsx`), não por um "quem vê Configurações" único: o admin da
-   organização vê DOIS itens (Usuários e Categorias), a plataforma vê quatro
-   (Organizações e Tipos de Anomalia são dela), o gerente não vê a seção.
+   organização vê TRÊS itens (Usuários, Categorias e Layouts de exportação), a
+   plataforma vê cinco (Organizações e Tipos de Anomalia são dela), o gerente não vê a
+   seção.
 
-   | Ação                            | platform_admin | admin (org)      | manager (org)         | client_manager | client_operator |
-   | ------------------------------- | -------------- | ---------------- | --------------------- | -------------- | --------------- |
-   | Criar/rodar conciliação         | ✅             | ✅               | ✅                    | ✅             | ✅              |
-   | Revisar / exportar              | ✅             | ✅               | ✅                    | ✅             | ✅              |
-   | Sincronizar contas do Omie      | ✅             | ✅               | ✅                    | ✅             | ✅              |
-   | Manter o glossário              | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
-   | Gerir usuários do cliente       | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
-   | Criar cliente                   | ✅             | ✅               | ✅ (vira responsável) | ❌             | ❌              |
-   | Editar/excluir/encerrar cliente | ✅             | ✅               | ❌                    | ❌             | ❌              |
-   | Gerir conexões de origem        | ✅             | ✅               | ✅ (carteira)         | ❌             | ❌              |
-   | Ver outro tenant                | ✅             | ✅ (própria org) | ✅ (carteira)         | ❌             | ❌              |
-   | Gerir usuários da org           | ✅             | ✅ (própria org) | ❌                    | ❌             | ❌              |
-   | Categorias de cliente (escrita) | ✅             | ✅ (própria org) | ❌                    | ❌             | ❌              |
-   | Tipos de anomalia (escrita)     | ✅             | ❌               | ❌                    | ❌             | ❌              |
-   | Gerir organizações              | ✅             | ❌               | ❌                    | ❌             | ❌              |
-   | Teste de alerta                 | ✅             | ✅               | ❌                    | ❌             | ❌              |
-   | Ver plano de contas (S10)       | ✅             | ✅               | ✅ (carteira)         | ✅             | ✅              |
-   | Sincronizar plano de contas     | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
-   | Ver títulos em aberto (S11)     | ✅             | ✅               | ✅ (carteira)         | ✅             | ✅              |
-   | Sincronizar títulos em aberto   | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
-   | Ver contexto do título (S15)    | ✅             | ✅               | ✅ (carteira)         | ✅             | ✅              |
-   | Registrar contexto do título    | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
-   | Sincronizar movimentos (S12)    | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
-   | Editar o de-para (S12)          | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
-   | Catálogo de destinos (escrita)  | ✅             | ✅ (própria org) | ❌                    | ❌             | ❌              |
-   | Redefinir senha de usuário      | ✅             | ❌               | ❌                    | ❌             | ❌              |
-   | Enviar arquivo do cliente (S14) | ✅             | ✅               | ✅ (carteira)         | ✅             | ✅              |
-   | Configurar mapeamento (S14)     | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
-   | Plano contábil do cliente (S16) | ✅             | ✅               | ✅ (carteira)         | ❌             | ❌              |
+   | Ação                                | platform_admin | admin (org)      | manager (org)         | client_manager | client_operator |
+   | ----------------------------------- | -------------- | ---------------- | --------------------- | -------------- | --------------- |
+   | Criar/rodar conciliação             | ✅             | ✅               | ✅                    | ✅             | ✅              |
+   | Revisar / exportar                  | ✅             | ✅               | ✅                    | ✅             | ✅              |
+   | Sincronizar contas do Omie          | ✅             | ✅               | ✅                    | ✅             | ✅              |
+   | Manter o glossário                  | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
+   | Gerir usuários do cliente           | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
+   | Criar cliente                       | ✅             | ✅               | ✅ (vira responsável) | ❌             | ❌              |
+   | Editar/excluir/encerrar cliente     | ✅             | ✅               | ❌                    | ❌             | ❌              |
+   | Gerir conexões de origem            | ✅             | ✅               | ✅ (carteira)         | ❌             | ❌              |
+   | Ver outro tenant                    | ✅             | ✅ (própria org) | ✅ (carteira)         | ❌             | ❌              |
+   | Gerir usuários da org               | ✅             | ✅ (própria org) | ❌                    | ❌             | ❌              |
+   | Categorias de cliente (escrita)     | ✅             | ✅ (própria org) | ❌                    | ❌             | ❌              |
+   | Tipos de anomalia (escrita)         | ✅             | ❌               | ❌                    | ❌             | ❌              |
+   | Gerir organizações                  | ✅             | ❌               | ❌                    | ❌             | ❌              |
+   | Teste de alerta                     | ✅             | ✅               | ❌                    | ❌             | ❌              |
+   | Ver plano de contas (S10)           | ✅             | ✅               | ✅ (carteira)         | ✅             | ✅              |
+   | Sincronizar plano de contas         | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
+   | Ver títulos em aberto (S11)         | ✅             | ✅               | ✅ (carteira)         | ✅             | ✅              |
+   | Sincronizar títulos em aberto       | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
+   | Ver contexto do título (S15)        | ✅             | ✅               | ✅ (carteira)         | ✅             | ✅              |
+   | Registrar contexto do título        | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
+   | Sincronizar movimentos (S12)        | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
+   | Editar o de-para (S12)              | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
+   | Catálogo de destinos (escrita)      | ✅             | ✅ (própria org) | ❌                    | ❌             | ❌              |
+   | Redefinir senha de usuário          | ✅             | ❌               | ❌                    | ❌             | ❌              |
+   | Enviar arquivo do cliente (S14)     | ✅             | ✅               | ✅ (carteira)         | ✅             | ✅              |
+   | Configurar mapeamento (S14)         | ✅             | ✅               | ✅ (carteira)         | ✅             | ❌              |
+   | Plano contábil do cliente (S16)     | ✅             | ✅               | ✅ (carteira)         | ❌             | ❌              |
+   | Gerar/baixar arquivo contábil (S13) | ✅             | ✅               | ✅ (carteira)         | ❌             | ❌              |
+   | Layouts de exportação (S13)         | ✅             | ✅ (própria org) | ❌                    | ❌             | ❌              |
 
    **`manage_client_connections` (Sprint 9) inclui o `manager` de propósito**: ele
    cria cliente, e sem a célula o gerente do escritório parceiro cadastraria a
@@ -555,6 +565,22 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    decisão do planejador, validada pelo Pedro em 29/09/2026 junto com as outras cinco
    da sprint, todas mantidas (registro na página da Sprint 16 do doc Sprints).
 
+   **As duas da Sprint 13 (arquivo contábil) também são próprias, e `review_export` NÃO
+   serve.** `generate_accounting_file` (gerar, listar e baixar) é do STAFF: o arquivo é
+   artefato de trabalho do escritório, que ele sobe na contabilidade do cliente final, e
+   `review_export` é dos cinco papéis — reusá-la deixaria o `client_operator` baixar esse
+   arquivo (teste `test_review_export_continua_de_todos`). `manage_export_layouts`
+   (criar, versionar, criar a partir do modelo) é plataforma e admin: layout é
+   configuração da ORGANIZAÇÃO e uma versão nova muda o arquivo de todos os clientes
+   dela; não reusa `manage_mapping_catalog`, cujas células coincidem hoje por outra
+   pergunta. LER layouts aceita qualquer das duas (o gerente escolhe o layout ao gerar)
+   e LISTAR gerações pede `generate_accounting_file` — as duas leituras foram decisões do
+   planejador (ADR-091-BE, ADR-093-BE), validadas pelo Pedro em 29/09/2026 junto com as
+   outras duas da sprint, todas mantidas: o `<N>` do nome do arquivo é a versão da
+   MATERIALIZAÇÃO, não a do layout, e o layout aceita de 2 a 4 casas decimais. O usuário de
+   cliente negado nas rotas de layout (sem `client_id`) grava `denied` com o PRÓPRIO
+   tenant (`require_org_permission`).
+
    "(carteira)" e "(própria org)" **não** são células: são `resolve_client_access`
    e os filtros de coleção. **Tipos de anomalia é a única linha só-plataforma
    além de "Gerir organizações"**: a taxonomia é uma tabela GLOBAL do produto, e
@@ -622,7 +648,11 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
       materializações retidas, o **histórico** de cada item é lido pela vigência que o
       decidiu: com as decisões purgadas e a DEK destruída, ele passa a ler vazio (ou
       `[indecifrável]`), nunca 500, e o código da conta e o do banco, que estão em
-      claro no snapshot, continuam;
+      claro no snapshot, continuam; as **gerações do arquivo contábil** (S13,
+      `accounting_file_generations`, só metadados e SHA-256) também FICAM no
+      encerramento, legíveis, sem gerar nem baixar (o histórico dos itens não é mais
+      legível, então o arquivo não se reproduz); na exclusão definitiva saem ANTES das
+      materializações (apontam para elas) e dos usuários (autoria RESTRICT);
       conciliações, valores, datas,
       categoria e carteira FICAM, só-leitura.
     - **Encerrado é TERMINAL**: cliente que volta é cadastro novo. Toda escrita
@@ -910,6 +940,7 @@ ClickUp**, não no repo. `make sprints` lista o estado.
 | **12** | De-para multi-destino                      | `client_movements`/`client_movement_syncs`, `mapping_destinations`/`mapping_targets`, `client_mapping_decisions`, `client_mapping_materializations(_items)`, aba "De-para"            |
 | **14** | Origem por arquivo (cliente sem ERP)       | provedor `arquivo` (`file_adapter.py`), `client_input_mappings`, `client_file_categories`, `client_file_imports`, `client_movements.description_encrypted`, rota "Origem por arquivo" |
 | **15** | Contexto do título: acordo × inadimplência | `title_contexts`, rotas `/titles/{id}/context` e `/titles/receivables-report`, aba "Relatório de recebíveis"                                                                          |
+| **13** | Exportador para sistema contábil           | `export_layouts`/`export_layout_versions`, `accounting_file_generations`, `modules/export_layouts/` e `accounting_files/`, "Gerar arquivo" no de-para, tela "Layouts de exportação"   |
 | **16** | Plano contábil do cliente e partida        | `client_accounting_accounts`, `client_source_account_bindings`, `history_encrypted`, snapshot com conta, banco e vigência, tela "Plano contábil"                                      |
 
 **A Sprint 12 (de-para multi-destino)** criou a peça central da plataforma: a decisão
@@ -1014,6 +1045,37 @@ vez. Ela também mediu um defeito ANTERIOR à sprint e de toda a API: a resposta
 commit da `get_db_session` (em 14 de 15 criações o `201` chegou antes do dado), o que fez a
 tela ler estado velho e, uma vez, deixou uma escrita passar pela trava de cliente encerrado
 logo depois do `204` do encerramento.
+
+**A Sprint 13 (exportador para sistema contábil)** fecha o ciclo do escritório parceiro: da
+materialização do de-para no destino `conta_contabil` sai o arquivo que o sistema contábil
+importa, byte a byte. O que vale como lei:
+
+- **layout é configuração versionada por ORGANIZAÇÃO**, nunca código por cliente: vocabulário
+  fechado de campos (`LayoutField`, a mesma enum na validação e no gerador), parâmetros do
+  arquivo validados com 422 `LAYOUT_INVALIDO` nomeando o campo; alterar grava a versão N+1 e a
+  anterior fica consultável; o modelo "Domínio: lançamentos contábeis (CSV)" é dado do CÓDIGO;
+  prefixo do valor e cabeçalho de coluna que começam com `= + - @` são recusados pela MESMA
+  lista (`FORMULA_PREFIXES`) que recusa o texto do dado;
+- **geração determinística e sem recálculo**: linhas só de `materialized_lines` (snapshot +
+  histórico da vigência), partida só de `derive_partida`, ordem (data, `source_movement_id`, id
+  do item); mesma materialização + mesma versão de layout = mesmos bytes e mesmo SHA-256;
+- **recusa, nunca altera texto**: cobertura parcial, completude de partida < 100%, partição que
+  não fecha e texto que não cabe (quebra de linha, separador, início `= + - @`, fora da
+  codificação) são 409 tipados que nomeiam só CÓDIGOS de categoria; nada é substituído,
+  escapado ou truncado (o `quotePrefix` do Excel não serve aqui);
+- **o conteúdo do arquivo não persiste**: `accounting_file_generations` guarda só metadados e o
+  SHA-256; o download REGENERA e confere (divergência = 409 `ARQUIVO_DIVERGENTE` + alerta de
+  plantão, nunca um arquivo diferente); `export` na trilha na geração e em cada download;
+  cliente encerrado = gerar e baixar 409, histórico legível; exclusão definitiva apaga as
+  gerações antes das materializações;
+- a métrica é `arquivo_contabil_gerado` (8 chaves, só IDs e números) casada com o
+  `depara_aplicado` pelo `materializacao_id`, que passou a existir nele (sem backfill).
+
+Números deste primer: endpoints sensíveis 108 → **116**, matriz 27 → **29**, pares de AAD seguem
+**17**. O QA aprovou as 6 tasks na rodada 1 por revisão estática, unitários (2204 back, 1016
+front), contrato com diff 0 e o teste-ouro unitário da amostra (32/32 byte a byte), SEM Docker:
+integração, a11y em browser e prints ficaram para a validação humana (ADR-043-QA), junto com a
+importação real no Domínio sem advertência.
 
 ✅ **A Sprint 15 (contexto do título) foi validada em 24/09/2026 à noite** (PR #203
 da sprint, correções da validação em `fix/S15-validation-findings`). Ela pendura no
@@ -1193,6 +1255,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.59 — 29/09/2026. **A Sprint 13 (exportador para sistema contábil) entrou no primer, e o primer foi restaurado pela QUARTA vez.** O commit do QA (`1012e8e`) levou o `CLAUDE.md` do worktree (o prompt do papel, 87 linhas) por cima das 1311 do primer, e a edição do `PROJECT.md` foi negada na sessão dele; o patch ficou no `HANDOFF.md` e a validação humana (86e3fypch) o aplicou com cada número conferido por comando: §3.15 com as 8 rotas novas (108 → **116**) e `GET /export-layout-templates` fora com motivo; §4.9 com `generate_accounting_file` e `manage_export_layouts` (27 → **29**) e o porquê de `review_export` não servir; §4.12 com as gerações (ficam no encerramento, saem antes das materializações na exclusão definitiva); §8 com a linha e o parágrafo da S13. Pares de AAD seguem **17**. As 4 decisões do planejador da sprint (quem lê layouts, quem lista gerações, o `<N>` do nome do arquivo e as casas decimais) foram validadas pelo Pedro e mantidas. A causa desta vez foi dupla: o `AGENT_PATHS_QA` alcança o `CLAUDE.md` do worktree, e o hub semeou os `PROJECT.md` de uma `develop` LOCAL sem a S16. O hub passou a semear do commit de onde o worktree saiu, a tirar o `CLAUDE.md` do worktree de todo commit e a recusar primer que encolhe ou perde a última `_Versão` (86e3fyjan, repositório `agents-hub`); a skill `sprint-preflight` exige a `develop` local igual à do origin. A validação rodou o que o QA não pôde: pytest completo contra Postgres em Python 3.12 (3920 passed, 0 failed), ciclo das 2 migrations, contrato com diff 0, vitest 1020, a11y 558 por tema nos três temas, 102 verificações pela API (o arquivo gerado da amostra é o CSV real do escritório byte a byte) e prints desktop e 390px. No mesmo PR entraram os dois outros follow-ups do QA: prefixo do valor e cabeçalho de coluna que começam com `= + - @` são 422 (`FORMULA_PREFIXES` virou fonte única, na definição do layout), e três estados do front (diálogo de layout que não resetava, recusa velha na tela depois de materializar de novo, diálogo do modelo fechando com o POST em andamento). A resposta antes do commit (86e3fxqqa) apareceu de novo, duas vezes, no cenário pela API._
 
 _Versão 1.58 — 29/09/2026. **As 6 decisões do planejador da Sprint 16 foram validadas pelo Pedro e todas mantidas**, e a §4.9 deixou de chamar a exclusão do `client_manager` de pendente. As outras cinco não estavam no primer: modelo de planilha próprio para o plano contábil (o export nativo do Domínio fica para um futuro talvez, por não ter colunas documentadas), decisão legada do catálogo em `conta_contabil` incompleta sem bloquear, importação de de-para por planilha recusada nesse destino até a planilha levar o histórico (86e3fxqqe), conta padrão do banco só para linha sem conta de origem, e bloqueio por falta de banco só em linha com conta decidida. O registro fica na página da Sprint 16; os follow-ups da validação, no épico 86e3fxqq7._
 

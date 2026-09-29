@@ -30,6 +30,7 @@ from app.modules.usage_events.service import UsageEventService, decimal_to_cents
 
 _ADAPTER: TypeAdapter[Any] = TypeAdapter(UsageEventRequest)
 _CLIENT_ID = UUID("3f7b1e2a-0000-4000-8000-0000000000c1")
+_MATERIALIZATION_ID = UUID("3f7b1e2a-0000-4000-8000-0000000000a1")
 
 _S12_EVENTS = [UsageEventName.MOVIMENTOS_SINCRONIZADOS, UsageEventName.DEPARA_APLICADO]
 
@@ -63,6 +64,7 @@ def _depara(**over: Any) -> dict[str, Any]:
         "client_id": _CLIENT_ID,
         "destino": "demonstrativo_contabil",
         "competencia": "2026-06",
+        "materializacao_id": _MATERIALIZATION_ID,
         "valor_com_decisao_centavos": 9_820_00,
         "valor_nao_mapear_centavos": 1_200_00,
         "valor_sem_decisao_centavos": 180_00,
@@ -162,13 +164,15 @@ class TestMovimentosSincronizados:
 
 
 class TestDeparaAplicado:
-    def test_props_tem_exatamente_as_sete_chaves(self) -> None:
+    def test_props_tem_exatamente_as_oito_chaves(self) -> None:
         """As seis do Outcome do PRD + `competencia` (follow-up 86e3f0ux7, item 6):
-        sem ela a leitura D+30 por competência não era possível."""
+        sem ela a leitura D+30 por competência não era possível + `materializacao_id`
+        (S13, BACK 13.1): sem ela a métrica da S13 não casa com o arquivo gerado."""
         assert set(DeparaAplicadoProps.model_fields) == {
             "client_id",
             "destino",
             "competencia",
+            "materializacao_id",
             "valor_com_decisao_centavos",
             "valor_nao_mapear_centavos",
             "valor_sem_decisao_centavos",
@@ -239,6 +243,7 @@ class TestDeparaAplicado:
             client_id=_CLIENT_ID,
             destino="demonstrativo_contabil",
             competencia=date(2026, 6, 1),
+            materializacao_id=_MATERIALIZATION_ID,
             valor_com_decisao=Decimal("98200.00"),
             valor_nao_mapear=Decimal("12000.10"),
             valor_sem_decisao=Decimal("1800.05"),
@@ -252,6 +257,7 @@ class TestDeparaAplicado:
         assert props["valor_com_decisao_centavos"] == 9_820_000
         assert props["valor_nao_mapear_centavos"] == 1_200_010
         assert props["valor_sem_decisao_centavos"] == 180_005
+        assert props["materializacao_id"] == str(_MATERIALIZATION_ID)
         for chave in (
             "valor_com_decisao_centavos",
             "valor_nao_mapear_centavos",
@@ -273,6 +279,7 @@ class TestDeparaAplicado:
             "client_id": _CLIENT_ID,
             "destino": "demonstrativo_contabil",
             "competencia": date(2026, 6, 1),
+            "materializacao_id": _MATERIALIZATION_ID,
             "valor_com_decisao": Decimal("1.00"),
             "valor_nao_mapear": Decimal("0"),
             "valor_sem_decisao": Decimal("0"),

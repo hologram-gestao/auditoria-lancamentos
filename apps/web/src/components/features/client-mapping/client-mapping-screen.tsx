@@ -58,6 +58,7 @@ import type { ListClientMappingParams } from '@/lib/api/client-mapping';
 import { hasPermission, isPlatformScoped } from '@/lib/authz';
 import { isCompetence, localCurrentCompetence } from '@/lib/competence';
 import type { MappingDestination } from '@/lib/contracts';
+import { triggerBrowserDownload } from '@/lib/download';
 import { originIsFileBased } from '@/lib/origin-capabilities';
 import { useAuthStore } from '@/stores/auth';
 
@@ -159,6 +160,10 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
   const canManageChart = hasPermission(currentUser, 'manage_client_accounting_chart');
   const canSync = hasPermission(currentUser, 'sync_client_movements');
   const canUpload = hasPermission(currentUser, 'upload_client_file');
+  // S13: gerar/baixar o arquivo contábil e (para o texto do "sem layout")
+  // administrar layouts — duas permissões próprias, nunca `review_export`.
+  const canGenerateFile = hasPermission(currentUser, 'generate_accounting_file');
+  const canManageLayouts = hasPermission(currentUser, 'manage_export_layouts');
   // S14: origem por ARQUIVO — a base vem do envio, não do sync (409
   // `ORIGEM_POR_ARQUIVO`). Decidido pela capacidade, no helper único.
   const fileOrigin = originIsFileBased(client?.connections ?? []);
@@ -185,6 +190,19 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
   function clearFilters() {
     setCodeInput('');
     setMany({ [PARAM.situation]: null, [PARAM.code]: null, [PARAM.page]: null });
+  }
+
+  // S13: a recusa do arquivo nomeia a categoria a corrigir — leva à aba
+  // Decisões filtrada por ela, onde a gaveta de decisão abre. O campo de busca é
+  // atualizado junto, senão o debounce escreveria o termo antigo de volta.
+  function reviewCategory(categoryCode: string) {
+    setCodeInput(categoryCode);
+    setMany({
+      [PARAM.view]: null,
+      [PARAM.code]: categoryCode,
+      [PARAM.situation]: null,
+      [PARAM.page]: null,
+    });
   }
 
   function clearCode() {
@@ -345,6 +363,10 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
                 isClosed={isClosed}
                 originStatus={client?.origin_status ?? 'ativa'}
                 fileOrigin={fileOrigin}
+                canGenerateFile={canGenerateFile}
+                canManageLayouts={canManageLayouts}
+                layoutsOrganizationId={platform ? clientOrganizationId : null}
+                onReviewCategory={reviewCategory}
               />
             </TabsContent>
           </Tabs>
@@ -376,19 +398,4 @@ export function defaultDestinationType(destinations: readonly MappingDestination
     destinations[0]?.type ??
     ''
   );
-}
-
-/**
- * Link temporário + `click()` — o padrão do download de blob da casa
- * (`export-report-button.tsx`). O revoke libera a memória do objeto.
- */
-function triggerBrowserDownload(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
 }

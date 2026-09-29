@@ -14,6 +14,7 @@ import {
   BookOpen,
   Building2,
   Calculator,
+  FileOutput,
   FileSpreadsheet,
   Landmark,
   LayoutDashboard,
@@ -140,6 +141,15 @@ const SETTINGS_ITEMS: ReadonlyArray<{
     label: 'Categorias de Cliente',
     icon: <Tags className="h-4 w-4" aria-hidden="true" />,
     permission: 'manage_client_categories',
+  },
+  // S13 (R3): os layouts do arquivo contábil são configuração da ORGANIZAÇÃO —
+  // plataforma e admin. O gerente GERA o arquivo (`generate_accounting_file`, no
+  // de-para) mas não administra layout, então não vê o item.
+  {
+    href: '/configuracoes/layouts-exportacao',
+    label: 'Layouts de exportação',
+    icon: <FileOutput className="h-4 w-4" aria-hidden="true" />,
+    permission: 'manage_export_layouts',
   },
   {
     href: '/configuracoes/organizacoes',

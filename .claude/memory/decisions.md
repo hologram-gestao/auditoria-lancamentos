@@ -6770,3 +6770,346 @@ Reprovação do QA: os avisos de pendência mandavam o leitor fazer o que a matr
   `AccountingPlanNotice` (lista) e o estado "sem plano" da `AccountingDecisionSheet` (esta não
   estava na reprovação, mas tinha o mesmo "Importe o plano" para o `client_manager`) trocam o
   verbo por texto informativo e o link por "Ver Plano contábil".
+
+## ADR-090-BE — Outcome da Sprint 13: `materializacao_id` no `depara_aplicado` e o evento `arquivo_contabil_gerado` (Sprint 13 / BACK 13.1)
+
+**Data:** 2026-09-29 · **Status:** ativo · **Escopo:** `usage_events/schemas.py` (enum,
+`DeparaAplicadoProps`, `ArquivoContabilGeradoProps`), `usage_events/service.py`
+(`emit_depara_aplicado`, `emit_arquivo_contabil_gerado`), `client_mapping/materialization.py`.
+
+**Chave de casamento:** `DeparaAplicadoProps.materializacao_id: UUID` (obrigatória na emissão);
+`materialize` passa `materialization.id` (a linha recém-criada, depois do `refresh`/`commit`).
+**Sem backfill:** eventos anteriores ao deploy da S13 não têm a chave; a leitura D+30 casa por
+`materializacao_id`, então eles ficam fora por construção (registrado no docstring e no comentário
+do enum).
+
+**Evento novo `arquivo_contabil_gerado`:** as OITO chaves do PRD e nenhuma a mais (`client_id`,
+`destino` slug, `competencia` `YYYY-MM`, `materializacao_id`, `layout_id`, `layout_versao ge=1`,
+`linhas ge=0`, `valor_total_centavos ge=0`). Nenhum nome (layout, cliente, categoria) nem histórico;
+entrou no guardrail anti-PII (`_PROPS_MODELS`). De backend, fora de `CLIENT_EMITTED_EVENTS` e FORA
+de `DEDUPED_EVENT_NAMES` (cada geração é uma linha; nenhuma migration).
+
+**Emissor `emit_arquivo_contabil_gerado`:** recebe `valor_total: Decimal` (Σ|valor| das linhas do
+arquivo) e converte por `decimal_to_cents`; props em `_props_or_none` (fail-soft: a 13.4 chama
+DEPOIS do commit da geração). Não há outro "mapa evento→props" no repo além do enum + modelo +
+emissor (o sink valida no emissor); a documentação do evento é o comentário do enum (fórmula,
+baseline ~15 min, alvo ≤ 2 min, primeira geração de cada materialização).
+
+**Fórmula D+30:** mediana de `arquivo_contabil_gerado.created_at − depara_aplicado.created_at`
+casados por `props->>'materializacao_id'`, usando a PRIMEIRA geração de cada materialização.
+
+⚠️ Integração (`test_client_mapping_materialization_endpoints.py`, que agora afirma
+`materializacao_id` = id da linha gravada e = `data.id` da resposta) ajustada e NÃO executada
+(socket do Docker negado pelo sandbox).
+
+## ADR-091-BE — Layout de exportação por organização, versionado, com o modelo Domínio no código; duas permissões novas e a leitura do gerente (Sprint 13 / BACK 13.2)
+
+**Data:** 2026-09-29 · **Status:** ativo (decisão (a) PENDENTE de validação humana) · **Escopo:**
+`db/models/export_layout.py`, migration `b3d9e5f17a20`, `modules/export_layouts/` (definition PURO,
+repository, service, schemas, routes), `authz.py` (+2 permissões, 27 → 29), `dependencies.py`
+(`require_org_permission`, `ManageExportLayoutsDep`, `ReadExportLayoutsDep`, `GenerateAccountingFileDep`),
+`ErrorCode.LAYOUT_INVALIDO`/`LAYOUT_NOME_DUPLICADO`, lista canônica 108 → 113.
+
+**Modelo:** `export_layouts` (organização RESTRICT, nome, sistema alvo em texto, `created_by` RESTRICT,
+`UNIQUE(organization_id, name)` — o "criar a partir do modelo" clicado duas vezes vira 409, via SAVEPOINT +
+nome da constraint) + `export_layout_versions` (definição JSONB IMUTÁVEL, `UNIQUE(layout_id, version)`,
+`CHECK version >= 1`, autor RESTRICT). Nova versão = `SELECT … FOR UPDATE` do layout (já no alcance) → N+1 →
+SAVEPOINT (a UNIQUE é a rede; perdeu → 409). Nenhum `UPDATE` de definição, nenhuma rota que apague. Nenhum
+campo cifrado (layout é configuração da organização; nenhum par de AAD novo). Sem `server_default` de
+organização (tabela nova, sem escritor legado).
+
+**Definição (`export_layouts/definition.py`, PURO):** vocabulário FECHADO `LayoutField` (data, conta_debito,
+conta_credito, valor, historico, competencia, codigo_categoria_origem) — a MESMA enum que o gerador (13.3)
+consome. Coluna = campo + rótulo opcional do cabeçalho; o FORMATO da coluna vem do campo (data pelo
+`dateFormat`, valor pelo `amountFormat`, o resto texto) — sem formato por coluna à parte (seriam duas
+respostas para a mesma pergunta). Parâmetros: `separator`, `hasHeader`, `encoding`, `lineEnding` (crlf|lf),
+`dateFormat` (tokens dd/mm/aaaa|aa com um separador), `amountFormat` {prefix, thousandsSeparator,
+decimalSeparator, decimalPlaces 0–4}; valor sempre absoluto. JSONB guarda a forma CANÔNICA camelCase
+(`to_json()`), e ler de volta passa pela mesma `parse_definition`.
+
+**Erros:** a FORMA (tipo, chave desconhecida, obrigatório, tetos de string e de 20 colunas) é Pydantic → 400
+`VALIDATION_ERROR`. O que ORIENTA é `ExportLayoutDefinitionError` 422 `LAYOUT_INVALIDO` com
+`details.field` no caminho do JSON (`columns[2].field`, `encoding`, `amountFormat.decimalPlaces`…), levantado
+ANTES de qualquer escrita. Por isso os campos semânticos são `str`/`int` livres no schema (um `Literal`
+transformaria "campo fora do vocabulário" em 400 mudo). Codificação: `codecs.lookup` + codificar um texto
+(recusa `base64`/`rot13`/`zlib`, que o lookup conhece). Separador vazio, com quebra de linha, alfanumérico ou
+igual ao decimal → `separator`; milhar igual ao decimal/ao separador; prefixo com dígito/separador/fora da
+codificação; cabeçalho com separador/quebra/fora da codificação.
+
+**Modelo Domínio** declarado no CÓDIGO (`DOMINIO_TEMPLATE`, chave `dominio_lancamentos_csv`), exatamente a
+tabela do PRD lida da amostra: data;conta_debito;conta_credito;valor;historico, `;`, sem cabeçalho, `latin-1`,
+CRLF, `dd/mm/aaaa`, `R$ ` + `.` + `,` + 2 casas. O "criar a partir do modelo" passa a definição do modelo pela
+MESMA validação.
+
+**Rotas (paths da sugestão do PRD):** `GET /export-layout-templates` (fora da lista canônica: dado de código);
+`GET /export-layouts` (`?organizationId=` via `resolve_organization_filter`); `POST /export-layouts`;
+`POST /export-layouts/from-template` (literal ANTES de `/{layout_id}`); `GET /export-layouts/{id}` (todas as
+versões, autor por `author_for_viewer`); `POST /export-layouts/{id}/versions`. Organização do layout novo por
+`resolve_organization_for_creation`; organização suspensa = 409 na escrita. PK de outra organização = 404
+(`scoped_by_organization` no SELECT; sem linha de trilha — não há padrão para 404 de configuração de org,
+como no catálogo da S12). Escritas commitam no serviço antes de responder (a correção geral 86e3fxqqa não é
+desta sprint).
+
+**Permissões (células do PRD R3):** `generate_accounting_file` = `_STAFF`; `manage_export_layouts` =
+`_ADMINS`. `review_export` intocada (teste). **(a) DECISÃO DO PLANEJADOR, pendente de validação humana:**
+LER layouts pede `manage_export_layouts` OU `generate_accounting_file` (o gerente escolhe o layout ao gerar);
+usuário de cliente não lê.
+
+**Guard de organização (`require_org_permission(*perms)`):** as rotas de layout não têm `client_id`. A
+negação de USUÁRIO DE CLIENTE grava 1 linha `denied` em `access_audit` com `commit=True`; como a coluna
+`client_id` é NOT NULL e não há cliente alvo, ela recebe o tenant DO PRÓPRIO ATOR (`user_scope='client'` e
+`actor_client_id` a distinguem de uma negação cross-tenant). Staff negado (o gerente escrevendo) recebe 403
+sem linha: não há tenant a registrar.
+
+**Bateria:** layout-alvo de uma TERCEIRA organização (`SECRET_LAYOUT_C`), como o catálogo da S12; bodies
+válidos (definição do modelo). Contagem `grep -c "SensitiveEndpoint("` = 113; doc regenerada (113/113).
+`schema.ts` do front NÃO é deste papel (scope-guard): a FRONT regenera pela receita do ADR-045-FE.
+
+⚠️ Integração (`test_export_layouts_endpoints.py`, `test_migrations.py::TestLayoutsDeExportacaoRoundTrip`,
+bateria) ESCRITA, COLETADA e NÃO EXECUTADA (socket do Docker negado). Migration renderizada em `--sql` nos dois
+sentidos.
+
+## ADR-092-BE — Gerador genérico e determinístico do arquivo contábil: ordem, recusas e de onde sai cada parcela (Sprint 13 / BACK 13.3)
+
+**Data:** 2026-09-29 · **Status:** ativo · **Escopo:** `modules/accounting_files/generator.py` (PURO),
+`ErrorCode.ARQUIVO_*` (5 recusas da geração), `export_layouts/definition.py` (casas 2–4 e colisões com o
+separador).
+
+**Núcleo puro:** `generate_accounting_file(totals, lines, definition) -> GeneratedFile(content, lines,
+total_amount, sha256)`. `lines` são `ExportLine` — o snapshot do item + o histórico da VIGÊNCIA, exatamente o
+que `ClientMappingApplyService.materialized_lines` devolve (a 13.4 converte `MaterializedLine` → `ExportLine`);
+`totals` são colunas do REGISTRO da materialização. Débito/crédito por `partida.derive_partida`; "partida
+completa" por `is_partida_completa`; completude por `partida_completeness` (teste de fonte trava o reuso e a
+ausência de `amount > 0`, `apply_mapping`, `sqlalchemy`, repositório de movimentos). Interpreta a definição
+(`LayoutField`, a mesma enum da validação) — nunca um gerador por sistema.
+
+**Só linhas com conta decidida** (`alvo` + `accounting_account_code`); `nao_mapear`, sem decisão, sem
+categoria ficam fora; valor ZERO não é lançamento (`derive_partida` → `None`) e fica fora.
+
+**ORDEM DOCUMENTADA:** `(movement_date, source_movement_id [texto, lexicográfica], str(item_id))`. Mesma
+materialização + mesma versão = mesmos bytes (teste com entrada embaralhada).
+
+**Recusas (409, antes de montar o arquivo, nesta ordem), só códigos em `details`:**
+a. `ARQUIVO_DESTINO_INVALIDO` — destino ≠ `conta_contabil`;
+b. `ARQUIVO_COBERTURA_PARCIAL` — `partial_coverage_confirmed`; `categoryCodes` = códigos dos itens `sem_decisao`;
+c. `ARQUIVO_PARTIDA_INCOMPLETA` — algum `alvo` com `not is_partida_completa` OU histórico `None`/`[indecifrável]`
+   (vigência purgada ou DEK destruída — nunca sentinela no arquivo); `categoryCodes` + `completenessPct`;
+d. `ARQUIVO_PARTICAO_NAO_FECHA` — parcelas: `competenceAmount` = Σ|valor| de TODOS os itens do snapshot;
+   `withAccountAmount` = Σ|valor| dos itens `alvo` com conta, RECOMPUTADO dos itens (é o que o arquivo leva);
+   `notMappedAmount`/`undecidedAmount`/`uncategorizedAmount` = colunas `not_mapped_amount`/`undecided_amount`/
+   `uncategorized_amount` do REGISTRO (nenhuma coluna inventada); fecha se com_conta + as três = competência;
+e. `ARQUIVO_TEXTO_NAO_CABE` — sobre os valores textuais DISTINTOS das colunas de texto do layout (histórico,
+   contas, competência, código da categoria): quebra de linha → `quebra_de_linha`; separador →
+   `contem_separador`; começa com `= + - @` → `inicio_de_formula`; `UnicodeEncodeError` na codificação do
+   layout → `fora_da_codificacao`. `categories = [{categoryCode, field, reason}]`.
+Nenhuma recusa ecoa histórico/descrição/nome (nem em `message`, que também vai na resposta) — teste com
+`capture_logs`. Nunca substituir, escapar, truncar ou `quotePrefix` (teste de fonte);
+`neutralize_formula_injection` NÃO é usado.
+
+**Valor:** `format_amount` em `Decimal`, `format(q, "f")` (sem notação científica), absoluto, milhar manual.
+**Casas do layout passaram a 2–4** (ajuste na definição da 13.2): menos de 2 exigiria arredondar o dinheiro que
+entra na contabilidade — alteração silenciosa; mais casas só completam com zeros. Property-based (hypothesis):
+ida e volta sobre Decimal de 2 casas, milhar em grupos de 3, nunca `E`.
+
+**Colisões fechadas na definição (13.2):** separador da data dentro do separador de colunas → 422 `dateFormat`;
+coluna `competencia` (AAAA-MM) com `-` no separador → 422 `separator` — texto FORMATADO pelo gerador nunca pode
+conter o separador.
+
+**Teste-ouro (unitário):** extrato (32) → `apply_mapping` real com as 23 decisões e `649` padrão → `ExportLine`
+com o histórico da decisão → modelo Domínio: 32/32 linhas idênticas (multiconjunto) e o arquivo inteiro igual ao
+esperado reordenado por (data, identificador da linha), Latin-1, CRLF no fim, sem cabeçalho;
+Σ|valor| = 53.570,99.
+
+## ADR-093-BE — Gerar, listar e baixar o arquivo contábil: registro sem conteúdo, SHA-256 no download, versão no nome, commit antes da resposta (Sprint 13 / BACK 13.4)
+
+**Data:** 2026-09-29 · **Status:** ativo (decisão (a) PENDENTE de validação humana) · **Escopo:**
+`db/models/accounting_file_generation.py`, migration `c7e2a9d4b816`, `modules/accounting_files/`
+(repository, service, schemas, routes), `AlertCode.ACCOUNTING_FILE_DIVERGENT`,
+`ErrorCode.ARQUIVO_SEM_MATERIALIZACAO`/`ARQUIVO_DIVERGENTE`, `clients/repository.py` (exclusão), lista
+canônica 113 → 116.
+
+**Paths (sugestão do PRD):** `POST|GET /api/v1/clients/{client_id}/accounting-files` e
+`GET /api/v1/clients/{client_id}/accounting-files/{generation_id}/download`. As três com
+`GenerateAccountingFileDep` (guard AUDITADO por cliente) declarado ANTES de `OpenClientDep` — o operador de um
+cliente encerrado recebe o mesmo 403 com linha `denied`, não o estado do cliente. Gerar e baixar =
+`OpenClientDep` (encerrado 409); listar = `AccessibleClientDep` (histórico de metadados legível). **(a)
+DECISÃO DO PLANEJADOR, pendente de validação humana:** listar também pede `generate_accounting_file`.
+
+**Tabela `accounting_file_generations` (só metadados):** `client_id` (CASCADE, desnormalizado, toda query o
+filtra), `materialization_id` (RESTRICT), `(layout_id, layout_version)` por FK COMPOSTA para
+`export_layout_versions(layout_id, version)` (RESTRICT — a versão registrada existe e não some), `author_id`
+(RESTRICT), `competence` (1º dia, CHECK), `line_count`, `total_amount DECIMAL(14,2)`, `sha256` (CHECK
+`^[0-9a-f]{64}$`), `created_at`; índice `(client_id, materialization_id)`. SEM conteúdo, histórico ou nome de
+arquivo (teste lista as colunas). Sem UNIQUE: cada POST é uma geração (idempotência não exigida; corrida de
+duplo clique = duas linhas, nunca 500).
+
+**Gerar:** layout da organização DO CLIENTE (`get_layout_for_organization`; outra org = 404 igual a
+inexistente), versão MAIS RECENTE; materialização = a ÚLTIMA do `conta_contabil` na competência (pelo
+`destination_type` desnormalizado), ou a explícita — que tem de ser do cliente E da competência (senão 404).
+Sem materialização → 409 `ARQUIVO_SEM_MATERIALIZACAO` e NADA materializado. Linhas =
+`materialized_lines` → `ExportLine` → gerador da 13.3 (recusas 409 propagadas, nada gravado). Ordem das
+escritas: geração → `access_audit export` → COMMIT → evento `arquivo_contabil_gerado` (fail-soft; props em
+`_props_or_none`, emissão + commit dentro de `try`, warning só com IDs) → resposta com os metadados.
+
+**Baixar:** regenera pela materialização + versão de layout REGISTRADAS e confere o SHA-256. Bate →
+`StreamingResponse`, `Content-Disposition: attachment; filename="lancamentos_<AAAA-MM>_v<N>.csv"`,
+`Content-Type: text/csv; charset=<MIME do layout>` (`latin-1` → `iso-8859-1`), trilha `export`, COMMIT. **`<N>` é
+a versão da MATERIALIZAÇÃO** (qual fechamento do mês o arquivo carrega), não a do layout. Não bate — ou a
+regeneração é recusada (ex.: histórico ilegível) → `send_alert(ACCOUNTING_FILE_DIVERGENT)` no canal de
+PLANTÃO (só IDs) + 409 `ARQUIVO_DIVERGENTE`, sem bytes e sem linha `export`.
+
+**Resposta depois do commit:** a correção geral 86e3fxqqa não é desta sprint; estas rotas commitam
+explicitamente no serviço antes de montar a resposta (o teardown do `get_db_session` roda depois do envio).
+
+**Saída do cliente:** exclusão definitiva apaga as gerações ANTES das materializações (FK RESTRICT) e dos
+usuários (autor RESTRICT); encerramento as MANTÉM (como as materializações) — teste de fonte + integração.
+
+**Contrato:** `tests/unit/test_openapi_sprint13.py` gera `app.openapi()` e trava rotas e campos (o `schema.ts`
+é da FRONT, receita do ADR-045-FE). Doc da lista regenerada 116/116.
+
+⚠️ Integração (`test_accounting_files_endpoints.py` — ponta a ponta pela ingestão da S14 até o download, 32/32
+byte a byte; `test_migrations.py::TestGeracoesDoArquivoContabilRoundTrip`; bateria) ESCRITA, COLETADA e NÃO
+EXECUTADA (socket do Docker negado). Migration renderizada em `--sql`.
+
+---
+
+## ADR-054-FE — Layouts de exportação: tela própria em Configurações, definição lida por leitor tipado, filtro na URL (Sprint 13 / FRONT 13.5)
+
+**Data:** 2026-09-29 · **Status:** ativo · **Escopo:** `lib/authz.ts`, `configuracoes/layouts-exportacao`, `components/features/export-layouts/`
+
+- **Contrato conferido SEM API de pé** (receita do ADR-045-FE): `app.openapi()` do worktree
+  `agent-backend@a632a02` com o venv do checkout principal e as chaves fake do CI →
+  `openapi-typescript` → `schema.ts`. Script e JSON em `apps/web/test-results/`
+  (`dump_openapi.py`, `openapi-s13.json`, ignorados). O `apps/web/node_modules` do worktree
+  NÃO existia nesta rodada: criei o link para o do checkout principal (ignorado pelo
+  `apps/web/.gitignore:20`, conferido com `git check-ignore`).
+- **Permissões 27 → 29**, transcritas célula a célula do `PERMISSION_MATRIX` do back:
+  `generate_accounting_file` = staff (plataforma, admin, gerente); `manage_export_layouts` =
+  plataforma e admin. O gerente GERA mas não administra layout.
+- **Menu:** "Layouts de exportação" é uma linha em `SETTINGS_ITEMS` (`manage_export_layouts`) —
+  a rota e o item consultam a MESMA permissão; deep link sem ela cai no `AccessDenied`.
+- **A definição chega como `{[key]: unknown}`** (`ExportLayoutVersionItem.definition`). Em vez
+  de cast, `lib/export-layout-definition.ts::readLayoutDefinition` estreita campo a campo e
+  devolve `null` quando a forma não bate; a gaveta mostra "Não foi possível ler os parâmetros
+  desta versão." em vez de `undefined`. Rótulos legíveis (separador por nome, CRLF explicado,
+  Latin-1, exemplo de valor montado com os separadores DO LAYOUT, sem `Intl`).
+- **Filtro de organização da plataforma na URL** (`?organizacao=`), repassado ao hook como
+  `organizationId` (server-side). O nome da organização na coluna vem das opções de
+  organização (a lista traz só o id), mesmo cache do filtro.
+- **"Criar a partir do modelo Domínio":** `templateKey = 'dominio_lancamentos_csv'`
+  (constante `DOMINIO_TEMPLATE_KEY`, espelho de `DOMINIO_TEMPLATE.key`); nome opcional (vazio
+  = `null`, o servidor usa o nome do modelo); organização pela fábrica
+  `organizationTargetField` (obrigatória só para a plataforma; suspensas fora). 409
+  `LAYOUT_NOME_DUPLICADO` vira erro do campo Nome; qualquer outro erro tipado aparece pelo
+  `userMessage` numa caixa `role="alert"` DENTRO do diálogo — nunca toast.
+- **Gaveta de versões presentacional quanto ao alvo:** `open` e `layoutId` separados — o alvo
+  não é limpo ao fechar, para o conteúdo não sumir durante a animação de saída.
+
+---
+
+## ADR-055-FE — Arquivo contábil no de-para: seção própria num provider, recusa como estado com leitor tipado, correção pela lista de decisões (Sprint 13 / FRONT 13.6)
+
+**Data:** 2026-09-29 · **Status:** ativo · **Escopo:** `components/features/client-mapping/accounting-file-section.tsx`, `lib/accounting-file-refusals.ts`, `hooks/use-accounting-files.ts`
+
+- **Onde:** seção "Arquivo contábil de {mês}" na aba Prévia do de-para, SÓ com
+  `generate_accounting_file` e SÓ no `conta_contabil` (`isAccountingDestination`, o corte
+  único do ADR-052-FE). Fica FORA do bloco da prévia: o histórico (e o motivo, no cliente
+  encerrado) aparece mesmo quando a prévia não pôde ser calculada. Cada versão materializada
+  ganha "Gerar arquivo" (gera aquela versão, `materializationId`); a da seção gera a mais
+  recente (sem `materializationId`).
+- **Provider, não prop drilling:** `AccountingFileGeneratorProvider` (contexto) é montado
+  só quando a seção existe. Fora dele NENHUM hook do arquivo roda (layouts, gerações,
+  mutations), e `GenerateVersionButton` devolve `null`. Efeito colateral bom: os testes
+  antigos do de-para não precisaram de `QueryClientProvider`; só o
+  `client-mapping-accounting.test.tsx` (admin/gerente no `conta_contabil`) ganhou mocks
+  neutros dos dois hooks novos.
+- **Layout:** um → gera direto (sem diálogo); mais de um → diálogo com seletor
+  (rhf + zod, escolha obrigatória); nenhum → estado ramificado por `manage_export_layouts`
+  (admin: link "Ir para Layouts de exportação"; gerente: "Peça ao administrador da
+  organização"). A plataforma lê os layouts com `organizationId` = organização DO CLIENTE
+  (o layout de outra org é 404 no gerar); o staff manda `null`.
+- **Sem materialização:** "Gerar arquivo" aparece DESABILITADO com `aria-describedby` na
+  instrução de materializar; o 409 `ARQUIVO_SEM_MATERIALIZACAO` continua tratado.
+- **Recusas:** `readAccountingFileRefusal` estreita `ApiError.details` sem cast
+  (`categoryCodes`, as cinco parcelas, `categories[{categoryCode, field, reason}]`) e devolve
+  `kind: 'other'` para qualquer outro erro — que usa a MESMA caixa de estado (nunca toast). A
+  recusa guarda a competência e o alvo (versão): trocar de competência não deixa a recusa de
+  outra na tela, e a da versão diz "(versão N)".
+- **Correção:** o botão por categoria (`manage_client_mapping` e cliente aberto — ADR-053-FE)
+  leva à aba Decisões filtrada pelo código (`reviewCategory` na tela: atualiza o campo de busca
+  JUNTO com a URL, senão o debounce escreveria o termo antigo de volta). Não há deep link que
+  abra a gaveta direto; a pessoa clica "Alterar" na linha filtrada.
+- **Download:** `apiGetBlob` (fluxo de auth do BFF) + `lib/download.ts::triggerBrowserDownload`,
+  agora a ÚNICA cópia (as de `export-report-button.tsx` e `client-mapping-screen.tsx` foram
+  trocadas pelo import). Nome do `Content-Disposition`; fallback `item.fileName`, que é o mesmo
+  nome registrado. `ARQUIVO_DIVERGENTE` vira caixa de erro com título próprio na seção.
+- **Histórico:** `pageSize = 100` (teto do servidor) filtrado pela competência, sem paginação
+  (uma competência tem poucas gerações). Total por `formatBRL(totalAmount)` (string Decimal).
+
+---
+
+## ADR-043-QA — Sprint 13, rodada 1: as 6 tasks aprovadas por revisão estática + unitários, com integração, a11y em browser e prints pendentes (QA 86e3fxwgj, 29/09/2026)
+
+**Data:** 2026-09-29 · **Status:** ativo · **Escopo:** BACK 13.1–13.4 (a632a02), FRONT 13.5–13.6 (514c8d2), base `ee621fb`
+
+**Base da revisão:** `ee621fb` (= `origin/develop`, de onde os worktrees saíram), NÃO a ref
+`develop` local (786479a, anterior à S16): `develop..HEAD` do prompt mostraria os commits da S16
+junto. Infra não teve task nem commit.
+
+**O que rodou (output real, no sandbox do QA):**
+- backend: `ruff check` "All checks passed!"; `ruff format --check` "472 files already
+  formatted"; `mypy app` "Success: no issues found in 261 source files"; `pytest tests/unit`
+  "2204 passed" (inclui o teste-ouro unitário: 32/32 linhas e o arquivo inteiro byte a byte contra
+  `lancamentos_esperados.csv`, SHA-256 estável com entrada embaralhada, Σ = 53.570,99);
+  `grep -c "SensitiveEndpoint("` = **116**; `alembic heads` = `c7e2a9d4b816` (uma cabeça);
+  `alembic downgrade c7e2a9d4b816:a8c4e7d25f19 --sql` derruba índice + 3 tabelas (downgrade real).
+- contrato: `app.openapi()` do worktree do backend → `openapi-typescript 7.13.0` → `diff`
+  contra `apps/web/src/lib/contracts/schema.ts` = **0 linhas**.
+- frontend: `tsc --noEmit` limpo; `eslint --max-warnings=0 src e2e` limpo; `prettier --check`
+  nos 27 arquivos alterados limpo; `vitest run` "69 files, 1016 passed".
+
+**O que NÃO rodou (e por quê):** o socket do Docker é negado ao QA
+(`dial unix /var/run/docker.sock: socket: operation not permitted`) e a sondagem de porta do
+Postgres pede aprovação. Logo, ESCRITOS e NÃO EXECUTADOS: `test_accounting_files_endpoints.py`
+(o e2e da ingestão S14 ao download, 32/32 byte a byte), `test_export_layouts_endpoints.py`,
+`test_sensitive_endpoints.py` com as 8 rotas novas, `test_migrations.py`
+(`TestLayoutsDeExportacaoRoundTrip`, `TestGeracoesDoArquivoContabilRoundTrip`),
+`test_client_mapping_materialization_endpoints.py` e `test_s12_qa_two_destinations.py`. Também não
+rodaram o gate de a11y em browser (os 11 cenários novos do `a11y-mocked.spec.ts`) nem os prints
+desktop/390px. Tudo isso é da validação humana, como na S14 (ADR-042-QA).
+
+**Por que aprovar sem a integração (e o que foi conferido no lugar):** leitura do SQL que só o
+banco exercita: a partição fecha por construção (registro e itens usam Σ|valor| sobre o MESMO
+universo em `client_mapping/apply.py`); toda query de geração filtra `client_id` no próprio
+SELECT; a FK composta para `export_layout_versions(layout_id, version)` tem a UNIQUE que ela exige;
+SAVEPOINT + nome da constraint no duplo clique do "criar a partir do modelo"; nenhum UPDATE ORM em
+lote; os RESTRICTs não têm rota de exclusão física de usuário/organização que os alcance; a
+exclusão definitiva apaga as gerações antes das materializações e dos usuários. Nenhum caminho
+para 500 achado.
+
+**Evidência por contexto (permissões novas):** `generate_accounting_file` = plataforma, admin e
+gerente (carteira); `manage_export_layouts` = plataforma e admin — idênticas em `authz.py`,
+`test_authz_matrix.py` (29), `lib/authz.ts` e `authz.test.ts`; `review_export` intocada (teste).
+Tela: item do menu e página de Layouts por `manage_export_layouts` (a página mostra `AccessDenied`
+sem ela; o gerente não vê o item, `sidebar-nav.test.tsx`); a seção do arquivo no de-para
+(histórico, Baixar, "Gerar arquivo" da seção e o de CADA versão materializada) só monta com
+`generate_accounting_file` e no `conta_contabil`, e fora do provider o botão por versão devolve
+`null`; `client_manager`/`client_operator` não veem Gerar nem Baixar em contexto nenhum (vitest
+`accounting-file-section.test.tsx`); cliente encerrado esconde Gerar e Baixar e mantém o
+histórico; o link "Ir para Layouts" exige `manage_export_layouts` (o gerente lê "peça ao
+administrador"); "Corrigir categoria" exige `manage_client_mapping` + cliente aberto. NÃO conferido
+em browser real: só por vitest e leitura.
+
+**Decisões do planejador pendentes de validação humana:** (a) LER layouts com
+`manage_export_layouts` OU `generate_accounting_file` (ADR-091-BE); (b) LISTAR gerações também
+pede `generate_accounting_file` (ADR-093-BE); (c) o `<N>` do nome do arquivo é a versão da
+MATERIALIZAÇÃO, não a do layout (ADR-093-BE); (d) casas decimais do layout de 2 a 4 (ADR-092-BE).
+
+**Primer:** a edição do `PROJECT.md` pela ferramenta de edição foi NEGADA nesta sessão (como na
+S16). O patch das §3.15, §4.9, §8 e do rodapé v1.59 ficou pronto no `HANDOFF.md`. Achado maior: o
+hub semeou o `PROJECT.md` dos quatro worktrees a partir do `develop` LOCAL (sem a S16); o QA
+restaurou o SEU a partir de `ee621fb:CLAUDE.md` no início (antes da negação), para que o commit do
+QA não apague a S16 do primer pela quarta vez. Follow-up 86e3fyjan.
+
+**Follow-ups (não bloqueiam):** 86e3fyjan (hub: semear da base real), 86e3fyjbm (front: 3 ajustes
+de estado), 86e3fyjcc (back: prefixo/cabeçalho de layout com caractere de fórmula).

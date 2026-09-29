@@ -131,6 +131,23 @@ vi.mock('@/hooks/use-client-accounting-chart', () => ({
         },
 }));
 
+// S13 (FRONT 13.6): no `conta_contabil`, admin e gerente veem a seção do
+// arquivo contábil. Aqui ela fica neutra (sem layout, sem geração); o
+// comportamento dela é medido em `accounting-file-section.test.tsx`.
+vi.mock('@/hooks/use-export-layouts', () => ({
+  useExportLayouts: () => ({ data: [], isLoading: false, isSuccess: true, isError: false }),
+}));
+vi.mock('@/hooks/use-accounting-files', () => ({
+  useAccountingFiles: () => ({
+    data: { data: [], pagination: { page: 1, pageSize: 100, total: 0, totalPages: 0 } },
+    isLoading: false,
+    isFetching: false,
+    isError: false,
+  }),
+  useGenerateAccountingFile: () => mutationState(),
+  useDownloadAccountingFile: () => mutationState(),
+}));
+
 const clientDetailState = {
   data: undefined as
     | {

@@ -25,6 +25,7 @@ from app.db.models.usage_event import (
 from app.modules.reconciliations.qualification.schemas import SemanticStatus
 from app.modules.usage_events.schemas import (
     CLIENT_EMITTED_EVENTS,
+    ArquivoContabilGeradoProps,
     ArquivoProcessadoProps,
     AutorNavegouForaProps,
     AutorNavegouForaRequest,
@@ -66,6 +67,8 @@ _PROPS_MODELS: list[type[BaseModel]] = [
     FechamentoProduzidoProps,
     # S16 (BACK 16.4): só id e contagens — nenhum `str`.
     PlanoContabilImportadoProps,
+    # S13 (BACK 13.1): IDs, números e os dois `str` de formato fechado.
+    ArquivoContabilGeradoProps,
 ]
 
 #: Tipos que NÃO carregam texto livre. `bool`/`int` são grandezas, `Literal` é
@@ -331,6 +334,9 @@ class TestAllowListDeDedup:
             # S15 (BACK 15.2): a leitura D+30 lê a ÚLTIMA linha por client_id —
             # abrir o relatório 30 vezes precisa gerar 30 linhas.
             UsageEventName.RECEBIVEIS_CLASSIFICADOS,
+            # S13 (BACK 13.1): cada geração do arquivo contábil é uma linha —
+            # gerar de novo a mesma materialização também é um fato.
+            UsageEventName.ARQUIVO_CONTABIL_GERADO,
         ],
         ids=lambda e: e.value,
     )
