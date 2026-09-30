@@ -4,10 +4,13 @@
  * autenticado não carrega nada daqui.
  *
  * Regras que este arquivo segue:
- *   - Cor SÓ por token do tema (`hsl(var(--token) / alfa)`). As variáveis `--lp-*`
- *     são derivadas dos tokens e usadas APENAS em fundo decorativo, borda e sombra,
- *     nunca em texto: todo texto da landing está sobre uma superfície sólida
- *     (`bg-background`, `bg-card`) com os pares travados no theme-contrast.test.ts.
+ *   - Cor SÓ por token do tema (`hsl(var(--token) / alfa)`), mais UMA cor própria da
+ *     landing: o verde da Hologram (`--lp-brand`, 86e3h0xcr), com a fonte do hex ao
+ *     lado. As variáveis `--lp-*` são usadas em fundo decorativo, borda, sombra, ícone
+ *     e no preenchimento do botão primário (`.lp-cta`, texto navy), nunca em texto
+ *     corrido: todo texto da landing está sobre uma superfície sólida (`bg-background`,
+ *     `bg-card`) com os pares travados no theme-contrast.test.ts e os do verde no
+ *     landing-contrast.test.ts.
  *   - Entrada entre 300 e 700 ms, `ease-out`; nada pisca nem gira; nenhum efeito
  *     em texto corrido.
  *   - Sob `prefers-reduced-motion: reduce` tudo vira o estado final e a aurora
@@ -15,23 +18,37 @@
  */
 
 .landing {
+  /*
+   * Verde da Hologram (86e3h0xcr): #05d1bf, rgb(5, 209, 191), amostrado por pixel do
+   * botão "Começar agora" e do título verde do site da Hologram
+   * (`Docs/brand/site-hologram-cta-2026-09-30.png`, print de 30/09/2026: 103.571
+   * pixels com esse valor exato). É a cor de destaque da landing e SÓ dela: o app
+   * autenticado não carrega este arquivo.
+   */
+  --lp-brand: 175 95% 42%;
+  /*
+   * Texto sobre o verde: o navy da marca (#0C0C5A), cópia LITERAL do `--primary` do
+   * tema claro (`:root` do globals.css). Não dá para ler `var(--primary)`: dentro da
+   * `.hologram` ele é branco, e branco sobre o verde dá 1,9:1. Navy sobre o verde dá
+   * 8,95:1. O landing-contrast.test.ts trava os pares e a cópia.
+   */
+  --lp-brand-fg: 240 76.5% 20%;
   --lp-glow-primary: hsl(var(--primary) / 0.18);
-  --lp-glow-info: hsl(var(--info) / 0.38);
+  --lp-glow-brand: hsl(var(--lp-brand) / 0.38);
   --lp-glow-accent: hsl(var(--accent) / 1);
   --lp-edge: hsl(var(--primary) / 0.14);
-  --lp-edge-strong: hsl(var(--primary) / 0.32);
+  --lp-edge-strong: hsl(var(--lp-brand) / 0.4);
   --lp-grid-line: hsl(var(--border) / 0.55);
-  --lp-shadow: 0 18px 48px -24px hsl(var(--info) / 0.45);
+  --lp-shadow: 0 18px 48px -24px hsl(var(--lp-brand) / 0.45);
   /* Filete de luz (rodapé, header rolado, divisor de seção): decorativo. */
   --lp-filament: linear-gradient(90deg, transparent, var(--lp-edge-strong), transparent);
   /*
-   * Stop claro do gradiente do título: `--info` misturado 60/40 com `--foreground`.
-   * Medido sobre o pixel mais claro da aurora atrás da palavra: 7,67:1 (desktop) e
-   * 6,62:1 (390px). `--info` puro daria perto de 4,8:1 em 390px (conta sobre a mesma
-   * medição), folga curta para uma aurora que se move. O e2e "texto sobre a aurora"
-   * mede os DOIS stops do `.lp-gradient-text` contra o fundo pintado.
+   * Stop claro do gradiente do título: o verde misturado 60/40 com `--foreground`,
+   * que o afasta da bolha verde da aurora atrás da palavra. O e2e "texto sobre a
+   * aurora" mede os DOIS stops do `.lp-gradient-text` contra o pixel mais claro do
+   * fundo pintado (valores medidos no rodapé do CLAUDE.md, versão da 86e3h0xcr).
    */
-  --lp-gradient-end: color-mix(in srgb, hsl(var(--info)) 60%, hsl(var(--foreground)));
+  --lp-gradient-end: color-mix(in srgb, hsl(var(--lp-brand)) 60%, hsl(var(--foreground)));
   scroll-behavior: smooth;
   /* O header fixo cobriria o topo da seção ao seguir `#contato`. */
   scroll-padding-top: 5rem;
@@ -76,7 +93,7 @@
   position: absolute;
   inset: 10% 0 0;
   pointer-events: none;
-  background: radial-gradient(ellipse 50% 60% at 70% 50%, var(--lp-glow-info), transparent 70%);
+  background: radial-gradient(ellipse 50% 60% at 70% 50%, var(--lp-glow-brand), transparent 70%);
   opacity: 0.6;
 }
 
@@ -93,7 +110,7 @@
   left: -8rem;
   width: 36rem;
   height: 36rem;
-  background: var(--lp-glow-info);
+  background: var(--lp-glow-brand);
 }
 
 .lp-aurora__blob--2 {
@@ -178,14 +195,14 @@
   border-color: var(--lp-edge);
 }
 
-/* Ponto de 6 px em `--info` com um anel que pulsa (2 s). Parado em movimento reduzido. */
+/* Ponto de 6 px no verde da marca com um anel que pulsa (2 s). Parado em movimento reduzido. */
 .lp-pulse-dot {
   position: relative;
   flex-shrink: 0;
   width: 6px;
   height: 6px;
   border-radius: 9999px;
-  background: hsl(var(--info));
+  background: hsl(var(--lp-brand));
 }
 
 .lp-pulse-dot::after {
@@ -193,7 +210,7 @@
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: hsl(var(--info));
+  background: hsl(var(--lp-brand));
   animation: lp-pulse 2s ease-out infinite;
 }
 
@@ -422,7 +439,7 @@
     pointer-events: none;
     background: radial-gradient(
       260px circle at var(--lp-mx, 50%) var(--lp-my, 0%),
-      var(--lp-glow-info),
+      var(--lp-glow-brand),
       transparent 70%
     );
     opacity: 0;
@@ -443,7 +460,7 @@
 .lp-step-number {
   box-shadow:
     inset 0 0 0 1px var(--lp-edge-strong),
-    0 0 18px -6px hsl(var(--info) / 0.6);
+    0 0 18px -6px hsl(var(--lp-brand) / 0.6);
 }
 
 /* ---------- Tour do produto (86e3gqfkf) ---------- */
@@ -520,8 +537,8 @@
   left: 0;
   width: 100%;
   height: var(--lp-progress-y, 0px);
-  background: linear-gradient(180deg, hsl(var(--info) / 0.4), hsl(var(--info)));
-  box-shadow: 0 0 10px hsl(var(--info) / 0.6);
+  background: linear-gradient(180deg, hsl(var(--lp-brand) / 0.4), hsl(var(--lp-brand)));
+  box-shadow: 0 0 10px hsl(var(--lp-brand) / 0.6);
   opacity: 0;
   transition:
     height 800ms ease-out,
@@ -533,7 +550,7 @@
   .lp-line__progress {
     height: 100%;
     width: var(--lp-progress-x, 0px);
-    background: linear-gradient(90deg, hsl(var(--info) / 0.4), hsl(var(--info)));
+    background: linear-gradient(90deg, hsl(var(--lp-brand) / 0.4), hsl(var(--lp-brand)));
   }
 }
 
@@ -555,9 +572,9 @@
 
 [data-lp-stepper-on] [data-lp-step][data-active] .lp-step-number {
   box-shadow:
-    inset 0 0 0 1px hsl(var(--info) / 0.7),
-    0 0 0 4px hsl(var(--info) / 0.16),
-    0 0 28px -2px hsl(var(--info) / 0.9);
+    inset 0 0 0 1px hsl(var(--lp-brand) / 0.7),
+    0 0 0 4px hsl(var(--lp-brand) / 0.16),
+    0 0 28px -2px hsl(var(--lp-brand) / 0.9);
 }
 
 /* ---------- Dores e respostas: a resposta chega depois (86e3gwzj0) ---------- */
@@ -599,7 +616,7 @@
  * Entrada de 600 a 900 ms e depois parada; só o pulso do ponto central é loop.
  */
 .lp-vig__link {
-  stroke: hsl(var(--info) / 0.55);
+  stroke: hsl(var(--lp-brand) / 0.55);
   stroke-width: 1.5;
   stroke-dasharray: 100;
   stroke-dashoffset: 0;
@@ -618,7 +635,7 @@
 
 .lp-vig__avatar circle {
   fill: hsl(var(--card));
-  stroke: hsl(var(--info) / 0.6);
+  stroke: hsl(var(--lp-brand) / 0.6);
   stroke-width: 1.5;
 }
 
@@ -629,11 +646,11 @@
 }
 
 .lp-vig__hub {
-  fill: hsl(var(--info));
+  fill: hsl(var(--lp-brand));
 }
 
 .lp-vig__pulse {
-  fill: hsl(var(--info));
+  fill: hsl(var(--lp-brand));
   transform-box: fill-box;
   transform-origin: center;
   animation: lp-pulse 2s ease-out infinite;
@@ -641,7 +658,7 @@
 
 .lp-vig__shackle {
   fill: none;
-  stroke: hsl(var(--info));
+  stroke: hsl(var(--lp-brand));
   stroke-width: 6;
   stroke-linecap: round;
   transition: transform 700ms ease-out 200ms;
@@ -649,12 +666,12 @@
 
 .lp-vig__lock {
   fill: hsl(var(--card));
-  stroke: hsl(var(--info) / 0.6);
+  stroke: hsl(var(--lp-brand) / 0.6);
   stroke-width: 1.5;
 }
 
 .lp-vig__keyhole {
-  fill: hsl(var(--info));
+  fill: hsl(var(--lp-brand));
 }
 
 .lp-vig__key {
@@ -671,7 +688,7 @@
 }
 
 .lp-vig__hatch-line {
-  stroke: hsl(var(--info) / 0.7);
+  stroke: hsl(var(--lp-brand) / 0.7);
   stroke-width: 2;
 }
 
@@ -731,7 +748,7 @@
 .lp-header[data-scrolled] {
   background-color: hsl(var(--background));
   border-bottom-color: hsl(var(--border));
-  box-shadow: 0 8px 24px -16px hsl(var(--info) / 0.35);
+  box-shadow: 0 8px 24px -16px hsl(var(--lp-brand) / 0.35);
 }
 
 /* Filete inferior em gradiente, que acende quando o header fica sólido. */
@@ -763,6 +780,34 @@
   pointer-events: none;
 }
 
+/* ---------- Botão primário da landing: verde com texto navy (86e3h0xcr) ---------- */
+
+/*
+ * Sobre o `<Button>` padrão (que pinta `bg-primary`, BRANCO no Hologram). O seletor
+ * leva `.landing` na frente para vencer as utilidades do Tailwind (`bg-primary`,
+ * `hover:bg-primary/90`, `focus-visible:ring-ring`) sem depender da ordem dos
+ * arquivos. Texto SEMPRE `--lp-brand-fg` (navy): branco sobre o verde reprova.
+ * Hover escurece o verde misturando 10 % de preto (navy sobre ele: 7,2:1); o anel
+ * de foco é o próprio verde. O login e o app não têm esta classe.
+ */
+.landing .lp-cta {
+  background-color: hsl(var(--lp-brand));
+  color: hsl(var(--lp-brand-fg));
+}
+
+.landing .lp-cta:hover {
+  background-color: color-mix(in srgb, hsl(var(--lp-brand)) 90%, black);
+}
+
+.landing .lp-cta:focus-visible {
+  --tw-ring-color: hsl(var(--lp-brand));
+}
+
+/* Ícone na cor da marca (check dos bullets do tour): ícone, não texto corrido. */
+.lp-brand-text {
+  color: hsl(var(--lp-brand));
+}
+
 /* ---------- Botão primário: brilho no hover ---------- */
 
 .lp-glow-button {
@@ -773,7 +818,7 @@
 }
 
 .lp-glow-button:hover {
-  box-shadow: 0 0 28px -4px hsl(var(--info) / 0.55);
+  box-shadow: 0 0 28px -4px hsl(var(--lp-brand) / 0.55);
 }
 
 /* ---------- Sucesso do formulário: check que se desenha ---------- */

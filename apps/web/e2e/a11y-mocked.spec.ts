@@ -7761,6 +7761,75 @@ test.describe('Landing pública (86e3fr9vz)', () => {
     );
   }
 
+  /**
+   * Contraste do texto de um botão SÓLIDO contra o fundo que ele pinta (86e3h0xcr, o
+   * verde da marca com texto navy). O texto some com `color: transparent` (texto comum,
+   * não `background-clip`), sem transição, e a faixa interna da caixa é fotografada:
+   * 8 px a menos de cada lado, fora dos cantos arredondados, onde entraria o fundo da
+   * página. A razão é a PIOR contra todos os pixels da faixa: com texto escuro sobre
+   * fundo claro, o pior pixel não é o mais claro (o critério do `contrasteSobreAurora`).
+   */
+  async function contrasteDoBotao(page: Page, locator: Locator): Promise<number> {
+    const color = await locator.evaluate((el) => getComputedStyle(el).color);
+    const box = await locator.boundingBox();
+    expect(box, 'botão sem caixa').not.toBeNull();
+    let png: Buffer;
+    try {
+      await locator.evaluate((el) => {
+        (el as HTMLElement).style.setProperty('transition', 'none', 'important');
+        (el as HTMLElement).style.setProperty('color', 'transparent', 'important');
+      });
+      const clip = box
+        ? {
+            x: box.x + 8,
+            y: box.y + 2,
+            width: Math.max(1, box.width - 16),
+            height: Math.max(1, box.height - 4),
+          }
+        : undefined;
+      png = await page.screenshot({ clip }).catch(() => page.screenshot({ clip }));
+    } finally {
+      await locator.evaluate((el) => {
+        (el as HTMLElement).style.removeProperty('color');
+        (el as HTMLElement).style.removeProperty('transition');
+      });
+    }
+    return page.evaluate(
+      async ({ b64, textColor }) => {
+        const img = new Image();
+        img.src = `data:image/png;base64,${b64}`;
+        await img.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('sem canvas 2d');
+        ctx.drawImage(img, 0, 0);
+        const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        const lin = (v: number) => {
+          const c = v / 255;
+          return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+        };
+        const lum = (r: number, g: number, b: number) =>
+          0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+        const probe = document.createElement('canvas').getContext('2d');
+        if (!probe) throw new Error('sem canvas 2d');
+        probe.fillStyle = textColor;
+        probe.fillRect(0, 0, 1, 1);
+        const [r = 0, g = 0, b = 0] = probe.getImageData(0, 0, 1, 1).data;
+        const text = lum(r, g, b);
+        let pior = Infinity;
+        for (let i = 0; i < data.length; i += 4) {
+          const fundo = lum(data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0);
+          const [hi, lo] = text > fundo ? [text, fundo] : [fundo, text];
+          pior = Math.min(pior, (hi + 0.05) / (lo + 0.05));
+        }
+        return pior;
+      },
+      { b64: png.toString('base64'), textColor: color },
+    );
+  }
+
   /** As duas cores do gradiente de um `.lp-gradient-text`, resolvidas no browser. */
   async function stopsDoGradiente(locator: Locator): Promise<string[]> {
     return locator.evaluate((el) =>
@@ -7818,6 +7887,34 @@ test.describe('Landing pública (86e3fr9vz)', () => {
 
         await contato.hover();
         await analyze(page, `landing, hover em Entrar em contato (${vp.label})`);
+        // O CTA é o verde da marca com texto navy (86e3h0xcr). Primeiro, que o fundo em
+        // hover É o verde escurecido (um `bg-primary` branco com texto escuro também
+        // passaria no contraste); depois, o texto contra o pixel do botão.
+        await expect.poll(() => contato.evaluate((el) => el.getAnimations().length)).toBe(0);
+        const cta = await contato.evaluate((el) => {
+          const resolver = (cor: string) => {
+            const probe = document.createElement('span');
+            probe.style.backgroundColor = cor;
+            el.appendChild(probe);
+            const resolvida = getComputedStyle(probe).backgroundColor;
+            probe.remove();
+            return resolvida;
+          };
+          return {
+            fundo: getComputedStyle(el).backgroundColor,
+            hover: resolver('color-mix(in srgb, hsl(var(--lp-brand)) 90%, black)'),
+            base: resolver('hsl(var(--lp-brand))'),
+            comMouse: window.matchMedia('(hover: hover)').matches,
+          };
+        });
+        // No projeto de toque o `:hover` emulado pode não pegar: ali vale o verde base.
+        expect(
+          cta.comMouse ? [cta.hover] : [cta.hover, cta.base],
+          'CTA pinta o verde da marca',
+        ).toContain(cta.fundo);
+        const razaoCta = await contrasteDoBotao(page, contato);
+        console.log(`contraste do CTA em hover · ${vp.label}: ${razaoCta.toFixed(2)}:1`);
+        expect(razaoCta, `CTA em hover (${vp.label})`).toBeGreaterThanOrEqual(4.5);
         await entrar.hover();
         await analyze(page, `landing, hover em Entrar (${vp.label})`);
 

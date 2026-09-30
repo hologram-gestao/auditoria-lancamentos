@@ -148,7 +148,7 @@ export function LandingTourTabs({ items, labels }: { items: TourItemView[]; labe
                     <li key={bullet} className="flex gap-3">
                       <CheckCircle2
                         aria-hidden="true"
-                        className="text-success mt-0.5 h-5 w-5 shrink-0"
+                        className="lp-brand-text mt-0.5 h-5 w-5 shrink-0"
                       />
                       <span className="text-muted-foreground leading-relaxed">{bullet}</span>
                     </li>
