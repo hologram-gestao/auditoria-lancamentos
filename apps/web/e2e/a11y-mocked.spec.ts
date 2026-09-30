@@ -7653,11 +7653,10 @@ test.describe('Landing pública (86e3fr9vz)', () => {
 
   /**
    * Contraste do texto contra o fundo que a página REALMENTE pinta atrás dele (aurora
-   * no hero, spotlight nos cards).
+   * no hero, pastilha acesa do "Como funciona", moldura do tour).
    *
-   * Nem a aurora (bolhas absolutas com `blur`) nem o spotlight (`::after` do card)
-   * são vistos pelo axe como fundo do texto: ele devolve `incomplete` ou mede contra
-   * o `bg-card` puro. Aqui: o elemento fica `visibility: hidden` (e não `color:
+   * A aurora (bolhas absolutas com `blur`) não é vista pelo axe como fundo do texto:
+   * ele devolve `incomplete` ou mede contra o `bg-background` puro. Aqui: o elemento fica `visibility: hidden` (e não `color:
    * transparent`, que não apaga texto pintado por `background-clip: text`), a caixa
    * é fotografada, o PNG é decodificado num canvas e a cor do texto é comparada com o
    * pixel de fundo MAIS CLARO da caixa, o pior caso para texto claro.
@@ -7761,6 +7760,75 @@ test.describe('Landing pública (86e3fr9vz)', () => {
     );
   }
 
+  /**
+   * Contraste do texto de um botão SÓLIDO contra o fundo que ele pinta (86e3h0xcr, o
+   * verde da marca com texto navy). O texto some com `color: transparent` (texto comum,
+   * não `background-clip`), sem transição, e a faixa interna da caixa é fotografada:
+   * 8 px a menos de cada lado, fora dos cantos arredondados, onde entraria o fundo da
+   * página. A razão é a PIOR contra todos os pixels da faixa: com texto escuro sobre
+   * fundo claro, o pior pixel não é o mais claro (o critério do `contrasteSobreAurora`).
+   */
+  async function contrasteDoBotao(page: Page, locator: Locator): Promise<number> {
+    const color = await locator.evaluate((el) => getComputedStyle(el).color);
+    const box = await locator.boundingBox();
+    expect(box, 'botão sem caixa').not.toBeNull();
+    let png: Buffer;
+    try {
+      await locator.evaluate((el) => {
+        (el as HTMLElement).style.setProperty('transition', 'none', 'important');
+        (el as HTMLElement).style.setProperty('color', 'transparent', 'important');
+      });
+      const clip = box
+        ? {
+            x: box.x + 8,
+            y: box.y + 2,
+            width: Math.max(1, box.width - 16),
+            height: Math.max(1, box.height - 4),
+          }
+        : undefined;
+      png = await page.screenshot({ clip }).catch(() => page.screenshot({ clip }));
+    } finally {
+      await locator.evaluate((el) => {
+        (el as HTMLElement).style.removeProperty('color');
+        (el as HTMLElement).style.removeProperty('transition');
+      });
+    }
+    return page.evaluate(
+      async ({ b64, textColor }) => {
+        const img = new Image();
+        img.src = `data:image/png;base64,${b64}`;
+        await img.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('sem canvas 2d');
+        ctx.drawImage(img, 0, 0);
+        const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        const lin = (v: number) => {
+          const c = v / 255;
+          return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+        };
+        const lum = (r: number, g: number, b: number) =>
+          0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+        const probe = document.createElement('canvas').getContext('2d');
+        if (!probe) throw new Error('sem canvas 2d');
+        probe.fillStyle = textColor;
+        probe.fillRect(0, 0, 1, 1);
+        const [r = 0, g = 0, b = 0] = probe.getImageData(0, 0, 1, 1).data;
+        const text = lum(r, g, b);
+        let pior = Infinity;
+        for (let i = 0; i < data.length; i += 4) {
+          const fundo = lum(data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0);
+          const [hi, lo] = text > fundo ? [text, fundo] : [fundo, text];
+          pior = Math.min(pior, (hi + 0.05) / (lo + 0.05));
+        }
+        return pior;
+      },
+      { b64: png.toString('base64'), textColor: color },
+    );
+  }
+
   /** As duas cores do gradiente de um `.lp-gradient-text`, resolvidas no browser. */
   async function stopsDoGradiente(locator: Locator): Promise<string[]> {
     return locator.evaluate((el) =>
@@ -7818,6 +7886,34 @@ test.describe('Landing pública (86e3fr9vz)', () => {
 
         await contato.hover();
         await analyze(page, `landing, hover em Entrar em contato (${vp.label})`);
+        // O CTA é o verde da marca com texto navy (86e3h0xcr). Primeiro, que o fundo em
+        // hover É o verde escurecido (um `bg-primary` branco com texto escuro também
+        // passaria no contraste); depois, o texto contra o pixel do botão.
+        await expect.poll(() => contato.evaluate((el) => el.getAnimations().length)).toBe(0);
+        const cta = await contato.evaluate((el) => {
+          const resolver = (cor: string) => {
+            const probe = document.createElement('span');
+            probe.style.backgroundColor = cor;
+            el.appendChild(probe);
+            const resolvida = getComputedStyle(probe).backgroundColor;
+            probe.remove();
+            return resolvida;
+          };
+          return {
+            fundo: getComputedStyle(el).backgroundColor,
+            hover: resolver('color-mix(in srgb, hsl(var(--lp-brand)) 90%, black)'),
+            base: resolver('hsl(var(--lp-brand))'),
+            comMouse: window.matchMedia('(hover: hover)').matches,
+          };
+        });
+        // No projeto de toque o `:hover` emulado pode não pegar: ali vale o verde base.
+        expect(
+          cta.comMouse ? [cta.hover] : [cta.hover, cta.base],
+          'CTA pinta o verde da marca',
+        ).toContain(cta.fundo);
+        const razaoCta = await contrasteDoBotao(page, contato);
+        console.log(`contraste do CTA em hover · ${vp.label}: ${razaoCta.toFixed(2)}:1`);
+        expect(razaoCta, `CTA em hover (${vp.label})`).toBeGreaterThanOrEqual(4.5);
         await entrar.hover();
         await analyze(page, `landing, hover em Entrar (${vp.label})`);
 
@@ -7865,51 +7961,6 @@ test.describe('Landing pública (86e3fr9vz)', () => {
         }
       });
 
-      test('spotlight do card: texto sobre o brilho mantém AA (4,5:1)', async ({
-        page,
-        context,
-      }) => {
-        // COM movimento: sob movimento reduzido o spotlight nem existe.
-        await abrirLanding(page, context, { reducedMotion: false });
-        const card = page.locator('#para-quem li').first();
-        await card.scrollIntoViewIfNeeded();
-        await expect(card).toHaveAttribute('data-revealed', '');
-        const texto = card.locator('p');
-        const caixa = await texto.boundingBox();
-        expect(caixa, 'texto do card sem caixa').not.toBeNull();
-        if (!caixa) return;
-        // Ponteiro no MEIO do texto: o centro do brilho embaixo dele é o pior caso.
-        await page.mouse.move(caixa.x + caixa.width / 2, caixa.y + caixa.height / 2);
-
-        // Só com mouse: no projeto que emula toque (`hover: none`) o spotlight não
-        // existe, por desenho, e é ISSO que se afirma ali (o gate não aceita teste pulado).
-        const comMouse = await page.evaluate(() => window.matchMedia('(hover: hover)').matches);
-        if (!comMouse) {
-          expect(await card.evaluate((el) => getComputedStyle(el, '::after').content)).toBe('none');
-          expect(await card.evaluate((el) => el.style.getPropertyValue('--lp-mx'))).toBe('');
-          return;
-        }
-        await expect
-          .poll(() => card.evaluate((el) => el.style.getPropertyValue('--lp-mx')))
-          .not.toBe('');
-        await expect
-          .poll(() => card.evaluate((el) => getComputedStyle(el, '::after').opacity))
-          .toBe('0.6');
-        await expect
-          .poll(() => card.evaluate((el) => el.getAnimations({ subtree: true }).length))
-          .toBe(0);
-        const alvos: [string, Locator][] = [
-          ['título', card.locator('h3')],
-          ['texto', texto],
-        ];
-        for (const [nome, alvo] of alvos) {
-          const razao = await contrasteSobreAurora(page, alvo);
-          console.log(`contraste sob o spotlight · ${nome} · ${vp.label}: ${razao.toFixed(2)}:1`);
-          expect.soft(razao, `${nome} (${vp.label}) sob o spotlight`).toBeGreaterThanOrEqual(4.5);
-        }
-        await shotTela(page, `landing-spotlight-${slug}`);
-      });
-
       test('tour: abas pelo teclado, moldura em hover, AA sobre a moldura e sem rolagem horizontal', async ({
         page,
         context,
@@ -7953,7 +8004,8 @@ test.describe('Landing pública (86e3fr9vz)', () => {
           'true',
         );
         if (THEME === 'hologram' && slug === 'desktop') {
-          await abas.getByRole('tab', { name: 'Conciliação' }).click();
+          // Print na aba Anomalias: a figura recapturada no tema Hologram (86e3h0xcr).
+          await abas.getByRole('tab', { name: 'Anomalias' }).click();
           // Sem anel de foco no print: ele é do teclado usado acima, não da tela.
           await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
           await page.mouse.move(0, 0);
@@ -8031,7 +8083,7 @@ test.describe('Landing pública (86e3fr9vz)', () => {
         }
       });
 
-      test('ritmo: pares e vinhetas terminam no estado final, vinheta só de md para cima', async ({
+      test('ritmo: pares e a vinheta terminam no estado final, vinheta só de md para cima', async ({
         page,
         context,
       }) => {
@@ -8043,30 +8095,24 @@ test.describe('Landing pública (86e3fr9vz)', () => {
         await aguardarAnimacao(resposta);
         await expect(resposta).toHaveCSS('opacity', '1');
 
-        for (const id of ['para-quem', 'seguranca']) {
-          const vinheta = page.locator(`#${id} [data-lp-vignette]`);
-          await expect(vinheta).toHaveCount(1);
-          if (vp.size.width < 768) {
-            // Abaixo de `md` a vinheta não é desenhada (o contêiner é `hidden`).
-            await expect(vinheta).toBeHidden();
-            continue;
-          }
+        // Só "Segurança" tem vinheta (o cadeado); a de avatares de "Para quem" saiu na
+        // 86e3h0xcr.
+        await expect(page.locator('[data-lp-vignette]')).toHaveCount(1);
+        const vinheta = page.locator('#seguranca [data-lp-vignette]');
+        await expect(vinheta).toHaveCount(1);
+        if (vp.size.width < 768) {
+          // Abaixo de `md` a vinheta não é desenhada (o contêiner é `hidden`).
+          await expect(vinheta).toBeHidden();
+        } else {
           await vinheta.scrollIntoViewIfNeeded();
-          await expect(page.locator(`#${id} [data-reveal]`).first()).toHaveAttribute(
+          await expect(page.locator('#seguranca [data-reveal]').first()).toHaveAttribute(
             'data-revealed',
             '',
           );
           await expect(vinheta).toBeVisible();
+          // Entrada e depois PARADA: nenhuma animação, nem loop.
           await expect
-            .poll(() =>
-              vinheta.evaluate(
-                (el) =>
-                  el
-                    .getAnimations({ subtree: true })
-                    .filter((a) => !(a instanceof CSSAnimation && a.animationName === 'lp-pulse'))
-                    .length,
-              ),
-            )
+            .poll(() => vinheta.evaluate((el) => el.getAnimations({ subtree: true }).length))
             .toBe(0);
         }
         await exigirSemRolagemHorizontal(page, `landing com movimento (${vp.label})`);
@@ -8223,6 +8269,14 @@ test.describe('Landing pública (86e3fr9vz)', () => {
     // dispararia nada. O ponteiro sai de cima do painel (hover pausa a troca).
     await page.mouse.move(0, 0);
     await expect(tour.locator('[data-autoplay]')).toHaveAttribute('data-autoplay', 'on');
+    // A linha de progresso da aba ativa (86e3h0xcr) corre junto com o relógio, e o
+    // botão de pausa é só ícone (o nome acessível diz o que faz).
+    await expect(
+      abas.getByRole('tab', { selected: true }).locator('[data-lp-tab-progress="running"]'),
+    ).toHaveCount(1);
+    await expect(
+      tour.getByRole('button', { name: 'Pausar a troca automática das telas' }),
+    ).toHaveText('');
     await page.clock.fastForward(6100);
     await expect(abas.getByRole('tab', { name: 'Anomalias' })).toHaveAttribute(
       'aria-selected',
@@ -8236,11 +8290,14 @@ test.describe('Landing pública (86e3fr9vz)', () => {
       'true',
     );
     await expect(
+      abas.getByRole('tab', { name: 'De-para' }).locator('[data-lp-tab-progress="full"]'),
+    ).toHaveCount(1);
+    await expect(
       tour.getByRole('button', { name: 'Retomar a troca automática das telas' }),
     ).toBeVisible();
   });
 
-  test('tour: sob movimento reduzido não troca nem mostra o botão de pausa', async ({
+  test('tour: sob movimento reduzido não troca nem mostra o botão de pausa nem a linha', async ({
     page,
     context,
   }) => {
@@ -8255,6 +8312,7 @@ test.describe('Landing pública (86e3fr9vz)', () => {
       'true',
     );
     await expect(tour.getByRole('button', { name: /troca automática/ })).toHaveCount(0);
+    await expect(tour.locator('[data-lp-tab-progress]')).toHaveCount(0);
   });
 
   test('efeitos: revelação na rolagem e header rolado, com movimento', async ({

@@ -1,14 +1,15 @@
 /**
  * Dinamismo abaixo do hero (86e3gwzj0): o "Como funciona" vivo do `reveal.tsx`
  * (um passo aceso por vez, 3 s cada, só visível, pausa no hover e no foco, nada sob
- * movimento reduzido) e o teto de elementos das vinhetas das seções.
+ * movimento reduzido) e o teto de elementos da vinheta de "Segurança", a única.
  */
 import { act, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { LandingAudience } from '../landing-audience';
 import { LandingHow } from '../landing-how';
 import { STEPPER_STEP_MS, LandingEffects } from '../reveal';
-import { AudienceVignette, SecurityVignette } from '../section-vignettes';
+import { SecurityVignette } from '../section-vignettes';
 
 function mockEnvironment({
   reducedMotion = false,
@@ -109,13 +110,15 @@ describe('"Como funciona" vivo', () => {
 });
 
 describe('vinhetas das seções', () => {
-  it.each([
-    ['Para quem', AudienceVignette],
-    ['Segurança', SecurityVignette],
-  ])('%s: decorativa e com no máximo 20 elementos SVG', (_nome, Vignette) => {
-    const { container } = render(<Vignette />);
+  it('Segurança: decorativa e com no máximo 20 elementos SVG', () => {
+    const { container } = render(<SecurityVignette />);
     const svg = container.querySelector('svg');
     expect(svg).toHaveAttribute('aria-hidden', 'true');
     expect(container.querySelectorAll('svg, svg *').length).toBeLessThanOrEqual(20);
+  });
+
+  it('Para quem não tem vinheta (os avatares saíram na 86e3h0xcr)', () => {
+    const { container } = render(<LandingAudience />);
+    expect(container.querySelector('[data-lp-vignette]')).toBeNull();
   });
 });

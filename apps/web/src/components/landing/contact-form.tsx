@@ -276,7 +276,7 @@ export function ContactForm() {
                 type="submit"
                 size="lg"
                 disabled={pending}
-                className="lp-glow-button w-full sm:w-auto"
+                className="lp-glow-button lp-cta w-full sm:w-auto"
               >
                 {pending && <Loader2 className="animate-spin" aria-hidden="true" />}
                 {pending ? contact.submitting : contact.submit}
