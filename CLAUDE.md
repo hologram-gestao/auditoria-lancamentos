@@ -224,8 +224,10 @@
       `GET /export-layouts/{id}`, `POST /export-layouts/{id}/versions`), estas por
       ORGANIZAÇÃO como o catálogo da S12 (alvo da bateria numa terceira org). Só
       auth, tipos de anomalia, `test-connection`, `alert-test`, as 5 rotas de
-      `/organizations` (plataforma, sem dado de cliente) e `GET /export-layout-templates`
-      (modelos declarados no código, iguais para toda organização) ficam fora, com motivo.
+      `/organizations` (plataforma, sem dado de cliente), `GET /export-layout-templates`
+      (modelos declarados no código, iguais para toda organização) e o `POST /leads`
+      público da landing (86e3fr9ut: não lê nem grava dado escopável) ficam fora, com
+      motivo, em `NON_TENANT_ENDPOINTS` (**16** entradas hoje).
       Essa lista é o denominador da métrica de isolamento — endpoint fora dela é
       buraco que ninguém mede.
     - **Identidade de usuário em response é ENXUTA e mascarada por escopo**
@@ -335,6 +337,14 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
 3. **Valores monetários em claro** (campos `amount`, `balance`) — são números sem identificação, sem valor isolado.
 4. **Datas em claro** (`transaction_date`, `reference_month`) — necessárias para SQL ordering/filtering.
 5. **Nenhum dado identificável do cliente final persiste em claro** — CNPJ, razão social, fornecedores, **nomes/descrições** de categorias e de contas são **sempre buscados do Omie em tempo real** e mantidos apenas em cache com TTL. **Código não é nome** (delta da 86e33bmkb, 02–03/09/2026): `reconciliation_omie_entries` persiste em claro `amount` (já coberto pela §4.3), `category_code` (só o código, ex. "2.04.78") e `supplier_code` (o `codigo_cliente_omie` numérico do cadastro) como snapshot do processamento — única fonte de Valor/Categoria/Fornecedor para divergências de **título** (Atrasado/Previsto), que ficam fora do `ListarExtrato` e portanto fora do enriquecimento em runtime. Os **nomes** continuam resolvidos em tempo real e nunca persistem: descrição de categoria via `ListarCategorias` + cache TTL, razão social do fornecedor via `ConsultarCliente` + cache TTL (`clientes_cache`, com cache negativo de 15 min para código que o Omie respondeu não conhecer).
+   **Lead da landing NÃO é dado do cliente final** (decisão do Pedro, 28/09/2026, épico
+   86e3fr9tj): `leads` guarda em claro nome, e-mail, empresa, WhatsApp e mensagem de quem
+   preencheu o formulário público, porque é prospect sem tenant (não há DEK para usar e
+   não existe chave de plataforma). A compensação é o mínimo: sem IP, sem user agent, sem
+   FK para cliente ou organização, com `consent_at` e `consent_text_version` como
+   evidência do consentimento (LGPD). Nenhum campo do lead vai para log nem para
+   `usage_events` (`lead_recebido` leva só booleanos). Não leia esta exceção como
+   precedente para dado de cliente.
 6. **Arquivo original nunca persiste** — processado em memória e descartado.
 7. **Trilha de acesso (`access_audit`, LGPD — Sprint 3 + 5):** toda visualização,
    exportação ou negação de acesso a relatório grava 1 linha com **só IDs**
@@ -929,6 +939,19 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   `components/shared/collapsible-summary.tsx`, com estado por tela no `localStorage`
   (try/catch, sem armazenamento abre aberto) e o conteúdo recolhido montado com `hidden`.
   Tela nova com cards de totais usa ela, nunca um "ocultar" próprio.
+- **Página pública de marca é o grupo `(public)`, com as próprias regras** (86e3fr9vz):
+  landing `/` e `/privacidade` passam no `middleware.ts` sem cookie (`PUBLIC_PATHS`; com
+  sessão, `/` vai para `/clientes`), usam tema Hologram FIXO pelo wrapper `.hologram` (sem
+  seletor), largura contida (`max-w-6xl`) e a janela rola. Efeitos só em CSS escopado
+  (`app/(public)/landing.css`, variáveis `--lp-*` em fundo, borda e sombra, nunca em
+  texto) mais UM componente cliente (`components/landing/reveal.tsx`); tudo parado sob
+  `prefers-reduced-motion`, que é também o estado que o gate de a11y mede. Texto da
+  landing só em `components/landing/content.ts` (espelho comentado em
+  `Docs/landing/COPY.md`). Nada disso vale para o app autenticado.
+- **Nome do produto só em `lib/brand.ts` (web) e `core/branding.py` (API)** (86e3fr9x3):
+  título, header, login, metadados, título do OpenAPI e os textos operacionais com a
+  sigla leem de lá. `brand.test.ts` e `test_branding.py` recusam o nome escrito à mão em
+  qualquer outro arquivo; a troca pelo nome novo (86e3fr9wm) é uma linha de cada lado.
 
 ### API
 
@@ -1225,6 +1248,18 @@ detalhe de feature:
 `resolve_organization_for_creation`/`resolve_organization_filter`,
 `modules/organizations/` e `scripts/promote_platform_admin.py`.
 
+**A landing pública e a captação de leads também NÃO foram sprint do hub.** Vieram do
+épico ClickUp `86e3fr9tj` (29/09/2026, plano em
+[Docs/landing/PLANO_LANDING_PAGE.md](Docs/landing/PLANO_LANDING_PAGE.md), copy com fontes
+em [Docs/landing/COPY.md](Docs/landing/COPY.md)) e deixaram: a raiz `/` como página
+pública (grupo `app/(public)/`, com `/privacidade`), a tabela `leads`, o
+`POST /api/v1/leads` público (honeypot, 3 por e-mail em 24 h, `slowapi` como teto global,
+aviso no Slack fail-soft por `LEADS_SLACK_WEBHOOK_URL`, que não é canal de plantão), o
+evento `lead_recebido` e as constantes de marca `lib/brand.ts`/`core/branding.py`. O nome
+do produto e o domínio próprio seguem abertos (86e3fr9wm, roteiro em
+[Docs/landing/DOMINIO_E_NOME.md](Docs/landing/DOMINIO_E_NOME.md)): o mapeamento de domínio
+do Cloud Run não atende `southamerica-east1`, então o caminho é Load Balancer HTTPS.
+
 ---
 
 ## 9. Comandos Frequentes
@@ -1333,6 +1368,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.64 — 29/09/2026. **A raiz do sistema virou uma landing pública com captação de leads, e o nome do produto passou a morar num lugar só (épico 86e3fr9tj).** A `/` deixou de redirecionar para o login: é o grupo `app/(public)/` (landing e `/privacidade`), público no `middleware.ts` (`PUBLIC_PATHS`; com sessão, `/` vai para `/clientes`), com tema Hologram fixo pelo wrapper `.hologram`, largura contida e efeitos só em CSS escopado mais um componente cliente, tudo parado sob `prefers-reduced-motion` (§7 Frontend). O formulário grava em `leads` (migration `490bffa3f6e2`, reversível) pelo `POST /api/v1/leads` sem autenticação, que entrou em `NON_TENANT_ENDPOINTS` (15 → **16**) sem mexer na lista canônica (**116**); a §4.5 ganhou a exceção do lead em claro (prospect sem tenant, decisão do Pedro de 28/09), com o mínimo de campos e sem IP. Anti-spam: honeypot e 3 por e-mail em 24 h respondem o mesmo 200 sem gravar; o `slowapi` de 10/min é teto GLOBAL por instância, porque atrás do BFF a API vê o IP do proxy (86e3anx10). O aviso no Slack é inline, fail-soft e com timeout de 3 s, com mrkdwn escapado e log só da categoria da falha; `LEADS_SLACK_WEBHOOK_URL` não conta como canal de plantão, pelo mesmo motivo do sintético (§3.14), e a secret `leads-slack-webhook-url-<env>` precisa existir antes do deploy. O redactor passou a mascarar chaves `webhook` e `url`. O nome do produto saiu de cinco literais para `lib/brand.ts` e `core/branding.py`, com testes que recusam o nome escrito à mão em qualquer outro arquivo: a troca pelo nome novo (86e3fr9wm, bloqueada) é uma linha de cada lado. A doc gerada de endpoints sensíveis entrou no `.prettierignore`, como o contrato: o hook reescrevia o arquivo inteiro. Matriz (**29**) e pares de AAD (**17**) não mudaram._
 
 _Versão 1.63 — 29/09/2026. **Os quatro candidatos que sobraram do épico de follow-ups da S14 viraram task e foram pagos, mais o achado do de-para que estava solto.** Três são a MESMA falha em lugares diferentes: a tela oferece algo que o destino não entrega. **86e3g9uku** — o painel do cliente sem conciliações mostrava "Criar conciliação" apontando para a LISTA, onde a criação já estava escondida para cliente sem origem (S9) e para cliente só-arquivo (S14, `CAPACIDADE_AUSENTE`); agora o estado vazio pergunta `originCodeFor(…, 'listar_contas')`, a MESMA chamada da lista, e o rótulo virou "Ir para conciliações" (o link navega, não cria). **86e3g9u3w** — a gaveta de conexão listava todos os tipos, e escolher "Arquivo" num cliente com Omie levava 409 `ORIGEM_JA_CONECTADA` depois do formulário inteiro preenchido; nasceu `connectableProviderTypes` (`lib/origin-capabilities.ts`), que projeta a trava do §4.8: com uma conexão que lista lançamentos, some todo tipo que também lista e é DIFERENTE dela — o mesmo tipo fica, porque duas conexões Omie com rótulos distintos são permitidas. `PROVIDER_TYPES` ganhou `listsLedger` pelo mesmo motivo que já carrega `requiresCredentials`: na criação não há conexão para perguntar à capacidade. **86e3g9ua7** — no de-para do cliente por arquivo o estado da base dizia "Nunca sincronizada"/"Sincronizada em", mandando procurar um botão "Sincronizar" que a própria tela já trocou por "Enviar arquivo do mês"; o texto passou a ramificar por `originIsFileBased`, a mesma resposta que ramifica a ação. **86e3g9v0j** — `title_contexts.text_iv` era `String(32)` no banco e `String(24)` no modelo: a migration da S15 escreveu um literal em vez de `IV_HEX_LENGTH`, e o IV é `os.urandom(12)` em hex, sempre 24. Nada quebrava, mas o `alembic check` acusava drift em toda entrega; migration nova alinha a coluna (a da S15 não se reescreve) e um teste varre o metadata atrás de coluna `_iv` com literal. **86e3g3dg3** (do épico da S16) — planilha de de-para exportada de OUTRO destino era recusada como `CONTAS_DA_PLANILHA_INVALIDAS` porque a pré-validação de contas não filtrava por `line.destination`; agora usa o mesmo filtro do laço que rejeita com `destino_diferente`, então a recusa aponta o arquivo errado em vez do plano de contas. Três regras novas: duas na §7 Frontend (ação tem de existir no destino, pela MESMA chamada dos dois lados; a palavra do estado acompanha a origem) e uma na §7 Backend (tamanho de coluna derivado de constante usa a constante). Endpoints sensíveis (**116**), matriz (**29**) e pares de AAD (**17**) não mudaram._
 
