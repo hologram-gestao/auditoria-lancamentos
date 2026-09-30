@@ -7901,8 +7901,8 @@ test.describe('Landing pública (86e3fr9vz)', () => {
           };
           return {
             fundo: getComputedStyle(el).backgroundColor,
-            hover: resolver('color-mix(in srgb, hsl(var(--lp-brand)) 90%, black)'),
-            base: resolver('hsl(var(--lp-brand))'),
+            hover: resolver('hsl(var(--brand-hover))'),
+            base: resolver('hsl(var(--brand))'),
             comMouse: window.matchMedia('(hover: hover)').matches,
           };
         });

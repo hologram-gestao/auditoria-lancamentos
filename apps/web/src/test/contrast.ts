@@ -1,8 +1,7 @@
 /**
  * Contraste WCAG 2.1 a partir de tokens de CSS no formato `H S% L%` (o que o
  * Tailwind embrulha em `hsl()`). Usado pelas travas de contraste do tema
- * (`theme-contrast.test.ts`) e da landing (`landing-contrast.test.ts`), que parseiam
- * o CSS de verdade em vez de copiar valores.
+ * (`theme-contrast.test.ts`), que parseiam o CSS de verdade em vez de copiar valores.
  */
 
 export type Rgb = [number, number, number];

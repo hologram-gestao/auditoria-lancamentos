@@ -34,7 +34,7 @@ export function LandingHeader() {
           <Button asChild variant="outline" size="sm">
             <Link href="/login">{header.signIn}</Link>
           </Button>
-          <Button asChild size="sm" className="lp-glow-button lp-cta">
+          <Button asChild size="sm" variant="brand" className="lp-glow-button">
             <a href={`/#${CONTACT_ANCHOR}`}>{header.contact}</a>
           </Button>
         </nav>

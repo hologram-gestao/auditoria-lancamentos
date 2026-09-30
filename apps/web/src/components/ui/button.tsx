@@ -18,6 +18,12 @@ const buttonVariants = cva(
         // resultante não é um token, então nenhum teste o trava. No escuro
         // reprovava de verdade: 3,95:1 contra o mínimo de 4,5.
         destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive-hover',
+        // Verde da marca com texto navy (86e3h1h75): o primário das páginas
+        // públicas (landing e login), onde o `default` é BRANCO (tema Hologram
+        // fixo). Hover por token sólido e anel de foco no próprio verde;
+        // `cursor-pointer` e `disabled:opacity-50` vêm da base: desabilitado é
+        // o verde apagado, nunca um cinza sólido.
+        brand: 'bg-brand text-brand-foreground hover:bg-brand-hover focus-visible:ring-brand',
         outline: 'border border-input bg-background hover:bg-accent hover:text-accent-foreground',
         secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
         ghost: 'hover:bg-accent hover:text-accent-foreground',
