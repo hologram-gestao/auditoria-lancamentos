@@ -8268,6 +8268,14 @@ test.describe('Landing pública (86e3fr9vz)', () => {
     // dispararia nada. O ponteiro sai de cima do painel (hover pausa a troca).
     await page.mouse.move(0, 0);
     await expect(tour.locator('[data-autoplay]')).toHaveAttribute('data-autoplay', 'on');
+    // A linha de progresso da aba ativa (86e3h0xcr) corre junto com o relógio, e o
+    // botão de pausa é só ícone (o nome acessível diz o que faz).
+    await expect(
+      abas.getByRole('tab', { selected: true }).locator('[data-lp-tab-progress="running"]'),
+    ).toHaveCount(1);
+    await expect(
+      tour.getByRole('button', { name: 'Pausar a troca automática das telas' }),
+    ).toHaveText('');
     await page.clock.fastForward(6100);
     await expect(abas.getByRole('tab', { name: 'Anomalias' })).toHaveAttribute(
       'aria-selected',
@@ -8281,11 +8289,14 @@ test.describe('Landing pública (86e3fr9vz)', () => {
       'true',
     );
     await expect(
+      abas.getByRole('tab', { name: 'De-para' }).locator('[data-lp-tab-progress="full"]'),
+    ).toHaveCount(1);
+    await expect(
       tour.getByRole('button', { name: 'Retomar a troca automática das telas' }),
     ).toBeVisible();
   });
 
-  test('tour: sob movimento reduzido não troca nem mostra o botão de pausa', async ({
+  test('tour: sob movimento reduzido não troca nem mostra o botão de pausa nem a linha', async ({
     page,
     context,
   }) => {
@@ -8300,6 +8311,7 @@ test.describe('Landing pública (86e3fr9vz)', () => {
       'true',
     );
     await expect(tour.getByRole('button', { name: /troca automática/ })).toHaveCount(0);
+    await expect(tour.locator('[data-lp-tab-progress]')).toHaveCount(0);
   });
 
   test('efeitos: revelação na rolagem e header rolado, com movimento', async ({

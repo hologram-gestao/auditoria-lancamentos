@@ -41,9 +41,7 @@ export function LandingTour() {
           items={items}
           labels={{
             tabs: tour.tabsLabel,
-            pause: tour.pause,
             pauseLabel: tour.pauseLabel,
-            resume: tour.resume,
             resumeLabel: tour.resumeLabel,
           }}
         />

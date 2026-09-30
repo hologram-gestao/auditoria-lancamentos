@@ -168,10 +168,11 @@ export const tour = {
   eyebrow: 'Por dentro',
   title: `Veja o ${PRODUCT_NAME} por dentro`,
   tabsLabel: 'Telas do produto',
-  /** Controle da troca automática (WCAG 2.2.2): o nome acessível começa pelo texto visível. */
-  pause: 'Pausar',
+  /**
+   * Controle da troca automática (WCAG 2.2.2): botão só de ícone desde a 86e3h0xcr, com
+   * estes nomes acessíveis. Quem explica a troca na tela é a linha de progresso da aba.
+   */
   pauseLabel: 'Pausar a troca automática das telas',
-  resume: 'Retomar',
   resumeLabel: 'Retomar a troca automática das telas',
   items: [
     {

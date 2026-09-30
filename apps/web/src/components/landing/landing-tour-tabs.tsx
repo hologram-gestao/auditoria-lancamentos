@@ -5,10 +5,18 @@
  *
  * Troca automática a cada 6 s, e só enquanto a seção está na tela, ninguém mexeu e
  * o ponteiro não está sobre a tela mostrada. Para de vez no primeiro clique ou foco
- * nas abas ou no painel, e nem começa sob `prefers-reduced-motion`. Como a troca é
- * conteúdo que se atualiza sozinho por mais de 5 s, existe um botão para pausar e
- * retomar (WCAG 2.2.2), no molde do carrossel do APG; ele só aparece quando há troca
- * a controlar. Leitor de tela não ouve a troca: o painel não é `aria-live`.
+ * nas abas ou no painel, e nem começa sob `prefers-reduced-motion`.
+ *
+ * Quem EXPLICA a troca na tela é uma linha de 2 px na base da aba ativa (86e3h0xcr):
+ * decorativa (`aria-hidden`), cresce de 0 a 100 % nos 6 s do relógio enquanto ele está
+ * armado e fica cheia quando ele para (ponteiro em cima, fora da tela, parada). A `key`
+ * muda a cada armada, então a animação recomeça junto com o `setTimeout`.
+ *
+ * Como a troca é conteúdo que se atualiza sozinho por mais de 5 s, existe um botão
+ * para pausar e retomar (WCAG 2.2.2), no molde do carrossel do APG: só ícone, com o
+ * nome acessível dizendo o que faz, à direita da faixa de abas, e só quando há troca a
+ * controlar. Sob movimento reduzido não há troca, nem linha, nem botão. Leitor de tela
+ * não ouve a troca: o painel não é `aria-live`.
  *
  * Os painéis ficam montados (`forceMount`: a imagem da próxima aba não some e volta)
  * e o inativo leva `hidden`, mais o `data-[state=inactive]:hidden` do `TabsContent`;
@@ -39,9 +47,7 @@ export interface TourItemView {
 
 export interface TourLabels {
   tabs: string;
-  pause: string;
   pauseLabel: string;
-  resume: string;
   resumeLabel: string;
 }
 
@@ -98,16 +104,25 @@ export function LandingTourTabs({ items, labels }: { items: TourItemView[]; labe
   return (
     <div ref={rootRef} data-autoplay={armed ? 'on' : 'off'}>
       <Tabs value={value} onValueChange={setValue} className="grid gap-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-start justify-between gap-3">
           <TabsList
             aria-label={labels.tabs}
-            className="h-auto flex-wrap justify-start"
+            className="h-auto min-w-0 flex-wrap justify-start"
             onPointerDown={stop}
             onFocus={stop}
           >
             {items.map((item) => (
-              <TabsTrigger key={item.id} value={item.id}>
+              <TabsTrigger key={item.id} value={item.id} className="relative overflow-hidden">
                 {item.tab}
+                {autoAllowed && item.id === value && (
+                  <span
+                    key={`${item.id}-${armed ? 'on' : 'off'}`}
+                    aria-hidden="true"
+                    data-lp-tab-progress={armed ? 'running' : 'full'}
+                    className="lp-tab-progress"
+                    style={{ '--lp-tab-ms': `${TOUR_AUTO_ADVANCE_MS}ms` } as React.CSSProperties}
+                  />
+                )}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -115,13 +130,12 @@ export function LandingTourTabs({ items, labels }: { items: TourItemView[]; labe
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              className="text-muted-foreground"
+              size="icon"
+              className="text-muted-foreground shrink-0"
               aria-label={stopped ? labels.resumeLabel : labels.pauseLabel}
               onClick={() => setStopped((current) => !current)}
             >
               {stopped ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}
-              {stopped ? labels.resume : labels.pause}
             </Button>
           )}
         </div>

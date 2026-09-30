@@ -441,6 +441,35 @@
   position: relative;
 }
 
+/*
+ * Linha de progresso da aba ativa (86e3h0xcr): 2 px na base, no verde da marca. Cheia
+ * por padrão (relógio parado); com o relógio armado cresce de 0 a 100 % no tempo da
+ * troca (`--lp-tab-ms`, escrito do `TOUR_AUTO_ADVANCE_MS`). Decorativa, fora do texto.
+ */
+.lp-tab-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: hsl(var(--lp-brand));
+  transform-origin: left center;
+  pointer-events: none;
+}
+
+.lp-tab-progress[data-lp-tab-progress='running'] {
+  animation: lp-tab-progress var(--lp-tab-ms, 6s) linear both;
+}
+
+@keyframes lp-tab-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
 /* Troca de aba: o painel que entra aparece em 250 ms. O que sai some na hora. */
 .lp-tour-panel[data-state='active'] {
   animation: lp-fade-in 250ms ease-out;
@@ -769,6 +798,7 @@
   .lp-aurora__blob,
   .lp-fade-up,
   .lp-tour-panel[data-state='active'],
+  .lp-tab-progress[data-lp-tab-progress='running'],
   .lp-pulse-dot::after,
   .lp-float,
   .lp-progress,

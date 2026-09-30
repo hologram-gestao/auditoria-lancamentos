@@ -119,8 +119,10 @@ Rótulo: **Como funciona** · Título do bloco: **Do arquivo ao lançamento, em 
 Rótulo: **Por dentro** · Título do bloco: **Veja o Hologram OS por dentro** · Cinco abas; cada
 uma mostra um print REAL da plataforma numa moldura de navegador (título fictício na barra:
 "<tela> · Hologram OS"), uma frase e dois bullets. As abas trocam sozinhas a cada 6 s
-enquanto o bloco está na tela, param no primeiro clique ou foco, e têm o botão **Pausar** /
-**Retomar** (nome acessível: "Pausar a troca automática das telas").
+enquanto o bloco está na tela, param no primeiro clique ou foco; uma linha fina na base da
+aba ativa mostra o tempo até a próxima troca, e o botão de pausar e retomar é só ícone, sem
+texto visível (nomes acessíveis: "Pausar a troca automática das telas" e "Retomar a troca
+automática das telas"; 86e3h0xcr).
 
 Os prints são cópias otimizadas de `Docs/manual/fonte/img/` com dado fictício ("Cliente
 Exemplo Ltda", "Ana da Hologram": Hologram é a empresa, pode). As outras nove figuras do
