@@ -1054,4 +1054,5 @@ NON_TENANT_ENDPOINTS: dict[str, str] = {
     "GET /api/v1/organizations/platform-admins": "administração da plataforma (ManagePlatformDep); só quem tem scope=platform, sem organização nem cliente",
     "GET /api/v1/organizations/{organization_id}": "administração da plataforma (ManagePlatformDep)",
     "PATCH /api/v1/organizations/{organization_id}": "administração da plataforma (ManagePlatformDep)",
+    "POST /api/v1/leads": "público; captação de lead da landing; não lê nem grava dado escopável",
 }

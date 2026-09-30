@@ -40,6 +40,7 @@ from app.modules.usage_events.schemas import (
     FechamentoProduzidoProps,
     FlagRevisadoProps,
     GlossarioEditadoProps,
+    LeadRecebidoProps,
     MovimentosSincronizadosProps,
     OmieLancamentoEnviadoProps,
     OmieLancamentoRejeitadoProps,
@@ -675,6 +676,34 @@ class UsageEventService:
                 layout_versao=layout_versao,
                 linhas=linhas,
                 valor_total_centavos=decimal_to_cents(valor_total),
+            ),
+        )
+        if props is None:
+            return False
+        return await self.emit(event, props=props)
+
+    async def emit_lead_recebido(
+        self,
+        *,
+        has_company: bool,
+        has_whatsapp: bool,
+        has_message: bool,
+        notified: bool,
+    ) -> bool:
+        """86e3fr9ut — um lead da landing foi gravado. Sem `session_id`, sem dedup.
+
+        Chamado DEPOIS de gravar o lead: as props passam pelo `_props_or_none`, então
+        uma prop recusada vira warning, nunca 500 na resposta ao visitante.
+        """
+        event = UsageEventName.LEAD_RECEBIDO
+        props = self._props_or_none(
+            event,
+            lambda: LeadRecebidoProps(
+                source="landing",
+                has_company=has_company,
+                has_whatsapp=has_whatsapp,
+                has_message=has_message,
+                notified=notified,
             ),
         )
         if props is None:
