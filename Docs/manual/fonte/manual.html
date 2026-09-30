@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<title>Manual da plataforma</title>
+<title>Hologram OS · Manual da plataforma</title>
 <link rel="stylesheet" href="manual.css">
 </head>
 <body>
@@ -11,11 +11,12 @@
 <section class="cover">
   <div class="mark">Documentação do produto</div>
   <div class="rule"></div>
+  <p class="product">Hologram OS</p>
   <h1>Manual da<br>plataforma</h1>
   <p class="sub">Conciliação bancária, classificação contábil e geração do arquivo que o sistema contábil importa. Guia completo para escritórios contábeis e BPOs financeiros.</p>
   <div class="foot">
-    <span>Versão 1.0 · Setembro de 2026</span>
-    <span>Material de apoio comercial e operacional</span>
+    <span>Versão 1.1 · Setembro de 2026</span>
+    <span>Hologram Gestão · Material de apoio comercial e operacional</span>
   </div>
 </section>
 
@@ -23,7 +24,7 @@
 <section class="front">
   <h2>Sobre este manual</h2>
 
-  <p class="lead">Este documento descreve, do começo ao fim, o que a plataforma faz e como operá-la. Ele foi escrito para quem vai usar o sistema no dia a dia: sócios de escritórios contábeis, gerentes de carteira, analistas de BPO financeiro e as equipes dos clientes atendidos.</p>
+  <p class="lead">Este documento descreve, do começo ao fim, o que o Hologram OS faz e como operá-lo. Ele foi escrito para quem vai usar o sistema no dia a dia: sócios de escritórios contábeis, gerentes de carteira, analistas de BPO financeiro e as equipes dos clientes atendidos.</p>
 
   <p>Não é um documento técnico. Nenhum conhecimento de programação é necessário para ler qualquer parte dele. Onde uma regra do sistema existe por um motivo contábil ou de segurança, o motivo está escrito junto, porque saber por que uma trava existe é o que permite confiar nela.</p>
 
@@ -39,18 +40,13 @@
     <dt>Imagens</dt>
     <dd>Todas as capturas são do produto em funcionamento, com dados de demonstração. Nomes de empresas, valores e datas são fictícios.</dd>
   </dl>
-
-  <div class="callout">
-    <span class="label">Uma observação sobre o nome</span>
-    <p>A plataforma está em processo de definição de marca. Neste manual ela é tratada apenas como “a plataforma”. As imagens mostram a versão atual da interface, cuja identidade visual será atualizada junto com o nome.</p>
-  </div>
 </section>
 
 <!-- ============================ SUMÁRIO ============================ -->
 <section class="toc">
   <h2>Sumário</h2>
   <ol>
-    <li class="part"><a href="#cap1">1. A plataforma em uma página</a></li>
+    <li class="part"><a href="#cap1">1. O Hologram OS em uma página</a></li>
     <li class="part"><a href="#cap2">2. Conceitos e vocabulário</a></li>
     <li class="part"><a href="#cap3">3. Perfis de acesso</a></li>
     <li class="part"><a href="#cap4">4. Primeiro acesso</a></li>
@@ -88,10 +84,10 @@
 <!-- ============================ CAP 1 ============================ -->
 <header class="chead" id="cap1">
   <p class="num">Capítulo 1</p>
-  <h1 class="chapter">A plataforma em uma página</h1>
+  <h1 class="chapter">O Hologram OS em uma página</h1>
 </header>
 
-<p class="lead">Todo mês, alguém no escritório abre o extrato de um cliente, abre o ERP dele e compara linha por linha. Depois classifica o que não estava classificado, corrige o que veio errado e monta o lote que entra no sistema contábil. A plataforma faz esse caminho inteiro, e faz de um jeito auditável: cada decisão fica registrada, com autor e data.</p>
+<p class="lead">Todo mês, alguém no escritório abre o extrato de um cliente, abre o ERP dele e compara linha por linha. Depois classifica o que não estava classificado, corrige o que veio errado e monta o lote que entra no sistema contábil. O Hologram OS faz esse caminho inteiro, e faz de um jeito auditável: cada decisão fica registrada, com autor e data.</p>
 
 <p>O que muda não é a natureza do trabalho, é quanto dele precisa ser feito à mão. A leitura do arquivo, a comparação com o ERP, a montagem da partida e a geração do arquivo contábil passam a ser do sistema. A decisão continua sendo de quem entende de contabilidade.</p>
 
@@ -143,7 +139,7 @@
     <tr><th style="width:26%">Termo</th><th>O que significa aqui</th></tr>
   </thead>
   <tbody>
-    <tr><td><strong>Organização</strong></td><td>O escritório contábil ou BPO que usa a plataforma. Cada organização tem seus próprios clientes, sua equipe e seu catálogo de configurações. Uma organização nunca enxerga a outra.</td></tr>
+    <tr><td><strong>Organização</strong></td><td>O escritório contábil ou BPO que usa o Hologram OS. Cada organização tem seus próprios clientes, sua equipe e seu catálogo de configurações. Uma organização nunca enxerga a outra.</td></tr>
     <tr><td><strong>Cliente</strong></td><td>A empresa atendida pela organização. É a unidade de tudo: conciliações, contas, plano de contas e usuários pertencem a um cliente.</td></tr>
     <tr><td><strong>Origem</strong></td><td>De onde vêm os lançamentos do cliente. Hoje existem duas: a conexão com o ERP Omie e o envio de arquivo (planilha ou extrato), para o cliente que não tem ERP.</td></tr>
     <tr><td><strong>Conciliação</strong></td><td>O confronto de uma conta bancária com o ERP em um mês. Uma conciliação corresponde sempre a uma conta e um mês, mesmo que o extrato tenha vindo quebrado em vários arquivos.</td></tr>
@@ -184,7 +180,7 @@
     <tr><th style="width:24%">Perfil</th><th>Quem é</th><th style="width:30%">Alcance</th></tr>
   </thead>
   <tbody>
-    <tr><td><strong>Administrador da plataforma</strong></td><td>Quem opera a plataforma como produto, dá suporte e cadastra organizações.</td><td>Todas as organizações.</td></tr>
+    <tr><td><strong>Administrador da plataforma</strong></td><td>Quem opera o Hologram OS como produto, dá suporte e cadastra organizações.</td><td>Todas as organizações.</td></tr>
     <tr><td><strong>Administrador</strong></td><td>Sócio ou responsável pelo escritório. Cadastra clientes, define a equipe e configura o catálogo da organização.</td><td>Todos os clientes da própria organização.</td></tr>
     <tr><td><strong>Gerente</strong></td><td>Quem toca a carteira: cadastra cliente, conecta origem, concilia, classifica e fecha o mês.</td><td>Somente os clientes da própria carteira.</td></tr>
     <tr><td><strong>Gerente do cliente</strong></td><td>Pessoa da empresa atendida, com autonomia: concilia, classifica, mantém o glossário e gere os usuários dela.</td><td>Somente a própria empresa.</td></tr>
@@ -209,9 +205,13 @@
     <tr><td>Criar e rodar conciliação</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td></tr>
     <tr><td>Revisar e exportar relatório</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td></tr>
     <tr><td>Enviar arquivo do cliente</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td></tr>
+    <tr><td>Sincronizar contas bancárias</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td></tr>
     <tr><td>Manter o glossário</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td></tr>
     <tr><td>Editar o de-para</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td></tr>
-    <tr><td>Sincronizar dados da origem</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td></tr>
+    <tr><td>Configurar o mapeamento do arquivo</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td></tr>
+    <tr><td>Sincronizar plano de contas, títulos e movimentos</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td></tr>
+    <tr><td>Registrar contexto de título</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td></tr>
+    <tr><td>Gerir os usuários do cliente</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td></tr>
     <tr><td>Gerar o arquivo contábil</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td></tr>
     <tr><td>Importar o plano contábil</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td></tr>
     <tr><td>Gerir conexões de origem</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td></tr>
@@ -219,6 +219,7 @@
     <tr><td>Editar e encerrar cliente</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td><td class="c no">não</td></tr>
     <tr><td>Gerir a equipe da organização</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td><td class="c no">não</td></tr>
     <tr><td>Configurar layouts de exportação</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td><td class="c no">não</td></tr>
+    <tr><td>Redefinir a senha de um usuário</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td><td class="c no">não</td><td class="c no">não</td></tr>
     <tr><td>Cadastrar organizações</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td><td class="c no">não</td><td class="c no">não</td></tr>
   </tbody>
 </table>
@@ -240,7 +241,7 @@
 <h2>Entrar</h2>
 <p>O acesso é por e-mail e senha. Se a combinação estiver errada, a mensagem é sempre a mesma, sem dizer se o problema foi o e-mail ou a senha: é uma proteção contra quem tenta descobrir quais e-mails existem no sistema. Depois de cinco tentativas em cinco minutos, novas tentativas são bloqueadas temporariamente.</p>
 
-<p>Quem esquece a senha fala com o administrador da conta. A redefinição é feita pela plataforma e, ao ser feita, encerra imediatamente todas as sessões abertas daquele usuário, que precisa entrar de novo com a senha nova.</p>
+<p>Quem esquece a senha fala com o administrador da conta. A redefinição é feita pela administração do Hologram OS e, ao ser feita, encerra imediatamente todas as sessões abertas daquele usuário, que precisa entrar de novo com a senha nova.</p>
 
 <h3>Senhas</h3>
 <ul class="tight">
@@ -261,7 +262,7 @@
 <p>O sino no alto da tela avisa quando um processamento termina, com ou sem erro. É por isso que não é preciso ficar esperando na tela de uma conciliação: envia-se o arquivo, sai-se da tela e o sino chama de volta.</p>
 
 <h3>Temas</h3>
-<p>A interface tem três temas, incluindo um claro para quem prefere, e a escolha fica salva por usuário. As imagens deste manual usam o tema escuro, que é o padrão.</p>
+<p>A interface tem três temas: Hologram, no azul-marinho da marca, que é o padrão; claro; e escuro. A escolha fica salva no navegador. As imagens deste manual estão no tema Hologram, com exceção das seções 6.5 e 6.6, capturadas no tema escuro.</p>
 
 <!-- ============================ CAP 5 ============================ -->
 <header class="chead" id="cap5">
@@ -273,7 +274,7 @@
 
 <h2 id="s51">5.1 Cadastrar o cliente</h2>
 
-<p>Em <span class="ui">Clientes</span>, o botão <span class="ui">Novo Cliente</span> abre o formulário. São obrigatórios o nome e o CNPJ; a categoria é opcional e serve para organizar a lista (por exemplo, Fintech, Comércio, Serviços). As categorias disponíveis são definidas pela organização, em <span class="ui">Configurações</span>.</p>
+<p>Em <span class="ui">Clientes</span>, o botão <span class="ui">Novo Cliente</span> abre o formulário. Só o nome é obrigatório; a categoria é opcional e serve para organizar a lista (por exemplo, Fintech, Comércio, Serviços). As categorias disponíveis são definidas pela organização, em <span class="ui">Configurações</span>.</p>
 
 <p>O cadastro tem um interruptor para conectar o ERP Omie na hora. Se a credencial ainda não estiver em mãos, basta deixá-lo desligado: o cliente nasce sem origem, e a conexão pode ser feita depois. Um cliente sem origem é um cliente válido, ele apenas ainda não tem de onde puxar lançamentos.</p>
 
@@ -291,7 +292,7 @@
 <h3>Os dois tipos</h3>
 <dl class="kv">
   <dt>Omie</dt>
-  <dd>Exige a chave e o segredo de aplicativo do cliente no Omie, fornecidos por ele. A plataforma testa a credencial no momento do cadastro e só aceita se o ERP responder.</dd>
+  <dd>Exige a chave e o segredo de aplicativo do cliente no Omie, fornecidos por ele. O Hologram OS testa a credencial no momento do cadastro e só aceita se o ERP responder.</dd>
   <dt>Arquivo</dt>
   <dd>Para o cliente que não tem ERP. Não pede credencial nenhuma: os lançamentos passam a vir da planilha ou do extrato que ele manda todo mês. O capítulo 7.2 explica a configuração.</dd>
 </dl>
@@ -388,7 +389,7 @@
 
 <h3>Formatos e limites</h3>
 <ul class="tight">
-  <li>Aceita PDF, XLSX, XLS e CSV.</li>
+  <li>Aceita PDF, XLSX e CSV. Planilha no formato antigo .xls é recusada, com a orientação de salvá-la como .xlsx ou .csv.</li>
   <li>Até 20 MB por arquivo.</li>
   <li>O conteúdo do arquivo é verificado, não apenas a extensão. Um arquivo renomeado não passa.</li>
   <li>O mesmo arquivo anexado duas vezes na mesma conciliação é recusado.</li>
@@ -468,7 +469,7 @@
 
 <h2 id="s66">6.6 Lançar no Omie o que faltou</h2>
 
-<p>As compras de fatura de cartão que não têm lançamento correspondente no ERP costumavam virar uma lista para alguém redigitar. A plataforma lança essas linhas diretamente na conta do cartão no Omie.</p>
+<p>As compras de fatura de cartão que não têm lançamento correspondente no ERP costumavam virar uma lista para alguém redigitar. O Hologram OS lança essas linhas diretamente na conta do cartão no Omie.</p>
 
 <figure>
   <img src="img/lancamento.png" alt="Seleção de compras para lançar no Omie">
@@ -531,7 +532,7 @@
 
 <h2 id="s73">7.3 O de-para</h2>
 
-<p>Aqui mora a decisão central da plataforma: para onde cada categoria de origem vai, em cada destino.</p>
+<p>Aqui mora a decisão central do Hologram OS: para onde cada categoria de origem vai, em cada destino.</p>
 
 <figure>
   <img src="img/de-para.png" alt="Tela do de-para com as decisões por destino">
@@ -658,7 +659,7 @@
   <dt>Layouts de exportação</dt>
   <dd>Os formatos de arquivo contábil, descritos na seção 7.5.</dd>
   <dt>Tipos de anomalia</dt>
-  <dd>O catálogo de apontamentos que a análise pode gerar. É comum a toda a plataforma, e por isso mantido pela administração da plataforma; a organização consulta e usa.</dd>
+  <dd>O catálogo de apontamentos que a análise pode gerar. É comum a todas as organizações do Hologram OS, e por isso mantido pela administração da plataforma; a organização consulta e usa.</dd>
 </dl>
 
 <h2>Encerrar um cliente</h2>
@@ -666,7 +667,7 @@
 <p>Quando um cliente deixa a carteira, a saída não é apagar tudo. O encerramento separa quem o cliente <em>é</em> do que <em>aconteceu</em>:</p>
 
 <ul class="tight">
-  <li>Sai a identificação: nome, CNPJ e credenciais são removidos, e os usuários daquele cliente são anonimizados e desativados.</li>
+  <li>Sai a identificação: o nome dá lugar a um rótulo anônimo, as credenciais são removidas e os usuários daquele cliente são anonimizados e desativados.</li>
   <li>Sai o que era sigiloso: a chave de criptografia do cliente é destruída, o que torna todo o conteúdo cifrado dele definitivamente ilegível.</li>
   <li>Fica o operacional: conciliações, valores, datas e materializações continuam disponíveis, apenas para leitura.</li>
 </ul>
@@ -679,10 +680,10 @@
   <h1 class="chapter">Segurança, privacidade e LGPD</h1>
 </header>
 
-<p class="lead">Um escritório contábil guarda, em nome de terceiros, alguns dos dados mais sensíveis que uma empresa tem. Estas são as decisões de projeto que sustentam essa responsabilidade, descritas sem jargão.</p>
+<p class="lead">Um escritório contábil guarda, em nome de terceiros, alguns dos dados mais sensíveis que uma empresa tem. Estas são as decisões de projeto do Hologram OS que sustentam essa responsabilidade, descritas sem jargão.</p>
 
 <h2>Cada cliente tem a própria chave</h2>
-<p>Os dados sensíveis de um cliente (credenciais, descrições de lançamento, observações, nomes de categoria e histórico) são cifrados com uma chave exclusiva dele. Não existe uma chave mestra que abra tudo, e o conteúdo cifrado de um cliente não é decifrável no contexto de outro.</p>
+<p>Os dados sensíveis de um cliente (credenciais, descrições de lançamento, observações, nomes de categoria e histórico) são cifrados com uma chave exclusiva dele, e o conteúdo cifrado de um cliente não é decifrável no contexto de outro. A chave de cada cliente é guardada trancada por uma chave-mestra que fica num cofre de chaves gerenciado, do qual nunca sai; ninguém da equipe tem acesso direto a ela.</p>
 
 <p>É essa arquitetura que torna o encerramento de cliente realmente efetivo: destruir a chave de um cliente basta para tornar todo o conteúdo sigiloso dele ilegível de uma vez.</p>
 
@@ -690,6 +691,14 @@
 <p>O primeiro nível separa clientes: um usuário do cliente alcança apenas a própria empresa. O segundo separa organizações: o escritório vizinho hospedado na mesma plataforma não alcança nem o nome dos seus clientes, nem os nomes da sua equipe.</p>
 
 <p>A verificação não acontece só na tela. Cada consulta ao banco de dados já sai restrita ao que o usuário pode ver, de modo que uma tentativa de acessar um recurso de outro cliente responde como se ele não existisse, sem revelar nem que existe.</p>
+
+<h2>Processamento por inteligência artificial</h2>
+<p>Dois pontos do fluxo usam um provedor externo de inteligência artificial, a Anthropic:</p>
+<ul class="tight">
+  <li><strong>Leitura do arquivo da conciliação.</strong> O extrato ou a fatura enviada é lido pelo provedor, que extrai as movimentações. O arquivo é processado em memória e não fica armazenado na plataforma.</li>
+  <li><strong>Análise de classificação.</strong> Para apontar classificações suspeitas, a plataforma envia ao provedor a descrição de cada movimentação conciliada, com o valor, o fornecedor e a categoria lançados no ERP, junto com o glossário do cliente.</li>
+</ul>
+<p>O cruzamento com o ERP não usa inteligência artificial: são as regras fixas da seção 6.3. A planilha da origem por arquivo também não passa pelo provedor, porque é lida pelo mapeamento de colunas. E a IA nunca decide: ela aponta, e quem decide é uma pessoa.</p>
 
 <h2>O que não é guardado</h2>
 <ul class="tight">
@@ -712,7 +721,7 @@
   <h1 class="chapter">Limites conhecidos</h1>
 </header>
 
-<p class="lead">Um manual honesto diz também onde o produto para. Estes são os limites atuais, com o motivo de cada um. Nenhum deles é acidental.</p>
+<p class="lead">Um manual honesto diz também onde o produto para. Estes são os limites atuais do Hologram OS, com o motivo de cada um. Nenhum deles é acidental.</p>
 
 <table class="long">
   <thead><tr><th style="width:34%">Limite</th><th>Motivo</th></tr></thead>
@@ -737,7 +746,7 @@
   <h1 class="chapter">Recusas e o que fazer</h1>
 </header>
 
-<p class="lead">A plataforma prefere recusar com explicação a aceitar com defeito. Esta tabela reúne as recusas mais comuns, o que cada uma significa e qual é a saída.</p>
+<p class="lead">O Hologram OS prefere recusar com explicação a aceitar com defeito. Esta tabela reúne as recusas mais comuns, o que cada uma significa e qual é a saída.</p>
 
 <table class="long">
   <thead><tr><th style="width:32%">O que aparece</th><th style="width:34%">O que significa</th><th>O que fazer</th></tr></thead>
@@ -811,7 +820,7 @@
     <tr><td>Divergência Omie</td><td>Lançamento que existe no ERP e não apareceu no extrato.</td></tr>
     <tr><td>Glossário</td><td>O vocabulário contábil de um cliente: categorias, fornecedores típicos e regras de auditoria.</td></tr>
     <tr><td>Materialização</td><td>O fechamento de uma competência em um destino, em versão imutável.</td></tr>
-    <tr><td>Organização</td><td>O escritório contábil ou BPO que usa a plataforma.</td></tr>
+    <tr><td>Organização</td><td>O escritório contábil ou BPO que usa o Hologram OS.</td></tr>
     <tr><td>Origem</td><td>De onde vêm as contas e os lançamentos do cliente.</td></tr>
     <tr><td>Partida</td><td>O par de contas, débito e crédito, de uma linha do arquivo contábil.</td></tr>
     <tr><td>Plano contábil</td><td>O plano de contas do sistema contábil de destino, importado por cliente.</td></tr>

@@ -40,7 +40,7 @@
     padding-bottom: 3mm;
   }
   @top-right {
-    content: "Manual da plataforma";
+    content: "Hologram OS · Manual da plataforma";
     font-family: "Fira", sans-serif;
     font-size: 7.6pt;
     letter-spacing: 0.06em;
@@ -114,6 +114,15 @@ code, .mono {
   color: #9ea4e8;
   margin-bottom: 60mm;
 }
+.cover .product {
+  font-family: "Fira", sans-serif;
+  font-weight: 600;
+  font-size: 18pt;
+  letter-spacing: 0.02em;
+  color: #c9cdf2;
+  margin: 0 0 3mm 0;
+  text-align: left;
+}
 .cover h1 {
   font-family: "Fira", sans-serif;
   font-weight: 600;
@@ -158,7 +167,7 @@ code, .mono {
   margin: 0 0 5mm 0;
 }
 
-.toc { page: plain; }
+.toc { page: plain; break-before: page; }
 .toc ol { list-style: none; margin: 0; padding: 0; }
 .toc > ol > li { margin-bottom: 1.6mm; }
 .toc a {
