@@ -133,10 +133,33 @@ gcloud run jobs execute auditoria-api-sync-titles-<env> \
 > O botão de sincronizar manual da tela é outro caminho (rota da API, papel
 > backend). Este agendamento é o que garante a carteira **diária**.
 
+### 6. Aviso de leads da landing pública (86e3fr9ut)
+
+A landing (`/`) grava cada contato do formulário na tabela `leads` e avisa o canal
+da ADL no Slack por um **incoming webhook próprio**, montado na API como
+`LEADS_SLACK_WEBHOOK_URL` (secret `leads-slack-webhook-url-<env>`). Não é canal de
+plantão: vazio, o lead é gravado e o aviso é pulado (`lead_notification_skipped` no
+log, sem a URL). O `setup-gcp.sh <env>` cria o container com uma versão VAZIA; ele
+tem de rodar **antes** do primeiro deploy que referencia a secret, senão o
+`--update-secrets` do workflow falha.
+
+Alguém com acesso ao Slack cria o incoming webhook no canal da ADL e o operador
+adiciona o valor:
+
+```bash
+printf '%s' 'https://hooks.slack.com/services/XXX' \
+  | gcloud secrets versions add leads-slack-webhook-url-<env> --data-file=- --project=liberdade-assessoria
+```
+
+A revisão seguinte da API lê o `:latest`. Conferência: envie um lead de teste pela
+landing e veja a mensagem no canal; a linha em `leads` fica com `notified_at`
+preenchido.
+
 ## Verificação rápida
 
 - [ ] `setup-gcp.sh <env>` rodou sem erro fatal; `KEK_KMS_KEY_NAME` impresso.
 - [ ] Pelo menos um canal de alerta com valor real (`gcloud secrets versions list alert-webhook-url-<env>`).
+- [ ] Secret `leads-slack-webhook-url-<env>` existe (vazia ou com a URL do canal da ADL) antes do deploy.
 - [ ] Admin de monitoração criado + `SMOKE_ADMIN_EMAIL/PASSWORD` no Environment.
 - [ ] `API_URL_<env>` setada no Environment.
 - [ ] Deploy verde, com `smoke-alert` provando `delivered=true`.

@@ -14,3 +14,7 @@ Docs/flow
 # hook de commit reindentar 4700 linhas a cada regeração, e as 3 linhas que
 # mudaram de verdade somem no meio da reescrita.
 apps/web/src/lib/contracts/schema.ts
+
+# Doc GERADA por `apps/api/scripts/gen_sensitive_endpoints_doc.py`, pelo mesmo motivo
+# do contrato: o hook reescrevia o arquivo inteiro e a linha nova sumia no diff.
+apps/api/docs/endpoints-sensiveis-sprint5.md

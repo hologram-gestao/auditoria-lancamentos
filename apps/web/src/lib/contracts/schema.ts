@@ -1830,6 +1830,23 @@ export interface paths {
         patch: operations["update_organization_api_v1_organizations__organization_id__patch"];
         trace?: never;
     };
+    "/api/v1/leads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Recebe o contato do formulário da landing pública (sem autenticação). */
+        post: operations["create_lead_api_v1_leads_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -4602,6 +4619,54 @@ export interface components {
              */
             dateFormat: string;
             amountFormat: components["schemas"]["AmountFormatPayload"];
+        };
+        /**
+         * LeadCreate
+         * @description Body de POST /api/v1/leads.
+         */
+        LeadCreate: {
+            /** Name */
+            name: string;
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+            /** Company */
+            company?: string | null;
+            /** Whatsapp */
+            whatsapp?: string | null;
+            /** Message */
+            message?: string | null;
+            /**
+             * Consent
+             * @constant
+             */
+            consent: true;
+            /**
+             * Website
+             * @default
+             */
+            website: string;
+        };
+        /**
+         * LeadReceived
+         * @description Confirmação genérica: igual para lead gravado, honeypot e limite por e-mail.
+         */
+        LeadReceived: {
+            /**
+             * Received
+             * @default true
+             * @constant
+             */
+            received: true;
+        };
+        /**
+         * LeadReceivedResponse
+         * @description Body do 200 de POST /api/v1/leads.
+         */
+        LeadReceivedResponse: {
+            data?: components["schemas"]["LeadReceived"];
         };
         /**
          * ListedFileEntry
@@ -11535,6 +11600,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OrganizationItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_lead_api_v1_leads_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LeadCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeadReceivedResponse"];
                 };
             };
             /** @description Validation Error */

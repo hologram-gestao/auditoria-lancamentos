@@ -87,6 +87,12 @@ env:
   # volta ao canal de plantão (fallback no backend). NÃO conta como canal
   # entregável — o fail-closed continua exigindo ALERT_WEBHOOK_SECRET/EMAIL.
   ALERT_WEBHOOK_SYNTHETIC_SECRET: alert-webhook-url-synthetic-dev
+  # Aviso de leads da landing pública (86e3fr9ut): incoming webhook do canal da ADL
+  # no Slack, montado como LEADS_SLACK_WEBHOOK_URL. Criado por
+  # scripts/setup-gcp.sh dev com versão VAZIA (vazio = lead gravado, aviso pulado).
+  # NÃO é canal de plantão. Precisa existir ANTES deste deploy, senão o
+  # `--update-secrets` falha.
+  LEADS_SLACK_SECRET: leads-slack-webhook-url-dev
   # NB: a base da API (vars.API_URL_DEV) é uma variable de ENVIRONMENT — só
   # resolve dentro de um job que declara `environment:`. Por isso ela é setada no
   # env do job `smoke-alert` (abaixo), não aqui no topo (onde não resolveria).
@@ -179,7 +185,7 @@ jobs:
           gcloud run jobs update ${{ env.MIGRATE_JOB }} \
             --image=${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/auditoria-api:dev \
             --update-env-vars=KEK_KMS_KEY_NAME=${{ env.KEK_KMS_KEY_NAME }} \
-            --update-secrets=ALERT_WEBHOOK_URL=${{ env.ALERT_WEBHOOK_SECRET }}:latest,ALERT_EMAIL_TO=${{ env.ALERT_EMAIL_SECRET }}:latest,ALERT_WEBHOOK_URL_SYNTHETIC=${{ env.ALERT_WEBHOOK_SYNTHETIC_SECRET }}:latest \
+            --update-secrets=ALERT_WEBHOOK_URL=${{ env.ALERT_WEBHOOK_SECRET }}:latest,ALERT_EMAIL_TO=${{ env.ALERT_EMAIL_SECRET }}:latest,ALERT_WEBHOOK_URL_SYNTHETIC=${{ env.ALERT_WEBHOOK_SYNTHETIC_SECRET }}:latest,LEADS_SLACK_WEBHOOK_URL=${{ env.LEADS_SLACK_SECRET }}:latest \
             --region=${{ env.REGION }} \
             --project=${{ env.PROJECT_ID }}
 
@@ -191,7 +197,7 @@ jobs:
           gcloud run jobs update ${{ env.CLEANUP_JOB }} \
             --image=${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/auditoria-api:dev \
             --update-env-vars=KEK_KMS_KEY_NAME=${{ env.KEK_KMS_KEY_NAME }} \
-            --update-secrets=ALERT_WEBHOOK_URL=${{ env.ALERT_WEBHOOK_SECRET }}:latest,ALERT_EMAIL_TO=${{ env.ALERT_EMAIL_SECRET }}:latest,ALERT_WEBHOOK_URL_SYNTHETIC=${{ env.ALERT_WEBHOOK_SYNTHETIC_SECRET }}:latest \
+            --update-secrets=ALERT_WEBHOOK_URL=${{ env.ALERT_WEBHOOK_SECRET }}:latest,ALERT_EMAIL_TO=${{ env.ALERT_EMAIL_SECRET }}:latest,ALERT_WEBHOOK_URL_SYNTHETIC=${{ env.ALERT_WEBHOOK_SYNTHETIC_SECRET }}:latest,LEADS_SLACK_WEBHOOK_URL=${{ env.LEADS_SLACK_SECRET }}:latest \
             --region=${{ env.REGION }} \
             --project=${{ env.PROJECT_ID }}
 
@@ -215,7 +221,7 @@ jobs:
             gcloud run jobs update "${SYNC_TITLES_JOB}" \
               --image=${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/auditoria-api:dev \
               --update-env-vars=KEK_KMS_KEY_NAME=${{ env.KEK_KMS_KEY_NAME }} \
-              --update-secrets=ALERT_WEBHOOK_URL=${{ env.ALERT_WEBHOOK_SECRET }}:latest,ALERT_EMAIL_TO=${{ env.ALERT_EMAIL_SECRET }}:latest,ALERT_WEBHOOK_URL_SYNTHETIC=${{ env.ALERT_WEBHOOK_SYNTHETIC_SECRET }}:latest \
+              --update-secrets=ALERT_WEBHOOK_URL=${{ env.ALERT_WEBHOOK_SECRET }}:latest,ALERT_EMAIL_TO=${{ env.ALERT_EMAIL_SECRET }}:latest,ALERT_WEBHOOK_URL_SYNTHETIC=${{ env.ALERT_WEBHOOK_SYNTHETIC_SECRET }}:latest,LEADS_SLACK_WEBHOOK_URL=${{ env.LEADS_SLACK_SECRET }}:latest \
               --region="${REGION}" \
               --project="${PROJECT_ID}" \
             || echo "::warning::Falha ao re-resolver o digest de ${SYNC_TITLES_JOB} — a sincronização diária da carteira pode rodar com imagem velha."
@@ -267,7 +273,7 @@ jobs:
             --region=${{ env.REGION }} \
             --project=${{ env.PROJECT_ID }} \
             --update-env-vars=DEPLOYED_AT=$(date -u +%Y%m%dT%H%M%SZ),KEK_KMS_KEY_NAME=${{ env.KEK_KMS_KEY_NAME }} \
-            --update-secrets=ALERT_WEBHOOK_URL=${{ env.ALERT_WEBHOOK_SECRET }}:latest,ALERT_EMAIL_TO=${{ env.ALERT_EMAIL_SECRET }}:latest,ALERT_WEBHOOK_URL_SYNTHETIC=${{ env.ALERT_WEBHOOK_SYNTHETIC_SECRET }}:latest \
+            --update-secrets=ALERT_WEBHOOK_URL=${{ env.ALERT_WEBHOOK_SECRET }}:latest,ALERT_EMAIL_TO=${{ env.ALERT_EMAIL_SECRET }}:latest,ALERT_WEBHOOK_URL_SYNTHETIC=${{ env.ALERT_WEBHOOK_SYNTHETIC_SECRET }}:latest,LEADS_SLACK_WEBHOOK_URL=${{ env.LEADS_SLACK_SECRET }}:latest \
             --quiet
 
   # ------------------------------------------------------------------

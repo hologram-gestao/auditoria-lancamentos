@@ -1,6 +1,7 @@
 /**
- * Layout das rotas públicas (login). Sem sidebar/menu — apenas centraliza o conteúdo.
- * Doc §7.1: única rota pública do sistema.
+ * Layout da tela de login. Sem sidebar/menu — apenas centraliza o conteúdo.
+ * As outras rotas públicas (landing e aviso de privacidade) têm layout próprio,
+ * no grupo `(public)`.
  */
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (

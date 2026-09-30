@@ -5,6 +5,7 @@
 import { Check, MinusCircle, AlertTriangle, Upload } from 'lucide-react';
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { PRODUCT_SHORT_NAME } from '@/lib/brand';
 import { cn } from '@/lib/utils';
 
 interface SituationBadgeProps {
@@ -146,7 +147,7 @@ export function LancadaNoOmieBadge({ omieLancamentoId }: { omieLancamentoId: num
   if (omieLancamentoId === null) {
     return <span className={classes}>{conteudo}</span>;
   }
-  const dica = `Lançamento Omie nº ${omieLancamentoId} criado pelo ADL nesta sessão.`;
+  const dica = `Lançamento Omie nº ${omieLancamentoId} criado pelo ${PRODUCT_SHORT_NAME} nesta sessão.`;
   return (
     <BadgeComDica dica={dica} ariaLabel={`Lançada no Omie — ${dica}`} className={classes}>
       {conteudo}

@@ -101,7 +101,14 @@
  */
 
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
+import {
+  expect,
+  test,
+  type BrowserContext,
+  type Locator,
+  type Page,
+  type Route,
+} from '@playwright/test';
 
 /**
  * Tema do run (86e2n39hb) — o gate roda esta suíte UMA vez POR TEMA
@@ -7599,3 +7606,289 @@ for (const vp of VIEWPORTS) {
     });
   });
 }
+
+/**
+ * Landing pública e aviso de privacidade (86e3fr9vz, épico 86e3fr9tj).
+ *
+ * A landing tem o tema Hologram FIXO (wrapper `.hologram`), então os três runs do
+ * gate medem a mesma coisa, e isso é o esperado: o critério é "nenhum tema salvo
+ * muda a landing". Sem cookie (a landing só existe deslogado; com sessão, `/` vai
+ * para `/clientes`).
+ *
+ * As medições de a11y rodam com `prefers-reduced-motion: reduce`: é o estado FINAL
+ * dos efeitos (tudo visível, nada no meio de um fade), o mesmo que a pessoa com
+ * movimento reduzido vê. Um cenário à parte roda COM movimento e prova que a
+ * revelação na rolagem e o header rolado funcionam.
+ */
+test.describe('Landing pública (86e3fr9vz)', () => {
+  const LEADS_ROUTE = '**/api/v1/leads';
+  const NAV_NAME = 'Acesso e contato';
+
+  /** Print SÓ da viewport (o `shot` é página inteira). */
+  async function shotTela(page: Page, name: string): Promise<void> {
+    if (process.env.E2E_SHOTS !== '1') return;
+    await page
+      .screenshot({ path: `a11y-shots/${THEME}/${name}.png` })
+      .catch((err: unknown) => console.warn(`shot ${name} falhou: ${String(err)}`));
+  }
+
+  async function abrirLanding(
+    page: Page,
+    context: BrowserContext,
+    { reducedMotion = true } = {},
+  ): Promise<void> {
+    await context.clearCookies();
+    if (reducedMotion) await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('/');
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+  }
+
+  async function exigirSemRolagemHorizontal(page: Page, label: string): Promise<void> {
+    const { scrollWidth, innerWidth } = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      innerWidth: window.innerWidth,
+    }));
+    expect(scrollWidth, `${label}: a página rola na horizontal`).toBeLessThanOrEqual(innerWidth);
+  }
+
+  /**
+   * Contraste do texto contra o fundo que a aurora REALMENTE pinta atrás dele.
+   *
+   * A aurora não é ancestral do texto (são bolhas absolutas com `blur`), então o axe
+   * devolve `incomplete` ali em vez de medir. Aqui: o texto fica transparente, a
+   * caixa do elemento é fotografada (o fundo puro, com bolhas, grade e máscara), o
+   * PNG é decodificado num canvas e a cor do texto é comparada com o pixel de fundo
+   * MAIS CLARO da caixa, o pior caso para texto claro.
+   */
+  async function contrasteSobreAurora(page: Page, locator: Locator): Promise<number> {
+    const color = await locator.evaluate((el) => getComputedStyle(el).color);
+    await locator.evaluate((el) => {
+      (el as HTMLElement).style.setProperty('color', 'transparent', 'important');
+    });
+    const box = await locator.boundingBox();
+    expect(box, 'elemento do hero sem caixa').not.toBeNull();
+    const png = await page.screenshot({ clip: box ?? undefined });
+    await locator.evaluate((el) => (el as HTMLElement).style.removeProperty('color'));
+    return page.evaluate(
+      async ({ b64, textColor }) => {
+        const img = new Image();
+        img.src = `data:image/png;base64,${b64}`;
+        await img.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('sem canvas 2d');
+        ctx.drawImage(img, 0, 0);
+        const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        const lin = (v: number) => {
+          const c = v / 255;
+          return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+        };
+        const lum = (r: number, g: number, b: number) =>
+          0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+        let brightest = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          brightest = Math.max(brightest, lum(data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0));
+        }
+        const [r = 0, g = 0, b = 0] = (textColor.match(/[\d.]+/g) ?? []).map(Number);
+        const text = lum(r, g, b);
+        const [hi, lo] = text > brightest ? [text, brightest] : [brightest, text];
+        return (hi + 0.05) / (lo + 0.05);
+      },
+      { b64: png.toString('base64'), textColor: color },
+    );
+  }
+
+  async function preencherFormulario(page: Page): Promise<void> {
+    const form = page.locator('#contato');
+    await form.getByLabel('Nome', { exact: true }).fill('Maria Contadora');
+    await form.getByLabel('E-mail', { exact: true }).fill('maria@exemplo.com.br');
+    await form.getByRole('checkbox').check();
+  }
+
+  for (const vp of VIEWPORTS) {
+    test.describe(vp.label, () => {
+      test.use({ viewport: vp.size });
+      const slug = vp.label === 'desktop' ? 'desktop' : 'mobile';
+
+      test('landing: estrutura, tema fixo, hover e header rolado', async ({ page, context }) => {
+        await abrirLanding(page, context);
+        await expect(page.getByRole('banner')).toBeVisible();
+        await expect(page.getByRole('contentinfo')).toBeVisible();
+        await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
+        await expect(page.locator('.landing')).toHaveClass(/\bhologram\b/);
+        // Nenhum seletor de tema na página de marca (D1).
+        await expect(page.getByRole('button', { name: /tema/i })).toHaveCount(0);
+        await exigirSemRolagemHorizontal(page, `landing (${vp.label})`);
+
+        const nav = page.getByRole('navigation', { name: NAV_NAME });
+        const contato = nav.getByRole('link', { name: 'Entrar em contato' });
+        const entrar = nav.getByRole('link', { name: 'Entrar', exact: true });
+        await expect(contato).toBeVisible();
+        await expect(entrar).toBeVisible();
+        // Os dois botões do header cabem na viewport, inclusive em 390px.
+        for (const botao of [contato, entrar]) {
+          const box = await botao.boundingBox();
+          expect(box, `${vp.label}: botão do header sem caixa`).not.toBeNull();
+          if (box) expect(box.x + box.width).toBeLessThanOrEqual(vp.size.width);
+        }
+        await shotTela(page, `landing-topo-${slug}`);
+        await shot(page, `landing-inteira-${slug}`);
+
+        await contato.hover();
+        await analyze(page, `landing, hover em Entrar em contato (${vp.label})`);
+        await entrar.hover();
+        await analyze(page, `landing, hover em Entrar (${vp.label})`);
+
+        // Header nos dois estados: o de topo já foi medido acima; agora rolado.
+        await page.evaluate(() => window.scrollTo(0, 700));
+        await expect(page.locator('[data-lp-header]')).toHaveAttribute('data-scrolled', '');
+        await analyze(page, `landing, header rolado (${vp.label})`);
+
+        const card = page.locator('#para-quem li').first();
+        await card.scrollIntoViewIfNeeded();
+        await card.hover();
+        await shotTela(page, `landing-card-hover-${slug}`);
+        await analyze(page, `landing, card em hover (${vp.label})`);
+      });
+
+      test('hero: texto sobre a aurora mantém contraste AA (4,5:1)', async ({ page, context }) => {
+        await abrirLanding(page, context);
+        const hero = page.locator('section[aria-labelledby="hero-title"]');
+        const alvos: [string, Locator][] = [
+          ['sobretítulo', hero.locator('p').first()],
+          ['título', hero.getByRole('heading', { level: 1 })],
+          ['subtítulo', hero.locator('p').nth(1)],
+        ];
+        for (const [nome, alvo] of alvos) {
+          const razao = await contrasteSobreAurora(page, alvo);
+          console.log(`contraste sobre a aurora · ${nome} · ${vp.label}: ${razao.toFixed(2)}:1`);
+          expect.soft(razao, `${nome} (${vp.label}) sobre a aurora`).toBeGreaterThanOrEqual(4.5);
+        }
+      });
+
+      test('landing: "Entrar em contato" rola até o formulário e "Entrar" leva ao login', async ({
+        page,
+        context,
+      }) => {
+        await abrirLanding(page, context);
+        const nav = page.getByRole('navigation', { name: NAV_NAME });
+        await nav.getByRole('link', { name: 'Entrar em contato' }).click();
+        await expect(page).toHaveURL(/#contato$/);
+        await expect(page.getByRole('heading', { name: 'Fale com a gente' })).toBeInViewport();
+        await nav.getByRole('link', { name: 'Entrar', exact: true }).click();
+        await expect(page).toHaveURL(/\/login$/);
+      });
+
+      test('landing: formulário com erro de campo e erro do servidor', async ({
+        page,
+        context,
+      }) => {
+        await abrirLanding(page, context);
+        const form = page.locator('#contato');
+        await form.scrollIntoViewIfNeeded();
+        // Erro de campo: enviar vazio marca os obrigatórios.
+        await form.getByRole('button', { name: 'Enviar' }).click();
+        await expect(form.getByText('Informe seu nome.')).toBeVisible();
+        await expect(form.getByLabel('Nome', { exact: true })).toHaveAttribute(
+          'aria-invalid',
+          'true',
+        );
+        await analyze(page, `landing, formulário com erro de campo (${vp.label})`);
+
+        // Erro do servidor: 429 no envelope padrão.
+        await page.route(LEADS_ROUTE, (route) =>
+          route.fulfill({
+            status: 429,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              error: {
+                code: 'RATE_LIMITED',
+                message: 'Rate limit excedido',
+                userMessage: 'Muitas tentativas. Aguarde 1 minuto antes de tentar novamente.',
+              },
+            }),
+          }),
+        );
+        await preencherFormulario(page);
+        const enviar = form.getByRole('button', { name: 'Enviar' });
+        await enviar.click();
+        await expect(form.getByRole('alert')).toContainText(
+          'Muitas mensagens em pouco tempo. Tente de novo em um minuto.',
+        );
+        await expect(enviar).toBeEnabled();
+        await enviar.hover();
+        await shotTela(page, `landing-form-erro-${slug}`);
+        await analyze(page, `landing, formulário com erro do servidor (${vp.label})`);
+      });
+
+      test('landing: envio com sucesso manda o honeypot vazio e mostra a confirmação', async ({
+        page,
+        context,
+      }) => {
+        let body: Record<string, unknown> | null = null;
+        await page.route(LEADS_ROUTE, (route) => {
+          body = route.request().postDataJSON() as Record<string, unknown>;
+          return route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ data: { received: true } }),
+          });
+        });
+        await abrirLanding(page, context);
+        const form = page.locator('#contato');
+        await form.scrollIntoViewIfNeeded();
+        await shotTela(page, `landing-form-${slug}`);
+        await preencherFormulario(page);
+        await form.getByRole('button', { name: 'Enviar' }).click();
+        await expect(form.getByRole('status')).toContainText('Recebemos sua mensagem.');
+        await expect(form.getByRole('status')).toBeFocused();
+        expect(body).toMatchObject({ consent: true, website: '', name: 'Maria Contadora' });
+        await shotTela(page, `landing-form-sucesso-${slug}`);
+        await analyze(page, `landing, confirmação de envio (${vp.label})`);
+      });
+
+      test('aviso de privacidade: público com e sem sessão', async ({ page, context }) => {
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        await page.goto('/privacidade');
+        await expect(page).toHaveURL(/\/privacidade$/);
+        await expect(
+          page.getByRole('heading', { level: 1, name: 'Aviso de privacidade' }),
+        ).toBeVisible();
+        await context.clearCookies();
+        await page.goto('/privacidade');
+        await expect(page).toHaveURL(/\/privacidade$/);
+        await exigirSemRolagemHorizontal(page, `privacidade (${vp.label})`);
+        await shot(page, `privacidade-${slug}`);
+        await analyze(page, `aviso de privacidade (${vp.label})`);
+      });
+    });
+  }
+
+  test('com sessão, a raiz vai para /clientes', async ({ page }) => {
+    // O beforeEach da suíte já pôs o cookie de sessão. Olha o PRÓPRIO redirect, sem
+    // segui-lo: o servidor standalone do gate monta o `location` com `localhost`, e
+    // o cookie (posto para o host do baseURL) não iria no segundo salto. É o mesmo
+    // `nextUrl.clone()` do redirect de `/login`, que em dev funciona.
+    const response = await page.request.get('/', { maxRedirects: 0 });
+    expect(response.status()).toBe(307);
+    expect(new URL(response.headers()['location'] ?? '', 'http://x').pathname).toBe('/clientes');
+  });
+
+  test('efeitos: revelação na rolagem e header rolado, com movimento', async ({
+    page,
+    context,
+  }) => {
+    await abrirLanding(page, context, { reducedMotion: false });
+    const titulo = page.locator('#contato [data-reveal]').first();
+    await expect(page.locator('.landing')).toHaveAttribute('data-lp-js', '');
+    await expect(titulo).not.toHaveAttribute('data-revealed', '');
+    await expect(page.locator('[data-lp-header]')).not.toHaveAttribute('data-scrolled', '');
+    await titulo.scrollIntoViewIfNeeded();
+    await expect(titulo).toHaveAttribute('data-revealed', '');
+    await expect(page.locator('[data-lp-header]')).toHaveAttribute('data-scrolled', '');
+    await aguardarAnimacao(titulo);
+    await expect(titulo).toHaveCSS('opacity', '1');
+  });
+});

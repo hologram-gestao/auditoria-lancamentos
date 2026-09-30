@@ -204,6 +204,22 @@ ensure_alert_secret "$ALERT_WEBHOOK_SECRET"
 ensure_alert_secret "$ALERT_EMAIL_SECRET"
 
 # ------------------------------------------------------------------
+# 4b. Aviso de leads da landing pública (86e3fr9ut) — Secret Manager
+#     Incoming webhook do canal da ADL no Slack, montado na API como
+#     LEADS_SLACK_WEBHOOK_URL. NÃO é canal de plantão (não entra no fail-closed):
+#     vazio = o lead é gravado e o aviso é pulado. Mesmo molde dos canais de
+#     alerta: container + versão VAZIA semeada (para o `:latest` do deploy
+#     resolver) + secretAccessor per-secret. O operador adiciona a URL real:
+#       printf '%s' "<url do webhook>" | gcloud secrets versions add \
+#         leads-slack-webhook-url-<env> --data-file=- --project=<projeto>
+#     ⚠️ A secret precisa existir ANTES do primeiro deploy que a referencia.
+# ------------------------------------------------------------------
+LEADS_SLACK_SECRET="leads-slack-webhook-url-${ENV}"
+echo ""
+echo "=== Aviso de leads da landing (${ENV}) ==="
+ensure_alert_secret "$LEADS_SLACK_SECRET"
+
+# ------------------------------------------------------------------
 # 5. Sincronização diária da CARTEIRA DE TÍTULOS (Sprint 11, R5 / INFRA 11.6)
 #    Não existe scheduler DENTRO da aplicação (a FASE 0 removeu Redis/ARQ; só
 #    há BackgroundTasks e Cloud Run Jobs). O molde é o job de limpeza que já

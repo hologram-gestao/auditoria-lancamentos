@@ -25,6 +25,7 @@ from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from app import __version__
 from app.core.alerting import verify_alert_config
+from app.core.branding import API_TITLE
 from app.core.config import get_settings
 from app.core.dependencies import DbSessionDep
 from app.core.exceptions import AppError, ErrorCode, RateLimitedError, to_error_response
@@ -52,6 +53,7 @@ from app.modules.client_titles import routes as client_titles_routes
 from app.modules.clients import routes as clients_routes
 from app.modules.export_layouts import routes as export_layouts_routes
 from app.modules.glossary import routes as glossary_routes
+from app.modules.leads import routes as leads_routes
 from app.modules.mapping_catalog import routes as mapping_catalog_routes
 from app.modules.notifications import routes as notifications_routes
 from app.modules.omie_data import routes as omie_data_routes
@@ -275,7 +277,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
 
     app = FastAPI(
-        title="Sistema de Auditoria de Lançamentos — API",
+        title=API_TITLE,
         description="Backend da plataforma interna de conciliação bancária da Hologram.",
         version=__version__,
         lifespan=lifespan,
@@ -348,6 +350,7 @@ def create_app() -> FastAPI:
     app.include_router(usage_events_routes.router)
     app.include_router(system_routes.router)
     app.include_router(organizations_routes.router)
+    app.include_router(leads_routes.router)
 
     # Cache L1 de lançamentos Omie (S11) — singleton in-memory por processo.
     # Instanciado aqui (não no lifespan) para existir mesmo quando testes

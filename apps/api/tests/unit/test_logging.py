@@ -56,6 +56,11 @@ class TestRedactor:
             "OMIE_ENCRYPTION_KEY",
             "SEARCH_BLIND_INDEX_KEY",
             "search_blind_index_key",
+            "url",
+            "webhook",
+            "webhook_url",
+            "LEADS_SLACK_WEBHOOK_URL",
+            "database_url",
         ],
     )
     def test_sensitive_keys_are_redacted(self, key: str) -> None:
