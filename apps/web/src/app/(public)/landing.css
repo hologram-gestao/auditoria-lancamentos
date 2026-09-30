@@ -370,13 +370,9 @@
 
 /* ---------- Cards ---------- */
 
-/*
- * `isolation` dá ao card o próprio contexto: o `::after` (spotlight, z-index -1)
- * pinta entre o fundo `bg-card` e o texto, nunca por cima dele.
- */
+/* Hover do card: sobe 2 px, borda e sombra na cor da marca. Nada pinta atrás do texto. */
 .lp-card {
   position: relative;
-  isolation: isolate;
   transition:
     transform 300ms ease-out,
     box-shadow 300ms ease-out,
@@ -421,34 +417,6 @@
 
 .lp-card:hover::before {
   opacity: 1;
-}
-
-/*
- * Spotlight: brilho que segue o ponteiro (`--lp-mx`/`--lp-my`, escritos pelo
- * `reveal.tsx`). Só com mouse (`hover: hover`); desligado em movimento reduzido.
- * Atrás do texto: o pior caso (texto `muted` no centro do brilho) é medido por pixel
- * no e2e "spotlight do card".
- */
-@media (hover: hover) {
-  .lp-card::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    border-radius: inherit;
-    pointer-events: none;
-    background: radial-gradient(
-      260px circle at var(--lp-mx, 50%) var(--lp-my, 0%),
-      var(--lp-glow-brand),
-      transparent 70%
-    );
-    opacity: 0;
-    transition: opacity 300ms ease-out;
-  }
-
-  .lp-card:hover::after {
-    opacity: 0.6;
-  }
 }
 
 .lp-icon {
@@ -611,51 +579,10 @@
 /* ---------- Vinhetas das seções (86e3gwzj0) ---------- */
 
 /*
- * SVG decorativo ao lado do título. Estado FINAL é o padrão (sem JS, sob movimento
- * reduzido e depois da revelação); o "antes" mora no bloco `no-preference` abaixo.
- * Entrada de 600 a 900 ms e depois parada; só o pulso do ponto central é loop.
+ * SVG decorativo ao lado do título de "Segurança" (o cadeado). Estado FINAL é o padrão
+ * (sem JS, sob movimento reduzido e depois da revelação); o "antes" mora no bloco
+ * `no-preference` abaixo. Entrada de 600 a 900 ms e depois parada, sem loop.
  */
-.lp-vig__link {
-  stroke: hsl(var(--lp-brand) / 0.55);
-  stroke-width: 1.5;
-  stroke-dasharray: 100;
-  stroke-dashoffset: 0;
-  transition: stroke-dashoffset 700ms ease-out;
-  transition-delay: calc(var(--lp-vig-i, 0) * 100ms + 150ms);
-}
-
-.lp-vig__avatar {
-  transform-box: fill-box;
-  transform-origin: center;
-  transition:
-    opacity 600ms ease-out,
-    transform 600ms ease-out;
-  transition-delay: calc(var(--lp-vig-i, 0) * 100ms);
-}
-
-.lp-vig__avatar circle {
-  fill: hsl(var(--card));
-  stroke: hsl(var(--lp-brand) / 0.6);
-  stroke-width: 1.5;
-}
-
-.lp-vig__avatar text {
-  fill: hsl(var(--foreground));
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.lp-vig__hub {
-  fill: hsl(var(--lp-brand));
-}
-
-.lp-vig__pulse {
-  fill: hsl(var(--lp-brand));
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: lp-pulse 2s ease-out infinite;
-}
-
 .lp-vig__shackle {
   fill: none;
   stroke: hsl(var(--lp-brand));
@@ -706,15 +633,6 @@
 
   .landing[data-lp-js] [data-reveal]:not([data-revealed]) .lp-draw path {
     stroke-dashoffset: 24;
-  }
-
-  .landing[data-lp-js] [data-reveal]:not([data-revealed]) .lp-vig__link {
-    stroke-dashoffset: 100;
-  }
-
-  .landing[data-lp-js] [data-reveal]:not([data-revealed]) .lp-vig__avatar {
-    opacity: 0;
-    transform: scale(0.8);
   }
 
   .landing[data-lp-js] [data-reveal]:not([data-revealed]) .lp-vig__shackle {
@@ -851,7 +769,6 @@
   .lp-aurora__blob,
   .lp-fade-up,
   .lp-tour-panel[data-state='active'],
-  .lp-vig__pulse,
   .lp-pulse-dot::after,
   .lp-float,
   .lp-progress,
@@ -901,12 +818,6 @@
     transition: none;
   }
 
-  /* Spotlight desligado: o brilho seguindo o ponteiro é movimento. */
-  .lp-card::after,
-  .lp-card:hover::after {
-    display: none;
-  }
-
   .lp-pulse-dot::after {
     display: none;
   }
@@ -918,8 +829,6 @@
   .lp-pair-answer,
   .lp-draw path,
   .lp-audience .lp-icon,
-  .lp-vig__link,
-  .lp-vig__avatar,
   .lp-vig__shackle,
   .lp-vig__key,
   .lp-vig__cipher {
@@ -928,10 +837,6 @@
 
   .lp-audience .lp-card:hover .lp-icon {
     transform: none;
-  }
-
-  .lp-vig__pulse {
-    display: none;
   }
 
   .lp-header::after,

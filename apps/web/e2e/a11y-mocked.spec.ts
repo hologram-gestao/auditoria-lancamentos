@@ -7653,11 +7653,10 @@ test.describe('Landing pública (86e3fr9vz)', () => {
 
   /**
    * Contraste do texto contra o fundo que a página REALMENTE pinta atrás dele (aurora
-   * no hero, spotlight nos cards).
+   * no hero, pastilha acesa do "Como funciona", moldura do tour).
    *
-   * Nem a aurora (bolhas absolutas com `blur`) nem o spotlight (`::after` do card)
-   * são vistos pelo axe como fundo do texto: ele devolve `incomplete` ou mede contra
-   * o `bg-card` puro. Aqui: o elemento fica `visibility: hidden` (e não `color:
+   * A aurora (bolhas absolutas com `blur`) não é vista pelo axe como fundo do texto:
+   * ele devolve `incomplete` ou mede contra o `bg-background` puro. Aqui: o elemento fica `visibility: hidden` (e não `color:
    * transparent`, que não apaga texto pintado por `background-clip: text`), a caixa
    * é fotografada, o PNG é decodificado num canvas e a cor do texto é comparada com o
    * pixel de fundo MAIS CLARO da caixa, o pior caso para texto claro.
@@ -7962,51 +7961,6 @@ test.describe('Landing pública (86e3fr9vz)', () => {
         }
       });
 
-      test('spotlight do card: texto sobre o brilho mantém AA (4,5:1)', async ({
-        page,
-        context,
-      }) => {
-        // COM movimento: sob movimento reduzido o spotlight nem existe.
-        await abrirLanding(page, context, { reducedMotion: false });
-        const card = page.locator('#para-quem li').first();
-        await card.scrollIntoViewIfNeeded();
-        await expect(card).toHaveAttribute('data-revealed', '');
-        const texto = card.locator('p');
-        const caixa = await texto.boundingBox();
-        expect(caixa, 'texto do card sem caixa').not.toBeNull();
-        if (!caixa) return;
-        // Ponteiro no MEIO do texto: o centro do brilho embaixo dele é o pior caso.
-        await page.mouse.move(caixa.x + caixa.width / 2, caixa.y + caixa.height / 2);
-
-        // Só com mouse: no projeto que emula toque (`hover: none`) o spotlight não
-        // existe, por desenho, e é ISSO que se afirma ali (o gate não aceita teste pulado).
-        const comMouse = await page.evaluate(() => window.matchMedia('(hover: hover)').matches);
-        if (!comMouse) {
-          expect(await card.evaluate((el) => getComputedStyle(el, '::after').content)).toBe('none');
-          expect(await card.evaluate((el) => el.style.getPropertyValue('--lp-mx'))).toBe('');
-          return;
-        }
-        await expect
-          .poll(() => card.evaluate((el) => el.style.getPropertyValue('--lp-mx')))
-          .not.toBe('');
-        await expect
-          .poll(() => card.evaluate((el) => getComputedStyle(el, '::after').opacity))
-          .toBe('0.6');
-        await expect
-          .poll(() => card.evaluate((el) => el.getAnimations({ subtree: true }).length))
-          .toBe(0);
-        const alvos: [string, Locator][] = [
-          ['título', card.locator('h3')],
-          ['texto', texto],
-        ];
-        for (const [nome, alvo] of alvos) {
-          const razao = await contrasteSobreAurora(page, alvo);
-          console.log(`contraste sob o spotlight · ${nome} · ${vp.label}: ${razao.toFixed(2)}:1`);
-          expect.soft(razao, `${nome} (${vp.label}) sob o spotlight`).toBeGreaterThanOrEqual(4.5);
-        }
-        await shotTela(page, `landing-spotlight-${slug}`);
-      });
-
       test('tour: abas pelo teclado, moldura em hover, AA sobre a moldura e sem rolagem horizontal', async ({
         page,
         context,
@@ -8128,7 +8082,7 @@ test.describe('Landing pública (86e3fr9vz)', () => {
         }
       });
 
-      test('ritmo: pares e vinhetas terminam no estado final, vinheta só de md para cima', async ({
+      test('ritmo: pares e a vinheta terminam no estado final, vinheta só de md para cima', async ({
         page,
         context,
       }) => {
@@ -8140,30 +8094,24 @@ test.describe('Landing pública (86e3fr9vz)', () => {
         await aguardarAnimacao(resposta);
         await expect(resposta).toHaveCSS('opacity', '1');
 
-        for (const id of ['para-quem', 'seguranca']) {
-          const vinheta = page.locator(`#${id} [data-lp-vignette]`);
-          await expect(vinheta).toHaveCount(1);
-          if (vp.size.width < 768) {
-            // Abaixo de `md` a vinheta não é desenhada (o contêiner é `hidden`).
-            await expect(vinheta).toBeHidden();
-            continue;
-          }
+        // Só "Segurança" tem vinheta (o cadeado); a de avatares de "Para quem" saiu na
+        // 86e3h0xcr.
+        await expect(page.locator('[data-lp-vignette]')).toHaveCount(1);
+        const vinheta = page.locator('#seguranca [data-lp-vignette]');
+        await expect(vinheta).toHaveCount(1);
+        if (vp.size.width < 768) {
+          // Abaixo de `md` a vinheta não é desenhada (o contêiner é `hidden`).
+          await expect(vinheta).toBeHidden();
+        } else {
           await vinheta.scrollIntoViewIfNeeded();
-          await expect(page.locator(`#${id} [data-reveal]`).first()).toHaveAttribute(
+          await expect(page.locator('#seguranca [data-reveal]').first()).toHaveAttribute(
             'data-revealed',
             '',
           );
           await expect(vinheta).toBeVisible();
+          // Entrada e depois PARADA: nenhuma animação, nem loop.
           await expect
-            .poll(() =>
-              vinheta.evaluate(
-                (el) =>
-                  el
-                    .getAnimations({ subtree: true })
-                    .filter((a) => !(a instanceof CSSAnimation && a.animationName === 'lp-pulse'))
-                    .length,
-              ),
-            )
+            .poll(() => vinheta.evaluate((el) => el.getAnimations({ subtree: true }).length))
             .toBe(0);
         }
         await exigirSemRolagemHorizontal(page, `landing com movimento (${vp.label})`);
