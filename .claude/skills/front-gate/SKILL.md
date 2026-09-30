@@ -326,8 +326,10 @@ viewportSize().width` (padrão em `spec:2147-2165` e `:2190-2205`). Antes de med
   grep -rnE "<(p|span|div|button|a|td|th|svg|input)[^>]*\btitle=" apps/web/src/components --include=*.tsx | grep -v __tests__ | wc -l   # hoje 3 inline (1 é title={undefined}) + 3 em linha própria
   ```
 - **`cursor-pointer` no componente-base**, não tela a tela (`components/ui/button.tsx:8-11`);
-  secundário com cor da paleta (`variant="secondary"` → `bg-secondary`, `:18`), nunca
-  cinza indistinguível.
+  secundário com cor da paleta (`variant="secondary"` → `bg-secondary`, `:28`), nunca
+  cinza indistinguível. `variant="brand"` (verde da marca, texto navy, token `--brand`,
+  86e3h1h75) é o primário das PÁGINAS PÚBLICAS (landing e login, tema Hologram fixo);
+  no app autenticado o primário continua o `default`.
 - **Diálogo que abre OUTRO diálogo: nunca empilhe, e nunca no mesmo tick.** Dois `Dialog`
   do Radix abertos marcam o fundo com `aria-hidden` e o de cima fica fora do teclado. E
   fechar A e abrir B no MESMO clique também falha: o `Presence` mantém A montado ~200ms

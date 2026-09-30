@@ -939,19 +939,29 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   `components/shared/collapsible-summary.tsx`, com estado por tela no `localStorage`
   (try/catch, sem armazenamento abre aberto) e o conteúdo recolhido montado com `hidden`.
   Tela nova com cards de totais usa ela, nunca um "ocultar" próprio.
-- **Página pública de marca é o grupo `(public)`, com as próprias regras** (86e3fr9vz):
-  landing `/` e `/privacidade` passam no `middleware.ts` sem cookie (`PUBLIC_PATHS`; com
-  sessão, `/` vai para `/clientes`), usam tema Hologram FIXO pelo wrapper `.hologram` (sem
-  seletor), largura contida (`max-w-6xl`) e a janela rola. Efeitos só em CSS escopado
-  (`app/(public)/landing.css`, variáveis `--lp-*` em fundo, borda, sombra e ícone, nunca
-  em texto corrido) mais UM componente cliente de efeitos (`components/landing/reveal.tsx`).
-  A cor de destaque é o **verde da Hologram**, `--lp-brand` (`#05d1bf`, amostrado por pixel
-  de `Docs/brand/site-hologram-cta-2026-09-30.png`, 86e3h0xcr): variável escopada da
-  landing, nunca token do tema. O botão primário da landing (`.lp-cta`) é verde com texto
-  `--lp-brand-fg`, cópia literal do navy do `--primary` claro: **nunca texto branco sobre o
-  verde** (1,85:1); os pares ficam em `landing-contrast.test.ts`. Nada pinta atrás do texto
-  de card (o spotlight saiu na 86e3h0xcr); tudo
-  parado sob `prefers-reduced-motion`, que é também o estado que o gate de a11y mede.
+- **Página pública de marca é o grupo `(public)` e o login, com as próprias regras**
+  (86e3fr9vz; login desde a 86e3h1h75): landing `/` e `/privacidade` passam no
+  `middleware.ts` sem cookie (`PUBLIC_PATHS`; com sessão, `/` vai para `/clientes`, e
+  `/login` com sessão também). Os dois layouts (`(public)/layout.tsx` e
+  `(auth)/layout.tsx`) usam tema Hologram FIXO pelo wrapper `.hologram lp-public` (sem
+  seletor; o `<html>` guarda o tema salvo, que volta a valer depois de entrar) e a janela
+  rola. A landing tem largura contida (`max-w-6xl`); o login tem duas colunas de `lg` para
+  cima, o **painel de marca** (`components/landing/sign-in-brand-panel.tsx`: a aurora em
+  intensidade baixa, a logomark, a frase e os chips do hero) e o card estreito
+  (`max-w-sm`, logomark e título dentro, texto neutro de organização), e abaixo de `lg`
+  só o card. Efeitos só em CSS escopado: o que as duas páginas dividem (variáveis `--lp-*`,
+  aurora, grade, palavra em gradiente, borda em gradiente dos cards) mora em
+  `app/public-brand.css`, o resto da landing em `app/(public)/landing.css`, sempre em
+  fundo, borda, sombra e ícone, nunca em texto corrido, mais UM componente cliente de
+  efeitos (`components/landing/reveal.tsx`). A cor de destaque é o **verde da Hologram**,
+  o token `--brand` do `globals.css` (`#05d1bf`, amostrado por pixel de
+  `Docs/brand/site-hologram-cta-2026-09-30.png`; mesmo valor nos três temas, com
+  `--brand-foreground` e `--brand-hover`), e o botão primário das páginas públicas é o
+  `<Button variant="brand">`: verde com texto navy (cópia literal do `--primary` claro),
+  hover sólido, anel de foco no próprio verde, desabilitado a 50 %. **Nunca texto branco
+  sobre o verde** (1,85:1); os pares ficam em `theme-contrast.test.ts`. O verde não é cor
+  do app autenticado: token existe para ser um só, não para vestir tela de dado. Nada pinta
+  atrás do texto de card (o spotlight saiu na 86e3h0xcr); tudo parado sob `prefers-reduced-motion`, que é também o estado que o gate de a11y mede.
   **Um efeito por bloco, e loop só enquanto o bloco está na tela** (86e3gwzj0): o "antes"
   de cada entrada mora sob `prefers-reduced-motion: no-preference`, e nenhum efeito
   novo entra sem medição por pixel quando pinta atrás de texto. O tour (86e3gqfkf) usa
@@ -963,7 +973,8 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   ativa explica a troca automática e o botão de pausar é só ícone (WCAG 2.2.2). Texto
   da landing só em `components/landing/content.ts` (espelho comentado em
   `Docs/landing/COPY.md`), com tetos de caracteres por campo travados em
-  `content.test.ts`. Nada disso vale para o app autenticado.
+  `content.test.ts`; os textos novos do login moram lá também (`login`). Nada disso vale
+  para o app autenticado.
 - **Nome do produto só em `lib/brand.ts` (web) e `core/branding.py` (API)** (86e3fr9x3):
   `PRODUCT_NAME = 'Hologram OS'` (título, header, login, landing, metadados, título do
   OpenAPI "Hologram OS API", prefixo `[Hologram OS]` dos alertas, textos operacionais) e
@@ -1391,6 +1402,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.68 — 30/09/2026. **O login virou a ponte entre a landing e o sistema, e o verde da Hologram virou token do tema (86e3h1h75, pedido do Pedro: "essa caixa de login está meio feia, estranha e desproporcional").** O verde saiu da `landing.css` (`--lp-brand`, 86e3h0xcr) para o `globals.css` como `--brand`, `--brand-foreground` (o navy, cópia literal do `--primary` claro) e `--brand-hover` (sólido: o verde com 10 % de preto convertido para HSL, pela regra do `--destructive-hover`), com o MESMO valor nos três blocos, e o `Button` ganhou `variant="brand"`; a classe `.lp-cta` e o `landing-contrast.test.ts` sumiram, e os pares foram para o `theme-contrast.test.ts` (navy sobre o verde e sobre o hover nos três temas, verde sobre fundo e card do Hologram, branco sobre o verde reprovando). O que a landing e o login dividem (variáveis `--lp-*`, aurora, grade, palavra em gradiente, borda em gradiente) foi extraído para `app/public-brand.css`, escopado em `.lp-public`. O login ganhou tema Hologram fixo no wrapper (o `<html>` continua com o tema salvo), duas colunas de `lg` para cima com o painel de marca (aurora a 55 %, logomark, a frase e os chips do hero), card de 384 px com logomark e título dentro, subtítulo "Entre com o seu acesso." e placeholder `voce@empresa.com.br` (a plataforma é multi-organização desde o épico 86e36ec0q), campos de 44 px, "Entrar" verde que desabilitado só apaga, erro só na mensagem com ícone (`FormMessage` aceita `icon`, opcional) e o rótulo na cor do texto, "Voltar para o site" e "Hologram Gestão". Os textos novos moram em `content.ts` (`login`); o fluxo de autenticação e o middleware não mudaram. Medido por pixel no Hologram: "Entrar" em hover 7,32:1 (o CTA da landing também, antes 7,24:1 pelo `color-mix`), frase do painel sobre a aurora 15,63:1 e os dois stops do destaque 17,07:1 e 11,31:1; os números da landing não mudaram. Os helpers de medição por pixel do e2e subiram do bloco da landing para o topo do spec, e o bloco novo "Login: a ponte entre a landing e o sistema" mede tema fixo, painel, card sem rolagem horizontal em 390px, hover do botão e rótulo sem vermelho._
 
 _Versão 1.67 — 30/09/2026. **A landing ganhou o verde da Hologram e perdeu dois efeitos (86e3h0xcr, feedback de uma colega: "senti falta do verde da Hologram").** O verde `#05d1bf` (hsl 175 95% 42%) foi amostrado por pixel do botão e do título do site da Hologram (`Docs/brand/site-hologram-cta-2026-09-30.png`, 103.571 pixels exatos) e entrou como `--lp-brand`, variável escopada da landing com a fonte ao lado, no lugar do `--info` em todos os efeitos: aurora, stop claro do título (misturado 60/40 com `--foreground`, medido por pixel a 7,23:1 no desktop e 6,92:1 em 390px), ponto da pílula, linha e pastilha ativa do "Como funciona", filetes, borda em gradiente, sombras e o cadeado. O botão primário da landing (`.lp-cta`: header, hero e "Enviar") é verde com texto navy, `--lp-brand-fg`, cópia literal do `--primary` do tema claro, porque dentro da `.hologram` o `--primary` é branco e branco sobre o verde dá 1,85:1; navy sobre o verde dá 8,94:1 e 7,24:1 em hover (medido por pixel no e2e, que também confere que o fundo é o verde). Os pares ficam em `landing-contrast.test.ts`, lidos do CSS real, e os helpers de cor dos dois testes de contraste passaram para `src/test/contrast.ts`. O spotlight dos cards e a vinheta de avatares de "Para quem" saíram (o cadeado de "Segurança" ficou, e é a única vinheta). As figuras de anomalias e de lançamento do tour, que estavam no tema escuro, foram recapturadas no Hologram pelos mesmos cenários do gate de a11y que as geraram (mesmo dado mockado, mesmo recorte). A troca automática das abas passou a ser explicada por uma linha de 2 px na aba ativa, que cresce nos 6 s do relógio e fica cheia quando ele para, e o "Pausar/Retomar" virou botão só de ícone com os mesmos nomes acessíveis. Medido por pixel no Hologram, sem mudança: título do passo ativo 16,4:1, dígito sobre a pastilha acesa 13,2:1, passo apagado 8,0:1, barra do tour 7,57:1._
 
