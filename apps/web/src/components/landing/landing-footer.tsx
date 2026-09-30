@@ -5,16 +5,16 @@ import { BrandMark } from '@/components/shared/brand-mark';
 
 import { footer } from './content';
 
-const YEAR = 2026;
-
 export function LandingFooter() {
+  // Server component estático: vale o ano do build, e cada deploy o atualiza.
+  const year = new Date().getFullYear();
   return (
     <footer className="border-t">
       <div className="text-muted-foreground mx-auto flex max-w-6xl flex-col gap-4 px-4 py-8 text-sm sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <div className="flex items-center gap-2">
           <BrandMark className="text-primary h-5 shrink-0" />
           <span>
-            © {YEAR} {footer.company}
+            © {year} {footer.company}
           </span>
         </div>
         <nav aria-label={footer.navLabel} className="flex items-center gap-6">
