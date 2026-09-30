@@ -46,7 +46,7 @@ export const hero = {
   titleBefore: 'O financeiro do seu cliente, ',
   titleHighlight: 'conferido',
   titleAfter: ' antes de virar contabilidade.',
-  subtitle: `O ${PRODUCT_NAME} cruza extrato, fatura e planilha com o que foi lançado, mostra o que não bate e deixa pronto o que segue para o sistema contábil. Sua equipe revisa as exceções, não o mês inteiro.`,
+  subtitle: `O ${PRODUCT_NAME} cruza extrato, fatura e planilha com o que foi lançado e mostra o que não bate. Sua equipe revisa as exceções, não o mês inteiro.`,
   primary: 'Entrar em contato',
   secondary: 'Entrar',
   /**
@@ -87,17 +87,17 @@ export const audience = {
     {
       icon: 'calculator',
       title: 'Escritório de contabilidade',
-      text: 'Saiba se o cliente está pronto para a integração contábil antes de importar. O que não bate aparece na conferência, não no balancete.',
+      text: 'Saiba se o cliente está pronto para a integração contábil antes de importar, e não no balancete.',
     },
     {
       icon: 'briefcase',
       title: 'BPO financeiro',
-      text: 'Concilie cada conta, mês a mês, com revisão por etapas, relatório em Excel e as compras do cartão lançadas no Omie.',
+      text: 'Cada conta, mês a mês, com revisão por etapas, relatório em Excel e compras do cartão lançadas no Omie.',
     },
     {
       icon: 'building',
       title: 'Empresa',
-      text: 'Com ERP ou só com planilha, seu financeiro chega conferido ao contador, com os títulos vencidos e as exceções explicados.',
+      text: 'Com ERP ou só planilha, seu financeiro chega conferido ao contador, com títulos vencidos explicados.',
     },
   ],
 } as const;
@@ -109,24 +109,28 @@ export const pains = {
   answerLabel: `Como o ${PRODUCT_NAME} responde`,
   items: [
     {
-      pain: 'O fechamento não roda todo mês. Fica para depois, e o erro de janeiro só aparece quando o balanço aperta.',
+      icon: 'calendar-clock',
+      pain: 'O fechamento não roda todo mês, e o erro de janeiro só aparece quando o balanço aperta.',
       answer:
-        'Cada conta de cada mês vira uma conciliação própria, com o que já foi conferido e o que falta. Dá para fechar mês a mês sem montar planilha.',
+        'Cada conta de cada mês vira uma conciliação própria, com o que já foi conferido e o que falta, sem montar planilha.',
     },
     {
-      pain: 'Dado ruim entra na contabilidade: imobilizado lançado como despesa, ajuste de saldo inventado, tarifas somadas errado. Corrigir depois custa mais que lançar certo.',
+      icon: 'shield-alert',
+      pain: 'Dado ruim entra na contabilidade: imobilizado como despesa, ajuste de saldo inventado, tarifa somada errado.',
       answer:
-        'Cada movimentação é comparada com o que foi lançado, por valor e data, com regra fixa. O que não bate vira anomalia com tipo e motivo. A IA aponta o que parece incoerente; quem decide é a sua equipe.',
+        'Cada movimentação é comparada com o que foi lançado, por valor e data, com regra fixa. O que não bate vira anomalia; a IA aponta, sua equipe decide.',
     },
     {
+      icon: 'table',
       pain: 'Categorizar, fazer o de-para e montar o lançamento contábil vira PROCV, cliente a cliente.',
       answer:
-        'Cada cliente tem o próprio de-para da categoria para a conta contábil, com o plano de contas dele e o histórico padrão. Débito e crédito saem do sinal da movimentação, e o arquivo sai no layout que o sistema contábil importa, hoje em validação com escritórios parceiros.',
+        'De-para por cliente até a conta contábil, débito e crédito pelo sinal, e o arquivo no layout do sistema contábil, em validação com parceiros.',
     },
     {
-      pain: 'A maioria dos clientes não tem ERP. Chega planilha e extrato em todo formato, pelo WhatsApp.',
+      icon: 'file-spreadsheet',
+      pain: 'A maioria dos clientes não tem ERP: chega planilha e extrato em todo formato, pelo WhatsApp.',
       answer:
-        'Cliente com Omie é conectado direto. Cliente sem sistema manda a planilha do mês, lida por um mapeamento configurado uma vez. Extrato e fatura em PDF ou planilha são lidos por IA, e você confere uma amostra antes de seguir.',
+        'Cliente com Omie é conectado direto; sem sistema, manda a planilha do mês. Extrato e fatura são lidos por IA, e você confere uma amostra.',
     },
   ],
 } as const;
@@ -137,19 +141,90 @@ export const how = {
   steps: [
     {
       title: 'Envie o arquivo ou conecte a origem',
-      text: `Extrato, fatura de cartão ou planilha do cliente. Se ele usa Omie, o ${PRODUCT_NAME} busca os lançamentos por conta própria.`,
+      text: `Extrato, fatura ou planilha do cliente. Se ele usa Omie, o ${PRODUCT_NAME} busca os lançamentos sozinho.`,
     },
     {
       title: `O ${PRODUCT_NAME} lê e cruza`,
-      text: 'A IA extrai as movimentações do arquivo. O cruzamento com os lançamentos segue regra fixa: até um centavo de diferença no valor e até três dias na data.',
+      text: 'A IA extrai as movimentações e o cruzamento segue regra fixa: até um centavo no valor e três dias na data.',
     },
     {
       title: 'Sua equipe revisa o que ficou de fora',
-      text: 'Divergências, lançamentos sem par e anomalias aparecem separados, com espaço para a nota de resolução de cada um.',
+      text: 'Divergências, lançamentos sem par e anomalias aparecem separados, com a nota de resolução de cada um.',
     },
     {
       title: 'Sai o relatório e o lançamento',
-      text: 'Relatório da conciliação em Excel, compras do cartão lançadas no Omie e o arquivo contábil no layout do seu sistema.',
+      text: 'Relatório em Excel, compras do cartão lançadas no Omie e o arquivo contábil no layout do seu sistema.',
+    },
+  ],
+} as const;
+
+/**
+ * Tour do produto (86e3gqfkf): cinco telas REAIS, em abas. Os prints vêm de
+ * `Docs/manual/fonte/img/` (dado fictício: "Cliente Exemplo Ltda"); figura com nome
+ * de dado de teste não entra. Arquivo, largura e altura moram em `landing-tour.tsx`.
+ * Tetos: frase até 120 caracteres, bullet até 80 (`content.test.ts`).
+ */
+export const tour = {
+  eyebrow: 'Por dentro',
+  title: `Veja o ${PRODUCT_NAME} por dentro`,
+  tabsLabel: 'Telas do produto',
+  /** Controle da troca automática (WCAG 2.2.2): o nome acessível começa pelo texto visível. */
+  pause: 'Pausar',
+  pauseLabel: 'Pausar a troca automática das telas',
+  resume: 'Retomar',
+  resumeLabel: 'Retomar a troca automática das telas',
+  items: [
+    {
+      id: 'conciliacao',
+      tab: 'Conciliação',
+      frameTitle: `Conciliação · ${PRODUCT_NAME}`,
+      alt: 'Conciliação de um cartão com os totais por situação, o resumo de saldo e três arquivos',
+      text: 'Cada conta de cada mês numa tela: o que bateu, o que ficou sem par e os arquivos que entraram.',
+      bullets: [
+        'Totais por situação e a diferença de saldo logo no topo',
+        'Vários arquivos na mesma conciliação, como uma fatura em partes',
+      ],
+    },
+    {
+      id: 'anomalias',
+      tab: 'Anomalias',
+      frameTitle: `Anomalias · ${PRODUCT_NAME}`,
+      alt: 'Aba de anomalias com a severidade, o tipo e a resposta sobre o alerta',
+      text: 'O que não bate vira anomalia com tipo e severidade, e cada uma é resolvida por alguém da equipe.',
+      bullets: ['Sua equipe diz se o alerta procedia ou não', 'Filtro por severidade e por status'],
+    },
+    {
+      id: 'lancamento',
+      tab: 'Lançar no Omie',
+      frameTitle: `Movimentações · ${PRODUCT_NAME}`,
+      alt: 'Movimentações de uma fatura sem par no Omie, com o botão para lançar a compra',
+      text: 'Compras da fatura que ainda não estão no Omie são lançadas dali mesmo, uma a uma ou em lote.',
+      bullets: [
+        'Cada compra vira um lançamento só, sem duplicar',
+        'Só compra de cartão entra; estorno fica com a sua equipe',
+      ],
+    },
+    {
+      id: 'de-para',
+      tab: 'De-para',
+      frameTitle: `De-para · ${PRODUCT_NAME}`,
+      alt: 'De-para de um cliente com as contagens por situação e a decisão de cada categoria',
+      text: 'Para onde cada categoria do cliente vai em cada destino, com o que já foi decidido e o que falta.',
+      bullets: [
+        'O que o plano de contas já declara chega como proposta',
+        'A decisão vale por competência, e o mês fechado não muda',
+      ],
+    },
+    {
+      id: 'carteira',
+      tab: 'Carteira',
+      frameTitle: `Carteira · ${PRODUCT_NAME}`,
+      alt: 'Carteira de títulos com os totais a receber e a pagar e as faixas de atraso',
+      text: 'Títulos a pagar e a receber em aberto, de todas as contas e sem recorte de mês.',
+      bullets: [
+        'Atraso em faixas, de 1 a 30 dias até mais de 90',
+        'O contexto do título separa acordo de inadimplência',
+      ],
     },
   ],
 } as const;
@@ -161,17 +236,17 @@ export const security = {
     {
       icon: 'key',
       title: 'Uma chave por cliente',
-      text: 'Os dados sensíveis de cada cliente são cifrados com uma chave própria. O conteúdo de um cliente não abre com a chave de outro.',
+      text: 'Os dados sensíveis de cada cliente são cifrados com chave própria, que não abre o conteúdo de outro.',
     },
     {
       icon: 'file',
       title: 'O arquivo original não fica guardado',
-      text: 'O arquivo é lido por IA para extrair as movimentações e não fica armazenado pela plataforma. Na revisão, a IA também apoia sua equipe apontando o que parece incoerente; quem decide é sempre uma pessoa.',
+      text: 'Lido por IA para extrair as movimentações, e não fica guardado. Na revisão a IA também aponta; quem decide é uma pessoa.',
     },
     {
       icon: 'users',
       title: 'Cada um vê só o que é seu',
-      text: 'O escritório alcança só os próprios clientes, e o cliente final só a própria empresa. Exportações e tentativas de acesso negadas ficam registradas.',
+      text: 'O escritório vê só os próprios clientes, e o cliente, só a empresa dele. Exportação e acesso negado ficam registrados.',
     },
     {
       icon: 'lock',
