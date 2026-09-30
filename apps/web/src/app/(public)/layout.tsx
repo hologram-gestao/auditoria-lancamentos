@@ -16,11 +16,12 @@ import { LandingFooter } from '@/components/landing/landing-footer';
 import { LandingHeader } from '@/components/landing/landing-header';
 import { LandingEffects } from '@/components/landing/reveal';
 
+import '../public-brand.css';
 import './landing.css';
 
 export default function PublicLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="hologram landing bg-background text-foreground flex min-h-screen flex-col overflow-x-clip font-sans antialiased">
+    <div className="hologram lp-public landing bg-background text-foreground flex min-h-screen flex-col overflow-x-clip font-sans antialiased">
       <LandingHeader />
       <main id="conteudo" className="flex-1">
         {children}

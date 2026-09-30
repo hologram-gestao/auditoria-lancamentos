@@ -3590,10 +3590,17 @@ test.describe('Tema claro/escuro (86e2n39hb)', () => {
     await expect(page.getByRole('heading', { name: 'Clientes' })).toBeVisible();
   });
 
-  test('o tema vale também na tela de login (decisão c)', async ({ page, context }) => {
+  // 86e3h1h75: o login virou página pública de marca, com o Hologram FIXO no wrapper
+  // (como a landing). O `<html>` continua com o tema SALVO: é ele que volta a valer
+  // depois de entrar, e a tela não pode apagá-lo.
+  test('login: o <html> guarda o tema salvo e o wrapper fixa o Hologram', async ({
+    page,
+    context,
+  }) => {
     await context.clearCookies();
     await page.goto('/login');
     await expect(page.locator('html')).toHaveClass(new RegExp(`\\b${THEME}\\b`));
+    await expect(page.locator('.lp-public')).toHaveClass(/\bhologram\b/);
     await analyze(page, 'login com tema aplicado');
     await shot(page, 'tema-login');
   });
@@ -7607,6 +7614,219 @@ for (const vp of VIEWPORTS) {
   });
 }
 
+/*
+ * Medições das páginas públicas de marca (landing e login, 86e3h1h75): subiram do
+ * bloco da landing para o topo do arquivo quando o login passou a ter a mesma aurora,
+ * o mesmo botão verde e o mesmo tema fixo.
+ */
+/** Print SÓ da viewport (o `shot` é página inteira). */
+async function shotTela(page: Page, name: string): Promise<void> {
+  if (process.env.E2E_SHOTS !== '1') return;
+  await page
+    .screenshot({ path: `a11y-shots/${THEME}/${name}.png` })
+    .catch((err: unknown) => console.warn(`shot ${name} falhou: ${String(err)}`));
+}
+
+async function exigirSemRolagemHorizontal(page: Page, label: string): Promise<void> {
+  const { scrollWidth, innerWidth } = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    innerWidth: window.innerWidth,
+  }));
+  expect(scrollWidth, `${label}: a página rola na horizontal`).toBeLessThanOrEqual(innerWidth);
+}
+
+/**
+ * Contraste do texto contra o fundo que a página REALMENTE pinta atrás dele (aurora
+ * no hero, pastilha acesa do "Como funciona", moldura do tour).
+ *
+ * A aurora (bolhas absolutas com `blur`) não é vista pelo axe como fundo do texto:
+ * ele devolve `incomplete` ou mede contra o `bg-background` puro. Aqui: o elemento fica `visibility: hidden` (e não `color:
+ * transparent`, que não apaga texto pintado por `background-clip: text`), a caixa
+ * é fotografada, o PNG é decodificado num canvas e a cor do texto é comparada com o
+ * pixel de fundo MAIS CLARO da caixa, o pior caso para texto claro.
+ *
+ * `textColor` é qualquer cor CSS (inclusive `color(srgb …)`, que é como o
+ * `color-mix` volta computado): ela é pintada num canvas e lida em sRGB 8 bits.
+ *
+ * Elemento INLINE (a palavra em gradiente dentro do `h1`): quem fica escondido é o
+ * BLOCO que o contém, não só ele. A caixa de um inline encosta nos glifos vizinhos,
+ * e o arredondamento para pixel de dispositivo (DPR 2,75 no Pixel 5) e a fonte
+ * sans-serif de cada máquina decidem se uma fatia da letra ao lado entra na foto: no
+ * runner do CI entrava, e o pixel "mais claro do fundo" era o próprio texto (razão
+ * 1,00). O fundo atrás da caixa não depende do texto, então esconder o bloco inteiro
+ * não muda a medição. A caixa fotografada ainda encolhe 1 px por lado, e um pixel
+ * mais claro com a cor EXATA do texto reprova com erro explícito em vez de 1,00 mudo.
+ */
+async function contrasteSobreAurora(
+  page: Page,
+  locator: Locator,
+  textColor?: string,
+): Promise<number> {
+  const color = textColor ?? (await locator.evaluate((el) => getComputedStyle(el).color));
+  // Caixa e handle ANTES de esconder: escondido, o elemento sai da árvore de
+  // acessibilidade e um locator por papel (`getByRole`) deixa de achá-lo.
+  const box = await locator.boundingBox();
+  expect(box, 'elemento sem caixa').not.toBeNull();
+  const handle = await locator.elementHandle();
+  expect(handle, 'elemento sem handle').not.toBeNull();
+  // O que some da foto: o bloco que contém um inline (ver o JSDoc), senão o próprio
+  // elemento. A caixa medida continua sendo a DO ELEMENTO.
+  const escondido = await handle?.evaluateHandle((el) =>
+    getComputedStyle(el).display === 'inline' ? (el.closest('h1,h2,h3,p,li,div') ?? el) : el,
+  );
+  let png: Buffer;
+  try {
+    await escondido?.evaluate((el) => {
+      (el as HTMLElement).style.setProperty('visibility', 'hidden', 'important');
+    });
+    // 1 px a menos por lado: a borda da caixa é onde o arredondamento pega o vizinho.
+    const clip = box
+      ? {
+          x: box.x + 1,
+          y: box.y + 1,
+          width: Math.max(1, box.width - 2),
+          height: Math.max(1, box.height - 2),
+        }
+      : undefined;
+    // Uma retentativa para o soluço do protocolo ("Unable to capture screenshot"), o
+    // mesmo do `shot`: com `E2E_SHOTS=1`, outros workers tiram prints de página
+    // inteira ao mesmo tempo. Aqui a captura É a medição, então a 2ª falha reprova.
+    png = await page.screenshot({ clip }).catch(() => page.screenshot({ clip }));
+  } finally {
+    await escondido?.evaluate((el) => (el as HTMLElement).style.removeProperty('visibility'));
+    await escondido?.dispose();
+    await handle?.dispose();
+  }
+  return page.evaluate(
+    async ({ b64, textColor }) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${b64}`;
+      await img.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('sem canvas 2d');
+      ctx.drawImage(img, 0, 0);
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      const lin = (v: number) => {
+        const c = v / 255;
+        return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      };
+      const lum = (r: number, g: number, b: number) =>
+        0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+      let brightest = -1;
+      let brightestRgb: [number, number, number] = [0, 0, 0];
+      for (let i = 0; i < data.length; i += 4) {
+        const px: [number, number, number] = [data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0];
+        const l = lum(...px);
+        if (l > brightest) [brightest, brightestRgb] = [l, px];
+      }
+      const probe = document.createElement('canvas').getContext('2d');
+      if (!probe) throw new Error('sem canvas 2d');
+      probe.fillStyle = '#010203';
+      const sentinel = probe.fillStyle;
+      probe.fillStyle = textColor;
+      if (probe.fillStyle === sentinel) throw new Error(`cor não reconhecida: ${textColor}`);
+      probe.fillRect(0, 0, 1, 1);
+      const [r = 0, g = 0, b = 0] = probe.getImageData(0, 0, 1, 1).data;
+      if (brightestRgb[0] === r && brightestRgb[1] === g && brightestRgb[2] === b) {
+        throw new Error(
+          `texto vazou na foto: o pixel mais claro da caixa é rgb(${r}, ${g}, ${b}), a ` +
+            `cor exata do texto (${textColor}); a medição seria 1,00:1 e não o fundo`,
+        );
+      }
+      const text = lum(r, g, b);
+      const [hi, lo] = text > brightest ? [text, brightest] : [brightest, text];
+      return (hi + 0.05) / (lo + 0.05);
+    },
+    { b64: png.toString('base64'), textColor: color },
+  );
+}
+
+/**
+ * Contraste do texto de um botão SÓLIDO contra o fundo que ele pinta (86e3h0xcr, o
+ * verde da marca com texto navy). O texto some com `color: transparent` (texto comum,
+ * não `background-clip`), sem transição, e a faixa interna da caixa é fotografada:
+ * 8 px a menos de cada lado, fora dos cantos arredondados, onde entraria o fundo da
+ * página. A razão é a PIOR contra todos os pixels da faixa: com texto escuro sobre
+ * fundo claro, o pior pixel não é o mais claro (o critério do `contrasteSobreAurora`).
+ */
+async function contrasteDoBotao(page: Page, locator: Locator): Promise<number> {
+  const color = await locator.evaluate((el) => getComputedStyle(el).color);
+  const box = await locator.boundingBox();
+  expect(box, 'botão sem caixa').not.toBeNull();
+  let png: Buffer;
+  try {
+    await locator.evaluate((el) => {
+      (el as HTMLElement).style.setProperty('transition', 'none', 'important');
+      (el as HTMLElement).style.setProperty('color', 'transparent', 'important');
+    });
+    const clip = box
+      ? {
+          x: box.x + 8,
+          y: box.y + 2,
+          width: Math.max(1, box.width - 16),
+          height: Math.max(1, box.height - 4),
+        }
+      : undefined;
+    png = await page.screenshot({ clip }).catch(() => page.screenshot({ clip }));
+  } finally {
+    await locator.evaluate((el) => {
+      (el as HTMLElement).style.removeProperty('color');
+      (el as HTMLElement).style.removeProperty('transition');
+    });
+  }
+  return page.evaluate(
+    async ({ b64, textColor }) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${b64}`;
+      await img.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('sem canvas 2d');
+      ctx.drawImage(img, 0, 0);
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      const lin = (v: number) => {
+        const c = v / 255;
+        return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      };
+      const lum = (r: number, g: number, b: number) =>
+        0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+      const probe = document.createElement('canvas').getContext('2d');
+      if (!probe) throw new Error('sem canvas 2d');
+      probe.fillStyle = textColor;
+      probe.fillRect(0, 0, 1, 1);
+      const [r = 0, g = 0, b = 0] = probe.getImageData(0, 0, 1, 1).data;
+      const text = lum(r, g, b);
+      let pior = Infinity;
+      for (let i = 0; i < data.length; i += 4) {
+        const fundo = lum(data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0);
+        const [hi, lo] = text > fundo ? [text, fundo] : [fundo, text];
+        pior = Math.min(pior, (hi + 0.05) / (lo + 0.05));
+      }
+      return pior;
+    },
+    { b64: png.toString('base64'), textColor: color },
+  );
+}
+
+/** As duas cores do gradiente de um `.lp-gradient-text`, resolvidas no browser. */
+async function stopsDoGradiente(locator: Locator): Promise<string[]> {
+  return locator.evaluate((el) =>
+    ['--lp-grad-from', '--lp-grad-to'].map((variavel) => {
+      const probe = document.createElement('span');
+      probe.style.color = `var(${variavel})`;
+      el.appendChild(probe);
+      const cor = getComputedStyle(probe).color;
+      probe.remove();
+      return cor;
+    }),
+  );
+}
+
 /**
  * Landing pública e aviso de privacidade (86e3fr9vz, épico 86e3fr9tj).
  *
@@ -7624,14 +7844,6 @@ test.describe('Landing pública (86e3fr9vz)', () => {
   const LEADS_ROUTE = '**/api/v1/leads';
   const NAV_NAME = 'Acesso e contato';
 
-  /** Print SÓ da viewport (o `shot` é página inteira). */
-  async function shotTela(page: Page, name: string): Promise<void> {
-    if (process.env.E2E_SHOTS !== '1') return;
-    await page
-      .screenshot({ path: `a11y-shots/${THEME}/${name}.png` })
-      .catch((err: unknown) => console.warn(`shot ${name} falhou: ${String(err)}`));
-  }
-
   async function abrirLanding(
     page: Page,
     context: BrowserContext,
@@ -7641,206 +7853,6 @@ test.describe('Landing pública (86e3fr9vz)', () => {
     if (reducedMotion) await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/');
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
-  }
-
-  async function exigirSemRolagemHorizontal(page: Page, label: string): Promise<void> {
-    const { scrollWidth, innerWidth } = await page.evaluate(() => ({
-      scrollWidth: document.documentElement.scrollWidth,
-      innerWidth: window.innerWidth,
-    }));
-    expect(scrollWidth, `${label}: a página rola na horizontal`).toBeLessThanOrEqual(innerWidth);
-  }
-
-  /**
-   * Contraste do texto contra o fundo que a página REALMENTE pinta atrás dele (aurora
-   * no hero, pastilha acesa do "Como funciona", moldura do tour).
-   *
-   * A aurora (bolhas absolutas com `blur`) não é vista pelo axe como fundo do texto:
-   * ele devolve `incomplete` ou mede contra o `bg-background` puro. Aqui: o elemento fica `visibility: hidden` (e não `color:
-   * transparent`, que não apaga texto pintado por `background-clip: text`), a caixa
-   * é fotografada, o PNG é decodificado num canvas e a cor do texto é comparada com o
-   * pixel de fundo MAIS CLARO da caixa, o pior caso para texto claro.
-   *
-   * `textColor` é qualquer cor CSS (inclusive `color(srgb …)`, que é como o
-   * `color-mix` volta computado): ela é pintada num canvas e lida em sRGB 8 bits.
-   *
-   * Elemento INLINE (a palavra em gradiente dentro do `h1`): quem fica escondido é o
-   * BLOCO que o contém, não só ele. A caixa de um inline encosta nos glifos vizinhos,
-   * e o arredondamento para pixel de dispositivo (DPR 2,75 no Pixel 5) e a fonte
-   * sans-serif de cada máquina decidem se uma fatia da letra ao lado entra na foto: no
-   * runner do CI entrava, e o pixel "mais claro do fundo" era o próprio texto (razão
-   * 1,00). O fundo atrás da caixa não depende do texto, então esconder o bloco inteiro
-   * não muda a medição. A caixa fotografada ainda encolhe 1 px por lado, e um pixel
-   * mais claro com a cor EXATA do texto reprova com erro explícito em vez de 1,00 mudo.
-   */
-  async function contrasteSobreAurora(
-    page: Page,
-    locator: Locator,
-    textColor?: string,
-  ): Promise<number> {
-    const color = textColor ?? (await locator.evaluate((el) => getComputedStyle(el).color));
-    // Caixa e handle ANTES de esconder: escondido, o elemento sai da árvore de
-    // acessibilidade e um locator por papel (`getByRole`) deixa de achá-lo.
-    const box = await locator.boundingBox();
-    expect(box, 'elemento sem caixa').not.toBeNull();
-    const handle = await locator.elementHandle();
-    expect(handle, 'elemento sem handle').not.toBeNull();
-    // O que some da foto: o bloco que contém um inline (ver o JSDoc), senão o próprio
-    // elemento. A caixa medida continua sendo a DO ELEMENTO.
-    const escondido = await handle?.evaluateHandle((el) =>
-      getComputedStyle(el).display === 'inline' ? (el.closest('h1,h2,h3,p,li,div') ?? el) : el,
-    );
-    let png: Buffer;
-    try {
-      await escondido?.evaluate((el) => {
-        (el as HTMLElement).style.setProperty('visibility', 'hidden', 'important');
-      });
-      // 1 px a menos por lado: a borda da caixa é onde o arredondamento pega o vizinho.
-      const clip = box
-        ? {
-            x: box.x + 1,
-            y: box.y + 1,
-            width: Math.max(1, box.width - 2),
-            height: Math.max(1, box.height - 2),
-          }
-        : undefined;
-      // Uma retentativa para o soluço do protocolo ("Unable to capture screenshot"), o
-      // mesmo do `shot`: com `E2E_SHOTS=1`, outros workers tiram prints de página
-      // inteira ao mesmo tempo. Aqui a captura É a medição, então a 2ª falha reprova.
-      png = await page.screenshot({ clip }).catch(() => page.screenshot({ clip }));
-    } finally {
-      await escondido?.evaluate((el) => (el as HTMLElement).style.removeProperty('visibility'));
-      await escondido?.dispose();
-      await handle?.dispose();
-    }
-    return page.evaluate(
-      async ({ b64, textColor }) => {
-        const img = new Image();
-        img.src = `data:image/png;base64,${b64}`;
-        await img.decode();
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) throw new Error('sem canvas 2d');
-        ctx.drawImage(img, 0, 0);
-        const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-        const lin = (v: number) => {
-          const c = v / 255;
-          return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-        };
-        const lum = (r: number, g: number, b: number) =>
-          0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-        let brightest = -1;
-        let brightestRgb: [number, number, number] = [0, 0, 0];
-        for (let i = 0; i < data.length; i += 4) {
-          const px: [number, number, number] = [data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0];
-          const l = lum(...px);
-          if (l > brightest) [brightest, brightestRgb] = [l, px];
-        }
-        const probe = document.createElement('canvas').getContext('2d');
-        if (!probe) throw new Error('sem canvas 2d');
-        probe.fillStyle = '#010203';
-        const sentinel = probe.fillStyle;
-        probe.fillStyle = textColor;
-        if (probe.fillStyle === sentinel) throw new Error(`cor não reconhecida: ${textColor}`);
-        probe.fillRect(0, 0, 1, 1);
-        const [r = 0, g = 0, b = 0] = probe.getImageData(0, 0, 1, 1).data;
-        if (brightestRgb[0] === r && brightestRgb[1] === g && brightestRgb[2] === b) {
-          throw new Error(
-            `texto vazou na foto: o pixel mais claro da caixa é rgb(${r}, ${g}, ${b}), a ` +
-              `cor exata do texto (${textColor}); a medição seria 1,00:1 e não o fundo`,
-          );
-        }
-        const text = lum(r, g, b);
-        const [hi, lo] = text > brightest ? [text, brightest] : [brightest, text];
-        return (hi + 0.05) / (lo + 0.05);
-      },
-      { b64: png.toString('base64'), textColor: color },
-    );
-  }
-
-  /**
-   * Contraste do texto de um botão SÓLIDO contra o fundo que ele pinta (86e3h0xcr, o
-   * verde da marca com texto navy). O texto some com `color: transparent` (texto comum,
-   * não `background-clip`), sem transição, e a faixa interna da caixa é fotografada:
-   * 8 px a menos de cada lado, fora dos cantos arredondados, onde entraria o fundo da
-   * página. A razão é a PIOR contra todos os pixels da faixa: com texto escuro sobre
-   * fundo claro, o pior pixel não é o mais claro (o critério do `contrasteSobreAurora`).
-   */
-  async function contrasteDoBotao(page: Page, locator: Locator): Promise<number> {
-    const color = await locator.evaluate((el) => getComputedStyle(el).color);
-    const box = await locator.boundingBox();
-    expect(box, 'botão sem caixa').not.toBeNull();
-    let png: Buffer;
-    try {
-      await locator.evaluate((el) => {
-        (el as HTMLElement).style.setProperty('transition', 'none', 'important');
-        (el as HTMLElement).style.setProperty('color', 'transparent', 'important');
-      });
-      const clip = box
-        ? {
-            x: box.x + 8,
-            y: box.y + 2,
-            width: Math.max(1, box.width - 16),
-            height: Math.max(1, box.height - 4),
-          }
-        : undefined;
-      png = await page.screenshot({ clip }).catch(() => page.screenshot({ clip }));
-    } finally {
-      await locator.evaluate((el) => {
-        (el as HTMLElement).style.removeProperty('color');
-        (el as HTMLElement).style.removeProperty('transition');
-      });
-    }
-    return page.evaluate(
-      async ({ b64, textColor }) => {
-        const img = new Image();
-        img.src = `data:image/png;base64,${b64}`;
-        await img.decode();
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) throw new Error('sem canvas 2d');
-        ctx.drawImage(img, 0, 0);
-        const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-        const lin = (v: number) => {
-          const c = v / 255;
-          return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-        };
-        const lum = (r: number, g: number, b: number) =>
-          0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-        const probe = document.createElement('canvas').getContext('2d');
-        if (!probe) throw new Error('sem canvas 2d');
-        probe.fillStyle = textColor;
-        probe.fillRect(0, 0, 1, 1);
-        const [r = 0, g = 0, b = 0] = probe.getImageData(0, 0, 1, 1).data;
-        const text = lum(r, g, b);
-        let pior = Infinity;
-        for (let i = 0; i < data.length; i += 4) {
-          const fundo = lum(data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0);
-          const [hi, lo] = text > fundo ? [text, fundo] : [fundo, text];
-          pior = Math.min(pior, (hi + 0.05) / (lo + 0.05));
-        }
-        return pior;
-      },
-      { b64: png.toString('base64'), textColor: color },
-    );
-  }
-
-  /** As duas cores do gradiente de um `.lp-gradient-text`, resolvidas no browser. */
-  async function stopsDoGradiente(locator: Locator): Promise<string[]> {
-    return locator.evaluate((el) =>
-      ['--lp-grad-from', '--lp-grad-to'].map((variavel) => {
-        const probe = document.createElement('span');
-        probe.style.color = `var(${variavel})`;
-        el.appendChild(probe);
-        const cor = getComputedStyle(probe).color;
-        probe.remove();
-        return cor;
-      }),
-    );
   }
 
   async function preencherFormulario(page: Page): Promise<void> {
@@ -8330,4 +8342,162 @@ test.describe('Landing pública (86e3fr9vz)', () => {
     await aguardarAnimacao(titulo);
     await expect(titulo).toHaveCSS('opacity', '1');
   });
+});
+
+/**
+ * Login: a ponte entre a landing e o sistema (86e3h1h75).
+ *
+ * Tema Hologram FIXO no wrapper, painel de marca com a aurora da landing em intensidade
+ * baixa de `lg` para cima, card estreito, botão no verde da marca e erro só na
+ * mensagem. Como na landing, as medições rodam com `prefers-reduced-motion: reduce`
+ * (aurora parada: o pixel medido é o mesmo a cada run) e os três runs do gate medem a
+ * mesma página. O fluxo de autenticação não mudou e segue coberto pelos cenários
+ * "Login (…)" acima.
+ */
+test.describe('Login: a ponte entre a landing e o sistema (86e3h1h75)', () => {
+  const PANEL_NAME = 'Sobre o Hologram OS';
+
+  async function abrirLogin(page: Page, context: BrowserContext): Promise<void> {
+    // Com cookie o middleware manda para `/clientes`: a tela de login só existe deslogado.
+    await context.clearCookies();
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('/login');
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+  }
+
+  /** Cor de um token resolvida no browser, dentro do elemento (herda o tema dele). */
+  async function corDoToken(locator: Locator, token: string): Promise<string> {
+    return locator.evaluate((el, variavel) => {
+      const probe = document.createElement('span');
+      probe.style.color = `hsl(var(${variavel}))`;
+      el.appendChild(probe);
+      const cor = getComputedStyle(probe).color;
+      probe.remove();
+      return cor;
+    }, token);
+  }
+
+  for (const vp of VIEWPORTS) {
+    test.describe(vp.label, () => {
+      test.use({ viewport: vp.size });
+      const slug = vp.label === 'desktop' ? 'desktop' : 'mobile';
+      const desktop = vp.label === 'desktop';
+
+      test('tema fixo, painel de marca no desktop, card sozinho no celular', async ({
+        page,
+        context,
+      }) => {
+        await abrirLogin(page, context);
+        await expect(page.locator('html')).toHaveClass(new RegExp(`\\b${THEME}\\b`));
+        await expect(page.locator('.lp-public')).toHaveClass(/\bhologram\b/);
+        await expect(page.getByRole('button', { name: /tema/i })).toHaveCount(0);
+        await exigirSemRolagemHorizontal(page, `login (${vp.label})`);
+
+        const voltar = page.getByRole('link', { name: 'Voltar para o site' });
+        await expect(voltar).toHaveAttribute('href', '/');
+        const titulo = page.getByRole('heading', { level: 1, name: 'Hologram OS' });
+        const card = page.locator('.lp-auth-card');
+        await expect(card).toContainText('Entre com o seu acesso.');
+        await expect(card.getByRole('heading', { level: 1 })).toHaveCount(1);
+        await expect(titulo).toBeVisible();
+        const caixa = await card.boundingBox();
+        expect(caixa, 'card sem caixa').not.toBeNull();
+        if (caixa) {
+          // O card é estreito (384 px) e cabe inteiro na largura, inclusive em 390px.
+          expect(caixa.width).toBeLessThanOrEqual(384);
+          expect(caixa.x).toBeGreaterThanOrEqual(0);
+          expect(caixa.x + caixa.width).toBeLessThanOrEqual(vp.size.width);
+        }
+
+        const painel = page.getByRole('complementary', { name: PANEL_NAME });
+        if (!desktop) {
+          // Abaixo de `lg`, só o card: o painel não existe na tela nem para o leitor.
+          await expect(painel).toBeHidden();
+        } else {
+          await expect(painel).toBeVisible();
+          // A frase do hero sobre a aurora: o texto e os DOIS stops da palavra em
+          // gradiente contra o pixel mais claro do fundo que a página pinta atrás.
+          const frase = painel.getByTestId('sign-in-panel-title');
+          const razao = await contrasteSobreAurora(page, frase);
+          console.log(`login · frase do painel sobre a aurora: ${razao.toFixed(2)}:1`);
+          expect.soft(razao, 'frase do painel sobre a aurora').toBeGreaterThanOrEqual(4.5);
+          const destaque = frase.locator('.lp-gradient-text');
+          const stops = await stopsDoGradiente(destaque);
+          expect(stops).toHaveLength(2);
+          for (const [indice, stop] of stops.entries()) {
+            const razaoStop = await contrasteSobreAurora(page, destaque, stop);
+            console.log(
+              `login · destaque do painel, stop ${indice + 1} (${stop}): ${razaoStop.toFixed(2)}:1`,
+            );
+            expect
+              .soft(razaoStop, `destaque do painel, stop ${indice + 1}`)
+              .toBeGreaterThanOrEqual(4.5);
+          }
+        }
+        await shotTela(page, `login-${slug}`);
+        await analyze(page, `login, ponte da landing (${vp.label})`);
+      });
+
+      test('botão Entrar: verde da marca, texto navy com 4,5:1 em hover', async ({
+        page,
+        context,
+      }) => {
+        await abrirLogin(page, context);
+        const entrar = page.getByRole('button', { name: 'Entrar' });
+        // Vazio, ele só apaga (50 % de opacidade), nunca vira um cinza sólido.
+        await expect(entrar).toBeDisabled();
+        await expect(entrar).toHaveCSS('opacity', '0.5');
+        await page.getByLabel('E-mail', { exact: true }).fill('ana@exemplo.com.br');
+        await page.getByLabel('Senha', { exact: true }).fill('qualquer');
+        await expect(entrar).toBeEnabled();
+        await entrar.hover();
+        await expect.poll(() => entrar.evaluate((el) => el.getAnimations().length)).toBe(0);
+        const cores = await entrar.evaluate((el) => {
+          const resolver = (cor: string) => {
+            const probe = document.createElement('span');
+            probe.style.backgroundColor = cor;
+            el.appendChild(probe);
+            const resolvida = getComputedStyle(probe).backgroundColor;
+            probe.remove();
+            return resolvida;
+          };
+          return {
+            fundo: getComputedStyle(el).backgroundColor,
+            hover: resolver('hsl(var(--brand-hover))'),
+            base: resolver('hsl(var(--brand))'),
+            comMouse: window.matchMedia('(hover: hover)').matches,
+          };
+        });
+        // No projeto de toque o `:hover` emulado pode não pegar: ali vale o verde base.
+        expect(
+          cores.comMouse ? [cores.hover] : [cores.hover, cores.base],
+          'Entrar pinta o verde da marca',
+        ).toContain(cores.fundo);
+        const razao = await contrasteDoBotao(page, entrar);
+        console.log(`login · Entrar em hover · ${vp.label}: ${razao.toFixed(2)}:1`);
+        expect(razao, `Entrar em hover (${vp.label})`).toBeGreaterThanOrEqual(4.5);
+        await analyze(page, `login, hover em Entrar (${vp.label})`);
+      });
+
+      test('erro de campo: só a mensagem fica vermelha, o rótulo não', async ({
+        page,
+        context,
+      }) => {
+        await abrirLogin(page, context);
+        const email = page.getByLabel('E-mail', { exact: true });
+        await email.fill('joao@');
+        await email.blur();
+        const mensagem = page.getByText('E-mail inválido.');
+        await expect(mensagem).toBeVisible();
+        await expect(email).toHaveAttribute('aria-invalid', 'true');
+        const card = page.locator('.lp-auth-card');
+        const rotulo = card.locator('label', { hasText: 'E-mail' });
+        await expect(rotulo).toHaveCSS('color', await corDoToken(card, '--foreground'));
+        await expect(mensagem).toHaveCSS('color', await corDoToken(card, '--destructive'));
+        await expect(mensagem.locator('svg')).toHaveCount(1);
+        await shotTela(page, `login-erro-${slug}`);
+        await analyze(page, `login, e-mail inválido (${vp.label})`);
+      });
+    });
+  }
 });

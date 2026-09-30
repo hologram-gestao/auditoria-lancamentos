@@ -1,5 +1,6 @@
 /**
- * TODO o texto da landing pública e do aviso de privacidade (86e3fr9uf).
+ * TODO o texto da landing pública, do aviso de privacidade (86e3fr9uf) e o texto de
+ * marca da tela de login (86e3h1h75).
  *
  * A versão comentada, com a fonte de cada dor e a evidência de cada afirmação, é
  * `Docs/landing/COPY.md`. A revisão do Lucas vira edição AQUI: nenhum componente
@@ -289,6 +290,22 @@ export const contact = {
     rateLimited: 'Muitas mensagens em pouco tempo. Tente de novo em um minuto.',
     generic: 'Não foi possível enviar agora. Tente de novo em instantes.',
   },
+} as const;
+
+/**
+ * Tela de login (86e3h1h75): ela passou a ser a ponte entre a landing e o sistema, com
+ * o mesmo tema fixo e o painel de marca, então os textos NOVOS dela moram aqui. Os de
+ * formulário (rótulos, "Entrar", a ajuda de senha, as mensagens de erro) ficam na
+ * própria tela, como sempre estiveram. Neutros: a plataforma é multi-organização, e
+ * quem entra não é só gente da Hologram.
+ */
+export const login = {
+  subtitle: 'Entre com o seu acesso.',
+  emailPlaceholder: 'voce@empresa.com.br',
+  backToSite: 'Voltar para o site',
+  /** Nome do painel de marca (landmark `complementary`), visível só de `lg` para cima. */
+  panelLabel: `Sobre o ${PRODUCT_NAME}`,
+  footer: COMPANY_NAME,
 } as const;
 
 export const footer = {
