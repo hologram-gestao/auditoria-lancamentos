@@ -674,3 +674,9 @@ export type GenerateAccountingFileRequest = Schemas['GenerateAccountingFileReque
 export type ListAccountingFilesQuery = NonNullable<
   paths['/api/v1/clients/{client_id}/accounting-files']['get']['parameters']['query']
 >;
+
+// ── Leads da landing pública (86e3fr9ut) ────────────────────────────────────
+/** Body do `POST /leads` (público). `website` é o honeypot: vai sempre, vazio. */
+export type LeadCreate = Schemas['LeadCreate'];
+/** Resposta genérica do `POST /leads`: igual para lead gravado, honeypot e limite. */
+export type LeadReceived = Schemas['LeadReceived'];
