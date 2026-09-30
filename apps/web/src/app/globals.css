@@ -70,6 +70,20 @@
     --input: 240 5.9% 90%;
     /* Anel de foco na cor da marca (mesmo marinho do primary). */
     --ring: 240 76.5% 20%;
+    /* VERDE da marca Hologram (86e3h1h75): #05d1bf, rgb(5, 209, 191), amostrado por
+       PIXEL do botão "Começar agora" do site da Hologram
+       (`Docs/brand/site-hologram-cta-2026-09-30.png`). É a cor de DESTAQUE das páginas
+       públicas (landing e login) e o botão `variant="brand"`. Mesmo valor nos TRÊS
+       blocos: é a cor da marca, não muda com o tema. Nunca texto corrido sobre fundo
+       claro (o branco sobre ele dá 1,85:1); o texto SOBRE ele é o `--brand-foreground`. */
+    --brand: 175 95% 42%;
+    /* Texto sobre o verde: o navy da marca (#0C0C5A), cópia LITERAL do `--primary`
+       deste bloco. Não dá para ler `var(--primary)`: no Hologram ele é branco, e
+       branco sobre o verde dá 1,85:1. Navy sobre o verde: 8,94:1. */
+    --brand-foreground: 240 76.5% 20%;
+    /* Hover SÓLIDO (a regra do `--destructive-hover`): o verde com 10 % de preto,
+       `color-mix(in srgb, verde 90%, black)` convertido para HSL. Navy sobre ele: 7,31:1. */
+    --brand-hover: 175 95% 38%;
     --radius: 0.5rem;
   }
 
@@ -113,6 +127,10 @@
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
     --ring: 240 75% 72%;
+    /* Verde da marca: o MESMO valor do `:root` (é a cor da marca, não do tema). */
+    --brand: 175 95% 42%;
+    --brand-foreground: 240 76.5% 20%;
+    --brand-hover: 175 95% 38%;
   }
 
   /* Tema HOLOGRAM (86e2ukrc9, 25/08/2026) — as superfícies são o navy da
@@ -160,6 +178,10 @@
     --border: 222 40% 20%;
     --input: 222 40% 20%;
     --ring: 0 0% 98%;
+    /* Verde da marca: o MESMO valor do `:root` (é a cor da marca, não do tema). */
+    --brand: 175 95% 42%;
+    --brand-foreground: 240 76.5% 20%;
+    --brand-hover: 175 95% 38%;
     --radius: 0.5rem;
   }
 }

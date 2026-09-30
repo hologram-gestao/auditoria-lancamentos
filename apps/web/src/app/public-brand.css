@@ -1,0 +1,195 @@
+/*
+ * A "cara pública" da marca, dividida entre a landing (`(public)/layout.tsx`) e o login
+ * (`(auth)/layout.tsx`), 86e3h1h75: as variáveis de brilho e borda, a aurora, a grade,
+ * a palavra em gradiente e a borda em gradiente dos cards. Tudo escopado em
+ * `.lp-public`, a classe que os dois wrappers levam junto de `.hologram` (tema fixo). O
+ * app autenticado não carrega este arquivo.
+ *
+ * As regras são as da `landing.css`: cor só por token (`--brand` é o verde da marca,
+ * no `globals.css`), nada decorativo atrás de texto corrido, e sob
+ * `prefers-reduced-motion: reduce` a aurora fica parada (bloco no fim).
+ */
+
+.lp-public {
+  --lp-glow-primary: hsl(var(--primary) / 0.18);
+  --lp-glow-brand: hsl(var(--brand) / 0.38);
+  --lp-glow-accent: hsl(var(--accent) / 1);
+  --lp-edge: hsl(var(--primary) / 0.14);
+  --lp-edge-strong: hsl(var(--brand) / 0.4);
+  --lp-grid-line: hsl(var(--border) / 0.55);
+  --lp-shadow: 0 18px 48px -24px hsl(var(--brand) / 0.45);
+  /*
+   * Stop claro do gradiente do título: o verde misturado 60/40 com `--foreground`,
+   * que o afasta da bolha verde da aurora atrás da palavra. O e2e "texto sobre a
+   * aurora" mede os DOIS stops do `.lp-gradient-text` contra o pixel mais claro do
+   * fundo pintado, no hero da landing e no painel do login.
+   */
+  --lp-gradient-end: color-mix(in srgb, hsl(var(--brand)) 60%, hsl(var(--foreground)));
+}
+
+/* ---------- Aurora ---------- */
+
+.lp-aurora {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  /* Esmaece no pé do hero: sem isso o brilho é cortado numa linha reta pelo
+     `overflow` da seção (visto no print de 1440px). */
+  mask-image: linear-gradient(to bottom, black 65%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, black 65%, transparent);
+}
+
+/*
+ * Intensidade baixa (o painel de marca do login): a mesma aurora a 55 %, sem o
+ * esmaecimento do pé, porque o painel ocupa a altura inteira da tela e não termina
+ * numa seção seguinte.
+ */
+.lp-aurora--soft {
+  opacity: 0.55;
+  mask-image: none;
+  -webkit-mask-image: none;
+}
+
+.lp-aurora__blob {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(80px);
+  will-change: transform;
+  animation: lp-drift 32s ease-in-out infinite alternate;
+}
+
+.lp-aurora__blob--1 {
+  top: -12rem;
+  left: -8rem;
+  width: 36rem;
+  height: 36rem;
+  background: var(--lp-glow-brand);
+}
+
+.lp-aurora__blob--2 {
+  top: 4rem;
+  right: -10rem;
+  width: 30rem;
+  height: 30rem;
+  background: var(--lp-glow-accent);
+  animation-duration: 38s;
+  animation-direction: alternate-reverse;
+}
+
+.lp-aurora__blob--3 {
+  bottom: -14rem;
+  left: 30%;
+  width: 34rem;
+  height: 26rem;
+  background: var(--lp-glow-primary);
+  animation-duration: 26s;
+}
+
+/* Grade sutil, esmaecendo para as bordas: CSS puro, sem asset. */
+.lp-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(var(--lp-grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--lp-grid-line) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, black 20%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, black 20%, transparent 75%);
+  opacity: 0.7;
+}
+
+@keyframes lp-drift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(3rem, 2rem, 0) scale(1.08);
+  }
+  100% {
+    transform: translate3d(-2rem, 3rem, 0) scale(0.96);
+  }
+}
+
+/* ---------- A palavra em destaque ---------- */
+
+/*
+ * Uma palavra do título em gradiente (de `--foreground` para `--lp-gradient-end`).
+ * `--lp-grad-from` e `--lp-grad-to` são lidos pelo e2e para medir os dois stops.
+ * Em alto contraste forçado o texto volta a ser cor sólida do sistema.
+ */
+.lp-gradient-text {
+  --lp-grad-from: hsl(var(--foreground));
+  --lp-grad-to: var(--lp-gradient-end);
+  background-image: linear-gradient(90deg, var(--lp-grad-from), var(--lp-grad-to));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+@media (forced-colors: active) {
+  .lp-gradient-text {
+    background-image: none;
+    color: CanvasText;
+    -webkit-text-fill-color: CanvasText;
+  }
+}
+
+/* ---------- Borda em gradiente dos cards ---------- */
+
+/*
+ * Um retângulo com o gradiente, recortado por máscara para sobrar só a faixa de 1 px
+ * (`padding`) em volta. Mais clara no topo, como um filete de luz. Decorativa, fora de
+ * baixo do texto. Vale para os cards da landing (`.lp-card`), a moldura do tour
+ * (`.lp-frame`) e o card do login (`.lp-auth-card`).
+ */
+.lp-card::before,
+.lp-frame::before,
+.lp-auth-card::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  padding: 1px;
+  border-radius: inherit;
+  background: linear-gradient(
+    160deg,
+    var(--lp-edge-strong),
+    transparent 35%,
+    transparent 65%,
+    var(--lp-edge)
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.8;
+  transition: opacity 300ms ease-out;
+}
+
+/*
+ * Card do login: a borda e a sombra dos cards da landing, parado. Formulário não sobe
+ * no hover (a landing sobe o card porque ele é um convite; aqui a pessoa está
+ * digitando dentro dele).
+ */
+.lp-auth-card {
+  position: relative;
+  box-shadow: var(--lp-shadow);
+}
+
+/* ---------- Movimento reduzido: aurora parada, sem transição ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-aurora__blob {
+    animation: none;
+  }
+
+  .lp-card::before,
+  .lp-frame::before,
+  .lp-auth-card::before {
+    transition: none;
+  }
+}
