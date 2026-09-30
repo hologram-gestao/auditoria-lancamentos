@@ -7978,6 +7978,28 @@ test.describe('Landing pública (86e3fr9vz)', () => {
     expect(new URL(response.headers()['location'] ?? '', 'http://x').pathname).toBe('/clientes');
   });
 
+  test('manual: o botão baixa o PDF na mesma aba e o arquivo responde como PDF', async ({
+    page,
+    context,
+  }) => {
+    await abrirLanding(page, context);
+    const link = page
+      .locator('#seguranca')
+      .getByRole('link', { name: 'Baixar o manual (PDF)', exact: true });
+    await expect(link).toHaveAttribute('download', '');
+    await expect(link).toHaveAccessibleDescription('PDF, 3 MB');
+    const href = await link.getAttribute('href');
+    expect(href).toBe('/manual-hologram-os.pdf');
+    // Nova aba só com `rel=noopener`; hoje o link nem abre aba (baixa na mesma).
+    const target = await link.getAttribute('target');
+    if (target === '_blank') expect(await link.getAttribute('rel')).toContain('noopener');
+    else expect(target).toBeNull();
+    // O arquivo é pedido direto ao servidor, fora do browser: um PDF não passa pelo axe.
+    const resposta = await page.request.get(href ?? '');
+    expect(resposta.status()).toBe(200);
+    expect(resposta.headers()['content-type']).toContain('application/pdf');
+  });
+
   test('efeitos: revelação na rolagem e header rolado, com movimento', async ({
     page,
     context,

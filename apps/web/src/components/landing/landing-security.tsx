@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { security } from './content';
 import { LandingIcon } from './landing-icon';
 import { LandingSection, revealDelay } from './landing-section';
+import { ManualDownload } from './manual-download';
 
 export function LandingSecurity() {
   return (
@@ -28,14 +29,18 @@ export function LandingSecurity() {
           </li>
         ))}
       </ul>
-      <p data-reveal className="mt-8">
+      <div
+        data-reveal
+        className="mt-8 flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between"
+      >
         <Link
           href="/privacidade"
-          className="focus-visible:ring-ring rounded-sm font-medium underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2"
+          className="focus-visible:ring-ring self-start rounded-sm font-medium underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 sm:self-auto"
         >
           {security.privacyLink}
         </Link>
-      </p>
+        <ManualDownload id="manual-seguranca" />
+      </div>
     </LandingSection>
   );
 }

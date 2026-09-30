@@ -16,6 +16,18 @@ export const CONSENT_TEXT_VERSION = '2026-09-30';
 
 export const CONTACT_ANCHOR = 'contato';
 
+/**
+ * Manual da plataforma, servido de `public/` (cópia de `Docs/manual/Manual-Hologram-OS.pdf`
+ * da `main`). O `robots.txt` libera este caminho. Trocou o PDF, confira o `size`: um
+ * teste compara com o arquivo.
+ */
+export const manual = {
+  href: '/manual-hologram-os.pdf',
+  label: 'Baixar o manual (PDF)',
+  size: 'PDF, 3 MB',
+  successLead: 'Enquanto respondemos, leia o manual',
+} as const;
+
 export const landingMeta = {
   title: `${PRODUCT_NAME}: o financeiro do seu cliente, conferido antes da contabilidade`,
   description: `O ${PRODUCT_NAME} cruza extrato, fatura e planilha com o que foi lançado, mostra o que não bate e deixa pronto o que segue para o sistema contábil.`,

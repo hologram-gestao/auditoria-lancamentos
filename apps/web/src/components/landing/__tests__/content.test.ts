@@ -4,7 +4,7 @@
  * o nome novo só pela constante, sem travessão e com a versão do consentimento igual
  * à do backend.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -35,6 +35,14 @@ describe('landing/content', () => {
     for (const forbidden of ['garantimos', 'revolucion', '100%', 'inteligente']) {
       expect(ALL_TEXT.toLowerCase()).not.toContain(forbidden);
     }
+  });
+
+  it('o tamanho anunciado do manual é o do arquivo em public/', () => {
+    const bytes = statSync(
+      resolve(__dirname, '../../../../public', content.manual.href.slice(1)),
+    ).size;
+    const megabytes = Math.round(bytes / 1_000_000);
+    expect(content.manual.size).toBe(`PDF, ${megabytes} MB`);
   });
 
   it('a versão do consentimento é a mesma do backend', () => {

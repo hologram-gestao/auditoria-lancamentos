@@ -122,7 +122,10 @@ Rótulo: **Segurança e privacidade** · Título do bloco: **O dado do seu clien
 | 3    | Cada um vê só o que é seu            | O escritório alcança só os próprios clientes, e o cliente final só a própria empresa. Exportações e tentativas de acesso negadas ficam registradas.                                                       |
 | 4    | Encerrou, acabou                     | Quando um cliente sai, a chave dele é destruída e o conteúdo cifrado deixa de poder ser lido.                                                                                                             |
 
-Link ao final: **Leia o aviso de privacidade** (`/privacidade`).
+Link ao final: **Leia o aviso de privacidade** (`/privacidade`). Ao lado, botão secundário
+**Baixar o manual (PDF)** com "PDF, 3 MB" (`/manual-hologram-os.pdf`, cópia de
+`Docs/manual/Manual-Hologram-OS.pdf`); o mesmo link aparece na confirmação do formulário
+como **Enquanto respondemos, leia o manual**.
 
 ### 7. Formulário de contato (`#contato`)
 
