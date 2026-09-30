@@ -9,7 +9,7 @@ import { LandingSection, revealDelay } from './landing-section';
 
 export function LandingPains() {
   return (
-    <LandingSection id="dores" title={pains.title}>
+    <LandingSection id="dores" eyebrow={pains.eyebrow} title={pains.title}>
       <ol className="grid gap-4 lg:gap-6">
         {pains.items.map((item, index) => (
           <li

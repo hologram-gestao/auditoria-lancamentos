@@ -9,8 +9,12 @@
  *
  * Para leitor de tela a vinheta é UMA figura com nome ("exemplo ilustrativo"); o
  * miolo é `aria-hidden`, porque linhas de um cliente inventado não são conteúdo.
+ *
+ * Refino de 30/09 (86e3gr6k5): um mini-card sobre o canto inferior esquerdo (uma
+ * anomalia apontada), FORA do card inclinado, flutuando 6 px em 6 s. Dá profundidade
+ * sem mexer no card principal; parado sob movimento reduzido. Superfície sólida.
  */
-import { CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 import { vignette } from './content';
 
@@ -19,7 +23,7 @@ const FLIP_STEP_MS = 1200;
 
 export function ProductVignette() {
   return (
-    <figure aria-label={vignette.label} className="lp-tilt w-full">
+    <figure aria-label={vignette.label} className="lp-tilt relative w-full">
       <div aria-hidden="true" className="lp-tilt__card bg-card rounded-xl border p-5 sm:p-6">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
@@ -80,6 +84,17 @@ export function ProductVignette() {
             {vignette.footerValue}
           </span>
         </div>
+      </div>
+
+      <div
+        aria-hidden="true"
+        className="lp-float bg-card absolute -bottom-16 left-3 max-w-[16rem] rounded-lg border p-3 lg:-left-8"
+      >
+        <span className="bg-warning-muted text-warning inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium">
+          <AlertTriangle className="h-3 w-3" />
+          {vignette.flagBadge}
+        </span>
+        <p className="mt-2 text-sm font-medium">{vignette.flagText}</p>
       </div>
     </figure>
   );

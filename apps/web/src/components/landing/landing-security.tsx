@@ -11,7 +11,7 @@ import { LandingSection, revealDelay } from './landing-section';
 
 export function LandingSecurity() {
   return (
-    <LandingSection id="seguranca" title={security.title}>
+    <LandingSection id="seguranca" eyebrow={security.eyebrow} title={security.title}>
       <ul className="grid gap-4 sm:grid-cols-2 lg:gap-6">
         {security.items.map((item, index) => (
           <li
