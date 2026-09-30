@@ -58,6 +58,11 @@ SENSITIVE_KEY_TERMS: frozenset[str] = frozenset(
         "cookie",
         "encryption_key",
         "blind_index",
+        # URL de webhook é credencial (quem tem a URL posta no canal). `url` pega
+        # `webhook_url`, `LEADS_SLACK_WEBHOOK_URL` e `database_url`; `webhook` pega
+        # a chave curta. Nenhum log da aplicação usa `url` como dado neutro (86e3fr9ut).
+        "webhook",
+        "url",
     }
 )
 

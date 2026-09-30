@@ -162,6 +162,7 @@ Não carregam dado escopável a um cliente. Registradas explicitamente para que 
 | `POST /api/v1/auth/logout` | autenticação — apenas limpa cookies |
 | `POST /api/v1/auth/refresh` | autenticação — opera sobre o próprio token |
 | `POST /api/v1/clients/test-connection` | valida credenciais enviadas no body; nada persistido |
+| `POST /api/v1/leads` | público; captação de lead da landing; não lê nem grava dado escopável |
 | `POST /api/v1/organizations` | administração da plataforma (ManagePlatformDep) |
 | `POST /api/v1/system/alert-test` | diagnóstico de alerting; plataforma ou admin (RUN_ALERT_TEST) |
 

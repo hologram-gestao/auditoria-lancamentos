@@ -294,6 +294,19 @@ class Settings(BaseSettings):
     # segurar o event loop nem a request que o disparou.
     ALERT_WEBHOOK_TIMEOUT_SECONDS: float = 5.0
 
+    # ---------- Leads da landing pública (86e3fr9ut) ----------
+    # Incoming webhook do canal da ADL no Slack que recebe o aviso de cada contato
+    # deixado no formulário da landing. Segredo: nunca logar, nunca devolver.
+    # ⚠️ NÃO entra em `has_webhook_alert`/`has_alert_channel`, pelo mesmo motivo do
+    # `ALERT_WEBHOOK_URL_SYNTHETIC`: não é canal de plantão, e contá-lo deixaria o
+    # fail-closed (`verify_alert_config`) subir um serviço sem para onde alertar.
+    # Ausente ou vazio (a secret nasce com uma versão vazia): o lead é gravado e o
+    # aviso é pulado, com `lead_notification_skipped` no log.
+    LEADS_SLACK_WEBHOOK_URL: SecretStr | None = Field(
+        default=None,
+        description="Webhook do Slack para avisar leads da landing. Segredo — nunca logar.",
+    )
+
     # ---------- Validators ----------
     @field_validator("OMIE_ENCRYPTION_KEY", "JWT_SECRET", "SEARCH_BLIND_INDEX_KEY")
     @classmethod

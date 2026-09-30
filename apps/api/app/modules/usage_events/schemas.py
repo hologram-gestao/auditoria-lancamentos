@@ -233,6 +233,11 @@ class UsageEventName(StrEnum):
     # Baseline **~15 min por cliente** (autorrelato do contador parceiro em
     # 02/09/2026, não cronometrado). Alvo **≤ 2 min**.
     ARQUIVO_CONTABIL_GERADO = "arquivo_contabil_gerado"
+    # 86e3fr9ut — contato deixado no formulário da landing pública. De BACKEND,
+    # sem `session_id`, fora da dedup: cada lead gravado é uma linha. Só origem e
+    # booleanos de preenchimento; nunca nome, e-mail, empresa, WhatsApp ou mensagem.
+    # Honeypot e limite por e-mail NÃO emitem (nada foi gravado).
+    LEAD_RECEBIDO = "lead_recebido"
 
 
 #: Eventos que o `POST /api/v1/usage-events` aceita. Os de backend ficam de fora
@@ -673,6 +678,20 @@ class UsuarioTransferidoDeOrganizacaoProps(_StrictProps):
     n_carteira_removida: int = Field(ge=0)
     n_favoritos_removidos: int = Field(ge=0)
     n_notificacoes_removidas: int = Field(ge=0)
+
+
+class LeadRecebidoProps(_StrictProps):
+    """`lead_recebido` (86e3fr9ut) — um lead da landing foi gravado.
+
+    Diz de onde veio, quais campos opcionais vieram preenchidos e se o aviso no
+    Slack foi aceito. Nenhum campo de texto: o conteúdo do lead fica só na tabela.
+    """
+
+    source: Literal["landing"]
+    has_company: bool
+    has_whatsapp: bool
+    has_message: bool
+    notified: bool
 
 
 class GlossarioEditadoProps(_StrictProps):
