@@ -236,7 +236,8 @@ export function MovementsTab({ sessionId, isCard, canPostToOmie }: MovementsTabP
 
   /** Compras da página que o servidor aceitaria lançar (mesma regra dele). */
   const eligibleIds = useMemo(
-    () => items.filter((e) => getPostingBlock(e, { isCard: showPosting }) === null).map((e) => e.id),
+    () =>
+      items.filter((e) => getPostingBlock(e, { isCard: showPosting }) === null).map((e) => e.id),
     [items, showPosting],
   );
 

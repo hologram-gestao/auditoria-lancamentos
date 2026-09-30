@@ -1082,6 +1082,12 @@ const SESSIONS = [
  * é por isso que os cenários anteriores nunca o pegaram.
  */
 let listOverflows = false;
+/**
+ * Cliente SEM nenhuma conciliação: é o estado vazio do painel (86e3g9uku), que
+ * antes prometia "Criar conciliação" e levava a uma lista onde a criação estava
+ * escondida. Só os cenários do painel ligam.
+ */
+let noSessions = false;
 
 /** 12 linhas: transborda com folga em 900px de altura e em 390×844. */
 const OVERFLOW_SESSIONS = Array.from({ length: 12 }, (_, i) =>
@@ -2480,7 +2486,7 @@ async function fulfillApi(route: Route): Promise<void> {
     return json(CLIENT_DETAIL);
   }
   if (path === `/api/v1/clients/${CLIENT_ID}/reconciliations`) {
-    const list = listOverflows ? OVERFLOW_SESSIONS : SESSIONS;
+    const list = noSessions ? [] : listOverflows ? OVERFLOW_SESSIONS : SESSIONS;
     return json({ data: list, pagination: { ...PAGINATION, total: list.length } });
   }
   if (path === `/api/v1/reconciliations/${SESSION_ID}`) {
@@ -2925,6 +2931,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   // S14: a origem é o Omie por padrão; o cliente sem sistema (arquivo), o
   // mapeamento salvo e o envio bem-sucedido são o ponto de partida do bloco.
   clientFileOrigin = false;
+  noSessions = false;
   inputMappingState = 'salvo';
   fileProcessOutcome = 'sucesso';
   // S16: o cliente TEM plano contábil e a importação dá certo, por padrão.
@@ -6432,6 +6439,47 @@ for (const vp of VIEWPORTS) {
       await analyze(page, `origem por arquivo — toast de mapeamento alterado (${vp.label})`);
     });
 
+    // 86e3g9u3w: um cliente tem um tipo de origem de lançamentos só (§4.8), e
+    // oferecer o outro é oferecer um 409 depois do formulário inteiro preenchido.
+    test('gaveta num cliente com Omie: o tipo "Arquivo" nem é oferecido', async ({ page }) => {
+      await page.goto(`/clientes/${CLIENT_ID}/painel`);
+
+      await page.getByRole('button', { name: 'Conectar origem' }).first().click();
+      const gaveta = page.getByRole('dialog').filter({ hasText: 'Conectar origem' });
+      await aguardarAnimacao(gaveta);
+      await gaveta.getByRole('combobox', { name: 'Tipo de origem' }).click();
+      const opcoes = page.getByRole('option');
+      await expect(opcoes).toHaveCount(1);
+      await expect(opcoes.first()).toHaveText('Omie');
+      await analyze(page, `painel — gaveta sem o tipo conflitante (${vp.label})`);
+    });
+
+    // 86e3g9uku: o painel não promete ação que a tela de destino não oferece.
+    test('painel sem conciliações: cliente por arquivo não é convidado a conciliar', async ({
+      page,
+    }) => {
+      noSessions = true;
+      clientFileOrigin = true;
+      await page.goto(`/clientes/${CLIENT_ID}/painel`);
+
+      const vazio = page.getByTestId('dashboard-no-reconciliations');
+      await expect(vazio).toHaveAttribute('data-state', 'arquivo');
+      await exigirEstadoVazioLegivel(
+        page,
+        'Este cliente não concilia',
+        `${vp.label} · painel do cliente por arquivo`,
+        vazio,
+      );
+      await expect(vazio.getByRole('link', { name: 'Ir para Origem por arquivo' })).toBeVisible();
+      await expect(page.getByRole('link', { name: /Criar conciliação/ })).toHaveCount(0);
+
+      // Quem rola é o `<main>`, então `fullPage` sozinho fotografa o TOPO da
+      // página e o estado vazio nem sai do PNG a 390px (lição da 86e3fxqqh).
+      await vazio.scrollIntoViewIfNeeded();
+      await shot(page, `painel-sem-conciliacoes-arquivo-${slugF}`);
+      await analyze(page, `painel — sem conciliações, cliente por arquivo (${vp.label})`);
+    });
+
     test('gaveta de conexão: tipo "Arquivo" sem credencial nem teste; Salvar habilita direto', async ({
       page,
     }) => {
@@ -6610,6 +6658,11 @@ for (const vp of VIEWPORTS) {
         `/clientes/${CLIENT_ID}/origem-arquivo?competence=2026-06`,
       );
       await exigirDentroDaViewport(page, enviarLink, `${vp.label}: "Enviar arquivo do mês"`);
+      // 86e3g9ua7: a PALAVRA acompanha a origem — "Sincronizada em" aqui mandaria
+      // procurar o botão que esta mesma tela acabou de esconder.
+      const base = page.getByTestId('mapping-base-state');
+      await expect(base).toContainText('Arquivo processado em');
+      await expect(base).not.toContainText('incroniz');
       await shot(page, `de-para-origem-arquivo-${slugE}`);
       await analyze(page, `de-para — cliente com origem por arquivo (${vp.label})`);
 

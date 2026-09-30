@@ -1088,6 +1088,11 @@ describe('ClientMappingScreen — prévia da competência (R0 · R5)', () => {
       'href',
       `/clientes/${TENANT}/origem-arquivo?competence=2026-06`,
     );
+    // 86e3g9ua7: a PALAVRA acompanha a origem. "Sincronizada em" aqui mandaria
+    // procurar um botão "Sincronizar" que esta mesma tela acabou de esconder.
+    const base = screen.getByTestId('mapping-base-state');
+    expect(base).toHaveTextContent(/Arquivo processado em/);
+    expect(base).not.toHaveTextContent(/incroniz/);
   });
 
   it('origem por ARQUIVO com base nunca sincronizada: a instrução fala do envio, não do sync', () => {

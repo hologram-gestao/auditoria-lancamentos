@@ -83,10 +83,7 @@ interface ClientUserFormDrawerProps {
   user: ClientUserResponse | null;
 }
 
-const ROLE_OPTIONS = Object.entries(CLIENT_USER_ROLE_LABELS) as [
-  ClientUserRoleFormValue,
-  string,
-][];
+const ROLE_OPTIONS = Object.entries(CLIENT_USER_ROLE_LABELS) as [ClientUserRoleFormValue, string][];
 
 export function ClientUserFormDrawer({
   open,

@@ -813,6 +813,14 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
     ("parece cabeçalho": sem dígito, curto) não resolve, porque nome de conta passa no
     teste. A exceção é `SEM_MAPEAMENTO`, onde mostrar as colunas É a função da resposta
     (a tela constrói o mapeamento a partir delas) — exceção declarada, não esquecimento;
+  - **coluna com tamanho fixo derivado de uma constante usa a CONSTANTE, nunca um
+    literal** (86e3g9v0j): `title_contexts.text_iv` nasceu `String(32)` na migration da
+    S15 enquanto o modelo e as outras 16 colunas `_iv` diziam `IV_HEX_LENGTH = 24`. Não
+    quebrou nada (24 cabe em 32), mas o `alembic check` passou a acusar drift em toda
+    entrega, e o próximo `--autogenerate` emitiria o ALTER sozinho dentro de outra
+    sprint. Migration aplicada não se reescreve: a correção é migration nova. O que
+    impede a terceira vez é teste que varre o metadata
+    (`tests/unit/test_iv_column_length.py`), não revisão;
   - UNIQUE que a corrida alcança (duplo clique, duas abas): `ON CONFLICT DO NOTHING` para
     ação idempotente, SAVEPOINT + nome da constraint → 409 para escrita. Checar antes de
     inserir não protege nada sob concorrência.
@@ -891,6 +899,20 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   a tela explica o que é o recurso, por que ele não está disponível ali e quem pode
   liberar. Quem some do menu é o que a MATRIZ nega, nunca o que o dado do cliente ainda
   não tem.
+- **Ação oferecida numa tela TEM de existir na tela de destino, e quem decide é a MESMA
+  chamada dos dois lados** (86e3g9uku · 86e3g9u3w). O painel do cliente oferecia "Criar
+  conciliação" apontando para a lista, onde a criação já estava escondida para cliente
+  sem origem e para cliente só-arquivo; a gaveta de conexão oferecia um tipo que o
+  servidor recusa com 409. Em toda ponte entre telas, a origem chama `originCodeFor(…)` /
+  a capacidade **com o mesmo argumento** que o destino usa — perguntar diferente faz as
+  duas discordarem sobre o mesmo cliente, e o rótulo do botão diz o que ele faz de fato
+  ("Ir para conciliações", não "Criar conciliação", quando o link só navega).
+- **A PALAVRA do estado acompanha a origem, não o verbo de uma origem só** (86e3g9ua7).
+  No de-para, "Nunca sincronizada"/"Sincronizada em" num cliente por arquivo manda
+  procurar um botão "Sincronizar" que a própria tela já trocou por "Enviar arquivo do
+  mês" (lá `POST …/movements/sync` é 409 `ORIGEM_POR_ARQUIVO`). Texto de estado ao lado
+  de uma ação condicional se ramifica pela MESMA resposta que ramifica a ação
+  (`originIsFileBased`), senão a tela se contradiz em duas linhas vizinhas.
 - **Dois padrões de altura para tabela, e a tela escolhe um** (86e3eq9uy): `<Table fill>`
   dentro de `<TableCard>` quando a tabela é o que enche a janela (a tabela rola por
   dentro); `<Table stickyHeader="page">` + `<TableCard pageScroll>` quando o conteúdo acima
@@ -1311,6 +1333,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.63 — 29/09/2026. **Os quatro candidatos que sobraram do épico de follow-ups da S14 viraram task e foram pagos, mais o achado do de-para que estava solto.** Três são a MESMA falha em lugares diferentes: a tela oferece algo que o destino não entrega. **86e3g9uku** — o painel do cliente sem conciliações mostrava "Criar conciliação" apontando para a LISTA, onde a criação já estava escondida para cliente sem origem (S9) e para cliente só-arquivo (S14, `CAPACIDADE_AUSENTE`); agora o estado vazio pergunta `originCodeFor(…, 'listar_contas')`, a MESMA chamada da lista, e o rótulo virou "Ir para conciliações" (o link navega, não cria). **86e3g9u3w** — a gaveta de conexão listava todos os tipos, e escolher "Arquivo" num cliente com Omie levava 409 `ORIGEM_JA_CONECTADA` depois do formulário inteiro preenchido; nasceu `connectableProviderTypes` (`lib/origin-capabilities.ts`), que projeta a trava do §4.8: com uma conexão que lista lançamentos, some todo tipo que também lista e é DIFERENTE dela — o mesmo tipo fica, porque duas conexões Omie com rótulos distintos são permitidas. `PROVIDER_TYPES` ganhou `listsLedger` pelo mesmo motivo que já carrega `requiresCredentials`: na criação não há conexão para perguntar à capacidade. **86e3g9ua7** — no de-para do cliente por arquivo o estado da base dizia "Nunca sincronizada"/"Sincronizada em", mandando procurar um botão "Sincronizar" que a própria tela já trocou por "Enviar arquivo do mês"; o texto passou a ramificar por `originIsFileBased`, a mesma resposta que ramifica a ação. **86e3g9v0j** — `title_contexts.text_iv` era `String(32)` no banco e `String(24)` no modelo: a migration da S15 escreveu um literal em vez de `IV_HEX_LENGTH`, e o IV é `os.urandom(12)` em hex, sempre 24. Nada quebrava, mas o `alembic check` acusava drift em toda entrega; migration nova alinha a coluna (a da S15 não se reescreve) e um teste varre o metadata atrás de coluna `_iv` com literal. **86e3g3dg3** (do épico da S16) — planilha de de-para exportada de OUTRO destino era recusada como `CONTAS_DA_PLANILHA_INVALIDAS` porque a pré-validação de contas não filtrava por `line.destination`; agora usa o mesmo filtro do laço que rejeita com `destino_diferente`, então a recusa aponta o arquivo errado em vez do plano de contas. Três regras novas: duas na §7 Frontend (ação tem de existir no destino, pela MESMA chamada dos dois lados; a palavra do estado acompanha a origem) e uma na §7 Backend (tamanho de coluna derivado de constante usa a constante). Endpoints sensíveis (**116**), matriz (**29**) e pares de AAD (**17**) não mudaram._
 
 _Versão 1.62 — 29/09/2026. **Dois follow-ups em aberto de sprints anteriores foram pagos: a recusa de cabeçalho não ecoa mais a planilha, e a aba "Origem por arquivo" parou de ser invisível.** **86e3fvffy (achado do QA da S16, não bloqueante)** — as duas checagens de cabeçalho devolviam a linha 1 do arquivo CRUA em `details` (`foundColumns`, mais `unexpectedColumns`/`repeatedColumns` no plano contábil). Numa planilha enviada SEM cabeçalho a linha 1 é DADO, então o 422 passava a conter nome de conta (S16) ou descrição de lançamento (S14) — o que a §4.1 manda cifrar e a §4.5 manda nunca devolver. Agora `details` só nomeia o vocabulário NOSSO (colunas do modelo, colunas do mapeamento, e a repetição quando a coluna repetida é do modelo) e o que veio do arquivo vira contagem (`foundColumnCount`, `unexpectedColumnCount`); a tela troca a lista de "colunas encontradas" pelo diagnóstico que ela de fato entregava ("a planilha tem N colunas, M fora do modelo. Confira se a linha 1 é o cabeçalho"). A opção de filtrar por heurística ("parece cabeçalho") foi recusada pelo Pedro: nome de conta passa no teste. `SEM_MAPEAMENTO` mantém `foundColumns` como exceção DECLARADA — mostrar as colunas é a função daquela resposta. Regra nova na §7 Backend. **86e3fqnc9 (follow-up da validação da S14)** — o item "Origem por arquivo" só aparecia para o cliente que JÁ tinha conexão `arquivo`, e o resultado era um recurso invisível: quem opera não descobria que dá para atender cliente sem ERP mandando a planilha do mês. Esconder nunca foi regra da §4.9 (ler a aba é `AccessibleClientDep`, ninguém seria negado); o que o servidor nega é CONECTAR. A aba passou a ser sempre listada e a TELA explica três estados — encerrado, origem de outro tipo já conectada (conectar seria 409 `ORIGEM_JA_CONECTADA`, então não há botão) e sem origem nenhuma —, com "peça ao administrador" para quem não tem `manage_client_connections`. Qual origem está no caminho é decidido pela CAPACIDADE (`listar_lancamentos`), nunca por `provider_type === 'omie'`. "Conectar origem por arquivo" leva ao painel com a gaveta já aberta no tipo Arquivo (`?conectar=<tipo>`, lido uma vez e apagado da URL). Regra nova na §7 Frontend. Endpoints sensíveis (**116**), matriz (**29**) e pares de AAD (**17**) não mudaram: nenhuma rota nem permissão nova._
 

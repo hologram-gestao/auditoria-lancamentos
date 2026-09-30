@@ -22,10 +22,13 @@
 import { ArrowRight, CalendarCheck, Landmark, ListChecks, ShieldAlert } from 'lucide-react';
 import Link from 'next/link';
 
+import { fileOriginPath } from '@/components/features/navigation/nav-items';
 import { Button } from '@/components/ui/button';
 import { useClientDetail, useReconciliationsList } from '@/hooks/use-clients';
 import { ApiError } from '@/lib/api/client';
+import type { ClientConnection, OriginStatus } from '@/lib/contracts';
 import { formatReferenceMonth, formatSyncedAt } from '@/lib/format';
+import { originCodeFor, originIsFileBased } from '@/lib/origin-capabilities';
 import { currentMonth } from '@/lib/validation/reconciliations';
 
 import { ClientConnectionsSection } from './connections/client-connections-section';
@@ -136,17 +139,12 @@ export function ClientDashboard({ clientId }: { clientId: string }) {
       />
 
       {latest === undefined ? (
-        <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed p-8 text-center">
-          <p className="text-muted-foreground text-sm">
-            Este cliente ainda não tem conciliações. Comece pela lista de conciliações.
-          </p>
-          <Button asChild>
-            <Link href={`/clientes/${clientId}`}>
-              Criar conciliação
-              <ArrowRight className="h-4 w-4" aria-hidden="true" />
-            </Link>
-          </Button>
-        </div>
+        <NoReconciliations
+          clientId={clientId}
+          originStatus={detailQuery.data?.origin_status ?? 'sem_origem'}
+          connections={detailQuery.data?.connections ?? []}
+          isClosed={detailQuery.data?.closed_at != null}
+        />
       ) : (
         <Button variant="outline" asChild>
           <Link href={`/clientes/${clientId}/conciliacao/${latest.id}`}>
@@ -165,6 +163,74 @@ interface StatTileProps {
   value: string;
   hint?: string;
   badge?: React.ReactNode;
+}
+
+/**
+ * Cliente sem nenhuma conciliação (86e3g9uku).
+ *
+ * O texto antigo era uma promessa falsa: "Criar conciliação" é um `Link` para a
+ * LISTA, e lá a criação já está escondida para quem não pode conciliar — cliente
+ * sem origem (S9) e cliente só-arquivo (S14, `CAPACIDADE_AUSENTE`). A pessoa
+ * clicava e chegava numa tela sem o botão prometido.
+ *
+ * Quem decide é `originCodeFor(..., 'listar_contas')` — a MESMA chamada que a
+ * lista faz para esconder a criação (`reconciliations/list/reconciliations-list.tsx`).
+ * Perguntar diferente aqui faria as duas telas discordarem sobre o mesmo cliente.
+ */
+function NoReconciliations({
+  clientId,
+  originStatus,
+  connections,
+  isClosed,
+}: {
+  clientId: string;
+  originStatus: OriginStatus;
+  connections: readonly ClientConnection[];
+  isClosed: boolean;
+}) {
+  const fileOrigin = originIsFileBased(connections);
+  const originCode = originCodeFor(originStatus, connections, 'listar_contas');
+  const state = isClosed
+    ? 'encerrado'
+    : fileOrigin
+      ? 'arquivo'
+      : originCode === null
+        ? 'pronto'
+        : 'sem-origem';
+  return (
+    <div
+      data-testid="dashboard-no-reconciliations"
+      data-state={state}
+      className="flex flex-col items-center gap-4 rounded-lg border border-dashed p-8 text-center"
+    >
+      <p className="text-muted-foreground mx-auto max-w-prose text-sm">
+        {state === 'encerrado'
+          ? 'Este cliente foi encerrado e não tem conciliações. O histórico fica disponível só para leitura.'
+          : state === 'arquivo'
+            ? 'Este cliente não concilia: os lançamentos dele entram pelo envio do arquivo do mês e são classificados no de-para.'
+            : state === 'sem-origem'
+              ? 'Este cliente ainda não tem conciliações. Para conciliar, ele precisa de uma origem conectada e ativa — o estado da origem está logo acima.'
+              : 'Este cliente ainda não tem conciliações. Comece pela lista de conciliações.'}
+      </p>
+      {state === 'pronto' && (
+        <Button asChild>
+          {/* Rótulo honesto: o link leva à LISTA, onde a gaveta de criação vive. */}
+          <Link href={`/clientes/${clientId}`}>
+            Ir para conciliações
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </Link>
+        </Button>
+      )}
+      {state === 'arquivo' && (
+        <Button asChild variant="outline">
+          <Link href={fileOriginPath(clientId)}>
+            Ir para Origem por arquivo
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </Link>
+        </Button>
+      )}
+    </div>
+  );
 }
 
 function StatTile({ icon, label, value, hint, badge }: StatTileProps) {

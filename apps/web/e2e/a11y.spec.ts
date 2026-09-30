@@ -78,7 +78,10 @@ test('Contas Bancárias', async ({ page }) => {
 
 test('Detalhe da conciliação', async ({ page }) => {
   await page.goto(`/clientes/${CLIENT_ID}`);
-  await page.getByRole('link', { name: /Abrir conciliação/ }).first().click();
+  await page
+    .getByRole('link', { name: /Abrir conciliação/ })
+    .first()
+    .click();
   await page.waitForURL('**/conciliacao/**');
   await analyze(page, 'detalhe da conciliação');
 });
@@ -95,7 +98,10 @@ test('Detalhe da conciliação', async ({ page }) => {
  */
 test('Modal "Trocar lançamento" — a11y e seleção por teclado', async ({ page }) => {
   await page.goto(`/clientes/${CLIENT_ID}`);
-  await page.getByRole('link', { name: /Abrir conciliação/ }).first().click();
+  await page
+    .getByRole('link', { name: /Abrir conciliação/ })
+    .first()
+    .click();
   await page.waitForURL('**/conciliacao/**');
 
   // "Trocar lançamento" só existe em linha `conciliado`; percorre os menus até

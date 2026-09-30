@@ -270,7 +270,11 @@ export function MappingPreviewPanel({
             <h3 id="mapping-base-state-heading" className="text-sm font-semibold">
               Base de movimentos de {formatReferenceMonth(validCompetence)}
             </h3>
-            <BaseStateText query={stateQuery} onRetry={() => void stateQuery.refetch()} />
+            <BaseStateText
+              query={stateQuery}
+              fileOrigin={fileOrigin}
+              onRetry={() => void stateQuery.refetch()}
+            />
           </div>
           {showSyncAction && syncButton}
           {showUploadLink && uploadLink}
@@ -280,7 +284,9 @@ export function MappingPreviewPanel({
         )}
         {canSync && isClosed && (
           <p className="text-muted-foreground text-sm">
-            Cliente encerrado: a sincronização está indisponível.
+            {fileOrigin
+              ? 'Cliente encerrado: o envio de arquivos está indisponível.'
+              : 'Cliente encerrado: a sincronização está indisponível.'}
           </p>
         )}
       </section>
@@ -341,11 +347,22 @@ export function MappingPreviewPanel({
   );
 }
 
+/**
+ * O estado da base da competência — e a PALAVRA muda com a origem (86e3g9ua7).
+ *
+ * Num cliente por arquivo ninguém sincroniza: `POST …/movements/sync` nele é 409
+ * `ORIGEM_POR_ARQUIVO`, e a base é alimentada pelo envio do arquivo do mês. Dizer
+ * "Nunca sincronizada" ali manda a pessoa procurar um botão "Sincronizar" que a
+ * própria tela já trocou por "Enviar arquivo do mês". `fileOrigin` é a MESMA
+ * resposta que troca o botão (`originIsFileBased`, pela capacidade).
+ */
 function BaseStateText({
   query,
+  fileOrigin,
   onRetry,
 }: {
   query: { data?: MovementsSyncState; isLoading: boolean; isError: boolean };
+  fileOrigin: boolean;
   onRetry: () => void;
 }) {
   if (query.isLoading) {
@@ -369,16 +386,20 @@ function BaseStateText({
   return (
     <div className="space-y-1 text-sm" data-testid="mapping-base-state">
       {state.neverSynced ? (
-        <p className="text-muted-foreground">Nunca sincronizada.</p>
+        <p className="text-muted-foreground">
+          {fileOrigin ? 'Nenhum arquivo processado nesta competência.' : 'Nunca sincronizada.'}
+        </p>
       ) : (
         <p className="text-muted-foreground">
-          Sincronizada em {state.syncedAt ? formatCreatedAt(state.syncedAt) : '—'}.
+          {fileOrigin ? 'Arquivo processado em ' : 'Sincronizada em '}
+          {state.syncedAt ? formatCreatedAt(state.syncedAt) : '—'}.
         </p>
       )}
       {state.syncFailedAt != null && (
         <p className="text-warning flex items-center gap-1.5">
-          <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />A última tentativa falhou
-          em {formatCreatedAt(state.syncFailedAt)}
+          <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+          {fileOrigin ? 'A última importação falhou em ' : 'A última tentativa falhou em '}
+          {formatCreatedAt(state.syncFailedAt)}
           {state.syncedAt ? '; a prévia usa a última base íntegra.' : '.'}
         </p>
       )}

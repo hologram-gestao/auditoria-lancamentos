@@ -317,8 +317,8 @@ function TimeoutAlert({ onRefresh, onBackToForm }: TimeoutAlertProps) {
             O processamento está demorando mais que o esperado
           </p>
           <p className="text-sm leading-snug">
-            Atualize para verificar o resultado, ou volte para a lista — você será avisado no
-            sino quando terminar.
+            Atualize para verificar o resultado, ou volte para a lista — você será avisado no sino
+            quando terminar.
           </p>
         </div>
       </div>

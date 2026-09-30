@@ -85,6 +85,29 @@ export function hasFileConnection(connections: readonly ConnectionLike[]): boole
 }
 
 /**
+ * Os tipos que a gaveta de CONECTAR pode oferecer neste cliente (86e3g9u3w).
+ *
+ * Espelho da trava do servidor (`ORIGEM_JA_CONECTADA`, §4.8): um cliente tem um
+ * tipo de origem de LANÇAMENTOS só, então, se já existe uma conexão que lista
+ * lançamentos (em qualquer estado — a trava não olha status), todo tipo que
+ * também lista e é DIFERENTE dela seria 409. Mostrar ação que o servidor nega é
+ * defeito (§4.9), e aqui o custo era preencher a gaveta inteira para descobrir
+ * no submit.
+ *
+ * O tipo da conexão existente CONTINUA na lista: o servidor só recusa tipo
+ * diferente — duas conexões Omie com rótulos distintos são permitidas.
+ * Tipo que não lista lançamentos nunca é escondido.
+ */
+export function connectableProviderTypes<T extends { value: string; listsLedger: boolean }>(
+  options: readonly T[],
+  connections: readonly ConnectionLike[],
+): T[] {
+  const ledger = connections.find((c) => c.capabilities.includes('listar_lancamentos')) ?? null;
+  if (ledger === null) return [...options];
+  return options.filter((o) => !o.listsLedger || o.value === ledger.provider_type);
+}
+
+/**
  * A base de movimentos deste cliente é alimentada pelo ENVIO do arquivo, não
  * por sincronização? Espelho da checagem do servidor em
  * `ClientMovementsSyncService.sync` (S14): a conexão que atende

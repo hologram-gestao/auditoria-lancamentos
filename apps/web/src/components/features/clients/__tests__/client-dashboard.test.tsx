@@ -139,15 +139,70 @@ describe('ClientDashboard', () => {
     expect(within(ultima).getByText('Processada')).toBeVisible();
   });
 
-  it('cliente sem conciliação convida a criar a primeira', () => {
+  // 86e3g9uku: o estado vazio não pode prometer o que a tela de destino não
+  // oferece. "Criar conciliação" levava à LISTA, onde a criação já está
+  // escondida para quem não pode conciliar.
+  function semConciliacoes() {
     monthState.data = {
       data: [],
       pagination: { page: 1, pageSize: 100, total: 0, totalPages: 0 },
     };
     latestState.data = { data: [], pagination: { page: 1, pageSize: 1, total: 0, totalPages: 0 } };
+  }
+
+  it('cliente que concilia: convida, com rótulo honesto (o link leva à LISTA)', () => {
+    semConciliacoes();
     render(<ClientDashboard clientId="c1" />);
-    expect(screen.getByText(/ainda não tem conciliações/)).toBeVisible();
-    expect(screen.getByRole('link', { name: /Criar conciliação/ })).toBeVisible();
+    const vazio = screen.getByTestId('dashboard-no-reconciliations');
+    expect(vazio).toHaveAttribute('data-state', 'pronto');
+    expect(vazio).toHaveTextContent(/ainda não tem conciliações/);
+    const link = screen.getByRole('link', { name: /Ir para conciliações/ });
+    expect(link).toHaveAttribute('href', '/clientes/c1');
+    expect(screen.queryByRole('link', { name: /Criar conciliação/ })).toBeNull();
+  });
+
+  it('cliente por arquivo: diz que não concilia e manda para Origem por arquivo', () => {
+    semConciliacoes();
+    detailState.data = {
+      ...detailState.data!,
+      connections: [
+        {
+          id: 'arq-1',
+          provider_type: 'arquivo',
+          label: 'Arquivo',
+          status: 'ativa',
+          capabilities: ['listar_lancamentos'],
+        },
+      ],
+    };
+    render(<ClientDashboard clientId="c1" />);
+    const vazio = screen.getByTestId('dashboard-no-reconciliations');
+    expect(vazio).toHaveAttribute('data-state', 'arquivo');
+    expect(vazio).toHaveTextContent(/não concilia/);
+    expect(screen.getByRole('link', { name: /Ir para Origem por arquivo/ })).toHaveAttribute(
+      'href',
+      '/clientes/c1/origem-arquivo',
+    );
+    expect(screen.queryByRole('link', { name: /Ir para conciliações/ })).toBeNull();
+  });
+
+  it('cliente sem origem: explica o que falta, sem ação que a lista não oferece', () => {
+    semConciliacoes();
+    detailState.data = { ...detailState.data!, origin_status: 'sem_origem', connections: [] };
+    render(<ClientDashboard clientId="c1" />);
+    const vazio = screen.getByTestId('dashboard-no-reconciliations');
+    expect(vazio).toHaveAttribute('data-state', 'sem-origem');
+    expect(vazio).toHaveTextContent(/origem conectada e ativa/);
+    expect(within(vazio).queryByRole('link')).toBeNull();
+  });
+
+  it('cliente encerrado: nenhuma ação no estado vazio', () => {
+    semConciliacoes();
+    detailState.data = { ...detailState.data!, closed_at: '2026-09-01T00:00:00Z' };
+    render(<ClientDashboard clientId="c1" />);
+    const vazio = screen.getByTestId('dashboard-no-reconciliations');
+    expect(vazio).toHaveAttribute('data-state', 'encerrado');
+    expect(within(vazio).queryByRole('link')).toBeNull();
   });
 
   it('carregando mostra skeleton; erro oferece retry', () => {
