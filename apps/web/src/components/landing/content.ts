@@ -49,9 +49,13 @@ export const hero = {
   subtitle: `O ${PRODUCT_NAME} cruza extrato, fatura e planilha com o que foi lançado, mostra o que não bate e deixa pronto o que segue para o sistema contábil. Sua equipe revisa as exceções, não o mês inteiro.`,
   primary: 'Entrar em contato',
   secondary: 'Entrar',
-  /** Chips abaixo dos botões: o que entra e o que sai (`parse_service.py`, export, Sprint 13). */
+  /**
+   * Chips abaixo dos botões: o que entra e o que sai (`parse_service.py`, export, Sprint 13).
+   * Sem XLS: o servidor recusa `.xls` pelos magic bytes, com orientação para salvar como
+   * `.xlsx` ou `.csv`.
+   */
   chipsLabel: 'Formatos',
-  chips: ['Lê PDF, XLSX, XLS, CSV e Omie', 'Entrega Excel, Omie e o arquivo contábil'],
+  chips: ['Lê PDF, XLSX, CSV e Omie', 'Entrega Excel, Omie e o arquivo contábil'],
 } as const;
 
 /** Vinheta de produto: dado FICTÍCIO, valores redondos, nada que pareça cliente real. */
