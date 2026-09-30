@@ -506,6 +506,214 @@
   transform: none;
 }
 
+/*
+ * "Como funciona" vivo (86e3gwzj0): com o loop ligado (`data-lp-stepper-on`, posto
+ * pelo `reveal.tsx`), os passos inativos vão para `muted` e o ativo fica em
+ * `foreground` com a pastilha acesa. A linha de progresso é filha da `.lp-line` e
+ * cresce até o centro da pastilha ativa (`--lp-progress-x` em `lg`, `-y` abaixo).
+ * O brilho da pastilha é sombra, FORA do dígito: o fundo atrás do número continua o
+ * gradiente da `.lp-icon` (o e2e mede o dígito por pixel).
+ */
+.lp-line__progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: var(--lp-progress-y, 0px);
+  background: linear-gradient(180deg, hsl(var(--info) / 0.4), hsl(var(--info)));
+  box-shadow: 0 0 10px hsl(var(--info) / 0.6);
+  opacity: 0;
+  transition:
+    height 800ms ease-out,
+    width 800ms ease-out,
+    opacity 300ms ease-out;
+}
+
+@media (min-width: 1024px) {
+  .lp-line__progress {
+    height: 100%;
+    width: var(--lp-progress-x, 0px);
+    background: linear-gradient(90deg, hsl(var(--info) / 0.4), hsl(var(--info)));
+  }
+}
+
+[data-lp-stepper-on] .lp-line__progress {
+  opacity: 1;
+}
+
+.lp-step-title {
+  transition: color 400ms ease-out;
+}
+
+.lp-step-number {
+  transition: box-shadow 400ms ease-out;
+}
+
+[data-lp-stepper-on] [data-lp-step]:not([data-active]) .lp-step-title {
+  color: hsl(var(--muted-foreground));
+}
+
+[data-lp-stepper-on] [data-lp-step][data-active] .lp-step-number {
+  box-shadow:
+    inset 0 0 0 1px hsl(var(--info) / 0.7),
+    0 0 0 4px hsl(var(--info) / 0.16),
+    0 0 28px -2px hsl(var(--info) / 0.9);
+}
+
+/* ---------- Dores e respostas: a resposta chega depois (86e3gwzj0) ---------- */
+
+/*
+ * O card entra com a dor; a seta se desenha 100 ms depois e a resposta 200 ms
+ * depois, sobre o mesmo `--lp-delay` do card. O estado "antes" só existe com JS e
+ * sem movimento reduzido (`no-preference`): sob `reduce` nunca há quadro escondido.
+ */
+.lp-pair-answer {
+  transition:
+    opacity 500ms ease-out,
+    transform 500ms ease-out;
+  transition-delay: calc(var(--lp-delay, 0ms) + 200ms);
+}
+
+.lp-draw path {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 500ms ease-out;
+  transition-delay: calc(var(--lp-delay, 0ms) + 100ms);
+}
+
+/* ---------- Para quem: a pastilha cresce no hover do card ---------- */
+
+.lp-audience .lp-icon {
+  transition: transform 300ms ease-out;
+}
+
+.lp-audience .lp-card:hover .lp-icon {
+  transform: scale(1.06);
+}
+
+/* ---------- Vinhetas das seções (86e3gwzj0) ---------- */
+
+/*
+ * SVG decorativo ao lado do título. Estado FINAL é o padrão (sem JS, sob movimento
+ * reduzido e depois da revelação); o "antes" mora no bloco `no-preference` abaixo.
+ * Entrada de 600 a 900 ms e depois parada; só o pulso do ponto central é loop.
+ */
+.lp-vig__link {
+  stroke: hsl(var(--info) / 0.55);
+  stroke-width: 1.5;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 700ms ease-out;
+  transition-delay: calc(var(--lp-vig-i, 0) * 100ms + 150ms);
+}
+
+.lp-vig__avatar {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    opacity 600ms ease-out,
+    transform 600ms ease-out;
+  transition-delay: calc(var(--lp-vig-i, 0) * 100ms);
+}
+
+.lp-vig__avatar circle {
+  fill: hsl(var(--card));
+  stroke: hsl(var(--info) / 0.6);
+  stroke-width: 1.5;
+}
+
+.lp-vig__avatar text {
+  fill: hsl(var(--foreground));
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.lp-vig__hub {
+  fill: hsl(var(--info));
+}
+
+.lp-vig__pulse {
+  fill: hsl(var(--info));
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: lp-pulse 2s ease-out infinite;
+}
+
+.lp-vig__shackle {
+  fill: none;
+  stroke: hsl(var(--info));
+  stroke-width: 6;
+  stroke-linecap: round;
+  transition: transform 700ms ease-out 200ms;
+}
+
+.lp-vig__lock {
+  fill: hsl(var(--card));
+  stroke: hsl(var(--info) / 0.6);
+  stroke-width: 1.5;
+}
+
+.lp-vig__keyhole {
+  fill: hsl(var(--info));
+}
+
+.lp-vig__key {
+  fill: hsl(var(--muted-foreground));
+  transform-box: fill-box;
+  /* Centro do anel da chave (círculo de raio 10 na ponta esquerda do desenho). */
+  transform-origin: 10px 50%;
+  transition: transform 800ms ease-out 100ms;
+}
+
+.lp-vig__block {
+  fill: hsl(var(--muted));
+  stroke: hsl(var(--border));
+}
+
+.lp-vig__hatch-line {
+  stroke: hsl(var(--info) / 0.7);
+  stroke-width: 2;
+}
+
+.lp-vig__cipher {
+  opacity: 1;
+  transition: opacity 600ms ease-out;
+  transition-delay: calc(var(--lp-vig-i, 0) * 150ms + 300ms);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .landing[data-lp-js] [data-reveal]:not([data-revealed]) .lp-pair-answer {
+    opacity: 0;
+    transform: translate3d(12px, 0, 0);
+  }
+
+  .landing[data-lp-js] [data-reveal]:not([data-revealed]) .lp-draw path {
+    stroke-dashoffset: 24;
+  }
+
+  .landing[data-lp-js] [data-reveal]:not([data-revealed]) .lp-vig__link {
+    stroke-dashoffset: 100;
+  }
+
+  .landing[data-lp-js] [data-reveal]:not([data-revealed]) .lp-vig__avatar {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+
+  .landing[data-lp-js] [data-reveal]:not([data-revealed]) .lp-vig__shackle {
+    transform: translateY(-8px);
+  }
+
+  /* A chave entra de pé e gira 90 graus até a horizontal, como se virasse no miolo. */
+  .landing[data-lp-js] [data-reveal]:not([data-revealed]) .lp-vig__key {
+    transform: rotate(-90deg);
+  }
+
+  .landing[data-lp-js] [data-reveal]:not([data-revealed]) .lp-vig__cipher {
+    opacity: 0;
+  }
+}
+
 /* ---------- Header ---------- */
 
 .lp-header {
@@ -598,6 +806,7 @@
   .lp-aurora__blob,
   .lp-fade-up,
   .lp-tour-panel[data-state='active'],
+  .lp-vig__pulse,
   .lp-pulse-dot::after,
   .lp-float,
   .lp-progress,
@@ -654,6 +863,29 @@
   }
 
   .lp-pulse-dot::after {
+    display: none;
+  }
+
+  /* 86e3gwzj0: passos, pares e vinhetas no estado final, sem transição. */
+  .lp-line__progress,
+  .lp-step-title,
+  .lp-step-number,
+  .lp-pair-answer,
+  .lp-draw path,
+  .lp-audience .lp-icon,
+  .lp-vig__link,
+  .lp-vig__avatar,
+  .lp-vig__shackle,
+  .lp-vig__key,
+  .lp-vig__cipher {
+    transition: none;
+  }
+
+  .lp-audience .lp-card:hover .lp-icon {
+    transform: none;
+  }
+
+  .lp-vig__pulse {
     display: none;
   }
 

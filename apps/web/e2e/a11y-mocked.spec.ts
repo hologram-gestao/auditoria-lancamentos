@@ -7962,6 +7962,116 @@ test.describe('Landing pública (86e3fr9vz)', () => {
         }
       });
 
+      test('como funciona: passo aceso mantém AA (título e dígito sobre a pastilha)', async ({
+        page,
+        context,
+      }) => {
+        // COM movimento: sob movimento reduzido o passo a passo não liga (todos acesos).
+        await page.clock.install();
+        await abrirLanding(page, context, { reducedMotion: false });
+        const bloco = page.locator('#como-funciona [data-lp-stepper]');
+        await bloco.scrollIntoViewIfNeeded();
+        await expect(bloco).toHaveAttribute('data-lp-stepper-on', '');
+        const passos = bloco.locator('[data-lp-step]');
+        await expect(passos.nth(3)).toHaveAttribute('data-revealed', '');
+        // Um passo adiante (a linha anda), e o ponteiro em cima congela o loop.
+        await page.clock.fastForward(3100);
+        const ativo = bloco.locator('[data-lp-step][data-active]');
+        await expect(ativo).toHaveCount(1);
+        await bloco.hover();
+        const indice = await ativo.evaluate((el) =>
+          Array.from(el.parentElement?.children ?? []).indexOf(el),
+        );
+        await page.clock.fastForward(9000);
+        await expect(passos.nth(indice)).toHaveAttribute('data-active', '');
+        await expect
+          .poll(() => bloco.evaluate((el) => el.getAnimations({ subtree: true }).length))
+          .toBe(0);
+
+        const inativo = passos.nth((indice + 1) % 4);
+        // Estado FINAL antes de medir: o título apagado já na cor `muted` e o ativo na
+        // `foreground`, resolvidas no browser, mais dois quadros de pintura. Sob carga alta
+        // a captura chegou a pegar um quadro com o título ainda branco (2,49:1 é
+        // `muted-foreground` contra o próprio branco), e é o estado final que se mede.
+        const corDoToken = (token: string) =>
+          bloco.evaluate((el, t) => {
+            const probe = document.createElement('span');
+            probe.style.color = `hsl(var(--${t}))`;
+            el.appendChild(probe);
+            const cor = getComputedStyle(probe).color;
+            probe.remove();
+            return cor;
+          }, token);
+        await expect(inativo.locator('h3')).toHaveCSS(
+          'color',
+          await corDoToken('muted-foreground'),
+        );
+        await expect(ativo.locator('h3')).toHaveCSS('color', await corDoToken('foreground'));
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+            ),
+        );
+        const alvos: [string, Locator][] = [
+          ['título do passo ativo', ativo.locator('h3')],
+          ['dígito sobre a pastilha acesa', ativo.locator('[data-lp-step-digit]')],
+          ['título de passo apagado', inativo.locator('h3')],
+        ];
+        for (const [nome, alvo] of alvos) {
+          const razao = await contrasteSobreAurora(page, alvo);
+          console.log(
+            `contraste em "Como funciona" · ${nome} · ${vp.label}: ${razao.toFixed(2)}:1`,
+          );
+          expect.soft(razao, `${nome} (${vp.label})`).toBeGreaterThanOrEqual(4.5);
+        }
+        await analyze(page, `landing, como funciona com um passo aceso (${vp.label})`);
+        if (THEME === 'hologram' && slug === 'desktop') {
+          await shotTela(page, 'landing-how-active-desktop');
+        }
+      });
+
+      test('ritmo: pares e vinhetas terminam no estado final, vinheta só de md para cima', async ({
+        page,
+        context,
+      }) => {
+        await abrirLanding(page, context, { reducedMotion: false });
+        const par = page.locator('#dores li').first();
+        await par.scrollIntoViewIfNeeded();
+        await expect(par).toHaveAttribute('data-revealed', '');
+        const resposta = par.locator('.lp-pair-answer');
+        await aguardarAnimacao(resposta);
+        await expect(resposta).toHaveCSS('opacity', '1');
+
+        for (const id of ['para-quem', 'seguranca']) {
+          const vinheta = page.locator(`#${id} [data-lp-vignette]`);
+          await expect(vinheta).toHaveCount(1);
+          if (vp.size.width < 768) {
+            // Abaixo de `md` a vinheta não é desenhada (o contêiner é `hidden`).
+            await expect(vinheta).toBeHidden();
+            continue;
+          }
+          await vinheta.scrollIntoViewIfNeeded();
+          await expect(page.locator(`#${id} [data-reveal]`).first()).toHaveAttribute(
+            'data-revealed',
+            '',
+          );
+          await expect(vinheta).toBeVisible();
+          await expect
+            .poll(() =>
+              vinheta.evaluate(
+                (el) =>
+                  el
+                    .getAnimations({ subtree: true })
+                    .filter((a) => !(a instanceof CSSAnimation && a.animationName === 'lp-pulse'))
+                    .length,
+              ),
+            )
+            .toBe(0);
+        }
+        await exigirSemRolagemHorizontal(page, `landing com movimento (${vp.label})`);
+      });
+
       test('landing: "Entrar em contato" rola até o formulário e "Entrar" leva ao login', async ({
         page,
         context,
