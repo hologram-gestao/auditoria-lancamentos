@@ -7,9 +7,13 @@ import {
   Briefcase,
   Building2,
   Calculator,
+  CalendarClock,
+  FileSpreadsheet,
   FileX2,
   KeyRound,
   Lock,
+  ShieldAlert,
+  Table,
   UsersRound,
   type LucideIcon,
 } from 'lucide-react';
@@ -22,6 +26,10 @@ const ICONS = {
   file: FileX2,
   users: UsersRound,
   lock: Lock,
+  'calendar-clock': CalendarClock,
+  'shield-alert': ShieldAlert,
+  table: Table,
+  'file-spreadsheet': FileSpreadsheet,
 } satisfies Record<string, LucideIcon>;
 
 export type LandingIconName = keyof typeof ICONS;

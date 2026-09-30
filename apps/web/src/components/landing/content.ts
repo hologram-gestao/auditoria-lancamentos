@@ -46,7 +46,7 @@ export const hero = {
   titleBefore: 'O financeiro do seu cliente, ',
   titleHighlight: 'conferido',
   titleAfter: ' antes de virar contabilidade.',
-  subtitle: `O ${PRODUCT_NAME} cruza extrato, fatura e planilha com o que foi lançado, mostra o que não bate e deixa pronto o que segue para o sistema contábil. Sua equipe revisa as exceções, não o mês inteiro.`,
+  subtitle: `O ${PRODUCT_NAME} cruza extrato, fatura e planilha com o que foi lançado e mostra o que não bate. Sua equipe revisa as exceções, não o mês inteiro.`,
   primary: 'Entrar em contato',
   secondary: 'Entrar',
   /**
@@ -87,17 +87,17 @@ export const audience = {
     {
       icon: 'calculator',
       title: 'Escritório de contabilidade',
-      text: 'Saiba se o cliente está pronto para a integração contábil antes de importar. O que não bate aparece na conferência, não no balancete.',
+      text: 'Saiba se o cliente está pronto para a integração contábil antes de importar, e não no balancete.',
     },
     {
       icon: 'briefcase',
       title: 'BPO financeiro',
-      text: 'Concilie cada conta, mês a mês, com revisão por etapas, relatório em Excel e as compras do cartão lançadas no Omie.',
+      text: 'Cada conta, mês a mês, com revisão por etapas, relatório em Excel e compras do cartão lançadas no Omie.',
     },
     {
       icon: 'building',
       title: 'Empresa',
-      text: 'Com ERP ou só com planilha, seu financeiro chega conferido ao contador, com os títulos vencidos e as exceções explicados.',
+      text: 'Com ERP ou só planilha, seu financeiro chega conferido ao contador, com títulos vencidos explicados.',
     },
   ],
 } as const;
@@ -109,24 +109,28 @@ export const pains = {
   answerLabel: `Como o ${PRODUCT_NAME} responde`,
   items: [
     {
-      pain: 'O fechamento não roda todo mês. Fica para depois, e o erro de janeiro só aparece quando o balanço aperta.',
+      icon: 'calendar-clock',
+      pain: 'O fechamento não roda todo mês, e o erro de janeiro só aparece quando o balanço aperta.',
       answer:
-        'Cada conta de cada mês vira uma conciliação própria, com o que já foi conferido e o que falta. Dá para fechar mês a mês sem montar planilha.',
+        'Cada conta de cada mês vira uma conciliação própria, com o que já foi conferido e o que falta, sem montar planilha.',
     },
     {
-      pain: 'Dado ruim entra na contabilidade: imobilizado lançado como despesa, ajuste de saldo inventado, tarifas somadas errado. Corrigir depois custa mais que lançar certo.',
+      icon: 'shield-alert',
+      pain: 'Dado ruim entra na contabilidade: imobilizado como despesa, ajuste de saldo inventado, tarifa somada errado.',
       answer:
-        'Cada movimentação é comparada com o que foi lançado, por valor e data, com regra fixa. O que não bate vira anomalia com tipo e motivo. A IA aponta o que parece incoerente; quem decide é a sua equipe.',
+        'Cada movimentação é comparada com o que foi lançado, por valor e data, com regra fixa. O que não bate vira anomalia; a IA aponta, sua equipe decide.',
     },
     {
+      icon: 'table',
       pain: 'Categorizar, fazer o de-para e montar o lançamento contábil vira PROCV, cliente a cliente.',
       answer:
-        'Cada cliente tem o próprio de-para da categoria para a conta contábil, com o plano de contas dele e o histórico padrão. Débito e crédito saem do sinal da movimentação, e o arquivo sai no layout que o sistema contábil importa, hoje em validação com escritórios parceiros.',
+        'De-para por cliente até a conta contábil, débito e crédito pelo sinal, e o arquivo no layout do sistema contábil, em validação com parceiros.',
     },
     {
-      pain: 'A maioria dos clientes não tem ERP. Chega planilha e extrato em todo formato, pelo WhatsApp.',
+      icon: 'file-spreadsheet',
+      pain: 'A maioria dos clientes não tem ERP: chega planilha e extrato em todo formato, pelo WhatsApp.',
       answer:
-        'Cliente com Omie é conectado direto. Cliente sem sistema manda a planilha do mês, lida por um mapeamento configurado uma vez. Extrato e fatura em PDF ou planilha são lidos por IA, e você confere uma amostra antes de seguir.',
+        'Cliente com Omie é conectado direto; sem sistema, manda a planilha do mês. Extrato e fatura são lidos por IA, e você confere uma amostra.',
     },
   ],
 } as const;
@@ -137,19 +141,19 @@ export const how = {
   steps: [
     {
       title: 'Envie o arquivo ou conecte a origem',
-      text: `Extrato, fatura de cartão ou planilha do cliente. Se ele usa Omie, o ${PRODUCT_NAME} busca os lançamentos por conta própria.`,
+      text: `Extrato, fatura ou planilha do cliente. Se ele usa Omie, o ${PRODUCT_NAME} busca os lançamentos sozinho.`,
     },
     {
       title: `O ${PRODUCT_NAME} lê e cruza`,
-      text: 'A IA extrai as movimentações do arquivo. O cruzamento com os lançamentos segue regra fixa: até um centavo de diferença no valor e até três dias na data.',
+      text: 'A IA extrai as movimentações e o cruzamento segue regra fixa: até um centavo no valor e três dias na data.',
     },
     {
       title: 'Sua equipe revisa o que ficou de fora',
-      text: 'Divergências, lançamentos sem par e anomalias aparecem separados, com espaço para a nota de resolução de cada um.',
+      text: 'Divergências, lançamentos sem par e anomalias aparecem separados, com a nota de resolução de cada um.',
     },
     {
       title: 'Sai o relatório e o lançamento',
-      text: 'Relatório da conciliação em Excel, compras do cartão lançadas no Omie e o arquivo contábil no layout do seu sistema.',
+      text: 'Relatório em Excel, compras do cartão lançadas no Omie e o arquivo contábil no layout do seu sistema.',
     },
   ],
 } as const;
@@ -161,17 +165,17 @@ export const security = {
     {
       icon: 'key',
       title: 'Uma chave por cliente',
-      text: 'Os dados sensíveis de cada cliente são cifrados com uma chave própria. O conteúdo de um cliente não abre com a chave de outro.',
+      text: 'Os dados sensíveis de cada cliente são cifrados com chave própria, que não abre o conteúdo de outro.',
     },
     {
       icon: 'file',
       title: 'O arquivo original não fica guardado',
-      text: 'O arquivo é lido por IA para extrair as movimentações e não fica armazenado pela plataforma. Na revisão, a IA também apoia sua equipe apontando o que parece incoerente; quem decide é sempre uma pessoa.',
+      text: 'Lido por IA para extrair as movimentações, e não fica guardado. Na revisão a IA também aponta; quem decide é uma pessoa.',
     },
     {
       icon: 'users',
       title: 'Cada um vê só o que é seu',
-      text: 'O escritório alcança só os próprios clientes, e o cliente final só a própria empresa. Exportações e tentativas de acesso negadas ficam registradas.',
+      text: 'O escritório vê só os próprios clientes, e o cliente, só a empresa dele. Exportação e acesso negado ficam registrados.',
     },
     {
       icon: 'lock',

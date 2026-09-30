@@ -64,9 +64,8 @@ público; a 7 e a 8, no bloco de segurança.
   contabilidade, BPOs financeiros e empresas**
 - Título: **O financeiro do seu cliente, _conferido_ antes de virar contabilidade.** A palavra
   "conferido" é o único destaque do hero (gradiente da marca).
-- Subtítulo: O Hologram OS cruza extrato, fatura e planilha com o que foi lançado, mostra o que
-  não bate e deixa pronto o que segue para o sistema contábil. Sua equipe revisa as exceções,
-  não o mês inteiro.
+- Subtítulo: O Hologram OS cruza extrato, fatura e planilha com o que foi lançado e mostra o que
+  não bate. Sua equipe revisa as exceções, não o mês inteiro.
 - Botões: **Entrar em contato** (primário) e **Entrar** (secundário).
 - Chips abaixo dos botões: **Lê PDF, XLSX, CSV e Omie** · **Entrega Excel, Omie e o
   arquivo contábil**.
@@ -80,47 +79,51 @@ público; a 7 e a 8, no bloco de segurança.
 
 Rótulo: **Para quem** · Título do bloco: **Feito para quem fecha o financeiro de outras empresas**
 
-| Card | Título                      | Texto                                                                                                                                 |
-| ---- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| 1    | Escritório de contabilidade | Saiba se o cliente está pronto para a integração contábil antes de importar. O que não bate aparece na conferência, não no balancete. |
-| 2    | BPO financeiro              | Concilie cada conta, mês a mês, com revisão por etapas, relatório em Excel e as compras do cartão lançadas no Omie.                   |
-| 3    | Empresa                     | Com ERP ou só com planilha, seu financeiro chega conferido ao contador, com os títulos vencidos e as exceções explicados.             |
+| Card | Título                      | Texto                                                                                                   |
+| ---- | --------------------------- | ------------------------------------------------------------------------------------------------------- |
+| 1    | Escritório de contabilidade | Saiba se o cliente está pronto para a integração contábil antes de importar, e não no balancete.        |
+| 2    | BPO financeiro              | Cada conta, mês a mês, com revisão por etapas, relatório em Excel e compras do cartão lançadas no Omie. |
+| 3    | Empresa                     | Com ERP ou só planilha, seu financeiro chega conferido ao contador, com títulos vencidos explicados.    |
 
 ### 4. Dores e respostas
 
 Rótulo: **Dores e respostas** · Título do bloco: **O trabalho que ninguém vê, e que decide o
 fechamento** · Rótulos de cada par: **O problema** e **Como o Hologram OS responde**
 
-| Par | Dor                                                                                                                                                                 | Resposta                                                                                                                                                                                                                                                                       |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | O fechamento não roda todo mês. Fica para depois, e o erro de janeiro só aparece quando o balanço aperta.                                                           | Cada conta de cada mês vira uma conciliação própria, com o que já foi conferido e o que falta. Dá para fechar mês a mês sem montar planilha.                                                                                                                                   |
-| 2   | Dado ruim entra na contabilidade: imobilizado lançado como despesa, ajuste de saldo inventado, tarifas somadas errado. Corrigir depois custa mais que lançar certo. | Cada movimentação é comparada com o que foi lançado, por valor e data, com regra fixa. O que não bate vira anomalia com tipo e motivo. A IA aponta o que parece incoerente; quem decide é a sua equipe.                                                                        |
-| 3   | Categorizar, fazer o de-para e montar o lançamento contábil vira PROCV, cliente a cliente.                                                                          | Cada cliente tem o próprio de-para da categoria para a conta contábil, com o plano de contas dele e o histórico padrão. Débito e crédito saem do sinal da movimentação, e o arquivo sai no layout que o sistema contábil importa, hoje em validação com escritórios parceiros. |
-| 4   | A maioria dos clientes não tem ERP. Chega planilha e extrato em todo formato, pelo WhatsApp.                                                                        | Cliente com Omie é conectado direto. Cliente sem sistema manda a planilha do mês, lida por um mapeamento configurado uma vez. Extrato e fatura em PDF ou planilha são lidos por IA, e você confere uma amostra antes de seguir.                                                |
+| Par | Ícone              | Dor                                                                                                          | Resposta                                                                                                                                             |
+| --- | ------------------ | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `calendar-clock`   | O fechamento não roda todo mês, e o erro de janeiro só aparece quando o balanço aperta.                      | Cada conta de cada mês vira uma conciliação própria, com o que já foi conferido e o que falta, sem montar planilha.                                  |
+| 2   | `shield-alert`     | Dado ruim entra na contabilidade: imobilizado como despesa, ajuste de saldo inventado, tarifa somada errado. | Cada movimentação é comparada com o que foi lançado, por valor e data, com regra fixa. O que não bate vira anomalia; a IA aponta, sua equipe decide. |
+| 3   | `table`            | Categorizar, fazer o de-para e montar o lançamento contábil vira PROCV, cliente a cliente.                   | De-para por cliente até a conta contábil, débito e crédito pelo sinal, e o arquivo no layout do sistema contábil, em validação com parceiros.        |
+| 4   | `file-spreadsheet` | A maioria dos clientes não tem ERP: chega planilha e extrato em todo formato, pelo WhatsApp.                 | Cliente com Omie é conectado direto; sem sistema, manda a planilha do mês. Extrato e fatura são lidos por IA, e você confere uma amostra.            |
+
+Tetos (86e3gwzj0, travados em `content.test.ts`): dor até 120 caracteres, resposta até 160,
+card de "Para quem" uma frase de até 110, passo de "Como funciona" até 110, item de segurança
+até 120. Subir um teto é decisão de copy, não ajuste de teste.
 
 ### 5. Como funciona
 
 Rótulo: **Como funciona** · Título do bloco: **Do arquivo ao lançamento, em quatro passos**
 
-1. **Envie o arquivo ou conecte a origem.** Extrato, fatura de cartão ou planilha do cliente.
-   Se ele usa Omie, o Hologram OS busca os lançamentos por conta própria.
-2. **O Hologram OS lê e cruza.** A IA extrai as movimentações do arquivo. O cruzamento com os
-   lançamentos segue regra fixa: até um centavo de diferença no valor e até três dias na data.
+1. **Envie o arquivo ou conecte a origem.** Extrato, fatura ou planilha do cliente. Se ele usa
+   Omie, o Hologram OS busca os lançamentos sozinho.
+2. **O Hologram OS lê e cruza.** A IA extrai as movimentações e o cruzamento segue regra fixa:
+   até um centavo no valor e três dias na data.
 3. **Sua equipe revisa o que ficou de fora.** Divergências, lançamentos sem par e anomalias
-   aparecem separados, com espaço para a nota de resolução de cada um.
-4. **Sai o relatório e o lançamento.** Relatório da conciliação em Excel, compras do cartão
-   lançadas no Omie e o arquivo contábil no layout do seu sistema.
+   aparecem separados, com a nota de resolução de cada um.
+4. **Sai o relatório e o lançamento.** Relatório em Excel, compras do cartão lançadas no Omie e o
+   arquivo contábil no layout do seu sistema.
 
 ### 6. Segurança e privacidade
 
 Rótulo: **Segurança e privacidade** · Título do bloco: **O dado do seu cliente continua dele**
 
-| Item | Título                               | Texto                                                                                                                                                                                                     |
-| ---- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1    | Uma chave por cliente                | Os dados sensíveis de cada cliente são cifrados com uma chave própria. O conteúdo de um cliente não abre com a chave de outro.                                                                            |
-| 2    | O arquivo original não fica guardado | O arquivo é lido por IA para extrair as movimentações e não fica armazenado pela plataforma. Na revisão, a IA também apoia sua equipe apontando o que parece incoerente; quem decide é sempre uma pessoa. |
-| 3    | Cada um vê só o que é seu            | O escritório alcança só os próprios clientes, e o cliente final só a própria empresa. Exportações e tentativas de acesso negadas ficam registradas.                                                       |
-| 4    | Encerrou, acabou                     | Quando um cliente sai, a chave dele é destruída e o conteúdo cifrado deixa de poder ser lido.                                                                                                             |
+| Item | Título                               | Texto                                                                                                                    |
+| ---- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| 1    | Uma chave por cliente                | Os dados sensíveis de cada cliente são cifrados com chave própria, que não abre o conteúdo de outro.                     |
+| 2    | O arquivo original não fica guardado | Lido por IA para extrair as movimentações, e não fica guardado. Na revisão a IA também aponta; quem decide é uma pessoa. |
+| 3    | Cada um vê só o que é seu            | O escritório vê só os próprios clientes, e o cliente, só a empresa dele. Exportação e acesso negado ficam registrados.   |
+| 4    | Encerrou, acabou                     | Quando um cliente sai, a chave dele é destruída e o conteúdo cifrado deixa de poder ser lido.                            |
 
 Link ao final: **Leia o aviso de privacidade** (`/privacidade`). Ao lado, botão secundário
 **Baixar o manual (PDF)** com "PDF, 3 MB" (`/manual-hologram-os.pdf`, cópia de

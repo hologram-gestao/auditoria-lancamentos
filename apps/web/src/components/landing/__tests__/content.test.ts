@@ -45,6 +45,51 @@ describe('landing/content', () => {
     expect(content.manual.size).toBe(`PDF, ${megabytes} MB`);
   });
 
+  it('não anuncia XLS: o servidor recusa `.xls` pelos magic bytes', () => {
+    expect(ALL_TEXT).not.toMatch(/\bXLS\b/i);
+  });
+
+  /**
+   * Tetos de texto (86e3gwzj0, feedback do Laio: "dá para enxugar o texto"). O teste
+   * falha quando alguém volta a encher um card, um par ou um passo; subir um teto é
+   * decisão de copy, não ajuste de teste.
+   */
+  describe('tetos de texto por campo', () => {
+    const cabe = (campo: string, texto: string, teto: number) =>
+      expect(texto.length, `${campo} (${texto.length} caracteres): "${texto}"`).toBeLessThanOrEqual(
+        teto,
+      );
+
+    it('o subtítulo do hero é curto', () => {
+      cabe('hero.subtitle', content.hero.subtitle, 160);
+    });
+
+    it('cada card de "Para quem" é uma frase de até 110 caracteres', () => {
+      for (const item of content.audience.items) {
+        cabe(`audience "${item.title}"`, item.text, 110);
+        expect(item.text.replace(/\.$/, ''), `audience "${item.title}" em uma frase`).not.toMatch(
+          /[.!?]/,
+        );
+      }
+    });
+
+    it('cada par de "Dores e respostas": dor até 120, resposta até 160, com ícone', () => {
+      for (const [indice, item] of content.pains.items.entries()) {
+        cabe(`pains[${indice}].pain`, item.pain, 120);
+        cabe(`pains[${indice}].answer`, item.answer, 160);
+        expect(item.icon).toBeTruthy();
+      }
+    });
+
+    it('cada passo de "Como funciona" tem até 110 caracteres', () => {
+      for (const step of content.how.steps) cabe(`how "${step.title}"`, step.text, 110);
+    });
+
+    it('cada item de segurança tem até 120 caracteres', () => {
+      for (const item of content.security.items) cabe(`security "${item.title}"`, item.text, 120);
+    });
+  });
+
   it('a versão do consentimento é a mesma do backend', () => {
     const schemas = readFileSync(
       resolve(__dirname, '../../../../../api/app/modules/leads/schemas.py'),
