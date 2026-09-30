@@ -64,9 +64,8 @@ público; a 7 e a 8, no bloco de segurança.
   contabilidade, BPOs financeiros e empresas**
 - Título: **O financeiro do seu cliente, _conferido_ antes de virar contabilidade.** A palavra
   "conferido" é o único destaque do hero (gradiente da marca).
-- Subtítulo: O Hologram OS cruza extrato, fatura e planilha com o que foi lançado, mostra o que
-  não bate e deixa pronto o que segue para o sistema contábil. Sua equipe revisa as exceções,
-  não o mês inteiro.
+- Subtítulo: O Hologram OS cruza extrato, fatura e planilha com o que foi lançado e mostra o que
+  não bate. Sua equipe revisa as exceções, não o mês inteiro.
 - Botões: **Entrar em contato** (primário) e **Entrar** (secundário).
 - Chips abaixo dos botões: **Lê PDF, XLSX, CSV e Omie** · **Entrega Excel, Omie e o
   arquivo contábil**.
@@ -80,47 +79,73 @@ público; a 7 e a 8, no bloco de segurança.
 
 Rótulo: **Para quem** · Título do bloco: **Feito para quem fecha o financeiro de outras empresas**
 
-| Card | Título                      | Texto                                                                                                                                 |
-| ---- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| 1    | Escritório de contabilidade | Saiba se o cliente está pronto para a integração contábil antes de importar. O que não bate aparece na conferência, não no balancete. |
-| 2    | BPO financeiro              | Concilie cada conta, mês a mês, com revisão por etapas, relatório em Excel e as compras do cartão lançadas no Omie.                   |
-| 3    | Empresa                     | Com ERP ou só com planilha, seu financeiro chega conferido ao contador, com os títulos vencidos e as exceções explicados.             |
+| Card | Título                      | Texto                                                                                                   |
+| ---- | --------------------------- | ------------------------------------------------------------------------------------------------------- |
+| 1    | Escritório de contabilidade | Saiba se o cliente está pronto para a integração contábil antes de importar, e não no balancete.        |
+| 2    | BPO financeiro              | Cada conta, mês a mês, com revisão por etapas, relatório em Excel e compras do cartão lançadas no Omie. |
+| 3    | Empresa                     | Com ERP ou só planilha, seu financeiro chega conferido ao contador, com títulos vencidos explicados.    |
 
 ### 4. Dores e respostas
 
 Rótulo: **Dores e respostas** · Título do bloco: **O trabalho que ninguém vê, e que decide o
 fechamento** · Rótulos de cada par: **O problema** e **Como o Hologram OS responde**
 
-| Par | Dor                                                                                                                                                                 | Resposta                                                                                                                                                                                                                                                                       |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | O fechamento não roda todo mês. Fica para depois, e o erro de janeiro só aparece quando o balanço aperta.                                                           | Cada conta de cada mês vira uma conciliação própria, com o que já foi conferido e o que falta. Dá para fechar mês a mês sem montar planilha.                                                                                                                                   |
-| 2   | Dado ruim entra na contabilidade: imobilizado lançado como despesa, ajuste de saldo inventado, tarifas somadas errado. Corrigir depois custa mais que lançar certo. | Cada movimentação é comparada com o que foi lançado, por valor e data, com regra fixa. O que não bate vira anomalia com tipo e motivo. A IA aponta o que parece incoerente; quem decide é a sua equipe.                                                                        |
-| 3   | Categorizar, fazer o de-para e montar o lançamento contábil vira PROCV, cliente a cliente.                                                                          | Cada cliente tem o próprio de-para da categoria para a conta contábil, com o plano de contas dele e o histórico padrão. Débito e crédito saem do sinal da movimentação, e o arquivo sai no layout que o sistema contábil importa, hoje em validação com escritórios parceiros. |
-| 4   | A maioria dos clientes não tem ERP. Chega planilha e extrato em todo formato, pelo WhatsApp.                                                                        | Cliente com Omie é conectado direto. Cliente sem sistema manda a planilha do mês, lida por um mapeamento configurado uma vez. Extrato e fatura em PDF ou planilha são lidos por IA, e você confere uma amostra antes de seguir.                                                |
+| Par | Ícone              | Dor                                                                                                          | Resposta                                                                                                                                             |
+| --- | ------------------ | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `calendar-clock`   | O fechamento não roda todo mês, e o erro de janeiro só aparece quando o balanço aperta.                      | Cada conta de cada mês vira uma conciliação própria, com o que já foi conferido e o que falta, sem montar planilha.                                  |
+| 2   | `shield-alert`     | Dado ruim entra na contabilidade: imobilizado como despesa, ajuste de saldo inventado, tarifa somada errado. | Cada movimentação é comparada com o que foi lançado, por valor e data, com regra fixa. O que não bate vira anomalia; a IA aponta, sua equipe decide. |
+| 3   | `table`            | Categorizar, fazer o de-para e montar o lançamento contábil vira PROCV, cliente a cliente.                   | De-para por cliente até a conta contábil, débito e crédito pelo sinal, e o arquivo no layout do sistema contábil, em validação com parceiros.        |
+| 4   | `file-spreadsheet` | A maioria dos clientes não tem ERP: chega planilha e extrato em todo formato, pelo WhatsApp.                 | Cliente com Omie é conectado direto; sem sistema, manda a planilha do mês. Extrato e fatura são lidos por IA, e você confere uma amostra.            |
+
+Tetos (86e3gwzj0, travados em `content.test.ts`): dor até 120 caracteres, resposta até 160,
+card de "Para quem" uma frase de até 110, passo de "Como funciona" até 110, item de segurança
+até 120. Subir um teto é decisão de copy, não ajuste de teste.
 
 ### 5. Como funciona
 
 Rótulo: **Como funciona** · Título do bloco: **Do arquivo ao lançamento, em quatro passos**
 
-1. **Envie o arquivo ou conecte a origem.** Extrato, fatura de cartão ou planilha do cliente.
-   Se ele usa Omie, o Hologram OS busca os lançamentos por conta própria.
-2. **O Hologram OS lê e cruza.** A IA extrai as movimentações do arquivo. O cruzamento com os
-   lançamentos segue regra fixa: até um centavo de diferença no valor e até três dias na data.
+1. **Envie o arquivo ou conecte a origem.** Extrato, fatura ou planilha do cliente. Se ele usa
+   Omie, o Hologram OS busca os lançamentos sozinho.
+2. **O Hologram OS lê e cruza.** A IA extrai as movimentações e o cruzamento segue regra fixa:
+   até um centavo no valor e três dias na data.
 3. **Sua equipe revisa o que ficou de fora.** Divergências, lançamentos sem par e anomalias
-   aparecem separados, com espaço para a nota de resolução de cada um.
-4. **Sai o relatório e o lançamento.** Relatório da conciliação em Excel, compras do cartão
-   lançadas no Omie e o arquivo contábil no layout do seu sistema.
+   aparecem separados, com a nota de resolução de cada um.
+4. **Sai o relatório e o lançamento.** Relatório em Excel, compras do cartão lançadas no Omie e o
+   arquivo contábil no layout do seu sistema.
+
+### 5b. Por dentro (tour com prints reais, 86e3gqfkf)
+
+Rótulo: **Por dentro** · Título do bloco: **Veja o Hologram OS por dentro** · Cinco abas; cada
+uma mostra um print REAL da plataforma numa moldura de navegador (título fictício na barra:
+"<tela> · Hologram OS"), uma frase e dois bullets. As abas trocam sozinhas a cada 6 s
+enquanto o bloco está na tela, param no primeiro clique ou foco, e têm o botão **Pausar** /
+**Retomar** (nome acessível: "Pausar a troca automática das telas").
+
+Os prints são cópias otimizadas de `Docs/manual/fonte/img/` com dado fictício ("Cliente
+Exemplo Ltda", "Ana da Hologram": Hologram é a empresa, pode). As outras nove figuras do
+manual **não** entram: têm nome de dado de teste ou são telas de administração.
+
+| Aba            | Print             | Frase                                                                                             | Bullets                                                                                                                   |
+| -------------- | ----------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Conciliação    | `conciliacao.png` | Cada conta de cada mês numa tela: o que bateu, o que ficou sem par e os arquivos que entraram.    | Totais por situação e a diferença de saldo logo no topo · Vários arquivos na mesma conciliação, como uma fatura em partes |
+| Anomalias      | `anomalias.png`   | O que não bate vira anomalia com tipo e severidade, e cada uma é resolvida por alguém da equipe.  | Sua equipe diz se o alerta procedia ou não · Filtro por severidade e por status                                           |
+| Lançar no Omie | `lancamento.png`  | Compras da fatura que ainda não estão no Omie são lançadas dali mesmo, uma a uma ou em lote.      | Cada compra vira um lançamento só, sem duplicar · Só compra de cartão entra; estorno fica com a sua equipe                |
+| De-para        | `de-para.png`     | Para onde cada categoria do cliente vai em cada destino, com o que já foi decidido e o que falta. | O que o plano de contas já declara chega como proposta · A decisão vale por competência, e o mês fechado não muda         |
+| Carteira       | `carteira.png`    | Títulos a pagar e a receber em aberto, de todas as contas e sem recorte de mês.                   | Atraso em faixas, de 1 a 30 dias até mais de 90 · O contexto do título separa acordo de inadimplência                     |
+
+Tetos (`content.test.ts`): frase até 120 caracteres, exatamente dois bullets, cada um até 80.
 
 ### 6. Segurança e privacidade
 
 Rótulo: **Segurança e privacidade** · Título do bloco: **O dado do seu cliente continua dele**
 
-| Item | Título                               | Texto                                                                                                                                                                                                     |
-| ---- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1    | Uma chave por cliente                | Os dados sensíveis de cada cliente são cifrados com uma chave própria. O conteúdo de um cliente não abre com a chave de outro.                                                                            |
-| 2    | O arquivo original não fica guardado | O arquivo é lido por IA para extrair as movimentações e não fica armazenado pela plataforma. Na revisão, a IA também apoia sua equipe apontando o que parece incoerente; quem decide é sempre uma pessoa. |
-| 3    | Cada um vê só o que é seu            | O escritório alcança só os próprios clientes, e o cliente final só a própria empresa. Exportações e tentativas de acesso negadas ficam registradas.                                                       |
-| 4    | Encerrou, acabou                     | Quando um cliente sai, a chave dele é destruída e o conteúdo cifrado deixa de poder ser lido.                                                                                                             |
+| Item | Título                               | Texto                                                                                                                    |
+| ---- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| 1    | Uma chave por cliente                | Os dados sensíveis de cada cliente são cifrados com chave própria, que não abre o conteúdo de outro.                     |
+| 2    | O arquivo original não fica guardado | Lido por IA para extrair as movimentações, e não fica guardado. Na revisão a IA também aponta; quem decide é uma pessoa. |
+| 3    | Cada um vê só o que é seu            | O escritório vê só os próprios clientes, e o cliente, só a empresa dele. Exportação e acesso negado ficam registrados.   |
+| 4    | Encerrou, acabou                     | Quando um cliente sai, a chave dele é destruída e o conteúdo cifrado deixa de poder ser lido.                            |
 
 Link ao final: **Leia o aviso de privacidade** (`/privacidade`). Ao lado, botão secundário
 **Baixar o manual (PDF)** com "PDF, 3 MB" (`/manual-hologram-os.pdf`, cópia de
@@ -173,6 +198,19 @@ privacidade**. O ano é o do build.
 | Escritório só os próprios clientes; cliente final só a própria empresa                   | `resolve_client_access`, §3.15 e §4.8                                                                                                                                                 |
 | Exportações e acessos negados registrados                                                | `access_audit` com `export` e `denied` (§4.7; `core/audit.py`, export da conciliação, arquivo contábil)                                                                               |
 | Chave destruída quando o cliente sai                                                     | `dek_wrapped → NULL` no encerramento, §4.12                                                                                                                                           |
+| Tour: totais por situação e diferença de saldo no topo                                   | Cabeçalho da conciliação (cards de totais e "Resumo geral" com a diferença), `conciliacao.png`                                                                                        |
+| Tour: vários arquivos na mesma conciliação                                               | `reconciliation_files` com `UNIQUE(session_id, file_hash)`, multi-arquivo (Sprint 4, §4.10)                                                                                           |
+| Tour: anomalia com tipo e severidade, resolvida pela equipe                              | `anomaly_types` com severidade (S15), "Marcar como resolvida" com nota (`resolution_note_encrypted`, §4.1)                                                                            |
+| Tour: a equipe diz se o alerta procedia                                                  | `review_verdict` (Sprint 6), coluna "O flag procedia?" com Procedente/Improcedente                                                                                                    |
+| Tour: filtro por severidade e por status                                                 | Filtros da aba Anomalias, `anomalias.png`                                                                                                                                             |
+| Tour: compras sem par lançadas dali, uma a uma ou em lote                                | Sprint 7 (`omie_posting/`, `IncluirLancCC` verificado em 21/08, ligado em dev), seleção em lote na aba Movimentações, `lancamento.png`                                                |
+| Tour: cada compra vira um lançamento só, sem duplicar                                    | `UNIQUE(file_entry_id)` em `reconciliation_omie_postings` (§4.11), `cCodIntLanc` pela identidade da linha e idempotente no Omie (§3.16)                                               |
+| Tour: só compra de cartão; estorno fica com a equipe                                     | Elegibilidade `account_type == 'credit_card'` e estorno bloqueado (`estorno_nao_verificado`, §3.16)                                                                                   |
+| Tour: o que o plano de contas declara chega como proposta                                | Herança do `dre_code` do plano de contas no destino `demonstrativo_contabil` (Sprint 10 e 12), "Herdadas da origem · Propostas pelo plano de contas" em `de-para.png`                 |
+| Tour: a decisão vale por competência, e o mês fechado não muda                           | Vigência por competência append-only, retroativa sobre competência materializada é 409, materialização imutável (Sprint 12, §8)                                                       |
+| Tour: títulos em aberto de todas as contas, sem recorte de mês                           | `client_titles` (Sprint 11), subtítulo da tela em `carteira.png`                                                                                                                      |
+| Tour: atraso em faixas, de 1 a 30 até mais de 90 dias                                    | Aging calculado no servidor (Sprint 11), faixas 1 a 30, 31 a 60, 61 a 90 e 90+ em `carteira.png`                                                                                      |
+| Tour: o contexto do título separa acordo de inadimplência                                | `title_contexts` e relatório de recebíveis (Sprint 15)                                                                                                                                |
 
 ---
 

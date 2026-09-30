@@ -1,7 +1,7 @@
 /**
  * Segurança e privacidade (86e3fr9vz): quatro fatos, como eles são, e o link para
  * o aviso de privacidade. Nada aqui afirma retenção ou treinamento do provedor de
- * IA (86e3anx75 segue aberta).
+ * IA (86e3anx75 segue aberta). Ao lado do título, a vinheta do cadeado (86e3gwzj0).
  */
 import Link from 'next/link';
 
@@ -9,10 +9,16 @@ import { security } from './content';
 import { LandingIcon } from './landing-icon';
 import { LandingSection, revealDelay } from './landing-section';
 import { ManualDownload } from './manual-download';
+import { SecurityVignette } from './section-vignettes';
 
 export function LandingSecurity() {
   return (
-    <LandingSection id="seguranca" eyebrow={security.eyebrow} title={security.title}>
+    <LandingSection
+      id="seguranca"
+      eyebrow={security.eyebrow}
+      title={security.title}
+      aside={<SecurityVignette />}
+    >
       <ul className="grid gap-4 sm:grid-cols-2 lg:gap-6">
         {security.items.map((item, index) => (
           <li
