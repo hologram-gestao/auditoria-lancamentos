@@ -1,4 +1,4 @@
-# CLAUDE.md — Sistema de Auditoria de Lançamentos (Hologram)
+# CLAUDE.md — Hologram OS (Hologram Gestão)
 
 > **Para futuras conversas com Claude:** este arquivo é o _primer_ obrigatório. Leia-o antes de qualquer ação. Ele é atualizado continuamente conforme decisões são tomadas.
 >
@@ -30,13 +30,13 @@
 
 ## 1. Contexto Rápido
 
-**O que é:** SaaS interno da Hologram Gestão para auditoria de lançamentos bancários contra o ERP Omie.
+**O que é:** o **Hologram OS**, plataforma para conciliar, classificar e fechar o financeiro de cada cliente: nasceu como auditoria de lançamentos bancários contra o ERP Omie e hoje vai até o arquivo contábil. O nome é de 30/09/2026 (decisão do Pedro); antes era "Sistema de Auditoria de Lançamentos", sigla **ADL**, que continua em comentário, histórico, identificador (`ADL-PARSE-*`, prefixo do `cCodIntLanc`) e no canal do Slack, mas nunca em texto de tela. Domínio previsto: `hologramos.com.br`, ainda não registrado.
 
 **Fluxo núcleo:**
 
 1. Analista faz upload de extrato/fatura → 2. IA (Claude) extrai movimentações → 3. Humano valida amostra → 4. Sistema busca lançamentos Omie e faz matching determinístico → 5. Humano revisa → 6. Relatório Excel gerado.
 
-**É multi-organização desde o épico 86e36ec0q** (até 09/2026 não era): a plataforma hospeda **organizações** (BPOs e escritórios de contabilidade), cada uma com os próprios clientes finais, staff e catálogo de categorias. A Hologram é a **primeira** organização, não a dona do sistema. "Multi-cliente" segue significando múltiplos clientes finais **de uma organização**. Ver §4.8.
+**É multi-organização desde o épico 86e36ec0q** (até 09/2026 não era): a plataforma hospeda **organizações** (BPOs e escritórios de contabilidade), cada uma com os próprios clientes finais, staff e catálogo de categorias. A **Hologram Gestão** é a **primeira** organização, não a dona do sistema: o produto é o Hologram OS, a empresa é uma das organizações dele. "Multi-cliente" segue significando múltiplos clientes finais **de uma organização**. Ver §4.8.
 
 **Fontes da verdade:**
 
@@ -949,9 +949,14 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   landing só em `components/landing/content.ts` (espelho comentado em
   `Docs/landing/COPY.md`). Nada disso vale para o app autenticado.
 - **Nome do produto só em `lib/brand.ts` (web) e `core/branding.py` (API)** (86e3fr9x3):
-  título, header, login, metadados, título do OpenAPI e os textos operacionais com a
-  sigla leem de lá. `brand.test.ts` e `test_branding.py` recusam o nome escrito à mão em
-  qualquer outro arquivo; a troca pelo nome novo (86e3fr9wm) é uma linha de cada lado.
+  `PRODUCT_NAME = 'Hologram OS'` (título, header, login, landing, metadados, título do
+  OpenAPI "Hologram OS API", prefixo `[Hologram OS]` dos alertas, textos operacionais) e
+  `COMPANY_NAME = 'Hologram Gestão'` (quem trata o dado, rodapé). `brand.test.ts`,
+  `test_branding.py` e `content.test.ts` recusam o nome ANTIGO e a sigla ADL em string
+  (literais escritos no próprio teste) e o nome novo escrito à mão fora dos arquivos de
+  marca. URL absoluta só por `NEXT_PUBLIC_SITE_URL` (`lib/site-url.ts`): sem ela não há
+  `metadataBase`, canônica nem sitemap, e o domínio nunca é montado a partir de
+  `PRODUCT_DOMAIN`.
 
 ### API
 
@@ -1255,10 +1260,12 @@ em [Docs/landing/COPY.md](Docs/landing/COPY.md)) e deixaram: a raiz `/` como pá
 pública (grupo `app/(public)/`, com `/privacidade`), a tabela `leads`, o
 `POST /api/v1/leads` público (honeypot, 3 por e-mail em 24 h, `slowapi` como teto global,
 aviso no Slack fail-soft por `LEADS_SLACK_WEBHOOK_URL`, que não é canal de plantão), o
-evento `lead_recebido` e as constantes de marca `lib/brand.ts`/`core/branding.py`. O nome
-do produto e o domínio próprio seguem abertos (86e3fr9wm, roteiro em
-[Docs/landing/DOMINIO_E_NOME.md](Docs/landing/DOMINIO_E_NOME.md)): o mapeamento de domínio
-do Cloud Run não atende `southamerica-east1`, então o caminho é Load Balancer HTTPS.
+evento `lead_recebido` e as constantes de marca `lib/brand.ts`/`core/branding.py`. Em
+30/09 o produto ganhou nome, **Hologram OS**, e a landing passou a nomeá-lo (86e3gr6k5,
+junto com o refino visual). A landing oferece o manual em PDF para baixar. O domínio `hologramos.com.br` segue a registrar (86e3fr9wm,
+roteiro em [Docs/landing/DOMINIO_E_NOME.md](Docs/landing/DOMINIO_E_NOME.md)): o
+mapeamento de domínio do Cloud Run não atende `southamerica-east1`, então o caminho é Load
+Balancer HTTPS.
 
 ---
 
@@ -1368,6 +1375,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.65 — 30/09/2026. **O produto se chama Hologram OS (decisão do Pedro), e a landing ganhou presença (86e3gr6k5, que fecha o executável de 86e3fr9x3 e 86e3fr9wm).** `PRODUCT_NAME`, `PRODUCT_TITLE` e `PRODUCT_SHORT_NAME` valem "Hologram OS" (sem sigla nova), o OpenAPI é "Hologram OS API", nasceu `PRODUCT_DOMAIN = 'hologramos.com.br'` (domínio ainda não registrado) e a empresa segue "Hologram Gestão". A landing nomeia o produto (a D2 do plano caiu); o texto do consentimento não mudou, então a versão dele também não. Os testes de marca passaram a escrever os literais ANTIGOS: derivados da constante, eles procurariam o nome novo e deixariam o antigo voltar calado. Dois textos fora da tela trocaram e merecem aviso: o prefixo dos alertas virou `[Hologram OS]` (`ALERT_PREFIX`; filtro de e-mail ou canal montado sobre `[ADL]` precisa ser refeito) e a nota de resolução do lançamento no Omie lê a constante. O que é identificador FICOU: o prefixo `ADL` do `cCodIntLanc` (chave de dedup do que já foi lançado, §3.16) e o `ADL-PARSE-*`. A URL absoluta da landing (`metadataBase`, canônica, `sitemap.xml`) só existe com `NEXT_PUBLIC_SITE_URL`, build-arg a ligar no dia em que o domínio apontar. O refino visual é só CSS escopado e o `reveal.tsx`: palavra do título em gradiente (stop claro misturado a `--foreground`, medido por pixel a 7,67:1 no desktop e 6,62:1 em 390px), pílula com ponto pulsante, chips de formatos, mini-card flutuante na vinheta, rótulos de seção, divisores e filetes, grade atrás de "Como funciona", ruído SVG no fundo, borda em gradiente e spotlight nos cards. O spotlight pinta ATRÁS do texto e o axe não o enxerga, então o e2e mede o pior caso por pixel (texto `muted` no centro do brilho: 5,54:1); ele só existe com mouse e sem movimento reduzido, e o cenário do e2e AFIRMA a ausência no projeto de toque, porque o gate reprova teste pulado. A medição por pixel passou a esconder com `visibility: hidden`: `color: transparent` não apaga texto pintado por `background-clip: text`. A landing também oferece o manual: `public/manual-hologram-os.pdf` (cópia do `Docs/manual/Manual-Hologram-OS.pdf` da `main`), liberado no `robots.txt`, num botão secundário no fim da seção de segurança e na confirmação do formulário, com `download`, na mesma aba e com o tamanho ao lado; um teste falha se o PDF mudar e o "3 MB" não. **Regra que fica para o gate local:** efeito visual novo encarece o print de página inteira (3 a 6 s por captura no Pixel 5), e o cenário que tira três prints passou de 30 s só com `E2E_SHOTS=1`; o CI não tira prints. Antes de subir timeout, medir cada passo (`DEBUG=pw:api`) e cada efeito desligado um por vez: o mais caro na captura é o `blur` da aurora, que já existia._
 
 _Versão 1.64 — 29/09/2026. **A raiz do sistema virou uma landing pública com captação de leads, e o nome do produto passou a morar num lugar só (épico 86e3fr9tj).** A `/` deixou de redirecionar para o login: é o grupo `app/(public)/` (landing e `/privacidade`), público no `middleware.ts` (`PUBLIC_PATHS`; com sessão, `/` vai para `/clientes`), com tema Hologram fixo pelo wrapper `.hologram`, largura contida e efeitos só em CSS escopado mais um componente cliente, tudo parado sob `prefers-reduced-motion` (§7 Frontend). O formulário grava em `leads` (migration `490bffa3f6e2`, reversível) pelo `POST /api/v1/leads` sem autenticação, que entrou em `NON_TENANT_ENDPOINTS` (15 → **16**) sem mexer na lista canônica (**116**); a §4.5 ganhou a exceção do lead em claro (prospect sem tenant, decisão do Pedro de 28/09), com o mínimo de campos e sem IP. Anti-spam: honeypot e 3 por e-mail em 24 h respondem o mesmo 200 sem gravar; o `slowapi` de 10/min é teto GLOBAL por instância, porque atrás do BFF a API vê o IP do proxy (86e3anx10). O aviso no Slack é inline, fail-soft e com timeout de 3 s, com mrkdwn escapado e log só da categoria da falha; `LEADS_SLACK_WEBHOOK_URL` não conta como canal de plantão, pelo mesmo motivo do sintético (§3.14), e a secret `leads-slack-webhook-url-<env>` precisa existir antes do deploy. O redactor passou a mascarar chaves `webhook` e `url`. O nome do produto saiu de cinco literais para `lib/brand.ts` e `core/branding.py`, com testes que recusam o nome escrito à mão em qualquer outro arquivo: a troca pelo nome novo (86e3fr9wm, bloqueada) é uma linha de cada lado. A doc gerada de endpoints sensíveis entrou no `.prettierignore`, como o contrato: o hook reescrevia o arquivo inteiro. Matriz (**29**) e pares de AAD (**17**) não mudaram._
 
