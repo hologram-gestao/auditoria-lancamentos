@@ -9,11 +9,16 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 
 import { privacy } from '@/components/landing/content';
+import { siteUrl } from '@/lib/site-url';
+
+const SITE_URL = siteUrl();
 
 export const metadata: Metadata = {
   title: privacy.metaTitle,
   description: privacy.metaDescription,
   robots: { index: true, follow: true },
+  // URL absoluta só com o domínio próprio: `lib/site-url.ts`.
+  ...(SITE_URL ? { metadataBase: SITE_URL, alternates: { canonical: '/privacidade' } } : {}),
 };
 
 export default function PrivacyPage() {

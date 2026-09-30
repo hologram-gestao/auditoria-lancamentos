@@ -16,8 +16,11 @@
 - Português do Brasil, frases curtas, segunda pessoa ("seu cliente", "seu fechamento").
 - Nenhum número de resultado (horas economizadas, % de acerto, quantidade de clientes): não
   existe medição. Os únicos números da página são regras do produto (um centavo, três dias).
-- Sem nome de produto: "a plataforma da Hologram". O nome antigo e a sigla antiga não aparecem
-  (um teste do front trava isso em `content.ts`).
+- O produto se chama **Hologram OS** (decisão do Pedro, 30/09/2026) e a página o nomeia: no
+  header, no hero, na resposta às dores, em "Como funciona" e no rodapé, sem repetir em todo
+  bullet. Quem trata o dado do formulário é a empresa, **Hologram Gestão**. Em `content.ts` o
+  nome vem sempre de `PRODUCT_NAME` (`lib/brand.ts`); o nome antigo e a sigla antiga não
+  aparecem (um teste do front trava as duas coisas).
 - Sem superlativo, sem "inteligente" como adjetivo, sem "garantimos", sem travessão, sem emoji,
   sem jargão de desenvolvimento (tenant, endpoint, chave de dados).
 - Segurança como ela é: o arquivo passa por um provedor de IA para a leitura, e a qualificação
@@ -31,16 +34,16 @@
 
 Ordem: da mais cara para a mais barata, pela régua das reuniões com o Murilo.
 
-| #   | Dor (como o público sente)                                                                                    | Fonte                                                                    | O que existe na `main` e sustenta a resposta                                                                                                                                                                                                         |
-| --- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | O fechamento não roda todo mês; vira um mutirão no começo do ano                                              | Resumo geral, "Dores consolidadas" nº 1; R2 "O contábil é o gargalo"     | Conciliação por conta e mês (`uq_recon_sessions_account_month`, Sprint 4), lista de conciliações, revisão por abas, relatório Excel (S11 a S14)                                                                                                      |
-| 2   | Dado ruim entra na contabilidade: imobilizado como despesa, ajuste de saldo inventado, tarifas somadas errado | R1 "As dores" nº 2 e o caso do imobilizado                               | Cruzamento determinístico com tolerância de R$ 0,01 e 3 dias (`CLAUDE.md` §5), anomalias tipadas (S15), qualificação por IA que sinaliza e não decide (S19, §5.6)                                                                                    |
-| 3   | Categorizar, fazer de-para e montar lançamento é PROCV manual, cliente a cliente                              | Dores consolidadas nº 2 e 3; R2 "Eu queria ter 50 clientes que nem esse" | De-para por cliente e destino (Sprint 12), plano contábil do cliente e partida pelo sinal (Sprint 16), arquivo no layout do sistema contábil (Sprint 13, na `main`; importação real no Domínio ainda não validada), glossário por cliente (Sprint 6) |
-| 4   | A maioria dos clientes não tem ERP; chega planilha e extrato em todo formato                                  | R2 "Só 6–7 usam Omie"; Dores consolidadas nº 4                           | Conexão com Omie (Sprint 9), origem por arquivo com mapeamento de entrada (Sprint 14), leitura de extrato e fatura por IA em PDF, CSV, XLSX e XLS (`parse_service.py`, S9, Sprint 2), validação humana de amostra (§1 passo 3)                       |
-| 5   | Fatura de cartão é trabalho à parte e ninguém lança                                                           | Operação da Hologram                                                     | Conciliação de fatura (Sprint 1) e lançamento das compras no Omie (Sprint 7; `OMIE_POSTING_ENABLED` ligado em dev desde 21/08)                                                                                                                       |
-| 6   | Título vencido há meses não aparece na conciliação do mês                                                     | Operação da Hologram                                                     | Carteira de títulos sem recorte de mês (Sprint 11) e contexto do título (Sprint 15)                                                                                                                                                                  |
-| 7   | O escritório não pode vazar um cliente para o outro; o cliente final quer ver o próprio dado                  | Camada de organizações e Sprint 5                                        | Acesso do cliente ao próprio cadastro, organização só alcança os próprios clientes (§3.15)                                                                                                                                                           |
-| 8   | "Onde meus dados ficam e quem lê?"                                                                            | 86e3anx75                                                                | Chave própria por cliente (§4.1), arquivo original nunca guardado (§4.6), trilha de acesso (§4.7), destruição da chave no encerramento (§4.12)                                                                                                       |
+| #   | Dor (como o público sente)                                                                                    | Fonte                                                                    | O que existe na `main` e sustenta a resposta                                                                                                                                                                                                                                               |
+| --- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | O fechamento não roda todo mês; vira um mutirão no começo do ano                                              | Resumo geral, "Dores consolidadas" nº 1; R2 "O contábil é o gargalo"     | Conciliação por conta e mês (`uq_recon_sessions_account_month`, Sprint 4), lista de conciliações, revisão por abas, relatório Excel (S11 a S14)                                                                                                                                            |
+| 2   | Dado ruim entra na contabilidade: imobilizado como despesa, ajuste de saldo inventado, tarifas somadas errado | R1 "As dores" nº 2 e o caso do imobilizado                               | Cruzamento determinístico com tolerância de R$ 0,01 e 3 dias (`CLAUDE.md` §5), anomalias tipadas (S15), qualificação por IA que sinaliza e não decide (S19, §5.6)                                                                                                                          |
+| 3   | Categorizar, fazer de-para e montar lançamento é PROCV manual, cliente a cliente                              | Dores consolidadas nº 2 e 3; R2 "Eu queria ter 50 clientes que nem esse" | De-para por cliente e destino (Sprint 12), plano contábil do cliente e partida pelo sinal (Sprint 16), arquivo no layout do sistema contábil (Sprint 13, na `main`; importação real no Domínio ainda não validada), glossário por cliente (Sprint 6)                                       |
+| 4   | A maioria dos clientes não tem ERP; chega planilha e extrato em todo formato                                  | R2 "Só 6–7 usam Omie"; Dores consolidadas nº 4                           | Conexão com Omie (Sprint 9), origem por arquivo com mapeamento de entrada (Sprint 14), leitura de extrato e fatura por IA em PDF, CSV e XLSX, com `.xls` recusado e orientado a salvar como `.xlsx` ou `.csv` (`parse_service.py`, S9, Sprint 2), validação humana de amostra (§1 passo 3) |
+| 5   | Fatura de cartão é trabalho à parte e ninguém lança                                                           | Operação da Hologram                                                     | Conciliação de fatura (Sprint 1) e lançamento das compras no Omie (Sprint 7; `OMIE_POSTING_ENABLED` ligado em dev desde 21/08)                                                                                                                                                             |
+| 6   | Título vencido há meses não aparece na conciliação do mês                                                     | Operação da Hologram                                                     | Carteira de títulos sem recorte de mês (Sprint 11) e contexto do título (Sprint 15)                                                                                                                                                                                                        |
+| 7   | O escritório não pode vazar um cliente para o outro; o cliente final quer ver o próprio dado                  | Camada de organizações e Sprint 5                                        | Acesso do cliente ao próprio cadastro, organização só alcança os próprios clientes (§3.15)                                                                                                                                                                                                 |
+| 8   | "Onde meus dados ficam e quem lê?"                                                                            | 86e3anx75                                                                | Chave própria por cliente (§4.1), arquivo original nunca guardado (§4.6), trilha de acesso (§4.7), destruição da chave no encerramento (§4.12)                                                                                                                                             |
 
 A página usa as dores 1 a 4 no bloco "Dores e respostas"; a 5 e a 6 entram nos cards de
 público; a 7 e a 8, no bloco de segurança.
@@ -51,25 +54,31 @@ público; a 7 e a 8, no bloco de segurança.
 
 ### 1. Header
 
-- Marca: logomark + "Hologram" (abaixo de 640px, só a logomark).
+- Marca: logomark + "Hologram OS" (abaixo de 640px, só a logomark).
 - Botão secundário: **Entrar** (vai para `/login`).
 - Botão primário: **Entrar em contato** (rola até o formulário).
 
 ### 2. Hero
 
-- Sobretítulo: **Para escritórios de contabilidade, BPOs financeiros e empresas**
-- Título: **O financeiro do seu cliente, conferido antes de virar contabilidade.**
-- Subtítulo: A plataforma da Hologram cruza extrato, fatura e planilha com o que foi lançado,
-  mostra o que não bate e deixa pronto o que segue para o sistema contábil. Sua equipe revisa
-  as exceções, não o mês inteiro.
+- Sobretítulo (em pílula, com um ponto de luz à esquerda): **Hologram OS, para escritórios de
+  contabilidade, BPOs financeiros e empresas**
+- Título: **O financeiro do seu cliente, _conferido_ antes de virar contabilidade.** A palavra
+  "conferido" é o único destaque do hero (gradiente da marca).
+- Subtítulo: O Hologram OS cruza extrato, fatura e planilha com o que foi lançado, mostra o que
+  não bate e deixa pronto o que segue para o sistema contábil. Sua equipe revisa as exceções,
+  não o mês inteiro.
 - Botões: **Entrar em contato** (primário) e **Entrar** (secundário).
+- Chips abaixo dos botões: **Lê PDF, XLSX, CSV e Omie** · **Entrega Excel, Omie e o
+  arquivo contábil**.
 - Vinheta ao lado: card "Conciliação · Conta corrente · Março" com cinco linhas fictícias de
-  "Cliente exemplo" cujos selos passam de "Pendente" para "Conciliado", e um rodapé "Saldo
-  conferido".
+  "Cliente exemplo" cujos selos passam de "Pendente" para "Conciliado", e um rodapé "Diferença
+  de saldo R$ 0,00". Sobre o canto inferior esquerdo, um mini-card flutuante com o selo
+  **Classificação suspeita** e a linha **IOF lançado como juros** (a anomalia que a revisão
+  aponta).
 
 ### 3. Para quem
 
-Título do bloco: **Feito para quem fecha o financeiro de outras empresas**
+Rótulo: **Para quem** · Título do bloco: **Feito para quem fecha o financeiro de outras empresas**
 
 | Card | Título                      | Texto                                                                                                                                 |
 | ---- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
@@ -79,7 +88,8 @@ Título do bloco: **Feito para quem fecha o financeiro de outras empresas**
 
 ### 4. Dores e respostas
 
-Título do bloco: **O trabalho que ninguém vê, e que decide o fechamento**
+Rótulo: **Dores e respostas** · Título do bloco: **O trabalho que ninguém vê, e que decide o
+fechamento** · Rótulos de cada par: **O problema** e **Como o Hologram OS responde**
 
 | Par | Dor                                                                                                                                                                 | Resposta                                                                                                                                                                                                                                                                       |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -90,11 +100,11 @@ Título do bloco: **O trabalho que ninguém vê, e que decide o fechamento**
 
 ### 5. Como funciona
 
-Título do bloco: **Do arquivo ao lançamento, em quatro passos**
+Rótulo: **Como funciona** · Título do bloco: **Do arquivo ao lançamento, em quatro passos**
 
 1. **Envie o arquivo ou conecte a origem.** Extrato, fatura de cartão ou planilha do cliente.
-   Se ele usa Omie, a plataforma busca os lançamentos por conta própria.
-2. **A plataforma lê e cruza.** A IA extrai as movimentações do arquivo. O cruzamento com os
+   Se ele usa Omie, o Hologram OS busca os lançamentos por conta própria.
+2. **O Hologram OS lê e cruza.** A IA extrai as movimentações do arquivo. O cruzamento com os
    lançamentos segue regra fixa: até um centavo de diferença no valor e até três dias na data.
 3. **Sua equipe revisa o que ficou de fora.** Divergências, lançamentos sem par e anomalias
    aparecem separados, com espaço para a nota de resolução de cada um.
@@ -103,7 +113,7 @@ Título do bloco: **Do arquivo ao lançamento, em quatro passos**
 
 ### 6. Segurança e privacidade
 
-Título do bloco: **O dado do seu cliente continua dele**
+Rótulo: **Segurança e privacidade** · Título do bloco: **O dado do seu cliente continua dele**
 
 | Item | Título                               | Texto                                                                                                                                                                                                     |
 | ---- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -112,11 +122,14 @@ Título do bloco: **O dado do seu cliente continua dele**
 | 3    | Cada um vê só o que é seu            | O escritório alcança só os próprios clientes, e o cliente final só a própria empresa. Exportações e tentativas de acesso negadas ficam registradas.                                                       |
 | 4    | Encerrou, acabou                     | Quando um cliente sai, a chave dele é destruída e o conteúdo cifrado deixa de poder ser lido.                                                                                                             |
 
-Link ao final: **Leia o aviso de privacidade** (`/privacidade`).
+Link ao final: **Leia o aviso de privacidade** (`/privacidade`). Ao lado, botão secundário
+**Baixar o manual (PDF)** com "PDF, 3 MB" (`/manual-hologram-os.pdf`, cópia de
+`Docs/manual/Manual-Hologram-OS.pdf`); o mesmo link aparece na confirmação do formulário
+como **Enquanto respondemos, leia o manual**.
 
 ### 7. Formulário de contato (`#contato`)
 
-- Título: **Fale com a gente**
+- Rótulo: **Contato** · Título: **Fale com a gente**
 - Linha de apoio: Conte um pouco do seu cenário. Respondemos pelo e-mail informado.
 - Campos: **Nome** · **E-mail** · **Empresa ou escritório** (opcional) · **WhatsApp**
   (opcional) · **Mensagem** (opcional)
@@ -130,34 +143,36 @@ Link ao final: **Leia o aviso de privacidade** (`/privacidade`).
 
 ### 8. Rodapé
 
-"Hologram Gestão" · link **Entrar** · link **Aviso de privacidade** · "© 2026".
+"© {ano} Hologram Gestão" · "Hologram OS" ao lado · link **Entrar** · link **Aviso de
+privacidade**. O ano é o do build.
 
 ---
 
 ## (c) Afirmações e evidência
 
-| Afirmação na página                                                                      | Evidência                                                                                                                                          |
-| ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Cruza extrato, fatura e planilha com o que foi lançado                                   | Fluxo núcleo (`CLAUDE.md` §1), matcher (`processing/matcher.py`), fatura de cartão (Sprint 1), planilha por origem de arquivo (Sprint 14)          |
-| Cada conta de cada mês vira uma conciliação própria                                      | `UNIQUE(client_id, omie_conta_id, reference_month)`, §4.10                                                                                         |
-| Regra fixa: até um centavo e até três dias                                               | `AMOUNT_TOLERANCE = 0.01`, `DATE_DIVERGENCE_RANGE = 3`, §5.1 e §5.2                                                                                |
-| O que não bate vira anomalia com tipo e motivo                                           | `anomaly_types` (S15), anomalias na revisão                                                                                                        |
-| A IA aponta; quem decide é a equipe                                                      | §5.6 ("IA nunca decide match"), qualificação S19 com veredito do revisor (Sprint 6)                                                                |
-| De-para por cliente, plano de contas, histórico padrão                                   | Sprint 12 e Sprint 16 (`client_mapping_decisions.history_encrypted`)                                                                               |
-| Débito e crédito saem do sinal                                                           | `partida.derive_partida` (Sprint 16)                                                                                                               |
-| Arquivo no layout que o sistema contábil importa, em validação com escritórios parceiros | Sprint 13 na `main` (`modules/accounting_files`, `modules/export_layouts`); importação real no Domínio pendente (§8, parágrafo da Sprint 13)       |
-| Cliente com Omie conectado direto                                                        | `client_connections` (Sprint 9)                                                                                                                    |
-| Planilha lida por um mapeamento configurado uma vez                                      | `client_input_mappings` (Sprint 14)                                                                                                                |
-| Extrato e fatura em PDF ou planilha lidos por IA                                         | `_ALLOWED_EXTENSIONS = {".pdf", ".csv", ".xlsx", ".xls"}` em `reconciliations/parse_service.py`                                                    |
-| Você confere uma amostra antes de seguir                                                 | §1 passo 3 ("Humano valida amostra")                                                                                                               |
-| Compras do cartão lançadas no Omie                                                       | Sprint 7, `IncluirLancCC` verificado em 21/08; `OMIE_POSTING_ENABLED` ligado em dev                                                                |
-| Títulos vencidos explicados                                                              | `client_titles` (Sprint 11), `title_contexts` (Sprint 15)                                                                                          |
-| Uma chave por cliente; não abre com a de outro                                           | DEK por cliente + AAD, §4.1                                                                                                                        |
-| O arquivo é lido por IA e não fica armazenado                                            | Extração em `integrations/anthropic/client.py`; arquivo nunca persistido, §3.10 e §4.6                                                             |
-| Na revisão, a IA aponta o que parece incoerente; quem decide é uma pessoa                | Qualificação S19 (`reconciliations/qualification/semantic.py`, que envia descrições e glossário ao provedor), veredito do revisor (Sprint 6), §5.6 |
-| Escritório só os próprios clientes; cliente final só a própria empresa                   | `resolve_client_access`, §3.15 e §4.8                                                                                                              |
-| Exportações e acessos negados registrados                                                | `access_audit` com `export` e `denied` (§4.7; `core/audit.py`, export da conciliação, arquivo contábil)                                            |
-| Chave destruída quando o cliente sai                                                     | `dek_wrapped → NULL` no encerramento, §4.12                                                                                                        |
+| Afirmação na página                                                                      | Evidência                                                                                                                                                                             |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Chips: lê PDF, XLSX, CSV e Omie; entrega Excel, Omie e o arquivo contábil                | PDF, XLSX e CSV; .xls é recusado com orientação (`parse_service.py`), conexão Omie (Sprint 9), export Excel (S14), `IncluirLancCC` (Sprint 7), `modules/accounting_files` (Sprint 13) |
+| Cruza extrato, fatura e planilha com o que foi lançado                                   | Fluxo núcleo (`CLAUDE.md` §1), matcher (`processing/matcher.py`), fatura de cartão (Sprint 1), planilha por origem de arquivo (Sprint 14)                                             |
+| Cada conta de cada mês vira uma conciliação própria                                      | `UNIQUE(client_id, omie_conta_id, reference_month)`, §4.10                                                                                                                            |
+| Regra fixa: até um centavo e até três dias                                               | `AMOUNT_TOLERANCE = 0.01`, `DATE_DIVERGENCE_RANGE = 3`, §5.1 e §5.2                                                                                                                   |
+| O que não bate vira anomalia com tipo e motivo                                           | `anomaly_types` (S15), anomalias na revisão                                                                                                                                           |
+| A IA aponta; quem decide é a equipe                                                      | §5.6 ("IA nunca decide match"), qualificação S19 com veredito do revisor (Sprint 6)                                                                                                   |
+| De-para por cliente, plano de contas, histórico padrão                                   | Sprint 12 e Sprint 16 (`client_mapping_decisions.history_encrypted`)                                                                                                                  |
+| Débito e crédito saem do sinal                                                           | `partida.derive_partida` (Sprint 16)                                                                                                                                                  |
+| Arquivo no layout que o sistema contábil importa, em validação com escritórios parceiros | Sprint 13 na `main` (`modules/accounting_files`, `modules/export_layouts`); importação real no Domínio pendente (§8, parágrafo da Sprint 13)                                          |
+| Cliente com Omie conectado direto                                                        | `client_connections` (Sprint 9)                                                                                                                                                       |
+| Planilha lida por um mapeamento configurado uma vez                                      | `client_input_mappings` (Sprint 14)                                                                                                                                                   |
+| Extrato e fatura em PDF ou planilha lidos por IA                                         | PDF, XLSX e CSV; .xls é recusado com orientação (`reconciliations/parse_service.py`)                                                                                                  |
+| Você confere uma amostra antes de seguir                                                 | §1 passo 3 ("Humano valida amostra")                                                                                                                                                  |
+| Compras do cartão lançadas no Omie                                                       | Sprint 7, `IncluirLancCC` verificado em 21/08; `OMIE_POSTING_ENABLED` ligado em dev                                                                                                   |
+| Títulos vencidos explicados                                                              | `client_titles` (Sprint 11), `title_contexts` (Sprint 15)                                                                                                                             |
+| Uma chave por cliente; não abre com a de outro                                           | DEK por cliente + AAD, §4.1                                                                                                                                                           |
+| O arquivo é lido por IA e não fica armazenado                                            | Extração em `integrations/anthropic/client.py`; arquivo nunca persistido, §3.10 e §4.6                                                                                                |
+| Na revisão, a IA aponta o que parece incoerente; quem decide é uma pessoa                | Qualificação S19 (`reconciliations/qualification/semantic.py`, que envia descrições e glossário ao provedor), veredito do revisor (Sprint 6), §5.6                                    |
+| Escritório só os próprios clientes; cliente final só a própria empresa                   | `resolve_client_access`, §3.15 e §4.8                                                                                                                                                 |
+| Exportações e acessos negados registrados                                                | `access_audit` com `export` e `denied` (§4.7; `core/audit.py`, export da conciliação, arquivo contábil)                                                                               |
+| Chave destruída quando o cliente sai                                                     | `dek_wrapped → NULL` no encerramento, §4.12                                                                                                                                           |
 
 ---
 
@@ -175,7 +190,7 @@ mudar o texto = mudar a versão nos dois).
 
 > **Aviso de privacidade**
 >
-> Este aviso vale para o formulário de contato desta página. Ele não trata dos dados que os
+> Este aviso vale para o formulário de contato do Hologram OS. Ele não trata dos dados que os
 > clientes da plataforma processam nela.
 >
 > Versão de 30 de setembro de 2026.

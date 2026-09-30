@@ -1,7 +1,7 @@
 [project]
 name = "auditoria-api"
 version = "0.1.0"
-description = "Backend do Sistema de Auditoria de Lançamentos — Hologram"
+description = "Backend do Hologram OS, da Hologram Gestão"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Proprietary" }

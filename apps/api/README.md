@@ -1,6 +1,6 @@
 # apps/api — Backend FastAPI
 
-Backend do Sistema de Auditoria de Lançamentos.
+Backend do Hologram OS.
 
 ## Requisitos
 

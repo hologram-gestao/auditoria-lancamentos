@@ -17,7 +17,7 @@ import { submitLead } from '@/lib/api/leads';
 import { assertNoA11yViolations } from '@/test/a11y';
 
 import { ContactForm } from '../contact-form';
-import { contact } from '../content';
+import { contact, manual } from '../content';
 
 vi.mock('@/lib/api/leads', () => ({ submitLead: vi.fn() }));
 
@@ -101,6 +101,23 @@ describe('ContactForm', () => {
       website: '',
     });
     expect(screen.queryByRole('button', { name: contact.submit })).toBeNull();
+    await assertNoA11yViolations(container);
+  });
+
+  it('a confirmação oferece o manual para baixar, com o tamanho, na mesma aba', async () => {
+    submitLeadMock.mockResolvedValue({ received: true });
+    const user = userEvent.setup();
+    const { container } = renderForm();
+    await fillRequired(user);
+    await user.click(screen.getByRole('checkbox'));
+    await user.click(submitButton());
+
+    const link = await screen.findByRole('link', { name: new RegExp(manual.successLead) });
+    expect(link).toHaveAttribute('href', manual.href);
+    expect(link).toHaveAttribute('download');
+    expect(link).not.toHaveAttribute('target');
+    expect(link).toHaveAccessibleDescription(manual.size);
+    expect(screen.getByRole('status')).toContainElement(link);
     await assertNoA11yViolations(container);
   });
 
