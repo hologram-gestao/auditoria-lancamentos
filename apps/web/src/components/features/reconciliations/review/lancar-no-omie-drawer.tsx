@@ -44,6 +44,7 @@ import type {
   OmiePostingLineResult,
 } from '@/lib/api/omie-postings';
 import type { FileEntryItem } from '@/lib/api/reconciliations';
+import { PRODUCT_SHORT_NAME } from '@/lib/brand';
 import { formatBRDate, formatBRL } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -161,7 +162,8 @@ export function LancarNoOmieDrawer({
             {entries.length === 1
               ? 'A compra abaixo será lançada na conta do cartão no Omie.'
               : `As ${entries.length} compras abaixo serão lançadas na conta do cartão no Omie.`}{' '}
-            O lançamento é gravado na contabilidade do cliente e não pode ser desfeito pelo ADL.
+            O lançamento é gravado na contabilidade do cliente e não pode ser desfeito pelo{' '}
+            {PRODUCT_SHORT_NAME}.
           </SheetDescription>
         </SheetHeader>
 

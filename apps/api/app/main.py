@@ -25,6 +25,7 @@ from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from app import __version__
 from app.core.alerting import verify_alert_config
+from app.core.branding import API_TITLE
 from app.core.config import get_settings
 from app.core.dependencies import DbSessionDep
 from app.core.exceptions import AppError, ErrorCode, RateLimitedError, to_error_response
@@ -276,7 +277,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
 
     app = FastAPI(
-        title="Sistema de Auditoria de Lançamentos — API",
+        title=API_TITLE,
         description="Backend da plataforma interna de conciliação bancária da Hologram.",
         version=__version__,
         lifespan=lifespan,

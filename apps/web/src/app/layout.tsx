@@ -1,12 +1,14 @@
 import type { Metadata } from 'next';
 
+import { PRODUCT_TAGLINE, PRODUCT_TITLE } from '@/lib/brand';
+
 import { Providers } from './providers';
 
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Sistema de Auditoria de Lançamentos',
-  description: 'Plataforma interna da Hologram Gestão para conciliação bancária.',
+  title: PRODUCT_TITLE,
+  description: PRODUCT_TAGLINE,
   robots: { index: false, follow: false },
 };
 

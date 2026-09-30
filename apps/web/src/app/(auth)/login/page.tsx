@@ -41,6 +41,7 @@ import { Input } from '@/components/ui/input';
 import { PasswordInput } from '@/components/ui/password-input';
 import { login as loginRequest } from '@/lib/api/auth';
 import { ApiError, NetworkError } from '@/lib/api/client';
+import { PRODUCT_TITLE } from '@/lib/brand';
 import { loginSchema, type LoginFormValues } from '@/lib/validation/auth';
 import { useAuthStore } from '@/stores/auth';
 
@@ -89,9 +90,7 @@ export default function LoginPage() {
       <div className="mb-8 text-center">
         {/* Logomark por token (86e2ukrc9): a cor acompanha o tema. */}
         <BrandMark className="text-primary mx-auto mb-4 h-12" />
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Sistema de Auditoria de Lançamentos
-        </h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{PRODUCT_TITLE}</h1>
         <p className="text-muted-foreground mt-2 text-sm">Entre com seu acesso da Hologram.</p>
       </div>
 
