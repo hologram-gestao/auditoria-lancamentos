@@ -1,0 +1,835 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Hologram OS · Manual da plataforma</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body>
+
+<!-- ============================ CAPA ============================ -->
+<section class="cover">
+  <div class="mark">Documentação do produto</div>
+  <div class="rule"></div>
+  <p class="product">Hologram OS</p>
+  <h1>Manual da<br>plataforma</h1>
+  <p class="sub">Conciliação bancária, classificação contábil e geração do arquivo que o sistema contábil importa. Guia completo para escritórios contábeis e BPOs financeiros.</p>
+  <div class="foot">
+    <span>Versão 1.1 · Setembro de 2026</span>
+    <span>Hologram Gestão · Material de apoio comercial e operacional</span>
+  </div>
+</section>
+
+<!-- ======================= SOBRE ESTE MANUAL ======================= -->
+<section class="front">
+  <h2>Sobre este manual</h2>
+
+  <p class="lead">Este documento descreve, do começo ao fim, o que o Hologram OS faz e como operá-lo. Ele foi escrito para quem vai usar o sistema no dia a dia: sócios de escritórios contábeis, gerentes de carteira, analistas de BPO financeiro e as equipes dos clientes atendidos.</p>
+
+  <p>Não é um documento técnico. Nenhum conhecimento de programação é necessário para ler qualquer parte dele. Onde uma regra do sistema existe por um motivo contábil ou de segurança, o motivo está escrito junto, porque saber por que uma trava existe é o que permite confiar nela.</p>
+
+  <h3>Como o manual está organizado</h3>
+  <p>Os capítulos seguem a ordem real de trabalho. Primeiro o vocabulário e os perfis de acesso, depois a preparação de um cliente novo, em seguida o fechamento mensal (conciliação), a ponte para a contabilidade, a carteira de títulos e, por fim, administração e segurança. Quem já usa o sistema pode ir direto ao capítulo que precisa; quem está conhecendo agora ganha mais lendo na ordem.</p>
+
+  <h3>Convenções</h3>
+  <dl class="kv">
+    <dt>Blocos destacados</dt>
+    <dd>Os blocos em cinza trazem contexto ou boa prática. Os blocos em âmbar trazem avisos: coisas que o sistema recusa, ou que custam retrabalho se forem feitas fora de ordem.</dd>
+    <dt>Nomes de tela</dt>
+    <dd>Nomes de botões, abas e menus aparecem <span class="ui">nesta fonte</span>, iguais ao que está na tela.</dd>
+    <dt>Imagens</dt>
+    <dd>Todas as capturas são do produto em funcionamento, com dados de demonstração. Nomes de empresas, valores e datas são fictícios.</dd>
+  </dl>
+</section>
+
+<!-- ============================ SUMÁRIO ============================ -->
+<section class="toc">
+  <h2>Sumário</h2>
+  <ol>
+    <li class="part"><a href="#cap1">1. O Hologram OS em uma página</a></li>
+    <li class="part"><a href="#cap2">2. Conceitos e vocabulário</a></li>
+    <li class="part"><a href="#cap3">3. Perfis de acesso</a></li>
+    <li class="part"><a href="#cap4">4. Primeiro acesso</a></li>
+    <li class="part"><a href="#cap5">5. Preparar um cliente</a></li>
+    <li class="sub"><a href="#s51">5.1 Cadastrar o cliente</a></li>
+    <li class="sub"><a href="#s52">5.2 Conectar a origem dos dados</a></li>
+    <li class="sub"><a href="#s53">5.3 Contas bancárias</a></li>
+    <li class="sub"><a href="#s54">5.4 Plano de Contas da origem</a></li>
+    <li class="sub"><a href="#s55">5.5 Plano contábil e a conta do banco</a></li>
+    <li class="sub"><a href="#s56">5.6 Glossário do cliente</a></li>
+    <li class="part"><a href="#cap6">6. O fechamento: conciliação</a></li>
+    <li class="sub"><a href="#s61">6.1 Criar a conciliação</a></li>
+    <li class="sub"><a href="#s62">6.2 O que o sistema faz sozinho</a></li>
+    <li class="sub"><a href="#s63">6.3 Como o cruzamento decide</a></li>
+    <li class="sub"><a href="#s64">6.4 Revisar o resultado</a></li>
+    <li class="sub"><a href="#s65">6.5 Anomalias e o veredito do revisor</a></li>
+    <li class="sub"><a href="#s66">6.6 Lançar no Omie o que faltou</a></li>
+    <li class="sub"><a href="#s67">6.7 Relatório em Excel e painel</a></li>
+    <li class="part"><a href="#cap7">7. A ponte contábil</a></li>
+    <li class="sub"><a href="#s71">7.1 A base de movimentos</a></li>
+    <li class="sub"><a href="#s72">7.2 Cliente sem ERP: origem por arquivo</a></li>
+    <li class="sub"><a href="#s73">7.3 O de-para</a></li>
+    <li class="sub"><a href="#s74">7.4 Prévia, partida e materialização</a></li>
+    <li class="sub"><a href="#s75">7.5 Gerar o arquivo do sistema contábil</a></li>
+    <li class="part"><a href="#cap8">8. Carteira de títulos</a></li>
+    <li class="part"><a href="#cap9">9. Administração</a></li>
+    <li class="part"><a href="#cap10">10. Segurança, privacidade e LGPD</a></li>
+    <li class="part"><a href="#cap11">11. Limites conhecidos</a></li>
+    <li class="part"><a href="#apa">Apêndice A. Recusas e o que fazer</a></li>
+    <li class="part"><a href="#apb">Apêndice B. Checklist do fechamento</a></li>
+    <li class="part"><a href="#apc">Apêndice C. Glossário rápido</a></li>
+  </ol>
+</section>
+
+<!-- ============================ CAP 1 ============================ -->
+<header class="chead" id="cap1">
+  <p class="num">Capítulo 1</p>
+  <h1 class="chapter">O Hologram OS em uma página</h1>
+</header>
+
+<p class="lead">Todo mês, alguém no escritório abre o extrato de um cliente, abre o ERP dele e compara linha por linha. Depois classifica o que não estava classificado, corrige o que veio errado e monta o lote que entra no sistema contábil. O Hologram OS faz esse caminho inteiro, e faz de um jeito auditável: cada decisão fica registrada, com autor e data.</p>
+
+<p>O que muda não é a natureza do trabalho, é quanto dele precisa ser feito à mão. A leitura do arquivo, a comparação com o ERP, a montagem da partida e a geração do arquivo contábil passam a ser do sistema. A decisão continua sendo de quem entende de contabilidade.</p>
+
+<h2>O ciclo do mês</h2>
+
+<div class="flow">
+  <div class="step"><span class="n">01</span><span class="t">Entra</span><span class="d">O extrato ou a fatura do mês é enviado. Um cliente sem ERP manda a planilha dele.</span></div>
+  <div class="step"><span class="n">02</span><span class="t">Lê</span><span class="d">O sistema extrai cada movimentação do arquivo e confere a soma contra o saldo declarado.</span></div>
+  <div class="step"><span class="n">03</span><span class="t">Cruza</span><span class="d">Compara com os lançamentos do ERP por valor, data e fornecedor, sem chute.</span></div>
+  <div class="step"><span class="n">04</span><span class="t">Aponta</span><span class="d">Separa o que bateu, o que não bateu e o que está classificado de forma suspeita.</span></div>
+  <div class="step"><span class="n">05</span><span class="t">Entrega</span><span class="d">Relatório em Excel, lançamentos no ERP e o arquivo que a contabilidade importa.</span></div>
+</div>
+
+<p class="note">As etapas 2 a 4 acontecem em segundo plano. Quem enviou o arquivo pode fechar a tela e continuar trabalhando: uma notificação avisa quando a conciliação termina.</p>
+
+<h2>Três coisas que definem o produto</h2>
+
+<h3>A inteligência artificial lê, mas não julga</h3>
+<p>O arquivo do banco chega em qualquer formato, e é a IA que transforma aquilo em linhas estruturadas. Daí em diante, nada é estatístico: o cruzamento com o ERP é aritmética pura, com tolerâncias fixas e publicadas. Um lançamento nunca é considerado conciliado porque um modelo achou parecido.</p>
+
+<h3>Cada cliente é um mundo fechado</h3>
+<p>Os dados de um cliente são cifrados com uma chave exclusiva dele, e o escritório vizinho hospedado na mesma plataforma não alcança nem o nome dos seus clientes. O próprio cliente final pode receber acesso e enxergar apenas o que é dele.</p>
+
+<h3>O trabalho termina na contabilidade, não no relatório</h3>
+<p>A conciliação é o começo. A plataforma leva o mês inteiro até o arquivo que o sistema contábil importa, com débito, crédito, valor, data e histórico, montado a partir das decisões que o escritório tomou uma única vez.</p>
+
+<div class="pull">
+  Conferir, classificar e lançar continuam sendo decisões do contador. O que a plataforma elimina é a digitação, a comparação manual e a perda de informação entre uma etapa e outra.
+</div>
+
+<h2>O que a plataforma não faz</h2>
+<ul>
+  <li>Não substitui o ERP nem o sistema contábil. Ela conversa com os dois.</li>
+  <li>Não decide classificação sozinha. Sugere, aponta divergência e espera alguém confirmar.</li>
+  <li>Não envia nada para a contabilidade sem comando. O arquivo é gerado, conferido e baixado por uma pessoa.</li>
+  <li>Não altera títulos, cadastros ou saldos no ERP. A única escrita que ela faz está descrita na seção 6.6, e é explícita.</li>
+</ul>
+
+<!-- ============================ CAP 2 ============================ -->
+<header class="chead" id="cap2">
+  <p class="num">Capítulo 2</p>
+  <h1 class="chapter">Conceitos e vocabulário</h1>
+</header>
+
+<p class="lead">Sete palavras aparecem o tempo todo no sistema e têm significado preciso. Vale ler esta lista uma vez; ela evita a maior parte das dúvidas de operação.</p>
+
+<table class="long">
+  <thead>
+    <tr><th style="width:26%">Termo</th><th>O que significa aqui</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Organização</strong></td><td>O escritório contábil ou BPO que usa o Hologram OS. Cada organização tem seus próprios clientes, sua equipe e seu catálogo de configurações. Uma organização nunca enxerga a outra.</td></tr>
+    <tr><td><strong>Cliente</strong></td><td>A empresa atendida pela organização. É a unidade de tudo: conciliações, contas, plano de contas e usuários pertencem a um cliente.</td></tr>
+    <tr><td><strong>Origem</strong></td><td>De onde vêm os lançamentos do cliente. Hoje existem duas: a conexão com o ERP Omie e o envio de arquivo (planilha ou extrato), para o cliente que não tem ERP.</td></tr>
+    <tr><td><strong>Conciliação</strong></td><td>O confronto de uma conta bancária com o ERP em um mês. Uma conciliação corresponde sempre a uma conta e um mês, mesmo que o extrato tenha vindo quebrado em vários arquivos.</td></tr>
+    <tr><td><strong>Competência</strong></td><td>O mês a que os dados se referem, no formato mês e ano. É o recorte usado pela ponte contábil, que trabalha com o mês inteiro do cliente, e não com uma conta isolada.</td></tr>
+    <tr><td><strong>De-para</strong></td><td>A decisão de para onde cada categoria de origem vai, em cada destino. A mesma categoria pode ter decisões diferentes em destinos diferentes.</td></tr>
+    <tr><td><strong>Destino</strong></td><td>O uso que se dá à classificação: conta contábil, demonstrativo, fluxo de caixa e outros. Cada destino tem seu próprio conjunto de decisões.</td></tr>
+    <tr><td><strong>Materialização</strong></td><td>O fechamento de uma competência em um destino. Congela o que foi decidido, numa versão que não muda mais. É dela que sai o arquivo contábil.</td></tr>
+  </tbody>
+</table>
+
+<div class="callout">
+  <span class="label">Por que “uma conta e um mês”</span>
+  <p>Contador reconhece esse recorte, e ele evita o erro mais caro da conciliação: misturar dois períodos no mesmo confronto. Se o extrato do mês vier em três partes, as três entram na mesma conciliação e formam um resumo só. Tentar criar uma segunda conciliação para a mesma conta e o mesmo mês é recusado, com a indicação de anexar o arquivo à existente.</p>
+</div>
+
+<h2>Dois planos de contas, e eles não são a mesma coisa</h2>
+<p>Esta é a distinção que mais confunde no começo, e o sistema mantém os dois nomes separados de propósito.</p>
+
+<dl class="kv">
+  <dt>Plano de Contas</dt>
+  <dd>É o plano da <em>origem</em>, ou seja, a classificação que o ERP do cliente já usa. A plataforma lê, não edita.</dd>
+  <dt>Plano contábil</dt>
+  <dd>É o plano do <em>destino</em>, ou seja, o plano de contas do sistema contábil onde o escritório lança. Ele é importado por planilha, por cliente, e é dele que saem as contas de débito e crédito do arquivo final.</dd>
+</dl>
+
+<p>O de-para é exatamente a ponte entre os dois: pega a categoria que veio da origem e diz em que conta do plano contábil ela entra.</p>
+
+<!-- ============================ CAP 3 ============================ -->
+<header class="chead" id="cap3">
+  <p class="num">Capítulo 3</p>
+  <h1 class="chapter">Perfis de acesso</h1>
+</header>
+
+<p class="lead">São cinco perfis. Três pertencem à organização e dois pertencem ao cliente final. O perfil define o que a pessoa pode fazer; o alcance (quais clientes ela enxerga) é definido separadamente, pela carteira.</p>
+
+<table class="long">
+  <thead>
+    <tr><th style="width:24%">Perfil</th><th>Quem é</th><th style="width:30%">Alcance</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Administrador da plataforma</strong></td><td>Quem opera o Hologram OS como produto, dá suporte e cadastra organizações.</td><td>Todas as organizações.</td></tr>
+    <tr><td><strong>Administrador</strong></td><td>Sócio ou responsável pelo escritório. Cadastra clientes, define a equipe e configura o catálogo da organização.</td><td>Todos os clientes da própria organização.</td></tr>
+    <tr><td><strong>Gerente</strong></td><td>Quem toca a carteira: cadastra cliente, conecta origem, concilia, classifica e fecha o mês.</td><td>Somente os clientes da própria carteira.</td></tr>
+    <tr><td><strong>Gerente do cliente</strong></td><td>Pessoa da empresa atendida, com autonomia: concilia, classifica, mantém o glossário e gere os usuários dela.</td><td>Somente a própria empresa.</td></tr>
+    <tr><td><strong>Operador do cliente</strong></td><td>Pessoa da empresa atendida, com acesso operacional: envia arquivo, concilia, revisa e exporta.</td><td>Somente a própria empresa.</td></tr>
+  </tbody>
+</table>
+
+<h2>O que cada perfil pode fazer</h2>
+
+<table class="long">
+  <thead>
+    <tr>
+      <th>Ação</th>
+      <th class="c" style="width:11%">Admin.<br>plataforma</th>
+      <th class="c" style="width:11%">Admin.</th>
+      <th class="c" style="width:11%">Gerente</th>
+      <th class="c" style="width:11%">Gerente<br>do cliente</th>
+      <th class="c" style="width:11%">Operador<br>do cliente</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>Criar e rodar conciliação</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td></tr>
+    <tr><td>Revisar e exportar relatório</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td></tr>
+    <tr><td>Enviar arquivo do cliente</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td></tr>
+    <tr><td>Sincronizar contas bancárias</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td></tr>
+    <tr><td>Manter o glossário</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td></tr>
+    <tr><td>Editar o de-para</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td></tr>
+    <tr><td>Configurar o mapeamento do arquivo</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td></tr>
+    <tr><td>Sincronizar plano de contas, títulos e movimentos</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td></tr>
+    <tr><td>Registrar contexto de título</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td></tr>
+    <tr><td>Gerir os usuários do cliente</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td></tr>
+    <tr><td>Gerar o arquivo contábil</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td></tr>
+    <tr><td>Importar o plano contábil</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td></tr>
+    <tr><td>Gerir conexões de origem</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td></tr>
+    <tr><td>Criar cliente</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td></tr>
+    <tr><td>Editar e encerrar cliente</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td><td class="c no">não</td></tr>
+    <tr><td>Gerir a equipe da organização</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td><td class="c no">não</td></tr>
+    <tr><td>Configurar layouts de exportação</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td><td class="c no">não</td></tr>
+    <tr><td>Redefinir a senha de um usuário</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td><td class="c no">não</td><td class="c no">não</td></tr>
+    <tr><td>Cadastrar organizações</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td><td class="c no">não</td><td class="c no">não</td></tr>
+  </tbody>
+</table>
+
+<div class="callout">
+  <span class="label">A tela esconde o que o perfil não pode</span>
+  <p>Quando um perfil não tem uma permissão, o botão correspondente não aparece para ele. Isso não é só estética: a mesma regra é aplicada no servidor, de modo que ninguém consegue executar uma ação por um caminho alternativo. O operador do cliente, por exemplo, vê a tela do de-para e a prévia, mas não encontra o botão de decidir.</p>
+</div>
+
+<h2>Carteira compartilhada</h2>
+<p>Um cliente pode ter vários gerentes com acesso e sempre um único responsável. O responsável é quem aparece na coluna <span class="ui">Gerente Responsável</span> da lista e é a quem se cobra o fechamento; os demais entram como colaboradores, com o mesmo acesso. Trocar o responsável não tira o acesso de ninguém, e o sistema não permite deixar um cliente ativo sem responsável.</p>
+
+<!-- ============================ CAP 4 ============================ -->
+<header class="chead" id="cap4">
+  <p class="num">Capítulo 4</p>
+  <h1 class="chapter">Primeiro acesso</h1>
+</header>
+
+<h2>Entrar</h2>
+<p>O acesso é por e-mail e senha. Se a combinação estiver errada, a mensagem é sempre a mesma, sem dizer se o problema foi o e-mail ou a senha: é uma proteção contra quem tenta descobrir quais e-mails existem no sistema. Depois de cinco tentativas em cinco minutos, novas tentativas são bloqueadas temporariamente.</p>
+
+<p>Quem esquece a senha fala com o administrador da conta. A redefinição é feita pela administração do Hologram OS e, ao ser feita, encerra imediatamente todas as sessões abertas daquele usuário, que precisa entrar de novo com a senha nova.</p>
+
+<h3>Senhas</h3>
+<ul class="tight">
+  <li>Usuários da equipe do escritório: no mínimo 8 caracteres.</li>
+  <li>Usuários do cliente final: no mínimo 10 caracteres.</li>
+  <li>Desativar um usuário tem efeito imediato. Ele perde o acesso na próxima ação, sem esperar o login expirar.</li>
+</ul>
+
+<h2>A tela</h2>
+<p>A navegação tem dois níveis. Fora de um cliente, o menu mostra a lista de clientes e, para quem administra, a seção <span class="ui">Configurações</span>. Ao entrar em um cliente, o menu passa a mostrar as seções daquele cliente: conciliações, contas bancárias, painel, glossário, os dois planos de contas, carteira, de-para e usuários.</p>
+
+<figure>
+  <img src="img/clientes.png" alt="Lista de clientes">
+  <figcaption>A lista de clientes da organização. Cada linha traz a categoria, o gerente responsável, a situação e quantas conciliações o cliente já tem. O coração marca favoritos, que sobem para o topo.</figcaption>
+</figure>
+
+<h3>Notificações</h3>
+<p>O sino no alto da tela avisa quando um processamento termina, com ou sem erro. É por isso que não é preciso ficar esperando na tela de uma conciliação: envia-se o arquivo, sai-se da tela e o sino chama de volta.</p>
+
+<h3>Temas</h3>
+<p>A interface tem três temas: Hologram, no azul-marinho da marca, que é o padrão; claro; e escuro. A escolha fica salva no navegador. As imagens deste manual estão no tema Hologram, com exceção das seções 6.5 e 6.6, capturadas no tema escuro.</p>
+
+<!-- ============================ CAP 5 ============================ -->
+<header class="chead" id="cap5">
+  <p class="num">Capítulo 5</p>
+  <h1 class="chapter">Preparar um cliente</h1>
+</header>
+
+<p class="lead">Um cliente novo leva poucos minutos para começar a conciliar, e mais alguns para ficar pronto para a ponte contábil. Esta é a ordem que evita retrabalho.</p>
+
+<h2 id="s51">5.1 Cadastrar o cliente</h2>
+
+<p>Em <span class="ui">Clientes</span>, o botão <span class="ui">Novo Cliente</span> abre o formulário. Só o nome é obrigatório; a categoria é opcional e serve para organizar a lista (por exemplo, Fintech, Comércio, Serviços). As categorias disponíveis são definidas pela organização, em <span class="ui">Configurações</span>.</p>
+
+<p>O cadastro tem um interruptor para conectar o ERP Omie na hora. Se a credencial ainda não estiver em mãos, basta deixá-lo desligado: o cliente nasce sem origem, e a conexão pode ser feita depois. Um cliente sem origem é um cliente válido, ele apenas ainda não tem de onde puxar lançamentos.</p>
+
+<p>Quando um gerente cria o cliente, ele já entra como responsável. Quando um administrador cria, o cliente nasce sem responsável e o primeiro gerente adicionado assume o posto.</p>
+
+<h2 id="s52">5.2 Conectar a origem dos dados</h2>
+
+<p>A origem é de onde vêm as contas e os lançamentos. Ela é configurada no <span class="ui">Painel</span> do cliente, na seção <span class="ui">Origens de dado</span>.</p>
+
+<figure>
+  <img src="img/painel.png" alt="Painel do cliente com a seção de origens de dado">
+  <figcaption>O painel do cliente reúne o resumo do mês e o estado da origem. A tabela mostra o tipo, a situação e quando a conexão foi verificada pela última vez.</figcaption>
+</figure>
+
+<h3>Os dois tipos</h3>
+<dl class="kv">
+  <dt>Omie</dt>
+  <dd>Exige a chave e o segredo de aplicativo do cliente no Omie, fornecidos por ele. O Hologram OS testa a credencial no momento do cadastro e só aceita se o ERP responder.</dd>
+  <dt>Arquivo</dt>
+  <dd>Para o cliente que não tem ERP. Não pede credencial nenhuma: os lançamentos passam a vir da planilha ou do extrato que ele manda todo mês. O capítulo 7.2 explica a configuração.</dd>
+</dl>
+
+<div class="callout warn">
+  <span class="label">Um cliente, um tipo de origem</span>
+  <p>Um cliente que já recebe lançamentos do Omie não pode também receber por arquivo, e vice-versa. Se fosse permitido, a mesma movimentação poderia entrar duas vezes por caminhos diferentes. Para trocar de origem, remove-se a conexão existente e cria-se a nova.</p>
+</div>
+
+<h3>Os três estados possíveis</h3>
+<p>O estado da origem é calculado na hora, e é ele que decide quais telas ficam liberadas:</p>
+<ul class="tight">
+  <li><strong>Sem origem</strong>: o cliente ainda não tem de onde puxar dados. As telas que dependem da origem explicam isso e oferecem o caminho para conectar.</li>
+  <li><strong>Ativa</strong>: a última verificação funcionou. Tudo liberado.</li>
+  <li><strong>Com erro</strong>: a credencial foi recusada pela origem, em geral porque mudou. A tela indica reconectar.</li>
+</ul>
+
+<h2 id="s53">5.3 Contas bancárias</h2>
+
+<p>A tela <span class="ui">Contas Bancárias</span> mostra as contas correntes, aplicações e cartões que o cliente tem cadastrados na origem. É dessa lista que se escolhe a conta ao criar uma conciliação.</p>
+
+<p>A lista é atualizada automaticamente uma vez por dia e pode ser forçada a qualquer momento. Contas novas criadas no ERP aparecem na próxima sincronização.</p>
+
+<h2 id="s54">5.4 Plano de Contas da origem</h2>
+
+<p>Esta tela mostra a classificação que o ERP do cliente já tem: o código de cada categoria, o nome, a situação e, principalmente, a conta de demonstrativo que a própria origem já vincula a ela.</p>
+
+<figure>
+  <img src="img/plano-de-contas.png" alt="Plano de Contas da origem">
+  <figcaption>Cinco indicadores resumem o plano: quantas categorias vieram, quantas estão ativas, quantas já trazem conta de demonstrativo, quantas não trazem e quantas têm conta contábil. Clicar num número filtra a lista por ele.</figcaption>
+</figure>
+
+<p>O indicador <span class="ui">Sem destino declarado</span> merece atenção porque é fácil de ler errado. Ele não é uma pendência: transferências entre contas próprias e categorias totalizadoras simplesmente não têm conta de demonstrativo, e isso é correto. O sistema nunca inventa um destino para elas.</p>
+
+<p>Esse vínculo que a origem já declara é aproveitado no de-para como sugestão, o que poupa boa parte da digitação inicial. Uma categoria que deixa de existir na origem não é apagada aqui, ela passa a constar como ausente, porque pode haver decisão de de-para apontando para ela.</p>
+
+<h2 id="s55">5.5 Plano contábil e a conta do banco</h2>
+
+<p>O plano contábil é o plano de contas do sistema onde o escritório de fato lança, e ele é importado por planilha, por cliente. O modelo tem quatro colunas: código reduzido, nome, tipo (analítica ou sintética) e, opcionalmente, classificação.</p>
+
+<figure>
+  <img src="img/plano-contabil.png" alt="Plano contábil do cliente">
+  <figcaption>O plano contábil importado, com filtros por tipo e por situação. Só contas analíticas e ativas podem receber lançamento.</figcaption>
+</figure>
+
+<h3>Como a importação se comporta</h3>
+<ul class="tight">
+  <li>A planilha entra inteira ou não entra. Se uma linha estiver inválida, o arquivo é recusado e nada é gravado, com o motivo indicado linha a linha.</li>
+  <li>Reimportar não duplica: o sistema casa pelo código reduzido, atualiza o que mudou e marca como inativa a conta que sumiu da planilha. Nada é apagado, porque pode haver decisão antiga apontando para aquela conta.</li>
+  <li>Só conta analítica e ativa pode ser escolhida como destino. Conta sintética é recusada, com a explicação.</li>
+</ul>
+
+<h3>A conta do banco</h3>
+<p>Uma partida tem dois lados. O lado da categoria vem do de-para; o lado do banco vem daqui: para cada conta de origem do cliente (cada conta corrente, cartão ou aplicação), indica-se qual conta contábil a representa. Há ainda a possibilidade de definir uma conta padrão, usada quando o arquivo enviado pelo cliente não traz a informação de conta.</p>
+
+<div class="callout warn">
+  <span class="label">Sem a conta do banco, não sai arquivo</span>
+  <p>Se uma linha tiver categoria decidida mas nenhuma conta de banco resolvível, a materialização é bloqueada com um aviso que aponta exatamente essa configuração. É proposital: um arquivo contábil com um lado da partida em branco seria recusado na importação, ou pior, aceito errado.</p>
+</div>
+
+<h2 id="s56">5.6 Glossário do cliente</h2>
+
+<p>O glossário é o vocabulário contábil daquele cliente, escrito uma vez e usado em todas as conciliações seguintes. É onde mora o conhecimento que hoje costuma ficar na cabeça de quem fecha o mês.</p>
+
+<p>Cada entrada tem um tipo:</p>
+
+<table>
+  <thead><tr><th style="width:26%">Tipo</th><th>Para que serve</th><th style="width:34%">Exemplo</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Categoria</strong></td><td>Explica quando uma categoria do plano deve ser usada, e quando não deve.</td><td>“Compra de insumos: farinha, fermento e açúcar. Não usar para embalagem, que tem categoria própria.”</td></tr>
+    <tr><td><strong>Fornecedor típico</strong></td><td>Registra quem é um fornecedor recorrente e como ele aparece no extrato.</td><td>“Moinho Santa Clara: fornecedor de farinha, boletos quinzenais entre R$ 2.000 e R$ 8.000.”</td></tr>
+    <tr><td><strong>Regra de auditoria</strong></td><td>Fixa uma regra de classificação que vale para aquele cliente.</td><td>“IOF nunca é juros: vai para despesa financeira própria.”</td></tr>
+  </tbody>
+</table>
+
+<p>Essas entradas são usadas como referência na análise de classificação. Uma regra registrada hoje passa a ser cobrada em toda conciliação daquele cliente, inclusive quando quem revisa for outra pessoa.</p>
+
+<!-- ============================ CAP 6 ============================ -->
+<header class="chead" id="cap6">
+  <p class="num">Capítulo 6</p>
+  <h1 class="chapter">O fechamento: conciliação</h1>
+</header>
+
+<h2 id="s61">6.1 Criar a conciliação</h2>
+
+<p>Na tela <span class="ui">Conciliações</span> do cliente, o botão de criar abre uma gaveta lateral. São três decisões: a conta, o mês e os arquivos.</p>
+
+<ol class="steps">
+  <li>Escolha a conta bancária e o mês de referência.</li>
+  <li>Anexe o extrato ou a fatura. Se o extrato veio quebrado, anexe todas as partes: elas entram na mesma conciliação e formam um resumo único.</li>
+  <li>Confira a prévia da extração. O sistema mostra o que leu de cada arquivo antes de qualquer coisa ser gravada.</li>
+  <li>Confirme. Daí em diante o processamento roda sozinho e o sino avisa quando terminar.</li>
+</ol>
+
+<h3>Formatos e limites</h3>
+<ul class="tight">
+  <li>Aceita PDF, XLSX e CSV. Planilha no formato antigo .xls é recusada, com a orientação de salvá-la como .xlsx ou .csv.</li>
+  <li>Até 20 MB por arquivo.</li>
+  <li>O conteúdo do arquivo é verificado, não apenas a extensão. Um arquivo renomeado não passa.</li>
+  <li>O mesmo arquivo anexado duas vezes na mesma conciliação é recusado.</li>
+</ul>
+
+<div class="callout">
+  <span class="label">A trava do saldo</span>
+  <p>Depois de ler o arquivo, o sistema soma o que extraiu e confere contra o saldo declarado no próprio documento. Se a conta não fechar, a confirmação da prévia é bloqueada e o motivo é exibido. É a rede que pega o arquivo truncado, a página que faltou e o PDF que veio cortado, antes que uma conciliação incompleta entre no sistema.</p>
+</div>
+
+<h2 id="s62">6.2 O que o sistema faz sozinho</h2>
+
+<p>Confirmada a criação, três coisas acontecem em segundo plano, nesta ordem:</p>
+
+<ol class="steps">
+  <li><strong>Busca no ERP</strong> os lançamentos daquela conta no período, incluindo alguns dias antes e depois do mês, para alcançar o lançamento que caiu na virada.</li>
+  <li><strong>Cruza</strong> cada movimentação do arquivo com os lançamentos encontrados, segundo as regras da próxima seção.</li>
+  <li><strong>Analisa a classificação</strong> do que foi conciliado, usando o glossário do cliente como referência, e registra as anomalias encontradas.</li>
+</ol>
+
+<p>O arquivo enviado não fica guardado. Ele é processado em memória e descartado; o que permanece é o resultado estruturado da leitura.</p>
+
+<h2 id="s63">6.3 Como o cruzamento decide</h2>
+
+<p>Esta é a parte que precisa ser previsível, e por isso ela é publicada em detalhe. Não há modelo estatístico, aprendizado ou heurística: são regras fixas.</p>
+
+<table>
+  <thead><tr><th style="width:30%">Critério</th><th>Regra</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Valor</strong></td><td>Diferença de até R$ 0,01 é considerada o mesmo valor. Acima disso, não é par.</td></tr>
+    <tr><td><strong>Data</strong></td><td>Mesma data: conciliado. De 1 a 3 dias de diferença: conciliado com data divergente, e uma anomalia é registrada. Acima de 3 dias: não é par.</td></tr>
+    <tr><td><strong>Fornecedor</strong></td><td>Entra como desempate quando dois candidatos empatam em valor e data. A semelhança entre o nome no extrato e o cadastro do ERP favorece o par mais provável, mas nunca elimina um candidato sozinho.</td></tr>
+    <tr><td><strong>Exclusividade</strong></td><td>Um lançamento do ERP casa com uma única linha do extrato, e vice-versa. Não existe par repetido.</td></tr>
+  </tbody>
+</table>
+
+<p>O cruzamento acontece em passadas, da evidência mais forte para a mais fraca: primeiro todos os pares de data exata, depois os de um dia de diferença, e assim por diante. Isso impede que uma linha ambígua, processada antes, leve o lançamento que pertencia a outra.</p>
+
+<div class="callout">
+  <span class="label">Por que 3 dias, e por que fixo</span>
+  <p>Três dias cobrem o caso real de pagamento feito na sexta e compensado na segunda. O valor não é configurável de propósito: uma tolerância ajustável vira uma discussão por cliente, e o resultado de uma conciliação deixaria de ser comparável com o de outra.</p>
+</div>
+
+<h2 id="s64">6.4 Revisar o resultado</h2>
+
+<p>A tela da conciliação abre com o resumo em cartões, o confronto de saldos e os arquivos que a compõem. Abaixo, quatro abas organizam o que precisa de atenção.</p>
+
+<figure>
+  <img src="img/conciliacao.png" alt="Tela de uma conciliação processada">
+  <figcaption>A conciliação processada. Os cartões do topo dão o retrato imediato; o bloco <span class="ui">Resumo geral</span> confronta o saldo do arquivo com o do ERP e marca <span class="ui">Conferido</span> quando a diferença é zero.</figcaption>
+</figure>
+
+<table>
+  <thead><tr><th style="width:30%">Aba</th><th>O que traz</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Movimentações</strong></td><td>Todas as linhas do extrato, com a situação de cada uma: conciliada, conciliada com data divergente, sem correspondência no ERP ou ignorada na revisão.</td></tr>
+    <tr><td><strong>Divergências Omie</strong></td><td>O contrário: o que está lançado no ERP e não apareceu no extrato. Inclui títulos previstos e atrasados.</td></tr>
+    <tr><td><strong>Anomalias</strong></td><td>Os apontamentos da análise, com severidade e status.</td></tr>
+    <tr><td><strong>Resumo</strong></td><td>Os totais consolidados da conciliação.</td></tr>
+  </tbody>
+</table>
+
+<p>Cada aba tem filtros próprios e busca por descrição. Qualquer linha aceita uma observação escrita pelo revisor, que fica salva na conciliação e sai no relatório.</p>
+
+<h2 id="s65">6.5 Anomalias e o veredito do revisor</h2>
+
+<p>Anomalia é tudo que passou pelo cruzamento e ainda assim merece um olhar humano. O caso mais interessante não é o erro de soma: é a classificação suspeita, quando o valor está certo mas a categoria não parece a correta para aquele cliente.</p>
+
+<figure>
+  <img src="img/anomalias.png" alt="Aba de anomalias com o veredito do revisor">
+  <figcaption>A aba de anomalias. Cada apontamento tem severidade, tipo, origem e status. A coluna <span class="ui">O flag procedia?</span> é onde o revisor responde se o apontamento fazia sentido.</figcaption>
+</figure>
+
+<p>O veredito serve para duas coisas. A primeira é operacional: marcar como <span class="ui">Procedente</span> ou <span class="ui">Improcedente</span> deixa registrado o que foi decidido, com autor e data. A segunda é de qualidade: um tipo de apontamento que é sempre julgado improcedente num cliente é sinal de que falta uma regra no glossário daquele cliente.</p>
+
+<p>Resolver uma anomalia é uma ação separada do veredito, e as duas convivem: um apontamento pode ser procedente e já resolvido, ou improcedente e encerrado sem ação.</p>
+
+<h2 id="s66">6.6 Lançar no Omie o que faltou</h2>
+
+<p>As compras de fatura de cartão que não têm lançamento correspondente no ERP costumavam virar uma lista para alguém redigitar. O Hologram OS lança essas linhas diretamente na conta do cartão no Omie.</p>
+
+<figure>
+  <img src="img/lancamento.png" alt="Seleção de compras para lançar no Omie">
+  <figcaption>Na aba de movimentações, as linhas sem correspondência podem ser selecionadas em lote. A barra superior confirma quantas estão selecionadas e oferece o lançamento em uma ação.</figcaption>
+</figure>
+
+<p>O fluxo é: selecionar as linhas, classificar a categoria (o que pode ser feito em lote), conferir o resumo e confirmar. Cada linha vira um lançamento, com data, valor, categoria e a descrição da compra como observação.</p>
+
+<div class="callout warn">
+  <span class="label">Dois limites deliberados</span>
+  <p><strong>Estorno é bloqueado.</strong> A representação de crédito na API do ERP ainda não foi validada pela equipe, e lançar um estorno no palpite poderia registrá-lo como uma segunda despesa. Enquanto não houver certeza, o sistema recusa.</p>
+  <p><strong>Falha de comunicação nunca reenvia às cegas.</strong> Se a resposta do ERP não chegar, a linha fica marcada para conferência manual em vez de ser lançada de novo. O critério interno é explícito: um único lançamento duplicado em produção e o recurso é desligado inteiro.</p>
+</div>
+
+<p class="note">Este é o único ponto em que a plataforma escreve no ERP. Todo o resto é leitura. Por ser uma escrita na contabilidade do cliente, o recurso é liberado ambiente a ambiente, de forma consciente.</p>
+
+<h2 id="s67">6.7 Relatório em Excel e painel</h2>
+
+<p>O botão <span class="ui">Exportar relatório</span> gera a planilha completa da conciliação: as movimentações com a situação de cada uma, as divergências, as anomalias e o resumo. É o arquivo que se arquiva no fechamento ou se envia a quem pediu explicação.</p>
+
+<p>O <span class="ui">Painel</span> do cliente resume o mês corrente: quantas conciliações foram feitas, quantas anomalias apareceram, quantas contas estão sincronizadas e quando foi a última conciliação.</p>
+
+<!-- ============================ CAP 7 ============================ -->
+<header class="chead" id="cap7">
+  <p class="num">Capítulo 7</p>
+  <h1 class="chapter">A ponte contábil</h1>
+</header>
+
+<p class="lead">A conciliação responde “o extrato bate com o ERP?”. A ponte contábil responde outra pergunta: “o mês inteiro deste cliente, classificado do jeito que o escritório decidiu, cabe em um arquivo que o sistema contábil importa?”. São caminhos independentes, e o segundo é onde o escritório ganha escala.</p>
+
+<h2 id="s71">7.1 A base de movimentos</h2>
+
+<p>A ponte não lê a conciliação. Ela trabalha sobre uma base própria: todos os lançamentos do cliente em uma competência, vindos da origem, sem recorte de conta. Essa base é atualizada pelo botão de sincronizar, dentro da tela do de-para.</p>
+
+<p>A sincronização nunca apaga. Um lançamento que existia e não veio na nova leitura é marcado como ausente na origem, e continua visível. O que sumiu do ERP não some do histórico do escritório sem deixar rastro.</p>
+
+<h2 id="s72">7.2 Cliente sem ERP: origem por arquivo</h2>
+
+<p>Para o cliente que não tem ERP, a mesma base é alimentada pela planilha que ele manda todo mês. A configuração é feita uma única vez, na aba <span class="ui">Origem por arquivo</span>.</p>
+
+<figure>
+  <img src="img/mapeamento.png" alt="Gaveta de configuração do mapeamento de colunas">
+  <figcaption>O mapeamento de colunas. Escolhe-se um arquivo do cliente para ver as colunas reais dele e diz-se qual coluna é cada campo. Nada é inferido, inclusive a convenção de sinal.</figcaption>
+</figure>
+
+<p>Declara-se qual coluna é a data, qual é a descrição, qual é o valor e qual é a categoria, além do formato numérico. A convenção de sinal é escolhida explicitamente entre três possibilidades:</p>
+
+<ul class="tight">
+  <li><strong>Valor com sinal</strong>: a coluna já vem negativa nas saídas e positiva nas entradas.</li>
+  <li><strong>Coluna de natureza</strong>: uma coluna diz se a linha é débito ou crédito, e o valor vem sem sinal.</li>
+  <li><strong>Colunas separadas</strong>: débito e crédito em duas colunas distintas, ambas sem sinal.</li>
+</ul>
+
+<p>Feito o mapeamento, o envio mensal é direto: escolhe-se a competência, anexa-se o arquivo e, opcionalmente, informa-se o total esperado para conferência. As linhas entram na base de movimentos exatamente como as do ERP entrariam, e seguem para o de-para pelo mesmo caminho.</p>
+
+<div class="callout warn">
+  <span class="label">O arquivo entra inteiro ou não entra</span>
+  <p>Cabeçalho que não bate com o mapeamento, linha inválida ou total declarado divergente resultam em recusa, com o motivo apontado, e nenhuma linha é gravada. Enviar o mesmo arquivo duas vezes é recusado; enviar uma versão corrigida da mesma competência substitui a anterior, e as linhas antigas passam a constar como ausentes.</p>
+</div>
+
+<h2 id="s73">7.3 O de-para</h2>
+
+<p>Aqui mora a decisão central do Hologram OS: para onde cada categoria de origem vai, em cada destino.</p>
+
+<figure>
+  <img src="img/de-para.png" alt="Tela do de-para com as decisões por destino">
+  <figcaption>As decisões de um destino. Os cinco indicadores mostram o universo de categorias e em que estado cada grupo está; clicar num deles filtra a lista.</figcaption>
+</figure>
+
+<h3>Os estados de uma categoria</h3>
+<table>
+  <thead><tr><th style="width:28%">Estado</th><th>O que quer dizer</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Herdada da origem</strong></td><td>O plano de contas do ERP já declara um destino para essa categoria, e a plataforma propõe o mesmo. Basta confirmar.</td></tr>
+    <tr><td><strong>Confirmada</strong></td><td>Alguém da equipe assumiu a decisão, herdada ou digitada.</td></tr>
+    <tr><td><strong>Não mapear</strong></td><td>Decisão explícita de que aquela categoria fica fora daquele destino. Transferência entre contas próprias no demonstrativo é o caso clássico.</td></tr>
+    <tr><td><strong>Sem decisão</strong></td><td>Ninguém decidiu ainda. É o que falta para fechar a competência.</td></tr>
+  </tbody>
+</table>
+
+<p>“Não mapear” e “sem decisão” são coisas diferentes, e a distinção importa: a primeira é uma decisão tomada, a segunda é trabalho pendente.</p>
+
+<h3>Vigência</h3>
+<p>Toda decisão vale a partir de uma competência. Mudar a decisão de uma categoria não reescreve o passado: cria uma vigência nova, e o que já foi fechado continua explicado pela decisão que valia na época. Tentar alterar retroativamente uma competência já materializada é recusado.</p>
+
+<h3>Trabalho em lote</h3>
+<p>Três recursos aceleram a configuração inicial: confirmar todas as herdadas de uma vez, exportar as decisões em planilha para preencher fora do sistema e importar a planilha preenchida de volta. Na importação, uma conta inválida faz a planilha inteira ser recusada, para não deixar metade do de-para aplicada.</p>
+
+<h2 id="s74">7.4 Prévia, partida e materialização</h2>
+
+<p>A aba <span class="ui">Prévia da competência</span> mostra como o mês fica com as decisões atuais, antes de qualquer coisa ser fechada.</p>
+
+<figure>
+  <img src="img/previa.png" alt="Prévia da competência com cobertura e partida contábil">
+  <figcaption>A prévia de um mês no destino Conta contábil. Acima, a cobertura por valor; abaixo, a completude da partida, linha a linha, com conta, histórico e valor.</figcaption>
+</figure>
+
+<p>Dois números resumem a prévia, e os dois são calculados por valor, não por quantidade de linhas:</p>
+<ul class="tight">
+  <li><strong>Cobertura</strong>: quanto do valor com categoria já tem decisão.</li>
+  <li><strong>Partida completa</strong>: quanto do valor com conta decidida tem os dois lados da partida e o histórico prontos.</li>
+</ul>
+
+<h3>De onde sai a partida</h3>
+<p>A partida é derivada do sinal do lançamento, nunca do texto. Uma entrada debita a conta do banco e credita a conta decidida para a categoria; uma saída faz o contrário. O lado do banco vem da associação configurada na seção 5.5, e o histórico padrão é o texto que o escritório definiu ao decidir a categoria.</p>
+
+<h3>Materializar</h3>
+<p>Materializar fecha a competência naquele destino. Gera uma versão numerada, com tudo congelado: os códigos, os valores, a vigência que decidiu cada linha e o histórico do momento. Reimportar o plano contábil depois, ou trocar uma decisão, não muda o que já foi materializado. Se for preciso refazer, materializa-se de novo e nasce a versão seguinte, sem que a anterior deixe de existir.</p>
+
+<h2 id="s75">7.5 Gerar o arquivo do sistema contábil</h2>
+
+<p>Da versão materializada sai o arquivo que a contabilidade importa. A seção fica na própria tela do de-para, abaixo da prévia.</p>
+
+<figure>
+  <img src="img/arquivo-contabil.png" alt="Seção do arquivo contábil com o histórico de gerações">
+  <figcaption>Cada geração fica registrada: quando, por quem, de qual versão do de-para, com qual layout, quantas linhas e o valor total. O arquivo pode ser baixado de novo a qualquer momento.</figcaption>
+</figure>
+
+<p>Três garantias definem essa etapa:</p>
+
+<ol class="steps">
+  <li><strong>Nada é enviado automaticamente.</strong> Uma pessoa gera, confere e baixa. A importação no sistema contábil continua sendo um ato deliberado do escritório.</li>
+  <li><strong>A geração é determinística.</strong> A mesma versão materializada com o mesmo layout produz exatamente os mesmos bytes, sempre. O conteúdo do arquivo não é guardado no servidor: cada download regenera o arquivo e confere a assinatura contra a que foi registrada na primeira geração. Se der diferença, o download é bloqueado em vez de entregar um arquivo diferente.</li>
+  <li><strong>O sistema recusa em vez de consertar.</strong> Se a cobertura estiver parcial, se faltar um lado de partida ou se algum texto não couber nas regras do layout, a geração é recusada com o motivo, apontando as categorias envolvidas. Nada é truncado, substituído ou escapado sem aviso.</li>
+</ol>
+
+<h3>Layouts de exportação</h3>
+<p>O formato do arquivo é uma configuração da organização, não código: quais colunas, em que ordem, separador, codificação, formato de data e de valor. Existe um modelo pronto para o padrão Domínio, e a partir dele criam-se variações.</p>
+
+<figure>
+  <img src="img/layouts.png" alt="Tela de layouts de exportação">
+  <figcaption>Os layouts da organização. Cada alteração vira uma versão nova, e um arquivo gerado no passado continua explicado pela versão que o gerou.</figcaption>
+</figure>
+
+<!-- ============================ CAP 8 ============================ -->
+<header class="chead" id="cap8">
+  <p class="num">Capítulo 8</p>
+  <h1 class="chapter">Carteira de títulos</h1>
+</header>
+
+<p class="lead">A conciliação sempre pede uma conta e um mês. A carteira faz o recorte oposto: todos os títulos a pagar e a receber em aberto, de todas as contas, sem recorte de período. É esse recorte que faz aparecer o título vencido há quatro meses, que nenhuma conciliação mensal traria.</p>
+
+<figure>
+  <img src="img/carteira.png" alt="Carteira de títulos em aberto">
+  <figcaption>A carteira. Dois blocos, a receber e a pagar, com o total em aberto, o que está a vencer, o que está vencido e a abertura por faixa de atraso. Clicar num valor filtra a lista abaixo.</figcaption>
+</figure>
+
+<h2>Como ler os totais</h2>
+<p>Os valores do topo são calculados sobre a carteira inteira, não sobre a página visível. O atraso é medido na data da consulta e aberto em quatro faixas: 1 a 30, 31 a 60, 61 a 90 e mais de 90 dias. A lista abaixo aceita filtro por tipo, ordenação e busca, e o cabeçalho acompanha a rolagem.</p>
+
+<p>A carteira é atualizada por uma rotina diária. O botão <span class="ui">Sincronizar agora</span> força a atualização quando se precisa da posição do momento, e a data da última atualização fica sempre visível ao lado.</p>
+
+<h2>Contexto do título</h2>
+<p>Um título vencido nem sempre é inadimplência. Pode haver acordo, antecipação, nota a cancelar ou cobrança suspensa. O contexto é o registro dessa informação no próprio título.</p>
+
+<p>Cada registro tem um tipo, um texto livre, o autor e a data. O histórico é acumulativo: um contexto novo não apaga o anterior, e nada disso altera o título no ERP. A coluna <span class="ui">Contexto</span> da lista mostra quantos registros cada título tem, o que permite ver de relance o que já foi tratado.</p>
+
+<h2>Relatório de recebíveis</h2>
+
+<figure>
+  <img src="img/recebiveis.png" alt="Relatório de recebíveis em dois grupos">
+  <figcaption>O relatório separa, para o que está vencido, a inadimplência real do que tem contexto registrado, nos dois sentidos: a receber e a pagar.</figcaption>
+</figure>
+
+<p>O relatório usa o contexto mais recente de cada título para separar dois grupos: <strong>inadimplência real</strong> (títulos vencidos sem contexto, ou marcados como perda provável) e <strong>vencido com contexto</strong> (aquilo que já tem explicação registrada). É a diferença entre “temos R$ 97 mil vencidos” e “temos R$ 3 mil de inadimplência real, o resto está acordado”.</p>
+
+<!-- ============================ CAP 9 ============================ -->
+<header class="chead" id="cap9">
+  <p class="num">Capítulo 9</p>
+  <h1 class="chapter">Administração</h1>
+</header>
+
+<h2>A equipe da organização</h2>
+<p>Em <span class="ui">Configurações &gt; Usuários</span>, o administrador cadastra e edita a equipe do escritório. Além de criar e desativar usuários, é ali que se define quem é gerente e quem é administrador.</p>
+
+<p>Quando alguém da equipe muda de escritório, existe uma ação específica de transferência, em vez de apagar e recriar o usuário. A transferência preserva o histórico da pessoa, remove os acessos que não fazem mais sentido e é recusada enquanto ela for responsável por algum cliente ativo, para que nenhum cliente fique órfão.</p>
+
+<h2>Os usuários do cliente</h2>
+<p>Dentro de cada cliente há uma seção de usuários, onde se concede acesso às pessoas da empresa atendida. Elas entram com o próprio login e enxergam apenas aquele cliente: nem a lista de clientes do escritório, nem qualquer dado de outra empresa.</p>
+
+<p>É o caminho natural para tirar da caixa de entrada as perguntas de rotina. Em vez de pedir o relatório por e-mail, o cliente entra e consulta a conciliação, a carteira e os títulos que já têm contexto registrado.</p>
+
+<h2>Catálogos da organização</h2>
+<dl class="kv">
+  <dt>Categorias de cliente</dt>
+  <dd>Os rótulos usados para organizar a lista de clientes. Cada organização tem os seus.</dd>
+  <dt>Layouts de exportação</dt>
+  <dd>Os formatos de arquivo contábil, descritos na seção 7.5.</dd>
+  <dt>Tipos de anomalia</dt>
+  <dd>O catálogo de apontamentos que a análise pode gerar. É comum a todas as organizações do Hologram OS, e por isso mantido pela administração da plataforma; a organização consulta e usa.</dd>
+</dl>
+
+<h2>Encerrar um cliente</h2>
+
+<p>Quando um cliente deixa a carteira, a saída não é apagar tudo. O encerramento separa quem o cliente <em>é</em> do que <em>aconteceu</em>:</p>
+
+<ul class="tight">
+  <li>Sai a identificação: o nome dá lugar a um rótulo anônimo, as credenciais são removidas e os usuários daquele cliente são anonimizados e desativados.</li>
+  <li>Sai o que era sigiloso: a chave de criptografia do cliente é destruída, o que torna todo o conteúdo cifrado dele definitivamente ilegível.</li>
+  <li>Fica o operacional: conciliações, valores, datas e materializações continuam disponíveis, apenas para leitura.</li>
+</ul>
+
+<p>O encerramento é terminal. Um cliente que volta entra como cadastro novo. Para o caso em que o titular exige o apagamento completo dos dados, existe a exclusão definitiva, que remove tudo, e que é conduzida pela administração da plataforma.</p>
+
+<!-- ============================ CAP 10 ============================ -->
+<header class="chead" id="cap10">
+  <p class="num">Capítulo 10</p>
+  <h1 class="chapter">Segurança, privacidade e LGPD</h1>
+</header>
+
+<p class="lead">Um escritório contábil guarda, em nome de terceiros, alguns dos dados mais sensíveis que uma empresa tem. Estas são as decisões de projeto do Hologram OS que sustentam essa responsabilidade, descritas sem jargão.</p>
+
+<h2>Cada cliente tem a própria chave</h2>
+<p>Os dados sensíveis de um cliente (credenciais, descrições de lançamento, observações, nomes de categoria e histórico) são cifrados com uma chave exclusiva dele, e o conteúdo cifrado de um cliente não é decifrável no contexto de outro. A chave de cada cliente é guardada trancada por uma chave-mestra que fica num cofre de chaves gerenciado, do qual nunca sai; ninguém da equipe tem acesso direto a ela.</p>
+
+<p>É essa arquitetura que torna o encerramento de cliente realmente efetivo: destruir a chave de um cliente basta para tornar todo o conteúdo sigiloso dele ilegível de uma vez.</p>
+
+<h2>Isolamento em dois níveis</h2>
+<p>O primeiro nível separa clientes: um usuário do cliente alcança apenas a própria empresa. O segundo separa organizações: o escritório vizinho hospedado na mesma plataforma não alcança nem o nome dos seus clientes, nem os nomes da sua equipe.</p>
+
+<p>A verificação não acontece só na tela. Cada consulta ao banco de dados já sai restrita ao que o usuário pode ver, de modo que uma tentativa de acessar um recurso de outro cliente responde como se ele não existisse, sem revelar nem que existe.</p>
+
+<h2>Processamento por inteligência artificial</h2>
+<p>Dois pontos do fluxo usam um provedor externo de inteligência artificial, a Anthropic:</p>
+<ul class="tight">
+  <li><strong>Leitura do arquivo da conciliação.</strong> O extrato ou a fatura enviada é lido pelo provedor, que extrai as movimentações. O arquivo é processado em memória e não fica armazenado na plataforma.</li>
+  <li><strong>Análise de classificação.</strong> Para apontar classificações suspeitas, a plataforma envia ao provedor a descrição de cada movimentação conciliada, com o valor, o fornecedor e a categoria lançados no ERP, junto com o glossário do cliente.</li>
+</ul>
+<p>O cruzamento com o ERP não usa inteligência artificial: são as regras fixas da seção 6.3. A planilha da origem por arquivo também não passa pelo provedor, porque é lida pelo mapeamento de colunas. E a IA nunca decide: ela aponta, e quem decide é uma pessoa.</p>
+
+<h2>O que não é guardado</h2>
+<ul class="tight">
+  <li><strong>O arquivo original.</strong> Extratos e faturas são processados em memória e descartados. O que fica é o resultado estruturado da leitura.</li>
+  <li><strong>Nomes de terceiros.</strong> Razão social de fornecedor e nome de categoria não ficam armazenados em texto legível; são buscados na origem no momento em que a tela precisa exibi-los.</li>
+  <li><strong>Senhas.</strong> Guardadas apenas como resumo criptográfico irreversível, jamais em texto.</li>
+</ul>
+
+<p>Valores e datas ficam em texto legível, de propósito: são números sem identificação, necessários para ordenar, filtrar e somar.</p>
+
+<h2>Trilha de acesso</h2>
+<p>Visualizações e exportações de relatório, além de todas as tentativas de acesso negadas, ficam registradas. O registro guarda apenas identificadores, data e hora, nunca o conteúdo consultado. Navegação dentro do próprio cliente não gera registro, para que a trilha continue útil em vez de virar ruído.</p>
+
+<h2>Disponibilidade e monitoramento</h2>
+<p>A plataforma roda em infraestrutura gerenciada, com monitoramento ativo. Falhas no processamento de uma conciliação, na comunicação com o ERP ou em qualquer rotina automática geram alerta para a equipe responsável, independentemente de alguém ter reportado o problema.</p>
+
+<!-- ============================ CAP 11 ============================ -->
+<header class="chead" id="cap11">
+  <p class="num">Capítulo 11</p>
+  <h1 class="chapter">Limites conhecidos</h1>
+</header>
+
+<p class="lead">Um manual honesto diz também onde o produto para. Estes são os limites atuais do Hologram OS, com o motivo de cada um. Nenhum deles é acidental.</p>
+
+<table class="long">
+  <thead><tr><th style="width:34%">Limite</th><th>Motivo</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Estorno não é lançado no ERP</strong></td><td>A representação de crédito na API do ERP não foi validada contra a operação real. Lançar no palpite poderia registrar um estorno como segunda despesa.</td></tr>
+    <tr><td><strong>O lançamento no ERP cobre fatura de cartão</strong></td><td>O fluxo foi construído e verificado para a conta de cartão. Outras contas continuam apenas em leitura.</td></tr>
+    <tr><td><strong>Um cliente tem um tipo de origem</strong></td><td>Permitir ERP e arquivo ao mesmo tempo abriria caminho para a mesma movimentação entrar duas vezes.</td></tr>
+    <tr><td><strong>Tolerância de data fixa em 3 dias</strong></td><td>Tolerância configurável por cliente tornaria o resultado de uma conciliação incomparável com o de outra.</td></tr>
+    <tr><td><strong>O arquivo contábil não é enviado sozinho</strong></td><td>A importação no sistema contábil é um ato deliberado do escritório, e assim permanece.</td></tr>
+    <tr><td><strong>Integração bancária direta</strong></td><td>Hoje os lançamentos entram pelo ERP ou por arquivo. A conexão direta com bancos está no plano de evolução, não no produto atual.</td></tr>
+  </tbody>
+</table>
+
+<div class="callout">
+  <span class="label">Como o produto evolui</span>
+  <p>Cada ciclo de desenvolvimento termina com uma validação feita por uma pessoa, fora do ambiente automatizado: a suíte completa de testes, o teste de acessibilidade da interface em três temas e um roteiro de uso ponta a ponta, na tela. O que não passa nessa validação não é entregue. É a mesma disciplina que sustenta as afirmações deste manual.</p>
+</div>
+
+<!-- ============================ APÊNDICE A ============================ -->
+<header class="chead" id="apa">
+  <p class="num">Apêndice A</p>
+  <h1 class="chapter">Recusas e o que fazer</h1>
+</header>
+
+<p class="lead">O Hologram OS prefere recusar com explicação a aceitar com defeito. Esta tabela reúne as recusas mais comuns, o que cada uma significa e qual é a saída.</p>
+
+<table class="long">
+  <thead><tr><th style="width:32%">O que aparece</th><th style="width:34%">O que significa</th><th>O que fazer</th></tr></thead>
+  <tbody>
+    <tr><td>Já existe conciliação para esta conta e este mês</td><td>O recorte conta mais mês é único.</td><td>Abrir a conciliação existente e anexar o arquivo a ela.</td></tr>
+    <tr><td>Arquivo já enviado nesta conciliação</td><td>A mesma parte foi anexada duas vezes.</td><td>Conferir as partes já anexadas na lista de arquivos.</td></tr>
+    <tr><td>O saldo extraído não fecha</td><td>A soma das linhas lidas não bate com o saldo declarado no documento.</td><td>Conferir se o arquivo está completo. Extrato com páginas faltando é a causa mais comum.</td></tr>
+    <tr><td>O arquivo excede o limite</td><td>Arquivo acima de 20 MB.</td><td>Dividir o extrato em partes e anexar todas à mesma conciliação.</td></tr>
+    <tr><td>Este cliente não tem origem conectada</td><td>Falta conectar o ERP ou a origem por arquivo.</td><td>Ir ao painel do cliente e conectar a origem.</td></tr>
+    <tr><td>A origem está com erro</td><td>A credencial foi recusada, em geral porque mudou no ERP.</td><td>Reconectar com a credencial atual.</td></tr>
+    <tr><td>Cabeçalho divergente no envio de arquivo</td><td>As colunas do arquivo não batem com o mapeamento configurado.</td><td>Ajustar o mapeamento ou pedir ao cliente o arquivo no formato de sempre.</td></tr>
+    <tr><td>Total declarado divergente</td><td>A soma das linhas não bate com o total informado no envio.</td><td>Conferir o arquivo antes de reenviar. Nada foi gravado.</td></tr>
+    <tr><td>Conta do banco pendente</td><td>Há linha com categoria decidida e sem conta contábil para o lado do banco.</td><td>Associar a conta de origem a uma conta contábil, na tela do plano contábil.</td></tr>
+    <tr><td>Cobertura parcial na geração</td><td>Existem categorias sem decisão na competência.</td><td>Decidir as pendentes no de-para e materializar de novo.</td></tr>
+    <tr><td>Texto não cabe no layout</td><td>Um histórico contém caractere que quebraria o arquivo, como o separador de colunas.</td><td>Ajustar o histórico padrão da decisão. Nada é truncado automaticamente.</td></tr>
+    <tr><td>Cliente encerrado</td><td>Toda escrita em cliente encerrado é bloqueada.</td><td>Apenas leitura. Um cliente que retorna entra como cadastro novo.</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================ APÊNDICE B ============================ -->
+<header class="chead" id="apb">
+  <p class="num">Apêndice B</p>
+  <h1 class="chapter">Checklist do fechamento</h1>
+</header>
+
+<h2>Uma vez, por cliente novo</h2>
+<ol class="steps">
+  <li>Cadastrar o cliente e definir o responsável.</li>
+  <li>Conectar a origem (ERP ou arquivo) e confirmar que ela ficou ativa.</li>
+  <li>Sincronizar as contas bancárias.</li>
+  <li>Sincronizar o Plano de Contas da origem e observar quantas categorias já trazem destino declarado.</li>
+  <li>Importar o plano contábil do cliente e associar a conta contábil de cada conta de origem.</li>
+  <li>Registrar no glossário as regras que hoje só existem na cabeça de quem atende o cliente.</li>
+  <li>Percorrer o de-para: confirmar as herdadas, decidir as pendentes e marcar o que fica fora do destino.</li>
+  <li>Conceder acesso às pessoas do cliente, se for o caso.</li>
+</ol>
+
+<h2>Todo mês</h2>
+<ol class="steps">
+  <li>Criar a conciliação de cada conta do mês e conferir a prévia antes de confirmar.</li>
+  <li>Aguardar a notificação e revisar: divergências primeiro, anomalias depois.</li>
+  <li>Dar o veredito nas anomalias e registrar as observações que explicam o mês.</li>
+  <li>Lançar no ERP as compras de cartão que faltaram.</li>
+  <li>Exportar o relatório em Excel e arquivar.</li>
+  <li>Sincronizar a base de movimentos da competência.</li>
+  <li>Conferir a prévia do de-para: cobertura e partida completa em 100%.</li>
+  <li>Materializar a competência.</li>
+  <li>Gerar o arquivo contábil, conferir e importar no sistema contábil.</li>
+  <li>Revisar a carteira e registrar contexto nos títulos vencidos que têm explicação.</li>
+</ol>
+
+<!-- ============================ APÊNDICE C ============================ -->
+<header class="chead" id="apc">
+  <p class="num">Apêndice C</p>
+  <h1 class="chapter">Glossário rápido</h1>
+</header>
+
+<table class="long">
+  <thead><tr><th style="width:30%">Termo</th><th>Definição</th></tr></thead>
+  <tbody>
+    <tr><td>Anomalia</td><td>Apontamento gerado pela análise, com severidade e status, para uma situação que merece olhar humano.</td></tr>
+    <tr><td>Base de movimentos</td><td>Os lançamentos do cliente em uma competência, independentemente de conta, usados pela ponte contábil.</td></tr>
+    <tr><td>Carteira (de clientes)</td><td>O conjunto de clientes que um gerente alcança.</td></tr>
+    <tr><td>Carteira (de títulos)</td><td>Os títulos a pagar e a receber em aberto de um cliente.</td></tr>
+    <tr><td>Competência</td><td>O mês de referência dos dados.</td></tr>
+    <tr><td>Conciliação</td><td>O confronto de uma conta bancária com o ERP em um mês.</td></tr>
+    <tr><td>Contexto do título</td><td>Registro tipado que explica por que um título vencido não é inadimplência.</td></tr>
+    <tr><td>Cobertura</td><td>Percentual do valor com categoria que já tem decisão de de-para.</td></tr>
+    <tr><td>De-para</td><td>A decisão de para onde cada categoria de origem vai, em cada destino.</td></tr>
+    <tr><td>Destino</td><td>O uso dado à classificação: conta contábil, demonstrativo, fluxo de caixa e outros.</td></tr>
+    <tr><td>Divergência Omie</td><td>Lançamento que existe no ERP e não apareceu no extrato.</td></tr>
+    <tr><td>Glossário</td><td>O vocabulário contábil de um cliente: categorias, fornecedores típicos e regras de auditoria.</td></tr>
+    <tr><td>Materialização</td><td>O fechamento de uma competência em um destino, em versão imutável.</td></tr>
+    <tr><td>Organização</td><td>O escritório contábil ou BPO que usa o Hologram OS.</td></tr>
+    <tr><td>Origem</td><td>De onde vêm as contas e os lançamentos do cliente.</td></tr>
+    <tr><td>Partida</td><td>O par de contas, débito e crédito, de uma linha do arquivo contábil.</td></tr>
+    <tr><td>Plano contábil</td><td>O plano de contas do sistema contábil de destino, importado por cliente.</td></tr>
+    <tr><td>Plano de Contas</td><td>A classificação que o ERP do cliente já usa.</td></tr>
+    <tr><td>Sem Omie</td><td>Linha do extrato sem lançamento correspondente no ERP.</td></tr>
+    <tr><td>Veredito</td><td>A resposta do revisor sobre se um apontamento procedia.</td></tr>
+    <tr><td>Vigência</td><td>A competência a partir da qual uma decisão de de-para passa a valer.</td></tr>
+  </tbody>
+</table>
+
+</body>
+</html>
