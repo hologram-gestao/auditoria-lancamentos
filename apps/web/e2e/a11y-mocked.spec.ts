@@ -7680,7 +7680,11 @@ test.describe('Landing pública (86e3fr9vz)', () => {
     await handle?.evaluate((el) => {
       (el as HTMLElement).style.setProperty('visibility', 'hidden', 'important');
     });
-    const png = await page.screenshot({ clip: box ?? undefined });
+    // Uma retentativa para o soluço do protocolo ("Unable to capture screenshot"), o
+    // mesmo do `shot`: com `E2E_SHOTS=1`, outros workers tiram prints de página inteira
+    // ao mesmo tempo. Aqui a captura É a medição, então a 2ª falha reprova o teste.
+    const clip = box ?? undefined;
+    const png = await page.screenshot({ clip }).catch(() => page.screenshot({ clip }));
     await handle?.evaluate((el) => (el as HTMLElement).style.removeProperty('visibility'));
     await handle?.dispose();
     return page.evaluate(
