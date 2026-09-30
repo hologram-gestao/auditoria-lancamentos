@@ -29,8 +29,11 @@ export function LandingHero() {
 
       <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 pb-20 pt-28 sm:px-6 sm:pt-36 lg:grid-cols-[1.1fr_1fr] lg:gap-16 lg:pb-28">
         <div className="min-w-0">
+          {/* `text-foreground`, não `muted`: o sobretítulo fica sobre o pico da aurora, e
+              em `muted-foreground` media 4,16:1 (abaixo do AA). O e2e "texto sobre a
+              aurora" mede os três textos do hero contra o fundo pintado. */}
           <p
-            className="lp-fade-up text-muted-foreground text-sm font-medium tracking-wide"
+            className="lp-fade-up text-foreground text-sm font-medium tracking-wide"
             style={delay(0)}
           >
             {hero.eyebrow}

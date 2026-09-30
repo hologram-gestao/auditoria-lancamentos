@@ -7651,6 +7651,55 @@ test.describe('Landing pública (86e3fr9vz)', () => {
     expect(scrollWidth, `${label}: a página rola na horizontal`).toBeLessThanOrEqual(innerWidth);
   }
 
+  /**
+   * Contraste do texto contra o fundo que a aurora REALMENTE pinta atrás dele.
+   *
+   * A aurora não é ancestral do texto (são bolhas absolutas com `blur`), então o axe
+   * devolve `incomplete` ali em vez de medir. Aqui: o texto fica transparente, a
+   * caixa do elemento é fotografada (o fundo puro, com bolhas, grade e máscara), o
+   * PNG é decodificado num canvas e a cor do texto é comparada com o pixel de fundo
+   * MAIS CLARO da caixa, o pior caso para texto claro.
+   */
+  async function contrasteSobreAurora(page: Page, locator: Locator): Promise<number> {
+    const color = await locator.evaluate((el) => getComputedStyle(el).color);
+    await locator.evaluate((el) => {
+      (el as HTMLElement).style.setProperty('color', 'transparent', 'important');
+    });
+    const box = await locator.boundingBox();
+    expect(box, 'elemento do hero sem caixa').not.toBeNull();
+    const png = await page.screenshot({ clip: box ?? undefined });
+    await locator.evaluate((el) => (el as HTMLElement).style.removeProperty('color'));
+    return page.evaluate(
+      async ({ b64, textColor }) => {
+        const img = new Image();
+        img.src = `data:image/png;base64,${b64}`;
+        await img.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('sem canvas 2d');
+        ctx.drawImage(img, 0, 0);
+        const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        const lin = (v: number) => {
+          const c = v / 255;
+          return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+        };
+        const lum = (r: number, g: number, b: number) =>
+          0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+        let brightest = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          brightest = Math.max(brightest, lum(data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0));
+        }
+        const [r = 0, g = 0, b = 0] = (textColor.match(/[\d.]+/g) ?? []).map(Number);
+        const text = lum(r, g, b);
+        const [hi, lo] = text > brightest ? [text, brightest] : [brightest, text];
+        return (hi + 0.05) / (lo + 0.05);
+      },
+      { b64: png.toString('base64'), textColor: color },
+    );
+  }
+
   async function preencherFormulario(page: Page): Promise<void> {
     const form = page.locator('#contato');
     await form.getByLabel('Nome', { exact: true }).fill('Maria Contadora');
@@ -7702,6 +7751,21 @@ test.describe('Landing pública (86e3fr9vz)', () => {
         await card.hover();
         await shotTela(page, `landing-card-hover-${slug}`);
         await analyze(page, `landing, card em hover (${vp.label})`);
+      });
+
+      test('hero: texto sobre a aurora mantém contraste AA (4,5:1)', async ({ page, context }) => {
+        await abrirLanding(page, context);
+        const hero = page.locator('section[aria-labelledby="hero-title"]');
+        const alvos: [string, Locator][] = [
+          ['sobretítulo', hero.locator('p').first()],
+          ['título', hero.getByRole('heading', { level: 1 })],
+          ['subtítulo', hero.locator('p').nth(1)],
+        ];
+        for (const [nome, alvo] of alvos) {
+          const razao = await contrasteSobreAurora(page, alvo);
+          console.log(`contraste sobre a aurora · ${nome} · ${vp.label}: ${razao.toFixed(2)}:1`);
+          expect.soft(razao, `${nome} (${vp.label}) sobre a aurora`).toBeGreaterThanOrEqual(4.5);
+        }
       });
 
       test('landing: "Entrar em contato" rola até o formulário e "Entrar" leva ao login', async ({
