@@ -33,6 +33,13 @@ const config: Config = {
           muted: 'hsl(var(--destructive-muted))',
           hover: 'hsl(var(--destructive-hover))',
         },
+        // Verde da marca (86e3h1h75): destaque das páginas públicas e o botão
+        // `variant="brand"`. Texto sobre ele é SEMPRE `brand-foreground` (navy).
+        brand: {
+          DEFAULT: 'hsl(var(--brand))',
+          foreground: 'hsl(var(--brand-foreground))',
+          hover: 'hsl(var(--brand-hover))',
+        },
         // Feedback semântico — a UI usa SÓ estes tokens (proibido `bg-blue-50`,
         // `text-emerald-600`, hex etc). `muted` é a variante de FUNDO de
         // banner/badge; `DEFAULT` é o traço/ícone/preenchimento forte.

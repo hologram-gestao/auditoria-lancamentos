@@ -12,7 +12,9 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { login as copy } from '@/components/landing/content';
 import { ApiError } from '@/lib/api/client';
+import { PRODUCT_TITLE } from '@/lib/brand';
 
 const { loginMock, replaceMock } = vi.hoisted(() => ({
   loginMock: vi.fn(),
@@ -138,5 +140,49 @@ describe('LoginPage — validação do e-mail (86e2n39eg)', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(GENERIC);
     expect(replaceMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 86e3h1h75: a tela virou a ponte entre a landing e o sistema. O fluxo acima não muda;
+ * aqui se prova o que mudou no visual e no texto.
+ */
+describe('LoginPage — a ponte entre a landing e o sistema (86e3h1h75)', () => {
+  beforeEach(() => {
+    loginMock.mockReset();
+    replaceMock.mockReset();
+  });
+
+  it('título e subtítulo DENTRO do card, com texto neutro (a plataforma é multi-organização)', () => {
+    render(<LoginPage />);
+    const titulo = screen.getByRole('heading', { level: 1, name: PRODUCT_TITLE });
+    const card = titulo.closest('.lp-auth-card');
+    expect(card).not.toBeNull();
+    expect(card).toHaveClass('max-w-sm', 'p-8');
+    expect(screen.getByText(copy.subtitle)).toBeInTheDocument();
+    expect(emailInput()).toHaveAttribute('placeholder', copy.emailPlaceholder);
+    expect(card?.textContent).not.toMatch(/acesso da Hologram|@hologram\.com\.br/);
+  });
+
+  it('o botão Entrar é o verde da marca, e desabilitado ele só apaga (nunca cinza sólido)', () => {
+    render(<LoginPage />);
+    const entrar = screen.getByRole('button', { name: 'Entrar' });
+    expect(entrar).toBeDisabled();
+    expect(entrar).toHaveClass('bg-brand', 'text-brand-foreground', 'disabled:opacity-50');
+    expect(entrar).not.toHaveClass('bg-primary');
+  });
+
+  it('no erro, só a mensagem fica vermelha (com ícone); o rótulo segue na cor do texto', async () => {
+    const user = userEvent.setup();
+    render(<LoginPage />);
+    await user.type(emailInput(), 'joao@');
+    await user.tab();
+
+    const mensagem = await screen.findByText('E-mail inválido.');
+    expect(mensagem).toHaveClass('text-destructive');
+    expect(mensagem.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    const rotulo = screen.getByText('E-mail', { selector: 'label' });
+    expect(rotulo).toHaveClass('text-foreground');
+    expect(rotulo).not.toHaveClass('text-destructive');
   });
 });

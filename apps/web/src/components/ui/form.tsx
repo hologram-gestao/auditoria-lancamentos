@@ -139,8 +139,16 @@ FormDescription.displayName = 'FormDescription';
 
 const FormMessage = React.forwardRef<
   HTMLParagraphElement,
-  React.HTMLAttributes<HTMLParagraphElement>
->(({ className, children, ...props }, ref) => {
+  React.HTMLAttributes<HTMLParagraphElement> & {
+    /**
+     * Ícone decorativo antes da mensagem (86e3h1h75, o login). O texto continua filho
+     * DIRETO do `<p>` que leva o `id` do `aria-describedby`, então quem procura a
+     * mensagem pelo texto acha o elemento ligado ao campo. Opcional: sem ele, a
+     * mensagem é a de sempre.
+     */
+    icon?: React.ReactNode;
+  }
+>(({ className, children, icon, ...props }, ref) => {
   const { error, formMessageId } = useFormField();
   const body = error ? String(error?.message ?? '') : children;
 
@@ -152,9 +160,14 @@ const FormMessage = React.forwardRef<
     <p
       ref={ref}
       id={formMessageId}
-      className={cn('text-destructive text-sm font-medium', className)}
+      className={cn(
+        'text-destructive text-sm font-medium',
+        icon !== undefined && 'flex items-start gap-1.5',
+        className,
+      )}
       {...props}
     >
+      {icon}
       {body}
     </p>
   );

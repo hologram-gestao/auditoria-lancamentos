@@ -69,6 +69,10 @@ const PAIRS: ReadonlyArray<{ text: string; bg: string; where: string }> = [
     where: 'botão/badge destrutivo em hover',
   },
   { text: 'primary-foreground', bg: 'primary', where: 'botão primário' },
+  // Verde da marca (86e3h1h75): o botão `variant="brand"` da landing e do login,
+  // em repouso e em hover (token sólido, como o destrutivo).
+  { text: 'brand-foreground', bg: 'brand', where: 'botão brand (landing, login)' },
+  { text: 'brand-foreground', bg: 'brand-hover', where: 'botão brand em hover' },
   { text: 'success-foreground', bg: 'success', where: 'preenchimento de sucesso' },
   { text: 'warning-foreground', bg: 'warning', where: 'preenchimento de atenção' },
   { text: 'info-foreground', bg: 'info', where: 'preenchimento informativo' },
@@ -99,3 +103,62 @@ describe.each(['root', 'dark', 'hologram'] as const)(
     // (opaco, travado no par "toast de erro" acima), nunca `/N`.
   },
 );
+
+/**
+ * O verde da marca (86e3h1h75; era o `--lp-brand` da landing, 86e3h0xcr). É a cor da
+ * MARCA, não do tema: o mesmo valor nos três blocos. Como cor de primeiro plano ele só
+ * aparece nas páginas públicas, que fixam o tema Hologram, então os pares "verde sobre
+ * a superfície" são medidos só contra o bloco `.hologram`.
+ */
+describe('verde da marca (--brand)', () => {
+  const blocks = {
+    root: parseTokens(':root'),
+    dark: parseTokens('.dark'),
+    hologram: parseTokens('.hologram'),
+  };
+  const rgbOf = (tokens: Record<string, string>, name: string): Rgb => {
+    const value = tokens[name];
+    if (value === undefined) throw new Error(`token \`--${name}\` não existe`);
+    return hslToRgb(value);
+  };
+  const brand = rgbOf(blocks.hologram, 'brand');
+
+  it.each(['brand', 'brand-foreground', 'brand-hover'])(
+    '`--%s` tem o mesmo valor nos três temas',
+    (name) => {
+      expect(blocks.dark[name]).toBe(blocks.root[name]);
+      expect(blocks.hologram[name]).toBe(blocks.root[name]);
+    },
+  );
+
+  it('é o #05d1bf amostrado do site da Hologram (hsl 175 95% 42%)', () => {
+    const [r, g, b] = brand.map((channel) => Math.round(channel * 255));
+    // A conversão de `175 95% 42%` cai a 1 unidade do pixel (5, 209, 191).
+    expect(Math.abs((r ?? 0) - 5)).toBeLessThanOrEqual(1);
+    expect(Math.abs((g ?? 0) - 209)).toBeLessThanOrEqual(1);
+    expect(Math.abs((b ?? 0) - 191)).toBeLessThanOrEqual(1);
+  });
+
+  it('o hover é o verde com 10 % de preto (`color-mix(in srgb, verde 90%, black)`)', () => {
+    const hover = rgbOf(blocks.root, 'brand-hover').map((c) => Math.round(c * 255));
+    const mix = brand.map((c) => Math.round(c * 0.9 * 255));
+    for (const [indice, canal] of hover.entries()) {
+      expect(Math.abs(canal - (mix[indice] ?? 0))).toBeLessThanOrEqual(2);
+    }
+  });
+
+  it('o texto sobre o verde é a cópia literal do navy da marca (`--primary` do tema claro)', () => {
+    expect(blocks.root['brand-foreground']).toBe(blocks.root['primary']);
+  });
+
+  it.each([
+    ['verde sobre o fundo Hologram (check dos bullets, linha do passo)', 'background'],
+    ['verde sobre o card Hologram', 'card'],
+  ])('%s passa 4.5:1', (_where, bg) => {
+    expect(contrast(brand, rgbOf(blocks.hologram, bg))).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
+  });
+
+  it('branco (o `--primary` do Hologram) sobre o verde REPROVA: nunca texto branco no verde', () => {
+    expect(contrast(rgbOf(blocks.hologram, 'primary'), brand)).toBeLessThan(AA_NORMAL_TEXT);
+  });
+});
