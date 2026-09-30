@@ -1,0 +1,415 @@
+/* =====================================================================
+   Manual da plataforma — folha de estilo de impressão (WeasyPrint)
+   ===================================================================== */
+
+@font-face { font-family: "Plex Serif"; src: url("fonts/IBMPlexSerif-Regular.ttf"); font-weight: 400; font-style: normal; }
+@font-face { font-family: "Plex Serif"; src: url("fonts/IBMPlexSerif-SemiBold.ttf"); font-weight: 600; font-style: normal; }
+@font-face { font-family: "Plex Serif"; src: url("fonts/IBMPlexSerif-Italic.ttf"); font-weight: 400; font-style: italic; }
+@font-face { font-family: "Fira"; src: url("fonts/FiraSans-Regular.ttf"); font-weight: 400; font-style: normal; }
+@font-face { font-family: "Fira"; src: url("fonts/FiraSans-Medium.ttf"); font-weight: 500; font-style: normal; }
+@font-face { font-family: "Fira"; src: url("fonts/FiraSans-SemiBold.ttf"); font-weight: 600; font-style: normal; }
+@font-face { font-family: "Fira"; src: url("fonts/FiraSans-Italic.ttf"); font-weight: 400; font-style: italic; }
+@font-face { font-family: "Fira"; src: url("fonts/FiraSans-MediumItalic.ttf"); font-weight: 500; font-style: italic; }
+@font-face { font-family: "Plex Mono"; src: url("fonts/IBMPlexMono-Regular.ttf"); font-weight: 400; }
+
+:root {
+  --navy: #0c0c5a;
+  --navy-soft: #2a2a78;
+  --ink: #1b1d29;
+  --muted: #5c6274;
+  --rule: #d9dce4;
+  --tint: #f3f4f8;
+  --amber: #8a5300;
+  --amber-tint: #fdf6ec;
+  --green: #1f6b45;
+}
+
+/* ---------- páginas ---------- */
+
+@page {
+  size: A4;
+  margin: 24mm 19mm 20mm 19mm;
+
+  @top-left {
+    content: string(chaptertitle);
+    font-family: "Fira", sans-serif;
+    font-size: 7.6pt;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #8b90a0;
+    padding-bottom: 3mm;
+  }
+  @top-right {
+    content: "Manual da plataforma";
+    font-family: "Fira", sans-serif;
+    font-size: 7.6pt;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #b3b7c4;
+    padding-bottom: 3mm;
+  }
+  @bottom-right {
+    content: counter(page);
+    font-family: "Fira", sans-serif;
+    font-size: 8.5pt;
+    color: var(--muted);
+    padding-top: 4mm;
+  }
+}
+
+@page cover { margin: 0; @top-left { content: none; } @top-right { content: none; } @bottom-right { content: none; } }
+@page plain { @top-left { content: none; } @top-right { content: none; } }
+
+/* ---------- base ---------- */
+
+html {
+  font-family: "Plex Serif", Georgia, serif;
+  font-size: 10.2pt;
+  line-height: 1.52;
+  color: var(--ink);
+  hyphens: auto;
+  hyphenate-limit-chars: 9 4 4;
+}
+
+/* hifenização só no texto corrido: em tabela, título e legenda fica feia */
+table, thead th, tbody td, figcaption, h1, h2, h3,
+.flow, .cover, .callout .label, .toc, .kv dt, .note, .pull, .chead {
+  hyphens: manual;
+}
+
+body { margin: 0; }
+
+p { margin: 0 0 3.2mm 0; text-align: justify; orphans: 3; widows: 3; }
+p.lead { font-size: 11pt; color: #33364a; }
+strong { font-weight: 600; }
+em { font-style: italic; }
+
+a { color: var(--navy); text-decoration: none; }
+
+.sans { font-family: "Fira", sans-serif; }
+code, .mono {
+  font-family: "Plex Mono", monospace;
+  font-size: 0.86em;
+  background: var(--tint);
+  padding: 0.3mm 1mm;
+  border-radius: 1.4pt;
+}
+
+/* ---------- capa ---------- */
+
+.cover {
+  page: cover;
+  height: 297mm;
+  background: var(--navy);
+  color: #fff;
+  padding: 44mm 26mm 22mm 26mm;
+  box-sizing: border-box;
+  position: relative;
+}
+.cover .mark {
+  font-family: "Fira", sans-serif;
+  font-size: 8.4pt;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: #9ea4e8;
+  margin-bottom: 60mm;
+}
+.cover h1 {
+  font-family: "Fira", sans-serif;
+  font-weight: 600;
+  font-size: 34pt;
+  line-height: 1.1;
+  margin: 0 0 6mm 0;
+  color: #fff;
+  letter-spacing: -0.01em;
+}
+.cover .sub {
+  font-family: "Plex Serif", serif;
+  font-size: 12.6pt;
+  line-height: 1.5;
+  color: #c9cdf2;
+  max-width: 116mm;
+  margin: 0 0 12mm 0;
+  text-align: left;
+}
+.cover .rule { width: 34mm; height: 2.4pt; background: #6f76d8; margin-bottom: 10mm; }
+.cover .foot {
+  position: absolute;
+  bottom: 22mm;
+  left: 26mm;
+  right: 26mm;
+  font-family: "Fira", sans-serif;
+  font-size: 9pt;
+  color: #9ea4e8;
+  display: flex;
+  justify-content: space-between;
+  border-top: 0.5pt solid #3c3f8f;
+  padding-top: 4mm;
+}
+
+/* ---------- folha de rosto e sumário ---------- */
+
+.front { page: plain; }
+.front h2, .toc h2 {
+  font-family: "Fira", sans-serif;
+  font-size: 13pt;
+  font-weight: 600;
+  color: var(--navy);
+  margin: 0 0 5mm 0;
+}
+
+.toc { page: plain; }
+.toc ol { list-style: none; margin: 0; padding: 0; }
+.toc > ol > li { margin-bottom: 1.6mm; }
+.toc a {
+  display: block;
+  font-family: "Fira", sans-serif;
+  font-size: 10pt;
+  color: var(--ink);
+}
+.toc a::after {
+  content: target-counter(attr(href), page);
+  float: right;
+  font-size: 9pt;
+  color: var(--muted);
+}
+.toc .part {
+  font-weight: 600;
+  color: var(--navy);
+  border-bottom: 0.5pt solid var(--rule);
+  padding-bottom: 1.4mm;
+  margin-top: 6mm;
+}
+.toc .sub a { font-size: 9.2pt; color: #4b5062; padding-left: 7mm; }
+
+/* ---------- abertura de capítulo ---------- */
+
+.chead {
+  break-before: page;
+  border-bottom: 1.6pt solid var(--navy);
+  padding-bottom: 4mm;
+  margin-bottom: 7mm;
+}
+.chead .num {
+  font-family: "Fira", sans-serif;
+  font-size: 9pt;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #8f94d0;
+  margin: 0 0 3mm 0;
+  text-align: left;
+}
+h1.chapter {
+  string-set: chaptertitle content();
+  font-family: "Fira", sans-serif;
+  font-weight: 600;
+  font-size: 21pt;
+  line-height: 1.15;
+  color: var(--navy);
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+h2 {
+  font-family: "Fira", sans-serif;
+  font-weight: 600;
+  font-size: 12.4pt;
+  color: var(--navy);
+  margin: 8mm 0 2.6mm 0;
+  break-after: avoid;
+}
+h3 {
+  font-family: "Fira", sans-serif;
+  font-weight: 600;
+  font-size: 10.2pt;
+  color: #2c2f45;
+  margin: 5.4mm 0 1.8mm 0;
+  break-after: avoid;
+}
+
+/* ---------- listas ---------- */
+
+ul, ol { margin: 0 0 3.4mm 0; padding-left: 5.2mm; }
+li { margin-bottom: 1.5mm; }
+ul li::marker { color: var(--navy-soft); }
+ol li::marker { font-family: "Fira", sans-serif; font-size: 9pt; color: var(--navy-soft); }
+
+ul.tight li, ol.tight li { margin-bottom: 0.8mm; }
+
+ol.steps { counter-reset: step; list-style: none; padding-left: 0; }
+ol.steps > li {
+  counter-increment: step;
+  position: relative;
+  padding-left: 8mm;
+  margin-bottom: 2.4mm;
+  break-inside: avoid;
+}
+ol.steps > li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0.2mm;
+  width: 5mm;
+  height: 5mm;
+  border-radius: 50%;
+  background: var(--navy);
+  color: #fff;
+  font-family: "Fira", sans-serif;
+  font-size: 7.6pt;
+  font-weight: 600;
+  text-align: center;
+  line-height: 5mm;
+}
+
+/* ---------- tabelas ---------- */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: "Fira", sans-serif;
+  font-size: 8.8pt;
+  margin: 0 0 4mm 0;
+  break-inside: avoid;
+}
+table.long { break-inside: auto; }
+table.long tr { break-inside: avoid; }
+thead th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 8pt;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--navy);
+  border-bottom: 1pt solid var(--navy);
+  padding: 1.6mm 2mm 1.4mm 0;
+}
+tbody td {
+  vertical-align: top;
+  padding: 1.7mm 2mm 1.7mm 0;
+  border-bottom: 0.4pt solid var(--rule);
+  line-height: 1.38;
+}
+tbody tr:last-child td { border-bottom: 0.8pt solid var(--rule); }
+td.c, th.c { text-align: center; }
+.yes { color: var(--green); font-weight: 600; }
+.no { color: #a33; }
+caption {
+  caption-side: top;
+  text-align: left;
+  font-family: "Fira", sans-serif;
+  font-size: 8.4pt;
+  color: var(--muted);
+  padding-bottom: 1.6mm;
+}
+
+/* ---------- destaques ---------- */
+
+.callout {
+  border-left: 2.2pt solid var(--navy);
+  background: var(--tint);
+  padding: 3mm 4mm 1.4mm 4mm;
+  margin: 0 0 4mm 0;
+  break-inside: avoid;
+}
+.callout .label {
+  font-family: "Fira", sans-serif;
+  font-size: 7.6pt;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--navy);
+  display: block;
+  margin-bottom: 1.4mm;
+}
+.callout p { margin-bottom: 1.8mm; font-size: 9.6pt; }
+.callout.warn { border-left-color: var(--amber); background: var(--amber-tint); }
+.callout.warn .label { color: var(--amber); }
+
+.pull {
+  font-family: "Fira", sans-serif;
+  font-size: 11.6pt;
+  line-height: 1.35;
+  color: var(--navy);
+  border-top: 1pt solid var(--rule);
+  border-bottom: 1pt solid var(--rule);
+  padding: 4mm 0;
+  margin: 6mm 0;
+  text-align: left;
+  break-inside: avoid;
+}
+
+/* ---------- figuras ---------- */
+
+figure {
+  margin: 4mm 0 5mm 0;
+  break-inside: avoid;
+  counter-increment: figura;
+}
+figure img {
+  width: 94%;
+  display: block;
+  margin: 0 auto;
+  border: 0.5pt solid #c8ccd8;
+  border-radius: 2pt;
+}
+figcaption {
+  width: 94%;
+  margin: 0 auto;
+  font-family: "Fira", sans-serif;
+  font-size: 8.2pt;
+  line-height: 1.4;
+  color: var(--muted);
+  padding-top: 1.8mm;
+}
+figcaption::before {
+  content: "Figura " counter(figura) ". ";
+  font-weight: 600;
+  color: var(--navy);
+}
+
+/* ---------- diagrama do ciclo ---------- */
+
+.flow { display: flex; gap: 2mm; margin: 5mm 0 2mm 0; break-inside: avoid; }
+.flow .step {
+  flex: 1;
+  border: 0.6pt solid var(--rule);
+  border-top: 2pt solid var(--navy);
+  padding: 3mm 2.4mm;
+  background: #fbfbfd;
+}
+.flow .step .n {
+  font-family: "Fira", sans-serif;
+  font-size: 7.4pt;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: #9297c8;
+  display: block;
+  margin-bottom: 1.4mm;
+}
+.flow .step .t {
+  font-family: "Fira", sans-serif;
+  font-size: 9pt;
+  font-weight: 600;
+  color: var(--navy);
+  display: block;
+  margin-bottom: 1.2mm;
+}
+.flow .step .d {
+  font-size: 8.4pt;
+  line-height: 1.34;
+  color: #4b5062;
+  font-family: "Fira", sans-serif;
+}
+
+/* ---------- misc ---------- */
+
+.kv { font-family: "Fira", sans-serif; font-size: 9.2pt; }
+.kv dt { font-weight: 600; color: var(--navy); margin-top: 2.4mm; }
+.kv dd { margin: 0.6mm 0 0 0; color: #3b3f52; }
+
+.ui { font-family: "Fira", sans-serif; font-weight: 500; font-size: 0.94em; }
+
+.note { font-size: 9pt; color: var(--muted); font-family: "Fira", sans-serif; }
+
+hr.soft { border: 0; border-top: 0.5pt solid var(--rule); margin: 6mm 0; }
