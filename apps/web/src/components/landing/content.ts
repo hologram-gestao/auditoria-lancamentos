@@ -10,7 +10,7 @@
 import { COMPANY_NAME, COMPANY_SHORT_NAME } from '@/lib/brand';
 
 /** Versão do texto de consentimento. Igual a `CONSENT_TEXT_VERSION` do backend. */
-export const CONSENT_TEXT_VERSION = '2026-09-29';
+export const CONSENT_TEXT_VERSION = '2026-09-30';
 
 export const CONTACT_ANCHOR = 'contato';
 
@@ -137,7 +137,7 @@ export const security = {
     {
       icon: 'file',
       title: 'O arquivo original não fica guardado',
-      text: 'O arquivo é processado por IA apenas para a leitura das movimentações e não é armazenado pela plataforma.',
+      text: 'O arquivo é lido por IA para extrair as movimentações e não fica armazenado pela plataforma. Na revisão, a IA também apoia sua equipe apontando o que parece incoerente; quem decide é sempre uma pessoa.',
     },
     {
       icon: 'users',
@@ -197,7 +197,7 @@ export const privacy = {
   title: 'Aviso de privacidade',
   intro:
     'Este aviso vale para o formulário de contato desta página. Ele não trata dos dados que os clientes da plataforma processam nela.',
-  updated: 'Versão de 29 de setembro de 2026.',
+  updated: 'Versão de 30 de setembro de 2026.',
   sections: [
     {
       title: 'Quais dados coletamos',
@@ -205,7 +205,7 @@ export const privacy = {
     },
     {
       title: 'O que não coletamos',
-      text: 'Não guardamos seu endereço IP nem o navegador que você usou, e o formulário não usa cookies de rastreamento.',
+      text: 'O contato é gravado sem o seu endereço IP e sem dados do seu navegador, e o formulário não usa cookies de rastreamento. Os registros técnicos de acesso do servidor, comuns a qualquer site, ficam por tempo limitado e não são ligados ao seu contato.',
     },
     {
       title: 'Para quê',

@@ -36,7 +36,7 @@ from app.db.models.lead import (
 
 #: Versão do texto de consentimento exibido no formulário. Mudou o texto na landing
 #: (`apps/web/src/components/landing/content.ts`), muda aqui e lá, na mesma entrega.
-CONSENT_TEXT_VERSION = "2026-09-29"
+CONSENT_TEXT_VERSION = "2026-09-30"
 
 LEAD_NAME_MIN = 2
 
