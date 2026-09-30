@@ -171,7 +171,8 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.web == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Build até 9 min + suíte de 636 cenários em ~12 min + instalação (medido no run 36773705921, 30/09/2026).
+    timeout-minutes: 35
 
     # 86e2n39hb — o gate mede os DOIS temas: um leg por tema, para o escuro
     # nunca entrar sem cobertura. Espelho do loop de `scripts/a11y-gate.sh`.
