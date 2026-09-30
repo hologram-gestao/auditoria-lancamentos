@@ -159,8 +159,9 @@ export const how = {
 } as const;
 
 /**
- * Tour do produto (86e3gqfkf): cinco telas REAIS, em abas. Os prints vêm de
- * `Docs/manual/fonte/img/` (dado fictício: "Cliente Exemplo Ltda"); figura com nome
+ * Tour do produto (86e3gqfkf): cinco telas REAIS, em abas, no tema Hologram. Os prints
+ * vêm de `Docs/manual/fonte/img/` (dado fictício: "Cliente Exemplo Ltda"; anomalias e
+ * lançamento recapturados no Hologram na 86e3h0xcr); figura com nome
  * de dado de teste não entra. Arquivo, largura e altura moram em `landing-tour.tsx`.
  * Tetos: frase até 120 caracteres, bullet até 80 (`content.test.ts`).
  */

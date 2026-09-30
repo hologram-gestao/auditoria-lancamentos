@@ -8004,7 +8004,8 @@ test.describe('Landing pública (86e3fr9vz)', () => {
           'true',
         );
         if (THEME === 'hologram' && slug === 'desktop') {
-          await abas.getByRole('tab', { name: 'Conciliação' }).click();
+          // Print na aba Anomalias: a figura recapturada no tema Hologram (86e3h0xcr).
+          await abas.getByRole('tab', { name: 'Anomalias' }).click();
           // Sem anel de foco no print: ele é do teclado usado acima, não da tela.
           await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
           await page.mouse.move(0, 0);
