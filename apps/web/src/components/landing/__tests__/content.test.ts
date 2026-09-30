@@ -1,23 +1,30 @@
 /**
- * Travas do texto da landing (decisão D2 e regras da copy em `Docs/landing/COPY.md`):
- * sem o nome antigo do produto, sem a sigla, sem travessão e com a versão do
- * consentimento igual à do backend.
+ * Travas do texto da landing (regras da copy em `Docs/landing/COPY.md`): sem o nome
+ * antigo do produto nem a sigla antiga (escritos AQUI, não derivados da constante),
+ * o nome novo só pela constante, sem travessão e com a versão do consentimento igual
+ * à do backend.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { PRODUCT_NAME, PRODUCT_SHORT_NAME } from '@/lib/brand';
+import { PRODUCT_NAME } from '@/lib/brand';
 
 import * as content from '../content';
 
 const ALL_TEXT = JSON.stringify(content);
 
 describe('landing/content', () => {
-  it('não usa o nome antigo do produto nem a sigla', () => {
-    expect(ALL_TEXT).not.toContain(PRODUCT_NAME);
-    expect(ALL_TEXT).not.toMatch(new RegExp(`\\b${PRODUCT_SHORT_NAME}\\b`));
+  it('não usa o nome antigo do produto nem a sigla antiga', () => {
+    expect(ALL_TEXT).not.toContain('Auditoria de Lançamentos');
+    expect(ALL_TEXT).not.toMatch(/\bADL\b/);
+  });
+
+  it('nomeia o produto, e sempre pela constante', () => {
+    expect(ALL_TEXT).toContain(PRODUCT_NAME);
+    const source = readFileSync(resolve(__dirname, '../content.ts'), 'utf8');
+    expect(source).not.toContain(PRODUCT_NAME);
   });
 
   it('não usa travessão', () => {
@@ -28,6 +35,14 @@ describe('landing/content', () => {
     for (const forbidden of ['garantimos', 'revolucion', '100%', 'inteligente']) {
       expect(ALL_TEXT.toLowerCase()).not.toContain(forbidden);
     }
+  });
+
+  it('o tamanho anunciado do manual é o do arquivo em public/', () => {
+    const bytes = statSync(
+      resolve(__dirname, '../../../../public', content.manual.href.slice(1)),
+    ).size;
+    const megabytes = Math.round(bytes / 1_000_000);
+    expect(content.manual.size).toBe(`PDF, ${megabytes} MB`);
   });
 
   it('a versão do consentimento é a mesma do backend', () => {

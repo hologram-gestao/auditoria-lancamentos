@@ -7652,23 +7652,68 @@ test.describe('Landing pública (86e3fr9vz)', () => {
   }
 
   /**
-   * Contraste do texto contra o fundo que a aurora REALMENTE pinta atrás dele.
+   * Contraste do texto contra o fundo que a página REALMENTE pinta atrás dele (aurora
+   * no hero, spotlight nos cards).
    *
-   * A aurora não é ancestral do texto (são bolhas absolutas com `blur`), então o axe
-   * devolve `incomplete` ali em vez de medir. Aqui: o texto fica transparente, a
-   * caixa do elemento é fotografada (o fundo puro, com bolhas, grade e máscara), o
-   * PNG é decodificado num canvas e a cor do texto é comparada com o pixel de fundo
-   * MAIS CLARO da caixa, o pior caso para texto claro.
+   * Nem a aurora (bolhas absolutas com `blur`) nem o spotlight (`::after` do card)
+   * são vistos pelo axe como fundo do texto: ele devolve `incomplete` ou mede contra
+   * o `bg-card` puro. Aqui: o elemento fica `visibility: hidden` (e não `color:
+   * transparent`, que não apaga texto pintado por `background-clip: text`), a caixa
+   * é fotografada, o PNG é decodificado num canvas e a cor do texto é comparada com o
+   * pixel de fundo MAIS CLARO da caixa, o pior caso para texto claro.
+   *
+   * `textColor` é qualquer cor CSS (inclusive `color(srgb …)`, que é como o
+   * `color-mix` volta computado): ela é pintada num canvas e lida em sRGB 8 bits.
+   *
+   * Elemento INLINE (a palavra em gradiente dentro do `h1`): quem fica escondido é o
+   * BLOCO que o contém, não só ele. A caixa de um inline encosta nos glifos vizinhos,
+   * e o arredondamento para pixel de dispositivo (DPR 2,75 no Pixel 5) e a fonte
+   * sans-serif de cada máquina decidem se uma fatia da letra ao lado entra na foto: no
+   * runner do CI entrava, e o pixel "mais claro do fundo" era o próprio texto (razão
+   * 1,00). O fundo atrás da caixa não depende do texto, então esconder o bloco inteiro
+   * não muda a medição. A caixa fotografada ainda encolhe 1 px por lado, e um pixel
+   * mais claro com a cor EXATA do texto reprova com erro explícito em vez de 1,00 mudo.
    */
-  async function contrasteSobreAurora(page: Page, locator: Locator): Promise<number> {
-    const color = await locator.evaluate((el) => getComputedStyle(el).color);
-    await locator.evaluate((el) => {
-      (el as HTMLElement).style.setProperty('color', 'transparent', 'important');
-    });
+  async function contrasteSobreAurora(
+    page: Page,
+    locator: Locator,
+    textColor?: string,
+  ): Promise<number> {
+    const color = textColor ?? (await locator.evaluate((el) => getComputedStyle(el).color));
+    // Caixa e handle ANTES de esconder: escondido, o elemento sai da árvore de
+    // acessibilidade e um locator por papel (`getByRole`) deixa de achá-lo.
     const box = await locator.boundingBox();
-    expect(box, 'elemento do hero sem caixa').not.toBeNull();
-    const png = await page.screenshot({ clip: box ?? undefined });
-    await locator.evaluate((el) => (el as HTMLElement).style.removeProperty('color'));
+    expect(box, 'elemento sem caixa').not.toBeNull();
+    const handle = await locator.elementHandle();
+    expect(handle, 'elemento sem handle').not.toBeNull();
+    // O que some da foto: o bloco que contém um inline (ver o JSDoc), senão o próprio
+    // elemento. A caixa medida continua sendo a DO ELEMENTO.
+    const escondido = await handle?.evaluateHandle((el) =>
+      getComputedStyle(el).display === 'inline' ? (el.closest('h1,h2,h3,p,li,div') ?? el) : el,
+    );
+    let png: Buffer;
+    try {
+      await escondido?.evaluate((el) => {
+        (el as HTMLElement).style.setProperty('visibility', 'hidden', 'important');
+      });
+      // 1 px a menos por lado: a borda da caixa é onde o arredondamento pega o vizinho.
+      const clip = box
+        ? {
+            x: box.x + 1,
+            y: box.y + 1,
+            width: Math.max(1, box.width - 2),
+            height: Math.max(1, box.height - 2),
+          }
+        : undefined;
+      // Uma retentativa para o soluço do protocolo ("Unable to capture screenshot"), o
+      // mesmo do `shot`: com `E2E_SHOTS=1`, outros workers tiram prints de página
+      // inteira ao mesmo tempo. Aqui a captura É a medição, então a 2ª falha reprova.
+      png = await page.screenshot({ clip }).catch(() => page.screenshot({ clip }));
+    } finally {
+      await escondido?.evaluate((el) => (el as HTMLElement).style.removeProperty('visibility'));
+      await escondido?.dispose();
+      await handle?.dispose();
+    }
     return page.evaluate(
       async ({ b64, textColor }) => {
         const img = new Image();
@@ -7687,16 +7732,46 @@ test.describe('Landing pública (86e3fr9vz)', () => {
         };
         const lum = (r: number, g: number, b: number) =>
           0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-        let brightest = 0;
+        let brightest = -1;
+        let brightestRgb: [number, number, number] = [0, 0, 0];
         for (let i = 0; i < data.length; i += 4) {
-          brightest = Math.max(brightest, lum(data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0));
+          const px: [number, number, number] = [data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0];
+          const l = lum(...px);
+          if (l > brightest) [brightest, brightestRgb] = [l, px];
         }
-        const [r = 0, g = 0, b = 0] = (textColor.match(/[\d.]+/g) ?? []).map(Number);
+        const probe = document.createElement('canvas').getContext('2d');
+        if (!probe) throw new Error('sem canvas 2d');
+        probe.fillStyle = '#010203';
+        const sentinel = probe.fillStyle;
+        probe.fillStyle = textColor;
+        if (probe.fillStyle === sentinel) throw new Error(`cor não reconhecida: ${textColor}`);
+        probe.fillRect(0, 0, 1, 1);
+        const [r = 0, g = 0, b = 0] = probe.getImageData(0, 0, 1, 1).data;
+        if (brightestRgb[0] === r && brightestRgb[1] === g && brightestRgb[2] === b) {
+          throw new Error(
+            `texto vazou na foto: o pixel mais claro da caixa é rgb(${r}, ${g}, ${b}), a ` +
+              `cor exata do texto (${textColor}); a medição seria 1,00:1 e não o fundo`,
+          );
+        }
         const text = lum(r, g, b);
         const [hi, lo] = text > brightest ? [text, brightest] : [brightest, text];
         return (hi + 0.05) / (lo + 0.05);
       },
       { b64: png.toString('base64'), textColor: color },
+    );
+  }
+
+  /** As duas cores do gradiente de um `.lp-gradient-text`, resolvidas no browser. */
+  async function stopsDoGradiente(locator: Locator): Promise<string[]> {
+    return locator.evaluate((el) =>
+      ['--lp-grad-from', '--lp-grad-to'].map((variavel) => {
+        const probe = document.createElement('span');
+        probe.style.color = `var(${variavel})`;
+        el.appendChild(probe);
+        const cor = getComputedStyle(probe).color;
+        probe.remove();
+        return cor;
+      }),
     );
   }
 
@@ -7713,6 +7788,11 @@ test.describe('Landing pública (86e3fr9vz)', () => {
       const slug = vp.label === 'desktop' ? 'desktop' : 'mobile';
 
       test('landing: estrutura, tema fixo, hover e header rolado', async ({ page, context }) => {
+        // Com `E2E_SHOTS=1` este cenário tira TRÊS prints, um deles da página inteira (a
+        // landing é alta e o Pixel 5 tem DPR 2,75: medido 3 a 6 s por captura). Sem os
+        // prints, como no CI, ele roda em 11 a 13 s; com eles, disputando CPU com os
+        // outros workers, passava de 30 s. O tempo extra é só das capturas auxiliares.
+        test.slow(process.env.E2E_SHOTS === '1', 'três prints, um de página inteira');
         await abrirLanding(page, context);
         await expect(page.getByRole('banner')).toBeVisible();
         await expect(page.getByRole('contentinfo')).toBeVisible();
@@ -7766,6 +7846,68 @@ test.describe('Landing pública (86e3fr9vz)', () => {
           console.log(`contraste sobre a aurora · ${nome} · ${vp.label}: ${razao.toFixed(2)}:1`);
           expect.soft(razao, `${nome} (${vp.label}) sobre a aurora`).toBeGreaterThanOrEqual(4.5);
         }
+
+        // A palavra em gradiente (86e3gr6k5): os DOIS stops contra o pixel mais claro
+        // atrás DELA. O pior stop é o que decide.
+        const destaque = hero.locator('.lp-gradient-text');
+        await expect(destaque).toHaveCount(1);
+        const stops = await stopsDoGradiente(destaque);
+        expect(stops).toHaveLength(2);
+        expect(stops[0], 'o gradiente tem duas cores').not.toBe(stops[1]);
+        for (const [indice, stop] of stops.entries()) {
+          const razao = await contrasteSobreAurora(page, destaque, stop);
+          console.log(
+            `contraste sobre a aurora · destaque, stop ${indice + 1} (${stop}) · ${vp.label}: ${razao.toFixed(2)}:1`,
+          );
+          expect
+            .soft(razao, `destaque, stop ${indice + 1} (${vp.label}) sobre a aurora`)
+            .toBeGreaterThanOrEqual(4.5);
+        }
+      });
+
+      test('spotlight do card: texto sobre o brilho mantém AA (4,5:1)', async ({
+        page,
+        context,
+      }) => {
+        // COM movimento: sob movimento reduzido o spotlight nem existe.
+        await abrirLanding(page, context, { reducedMotion: false });
+        const card = page.locator('#para-quem li').first();
+        await card.scrollIntoViewIfNeeded();
+        await expect(card).toHaveAttribute('data-revealed', '');
+        const texto = card.locator('p');
+        const caixa = await texto.boundingBox();
+        expect(caixa, 'texto do card sem caixa').not.toBeNull();
+        if (!caixa) return;
+        // Ponteiro no MEIO do texto: o centro do brilho embaixo dele é o pior caso.
+        await page.mouse.move(caixa.x + caixa.width / 2, caixa.y + caixa.height / 2);
+
+        // Só com mouse: no projeto que emula toque (`hover: none`) o spotlight não
+        // existe, por desenho, e é ISSO que se afirma ali (o gate não aceita teste pulado).
+        const comMouse = await page.evaluate(() => window.matchMedia('(hover: hover)').matches);
+        if (!comMouse) {
+          expect(await card.evaluate((el) => getComputedStyle(el, '::after').content)).toBe('none');
+          expect(await card.evaluate((el) => el.style.getPropertyValue('--lp-mx'))).toBe('');
+          return;
+        }
+        await expect
+          .poll(() => card.evaluate((el) => el.style.getPropertyValue('--lp-mx')))
+          .not.toBe('');
+        await expect
+          .poll(() => card.evaluate((el) => getComputedStyle(el, '::after').opacity))
+          .toBe('0.6');
+        await expect
+          .poll(() => card.evaluate((el) => el.getAnimations({ subtree: true }).length))
+          .toBe(0);
+        const alvos: [string, Locator][] = [
+          ['título', card.locator('h3')],
+          ['texto', texto],
+        ];
+        for (const [nome, alvo] of alvos) {
+          const razao = await contrasteSobreAurora(page, alvo);
+          console.log(`contraste sob o spotlight · ${nome} · ${vp.label}: ${razao.toFixed(2)}:1`);
+          expect.soft(razao, `${nome} (${vp.label}) sob o spotlight`).toBeGreaterThanOrEqual(4.5);
+        }
+        await shotTela(page, `landing-spotlight-${slug}`);
       });
 
       test('landing: "Entrar em contato" rola até o formulário e "Entrar" leva ao login', async ({
@@ -7874,6 +8016,28 @@ test.describe('Landing pública (86e3fr9vz)', () => {
     const response = await page.request.get('/', { maxRedirects: 0 });
     expect(response.status()).toBe(307);
     expect(new URL(response.headers()['location'] ?? '', 'http://x').pathname).toBe('/clientes');
+  });
+
+  test('manual: o botão baixa o PDF na mesma aba e o arquivo responde como PDF', async ({
+    page,
+    context,
+  }) => {
+    await abrirLanding(page, context);
+    const link = page
+      .locator('#seguranca')
+      .getByRole('link', { name: 'Baixar o manual (PDF)', exact: true });
+    await expect(link).toHaveAttribute('download', '');
+    await expect(link).toHaveAccessibleDescription('PDF, 3 MB');
+    const href = await link.getAttribute('href');
+    expect(href).toBe('/manual-hologram-os.pdf');
+    // Nova aba só com `rel=noopener`; hoje o link nem abre aba (baixa na mesma).
+    const target = await link.getAttribute('target');
+    if (target === '_blank') expect(await link.getAttribute('rel')).toContain('noopener');
+    else expect(target).toBeNull();
+    // O arquivo é pedido direto ao servidor, fora do browser: um PDF não passa pelo axe.
+    const resposta = await page.request.get(href ?? '');
+    expect(resposta.status()).toBe(200);
+    expect(resposta.headers()['content-type']).toContain('application/pdf');
   });
 
   test('efeitos: revelação na rolagem e header rolado, com movimento', async ({

@@ -20,6 +20,7 @@ import pytest
 import respx
 
 from app.core.alerting import (
+    ALERT_PREFIX,
     Alert,
     AlertCode,
     AlertConfigError,
@@ -88,7 +89,7 @@ class TestAlertPayload:
         assert payload["service"] == "adl"
         assert payload["session_id"] == "sess-1"
         assert payload["client_id"] == "cli-1"
-        assert payload["text"].startswith("[ADL] session_error:")
+        assert payload["text"].startswith(f"{ALERT_PREFIX} session_error:")
         # Só as chaves esperadas — nenhum campo extra (defesa contra PII).
         assert set(payload) == {"text", "service", "code", "session_id", "client_id"}
 

@@ -250,7 +250,7 @@ class LancamentoExtrato(BaseModel):
             "o `ListarExtrato` NÃO devolve este campo** — nem em linha "
             "orgânica, nem na recém-criada pela captura (readback). "
             "Consequência: a reconciliação pós-timeout da BACK 07.4 é sempre "
-            "INCONCLUSIVA por este caminho, e o ADL **não reenvia** (nunca "
+            "INCONCLUSIVA por este caminho, e a plataforma **não reenvia** (nunca "
             "duplica). A saída provada pela captura é outra: o `IncluirLancCC` "
             "é IDEMPOTENTE sobre `cCodIntLanc` (2º POST devolveu o MESMO "
             "`nCodLanc`, status 0) — mudar o caminho de timeout para reenviar "
@@ -803,7 +803,7 @@ class IncluirLancCCRequest(BaseModel):
             "param (fora do `cabecalho`). ✅ VERIFICADO (captura 21/08/2026): "
             "o Omie é IDEMPOTENTE sobre ela — o 2º POST do mesmo código "
             "devolveu o MESMO `nCodLanc` com status 0, sem criar segundo "
-            "lançamento. A dedup primária continua sendo do ADL (BACK 07.2)."
+            "lançamento. A dedup primária continua sendo da plataforma (BACK 07.2)."
         ),
     )
     cabecalho: LancCCCabecalho

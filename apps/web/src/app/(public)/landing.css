@@ -1,7 +1,7 @@
 /*
- * Efeitos da landing pública (86e3fr9vz, decisão D12 do plano): tudo escopado em
- * `.landing`, que só existe no layout do grupo `(public)`. O app autenticado não
- * carrega nada daqui.
+ * Efeitos da landing pública (86e3fr9vz, decisão D12 do plano; refino 86e3gr6k5): tudo
+ * escopado em `.landing`, que só existe no layout do grupo `(public)`. O app
+ * autenticado não carrega nada daqui.
  *
  * Regras que este arquivo segue:
  *   - Cor SÓ por token do tema (`hsl(var(--token) / alfa)`). As variáveis `--lp-*`
@@ -22,9 +22,40 @@
   --lp-edge-strong: hsl(var(--primary) / 0.32);
   --lp-grid-line: hsl(var(--border) / 0.55);
   --lp-shadow: 0 18px 48px -24px hsl(var(--info) / 0.45);
+  /* Filete de luz (rodapé, header rolado, divisor de seção): decorativo. */
+  --lp-filament: linear-gradient(90deg, transparent, var(--lp-edge-strong), transparent);
+  /*
+   * Stop claro do gradiente do título: `--info` misturado 60/40 com `--foreground`.
+   * Medido sobre o pixel mais claro da aurora atrás da palavra: 7,67:1 (desktop) e
+   * 6,62:1 (390px). `--info` puro daria perto de 4,8:1 em 390px (conta sobre a mesma
+   * medição), folga curta para uma aurora que se move. O e2e "texto sobre a aurora"
+   * mede os DOIS stops do `.lp-gradient-text` contra o fundo pintado.
+   */
+  --lp-gradient-end: color-mix(in srgb, hsl(var(--info)) 60%, hsl(var(--foreground)));
   scroll-behavior: smooth;
   /* O header fixo cobriria o topo da seção ao seguir `#contato`. */
   scroll-padding-top: 5rem;
+  /* Contexto próprio: o ruído (`::before`, z-index -1) fica entre o fundo e o conteúdo. */
+  isolation: isolate;
+}
+
+/*
+ * Ruído leve no fundo da página inteira (86e3gr6k5): SVG `feTurbulence` em data URI
+ * (a CSP tem `img-src data:`), fixo, 3,5 % de opacidade. Fica ATRÁS do conteúdo
+ * (z-index -1 no contexto isolado da `.landing`): cards e pílulas são sólidos, então o
+ * ruído só aparece no fundo. Sem `mix-blend-mode` de propósito: numa camada fixa do
+ * tamanho da tela ele obriga a recompor a página inteira a cada quadro, e a 3,5 % a
+ * diferença não se vê. É estático; nada a desligar.
+ */
+.landing::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 160px 160px;
 }
 
 /* ---------- Aurora do hero ---------- */
@@ -98,6 +129,13 @@
   opacity: 0.7;
 }
 
+/* A mesma grade atrás de "Como funciona", com máscara radial no centro do bloco. */
+.lp-grid--section {
+  mask-image: radial-gradient(ellipse 60% 55% at 50% 50%, black 10%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse 60% 55% at 50% 50%, black 10%, transparent 75%);
+  opacity: 0.5;
+}
+
 @keyframes lp-drift {
   0% {
     transform: translate3d(0, 0, 0) scale(1);
@@ -107,6 +145,66 @@
   }
   100% {
     transform: translate3d(-2rem, 3rem, 0) scale(0.96);
+  }
+}
+
+/* ---------- Hero: o único destaque, a pílula e o ponto ---------- */
+
+/*
+ * Uma palavra do título em gradiente (de `--foreground` para `--lp-gradient-end`).
+ * `--lp-grad-from` e `--lp-grad-to` são lidos pelo e2e para medir os dois stops.
+ * Em alto contraste forçado o texto volta a ser cor sólida do sistema.
+ */
+.lp-gradient-text {
+  --lp-grad-from: hsl(var(--foreground));
+  --lp-grad-to: var(--lp-gradient-end);
+  background-image: linear-gradient(90deg, var(--lp-grad-from), var(--lp-grad-to));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+@media (forced-colors: active) {
+  .lp-gradient-text {
+    background-image: none;
+    color: CanvasText;
+    -webkit-text-fill-color: CanvasText;
+  }
+}
+
+/* Pílula do sobretítulo: superfície sólida com a borda da marca. */
+.lp-pill {
+  border-color: var(--lp-edge);
+}
+
+/* Ponto de 6 px em `--info` com um anel que pulsa (2 s). Parado em movimento reduzido. */
+.lp-pulse-dot {
+  position: relative;
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: hsl(var(--info));
+}
+
+.lp-pulse-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: hsl(var(--info));
+  animation: lp-pulse 2s ease-out infinite;
+}
+
+@keyframes lp-pulse {
+  from {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  to {
+    transform: scale(3);
+    opacity: 0;
   }
 }
 
@@ -142,6 +240,22 @@
 
 .lp-tilt:hover .lp-tilt__card {
   transform: none;
+}
+
+/* Mini-card da anomalia: flutua 6 px em 6 s, sobre o canto do card inclinado. */
+.lp-float {
+  box-shadow: var(--lp-shadow);
+  animation: lp-float 6s ease-in-out infinite;
+}
+
+@keyframes lp-float {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -6px, 0);
+  }
 }
 
 /*
@@ -239,22 +353,45 @@
 
 /* ---------- Cards ---------- */
 
+/*
+ * `isolation` dá ao card o próprio contexto: o `::after` (spotlight, z-index -1)
+ * pinta entre o fundo `bg-card` e o texto, nunca por cima dele.
+ */
 .lp-card {
   position: relative;
+  isolation: isolate;
   transition:
     transform 300ms ease-out,
     box-shadow 300ms ease-out,
     border-color 300ms ease-out;
 }
 
-/* Filete de luz no topo do card: decorativo, fora de baixo do texto. */
+/*
+ * Borda em gradiente: um retângulo com o gradiente, recortado por máscara para
+ * sobrar só a faixa de 1 px (`padding`) em volta. Mais clara no topo, como um filete
+ * de luz. Decorativa, fora de baixo do texto.
+ */
 .lp-card::before {
   content: '';
   position: absolute;
-  inset: 0 1.5rem auto;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--lp-edge-strong), transparent);
+  inset: -1px;
+  padding: 1px;
+  border-radius: inherit;
+  background: linear-gradient(
+    160deg,
+    var(--lp-edge-strong),
+    transparent 35%,
+    transparent 65%,
+    var(--lp-edge)
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
   pointer-events: none;
+  opacity: 0.8;
+  transition: opacity 300ms ease-out;
 }
 
 .lp-card:hover {
@@ -263,9 +400,62 @@
   box-shadow: var(--lp-shadow);
 }
 
+.lp-card:hover::before {
+  opacity: 1;
+}
+
+/*
+ * Spotlight: brilho que segue o ponteiro (`--lp-mx`/`--lp-my`, escritos pelo
+ * `reveal.tsx`). Só com mouse (`hover: hover`); desligado em movimento reduzido.
+ * Atrás do texto: o pior caso (texto `muted` no centro do brilho) é medido por pixel
+ * no e2e "spotlight do card".
+ */
+@media (hover: hover) {
+  .lp-card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    background: radial-gradient(
+      260px circle at var(--lp-mx, 50%) var(--lp-my, 0%),
+      var(--lp-glow-info),
+      transparent 70%
+    );
+    opacity: 0;
+    transition: opacity 300ms ease-out;
+  }
+
+  .lp-card:hover::after {
+    opacity: 0.6;
+  }
+}
+
 .lp-icon {
   background: linear-gradient(135deg, hsl(var(--accent)), hsl(var(--secondary)));
   box-shadow: inset 0 0 0 1px var(--lp-edge);
+}
+
+/* Número do passo: a pastilha da `.lp-icon`, com um halo discreto. */
+.lp-step-number {
+  box-shadow:
+    inset 0 0 0 1px var(--lp-edge-strong),
+    0 0 18px -6px hsl(var(--info) / 0.6);
+}
+
+/* ---------- Divisor entre seções ---------- */
+
+/* Filete de 1 px, 60 % da largura, centrado, no topo de cada seção após a primeira. */
+.lp-section + .lp-section::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 20%;
+  right: 20%;
+  height: 1px;
+  background: var(--lp-filament);
+  pointer-events: none;
 }
 
 /* ---------- Como funciona: linha que se desenha ---------- */
@@ -310,6 +500,35 @@
   box-shadow: 0 8px 24px -16px hsl(var(--info) / 0.35);
 }
 
+/* Filete inferior em gradiente, que acende quando o header fica sólido. */
+.lp-header::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 -1px;
+  height: 1px;
+  background: var(--lp-filament);
+  opacity: 0;
+  transition: opacity 300ms ease-out;
+  pointer-events: none;
+}
+
+.lp-header[data-scrolled]::after {
+  opacity: 1;
+}
+
+/* ---------- Rodapé: filete de luz no topo ---------- */
+
+.lp-footer::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 10%;
+  right: 10%;
+  height: 1px;
+  background: var(--lp-filament);
+  pointer-events: none;
+}
+
 /* ---------- Botão primário: brilho no hover ---------- */
 
 .lp-glow-button {
@@ -352,6 +571,8 @@
 
   .lp-aurora__blob,
   .lp-fade-up,
+  .lp-pulse-dot::after,
+  .lp-float,
   .lp-progress,
   .lp-check path,
   .lp-check circle {
@@ -396,6 +617,21 @@
   .lp-card,
   .lp-card:hover {
     transform: none;
+    transition: none;
+  }
+
+  /* Spotlight desligado: o brilho seguindo o ponteiro é movimento. */
+  .lp-card::after,
+  .lp-card:hover::after {
+    display: none;
+  }
+
+  .lp-pulse-dot::after {
+    display: none;
+  }
+
+  .lp-header::after,
+  .lp-card::before {
     transition: none;
   }
 }

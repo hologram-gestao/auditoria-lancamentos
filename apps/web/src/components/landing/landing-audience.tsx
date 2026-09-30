@@ -6,7 +6,7 @@ import { LandingSection, revealDelay } from './landing-section';
 
 export function LandingAudience() {
   return (
-    <LandingSection id="para-quem" title={audience.title}>
+    <LandingSection id="para-quem" eyebrow={audience.eyebrow} title={audience.title}>
       <ul className="grid gap-4 md:grid-cols-3 md:gap-6">
         {audience.items.map((item, index) => (
           <li

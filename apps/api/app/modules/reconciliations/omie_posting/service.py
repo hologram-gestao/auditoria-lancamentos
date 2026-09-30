@@ -43,6 +43,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 
+from app.core.branding import PRODUCT_NAME
 from app.core.crypto_service import (
     AAD_ANOMALY_RESOLUTION_NOTE,
     AAD_FILE_ENTRY_DESCRIPTION,
@@ -117,7 +118,7 @@ _C_TIPO_DOCUMENTO = "DIN"
 
 #: Nota gravada na anomalia resolvida. Sem PII: só o ID do lançamento Omie.
 #: O mínimo de 10 chars da revisão (Doc §17.3) é respeitado com folga.
-_RESOLUTION_NOTE = "Lancado no Omie pelo ADL - lancamento {omie_lancamento_id}."
+_RESOLUTION_NOTE = f"Lancado no Omie pelo {PRODUCT_NAME} - lancamento {{omie_lancamento_id}}."
 
 
 @dataclass(frozen=True, slots=True)

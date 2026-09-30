@@ -2,7 +2,7 @@
   "name": "@auditoria/web",
   "version": "0.1.0",
   "private": true,
-  "description": "Frontend Next.js 14 — Sistema de Auditoria de Lançamentos",
+  "description": "Frontend Next.js 14 do Hologram OS",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

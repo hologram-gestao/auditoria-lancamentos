@@ -8,7 +8,11 @@
  *      esconder os blocos `[data-reveal]` (sem JS, tudo aparece);
  *   2. revela cada `[data-reveal]` quando ele entra na tela (`IntersectionObserver`),
  *      uma vez só;
- *   3. liga `data-scrolled` no header (`[data-lp-header]`) quando a página sai do topo.
+ *   3. liga `data-scrolled` no header (`[data-lp-header]`) quando a página sai do topo;
+ *   4. spotlight dos cards (86e3gr6k5): escreve a posição do ponteiro em `--lp-mx` e
+ *      `--lp-my` (px) no `.lp-card` sob ele; o `.lp-card::after` desenha o brilho ali.
+ *      Só com mouse de verdade (`hover: hover`) e SEM movimento reduzido: o brilho
+ *      seguindo o ponteiro é movimento disparado por interação.
  *
  * Não renderiza nada. Sob `prefers-reduced-motion` o CSS já mostra o estado final;
  * o observer continua rodando, sem efeito visível.
@@ -50,9 +54,24 @@ export function LandingEffects() {
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
 
+    const spotlight =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(hover: hover)').matches &&
+      !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const onPointerMove = (event: PointerEvent) => {
+      if (event.pointerType !== 'mouse' || !(event.target instanceof Element)) return;
+      const card = event.target.closest<HTMLElement>('.lp-card');
+      if (!card) return;
+      const rect = card.getBoundingClientRect();
+      card.style.setProperty('--lp-mx', `${event.clientX - rect.left}px`);
+      card.style.setProperty('--lp-my', `${event.clientY - rect.top}px`);
+    };
+    if (spotlight) root.addEventListener('pointermove', onPointerMove, { passive: true });
+
     return () => {
       observer?.disconnect();
       window.removeEventListener('scroll', onScroll);
+      root.removeEventListener('pointermove', onPointerMove);
       root.removeAttribute('data-lp-js');
     };
   }, []);

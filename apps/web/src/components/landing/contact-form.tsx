@@ -38,6 +38,7 @@ import {
 } from '@/lib/validation/lead';
 
 import { contact } from './content';
+import { ManualDownload } from './manual-download';
 
 function errorMessageFor(err: unknown): string {
   if (err instanceof NetworkError) return err.userMessage;
@@ -110,6 +111,9 @@ export function ContactForm() {
             </svg>
             <p className="text-xl font-semibold">{contact.successTitle}</p>
             <p className="text-muted-foreground">{contact.successText}</p>
+            <div className="mt-2">
+              <ManualDownload id="manual-confirmacao" variant="link" />
+            </div>
           </div>
         )}
       </div>

@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from app.core.branding import PRODUCT_NAME
 from app.core.logging import get_logger
 
 if TYPE_CHECKING:
@@ -49,11 +50,16 @@ if TYPE_CHECKING:
 
 log = get_logger(__name__)
 
+# Marca na frente de todo alerta (texto do webhook, resumo e assunto do e-mail). Era
+# "[ADL]" até 30/09/2026: filtro de e-mail ou de canal montado sobre o prefixo antigo
+# precisa ser refeito.
+ALERT_PREFIX = f"[{PRODUCT_NAME}]"
+
 # Mensagem canônica do gatilho SINTÉTICO — compartilhada pelo endpoint HTTP admin
 # (`app/modules/system/routes.py`) e pelo CLI de deploy
 # (`app/cli/alert_synthetic_check.py`, o Job da INFRA 03.7). Sem PII.
 SYNTHETIC_ALERT_MESSAGE = (
-    "Teste sintetico de alerta do ADL — a chegada desta mensagem prova que o "
+    f"Teste sintetico de alerta do {PRODUCT_NAME} — a chegada desta mensagem prova que o "
     "canal de plantao esta entregando alertas."
 )
 
@@ -103,11 +109,11 @@ class Alert:
 
     def to_webhook_payload(self) -> dict[str, Any]:
         # `text` torna o payload compatível com Slack/Discord/webhooks genéricos.
-        return {"text": f"[ADL] {self.code.value}: {self.message}", **self._fields()}
+        return {"text": f"{ALERT_PREFIX} {self.code.value}: {self.message}", **self._fields()}
 
     def summary_line(self) -> str:
         extras = " ".join(f"{k}={v}" for k, v in self._fields().items())
-        return f"[ADL] {self.code.value}: {self.message} ({extras})"
+        return f"{ALERT_PREFIX} {self.code.value}: {self.message} ({extras})"
 
 
 @dataclass(frozen=True)
@@ -176,7 +182,7 @@ async def _send_email(alert: Alert, settings: Settings) -> bool:
 
     def _send() -> None:
         msg = EmailMessage()
-        msg["Subject"] = f"[ADL] {alert.code.value}"
+        msg["Subject"] = f"{ALERT_PREFIX} {alert.code.value}"
         msg["From"] = settings.ALERT_EMAIL_FROM
         msg["To"] = to_addr
         msg.set_content(alert.summary_line())

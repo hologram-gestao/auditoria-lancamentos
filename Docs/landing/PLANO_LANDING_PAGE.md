@@ -25,35 +25,35 @@ avisa o canal da ADL no Slack. Usuário logado que abre `/` vai para `/clientes`
 
 1. **Escritórios de contabilidade e contadores parceiros**, que recebem o financeiro de dezenas
    de clientes em qualidade ruim e pagam o preço no fechamento. Frame decidido nas reuniões com
-   o Murilo (`Docs/reunioes/`): a plataforma responde à pergunta *"esse cliente está pronto para
-   a minha integração contábil?"*.
+   o Murilo (`Docs/reunioes/`): a plataforma responde à pergunta _"esse cliente está pronto para
+   a minha integração contábil?"_.
 2. **BPOs financeiros e gestores financeiros**, que conciliam, revisam e lançam todo mês
    (o uso original da Hologram).
 3. **Empresas** que têm ERP ou só planilha e querem o próprio financeiro auditado antes de ir
    para o contador.
 
 **O que a página NÃO é:** não é catálogo de features, não é documentação, não tem preço, não
-promete número nenhum que o produto não meça hoje, e não usa o nome do produto (ele ainda não
-existe; ver §9).
+promete número nenhum que o produto não meça hoje. Desde 30/09/2026 ela **nomeia o produto**:
+Hologram OS (D2 revisada).
 
 ---
 
 ## 2. Decisões tomadas (o executor não pergunta, executa)
 
-| # | Decisão | Motivo |
-|---|---|---|
-| D1 | **Tema Hologram fixo** na landing e em `/privacidade`; sem seletor de tema | Página de marca; o token da marca é `.hologram` em `globals.css:125`. Fixar também tira a landing da variação por tema (o gate continua rodando nos 3 temas, com resultado idêntico) |
-| D2 | **Sem nome de produto.** A copy fala "a plataforma da Hologram" e "Hologram". Nasce **uma constante** de marca (`apps/web/src/lib/brand.ts` e `apps/api/app/core/branding.py`) usada em título, metadados, login, header e landing | A subtask 4 está bloqueada no nome; centralizar agora faz a subtask 5 virar mudança de uma linha |
-| D3 | **Sem foto de banco de imagens na v1.** A riqueza visual vem de CSS e SVG: fundo com gradientes da marca em movimento lento, vinhetas de produto **animadas** construídas com os próprios primitivos da UI, cards com vidro e brilho no hover (ver §4). Ficam **dois slots** de `next/image` (16:9 e 4:3) com placeholder documentado, para as imagens do Magnific que o Pedro baixar e conferir a licença | O executor não pode baixar imagem nem conferir licença; CSP tem `img-src 'self'`, então qualquer imagem tem de ser servida de `apps/web/public/landing/`. Uma landing moderna não depende de foto: depende de composição, tipografia e movimento |
-| D4 | **Webfont só se o arquivo já estiver no repo.** Se existir `apps/web/src/fonts/*.woff2` (o Pedro pode baixar Manrope ou Inter do Google Fonts e colocar lá), a landing usa `next/font/local` escopado no layout público; se não existir, usa a pilha `font-sans` do app, com escala tipográfica generosa (título 3xl a 6xl, `tracking-tight`, `leading-[1.05]`) | `next/font/google` baixa no build e o sandbox do executor não tem rede. A fonte não pode bloquear a entrega, mas a tipografia é metade da "cara moderna" |
-| D12 | **A landing tem de ser bonita e moderna, com efeitos visuais, nas cores da Hologram.** Pedido explícito do Pedro (29/09). Isso não estava nas subtasks: a 1 só cita as cores, a 3 não fala de estética. A §4 descreve o que "moderna" significa aqui, e o critério de aceite visual é do Pedro e do Lucas, pelo print e pelo link em dev | Landing é peça de marca no evento de 30/09; uma página correta e sem graça falha no objetivo mesmo passando em todo gate |
-| D5 | **Anti-spam em 4 camadas, sem CAPTCHA:** honeypot, tamanho estrito por campo, limite por e-mail (3 em 24h, silencioso), e `slowapi` como teto global | CAPTCHA traz script de terceiro (CSP), chave e dependência externa. O IP visto pela API é o do proxy (`86e3anx10`), então o `slowapi` por IP é um teto **global por instância**: é rede de segurança, não a defesa principal. Dívida registrada, ver §5.4 |
-| D6 | **Aviso do Slack inline, fail-soft, timeout 3 s**; `notified_at` gravado na mesma transação quando entrega | Simples, testável, sem sessão de banco em background; o visitante espera no máximo 3 s a mais |
-| D7 | **Lead em claro**, só os campos decididos, sem IP, sem user agent | Decisão do Pedro (28/09): dado de prospect, não do cliente final. Registrar no `CLAUDE.md` para ninguém ler a §4.5 como contradição |
-| D8 | **Nasce uma página `/privacidade`** pública, curta e factual | O consentimento LGPD precisa apontar para um texto de uso do dado; sem ele o checkbox é decorativo |
-| D9 | **Um worktree, uma branch (`feat/landing-leads`), um PR para `develop`**, base `origin/develop` | As subtasks 2 e 3 compartilham o contrato do endpoint; PR único evita front sem back em dev. A develop está à frente da main (#255) e as branches `feat/client-screens-layout` e `fix/client-titles-row-slack` estão pushed e não mergeadas: elas tocam `middleware.ts`/`e2e`; conflito é esperado e se resolve no merge, não agora |
-| D10 | Contrato OpenAPI regenerado **sem servidor**: `python -c "from app.main import app; import json; print(json.dumps(app.openapi()))" > openapi.json` e `openapi-typescript openapi.json -o src/lib/contracts/schema.ts` | O sandbox não abre socket para o `gen:types` apontar em `localhost:8000` |
-| D11 | Subtasks **4 e 5 não podem ser concluídas** sem o nome; o que dá para fazer nelas está na §9 e §10 e É feito | "Fazer todas as tasks" significa levar cada uma até a fronteira do que não depende de terceiros |
+| #   | Decisão                                                                                                                                                                                                                                                                                                                                                                                                    | Motivo                                                                                                                                                                                                                                                                                                                              |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | **Tema Hologram fixo** na landing e em `/privacidade`; sem seletor de tema                                                                                                                                                                                                                                                                                                                                 | Página de marca; o token da marca é `.hologram` em `globals.css:125`. Fixar também tira a landing da variação por tema (o gate continua rodando nos 3 temas, com resultado idêntico)                                                                                                                                                |
+| D2  | **Revisada em 30/09/2026: a landing nomeia o produto, Hologram OS** (decisão do Pedro; domínio `hologramos.com.br`, a registrar). O nome vem da constante de marca (`apps/web/src/lib/brand.ts` e `apps/api/app/core/branding.py`), usada em título, metadados, login, header e landing; quem trata o dado do formulário continua sendo a Hologram Gestão. Até 29/09 a decisão era "sem nome de produto"   | O nome foi decidido; a constante criada na v1 fez a troca virar uma linha de cada lado (86e3gr6k5)                                                                                                                                                                                                                                  |
+| D3  | **Sem foto de banco de imagens na v1.** A riqueza visual vem de CSS e SVG: fundo com gradientes da marca em movimento lento, vinhetas de produto **animadas** construídas com os próprios primitivos da UI, cards com vidro e brilho no hover (ver §4). Ficam **dois slots** de `next/image` (16:9 e 4:3) com placeholder documentado, para as imagens do Magnific que o Pedro baixar e conferir a licença | O executor não pode baixar imagem nem conferir licença; CSP tem `img-src 'self'`, então qualquer imagem tem de ser servida de `apps/web/public/landing/`. Uma landing moderna não depende de foto: depende de composição, tipografia e movimento                                                                                    |
+| D4  | **Webfont só se o arquivo já estiver no repo.** Se existir `apps/web/src/fonts/*.woff2` (o Pedro pode baixar Manrope ou Inter do Google Fonts e colocar lá), a landing usa `next/font/local` escopado no layout público; se não existir, usa a pilha `font-sans` do app, com escala tipográfica generosa (título 3xl a 6xl, `tracking-tight`, `leading-[1.05]`)                                            | `next/font/google` baixa no build e o sandbox do executor não tem rede. A fonte não pode bloquear a entrega, mas a tipografia é metade da "cara moderna"                                                                                                                                                                            |
+| D12 | **A landing tem de ser bonita e moderna, com efeitos visuais, nas cores da Hologram.** Pedido explícito do Pedro (29/09). Isso não estava nas subtasks: a 1 só cita as cores, a 3 não fala de estética. A §4 descreve o que "moderna" significa aqui, e o critério de aceite visual é do Pedro e do Lucas, pelo print e pelo link em dev                                                                   | Landing é peça de marca no evento de 30/09; uma página correta e sem graça falha no objetivo mesmo passando em todo gate                                                                                                                                                                                                            |
+| D5  | **Anti-spam em 4 camadas, sem CAPTCHA:** honeypot, tamanho estrito por campo, limite por e-mail (3 em 24h, silencioso), e `slowapi` como teto global                                                                                                                                                                                                                                                       | CAPTCHA traz script de terceiro (CSP), chave e dependência externa. O IP visto pela API é o do proxy (`86e3anx10`), então o `slowapi` por IP é um teto **global por instância**: é rede de segurança, não a defesa principal. Dívida registrada, ver §5.4                                                                           |
+| D6  | **Aviso do Slack inline, fail-soft, timeout 3 s**; `notified_at` gravado na mesma transação quando entrega                                                                                                                                                                                                                                                                                                 | Simples, testável, sem sessão de banco em background; o visitante espera no máximo 3 s a mais                                                                                                                                                                                                                                       |
+| D7  | **Lead em claro**, só os campos decididos, sem IP, sem user agent                                                                                                                                                                                                                                                                                                                                          | Decisão do Pedro (28/09): dado de prospect, não do cliente final. Registrar no `CLAUDE.md` para ninguém ler a §4.5 como contradição                                                                                                                                                                                                 |
+| D8  | **Nasce uma página `/privacidade`** pública, curta e factual                                                                                                                                                                                                                                                                                                                                               | O consentimento LGPD precisa apontar para um texto de uso do dado; sem ele o checkbox é decorativo                                                                                                                                                                                                                                  |
+| D9  | **Um worktree, uma branch (`feat/landing-leads`), um PR para `develop`**, base `origin/develop`                                                                                                                                                                                                                                                                                                            | As subtasks 2 e 3 compartilham o contrato do endpoint; PR único evita front sem back em dev. A develop está à frente da main (#255) e as branches `feat/client-screens-layout` e `fix/client-titles-row-slack` estão pushed e não mergeadas: elas tocam `middleware.ts`/`e2e`; conflito é esperado e se resolve no merge, não agora |
+| D10 | Contrato OpenAPI regenerado **sem servidor**: `python -c "from app.main import app; import json; print(json.dumps(app.openapi()))" > openapi.json` e `openapi-typescript openapi.json -o src/lib/contracts/schema.ts`                                                                                                                                                                                      | O sandbox não abre socket para o `gen:types` apontar em `localhost:8000`                                                                                                                                                                                                                                                            |
+| D11 | Subtasks **4 e 5 não podem ser concluídas** sem o nome; o que dá para fazer nelas está na §9 e §10 e É feito                                                                                                                                                                                                                                                                                               | "Fazer todas as tasks" significa levar cada uma até a fronteira do que não depende de terceiros                                                                                                                                                                                                                                     |
 
 ---
 
@@ -74,16 +74,16 @@ existe; ver §9).
 
 ### 3.2 Dores e como a plataforma responde (com a fonte de cada uma)
 
-| Dor (como o público sente) | Fonte | O que existe hoje e sustenta a frase |
-|---|---|---|
-| O fechamento não roda todo mês; vira um crunch de meses | Murilo, R2 (dores consolidadas nº 1) | Conciliação por conta + mês, com lista, revisão por abas e relatório Excel (S0 a S19, Sprint 4) |
-| Dado ruim entra na contabilidade: imobilizado lançado como despesa, "ajuste de saldo" inventado, tarifas somadas errado | Murilo, R1 (as dores nº 2) | Cruzamento determinístico com tolerância de R$ 0,01 e 3 dias, anomalias tipadas, qualificação por IA que **sinaliza** e nunca decide (§5) |
-| Categorizar, fazer de-para e montar lançamento é PROCV manual, cliente a cliente | Murilo, R2 (nº 2 e 3) | De-para multi-destino por cliente (S12), plano contábil do cliente e partida derivada do sinal (S16), glossário por cliente (Sprint 6) |
-| A maioria dos clientes não tem ERP; chega planilha e extrato em todo formato | Murilo, R1/R2 (6 a 7 de 40 com Omie) | Origem por arquivo com mapeamento de entrada (S14); leitura de extrato e fatura por IA (S9, Sprint 2) |
-| Fatura de cartão é trabalho à parte e ninguém lança | Hologram (Sprint 1 e 7) | Conciliação de fatura de cartão e lançamento das compras no Omie (desligado por ambiente; **não prometer** na landing além de "lança no Omie" se `OMIE_POSTING_ENABLED` estiver ligado em dev: descrever como "prepara o lançamento" se não for o caso) |
-| Título vencido há meses não aparece na conciliação do mês | Sprint 11 e 15 | Carteira de títulos em aberto sem recorte de mês; contexto do título separa inadimplência real de acordo |
-| O cliente final quer ver o próprio dado, e o escritório não pode vazar um cliente para o outro | Sprint 5 e camada de organizações | Acesso do cliente ao próprio tenant; organização só alcança os próprios clientes; decisão única de acesso (§3.15) |
-| "Onde meus dados ficam e quem lê?" | 86e3anx75, §4 | Chave de criptografia própria por cliente, arquivo original nunca guardado, trilha de acesso (LGPD), encerramento com destruição da chave |
+| Dor (como o público sente)                                                                                              | Fonte                                | O que existe hoje e sustenta a frase                                                                                                                                                                                                                    |
+| ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| O fechamento não roda todo mês; vira um crunch de meses                                                                 | Murilo, R2 (dores consolidadas nº 1) | Conciliação por conta + mês, com lista, revisão por abas e relatório Excel (S0 a S19, Sprint 4)                                                                                                                                                         |
+| Dado ruim entra na contabilidade: imobilizado lançado como despesa, "ajuste de saldo" inventado, tarifas somadas errado | Murilo, R1 (as dores nº 2)           | Cruzamento determinístico com tolerância de R$ 0,01 e 3 dias, anomalias tipadas, qualificação por IA que **sinaliza** e nunca decide (§5)                                                                                                               |
+| Categorizar, fazer de-para e montar lançamento é PROCV manual, cliente a cliente                                        | Murilo, R2 (nº 2 e 3)                | De-para multi-destino por cliente (S12), plano contábil do cliente e partida derivada do sinal (S16), glossário por cliente (Sprint 6)                                                                                                                  |
+| A maioria dos clientes não tem ERP; chega planilha e extrato em todo formato                                            | Murilo, R1/R2 (6 a 7 de 40 com Omie) | Origem por arquivo com mapeamento de entrada (S14); leitura de extrato e fatura por IA (S9, Sprint 2)                                                                                                                                                   |
+| Fatura de cartão é trabalho à parte e ninguém lança                                                                     | Hologram (Sprint 1 e 7)              | Conciliação de fatura de cartão e lançamento das compras no Omie (desligado por ambiente; **não prometer** na landing além de "lança no Omie" se `OMIE_POSTING_ENABLED` estiver ligado em dev: descrever como "prepara o lançamento" se não for o caso) |
+| Título vencido há meses não aparece na conciliação do mês                                                               | Sprint 11 e 15                       | Carteira de títulos em aberto sem recorte de mês; contexto do título separa inadimplência real de acordo                                                                                                                                                |
+| O cliente final quer ver o próprio dado, e o escritório não pode vazar um cliente para o outro                          | Sprint 5 e camada de organizações    | Acesso do cliente ao próprio tenant; organização só alcança os próprios clientes; decisão única de acesso (§3.15)                                                                                                                                       |
+| "Onde meus dados ficam e quem lê?"                                                                                      | 86e3anx75, §4                        | Chave de criptografia própria por cliente, arquivo original nunca guardado, trilha de acesso (LGPD), encerramento com destruição da chave                                                                                                               |
 
 **Regras da copy:**
 
@@ -109,8 +109,8 @@ existe; ver §9).
    (`/login`) e botão primário **Entrar em contato** (âncora `#contato`).
 2. **Hero:** título (uma frase, a promessa), subtítulo (para quem e o que muda), os dois botões
    repetidos, e ao lado uma vinheta de produto (card de conciliação com badges de status).
-   Sugestão de título para o executor refinar: *"O financeiro do seu cliente, conferido antes de
-   virar contabilidade."*
+   Sugestão de título para o executor refinar: _"O financeiro do seu cliente, conferido antes de
+   virar contabilidade."_
 3. **Para quem** (3 cards curtos): escritório de contabilidade, BPO financeiro, empresa.
 4. **Dores e respostas** (4 pares, do mais caro ao mais barato, saídos da tabela 3.2).
 5. **Como funciona** (4 passos, na ordem do fluxo núcleo do §1 do `CLAUDE.md`): envia o arquivo
@@ -189,7 +189,7 @@ revisão dele virar edição de um lugar só.
   desligado sob `@media (prefers-reduced-motion: reduce)`** (as animações viram estado final,
   a aurora fica parada); LCP é texto, não imagem; a página não carrega JS de animação além do
   `reveal.tsx`. Performance: `next build` sem aviso de bundle, e `pnpm --filter @auditoria/web
-  build` continua verde.
+build` continua verde.
 - **Contraste sob efeito:** o gate de a11y mede com o ponteiro EM CIMA dos botões e cards
   (`hover()` explícito antes do `analyze`, regra do `CLAUDE.md` v1.34) e mede o header nos
   dois estados (topo e rolado). Vidro e brilho ficam fora de baixo do texto; se o axe devolver
@@ -214,19 +214,19 @@ revisão dele virar edição de um lugar só.
 
 ### 5.1 Modelo `leads` (migration reversível, skill `migration`)
 
-| Coluna | Tipo | Regra |
-|---|---|---|
-| `id` | UUID pk | `uuid4` |
-| `name` | `String(120)` NOT NULL | trim; 2 a 120 |
-| `email` | `String(254)` NOT NULL | trim; `EmailStr` (dep `email-validator` já existe) |
-| `company` | `String(120)` NULL | opcional |
-| `whatsapp` | `String(20)` NULL | opcional; só dígitos, `+`, espaço, `(`, `)`, `-` |
-| `message` | `String(1000)` NULL | opcional |
-| `consent_at` | `TIMESTAMPTZ` NOT NULL | momento do consentimento (evidência LGPD), `now()` do servidor |
-| `consent_text_version` | `String(20)` NOT NULL | versão do texto exibido (ex.: `2026-09-29`), constante no código |
-| `source` | `String(30)` NOT NULL default `'landing'` | origem do lead |
-| `notified_at` | `TIMESTAMPTZ` NULL | quando o Slack aceitou |
-| `created_at` | `TIMESTAMPTZ` NOT NULL default `now()` | |
+| Coluna                 | Tipo                                      | Regra                                                            |
+| ---------------------- | ----------------------------------------- | ---------------------------------------------------------------- |
+| `id`                   | UUID pk                                   | `uuid4`                                                          |
+| `name`                 | `String(120)` NOT NULL                    | trim; 2 a 120                                                    |
+| `email`                | `String(254)` NOT NULL                    | trim; `EmailStr` (dep `email-validator` já existe)               |
+| `company`              | `String(120)` NULL                        | opcional                                                         |
+| `whatsapp`             | `String(20)` NULL                         | opcional; só dígitos, `+`, espaço, `(`, `)`, `-`                 |
+| `message`              | `String(1000)` NULL                       | opcional                                                         |
+| `consent_at`           | `TIMESTAMPTZ` NOT NULL                    | momento do consentimento (evidência LGPD), `now()` do servidor   |
+| `consent_text_version` | `String(20)` NOT NULL                     | versão do texto exibido (ex.: `2026-09-29`), constante no código |
+| `source`               | `String(30)` NOT NULL default `'landing'` | origem do lead                                                   |
+| `notified_at`          | `TIMESTAMPTZ` NULL                        | quando o Slack aceitou                                           |
+| `created_at`           | `TIMESTAMPTZ` NOT NULL default `now()`    |                                                                  |
 
 Índice `ix_leads_email_lower_created_at` em `(lower(email), created_at)` para o limite por
 e-mail. Sem FK para `clients`/`organizations`/`users`. Sem IP, sem user agent, sem cookie.
@@ -414,6 +414,10 @@ Contrato OpenAPI regenerado (D10) entra no commit 3 (o schema TS muda junto com 
 
 ## 9. Subtask 4 (infra, `86e3fr9wm`): o que dá para fazer sem o nome
 
+> **Atualização de 30/09/2026:** o nome saiu (Hologram OS, `hologramos.com.br`). O documento
+> `Docs/landing/DOMINIO_E_NOME.md` já traz a decisão e o roteiro com o domínio real; falta
+> registrar o domínio e montar o Load Balancer.
+
 Entregável `Docs/landing/DOMINIO_E_NOME.md`:
 
 1. **Checklist técnico do domínio próprio no Cloud Run** em `southamerica-east1`: se o
@@ -438,6 +442,10 @@ pelo nome) e o executor diz isso no handoff.
 ---
 
 ## 10. Subtask 5 (rename, `86e3fr9x3`): o que dá para fazer sem o nome
+
+> **Atualização de 30/09/2026:** feito na 86e3gr6k5. `brand.ts` e `branding.py` dizem Hologram
+> OS; os testes de marca proíbem o nome e a sigla antigos (literais escritos no teste) e o nome
+> novo escrito à mão fora dos arquivos de marca.
 
 - `apps/web/src/lib/brand.ts`: `PRODUCT_NAME = 'Auditoria de Lançamentos'` (valor atual,
   **sem mudança visual**), `COMPANY_NAME = 'Hologram Gestão'`, `PRODUCT_TAGLINE`.
@@ -484,7 +492,7 @@ pelo nome) e o executor diz isso no handoff.
   com o checklist da §13 (deploy é sempre task separada). Nunca mover para `done`.
 - **Nunca** `git push`, `gh pr create`, `--no-verify`, `--force`. Ao fim, entregar os comandos
   prontos: `git push -u origin feat/landing-leads` e `gh pr create --base develop --head
-  feat/landing-leads` com título e corpo em português.
+feat/landing-leads` com título e corpo em português.
 - **Screenshots** em `/home/phaos93/auditoria-lancamentos/screenshots/pr-shots-86e3fr9vz/`
   (pasta ignorada pelo git), nunca em `/tmp`.
 - **`CLAUDE.md`:** a versão nova é `(maior versão em origin/develop) + 1`; conferir com
@@ -503,14 +511,14 @@ Base: o épico de layout das telas do cliente (`86e3fr9pd`, 4 tasks de front) le
 29/09/2026; cada subtask do épico de lista de clientes levou ~25 min; o backend novo aqui tem
 migration, módulo e integração com serviço externo.
 
-| Subtask | Estimativa | O que pesa |
-|---|---|---|
-| 1 copy | 45 min | leitura das fontes + `COPY.md` + `content.ts` |
-| 2 back | 90 min | migration, módulo, notificador, testes, deploy/secret, contrato |
-| 3 front | 180 min | 10 componentes, efeitos da §4 (aurora, vinheta animada, reveal, vidro), form, middleware + teste, e2e com hover, gate em container, prints |
-| 4 infra | 30 min | documento de checklist e nomes |
-| 5 rename | 30 min | constantes, substituições, teste de grep |
-| **Total** | **6 h 15** | é estimativa; o tempo real substitui no fechamento |
+| Subtask   | Estimativa | O que pesa                                                                                                                                 |
+| --------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1 copy    | 45 min     | leitura das fontes + `COPY.md` + `content.ts`                                                                                              |
+| 2 back    | 90 min     | migration, módulo, notificador, testes, deploy/secret, contrato                                                                            |
+| 3 front   | 180 min    | 10 componentes, efeitos da §4 (aurora, vinheta animada, reveal, vidro), form, middleware + teste, e2e com hover, gate em container, prints |
+| 4 infra   | 30 min     | documento de checklist e nomes                                                                                                             |
+| 5 rename  | 30 min     | constantes, substituições, teste de grep                                                                                                   |
+| **Total** | **6 h 15** | é estimativa; o tempo real substitui no fechamento                                                                                         |
 
 ---
 

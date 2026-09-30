@@ -1,20 +1,39 @@
 /**
- * Trava a marca num lugar só (86e3fr9x3): o nome do produto não pode voltar a ser
- * escrito à mão em tela nenhuma, senão a troca pelo nome novo deixa de ser uma
- * linha em `lib/brand.ts`.
+ * Trava a marca num lugar só (86e3fr9x3): o produto é o Hologram OS desde 30/09/2026.
+ * O nome ANTIGO não pode voltar em arquivo nenhum, e o nome novo não pode ser escrito
+ * à mão fora de `lib/brand.ts`, senão a próxima troca deixa de ser uma linha.
+ *
+ * Os literais antigos estão escritos AQUI, e não derivados da constante: derivados,
+ * o teste passaria a procurar o nome novo e deixaria o antigo voltar calado.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { PRODUCT_NAME, PRODUCT_SHORT_NAME, PRODUCT_TITLE } from '../brand';
+import {
+  COMPANY_NAME,
+  PRODUCT_DOMAIN,
+  PRODUCT_NAME,
+  PRODUCT_SHORT_NAME,
+  PRODUCT_TITLE,
+} from '../brand';
+
+const OLD_NAME = 'Auditoria de Lançamentos';
 
 // `__dirname`, não `import.meta.url`: no ambiente jsdom a URL do módulo não é `file:`.
 const SRC = resolve(__dirname, '..', '..');
 
-/** Podem conter o nome: a marca, o contrato gerado pela API e este teste. */
-const ALLOWED = new Set(['lib/brand.ts', 'lib/contracts/schema.ts', 'lib/__tests__/brand.test.ts']);
+/**
+ * Podem conter o nome: a marca, o contrato gerado pela API e os dois testes que
+ * escrevem o literal antigo para proibi-lo (este e o do texto da landing).
+ */
+const ALLOWED = new Set([
+  'lib/brand.ts',
+  'lib/contracts/schema.ts',
+  'lib/__tests__/brand.test.ts',
+  'components/landing/__tests__/content.test.ts',
+]);
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -46,20 +65,29 @@ function codeLines(file: string): string[] {
 }
 
 describe('lib/brand', () => {
-  it('mantém o nome de hoje, sem mudança visual até o nome novo existir', () => {
-    expect(PRODUCT_NAME).toBe('Auditoria de Lançamentos');
-    expect(PRODUCT_TITLE).toBe('Sistema de Auditoria de Lançamentos');
-    expect(PRODUCT_SHORT_NAME).toBe('ADL');
+  it('o produto é o Hologram OS, da Hologram Gestão', () => {
+    expect(PRODUCT_NAME).toBe('Hologram OS');
+    expect(PRODUCT_TITLE).toBe('Hologram OS');
+    expect(PRODUCT_SHORT_NAME).toBe('Hologram OS');
+    expect(PRODUCT_DOMAIN).toBe('hologramos.com.br');
+    expect(COMPANY_NAME).toBe('Hologram Gestão');
   });
 
-  it('o nome do produto só aparece escrito em lib/brand.ts', () => {
-    const offenders = FILES.filter((file) => readFileSync(file, 'utf8').includes(PRODUCT_NAME));
+  it('o nome antigo não aparece em arquivo nenhum', () => {
+    const offenders = FILES.filter((file) => readFileSync(file, 'utf8').includes(OLD_NAME));
     expect(offenders.map(rel)).toEqual([]);
   });
 
-  it('a sigla não aparece escrita à mão em texto de tela (string ou JSX)', () => {
-    // Em comentário a sigla segue permitida: é assim que o time chama o sistema. Código
-    // de erro do backend (`ADL-PARSE-LIMIT`) também: é identificador, não nome.
+  it('o nome novo só é escrito à mão em lib/brand.ts (em comentário pode)', () => {
+    const offenders = FILES.filter((file) =>
+      codeLines(file).some((line) => line.includes(PRODUCT_NAME)),
+    );
+    expect(offenders.map(rel)).toEqual([]);
+  });
+
+  it('a sigla antiga não aparece em texto de tela (string ou JSX)', () => {
+    // Em comentário a sigla segue permitida: é assim que o time chamava o sistema.
+    // Código de erro do backend (`ADL-PARSE-LIMIT`) também: é identificador, não nome.
     const inString = /['"`][^'"`]*\bADL\b(?!-)[^'"`]*['"`]/;
     const inJsxText = />[^<>{}]*\bADL\b(?!-)[^<>{}]*</;
     const offenders = FILES.filter((file) =>
