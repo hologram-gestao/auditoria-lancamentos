@@ -43,7 +43,9 @@ export function LandingHero() {
             className="lp-fade-up mt-4 text-4xl font-semibold leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl"
             style={delay(80)}
           >
-            {hero.title}
+            {hero.titleBefore}
+            {hero.titleHighlight}
+            {hero.titleAfter}
           </h1>
           <p
             className="lp-fade-up text-muted-foreground mt-6 max-w-xl text-base leading-relaxed sm:text-lg"

@@ -1,13 +1,12 @@
 """Marca do produto num lugar só (subtask 86e3fr9x3).
 
-O nome novo ainda não foi decidido (86e3fr9wm). Até lá o valor é o de hoje, sem
-mudança visível; quando o nome existir, a troca é aqui e em
-`apps/web/src/lib/brand.ts`. `tests/unit/test_branding.py` recusa o nome antigo
-escrito à mão fora deste arquivo.
+O produto se chama Hologram OS (decisão de 30/09/2026); a troca de nome é aqui e em
+`apps/web/src/lib/brand.ts`. `tests/unit/test_branding.py` recusa o nome antigo em
+qualquer arquivo de `app/` e o nome novo escrito à mão fora deste.
 """
 
 from __future__ import annotations
 
-PRODUCT_NAME = "Auditoria de Lançamentos"
-PRODUCT_TITLE = f"Sistema de {PRODUCT_NAME}"
-API_TITLE = f"{PRODUCT_TITLE} — API"
+PRODUCT_NAME = "Hologram OS"
+PRODUCT_TITLE = PRODUCT_NAME
+API_TITLE = f"{PRODUCT_TITLE} API"

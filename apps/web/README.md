@@ -1,6 +1,6 @@
 # apps/web — Frontend Next.js 14
 
-Frontend do Sistema de Auditoria de Lançamentos.
+Frontend do Hologram OS.
 
 ## Setup
 

@@ -16,6 +16,8 @@ export function LandingFooter() {
           <span>
             © {year} {footer.company}
           </span>
+          <span aria-hidden="true">·</span>
+          <span className="text-foreground font-medium">{footer.product}</span>
         </div>
         <nav aria-label={footer.navLabel} className="flex items-center gap-6">
           <Link

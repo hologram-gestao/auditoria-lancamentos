@@ -14,6 +14,9 @@ import { LandingHero } from '@/components/landing/landing-hero';
 import { LandingHow } from '@/components/landing/landing-how';
 import { LandingPains } from '@/components/landing/landing-pains';
 import { LandingSecurity } from '@/components/landing/landing-security';
+import { siteUrl } from '@/lib/site-url';
+
+const SITE_URL = siteUrl();
 
 export const metadata: Metadata = {
   title: landingMeta.title,
@@ -26,6 +29,8 @@ export const metadata: Metadata = {
   },
   // O layout raiz marca tudo como `noindex` (o app é interno); a landing é a exceção.
   robots: { index: true, follow: true },
+  // URL absoluta (Open Graph, canônica) só com o domínio próprio: `lib/site-url.ts`.
+  ...(SITE_URL ? { metadataBase: SITE_URL, alternates: { canonical: '/' } } : {}),
 };
 
 export default function LandingPage() {

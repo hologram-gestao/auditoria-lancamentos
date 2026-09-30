@@ -1,9 +1,10 @@
 # Domínio próprio e nome do produto (subtask 86e3fr9wm)
 
-> **Para quem é:** o Pedro e o Lucas, que decidem o nome, e quem for executar a troca de
-> domínio depois. **Estado:** a task segue **bloqueada pelo nome**. Este documento leva a task
-> até onde dá sem ele: o que precisa ser verdade na infraestrutura, os critérios e as
-> sugestões de nome, e o roteiro para depois da decisão. Escrito em 29/09/2026.
+> **Para quem é:** o Pedro e quem for executar a troca de domínio. **Estado (30/09/2026):** o
+> nome está **decidido**: o produto se chama **Hologram OS** e o domínio será
+> **`hologramos.com.br`**. O nome já está no código (subtask 86e3fr9x3). O domínio **ainda não
+> foi registrado** e não aponta para nada: falta registrar e montar o Load Balancer (seção 3).
+> A empresa continua **Hologram Gestão**.
 >
 > Regra deste documento: toda afirmação sobre o Google Cloud vem da documentação oficial,
 > com o link; o que não foi conferido está marcado **(a confirmar)**.
@@ -48,61 +49,55 @@ O que o caminho do Load Balancer implica, e ainda precisa ser conferido na hora 
 | **Links em alertas**                | Alertas levam só código e contexto (`core/alerting.py`), sem URL do web.                                                                                                                                                     | Nada a trocar hoje.                                                                                                                                                                                                                                                         |
 | **E-mail de "esqueci minha senha"** | Não existe envio por e-mail (a tela de login diz para falar com o administrador, 86e2u5140).                                                                                                                                 | Quando existir (86e3fr9xz), remetente e links no domínio novo.                                                                                                                                                                                                              |
 | **`robots`**                        | O layout raiz marca o app como `noindex`; a landing e `/privacidade` sobrescrevem com `index`, e `robots.txt` só libera essas duas.                                                                                          | Nada muda. Conferir no Search Console depois da troca.                                                                                                                                                                                                                      |
-| **Metadados da landing**            | Sem URL absoluta (`metadataBase` não definido).                                                                                                                                                                              | Definir `metadataBase` com o domínio novo quando existir, para o Open Graph sair com URL absoluta.                                                                                                                                                                          |
+| **Metadados da landing**            | `metadataBase`, canônica e `sitemap` só existem com `NEXT_PUBLIC_SITE_URL` (`apps/web/src/lib/site-url.ts`); hoje a variável não existe e a página sai sem URL absoluta.                                                     | Passar `NEXT_PUBLIC_SITE_URL=https://hologramos.com.br` como build-arg (seção 3, passo 7). Nenhuma linha de código muda.                                                                                                                                                    |
 
 ---
 
-## 2. Nome do produto
+## 2. Decidido: Hologram OS, `hologramos.com.br`
 
-### 2.1 Critérios
+Decisão do Pedro em 30/09/2026:
 
-Do épico e da conversa no grupo da ADL:
-
-1. **Cobrir o produto inteiro**: categorização e de-para para o sistema contábil, conciliação,
-   revisão, lançamento, carteira de títulos. "Auditoria de Lançamentos" descreve só uma parte.
-2. **Falar com contador e com BPO**, os dois públicos do evento de 30/09.
-3. **Curto e pronunciável em português**; funciona dito em voz alta numa reunião.
-4. **Convive com a marca Hologram** (a Hologram é a primeira organização da plataforma, não a
-   dona do nome): pode ser endossado ("X, da Hologram") sem depender dela.
-5. **Domínio `.com.br` disponível** e **sem registro conflitante no INPI** na classe de software
-   e serviços financeiros. Nenhuma das sugestões abaixo foi conferida: **disponibilidade de
-   domínio e de marca a confirmar**.
-6. "Olo Finance" foi sugerido e não pegou.
-
-### 2.2 Sugestões (disponibilidade de domínio e de marca a confirmar em todas)
-
-| Nome                    | Por quê                                                                                                                                    |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Crivo**               | É o que a plataforma faz para o contador: o dado passa pelo crivo antes de entrar na contabilidade. Curto, português, verbo e substantivo. |
-| **Lastro**              | Lastro contábil: cada lançamento com evidência por trás. Soa sólido e serve para financeiro e contábil.                                    |
-| **Conferi**             | Nasce da frase do hero ("conferido antes de virar contabilidade"). Informal, lembra ação feita. Risco: parece nome de app de consumo.      |
-| **Prumo**               | Instrumento que diz se está alinhado; "no prumo" é expressão comum. Serve para todo o produto, não só para conciliação.                    |
-| **Partida**             | Partida dobrada, a linguagem do contador (a Sprint 16 deriva a partida do sinal). Risco: palavra genérica, busca difícil.                  |
-| **Razão**               | Livro razão, e também "ter razão". Forte para contador; genérico demais para busca e marca.                                                |
-| **Fecho**               | Fechamento do mês. Curto e direto; risco de soar só como "fechamento", sem a parte de categorização.                                       |
-| **Aferi**               | Aferir: medir com padrão. Técnico, preciso, pouco usado como marca.                                                                        |
-| **Baliza**              | Referência que orienta. Neutro, serve para BPO e contador.                                                                                 |
-| **Esteira**             | O caminho do arquivo ao lançamento, passo a passo. Bom para descrever fluxo; fraco como marca sozinha.                                     |
-| **Norte**               | Direção. Muito usado em marcas brasileiras; busca e registro provavelmente difíceis.                                                       |
-| **Hologram Fechamento** | Marca endossada, zero risco de registro novo, comunica a função. Perde a independência da Hologram como organização.                       |
-
-Recomendação para a conversa (não é decisão): **Crivo** ou **Lastro**, pelos critérios 1 a 3,
-e conferir domínio e INPI dos dois antes de levar ao Lucas.
+- **Produto:** Hologram OS. Cobre o produto inteiro (conciliação, revisão, de-para, arquivo
+  contábil, carteira de títulos), que era o critério que "Auditoria de Lançamentos" não
+  atendia.
+- **Empresa:** continua **Hologram Gestão**, a primeira organização da plataforma. É ela quem
+  trata o dado do formulário da landing (aviso de privacidade).
+- **Domínio:** `hologramos.com.br`, **ainda não registrado**. Conferir a disponibilidade no
+  `registro.br` antes de qualquer outro passo.
+- **No código (86e3fr9x3, feito):** `PRODUCT_NAME = 'Hologram OS'` e `PRODUCT_DOMAIN =
+'hologramos.com.br'` em `apps/web/src/lib/brand.ts`, `PRODUCT_NAME = "Hologram OS"` em
+  `apps/api/app/core/branding.py`. A landing passou a nomear o produto (a D2 do plano caiu).
+  O domínio **não** é usado para montar URL: a URL absoluta vem só de `NEXT_PUBLIC_SITE_URL`.
 
 ---
 
-## 3. Roteiro depois da decisão
+## 3. Roteiro para colocar `hologramos.com.br` no ar
 
-1. Conferir e **registrar o domínio** (`registro.br` para `.com.br`), no nome da Hologram.
+1. **Registrar `hologramos.com.br`** no `registro.br`, no nome da Hologram Gestão.
 2. **Reservar o IP global** e montar o Load Balancer HTTPS externo com serverless NEG para o
    serviço web do ambiente (seção 1.1). Começar por **dev**.
-3. Criar o **certificado gerenciado** para o domínio e esperar o status ativo.
-4. Apontar o **DNS** (`A` para o IP do Load Balancer) e esperar a propagação.
-5. Atualizar as **env vars da API** sem deploy novo: `gcloud run services update <api> --update-env-vars=FRONTEND_URL=https://<domínio>,ALLOWED_ORIGINS=https://<domínio>` (o `ALLOWED_ORIGINS` é CSV: manter a URL `*.run.app` do web junto durante a transição).
-6. **Testar o cookie e o login** pelo domínio novo: entrar, navegar, sair; conferir no
-   DevTools que o cookie `access_token` está no host novo, HttpOnly e Secure.
-7. Definir `metadataBase` na landing e conferir o `robots.txt` e o Open Graph pelo domínio novo.
-8. Trocar o nome em `apps/web/src/lib/brand.ts` e `apps/api/app/core/branding.py` (subtask
-   86e3fr9x3): hoje é uma linha de cada lado, e os testes `brand.test.ts` e `test_branding.py`
-   recusam o nome antigo escrito em qualquer outro lugar.
-9. Repetir 2 a 7 em **prod** quando o ambiente existir.
+3. Criar o **certificado gerenciado** para `hologramos.com.br` e esperar o status ativo.
+4. Apontar o **DNS** (`A` de `hologramos.com.br` para o IP do Load Balancer) e esperar a
+   propagação.
+5. Atualizar as **env vars da API** sem deploy novo:
+   `gcloud run services update <api> --update-env-vars=FRONTEND_URL=https://hologramos.com.br,ALLOWED_ORIGINS=https://hologramos.com.br`
+   (o `ALLOWED_ORIGINS` é CSV: manter a URL `*.run.app` do web junto durante a transição).
+6. **Testar o cookie e o login** por `https://hologramos.com.br`: entrar, navegar, sair;
+   conferir no DevTools que o cookie `access_token` está no host novo, HttpOnly e Secure.
+7. **Ligar a URL absoluta da landing** (`metadataBase`, canônica, `sitemap.xml` e a linha
+   `Sitemap:` do `robots.txt`). É `NEXT_PUBLIC_`, então vale o valor do **build**, não do
+   runtime, e entra pelo mesmo caminho do `INTERNAL_API_URL`:
+   - `docker/Dockerfile.web`, antes do `RUN pnpm --filter @auditoria/web build`:
+     `ARG NEXT_PUBLIC_SITE_URL=` e `ENV NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}` (vazio
+     por padrão = comportamento de hoje);
+   - `docker/cloudbuild/cloudbuild-web.yaml`: mais um par `'--build-arg',
+'NEXT_PUBLIC_SITE_URL=${_SITE_URL}'` e `_SITE_URL: ''` em `substitutions`;
+   - `.github/workflows/deploy-dev.yml`, no passo que chama o `cloudbuild-web.yaml`:
+     `--substitutions=_TAG=dev,_API_URL=...,_SITE_URL=${{ vars.SITE_URL_DEV }}`, com a variável
+     de repositório `SITE_URL_DEV=https://hologramos.com.br`.
+     **Só no dia em que o domínio apontar:** com a variável e sem o domínio, a canônica e o
+     sitemap ensinariam o buscador um endereço que não abre. Valor sem `https://` estoura o
+     build de propósito (`lib/site-url.ts`).
+8. Conferir `https://hologramos.com.br/robots.txt`, `/sitemap.xml` e o Open Graph (um
+   validador de cartão de link) pelo domínio novo, e cadastrar o domínio no Search Console.
+9. Repetir 2 a 8 em **prod** quando o ambiente existir.

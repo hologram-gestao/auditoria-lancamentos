@@ -3,11 +3,13 @@
  *
  * A versão comentada, com a fonte de cada dor e a evidência de cada afirmação, é
  * `Docs/landing/COPY.md`. A revisão do Lucas vira edição AQUI: nenhum componente
- * da landing escreve texto de conteúdo por conta própria. Regras do texto: sem nome
- * de produto (D2), sem número de resultado, sem travessão, sem "garantimos". Um
- * teste (`__tests__/content.test.ts`) trava o nome antigo e a sigla.
+ * da landing escreve texto de conteúdo por conta própria. Regras do texto: o nome
+ * do produto vem SEMPRE de `PRODUCT_NAME` (a D2 caiu em 30/09/2026: a landing nomeia
+ * o produto), quem trata o dado é a empresa (`COMPANY_*`), sem número de resultado,
+ * sem travessão, sem "garantimos". Um teste (`__tests__/content.test.ts`) trava o
+ * nome antigo, a sigla e o travessão.
  */
-import { COMPANY_NAME, COMPANY_SHORT_NAME } from '@/lib/brand';
+import { COMPANY_NAME, COMPANY_SHORT_NAME, PRODUCT_NAME } from '@/lib/brand';
 
 /** Versão do texto de consentimento. Igual a `CONSENT_TEXT_VERSION` do backend. */
 export const CONSENT_TEXT_VERSION = '2026-09-30';
@@ -15,25 +17,29 @@ export const CONSENT_TEXT_VERSION = '2026-09-30';
 export const CONTACT_ANCHOR = 'contato';
 
 export const landingMeta = {
-  title: `${COMPANY_SHORT_NAME}: o financeiro do seu cliente, conferido antes da contabilidade`,
-  description:
-    'A plataforma da Hologram cruza extrato, fatura e planilha com o que foi lançado, mostra o que não bate e deixa pronto o que segue para o sistema contábil.',
+  title: `${PRODUCT_NAME}: o financeiro do seu cliente, conferido antes da contabilidade`,
+  description: `O ${PRODUCT_NAME} cruza extrato, fatura e planilha com o que foi lançado, mostra o que não bate e deixa pronto o que segue para o sistema contábil.`,
 } as const;
 
 export const header = {
-  brand: COMPANY_SHORT_NAME,
+  brand: PRODUCT_NAME,
   navLabel: 'Acesso e contato',
   signIn: 'Entrar',
   contact: 'Entrar em contato',
 } as const;
 
 export const hero = {
-  eyebrow: 'Para escritórios de contabilidade, BPOs financeiros e empresas',
-  title: 'O financeiro do seu cliente, conferido antes de virar contabilidade.',
-  subtitle:
-    'A plataforma da Hologram cruza extrato, fatura e planilha com o que foi lançado, mostra o que não bate e deixa pronto o que segue para o sistema contábil. Sua equipe revisa as exceções, não o mês inteiro.',
+  eyebrow: `${PRODUCT_NAME}, para escritórios de contabilidade, BPOs financeiros e empresas`,
+  /** O título em três partes: o meio é a ÚNICA palavra em destaque (gradiente) do hero. */
+  titleBefore: 'O financeiro do seu cliente, ',
+  titleHighlight: 'conferido',
+  titleAfter: ' antes de virar contabilidade.',
+  subtitle: `O ${PRODUCT_NAME} cruza extrato, fatura e planilha com o que foi lançado, mostra o que não bate e deixa pronto o que segue para o sistema contábil. Sua equipe revisa as exceções, não o mês inteiro.`,
   primary: 'Entrar em contato',
   secondary: 'Entrar',
+  /** Chips abaixo dos botões: o que entra e o que sai (`parse_service.py`, export, Sprint 13). */
+  chipsLabel: 'Formatos',
+  chips: ['Lê PDF, XLSX, XLS, CSV e Omie', 'Entrega Excel, Omie e o arquivo contábil'],
 } as const;
 
 /** Vinheta de produto: dado FICTÍCIO, valores redondos, nada que pareça cliente real. */
@@ -53,9 +59,13 @@ export const vignette = {
   ],
   footerLabel: 'Diferença de saldo',
   footerValue: 'R$ 0,00',
+  /** Mini-card flutuante: uma anomalia apontada, para dar profundidade à vinheta. */
+  flagBadge: 'Classificação suspeita',
+  flagText: 'IOF lançado como juros',
 } as const;
 
 export const audience = {
+  eyebrow: 'Para quem',
   title: 'Feito para quem fecha o financeiro de outras empresas',
   items: [
     {
@@ -77,9 +87,10 @@ export const audience = {
 } as const;
 
 export const pains = {
+  eyebrow: 'Dores e respostas',
   title: 'O trabalho que ninguém vê, e que decide o fechamento',
   painLabel: 'O problema',
-  answerLabel: 'Como a plataforma responde',
+  answerLabel: `Como o ${PRODUCT_NAME} responde`,
   items: [
     {
       pain: 'O fechamento não roda todo mês. Fica para depois, e o erro de janeiro só aparece quando o balanço aperta.',
@@ -105,14 +116,15 @@ export const pains = {
 } as const;
 
 export const how = {
+  eyebrow: 'Como funciona',
   title: 'Do arquivo ao lançamento, em quatro passos',
   steps: [
     {
       title: 'Envie o arquivo ou conecte a origem',
-      text: 'Extrato, fatura de cartão ou planilha do cliente. Se ele usa Omie, a plataforma busca os lançamentos por conta própria.',
+      text: `Extrato, fatura de cartão ou planilha do cliente. Se ele usa Omie, o ${PRODUCT_NAME} busca os lançamentos por conta própria.`,
     },
     {
-      title: 'A plataforma lê e cruza',
+      title: `O ${PRODUCT_NAME} lê e cruza`,
       text: 'A IA extrai as movimentações do arquivo. O cruzamento com os lançamentos segue regra fixa: até um centavo de diferença no valor e até três dias na data.',
     },
     {
@@ -127,6 +139,7 @@ export const how = {
 } as const;
 
 export const security = {
+  eyebrow: 'Segurança e privacidade',
   title: 'O dado do seu cliente continua dele',
   items: [
     {
@@ -154,6 +167,7 @@ export const security = {
 } as const;
 
 export const contact = {
+  eyebrow: 'Contato',
   title: 'Fale com a gente',
   lead: 'Conte um pouco do seu cenário. Respondemos pelo e-mail informado.',
   fields: {
@@ -186,6 +200,7 @@ export const contact = {
 
 export const footer = {
   company: COMPANY_NAME,
+  product: PRODUCT_NAME,
   signIn: 'Entrar',
   privacy: 'Aviso de privacidade',
   navLabel: 'Links do rodapé',
@@ -195,8 +210,7 @@ export const privacy = {
   metaTitle: `Aviso de privacidade · ${COMPANY_SHORT_NAME}`,
   metaDescription: 'Como a Hologram usa os dados enviados pelo formulário de contato da landing.',
   title: 'Aviso de privacidade',
-  intro:
-    'Este aviso vale para o formulário de contato desta página. Ele não trata dos dados que os clientes da plataforma processam nela.',
+  intro: `Este aviso vale para o formulário de contato do ${PRODUCT_NAME}. Ele não trata dos dados que os clientes da plataforma processam nela.`,
   updated: 'Versão de 30 de setembro de 2026.',
   sections: [
     {
