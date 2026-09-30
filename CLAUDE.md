@@ -943,8 +943,14 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   landing `/` e `/privacidade` passam no `middleware.ts` sem cookie (`PUBLIC_PATHS`; com
   sessão, `/` vai para `/clientes`), usam tema Hologram FIXO pelo wrapper `.hologram` (sem
   seletor), largura contida (`max-w-6xl`) e a janela rola. Efeitos só em CSS escopado
-  (`app/(public)/landing.css`, variáveis `--lp-*` em fundo, borda e sombra, nunca em
-  texto) mais UM componente cliente de efeitos (`components/landing/reveal.tsx`); tudo
+  (`app/(public)/landing.css`, variáveis `--lp-*` em fundo, borda, sombra e ícone, nunca
+  em texto corrido) mais UM componente cliente de efeitos (`components/landing/reveal.tsx`).
+  A cor de destaque é o **verde da Hologram**, `--lp-brand` (`#05d1bf`, amostrado por pixel
+  de `Docs/brand/site-hologram-cta-2026-09-30.png`, 86e3h0xcr): variável escopada da
+  landing, nunca token do tema. O botão primário da landing (`.lp-cta`) é verde com texto
+  `--lp-brand-fg`, cópia literal do navy do `--primary` claro: **nunca texto branco sobre o
+  verde** (1,85:1); os pares ficam em `landing-contrast.test.ts`. Nada pinta atrás do texto
+  de card (o spotlight saiu na 86e3h0xcr); tudo
   parado sob `prefers-reduced-motion`, que é também o estado que o gate de a11y mede.
   **Um efeito por bloco, e loop só enquanto o bloco está na tela** (86e3gwzj0): o "antes"
   de cada entrada mora sob `prefers-reduced-motion: no-preference`, e nenhum efeito
@@ -952,8 +958,9 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   **prints reais com dado fictício** de `Docs/manual/fonte/img/` (figura com nome de dado
   de teste não entra), copiados otimizados para `public/landing/tour/` e servidos com
   `next/image` `unoptimized`: o web é `standalone` sem `sharp`, e nesse modo o otimizador
-  do Next 14 responde 500. O estado das abas é o único outro JS de efeito
-  (`landing-tour-tabs.tsx`), com botão de pausar a troca automática (WCAG 2.2.2). Texto
+  do Next 14 responde 500. Todos os prints do tour estão no tema Hologram. O estado das
+  abas é o único outro JS de efeito (`landing-tour-tabs.tsx`): uma linha de progresso na aba
+  ativa explica a troca automática e o botão de pausar é só ícone (WCAG 2.2.2). Texto
   da landing só em `components/landing/content.ts` (espelho comentado em
   `Docs/landing/COPY.md`), com tetos de caracteres por campo travados em
   `content.test.ts`. Nada disso vale para o app autenticado.
@@ -1384,6 +1391,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.67 — 30/09/2026. **A landing ganhou o verde da Hologram e perdeu dois efeitos (86e3h0xcr, feedback de uma colega: "senti falta do verde da Hologram").** O verde `#05d1bf` (hsl 175 95% 42%) foi amostrado por pixel do botão e do título do site da Hologram (`Docs/brand/site-hologram-cta-2026-09-30.png`, 103.571 pixels exatos) e entrou como `--lp-brand`, variável escopada da landing com a fonte ao lado, no lugar do `--info` em todos os efeitos: aurora, stop claro do título (misturado 60/40 com `--foreground`, medido por pixel a 7,23:1 no desktop e 6,92:1 em 390px), ponto da pílula, linha e pastilha ativa do "Como funciona", filetes, borda em gradiente, sombras e o cadeado. O botão primário da landing (`.lp-cta`: header, hero e "Enviar") é verde com texto navy, `--lp-brand-fg`, cópia literal do `--primary` do tema claro, porque dentro da `.hologram` o `--primary` é branco e branco sobre o verde dá 1,85:1; navy sobre o verde dá 8,94:1 e 7,24:1 em hover (medido por pixel no e2e, que também confere que o fundo é o verde). Os pares ficam em `landing-contrast.test.ts`, lidos do CSS real, e os helpers de cor dos dois testes de contraste passaram para `src/test/contrast.ts`. O spotlight dos cards e a vinheta de avatares de "Para quem" saíram (o cadeado de "Segurança" ficou, e é a única vinheta). As figuras de anomalias e de lançamento do tour, que estavam no tema escuro, foram recapturadas no Hologram pelos mesmos cenários do gate de a11y que as geraram (mesmo dado mockado, mesmo recorte). A troca automática das abas passou a ser explicada por uma linha de 2 px na aba ativa, que cresce nos 6 s do relógio e fica cheia quando ele para, e o "Pausar/Retomar" virou botão só de ícone com os mesmos nomes acessíveis. Medido por pixel no Hologram, sem mudança: título do passo ativo 16,4:1, dígito sobre a pastilha acesa 13,2:1, passo apagado 8,0:1, barra do tour 7,57:1._
 
 _Versão 1.66 — 30/09/2026. **A landing ganhou o tour com prints reais e ritmo abaixo do hero (86e3gqfkf e 86e3gwzj0, feedback do Laio: "o início é mais encantador; dá para enxugar o texto e colocar mais dinamicidade").** O texto abaixo do hero caiu pela metade, sem afirmação nova, com tetos por campo em `content.test.ts` (card de público 110, dor 120, resposta 160, passo 110, item de segurança 120, frase do tour 120, bullet 80) e o `COPY.md` acompanhando linha a linha. A seção "Veja o Hologram OS por dentro" mostra cinco telas reais (conciliação, anomalias, lançamento no Omie, de-para, carteira) em abas, numa moldura de navegador: os PNGs saem de `Docs/manual/fonte/img/` reduzidos a 1600px e quantizados (39 a 90 KB), com largura e altura conferidas no cabeçalho do PNG por teste, e `next/image` `unoptimized`, porque o web roda `standalone` sem `sharp` e o otimizador do Next 14 responderia 500 (o slot `LandingImage` da landing tem o mesmo risco no dia em que for ligado). As abas trocam a cada 6 s só com a seção na tela, pausam sob o ponteiro, param no primeiro clique ou foco e têm botão de pausar e retomar (WCAG 2.2.2, desenho do carrossel do APG); com `forceMount` o Radix passa `hidden={false}` a todo painel, então o inativo recebe `hidden` explícito. O "Como funciona" acende um passo por vez em loop de 12 s pelo `reveal.tsx`, com a linha de progresso medida no DOM até a pastilha ativa; os pares de dor e resposta ganharam ícone, seta que se desenha e resposta 200 ms depois; "Para quem" e "Segurança" ganharam vinhetas SVG (no máximo 20 elementos, entrada de 600 a 900 ms e depois parada). Medido por pixel no Hologram: título do passo ativo 16,3:1, dígito sobre a pastilha acesa 13,1:1, passo apagado 8,0:1, título da barra do tour 7,57:1. **Regra que fica para o gate local:** com `E2E_SHOTS=1` e vários workers, a medição por pixel do hero em 390px passou a falhar com "Unable to capture screenshot" (o print inteiro em 390px tem 21 mil pixels de altura com DPR 2,75); retentativa e `test.slow` não resolvem, e isolada ela passa. Tire os prints com `--workers=1`; o gate em si (sem prints, como no CI) roda com os workers de sempre._
 

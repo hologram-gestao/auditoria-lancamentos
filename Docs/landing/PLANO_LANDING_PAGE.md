@@ -161,7 +161,11 @@ revisão dele virar edição de um lugar só.
   botão usam **só tokens**. Para os efeitos decorativos nasce um bloco de variáveis
   **escopadas à landing** (`.landing { --glow-1: hsl(var(--primary) / 0.18); ... }`), derivadas
   dos tokens existentes, usadas **apenas em fundo decorativo, borda e sombra**, nunca em texto.
-  Nenhum hex novo em componente (regra `front-gate` §4).
+  Nenhum hex novo em componente (regra `front-gate` §4). **Exceção registrada (86e3h0xcr,
+  30/09/2026):** o verde da Hologram, `#05d1bf`, amostrado por pixel do site da Hologram
+  (`Docs/brand/site-hologram-cta-2026-09-30.png`), entra como `--lp-brand` no bloco escopado
+  da `.landing` (nunca no tema) e é a cor de destaque dos efeitos e do botão primário da
+  landing, que leva texto navy (`--lp-brand-fg`); texto branco sobre o verde reprova (1,85:1).
 - **Efeitos, bloco a bloco:**
   - **Hero:** fundo com 2 ou 3 formas radiais (aurora) nas cores da marca, `blur` alto,
     drift lento por `@keyframes` (20 a 40 s, `will-change: transform`); grade sutil ou ruído
