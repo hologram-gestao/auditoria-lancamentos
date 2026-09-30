@@ -7664,6 +7664,15 @@ test.describe('Landing pública (86e3fr9vz)', () => {
    *
    * `textColor` é qualquer cor CSS (inclusive `color(srgb …)`, que é como o
    * `color-mix` volta computado): ela é pintada num canvas e lida em sRGB 8 bits.
+   *
+   * Elemento INLINE (a palavra em gradiente dentro do `h1`): quem fica escondido é o
+   * BLOCO que o contém, não só ele. A caixa de um inline encosta nos glifos vizinhos,
+   * e o arredondamento para pixel de dispositivo (DPR 2,75 no Pixel 5) e a fonte
+   * sans-serif de cada máquina decidem se uma fatia da letra ao lado entra na foto: no
+   * runner do CI entrava, e o pixel "mais claro do fundo" era o próprio texto (razão
+   * 1,00). O fundo atrás da caixa não depende do texto, então esconder o bloco inteiro
+   * não muda a medição. A caixa fotografada ainda encolhe 1 px por lado, e um pixel
+   * mais claro com a cor EXATA do texto reprova com erro explícito em vez de 1,00 mudo.
    */
   async function contrasteSobreAurora(
     page: Page,
@@ -7677,16 +7686,34 @@ test.describe('Landing pública (86e3fr9vz)', () => {
     expect(box, 'elemento sem caixa').not.toBeNull();
     const handle = await locator.elementHandle();
     expect(handle, 'elemento sem handle').not.toBeNull();
-    await handle?.evaluate((el) => {
-      (el as HTMLElement).style.setProperty('visibility', 'hidden', 'important');
-    });
-    // Uma retentativa para o soluço do protocolo ("Unable to capture screenshot"), o
-    // mesmo do `shot`: com `E2E_SHOTS=1`, outros workers tiram prints de página inteira
-    // ao mesmo tempo. Aqui a captura É a medição, então a 2ª falha reprova o teste.
-    const clip = box ?? undefined;
-    const png = await page.screenshot({ clip }).catch(() => page.screenshot({ clip }));
-    await handle?.evaluate((el) => (el as HTMLElement).style.removeProperty('visibility'));
-    await handle?.dispose();
+    // O que some da foto: o bloco que contém um inline (ver o JSDoc), senão o próprio
+    // elemento. A caixa medida continua sendo a DO ELEMENTO.
+    const escondido = await handle?.evaluateHandle((el) =>
+      getComputedStyle(el).display === 'inline' ? (el.closest('h1,h2,h3,p,li,div') ?? el) : el,
+    );
+    let png: Buffer;
+    try {
+      await escondido?.evaluate((el) => {
+        (el as HTMLElement).style.setProperty('visibility', 'hidden', 'important');
+      });
+      // 1 px a menos por lado: a borda da caixa é onde o arredondamento pega o vizinho.
+      const clip = box
+        ? {
+            x: box.x + 1,
+            y: box.y + 1,
+            width: Math.max(1, box.width - 2),
+            height: Math.max(1, box.height - 2),
+          }
+        : undefined;
+      // Uma retentativa para o soluço do protocolo ("Unable to capture screenshot"), o
+      // mesmo do `shot`: com `E2E_SHOTS=1`, outros workers tiram prints de página
+      // inteira ao mesmo tempo. Aqui a captura É a medição, então a 2ª falha reprova.
+      png = await page.screenshot({ clip }).catch(() => page.screenshot({ clip }));
+    } finally {
+      await escondido?.evaluate((el) => (el as HTMLElement).style.removeProperty('visibility'));
+      await escondido?.dispose();
+      await handle?.dispose();
+    }
     return page.evaluate(
       async ({ b64, textColor }) => {
         const img = new Image();
@@ -7705,9 +7732,12 @@ test.describe('Landing pública (86e3fr9vz)', () => {
         };
         const lum = (r: number, g: number, b: number) =>
           0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-        let brightest = 0;
+        let brightest = -1;
+        let brightestRgb: [number, number, number] = [0, 0, 0];
         for (let i = 0; i < data.length; i += 4) {
-          brightest = Math.max(brightest, lum(data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0));
+          const px: [number, number, number] = [data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0];
+          const l = lum(...px);
+          if (l > brightest) [brightest, brightestRgb] = [l, px];
         }
         const probe = document.createElement('canvas').getContext('2d');
         if (!probe) throw new Error('sem canvas 2d');
@@ -7717,6 +7747,12 @@ test.describe('Landing pública (86e3fr9vz)', () => {
         if (probe.fillStyle === sentinel) throw new Error(`cor não reconhecida: ${textColor}`);
         probe.fillRect(0, 0, 1, 1);
         const [r = 0, g = 0, b = 0] = probe.getImageData(0, 0, 1, 1).data;
+        if (brightestRgb[0] === r && brightestRgb[1] === g && brightestRgb[2] === b) {
+          throw new Error(
+            `texto vazou na foto: o pixel mais claro da caixa é rgb(${r}, ${g}, ${b}), a ` +
+              `cor exata do texto (${textColor}); a medição seria 1,00:1 e não o fundo`,
+          );
+        }
         const text = lum(r, g, b);
         const [hi, lo] = text > brightest ? [text, brightest] : [brightest, text];
         return (hi + 0.05) / (lo + 0.05);
