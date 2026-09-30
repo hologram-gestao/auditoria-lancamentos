@@ -159,8 +159,9 @@ export const how = {
 } as const;
 
 /**
- * Tour do produto (86e3gqfkf): cinco telas REAIS, em abas. Os prints vêm de
- * `Docs/manual/fonte/img/` (dado fictício: "Cliente Exemplo Ltda"); figura com nome
+ * Tour do produto (86e3gqfkf): cinco telas REAIS, em abas, no tema Hologram. Os prints
+ * vêm de `Docs/manual/fonte/img/` (dado fictício: "Cliente Exemplo Ltda"; anomalias e
+ * lançamento recapturados no Hologram na 86e3h0xcr); figura com nome
  * de dado de teste não entra. Arquivo, largura e altura moram em `landing-tour.tsx`.
  * Tetos: frase até 120 caracteres, bullet até 80 (`content.test.ts`).
  */
@@ -168,10 +169,11 @@ export const tour = {
   eyebrow: 'Por dentro',
   title: `Veja o ${PRODUCT_NAME} por dentro`,
   tabsLabel: 'Telas do produto',
-  /** Controle da troca automática (WCAG 2.2.2): o nome acessível começa pelo texto visível. */
-  pause: 'Pausar',
+  /**
+   * Controle da troca automática (WCAG 2.2.2): botão só de ícone desde a 86e3h0xcr, com
+   * estes nomes acessíveis. Quem explica a troca na tela é a linha de progresso da aba.
+   */
   pauseLabel: 'Pausar a troca automática das telas',
-  resume: 'Retomar',
   resumeLabel: 'Retomar a troca automática das telas',
   items: [
     {

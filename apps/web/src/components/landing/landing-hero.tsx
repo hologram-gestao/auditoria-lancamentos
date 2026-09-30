@@ -63,7 +63,7 @@ export function LandingHero() {
             className="lp-fade-up mt-8 flex flex-col gap-3 sm:flex-row sm:items-center"
             style={delay(240)}
           >
-            <Button asChild size="lg" className="lp-glow-button">
+            <Button asChild size="lg" className="lp-glow-button lp-cta">
               <a href={`#${CONTACT_ANCHOR}`}>{hero.primary}</a>
             </Button>
             <Button asChild size="lg" variant="outline">
