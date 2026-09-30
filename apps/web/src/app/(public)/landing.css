@@ -369,9 +369,11 @@
 /*
  * Borda em gradiente: um retângulo com o gradiente, recortado por máscara para
  * sobrar só a faixa de 1 px (`padding`) em volta. Mais clara no topo, como um filete
- * de luz. Decorativa, fora de baixo do texto.
+ * de luz. Decorativa, fora de baixo do texto. A moldura do tour (`.lp-frame`) usa a
+ * mesma borda.
  */
-.lp-card::before {
+.lp-card::before,
+.lp-frame::before {
   content: '';
   position: absolute;
   inset: -1px;
@@ -442,6 +444,30 @@
   box-shadow:
     inset 0 0 0 1px var(--lp-edge-strong),
     0 0 18px -6px hsl(var(--info) / 0.6);
+}
+
+/* ---------- Tour do produto (86e3gqfkf) ---------- */
+
+/*
+ * Moldura de navegador em volta do print: a inclinação é a da vinheta do hero
+ * (`.lp-tilt__card`, zera no hover) e a borda é a dos cards (`::before` acima).
+ */
+.lp-frame {
+  position: relative;
+}
+
+/* Troca de aba: o painel que entra aparece em 250 ms. O que sai some na hora. */
+.lp-tour-panel[data-state='active'] {
+  animation: lp-fade-in 250ms ease-out;
+}
+
+@keyframes lp-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 /* ---------- Divisor entre seções ---------- */
@@ -571,6 +597,7 @@
 
   .lp-aurora__blob,
   .lp-fade-up,
+  .lp-tour-panel[data-state='active'],
   .lp-pulse-dot::after,
   .lp-float,
   .lp-progress,
@@ -631,7 +658,8 @@
   }
 
   .lp-header::after,
-  .lp-card::before {
+  .lp-card::before,
+  .lp-frame::before {
     transition: none;
   }
 }

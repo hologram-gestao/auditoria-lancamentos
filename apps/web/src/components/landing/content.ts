@@ -158,6 +158,77 @@ export const how = {
   ],
 } as const;
 
+/**
+ * Tour do produto (86e3gqfkf): cinco telas REAIS, em abas. Os prints vêm de
+ * `Docs/manual/fonte/img/` (dado fictício: "Cliente Exemplo Ltda"); figura com nome
+ * de dado de teste não entra. Arquivo, largura e altura moram em `landing-tour.tsx`.
+ * Tetos: frase até 120 caracteres, bullet até 80 (`content.test.ts`).
+ */
+export const tour = {
+  eyebrow: 'Por dentro',
+  title: `Veja o ${PRODUCT_NAME} por dentro`,
+  tabsLabel: 'Telas do produto',
+  /** Controle da troca automática (WCAG 2.2.2): o nome acessível começa pelo texto visível. */
+  pause: 'Pausar',
+  pauseLabel: 'Pausar a troca automática das telas',
+  resume: 'Retomar',
+  resumeLabel: 'Retomar a troca automática das telas',
+  items: [
+    {
+      id: 'conciliacao',
+      tab: 'Conciliação',
+      frameTitle: `Conciliação · ${PRODUCT_NAME}`,
+      alt: 'Conciliação de um cartão com os totais por situação, o resumo de saldo e três arquivos',
+      text: 'Cada conta de cada mês numa tela: o que bateu, o que ficou sem par e os arquivos que entraram.',
+      bullets: [
+        'Totais por situação e a diferença de saldo logo no topo',
+        'Vários arquivos na mesma conciliação, como uma fatura em partes',
+      ],
+    },
+    {
+      id: 'anomalias',
+      tab: 'Anomalias',
+      frameTitle: `Anomalias · ${PRODUCT_NAME}`,
+      alt: 'Aba de anomalias com a severidade, o tipo e a resposta sobre o alerta',
+      text: 'O que não bate vira anomalia com tipo e severidade, e cada uma é resolvida por alguém da equipe.',
+      bullets: ['Sua equipe diz se o alerta procedia ou não', 'Filtro por severidade e por status'],
+    },
+    {
+      id: 'lancamento',
+      tab: 'Lançar no Omie',
+      frameTitle: `Movimentações · ${PRODUCT_NAME}`,
+      alt: 'Movimentações de uma fatura sem par no Omie, com o botão para lançar a compra',
+      text: 'Compras da fatura que ainda não estão no Omie são lançadas dali mesmo, uma a uma ou em lote.',
+      bullets: [
+        'Cada compra vira um lançamento só, sem duplicar',
+        'Só compra de cartão entra; estorno fica com a sua equipe',
+      ],
+    },
+    {
+      id: 'de-para',
+      tab: 'De-para',
+      frameTitle: `De-para · ${PRODUCT_NAME}`,
+      alt: 'De-para de um cliente com as contagens por situação e a decisão de cada categoria',
+      text: 'Para onde cada categoria do cliente vai em cada destino, com o que já foi decidido e o que falta.',
+      bullets: [
+        'O que o plano de contas já declara chega como proposta',
+        'A decisão vale por competência, e o mês fechado não muda',
+      ],
+    },
+    {
+      id: 'carteira',
+      tab: 'Carteira',
+      frameTitle: `Carteira · ${PRODUCT_NAME}`,
+      alt: 'Carteira de títulos com os totais a receber e a pagar e as faixas de atraso',
+      text: 'Títulos a pagar e a receber em aberto, de todas as contas e sem recorte de mês.',
+      bullets: [
+        'Atraso em faixas, de 1 a 30 dias até mais de 90',
+        'O contexto do título separa acordo de inadimplência',
+      ],
+    },
+  ],
+} as const;
+
 export const security = {
   eyebrow: 'Segurança e privacidade',
   title: 'O dado do seu cliente continua dele',

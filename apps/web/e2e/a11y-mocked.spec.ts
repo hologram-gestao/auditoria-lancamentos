@@ -7910,6 +7910,58 @@ test.describe('Landing pública (86e3fr9vz)', () => {
         await shotTela(page, `landing-spotlight-${slug}`);
       });
 
+      test('tour: abas pelo teclado, moldura em hover, AA sobre a moldura e sem rolagem horizontal', async ({
+        page,
+        context,
+      }) => {
+        await abrirLanding(page, context);
+        const tour = page.locator('#por-dentro');
+        await tour.scrollIntoViewIfNeeded();
+        const abas = tour.getByRole('tablist', { name: 'Telas do produto' });
+        await expect(abas.getByRole('tab')).toHaveCount(5);
+        const primeira = abas.getByRole('tab', { name: 'Conciliação' });
+        await expect(primeira).toHaveAttribute('aria-selected', 'true');
+        await primeira.focus();
+        await page.keyboard.press('ArrowRight');
+        const anomalias = abas.getByRole('tab', { name: 'Anomalias' });
+        await expect(anomalias).toHaveAttribute('aria-selected', 'true');
+        await expect(anomalias).toBeFocused();
+        const painel = tour.getByRole('tabpanel', { name: 'Anomalias' });
+        await expect(painel.getByRole('img')).toBeVisible();
+        // Um painel visível por vez: os outros quatro ficam montados e escondidos.
+        await expect(tour.getByRole('tabpanel')).toHaveCount(1);
+        await exigirSemRolagemHorizontal(page, `landing com o tour (${vp.label})`);
+        // A moldura cabe na viewport (a inclinação não a empurra para fora).
+        const moldura = painel.locator('.lp-frame');
+        const caixa = await moldura.boundingBox();
+        expect(caixa, 'moldura sem caixa').not.toBeNull();
+        if (caixa) expect(caixa.x + caixa.width).toBeLessThanOrEqual(vp.size.width);
+
+        await moldura.hover();
+        await analyze(page, `landing, tour com o ponteiro sobre a moldura (${vp.label})`);
+
+        // Título fictício da barra: texto sobre a moldura, medido contra o pixel mais
+        // claro atrás dele (a barra é `bg-muted`, com a borda em gradiente por perto).
+        const tituloDaBarra = painel.locator('[data-lp-frame-title]');
+        const razao = await contrasteSobreAurora(page, tituloDaBarra);
+        console.log(`contraste sobre a moldura do tour · ${vp.label}: ${razao.toFixed(2)}:1`);
+        expect(razao, `título da barra do tour (${vp.label})`).toBeGreaterThanOrEqual(4.5);
+
+        await page.keyboard.press('End');
+        await expect(abas.getByRole('tab', { name: 'Carteira' })).toHaveAttribute(
+          'aria-selected',
+          'true',
+        );
+        if (THEME === 'hologram' && slug === 'desktop') {
+          await abas.getByRole('tab', { name: 'Conciliação' }).click();
+          // Sem anel de foco no print: ele é do teclado usado acima, não da tela.
+          await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+          await page.mouse.move(0, 0);
+          await tour.scrollIntoViewIfNeeded();
+          await shotTela(page, 'landing-tour-desktop');
+        }
+      });
+
       test('landing: "Entrar em contato" rola até o formulário e "Entrar" leva ao login', async ({
         page,
         context,
@@ -8038,6 +8090,61 @@ test.describe('Landing pública (86e3fr9vz)', () => {
     const resposta = await page.request.get(href ?? '');
     expect(resposta.status()).toBe(200);
     expect(resposta.headers()['content-type']).toContain('application/pdf');
+  });
+
+  test('tour: troca sozinha a cada 6 s na tela e para no primeiro clique', async ({
+    page,
+    context,
+  }) => {
+    // Relógio do Playwright: os 6 s do `setTimeout` passam sem esperar de verdade.
+    await page.clock.install();
+    await abrirLanding(page, context, { reducedMotion: false });
+    const tour = page.locator('#por-dentro');
+    await tour.scrollIntoViewIfNeeded();
+    const abas = tour.getByRole('tablist', { name: 'Telas do produto' });
+    await expect(abas.getByRole('tab', { name: 'Conciliação' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(
+      tour.getByRole('button', { name: 'Pausar a troca automática das telas' }),
+    ).toBeVisible();
+    // O relógio só arma quando o observer vê a seção: avançar o tempo antes disso não
+    // dispararia nada. O ponteiro sai de cima do painel (hover pausa a troca).
+    await page.mouse.move(0, 0);
+    await expect(tour.locator('[data-autoplay]')).toHaveAttribute('data-autoplay', 'on');
+    await page.clock.fastForward(6100);
+    await expect(abas.getByRole('tab', { name: 'Anomalias' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await abas.getByRole('tab', { name: 'De-para' }).click();
+    await expect(tour.locator('[data-autoplay]')).toHaveAttribute('data-autoplay', 'off');
+    await page.clock.fastForward(20_000);
+    await expect(abas.getByRole('tab', { name: 'De-para' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(
+      tour.getByRole('button', { name: 'Retomar a troca automática das telas' }),
+    ).toBeVisible();
+  });
+
+  test('tour: sob movimento reduzido não troca nem mostra o botão de pausa', async ({
+    page,
+    context,
+  }) => {
+    await page.clock.install();
+    await abrirLanding(page, context);
+    const tour = page.locator('#por-dentro');
+    await tour.scrollIntoViewIfNeeded();
+    await expect(tour.locator('[data-autoplay]')).toHaveAttribute('data-autoplay', 'off');
+    await page.clock.fastForward(20_000);
+    await expect(tour.getByRole('tab', { name: 'Conciliação' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(tour.getByRole('button', { name: /troca automática/ })).toHaveCount(0);
   });
 
   test('efeitos: revelação na rolagem e header rolado, com movimento', async ({

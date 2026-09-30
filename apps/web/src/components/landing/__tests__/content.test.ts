@@ -88,6 +88,14 @@ describe('landing/content', () => {
     it('cada item de segurança tem até 120 caracteres', () => {
       for (const item of content.security.items) cabe(`security "${item.title}"`, item.text, 120);
     });
+
+    it('cada tela do tour: frase até 120, dois bullets até 80', () => {
+      for (const item of content.tour.items) {
+        cabe(`tour "${item.tab}"`, item.text, 120);
+        expect(item.bullets, `tour "${item.tab}"`).toHaveLength(2);
+        for (const bullet of item.bullets) cabe(`tour "${item.tab}" bullet`, bullet, 80);
+      }
+    });
   });
 
   it('a versão do consentimento é a mesma do backend', () => {

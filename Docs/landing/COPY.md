@@ -114,6 +114,28 @@ Rótulo: **Como funciona** · Título do bloco: **Do arquivo ao lançamento, em 
 4. **Sai o relatório e o lançamento.** Relatório em Excel, compras do cartão lançadas no Omie e o
    arquivo contábil no layout do seu sistema.
 
+### 5b. Por dentro (tour com prints reais, 86e3gqfkf)
+
+Rótulo: **Por dentro** · Título do bloco: **Veja o Hologram OS por dentro** · Cinco abas; cada
+uma mostra um print REAL da plataforma numa moldura de navegador (título fictício na barra:
+"<tela> · Hologram OS"), uma frase e dois bullets. As abas trocam sozinhas a cada 6 s
+enquanto o bloco está na tela, param no primeiro clique ou foco, e têm o botão **Pausar** /
+**Retomar** (nome acessível: "Pausar a troca automática das telas").
+
+Os prints são cópias otimizadas de `Docs/manual/fonte/img/` com dado fictício ("Cliente
+Exemplo Ltda", "Ana da Hologram": Hologram é a empresa, pode). As outras nove figuras do
+manual **não** entram: têm nome de dado de teste ou são telas de administração.
+
+| Aba            | Print             | Frase                                                                                             | Bullets                                                                                                                   |
+| -------------- | ----------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Conciliação    | `conciliacao.png` | Cada conta de cada mês numa tela: o que bateu, o que ficou sem par e os arquivos que entraram.    | Totais por situação e a diferença de saldo logo no topo · Vários arquivos na mesma conciliação, como uma fatura em partes |
+| Anomalias      | `anomalias.png`   | O que não bate vira anomalia com tipo e severidade, e cada uma é resolvida por alguém da equipe.  | Sua equipe diz se o alerta procedia ou não · Filtro por severidade e por status                                           |
+| Lançar no Omie | `lancamento.png`  | Compras da fatura que ainda não estão no Omie são lançadas dali mesmo, uma a uma ou em lote.      | Cada compra vira um lançamento só, sem duplicar · Só compra de cartão entra; estorno fica com a sua equipe                |
+| De-para        | `de-para.png`     | Para onde cada categoria do cliente vai em cada destino, com o que já foi decidido e o que falta. | O que o plano de contas já declara chega como proposta · A decisão vale por competência, e o mês fechado não muda         |
+| Carteira       | `carteira.png`    | Títulos a pagar e a receber em aberto, de todas as contas e sem recorte de mês.                   | Atraso em faixas, de 1 a 30 dias até mais de 90 · O contexto do título separa acordo de inadimplência                     |
+
+Tetos (`content.test.ts`): frase até 120 caracteres, exatamente dois bullets, cada um até 80.
+
 ### 6. Segurança e privacidade
 
 Rótulo: **Segurança e privacidade** · Título do bloco: **O dado do seu cliente continua dele**
@@ -176,6 +198,19 @@ privacidade**. O ano é o do build.
 | Escritório só os próprios clientes; cliente final só a própria empresa                   | `resolve_client_access`, §3.15 e §4.8                                                                                                                                                 |
 | Exportações e acessos negados registrados                                                | `access_audit` com `export` e `denied` (§4.7; `core/audit.py`, export da conciliação, arquivo contábil)                                                                               |
 | Chave destruída quando o cliente sai                                                     | `dek_wrapped → NULL` no encerramento, §4.12                                                                                                                                           |
+| Tour: totais por situação e diferença de saldo no topo                                   | Cabeçalho da conciliação (cards de totais e "Resumo geral" com a diferença), `conciliacao.png`                                                                                        |
+| Tour: vários arquivos na mesma conciliação                                               | `reconciliation_files` com `UNIQUE(session_id, file_hash)`, multi-arquivo (Sprint 4, §4.10)                                                                                           |
+| Tour: anomalia com tipo e severidade, resolvida pela equipe                              | `anomaly_types` com severidade (S15), "Marcar como resolvida" com nota (`resolution_note_encrypted`, §4.1)                                                                            |
+| Tour: a equipe diz se o alerta procedia                                                  | `review_verdict` (Sprint 6), coluna "O flag procedia?" com Procedente/Improcedente                                                                                                    |
+| Tour: filtro por severidade e por status                                                 | Filtros da aba Anomalias, `anomalias.png`                                                                                                                                             |
+| Tour: compras sem par lançadas dali, uma a uma ou em lote                                | Sprint 7 (`omie_posting/`, `IncluirLancCC` verificado em 21/08, ligado em dev), seleção em lote na aba Movimentações, `lancamento.png`                                                |
+| Tour: cada compra vira um lançamento só, sem duplicar                                    | `UNIQUE(file_entry_id)` em `reconciliation_omie_postings` (§4.11), `cCodIntLanc` pela identidade da linha e idempotente no Omie (§3.16)                                               |
+| Tour: só compra de cartão; estorno fica com a equipe                                     | Elegibilidade `account_type == 'credit_card'` e estorno bloqueado (`estorno_nao_verificado`, §3.16)                                                                                   |
+| Tour: o que o plano de contas declara chega como proposta                                | Herança do `dre_code` do plano de contas no destino `demonstrativo_contabil` (Sprint 10 e 12), "Herdadas da origem · Propostas pelo plano de contas" em `de-para.png`                 |
+| Tour: a decisão vale por competência, e o mês fechado não muda                           | Vigência por competência append-only, retroativa sobre competência materializada é 409, materialização imutável (Sprint 12, §8)                                                       |
+| Tour: títulos em aberto de todas as contas, sem recorte de mês                           | `client_titles` (Sprint 11), subtítulo da tela em `carteira.png`                                                                                                                      |
+| Tour: atraso em faixas, de 1 a 30 até mais de 90 dias                                    | Aging calculado no servidor (Sprint 11), faixas 1 a 30, 31 a 60, 61 a 90 e 90+ em `carteira.png`                                                                                      |
+| Tour: o contexto do título separa acordo de inadimplência                                | `title_contexts` e relatório de recebíveis (Sprint 15)                                                                                                                                |
 
 ---
 
