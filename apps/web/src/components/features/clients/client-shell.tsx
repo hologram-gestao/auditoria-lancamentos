@@ -27,6 +27,9 @@
  *   - o conteúdo é `min-h-0 min-w-0 flex-1`: sem `min-w-0` uma tabela larga
  *     estoura a viewport; sem `min-h-0` (coluna) o item cresce até a altura do
  *     conteúdo e as regiões roláveis internas param de rolar (ADR-007);
+ *   - isso é o padrão FILL. A tela do padrão pageScroll (a página rola) marca
+ *     a própria raiz com `data-page-scroll` e a cadeia vira altura natural
+ *     (86e3gkd80, ver o comentário do `return`);
  *   - largura total (sem `max-w-*`): listas usam o espaço todo.
  *
  * Carga do cliente: uma única `useClientDetail` no shell alimenta o cache do
@@ -98,8 +101,18 @@ export function ClientShell({ clientId, children }: ClientShellProps) {
   // sumiram das telas.
   const isClosed = client.closed_at != null;
 
+  // Os DOIS padrões de altura da §7 Frontend passam por aqui, e a tela escolhe
+  // um declarando (ou não) `data-page-scroll` na própria raiz:
+  // - FILL (sem o atributo): altura FIXA (`h-full` + `min-h-0 flex-1`), e a
+  //   tabela rola por dentro (ADR-007);
+  // - pageScroll (com o atributo): altura NATURAL, com piso na viewport. A
+  //   caixa fixa não serve aqui: o conteúdo que a transborda ainda rola no
+  //   `<main>`, mas o `padding-bottom` do `<main>` só entra depois do filho EM
+  //   FLUXO, e a página terminava colada na borda da janela (86e3gkd80: o card
+  //   "Conta do banco" parecia cortado, sem os 24px do `p-6`; a carteira, o
+  //   de-para e o plano de contas perdiam o mesmo respiro abaixo da paginação).
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full flex-col gap-4 has-[[data-page-scroll]]:h-auto has-[[data-page-scroll]]:min-h-full">
       {isClosed && (
         <p className="bg-muted text-muted-foreground flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
           <Archive className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -110,8 +123,9 @@ export function ClientShell({ clientId, children }: ClientShellProps) {
       {/* `min-h-0` (ADR-007): sem ele o item flex cresce até a altura do
           conteúdo e as regiões internas (TableCard/ScrollRegion) nunca rolam —
           a barra de paginação voltaria a cobrir linhas (86e2u4nxg/86e2uca1d,
-          pego pelo gate quando o layout virou coluna). */}
-      <div className="min-h-0 min-w-0 flex-1">{children}</div>
+          pego pelo gate quando o layout virou coluna). Só no padrão FILL: com
+          `data-page-scroll`, o item tem a altura do conteúdo. */}
+      <div className="min-h-0 min-w-0 flex-1 has-[[data-page-scroll]]:flex-none">{children}</div>
     </div>
   );
 }

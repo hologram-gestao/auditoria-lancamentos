@@ -81,6 +81,31 @@ describe('ClientShell — sem cabeçalho (86e3fr9q3)', () => {
     await assertNoA11yViolations(container);
   });
 
+  /**
+   * 86e3gkd80: os DOIS padrões de altura passam pelo shell. Sem
+   * `data-page-scroll` na tela, a cadeia é a do FILL (altura fixa, ADR-007);
+   * com ele, as variantes `:has()` soltam a altura. O jsdom não avalia `:has()`
+   * nem faz layout, então o que se trava aqui são as classes; a geometria (a
+   * página termina com o respiro do `<main>`) é do e2e.
+   */
+  it('a cadeia de altura é a do FILL, e a tela pageScroll a solta pelo atributo', () => {
+    render(
+      <ClientShell clientId="c1">
+        <section data-page-scroll aria-label="Tela">
+          <h1>Carteira</h1>
+        </section>
+      </ClientShell>,
+    );
+    const wrapper = screen.getByRole('region', { name: 'Tela' }).parentElement!;
+    const root = wrapper.parentElement!;
+    expect(root).toHaveClass(
+      'h-full',
+      'has-[[data-page-scroll]]:h-auto',
+      'has-[[data-page-scroll]]:min-h-full',
+    );
+    expect(wrapper).toHaveClass('min-h-0', 'flex-1', 'has-[[data-page-scroll]]:flex-none');
+  });
+
   it('cliente encerrado ganha o aviso de somente leitura no topo', async () => {
     clientState.data = {
       name: 'Cliente encerrado #abc12345',

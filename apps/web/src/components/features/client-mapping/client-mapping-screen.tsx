@@ -206,7 +206,14 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
   }
 
   return (
-    <section aria-labelledby="client-mapping-heading" className="flex flex-col gap-4">
+    // `data-page-scroll`: esta tela é do padrão em que a PÁGINA rola (§7
+    // Frontend). É o que faz o `ClientShell` soltar a altura fixa do padrão
+    // FILL; sem ele a página termina colada na borda da janela (86e3gkd80).
+    <section
+      aria-labelledby="client-mapping-heading"
+      data-page-scroll
+      className="flex flex-col gap-4"
+    >
       <div className="space-y-1">
         <h1 id="client-mapping-heading" className="text-xl font-semibold">
           De-para

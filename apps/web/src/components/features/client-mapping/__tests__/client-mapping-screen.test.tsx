@@ -733,6 +733,10 @@ describe('ClientMappingScreen — contadores que filtram (86e3f55bd)', () => {
     const area = region.closest('[aria-busy]');
     expect(area).not.toHaveClass('flex-1', 'min-h-[24rem]', 'lg:min-h-[8rem]');
     expect(region.closest('section')).not.toHaveClass('h-full');
+    // 86e3gkd80: a raiz declara o padrão, e é isso que solta a altura fixa do shell.
+    expect(screen.getByRole('heading', { level: 1 }).closest('section')).toHaveAttribute(
+      'data-page-scroll',
+    );
     const barra = screen.getByRole('navigation', { name: 'Paginação de categorias' });
     expect(region).not.toContainElement(barra);
     expect(region.compareDocumentPosition(barra) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
