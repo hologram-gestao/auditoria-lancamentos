@@ -7614,6 +7614,133 @@ for (const vp of VIEWPORTS) {
   });
 }
 
+/**
+ * Campo de arquivo é BOTÃO (86e3gkd4y). Na demo de 29/09 o "Escolher arquivo"
+ * das gavetas de importar não parecia clicável: era o `<input type="file">`
+ * cru, sem cursor nem hover. As quatro telas que o usavam passaram ao
+ * `FileInputField` compartilhado, e o que só o browser mede fica aqui: o
+ * cursor computado, o fundo que MUDA sob o ponteiro (axe com o hover ativo),
+ * o gatilho e o "Remover" dentro da viewport em 390px, e os dois estados
+ * (sem arquivo e com arquivo) nos três temas.
+ */
+const ARQUIVO_TELAS: {
+  slug: string;
+  nome: string;
+  campo: string;
+  arquivo: { name: string; mimeType: string; buffer: Buffer };
+  abrir: (page: Page) => Promise<Locator>;
+}[] = [
+  {
+    slug: 'plano-contabil-importar',
+    nome: 'importar plano contábil',
+    campo: 'Planilha (.csv ou .xlsx)',
+    arquivo: PLANILHA_PLANO,
+    abrir: async (page) => {
+      accountingChartEmpty = true;
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+      await page.getByRole('button', { name: 'Importar planilha' }).click();
+      const gaveta = page.getByRole('dialog');
+      await aguardarAnimacao(gaveta);
+      return gaveta;
+    },
+  },
+  {
+    slug: 'de-para-importar',
+    nome: 'importar de-para',
+    campo: 'Planilha (.xlsx)',
+    arquivo: { ...XLSX_EXEMPLO, name: 'de-para.xlsx' },
+    abrir: async (page) => {
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/de-para`);
+      await page.getByRole('button', { name: /Importar/ }).click();
+      const gaveta = page.getByRole('dialog');
+      await expect(gaveta.getByRole('heading', { name: 'Importar de-para' })).toBeVisible();
+      await aguardarAnimacao(gaveta);
+      return gaveta;
+    },
+  },
+  {
+    slug: 'origem-arquivo-envio',
+    nome: 'enviar arquivo do mês',
+    campo: 'Arquivo (.csv ou .xlsx)',
+    arquivo: XLSX_EXEMPLO,
+    abrir: async (page) => {
+      clientFileOrigin = true;
+      sessionUser = CLIENT_OPERATOR_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/origem-arquivo?competence=2026-08`);
+      const secao = page.getByTestId('file-upload-section');
+      await expect(secao.getByLabel('Competência')).toHaveValue('2026-08');
+      return secao;
+    },
+  },
+  {
+    slug: 'origem-arquivo-editor',
+    nome: 'editor de mapeamento',
+    campo: 'Arquivo (.csv ou .xlsx)',
+    arquivo: XLSX_EXEMPLO,
+    abrir: async (page) => {
+      clientFileOrigin = true;
+      inputMappingState = 'sem';
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/origem-arquivo`);
+      await page
+        .getByTestId('input-mapping-empty')
+        .getByRole('button', { name: 'Configurar mapeamento', exact: true })
+        .click();
+      const gaveta = page.getByRole('dialog');
+      await expect(gaveta.getByRole('heading', { name: 'Configurar mapeamento' })).toBeVisible();
+      await aguardarAnimacao(gaveta);
+      return gaveta;
+    },
+  },
+];
+
+for (const vp of VIEWPORTS) {
+  const slugArq = vp.label.replace(/\s+/g, '-');
+  test.describe(`Campo de arquivo é botão (86e3gkd4y) — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    for (const tela of ARQUIVO_TELAS) {
+      test(`${tela.nome}: gatilho com cursor e hover, e o arquivo escolhido aparece`, async ({
+        page,
+      }) => {
+        const escopo = await tela.abrir(page);
+        const gatilho = escopo.locator('label', { hasText: 'Escolher arquivo' });
+        await expect(gatilho).toHaveCount(1);
+        await exigirDentroDaViewport(page, gatilho, `${vp.label} · ${tela.nome}: gatilho`);
+        await expect(gatilho).toHaveCSS('cursor', 'pointer');
+        // Em 390px a seção de envio fica abaixo da dobra e quem rola é o
+        // `<main>`: o print de página inteira não a alcança sem rolar até ela.
+        await gatilho.scrollIntoViewIfNeeded();
+        await shot(page, `arquivo-${tela.slug}-sem-${slugArq}`);
+        await analyze(page, `${tela.nome} — sem arquivo (${vp.label})`);
+
+        const fundoAntes = await gatilho.evaluate((el) => getComputedStyle(el).backgroundColor);
+        await gatilho.hover();
+        await expect
+          .poll(() => gatilho.evaluate((el) => getComputedStyle(el).backgroundColor), {
+            message: `${vp.label} · ${tela.nome}: o fundo do gatilho muda no hover`,
+          })
+          .not.toBe(fundoAntes);
+        await analyze(page, `${tela.nome} — hover no gatilho (${vp.label})`);
+
+        await escopo.getByLabel(tela.campo).setInputFiles(tela.arquivo);
+        await expect(escopo.getByText(tela.arquivo.name, { exact: true })).toBeVisible();
+        await expect(gatilho).toHaveCount(0);
+        const remover = escopo.getByRole('button', { name: 'Remover arquivo selecionado' });
+        await exigirDentroDaViewport(page, remover, `${vp.label} · ${tela.nome}: "Remover"`);
+        await remover.scrollIntoViewIfNeeded();
+        await shot(page, `arquivo-${tela.slug}-com-${slugArq}`);
+        await analyze(page, `${tela.nome} — com arquivo (${vp.label})`);
+
+        await remover.click();
+        await expect(gatilho).toHaveCount(1);
+      });
+    }
+  });
+}
+
 /*
  * Medições das páginas públicas de marca (landing e login, 86e3h1h75): subiram do
  * bloco da landing para o topo do arquivo quando o login passou a ter a mesma aurora,

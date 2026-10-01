@@ -24,6 +24,7 @@ import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 
+import { FileInputField } from '@/components/shared/file-input-field';
 import { Button } from '@/components/ui/button';
 import {
   Form,
@@ -196,14 +197,14 @@ export function MappingImportSheet({
                   <FormItem>
                     <FormLabel>Planilha (.xlsx)</FormLabel>
                     <FormControl>
-                      <Input
-                        type="file"
+                      <FileInputField
                         accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         disabled={isBusy}
                         name={field.name}
                         ref={field.ref}
                         onBlur={field.onBlur}
-                        onChange={(e) => field.onChange(e.target.files?.[0] ?? null)}
+                        value={field.value}
+                        onChange={field.onChange}
                       />
                     </FormControl>
                     <FormMessage />
