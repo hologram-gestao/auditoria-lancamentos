@@ -73,6 +73,17 @@ flex-col overflow-hidden`) + `<Table fill>` (`:27`, `:43`). Nunca `overflow` no
   cima na faixa do padding. Não misture os dois padrões na mesma tabela. Travas: "a página rola, a
   tabela não, e o cabeçalho gruda no topo" e a carteira fora do teste "rola dentro da
   própria área" (`pageScroll` em `TELAS_COM_TABELA`).
+  **Tela sob `/clientes/[id]` nesse padrão marca a `<section>` raiz com `data-page-scroll`**
+  (86e3gkd80). O `ClientShell` dá a toda tela uma caixa de altura FIXA (`h-full` +
+  `min-h-0 flex-1`, a cadeia do FILL); com o atributo, `has-[[data-page-scroll]]` troca
+  por altura natural. Sem ele a página ROLA, e por isso o defeito engana: o transbordo de
+  descendente entra na área rolável do `<main>`, mas o `padding-bottom` do `p-6` só é
+  somado depois do filho em fluxo, e a página termina com o último elemento COLADO na
+  borda da janela (o card "Conta do banco" parecia cortado; a borda colada está "na
+  viewport", então `toBeInViewport` passa). Trava: `exigirFimDaPaginaComRespiro` (folga
+  entre o alvo e o fundo do `<main>` rolado até o fim ≥ o padding), no cenário
+  "a página termina com o respiro do <main>" de `TELAS_COM_TABELA` e no do plano contábil.
+  Tela nova pageScroll entra em `TELAS_COM_TABELA` com `pageScroll: true`.
 - **Shell**: só o `<main>` rola — `app/(app)/layout.tsx:121` (`h-dvh overflow-hidden`)
   e `:168` (`main … overflow-y-auto`). Proibido `h-screen`/`min-h-screen`/`100vh`.
 - Travas no browser: "a barra de paginação NUNCA cobre um card" (`e2e/a11y-mocked.spec.ts:1081`)

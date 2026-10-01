@@ -339,7 +339,14 @@ export function ChartOfAccountsScreen({ clientId }: { clientId: string }) {
   );
 
   return (
-    <section aria-labelledby="chart-of-accounts-heading" className="flex flex-col gap-4">
+    // `data-page-scroll`: esta tela é do padrão em que a PÁGINA rola (§7
+    // Frontend). É o que faz o `ClientShell` soltar a altura fixa do padrão
+    // FILL; sem ele a página termina colada na borda da janela (86e3gkd80).
+    <section
+      aria-labelledby="chart-of-accounts-heading"
+      data-page-scroll
+      className="flex flex-col gap-4"
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
           <h1 id="chart-of-accounts-heading" className="text-xl font-semibold">

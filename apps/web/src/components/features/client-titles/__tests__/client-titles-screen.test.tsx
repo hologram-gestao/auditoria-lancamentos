@@ -672,6 +672,10 @@ describe('ClientTitlesScreen — lista', () => {
     expect(card).not.toHaveClass('overflow-hidden');
     const area = region.closest('[aria-busy]');
     expect(area).not.toHaveClass('min-h-[24rem]', 'flex-1', 'lg:min-h-[8rem]');
+    // 86e3gkd80: a raiz declara o padrão, e é isso que solta a altura fixa do shell.
+    expect(screen.getByRole('heading', { level: 1 }).closest('section')).toHaveAttribute(
+      'data-page-scroll',
+    );
     // A paginação vem DEPOIS da tabela, no fluxo, fora da região.
     const barra = screen.getByRole('navigation', { name: 'Paginação de títulos' });
     expect(region).not.toContainElement(barra);

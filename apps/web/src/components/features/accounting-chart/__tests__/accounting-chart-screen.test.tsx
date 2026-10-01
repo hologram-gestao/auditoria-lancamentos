@@ -396,6 +396,33 @@ describe('sem plano', () => {
     expect(screen.getAllByRole('button', { name: 'Importar planilha' })).toHaveLength(1);
   });
 
+  /**
+   * 86e3gkd80: a tela é do padrão em que a PÁGINA rola, com e sem plano. A raiz
+   * declara `data-page-scroll` (é o que solta a altura fixa do `ClientShell`),
+   * a tabela do plano usa o par `pageScroll`/`stickyHeader="page"` e a seção da
+   * conta do banco vem depois, no fluxo. O jsdom não faz layout: a borda final
+   * alcançável por rolagem é medida no e2e.
+   */
+  it.each([
+    ['sem plano', () => withoutPlan()],
+    ['com plano', () => withPlan([account()])],
+  ])('%s: a página rola, e a raiz declara o padrão', (_label, arrange) => {
+    arrange();
+    render(<AccountingChartScreen clientId="c1" />);
+
+    const root = screen
+      .getByRole('heading', { level: 1, name: 'Plano contábil' })
+      .closest('section');
+    expect(root).toHaveAttribute('data-page-scroll');
+    expect(root).not.toHaveClass('h-full', 'min-h-0', 'flex-1');
+    const region = screen.getByRole('region', { name: 'Contas do plano contábil (rolável)' });
+    expect(region).toHaveClass('xl:overflow-clip');
+    expect(region.parentElement).toHaveClass('overflow-clip');
+    const bank = screen.getByTestId('bank-accounts-section');
+    expect(root).toContainElement(bank);
+    expect(region.compareDocumentPosition(bank) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('operador vê o modelo, sem botão', () => {
     withoutPlan();
     authState.user = clientOperator;
