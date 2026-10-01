@@ -29,6 +29,7 @@ import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 
 import { mappingPreviewPath } from '@/components/features/navigation/nav-items';
+import { FileInputField } from '@/components/shared/file-input-field';
 import { OriginStateBlock } from '@/components/shared/origin-state-notice';
 import { Button } from '@/components/ui/button';
 import {
@@ -246,15 +247,15 @@ export function FileUploadSection({
                   <FormItem>
                     <FormLabel>Arquivo (.csv ou .xlsx)</FormLabel>
                     <FormControl>
-                      <Input
-                        type="file"
+                      <FileInputField
                         accept={FILE_ACCEPT}
                         disabled={isPending}
                         name={field.name}
                         ref={field.ref}
                         onBlur={field.onBlur}
-                        onChange={(e) => {
-                          field.onChange(e.target.files?.[0] ?? null);
+                        value={field.value}
+                        onChange={(file) => {
+                          field.onChange(file);
                           setOutcome(null);
                         }}
                       />

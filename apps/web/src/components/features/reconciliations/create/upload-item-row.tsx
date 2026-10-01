@@ -11,11 +11,10 @@
 
 import { AlertCircle, CheckCircle2, CopyX, FileText, Loader2, X } from 'lucide-react';
 
+import { formatFileSize } from '@/components/shared/file-input-field';
 import { Button } from '@/components/ui/button';
 import { formatBRL } from '@/lib/format';
 import { cn } from '@/lib/utils';
-
-import { formatFileSize } from '../file-input-field';
 
 import type { UploadItem, UploadStatus } from './use-file-pipeline';
 
