@@ -945,6 +945,15 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   clicável. Gatilho com `buttonVariants`, anel de foco por `peer-focus-visible`, nome +
   tamanho + "Remover" com arquivo escolhido, `ref` do RHF chegando ao input real. Só o
   multi-arquivo inline da gaveta de conciliação fica fora (detalhe na skill `front-gate`).
+- **O `accept` não esconde formato que o servidor recusa COM MOTIVO: selecionável não é
+  aceito** (86e3gkd50). Na demo de 29/09 o plano exportado do Domínio (`.xls`) nem
+  aparecia no seletor, e a pessoa concluiu que o arquivo tinha sumido: filtrar no `accept`
+  é a recusa silenciosa que a Sprint 2 proibiu. A lista do navegador
+  (`SELECTABLE_FILE_EXTENSIONS` em `lib/validation/file-origin.ts`) é a fonte do
+  `FILE_ACCEPT` e da checagem do zod, as duas deixam o `.xls` passar, e quem recusa é o
+  servidor, com o 422 `FORMATO_NAO_SUPORTADO` e a instrução de salvar como XLSX ou CSV.
+  Recusar de novo no zod mostraria uma cópia da mensagem, que pode divergir, no lugar da
+  do servidor. O rótulo continua dizendo os formatos ACEITOS (".csv ou .xlsx").
 - **Página pública de marca é o grupo `(public)` e o login, com as próprias regras**
   (86e3fr9vz; login desde a 86e3h1h75): landing `/` e `/privacidade` passam no
   `middleware.ts` sem cookie (`PUBLIC_PATHS`; com sessão, `/` vai para `/clientes`, e
@@ -1408,6 +1417,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.70 — 01/10/2026. **O `.xls` legado voltou a aparecer no seletor de arquivo para receber a recusa acionável do servidor (86e3gkd50, épico 86e3gkd0a).** Na demo de 29/09 o plano de contas exportado do Domínio (`.xls`) nem aparecia no seletor das telas de importação: o `accept` o filtrava no navegador, uma recusa silenciosa. O backend já recusava o XLS pelos magic bytes (OLE/CFB) com 422 `FORMATO_NAO_SUPORTADO` e "Salve a planilha como XLSX ou CSV", e as telas já mostravam esse `userMessage`, mas o arquivo não chegava até lá: além do `accept`, o zod do envio do mês e o do plano contábil barravam a extensão antes de enviar. A lista do navegador virou `SELECTABLE_FILE_EXTENSIONS` (`.csv`, `.xlsx`, `.xls`), fonte do `FILE_ACCEPT` (com o MIME `application/vnd.ms-excel`) e da checagem do zod, então o par não diverge mais. Cobre o envio do arquivo do mês, o editor de mapeamento e a gaveta de importar plano contábil; o import de de-para segue só `.xlsx` (o arquivo é exportado pela própria plataforma). A frase do zod do envio perdeu o "e XLS" ("PDF não tem colunas para mapear"), porque o XLS não cai mais nesse ramo. O e2e ganhou o bloco ".xls legado" (o `accept` real, a recusa do servidor com a instrução e o axe nas três telas), e a recusa foi conferida contra a API real nas três rotas. Regra nova na §7 Frontend e na skill `front-gate`. Nada de backend; endpoints sensíveis (**116**), matriz (**29**) e pares de AAD (**17**) não mudaram._
 
 _Versão 1.69 — 01/10/2026. **O campo de arquivo virou componente compartilhado com cara de botão (86e3gkd4y, épico 86e3gkd0a).** Na demo de 29/09 o "Escolher arquivo" das gavetas de importar plano contábil e importar de-para não parecia clicável: era o `<Input type="file">` cru, cujo botão nativo não muda o cursor nem reage ao hover. O `FileInputField`, que já existia na conciliação e não tinha consumidor (a gaveta usa um multi-arquivo inline), subiu para `components/shared/` e substituiu os quatro usos crus: as duas gavetas de importar, o envio da origem por arquivo e o editor de mapeamento, com o `accept` de cada tela intacto. Na promoção ele ganhou quatro coisas: `ref`/`name`/`onBlur` encaminhados ao input real (o RHF continua focando o campo com erro), o anel de foco no gatilho visível por `peer-focus-visible` (antes o foco de teclado caía num input invisível), o input nativo zerado quando o valor volta a `null` (reset da gaveta do de-para; sem isso o mesmo arquivo não dispararia `change`) e o fim do `title` nativo no nome truncado. O e2e mede nas quatro telas o cursor, o fundo que muda sob o ponteiro, o axe com o hover ativo e o "Remover" dentro da viewport em 390px. Regra nova na §7 Frontend e na skill `front-gate`. Nada de backend; endpoints sensíveis (**116**), matriz (**29**) e pares de AAD (**17**) não mudaram._
 

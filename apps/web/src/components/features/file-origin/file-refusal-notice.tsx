@@ -39,10 +39,21 @@ import {
 } from '@/components/ui/table';
 import { lineReasonLabel, readFileRefusal, type FileRefusal } from '@/lib/file-origin-errors';
 import { formatBRL } from '@/lib/format';
+import { SELECTABLE_FILE_EXTENSIONS } from '@/lib/validation/file-origin';
 
-/** `accept` do input de arquivo — CSV e XLSX; PDF é recusado pelo servidor com motivo. */
-export const FILE_ACCEPT =
-  '.csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+/**
+ * `accept` do input de arquivo: as extensões SELECIONÁVEIS (fonte única em
+ * `lib/validation/file-origin.ts`) e os MIME de cada uma. O `.xls` entra para
+ * aparecer no seletor e receber a recusa tipada do servidor
+ * (`FORMATO_NAO_SUPORTADO`, "salve como XLSX ou CSV"), nunca para ser filtrado
+ * em silêncio (86e3gkd50). Formato aceito continua sendo CSV e XLSX.
+ */
+export const FILE_ACCEPT = [
+  ...SELECTABLE_FILE_EXTENSIONS,
+  'text/csv',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+].join(',');
 
 export function isCsvFileName(name: string): boolean {
   return name.toLowerCase().endsWith('.csv');

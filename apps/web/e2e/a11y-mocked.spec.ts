@@ -759,6 +759,32 @@ const ACCOUNTING_IMPORT_REFUSAL = {
 };
 
 /**
+ * 86e3gkd50 — o `.xls` legado. O servidor decide pelos magic bytes (OLE/CFB) e
+ * recusa com 422 `FORMATO_NAO_SUPORTADO`; o `userMessage` é o LITERAL de
+ * `client_file_ingestion/reader.py::detect_format`, que o plano contábil (S16)
+ * reusa. O mock não lê magic bytes: decide pelo nome do arquivo no multipart, e
+ * vale nas três rotas que recebem arquivo do cliente (inspeção, envio e plano).
+ */
+const XLS_REFUSAL = {
+  code: 'FORMATO_NAO_SUPORTADO',
+  message: 'arquivo XLS (formato antigo)',
+  userMessage: 'O formato XLS (Excel antigo) não é aceito. Salve a planilha como XLSX ou CSV.',
+};
+
+function enviouXls(route: Route): boolean {
+  const corpo = route.request().postDataBuffer()?.toString('latin1') ?? '';
+  return /filename="[^"]*\.xls"/i.test(corpo);
+}
+
+function recusarXls(route: Route): Promise<void> {
+  return route.fulfill({
+    status: 422,
+    contentType: 'application/json',
+    body: JSON.stringify({ error: XLS_REFUSAL }),
+  });
+}
+
+/**
  * Sprint 16 (FRONT 16.6) — o destino `conta_contabil` no de-para. Entra no
  * catálogo SÓ quando o cenário liga (`mappingAccountingDestination`): os
  * cenários antigos contam e escolhem destinos, e um terceiro mudaria o que eles
@@ -1921,6 +1947,7 @@ async function fulfillApi(route: Route): Promise<void> {
   // que a tela manda (tipo, situação e prefixo de código), para o seletor de
   // conta receber só analíticas ativas como o servidor faria.
   if (path === `/api/v1/clients/${CLIENT_ID}/accounting-chart/import`) {
+    if (enviouXls(route)) return recusarXls(route);
     if (accountingImportOutcome === 'linhas') {
       return route.fulfill({
         status: 422,
@@ -2437,9 +2464,11 @@ async function fulfillApi(route: Route): Promise<void> {
     return json({ mapping: inputMappingState === 'salvo' ? INPUT_MAPPING : null });
   }
   if (path === `/api/v1/clients/${CLIENT_ID}/file-origin/inspect`) {
+    if (enviouXls(route)) return recusarXls(route);
     return json(fileInspect());
   }
   if (path === `/api/v1/clients/${CLIENT_ID}/file-origin/process`) {
+    if (enviouXls(route)) return recusarXls(route);
     if (fileProcessOutcome !== 'sucesso') {
       return route.fulfill({
         status: 422,
@@ -8628,3 +8657,122 @@ test.describe('Login: a ponte entre a landing e o sistema (86e3h1h75)', () => {
     });
   }
 });
+
+/**
+ * `.xls` legado: aparece no seletor e recebe a recusa ACIONÁVEL do servidor
+ * (86e3gkd50). Na demo de 29/09 o plano de contas exportado do Domínio (.xls)
+ * nem aparecia no seletor das telas de importação: o `accept` o filtrava em
+ * silêncio, e a pessoa concluiu que o arquivo tinha sumido. Aqui: o `accept` do
+ * input REAL mostra o `.xls`, o navegador não o barra antes de enviar, e a
+ * recusa `FORMATO_NAO_SUPORTADO` aparece com a instrução de salvar como XLSX ou
+ * CSV, em `destructive-muted`, dentro da viewport e nos três temas.
+ *
+ * Bloco próprio no fim do arquivo, pelo motivo do bloco 86e3f55bc.
+ */
+const XLS_LEGADO = {
+  name: 'plano-dominio.xls',
+  mimeType: 'application/vnd.ms-excel',
+  // Magic bytes OLE/CFB do Excel antigo + enchimento: o servidor recusa ANTES de ler.
+  buffer: Buffer.concat([
+    Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]),
+    Buffer.alloc(504),
+  ]),
+};
+
+const XLS_TELAS: {
+  slug: string;
+  nome: string;
+  campo: string;
+  acao: string;
+  abrir: (page: Page) => Promise<Locator>;
+}[] = [
+  {
+    slug: 'origem-arquivo-envio',
+    nome: 'enviar arquivo do mês',
+    campo: 'Arquivo (.csv ou .xlsx)',
+    acao: 'Enviar arquivo',
+    abrir: async (page) => {
+      clientFileOrigin = true;
+      sessionUser = CLIENT_OPERATOR_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/origem-arquivo?competence=2026-08`);
+      const secao = page.getByTestId('file-upload-section');
+      await expect(secao.getByLabel('Competência')).toHaveValue('2026-08');
+      return secao;
+    },
+  },
+  {
+    slug: 'origem-arquivo-editor',
+    nome: 'editor de mapeamento',
+    campo: 'Arquivo (.csv ou .xlsx)',
+    acao: 'Inspecionar arquivo',
+    abrir: async (page) => {
+      clientFileOrigin = true;
+      inputMappingState = 'sem';
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/origem-arquivo`);
+      await page
+        .getByTestId('input-mapping-empty')
+        .getByRole('button', { name: 'Configurar mapeamento', exact: true })
+        .click();
+      const gaveta = page.getByRole('dialog');
+      await expect(gaveta.getByRole('heading', { name: 'Configurar mapeamento' })).toBeVisible();
+      await aguardarAnimacao(gaveta);
+      return gaveta;
+    },
+  },
+  {
+    slug: 'plano-contabil-importar',
+    nome: 'importar plano contábil',
+    campo: 'Planilha (.csv ou .xlsx)',
+    acao: 'Importar',
+    abrir: async (page) => {
+      accountingChartEmpty = true;
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+      await page.getByRole('button', { name: 'Importar planilha' }).click();
+      const gaveta = page.getByRole('dialog');
+      await aguardarAnimacao(gaveta);
+      return gaveta;
+    },
+  },
+];
+
+for (const vp of VIEWPORTS) {
+  const slugXls = vp.label.replace(/\s+/g, '-');
+  test.describe(`.xls legado: selecionável e recusado com instrução (86e3gkd50) — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    for (const tela of XLS_TELAS) {
+      test(`${tela.nome}: o .xls aparece no seletor e a recusa do servidor diz o que fazer`, async ({
+        page,
+      }) => {
+        const escopo = await tela.abrir(page);
+        const campo = escopo.getByLabel(tela.campo);
+        // O `setInputFiles` ignora o `accept`: o que prova "aparece no seletor" é o atributo.
+        await expect(campo).toHaveAttribute('accept', /(^|,)\.xls(,|$)/);
+        await expect(campo).toHaveAttribute('accept', /application\/vnd\.ms-excel/);
+
+        await campo.setInputFiles(XLS_LEGADO);
+        await expect(escopo.getByText(XLS_LEGADO.name, { exact: true })).toBeVisible();
+        await escopo.getByRole('button', { name: tela.acao, exact: true }).click();
+
+        const recusa = escopo.locator('[data-refusal-code="FORMATO_NAO_SUPORTADO"]');
+        await expect(recusa).toBeVisible();
+        await expect(recusa).toHaveAttribute('role', 'alert');
+        await expect(recusa).toContainText('Formato de arquivo não suportado');
+        await expect(recusa).toContainText('Salve a planilha como XLSX ou CSV');
+        // Nenhuma recusa do NAVEGADOR no lugar da do servidor, e nada de toast genérico.
+        await expect(escopo.getByText(/Envie (o arquivo|a planilha) em CSV/)).toHaveCount(0);
+        await expect(page.locator('[data-sonner-toast]')).toHaveCount(0);
+        expect(
+          await measuredContrast(page, '[data-refusal-code="FORMATO_NAO_SUPORTADO"] > p'),
+        ).toBeGreaterThanOrEqual(4.5);
+        await exigirDentroDaViewport(page, recusa, `${vp.label} · ${tela.nome}: a recusa`);
+
+        await recusa.scrollIntoViewIfNeeded();
+        await shot(page, `xls-recusa-${tela.slug}-${slugXls}`);
+        await analyze(page, `${tela.nome} — .xls recusado (${vp.label})`);
+      });
+    }
+  });
+}
