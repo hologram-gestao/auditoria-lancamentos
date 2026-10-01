@@ -5,7 +5,7 @@
  * (`^-?\d{1,12}([.,]\d{1,2})?$`) com o 400 genérico (§4.8) — sem dizer o que
  * está errado. Por isso os dois são conferidos AQUI, antes de enviar, com
  * mensagem. O arquivo em si é do servidor: a extensão é só conveniência (PDF
- * é recusado lá com motivo acionável, `FORMATO_NAO_SUPORTADO`).
+ * e XLS são recusados lá com motivo acionável, `FORMATO_NAO_SUPORTADO`).
  *
  * O total fica no estado como STRING DE CENTAVOS (`lib/money-input.ts`) — RAW
  * no estado, conversão só na borda (`centsToDecimalString`) e na exibição.
@@ -14,12 +14,18 @@ import { z } from 'zod';
 
 import { COMPETENCE_PATTERN } from '@/lib/competence';
 
-/** Extensões aceitas no navegador — o `accept` do input e esta lista são o mesmo par. */
-const ACCEPTED_EXTENSIONS = ['.csv', '.xlsx'] as const;
+/**
+ * Extensões que o navegador deixa ESCOLHER e ENVIAR — fonte do `accept` do input
+ * (`FILE_ACCEPT`), então os dois não divergem. Selecionável não é aceito: o
+ * `.xls` está aqui só para chegar ao servidor e receber a recusa tipada com a
+ * instrução de salvar como XLSX ou CSV (86e3gkd50). Fora do `accept`, o seletor
+ * o escondia e quem exportou do Domínio achava que o arquivo tinha sumido.
+ */
+export const SELECTABLE_FILE_EXTENSIONS = ['.csv', '.xlsx', '.xls'] as const;
 
-export function hasAcceptedExtension(fileName: string): boolean {
+export function hasSelectableExtension(fileName: string): boolean {
   const lower = fileName.toLowerCase();
-  return ACCEPTED_EXTENSIONS.some((ext) => lower.endsWith(ext));
+  return SELECTABLE_FILE_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
 /**
@@ -46,11 +52,11 @@ export const fileUploadFormSchema = z
       });
       return;
     }
-    if (!hasAcceptedExtension(file.name)) {
+    if (!hasSelectableExtension(file.name)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['file'],
-        message: 'Envie o arquivo em CSV ou XLSX — PDF e XLS não têm colunas para mapear.',
+        message: 'Envie o arquivo em CSV ou XLSX — PDF não tem colunas para mapear.',
       });
     }
   });
