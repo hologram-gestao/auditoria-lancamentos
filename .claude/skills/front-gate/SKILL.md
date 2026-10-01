@@ -342,6 +342,10 @@ viewportSize().width` (padrão em `spec:2147-2165` e `:2190-2205`). Antes de med
   continua. A única exceção é o multi-arquivo inline da gaveta de conciliação. Trava no
   browser: bloco "Campo de arquivo é botão" do `a11y-mocked.spec.ts` (cursor, fundo que
   muda no hover, axe com o hover ativo, "Remover" dentro da viewport em 390px).
+  O `accept` vem de `SELECTABLE_FILE_EXTENSIONS` (`lib/validation/file-origin.ts`, via
+  `FILE_ACCEPT`) e inclui o `.xls`: formato que o servidor recusa COM MOTIVO aparece no
+  seletor e é enviado, nunca é filtrado em silêncio pelo navegador nem barrado de novo no
+  zod (86e3gkd50). Trava: bloco ".xls legado" do mesmo spec.
   ```bash
   grep -rln 'type="file"' apps/web/src   # esperado: shared/file-input-field.tsx e create-reconciliation-drawer.tsx
   ```
