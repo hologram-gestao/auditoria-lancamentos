@@ -28,6 +28,7 @@ import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 
 import { FILE_ACCEPT } from '@/components/features/file-origin/file-refusal-notice';
+import { FileInputField } from '@/components/shared/file-input-field';
 import { Button } from '@/components/ui/button';
 import {
   Form,
@@ -37,7 +38,6 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
-import { Input } from '@/components/ui/input';
 import {
   Sheet,
   SheetBody,
@@ -156,15 +156,15 @@ export function AccountingChartImportSheet({
                   <FormItem>
                     <FormLabel>Planilha (.csv ou .xlsx)</FormLabel>
                     <FormControl>
-                      <Input
-                        type="file"
+                      <FileInputField
                         accept={FILE_ACCEPT}
                         disabled={isPending}
                         name={field.name}
                         ref={field.ref}
                         onBlur={field.onBlur}
-                        onChange={(e) => {
-                          field.onChange(e.target.files?.[0] ?? null);
+                        value={field.value}
+                        onChange={(file) => {
+                          field.onChange(file);
                           setRefusal(null);
                           setConfirming(false);
                         }}

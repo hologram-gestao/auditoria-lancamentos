@@ -317,19 +317,34 @@ viewportSize().width` (padrão em `spec:2147-2165` e `:2190-2205`). Antes de med
   ignora): `components/ui/tooltip.tsx` com `role="img"` + `aria-label` com a explicação
   INTEIRA + `tabIndex={0}` — copie de `reconciliations/review/situation-badge.tsx`,
   `reconciliations/review/qualification-cell.tsx`, `reconciliations/author-label.tsx`.
-  Hoje restam 5 `title` nativos legados (texto truncado em `file-input-field.tsx:106`,
-  `upload-item-row.tsx:52`, `anomaly-types-table.tsx:109`; badge em
-  `glossary-badges.tsx:47`; input em `anomaly-type-edit-dialog.tsx:132`) — não crie
-  o 6º; migrar é task própria. (`category-badge.tsx:43` passa `title={undefined}` de
+  Hoje restam 4 `title` nativos legados (texto truncado em `upload-item-row.tsx:51` e
+  `anomaly-types-table.tsx:109`; badge em `glossary-badges.tsx:47`; input em
+  `anomaly-type-edit-dialog.tsx:132`) — não crie o 5º; migrar é task própria. O do
+  `file-input-field` saiu quando ele virou componente compartilhado (86e3gkd4y): texto
+  truncado cujo nome completo já é o conteúdo do elemento não precisa de tooltip. (`category-badge.tsx:43` passa `title={undefined}` de
   propósito: entra no grep, não é tooltip.)
   ```bash
-  grep -rnE "<(p|span|div|button|a|td|th|svg|input)[^>]*\btitle=" apps/web/src/components --include=*.tsx | grep -v __tests__ | wc -l   # hoje 3 inline (1 é title={undefined}) + 3 em linha própria
+  grep -rnE "<(p|span|div|button|a|td|th|svg|input)[^>]*\btitle=" apps/web/src/components --include=*.tsx | grep -v __tests__ | wc -l   # hoje 2 inline (1 é title={undefined}) + 3 em linha própria
   ```
 - **`cursor-pointer` no componente-base**, não tela a tela (`components/ui/button.tsx:8-11`);
   secundário com cor da paleta (`variant="secondary"` → `bg-secondary`, `:28`), nunca
   cinza indistinguível. `variant="brand"` (verde da marca, texto navy, token `--brand`,
   86e3h1h75) é o primário das PÁGINAS PÚBLICAS (landing e login, tema Hologram fixo);
   no app autenticado o primário continua o `default`.
+- **Campo de arquivo é `components/shared/file-input-field.tsx`, nunca `<Input type="file">`
+  cru** (86e3gkd4y): o botão nativo do input não muda o cursor nem reage ao hover, e na
+  demo de 29/09 ninguém via que era clicável. O componente esconde o input (`peer
+  sr-only`), estiliza um `<label htmlFor>` com `buttonVariants({ variant: 'outline' })`
+  (não `<Button asChild>`: o Slot engole o clique no label), leva o anel de foco ao
+  gatilho por `peer-focus-visible`, mostra nome + tamanho + "Remover" com arquivo
+  escolhido e zera o input nativo quando o valor volta a `null`. Com RHF passe
+  `ref`/`name`/`onBlur` do `field`: o `ref` chega ao input real e o foco no erro
+  continua. A única exceção é o multi-arquivo inline da gaveta de conciliação. Trava no
+  browser: bloco "Campo de arquivo é botão" do `a11y-mocked.spec.ts` (cursor, fundo que
+  muda no hover, axe com o hover ativo, "Remover" dentro da viewport em 390px).
+  ```bash
+  grep -rln 'type="file"' apps/web/src   # esperado: shared/file-input-field.tsx e create-reconciliation-drawer.tsx
+  ```
 - **Diálogo que abre OUTRO diálogo: nunca empilhe, e nunca no mesmo tick.** Dois `Dialog`
   do Radix abertos marcam o fundo com `aria-hidden` e o de cima fica fora do teclado. E
   fechar A e abrir B no MESMO clique também falha: o `Presence` mantém A montado ~200ms

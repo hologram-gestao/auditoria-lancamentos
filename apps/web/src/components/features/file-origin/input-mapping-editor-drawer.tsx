@@ -34,6 +34,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { toast } from 'sonner';
 
+import { FileInputField } from '@/components/shared/file-input-field';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -305,13 +306,12 @@ export function InputMappingEditorDrawer({
                 </h3>
                 <div className="space-y-1.5">
                   <Label htmlFor="mapping-inspect-file">Arquivo (.csv ou .xlsx)</Label>
-                  <Input
+                  <FileInputField
                     id="mapping-inspect-file"
-                    type="file"
                     accept={FILE_ACCEPT}
                     disabled={isBusy}
-                    onChange={(e) => {
-                      const next = e.target.files?.[0] ?? null;
+                    value={file}
+                    onChange={(next) => {
                       setFile(next);
                       setInspection(null);
                       setInspectRefusal(null);

@@ -10,7 +10,7 @@
  *   - Schemas estritos no input — `z.coerce.number()` aceita o `string` que
  *     vem do `<select>` controlado pelo RHF e converte na validação.
  *   - `instanceof(File)` exige um `File` (não `FileList`); o componente de
- *     upload precisa entregar `files[0]` ao RHF (ver `file-input-field`).
+ *     upload precisa entregar `files[0]` ao RHF (ver `components/shared/file-input-field`).
  */
 import { z } from 'zod';
 
