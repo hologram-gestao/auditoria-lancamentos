@@ -13,7 +13,7 @@ from __future__ import annotations
 import inspect
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any
+from typing import Any, get_args
 from uuid import UUID, uuid4
 
 import pytest
@@ -26,10 +26,12 @@ from app.core.exceptions import FileLinesInvalidError
 from app.db.models import UserRole, UserScope
 from app.db.models.usage_event import DEDUPED_EVENT_NAMES
 from app.modules.client_accounting_chart.service import AccountingChartService
+from app.modules.client_accounting_chart.sheet import ChartLayout
 from app.modules.client_mapping import completeness as completeness_module
 from app.modules.client_mapping.completeness import partida_completeness
 from app.modules.usage_events.schemas import (
     CLIENT_EMITTED_EVENTS,
+    ChartImportLayout,
     PlanoContabilImportadoProps,
     UsageEventName,
 )
@@ -103,13 +105,29 @@ class TestCompletude:
 
 
 class TestEventoProps:
-    def test_as_quatro_chaves_exatas(self) -> None:
+    def test_as_cinco_chaves_exatas(self) -> None:
         assert set(PlanoContabilImportadoProps.model_fields) == {
             "client_id",
             "contas",
             "contas_novas",
             "contas_inativadas",
+            "layout",
         }
+
+    def test_layout_e_o_mesmo_vocabulario_do_leitor(self) -> None:
+        # Duas listas (a da métrica e a do leitor) só não envelhecem separadas se
+        # um teste as amarrar.
+        assert get_args(ChartImportLayout) == get_args(ChartLayout.__value__)
+
+    def test_layout_fora_do_vocabulario_e_recusado(self) -> None:
+        with pytest.raises(ValidationError):
+            PlanoContabilImportadoProps(
+                client_id=uuid4(),
+                contas=1,
+                contas_novas=1,
+                contas_inativadas=0,
+                layout="Contas importação.xlsx",  # type: ignore[arg-type]
+            )
 
     def test_nao_aceita_codigo_nem_nome(self) -> None:
         with pytest.raises(ValidationError):
@@ -118,6 +136,7 @@ class TestEventoProps:
                 contas=1,
                 contas_novas=1,
                 contas_inativadas=0,
+                layout="modelo",
                 codigo="649",  # type: ignore[call-arg]
             )
 
@@ -207,7 +226,13 @@ class TestEmissao:
         result, db, client = await _import(events, _PLANO)
         assert db.commits == 1
         assert events.calls == [
-            {"client_id": client.id, "contas": 2, "contas_novas": 2, "contas_inativadas": 0}
+            {
+                "client_id": client.id,
+                "contas": 2,
+                "contas_novas": 2,
+                "contas_inativadas": 0,
+                "layout": "modelo",
+            }
         ]
         assert (result.accounts, result.new, result.inactivated) == (2, 2, 0)
 
@@ -231,6 +256,6 @@ class TestEmissao:
 
         service = UsageEventService(_Repo2())  # type: ignore[arg-type]
         ok = await service.emit_plano_contabil_importado(
-            client_id=uuid4(), contas=-1, contas_novas=0, contas_inativadas=0
+            client_id=uuid4(), contas=-1, contas_novas=0, contas_inativadas=0, layout="modelo"
         )
         assert ok is False

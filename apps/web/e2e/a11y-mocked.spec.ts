@@ -669,7 +669,7 @@ const FILE_REFUSALS: Record<'cabecalho' | 'linhas', Record<string, unknown>> = {
  * cenário "sem plano" e o desfecho da importação são trocados por teste.
  */
 let accountingChartEmpty = false;
-let accountingImportOutcome: 'sucesso' | 'linhas' = 'sucesso';
+let accountingImportOutcome: 'sucesso' | 'linhas' | 'dominio' = 'sucesso';
 
 function accountingAccount(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -755,6 +755,26 @@ const ACCOUNTING_IMPORT_REFUSAL = {
       { line: 15, reason: 'nome_vazio' },
     ],
     total: 3,
+  },
+};
+
+/**
+ * 86e3gkd7y — o plano EXPORTADO do Domínio, reconhecido e recusado por uma conta
+ * depois do rodapé. É o `userMessage` literal do backend (`sheet.py`) e os
+ * motivos do conversor (`dominio.py`); o motivo `conta_fora_do_bloco` tem o
+ * rótulo mais longo do vocabulário, e é ele que a célula da tabela precisa caber.
+ */
+const ACCOUNTING_IMPORT_DOMINIO_REFUSAL = {
+  code: 'LINHAS_INVALIDAS',
+  message: 'invalid lines',
+  userMessage:
+    'O arquivo foi reconhecido como o plano de contas exportado do Domínio, mas há linhas que não puderam ser lidas com segurança. Confira as linhas apontadas (ou exporte o plano de novo) — nenhuma conta foi gravada.',
+  details: {
+    lines: [
+      { line: 100, reason: 'grau_divergente' },
+      { line: 575, reason: 'conta_fora_do_bloco' },
+    ],
+    total: 2,
   },
 };
 
@@ -1948,11 +1968,15 @@ async function fulfillApi(route: Route): Promise<void> {
   // conta receber só analíticas ativas como o servidor faria.
   if (path === `/api/v1/clients/${CLIENT_ID}/accounting-chart/import`) {
     if (enviouXls(route)) return recusarXls(route);
-    if (accountingImportOutcome === 'linhas') {
+    if (accountingImportOutcome === 'linhas' || accountingImportOutcome === 'dominio') {
+      const error =
+        accountingImportOutcome === 'dominio'
+          ? ACCOUNTING_IMPORT_DOMINIO_REFUSAL
+          : ACCOUNTING_IMPORT_REFUSAL;
       return route.fulfill({
         status: 422,
         contentType: 'application/json',
-        body: JSON.stringify({ error: ACCOUNTING_IMPORT_REFUSAL }),
+        body: JSON.stringify({ error }),
       });
     }
     accountingChartEmpty = false;
@@ -7196,6 +7220,39 @@ for (const vp of VIEWPORTS) {
       await gaveta.getByRole('button', { name: 'Cancelar' }).click();
       await expect(page.getByRole('dialog')).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Importar planilha' })).toBeFocused();
+    });
+
+    test('gaveta: o modelo diz que o export do Domínio é aceito, e a recusa dele cabe', async ({
+      page,
+    }) => {
+      accountingChartEmpty = true;
+      accountingImportOutcome = 'dominio';
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+
+      await page.getByRole('button', { name: 'Importar planilha' }).click();
+      const gaveta = page.getByRole('dialog');
+      await aguardarAnimacao(gaveta);
+      const linhaDominio = gaveta.getByText(
+        /O plano de contas exportado do Domínio em \.xlsx também é aceito/,
+      );
+      await linhaDominio.scrollIntoViewIfNeeded();
+      await expect(linhaDominio).toBeVisible();
+      await analyze(page, `plano contábil — gaveta com a linha do Domínio (${vp.label})`);
+
+      await gaveta.getByLabel('Planilha (.csv ou .xlsx)').setInputFiles(PLANILHA_PLANO);
+      await gaveta.getByRole('button', { name: 'Importar', exact: true }).click();
+      const recusa = gaveta.locator('[data-refusal-code="LINHAS_INVALIDAS"]');
+      await expect(recusa).toBeVisible();
+      await expect(recusa).toContainText('reconhecido como o plano de contas exportado do Domínio');
+      await expect(recusa.getByRole('row').nth(2)).toContainText('Conta depois do fim do plano');
+      // O cabeçalho do Domínio fica na linha 5: o rodapé da tabela não diz "linha 1".
+      await expect(recusa).not.toContainText('A linha 1 é o cabeçalho');
+      const motivo = recusa.getByRole('row').nth(2).getByRole('cell').nth(1);
+      await motivo.scrollIntoViewIfNeeded();
+      await exigirDentroDaViewport(page, motivo, `${vp.label}: motivo conta_fora_do_bloco`);
+      await shot(page, `plano-contabil-importacao-recusa-dominio-${slugPC16}`);
+      await analyze(page, `plano contábil — recusa do export do Domínio (${vp.label})`);
     });
 
     test('reimportação pede confirmação ANTES de enviar', async ({ page }) => {

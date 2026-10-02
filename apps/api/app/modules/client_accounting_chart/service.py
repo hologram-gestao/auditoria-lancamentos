@@ -48,7 +48,11 @@ from app.modules.client_accounting_chart.repository import (
     AccountingChartFilters,
     AccountingChartRepository,
 )
-from app.modules.client_accounting_chart.sheet import ChartSheetRow, parse_chart_sheet
+from app.modules.client_accounting_chart.sheet import (
+    ChartLayout,
+    ChartSheetRow,
+    parse_chart_sheet,
+)
 from app.modules.usage_events.repository import UsageEventRepository
 from app.modules.usage_events.service import UsageEventService
 
@@ -82,6 +86,9 @@ class ChartImportResult:
     accounts: int
     new: int
     inactivated: int
+    #: De onde veio a planilha (`modelo` ou o export nativo do `dominio`). Vai só
+    #: para a métrica, não para a resposta.
+    layout: ChartLayout = "modelo"
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,7 +268,8 @@ class AccountingChartService:
                 f"Cliente {client.id} está encerrado desde {client.closed_at.isoformat()}."
             )
         # CPU síncrona fora do event loop (limites do leitor checados antes de iterar).
-        rows = await run_in_threadpool(parse_chart_sheet, content)
+        parsed = await run_in_threadpool(parse_chart_sheet, content)
+        rows = parsed.rows
 
         await self._repo.lock_client_chart(client.id)
         cipher = await self._write_cipher(client)
@@ -278,10 +286,13 @@ class AccountingChartService:
         )
         await self._db.commit()
 
-        result = ChartImportResult(accounts=len(rows), new=len(inserts), inactivated=inactivated)
+        result = ChartImportResult(
+            accounts=len(rows), new=len(inserts), inactivated=inactivated, layout=parsed.layout
+        )
         log.info(
             "accounting_chart_imported",
             client_id=str(client.id),
+            layout=result.layout,
             accounts=result.accounts,
             new=result.new,
             updated=len(updates),
@@ -303,6 +314,7 @@ class AccountingChartService:
                 contas=result.accounts,
                 contas_novas=result.new,
                 contas_inativadas=result.inactivated,
+                layout=result.layout,
             )
         except Exception:
             log.warning("plano_contabil_importado_emit_failed", client_id=str(client.id))
