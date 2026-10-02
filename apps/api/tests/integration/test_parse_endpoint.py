@@ -44,7 +44,10 @@ from app.db.models import (
     UserRole,
 )
 from app.integrations.anthropic.client import AnthropicClient
-from app.integrations.anthropic.tools import EXTRACT_MOVEMENTS_TOOL_NAME
+from app.integrations.anthropic.tools import (
+    EXTRACT_MOVEMENTS_TOOL_NAME,
+    IDENTIFY_DOCUMENT_TOOL_NAME,
+)
 from app.main import app as fastapi_app
 from app.modules.reconciliations.routes import _get_anthropic_client
 
@@ -163,6 +166,31 @@ class _FakeAnthropic:
         self.messages = _FakeMessages(side_effect=side_effect)
 
 
+class _IdentifyToolUseBlock:
+    """`tool_use` da identificação (86e3ff8xd): banco e tipo de conta."""
+
+    def __init__(self) -> None:
+        self.type = "tool_use"
+        self.name = IDENTIFY_DOCUMENT_TOOL_NAME
+        self.id = "toolu_identify"
+        self.input = {"bank_name": "Banco do Brasil", "account_type": "checking"}
+
+
+class _FakeMessagesByTool(_FakeMessages):
+    """Responde conforme a tool forçada: identificação ou extração."""
+
+    async def create(self, **kwargs: Any) -> Any:
+        self.calls.append(kwargs)
+        if kwargs["tool_choice"]["name"] == IDENTIFY_DOCUMENT_TOOL_NAME:
+            return _Message([_IdentifyToolUseBlock()])
+        return self.side_effect
+
+
+class _FakeAnthropicByTool(_FakeAnthropic):
+    def __init__(self, *, side_effect: Any) -> None:
+        self.messages = _FakeMessagesByTool(side_effect=side_effect)
+
+
 def _ok_payload() -> dict[str, Any]:
     return {
         "bank_name": "Sicredi",
@@ -229,6 +257,18 @@ def _minimal_pdf_bytes() -> bytes:
     """PDF mínimo que passa magic bytes. Não precisa ser parseável — o teste
     mocka a Anthropic, então o conteúdo nunca é processado de verdade."""
     return b"%PDF-1.7\n%fake-pdf-content-for-tests\n" + b"x" * 100
+
+
+def _multipage_pdf_bytes(n_pages: int) -> bytes:
+    """PDF REAL de `n_pages` páginas em branco (o `pypdf` precisa lê-lo para dividir)."""
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    for _ in range(n_pages):
+        writer.add_blank_page(width=100, height=100)
+    buffer = BytesIO()
+    writer.write(buffer)
+    return buffer.getvalue()
 
 
 def _csv_bytes() -> bytes:
@@ -513,6 +553,66 @@ class TestParseIntegration:
         # Pagamento → débito → negativo. Recebimento → crédito → positivo.
         assert float(txs[0]["amount"]) < 0
         assert float(txs[1]["amount"]) > 0
+
+    async def test_pdf_de_varias_paginas_e_dividido_por_paginas(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        override_anthropic: dict[str, Any],
+    ) -> None:
+        """86e3ff8xd — 6 páginas: 1 identificação + ceil(6/2) = 3 blocos, juntados."""
+        fake = _FakeAnthropicByTool(side_effect=_ok_message())
+        override_anthropic["fake"] = fake
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="X", creator=admin)
+        await _login_as(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.post(
+            "/api/v1/reconciliations/parse",
+            data={"client_id": str(cliente.id)},
+            files={"file": ("extrato.pdf", _multipage_pdf_bytes(6), "application/pdf")},
+        )
+        assert resp.status_code == 200, resp.text
+        tools = [call["tool_choice"]["name"] for call in fake.messages.calls]
+        assert tools.count(IDENTIFY_DOCUMENT_TOOL_NAME) == 1
+        assert tools.count(EXTRACT_MOVEMENTS_TOOL_NAME) == 3
+        assert tools[0] == IDENTIFY_DOCUMENT_TOOL_NAME  # identificação ANTES dos blocos
+        extract_prompts = [
+            call["messages"][0]["content"][-1]["text"]
+            for call in fake.messages.calls
+            if call["tool_choice"]["name"] == EXTRACT_MOVEMENTS_TOOL_NAME
+        ]
+        assert sorted("bloco 1 de 3" in text for text in extract_prompts) == [False, False, True]
+        assert all('banco "Banco do Brasil"' in text for text in extract_prompts)
+        data = resp.json()["data"]
+        assert data["bank_name"] == "Banco do Brasil"  # da identificação, não do bloco
+        assert data["account_type"] == "checking"
+        assert len(data["transactions"]) == 3 * 2  # 2 por bloco, 3 blocos
+
+    async def test_pdf_acima_do_maximo_de_paginas_e_recusado_sem_chamar_a_ia(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        override_anthropic: dict[str, Any],
+    ) -> None:
+        fake = _FakeAnthropicByTool(side_effect=_ok_message())
+        override_anthropic["fake"] = fake
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="X", creator=admin)
+        await _login_as(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.post(
+            "/api/v1/reconciliations/parse",
+            data={"client_id": str(cliente.id)},
+            files={"file": ("extrato.pdf", _multipage_pdf_bytes(31), "application/pdf")},
+        )
+        assert resp.status_code == 400, resp.text
+        error = resp.json()["error"]
+        assert error["code"] == "VALIDATION_ERROR"
+        assert "31 páginas" in error["userMessage"]
+        assert "mesma conciliação" in error["userMessage"]
+        assert error["details"] == {"pages": 31, "maxPages": 30}
+        assert fake.messages.calls == []
 
     async def test_csv_happy_path(
         self,

@@ -27,6 +27,7 @@ from anthropic import (
     AuthenticationError,
 )
 from pydantic import SecretStr, ValidationError
+from structlog.testing import capture_logs
 
 from app.core.alerting import AlertCode
 from app.core.exceptions import (
@@ -37,8 +38,18 @@ from app.core.exceptions import (
 )
 from app.integrations.anthropic.client import AnthropicClient
 from app.integrations.anthropic.prompts import SYSTEM_PROMPT
-from app.integrations.anthropic.schemas import ExtractedStatement, ExtractedTransaction
-from app.integrations.anthropic.tools import EXTRACT_MOVEMENTS_TOOL, EXTRACT_MOVEMENTS_TOOL_NAME
+from app.integrations.anthropic.schemas import (
+    DocumentIdentity,
+    ExtractedStatement,
+    ExtractedStatementBlock,
+    ExtractedTransaction,
+)
+from app.integrations.anthropic.tools import (
+    EXTRACT_MOVEMENTS_TOOL,
+    EXTRACT_MOVEMENTS_TOOL_NAME,
+    IDENTIFY_DOCUMENT_TOOL,
+    IDENTIFY_DOCUMENT_TOOL_NAME,
+)
 
 # ----------------------------------------------------------------------
 # Helpers / fakes
@@ -604,6 +615,171 @@ class TestPartNoteInUserPrompt:
 
         blocks = fake.messages.calls[0]["messages"][0]["content"]
         assert "bloco" not in blocks[-1]["text"]
+        assert "já foi identificado" not in blocks[-1]["text"]
+
+    async def test_part_note_manda_devolver_lista_vazia_sem_inventar(self) -> None:
+        """D4: bloco sem movimentação devolve `transactions: []`."""
+        fake = _FakeAnthropic(side_effect=_ok_message())
+        client = _make_client(fake)
+
+        await client.extract_movements(
+            content=b"%PDF-", mime_type="application/pdf", document_kind="x", part=(3, 4)
+        )
+
+        text = fake.messages.calls[0]["messages"][0]["content"][-1]["text"]
+        assert "lista vazia" in text
+        assert "nunca invente linhas" in text
+
+
+# ----------------------------------------------------------------------
+# 86e3ff8xd — identificação pela primeira página e nota de identidade
+# ----------------------------------------------------------------------
+
+
+def _identity_message(payload: dict[str, Any] | None = None) -> _Message:
+    return _Message(
+        [
+            _ToolUseBlock(
+                name=IDENTIFY_DOCUMENT_TOOL_NAME,
+                payload=payload or {"bank_name": "Banco do Brasil", "account_type": "checking"},
+            )
+        ]
+    )
+
+
+@pytest.mark.unit
+class TestIdentifyDocument:
+    async def test_payload_so_a_primeira_pagina_tool_forcada_e_max_tokens_pequeno(self) -> None:
+        fake = _FakeAnthropic(side_effect=_identity_message())
+        client = _make_client(fake)
+        first_page = b"%PDF-1.7 primeira pagina"
+
+        identity = await client.identify_document(first_page)
+
+        assert identity == DocumentIdentity(bank_name="Banco do Brasil", account_type="checking")
+        call = fake.messages.calls[0]
+        assert call["model"] == "claude-test"
+        assert call["tools"] == [IDENTIFY_DOCUMENT_TOOL]
+        assert call["tool_choice"] == {"type": "tool", "name": IDENTIFY_DOCUMENT_TOOL_NAME}
+        assert call["max_tokens"] <= 1024
+        assert "identify_document" in call["system"][0]["text"]
+        assert call["system"][0]["text"] != SYSTEM_PROMPT
+        content = call["messages"][0]["content"]
+        assert content[0]["type"] == "document"
+        assert content[0]["source"]["media_type"] == "application/pdf"
+        assert base64.b64decode(content[0]["source"]["data"]) == first_page
+        assert "identify_document" in content[-1]["text"]
+
+    async def test_tool_input_invalido_vira_parse_error(self) -> None:
+        fake = _FakeAnthropic(
+            side_effect=_identity_message({"bank_name": "X", "account_type": "savings"})
+        )
+        with pytest.raises(AnthropicParseError):
+            await _make_client(fake).identify_document(b"%PDF-")
+
+    async def test_sem_tool_use_vira_parse_error(self) -> None:
+        fake = _FakeAnthropic(side_effect=_Message([_TextBlock("Banco do Brasil")]))
+        with pytest.raises(AnthropicParseError):
+            await _make_client(fake).identify_document(b"%PDF-")
+
+    async def test_tool_errada_e_ignorada(self) -> None:
+        fake = _FakeAnthropic(side_effect=_ok_message())  # chamou extract_movements
+        with pytest.raises(AnthropicParseError):
+            await _make_client(fake).identify_document(b"%PDF-")
+
+    async def test_timeout_e_auth_mapeados_como_na_extracao(self) -> None:
+        with pytest.raises(AnthropicTimeoutError):
+            await _make_client(
+                _FakeAnthropic(side_effect=APITimeoutError(request=_FAKE_REQUEST))
+            ).identify_document(b"%PDF-")
+
+        auth = AuthenticationError(
+            "bad key",
+            response=httpx.Response(401, request=_FAKE_REQUEST),
+            body=None,
+        )
+        with pytest.raises(AnthropicAuthError):
+            await _make_client(_FakeAnthropic(side_effect=auth)).identify_document(b"%PDF-")
+
+    async def test_5xx_depois_200_faz_retry(self) -> None:
+        fake = _FakeAnthropic(side_effect=[_api_status_error(502), _identity_message()])
+
+        identity = await _make_client(fake).identify_document(b"%PDF-")
+
+        assert identity.bank_name == "Banco do Brasil"
+        assert len(fake.messages.calls) == 2
+
+    async def test_log_so_com_contadores(self) -> None:
+        fake = _FakeAnthropic(side_effect=_identity_message())
+
+        with capture_logs() as events:
+            await _make_client(fake).identify_document(b"%PDF-1.7 pagina")
+
+        ok = [e for e in events if e["event"] == "anthropic_identify_ok"]
+        assert len(ok) == 1
+        assert set(ok[0]) >= {"model", "duration_ms", "bytes_in"}
+        assert "Banco do Brasil" not in str(ok[0])
+
+
+@pytest.mark.unit
+class TestIdentityNoteInUserPrompt:
+    async def test_identity_appends_note_with_bank_and_type(self) -> None:
+        fake = _FakeAnthropic(side_effect=_ok_message())
+        client = _make_client(fake)
+
+        await client.extract_movements(
+            content=b"%PDF-",
+            mime_type="application/pdf",
+            document_kind="extrato/fatura em PDF",
+            part=(2, 3),
+            identity=DocumentIdentity(bank_name="Banco do Brasil", account_type="credit_card"),
+        )
+
+        text = fake.messages.calls[0]["messages"][0]["content"][-1]["text"]
+        assert "bloco 2 de 3" in text
+        assert 'banco "Banco do Brasil"' in text
+        assert "`credit_card`" in text
+        assert "mesmo que este bloco não traga cabeçalho" in text
+        # O system prompt e a tool da extração não mudam (prompt caching).
+        assert fake.messages.calls[0]["system"][0]["text"] == SYSTEM_PROMPT
+        assert fake.messages.calls[0]["tools"] == [EXTRACT_MOVEMENTS_TOOL]
+
+
+@pytest.mark.unit
+class TestEmptyBlockValidation:
+    """D4: `transactions: []` só passa em modo bloco (`part` informado)."""
+
+    def _empty_fake(self) -> _FakeAnthropic:
+        payload = _valid_payload()
+        payload["transactions"] = []
+        return _FakeAnthropic(
+            side_effect=_Message([_ToolUseBlock(name=EXTRACT_MOVEMENTS_TOOL_NAME, payload=payload)])
+        )
+
+    async def test_bloco_vazio_e_aceito_em_modo_bloco(self) -> None:
+        client = _make_client(self._empty_fake())
+
+        statement = await client.extract_movements(
+            content=b"%PDF-", mime_type="application/pdf", document_kind="x", part=(2, 3)
+        )
+
+        assert isinstance(statement, ExtractedStatementBlock)
+        assert statement.transactions == []
+
+    async def test_arquivo_inteiro_vazio_continua_recusado(self) -> None:
+        client = _make_client(self._empty_fake())
+
+        with pytest.raises(AnthropicParseError):
+            await client.extract_movements(
+                content=b"%PDF-", mime_type="application/pdf", document_kind="x"
+            )
+
+    def test_schema_do_bloco_aceita_vazio_e_o_do_arquivo_nao(self) -> None:
+        payload = _valid_payload()
+        payload["transactions"] = []
+        assert ExtractedStatementBlock.model_validate(payload).transactions == []
+        with pytest.raises(ValidationError):
+            ExtractedStatement.model_validate(payload)
 
 
 # ----------------------------------------------------------------------

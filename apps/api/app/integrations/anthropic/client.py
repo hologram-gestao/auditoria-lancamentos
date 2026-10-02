@@ -12,6 +12,10 @@ Princípios (CLAUDE.md §3 + Doc §12):
     - **HTTP 400 por crédito esgotado** vira `AnthropicCreditError` e dispara o
       alerta de plantão `AlertCode.ANTHROPIC_CREDIT` (deduplicado por processo):
       antes caía no 4xx genérico e virava "arquivo inválido" (86e39yzxc).
+    - **Duas chamadas, um caminho.** `extract_movements` (a extração) e
+      `identify_document` (86e3ff8xd: banco e tipo de conta pela primeira página
+      de um PDF dividido) passam pelo MESMO retry e pelo MESMO mapeamento de
+      erro (`_call_with_retry` → `_invoke`); mudam só tool, prompt e `max_tokens`.
 
 Estilo espelha `OmieClient`: tenacity para retry com backoff exponencial,
 exceção tipada por classe de erro, redactor do `app.core.logging` faz a
@@ -50,11 +54,22 @@ from app.core.exceptions import (
     AnthropicTimeoutError,
 )
 from app.core.logging import get_logger
-from app.integrations.anthropic.prompts import SYSTEM_PROMPT, build_user_prompt
-from app.integrations.anthropic.schemas import ExtractedStatement
+from app.integrations.anthropic.prompts import (
+    IDENTIFY_SYSTEM_PROMPT,
+    IDENTIFY_USER_PROMPT,
+    SYSTEM_PROMPT,
+    build_user_prompt,
+)
+from app.integrations.anthropic.schemas import (
+    DocumentIdentity,
+    ExtractedStatement,
+    ExtractedStatementBlock,
+)
 from app.integrations.anthropic.tools import (
     EXTRACT_MOVEMENTS_TOOL,
     EXTRACT_MOVEMENTS_TOOL_NAME,
+    IDENTIFY_DOCUMENT_TOOL,
+    IDENTIFY_DOCUMENT_TOOL_NAME,
 )
 
 if TYPE_CHECKING:
@@ -85,6 +100,11 @@ _credit_alert_last_at: float | None = None
 # subida que o configurado não excede o cap de saída do modelo (`model_limits`),
 # em vez de descobrir isso num HTTP 400 da Anthropic no meio de uma conciliação.
 _MAX_OUTPUT_TOKENS = 32768
+
+# Teto de saída da IDENTIFICAÇÃO (86e3ff8xd, D2): a resposta são dois campos
+# curtos (banco e tipo de conta). Pequeno de propósito — é o que torna a chamada
+# barata e rápida (~5 s) antes dos blocos.
+_IDENTIFY_MAX_OUTPUT_TOKENS = 256
 
 
 class _RetryableAnthropicError(Exception):
@@ -185,6 +205,7 @@ class AnthropicClient:
         document_kind: str,
         model: str | None = None,
         part: tuple[int, int] | None = None,
+        identity: DocumentIdentity | None = None,
     ) -> ExtractedStatement:
         """Extrai `ExtractedStatement` chamando a Anthropic via tool use.
 
@@ -199,10 +220,14 @@ class AnthropicClient:
             model: override opcional do modelo. `None` usa o default do
                 construtor (ex. `claude-sonnet-4-5`).
             part: `(índice, total)` quando `content` é um bloco de um arquivo
-                dividido (`parse_chunking`); entra como nota no user prompt.
+                dividido (`parse_chunking`, `parse_pdf_pages`); entra como nota
+                no user prompt, e em modo bloco a validação aceita
+                `transactions` vazio (`ExtractedStatementBlock`, D4).
+            identity: banco e tipo de conta já identificados pela primeira
+                página (`identify_document`); entra como nota no user prompt.
 
         Returns:
-            `ExtractedStatement` validado.
+            `ExtractedStatement` validado (`ExtractedStatementBlock` em modo bloco).
 
         Raises:
             AnthropicAuthError: chave inválida/ausente, 401, 403.
@@ -210,46 +235,21 @@ class AnthropicClient:
             AnthropicParseError: modelo não chamou a tool, ou tool input
                 não passa na validação Pydantic.
         """
-        client = self._get_client()
-        user_content = self._build_user_content(content, mime_type, document_kind, part)
-        system_blocks = self._build_system_blocks()
+        user_content = self._build_user_content(
+            content, mime_type, document_kind, part, identity=identity
+        )
         chosen_model = model or self._model
 
         started = time.monotonic()
-        message: Any
-        try:
-            async for attempt in AsyncRetrying(
-                stop=stop_after_attempt(2),  # 1 chamada + 1 retry
-                wait=wait_exponential(multiplier=1, min=1, max=4),
-                retry=retry_if_exception_type(_RetryableAnthropicError),
-                reraise=True,
-            ):
-                with attempt:
-                    message = await self._invoke(
-                        client=client,
-                        model=chosen_model,
-                        system_blocks=system_blocks,
-                        user_content=user_content,
-                        attempt_number=attempt.retry_state.attempt_number,
-                    )
-        except _RetryableAnthropicError as exc:
-            # 5xx persistente após retry esgotar → mapeia para timeout (a UX
-            # final é a mesma: "tente novamente"). Mensagem técnica fica em
-            # `message`, não exposta ao usuário.
-            log.warning(
-                "anthropic_call_5xx_persistent",
-                model=chosen_model,
-                bytes_in=len(content),
-                duration_ms=round((time.monotonic() - started) * 1000),
-            )
-            raise AnthropicTimeoutError(
-                "Erro 5xx persistente da Anthropic após retry.",
-            ) from exc
-        except RetryError as exc:  # pragma: no cover  -- defensivo
-            raise AnthropicTimeoutError(
-                "Falha persistente ao chamar a Anthropic.",
-            ) from exc
-
+        message = await self._call_with_retry(
+            model=chosen_model,
+            system_blocks=self._build_system_blocks(),
+            user_content=user_content,
+            tools=[EXTRACT_MOVEMENTS_TOOL],
+            tool_name=EXTRACT_MOVEMENTS_TOOL_NAME,
+            max_tokens=self._max_output_tokens,
+            bytes_in=len(content),
+        )
         duration_ms = round((time.monotonic() - started) * 1000)
 
         # Truncamento: se o modelo bateu no teto de tokens, o `tool_use` volta
@@ -273,7 +273,7 @@ class AnthropicClient:
                 ),
             )
 
-        statement = self._extract_tool_payload(message)
+        statement = self._extract_tool_payload(message, block=part is not None)
 
         log.info(
             "anthropic_extract_ok",
@@ -283,6 +283,107 @@ class AnthropicClient:
             transaction_count=len(statement.transactions),
         )
         return statement
+
+    async def identify_document(self, content: bytes) -> DocumentIdentity:
+        """Identifica banco e tipo de conta pela PRIMEIRA página de um PDF (D2).
+
+        Chamada curta antes dos blocos de um PDF dividido (`parse_pdf_pages`):
+        `document` base64 de uma página, tool `identify_document` forçada,
+        `max_tokens` pequeno. Mesmo `_invoke` (retry, mapeamento de erro) da
+        extração.
+
+        Raises:
+            AnthropicAuthError / AnthropicTimeoutError / AnthropicCreditError:
+                como em `extract_movements`.
+            AnthropicParseError: modelo não chamou a tool, ou o input não passa
+                na validação.
+        """
+        user_content = [
+            self._document_block(content),
+            {"type": "text", "text": IDENTIFY_USER_PROMPT},
+        ]
+        started = time.monotonic()
+        message = await self._call_with_retry(
+            model=self._model,
+            system_blocks=[{"type": "text", "text": IDENTIFY_SYSTEM_PROMPT}],
+            user_content=user_content,
+            tools=[IDENTIFY_DOCUMENT_TOOL],
+            tool_name=IDENTIFY_DOCUMENT_TOOL_NAME,
+            max_tokens=_IDENTIFY_MAX_OUTPUT_TOKENS,
+            bytes_in=len(content),
+        )
+        duration_ms = round((time.monotonic() - started) * 1000)
+        if getattr(message, "stop_reason", None) == "max_tokens":
+            raise AnthropicParseError("Identificação truncada: stop_reason=max_tokens.")
+
+        raw_input = self._tool_input(message, IDENTIFY_DOCUMENT_TOOL_NAME)
+        try:
+            identity = DocumentIdentity.model_validate(raw_input)
+        except ValidationError as exc:
+            log.warning("anthropic_tool_validation_failed", error_count=len(exc.errors()))
+            raise AnthropicParseError(
+                f"Tool input inválido: {exc.errors()[0]['msg']}",
+            ) from exc
+
+        log.info(
+            "anthropic_identify_ok",
+            model=self._model,
+            duration_ms=duration_ms,
+            bytes_in=len(content),
+        )
+        return identity
+
+    async def _call_with_retry(
+        self,
+        *,
+        model: str,
+        system_blocks: list[dict[str, Any]],
+        user_content: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        tool_name: str,
+        max_tokens: int,
+        bytes_in: int,
+    ) -> Any:
+        """1 chamada + 1 retry em erro transitório; o resto do mapeamento é do `_invoke`."""
+        client = self._get_client()
+        started = time.monotonic()
+        message: Any
+        try:
+            async for attempt in AsyncRetrying(
+                stop=stop_after_attempt(2),  # 1 chamada + 1 retry
+                wait=wait_exponential(multiplier=1, min=1, max=4),
+                retry=retry_if_exception_type(_RetryableAnthropicError),
+                reraise=True,
+            ):
+                with attempt:
+                    message = await self._invoke(
+                        client=client,
+                        model=model,
+                        system_blocks=system_blocks,
+                        user_content=user_content,
+                        tools=tools,
+                        tool_name=tool_name,
+                        max_tokens=max_tokens,
+                        attempt_number=attempt.retry_state.attempt_number,
+                    )
+        except _RetryableAnthropicError as exc:
+            # 5xx persistente após retry esgotar → mapeia para timeout (a UX
+            # final é a mesma: "tente novamente"). Mensagem técnica fica em
+            # `message`, não exposta ao usuário.
+            log.warning(
+                "anthropic_call_5xx_persistent",
+                model=model,
+                bytes_in=bytes_in,
+                duration_ms=round((time.monotonic() - started) * 1000),
+            )
+            raise AnthropicTimeoutError(
+                "Erro 5xx persistente da Anthropic após retry.",
+            ) from exc
+        except RetryError as exc:  # pragma: no cover  -- defensivo
+            raise AnthropicTimeoutError(
+                "Falha persistente ao chamar a Anthropic.",
+            ) from exc
+        return message
 
     # ------------------------------------------------------------------
     # Construção de mensagens
@@ -311,6 +412,8 @@ class AnthropicClient:
         mime_type: str,
         document_kind: str,
         part: tuple[int, int] | None = None,
+        *,
+        identity: DocumentIdentity | None = None,
     ) -> list[dict[str, Any]]:
         """Constrói a lista de blocos de conteúdo do `user` message.
 
@@ -324,23 +427,31 @@ class AnthropicClient:
         blocks: list[dict[str, Any]] = []
 
         if mime_type == "application/pdf":
-            encoded = base64.b64encode(content).decode("ascii")
-            blocks.append(
-                {
-                    "type": "document",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "application/pdf",
-                        "data": encoded,
-                    },
-                }
-            )
+            blocks.append(self._document_block(content))
         else:
             text = self._decode_text(content)
             blocks.append({"type": "text", "text": text})
 
-        blocks.append({"type": "text", "text": build_user_prompt(document_kind, part=part)})
+        identity_note = (identity.bank_name, identity.account_type) if identity else None
+        blocks.append(
+            {
+                "type": "text",
+                "text": build_user_prompt(document_kind, part=part, identity=identity_note),
+            }
+        )
         return blocks
+
+    @staticmethod
+    def _document_block(content: bytes) -> dict[str, Any]:
+        """PDF como bloco `document` base64."""
+        return {
+            "type": "document",
+            "source": {
+                "type": "base64",
+                "media_type": "application/pdf",
+                "data": base64.b64encode(content).decode("ascii"),
+            },
+        }
 
     @staticmethod
     def _decode_text(content: bytes) -> str:
@@ -365,16 +476,19 @@ class AnthropicClient:
         model: str,
         system_blocks: list[dict[str, Any]],
         user_content: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        tool_name: str,
+        max_tokens: int,
         attempt_number: int,
     ) -> Any:
         """Faz a chamada concreta ao SDK e mapeia exceções."""
         try:
             return await client.messages.create(
                 model=model,
-                max_tokens=self._max_output_tokens,
+                max_tokens=max_tokens,
                 system=system_blocks,
-                tools=[EXTRACT_MOVEMENTS_TOOL],
-                tool_choice={"type": "tool", "name": EXTRACT_MOVEMENTS_TOOL_NAME},
+                tools=tools,
+                tool_choice={"type": "tool", "name": tool_name},
                 messages=[{"role": "user", "content": user_content}],
             )
         except APITimeoutError as exc:
@@ -457,40 +571,55 @@ class AnthropicClient:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _extract_tool_payload(message: Any) -> ExtractedStatement:
-        """Localiza o bloco `tool_use` esperado e valida via Pydantic.
+    def _tool_input(message: Any, tool_name: str) -> dict[str, Any]:
+        """Localiza o bloco `tool_use` de `tool_name` e devolve o `input` dict.
 
-        Edge cases (Doc §12.2 — Tratamento de erros do parsing):
-            - Modelo respondeu free-text → `AnthropicParseError`.
-            - Tool input com data PT-BR / valor inválido → `AnthropicParseError`.
-            - `transactions` vazio → bloqueado pelo `min_length=1` no schema.
+        Raises:
+            AnthropicParseError: modelo respondeu free-text, chamou outra tool
+                ou o input não é dict.
         """
         content_blocks: list[Any] = list(getattr(message, "content", []) or [])
         for block in content_blocks:
             block_type = getattr(block, "type", None)
             block_name = getattr(block, "name", None)
-            if block_type == "tool_use" and block_name == EXTRACT_MOVEMENTS_TOOL_NAME:
+            if block_type == "tool_use" and block_name == tool_name:
                 raw_input: Any = getattr(block, "input", None)
                 if not isinstance(raw_input, dict):
                     raise AnthropicParseError(
                         "Tool use sem input dict.",
                     )
-                try:
-                    return ExtractedStatement.model_validate(raw_input)
-                except ValidationError as exc:
-                    # `errors()` é estruturado e seguro para log — nenhum
-                    # valor financeiro completo, só caminhos e tipos. Nunca
-                    # logamos `raw_input` porque pode conter conteúdo
-                    # extraído do extrato.
-                    log.warning(
-                        "anthropic_tool_validation_failed",
-                        error_count=len(exc.errors()),
-                    )
-                    raise AnthropicParseError(
-                        f"Tool input inválido: {exc.errors()[0]['msg']}",
-                    ) from exc
+                return raw_input
 
         # Modelo não emitiu o tool_use esperado.
         raise AnthropicParseError(
-            "Modelo não chamou a tool extract_movements.",
+            f"Modelo não chamou a tool {tool_name}.",
         )
+
+    @classmethod
+    def _extract_tool_payload(cls, message: Any, *, block: bool = False) -> ExtractedStatement:
+        """Localiza o bloco `tool_use` da extração e valida via Pydantic.
+
+        Edge cases (Doc §12.2 — Tratamento de erros do parsing):
+            - Modelo respondeu free-text → `AnthropicParseError`.
+            - Tool input com data PT-BR / valor inválido → `AnthropicParseError`.
+            - `transactions` vazio → bloqueado pelo `min_length=1` no schema do
+              arquivo inteiro; aceito em modo bloco (`block=True`, D4), onde o
+              total é conferido na junção.
+        """
+        raw_input = cls._tool_input(message, EXTRACT_MOVEMENTS_TOOL_NAME)
+        try:
+            if block:
+                return ExtractedStatementBlock.model_validate(raw_input)
+            return ExtractedStatement.model_validate(raw_input)
+        except ValidationError as exc:
+            # `errors()` é estruturado e seguro para log — nenhum
+            # valor financeiro completo, só caminhos e tipos. Nunca
+            # logamos `raw_input` porque pode conter conteúdo
+            # extraído do extrato.
+            log.warning(
+                "anthropic_tool_validation_failed",
+                error_count=len(exc.errors()),
+            )
+            raise AnthropicParseError(
+                f"Tool input inválido: {exc.errors()[0]['msg']}",
+            ) from exc
