@@ -30,7 +30,7 @@
 
 ## 1. Contexto Rápido
 
-**O que é:** o **Hologram OS**, plataforma para conciliar, classificar e fechar o financeiro de cada cliente: nasceu como auditoria de lançamentos bancários contra o ERP Omie e hoje vai até o arquivo contábil. O nome é de 30/09/2026 (decisão do Pedro); antes era "Sistema de Auditoria de Lançamentos", sigla **ADL**, que continua em comentário, histórico, identificador (`ADL-PARSE-*`, prefixo do `cCodIntLanc`) e no canal do Slack, mas nunca em texto de tela. Domínio previsto: `hologramos.com.br`, ainda não registrado.
+**O que é:** o **Hologram OS**, plataforma para conciliar, classificar e fechar o financeiro de cada cliente: nasceu como auditoria de lançamentos bancários contra o ERP Omie e hoje vai até o arquivo contábil. O nome é de 30/09/2026 (decisão do Pedro); antes era "Sistema de Auditoria de Lançamentos", sigla **ADL**, que continua em comentário, histórico, identificador (`ADL-PARSE-*`, prefixo do `cCodIntLanc`) e no canal do Slack, mas nunca em texto de tela. **Domínio: NÃO decidido** (opções na mesa: `hologramos.com.br`, `hgos.com.br`, `holos.app.br`…; nenhum registrado) — o `PRODUCT_DOMAIN = 'hologramos.com.br'` do código é placeholder da primeira opção, e nenhuma URL é montada a partir dele (decisão e compra: task 86e3fr9wm).
 
 **Fluxo núcleo:**
 
@@ -1314,7 +1314,7 @@ pública (grupo `app/(public)/`, com `/privacidade`), a tabela `leads`, o
 aviso no Slack fail-soft por `LEADS_SLACK_WEBHOOK_URL`, que não é canal de plantão), o
 evento `lead_recebido` e as constantes de marca `lib/brand.ts`/`core/branding.py`. Em
 30/09 o produto ganhou nome, **Hologram OS**, e a landing passou a nomeá-lo (86e3gr6k5,
-junto com o refino visual). A landing oferece o manual em PDF para baixar. O domínio `hologramos.com.br` segue a registrar (86e3fr9wm,
+junto com o refino visual). A landing oferece o manual em PDF para baixar. O domínio segue SEM DECISÃO — `hologramos.com.br` é só a primeira opção, ao lado de `hgos.com.br` e `holos.app.br` (86e3fr9wm,
 roteiro em [Docs/landing/DOMINIO_E_NOME.md](Docs/landing/DOMINIO_E_NOME.md)): o
 mapeamento de domínio do Cloud Run não atende `southamerica-east1`, então o caminho é Load
 Balancer HTTPS.
