@@ -587,6 +587,10 @@ describe('importação', () => {
       within(notice).getByText('Grau diferente da profundidade da classificação'),
     ).toBeInTheDocument();
     expect(within(notice).getByText(/Conta depois do fim do plano/)).toBeInTheDocument();
+    // O cabeçalho do Domínio não está na linha 1: o rodapé não pode afirmar isso.
+    expect(within(notice).getByTestId('accounting-invalid-lines-count')).toHaveTextContent(
+      '7 linhas inválidas. Os números são os das linhas da planilha, como aparecem no Excel.',
+    );
   });
 
   it('CABECALHO_DIVERGENTE nomeia o que falta e CONTA o que veio da planilha', async () => {

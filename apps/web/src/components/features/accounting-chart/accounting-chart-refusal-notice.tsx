@@ -115,7 +115,7 @@ function RefusalBody({ refusal }: { refusal: AccountingChartRefusal }) {
             {refusal.total > refusal.lines.length
               ? `Mostrando ${refusal.lines.length} de ${refusal.total} linhas inválidas.`
               : `${refusal.total} ${refusal.total === 1 ? 'linha inválida' : 'linhas inválidas'}.`}{' '}
-            A linha 1 é o cabeçalho.
+            Os números são os das linhas da planilha, como aparecem no Excel.
           </p>
         </div>
       );
