@@ -311,6 +311,7 @@ class TestAmostraMsfgPeloCaminhoReal:
             "contas": 20,
             "contas_novas": 20,
             "contas_inativadas": 0,
+            "layout": "modelo",
         }
         accounts = await _accounts_by_code(http, client_id)
         assert len(accounts) == 20

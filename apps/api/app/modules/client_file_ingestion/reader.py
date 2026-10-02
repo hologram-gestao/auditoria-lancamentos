@@ -31,6 +31,7 @@ import csv
 import io
 import re
 import zipfile
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -55,7 +56,7 @@ from app.db.models.client_movement import (
 from app.utils.magic_bytes import FileType, detect_file_type
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Sequence
+    from collections.abc import Callable, Generator, Iterator, Sequence
 
     from app.db.models.client_input_mapping import ClientInputMapping
 
@@ -314,7 +315,7 @@ def _iter_csv(content: bytes, options: ReadOptions) -> Iterator[list[Any]]:
     yield from csv.reader(text, delimiter=options.csv_delimiter)
 
 
-def _iter_xlsx(content: bytes) -> Iterator[list[Any]]:
+def _iter_xlsx(content: bytes) -> Generator[list[Any]]:
     if not content.startswith(XLSX_MAGIC):
         raise _invalid("magic bytes")
     _check_zip_budget(content)
@@ -388,6 +389,51 @@ def read_table(
     except Exception:
         # A exceção original pode carregar o texto da célula: `from None` e
         # mensagem fixa — nada do arquivo vai para a resposta nem para o log.
+        raise _invalid("leitura") from None
+
+
+def read_xlsx_raw_rows(content: bytes, *, limit: int | None = None) -> list[tuple[int, list[Any]]]:
+    """Linhas CRUAS da primeira aba do XLSX, `(número da linha, células)`, SEM cabeçalho.
+
+    Para layout de terceiro cujo cabeçalho NÃO está na linha 1 (o export nativo do
+    plano de contas do Domínio tem um banner antes dele): quem chama decide onde o
+    cabeçalho está e o que é dado. Os guardas são os MESMOS de `read_table`:
+    orçamento do zip antes do openpyxl, colunas por linha, linhas PERCORRIDAS
+    (vazias inclusive) e linhas com dado; qualquer falha de abertura ou iteração é
+    o mesmo `ARQUIVO_INVALIDO` com `from None`.
+
+    Linha vazia VOLTA como `[]` (não é pulada): para quem chama, a linha em branco
+    é estrutura (onde um bloco termina). Células passam pelo mesmo `_cell` (texto
+    aparado, vazio vira `None`) e os `None` do fim da linha são cortados. `limit`
+    recorta as linhas PERCORRIDAS (a espiada da detecção de layout).
+
+    ⚠️ Célula mesclada: no modo `read_only` o valor vive só na célula-âncora, e as
+    demais posições da mescla chegam `None`.
+    """
+    try:
+        rows: list[tuple[int, list[Any]]] = []
+        with_data = 0
+        # `closing`: a espiada (`limit`) sai no meio, e o `finally` do gerador é
+        # o que fecha o workbook.
+        with closing(_iter_xlsx(content)) as values_iter:
+            for line, values in enumerate(values_iter, start=1):
+                if limit is not None and line > limit:
+                    break
+                if line > MAX_FILE_SCANNED_ROWS:
+                    raise _invalid("linhas demais")
+                cells = [_cell(v) for v in values]
+                while cells and cells[-1] is None:
+                    cells.pop()
+                if cells:
+                    with_data += 1
+                    if with_data > MAX_FILE_ROWS:
+                        raise _invalid("linhas demais")
+                rows.append((line, cells))
+        return rows
+    except AppError:
+        raise
+    except Exception:
+        # Mesmo contrato de `read_table`: a exceção original pode carregar a célula.
         raise _invalid("leitura") from None
 
 

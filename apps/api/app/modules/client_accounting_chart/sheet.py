@@ -16,8 +16,12 @@ da amostra anonimizada):
         649;Banco conta movimento;analitica;1.1.1.02.001
         662;Alugueis a receber - Inquilino D;analitica;1.1.2.01.004
 
-O export nativo do sistema contábil é CONVERTIDO para este modelo (aceitá-lo direto
-fica para quando houver amostra, S-1 do PRD).
+**O export nativo do plano de contas do Domínio (.xlsx) também é aceito** (86e3gkd7y,
+quando a amostra chegou): `parse_chart_sheet` reconhece o layout pelo cabeçalho
+(`dominio.find_dominio_header`, nas primeiras linhas) e o CONVERTE para as linhas deste
+modelo (`dominio.convert_dominio`), que passam pelo MESMO `validate_rows`. Sem a
+assinatura do Domínio, o caminho do modelo é o de sempre, intocado. O CSV nativo do
+Domínio não é aceito (não há amostra): cai na recusa de cabeçalho.
 
 **Reaproveita o leitor da Sprint 14** (`client_file_ingestion/reader.py`): tipo pelos
 magic bytes, nunca pela extensão; limites checados ANTES de iterar (zip, colunas,
@@ -35,7 +39,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, NoReturn
 
 from app.core.exceptions import (
     FileHeaderMismatchError,
@@ -48,11 +52,18 @@ from app.db.models.client_accounting_account import (
     MAX_ACCOUNTING_ACCOUNT_NAME_CHARS,
     AccountingAccountType,
 )
+from app.db.models.client_input_mapping import InputFileFormat
+from app.modules.client_accounting_chart.dominio import (
+    DOMINIO_HEADER_SEARCH_ROWS,
+    convert_dominio,
+    find_dominio_header,
+)
 from app.modules.client_file_ingestion.reader import (
     MAX_INVALID_LINES_REPORTED,
     ReadOptions,
     detect_format,
     read_table,
+    read_xlsx_raw_rows,
 )
 
 if TYPE_CHECKING:
@@ -66,6 +77,12 @@ COLUMN_TYPE = "tipo"
 COLUMN_CLASSIFICATION = "classificacao"
 REQUIRED_COLUMNS: tuple[str, ...] = (COLUMN_CODE, COLUMN_NAME, COLUMN_TYPE)
 OPTIONAL_COLUMNS: tuple[str, ...] = (COLUMN_CLASSIFICATION,)
+#: As colunas do modelo numa ordem fixa: é nela que o conversor do Domínio monta as
+#: linhas que entram em `validate_rows`.
+MODEL_COLUMNS: tuple[str, ...] = (COLUMN_CODE, COLUMN_NAME, COLUMN_TYPE, COLUMN_CLASSIFICATION)
+
+#: De onde veio a planilha — vocabulário FECHADO, vai para a métrica da importação.
+type ChartLayout = Literal["modelo", "dominio"]
 
 #: CSV do modelo: `;` e UTF-8 (o `-sig` aceita o BOM que o Excel grava). DECLARADOS,
 #: nunca farejados (mesma regra do mapeamento de entrada da S14).
@@ -104,6 +121,11 @@ _HEADER_MESSAGE = (
 _LINES_MESSAGE = (
     "A planilha tem linhas inválidas. Corrija as linhas apontadas e envie de novo — "
     "nenhuma conta foi gravada."
+)
+_DOMINIO_LINES_MESSAGE = (
+    "O arquivo foi reconhecido como o plano de contas exportado do Domínio, mas há "
+    "linhas que não puderam ser lidas com segurança. Confira as linhas apontadas (ou "
+    "exporte o plano de novo) — nenhuma conta foi gravada."
 )
 
 
@@ -262,42 +284,40 @@ def validate_rows(
     return valid, problems
 
 
-def parse_chart_sheet(content: bytes) -> list[ChartSheetRow]:
-    """Lê e valida a planilha INTEIRA; devolve as contas ou levanta a recusa tipada.
+@dataclass(frozen=True, slots=True)
+class ParsedChartSheet:
+    """As contas válidas e o layout reconhecido (`modelo` ou `dominio`)."""
 
-    Ordem das recusas (todas 422, nenhuma grava nada): formato pelo conteúdo
-    (`FORMATO_NAO_SUPORTADO`) → arquivo que não abre/não itera (`ARQUIVO_INVALIDO`)
-    → cabeçalho, ANTES da primeira linha (`CABECALHO_DIVERGENTE`) → linhas
-    (`LINHAS_INVALIDAS`, `details.lines=[{line, reason}]` limitado + `total`) →
-    planilha sem nenhuma conta (`ARQUIVO_INVALIDO`, `details.reason=sem_contas`).
-    """
-    # CSV ou XLSX pelo CONTEÚDO; PDF, XLS e o resto viram `FORMATO_NAO_SUPORTADO`.
-    options = ReadOptions(
-        file_format=detect_format(content),
-        csv_delimiter=CHART_CSV_DELIMITER,
-        encoding=CHART_CSV_ENCODING,
+    rows: list[ChartSheetRow]
+    layout: ChartLayout
+
+    def __repr__(self) -> str:
+        return f"<ParsedChartSheet rows={len(self.rows)} layout={self.layout}>"
+
+
+def _raise_invalid_file() -> NoReturn:
+    # A mensagem do leitor fala do MAPEAMENTO da S14; aqui é o modelo do plano.
+    raise FileInvalidError(
+        "planilha do plano contábil ilegível", user_message=_INVALID_FILE_MESSAGE
+    ) from None
+
+
+def _raise_lines(problems: Sequence[tuple[int, str]], *, user_message: str) -> NoReturn:
+    ordered = sorted(problems)
+    raise FileLinesInvalidError(
+        f"planilha do plano contábil: {len(ordered)} linha(s) inválida(s)",
+        user_message=user_message,
+        details={
+            "lines": [
+                {"line": line, "reason": reason}
+                for line, reason in ordered[:MAX_INVALID_LINES_REPORTED]
+            ],
+            "total": len(ordered),
+        },
     )
-    try:
-        table = read_table(content, options, on_header=check_header)
-    except FileInvalidError:
-        # A mensagem do leitor fala do MAPEAMENTO da S14; aqui é o modelo do plano.
-        raise FileInvalidError(
-            "planilha do plano contábil ilegível", user_message=_INVALID_FILE_MESSAGE
-        ) from None
 
-    valid, problems = validate_rows(table.columns, table.rows)
-    if problems:
-        raise FileLinesInvalidError(
-            f"planilha do plano contábil: {len(problems)} linha(s) inválida(s)",
-            user_message=_LINES_MESSAGE,
-            details={
-                "lines": [
-                    {"line": p.line, "reason": p.reason}
-                    for p in problems[:MAX_INVALID_LINES_REPORTED]
-                ],
-                "total": len(problems),
-            },
-        )
+
+def _require_accounts(valid: list[ChartSheetRow]) -> list[ChartSheetRow]:
     if not valid:
         raise FileInvalidError(
             "planilha do plano contábil sem nenhuma conta",
@@ -305,3 +325,67 @@ def parse_chart_sheet(content: bytes) -> list[ChartSheetRow]:
             details={"reason": "sem_contas"},
         )
     return valid
+
+
+def _dominio_header_line(content: bytes, file_format: InputFileFormat) -> int | None:
+    """A linha do cabeçalho do Domínio, se o XLSX tiver um nas primeiras linhas.
+
+    Só XLSX (o CSV nativo do Domínio não tem amostra). A espiada lê no máximo
+    `DOMINIO_HEADER_SEARCH_ROWS` linhas, com os guardas do leitor.
+    """
+    if file_format is not InputFileFormat.XLSX:
+        return None
+    try:
+        peek = read_xlsx_raw_rows(content, limit=DOMINIO_HEADER_SEARCH_ROWS)
+    except FileInvalidError:
+        _raise_invalid_file()
+    return find_dominio_header(peek)
+
+
+def _parse_dominio(content: bytes, header_line: int) -> list[ChartSheetRow]:
+    try:
+        raw = read_xlsx_raw_rows(content)
+    except FileInvalidError:
+        _raise_invalid_file()
+    conversion = convert_dominio(raw, header_line)
+    valid, problems = validate_rows(MODEL_COLUMNS, conversion.rows)
+    all_problems: list[tuple[int, str]] = [(p.line, p.reason) for p in problems]
+    all_problems += [(p.line, p.reason) for p in conversion.problems]
+    if all_problems:
+        _raise_lines(all_problems, user_message=_DOMINIO_LINES_MESSAGE)
+    return _require_accounts(valid)
+
+
+def parse_chart_sheet(content: bytes) -> ParsedChartSheet:
+    """Lê e valida a planilha INTEIRA; devolve as contas ou levanta a recusa tipada.
+
+    Ordem das recusas (todas 422, nenhuma grava nada): formato pelo conteúdo
+    (`FORMATO_NAO_SUPORTADO`) → arquivo que não abre/não itera (`ARQUIVO_INVALIDO`)
+    → cabeçalho, ANTES da primeira linha (`CABECALHO_DIVERGENTE`) → linhas
+    (`LINHAS_INVALIDAS`, `details.lines=[{line, reason}]` limitado + `total`) →
+    planilha sem nenhuma conta (`ARQUIVO_INVALIDO`, `details.reason=sem_contas`).
+
+    Layout: XLSX com o cabeçalho do Domínio nas primeiras linhas vai pelo conversor
+    (`dominio.py`); todo o resto é o modelo da plataforma, e o que não é nenhum dos
+    dois recebe a recusa de cabeçalho DO MODELO, como sempre.
+    """
+    # CSV ou XLSX pelo CONTEÚDO; PDF, XLS e o resto viram `FORMATO_NAO_SUPORTADO`.
+    file_format = detect_format(content)
+    header_line = _dominio_header_line(content, file_format)
+    if header_line is not None:
+        return ParsedChartSheet(rows=_parse_dominio(content, header_line), layout="dominio")
+
+    options = ReadOptions(
+        file_format=file_format,
+        csv_delimiter=CHART_CSV_DELIMITER,
+        encoding=CHART_CSV_ENCODING,
+    )
+    try:
+        table = read_table(content, options, on_header=check_header)
+    except FileInvalidError:
+        _raise_invalid_file()
+
+    valid, problems = validate_rows(table.columns, table.rows)
+    if problems:
+        _raise_lines([(p.line, p.reason) for p in problems], user_message=_LINES_MESSAGE)
+    return ParsedChartSheet(rows=_require_accounts(valid), layout="modelo")

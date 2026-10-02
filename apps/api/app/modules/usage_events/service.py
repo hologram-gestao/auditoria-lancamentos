@@ -32,6 +32,7 @@ from app.modules.usage_events.schemas import (
     ArquivoContabilGeradoProps,
     ArquivoProcessadoProps,
     CarteiraSincronizadaProps,
+    ChartImportLayout,
     ClienteCriadoProps,
     ClienteEncerradoProps,
     ClienteExcluidoProps,
@@ -620,7 +621,13 @@ class UsageEventService:
         return await self.emit(event, props=props)
 
     async def emit_plano_contabil_importado(
-        self, *, client_id: UUID, contas: int, contas_novas: int, contas_inativadas: int
+        self,
+        *,
+        client_id: UUID,
+        contas: int,
+        contas_novas: int,
+        contas_inativadas: int,
+        layout: ChartImportLayout,
     ) -> bool:
         """S16 — a importação do plano contábil deu certo. Sem `session_id`, sem dedup.
 
@@ -636,6 +643,7 @@ class UsageEventService:
                 contas=contas,
                 contas_novas=contas_novas,
                 contas_inativadas=contas_inativadas,
+                layout=layout,
             ),
         )
         if props is None:

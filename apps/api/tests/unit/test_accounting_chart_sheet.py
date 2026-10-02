@@ -67,7 +67,9 @@ def _body(exc: AppError) -> str:
 
 class TestAmostraReal:
     def test_o_plano_da_amostra_entra_inteiro(self) -> None:
-        rows = parse_chart_sheet(_SAMPLE.read_bytes())
+        parsed = parse_chart_sheet(_SAMPLE.read_bytes())
+        assert parsed.layout == "modelo"
+        rows = parsed.rows
         assert len(rows) == 20
         assert all(isinstance(r, ChartSheetRow) for r in rows)
         by_code = {r.code: r for r in rows}
@@ -78,7 +80,9 @@ class TestAmostraReal:
         assert rows[0].line == 2
 
     def test_repr_da_linha_nao_carrega_o_nome(self) -> None:
-        rows = parse_chart_sheet(_csv("codigo_reduzido;nome;tipo", f"662;{_SECRET_NAME};analitica"))
+        rows = parse_chart_sheet(
+            _csv("codigo_reduzido;nome;tipo", f"662;{_SECRET_NAME};analitica")
+        ).rows
         assert _SECRET_NAME not in repr(rows[0])
 
 
@@ -90,7 +94,7 @@ class TestModelo:
                 "Sintética;1.1;Ativo circulante;10",
                 "ANALITICA;1.1.1.02.001;Banco;649",
             )
-        )
+        ).rows
         assert [(r.code, r.account_type, r.classification) for r in rows] == [
             ("10", AccountingAccountType.SINTETICA, "1.1"),
             ("649", AccountingAccountType.ANALITICA, "1.1.1.02.001"),
@@ -98,12 +102,12 @@ class TestModelo:
 
     def test_bom_do_excel_e_aceito(self) -> None:
         content = b"\xef\xbb\xbf" + _csv("codigo_reduzido;nome;tipo", "649;Banco;analitica")
-        assert [r.code for r in parse_chart_sheet(content)] == ["649"]
+        assert [r.code for r in parse_chart_sheet(content).rows] == ["649"]
 
     def test_linha_em_branco_e_pulada(self) -> None:
         rows = parse_chart_sheet(
             _csv("codigo_reduzido;nome;tipo", "649;Banco;analitica", ";;", "650;Rend.;analitica")
-        )
+        ).rows
         assert [r.code for r in rows] == ["649", "650"]
         assert rows[1].line == 4
 
@@ -115,7 +119,9 @@ class TestModelo:
                 [650.0, "Rendimentos", "Analítica"],
             ]
         )
-        rows = parse_chart_sheet(content)
+        parsed = parse_chart_sheet(content)
+        assert parsed.layout == "modelo"
+        rows = parsed.rows
         assert [(r.code, r.account_type) for r in rows] == [
             ("649", AccountingAccountType.ANALITICA),
             ("650", AccountingAccountType.ANALITICA),

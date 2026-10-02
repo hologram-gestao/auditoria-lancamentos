@@ -130,6 +130,7 @@ class TestEventoDaImportacao:
             "contas": 20,
             "contas_novas": 20,
             "contas_inativadas": 0,
+            "layout": "modelo",
         }
 
         again = await _import(

@@ -5,7 +5,8 @@
  * A importação reusa o vocabulário de recusa de arquivo da S14 (mesmos `code`),
  * mas com `details` PRÓPRIOS — o cabeçalho aqui é o MODELO da plataforma, não
  * um mapeamento do cliente, então o que importa é o que falta, o que sobra e o
- * que repete; e os motivos de linha são outros oito. Por isso um leitor
+ * que repete; e os motivos de linha são outros (os oito do modelo e os sete
+ * do export do Domínio, 86e3gkd7y). Por isso um leitor
  * separado de `file-origin-errors.ts`, e não um `switch` a mais lá: a mesma
  * palavra (`CABECALHO_DIVERGENTE`) com instrução diferente para a pessoa.
  *
@@ -27,8 +28,9 @@ export const ACCOUNTING_CHART_REFUSAL_CODES = [
 export type AccountingChartRefusalCode = (typeof ACCOUNTING_CHART_REFUSAL_CODES)[number];
 
 /**
- * Motivos de linha inválida do leitor do plano (`client_accounting_chart/sheet.py`),
- * vocabulário FECHADO. Valor fora dele (backend mais novo) sai cru, nunca some.
+ * Motivos de linha inválida do leitor do plano (`client_accounting_chart/sheet.py`
+ * e, para o plano exportado do Domínio, `dominio.py`), vocabulário FECHADO. Valor
+ * fora dele (backend mais novo) sai cru, nunca some.
  */
 export const ACCOUNTING_LINE_REASON_LABELS: Record<string, string> = {
   codigo_vazio: 'Código reduzido vazio',
@@ -39,6 +41,15 @@ export const ACCOUNTING_LINE_REASON_LABELS: Record<string, string> = {
   nome_longo: 'Nome com mais de 200 caracteres',
   tipo_invalido: 'Tipo diferente de "analitica" ou "sintetica"',
   classificacao_longa: 'Classificação com mais de 40 caracteres',
+  // Só no plano exportado do Domínio (86e3gkd7y).
+  codigo_ausente: 'Conta sem o código reduzido na primeira coluna',
+  classificacao_ausente: 'Conta sem classificação',
+  classificacao_repetida: 'Classificação repetida no plano',
+  grau_ausente: 'Conta sem o grau no fim da linha',
+  grau_divergente: 'Grau diferente da profundidade da classificação',
+  linha_irreconhecivel: 'Linha fora do padrão do plano exportado do Domínio',
+  conta_fora_do_bloco:
+    'Conta depois do fim do plano (abaixo de uma linha em branco ou do rodapé): o arquivo inteiro foi recusado para nenhuma conta ficar de fora',
 };
 
 export function accountingLineReasonLabel(reason: string): string {
