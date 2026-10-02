@@ -619,18 +619,27 @@ class FechamentoProduzidoProps(_StrictProps):
     competencia: str = Field(pattern=COMPETENCE_PATTERN)
 
 
+#: De onde veio a planilha do plano contábil (86e3gkd7y). Espelho de
+#: `client_accounting_chart.sheet.ChartLayout` (o teste da métrica compara os dois):
+#: importar de lá puxaria o leitor de planilha para dentro do módulo de eventos.
+ChartImportLayout = Literal["modelo", "dominio"]
+
+
 class PlanoContabilImportadoProps(_StrictProps):
-    """`plano_contabil_importado` (S16 BACK 16.4) — as QUATRO chaves do PRD, nenhuma a mais.
+    """`plano_contabil_importado` (S16 BACK 16.4) — as QUATRO chaves do PRD, mais o layout.
 
     Só o id do cliente e contagens (`contas` na planilha, `contas_novas` que o cliente
-    não tinha, `contas_inativadas` que eram ativas e sumiram). Nenhum `str`: código e
-    nome de conta não têm onde caber (o guardrail anti-PII trava).
+    não tinha, `contas_inativadas` que eram ativas e sumiram), e `layout` (86e3gkd7y):
+    de onde veio a planilha, `modelo` da plataforma ou export nativo do `dominio`, em
+    vocabulário FECHADO (é o que mede quanto o export nativo é usado). Nenhum `str`
+    livre: código e nome de conta não têm onde caber (o guardrail anti-PII trava).
     """
 
     client_id: UUID
     contas: int = Field(ge=0)
     contas_novas: int = Field(ge=0)
     contas_inativadas: int = Field(ge=0)
+    layout: ChartImportLayout
 
 
 class OrganizacaoCriadaProps(_StrictProps):

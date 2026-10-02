@@ -39,6 +39,28 @@ codigo_reduzido;nome;tipo;classificacao
 662;Alugueis a receber - Inquilino D;analitica;1.1.2.01.004
 ```
 
+## Plano exportado do Domínio (.xlsx)
+
+Desde 02/10/2026 (86e3gkd7y) o arquivo que o Domínio exporta também é aceito, sem
+reescrever: a importação reconhece o layout e o converte para o modelo acima, que passa
+pelas MESMAS validações e pela mesma gravação. Leitor: `client_accounting_chart/dominio.py`.
+Fixture anonimizada e teste-ouro: `tests/fixtures/accounting_chart_dominio/`.
+
+- **Detecção:** só XLSX; uma das **10 primeiras linhas** tem exatamente as células
+  `Código`, `T`, `Classificação`, `Nome` e `Grau`, nessa ordem (espaços nas pontas,
+  maiúsculas e acentos ignorados, nenhuma célula a mais). Sem isso, vale o modelo da
+  plataforma, e o arquivo que não é nenhum dos dois recebe o `CABECALHO_DIVERGENTE` de
+  sempre. O CSV nativo do Domínio **não** é aceito (não há amostra).
+- **Leitura por padrão de célula**, não por coluna (o cabeçalho é desalinhado do dado e
+  o nome muda de coluna com o grau): em cada linha, as células preenchidas são
+  `código (inteiro)` · `S` opcional · `classificação` · `nome` · `grau (inteiro)`.
+  `S` = sintética, sem marca = analítica; o tipo nunca é inferido (grupo sintético sem
+  filho existe de verdade). O grau tem de ser a profundidade da classificação.
+- **Fim das contas:** a primeira linha sem código inteiro e sem classificação. O que vem
+  depois (o rodapé com assinaturas) não é lido, só conferido: linha com cara de conta ali
+  recusa o arquivo **inteiro** (`conta_fora_do_bloco`), para nenhuma conta ficar de fora
+  calada.
+
 ## Reimportação
 
 Casa por `codigo_reduzido`, numa transação só:
@@ -63,6 +85,11 @@ Resposta: `{"data": {"contas": N, "contasNovas": N, "contasInativadas": N}}` —
 `reason` ∈ `codigo_vazio`, `codigo_longo`, `codigo_invalido`, `codigo_repetido`, `nome_vazio`,
 `nome_longo`, `tipo_invalido`, `classificacao_longa`. `line` é a linha física da planilha
 (cabeçalho = 1).
+
+No plano exportado do Domínio, `reason` também pode ser `codigo_ausente`,
+`classificacao_ausente`, `classificacao_repetida`, `grau_ausente`, `grau_divergente`,
+`linha_irreconhecivel` ou `conta_fora_do_bloco`, e `line` é a linha que a pessoa vê no
+Excel (o banner e o cabeçalho contam).
 
 ## Validador único de conta (consumido pelas 16.2 e 16.3)
 

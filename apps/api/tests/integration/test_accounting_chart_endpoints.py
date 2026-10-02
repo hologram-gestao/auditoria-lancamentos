@@ -17,7 +17,10 @@ O que este módulo afirma (critérios de aceite da 16.1):
   - `client_manager` LÊ 200 e IMPORTA 403 com 1 linha `denied` (desenho da S10);
   - cliente encerrado: importar 409, ler 200; purga no encerramento e exclusão
     definitiva com autor do tenant (ordem da FK RESTRICT);
-  - nenhum nome, código ou célula em log (`structlog.testing.capture_logs`).
+  - nenhum nome, código ou célula em log (`structlog.testing.capture_logs`);
+  - o plano EXPORTADO do Domínio (fixture anonimizada, 86e3gkd7y) entra pela mesma
+    rota: 563 contas, 143 sintéticas, evento com `layout=dominio`; e uma conta
+    depois do rodapé recusa o arquivo inteiro com ZERO linhas gravadas.
 
 O cross-tenant e o cross-org das duas rotas rodam na bateria dos três atacantes
 (`test_sensitive_endpoints.py`), que lê a lista canônica.
@@ -31,7 +34,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import pytest
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from sqlalchemy import func, null, select
 from structlog.testing import capture_logs
 
@@ -44,6 +47,7 @@ from app.db.models import (
     Client,
     ClientAccountingAccount,
     ClientAssignment,
+    UsageEvent,
     User,
     UserRole,
     UserScope,
@@ -65,6 +69,12 @@ _SAMPLE = (
     / "plano_contabil.csv"
 )
 _SECRET_NAME = "Alugueis a receber - Inquilino Sigiloso"
+_DOMINIO = (
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "accounting_chart_dominio"
+    / "plano_dominio.xlsx"
+)
 
 
 def _csv(*lines: str) -> bytes:
@@ -527,3 +537,63 @@ class TestEncerramentoEExclusao:
         resp = await _import(client_with_db, world.client, buffer.getvalue(), filename="plano.xlsx")
         assert resp.status_code == 200, resp.text
         assert set(await _accounts(db_session, world.client.id)) == {"649"}
+
+
+class TestPlanoExportadoDoDominio:
+    async def test_a_fixture_entra_inteira_pela_mesma_rota(
+        self, client_with_db: AsyncClient, world: World, db_session: AsyncSession
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        with capture_logs() as logs:
+            resp = await _import(
+                client_with_db, world.client, _DOMINIO.read_bytes(), filename="plano.xlsx"
+            )
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"data": {"contas": 563, "contasNovas": 563, "contasInativadas": 0}}
+        assert await _count(db_session, world.client.id) == 563
+        assert "exemplo" not in repr(logs)
+
+        accounts = await _accounts(db_session, world.client.id)
+        assert sum(a.account_type == "sintetica" for a in accounts.values()) == 143
+        # Nome cifrado; a leitura decifra.
+        assert all("exemplo" not in a.name_encrypted for a in accounts.values())
+        sinteticas = await client_with_db.get(
+            _url(world.client), params={"type": "sintetica", "pageSize": 1}
+        )
+        assert sinteticas.json()["pagination"]["total"] == 143
+        (raiz,) = (
+            await client_with_db.get(_url(world.client), params={"code": "1", "pageSize": 1})
+        ).json()["data"]
+        assert raiz["code"] == "1"
+        assert raiz["name"] == "Grupo de exemplo 1"
+
+        stmt = select(UsageEvent).where(UsageEvent.event == "plano_contabil_importado")
+        (event,) = (await db_session.execute(stmt)).scalars().all()
+        assert event.props == {
+            "client_id": str(world.client.id),
+            "contas": 563,
+            "contas_novas": 563,
+            "contas_inativadas": 0,
+            "layout": "dominio",
+        }
+
+    async def test_conta_depois_do_rodape_recusa_inteiro_sem_gravar(
+        self, client_with_db: AsyncClient, world: World, db_session: AsyncSession
+    ) -> None:
+        wb = load_workbook(_DOMINIO)
+        ws = wb.worksheets[0]
+        ws["A575"], ws["H575"], ws["L575"], ws["X575"] = 999, "9.9", "Conta extra", 2
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        await _login(client_with_db, world.admin)
+        resp = await _import(client_with_db, world.client, buffer.getvalue(), filename="p.xlsx")
+        assert resp.status_code == 422, resp.text
+        error = resp.json()["error"]
+        assert error["code"] == "LINHAS_INVALIDAS"
+        assert error["details"] == {
+            "lines": [{"line": 575, "reason": "conta_fora_do_bloco"}],
+            "total": 1,
+        }
+        assert "exemplo" not in resp.text
+        assert "Conta extra" not in resp.text
+        assert await _count(db_session, world.client.id) == 0

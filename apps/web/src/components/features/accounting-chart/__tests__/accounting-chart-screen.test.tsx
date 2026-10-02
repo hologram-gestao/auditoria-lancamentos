@@ -381,6 +381,10 @@ describe('sem plano', () => {
       expect(within(empty).getAllByText(column).length).toBeGreaterThan(0);
     }
     expect(within(empty).getByText(/649;Banco conta movimento;analitica/)).toBeInTheDocument();
+    // 86e3gkd7y: o export nativo do Domínio também entra, e o modelo diz isso.
+    expect(
+      within(empty).getByText(/plano de contas exportado do Domínio em \.xlsx também é aceito/),
+    ).toBeInTheDocument();
     // Um botão só na tela: sem plano ele mora no estado vazio.
     expect(screen.getAllByRole('button', { name: 'Importar planilha' })).toHaveLength(1);
   });
@@ -536,6 +540,53 @@ describe('importação', () => {
       'Mostrando 2 de 60 linhas inválidas.',
     );
     expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it('a gaveta diz que o plano exportado do Domínio em .xlsx também é aceito', async () => {
+    withoutPlan();
+    render(<AccountingChartScreen clientId="c1" />);
+    const { dialog } = await openAndPick(/Importar planilha/);
+
+    const model = within(dialog).getByRole('region', { name: 'Modelo da planilha' });
+    expect(
+      within(model).getByText(
+        'O plano de contas exportado do Domínio em .xlsx também é aceito, do jeito que sai do sistema: a plataforma reconhece o arquivo e o converte para este modelo.',
+      ),
+    ).toBeInTheDocument();
+    // O rótulo do campo não muda: continua sendo a planilha .csv ou .xlsx.
+    expect(within(dialog).getByText(/Planilha \(\.csv ou \.xlsx\)/)).toBeInTheDocument();
+  });
+
+  it('LINHAS_INVALIDAS do plano do Domínio: os sete motivos novos saem em português', async () => {
+    withoutPlan();
+    const reasons = [
+      'codigo_ausente',
+      'classificacao_ausente',
+      'classificacao_repetida',
+      'grau_ausente',
+      'grau_divergente',
+      'linha_irreconhecivel',
+      'conta_fora_do_bloco',
+    ];
+    importState.mutateAsync = vi.fn().mockRejectedValue(
+      refusal('LINHAS_INVALIDAS', {
+        lines: reasons.map((reason, index) => ({ line: 100 + index, reason })),
+        total: reasons.length,
+      }),
+    );
+    render(<AccountingChartScreen clientId="c1" />);
+    const { user, dialog } = await openAndPick(/Importar planilha/);
+    await user.click(within(dialog).getByRole('button', { name: 'Importar' }));
+
+    const notice = await within(dialog).findByRole('alert');
+    for (const reason of reasons) {
+      // Nenhum motivo sai cru: cada um tem o rótulo do vocabulário.
+      expect(within(notice).queryByText(reason)).not.toBeInTheDocument();
+    }
+    expect(
+      within(notice).getByText('Grau diferente da profundidade da classificação'),
+    ).toBeInTheDocument();
+    expect(within(notice).getByText(/Conta depois do fim do plano/)).toBeInTheDocument();
   });
 
   it('CABECALHO_DIVERGENTE nomeia o que falta e CONTA o que veio da planilha', async () => {

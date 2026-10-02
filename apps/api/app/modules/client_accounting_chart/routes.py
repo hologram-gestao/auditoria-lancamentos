@@ -131,7 +131,12 @@ async def list_accounting_chart(
         "(opcional), em qualquer ordem e sem outras colunas; `tipo` é `analitica` ou "
         "`sintetica`; código reduzido com letras, dígitos, `.` e `-` (até 20), nome até "
         "200 caracteres, classificação até 40. Exemplo: `codigo_reduzido;nome;tipo` / "
-        "`649;Banco conta movimento;analitica`. A reimportação casa por código: conta "
+        "`649;Banco conta movimento;analitica`. Também aceita o plano de contas EXPORTADO "
+        "do Domínio em XLSX, reconhecido pelo cabeçalho `Código`/`T`/`Classificação`/"
+        "`Nome`/`Grau` nas 10 primeiras linhas e convertido para o modelo (código, `S` = "
+        "sintética e vazio = analítica, classificação, nome e grau, que tem de ser a "
+        "profundidade da classificação); o CSV nativo do Domínio não é aceito. "
+        "A reimportação casa por código: conta "
         "nova entra, conta existente atualiza nome, tipo e classificação (e volta a "
         "ativa), conta que sumiu da planilha vira INATIVA — nunca é apagada. Responde "
         "as contagens `contas`, `contasNovas`, `contasInativadas`. O nome é cifrado com "
@@ -144,8 +149,11 @@ async def list_accounting_chart(
         "MODELO — mais `details.unexpectedColumnCount`/`foundColumnCount`) e `LINHAS_INVALIDAS` (`details.lines=[{line, "
         "reason}]` com `reason` ∈ `codigo_vazio`, `codigo_longo`, `codigo_invalido`, "
         "`codigo_repetido`, `nome_vazio`, `nome_longo`, `tipo_invalido`, "
-        "`classificacao_longa`, e `details.total`) — a resposta nunca traz o conteúdo "
-        "de uma célula."
+        "`classificacao_longa` e, no export do Domínio, também `codigo_ausente`, "
+        "`classificacao_ausente`, `classificacao_repetida`, `grau_ausente`, "
+        "`grau_divergente`, `linha_irreconhecivel` e `conta_fora_do_bloco` (linha com "
+        "cara de conta depois do fim das contas: o arquivo inteiro é recusado), e "
+        "`details.total`) — a resposta nunca traz o conteúdo de uma célula."
     ),
 )
 async def import_accounting_chart(
@@ -154,7 +162,10 @@ async def import_accounting_chart(
     actor: ManageClientAccountingChartDep,
     settings: SettingsDep,
     service: ServiceDep,
-    file: Annotated[UploadFile, File(description="CSV (`;`, UTF-8) ou XLSX no modelo.")],
+    file: Annotated[
+        UploadFile,
+        File(description="CSV (`;`, UTF-8) ou XLSX no modelo, ou o XLSX exportado do Domínio."),
+    ],
 ) -> ChartImportEnvelope:
     content = await read_upload_within_limit(
         file,

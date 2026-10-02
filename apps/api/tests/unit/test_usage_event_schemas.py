@@ -65,7 +65,7 @@ _PROPS_MODELS: list[type[BaseModel]] = [
     DeparaAplicadoProps,
     ArquivoProcessadoProps,
     FechamentoProduzidoProps,
-    # S16 (BACK 16.4): só id e contagens — nenhum `str`.
+    # S16 (BACK 16.4): id e contagens; `layout` (86e3gkd7y) é `Literal` fechado.
     PlanoContabilImportadoProps,
     # S13 (BACK 13.1): IDs, números e os dois `str` de formato fechado.
     ArquivoContabilGeradoProps,
