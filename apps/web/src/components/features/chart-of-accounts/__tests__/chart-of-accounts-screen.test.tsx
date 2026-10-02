@@ -289,6 +289,10 @@ describe('ChartOfAccountsScreen — lista', () => {
     const area = region.closest('[aria-busy]');
     expect(area).not.toHaveClass('min-h-0', 'flex-1');
     expect(region.closest('section')).not.toHaveClass('h-full');
+    // 86e3gkd80: a raiz declara o padrão, e é isso que solta a altura fixa do shell.
+    expect(screen.getByRole('heading', { level: 1 }).closest('section')).toHaveAttribute(
+      'data-page-scroll',
+    );
     // A paginação vem DEPOIS da tabela, no fluxo, fora da região.
     const barra = screen.getByRole('navigation', { name: 'Paginação de categorias' });
     expect(region).not.toContainElement(barra);

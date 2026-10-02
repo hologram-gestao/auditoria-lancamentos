@@ -375,7 +375,14 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
   }
 
   return (
-    <section aria-labelledby="client-titles-heading" className="flex flex-col gap-4">
+    // `data-page-scroll`: esta tela é do padrão em que a PÁGINA rola (§7
+    // Frontend). É o que faz o `ClientShell` soltar a altura fixa do padrão
+    // FILL; sem ele a página termina colada na borda da janela (86e3gkd80).
+    <section
+      aria-labelledby="client-titles-heading"
+      data-page-scroll
+      className="flex flex-col gap-4"
+    >
       {/* A data da última sincronização mora à direita do título (86e3fr9qz): na
           linha das abas ela empurrava o "Sincronizar agora" para a linha de baixo
           em 1280px. Continua só na aba Carteira, como antes. */}

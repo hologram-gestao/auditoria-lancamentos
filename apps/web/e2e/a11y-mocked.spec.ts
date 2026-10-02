@@ -3367,6 +3367,28 @@ for (const vp of VIEWPORTS) {
       });
 
       /**
+       * 86e3gkd80: a página termina com o respiro do `<main>`, não colada na
+       * borda da janela. Nas três telas a perda era só o respiro abaixo da
+       * paginação (folga de 0 a 1px medida antes da correção); no plano
+       * contábil, que termina num card com borda, a perda virava "card cortado".
+       */
+      if ('pageScroll' in tela) {
+        test(`${tela.key}: a página termina com o respiro do <main> (86e3gkd80)`, async ({
+          page,
+        }) => {
+          tableListsOverflow = true;
+          sessionUser = tela.usuario();
+          await page.goto(tela.rota);
+          await expect(page.getByRole('heading', { name: tela.titulo, level: 1 })).toBeVisible();
+          await exigirFimDaPaginaComRespiro(
+            page,
+            page.getByRole('navigation', { name: /^Paginação de/ }),
+            `${tela.key} (${vp.label})`,
+          );
+        });
+      }
+
+      /**
        * Contraponto: recortar não pode virar "sumiu". Só em desktop, pelo mesmo
        * motivo da lista de cards — abaixo de `lg` o shell vira coluna, a altura
        * deixa de ser fixa e quem rola é o `<main>`.
@@ -4838,6 +4860,38 @@ async function exigirDentroDaViewport(page: Page, alvo: Locator, contexto: strin
     (caixa?.x ?? 0) + (caixa?.width ?? 0),
     `${contexto}: cortado na borda direita`,
   ).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0);
+}
+
+/**
+ * 86e3gkd80 — numa tela em que a PÁGINA rola, o fim do conteúdo tem de ser
+ * alcançável COM o respiro do `<main>` (o `p-6`), igual ao do topo. Quando o
+ * `ClientShell` prendia a tela numa caixa de altura fixa, o conteúdo ainda
+ * rolava (overflow de descendente), mas o `padding-bottom` do `<main>` só entra
+ * depois do filho em fluxo: a página terminava com o último elemento COLADO na
+ * borda da janela, e um card com borda ("Conta do banco") parecia cortado.
+ * `toBeInViewport` não pega isso (a borda colada está "na viewport"): a medida
+ * é a folga entre o alvo e o fundo do `<main>` rolado até o fim.
+ */
+async function exigirFimDaPaginaComRespiro(page: Page, alvo: Locator, contexto: string) {
+  await expect(alvo).toBeVisible();
+  await page.locator('main').evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+  const medida = await alvo.evaluate((el) => {
+    const main = el.closest('main');
+    if (main === null) return null;
+    return {
+      respiro: parseFloat(getComputedStyle(main).paddingBottom),
+      folga: main.getBoundingClientRect().bottom - el.getBoundingClientRect().bottom,
+      rolouAteOFim: main.scrollHeight - main.clientHeight - main.scrollTop <= 1,
+    };
+  });
+  expect(medida, `${contexto}: o alvo precisa estar dentro do <main>`).not.toBeNull();
+  expect(medida?.rolouAteOFim, `${contexto}: o <main> não rolou até o fim`).toBe(true);
+  expect(medida?.respiro ?? 0, `${contexto}: o <main> perdeu o padding`).toBeGreaterThan(0);
+  // 1px de tolerância de arredondamento (a borda do card mede 1px).
+  expect(
+    medida?.folga ?? -1,
+    `${contexto}: a página termina colada na borda da janela, sem o respiro do <main>`,
+  ).toBeGreaterThanOrEqual((medida?.respiro ?? 0) - 1);
 }
 
 /**
@@ -7210,6 +7264,52 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByRole('dialog')).toHaveCount(0);
       await expect(page.locator(TOAST_TITLE)).toContainText('Conta do banco associada.');
     });
+
+    /**
+     * 86e3gkd80 (print da demo de 29/09): a borda final do card "Conta do banco"
+     * tem de ser alcançável por rolagem da PÁGINA, com o respiro do `<main>`.
+     * Antes da correção, o `ClientShell` prendia a tela numa caixa de altura
+     * fixa e a página terminava com a borda do card colada na borda da janela
+     * (folga de 0px nos dois estados e nos dois viewports). O estado vazio é o
+     * do print: o modelo da planilha é alto e empurra o card para baixo.
+     */
+    for (const estado of ['sem plano', 'com plano'] as const) {
+      test(`${estado}: a borda final de "Conta do banco" é alcançável, com o respiro do <main> (86e3gkd80)`, async ({
+        page,
+      }) => {
+        accountingChartEmpty = estado === 'sem plano';
+        sessionUser = SYSTEM_MANAGER_USER;
+        await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+        await expect(page.getByRole('heading', { name: 'Plano contábil', level: 1 })).toBeVisible();
+        if (estado === 'sem plano') {
+          await expect(page.getByTestId('accounting-chart-empty')).toBeVisible();
+        } else {
+          await expect(
+            page
+              .getByRole('region', { name: 'Contas do plano contábil (rolável)' })
+              .getByRole('row'),
+          ).toHaveCount(ACCOUNTING_ACCOUNTS.length + 1);
+        }
+        const cardDoBanco = page
+          .getByTestId('bank-accounts-section')
+          .getByRole('region', { name: 'Contas de origem e conta do banco (rolável)' })
+          .locator('xpath=..');
+        await exigirFimDaPaginaComRespiro(
+          page,
+          cardDoBanco,
+          `${vp.label} · ${estado}: card "Conta do banco"`,
+        );
+        // A tabela do plano continua sem rolagem vertical própria: quem rola é a página.
+        expect(
+          await page
+            .getByRole('region', { name: 'Contas do plano contábil (rolável)' })
+            .evaluate((el) => el.scrollHeight - el.clientHeight),
+          'a tabela do plano não pode ter rolagem vertical própria',
+        ).toBe(0);
+        await shot(page, `plano-contabil-fim-da-pagina-${estado.replace(/\s+/g, '-')}-${slugPC16}`);
+        await analyze(page, `plano contábil — fim da página, ${estado} (${vp.label})`);
+      });
+    }
 
     test('operador do cliente lê a conta do banco, sem importar nem associar', async ({ page }) => {
       sessionUser = CLIENT_OPERATOR_USER;
