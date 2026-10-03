@@ -11,9 +11,15 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+from structlog.testing import capture_logs
 
 from app.core.exceptions import AnthropicParseError
-from app.integrations.anthropic.schemas import ExtractedStatement, ExtractedTransaction
+from app.integrations.anthropic.schemas import (
+    DocumentIdentity,
+    ExtractedStatement,
+    ExtractedStatementBlock,
+    ExtractedTransaction,
+)
 from app.modules.reconciliations.parse_chunking import merge_statements, plan_blocks
 
 PREAMBLE = "Extrato Conta Corrente\nConta: 1234-5\nPeríodo: 01/08/2026 a 31/08/2026\n\n"
@@ -139,7 +145,8 @@ def _statement(
     bank: str = "Banco Inter",
     account_type: str = "checking",
 ) -> ExtractedStatement:
-    return ExtractedStatement(
+    # `ExtractedStatementBlock` aceita `txs=[]` (bloco sem movimentação, D4).
+    return ExtractedStatementBlock(
         bank_name=bank,
         account_type=account_type,  # type: ignore[arg-type]
         period_start=start,
@@ -239,3 +246,101 @@ class TestMergeStatements:
     def test_lista_vazia_e_erro_de_programacao(self) -> None:
         with pytest.raises(ValueError, match="vazia"):
             merge_statements([])
+
+
+_IDENTITY = DocumentIdentity(bank_name="Banco do Brasil", account_type="checking")
+
+
+@pytest.mark.unit
+class TestMergeStatementsPdf:
+    """86e3ff8xd — junção com a identidade do documento (D4, D5)."""
+
+    def test_com_identity_banco_e_tipo_vem_dela_e_divergencia_nao_derruba(self) -> None:
+        a = _statement(
+            txs=[("A", "1")],
+            opening="0",
+            closing="1",
+            start=date(2026, 8, 1),
+            end=date(2026, 8, 2),
+            bank="Desconhecido",
+        )
+        b = _statement(
+            txs=[("B", "-1")],
+            opening="1",
+            closing="0",
+            start=date(2026, 8, 3),
+            end=date(2026, 8, 4),
+            bank="Outro Banco",
+            account_type="credit_card",
+        )
+
+        with capture_logs() as events:
+            merged = merge_statements([a, b], identity=_IDENTITY)
+
+        assert merged.bank_name == "Banco do Brasil"
+        assert merged.account_type == "checking"
+        assert [tx.description for tx in merged.transactions] == ["A", "B"]
+        divergence = [e for e in events if e["event"] == "parse_pdf_block_divergence"]
+        assert len(divergence) == 1
+        assert divergence[0]["blocks"] == 2
+        assert divergence[0]["divergent"] == 1
+        # Só números: nada do documento no evento.
+        assert "Outro Banco" not in str(divergence[0])
+        assert "credit_card" not in str(divergence[0])
+
+    def test_sem_identity_a_divergencia_continua_derrubando(self) -> None:
+        a = _statement(
+            txs=[("A", "1")], opening="0", closing="1", start=date(2026, 8, 1), end=date(2026, 8, 2)
+        )
+        b = _statement(
+            txs=[("B", "-1")],
+            opening="0",
+            closing="1",
+            start=date(2026, 8, 3),
+            end=date(2026, 8, 4),
+            account_type="credit_card",
+        )
+
+        with pytest.raises(AnthropicParseError):
+            merge_statements([a, b])
+
+    def test_periodo_ignora_bloco_vazio(self) -> None:
+        empty = _statement(
+            txs=[], opening="0", closing="0", start=date(2026, 1, 1), end=date(2026, 12, 31)
+        )
+        a = _statement(
+            txs=[("A", "1")], opening="0", closing="1", start=date(2026, 8, 1), end=date(2026, 8, 2)
+        )
+        b = _statement(
+            txs=[("B", "1")], opening="1", closing="2", start=date(2026, 8, 3), end=date(2026, 8, 4)
+        )
+
+        merged = merge_statements([a, empty, b], identity=_IDENTITY)
+
+        assert (merged.period_start, merged.period_end) == (date(2026, 8, 1), date(2026, 8, 4))
+        assert [tx.description for tx in merged.transactions] == ["A", "B"]
+        # Saldos seguem do primeiro e do último bloco, vazios ou não.
+        assert merged.opening_balance == Decimal("0")
+        assert merged.closing_balance == Decimal("2")
+
+    def test_periodo_ignora_bloco_vazio_tambem_sem_identity(self) -> None:
+        empty = _statement(
+            txs=[], opening="0", closing="0", start=date(2026, 1, 1), end=date(2026, 12, 31)
+        )
+        a = _statement(
+            txs=[("A", "1")], opening="0", closing="1", start=date(2026, 8, 1), end=date(2026, 8, 2)
+        )
+
+        merged = merge_statements([empty, a])
+
+        assert (merged.period_start, merged.period_end) == (date(2026, 8, 1), date(2026, 8, 2))
+
+    def test_total_zero_e_erro_acionavel(self) -> None:
+        empty = _statement(
+            txs=[], opening="0", closing="0", start=date(2026, 8, 1), end=date(2026, 8, 2)
+        )
+
+        with pytest.raises(AnthropicParseError) as exc_info:
+            merge_statements([empty, empty], identity=_IDENTITY)
+
+        assert "Nenhuma movimentação" in exc_info.value.user_message

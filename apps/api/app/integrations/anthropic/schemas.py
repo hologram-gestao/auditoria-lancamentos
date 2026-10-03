@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from datetime import date as _date_type
 from decimal import Decimal, InvalidOperation
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -87,13 +87,19 @@ class ExtractedTransaction(BaseModel):
         return _to_decimal(v)
 
 
+# Fonte única do enum de tipo de conta: o `ExtractedStatement`, o
+# `DocumentIdentity` e as duas tools (`tools.py`) falam o mesmo vocabulário.
+AccountType = Literal["checking", "credit_card", "investment"]
+ACCOUNT_TYPES: tuple[str, ...] = get_args(AccountType)
+
+
 class ExtractedStatement(BaseModel):
     """Resultado final da extração — payload do tool_use validado."""
 
     model_config = ConfigDict(strict=False)
 
     bank_name: str = Field(min_length=1)
-    account_type: Literal["checking", "credit_card", "investment"]
+    account_type: AccountType
     period_start: _date_type
     period_end: _date_type
     opening_balance: Decimal
@@ -104,3 +110,30 @@ class ExtractedStatement(BaseModel):
     @classmethod
     def _coerce_balances(cls, v: Any) -> Decimal:
         return _to_decimal(v)
+
+
+class ExtractedStatementBlock(ExtractedStatement):
+    """Resultado de UM bloco de um arquivo dividido (86e3ff8xd, D4).
+
+    Um bloco de PDF pode não ter movimentação nenhuma (página só com totais,
+    avisos ou rodapé), então aqui `transactions` aceita lista vazia. O arquivo
+    INTEIRO continua exigindo pelo menos uma linha: `merge_statements` recusa o
+    total zero com erro acionável. Só `AnthropicClient.extract_movements` em
+    modo bloco (`part is not None`) valida com este modelo.
+    """
+
+    transactions: list[ExtractedTransaction] = Field(min_length=0)
+
+
+class DocumentIdentity(BaseModel):
+    """Identificação de um documento dividido em blocos (86e3ff8xd, D2).
+
+    Vem de uma chamada curta só com a primeira página (`identify_document`) e
+    entra como nota no user prompt de TODO bloco: página do meio não tem
+    cabeçalho, e as regras de extração dependem do tipo de conta.
+    """
+
+    model_config = ConfigDict(strict=False)
+
+    bank_name: str = Field(min_length=1)
+    account_type: AccountType

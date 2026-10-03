@@ -11,4 +11,7 @@ Princípios (CLAUDE.md §3 + Doc §12):
 Estado atual (S9 — BACK 7.1):
     - `AnthropicClient.extract_movements(bytes, mime_type)` retorna
       `ExtractedStatement`.
+    - `AnthropicClient.identify_document(bytes)` (86e3ff8xd) retorna
+      `DocumentIdentity` (banco e tipo de conta) pela primeira página de um PDF
+      dividido em blocos de páginas.
 """

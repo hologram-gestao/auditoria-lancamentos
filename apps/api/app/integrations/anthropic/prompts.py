@@ -102,25 +102,65 @@ inventado, nada filtrado.\
 
 
 # Bloco de um arquivo dividido para processamento (86e39xvxm). O cabeçalho se
-# repete em todo bloco; sem esta nota o modelo poderia tentar "completar" o
-# período declarado no preâmbulo com linhas que estão em outros blocos.
+# repete em todo bloco (texto) ou pode nem existir (páginas do meio de um PDF,
+# 86e3ff8xd); sem esta nota o modelo poderia tentar "completar" o período
+# declarado no preâmbulo com linhas que estão em outros blocos. A última frase
+# é a D4: um bloco pode não ter movimentação, e inventar é pior que vazio.
 PART_NOTE_TEMPLATE = """ \
 Este é o bloco {index} de {total} do MESMO documento, dividido só para \
-processamento: o cabeçalho se repete em todos os blocos. Extraia apenas as \
-movimentações listadas neste bloco, sem completar com linhas de outros blocos.\
+processamento: o cabeçalho se repete em todos os blocos ou aparece só no \
+primeiro. Extraia apenas as movimentações listadas neste bloco, sem completar \
+com linhas de outros blocos. Se este bloco não tiver nenhuma movimentação (só \
+totais, avisos, saldos ou rodapé), devolva `transactions` como lista vazia; \
+nunca invente linhas.\
+"""
+
+# Documento já identificado numa chamada curta com a primeira página (86e3ff8xd,
+# D2). Página do meio não tem cabeçalho, e as regras 9 a 14 do system prompt
+# dependem do tipo de conta: a nota fixa os dois campos para todo bloco.
+IDENTITY_NOTE_TEMPLATE = """ \
+O documento já foi identificado como banco "{bank_name}", tipo de conta \
+`{account_type}`: use exatamente esse `bank_name` e esse `account_type` e \
+aplique as regras desse tipo de conta, mesmo que este bloco não traga cabeçalho.\
+"""
+
+# Chamada de identificação: só a primeira página, tool `identify_document`.
+IDENTIFY_SYSTEM_PROMPT = """\
+Você identifica extratos bancários e faturas de cartão de crédito brasileiros. \
+Sua única tarefa é chamar a tool `identify_document` informando o banco e o \
+tipo de conta do documento recebido. Não extraia movimentações e não escreva \
+texto livre.\
+"""
+
+IDENTIFY_USER_PROMPT = """\
+Esta é a primeira página de um extrato/fatura brasileiro. Identifique o \
+banco/instituição e o tipo de conta chamando a tool `identify_document`: \
+`checking` para conta corrente ou poupança, `investment` para conta de \
+aplicação/investimento, `credit_card` para fatura de cartão de crédito. Se não \
+conseguir identificar o banco, use "Desconhecido".\
 """
 
 
-def build_user_prompt(document_kind: str, *, part: tuple[int, int] | None = None) -> str:
+def build_user_prompt(
+    document_kind: str,
+    *,
+    part: tuple[int, int] | None = None,
+    identity: tuple[str, str] | None = None,
+) -> str:
     """Renderiza o prompt do usuário com o tipo de documento.
 
     Args:
         document_kind: ex. "extrato bancário em PDF", "fatura de cartão CSV".
         part: `(índice 1-based, total)` quando o conteúdo é um bloco de um
             arquivo dividido; `None` para o arquivo inteiro.
+        identity: `(bank_name, account_type)` quando o documento já foi
+            identificado pela primeira página; `None` quando não.
     """
     prompt = USER_PROMPT_TEMPLATE.format(document_kind=document_kind)
     if part is not None:
         index, total = part
         prompt += PART_NOTE_TEMPLATE.format(index=index, total=total)
+    if identity is not None:
+        bank_name, account_type = identity
+        prompt += IDENTITY_NOTE_TEMPLATE.format(bank_name=bank_name, account_type=account_type)
     return prompt
