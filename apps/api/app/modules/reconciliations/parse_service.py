@@ -17,9 +17,16 @@ Pipeline para cada formato suportado:
     XLSX  → openpyxl       →   render TSV   →   AnthropicClient (text block).
     XLS   → não suportado nesta versão (xlrd não está nas deps).
 
-Arquivo grande em TEXTO (CSV/XLSX) é dividido em blocos extraídos em paralelo
-e juntados (`parse_chunking`, 86e39xvxm): o tempo de uma chamada cresce com o
-número de linhas e estourava o teto de forma determinística. PDF vai inteiro.
+Arquivo grande é dividido em blocos extraídos em paralelo e juntados: o tempo
+de uma chamada cresce com o número de linhas e estourava o teto de forma
+determinística. Em TEXTO (CSV/XLSX) o corte é por linhas (`parse_chunking`,
+86e39xvxm); em PDF é por PÁGINAS (`parse_pdf_pages`, 86e3ff8xd), com uma chamada
+curta de identificação (banco e tipo de conta) só com a primeira página antes
+dos blocos, porque página do meio não tem cabeçalho. A junção é a mesma.
+
+Todo `/parse` termina com o evento `parse_completed` (tipo do arquivo, bytes,
+se dividiu, blocos, páginas ou registros, movimentações, duração): só
+contadores, nunca conteúdo, nome de arquivo ou descrição (§3.3, §4.5).
 """
 
 from __future__ import annotations
@@ -32,12 +39,18 @@ from io import BytesIO
 from pathlib import PurePosixPath
 
 import openpyxl
+from starlette.concurrency import run_in_threadpool
 
 from app.core.exceptions import AppError, ValidationAppError
 from app.core.logging import get_logger
 from app.integrations.anthropic.client import AnthropicClient
-from app.integrations.anthropic.schemas import ExtractedStatement, ExtractedTransaction
+from app.integrations.anthropic.schemas import (
+    DocumentIdentity,
+    ExtractedStatement,
+    ExtractedTransaction,
+)
 from app.modules.reconciliations.parse_chunking import merge_statements, plan_blocks
+from app.modules.reconciliations.parse_pdf_pages import plan_pdf_blocks
 from app.utils.magic_bytes import FileType, validate_upload_type
 
 log = get_logger(__name__)
@@ -80,6 +93,9 @@ class ParseService:
         chunk_rows: int = 100,
         chunk_min_rows: int = 150,
         chunk_concurrency: int = 4,
+        pdf_pages_per_block: int = 2,
+        pdf_min_pages: int = 4,
+        pdf_max_pages: int = 30,
     ) -> None:
         self._anthropic = anthropic_client
         # Extração em blocos (86e39xvxm). Fonte dos valores: `Settings`
@@ -89,6 +105,11 @@ class ParseService:
         self._chunk_rows = chunk_rows
         self._chunk_min_rows = max(chunk_min_rows, chunk_rows)
         self._chunk_concurrency = chunk_concurrency
+        # PDF por páginas (86e3ff8xd, `ADL_PARSE_PDF_*`): o mesmo semáforo acima
+        # limita as chamadas simultâneas dos blocos de PDF.
+        self._pdf_pages_per_block = pdf_pages_per_block
+        self._pdf_min_pages = pdf_min_pages
+        self._pdf_max_pages = pdf_max_pages
         # MOCK EXCLUSIVO DE DEMO — ver `Settings.MOCK_PARSE`. Quando ativo,
         # `parse_statement` ignora o `AnthropicClient` e devolve o payload
         # fictício da Padaria. As validações de tamanho/extensão/magic bytes
@@ -118,8 +139,9 @@ class ParseService:
 
         Raises:
             ValidationAppError: arquivo vazio, > limite, extensão proibida,
-                magic bytes não reconhecidos, ou `.xls` (não suportado nesta
-                versão).
+                magic bytes não reconhecidos, `.xls` (não suportado nesta
+                versão), ou PDF com mais páginas que `pdf_max_pages`
+                (`PdfTooManyPagesError`, com orientação para dividir).
             AnthropicAuthError / AnthropicTimeoutError / AnthropicParseError:
                 propagadas do `AnthropicClient` para o handler global.
         """
@@ -142,52 +164,155 @@ class ParseService:
             )
         detected = validate_upload_type(file_bytes, allowed=_ALLOWED_FOR_PARSE)
 
+        started = time.monotonic()
         content, mime_type = self._prepare_content(detected, file_bytes)
         document_kind = _DOCUMENT_KIND[detected]
+        file_type = detected.value
+        bytes_in = len(file_bytes)
 
         if self._mock_enabled:
             log.warning(
                 "parse_mock_used",
-                bytes_in=len(file_bytes),
-                detected=detected.value,
+                bytes_in=bytes_in,
+                detected=file_type,
                 delay_s=self._mock_delay_seconds,
             )
             if self._mock_delay_seconds > 0:
                 await asyncio.sleep(self._mock_delay_seconds)
-            return _MOCK_PADARIA_STATEMENT.model_copy(deep=True)
+            statement = _MOCK_PADARIA_STATEMENT.model_copy(deep=True)
+            self._log_completed(
+                file_type=file_type,
+                bytes_in=bytes_in,
+                blocks=1,
+                statement=statement,
+                started=started,
+            )
+            return statement
 
-        if detected in (FileType.CSV, FileType.XLSX):
-            plan = plan_blocks(
+        # Tamanho do arquivo na unidade da divisão (páginas ou registros), para
+        # o `parse_completed` do caminho inteiro.
+        size_fields: dict[str, int] = {}
+
+        if detected == FileType.PDF:
+            # `pypdf` é síncrono e lê arquivo de terceiro: fora do event loop.
+            pdf_plan = await run_in_threadpool(
+                plan_pdf_blocks,
+                file_bytes,
+                pages_per_block=self._pdf_pages_per_block,
+                min_pages=self._pdf_min_pages,
+                max_pages=self._pdf_max_pages,
+            )
+            if pdf_plan.skipped_reason is not None:
+                log.info(
+                    "parse_pdf_split_skipped",
+                    reason=pdf_plan.skipped_reason,
+                    pages=pdf_plan.pages,
+                    bytes_in=bytes_in,
+                )
+            if pdf_plan.is_split and pdf_plan.first_page is not None:
+                # D2: identificação curta pela primeira página ANTES dos blocos
+                # (página do meio não tem cabeçalho); depois todos os blocos,
+                # inclusive o primeiro, em paralelo.
+                identity = await self._anthropic.identify_document(pdf_plan.first_page)
+                statement = await self._extract_in_blocks(
+                    pdf_plan.blocks,
+                    mime_type=mime_type,
+                    document_kind=document_kind,
+                    file_type=file_type,
+                    bytes_in=bytes_in,
+                    identity=identity,
+                    pages=pdf_plan.pages,
+                )
+                self._log_completed(
+                    file_type=file_type,
+                    bytes_in=bytes_in,
+                    blocks=len(pdf_plan.blocks),
+                    statement=statement,
+                    started=started,
+                    pages=pdf_plan.pages,
+                )
+                return statement
+            size_fields = {"pages": pdf_plan.pages}
+
+        elif detected in (FileType.CSV, FileType.XLSX):
+            text_plan = plan_blocks(
                 AnthropicClient._decode_text(content),
                 chunk_rows=self._chunk_rows,
                 min_rows=self._chunk_min_rows,
             )
-            if plan.is_split:
-                return await self._extract_in_blocks(
-                    plan.blocks,
+            if text_plan.is_split:
+                statement = await self._extract_in_blocks(
+                    [block.encode("utf-8") for block in text_plan.blocks],
                     mime_type=mime_type,
                     document_kind=document_kind,
-                    bytes_in=len(file_bytes),
-                    data_records=plan.data_records,
+                    file_type=file_type,
+                    bytes_in=bytes_in,
+                    rows=text_plan.data_records,
                 )
+                self._log_completed(
+                    file_type=file_type,
+                    bytes_in=bytes_in,
+                    blocks=len(text_plan.blocks),
+                    statement=statement,
+                    started=started,
+                    data_records=text_plan.data_records,
+                )
+                return statement
+            size_fields = {"data_records": text_plan.data_records}
 
-        return await self._anthropic.extract_movements(
+        statement = await self._anthropic.extract_movements(
             content=content,
             mime_type=mime_type,
             document_kind=document_kind,
         )
+        self._log_completed(
+            file_type=file_type,
+            bytes_in=bytes_in,
+            blocks=1,
+            statement=statement,
+            started=started,
+            **size_fields,
+        )
+        return statement
+
+    @staticmethod
+    def _log_completed(
+        *,
+        file_type: str,
+        bytes_in: int,
+        blocks: int,
+        statement: ExtractedStatement,
+        started: float,
+        **size_fields: int,
+    ) -> None:
+        """Evento `parse_completed`, um por `/parse` (D7): só contadores."""
+        log.info(
+            "parse_completed",
+            file_type=file_type,
+            bytes_in=bytes_in,
+            split=blocks > 1,
+            blocks=blocks,
+            transaction_count=len(statement.transactions),
+            duration_ms=round((time.monotonic() - started) * 1000),
+            **size_fields,
+        )
 
     async def _extract_in_blocks(
         self,
-        blocks: list[str],
+        blocks: list[bytes],
         *,
         mime_type: str,
         document_kind: str,
+        file_type: str,
         bytes_in: int,
-        data_records: int,
+        identity: DocumentIdentity | None = None,
+        **size_fields: int,
     ) -> ExtractedStatement:
         """Uma chamada por bloco, em paralelo limitado, e a junção na ordem.
 
+        `blocks` são os bytes de cada chamada: PDF de páginas (`parse_pdf_pages`)
+        ou texto já codificado (`parse_chunking`); `identity` é a identificação
+        do PDF dividido, repassada a todo bloco e à junção (D2, D5).
         Semáforo limita as chamadas simultâneas (rate limit da conta Anthropic).
         `TaskGroup`: a primeira falha cancela os blocos ainda pendentes — não se
         gasta crédito extraindo o resto de um arquivo que já não vai fechar — e
@@ -202,16 +327,17 @@ class ParseService:
         semaphore = asyncio.Semaphore(self._chunk_concurrency)
         failed = asyncio.Event()
 
-        async def _extract_one(index: int, block: str) -> ExtractedStatement:
+        async def _extract_one(index: int, block: bytes) -> ExtractedStatement:
             async with semaphore:
                 if failed.is_set():
                     raise asyncio.CancelledError
                 try:
                     return await self._anthropic.extract_movements(
-                        content=block.encode("utf-8"),
+                        content=block,
                         mime_type=mime_type,
                         document_kind=document_kind,
                         part=(index + 1, total),
+                        identity=identity,
                     )
                 except BaseException:
                     failed.set()
@@ -230,15 +356,16 @@ class ParseService:
                 raise
             raise first from None
 
-        statement = merge_statements([task.result() for task in tasks])
+        statement = merge_statements([task.result() for task in tasks], identity=identity)
         log.info(
             "parse_chunked",
+            file_type=file_type,
             blocks=total,
-            rows=data_records,
             concurrency=self._chunk_concurrency,
             bytes_in=bytes_in,
             transaction_count=len(statement.transactions),
             duration_ms=round((time.monotonic() - started) * 1000),
+            **size_fields,
         )
         return statement
 

@@ -143,6 +143,9 @@ def _get_parse_service(
         chunk_rows=settings.ADL_PARSE_CHUNK_ROWS,
         chunk_min_rows=settings.ADL_PARSE_CHUNK_MIN_ROWS,
         chunk_concurrency=settings.ADL_PARSE_CHUNK_CONCURRENCY,
+        pdf_pages_per_block=settings.ADL_PARSE_PDF_PAGES_PER_BLOCK,
+        pdf_min_pages=settings.ADL_PARSE_PDF_MIN_PAGES,
+        pdf_max_pages=settings.ADL_PARSE_PDF_MAX_PAGES,
     )
 
 

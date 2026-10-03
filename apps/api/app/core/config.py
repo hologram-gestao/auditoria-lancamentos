@@ -138,15 +138,29 @@ class Settings(BaseSettings):
     ADL_PARSE_MAX_OUTPUT_TOKENS: int = 32_768
     # 86e39xvxm — extração em blocos para CSV/XLSX. O tempo de UMA chamada cresce
     # com o número de linhas (143 linhas ~ 75 s; o teto de 150 s comporta ~290),
-    # então o texto tabular é dividido em blocos extraídos em paralelo. PDF não
-    # é dividido. Ponto de partida: 100 linhas por bloco (~50 s), 4 chamadas
-    # simultâneas (rate limit da conta), e arquivo com até 150 linhas segue
-    # inteiro numa chamada só. Tempo de parede ~ ceil(blocos / paralelismo) x
-    # tempo de um bloco — calibrar pelos eventos `parse_chunked` /
+    # então o texto tabular é dividido em blocos extraídos em paralelo. PDF é
+    # dividido por PÁGINA (abaixo). Ponto de partida: 100 linhas por bloco
+    # (~50 s), 4 chamadas simultâneas (rate limit da conta; o semáforo é o MESMO
+    # para os blocos de PDF), e arquivo com até 150 linhas segue inteiro numa
+    # chamada só. Tempo de parede ~ ceil(blocos / paralelismo) x tempo de um
+    # bloco — calibrar pelos eventos `parse_chunked` / `parse_completed` /
     # `anthropic_extract_ok` (duration_ms, transaction_count).
     ADL_PARSE_CHUNK_ROWS: int = Field(default=100, ge=20, le=500)
     ADL_PARSE_CHUNK_MIN_ROWS: int = Field(default=150, ge=20, le=1000)
     ADL_PARSE_CHUNK_CONCURRENCY: int = Field(default=4, ge=1, le=16)
+    # 86e3ff8xd — extração em blocos de PÁGINAS para PDF (cinco envios do
+    # extrato BB do Laticínio, 28/09/2026, estouraram o teto aos 150 s). O PDF é
+    # cortado com o `pypdf`, a primeira página vai numa chamada curta de
+    # identificação (banco e tipo de conta) e os blocos rodam em paralelo com o
+    # semáforo das `ADL_PARSE_CHUNK_*`. Ponto de partida: 2 páginas por bloco,
+    # PDF com até 4 páginas vai inteiro (sem identificação) e acima de 30 páginas
+    # o `/parse` recusa com orientação (dividir e anexar as partes na mesma
+    # conciliação) — o orçamento de parede é fixo e ceil(blocos / paralelismo) x
+    # tempo de um bloco tem de caber nele. Calibrar pelo `duration_ms` de
+    # `parse_chunked` (file_type=pdf) e `anthropic_extract_ok`.
+    ADL_PARSE_PDF_PAGES_PER_BLOCK: int = Field(default=2, ge=1, le=10)
+    ADL_PARSE_PDF_MIN_PAGES: int = Field(default=4, ge=1, le=100)
+    ADL_PARSE_PDF_MAX_PAGES: int = Field(default=30, ge=1, le=100)
 
     # MOCK exclusivo de demo/gravação: quando True, `ParseService` retorna um
     # payload fixo (extrato fictício da Padaria Pão Quente) sem chamar a

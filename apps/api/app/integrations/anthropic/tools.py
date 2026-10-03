@@ -14,7 +14,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.integrations.anthropic.schemas import ACCOUNT_TYPES
+
 EXTRACT_MOVEMENTS_TOOL_NAME = "extract_movements"
+IDENTIFY_DOCUMENT_TOOL_NAME = "identify_document"
+
+_ACCOUNT_TYPE_DESCRIPTION = (
+    "checking = conta corrente / poupança; credit_card = fatura de "
+    "cartão de crédito; investment = conta de aplicação / "
+    "investimento (CDB, fundo, RDB, tesouro)."
+)
 
 # Schema imutável — exposto como dict pra ser passado direto ao SDK.
 # `cache_control: ephemeral` (P1-008): tool definition é estável entre
@@ -40,12 +49,8 @@ EXTRACT_MOVEMENTS_TOOL: dict[str, Any] = {
             },
             "account_type": {
                 "type": "string",
-                "enum": ["checking", "credit_card", "investment"],
-                "description": (
-                    "checking = conta corrente / poupança; credit_card = fatura de "
-                    "cartão de crédito; investment = conta de aplicação / "
-                    "investimento (CDB, fundo, RDB, tesouro)."
-                ),
+                "enum": list(ACCOUNT_TYPES),
+                "description": _ACCOUNT_TYPE_DESCRIPTION,
             },
             "period_start": {
                 "type": "string",
@@ -125,5 +130,36 @@ EXTRACT_MOVEMENTS_TOOL: dict[str, Any] = {
             "closing_balance",
             "transactions",
         ],
+    },
+}
+
+
+# 86e3ff8xd (D2) — identificação de um PDF dividido em blocos de páginas. Só
+# a primeira página vai nesta chamada; o resultado entra como nota no prompt de
+# todo bloco. `max_tokens` pequeno no client: a resposta são dois campos.
+IDENTIFY_DOCUMENT_TOOL: dict[str, Any] = {
+    "name": IDENTIFY_DOCUMENT_TOOL_NAME,
+    "description": (
+        "Identifica o banco/instituição e o tipo de conta de um extrato bancário "
+        "ou fatura de cartão a partir da primeira página do documento. Não "
+        "extrai movimentações."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "bank_name": {
+                "type": "string",
+                "description": (
+                    "Nome do banco/instituição identificado no documento. "
+                    'Use "Desconhecido" se não conseguir identificar.'
+                ),
+            },
+            "account_type": {
+                "type": "string",
+                "enum": list(ACCOUNT_TYPES),
+                "description": _ACCOUNT_TYPE_DESCRIPTION,
+            },
+        },
+        "required": ["bank_name", "account_type"],
     },
 }
