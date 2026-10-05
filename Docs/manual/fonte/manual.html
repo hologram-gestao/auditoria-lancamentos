@@ -695,9 +695,10 @@
 <h2>Processamento por inteligência artificial</h2>
 <p>Dois pontos do fluxo usam um provedor externo de inteligência artificial, a Anthropic:</p>
 <ul class="tight">
-  <li><strong>Leitura do arquivo da conciliação.</strong> O extrato ou a fatura enviada é lido pelo provedor, que extrai as movimentações. O arquivo é processado em memória e não fica armazenado na plataforma.</li>
+  <li><strong>Leitura do arquivo da conciliação.</strong> O extrato ou a fatura enviada é lido pelo provedor, que extrai as movimentações. Na plataforma, o arquivo é processado em memória e não fica armazenado; no provedor, vale a retenção descrita abaixo.</li>
   <li><strong>Análise de classificação.</strong> Para apontar classificações suspeitas, a plataforma envia ao provedor a descrição de cada movimentação conciliada, com o valor, o fornecedor e a categoria lançados no ERP, junto com o glossário do cliente.</li>
 </ul>
+<p>O envio é feito pela API comercial da Anthropic, sob os termos comerciais dela. Por esses termos, o conteúdo enviado não é usado para treinar modelos. Pela política de retenção da API, o conteúdo enviado e a resposta são apagados pelo provedor em até 30 dias, com exceções previstas: conteúdo sinalizado pelos sistemas automáticos de segurança do provedor como violação da política de uso pode ser guardado por até 2 anos, e há retenção quando a lei exige. O processamento acontece fora do Brasil: o provedor armazena dados apenas nos Estados Unidos e não oferece região na América do Sul.</p>
 <p>O cruzamento com o ERP não usa inteligência artificial: são as regras fixas da seção 6.3. A planilha da origem por arquivo também não passa pelo provedor, porque é lida pelo mapeamento de colunas. E a IA nunca decide: ela aponta, e quem decide é uma pessoa.</p>
 
 <h2>O que não é guardado</h2>
