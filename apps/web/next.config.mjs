@@ -21,6 +21,15 @@ const INTERNAL_API_URL = process.env.INTERNAL_API_URL ?? 'http://localhost:8000'
  * - `'unsafe-inline'` em `script-src` é necessário para os scripts inline
  *   que o Next 14 injeta (hydration). Trocar por nonce exige refactor mais
  *   profundo (next/script nonce strategy) — fica como dívida P2.
+ * - `'unsafe-eval'` em `script-src` SÓ em desenvolvimento (86e3anx7y,
+ *   05/10/2026): o `next dev` avalia código com `eval` (HMR e o source map
+ *   `eval-source-map` do webpack) e quebra sem ele; o build de produção não
+ *   usa `eval`, e liberar `eval` em produção deixa uma injeção virar execução
+ *   de código. Quem prova é o gate de a11y, que roda o build standalone: um
+ *   cenário lê o header e afirma a ausência, e todo cenário falha se o browser
+ *   acusar violação de CSP (`apps/web/e2e/a11y-mocked.spec.ts`). Biblioteca
+ *   que precisar de `eval` aparece lá; a correção é trocar a biblioteca ou o
+ *   uso, nunca devolver o `'unsafe-eval'`.
  * - `frame-ancestors 'none'` substitui `X-Frame-Options: DENY` em browsers
  *   modernos; mantemos os dois (defesa em profundidade).
  * - `connect-src 'self'` é suficiente porque todas as chamadas pra API vão
@@ -30,7 +39,7 @@ const INTERNAL_API_URL = process.env.INTERNAL_API_URL ?? 'http://localhost:8000'
  */
 const CSP = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  `script-src 'self' 'unsafe-inline'${IS_PROD ? '' : " 'unsafe-eval'"}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
