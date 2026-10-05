@@ -4,6 +4,19 @@
 capturas de tela do produto. Material de apoio para apresentação a escritórios contábeis e BPOs,
 e manual de operação para quem usa o sistema. Produto: **Hologram OS**; empresa: Hologram Gestão.
 
+## Fonte alterada depois da 1.1, PDF ainda não regerado (05/10/2026, task 86e3anx75)
+
+O bloco "Processamento por inteligência artificial" do cap. 10, em `fonte/manual.html`,
+ganhou o que os termos da Anthropic sustentam, conferido em 05/10/2026: o conteúdo enviado
+não é usado para treinar modelos, é apagado pelo provedor em até 30 dias (com as exceções
+de conteúdo sinalizado e de exigência legal) e é processado fora do Brasil. A frase "o arquivo
+não fica armazenado" passou a dizer que isso vale para a plataforma. As fontes estão em
+[../seguranca/SUBPROCESSADORES.md](../seguranca/SUBPROCESSADORES.md).
+
+**O PDF não foi regerado nesta entrega**: a imagem do WeasyPrint não estava na máquina. Ao
+regerar, atualize também a cópia servida pela landing (`apps/web/public/manual-hologram-os.pdf`,
+idêntica byte a byte a este PDF), cujo teste falha se o tamanho mudar e o texto do botão não.
+
 ## O que mudou na 1.1 (30/09/2026, task 86e3gqfmj)
 
 - **Nome.** O produto passa a se chamar Hologram OS (decisão do Pedro, 30/09/2026). Capa com o
