@@ -2951,7 +2951,58 @@ async function conteudoCobertoEmQualquerRolagem(page: Page, seletor: string): Pr
   return [...achados];
 }
 
+/**
+ * Coletor de violações de CSP (86e3anx7y), em TODO cenário do gate.
+ *
+ * O `'unsafe-eval'` saiu do `script-src` de produção (`next.config.mjs`), e o
+ * gate roda justamente o build de produção. Uma biblioteca que dependa de
+ * `eval`/`new Function` não quebra o axe: quebra o componente em silêncio, e o
+ * browser só deixa o rastro no console. Por isso cada cenário guarda toda
+ * mensagem de console ou erro de página que fale de CSP, e o `afterEach`
+ * reprova o cenário se houver alguma — nos três temas, landing e tour
+ * incluídos. Além do console, um init script transforma o
+ * `securitypolicyviolation` das diretivas de SCRIPT em `console.error`: é a
+ * família do `'unsafe-eval'`, e o evento chega mesmo quando o Chromium não
+ * escreve a linha. Achou violação: a correção é a biblioteca ou o uso, nunca
+ * devolver o `'unsafe-eval'`.
+ *
+ * UMA exceção, do ambiente do gate e não do produto: o `middleware.ts` monta o
+ * redirect sobre `request.nextUrl`, que no standalone local sai com `localhost`
+ * (ver o cenário "com sessão, a raiz vai para /clientes"), e o
+ * `upgrade-insecure-requests` o sobe para `https://localhost:<porta>`. Um
+ * prefetch de RSC que cai nesse redirect (rota pública com sessão, ou sessão
+ * limpa no meio do teste) é bloqueado pelo `connect-src 'self'`, porque a origem
+ * do gate é `http://127.0.0.1`. Em dev e produção o host do redirect é o do
+ * próprio serviço, em https, e a violação não existe. Só a linha do console com
+ * esse destino exato é ignorada; qualquer outra violação reprova.
+ */
+let cspViolations: string[] = [];
+
+const CSP_VIOLATION_MARKERS = [/Content Security Policy/i, /unsafe-eval/i];
+
+const GATE_REDIRECT_ARTIFACT =
+  /^Connecting to 'https:\/\/localhost:\d+\/[^']*' violates the following Content Security Policy directive: "connect-src 'self'"/;
+
+function recordIfCspViolation(text: string): void {
+  if (GATE_REDIRECT_ARTIFACT.test(text)) return;
+  if (CSP_VIOLATION_MARKERS.some((marker) => marker.test(text))) {
+    cspViolations.push(text);
+  }
+}
+
 test.beforeEach(async ({ page, context, baseURL }) => {
+  cspViolations = [];
+  page.on('console', (message) => recordIfCspViolation(message.text()));
+  page.on('pageerror', (error) => recordIfCspViolation(`${error.name}: ${error.message}`));
+  await page.addInitScript(() => {
+    document.addEventListener('securitypolicyviolation', (event) => {
+      if (!event.effectiveDirective.startsWith('script-src')) return;
+      console.error(
+        `Content Security Policy violation: ${event.violatedDirective} ` +
+          `blocked=${event.blockedURI || '(inline/eval)'}`,
+      );
+    });
+  });
   // Tema ANTES de qualquer navegação: o script inline do next-themes lê o
   // localStorage no primeiro paint — registrado aqui, vale para todo goto.
   // SET-IF-ABSENT de propósito: o script roda em TODO load; incondicional, um
@@ -3012,6 +3063,100 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   await context.addCookies([
     { name: 'access_token', value: 'e2e-mock', url: baseURL ?? 'http://localhost:3000' },
   ]);
+});
+
+test.afterEach(() => {
+  expect(cspViolations, 'violação de CSP no browser (ver o coletor acima do beforeEach)').toEqual(
+    [],
+  );
+});
+
+/**
+ * 86e3anx7y — o `script-src` de PRODUÇÃO não tem `'unsafe-eval'`.
+ *
+ * O gate sempre sobe o build standalone (`NODE_ENV=production`), então o header
+ * lido aqui é o de produção, e o teste é determinístico. Mede uma página
+ * autenticada e a landing pública: as duas saem do mesmo `headers()` do
+ * `next.config.mjs`, mas a landing passa sem cookie pelo `middleware.ts`, e é a
+ * página que o mundo inteiro vê.
+ */
+test.describe('CSP de produção sem unsafe-eval (86e3anx7y)', () => {
+  function scriptSrc(csp: string | undefined): string {
+    expect(csp, 'header content-security-policy ausente').toBeTruthy();
+    const directive = (csp ?? '')
+      .split(';')
+      .map((part) => part.trim())
+      .find((part) => part.startsWith('script-src '));
+    expect(directive, 'diretiva script-src ausente da CSP').toBeTruthy();
+    return directive ?? '';
+  }
+
+  test('landing e página autenticada: script-src sem unsafe-eval', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    // Landing PRIMEIRO, sem cookie. A ordem importa: limpar o cookie estando numa
+    // página autenticada deixa os prefetches do menu caírem no `middleware.ts`, que
+    // redireciona para o login montado sobre `request.nextUrl` (`localhost` no
+    // standalone local, não `127.0.0.1`), e o `connect-src 'self'` bloqueia esse
+    // redirect de outra origem. É o coletor acusando a troca de sessão do PRÓPRIO
+    // teste, não uma biblioteca.
+    await context.clearCookies();
+    const landing = await page.goto('/');
+    expect(landing?.status()).toBe(200);
+    expect(new URL(page.url()).pathname).toBe('/');
+    expect(scriptSrc(landing?.headers()['content-security-policy'])).not.toContain('unsafe-eval');
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+
+    await context.addCookies([
+      { name: 'access_token', value: 'e2e-mock', url: baseURL ?? 'http://localhost:3000' },
+    ]);
+    const authenticated = await page.goto(`/clientes/${CLIENT_ID}`);
+    expect(authenticated?.status()).toBe(200);
+    const authenticatedScriptSrc = scriptSrc(authenticated?.headers()['content-security-policy']);
+    expect(authenticatedScriptSrc).toContain("'self'");
+    expect(authenticatedScriptSrc).not.toContain('unsafe-eval');
+    await expect(page.getByRole('heading', { name: 'Conciliações' })).toBeVisible();
+  });
+
+  test('sentinela: o browser recusa eval e o coletor acusa', async ({ page, context }) => {
+    // Prova as DUAS pontas: a CSP servida bloqueia `eval` de fato (não só no texto
+    // do header), e o coletor do `afterEach` enxerga a recusa. Sem este cenário,
+    // um coletor quebrado (listener que não dispara, marcador que não casa)
+    // passaria verde em todo o gate sem ninguém saber.
+    await context.clearCookies();
+    await page.goto('/');
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+    // O código tem de ser da PÁGINA, e depois da avaliação do CDP: o
+    // `Runtime.evaluate` libera `eval` enquanto dura (`allowUnsafeEvalBlockedByCSP`,
+    // ligado por padrão), inclusive num `<script>` inserido dentro dele. Medido
+    // em 05/10/2026: síncrono, o `new Function` executa; num `setTimeout` do script
+    // da página, dá `EvalError`. E o Chromium não escreve linha de console para o
+    // eval recusado e capturado: quem o enxerga é o `securitypolicyviolation`.
+    await page.evaluate(() => {
+      const probe = document.createElement('script');
+      probe.textContent =
+        'setTimeout(function () {' +
+        " try { window.__e2eEvalProbe = 'executou: ' + new Function('return 40 + 2')(); }" +
+        " catch (error) { window.__e2eEvalProbe = error.name + ': ' + error.message; }" +
+        '}, 0);';
+      document.head.appendChild(probe);
+    });
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          String((window as unknown as { __e2eEvalProbe?: unknown }).__e2eEvalProbe ?? ''),
+        ),
+      )
+      .toMatch(/^EvalError: /);
+    await expect
+      .poll(() => cspViolations.some((line) => /unsafe-eval|blocked=eval$/.test(line)))
+      .toBe(true);
+    // A violação foi provocada aqui de propósito: zerada, o `afterEach` segue
+    // valendo para qualquer OUTRA que tenha aparecido.
+    cspViolations = cspViolations.filter((line) => !/unsafe-eval|blocked=eval$/.test(line));
+  });
 });
 
 const VIEWPORTS = [
