@@ -81,11 +81,8 @@ export default function LoginPage() {
         return;
       }
       if (err instanceof ApiError) {
-        if (err.status === 429) {
-          setSubmitError('Muitas tentativas. Aguarde 1 minuto antes de tentar novamente.');
-          return;
-        }
-        // 401 (e qualquer outro 4xx do login) cai no userMessage genérico do backend.
+        // 401 (mensagem genérica, §3.9) e 429 caem no userMessage do backend: é o
+        // servidor que sabe a janela do limite (5 minutos por e-mail, 86e3anx10).
         setSubmitError(err.userMessage);
         return;
       }

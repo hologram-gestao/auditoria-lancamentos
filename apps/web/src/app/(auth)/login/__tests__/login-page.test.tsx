@@ -141,6 +141,28 @@ describe('LoginPage — validação do e-mail (86e2n39eg)', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(GENERIC);
     expect(replaceMock).not.toHaveBeenCalled();
   });
+
+  it('429 mostra a mensagem do servidor, que sabe a janela do limite (86e3anx10)', async () => {
+    const RATE_LIMITED =
+      'Muitas tentativas de login com este e-mail. Aguarde 5 minutos e tente novamente.';
+    loginMock.mockRejectedValue(
+      new ApiError(429, {
+        code: 'RATE_LIMITED',
+        message: 'rate limited',
+        userMessage: RATE_LIMITED,
+      }),
+    );
+    const user = userEvent.setup();
+    render(<LoginPage />);
+    await user.type(emailInput(), 'ana@hologram.com.br');
+    await user.type(screen.getByLabelText('Senha'), 'qualquer');
+    await user.click(screen.getByRole('button', { name: 'Entrar' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(RATE_LIMITED);
+    expect(alert).not.toHaveTextContent('1 minuto');
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
 });
 
 /**
