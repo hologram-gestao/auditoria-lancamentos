@@ -195,6 +195,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/{user_id}/sessions/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Encerra todas as sessões abertas de um staff, sem desativar nem trocar a senha.
+         * @description Revogação de sessão sem troca de senha (86e3anx4u, parte 1).
+         *
+         *     Quem pode é quem GERE o staff (`manage_org_users`: plataforma qualquer
+         *     organização; admin só a própria). O alvo sai do MESMO recorte escopado do
+         *     `PATCH /users/{id}` (`get_session_revocation_target`): staff de outra
+         *     organização ou usuário de cliente é 404 sem nome; linha de plataforma só a
+         *     PRÓPRIA plataforma alcança (a lista de administradores da plataforma oferece
+         *     a ação), para o admin é 404. A própria sessão é 409 (há o logout).
+         *     Grava `users.password_changed_at` sem tocar o hash nem `active`: todo access
+         *     e refresh emitidos antes morrem no request seguinte, a conta continua ativa
+         *     e a pessoa entra de novo com a MESMA senha. 204 sem corpo.
+         */
+        post: operations["revoke_user_sessions_api_v1_users__user_id__sessions_revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clients/{client_id}/users": {
         parameters: {
             query?: never;
@@ -259,6 +289,34 @@ export interface paths {
         put?: never;
         /** Reativa um usuário do tenant previamente desativado. */
         post: operations["activate_client_user_api_v1_clients__client_id__users__user_id__activate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/users/{user_id}/sessions/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Encerra todas as sessões abertas de um usuário do tenant, sem desativar nem trocar a senha. Quem gere os usuários do cliente pode; a própria sessão é 409; cliente encerrado é 409.
+         * @description Revogação de sessão sem troca de senha (86e3anx4u, parte 1), lado do tenant.
+         *
+         *     `ManageClientUsersDep` passa por `AccessibleClientDep`: o ALCANCE é decidido
+         *     antes da permissão (atacante de outro tenant/organização recebe a negação
+         *     cross-tenant com a trilha dela), e o `client_operator` que alcança o cliente
+         *     mas não pode a ação recebe 403 com 1 linha `denied` em `access_audit`. O alvo
+         *     sai do SELECT com `AND client_id = <tenant da rota>`: usuário de outro
+         *     cliente é 404. Mesma mecânica da rota de staff: carimbo sem hash, `active`
+         *     intocado, 204 sem corpo.
+         */
+        post: operations["revoke_client_user_sessions_api_v1_clients__client_id__users__user_id__sessions_revoke_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7319,6 +7377,37 @@ export interface operations {
             };
         };
     };
+    revoke_user_sessions_api_v1_users__user_id__sessions_revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_client_users_api_v1_clients__client_id__users_get: {
         parameters: {
             query?: {
@@ -7521,6 +7610,38 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ClientUserResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_client_user_sessions_api_v1_clients__client_id__users__user_id__sessions_revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

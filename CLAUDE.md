@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 **S0–S19 + Sprints 0–5 do agents-hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **116/116** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **118/118** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
 > **O que cada sprint do agents-hub entregou** (todas na `main`):
 >
@@ -114,7 +114,7 @@
 9. **Nunca** retorne "senha incorreta" ou "email não existe" separadamente no login — resposta genérica "E-mail ou senha incorretos".
 10. **Nunca** faça upload de arquivo para disco. Processar em memória e descartar.
 11. **Nunca** permita que manager veja cliente fora da própria carteira. Sempre validar `client_assignments` — **qualquer** linha `(client_id, user_id)` concede acesso, responsável ou colaborador (§4.13).
-12. **Nunca** confie em token JWT sem revalidar `users.active = true` no DB (middleware) — usuário desativado perde acesso instantaneamente. A mesma leitura confere `users.password_changed_at` (86e3ewukz): token com `iat` anterior à última redefinição de senha pela plataforma é recusado, no access e no refresh — redefinir a senha DERRUBA as sessões abertas do alvo, que entra de novo com a senha nova. Quem for fazer revogação de sessão sem troca de senha (86e3anx4u) reusa essa coluna e esse check.
+12. **Nunca** confie em token JWT sem revalidar `users.active = true` no DB (middleware) — usuário desativado perde acesso instantaneamente. A mesma leitura confere `users.password_changed_at`: token com `iat` anterior ao carimbo é recusado, no access e no refresh. O carimbo tem **DOIS gatilhos**, e nenhum segundo mecanismo (sem tabela de `jti`, sem coluna nova): a **redefinição de senha pela plataforma** (86e3ewukz: hash novo + carimbo; o alvo entra de novo com a senha nova) e o **encerramento de sessões por quem gere o usuário** (86e3anx4u: SÓ o carimbo; hash e `active` intocados, o alvo entra de novo com a MESMA senha). O encerramento tem uma rota por família, `POST /users/{id}/sessions/revoke` (staff, `manage_org_users`) e `POST /clients/{id}/users/{user_id}/sessions/revoke` (usuário do cliente, `manage_client_users`), e a própria sessão é 409 (para sair da própria conta existe o logout). O `iat` é inteiro e a comparação é em segundos: token do MESMO segundo do carimbo continua valendo. Detecção de reuso de refresh rotacionado NÃO existe ainda (parte 2 da revogação, task própria).
 13. **Nunca leia, edite ou cite o conteúdo de arquivos `.env`, `.env.local`,
     `.env.production`, `.env.*` ou qualquer outro arquivo que contenha
     segredos reais.** Vale para qualquer ferramenta (Read, Edit, Bash com
@@ -193,7 +193,7 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**116** hoje — o arquivo é a fonte, confira com
+      (**118** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant E cross-org**: a bateria
       (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
@@ -201,7 +201,7 @@
       organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
-      (`PENDING_ENDPOINTS` está vazio: cobertura **116/116**). As 3 rotas do
+      (`PENDING_ENDPOINTS` está vazio: cobertura **118/118**). As 3 rotas do
       **plano de contas** (S10) e as 3 da **carteira de títulos** (S11 — lista,
       agregados e sincronizar) e as 3 da S15 (relatório de recebíveis, leitura e
       registro do contexto do título) entraram como coleção; as 20 da S12 também:
@@ -209,8 +209,11 @@
       catálogo de destinos e alvos (`/mapping-destinations`, por ORGANIZAÇÃO — o
       alvo atacado na bateria é de uma terceira org, porque o operador lê o
       catálogo da própria) e 11 do de-para (`/clients/{id}/mapping/{tipo}/…`), mais
-      a lista de materializações do follow-up 86e3f0ux7, e a redefinição de senha pela
-      plataforma (`POST /users/{id}/password`, 86e3ewukz). As 5 da S14 (origem
+      a lista de materializações do follow-up 86e3f0ux7, a redefinição de senha pela
+      plataforma (`POST /users/{id}/password`, 86e3ewukz) e as 2 do encerramento de
+      sessões (`POST /users/{id}/sessions/revoke` e
+      `POST /clients/{id}/users/{user_id}/sessions/revoke`, 86e3anx4u, `DETAIL_PK`:
+      o alvo sai do SELECT escopado da família dele). As 5 da S14 (origem
       por arquivo) também são coleção: leitura e escrita do mapeamento de entrada
       (`GET`/`PUT /clients/{id}/input-mapping`) e as três do envio
       (`POST /clients/{id}/file-origin/inspect` e `/process`, `GET …/imports`). As 4
@@ -551,6 +554,17 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    tipado: esse é o fluxo da troca da própria senha, 86e2n39hg, que pede a senha atual).
    O mínimo da senha é o do TIPO do alvo (8 staff, 10 usuário de cliente), das mesmas
    constantes da criação. Redefinir derruba as sessões abertas do alvo (§3.12).
+
+   **Encerrar sessões (86e3anx4u) NÃO ganhou célula, de propósito**: reusa
+   `manage_org_users` (staff: plataforma qualquer organização, admin a própria) e
+   `manage_client_users` (usuário de cliente: plataforma, admin da org, gerente com o
+   cliente na carteira, `client_manager` do próprio tenant), porque encerrar sessões e
+   desativar são a MESMA pergunta ("quem gere esta pessoa") e já têm resposta na
+   matriz. Reusar `reset_user_password` seria errado na direção oposta: aquela é
+   suporte, só da plataforma, e deixaria o admin sem conseguir tirar da conta um
+   gerente da própria organização com cookie copiado. A matriz segue com **29**
+   células; o `client_operator` recebe 403 com linha `denied`, e a própria linha não
+   mostra a ação (409 no servidor).
 
    **As duas da Sprint 14 (origem por arquivo) também são próprias.**
    `upload_client_file` é dos 5 papéis: mandar a planilha do mês é o dia a dia de
@@ -1428,6 +1442,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.77, 06/10/2026. **Nasceu a revogação de sessão sem desativar a conta nem trocar a senha (86e3anx4u, parte 1 do item do épico 86e3anwzu).** Até aqui, para tirar uma pessoa de todos os dispositivos sem matar a conta, só existia redefinir a senha dela pela plataforma. Agora quem GERE o usuário encerra as sessões dele: `POST /users/{id}/sessions/revoke` (staff, `ManageOrgUsersDep`, alvo pelo recorte escopado do módulo mais, só para a plataforma, os pares de plataforma, porque a lista de administradores da plataforma oferece a ação) e `POST /clients/{id}/users/{user_id}/sessions/revoke` (usuário do cliente, `ManageClientUsersDep` sobre `AccessibleClientDep` e `OpenClientDep`, alvo com `AND client_id` no SELECT). Opção A da task, alinhada com o Pedro em 06/10: o mecanismo é o MESMO carimbo `users.password_changed_at` e o MESMO check `token_predates_password_change` da 86e3ewukz, sem migration, sem coluna nova e sem tabela de `jti`; a §3.12 passou a dizer que o carimbo tem dois gatilhos. Nenhuma permissão nova (§4.9 explica por quê): a matriz segue com 29 células. Lista canônica 116 para **118**, com os três atacantes da bateria. Evento `sessoes_encerradas` só com IDs, sem dedup. Na tela, a ação "Encerrar sessões" (ícone de saída) entrou nas três listas, decidida por `hasPermission` e nunca na própria linha, com `AlertDialog` sem formulário que diz que a conta continua ativa e a pessoa entra com a senha atual. Dois detalhes que valem fora da task: o `AlertDialogAction` do Radix fecha no clique, então ação assíncrona que quer ficar aberta até o sucesso faz `event.preventDefault()` no `onClick`; e o 403 do guard de tenant para admin de OUTRA organização na rota do cliente é o mesmo de toda escrita da família `/clients/{id}/users` (não nasceu uma conversão nova para 404). A detecção de reuso de refresh rotacionado é a parte 2, task própria do Pedro._
 
 _Versão 1.76 — 05/10/2026. **O redator de log passou a mascarar também pela FORMA do valor, e o `'unsafe-eval'` saiu da CSP de produção (86e3anx7y, itens 5 e 1 da dívida menor de hardening do épico 86e3anwzu).** Item 5: até aqui a decisão era 100% pelo nome da chave, então segredo sob chave inocente (`error=str(exc)` com a URL do webhook dentro) passava direto, e o redator rodava ANTES do `format_exc_info`, de modo que o texto da exceção nunca era varrido. Agora uma segunda camada varre toda string do evento e troca só o trecho casado por `[REDACTED]` (§3.3), com uma constante nomeada por formato e a exceção do hash, que é a lição do `input_tokens` aplicada ao `file_hash`. O processor passou para depois de `StackInfoRenderer` e `format_exc_info` (`build_processors`), com teste da cadeia de produção inteira, renderer JSON incluído. A primeira versão do padrão do Discord tinha `(?:[a-z]+\.)?` no início e levava **74 s** para varrer 256 KB de letras sem espaço; com os subdomínios literais, 0,04 s, e a pior entrada adversarial medida de 256 KB leva cerca de 0,04 s. Acima de 256 KB a cauda vira `[REDACTED]` sem ser lida (fail-closed, como o teto de profundidade). Na suíte de hoje nenhum log carrega o `file_hash` inteiro (a conciliação loga `hash_prefix` de 8); a exceção protege o que vier. Item 1: `'unsafe-eval'` só entra no `script-src` fora de produção (o `next dev` precisa dele para HMR e source map); o `'unsafe-inline'` segue como dívida P2. O gate de a11y ganhou um cenário que lê o header da landing e de uma página autenticada, um coletor em TODO cenário que reprova se o browser acusar violação de CSP, e um sentinela que prova as duas pontas: um script da página tenta `new Function`, recebe `EvalError` e o coletor registra. Duas armadilhas medidas no caminho: o `page.evaluate` do Playwright é ISENTO de CSP (o `Runtime.evaluate` libera `eval` enquanto dura, inclusive num `<script>` inserido dentro dele), então o sentinela roda o eval num `setTimeout` do script da página; e o eval recusado e capturado não gera linha de console, só o evento `securitypolicyviolation`, que um init script repassa. O coletor tem UMA exceção, do ambiente: no standalone local o redirect do `middleware.ts` sai para `https://localhost:<porta>` (`request.nextUrl` mais o `upgrade-insecure-requests`), origem diferente da do gate, e o prefetch de RSC que cai nele leva bloqueio de `connect-src`; em dev o host é o do serviço. A API não emite CSP própria. Os itens 2 (política de senha), 3 (storage do rate limit) e 4 (lockout por conta) ficaram para decisão do Pedro. Endpoints sensíveis (**116**), matriz (**29**) e pares de AAD (**17**) não mudaram._
 

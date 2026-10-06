@@ -2361,6 +2361,13 @@ async function fulfillApi(route: Route): Promise<void> {
   if (redefinirSenha && route.request().method() === 'POST') {
     return route.fulfill({ status: 204 });
   }
+  // 86e3anx4u — encerrar sessões (staff e usuário do cliente): 204 sem corpo.
+  // Mesmo raciocínio: a autorização é do backend; a tela prova que a ação só
+  // aparece para quem gere a pessoa, e nunca na própria linha.
+  const encerrarSessoes = path.match(/\/users\/([^/]+)\/sessions\/revoke$/);
+  if (encerrarSessoes && route.request().method() === 'POST') {
+    return route.fulfill({ status: 204 });
+  }
   const transferir = path.match(/^\/api\/v1\/users\/([^/]+)\/transfer$/);
   if (transferir && route.request().method() === 'POST') {
     if (transferir[1] !== OTHER_ORG_STAFF.id) {
@@ -3648,6 +3655,64 @@ for (const vp of VIEWPORTS) {
       );
       await shot(page, `client-users-redefinir-senha-${vp.label.replace(/\s+/g, '-')}`);
       await analyze(page, `redefinir senha de usuário do cliente (${vp.label})`);
+    });
+
+    /**
+     * 86e3anx4u — "Encerrar sessões" na lista do tenant: quem GERE os usuários do
+     * cliente (a mesma célula de criar e desativar). Sem formulário; o corpo diz
+     * que a conta continua ativa e a pessoa entra com a senha atual. A própria
+     * linha fica de fora (o servidor responde 409).
+     */
+    test('encerrar sessões: o gerente do cliente vê a ação, confirma e o toast não nomeia ninguém (86e3anx4u)', async ({
+      page,
+    }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/usuarios`);
+      await expect(page.getByRole('row', { name: /Joana Prado/ })).toBeVisible();
+      await page.getByRole('button', { name: 'Encerrar sessões de Rui Sales' }).click();
+      const dialogo = page.getByRole('alertdialog', { name: 'Encerrar sessões' });
+      await expect(dialogo).toBeVisible();
+      await aguardarAnimacao(dialogo);
+      await expect(dialogo).toContainText('Rui Sales');
+      await expect(dialogo).toContainText('A conta continua ativa');
+      await expect(dialogo.getByRole('button', { name: 'Cancelar' })).toBeFocused();
+      const acao = dialogo.getByRole('button', { name: 'Encerrar sessões' });
+      await exigirDentroDaViewport(
+        page,
+        acao,
+        `${vp.label}: "Encerrar sessões" (usuário do cliente)`,
+      );
+      await shot(page, `client-users-encerrar-sessoes-${vp.label.replace(/\s+/g, '-')}`);
+      await analyze(page, `encerrar sessões de usuário do cliente (${vp.label})`);
+
+      await acao.click();
+      await expect(page.getByRole('alertdialog')).toHaveCount(0);
+      const toast = page.getByText(/Sessões encerradas/);
+      await expect(toast).toBeVisible();
+      await expect(toast).not.toContainText('Rui');
+    });
+
+    test('encerrar sessões: a própria linha e o operador ficam de fora (86e3anx4u)', async ({
+      page,
+    }) => {
+      // A Joana carrega o id do usuário de plataforma dos mocks: logada como
+      // plataforma, a ação dela some e a do Rui fica.
+      sessionUser = PLATFORM_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/usuarios`);
+      await expect(
+        page.getByRole('button', { name: 'Encerrar sessões de Rui Sales' }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole('button', { name: 'Encerrar sessões de Joana Prado' }),
+      ).toHaveCount(0);
+      // O operador não gere ninguém: nem a tela, nem a ação.
+      sessionUser = CLIENT_OPERATOR_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/usuarios`);
+      // `getByRole('alert')` casaria também o route announcer do Next: mire o título.
+      await expect(
+        page.getByRole('heading', { name: 'Você não tem acesso a esta página' }),
+      ).toBeVisible();
+      await expect(page.getByRole('button', { name: /^Encerrar sessões de/ })).toHaveCount(0);
     });
 
     test('gaveta de criação: papel restrito e senha com toggle (R5)', async ({ page }) => {
@@ -5891,6 +5956,77 @@ for (const vp of VIEWPORTS) {
     });
 
     /**
+     * 86e3anx4u — "Encerrar sessões" na lista de staff: o admin da organização
+     * gere o staff dela (`manage_org_users`) e vê a ação, menos na própria linha;
+     * é `alertdialog` sem formulário, com a ação primária dentro da viewport.
+     */
+    test('usuários: o admin encerra as sessões de um staff, nunca as próprias (86e3anx4u)', async ({
+      page,
+    }) => {
+      sessionUser = USER;
+      await page.goto('/configuracoes/usuarios');
+      await expect(page.getByRole('heading', { name: 'Usuários', level: 1 })).toBeVisible();
+      await expect(
+        page.getByRole('button', { name: `Encerrar sessões de ${USER.name}` }),
+      ).toHaveCount(0);
+
+      await page.getByRole('button', { name: 'Encerrar sessões de Gerente Hologram' }).click();
+      const dialogo = page.getByRole('alertdialog', { name: 'Encerrar sessões' });
+      await expect(dialogo).toBeVisible();
+      await aguardarAnimacao(dialogo);
+      await expect(dialogo).toContainText('Gerente Hologram');
+      await expect(dialogo).toContainText('entra de novo com a senha atual');
+      await expect(dialogo.getByRole('button', { name: 'Cancelar' })).toBeFocused();
+      const acao = dialogo.getByRole('button', { name: 'Encerrar sessões' });
+      await exigirDentroDaViewport(page, acao, `${vp.label}: "Encerrar sessões"`);
+      await shot(page, `usuarios-encerrar-sessoes-${slug}`);
+      await analyze(page, `diálogo de encerrar sessões (${vp.label})`);
+
+      await acao.click();
+      await expect(page.getByRole('alertdialog')).toHaveCount(0);
+      await expect(page.getByText(/Sessões encerradas/)).toBeVisible();
+    });
+
+    /**
+     * 86e3anx4u — na aba de administradores da plataforma a ação existe para
+     * cada par (a célula `manage_org_users` é da plataforma), nunca na própria
+     * conta. O gerente da organização não tem a célula e nem chega à tela.
+     */
+    test('usuários: a plataforma encerra as sessões de um par pela aba da plataforma (86e3anx4u)', async ({
+      page,
+    }) => {
+      sessionUser = PLATFORM_USER;
+      await page.goto('/configuracoes/usuarios?tab=plataforma');
+      const lista = page.getByRole('region', { name: 'Lista de administradores da plataforma' });
+      await expect(lista.getByRole('button', { name: /^Encerrar sessões de/ })).toHaveCount(
+        PLATFORM_ADMINS.length,
+      );
+      await lista.getByRole('button', { name: 'Encerrar sessões de Pedro H.' }).click();
+      const dialogo = page.getByRole('alertdialog', { name: 'Encerrar sessões' });
+      await expect(dialogo).toBeVisible();
+      await aguardarAnimacao(dialogo);
+      await expect(dialogo).toContainText('Pedro H.');
+      const acao = dialogo.getByRole('button', { name: 'Encerrar sessões' });
+      await exigirDentroDaViewport(page, acao, `${vp.label}: "Encerrar sessões" (plataforma)`);
+      await shot(page, `usuarios-plataforma-encerrar-sessoes-${slug}`);
+      await analyze(page, `encerrar sessões de um administrador da plataforma (${vp.label})`);
+      await dialogo.getByRole('button', { name: 'Cancelar' }).click();
+      await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    });
+
+    test('usuários: o gerente da organização NÃO vê a tela nem a ação de encerrar sessões (86e3anx4u)', async ({
+      page,
+    }) => {
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto('/configuracoes/usuarios');
+      // A tela de Usuários nega com "a este recurso" (a do cliente, com "a esta página").
+      await expect(
+        page.getByRole('heading', { name: 'Você não tem acesso a este recurso' }),
+      ).toBeVisible();
+      await expect(page.getByRole('button', { name: /^Encerrar sessões de/ })).toHaveCount(0);
+    });
+
+    /**
      * 86e3chrxw — a aba "Administradores da plataforma" da tela de Usuários,
      * a ÚNICA lista de `platform_admin` do produto (`GET /users` filtra
      * `scope='system'` e o `users_count` das organizações não os conta). Só a
@@ -5928,10 +6064,13 @@ for (const vp of VIEWPORTS) {
       await expect(lista.getByText('Inativo')).toBeVisible();
       // Promover e despromover é pelo script, e `PATCH /users/{id}` de uma linha
       // de plataforma é 404 — nem editar, nem desativar, nem "Novo Usuário"
-      // nesta aba (§4.9). A ÚNICA ação da linha é redefinir a senha
-      // (86e3ewukz), para os pares que não são a própria conta.
-      await expect(lista.getByRole('button')).toHaveCount(PLATFORM_ADMINS.length);
+      // nesta aba (§4.9). As ações da linha são redefinir a senha (86e3ewukz) e
+      // encerrar as sessões (86e3anx4u), para os pares que não são a própria conta.
+      await expect(lista.getByRole('button')).toHaveCount(PLATFORM_ADMINS.length * 2);
       await expect(lista.getByRole('button', { name: /^Redefinir senha de/ })).toHaveCount(
+        PLATFORM_ADMINS.length,
+      );
+      await expect(lista.getByRole('button', { name: /^Encerrar sessões de/ })).toHaveCount(
         PLATFORM_ADMINS.length,
       );
       await expect(page.getByRole('button', { name: 'Novo Usuário' })).toHaveCount(0);

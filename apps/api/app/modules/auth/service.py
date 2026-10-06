@@ -132,8 +132,9 @@ class AuthService:
             # User foi deletado/desativado (ou a organização suspensa) depois do
             # refresh ser emitido — bloqueia.
             raise UnauthorizedError("Sessão expirada. Faça login novamente.")
-        # 86e3ewukz: refresh emitido antes da redefinição de senha não renova
-        # nada — a sessão antiga morre inteira, access e refresh.
+        # 86e3ewukz + 86e3anx4u: refresh emitido antes da redefinição de senha
+        # ou do encerramento de sessões não renova nada — a sessão antiga morre
+        # inteira, access e refresh.
         if token_predates_password_change(payload.iat, ctx.user.password_changed_at):
             raise UnauthorizedError("Sessão expirada. Faça login novamente.")
 

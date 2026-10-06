@@ -734,6 +734,21 @@ class CannotResetOwnPasswordError(ConflictError):
     )
 
 
+class CannotRevokeOwnSessionsError(ConflictError):
+    """409 — quem gere o usuário tentou encerrar as PRÓPRIAS sessões (86e3anx4u).
+
+    A rota `…/sessions/revoke` existe para tirar OUTRA pessoa de todos os
+    dispositivos sem desativar a conta nem trocar a senha. Encerrar a própria
+    sessão é o `POST /auth/logout`: orienta em vez de aceitar — e evita que o
+    administrador se derrube no meio da própria operação.
+    """
+
+    default_user_message = (
+        "Esta ação encerra as sessões de OUTRA pessoa. Para sair da sua própria conta, "
+        "use o botão de sair."
+    )
+
+
 # ----------------------------------------------------------------------
 # Sprint 14 (BACK 14.3) — origem por ARQUIVO. Toda recusa é tipada (R5: motivo
 # específico e acionável), e nenhuma carrega conteúdo de célula.

@@ -14,6 +14,7 @@ import {
   createClientUser,
   deactivateClientUser,
   listClientUsers,
+  revokeClientUserSessions,
   updateClientUser,
   type ListClientUsersParams,
 } from '@/lib/api/client-users';
@@ -72,6 +73,20 @@ export function useSetClientUserActive(clientId: string) {
   return useMutation<ClientUserResponse, Error, { userId: string; active: boolean }>({
     mutationFn: ({ userId, active }) =>
       active ? activateClientUser(clientId, userId) : deactivateClientUser(clientId, userId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: clientUsersKeys.all(clientId) });
+    },
+  });
+}
+
+/**
+ * Encerramento de sessões de um usuário DO tenant (86e3anx4u). O `userId` é a
+ * variável da mutation; invalida só a árvore daquele cliente.
+ */
+export function useRevokeClientUserSessions(clientId: string) {
+  const qc = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: (userId) => revokeClientUserSessions(clientId, userId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: clientUsersKeys.all(clientId) });
     },

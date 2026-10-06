@@ -99,9 +99,10 @@ async def get_current_user(
         # Mensagem única para os três casos: não vazar se a conta existe, está
         # desativada, ou se a organização inteira foi suspensa.
         raise UnauthorizedError("Sessão expirou ou usuário inativo.")
-    # 86e3ewukz: senha redefinida pela plataforma derruba as sessões abertas —
-    # token emitido antes de `password_changed_at` é recusado, com a MESMA
-    # mensagem (o front trata 401 UNAUTHORIZED indo para o login).
+    # 86e3ewukz + 86e3anx4u: senha redefinida pela plataforma OU sessões
+    # encerradas por quem gere o usuário derrubam as sessões abertas — token
+    # emitido antes de `password_changed_at` é recusado, com a MESMA mensagem
+    # (o front trata 401 UNAUTHORIZED indo para o login).
     if token_predates_password_change(payload.iat, ctx.user.password_changed_at):
         raise UnauthorizedError("Sessão expirou ou usuário inativo.")
 
@@ -331,6 +332,14 @@ SyncOmieAccountsDep = Annotated[
 ]
 ManageClientUsersDep = Annotated[
     CurrentUser, Depends(require_permission(Permission.MANAGE_CLIENT_USERS))
+]
+# 86e3anx4u — a MESMA célula de `ManageClientUsersDep`, pelo guard que grava a
+# negação: o `client_operator` que alcança o cliente e tenta encerrar as sessões
+# de alguém recebe 403 com 1 linha `denied` em `access_audit` (§3.15). As seis
+# rotas anteriores da família `/clients/{id}/users` seguem com o guard sem trilha;
+# migrá-las é decisão à parte, não desta task.
+ManageClientUsersAuditedDep = Annotated[
+    CurrentUser, Depends(require_client_permission(Permission.MANAGE_CLIENT_USERS))
 ]
 EditClientDep = Annotated[CurrentUser, Depends(require_permission(Permission.EDIT_CLIENT))]
 ManageGlossaryDep = Annotated[CurrentUser, Depends(require_permission(Permission.MANAGE_GLOSSARY))]

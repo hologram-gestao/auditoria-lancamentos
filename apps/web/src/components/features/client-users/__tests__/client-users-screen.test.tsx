@@ -47,6 +47,7 @@ const createMock = vi.fn();
 const updateMock = vi.fn();
 const setActiveMock = vi.fn();
 const resetPasswordMock = vi.fn();
+const revokeSessionsMock = vi.fn();
 
 // A tela consulta o detalhe do cliente para saber se está ENCERRADO
 // (86e36pm1z) — `undefined` = aberto, as ações de escrita aparecem.
@@ -62,6 +63,7 @@ vi.mock('@/hooks/use-client-users', () => ({
   useCreateClientUser: () => ({ mutateAsync: createMock, isPending: false }),
   useUpdateClientUser: () => ({ mutateAsync: updateMock, isPending: false }),
   useSetClientUserActive: () => ({ mutateAsync: setActiveMock, isPending: false }),
+  useRevokeClientUserSessions: () => ({ mutateAsync: revokeSessionsMock, isPending: false }),
 }));
 
 // A tela importa o hook de redefinição de senha da plataforma (86e3ewukz),
@@ -301,6 +303,49 @@ describe('ClientUsersScreen — gating por papel', () => {
     authState.user = actor({ id: 'adm', role: 'admin', scope: 'system', client_id: null });
     render(<ClientUsersScreen clientId={CLIENT_ID} />);
     expect(screen.getByRole('button', { name: 'Novo usuário' })).toBeInTheDocument();
+  });
+});
+
+describe('ClientUsersScreen — encerrar sessões (86e3anx4u)', () => {
+  it('o gerente do cliente vê a ação em cada usuário do tenant e o diálogo manda o id', async () => {
+    const ui = userEvent.setup();
+    setList([user(), user({ id: 'u2', name: 'Rui Sales', role: 'client_manager' })]);
+    render(<ClientUsersScreen clientId={CLIENT_ID} />);
+
+    await ui.click(screen.getByRole('button', { name: 'Encerrar sessões de Joana Prado' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Encerrar sessões' });
+    expect(dialog).toHaveTextContent('Joana Prado');
+    expect(dialog).toHaveTextContent(/entra de novo com a senha atual/);
+    expect(revokeSessionsMock).not.toHaveBeenCalled();
+    await ui.click(within(dialog).getByRole('button', { name: 'Encerrar sessões' }));
+    await waitFor(() => expect(revokeSessionsMock).toHaveBeenCalledWith('u1'));
+  });
+
+  it('não oferece encerrar as próprias sessões (o backend devolve 409)', () => {
+    authState.user = actor({ id: 'u1' });
+    setList([user({ id: 'u1', name: 'Joana Prado' })]);
+    render(<ClientUsersScreen clientId={CLIENT_ID} />);
+    expect(screen.queryByRole('button', { name: 'Encerrar sessões de Joana Prado' })).toBeNull();
+  });
+
+  it('gerente da organização, admin e plataforma veem a ação (mesma célula de criar e desativar)', () => {
+    for (const over of [
+      { id: 'mgr', role: 'manager' as const, scope: 'system' as const, client_id: null },
+      { id: 'adm', role: 'admin' as const, scope: 'system' as const, client_id: null },
+      { id: 'plat', role: 'platform_admin' as const, scope: 'platform' as const, client_id: null },
+    ]) {
+      authState.user = actor(over);
+      const { unmount } = render(<ClientUsersScreen clientId={CLIENT_ID} />);
+      expect(screen.getByRole('button', { name: 'Encerrar sessões de Joana Prado' })).toBeVisible();
+      unmount();
+    }
+  });
+
+  it('o operador do cliente NÃO vê a ação (nem a tela): a célula não é dele', () => {
+    authState.user = actor({ id: 'op', role: 'client_operator' });
+    render(<ClientUsersScreen clientId={CLIENT_ID} />);
+    expect(screen.queryByRole('button', { name: /^Encerrar sessões de/ })).toBeNull();
+    expect(screen.getByRole('alert')).toHaveTextContent('Você não tem acesso a esta página');
   });
 });
 

@@ -179,11 +179,14 @@ def create_refresh_token(
 
 
 def token_predates_password_change(iat: int, password_changed_at: datetime | None) -> bool:
-    """`True` quando o token foi emitido ANTES da última redefinição de senha.
+    """`True` quando o token foi emitido ANTES do carimbo de revogação do usuário.
 
-    É o mecanismo de revogação de sessão (86e3ewukz): redefinir a senha grava
-    `users.password_changed_at`, e todo access/refresh com `iat` anterior a ela
-    deixa de valer — a pessoa entra de novo com a senha nova. Comparação em
+    É o mecanismo de revogação de sessão, com DOIS gatilhos que gravam o MESMO
+    `users.password_changed_at`: a redefinição de senha pela plataforma
+    (86e3ewukz — a pessoa entra de novo com a senha nova) e o encerramento de
+    sessões por quem gere o usuário (86e3anx4u — a pessoa entra de novo com a
+    MESMA senha, a conta segue ativa). Todo access/refresh com `iat` anterior ao
+    carimbo deixa de valer no request seguinte. Comparação em
     SEGUNDOS inteiros, porque `iat` é inteiro: um token emitido no MESMO segundo
     da redefinição continua valendo (janela de 1s, aceita) — a alternativa,
     `<=`, recusaria o login feito logo depois da redefinição.

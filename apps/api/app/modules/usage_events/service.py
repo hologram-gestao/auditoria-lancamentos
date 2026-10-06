@@ -52,6 +52,7 @@ from app.modules.usage_events.schemas import (
     QualificacaoEmitidaProps,
     RecebiveisClassificadosProps,
     SenhaRedefinidaPelaPlataformaProps,
+    SessoesEncerradasProps,
     UsageEventName,
     UsuarioTransferidoDeOrganizacaoProps,
 )
@@ -747,6 +748,25 @@ class UsageEventService:
         return await self.emit(
             UsageEventName.SENHA_REDEFINIDA_PELA_PLATAFORMA,
             props=SenhaRedefinidaPelaPlataformaProps.model_validate(
+                {
+                    "actor_user_id": actor_user_id,
+                    "target_user_id": target_user_id,
+                    "target_scope": target_scope,
+                }
+            ).model_dump(mode="json"),
+        )
+
+    async def emit_sessoes_encerradas(
+        self,
+        *,
+        actor_user_id: UUID,
+        target_user_id: UUID,
+        target_scope: str,
+    ) -> bool:
+        """86e3anx4u — alguém encerrou as sessões de um usuário sem trocar a senha. Só IDs."""
+        return await self.emit(
+            UsageEventName.SESSOES_ENCERRADAS,
+            props=SessoesEncerradasProps.model_validate(
                 {
                     "actor_user_id": actor_user_id,
                     "target_user_id": target_user_id,
