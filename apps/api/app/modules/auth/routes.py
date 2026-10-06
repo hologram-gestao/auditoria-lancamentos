@@ -3,7 +3,8 @@
 Princípios (Doc §7 + CLAUDE.md §3):
     - Tokens entregues APENAS em cookies HttpOnly + Secure (em prod) + SameSite=Lax.
     - Body do erro é genérico para login (não revela campo errado).
-    - Rate limit em /login: 5 tentativas / 5 min / IP+email (slowapi).
+    - Rate limit em /login: 5 FALHAS / 5 min / e-mail (limitador por identidade)
+      + teto de enxurrada por IP (slowapi). Ver `core/rate_limit.py`.
     - Logout limpa cookies — não há blacklist server-side de JWT (MVP).
 """
 
@@ -19,8 +20,9 @@ from app.core.dependencies import (
     DbSessionDep,
     SettingsDep,
 )
-from app.core.exceptions import UnauthorizedError
-from app.core.rate_limit import limiter
+from app.core.exceptions import RateLimitedError, UnauthorizedError
+from app.core.logging import get_logger
+from app.core.rate_limit import LOGIN_FLOOD_LIMIT, limiter, login_identity_limiter
 from app.modules.auth.repository import AuthRepository
 from app.modules.auth.schemas import (
     LoginRequest,
@@ -39,6 +41,14 @@ if TYPE_CHECKING:
 AUTH_PATH_PREFIX = "/api/v1/auth"
 
 router = APIRouter(prefix=AUTH_PATH_PREFIX, tags=["auth"])
+
+log = get_logger(__name__)
+
+#: Mensagem do 429 por identidade: nomeia a janela real (a do handler do
+#: slowapi fala em 1 minuto) e não diz se o e-mail existe (§3.9).
+LOGIN_RATE_LIMITED_MESSAGE = (
+    "Muitas tentativas de login com este e-mail. Aguarde 5 minutos e tente novamente."
+)
 
 
 def _get_auth_service(db: DbSessionDep, settings: SettingsDep) -> AuthService:
@@ -113,7 +123,7 @@ def _clear_auth_cookies(response: Response, settings: Settings) -> None:
     status_code=200,
     summary="Login com email + senha. Seta cookies HttpOnly de access + refresh.",
 )
-@limiter.limit("5/5minutes")
+@limiter.limit(LOGIN_FLOOD_LIMIT)
 async def login(
     request: Request,
     response: Response,
@@ -123,14 +133,35 @@ async def login(
 ) -> LoginResponse:
     """Valida credenciais e emite par de tokens em cookies.
 
-    Rate limit: 5 tentativas / 5 min POR IP (TODO S16: combinar com email).
-    Em violation, slowapi levanta `RateLimitExceeded` convertido pelo handler
-    global em HTTP 429 RATE_LIMITED.
+    Rate limit (86e3anx10), em duas camadas:
+        - por IDENTIDADE: 5 falhas / 5 min por e-mail. A consulta vem ANTES da
+          verificação, de propósito: quem já estourou recebe 429 mesmo com a
+          senha certa e não gasta bcrypt. Só falha (qualquer 401 do
+          `AuthService.login`) conta; sucesso não conta e não zera.
+        - por IP: teto de enxurrada (`LOGIN_FLOOD_LIMIT`). Atrás do BFF o IP é
+          o do proxy, então esse teto é global por instância e não distingue
+          pessoas.
+    Os dois respondem HTTP 429 RATE_LIMITED no envelope padrão.
 
     NOTA: `request: Request` PRECISA ser o primeiro parâmetro para o slowapi
     extrair o cliente — não mude essa ordem.
     """
-    ctx, access, refresh = await auth.login(email=payload.email, password=payload.password)
+    if login_identity_limiter.is_blocked(payload.email):
+        # Só o prefixo do hash vai para log, nunca o e-mail (§3.3).
+        log.warning(
+            "login_identity_rate_limited",
+            window=login_identity_limiter.window,
+            identity_prefix=login_identity_limiter.identity_prefix(payload.email),
+        )
+        raise RateLimitedError(
+            "Limite de falhas de login por identidade excedido.",
+            user_message=LOGIN_RATE_LIMITED_MESSAGE,
+        )
+    try:
+        ctx, access, refresh = await auth.login(email=payload.email, password=payload.password)
+    except UnauthorizedError:
+        login_identity_limiter.register_failure(payload.email)
+        raise
     _set_auth_cookies(response, access_token=access, refresh_token=refresh, settings=settings)
     return LoginResponse(user=AuthService.to_authenticated_user(ctx))
 

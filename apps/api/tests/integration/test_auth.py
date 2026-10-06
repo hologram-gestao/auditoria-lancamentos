@@ -4,7 +4,9 @@ Cenários:
     - Login com credenciais corretas seta cookies HttpOnly e devolve user.
     - Login com email/senha errados retorna 401 com mensagem GENÉRICA.
     - Login de user com active=false retorna 401 com mesma mensagem genérica.
-    - Rate limit dispara após 5 tentativas no mesmo (IP+email) em 5min.
+    - Rate limit do login é por IDENTIDADE (86e3anx10): 5 falhas do mesmo e-mail
+      em 5 min dão 429, e-mails diferentes não se somam, o IP não importa e
+      sucesso não conta.
     - Refresh com cookie válido emite novo par de tokens.
     - Refresh sem cookie retorna 401.
     - Refresh de user desativado entre login e refresh retorna 401.
@@ -16,9 +18,10 @@ Pula automaticamente se Docker não estiver disponível (via fixture pg_containe
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Any
 
 from fastapi import APIRouter
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import (
@@ -29,10 +32,6 @@ from app.core.dependencies import (
 from app.core.security import hash_password
 from app.db.models import User, UserRole
 from app.main import app as fastapi_app
-
-if TYPE_CHECKING:
-    from httpx import AsyncClient
-
 
 # Rota auxiliar /me — registrada uma vez no módulo para FastAPI resolver
 # `CurrentUserDep` (Annotated[CurrentUser, Depends(get_current_user)])
@@ -164,24 +163,117 @@ class TestLogin:
         )
         assert resp.status_code == 400
 
-    async def test_rate_limit_blocks_after_5_attempts(self, client_with_db: AsyncClient) -> None:
-        """5 tentativas de login passam, 6ª retorna 429 (CLAUDE.md §3.11)."""
+
+# ----------------------------------------------------------------------
+# Rate limit do login por identidade (86e3anx10)
+# ----------------------------------------------------------------------
+
+LOGIN_URL = "/api/v1/auth/login"
+RATE_LIMITED_MSG = (
+    "Muitas tentativas de login com este e-mail. Aguarde 5 minutos e tente novamente."
+)
+
+
+def _assert_rate_limited(resp_json: dict[str, Any]) -> None:
+    assert resp_json["error"]["code"] == "RATE_LIMITED"
+    assert resp_json["error"]["userMessage"] == RATE_LIMITED_MSG
+
+
+class TestLoginRateLimitByIdentity:
+    """Atrás do BFF a API vê o IP do proxy: o limite que distingue pessoas é o e-mail."""
+
+    async def test_emails_diferentes_nao_se_somam(self, client_with_db: AsyncClient) -> None:
+        """6 e-mails diferentes errando na mesma janela: todos 401, nenhum 429."""
+        for i in range(6):
+            resp = await client_with_db.post(
+                LOGIN_URL,
+                json={"email": f"pessoa{i}@hologram.com.br", "password": WRONG_PLAIN},
+            )
+            assert resp.status_code == 401, f"e-mail {i + 1}: {resp.status_code} {resp.text}"
+
+    async def test_cinco_falhas_do_mesmo_email_bloqueiam_ate_a_senha_certa(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """A 6ª tentativa é 429 mesmo com a senha certa: a consulta vem antes do bcrypt."""
+        await _seed_user(db_session, email="alvo@hologram.com.br")
         for i in range(5):
             resp = await client_with_db.post(
-                "/api/v1/auth/login",
-                json={"email": "rl@hologram.com.br", "password": WRONG_PLAIN},
+                LOGIN_URL, json={"email": "alvo@hologram.com.br", "password": WRONG_PLAIN}
             )
             assert resp.status_code == 401, f"tentativa {i + 1} deveria ser 401"
 
-        # 6ª tentativa
         resp = await client_with_db.post(
-            "/api/v1/auth/login",
-            json={"email": "rl@hologram.com.br", "password": WRONG_PLAIN},
+            LOGIN_URL, json={"email": "alvo@hologram.com.br", "password": LOGIN_PLAIN}
         )
-        assert resp.status_code == 429
-        body = resp.json()
-        assert body["error"]["code"] == "RATE_LIMITED"
-        assert "Muitas tentativas" in body["error"]["userMessage"]
+        assert resp.status_code == 429, resp.text
+        _assert_rate_limited(resp.json())
+        # Nenhum cookie de sessão sai num 429.
+        assert ACCESS_TOKEN_COOKIE not in " || ".join(resp.headers.get_list("set-cookie"))
+
+    async def test_limite_nao_depende_do_ip_do_cliente(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Dois IPs alternando o MESMO e-mail somam as falhas: a 6ª é 429.
+
+        `client_with_db` mantém o override da session; os dois clientes abaixo
+        usam o mesmo app com `request.client.host` diferentes.
+        """
+        await _seed_user(db_session, email="ip@hologram.com.br")
+        transports = (
+            ASGITransport(app=fastapi_app, client=("10.0.0.1", 1)),
+            ASGITransport(app=fastapi_app, client=("10.0.0.2", 1)),
+        )
+        async with (
+            AsyncClient(transport=transports[0], base_url="http://test") as ip1,
+            AsyncClient(transport=transports[1], base_url="http://test") as ip2,
+        ):
+            clients = (ip1, ip2)
+            for i in range(5):
+                resp = await clients[i % 2].post(
+                    LOGIN_URL, json={"email": "ip@hologram.com.br", "password": WRONG_PLAIN}
+                )
+                assert resp.status_code == 401, f"tentativa {i + 1} deveria ser 401"
+
+            resp = await clients[1].post(
+                LOGIN_URL, json={"email": "ip@hologram.com.br", "password": WRONG_PLAIN}
+            )
+            assert resp.status_code == 429, resp.text
+            _assert_rate_limited(resp.json())
+
+    async def test_sucesso_nao_consome(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """6 logins corretos seguidos do mesmo usuário: todos 200."""
+        await _seed_user(db_session, email="certo@hologram.com.br")
+        for i in range(6):
+            resp = await client_with_db.post(
+                LOGIN_URL, json={"email": "certo@hologram.com.br", "password": LOGIN_PLAIN}
+            )
+            assert resp.status_code == 200, f"login {i + 1}: {resp.status_code} {resp.text}"
+
+    async def test_email_existente_e_inexistente_sao_indistinguiveis(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Mesmo 401 nas falhas e mesmo 429 depois de 5, exista o e-mail ou não (§3.9)."""
+        await _seed_user(db_session, email="existe@hologram.com.br")
+        bodies: dict[str, list[dict[str, Any]]] = {}
+        for email in ("existe@hologram.com.br", "nao-existe@hologram.com.br"):
+            bodies[email] = []
+            for _ in range(5):
+                resp = await client_with_db.post(
+                    LOGIN_URL, json={"email": email, "password": WRONG_PLAIN}
+                )
+                assert resp.status_code == 401
+                bodies[email].append(resp.json())
+            resp = await client_with_db.post(
+                LOGIN_URL, json={"email": email, "password": WRONG_PLAIN}
+            )
+            assert resp.status_code == 429, resp.text
+            _assert_rate_limited(resp.json())
+            bodies[email].append(resp.json())
+
+        assert bodies["existe@hologram.com.br"] == bodies["nao-existe@hologram.com.br"]
+        assert bodies["existe@hologram.com.br"][0]["error"]["userMessage"] == GENERIC_ERR
 
 
 # ----------------------------------------------------------------------

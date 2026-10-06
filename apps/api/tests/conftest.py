@@ -42,6 +42,7 @@ if sys.platform == "win32":
 
 from app.core.config import get_settings
 from app.core.rate_limit import limiter as _rate_limiter
+from app.core.rate_limit import login_identity_limiter as _login_identity_limiter
 from app.db.models import (
     HOLOGRAM_ORGANIZATION_ID,
     HOLOGRAM_ORGANIZATION_NAME,
@@ -71,15 +72,18 @@ def _force_real_parse(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def _reset_rate_limiter() -> Iterator[None]:
-    """Limpa contadores in-memory do slowapi entre testes.
+    """Limpa contadores in-memory do slowapi e do limitador por identidade do login.
 
-    Sem isso, testes em sequência (mesmo IP 127.0.0.1) acumulam contagens e
-    estouram o limit do /auth/login. Testes específicos que validam o limit
-    sobem o contador intencionalmente — esta fixture garante isolamento.
+    Sem isso, testes em sequência (mesmo IP 127.0.0.1, mesmos e-mails de fixture)
+    acumulam contagens e estouram o limit do /auth/login. Testes específicos que
+    validam o limit sobem o contador intencionalmente — esta fixture garante
+    isolamento.
     """
     _rate_limiter.reset()
+    _login_identity_limiter.reset()
     yield
     _rate_limiter.reset()
+    _login_identity_limiter.reset()
 
 
 # ----------------------------------------------------------------------

@@ -319,7 +319,7 @@ def create_app() -> FastAPI:
 
     # Rate limit (slowapi) — anexado ao app.state para o decorator funcionar.
     # O Limiter singleton vive em `app.core.rate_limit`, com decorators aplicados
-    # diretamente nas rotas (ex: `@limiter.limit("5/5minutes")` em /auth/login).
+    # diretamente nas rotas (ex: `@limiter.limit(LOGIN_FLOOD_LIMIT)` em /auth/login).
     app.state.limiter = limiter
 
     _register_exception_handlers(app)
