@@ -45,6 +45,7 @@ let lastListEnabled: boolean | undefined;
 const createMock = vi.fn();
 const transferMock = vi.fn();
 const resetPasswordMock = vi.fn();
+const revokeSessionsMock = vi.fn();
 
 vi.mock('@/hooks/use-users', () => ({
   useUsersList: (params: Record<string, unknown>, options?: { enabled?: boolean }) => {
@@ -57,6 +58,11 @@ vi.mock('@/hooks/use-users', () => ({
   useTransferUser: () => ({ mutateAsync: transferMock, isPending: false, reset: vi.fn() }),
   useResetUserPassword: () => ({
     mutateAsync: resetPasswordMock,
+    isPending: false,
+    reset: vi.fn(),
+  }),
+  useRevokeUserSessions: () => ({
+    mutateAsync: revokeSessionsMock,
     isPending: false,
     reset: vi.fn(),
   }),
@@ -424,6 +430,66 @@ describe('Redefinir senha (86e3ewukz) — só a plataforma', () => {
   });
 });
 
+describe('Encerrar sessões (86e3anx4u) — quem gere o staff, pela matriz', () => {
+  beforeEach(() => {
+    revokeSessionsMock.mockReset().mockResolvedValue(undefined);
+  });
+
+  it('o admin da organização vê a ação em cada staff, menos na própria linha, e o diálogo manda o id', async () => {
+    authState.user = ORG_ADMIN;
+    listState.data = {
+      data: [
+        staff(),
+        staff({ id: 'adm', name: 'Admin', email: 'admin@hologram.com.br', role: 'admin' }),
+      ],
+      pagination: { page: 1, pageSize: 20, total: 2, totalPages: 1 },
+    };
+    const ui = userEvent.setup();
+    render(<UsersPage />);
+
+    expect(screen.getByRole('button', { name: 'Encerrar sessões de Bruna R.' })).toBeVisible();
+    // A própria linha fica de fora: o servidor responde 409 para ela (§4.9).
+    expect(screen.queryByRole('button', { name: 'Encerrar sessões de Admin' })).toBeNull();
+
+    await ui.click(screen.getByRole('button', { name: 'Encerrar sessões de Bruna R.' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Encerrar sessões' });
+    expect(dialog).toHaveTextContent('Bruna R.');
+    expect(dialog).toHaveTextContent(/A conta continua ativa/);
+    await ui.click(within(dialog).getByRole('button', { name: 'Encerrar sessões' }));
+    await waitFor(() => expect(revokeSessionsMock).toHaveBeenCalledWith('u1'));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+    expect(toastSuccess).toHaveBeenCalledWith(
+      'Sessões encerradas. A pessoa precisará entrar de novo com a senha atual.',
+    );
+  });
+
+  it('a plataforma também vê a ação no staff de qualquer organização', () => {
+    authState.user = PLATFORM;
+    render(<UsersPage />);
+    expect(screen.getByRole('button', { name: 'Encerrar sessões de Bruna R.' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Encerrar sessões de Carlos P.' })).toBeVisible();
+  });
+
+  it('o gerente da organização NÃO vê a ação: a célula `manage_org_users` não é dele', () => {
+    authState.user = { ...ORG_ADMIN, id: 'ger', role: 'manager' };
+    render(<UsersPage />);
+    expect(screen.queryByRole('button', { name: /^Encerrar sessões de/ })).toBeNull();
+    expect(screen.queryByRole('table')).toBeNull();
+  });
+
+  it('na aba da plataforma a ação existe em cada par, menos na própria conta', () => {
+    authState.user = PLATFORM;
+    currentSearch = 'tab=plataforma';
+    platformAdminsState.data = [
+      platformAdmin({ id: 'plat', name: 'Plataforma', email: 'plataforma@hologram.com.br' }),
+      platformAdmin({ id: 'pa-2', name: 'Laio S.', email: 'laio@hologramgestao.com' }),
+    ];
+    render(<UsersPage />);
+    expect(screen.getByRole('button', { name: 'Encerrar sessões de Laio S.' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Encerrar sessões de Plataforma' })).toBeNull();
+  });
+});
+
 describe('Transferir de organização (86e3bvbfx) — só a plataforma', () => {
   async function abrirEdicaoDe(ui: ReturnType<typeof userEvent.setup>, nome: string) {
     await ui.click(screen.getByRole('button', { name: `Editar ${nome}` }));
@@ -559,10 +625,14 @@ describe('Administradores da plataforma — aba própria, só para a plataforma 
     // `PATCH /users/{id}` responde 404 para linha de plataforma, e promover ou
     // despromover é só pelo script: nem editar, nem desativar, nem "Novo
     // Usuário" nesta aba — botão aqui seria ação que o servidor nega (§4.9). A
-    // ÚNICA ação da linha é redefinir a senha (86e3ewukz), para os pares que
-    // não são a própria conta (aqui os dois: o observador é 'plat', outro id).
-    expect(within(lista).queryAllByRole('button')).toHaveLength(2);
+    // ações da linha são redefinir a senha (86e3ewukz) e encerrar as sessões
+    // (86e3anx4u), para os pares que não são a própria conta (aqui os dois: o
+    // observador é 'plat', outro id).
+    expect(within(lista).queryAllByRole('button')).toHaveLength(4);
     expect(within(lista).queryAllByRole('button', { name: /^Redefinir senha de/ })).toHaveLength(2);
+    expect(within(lista).queryAllByRole('button', { name: /^Encerrar sessões de/ })).toHaveLength(
+      2,
+    );
     expect(screen.queryByRole('button', { name: 'Novo Usuário' })).not.toBeInTheDocument();
     expect(screen.queryByText('Bruna R.')).not.toBeInTheDocument();
     // A lista de staff não é consultada nesta aba.

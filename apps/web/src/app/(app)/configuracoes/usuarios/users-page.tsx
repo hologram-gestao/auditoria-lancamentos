@@ -29,6 +29,7 @@ import {
   ChevronLeft,
   ChevronRight,
   KeyRound,
+  LogOut,
   Power,
   PowerOff,
   Search,
@@ -50,6 +51,10 @@ import {
   ResetPasswordDialog,
   type ResetPasswordTarget,
 } from '@/components/features/users/reset-password-dialog';
+import {
+  RevokeSessionsDialog,
+  type RevokeSessionsTarget,
+} from '@/components/features/users/revoke-sessions-dialog';
 import { TransferUserDialog } from '@/components/features/users/transfer-user-dialog';
 import { UserRoleBadge, UserStatusBadge } from '@/components/features/users/user-badges';
 import { AccessDenied } from '@/components/shared/access-denied';
@@ -66,7 +71,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { useUrlState } from '@/hooks/use-url-state';
-import { useActivateUser, useUsersList } from '@/hooks/use-users';
+import { useActivateUser, useRevokeUserSessions, useUsersList } from '@/hooks/use-users';
 import { ApiError } from '@/lib/api/client';
 import type { User } from '@/lib/api/users';
 import { canManageSystemUsers, hasPermission, homePathFor, isPlatformScoped } from '@/lib/authz';
@@ -134,6 +139,12 @@ export default function UsersPage() {
   // próprio, fora do de edição (nada de Radix empilhado).
   const canResetPassword = hasPermission(currentUser, 'reset_user_password');
   const [resetting, setResetting] = useState<ResetPasswordTarget | null>(null);
+  // Encerrar sessões (86e3anx4u): quem GERE o staff — a mesma célula que já
+  // abre esta tela (`manage_org_users`), nunca `role ===`. A própria linha fica
+  // de fora (o servidor responde 409).
+  const canRevokeSessions = hasPermission(currentUser, 'manage_org_users');
+  const [revoking, setRevoking] = useState<RevokeSessionsTarget | null>(null);
+  const revokeMutation = useRevokeUserSessions();
 
   const activateMutation = useActivateUser();
 
@@ -303,6 +314,16 @@ export default function UsersPage() {
                             <KeyRound className="h-4 w-4" aria-hidden="true" />
                           </Button>
                         )}
+                        {canRevokeSessions && !isSelf && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setRevoking({ id: u.id, name: u.name, email: u.email })}
+                            aria-label={`Encerrar sessões de ${u.name}`}
+                          >
+                            <LogOut className="h-4 w-4" aria-hidden="true" />
+                          </Button>
+                        )}
                         {!isSelf &&
                           (u.active ? (
                             <Button
@@ -401,6 +422,7 @@ export default function UsersPage() {
             <PlatformAdminsTable
               currentUserId={currentUser.id}
               onResetPassword={canResetPassword ? setResetting : undefined}
+              onRevokeSessions={canRevokeSessions ? setRevoking : undefined}
             />
           </TabsContent>
         </Tabs>
@@ -426,6 +448,15 @@ export default function UsersPage() {
           open={resetting !== null}
           onOpenChange={(o) => !o && setResetting(null)}
           target={resetting}
+        />
+      )}
+      {canRevokeSessions && (
+        <RevokeSessionsDialog
+          open={revoking !== null}
+          onOpenChange={(o) => !o && setRevoking(null)}
+          target={revoking}
+          revoke={revokeMutation.mutateAsync}
+          isPending={revokeMutation.isPending}
         />
       )}
       <DeactivateConfirm

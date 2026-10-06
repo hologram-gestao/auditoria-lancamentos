@@ -20,13 +20,17 @@
  * 403 cru. A autoridade continua sendo o backend.
  */
 
-import { KeyRound, Plus, Power, PowerOff, Search, SquarePen } from 'lucide-react';
+import { KeyRound, LogOut, Plus, Power, PowerOff, Search, SquarePen } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import {
   ResetPasswordDialog,
   type ResetPasswordTarget,
 } from '@/components/features/users/reset-password-dialog';
+import {
+  RevokeSessionsDialog,
+  type RevokeSessionsTarget,
+} from '@/components/features/users/revoke-sessions-dialog';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -40,7 +44,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { useClientUsersList } from '@/hooks/use-client-users';
+import { useClientUsersList, useRevokeClientUserSessions } from '@/hooks/use-client-users';
 import { useClientDetail } from '@/hooks/use-clients';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { readPositiveInt, useUrlState } from '@/hooks/use-url-state';
@@ -70,6 +74,12 @@ export function ClientUsersScreen({ clientId }: { clientId: string }) {
   // encerrado (o servidor responde 409) e para a própria conta.
   const canResetPassword = hasPermission(currentUser, 'reset_user_password') && !isClosed;
   const [resetting, setResetting] = useState<ResetPasswordTarget | null>(null);
+  // Encerrar sessões (86e3anx4u): quem GERE os usuários do cliente (a mesma
+  // célula de criar e desativar); some com o cliente encerrado (409) e na
+  // própria linha (409).
+  const canRevokeSessions = canWrite;
+  const [revoking, setRevoking] = useState<RevokeSessionsTarget | null>(null);
+  const revokeMutation = useRevokeClientUserSessions(clientId);
 
   const url = useUrlState();
   const searchParam = url.get(PARAM.search) ?? '';
@@ -253,6 +263,18 @@ export function ClientUsersScreen({ clientId }: { clientId: string }) {
                               <KeyRound className="h-4 w-4" aria-hidden="true" />
                             </Button>
                           )}
+                          {canRevokeSessions && user.id !== currentUser.id && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() =>
+                                setRevoking({ id: user.id, name: user.name, email: user.email })
+                              }
+                              aria-label={`Encerrar sessões de ${user.name}`}
+                            >
+                              <LogOut className="h-4 w-4" aria-hidden="true" />
+                            </Button>
+                          )}
                           {/* Ninguém se desativa (o backend devolve 403); a
                               ação some para não oferecer o que será negado. */}
                           {canWrite && user.id !== currentUser.id && (
@@ -320,6 +342,15 @@ export function ClientUsersScreen({ clientId }: { clientId: string }) {
           open={resetting !== null}
           onOpenChange={(open) => !open && setResetting(null)}
           target={resetting}
+        />
+      )}
+      {canRevokeSessions && (
+        <RevokeSessionsDialog
+          open={revoking !== null}
+          onOpenChange={(open) => !open && setRevoking(null)}
+          target={revoking}
+          revoke={revokeMutation.mutateAsync}
+          isPending={revokeMutation.isPending}
         />
       )}
     </section>
