@@ -80,6 +80,10 @@ class UsageEventName(StrEnum):
     #: 86e3ewukz — a plataforma redefiniu a senha de alguém (suporte/emergência).
     #: Só IDs e o escopo do alvo; nunca e-mail, nome ou senha. Sem dedup.
     SENHA_REDEFINIDA_PELA_PLATAFORMA = "senha_redefinida_pela_plataforma"
+    #: 86e3anx4u — quem gere o usuário encerrou as sessões dele sem trocar a senha
+    #: nem desativar a conta (o MESMO carimbo `password_changed_at`). Só IDs e o
+    #: escopo do alvo. Sem dedup: cada encerramento é uma linha.
+    SESSOES_ENCERRADAS = "sessoes_encerradas"
     # Sprint 9 (BACK 09.4) — **a métrica da sprint**. De BACKEND, sem
     # `session_id`, fora da dedup por construção: cada cadastro é uma linha.
     #
@@ -666,6 +670,20 @@ class SenhaRedefinidaPelaPlataformaProps(_StrictProps):
     `actor_user_id` é a plataforma que redefiniu; `target_user_id` e
     `target_scope` (platform | system | client) dizem quem foi atingido. A senha
     NUNCA entra aqui (nem hash), nem e-mail ou nome (§3.2, §4.7).
+    """
+
+    actor_user_id: UUID
+    target_user_id: UUID
+    target_scope: Literal["platform", "system", "client"]
+
+
+class SessoesEncerradasProps(_StrictProps):
+    """`sessoes_encerradas` (86e3anx4u) — trilha da revogação de sessão sem troca de senha.
+
+    `actor_user_id` é quem gere o alvo (plataforma, admin ou gerente da organização,
+    gerente do cliente); `target_user_id` e `target_scope` (platform | system |
+    client) dizem quem foi tirado de todos os dispositivos. A conta segue ativa e a
+    senha é a mesma: nada disso entra aqui, nem e-mail ou nome (§3.2, §4.7).
     """
 
     actor_user_id: UUID

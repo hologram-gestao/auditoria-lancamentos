@@ -8,6 +8,7 @@ Cobre BACK 2.1 do backlog:
     - POST /api/v1/users/{id}/deactivate          (soft delete)
     - POST /api/v1/users/{id}/transfer              (muda de organização — só plataforma)
     - POST /api/v1/users/{id}/password              (redefine a senha — só plataforma)
+    - POST /api/v1/users/{id}/sessions/revoke       (encerra as sessões — sem trocar a senha)
 
 Toda rota exige a permissão `MANAGE_ORG_USERS` da matriz (plataforma e admin da
 organização); manager autenticado recebe 403. A EXCEÇÃO é `transfer`, que exige
@@ -224,4 +225,31 @@ async def reset_user_password(
     da senha volta, nem em log nem em evento.
     """
     await service.reset_password(user_id, viewer=platform, password=payload.password)
+    return Response(status_code=204)
+
+
+@router.post(
+    "/{user_id}/sessions/revoke",
+    status_code=204,
+    response_class=Response,
+    summary="Encerra todas as sessões abertas de um staff, sem desativar nem trocar a senha.",
+)
+async def revoke_user_sessions(
+    user_id: UUID,
+    admin: ManageOrgUsersDep,
+    service: UserServiceDep,
+) -> Response:
+    """Revogação de sessão sem troca de senha (86e3anx4u, parte 1).
+
+    Quem pode é quem GERE o staff (`manage_org_users`: plataforma qualquer
+    organização; admin só a própria). O alvo sai do MESMO recorte escopado do
+    `PATCH /users/{id}` (`get_session_revocation_target`): staff de outra
+    organização ou usuário de cliente é 404 sem nome; linha de plataforma só a
+    PRÓPRIA plataforma alcança (a lista de administradores da plataforma oferece
+    a ação), para o admin é 404. A própria sessão é 409 (há o logout).
+    Grava `users.password_changed_at` sem tocar o hash nem `active`: todo access
+    e refresh emitidos antes morrem no request seguinte, a conta continua ativa
+    e a pessoa entra de novo com a MESMA senha. 204 sem corpo.
+    """
+    await service.revoke_staff_sessions(user_id, viewer=admin)
     return Response(status_code=204)

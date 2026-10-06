@@ -21,6 +21,7 @@ from app.core.authz import (
 from app.core.exceptions import (
     CannotDeactivateSelfError,
     CannotResetOwnPasswordError,
+    CannotRevokeOwnSessionsError,
     ClientClosedError,
     EmailAlreadyExistsError,
     ForbiddenError,
@@ -351,6 +352,57 @@ class UserService:
                 target_user_id=target.id,
                 target_scope=target.scope,
             )
+
+    # ------------------------------ REVOKE SESSIONS (86e3anx4u) -------
+
+    async def revoke_sessions(self, target: User, *, viewer: CurrentUser) -> None:
+        """Encerra TODAS as sessões abertas do alvo sem desativar a conta nem trocar a senha.
+
+        O ÚNICO método que escreve a revogação, para as duas rotas (staff e usuário
+        de cliente). Quem resolve o alvo é o chamador, pelo leitor escopado da
+        família dele (`get_staff_by_id` ou `get_by_id_in_tenant`): aqui o alvo já é
+        uma linha que o observador alcança.
+
+        Mecanismo: o MESMO carimbo da redefinição de senha (86e3ewukz),
+        `users.password_changed_at` — `get_current_user` e o refresh recusam token
+        com `iat` anterior a ele. O hash NÃO muda (a pessoa entra de novo com a
+        mesma senha) e `active` NÃO muda (a conta continua ativa). A própria
+        sessão é 409 tipado: para sair da própria conta existe o logout.
+
+        Evento `sessoes_encerradas` só com IDs e o escopo do alvo.
+        """
+        if str(target.id) == viewer.id:
+            raise CannotRevokeOwnSessionsError(
+                f"Usuário {viewer.id} tentou encerrar as próprias sessões."
+            )
+        target.password_changed_at = datetime.now(UTC)
+        await self._repo.add(target)
+
+        if self._usage_events is not None:
+            await self._usage_events.emit_sessoes_encerradas(
+                actor_user_id=UUID(viewer.id),
+                target_user_id=target.id,
+                target_scope=target.scope,
+            )
+
+    async def revoke_staff_sessions(self, user_id: UUID, *, viewer: CurrentUser) -> None:
+        """Rota de staff: alvo por `get_session_revocation_target` (org do observador;
+        plataforma todas, inclusive os pares de plataforma).
+
+        Usuário de cliente, staff de outra organização e, para o admin, linha de
+        plataforma → 404, como todo alvo por PK do módulo (anti-IDOR, §3.15).
+        """
+        target = await self._repo.get_session_revocation_target(user_id, viewer=viewer)
+        if target is None:
+            raise NotFoundError("Usuário não encontrado.")
+        await self.revoke_sessions(target, viewer=viewer)
+
+    async def revoke_client_user_sessions(
+        self, *, client_id: UUID, user_id: UUID, viewer: CurrentUser
+    ) -> None:
+        """Rota do cliente: alvo com `AND client_id = <tenant da rota>` no SELECT (404 fora)."""
+        target = await self.get_client_user(client_id=client_id, user_id=user_id)
+        await self.revoke_sessions(target, viewer=viewer)
 
     # ------------------------------ ACTIVATE / DEACTIVATE -------------
 

@@ -178,6 +178,18 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         "(86e3ewukz)",
     ),
     SensitiveEndpoint(
+        "POST",
+        "/api/v1/users/{user_id}/sessions/revoke",
+        ScopeKind.DETAIL_PK,
+        "app/modules/users/routes.py",
+        "ManageOrgUsersDep + get_session_revocation_target/scoped_by_organization: AND "
+        "scope IN ('system' [, 'platform' só para a plataforma]) AND organization_id = <org do "
+        "observador> no próprio SELECT (plataforma: todas); usuário de cliente, staff de outra "
+        "org e, para o admin, linha de plataforma = 404; a própria sessão = 409; grava só "
+        "`password_changed_at` (hash e `active` intocados) — revogação sem troca de senha "
+        "(86e3anx4u)",
+    ),
+    SensitiveEndpoint(
         "GET",
         "/api/v1/client-categories",
         ScopeKind.COLLECTION,
@@ -534,6 +546,15 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         ScopeKind.DETAIL_PK,
         "app/modules/users/client_routes.py",
         f"{_VIA_CLIENT_PATH}; SELECT do alvo com AND client_id (anti-IDOR)",
+    ),
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients/{client_id}/users/{user_id}/sessions/revoke",
+        ScopeKind.DETAIL_PK,
+        "app/modules/users/client_routes.py",
+        f"{_VIA_CLIENT_PATH} (ManageClientUsersAuditedDep: o operador negado grava `denied`); "
+        "SELECT do alvo com AND client_id (anti-IDOR); a própria sessão = 409; tenant "
+        "encerrado = 409 (OpenClientDep) — revogação sem troca de senha (86e3anx4u)",
     ),
     # ---------------------------------------------------------------- glossário (S6)
     SensitiveEndpoint(

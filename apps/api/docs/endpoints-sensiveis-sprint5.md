@@ -15,10 +15,10 @@
 
 | | |
 | --- | --- |
-| Endpoints sensíveis (denominador) | **116** |
-| Com caso negativo cross-tenant verde | **116** |
+| Endpoints sensíveis (denominador) | **118** |
+| Com caso negativo cross-tenant verde | **118** |
 | Pendentes (implementação em outra task) | **0** |
-| Cobertura | **116/116 = 100%** |
+| Cobertura | **118/118 = 100%** |
 
 ## Lista canônica
 
@@ -37,6 +37,7 @@ Legenda de `tipo`: **coleção** = vaza forjando `client_id` na URL/payload · *
 | `POST` | `/api/v1/users/{user_id}/deactivate` | detalhe (PK) | `app/modules/users/routes.py` | ManageOrgUsersDep + get_staff_by_id/scoped_by_organization: AND scope='system' AND organization_id = <org do observador> no próprio SELECT (plataforma: todas); plataforma, usuário de cliente e staff de outra org = 404 | ✅ verde |
 | `POST` | `/api/v1/users/{user_id}/transfer` | detalhe (PK) | `app/modules/users/routes.py` | ManagePlatformDep (só plataforma; admin e gerente de QUALQUER organização = 403 antes de tocar a linha) + get_staff_by_id: alvo só staff (scope='system'), usuário de cliente e plataforma = 404 | ✅ verde |
 | `POST` | `/api/v1/users/{user_id}/password` | detalhe (PK) | `app/modules/users/routes.py` | ResetUserPasswordDep (só plataforma; admin e gerente de QUALQUER organização, inclusive a do alvo, e usuário de cliente = 403 antes de tocar a linha). O alvo é por PK em `users` inteira; a própria senha = 409; tenant encerrado = 409 (86e3ewukz) | ✅ verde |
+| `POST` | `/api/v1/users/{user_id}/sessions/revoke` | detalhe (PK) | `app/modules/users/routes.py` | ManageOrgUsersDep + get_session_revocation_target/scoped_by_organization: AND scope IN ('system' [, 'platform' só para a plataforma]) AND organization_id = <org do observador> no próprio SELECT (plataforma: todas); usuário de cliente, staff de outra org e, para o admin, linha de plataforma = 404; a própria sessão = 409; grava só `password_changed_at` (hash e `active` intocados) — revogação sem troca de senha (86e3anx4u) | ✅ verde |
 | `GET` | `/api/v1/client-categories` | coleção | `app/modules/client_categories/routes.py` | StaffDep/ManageClientCategoriesDep + scoped_by_organization no SELECT do catálogo (AND organization_id = <org do observador>; plataforma: todas); alvo por PK de outra organização = 404; a categoria nova nasce na org da LINHA do ator (resolve_organization_for_creation) | ✅ verde |
 | `POST` | `/api/v1/client-categories` | coleção | `app/modules/client_categories/routes.py` | StaffDep/ManageClientCategoriesDep + scoped_by_organization no SELECT do catálogo (AND organization_id = <org do observador>; plataforma: todas); alvo por PK de outra organização = 404; a categoria nova nasce na org da LINHA do ator (resolve_organization_for_creation) | ✅ verde |
 | `PATCH` | `/api/v1/client-categories/{category_id}` | detalhe (PK) | `app/modules/client_categories/routes.py` | StaffDep/ManageClientCategoriesDep + scoped_by_organization no SELECT do catálogo (AND organization_id = <org do observador>; plataforma: todas); alvo por PK de outra organização = 404; a categoria nova nasce na org da LINHA do ator (resolve_organization_for_creation) | ✅ verde |
@@ -86,6 +87,7 @@ Legenda de `tipo`: **coleção** = vaza forjando `client_id` na URL/payload · *
 | `PATCH` | `/api/v1/clients/{client_id}/users/{user_id}` | detalhe (PK) | `app/modules/users/client_routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); SELECT do alvo com AND client_id (anti-IDOR) | ✅ verde |
 | `POST` | `/api/v1/clients/{client_id}/users/{user_id}/activate` | detalhe (PK) | `app/modules/users/client_routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); SELECT do alvo com AND client_id (anti-IDOR) | ✅ verde |
 | `POST` | `/api/v1/clients/{client_id}/users/{user_id}/deactivate` | detalhe (PK) | `app/modules/users/client_routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); SELECT do alvo com AND client_id (anti-IDOR) | ✅ verde |
+| `POST` | `/api/v1/clients/{client_id}/users/{user_id}/sessions/revoke` | detalhe (PK) | `app/modules/users/client_routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) (ManageClientUsersAuditedDep: o operador negado grava `denied`); SELECT do alvo com AND client_id (anti-IDOR); a própria sessão = 409; tenant encerrado = 409 (OpenClientDep) — revogação sem troca de senha (86e3anx4u) | ✅ verde |
 | `GET` | `/api/v1/clients/{client_id}/glossary` | coleção | `app/modules/glossary/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) | ✅ verde |
 | `POST` | `/api/v1/clients/{client_id}/glossary` | coleção | `app/modules/glossary/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); client_id da entrada fixado pelo servidor | ✅ verde |
 | `PATCH` | `/api/v1/clients/{client_id}/glossary/{entry_id}` | detalhe (PK) | `app/modules/glossary/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); SELECT do alvo com AND client_id (anti-IDOR) | ✅ verde |
