@@ -6,6 +6,7 @@
     - PATCH  /api/v1/clients/{client_id}/users/{user_id}
     - POST   /api/v1/clients/{client_id}/users/{user_id}/activate
     - POST   /api/v1/clients/{client_id}/users/{user_id}/deactivate
+    - POST   /api/v1/clients/{client_id}/users/{user_id}/sessions/revoke
 
 Reusa o `UserService`/`UserRepository` da §8 — estendidos, não duplicados. O
 módulo é separado apenas por PREFIXO de rota; a lógica mora no mesmo service.
@@ -31,14 +32,17 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from app.core.dependencies import (
     AccessibleClientDep,
     DbSessionDep,
+    ManageClientUsersAuditedDep,
     ManageClientUsersDep,
     OpenClientDep,
 )
+from app.modules.usage_events.repository import UsageEventRepository
+from app.modules.usage_events.service import UsageEventService
 from app.modules.users.repository import UserRepository
 from app.modules.users.schemas import (
     ClientUserListResponse,
@@ -52,7 +56,13 @@ router = APIRouter(prefix="/api/v1/clients/{client_id}/users", tags=["client-use
 
 
 def _get_user_service(db: DbSessionDep) -> UserService:
-    return UserService(UserRepository(db))
+    # O serviço de eventos entrou com a revogação de sessão (86e3anx4u): é o
+    # mesmo molde das rotas de staff, e sem ele o `sessoes_encerradas` do
+    # usuário de cliente nunca seria gravado.
+    return UserService(
+        UserRepository(db),
+        usage_events=UsageEventService(UsageEventRepository(db)),
+    )
 
 
 UserServiceDep = Annotated[UserService, Depends(_get_user_service)]
@@ -199,3 +209,37 @@ async def activate_client_user(
         current_user_id=UUID(actor.id),
     )
     return ClientUserResponse.model_validate(user)
+
+
+@router.post(
+    "/{user_id}/sessions/revoke",
+    status_code=204,
+    response_class=Response,
+    summary=(
+        "Encerra todas as sessões abertas de um usuário do tenant, sem desativar "
+        "nem trocar a senha. Quem gere os usuários do cliente pode; a própria "
+        "sessão é 409; cliente encerrado é 409."
+    ),
+)
+async def revoke_client_user_sessions(
+    user_id: UUID,
+    actor: ManageClientUsersAuditedDep,
+    # 86e36pm1z — tenant encerrado: os usuários já estão anonimizados e
+    # desativados; não há sessão a encerrar e toda escrita é 409.
+    client: OpenClientDep,
+    service: UserServiceDep,
+) -> Response:
+    """Revogação de sessão sem troca de senha (86e3anx4u, parte 1), lado do tenant.
+
+    `ManageClientUsersAuditedDep` é a MESMA célula (`manage_client_users`) pelo
+    guard que passa por `AccessibleClientDep` e grava a negação: o ALCANCE é
+    decidido antes da permissão (atacante de outro tenant/organização recebe a
+    negação cross-tenant com a trilha dela), e o `client_operator` que alcança o
+    cliente mas não pode a ação recebe 403 com 1 linha `denied` em `access_audit`.
+    O alvo
+    sai do SELECT com `AND client_id = <tenant da rota>`: usuário de outro
+    cliente é 404. Mesma mecânica da rota de staff: carimbo sem hash, `active`
+    intocado, 204 sem corpo.
+    """
+    await service.revoke_client_user_sessions(client_id=client.id, user_id=user_id, viewer=actor)
+    return Response(status_code=204)

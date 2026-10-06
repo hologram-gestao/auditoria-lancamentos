@@ -79,3 +79,13 @@ export async function deactivateClientUser(
     `${basePath(clientId)}/${encodeURIComponent(userId)}/deactivate`,
   );
 }
+
+/**
+ * Encerra TODAS as sessões abertas de um usuário do tenant sem desativar nem
+ * trocar a senha (86e3anx4u). 204 sem corpo. Quem pode é quem gere os usuários
+ * do cliente (`manage_client_users`); a própria sessão é 409; cliente encerrado
+ * é 409.
+ */
+export async function revokeClientUserSessions(clientId: string, userId: string): Promise<void> {
+  await apiPost<void>(`${basePath(clientId)}/${encodeURIComponent(userId)}/sessions/revoke`);
+}

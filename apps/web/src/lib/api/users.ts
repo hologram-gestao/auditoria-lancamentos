@@ -147,3 +147,14 @@ export async function deactivateUser(id: string): Promise<User> {
 export async function resetUserPassword(id: string, payload: ResetPasswordPayload): Promise<void> {
   await apiPost<void>(`/api/v1/users/${id}/password`, payload);
 }
+
+/**
+ * Encerra TODAS as sessões abertas de um staff sem desativar a conta nem trocar
+ * a senha (86e3anx4u). 204 sem corpo; o servidor grava o carimbo de revogação e
+ * todo access/refresh anterior morre no request seguinte — a pessoa entra de
+ * novo com a MESMA senha. Quem pode é quem gere o staff (`manage_org_users`);
+ * a própria sessão é 409.
+ */
+export async function revokeUserSessions(id: string): Promise<void> {
+  await apiPost<void>(`/api/v1/users/${id}/sessions/revoke`);
+}

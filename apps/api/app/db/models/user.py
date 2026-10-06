@@ -155,13 +155,16 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         default=UserRole.MANAGER.value,
     )
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    # --- Revogação de sessão (86e3ewukz) -------------------------------------
-    # Carimbo da última redefinição de senha pela plataforma. `get_current_user`
-    # e o refresh recusam token com `iat` anterior a ele: é o que faz a
-    # redefinição EXPULSAR quem já estava dentro (numa conta comprometida, o
-    # invasor seguiria por até 7 dias só com a senha trocada). NULL = nunca
-    # redefinida. Quem for fazer a revogação de sessão sem troca de senha
-    # (86e3anx4u) reusa ESTA coluna e ESTE check — não nasce um segundo.
+    # --- Revogação de sessão (86e3ewukz + 86e3anx4u) ---------------------------
+    # Carimbo a partir do qual nenhum token anterior vale. `get_current_user` e o
+    # refresh recusam token com `iat` anterior a ele. DOIS gatilhos gravam aqui:
+    # a redefinição de senha pela plataforma (86e3ewukz: hash novo + carimbo) e o
+    # encerramento de sessões por quem gere o usuário (86e3anx4u: SÓ o carimbo,
+    # hash e `active` intocados — a pessoa entra de novo com a mesma senha). É o
+    # que faz qualquer um dos dois EXPULSAR quem já estava dentro (numa conta
+    # comprometida, o invasor seguiria por até 7 dias). NULL = nunca aconteceu
+    # nenhum dos dois. O nome ficou da primeira entrega; não nasce um segundo
+    # carimbo nem uma tabela de `jti`.
     password_changed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )

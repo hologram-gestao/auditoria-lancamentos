@@ -25,9 +25,10 @@
 
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { KeyRound } from 'lucide-react';
+import { KeyRound, LogOut } from 'lucide-react';
 
 import type { ResetPasswordTarget } from '@/components/features/users/reset-password-dialog';
+import type { RevokeSessionsTarget } from '@/components/features/users/revoke-sessions-dialog';
 import { UserStatusBadge } from '@/components/features/users/user-badges';
 import { Button } from '@/components/ui/button';
 import {
@@ -50,20 +51,25 @@ export const NOME_DA_REGIAO = 'Lista de administradores da plataforma';
 const COL_COUNT = 5;
 
 /**
- * `onResetPassword` (86e3ewukz): a ÚNICA ação da linha, e só para quem tem
- * `reset_user_password` (quem chama decide; sem a callback, a coluna nem existe).
- * A própria conta fica de fora: o servidor responde 409 para ela.
+ * Duas ações por linha, e só elas: `onResetPassword` (86e3ewukz, só para quem tem
+ * `reset_user_password`) e `onRevokeSessions` (86e3anx4u, `manage_org_users` — a
+ * plataforma encerra as sessões de um par sem trocar a senha). Quem chama decide
+ * pela matriz; sem callback nenhuma, a coluna nem existe. A própria conta fica
+ * de fora das duas: o servidor responde 409 para ela.
  */
 export function PlatformAdminsTable({
   currentUserId,
   onResetPassword,
+  onRevokeSessions,
 }: {
   currentUserId: string;
   onResetPassword?: (target: ResetPasswordTarget) => void;
+  onRevokeSessions?: (target: RevokeSessionsTarget) => void;
 }) {
   const { data, isLoading, isError } = usePlatformAdminsList();
   const rows = data ?? [];
-  const columnCount = onResetPassword ? COL_COUNT : COL_COUNT - 1;
+  const hasActions = Boolean(onResetPassword || onRevokeSessions);
+  const columnCount = hasActions ? COL_COUNT : COL_COUNT - 1;
 
   return (
     <div className="space-y-3">
@@ -84,7 +90,7 @@ export function PlatformAdminsTable({
               <TableHead>E-mail</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Cadastrado em</TableHead>
-              {onResetPassword && (
+              {hasActions && (
                 <TableHead>
                   <span className="sr-only">Ações</span>
                 </TableHead>
@@ -136,24 +142,44 @@ export function PlatformAdminsTable({
                   <TableCell className="text-muted-foreground whitespace-nowrap text-sm">
                     {format(new Date(admin.created_at), "dd 'de' MMM 'de' yyyy", { locale: ptBR })}
                   </TableCell>
-                  {onResetPassword && (
+                  {hasActions && (
                     <TableCell className="text-right">
                       {admin.id !== currentUserId && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() =>
-                            onResetPassword({
-                              id: admin.id,
-                              name: admin.name,
-                              email: admin.email,
-                              scope: 'platform',
-                            })
-                          }
-                          aria-label={`Redefinir senha de ${admin.name}`}
-                        >
-                          <KeyRound className="h-4 w-4" aria-hidden="true" />
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                          {onResetPassword && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() =>
+                                onResetPassword({
+                                  id: admin.id,
+                                  name: admin.name,
+                                  email: admin.email,
+                                  scope: 'platform',
+                                })
+                              }
+                              aria-label={`Redefinir senha de ${admin.name}`}
+                            >
+                              <KeyRound className="h-4 w-4" aria-hidden="true" />
+                            </Button>
+                          )}
+                          {onRevokeSessions && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() =>
+                                onRevokeSessions({
+                                  id: admin.id,
+                                  name: admin.name,
+                                  email: admin.email,
+                                })
+                              }
+                              aria-label={`Encerrar sessões de ${admin.name}`}
+                            >
+                              <LogOut className="h-4 w-4" aria-hidden="true" />
+                            </Button>
+                          )}
+                        </div>
                       )}
                     </TableCell>
                   )}

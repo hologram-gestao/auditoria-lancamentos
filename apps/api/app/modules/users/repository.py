@@ -170,6 +170,28 @@ class UserRepository:
             return None
         return StaffRow(user=row[0], organization_name=row[1])
 
+    async def get_session_revocation_target(
+        self, user_id: UUID, *, viewer: CurrentUser
+    ) -> User | None:
+        """Alvo da revogação de sessão pela rota de STAFF (86e3anx4u) — anti-IDOR.
+
+        O MESMO recorte de `get_staff_by_id` (`scope='system'` + a organização do
+        observador via `scoped_by_organization`), com UMA extensão: a plataforma
+        bem formada alcança também um par de PLATAFORMA, porque a lista de
+        administradores da plataforma (86e3chrxw) oferece a ação. O admin de
+        organização continua sem alcançar linha de plataforma (o scope e a org
+        nula a excluem no próprio SELECT → 404), e usuário de cliente nunca
+        entra por aqui (a rota dele é a do tenant).
+        """
+        scopes = [UserScope.SYSTEM.value]
+        if viewer.is_platform:
+            scopes.append(UserScope.PLATFORM.value)
+        stmt = select(User).where(User.id == user_id, User.scope.in_(scopes))
+        result = await self._session.execute(
+            scoped_by_organization(stmt, User.organization_id, viewer)
+        )
+        return result.scalar_one_or_none()
+
     async def get_organization(self, organization_id: UUID) -> Organization | None:
         """Leitor da organização para `resolve_organization_for_creation`."""
         return await self._session.get(Organization, organization_id)

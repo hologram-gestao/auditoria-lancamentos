@@ -16,6 +16,7 @@ import {
   deactivateUser,
   listUsers,
   resetUserPassword,
+  revokeUserSessions,
   transferUser,
   updateUser,
   type CreateUserPayload,
@@ -107,5 +108,20 @@ export function useTransferUser(id: string) {
 export function useResetUserPassword(id: string) {
   return useMutation<void, Error, ResetPasswordPayload>({
     mutationFn: (payload) => resetUserPassword(id, payload),
+  });
+}
+
+/**
+ * Encerramento de sessões de um staff (86e3anx4u). O `userId` é a variável da
+ * mutation (um hook por tela, não por linha). Invalida a lista de staff: o que
+ * a linha mostra não muda, mas a lista é a dona da ação e é o que a tela relê.
+ */
+export function useRevokeUserSessions() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: revokeUserSessions,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: usersKeys.all });
+    },
   });
 }
