@@ -282,6 +282,18 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
     (§4.5). No `usage_events` entra só uma **categoria fechada**, nunca o texto. - **Só cartão.** Elegibilidade é `session.account_type == 'credit_card'`
     (o `CR` do Omie). ⚠️ O PRD chama a conta de cartão de `CA` e **está errado**:
     `CA` é Conta Aplicação. Filtrar por `CA` lança na conta errada.
+17. **O limite do login é por IDENTIDADE, não por IP (86e3anx10).** Atrás do BFF do Next
+    a API vê o IP do PROXY para todo mundo (o uvicorn sobe sem `--forwarded-allow-ips`),
+    então um limite por IP é um balde da plataforma inteira. O que distingue pessoas é
+    `login_identity_limiter` (`core/rate_limit.py`): **5 FALHAS em 5 minutos por e-mail**
+    (chave `login:<sha256 do e-mail normalizado>`, o e-mail nunca vira chave nem log),
+    consultado DENTRO da rota antes do bcrypt (estourou, 429 mesmo com a senha certa) e
+    alimentado só por 401; sucesso não conta. Em memória, **por instância**: com N
+    instâncias o teto é 5 vezes N. Janela não é lockout de conta. O `@limiter.limit` por
+    IP do slowapi fica só como teto de ENXURRADA (`LOGIN_FLOOD_LIMIT`, 60/min, global por
+    instância). **`--forwarded-allow-ips` é proibido** (nem restrito, nem `*`) enquanto a
+    API for alcançável direto pelo `*.run.app`: o `X-Forwarded-For` seria forjável. O IP
+    real é da task de postura (86e3anx69), com o Load Balancer na frente.
 
 ---
 
@@ -1442,6 +1454,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.78, 06/10/2026. **O limite do login passou a ser por identidade, e o limite por IP virou teto de enxurrada (86e3anx10, a task urgente do épico 86e3anwzu).** Atrás do BFF do Next a API vê o IP do proxy para todo mundo, e o `5/5minutes` por IP do slowapi era um balde só para a plataforma inteira por instância: cinco erros de digitação de pessoas diferentes travavam o login de todos, e qualquer um derrubava o login de propósito. Nasceu `LoginIdentityLimiter` em `core/rate_limit.py` (`MovingWindowRateLimiter` da `limits` 5.8.0 sobre `MemoryStorage`, `5/5minutes` por chave `login:<sha256 do e-mail normalizado>`), consultado pela rota `login` com o `payload` já validado e ANTES do `AuthService.login` (`test`, que não consome cota) e alimentado só no `except UnauthorizedError` (`hit`); sem middleware que pré-lê o body, e o `TODO S16` que o previa saiu. O 429 por identidade tem mensagem própria com a janela real ("Aguarde 5 minutos") e loga só `window` e um `identity_prefix` de 8 hex. O decorador por IP passou a `LOGIN_FLOOD_LIMIT = "60/minute"`, no molde do `LEADS_RATE_LIMIT`. A tela de login deixou de ter texto próprio para 429 (dizia "1 minuto") e mostra o `userMessage` do servidor. Nova regra §3.17, com `--forwarded-allow-ips` proibido enquanto a API for pública. Endpoints sensíveis (**118**), matriz (**29**) e pares de AAD (**17**) não mudaram; o contrato mudou só em texto de descrição (o do login e um resto não regenerado da 86e3anx4u). Storage compartilhado e IP real ficam pendentes (86e3anx7y item 3, 86e3anx69)._
 
 _Versão 1.77, 06/10/2026. **Nasceu a revogação de sessão sem desativar a conta nem trocar a senha (86e3anx4u, parte 1 do item do épico 86e3anwzu).** Até aqui, para tirar uma pessoa de todos os dispositivos sem matar a conta, só existia redefinir a senha dela pela plataforma. Agora quem GERE o usuário encerra as sessões dele: `POST /users/{id}/sessions/revoke` (staff, `ManageOrgUsersDep`, alvo pelo recorte escopado do módulo mais, só para a plataforma, os pares de plataforma, porque a lista de administradores da plataforma oferece a ação) e `POST /clients/{id}/users/{user_id}/sessions/revoke` (usuário do cliente, `ManageClientUsersDep` sobre `AccessibleClientDep` e `OpenClientDep`, alvo com `AND client_id` no SELECT). Opção A da task, alinhada com o Pedro em 06/10: o mecanismo é o MESMO carimbo `users.password_changed_at` e o MESMO check `token_predates_password_change` da 86e3ewukz, sem migration, sem coluna nova e sem tabela de `jti`; a §3.12 passou a dizer que o carimbo tem dois gatilhos. Nenhuma permissão nova (§4.9 explica por quê): a matriz segue com 29 células. Lista canônica 116 para **118**, com os três atacantes da bateria. Evento `sessoes_encerradas` só com IDs, sem dedup. Na tela, a ação "Encerrar sessões" (ícone de saída) entrou nas três listas, decidida por `hasPermission` e nunca na própria linha, com `AlertDialog` sem formulário que diz que a conta continua ativa e a pessoa entra com a senha atual. Dois detalhes que valem fora da task: o `AlertDialogAction` do Radix fecha no clique, então ação assíncrona que quer ficar aberta até o sucesso faz `event.preventDefault()` no `onClick`; e o 403 do guard de tenant para admin de OUTRA organização na rota do cliente é o mesmo de toda escrita da família `/clients/{id}/users` (não nasceu uma conversão nova para 404). A detecção de reuso de refresh rotacionado é a parte 2, task própria do Pedro._
 

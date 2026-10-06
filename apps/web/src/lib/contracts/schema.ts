@@ -17,9 +17,15 @@ export interface paths {
          * Login com email + senha. Seta cookies HttpOnly de access + refresh.
          * @description Valida credenciais e emite par de tokens em cookies.
          *
-         *     Rate limit: 5 tentativas / 5 min POR IP (TODO S16: combinar com email).
-         *     Em violation, slowapi levanta `RateLimitExceeded` convertido pelo handler
-         *     global em HTTP 429 RATE_LIMITED.
+         *     Rate limit (86e3anx10), em duas camadas:
+         *         - por IDENTIDADE: 5 falhas / 5 min por e-mail. A consulta vem ANTES da
+         *           verificação, de propósito: quem já estourou recebe 429 mesmo com a
+         *           senha certa e não gasta bcrypt. Só falha (qualquer 401 do
+         *           `AuthService.login`) conta; sucesso não conta e não zera.
+         *         - por IP: teto de enxurrada (`LOGIN_FLOOD_LIMIT`). Atrás do BFF o IP é
+         *           o do proxy, então esse teto é global por instância e não distingue
+         *           pessoas.
+         *     Os dois respondem HTTP 429 RATE_LIMITED no envelope padrão.
          *
          *     NOTA: `request: Request` PRECISA ser o primeiro parâmetro para o slowapi
          *     extrair o cliente — não mude essa ordem.
@@ -308,10 +314,12 @@ export interface paths {
          * Encerra todas as sessões abertas de um usuário do tenant, sem desativar nem trocar a senha. Quem gere os usuários do cliente pode; a própria sessão é 409; cliente encerrado é 409.
          * @description Revogação de sessão sem troca de senha (86e3anx4u, parte 1), lado do tenant.
          *
-         *     `ManageClientUsersDep` passa por `AccessibleClientDep`: o ALCANCE é decidido
-         *     antes da permissão (atacante de outro tenant/organização recebe a negação
-         *     cross-tenant com a trilha dela), e o `client_operator` que alcança o cliente
-         *     mas não pode a ação recebe 403 com 1 linha `denied` em `access_audit`. O alvo
+         *     `ManageClientUsersAuditedDep` é a MESMA célula (`manage_client_users`) pelo
+         *     guard que passa por `AccessibleClientDep` e grava a negação: o ALCANCE é
+         *     decidido antes da permissão (atacante de outro tenant/organização recebe a
+         *     negação cross-tenant com a trilha dela), e o `client_operator` que alcança o
+         *     cliente mas não pode a ação recebe 403 com 1 linha `denied` em `access_audit`.
+         *     O alvo
          *     sai do SELECT com `AND client_id = <tenant da rota>`: usuário de outro
          *     cliente é 404. Mesma mecânica da rota de staff: carimbo sem hash, `active`
          *     intocado, 204 sem corpo.

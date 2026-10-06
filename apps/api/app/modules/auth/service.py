@@ -75,7 +75,7 @@ class AuthService:
         consumimos um `verify_password` contra um hash dummy pré-computado.
         Sem isso, atacante mede `t_response` e enumera emails válidos pela
         ausência do bcrypt (~150-200ms cost=12). Combinado ao rate limit
-        do `/login` (5/5min/IP), barra enumeração prática.
+        do `/login` (5 falhas/5min por e-mail), barra enumeração prática.
         """
         ctx = await self._repo.get_auth_context_by_email(email)
         if ctx is None:
