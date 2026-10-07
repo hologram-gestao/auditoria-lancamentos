@@ -3815,6 +3815,10 @@ test.describe('Sidebar em camadas (86e2n39h7)', () => {
     const clientNav = page.getByRole('navigation', { name: 'Seções do cliente' });
     await expect(clientNav.getByRole('link', { name: 'Contas Bancárias' })).toBeVisible();
     await expect(clientNav.getByText('Cliente Exemplo Ltda')).toBeVisible();
+    // 86e3k1q2j: o menu do cliente vem em seções, com o Painel abrindo a Operação.
+    for (const heading of ['Operação', 'Cadastros', 'Acesso']) {
+      await expect(clientNav.getByText(heading, { exact: true })).toBeVisible();
+    }
     await expect(page.getByRole('navigation', { name: 'Navegação principal' })).toHaveCount(0);
     // O hambúrguer é exclusivo do mobile (md:hidden) — no desktop não existe.
     await expect(page.getByRole('button', { name: 'Abrir menu de navegação' })).toHaveCount(0);
@@ -3835,6 +3839,9 @@ test.describe('Sidebar em camadas (86e2n39h7)', () => {
     const clientNav = page.getByRole('navigation', { name: 'Seções do cliente' });
     await expect(clientNav.getByRole('link', { name: 'Conciliações' })).toBeVisible();
     await expect(clientNav.getByRole('link', { name: 'Voltar para clientes' })).toHaveCount(0);
+    // Sem `manage_client_users`, a seção Acesso some inteira (sem cabeçalho órfão).
+    await expect(clientNav.getByText('Operação', { exact: true })).toBeVisible();
+    await expect(clientNav.getByText('Acesso', { exact: true })).toHaveCount(0);
     // `exact`: "Clientes" por substring casaria com um eventual Voltar.
     await expect(page.getByRole('link', { name: 'Clientes', exact: true })).toHaveCount(0);
     await expect(page.getByText('Configurações')).toHaveCount(0);
@@ -3926,6 +3933,7 @@ test.describe('Menu mobile — drawer (86e2n4pf9)', () => {
     const clientNav = dialog.getByRole('navigation', { name: 'Seções do cliente' });
     await expect(clientNav.getByRole('link', { name: 'Contas Bancárias' })).toBeVisible();
     await expect(clientNav.getByText('Cliente Exemplo Ltda')).toBeVisible();
+    await expect(clientNav.getByText('Cadastros', { exact: true })).toBeVisible();
     await analyze(page, 'drawer de navegação aberto (390px)');
     await shot(page, 'drawer-navegacao-cliente-390');
 

@@ -30,11 +30,22 @@ import {
 import { hasPermission, homePathFor, isClientScoped, type Permission } from '@/lib/authz';
 import type { AuthenticatedUser } from '@/lib/contracts';
 
+/** Tom do contador do item: info = em andamento, warning = decisão pendente, destructive = atraso. */
+export type NavCountTone = 'info' | 'warning' | 'destructive';
+
 export interface NavItem {
   href: string;
   label: string;
   icon: React.ReactNode;
   active: boolean;
+  /**
+   * Contador de pendência ao lado do rótulo (épico 86e3k1q1u). Sem `count`,
+   * nada renderiza. Quem preenche é o resumo do cliente (subtask 4); o número
+   * nunca vai sozinho: `countLabel` é o nome acessível ("12 títulos vencidos").
+   */
+  count?: number;
+  countTone?: NavCountTone;
+  countLabel?: string;
 }
 
 export interface NavSection {
@@ -174,12 +185,17 @@ export function mappingPreviewPath(clientId: string, competence: string): string
   return `/clientes/${clientId}/de-para?view=previa&competence=${encodeURIComponent(competence)}`;
 }
 
-/** Camada do CLIENTE: as seções internas de `/clientes/{id}/**`. */
-export function clientNavItems(
+/**
+ * Camada do CLIENTE: as seções internas de `/clientes/{id}/**`, agrupadas em
+ * Operação, Cadastros e Acesso (86e3k1q2j). O gating de cada item não mudou com
+ * o agrupamento; seção que fica sem item some inteira (a mesma regra de
+ * "Configurações" na camada global), nunca um cabeçalho órfão.
+ */
+export function clientNavSections(
   user: AuthenticatedUser,
   clientId: string,
   pathname: string,
-): NavItem[] {
+): NavSection[] {
   const base = `/clientes/${clientId}`;
   const accountsHref = `${base}/contas`;
   const dashboardHref = `${base}/painel`;
@@ -217,66 +233,29 @@ export function clientNavItems(
     !isMapping &&
     !isFileOrigin;
 
-  const items: NavItem[] = [
-    {
-      href: base,
-      label: 'Conciliações',
-      icon: <ListChecks className="h-4 w-4" aria-hidden="true" />,
-      active: isReconciliations,
-    },
-    {
-      href: accountsHref,
-      label: 'Contas Bancárias',
-      icon: <Landmark className="h-4 w-4" aria-hidden="true" />,
-      active: isAccounts,
-    },
+  // Operação: o trabalho do mês. "Painel" vem primeiro no menu, mas a rota de
+  // entrada do cliente continua a lista de conciliações (decisão da subtask 7).
+  const operation: NavItem[] = [
     {
       href: dashboardHref,
       label: 'Painel',
       icon: <LayoutDashboard className="h-4 w-4" aria-hidden="true" />,
       active: isDashboard,
     },
-    // Glossário (S6/R2) NÃO é gated: ler é de todo papel com acesso ao cliente —
-    // o operador o usa como referência na revisão. Quem pede permissão é a
-    // ESCRITA, dentro da tela.
     {
-      href: glossaryHref,
-      label: 'Glossário',
-      icon: <BookOpen className="h-4 w-4" aria-hidden="true" />,
-      active: isGlossary,
+      href: base,
+      label: 'Conciliações',
+      icon: <ListChecks className="h-4 w-4" aria-hidden="true" />,
+      active: isReconciliations,
     },
   ];
-  // S10 (R4): "Plano de Contas" é montado pela MATRIZ, como os itens de
-  // Configurações. A célula de LER é ✅ nos cinco papéis hoje, então na prática
-  // todo mundo com acesso ao cliente vê o item — o que o gating garante é que,
-  // no dia em que a célula fechar para algum papel, a rota e o item sumam
-  // JUNTOS. Quem pede permissão separada é SINCRONIZAR, dentro da tela.
-  if (hasPermission(user, 'view_client_chart_of_accounts')) {
-    items.push({
-      href: chartOfAccountsHref,
-      label: 'Plano de Contas',
-      icon: <ListTree className="h-4 w-4" aria-hidden="true" />,
-      active: isChartOfAccounts,
-    });
-  }
-  // S16 (R1): "Plano contábil" — o plano do sistema contábil de DESTINO, ao lado
-  // do "Plano de Contas" da origem (nomes distintos de propósito). NÃO é gated,
-  // pela regra do De-para: a LEITURA é `AccessibleClientDep` no backend, sem
-  // permissão própria. Quem pede permissão (`manage_client_accounting_chart`) é
-  // importar e associar a conta do banco, dentro da tela.
-  items.push({
-    href: accountingChartHref,
-    label: 'Plano contábil',
-    icon: <Calculator className="h-4 w-4" aria-hidden="true" />,
-    active: isAccountingChart,
-  });
-  // S11 (R5): "Carteira" pela MESMA regra do Plano de Contas. A célula de LER é
-  // ✅ nos cinco papéis hoje, então na prática todo mundo com acesso ao cliente
-  // vê o item — o que o gating garante é que, no dia em que a célula fechar
-  // para algum papel, a rota e o item sumam JUNTOS. Quem pede permissão
-  // separada é SINCRONIZAR, dentro da tela.
+  // S11 (R5): "Carteira" é montada pela MATRIZ. A célula de LER é ✅ nos cinco
+  // papéis hoje, então na prática todo mundo com acesso ao cliente vê o item; o
+  // que o gating garante é que, no dia em que a célula fechar para algum papel,
+  // a rota e o item sumam JUNTOS. Quem pede permissão separada é SINCRONIZAR,
+  // dentro da tela.
   if (hasPermission(user, 'view_client_receivables')) {
-    items.push({
+    operation.push({
       href: titlesHref,
       label: 'Carteira',
       icon: <Wallet className="h-4 w-4" aria-hidden="true" />,
@@ -284,12 +263,12 @@ export function clientNavItems(
     });
   }
   // S12 (R6): "De-para" NÃO é gated, pela regra do Glossário: LER é de todo
-  // papel que alcança o cliente — o operador inclusive, que vê a lista e a
+  // papel que alcança o cliente, o operador inclusive, que vê a lista e a
   // prévia. O backend não declara permissão de leitura (a rota é
   // `AccessibleClientDep`), e inventar uma aqui esconderia o que o servidor
   // libera. Quem pede permissão é a ESCRITA (`manage_client_mapping`) e o
   // sincronizar (`sync_client_movements`), dentro da tela.
-  items.push({
+  operation.push({
     href: mappingHref,
     label: 'De-para',
     icon: <ArrowRightLeft className="h-4 w-4" aria-hidden="true" />,
@@ -299,28 +278,77 @@ export function clientNavItems(
   // listada. Antes ela só existia para o cliente que já tinha conexão
   // `arquivo`, e o resultado era um recurso invisível: quem opera não descobria
   // que dá para atender cliente sem ERP mandando a planilha do mês. Quem
-  // explica o estado — sem origem, com Omie, encerrado — é a TELA, que também
+  // explica o estado (sem origem, com Omie, encerrado) é a TELA, que também
   // decide a ação pela permissão. Esconder aqui não é regra de §4.9: LER a aba
   // não pede permissão nenhuma (a rota é `AccessibleClientDep`), e o que o
   // servidor negaria é CONECTAR, que a tela já esconde de quem não pode.
-  items.push({
+  operation.push({
     href: fileOriginHref,
     label: 'Origem por arquivo',
     icon: <FileSpreadsheet className="h-4 w-4" aria-hidden="true" />,
     active: isFileOrigin,
   });
-  // Matriz: "Usuários" é de quem gere as pessoas DO tenant — gerente do
+
+  // Cadastros: o que o mês consulta e quase nunca muda.
+  const registry: NavItem[] = [
+    {
+      href: accountsHref,
+      label: 'Contas Bancárias',
+      icon: <Landmark className="h-4 w-4" aria-hidden="true" />,
+      active: isAccounts,
+    },
+    // Glossário (S6/R2) NÃO é gated: ler é de todo papel com acesso ao cliente;
+    // o operador o usa como referência na revisão. Quem pede permissão é a
+    // ESCRITA, dentro da tela.
+    {
+      href: glossaryHref,
+      label: 'Glossário',
+      icon: <BookOpen className="h-4 w-4" aria-hidden="true" />,
+      active: isGlossary,
+    },
+  ];
+  // S10 (R4): "Plano de Contas" pela MESMA regra da Carteira: a célula de LER é
+  // ✅ nos cinco papéis hoje, e o gating faz rota e item sumirem JUNTOS no dia
+  // em que ela fechar. Quem pede permissão separada é SINCRONIZAR, dentro da tela.
+  if (hasPermission(user, 'view_client_chart_of_accounts')) {
+    registry.push({
+      href: chartOfAccountsHref,
+      label: 'Plano de Contas',
+      icon: <ListTree className="h-4 w-4" aria-hidden="true" />,
+      active: isChartOfAccounts,
+    });
+  }
+  // S16 (R1): "Plano contábil", o plano do sistema contábil de DESTINO, ao lado
+  // do "Plano de Contas" da origem (nomes distintos de propósito). NÃO é gated,
+  // pela regra do De-para: a LEITURA é `AccessibleClientDep` no backend, sem
+  // permissão própria. Quem pede permissão (`manage_client_accounting_chart`) é
+  // importar e associar a conta do banco, dentro da tela.
+  registry.push({
+    href: accountingChartHref,
+    label: 'Plano contábil',
+    icon: <Calculator className="h-4 w-4" aria-hidden="true" />,
+    active: isAccountingChart,
+  });
+
+  // Acesso. Matriz: "Usuários" é de quem gere as pessoas DO tenant: gerente do
   // cliente, admin, plataforma e, desde a D2 (86e36ecjp), o gerente da
   // organização nos clientes da CARTEIRA. O "da carteira" não é esta linha: é
   // `resolve_client_access`, no servidor, que já decide se ele chega no cliente.
-  // O operador do cliente segue de fora.
+  // O operador do cliente segue de fora, e para ele a seção some inteira.
+  const access: NavItem[] = [];
   if (hasPermission(user, 'manage_client_users')) {
-    items.push({
+    access.push({
       href: usersHref,
       label: 'Usuários',
       icon: <UserCog className="h-4 w-4" aria-hidden="true" />,
       active: isUsers,
     });
   }
-  return items;
+
+  const sections: NavSection[] = [
+    { heading: 'Operação', items: operation },
+    { heading: 'Cadastros', items: registry },
+    { heading: 'Acesso', items: access },
+  ];
+  return sections.filter((section) => section.items.length > 0);
 }
