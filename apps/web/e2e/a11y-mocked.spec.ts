@@ -4367,6 +4367,14 @@ for (const vp of VIEWPORTS) {
       // `?conectar=arquivo` nasceu apontando para `/painel` (86e3fqnc9): a gaveta
       // abrir já no tipo pedido prova que a query sobreviveu ao redirect.
       originState = 'sem_origem';
+      // 308 de verdade, do servidor (redirect do `next.config`), com a query no destino.
+      const resposta = await page.request.get(`/clientes/${CLIENT_ID}/painel?conectar=arquivo`, {
+        maxRedirects: 0,
+      });
+      expect(resposta.status()).toBe(308);
+      expect(resposta.headers()['location']).toMatch(
+        new RegExp(`/clientes/${CLIENT_ID}\\?conectar=arquivo$`),
+      );
       await page.goto(`/clientes/${CLIENT_ID}/painel?conectar=arquivo`);
       await expect(page).toHaveURL(new RegExp(`/clientes/${CLIENT_ID}(\\?|$)`));
       await expect(page).not.toHaveURL(/\/painel/);

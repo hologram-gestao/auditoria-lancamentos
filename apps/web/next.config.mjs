@@ -60,6 +60,21 @@ const nextConfig = {
   // Transpile workspace packages (shared-types)
   transpilePackages: ['@auditoria/shared-types'],
 
+  // `/clientes/{id}/painel` é o endereço ANTIGO do painel (86e3k1q5n): o painel
+  // virou a raiz do cliente. Redirect de CONFIG, e não `permanentRedirect()` numa
+  // página: a página responde 200 (o layout já começou a transmitir) e redireciona
+  // no navegador com um refresh de 1 s; aqui sai um 308 de verdade, sem JS, e o
+  // Next leva a query junto (o `?conectar=<tipo>` da gaveta nasceu apontando para cá).
+  async redirects() {
+    return [
+      {
+        source: '/clientes/:clientId/painel',
+        destination: '/clientes/:clientId',
+        permanent: true,
+      },
+    ];
+  },
+
   // Headers de segurança (complementares ao nginx/proxy em prod)
   async headers() {
     const baseHeaders = [
