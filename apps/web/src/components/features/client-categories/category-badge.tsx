@@ -14,6 +14,8 @@ const baseBadge =
 
 const toneClasses: Record<string, string> = {
   neutral: 'bg-muted text-muted-foreground ring-border',
+  // "Destaque" segue o primário: verde no Hologram (86e3h578n, decisão do Pedro em
+  // 07/10). O par com alfa é medido composto no theme-contrast.test.ts.
   primary: 'bg-primary/10 text-primary ring-primary/30',
   info: 'bg-info-muted text-info ring-info/30',
   success: 'bg-success-muted text-success ring-success/30',

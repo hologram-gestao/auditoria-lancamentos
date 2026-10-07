@@ -31,6 +31,11 @@ const CSS = readFileSync(path.resolve(__dirname, '../globals.css'), 'utf8');
 /** WCAG 2.1 §1.4.11: contraste de componente de interface e de gráfico (não texto). */
 const NON_TEXT = 3;
 
+/** `fg` com opacidade `alpha` pintado sobre `bg` (o que o browser faz com `bg-x/N`). */
+function blend(fg: Rgb, alpha: number, bg: Rgb): Rgb {
+  return [0, 1, 2].map((i) => (fg[i] ?? 0) * alpha + (bg[i] ?? 0) * (1 - alpha)) as Rgb;
+}
+
 function parseTokens(selector: ':root' | '.dark' | '.hologram'): Record<string, string> {
   return parseCssVariables(CSS, selector);
 }
@@ -71,7 +76,13 @@ const PAIRS: ReadonlyArray<{ text: string; bg: string; where: string }> = [
     bg: 'destructive-hover',
     where: 'botão/badge destrutivo em hover',
   },
+  // No Hologram o primário é o verde de ação (86e3h578n): navy sobre o verde.
   { text: 'primary-foreground', bg: 'primary', where: 'botão primário' },
+  // Hover sólido do primário (86e3h578n): era `hover:bg-primary/90`, alfa intravável.
+  { text: 'primary-foreground', bg: 'primary-hover', where: 'botão primário em hover' },
+  // Link de ação em texto (86e3h578n): `foreground` no claro e no escuro, verde no Hologram.
+  { text: 'link', bg: 'background', where: 'link de ação em texto' },
+  { text: 'link', bg: 'card', where: 'link de ação dentro de card' },
   // Verde da marca (86e3h1h75): o botão `variant="brand"` da landing e do login,
   // em repouso e em hover (token sólido, como o destrutivo).
   { text: 'brand-foreground', bg: 'brand', where: 'botão brand (landing, login)' },
@@ -97,10 +108,41 @@ describe.each(['root', 'dark', 'hologram'] as const)(
       expect(contrast(rgb(text), rgb(bg))).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
     });
 
-    // Logomark (86e3h5783): componente NÃO textual (WCAG 1.4.11), então o limite é
-    // 3:1. Vive no header (`bg-card`) e nas páginas públicas (`background`).
-    it.each(['background', 'card'])('logo sobre %s passa 3:1 (componente não textual)', (bg) => {
-      expect(contrast(rgb('logo'), rgb(bg))).toBeGreaterThanOrEqual(NON_TEXT);
+    // Componentes NÃO textuais (WCAG 1.4.11), limite 3:1: a logomark (86e3h5783), que
+    // vive no header (`bg-card`) e nas páginas públicas (`background`), e o anel de
+    // foco (86e3h578n), verde no Hologram, em volta de botão, campo e link.
+    it.each([
+      { fg: 'logo', bg: 'background' },
+      { fg: 'logo', bg: 'card' },
+      { fg: 'ring', bg: 'background' },
+      { fg: 'ring', bg: 'card' },
+    ])('$fg sobre $bg passa 3:1 (componente não textual)', ({ fg, bg }) => {
+      expect(contrast(rgb(fg), rgb(bg))).toBeGreaterThanOrEqual(NON_TEXT);
+    });
+
+    // Fundo com ALFA que sobrou fora do botão (86e3h578n). Não é hover de botão (esse
+    // virou `--primary-hover`), e um token sólido para ele mudaria o claro e o escuro;
+    // então o par COMPOSTO é medido aqui, sobre a superfície onde ele vive de fato.
+    it.each([
+      // Chip "Destaque" (`category-badge`, tom `primary`): verde no Hologram por
+      // decisão do Pedro (07/10). Mora na tabela de clientes: card, e card com o
+      // `hover:bg-muted/50` da linha por baixo.
+      { text: 'primary', layers: [['primary', 0.1]], surface: 'card', where: 'chip Destaque' },
+      {
+        text: 'primary',
+        layers: [
+          ['muted', 0.5],
+          ['primary', 0.1],
+        ],
+        surface: 'card',
+        where: 'chip Destaque em linha com hover',
+      },
+    ] as const)('$text sobre $where passa 4.5:1 (alfa composto)', ({ text, layers, surface }) => {
+      const composed = layers.reduce<Rgb>(
+        (under, [token, alpha]) => blend(rgb(token), alpha, under),
+        rgb(surface),
+      );
+      expect(contrast(rgb(text), composed)).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
     });
 
     // Não há mais caso para `bg-destructive/10` (86e3dxund). Ele compunha os 10%
@@ -173,7 +215,57 @@ describe('verde da marca (--brand)', () => {
     expect(contrast(brand, rgbOf(blocks.hologram, bg))).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
   });
 
-  it('branco (o `--primary` do Hologram) sobre o verde REPROVA: nunca texto branco no verde', () => {
-    expect(contrast(rgbOf(blocks.hologram, 'primary'), brand)).toBeLessThan(AA_NORMAL_TEXT);
+  it('branco (o `--foreground` do Hologram) sobre o verde REPROVA: nunca texto branco no verde', () => {
+    expect(contrast(rgbOf(blocks.hologram, 'foreground'), brand)).toBeLessThan(AA_NORMAL_TEXT);
   });
+});
+
+/**
+ * O verde como cor de AÇÃO no Hologram (86e3h578n). Claro e escuro não mudam (decisão
+ * do Pedro, reavaliação depois de uma semana de uso): os tokens novos de lá
+ * reproduzem o que a tela já pintava.
+ */
+describe('verde de ação no Hologram (--primary, --ring, --link)', () => {
+  const blocks = {
+    root: parseTokens(':root'),
+    dark: parseTokens('.dark'),
+    hologram: parseTokens('.hologram'),
+  };
+  const rgbOf = (tokens: Record<string, string>, name: string): Rgb => {
+    const value = tokens[name];
+    if (value === undefined) throw new Error(`token \`--${name}\` não existe`);
+    return hslToRgb(value);
+  };
+
+  it('no Hologram, primário, anel de foco e link são o verde da marca, e o hover é o dele', () => {
+    const { hologram } = blocks;
+    expect(hologram['primary']).toBe(hologram['brand']);
+    expect(hologram['ring']).toBe(hologram['brand']);
+    expect(hologram['link']).toBe(hologram['brand']);
+    expect(hologram['primary-hover']).toBe(hologram['brand-hover']);
+    expect(hologram['primary-foreground']).toBe(hologram['brand-foreground']);
+  });
+
+  it('no Hologram o item ativo do menu continua o tint do navy, não uma segunda cor de ação', () => {
+    expect(blocks.hologram['accent']).not.toBe(blocks.hologram['brand']);
+    expect(blocks.hologram['accent']).toBe('222 50% 24%');
+  });
+
+  it.each(['root', 'dark'] as const)('no %s o link é o `--foreground` do bloco', (theme) => {
+    expect(blocks[theme]['link']).toBe(blocks[theme]['foreground']);
+  });
+
+  it.each(['root', 'dark'] as const)(
+    'no %s o `--primary-hover` é o antigo `primary/90` sobre o fundo (nada muda na tela)',
+    (theme) => {
+      const tokens = blocks[theme];
+      const hover = rgbOf(tokens, 'primary-hover').map((c) => Math.round(c * 255));
+      const old = blend(rgbOf(tokens, 'primary'), 0.9, rgbOf(tokens, 'background')).map((c) =>
+        Math.round(c * 255),
+      );
+      for (const [indice, canal] of hover.entries()) {
+        expect(Math.abs(canal - (old[indice] ?? 0))).toBeLessThanOrEqual(1);
+      }
+    },
+  );
 });

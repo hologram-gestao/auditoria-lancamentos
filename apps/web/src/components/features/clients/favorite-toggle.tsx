@@ -11,7 +11,8 @@
  * Acessibilidade: é um botão de alternância de verdade (`aria-pressed`), com
  * o nome carregando o cliente e a ação ("Favoritar X" / "Remover X dos
  * favoritos"). A dica segue o padrão do design system — nunca `title` nativo.
- * Cor por token: `text-primary` (marcado) e `text-muted-foreground` (não).
+ * Cor por token: `text-primary` (marcado) e `text-muted-foreground` (não). No
+ * Hologram o marcado é o verde de ação (86e3h578n): favorito é ação, não rótulo.
  *
  * `stopPropagation` no clique: a linha da lista navega ao ser clicada, e
  * favoritar não pode virar navegação. Vale para teclado também — Enter/Espaço

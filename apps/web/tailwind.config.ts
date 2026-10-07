@@ -22,6 +22,7 @@ const config: Config = {
         primary: {
           DEFAULT: 'hsl(var(--primary))',
           foreground: 'hsl(var(--primary-foreground))',
+          hover: 'hsl(var(--primary-hover))',
         },
         secondary: {
           DEFAULT: 'hsl(var(--secondary))',
@@ -43,6 +44,9 @@ const config: Config = {
         // Logomark (86e3h5783): a `BrandMark` pinta por `text-logo`, nunca por
         // `text-primary` — no Hologram o primário é o verde e a logo é branca.
         logo: 'hsl(var(--logo))',
+        // Link de ação em texto (86e3h578n): o `foreground` no claro e no escuro, o
+        // verde no Hologram. Não é para link de navegação do menu nem para botão.
+        link: 'hsl(var(--link))',
         // Feedback semântico — a UI usa SÓ estes tokens (proibido `bg-blue-50`,
         // `text-emerald-600`, hex etc). `muted` é a variante de FUNDO de
         // banner/badge; `DEFAULT` é o traço/ícone/preenchimento forte.

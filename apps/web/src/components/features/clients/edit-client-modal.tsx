@@ -186,7 +186,7 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
                   <Link
                     href={originFixPath(client.id)}
                     onClick={() => onOpenChange(false)}
-                    className="text-foreground underline underline-offset-4"
+                    className="text-link underline underline-offset-4"
                   >
                     Origens de dado
                   </Link>{' '}
