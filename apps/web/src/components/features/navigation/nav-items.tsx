@@ -73,13 +73,15 @@ export function globalNavSections(user: AuthenticatedUser, pathname: string): Na
   // Gating por perfil (R4): usuário DE tenant não tem lista global de clientes —
   // a casa dele é o próprio cliente. Mostrar "Clientes" para ele seria oferecer
   // uma rota que o servidor nega.
+  // A casa do tenant é a raiz do próprio cliente, que desde a 86e3k1q5n é o
+  // PAINEL: o rótulo acompanha o destino (§7 Frontend).
   const home = homePathFor(user);
   const main: NavItem[] = isClientScoped(user)
     ? [
         {
           href: home,
-          label: 'Conciliações',
-          icon: <ListChecks className="h-4 w-4" aria-hidden="true" />,
+          label: 'Painel',
+          icon: <LayoutDashboard className="h-4 w-4" aria-hidden="true" />,
           active: isPathActive(pathname, home),
         },
       ]
@@ -164,7 +166,7 @@ const SETTINGS_ITEMS: ReadonlyArray<{
  * rota muda num lugar só.
  */
 export function reconciliationsPath(clientId: string): string {
-  return `/clientes/${clientId}`;
+  return `/clientes/${clientId}/conciliacoes`;
 }
 
 /** Rota da aba "Origem por arquivo" (S14) — a mesma que o link do de-para aponta. */
@@ -267,7 +269,7 @@ export function clientNavSections(
   const counts = summary ? clientNavCounts(summary) : {};
   const base = `/clientes/${clientId}`;
   const accountsHref = `${base}/contas`;
-  const dashboardHref = `${base}/painel`;
+  const reconciliationsHref = reconciliationsPath(clientId);
   const usersHref = `${base}/usuarios`;
   const glossaryHref = `${base}/glossario`;
   const chartOfAccountsHref = `${base}/plano-de-contas`;
@@ -275,44 +277,36 @@ export function clientNavSections(
   const titlesHref = `${base}/carteira`;
   const mappingHref = `${base}/de-para`;
   const fileOriginHref = fileOriginPath(clientId);
-  // "Conciliações" continua ativo dentro do detalhe de uma conciliação — é a
-  // mesma área de navegação, só que um nível abaixo (regra herdada do
-  // ClientShell, que era o dono desta árvore até a 86e2n39h7).
-  //
-  // ⚠️ Rota nova do cliente entra TAMBÉM nesta negação: "Conciliações" é o
-  // fallback, então esquecer a linha aqui deixa dois itens marcados como ativos
-  // ao mesmo tempo.
-  const isAccounts = pathname.startsWith(accountsHref);
-  const isDashboard = pathname.startsWith(dashboardHref);
-  const isUsers = pathname.startsWith(usersHref);
-  const isGlossary = pathname.startsWith(glossaryHref);
-  const isChartOfAccounts = pathname.startsWith(chartOfAccountsHref);
-  const isAccountingChart = pathname.startsWith(accountingChartHref);
-  const isTitles = pathname.startsWith(titlesHref);
-  const isMapping = pathname.startsWith(mappingHref);
-  const isFileOrigin = pathname.startsWith(fileOriginHref);
+  // Cada item casa pela PRÓPRIA rota (86e3k1q5n): não existe mais item ativo
+  // "por exclusão". O Painel é a raiz do cliente e só ela; "Conciliações" é a
+  // lista e também o detalhe e o processamento de uma conciliação
+  // (`/conciliacao/{id}/**`), que são a mesma área um nível abaixo. Rota que
+  // nenhum item reivindica fica sem item ativo, em vez de acender um item que
+  // não é dela.
+  const isDashboard = pathname === base;
   const isReconciliations =
-    !isAccounts &&
-    !isDashboard &&
-    !isUsers &&
-    !isGlossary &&
-    !isChartOfAccounts &&
-    !isAccountingChart &&
-    !isTitles &&
-    !isMapping &&
-    !isFileOrigin;
+    isPathActive(pathname, reconciliationsHref) || pathname.startsWith(`${base}/conciliacao/`);
+  const isAccounts = isPathActive(pathname, accountsHref);
+  const isUsers = isPathActive(pathname, usersHref);
+  const isGlossary = isPathActive(pathname, glossaryHref);
+  const isChartOfAccounts = isPathActive(pathname, chartOfAccountsHref);
+  const isAccountingChart = isPathActive(pathname, accountingChartHref);
+  const isTitles = isPathActive(pathname, titlesHref);
+  const isMapping = isPathActive(pathname, mappingHref);
+  const isFileOrigin = isPathActive(pathname, fileOriginHref);
 
-  // Operação: o trabalho do mês. "Painel" vem primeiro no menu, mas a rota de
-  // entrada do cliente continua a lista de conciliações (decisão da subtask 7).
+  // Operação: o trabalho do mês. O Painel é a tela de entrada do cliente
+  // (`/clientes/{id}`, decisão do Pedro em 07/10/2026, 86e3k1q5n); a lista de
+  // conciliações mora em `/conciliacoes`.
   const operation: NavItem[] = [
     {
-      href: dashboardHref,
+      href: base,
       label: 'Painel',
       icon: <LayoutDashboard className="h-4 w-4" aria-hidden="true" />,
       active: isDashboard,
     },
     {
-      href: base,
+      href: reconciliationsHref,
       label: 'Conciliações',
       icon: <ListChecks className="h-4 w-4" aria-hidden="true" />,
       active: isReconciliations,

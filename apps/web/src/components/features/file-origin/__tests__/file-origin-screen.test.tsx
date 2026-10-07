@@ -342,7 +342,7 @@ describe('Mapeamento — estados e gating (R1 · R5)', () => {
     expect(screen.queryByRole('link', { name: /Conectar origem/ })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Ver origem do cliente' })).toHaveAttribute(
       'href',
-      `/clientes/${CLIENT_ID}/painel`,
+      `/clientes/${CLIENT_ID}`,
     );
     expect(screen.queryByTestId('file-upload-section')).not.toBeInTheDocument();
   });
@@ -355,7 +355,7 @@ describe('Mapeamento — estados e gating (R1 · R5)', () => {
     expect(empty).toHaveTextContent('não tem sistema contábil');
     expect(screen.getByRole('link', { name: 'Conectar origem por arquivo' })).toHaveAttribute(
       'href',
-      `/clientes/${CLIENT_ID}/painel?conectar=arquivo`,
+      `/clientes/${CLIENT_ID}?conectar=arquivo`,
     );
   });
 

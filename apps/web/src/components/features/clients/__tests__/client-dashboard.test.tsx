@@ -356,7 +356,7 @@ describe('ClientDashboard — blocos', () => {
     ).toBeVisible();
     expect(screen.getByRole('link', { name: 'Ver conciliações' })).toHaveAttribute(
       'href',
-      '/clientes/c1',
+      '/clientes/c1/conciliacoes',
     );
     await user.click(screen.getByRole('button', { name: 'Nova conciliação' }));
     expect(openDrawer).toHaveBeenCalledTimes(1);
@@ -540,7 +540,10 @@ describe('ClientDashboard — estados', () => {
 
     const vazio = screen.getByTestId('dashboard-no-reconciliations');
     expect(vazio).toHaveAttribute('data-state', 'pronto');
-    expect(within(vazio).getByRole('link', { name: /Ir para conciliações/ })).toBeVisible();
+    expect(within(vazio).getByRole('link', { name: /Ir para conciliações/ })).toHaveAttribute(
+      'href',
+      '/clientes/c1/conciliacoes',
+    );
     expect(card('Atividade')).toHaveTextContent('Nenhuma conciliação ainda.');
   });
 

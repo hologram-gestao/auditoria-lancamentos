@@ -247,7 +247,8 @@ describe('SidebarNav — camada global', () => {
     expect(screen.queryByRole('navigation', { name: 'Seções do cliente' })).not.toBeInTheDocument();
     const nav = screen.getByRole('navigation', { name: 'Navegação principal' });
     expect(within(nav).queryByRole('link', { name: 'Clientes' })).not.toBeInTheDocument();
-    expect(within(nav).getByRole('link', { name: 'Conciliações' })).toHaveAttribute(
+    // A casa do tenant é a raiz do próprio cliente, que é o PAINEL (86e3k1q5n).
+    expect(within(nav).getByRole('link', { name: 'Painel' })).toHaveAttribute(
       'href',
       '/clientes/c1',
     );
@@ -364,12 +365,47 @@ describe('SidebarNav — camada do cliente', () => {
       'Acesso',
       'Usuários',
     ]);
-    // Na raiz do cliente o ativo continua "Conciliações", por exclusão.
+    // A raiz do cliente é o PAINEL (86e3k1q5n): ele é o ativo, e só ele.
     const current = within(nav)
       .getAllByRole('link')
       .filter((link) => link.getAttribute('aria-current') === 'page')
       .map((link) => link.textContent);
-    expect(current).toEqual(['Conciliações']);
+    expect(current).toEqual(['Painel']);
+    expect(within(nav).getByRole('link', { name: 'Painel' })).toHaveAttribute(
+      'href',
+      '/clientes/c1',
+    );
+    expect(within(nav).getByRole('link', { name: 'Conciliações' })).toHaveAttribute(
+      'href',
+      '/clientes/c1/conciliacoes',
+    );
+  });
+
+  function activeItems(): Array<string | null> {
+    const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
+    return within(nav)
+      .getAllByRole('link')
+      .filter((link) => link.getAttribute('aria-current') === 'page')
+      .map((link) => link.textContent);
+  }
+
+  it('"Conciliações" casa pela própria rota: a lista, o detalhe e o processamento', () => {
+    for (const path of [
+      '/clientes/c1/conciliacoes',
+      '/clientes/c1/conciliacao/s9',
+      '/clientes/c1/conciliacao/processando/s9',
+    ]) {
+      currentPathname = path;
+      const { unmount } = render(<SidebarNav user={ADMIN} />);
+      expect(activeItems()).toEqual(['Conciliações']);
+      unmount();
+    }
+  });
+
+  it('rota que nenhum item reivindica não acende item nenhum (sem ativo por exclusão)', () => {
+    currentPathname = '/clientes/c1/rota-que-nao-existe';
+    render(<SidebarNav user={ADMIN} />);
+    expect(activeItems()).toEqual([]);
   });
 
   it('sem contador vindo do item, nenhum link carrega pílula de número', () => {
@@ -412,7 +448,7 @@ describe('SidebarNav — camada do cliente', () => {
     // O operador vê a aba: LER o mapeamento e ENVIAR o arquivo são dele.
     const item = within(nav).getByRole('link', { name: 'Origem por arquivo' });
     expect(item).toHaveAttribute('href', '/clientes/c1/origem-arquivo');
-    // Rota nova entrou na negação do fallback: "Conciliações" não fica ativo junto.
+    // Cada item casa pela própria rota: "Conciliações" não fica ativo junto.
     expect(item).toHaveAttribute('aria-current', 'page');
     expect(within(nav).getByRole('link', { name: 'Conciliações' })).not.toHaveAttribute(
       'aria-current',
@@ -454,8 +490,8 @@ describe('SidebarNav — camada do cliente', () => {
   });
 
   it('a rota do de-para não deixa "Conciliações" ativo junto', () => {
-    // "Conciliações" é o FALLBACK da camada do cliente: rota nova que não entre
-    // na negação de `isReconciliations` marca dois itens ao mesmo tempo.
+    // Desde a 86e3k1q5n cada item casa pela própria rota; o teste fica como
+    // trava contra a volta do "ativo por exclusão".
     currentPathname = '/clientes/c1/de-para';
     render(<SidebarNav user={ADMIN} />);
 
@@ -470,9 +506,8 @@ describe('SidebarNav — camada do cliente', () => {
   });
 
   it('a rota da carteira não deixa "Conciliações" ativo junto', () => {
-    // Mesma armadilha do plano de contas: "Conciliações" é o FALLBACK da camada
-    // do cliente, então rota nova que não entre na negação de
-    // `isReconciliations` marca dois itens ao mesmo tempo.
+    // Desde a 86e3k1q5n cada item casa pela própria rota; o teste fica como
+    // trava contra a volta do "ativo por exclusão".
     currentPathname = '/clientes/c1/carteira';
     render(<SidebarNav user={ADMIN} />);
 
@@ -487,8 +522,8 @@ describe('SidebarNav — camada do cliente', () => {
   });
 
   it('a rota do plano de contas não deixa "Conciliações" ativo junto', () => {
-    // "Conciliações" é o FALLBACK da camada do cliente: rota nova que não entre
-    // na negação de `isReconciliations` marca dois itens ao mesmo tempo.
+    // Desde a 86e3k1q5n cada item casa pela própria rota; o teste fica como
+    // trava contra a volta do "ativo por exclusão".
     currentPathname = '/clientes/c1/plano-de-contas';
     render(<SidebarNav user={ADMIN} />);
 

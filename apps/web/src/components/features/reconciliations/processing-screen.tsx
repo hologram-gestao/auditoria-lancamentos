@@ -36,6 +36,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
+import { reconciliationsPath } from '@/components/features/navigation/nav-items';
 import { Button } from '@/components/ui/button';
 import { useSessionStatus } from '@/hooks/use-reconciliations';
 import { ApiError } from '@/lib/api/client';
@@ -141,10 +142,11 @@ export function ProcessingScreen({ clientId, sessionId }: ProcessingScreenProps)
   function handleBackToForm() {
     // Sprint 4: a criação virou uma GAVETA aberta da lista — a página
     // `/conciliacao/nova` não existe mais. O destino é a lista do cliente.
-    router.push(`/clientes/${clientId}`);
+    router.push(reconciliationsPath(clientId));
   }
 
   function handleBackToClient() {
+    // "Voltar para o cliente" é a raiz do cliente, que desde a 86e3k1q5n é o painel.
     router.push(`/clientes/${clientId}`);
   }
 

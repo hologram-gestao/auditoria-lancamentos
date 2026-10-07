@@ -107,115 +107,136 @@ export function FlowChart({ buckets }: { buckets: readonly TitlesFlowBucket[] })
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="relative h-44">
-        <svg
-          role="img"
-          aria-label={`Fluxo previsto por faixa de vencimento. ${summary}.`}
-          viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
-          preserveAspectRatio="none"
-          className="absolute inset-0 h-full w-full"
-          data-testid="flow-chart-svg"
-        >
-          {grid.map((value) => (
-            <line
-              key={value}
-              data-testid="flow-chart-grid"
-              x1={0}
-              x2={VIEW_WIDTH}
-              y1={yOf(value)}
-              y2={yOf(value)}
-              vectorEffect="non-scaling-stroke"
-              style={{ stroke: 'hsl(var(--border))' }}
-              strokeDasharray="4 4"
-            />
-          ))}
-          <line
-            x1={0}
-            x2={VIEW_WIDTH}
-            y1={VIEW_HEIGHT}
-            y2={VIEW_HEIGHT}
-            vectorEffect="non-scaling-stroke"
-            style={{ stroke: 'hsl(var(--border))' }}
-          />
-          {series.map((b, index) => {
-            const center = groupWidth * index + groupWidth / 2;
-            const receberHeight = heightOf(b.aReceber.total);
-            const pagarHeight = heightOf(b.aPagar.total);
-            return (
-              <g key={b.bucket} data-testid="flow-chart-group" data-bucket={b.bucket}>
-                <rect
-                  x={center - gap / 2 - barWidth}
-                  y={VIEW_HEIGHT - receberHeight}
-                  width={barWidth}
-                  height={receberHeight}
-                  style={{ fill: 'hsl(var(--info))' }}
-                />
-                <rect
-                  x={center + gap / 2}
-                  y={VIEW_HEIGHT - pagarHeight}
-                  width={barWidth}
-                  height={pagarHeight}
-                  style={{ fill: 'hsl(var(--warning))' }}
-                />
-              </g>
-            );
-          })}
-        </svg>
-        {/* Rótulos do eixo sobre as linhas de grade, em HTML (ver docstring). */}
-        <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+      {/* O eixo tem CALHA própria à esquerda (`pl-14`): rótulo de grade nunca
+          cobre o topo de uma barra. A linha de faixas abaixo usa a mesma calha
+          para as colunas alinharem com os grupos. */}
+      <div className="relative h-44 pl-14">
+        <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 w-14">
           {grid.map((value) => (
             <span
               key={value}
               data-testid="flow-chart-axis-label"
-              className="text-muted-foreground bg-card absolute left-0 -translate-y-full pr-1 text-[11px] leading-none"
+              className="text-muted-foreground absolute left-0 -translate-y-1/2 whitespace-nowrap text-[11px] leading-none"
               style={{ top: `${(yOf(value) / VIEW_HEIGHT) * 100}%` }}
             >
               {axisLabel(value)}
             </span>
           ))}
         </div>
-        {/* Faixa sem título nenhum: o texto no lugar das barras. */}
-        <div aria-hidden="true" className="pointer-events-none absolute inset-0 grid grid-cols-5">
-          {series.map((b) => (
-            <div key={b.bucket} className="flex items-end justify-center pb-1">
-              {b.aReceber.count === 0 && b.aPagar.count === 0 && (
-                <span className="text-muted-foreground text-xs">sem títulos</span>
-              )}
-            </div>
-          ))}
+        <div className="relative h-full">
+          <svg
+            role="img"
+            aria-label={`Fluxo previsto por faixa de vencimento. ${summary}.`}
+            viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
+            preserveAspectRatio="none"
+            className="absolute inset-0 h-full w-full"
+            data-testid="flow-chart-svg"
+          >
+            {grid.map((value) => (
+              <line
+                key={value}
+                data-testid="flow-chart-grid"
+                x1={0}
+                x2={VIEW_WIDTH}
+                y1={yOf(value)}
+                y2={yOf(value)}
+                vectorEffect="non-scaling-stroke"
+                style={{ stroke: 'hsl(var(--border))' }}
+                strokeDasharray="4 4"
+              />
+            ))}
+            <line
+              x1={0}
+              x2={VIEW_WIDTH}
+              y1={VIEW_HEIGHT}
+              y2={VIEW_HEIGHT}
+              vectorEffect="non-scaling-stroke"
+              style={{ stroke: 'hsl(var(--border))' }}
+            />
+            {series.map((b, index) => {
+              const center = groupWidth * index + groupWidth / 2;
+              const receberHeight = heightOf(b.aReceber.total);
+              const pagarHeight = heightOf(b.aPagar.total);
+              return (
+                <g key={b.bucket} data-testid="flow-chart-group" data-bucket={b.bucket}>
+                  <rect
+                    x={center - gap / 2 - barWidth}
+                    y={VIEW_HEIGHT - receberHeight}
+                    width={barWidth}
+                    height={receberHeight}
+                    style={{ fill: 'hsl(var(--info))' }}
+                  />
+                  <rect
+                    x={center + gap / 2}
+                    y={VIEW_HEIGHT - pagarHeight}
+                    width={barWidth}
+                    height={pagarHeight}
+                    style={{ fill: 'hsl(var(--warning))' }}
+                  />
+                </g>
+              );
+            })}
+          </svg>
+          {/* Faixa sem título nenhum: o texto no lugar das barras. */}
+          <div aria-hidden="true" className="pointer-events-none absolute inset-0 grid grid-cols-5">
+            {series.map((b) => (
+              <div key={b.bucket} className="flex items-end justify-center pb-1">
+                {b.aReceber.count === 0 && b.aPagar.count === 0 && (
+                  <span className="text-muted-foreground text-center text-xs">sem títulos</span>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
-      <div aria-hidden="true" className="grid grid-cols-5 gap-1 text-center">
+      {/* Faixa e líquido. Em `sm`+ uma coluna por grupo, sob as barras; abaixo
+          de `sm` cinco valores com sinal não cabem lado a lado (um encostava no
+          outro em 390px), então o líquido vira lista e as colunas levam só o nome. */}
+      <div aria-hidden="true" className="grid grid-cols-5 gap-1 pl-14 text-center">
         {series.map((b) => (
           <div key={b.bucket} className="flex min-w-0 flex-col items-center gap-0.5">
             <span className="text-muted-foreground text-xs">{bucketLabel(b.bucket)}</span>
-            <Money value={b.net} tone="sign" className="text-[11px] font-medium sm:text-xs" />
+            <Money value={b.net} tone="sign" className="hidden text-xs font-medium sm:inline" />
           </div>
         ))}
       </div>
-      <table className="sr-only">
-        <caption>Fluxo previsto por faixa de vencimento</caption>
-        <thead>
-          <tr>
-            <th scope="col">Faixa</th>
-            <th scope="col">A receber</th>
-            <th scope="col">A pagar</th>
-            <th scope="col">Líquido</th>
-          </tr>
-        </thead>
-        <tbody>
-          {series.map((b) => (
-            <tr key={b.bucket}>
-              <th scope="row">{bucketLabel(b.bucket)}</th>
-              <td>{formatBRL(b.aReceber.total)}</td>
-              <td>{formatBRL(b.aPagar.total)}</td>
-              <td>
-                <Money value={b.net} tone="sign" />
-              </td>
+      <dl aria-hidden="true" className="space-y-1 text-xs sm:hidden">
+        {series.map((b) => (
+          <div key={b.bucket} className="flex justify-between gap-2">
+            <dt className="text-muted-foreground">Líquido {bucketLabel(b.bucket).toLowerCase()}</dt>
+            <dd className="font-medium">
+              <Money value={b.net} tone="sign" />
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {/* O `sr-only` vai num `div`, não na tabela: tabela ignora o `width: 1px`
+          (cresce até o conteúdo) e empurrava a página para 422px em 390px. */}
+      <div className="sr-only">
+        <table>
+          <caption>Fluxo previsto por faixa de vencimento</caption>
+          <thead>
+            <tr>
+              <th scope="col">Faixa</th>
+              <th scope="col">A receber</th>
+              <th scope="col">A pagar</th>
+              <th scope="col">Líquido</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {series.map((b) => (
+              <tr key={b.bucket}>
+                <th scope="row">{bucketLabel(b.bucket)}</th>
+                <td>{formatBRL(b.aReceber.total)}</td>
+                <td>{formatBRL(b.aPagar.total)}</td>
+                <td>
+                  <Money value={b.net} tone="sign" />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

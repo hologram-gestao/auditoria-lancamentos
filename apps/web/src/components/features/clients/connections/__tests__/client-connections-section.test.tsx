@@ -26,7 +26,7 @@ let searchParams = '';
 const routerReplace = vi.fn();
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: routerReplace, push: vi.fn() }),
-  usePathname: () => '/clientes/c1/painel',
+  usePathname: () => '/clientes/c1',
   useSearchParams: () => new URLSearchParams(searchParams),
 }));
 
@@ -320,7 +320,7 @@ describe('Origens — `?conectar=<tipo>` abre a gaveta no tipo pedido (86e3fqnc9
     const drawer = await screen.findByRole('dialog');
     expect(within(drawer).getByRole('combobox', { name: /Tipo/ })).toHaveTextContent('Arquivo');
     // O parâmetro sai da URL: senão o refresh e o voltar reabririam a gaveta.
-    expect(routerReplace).toHaveBeenCalledWith('/clientes/c1/painel', { scroll: false });
+    expect(routerReplace).toHaveBeenCalledWith('/clientes/c1', { scroll: false });
   });
 
   it('sem o parâmetro a gaveta fica fechada', () => {
@@ -339,7 +339,7 @@ describe('Origens — `?conectar=<tipo>` abre a gaveta no tipo pedido (86e3fqnc9
       <ClientConnectionsSection clientId={CLIENT_ID} originStatus="sem_origem" isClosed={false} />,
     );
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(routerReplace).toHaveBeenCalledWith('/clientes/c1/painel', { scroll: false });
+    expect(routerReplace).toHaveBeenCalledWith('/clientes/c1', { scroll: false });
   });
 
   it('tipo desconhecido na URL cai no padrão, nunca num valor que o schema recusa', async () => {

@@ -20,7 +20,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  usePathname: () => '/clientes/c1/painel',
+  usePathname: () => '/clientes/c1',
   useSearchParams: () => new URLSearchParams(''),
 }));
 
