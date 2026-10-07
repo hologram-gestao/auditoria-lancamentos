@@ -13,11 +13,11 @@
  * Cliente sem nenhum contexto registrado: tudo cai em `inadimplencia`, sem
  * erro — é o BASELINE (100% inadimplência), não um estado de falha.
  */
+import { Money } from '@/components/shared/money';
 import { useReceivablesReport } from '@/hooks/use-client-titles';
 import { ApiError } from '@/lib/api/client';
 import type { ReceivablesGroup, ReceivablesSide, TitleType } from '@/lib/contracts';
 import { formatBRDate, formatBRL } from '@/lib/format';
-import { cn } from '@/lib/utils';
 
 import { TITLE_TYPE_LABELS } from './client-titles-badges';
 
@@ -50,13 +50,11 @@ function GroupCard({
         <div>
           <dt className="text-muted-foreground text-xs font-medium">Total</dt>
           <dd>
-            <span
-              className={cn(
-                'block whitespace-nowrap text-xl font-semibold tabular-nums',
-                emphasis === 'destructive' && 'text-destructive',
-              )}
-            >
-              {formatBRL(group.total)}
+            <span className="block text-xl font-semibold">
+              <Money
+                value={group.total}
+                tone={emphasis === 'destructive' ? 'overdue' : 'neutral'}
+              />
             </span>
             <span className="text-muted-foreground text-xs">
               {group.qtd} {group.qtd === 1 ? 'título' : 'títulos'}

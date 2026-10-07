@@ -18,6 +18,7 @@
  * NÃO usa charts. Texto + tabela apenas (briefing §"O que NÃO fazer").
  */
 
+import { Money } from '@/components/shared/money';
 import { formatBRL } from '@/lib/format';
 
 interface SummaryCounts {
@@ -145,9 +146,9 @@ export function SummaryTab({
                     {status.label}
                   </dd>
                   {balances.difference !== null && status.label === 'Divergente' && (
-                    <p className="text-muted-foreground text-[10px]">
-                      Diferença: {formatBRL(Number(balances.difference))}
-                    </p>
+                    <dd className="text-muted-foreground text-[10px]">
+                      Diferença: <Money value={balances.difference} tone="sign" />
+                    </dd>
                   )}
                 </div>
               </dl>
@@ -208,7 +209,9 @@ function Indicator({ label, value, hint }: { label: string; value: string; hint?
     <div className="bg-card space-y-0.5 rounded-md border p-3">
       <dt className="text-muted-foreground text-xs">{label}</dt>
       <dd className="text-xl font-semibold tabular-nums">{value}</dd>
-      {hint !== undefined && <p className="text-muted-foreground text-[10px]">{hint}</p>}
+      {/* `<dd>`, não `<p>`: dentro do grupo do `<dl>` só cabem `<dt>` e `<dd>`
+          (axe `definition-list`, SERIOUS). A nota é uma segunda definição do termo. */}
+      {hint !== undefined && <dd className="text-muted-foreground text-[10px]">{hint}</dd>}
     </div>
   );
 }
