@@ -671,6 +671,14 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
     ),
     SensitiveEndpoint(
         "GET",
+        "/api/v1/clients/{client_id}/summary",
+        ScopeKind.COLLECTION,
+        "app/modules/client_summary/routes.py",
+        f"{_VIA_CLIENT_PATH}; cada contagem com client_id no próprio SELECT + "
+        "scoped_by_tenant; o bloco da carteira só com view_client_receivables (sem ela, null)",
+    ),
+    SensitiveEndpoint(
+        "GET",
         "/api/v1/clients/{client_id}/titles/summary",
         ScopeKind.COLLECTION,
         "app/modules/client_titles/routes.py",
