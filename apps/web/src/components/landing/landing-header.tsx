@@ -25,7 +25,7 @@ export function LandingHeader() {
           className="focus-visible:ring-ring flex min-w-0 items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2"
           aria-label={`${header.brand}, página inicial`}
         >
-          <BrandMark className="text-primary h-7 shrink-0" />
+          <BrandMark className="text-logo h-7 shrink-0" />
           <span className="hidden text-lg font-semibold tracking-tight sm:inline">
             {header.brand}
           </span>

@@ -140,11 +140,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {/* Hambúrguer só abaixo de `md`, onde o aside não existe (86e2n4pf9). */}
           <MobileNavDrawer user={user} />
           {/* Logomark por token (86e2ukrc9): marinho no claro, índigo no
-              escuro, branca no Hologram — `text-primary` decide. Abaixo de
+              escuro, branca no Hologram — `text-logo` decide (86e3h5783: o
+              `text-primary` virou o verde de ação no Hologram). Abaixo de
               `sm` a logo É a marca e o título SOME — com os dois, o truncate
               esmagava o nome do produto para um "A" órfão em 390px
               (pego no print do gate, não pelo axe). */}
-          <BrandMark className="text-primary h-6 shrink-0" />
+          <BrandMark className="text-logo h-6 shrink-0" />
           <div className="hidden min-w-0 truncate font-semibold sm:block">{PRODUCT_NAME}</div>
         </div>
         <div className="flex min-w-0 items-center gap-2 sm:gap-4">

@@ -84,6 +84,12 @@
     /* Hover SÓLIDO (a regra do `--destructive-hover`): o verde com 10 % de preto,
        `color-mix(in srgb, verde 90%, black)` convertido para HSL. Navy sobre ele: 7,31:1. */
     --brand-hover: 175 95% 38%;
+    /* LOGOMARK (86e3h5783): token próprio para a `BrandMark` deixar de seguir o
+       `--primary`. A logomark é a versão do site, branca sobre navy no Hologram,
+       e lá o primário vira o verde de ação (86e3h578n). Aqui no claro é cópia
+       LITERAL do `--primary` deste bloco (o marinho, 17,27:1 sobre o fundo).
+       Pares `logo` sobre `background` e `card` medidos no theme-contrast.test.ts. */
+    --logo: 240 76.5% 20%;
     --radius: 0.5rem;
   }
 
@@ -127,6 +133,8 @@
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
     --ring: 240 75% 72%;
+    /* Logomark: cópia literal do `--primary` deste bloco (6,04:1 sobre o fundo). */
+    --logo: 240 75% 72%;
     /* Verde da marca: o MESMO valor do `:root` (é a cor da marca, não do tema). */
     --brand: 175 95% 42%;
     --brand-foreground: 240 76.5% 20%;
@@ -182,6 +190,9 @@
     --brand: 175 95% 42%;
     --brand-foreground: 240 76.5% 20%;
     --brand-hover: 175 95% 38%;
+    /* Logomark BRANCA (decisão do Pedro, 30/09): não acompanha o primário, que
+       aqui é o verde. 17,24:1 sobre o card do header. */
+    --logo: 0 0% 98%;
     --radius: 0.5rem;
   }
 }

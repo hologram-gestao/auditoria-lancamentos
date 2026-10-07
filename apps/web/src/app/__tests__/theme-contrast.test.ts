@@ -28,6 +28,9 @@ import { AA_NORMAL_TEXT, contrast, hslToRgb, parseCssVariables, type Rgb } from 
 
 const CSS = readFileSync(path.resolve(__dirname, '../globals.css'), 'utf8');
 
+/** WCAG 2.1 §1.4.11: contraste de componente de interface e de gráfico (não texto). */
+const NON_TEXT = 3;
+
 function parseTokens(selector: ':root' | '.dark' | '.hologram'): Record<string, string> {
   return parseCssVariables(CSS, selector);
 }
@@ -94,6 +97,12 @@ describe.each(['root', 'dark', 'hologram'] as const)(
       expect(contrast(rgb(text), rgb(bg))).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
     });
 
+    // Logomark (86e3h5783): componente NÃO textual (WCAG 1.4.11), então o limite é
+    // 3:1. Vive no header (`bg-card`) e nas páginas públicas (`background`).
+    it.each(['background', 'card'])('logo sobre %s passa 3:1 (componente não textual)', (bg) => {
+      expect(contrast(rgb('logo'), rgb(bg))).toBeGreaterThanOrEqual(NON_TEXT);
+    });
+
     // Não há mais caso para `bg-destructive/10` (86e3dxund). Ele compunha os 10%
     // sobre `background` e PASSAVA nos três temas enquanto a tela reprovava: o
     // badge vive em linha de tabela, e em hover (`hover:bg-muted/50`) o que fica
@@ -149,6 +158,12 @@ describe('verde da marca (--brand)', () => {
 
   it('o texto sobre o verde é a cópia literal do navy da marca (`--primary` do tema claro)', () => {
     expect(blocks.root['brand-foreground']).toBe(blocks.root['primary']);
+  });
+
+  it('a logomark é branca no Hologram e cópia literal do `--primary` no claro e no escuro', () => {
+    expect(blocks.root['logo']).toBe(blocks.root['primary']);
+    expect(blocks.dark['logo']).toBe(blocks.dark['primary']);
+    expect(blocks.hologram['logo']).toBe(blocks.hologram['foreground']);
   });
 
   it.each([
