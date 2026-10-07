@@ -25,19 +25,20 @@ from uuid import UUID
 from app.core.logging import get_logger
 from app.db.models import DecisionOrigin, DecisionType, ProviderType
 from app.modules.client_mapping.service import CHART_SOURCE_TYPE
+from app.modules.client_mapping.vigencia import resolve_vigentes
 from app.modules.client_movements.competence import current_competence
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import date
 
-    from app.db.models import Client
+    from app.db.models import Client, ClientMappingDecision
     from app.db.models.mapping_catalog import MappingDestination
     from app.modules.client_accounting_chart.service import AccountRef
     from app.modules.client_chart_of_accounts.schemas import ResolvedNames
     from app.modules.client_file_categories.registry import ResolvedFileCategoryNames
     from app.modules.client_mapping.repository import ClientMappingRepository
-    from app.modules.client_mapping.service import ClientMappingDecisionService, DecisionView
+    from app.modules.client_mapping.service import ClientMappingDecisionService
     from app.modules.mapping_catalog.repository import MappingCatalogRepository
 
 log = get_logger(__name__)
@@ -170,9 +171,13 @@ class SituationCounts:
 
     @classmethod
     def of(cls, rows: list[MappingRow]) -> SituationCounts:
-        by_situation = Counter(row.situation for row in rows)
+        return cls.of_situations([row.situation for row in rows])
+
+    @classmethod
+    def of_situations(cls, situations: Sequence[MappingSituation]) -> SituationCounts:
+        by_situation = Counter(situations)
         return cls(
-            total=len(rows),
+            total=len(situations),
             herdada=by_situation["herdada"],
             confirmada=by_situation["confirmada"],
             nao_mapear=by_situation["nao_mapear"],
@@ -180,7 +185,21 @@ class SituationCounts:
         )
 
 
-def situation_of(view: DecisionView | None) -> MappingSituation:
+class SituationSource(Protocol):
+    """O que a situação lê de uma decisão vigente: o tipo e a origem.
+
+    A `DecisionView` da leitura e a linha crua do banco servem as duas: o resumo do
+    cliente conta situações sem montar a view, que decifraria o histórico do
+    `conta_contabil` só para descartá-lo.
+    """
+
+    @property
+    def decision_type(self) -> str: ...
+    @property
+    def origin(self) -> str: ...
+
+
+def situation_of(view: SituationSource | None) -> MappingSituation:
     """A situação de uma categoria a partir da decisão vigente — um lugar só."""
     if view is None:
         return "sem_decisao"
@@ -189,6 +208,46 @@ def situation_of(view: DecisionView | None) -> MappingSituation:
     if view.origin == DecisionOrigin.HERDADA.value:
         return "herdada"
     return "confirmada"
+
+
+async def universe_keys(
+    repository: ClientMappingRepository,
+    client_id: UUID,
+    decided_keys: set[tuple[str, str]],
+) -> set[tuple[str, str]]:
+    """O UNIVERSO de categorias do de-para: plano de contas + base de movimentos + decididas.
+
+    Um lugar só compõe o universo: a lista (`ClientMappingListService.universe`) e a
+    contagem do resumo do cliente (`situation_counts`) perguntam a MESMA coisa, e a
+    composição escrita duas vezes deixaria o contador do painel diferente do da lista.
+    """
+    keys: set[tuple[str, str]] = {
+        (CHART_SOURCE_TYPE, code) for code in await repository.chart_category_codes(client_id)
+    }
+    keys |= await repository.movement_category_keys(client_id)
+    keys |= decided_keys
+    return keys
+
+
+async def situation_counts(
+    repository: ClientMappingRepository,
+    client_id: UUID,
+    decisions: Sequence[ClientMappingDecision],
+    competence: date,
+) -> SituationCounts:
+    """As quatro situações do destino na competência, SEM nome nem histórico.
+
+    `decisions` é o conjunto COMPLETO de vigências do cliente no destino (o mesmo
+    que `ClientMappingRepository.list_decisions` devolve); a vigente de cada chave
+    sai de `resolve_vigentes`, e a situação de `situation_of`, as MESMAS funções da
+    lista. Por isso o resultado é igual a `SituationCounts.of(universe(...))`, sem
+    a leitura do `conta_contabil` decifrar o histórico de cada decisão.
+    """
+    vigentes = resolve_vigentes(decisions, competence)
+    keys = await universe_keys(
+        repository, client_id, {(d.source_type, d.category_code) for d in decisions}
+    )
+    return SituationCounts.of_situations([situation_of(vigentes.get(key)) for key in keys])
 
 
 class ClientMappingListService:
@@ -216,11 +275,7 @@ class ClientMappingListService:
         """O universo inteiro, ordenado por (tipo de origem, código) — ordem TOTAL."""
         vigentes = await self._decisions.vigentes(client, destination, competence)
         decided_keys = set(await self._decisions_keys(client, destination))
-        keys: set[tuple[str, str]] = {
-            (CHART_SOURCE_TYPE, code) for code in await self._repo.chart_category_codes(client.id)
-        }
-        keys |= await self._repo.movement_category_keys(client.id)
-        keys |= decided_keys
+        keys = await universe_keys(self._repo, client.id, decided_keys)
         rows: list[MappingRow] = []
         for key in sorted(keys):
             view = vigentes.get(key)

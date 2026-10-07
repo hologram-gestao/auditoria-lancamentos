@@ -25,6 +25,7 @@ import { AlertTriangle, CheckCircle2, Loader2, Upload, XCircle } from 'lucide-re
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
+import { Money } from '@/components/shared/money';
 import { Button } from '@/components/ui/button';
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
 import {
@@ -45,7 +46,7 @@ import type {
 } from '@/lib/api/omie-postings';
 import type { FileEntryItem } from '@/lib/api/reconciliations';
 import { PRODUCT_SHORT_NAME } from '@/lib/brand';
-import { formatBRDate, formatBRL } from '@/lib/format';
+import { formatBRDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 interface LancarNoOmieDrawerProps {
@@ -244,9 +245,7 @@ export function LancarNoOmieDrawer({
                           linha de baixo ALINHADO À ESQUERDA — enquanto o valor
                           curto da linha vizinha fica à direita. Duas compras do
                           mesmo lote apareciam alinhadas de formas diferentes. */}
-                      <span className="ml-auto whitespace-nowrap text-sm tabular-nums">
-                        {formatBRL(entry.amount, { signed: true })}
-                      </span>
+                      <Money value={entry.amount} tone="sign" className="ml-auto text-sm" />
                     </div>
 
                     {linha === undefined ? (

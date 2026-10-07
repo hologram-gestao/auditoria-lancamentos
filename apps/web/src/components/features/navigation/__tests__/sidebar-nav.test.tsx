@@ -254,7 +254,7 @@ describe('SidebarNav — camada do cliente', () => {
     expect(within(nav).getByText('Cliente Exemplo Ltda')).toBeInTheDocument();
   });
 
-  it('operador do cliente: sem Voltar e sem Usuários — 9 seções', () => {
+  it('operador do cliente: sem Voltar e sem Usuários, 9 itens em Operação e Cadastros', () => {
     currentPathname = '/clientes/c1';
     render(<SidebarNav user={CLIENT_OPERATOR} />);
 
@@ -263,20 +263,68 @@ describe('SidebarNav — camada do cliente', () => {
     // "Plano de Contas" entrou na S10, "Carteira" na S11, "De-para" na S12,
     // "Plano contábil" na S16 e "Origem por arquivo" (que era condicional)
     // virou fixa no follow-up 86e3fqnc9: LER é de todo papel que alcança o
-    // cliente nos cinco casos (o operador inclusive — ele ENVIA o arquivo).
-    // Quem some para ele é a ESCRITA — sincronizar, editar o de-para, importar
-    // o plano, configurar o mapeamento —, dentro de cada tela.
+    // cliente nos cinco casos (o operador inclusive, que ENVIA o arquivo).
+    // Quem some para ele é a ESCRITA, dentro de cada tela. A ordem é a das
+    // seções do 86e3k1q2j: Operação, depois Cadastros.
     expect(links.map((l) => l.textContent)).toEqual([
-      'Conciliações',
-      'Contas Bancárias',
       'Painel',
-      'Glossário',
-      'Plano de Contas',
-      'Plano contábil',
+      'Conciliações',
       'Carteira',
       'De-para',
       'Origem por arquivo',
+      'Contas Bancárias',
+      'Glossário',
+      'Plano de Contas',
+      'Plano contábil',
     ]);
+    // Sem `manage_client_users`, a seção Acesso some INTEIRA: nada de cabeçalho órfão.
+    expect(within(nav).getByText('Operação')).toBeInTheDocument();
+    expect(within(nav).getByText('Cadastros')).toBeInTheDocument();
+    expect(within(nav).queryByText('Acesso')).not.toBeInTheDocument();
+  });
+
+  it('agrupa em Operação, Cadastros e Acesso, cada item sob o próprio cabeçalho', () => {
+    currentPathname = '/clientes/c1';
+    render(<SidebarNav user={ADMIN} />);
+
+    const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
+    // A ordem do DOM é a ordem lida: cabeçalho, itens dele, próximo cabeçalho.
+    const sequence = Array.from(nav.querySelectorAll('a, div'))
+      .filter(
+        (el) =>
+          el.tagName === 'A' || ['Operação', 'Cadastros', 'Acesso'].includes(el.textContent ?? ''),
+      )
+      .map((el) => el.textContent);
+    expect(sequence).toEqual([
+      'Voltar para clientes',
+      'Operação',
+      'Painel',
+      'Conciliações',
+      'Carteira',
+      'De-para',
+      'Origem por arquivo',
+      'Cadastros',
+      'Contas Bancárias',
+      'Glossário',
+      'Plano de Contas',
+      'Plano contábil',
+      'Acesso',
+      'Usuários',
+    ]);
+    // Na raiz do cliente o ativo continua "Conciliações", por exclusão.
+    const current = within(nav)
+      .getAllByRole('link')
+      .filter((link) => link.getAttribute('aria-current') === 'page')
+      .map((link) => link.textContent);
+    expect(current).toEqual(['Conciliações']);
+  });
+
+  it('sem contador vindo do item, nenhum link carrega pílula de número', () => {
+    currentPathname = '/clientes/c1';
+    render(<SidebarNav user={ADMIN} />);
+
+    const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
+    expect(within(nav).queryAllByRole('img')).toHaveLength(0);
   });
 
   it('"Plano contábil" (S16) fica ativo na própria rota, sem marcar "Plano de Contas" nem "Conciliações"', () => {

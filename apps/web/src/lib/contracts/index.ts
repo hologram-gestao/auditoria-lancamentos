@@ -355,6 +355,12 @@ export type TitlesSummary = Schemas['TitlesSummaryResponse'];
 export type TitlesSummaryEnvelope = Schemas['TitlesSummaryEnvelope'];
 /** Os totais de UM tipo (a pagar OU a receber), com os quatro baldes nomeados. */
 export type AgingTotals = Schemas['AgingTotalsResponse'];
+/**
+ * Resumo do cliente (86e3k1q3j): as pendências do mês para o menu e o painel.
+ * Só contagens, códigos e IDs; o nome do tipo de anomalia e do destino vem dos
+ * catálogos que o front já tem. `titles` é `null` para quem não lê a carteira.
+ */
+export type ClientSummary = Schemas['ClientSummaryResponse'];
 /** Contagens do ciclo de sincronização + o `summary` resultante (evita 2º request). */
 export type TitlesSyncResult = Schemas['TitlesSyncResponse'];
 /** `a_pagar` | `a_receber` — enum FECHADO (a UI ramifica nos dois). */

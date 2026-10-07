@@ -1653,6 +1653,12 @@ const DETAIL = {
 let sessionUsedGlossary = false;
 
 /**
+ * 86e3k1q30 — saldo final DIVERGENTE só no cenário da "Diferença": com `false`,
+ * todos os cenários anteriores medem o mesmo Resumo conferido de sempre.
+ */
+let sessionBalanceDivergent = false;
+
+/**
  * Sprint 7 / R1 — a sessão vira CARTÃO só nos cenários de lançamento.
  *
  * Fica fora do `DETAIL` pelo mesmo motivo do selo: com `null`, todos os
@@ -2561,6 +2567,9 @@ async function fulfillApi(route: Route): Promise<void> {
       ...DETAIL,
       ...(sessionAccountType === null ? {} : { account_type: sessionAccountType }),
       ...(sessionErrorDetail ? { status: 'error', error_code: 'ADL-PARSE-LIMIT' } : {}),
+      ...(sessionBalanceDivergent
+        ? { balance_end_omie: '1520.00', balance_difference: '-20.00' }
+        : {}),
       qualification_used_glossary: sessionUsedGlossary,
     });
   }
@@ -3027,6 +3036,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   clientManagers = carteiraInicial();
   // Sprint 6: sessão SEM glossário e flag não julgado são o estado de partida.
   sessionUsedGlossary = false;
+  sessionBalanceDivergent = false;
   // Sprint 7: conta corrente é o estado de partida — só os cenários de
   // lançamento ligam o cartão.
   sessionAccountType = null;
@@ -3815,6 +3825,10 @@ test.describe('Sidebar em camadas (86e2n39h7)', () => {
     const clientNav = page.getByRole('navigation', { name: 'Seções do cliente' });
     await expect(clientNav.getByRole('link', { name: 'Contas Bancárias' })).toBeVisible();
     await expect(clientNav.getByText('Cliente Exemplo Ltda')).toBeVisible();
+    // 86e3k1q2j: o menu do cliente vem em seções, com o Painel abrindo a Operação.
+    for (const heading of ['Operação', 'Cadastros', 'Acesso']) {
+      await expect(clientNav.getByText(heading, { exact: true })).toBeVisible();
+    }
     await expect(page.getByRole('navigation', { name: 'Navegação principal' })).toHaveCount(0);
     // O hambúrguer é exclusivo do mobile (md:hidden) — no desktop não existe.
     await expect(page.getByRole('button', { name: 'Abrir menu de navegação' })).toHaveCount(0);
@@ -3835,6 +3849,9 @@ test.describe('Sidebar em camadas (86e2n39h7)', () => {
     const clientNav = page.getByRole('navigation', { name: 'Seções do cliente' });
     await expect(clientNav.getByRole('link', { name: 'Conciliações' })).toBeVisible();
     await expect(clientNav.getByRole('link', { name: 'Voltar para clientes' })).toHaveCount(0);
+    // Sem `manage_client_users`, a seção Acesso some inteira (sem cabeçalho órfão).
+    await expect(clientNav.getByText('Operação', { exact: true })).toBeVisible();
+    await expect(clientNav.getByText('Acesso', { exact: true })).toHaveCount(0);
     // `exact`: "Clientes" por substring casaria com um eventual Voltar.
     await expect(page.getByRole('link', { name: 'Clientes', exact: true })).toHaveCount(0);
     await expect(page.getByText('Configurações')).toHaveCount(0);
@@ -3926,6 +3943,7 @@ test.describe('Menu mobile — drawer (86e2n4pf9)', () => {
     const clientNav = dialog.getByRole('navigation', { name: 'Seções do cliente' });
     await expect(clientNav.getByRole('link', { name: 'Contas Bancárias' })).toBeVisible();
     await expect(clientNav.getByText('Cliente Exemplo Ltda')).toBeVisible();
+    await expect(clientNav.getByText('Cadastros', { exact: true })).toBeVisible();
     await analyze(page, 'drawer de navegação aberto (390px)');
     await shot(page, 'drawer-navegacao-cliente-390');
 
@@ -3970,6 +3988,35 @@ test.describe('Menu mobile — drawer (86e2n4pf9)', () => {
     await analyze(page, 'drawer — operador do cliente (390px)');
   });
 });
+
+/**
+ * 86e3k1q30 — a "Diferença" do Resumo passa pelo `<Money tone="sign">`: o sinal
+ * é o menos tipográfico (U+2212) e a cor vem do token. Só aparece com o saldo
+ * DIVERGENTE, que nenhum outro cenário monta; o axe mede o contraste do valor
+ * colorido em 10px, e o print mostra que ele não quebra depois do sinal.
+ */
+for (const vp of VIEWPORTS) {
+  const slugD = vp.label.replace(/\s+/g, '-');
+  test.describe(`Resumo da conciliação: Diferença com sinal (86e3k1q30) — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('saldo divergente mostra a Diferença com −R$ e cor de token', async ({ page }) => {
+      sessionBalanceDivergent = true;
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}?tab=resumo`);
+      // "Divergente" também aparece no cabeçalho da sessão ("Resumo geral"): a
+      // busca fica no painel da aba.
+      const resumo = page.getByLabel('Resumo', { exact: true });
+      await expect(resumo.getByText('Divergente', { exact: true })).toBeVisible();
+      // Ancorado: sem `^…$` o regex casa também o `<p>` "Diferença: −R$ 20,00".
+      const valor = resumo.getByText(/^\u2212R\$\s*20,00$/);
+      await expect(valor).toBeVisible();
+      await expect(valor).toHaveClass(/text-destructive/);
+      await expect(page.locator('#__next_error__')).toHaveCount(0);
+      await analyze(page, `resumo com saldo divergente (${vp.label})`);
+      await shot(page, `resumo-diferenca-${slugD}`);
+    });
+  });
+}
 
 /**
  * Sprint 6 / R4 (FRONT 06.7) — revisão: selo do glossário e veredito do flag.
