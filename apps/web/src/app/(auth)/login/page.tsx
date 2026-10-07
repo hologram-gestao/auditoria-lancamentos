@@ -94,8 +94,8 @@ export default function LoginPage() {
     <div className="lp-auth-card bg-card w-full max-w-sm rounded-xl border p-8">
       <div className="mb-8">
         {/* Logomark e título DENTRO do card (86e3h1h75): num lugar só, em qualquer
-            largura. `text-primary` é branco no tema Hologram fixo da página. */}
-        <BrandMark className="text-primary h-8" />
+            largura. `text-logo` é branco no tema Hologram fixo da página. */}
+        <BrandMark className="text-logo h-8" />
         <h1 className="mt-5 text-2xl font-semibold tracking-tight">{PRODUCT_TITLE}</h1>
         <p className="text-muted-foreground mt-1 text-sm">{copy.subtitle}</p>
       </div>

@@ -26,7 +26,7 @@ export function SignInBrandPanel() {
       </div>
 
       <div className="max-w-md">
-        <BrandMark className="text-primary h-12" />
+        <BrandMark className="text-logo h-12" />
         <p
           data-testid="sign-in-panel-title"
           className="mt-10 text-3xl font-semibold leading-tight tracking-tight"

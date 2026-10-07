@@ -15,7 +15,7 @@ export function LandingFooter() {
     <footer className="lp-footer relative border-t">
       <div className="text-muted-foreground mx-auto flex max-w-6xl flex-col gap-4 px-4 py-8 text-sm sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <div className="flex items-center gap-2">
-          <BrandMark className="text-primary h-5 shrink-0" />
+          <BrandMark className="text-logo h-5 shrink-0" />
           <span>
             © {year} {footer.company}
           </span>

@@ -3299,6 +3299,8 @@ for (const vp of VIEWPORTS) {
       await page.goto(`/clientes/${CLIENT_ID}`);
       await page.getByRole('button', { name: 'Criar conciliação' }).first().click();
       await expect(page.getByRole('dialog')).toBeVisible();
+      await aguardarAnimacao(page.getByRole('dialog'));
+      await shot(page, `gaveta-criacao-${vp.label.replace(/\s+/g, '-')}`);
       await analyze(page, `gaveta de criação (${vp.label})`);
     });
 

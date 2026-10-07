@@ -56,7 +56,6 @@ import { useAvailableOmieEntries, usePatchFileEntry } from '@/hooks/use-reconcil
 import { ApiError } from '@/lib/api/client';
 import type { AvailableOmieEntry, FileEntryItem } from '@/lib/api/reconciliations';
 import { formatBRDate, formatBRL } from '@/lib/format';
-import { cn } from '@/lib/utils';
 
 import { OmieStatusBadge } from './omie-status-badge';
 
@@ -194,10 +193,10 @@ export function TrocarLancamentoModal({
                     <TableRow
                       key={item.omie_id}
                       onClick={() => setSelectedId(item.omie_id)}
-                      className={cn(
-                        'cursor-pointer',
-                        isSelected && 'bg-primary/10 hover:bg-primary/15',
-                      )}
+                      // O destaque do selecionado é o `data-[state=selected]:bg-muted` do
+                      // `TableRow`. Um `bg-primary/10` que morava aqui nunca pintava: o
+                      // seletor de atributo vence a classe (86e3h578n).
+                      className="cursor-pointer"
                       data-state={isSelected ? 'selected' : undefined}
                     >
                       <TableCell className="py-4 pl-4 pr-0">
