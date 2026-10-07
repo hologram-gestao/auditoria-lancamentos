@@ -35,7 +35,12 @@ import { canAccessClient, canSeeSystemArea } from '@/lib/authz';
 import type { AuthenticatedUser } from '@/lib/contracts';
 import { cn } from '@/lib/utils';
 
-import { clientIdFromPathname, clientNavItems, globalNavSections } from './nav-items';
+import {
+  clientIdFromPathname,
+  clientNavSections,
+  globalNavSections,
+  type NavSection,
+} from './nav-items';
 import { NavLink } from './nav-link';
 
 interface SidebarNavProps {
@@ -59,26 +64,7 @@ export function SidebarNav({ user, onNavigate }: SidebarNavProps) {
   if (clientId === null || !canAccess) {
     return (
       <nav aria-label="Navegação principal" className="flex flex-col gap-1">
-        {globalNavSections(user, pathname).map((section) => (
-          <Fragment key={section.heading ?? 'principal'}>
-            {section.heading !== undefined && (
-              <div className="text-muted-foreground mt-4 px-3 pb-1 text-xs font-medium uppercase tracking-wide">
-                {section.heading}
-              </div>
-            )}
-            {section.items.map((item) => (
-              <NavLink
-                key={item.href}
-                href={item.href}
-                active={item.active}
-                icon={item.icon}
-                onClick={onNavigate}
-              >
-                {item.label}
-              </NavLink>
-            ))}
-          </Fragment>
-        ))}
+        <NavSections sections={globalNavSections(user, pathname)} onNavigate={onNavigate} />
       </nav>
     );
   }
@@ -112,17 +98,54 @@ export function SidebarNav({ user, onNavigate }: SidebarNavProps) {
           )}
         </div>
       )}
-      {clientNavItems(user, clientId, pathname).map((item) => (
-        <NavLink
-          key={item.href}
-          href={item.href}
-          active={item.active}
-          icon={item.icon}
-          onClick={onNavigate}
-        >
-          {item.label}
-        </NavLink>
-      ))}
+      <NavSections sections={clientNavSections(user, clientId, pathname)} onNavigate={onNavigate} />
     </nav>
+  );
+}
+
+/**
+ * Seções do menu, com o MESMO desenho nas duas camadas: cabeçalho em caixa alta
+ * discreto e os links logo abaixo. Seção sem `heading` (a principal da camada
+ * global) não ganha rótulo. A primeira seção encosta no bloco de cima; as
+ * seguintes ganham o respiro que separa os grupos.
+ */
+function NavSections({
+  sections,
+  onNavigate,
+}: {
+  sections: NavSection[];
+  onNavigate?: () => void;
+}) {
+  return (
+    <>
+      {sections.map((section, index) => (
+        <Fragment key={section.heading ?? 'principal'}>
+          {section.heading !== undefined && (
+            <div
+              className={cn(
+                'text-muted-foreground px-3 pb-1 text-xs font-medium uppercase tracking-wide',
+                index === 0 ? 'mt-1' : 'mt-4',
+              )}
+            >
+              {section.heading}
+            </div>
+          )}
+          {section.items.map((item) => (
+            <NavLink
+              key={item.href}
+              href={item.href}
+              active={item.active}
+              icon={item.icon}
+              count={item.count}
+              countTone={item.countTone}
+              countLabel={item.countLabel}
+              onClick={onNavigate}
+            >
+              {item.label}
+            </NavLink>
+          ))}
+        </Fragment>
+      ))}
+    </>
   );
 }

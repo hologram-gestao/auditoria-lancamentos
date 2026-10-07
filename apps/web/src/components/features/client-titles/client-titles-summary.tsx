@@ -30,6 +30,7 @@
  * SERIOUS).
  */
 import { CollapsibleSummary, SummaryInline } from '@/components/shared/collapsible-summary';
+import { Money, type MoneyTone } from '@/components/shared/money';
 import type { AgingBucket, AgingTotals, TitleType } from '@/lib/contracts';
 import { formatBRDate, formatBRL } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -42,12 +43,16 @@ const OVERDUE_BUCKETS = ['1_30', '31_60', '61_90', '90_mais'] as const satisfies
   'a_vencer'
 >[];
 
-/** Só o 90+ é destrutivo: é o dinheiro que a reunião procura primeiro. */
-const BUCKET_EMPHASIS: Record<(typeof OVERDUE_BUCKETS)[number], string> = {
-  '1_30': '',
-  '31_60': '',
-  '61_90': 'text-warning',
-  '90_mais': 'text-destructive',
+/**
+ * O tom de cada balde no `<Money>`: só o 90+ é atraso destacado (é o dinheiro
+ * que a reunião procura primeiro), o 61 a 90 é aviso, e os dois primeiros não
+ * colorem. O rótulo do balde, ao lado, diz o que a cor quer dizer.
+ */
+const BUCKET_TONE: Record<(typeof OVERDUE_BUCKETS)[number], MoneyTone> = {
+  '1_30': 'neutral',
+  '31_60': 'neutral',
+  '61_90': 'warning',
+  '90_mais': 'overdue',
 };
 
 /** As sete chaves clicáveis de um card: três totais e quatro baldes. */
@@ -179,14 +184,9 @@ function TotalsCard({
 }) {
   const typeLabel = TITLE_TYPE_LABELS[titleType];
   const totalsRows = [
-    { key: 'em_aberto', amount: totals.totalEmAberto, count: totals.qtdEmAberto, tone: '' },
-    { key: 'a_vencer', amount: totals.totalAVencer, count: totals.qtdAVencer, tone: '' },
-    {
-      key: 'vencido',
-      amount: totals.totalVencido,
-      count: totals.qtdVencido,
-      tone: 'text-destructive',
-    },
+    { key: 'em_aberto', amount: totals.totalEmAberto, count: totals.qtdEmAberto, tone: 'neutral' },
+    { key: 'a_vencer', amount: totals.totalAVencer, count: totals.qtdAVencer, tone: 'neutral' },
+    { key: 'vencido', amount: totals.totalVencido, count: totals.qtdVencido, tone: 'overdue' },
   ] as const;
 
   return (
@@ -215,16 +215,12 @@ function TotalsCard({
                   label={`${typeLabel}, ${TOTAL_LABELS[row.key]}: ${formatBRL(row.amount)}, ${countLabel(row.count)}. Filtrar a lista`}
                   onClick={() => onSelect(titleType, row.key)}
                 >
-                  {/* `whitespace-nowrap` não é enfeite: valor monetário que quebra
-                      depois do hífen é lido como outra coisa (defeito da S7). */}
-                  <span
-                    data-summary="total"
-                    className={cn(
-                      'block whitespace-nowrap text-base font-semibold tabular-nums',
-                      !isActive && row.tone,
-                    )}
-                  >
-                    {formatBRL(row.amount)}
+                  {/* O `<Money>` traz o `whitespace-nowrap`, que não é enfeite: valor
+                      monetário que quebra depois do hífen é lido como outra coisa
+                      (defeito da S7). Ativo, o tom sai e vale o `accent-foreground`
+                      do botão: o vermelho sobre `accent` seria par sem teste. */}
+                  <span data-summary="total" className="block text-base font-semibold">
+                    <Money value={row.amount} tone={isActive ? 'neutral' : row.tone} />
                   </span>
                   <span className={cn('text-xs', !isActive && 'text-muted-foreground')}>
                     {countLabel(row.count)}
@@ -250,13 +246,11 @@ function TotalsCard({
                   label={`${typeLabel}, ${BUCKET_LABELS[bucket]}: ${formatBRL(bucketValue(totals, bucket))}. Filtrar a lista`}
                   onClick={() => onSelect(titleType, bucket)}
                 >
-                  <span
-                    className={cn(
-                      'block whitespace-nowrap text-sm font-medium tabular-nums',
-                      !isActive && BUCKET_EMPHASIS[bucket],
-                    )}
-                  >
-                    {formatBRL(bucketValue(totals, bucket))}
+                  <span className="block text-sm font-medium">
+                    <Money
+                      value={bucketValue(totals, bucket)}
+                      tone={isActive ? 'neutral' : BUCKET_TONE[bucket]}
+                    />
                   </span>
                 </FilterValueButton>
               </dd>

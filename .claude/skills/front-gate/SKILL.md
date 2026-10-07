@@ -263,6 +263,17 @@ viewportSize().width` (padrão em `spec:2147-2165` e `:2190-2205`). Antes de med
 
 ## 4. Padrões de componente (cada um com o grep)
 
+- **Dinheiro com sinal e cor é o `<Money>`** de `components/shared/money.tsx` (86e3k1q30),
+  nunca classe solta: dois eixos, o SINAL vem do valor e a COR vem do `tone` (`sign` colore
+  pelo sinal e escreve `+` e o menos U+2212; `overdue`/`warning` pela situação; `neutral` não
+  colore). Cor nunca é o único aviso (o sinal ou o rótulo acompanham). Pai que precisa de
+  outra cor (botão ativo em `accent-foreground`) passa `tone="neutral"` ou a classe no
+  `className`, que vem por último no `cn`. Locator de e2e sobre célula `sign` procura `−R$`,
+  não `-R$`; `formatBRL` não mudou.
+- **Contador no item de menu** (`NavItem.count`, 86e3k1q2j): o `NavLink` só desenha a pílula
+  com `countLabel` presente, porque o número sozinho não diz do que é ("12 títulos
+  vencidos"). A pílula é `role="img"` + `aria-label`, fundo `-muted` com o texto no token
+  sólido do tom (`info` em andamento, `warning` decisão pendente, `destructive` atraso).
 - **Cor só por token semântico** (`success`/`warning`/`info`/`destructive` + `-foreground`/
   `-muted`, neutros `muted`/`border`/`input`), definidos nos três blocos de
   `app/globals.css` (`:root` `:6`, `.dark` `:106`, `.hologram` `:168`). Nada de

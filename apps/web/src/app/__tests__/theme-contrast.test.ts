@@ -90,6 +90,15 @@ const PAIRS: ReadonlyArray<{ text: string; bg: string; where: string }> = [
   { text: 'success-foreground', bg: 'success', where: 'preenchimento de sucesso' },
   { text: 'warning-foreground', bg: 'warning', where: 'preenchimento de atenção' },
   { text: 'info-foreground', bg: 'info', where: 'preenchimento informativo' },
+  // Dinheiro com sinal e cor (`<Money>`, 86e3k1q30): o valor colorido mora na
+  // página (`background`) e dentro de card (`card`). `tone="sign"` usa success
+  // e destructive; `overdue` usa destructive; `warning` usa warning.
+  { text: 'success', bg: 'background', where: '<Money> positivo na página' },
+  { text: 'success', bg: 'card', where: '<Money> positivo dentro de card' },
+  { text: 'destructive', bg: 'background', where: '<Money> negativo ou vencido na página' },
+  { text: 'destructive', bg: 'card', where: '<Money> negativo ou vencido dentro de card' },
+  { text: 'warning', bg: 'background', where: '<Money> em aviso na página' },
+  { text: 'warning', bg: 'card', where: '<Money> em aviso dentro de card' },
 ];
 
 describe.each(['root', 'dark', 'hologram'] as const)(

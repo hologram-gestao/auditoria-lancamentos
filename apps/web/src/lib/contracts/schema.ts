@@ -817,6 +817,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clients/{client_id}/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Resumo do cliente para o menu e o painel: só contagens, códigos e IDs, nenhum nome. Do mês `month` (`YYYY-MM`; padrão, o mês corrente no fuso do Brasil): conciliações por status e contas cobertas, anomalias em aberto por código do tipo e resolvidas, compras da fatura de cartão ainda sem lançamento no Omie (só compra; estorno fica fora), categorias sem decisão e cobertura do de-para por destino, e se o destino já foi materializado. Mais os títulos vencidos da carteira inteira (`null` para quem não lê a carteira) e a conciliação mais recente. Não lê a origem e não sincroniza nada. Mês mal formado: 400. */
+        get: operations["get_client_summary_api_v1_clients__client_id__summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clients/{client_id}/movements/sync": {
         parameters: {
             query?: never;
@@ -2262,6 +2279,18 @@ export interface components {
              */
             decimalPlaces: number;
         };
+        /** AnomaliesSummary */
+        AnomaliesSummary: {
+            /** Opentotal */
+            openTotal: number;
+            /**
+             * Bytype
+             * @description Anomalias em aberto do mês, por código do tipo.
+             */
+            byType: components["schemas"]["AnomalyTypeCount"][];
+            /** Resolvedinmonth */
+            resolvedInMonth: number;
+        };
         /**
          * AnomalyItem
          * @description Item de GET /api/v1/reconciliations/{id}/anomalies.
@@ -2345,6 +2374,16 @@ export interface components {
          * @enum {string}
          */
         AnomalySeverity: "critical" | "moderate" | "info";
+        /** AnomalyTypeCount */
+        AnomalyTypeCount: {
+            /**
+             * Code
+             * @description Código do tipo de anomalia; o nome vem do catálogo.
+             */
+            code: string;
+            /** Count */
+            count: number;
+        };
         /**
          * AnomalyTypeCreate
          * @description Body de POST /api/v1/anomaly-types — admin cria tipo custom (Fase 2).
@@ -2693,6 +2732,16 @@ export interface components {
          * @enum {string}
          */
         Capability: "verificar_credencial" | "listar_contas" | "listar_lancamentos" | "escrever" | "listar_titulos_em_aberto";
+        /** CardPurchasesToPost */
+        CardPurchasesToPost: {
+            /** Count */
+            count: number;
+            /**
+             * Totalamount
+             * @description Soma das compras (valor negativo, como no extrato). `0.00` sem compras.
+             */
+            totalAmount: string;
+        };
         /**
          * CategoryMode
          * @description De onde sai a categoria de origem — fonte ÚNICA do CHECK `category_mode`.
@@ -3248,6 +3297,29 @@ export interface components {
              * @default sem_origem
              */
             origin_status: components["schemas"]["OriginStatus"];
+        };
+        /**
+         * ClientSummaryEnvelope
+         * @description Envelope `{data: ...}` de `GET /clients/{client_id}/summary`.
+         */
+        ClientSummaryEnvelope: {
+            data: components["schemas"]["ClientSummaryResponse"];
+        };
+        /** ClientSummaryResponse */
+        ClientSummaryResponse: {
+            /**
+             * Referencemonth
+             * @description `YYYY-MM`.
+             */
+            referenceMonth: string;
+            reconciliations: components["schemas"]["ReconciliationsSummary"];
+            anomalies: components["schemas"]["AnomaliesSummary"];
+            cardPurchasesToPost: components["schemas"]["CardPurchasesToPost"];
+            /** Mapping */
+            mapping: components["schemas"]["MappingDestinationSummary"][];
+            /** @description `null` quando o papel de quem pede não lê a carteira (`view_client_receivables`); nunca 403. */
+            titles: components["schemas"]["TitlesSummaryBlock"] | null;
+            latestSession: components["schemas"]["LatestSessionSummary"] | null;
         };
         /**
          * ClientTitleResponse
@@ -4636,6 +4708,28 @@ export interface components {
              */
             hasMapping: boolean;
         };
+        /** LatestSessionSummary */
+        LatestSessionSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Referencemonth
+             * @description `YYYY-MM`.
+             */
+            referenceMonth: string;
+            /** Status */
+            status: string;
+            /** Accounttype */
+            accountType: string;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
         /** LayoutColumnPayload */
         LayoutColumnPayload: {
             /**
@@ -4870,6 +4964,29 @@ export interface components {
         MappingDestinationListResponse: {
             /** Data */
             data: components["schemas"]["MappingDestinationItem"][];
+        };
+        /** MappingDestinationSummary */
+        MappingDestinationSummary: {
+            /**
+             * Destinationcode
+             * @description O tipo do destino no catálogo da organização.
+             */
+            destinationCode: string;
+            /**
+             * Withoutdecision
+             * @description Categorias sem decisão na competência.
+             */
+            withoutDecision: number;
+            /**
+             * Coveragepct
+             * @description Cobertura da competência em %, uma casa decimal, a mesma da prévia do de-para. `null` quando não há movimento com categoria (nunca um 0% que pareça resultado).
+             */
+            coveragePct: string | null;
+            /**
+             * Materialized
+             * @description Há materialização deste destino na competência.
+             */
+            materialized: boolean;
         };
         /**
          * MappingDestinationUpdate
@@ -6050,6 +6167,34 @@ export interface components {
             transactions: components["schemas"]["ExtractedTransaction-Input"][];
         };
         /**
+         * ReconciliationStatusCounts
+         * @description As quatro chaves SEMPRE presentes, com zero onde não há sessão.
+         */
+        ReconciliationStatusCounts: {
+            /** Processing */
+            processing: number;
+            /** Reviewing */
+            reviewing: number;
+            /** Done */
+            done: number;
+            /** Error */
+            error: number;
+        };
+        /** ReconciliationsSummary */
+        ReconciliationsSummary: {
+            /**
+             * Accountstotal
+             * @description Contas do cliente no cache de contas (as que a conciliação oferece).
+             */
+            accountsTotal: number;
+            /**
+             * Accountswithsession
+             * @description Contas distintas com conciliação ativa no mês.
+             */
+            accountsWithSession: number;
+            byStatus: components["schemas"]["ReconciliationStatusCounts"];
+        };
+        /**
          * RefreshResponse
          * @description Body de POST /api/v1/auth/refresh — apenas confirma sucesso. Cookies foram atualizados.
          */
@@ -6583,6 +6728,26 @@ export interface components {
          * @enum {string}
          */
         TitleType: "a_pagar" | "a_receber";
+        /** TitlesSideSummary */
+        TitlesSideSummary: {
+            /** Overduecount */
+            overdueCount: number;
+            /** Overduetotal */
+            overdueTotal: string;
+        };
+        /** TitlesSummaryBlock */
+        TitlesSummaryBlock: {
+            /** Overduecount */
+            overdueCount: number;
+            /** Overduetotal */
+            overdueTotal: string;
+            aPagar: components["schemas"]["TitlesSideSummary"];
+            aReceber: components["schemas"]["TitlesSideSummary"];
+            /** Syncedat */
+            syncedAt: string | null;
+            /** Neversynced */
+            neverSynced: boolean;
+        };
         /**
          * TitlesSummaryEnvelope
          * @description Envelope `{data: ...}` de `GET /clients/{client_id}/titles/summary`.
@@ -9016,6 +9181,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TitleContextEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_client_summary_api_v1_clients__client_id__summary_get: {
+        parameters: {
+            query?: {
+                /** @description Mês de referência, `YYYY-MM`. */
+                month?: string | null;
+            };
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientSummaryEnvelope"];
                 };
             };
             /** @description Validation Error */

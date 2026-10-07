@@ -90,6 +90,10 @@ describe('MobileNavDrawer', () => {
     const nav = within(dialog).getByRole('navigation', { name: 'Seções do cliente' });
     expect(within(nav).getByRole('link', { name: 'Voltar para clientes' })).toBeInTheDocument();
     expect(within(nav).getByText('Cliente Exemplo Ltda')).toBeInTheDocument();
+    // As seções do 86e3k1q2j chegam ao drawer sem código próprio: ele reusa o SidebarNav.
+    for (const heading of ['Operação', 'Cadastros', 'Acesso']) {
+      expect(within(nav).getByText(heading)).toBeInTheDocument();
+    }
   });
 
   it('clicar num link fecha o drawer — inclusive o da página atual', async () => {
