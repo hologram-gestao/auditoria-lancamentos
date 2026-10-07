@@ -15,6 +15,11 @@
        1,25M px), nunca estimado de print (§6.5). Branco sobre ele: 16.96:1. */
     --primary: 240 76.5% 20%;
     --primary-foreground: 0 0% 98%;
+    /* Hover SÓLIDO do botão primário (86e3h578n), a regra do `--destructive-hover`:
+       era `hover:bg-primary/90`, alfa que nenhum teste trava. Aqui é o valor que
+       aquele alfa dava sobre o `background`, convertido para HSL, então o claro
+       não muda. Branco sobre ele: 13,04:1. */
+    --primary-hover: 240 49.2% 28%;
     --secondary: 240 4.8% 95.9%;
     --secondary-foreground: 240 5.9% 10%;
     --muted: 240 4.8% 95.9%;
@@ -70,6 +75,11 @@
     --input: 240 5.9% 90%;
     /* Anel de foco na cor da marca (mesmo marinho do primary). */
     --ring: 240 76.5% 20%;
+    /* LINK de ação em texto (86e3h578n): no claro e no escuro é o `--foreground`
+       do bloco (com sublinhado), então nada muda; no Hologram é o verde. Existe
+       para o componente não precisar saber o tema. Link de navegação do menu e
+       botão NÃO usam. */
+    --link: 240 10% 3.9%;
     /* VERDE da marca Hologram (86e3h1h75): #05d1bf, rgb(5, 209, 191), amostrado por
        PIXEL do botão "Começar agora" do site da Hologram
        (`Docs/brand/site-hologram-cta-2026-09-30.png`). É a cor de DESTAQUE das páginas
@@ -78,12 +88,18 @@
        claro (o branco sobre ele dá 1,85:1); o texto SOBRE ele é o `--brand-foreground`. */
     --brand: 175 95% 42%;
     /* Texto sobre o verde: o navy da marca (#0C0C5A), cópia LITERAL do `--primary`
-       deste bloco. Não dá para ler `var(--primary)`: no Hologram ele é branco, e
-       branco sobre o verde dá 1,85:1. Navy sobre o verde: 8,94:1. */
+       deste bloco. Não dá para ler `var(--primary)`: no Hologram ele é o próprio
+       verde (86e3h578n). Branco sobre o verde dá 1,85:1; navy sobre ele, 8,94:1. */
     --brand-foreground: 240 76.5% 20%;
     /* Hover SÓLIDO (a regra do `--destructive-hover`): o verde com 10 % de preto,
        `color-mix(in srgb, verde 90%, black)` convertido para HSL. Navy sobre ele: 7,31:1. */
     --brand-hover: 175 95% 38%;
+    /* LOGOMARK (86e3h5783): token próprio para a `BrandMark` deixar de seguir o
+       `--primary`. A logomark é a versão do site, branca sobre navy no Hologram,
+       e lá o primário vira o verde de ação (86e3h578n). Aqui no claro é cópia
+       LITERAL do `--primary` deste bloco (o marinho, 17,27:1 sobre o fundo).
+       Pares `logo` sobre `background` e `card` medidos no theme-contrast.test.ts. */
+    --logo: 240 76.5% 20%;
     --radius: 0.5rem;
   }
 
@@ -99,6 +115,8 @@
        índigo claro: 5.85:1; o preenchimento contra o background: 6.04:1). */
     --primary: 240 75% 72%;
     --primary-foreground: 240 80% 12%;
+    /* `primary/90` sobre o `background` deste bloco, sólido. Rótulo sobre ele: 4,89:1. */
+    --primary-hover: 240 54.4% 65.2%;
     --secondary: 240 3.7% 15.9%;
     --secondary-foreground: 0 0% 98%;
     --muted: 240 3.7% 15.9%;
@@ -127,6 +145,10 @@
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
     --ring: 240 75% 72%;
+    /* Link de ação em texto: o `--foreground` deste bloco. */
+    --link: 0 0% 98%;
+    /* Logomark: cópia literal do `--primary` deste bloco (6,04:1 sobre o fundo). */
+    --logo: 240 75% 72%;
     /* Verde da marca: o MESMO valor do `:root` (é a cor da marca, não do tema). */
     --brand: 175 95% 42%;
     --brand-foreground: 240 76.5% 20%;
@@ -138,8 +160,11 @@
      (`Docs/brand/hologram-banner.jpg`, família #081838/#082048). O botão
      primário é BRANCO com texto navy — o eco do wordmark branco sobre navy do
      banner. Terceiro tema selecionável no toggle (não mapeado pelo `system`).
-     TODOS os pares de contraste calculados antes de escrever e travados no
-     theme-contrast.test.ts (mínimo do bloco: 4.57:1). */
+     Desde 86e3h578n (07/10/2026) a cor de AÇÃO é o verde da marca: botão
+     primário verde com texto navy, anel de foco e link de ação em texto verdes.
+     O item ativo do menu (`--accent`) continua o tint do navy e a logomark
+     continua branca (`--logo`). TODOS os pares de contraste calculados antes de
+     escrever e travados no theme-contrast.test.ts. */
   .hologram {
     /* Controles NATIVOS do browser (ícone do calendário no input de mês,
        scrollbars, etc) seguem o `color-scheme`, não os tokens. O next-themes
@@ -153,8 +178,13 @@
     --card-foreground: 0 0% 98%;
     --popover: 222 55% 11%;
     --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 222 65% 14%;
+    /* Primário = o verde da marca, o mesmo valor do `--brand`. O texto sobre ele é
+       o navy, cópia literal do `--primary` do claro, pelo motivo do
+       `--brand-foreground`: branco sobre o verde dá 1,85:1 e reprova. Navy sobre o
+       verde: 8,94:1; sobre o hover: 7,31:1. */
+    --primary: 175 95% 42%;
+    --primary-foreground: 240 76.5% 20%;
+    --primary-hover: 175 95% 38%;
     --secondary: 222 45% 16%;
     --secondary-foreground: 0 0% 98%;
     --muted: 222 45% 16%;
@@ -177,11 +207,17 @@
     --info-muted: 218 55% 18%;
     --border: 222 40% 20%;
     --input: 222 40% 20%;
-    --ring: 0 0% 98%;
+    /* Anel de foco verde: 9,70:1 sobre o fundo e 9,32:1 sobre o card (mínimo 3:1). */
+    --ring: 175 95% 42%;
+    /* Link de ação em texto verde: os mesmos 9,70:1 e 9,32:1 (mínimo 4,5:1). */
+    --link: 175 95% 42%;
     /* Verde da marca: o MESMO valor do `:root` (é a cor da marca, não do tema). */
     --brand: 175 95% 42%;
     --brand-foreground: 240 76.5% 20%;
     --brand-hover: 175 95% 38%;
+    /* Logomark BRANCA (decisão do Pedro, 30/09): não acompanha o primário, que
+       aqui é o verde. 17,24:1 sobre o card do header. */
+    --logo: 0 0% 98%;
     --radius: 0.5rem;
   }
 }

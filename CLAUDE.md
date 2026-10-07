@@ -1009,8 +1009,9 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   `--brand-foreground` e `--brand-hover`), e o botão primário das páginas públicas é o
   `<Button variant="brand">`: verde com texto navy (cópia literal do `--primary` claro),
   hover sólido, anel de foco no próprio verde, desabilitado a 50 %. **Nunca texto branco
-  sobre o verde** (1,85:1); os pares ficam em `theme-contrast.test.ts`. O verde não é cor
-  do app autenticado: token existe para ser um só, não para vestir tela de dado. Nada pinta
+  sobre o verde** (1,85:1); os pares ficam em `theme-contrast.test.ts`. No app autenticado
+  o verde só entra como cor de AÇÃO do tema Hologram (item seguinte), nunca para vestir
+  tela de dado. Nada pinta
   atrás do texto de card (o spotlight saiu na 86e3h0xcr); tudo parado sob `prefers-reduced-motion`, que é também o estado que o gate de a11y mede.
   **Um efeito por bloco, e loop só enquanto o bloco está na tela** (86e3gwzj0): o "antes"
   de cada entrada mora sob `prefers-reduced-motion: no-preference`, e nenhum efeito
@@ -1025,6 +1026,15 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   `Docs/landing/COPY.md`), com tetos de caracteres por campo travados em
   `content.test.ts`; os textos novos do login moram lá também (`login`). Nada disso vale
   para o app autenticado.
+- **No tema Hologram o primário é o verde da marca; a logomark e o link têm token
+  próprio** (86e3h5783 + 86e3h578n): `--primary`, `--ring` e `--link` valem o `--brand`
+  no bloco `.hologram`, com o navy por cima (`--primary-foreground`). `--logo` pinta a
+  `BrandMark` (`text-logo`; o primário no claro e no escuro, BRANCA no Hologram), `--link`
+  pinta link de ação em texto (`text-link`; o `foreground` no claro e no escuro) e
+  `--primary-hover` é o hover sólido do `Button`/`Badge` `default` (no claro e no escuro, o
+  valor que o antigo `/90` dava). Claro e escuro não mudaram; `--accent` segue o tint do
+  navy. Ícone e indicador de ação seguem o primário; texto corrido e rótulo informativo
+  não (exceção decidida: o chip "Destaque" da categoria).
 - **Nome do produto só em `lib/brand.ts` (web) e `core/branding.py` (API)** (86e3fr9x3):
   `PRODUCT_NAME = 'Hologram OS'` (título, header, login, landing, metadados, título do
   OpenAPI "Hologram OS API", prefixo `[Hologram OS]` dos alertas, textos operacionais) e
@@ -1454,6 +1464,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.79, 07/10/2026. **No tema Hologram o verde da marca virou a cor de AÇÃO do app autenticado, e a logomark ganhou token próprio para continuar branca (86e3h5783 e 86e3h578n, subtasks 1 e 2 do épico 86e3h56nk).** Nasceram três tokens nos três blocos do `globals.css`, expostos no Tailwind: `--logo` (cópia literal do `--primary` no claro e no escuro, `0 0% 98%` no Hologram; toda `BrandMark` que usava `text-primary` passou a `text-logo`), `--link` (o `--foreground` no claro e no escuro, o verde no Hologram; aplicado nos dois links de ação em texto do app, `edit-client-modal` e `origin-state-notice`, e na variante `link` do `Button`, hoje sem uso) e `--primary-hover` (o hover do `Button` e do `Badge` `default` deixou de ser `primary/90` e `/80`: no claro `240 49.2% 28%` e no escuro `240 54.4% 65.2%`, o que o `/90` dava sobre o fundo, travado a 1 unidade por canal; no Hologram `175 95% 38%`, o `--brand-hover`). No bloco `.hologram`, `--primary` e `--ring` passaram ao verde e `--primary-foreground` ao navy; `--accent` ficou. Contrastes medidos no `theme-contrast.test.ts`: navy sobre o verde 8,94:1 e sobre o hover 7,31:1; anel e link verdes 9,70:1 sobre o fundo e 9,32:1 sobre o card; logomark 17,27:1 (claro), 6,04:1 (escuro) e 17,24:1 (Hologram, sobre o card); rótulo do primário em hover 13,04:1 (claro) e 4,89:1 (escuro); o chip "Destaque" composto, verde no Hologram por decisão do Pedro, 7,83:1 no card e 7,31:1 na linha em hover; branco sobre o verde continua reprovando (1,85:1). A `public-brand.css` lia `--primary` para o brilho da aurora e as bordas dos cards (branco no Hologram fixo): passou a ler `--foreground`, mesmo `0 0% 98%`, e a landing e o login não mudaram. Achado no caminho: o `bg-primary/10 hover:bg-primary/15` da linha selecionada do "Trocar lançamento" nunca pintava, porque o `data-[state=selected]:bg-muted` do `TableRow` vence pela especificidade do seletor de atributo; saiu como código morto (com ele, o fornecedor em cinza mediria 4,38:1 no claro). Nenhum backend: endpoints sensíveis (**118**), matriz (**29**) e pares de AAD (**17**) não mudaram._
 
 _Versão 1.78, 06/10/2026. **O limite do login passou a ser por identidade, e o limite por IP virou teto de enxurrada (86e3anx10, a task urgente do épico 86e3anwzu).** Atrás do BFF do Next a API vê o IP do proxy para todo mundo, e o `5/5minutes` por IP do slowapi era um balde só para a plataforma inteira por instância: cinco erros de digitação de pessoas diferentes travavam o login de todos, e qualquer um derrubava o login de propósito. Nasceu `LoginIdentityLimiter` em `core/rate_limit.py` (`MovingWindowRateLimiter` da `limits` 5.8.0 sobre `MemoryStorage`, `5/5minutes` por chave `login:<sha256 do e-mail normalizado>`), consultado pela rota `login` com o `payload` já validado e ANTES do `AuthService.login` (`test`, que não consome cota) e alimentado só no `except UnauthorizedError` (`hit`); sem middleware que pré-lê o body, e o `TODO S16` que o previa saiu. O 429 por identidade tem mensagem própria com a janela real ("Aguarde 5 minutos") e loga só `window` e um `identity_prefix` de 8 hex. O decorador por IP passou a `LOGIN_FLOOD_LIMIT = "60/minute"`, no molde do `LEADS_RATE_LIMIT`. A tela de login deixou de ter texto próprio para 429 (dizia "1 minuto") e mostra o `userMessage` do servidor. Nova regra §3.17, com `--forwarded-allow-ips` proibido enquanto a API for pública. Endpoints sensíveis (**118**), matriz (**29**) e pares de AAD (**17**) não mudaram; o contrato mudou só em texto de descrição (o do login e um resto não regenerado da 86e3anx4u). Storage compartilhado e IP real ficam pendentes (86e3anx7y item 3, 86e3anx69)._
 

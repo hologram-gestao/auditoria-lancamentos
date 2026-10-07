@@ -11,10 +11,13 @@
  */
 
 .lp-public {
-  --lp-glow-primary: hsl(var(--primary) / 0.18);
+  /* Brilho e borda BRANCOS: liam `--primary`, que era branco no Hologram e virou o
+     verde de ação (86e3h578n). `--foreground` tem o mesmo `0 0% 98%` aqui, então a
+     aurora e as bordas não mudam. */
+  --lp-glow-primary: hsl(var(--foreground) / 0.18);
   --lp-glow-brand: hsl(var(--brand) / 0.38);
   --lp-glow-accent: hsl(var(--accent) / 1);
-  --lp-edge: hsl(var(--primary) / 0.14);
+  --lp-edge: hsl(var(--foreground) / 0.14);
   --lp-edge-strong: hsl(var(--brand) / 0.4);
   --lp-grid-line: hsl(var(--border) / 0.55);
   --lp-shadow: 0 18px 48px -24px hsl(var(--brand) / 0.45);

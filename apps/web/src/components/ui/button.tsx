@@ -12,7 +12,10 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: 'bg-primary text-primary-foreground hover:bg-primary/90',
+        // Hover por token sólido (86e3h578n), pela mesma regra do destrutivo. No
+        // Hologram o primário é o verde da marca com texto navy; no claro e no
+        // escuro `--primary-hover` é o valor que o antigo `/90` dava.
+        default: 'bg-primary text-primary-foreground hover:bg-primary-hover',
         // Hover por TOKEN SÓLIDO, não `bg-destructive/90` (86e36ed1d): a
         // composição com alfa mistura o vermelho com a superfície e o par
         // resultante não é um token, então nenhum teste o trava. No escuro
@@ -27,7 +30,9 @@ const buttonVariants = cva(
         outline: 'border border-input bg-background hover:bg-accent hover:text-accent-foreground',
         secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
         ghost: 'hover:bg-accent hover:text-accent-foreground',
-        link: 'text-primary underline-offset-4 hover:underline',
+        // Link de ação em texto: `--link` (o `foreground` no claro e no escuro, o
+        // verde no Hologram). Hoje sem uso; a variante segue o token do link.
+        link: 'text-link underline-offset-4 hover:underline',
       },
       size: {
         default: 'h-10 px-4 py-2',

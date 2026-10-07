@@ -40,7 +40,7 @@ export function ThemeToggle() {
 
   const icon =
     !mounted || resolvedTheme === 'hologram' ? (
-      <BrandMark className="h-5 w-5" />
+      <BrandMark className="text-logo h-5 w-5" />
     ) : resolvedTheme === 'dark' ? (
       <Moon className="h-5 w-5" aria-hidden="true" />
     ) : (

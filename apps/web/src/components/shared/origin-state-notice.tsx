@@ -109,10 +109,7 @@ export function OriginStateBlock({
         <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
         <span>{copy.title}.</span>
         {showLink && (
-          <Link
-            href={originFixPath(clientId)}
-            className="text-foreground underline underline-offset-4"
-          >
+          <Link href={originFixPath(clientId)} className="text-link underline underline-offset-4">
             {copy.actionLabel}
           </Link>
         )}

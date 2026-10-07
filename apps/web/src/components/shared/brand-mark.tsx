@@ -2,7 +2,7 @@
  * Logomark "H" da Hologram (86e2ukrc9) — pintada por TOKEN, um asset só.
  *
  * O PNG oficial (fundo transparente) vira MÁSCARA CSS e o `bg-current` pinta a
- * forma com o `currentColor` do contexto — em `text-primary` a logo sai marinho
+ * forma com o `currentColor` do contexto — em `text-logo` a logo sai marinho
  * no claro, índigo no escuro e branca no tema Hologram, sem variante por tema e
  * sem vetorização de terceiros redesenhando a marca. O arquivo em
  * `public/brand/hologram-h.png` é derivado de `Docs/brand/h-svg-black.png`
