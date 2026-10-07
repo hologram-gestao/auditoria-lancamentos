@@ -14,6 +14,7 @@
  */
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { invalidateClientSummary } from '@/hooks/use-client-summary';
 import {
   getClientTitlesSummary,
   getReceivablesReport,
@@ -78,6 +79,7 @@ export function useSyncClientTitles(clientId: string) {
     mutationFn: () => syncClientTitles(clientId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: clientTitlesKeys.all(clientId) });
+      invalidateClientSummary(qc, clientId);
     },
   });
 }

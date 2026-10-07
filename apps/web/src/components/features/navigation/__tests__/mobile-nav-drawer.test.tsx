@@ -30,6 +30,11 @@ vi.mock('@/hooks/use-clients', () => ({
   useClientDetail: () => detailState,
 }));
 
+// Contadores do menu (86e3k1q3x): o drawer herda o SidebarNav; aqui sem resumo.
+vi.mock('@/hooks/use-client-summary', () => ({
+  useClientSummary: () => ({ data: undefined, isLoading: false, isError: false }),
+}));
+
 // Imports do SUT DEPOIS dos `vi.mock` (as factories fecham sobre variáveis
 // deste módulo — importar no topo as avaliaria antes da inicialização).
 import { MobileNavDrawer } from '@/components/features/navigation/mobile-nav-drawer';

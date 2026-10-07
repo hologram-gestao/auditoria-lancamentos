@@ -30,6 +30,7 @@ import { ArrowLeft } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import { Fragment } from 'react';
 
+import { useClientSummary } from '@/hooks/use-client-summary';
 import { useClientDetail } from '@/hooks/use-clients';
 import { canAccessClient, canSeeSystemArea } from '@/lib/authz';
 import type { AuthenticatedUser } from '@/lib/contracts';
@@ -60,6 +61,9 @@ export function SidebarNav({ user, onNavigate }: SidebarNavProps) {
   // Hook incondicional (rules of hooks); `enabled` barra o id vazio e o deep
   // link de outro tenant — nem dispara request (mesma regra do ClientShell).
   const detailQuery = useClientDetail(clientId ?? '', { enabled: canAccess });
+  // Contadores de pendência (86e3k1q3x): o mesmo resumo do painel, do mês que o
+  // SERVIDOR decide. Sem dado (carregando, erro), o menu sai sem pílula.
+  const summaryQuery = useClientSummary(clientId ?? '', undefined, { enabled: canAccess });
 
   if (clientId === null || !canAccess) {
     return (
@@ -98,7 +102,10 @@ export function SidebarNav({ user, onNavigate }: SidebarNavProps) {
           )}
         </div>
       )}
-      <NavSections sections={clientNavSections(user, clientId, pathname)} onNavigate={onNavigate} />
+      <NavSections
+        sections={clientNavSections(user, clientId, pathname, summaryQuery.data)}
+        onNavigate={onNavigate}
+      />
     </nav>
   );
 }

@@ -25,6 +25,7 @@ import {
   type UseQueryOptions,
 } from '@tanstack/react-query';
 
+import { invalidateClientSummary } from '@/hooks/use-client-summary';
 import { clientsKeys } from '@/hooks/use-clients';
 import type { BlobResponse } from '@/lib/api/client';
 import {
@@ -90,8 +91,11 @@ export function useParseStatement() {
 }
 
 export function useCreateReconciliation() {
+  const queryClient = useQueryClient();
   return useMutation<CreateReconciliationResult, Error, CreateReconciliationPayload>({
     mutationFn: createReconciliation,
+    // Conciliação nova entra como "em andamento" no contador do menu e no painel.
+    onSuccess: (_result, payload) => invalidateClientSummary(queryClient, payload.client_id),
   });
 }
 
@@ -109,6 +113,7 @@ export function useReprocessReconciliation(sessionId: string, clientId?: string)
     mutationFn: () => reprocessReconciliation(sessionId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
+      invalidateClientSummary(queryClient, clientId);
       if (clientId !== undefined) {
         void queryClient.invalidateQueries({
           queryKey: clientsKeys.reconciliationsAll(clientId),
@@ -137,6 +142,7 @@ export function useDiscardReconciliation(sessionId: string, clientId: string) {
       void queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
       // O contador de conciliações na lista de clientes pode mudar.
       void queryClient.invalidateQueries({ queryKey: ['clients'] });
+      invalidateClientSummary(queryClient, clientId);
     },
   });
 }
@@ -156,6 +162,7 @@ export function useCancelReconciliation(sessionId: string, clientId: string) {
         queryKey: clientsKeys.reconciliationsAll(clientId),
       });
       void queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
+      invalidateClientSummary(queryClient, clientId);
     },
   });
 }
@@ -411,6 +418,7 @@ export function usePatchFileEntry(sessionId: string) {
         queryKey: ['review', sessionId, 'file-entries'],
       });
       void qc.invalidateQueries({ queryKey: sessionKey(sessionId) });
+      invalidateClientSummary(qc);
     },
   });
 }
@@ -510,6 +518,7 @@ export function useCreateAnomaly(sessionId: string) {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['review', sessionId, 'anomalies'] });
       void qc.invalidateQueries({ queryKey: sessionKey(sessionId) });
+      invalidateClientSummary(qc);
     },
   });
 }
@@ -526,6 +535,7 @@ export function usePatchAnomaly(sessionId: string) {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['review', sessionId, 'anomalies'] });
       void qc.invalidateQueries({ queryKey: sessionKey(sessionId) });
+      invalidateClientSummary(qc);
     },
   });
 }

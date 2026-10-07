@@ -18,6 +18,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { invalidateClientSummary } from '@/hooks/use-client-summary';
 import {
   listOmieCategorias,
   postOmieLancamentos,
@@ -66,6 +67,8 @@ export function usePostOmieLancamentos(sessionId: string) {
       // resolvida e os contadores mudam — os três vivem em prefixos distintos.
       void qc.invalidateQueries({ queryKey: ['review', sessionId] });
       void qc.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
+      // As compras a lançar do resumo do cliente (painel) também mudam.
+      invalidateClientSummary(qc);
     },
   });
 }

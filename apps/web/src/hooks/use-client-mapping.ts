@@ -16,6 +16,7 @@
  */
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { invalidateClientSummary } from '@/hooks/use-client-summary';
 import type { BlobResponse } from '@/lib/api/client';
 import {
   applyMappingImport,
@@ -162,16 +163,21 @@ export function useSyncMovements(clientId: string) {
     onSuccess: (result, competence) => {
       qc.setQueryData(clientMappingKeys.syncState(clientId, competence), result.state);
       void qc.invalidateQueries({ queryKey: clientMappingKeys.all(clientId) });
+      invalidateClientSummary(qc, clientId);
     },
   });
 }
 
 function useInvalidateDestination(clientId: string, destinationType: string) {
   const qc = useQueryClient();
-  return () =>
+  // Toda escrita do de-para muda "sem decisão", cobertura ou materialização do
+  // resumo (contador do menu e card do painel).
+  return () => {
     void qc.invalidateQueries({
       queryKey: clientMappingKeys.destination(clientId, destinationType),
     });
+    invalidateClientSummary(qc, clientId);
+  };
 }
 
 export function useWriteMappingDecision(clientId: string, destinationType: string) {

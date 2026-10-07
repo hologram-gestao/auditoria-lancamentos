@@ -35,6 +35,21 @@ const detailState = {
   isError: false,
 };
 
+// Resumo do cliente (86e3k1q3x): só o `data` importa para o menu. `enabled`
+// é registrado para provar que deep link negado não dispara request.
+const summaryState = {
+  data: undefined as ClientSummary | undefined,
+  isError: false,
+};
+const summaryCalls: Array<{ clientId: string; enabled: boolean | undefined }> = [];
+
+vi.mock('@/hooks/use-client-summary', () => ({
+  useClientSummary: (clientId: string, _month?: string, options: { enabled?: boolean } = {}) => {
+    summaryCalls.push({ clientId, enabled: options.enabled });
+    return summaryState;
+  },
+}));
+
 vi.mock('@/hooks/use-clients', () => ({
   // O ClientShell agora monta o diálogo de exclusão (86e34jd1d).
   // O ClientShell/lista agora renderiza o coração de favorito (86e34jd5a).
@@ -46,7 +61,7 @@ vi.mock('@/hooks/use-clients', () => ({
 // deste módulo — importar no topo as avaliaria antes da inicialização).
 import { clientIdFromPathname } from '@/components/features/navigation/nav-items';
 import { SidebarNav } from '@/components/features/navigation/sidebar-nav';
-import type { AuthenticatedUser } from '@/lib/contracts';
+import type { AuthenticatedUser, ClientSummary } from '@/lib/contracts';
 import { assertNoA11yViolations } from '@/test/a11y';
 
 const ADMIN: AuthenticatedUser = {
@@ -95,7 +110,45 @@ const CLIENT_OPERATOR: AuthenticatedUser = {
   role: 'client_operator',
 };
 
+/** Resumo com as três pendências que viram contador, e as que não viram. */
+const SUMMARY: ClientSummary = {
+  referenceMonth: '2026-10',
+  reconciliations: {
+    accountsTotal: 4,
+    accountsWithSession: 3,
+    byStatus: { processing: 1, reviewing: 2, done: 1, error: 0 },
+  },
+  anomalies: { openTotal: 7, byType: [{ code: 'wrong_date', count: 7 }], resolvedInMonth: 2 },
+  cardPurchasesToPost: { count: 3, totalAmount: '-420.00' },
+  mapping: [
+    {
+      destinationCode: 'conta_contabil',
+      withoutDecision: 4,
+      coveragePct: '81.2',
+      materialized: false,
+    },
+    {
+      destinationCode: 'fluxo_de_caixa',
+      withoutDecision: 1,
+      coveragePct: null,
+      materialized: false,
+    },
+  ],
+  titles: {
+    overdueCount: 12,
+    overdueTotal: '82865.50',
+    aPagar: { overdueCount: 3, overdueTotal: '4380.00' },
+    aReceber: { overdueCount: 9, overdueTotal: '78485.50' },
+    syncedAt: '2026-10-07T09:10:00Z',
+    neverSynced: false,
+  },
+  latestSession: null,
+};
+
 beforeEach(() => {
+  summaryState.data = undefined;
+  summaryState.isError = false;
+  summaryCalls.length = 0;
   currentPathname = '/clientes';
   detailState.data = { name: 'Cliente Exemplo Ltda' };
   detailState.isLoading = false;
@@ -477,5 +530,59 @@ describe('SidebarNav — camada do cliente', () => {
     nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
     expect(within(nav).queryByText('Cliente')).not.toBeInTheDocument();
     expect(within(nav).getByRole('link', { name: 'Conciliações' })).toBeInTheDocument();
+  });
+});
+
+describe('SidebarNav — contadores de pendência (86e3k1q3x)', () => {
+  function countOf(nav: HTMLElement, linkName: string): HTMLElement | null {
+    const link = within(nav).getByRole('link', { name: new RegExp(`^${linkName}`) });
+    return within(link).queryByRole('img');
+  }
+
+  it('Conciliações, Carteira e De-para ganham contador com nome acessível; o resto não', async () => {
+    currentPathname = '/clientes/c1/contas';
+    summaryState.data = SUMMARY;
+    const { container } = render(<SidebarNav user={ADMIN} />);
+
+    const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
+    // processando + em revisão; vencidos; sem decisão somado nos destinos.
+    expect(countOf(nav, 'Conciliações')).toHaveAccessibleName('3 em andamento');
+    expect(countOf(nav, 'Conciliações')).toHaveTextContent('3');
+    expect(countOf(nav, 'Carteira')).toHaveAccessibleName('12 títulos vencidos');
+    expect(countOf(nav, 'De-para')).toHaveAccessibleName('5 categorias sem decisão');
+    // Tom de cada um: a cor do badge que a tela de destino já usa.
+    expect(countOf(nav, 'Conciliações')).toHaveClass('text-info');
+    expect(countOf(nav, 'Carteira')).toHaveClass('text-destructive');
+    expect(countOf(nav, 'De-para')).toHaveClass('text-warning');
+    // Painel, Origem por arquivo, Cadastros e Acesso nunca têm contador.
+    expect(within(nav).getAllByRole('img')).toHaveLength(3);
+    expect(summaryCalls.at(-1)).toEqual({ clientId: 'c1', enabled: true });
+    await assertNoA11yViolations(container);
+  });
+
+  it('papel sem a carteira (`titles` nulo) fica sem o contador da Carteira', () => {
+    currentPathname = '/clientes/c1';
+    summaryState.data = { ...SUMMARY, titles: null };
+    render(<SidebarNav user={CLIENT_OPERATOR} />);
+
+    const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
+    expect(countOf(nav, 'Carteira')).toBeNull();
+    expect(countOf(nav, 'Conciliações')).not.toBeNull();
+  });
+
+  it('resumo em erro ou carregando: nenhuma pílula, e o menu inteiro aparece', () => {
+    currentPathname = '/clientes/c1';
+    summaryState.isError = true;
+    render(<SidebarNav user={ADMIN} />);
+
+    const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
+    expect(within(nav).queryAllByRole('img')).toHaveLength(0);
+    expect(within(nav).getByRole('link', { name: 'Carteira' })).toBeInTheDocument();
+  });
+
+  it('deep link de outro tenant não pede o resumo do cliente alheio', () => {
+    currentPathname = '/clientes/c-alheio';
+    render(<SidebarNav user={CLIENT_OPERATOR} />);
+    expect(summaryCalls.every((call) => call.enabled === false)).toBe(true);
   });
 });

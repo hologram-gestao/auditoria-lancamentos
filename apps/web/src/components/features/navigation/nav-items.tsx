@@ -28,7 +28,7 @@ import {
 } from 'lucide-react';
 
 import { hasPermission, homePathFor, isClientScoped, type Permission } from '@/lib/authz';
-import type { AuthenticatedUser } from '@/lib/contracts';
+import type { AuthenticatedUser, ClientSummary } from '@/lib/contracts';
 
 /** Tom do contador do item: info = em andamento, warning = decisão pendente, destructive = atraso. */
 export type NavCountTone = 'info' | 'warning' | 'destructive';
@@ -185,6 +185,62 @@ export function mappingPreviewPath(clientId: string, competence: string): string
   return `/clientes/${clientId}/de-para?view=previa&competence=${encodeURIComponent(competence)}`;
 }
 
+/** O contador de UM item: número, tom e o nome acessível que diz do que é. */
+export interface NavCount {
+  count: number;
+  countTone: NavCountTone;
+  countLabel: string;
+}
+
+function plural(count: number, singular: string, pluralForm: string): string {
+  return `${count} ${count === 1 ? singular : pluralForm}`;
+}
+
+/**
+ * Os contadores do menu do cliente a partir do resumo (86e3k1q3x). Três itens
+ * e só três têm contador, cada um na cor do badge que a tela de destino já usa:
+ * Conciliações em `info` (em andamento: processando ou em revisão), Carteira em
+ * `destructive` (títulos vencidos) e De-para em `warning` (categorias sem
+ * decisão, somadas sobre os destinos). Zero não é pendência: o item fica sem
+ * pílula. `titles` nulo (papel que não lê a carteira) também.
+ *
+ * Nenhum número é calculado aqui além da soma do que o servidor contou: o mês,
+ * o "em andamento" e o "vencido" são decisões do `/summary`.
+ */
+export function clientNavCounts(summary: ClientSummary): {
+  reconciliations?: NavCount;
+  titles?: NavCount;
+  mapping?: NavCount;
+} {
+  const counts: { reconciliations?: NavCount; titles?: NavCount; mapping?: NavCount } = {};
+  const { byStatus } = summary.reconciliations;
+  const inProgress = byStatus.processing + byStatus.reviewing;
+  if (inProgress > 0) {
+    counts.reconciliations = {
+      count: inProgress,
+      countTone: 'info',
+      countLabel: `${inProgress} em andamento`,
+    };
+  }
+  const overdue = summary.titles?.overdueCount ?? 0;
+  if (overdue > 0) {
+    counts.titles = {
+      count: overdue,
+      countTone: 'destructive',
+      countLabel: plural(overdue, 'título vencido', 'títulos vencidos'),
+    };
+  }
+  const withoutDecision = summary.mapping.reduce((sum, item) => sum + item.withoutDecision, 0);
+  if (withoutDecision > 0) {
+    counts.mapping = {
+      count: withoutDecision,
+      countTone: 'warning',
+      countLabel: plural(withoutDecision, 'categoria sem decisão', 'categorias sem decisão'),
+    };
+  }
+  return counts;
+}
+
 /**
  * Camada do CLIENTE: as seções internas de `/clientes/{id}/**`, agrupadas em
  * Operação, Cadastros e Acesso (86e3k1q2j). O gating de cada item não mudou com
@@ -195,7 +251,11 @@ export function clientNavSections(
   user: AuthenticatedUser,
   clientId: string,
   pathname: string,
+  summary?: ClientSummary | undefined,
 ): NavSection[] {
+  // Sem resumo (carregando, erro, sem acesso), nenhum contador: o menu nunca
+  // espera o resumo para aparecer.
+  const counts = summary ? clientNavCounts(summary) : {};
   const base = `/clientes/${clientId}`;
   const accountsHref = `${base}/contas`;
   const dashboardHref = `${base}/painel`;
@@ -247,6 +307,7 @@ export function clientNavSections(
       label: 'Conciliações',
       icon: <ListChecks className="h-4 w-4" aria-hidden="true" />,
       active: isReconciliations,
+      ...counts.reconciliations,
     },
   ];
   // S11 (R5): "Carteira" é montada pela MATRIZ. A célula de LER é ✅ nos cinco
@@ -260,6 +321,7 @@ export function clientNavSections(
       label: 'Carteira',
       icon: <Wallet className="h-4 w-4" aria-hidden="true" />,
       active: isTitles,
+      ...counts.titles,
     });
   }
   // S12 (R6): "De-para" NÃO é gated, pela regra do Glossário: LER é de todo
@@ -273,6 +335,7 @@ export function clientNavSections(
     label: 'De-para',
     icon: <ArrowRightLeft className="h-4 w-4" aria-hidden="true" />,
     active: isMapping,
+    ...counts.mapping,
   });
   // S14 (R5), revisto no follow-up 86e3fqnc9: "Origem por arquivo" é SEMPRE
   // listada. Antes ela só existia para o cliente que já tinha conexão
