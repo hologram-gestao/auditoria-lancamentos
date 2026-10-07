@@ -265,9 +265,30 @@ viewportSize().width` (padrão em `spec:2147-2165` e `:2190-2205`). Antes de med
 
 - **Cor só por token semântico** (`success`/`warning`/`info`/`destructive` + `-foreground`/
   `-muted`, neutros `muted`/`border`/`input`), definidos nos três blocos de
-  `app/globals.css` (`:root` `:6`, `.dark` `:76`, `.hologram` `:125`). Nada de
+  `app/globals.css` (`:root` `:6`, `.dark` `:106`, `.hologram` `:168`). Nada de
   `emerald-100`/`zinc-700` nem `dark:` em componente. Pareamento que não inverte:
   sobre o SÓLIDO usa-se `-foreground`; sobre `-muted` o texto é o SÓLIDO.
+- **No Hologram o primário é o verde da marca** (86e3h578n, 07/10/2026): `--primary`,
+  `--ring` e `--link` valem `--brand` lá, com texto navy por cima (`--primary-foreground`,
+  cópia literal do `--primary` do claro: branco sobre o verde dá 1,85:1 e o teste exige
+  que REPROVE). Claro e escuro não mudaram. Três tokens nasceram para isso, nos três
+  blocos: **`--logo`** (a `BrandMark` pinta por `text-logo`, nunca `text-primary`: igual
+  ao primário no claro e no escuro, BRANCA no Hologram), **`--link`** (link de ação em
+  TEXTO dentro do app, `text-link` + sublinhado; é o `foreground` no claro e no escuro;
+  link de navegação do menu e botão não usam) e **`--primary-hover`** (hover sólido do
+  `Button` e do `Badge` `default`; no claro e no escuro é o valor que o antigo `/90` dava
+  sobre o fundo). O `--accent` (item ativo do menu, hover de dropdown) continua o tint do
+  navy: uma segunda cor de ação disputaria com o botão. Quem pode seguir o primário verde:
+  ícone ou indicador de AÇÃO (favorito marcado, passo ativo, contexto registrado, controle
+  nativo com `accent-primary`) e o chip "Destaque" da categoria (decisão do Pedro). Texto
+  corrido e rótulo informativo NÃO: troque por `text-foreground`/`text-muted-foreground`.
+  Pares travados no `theme-contrast.test.ts`: `primary-foreground` sobre `primary` e
+  `primary-hover`, `link` sobre `background` e `card` (4,5:1), `ring` e `logo` sobre
+  `background` e `card` (3:1, não textual) e o chip "Destaque" composto sobre o card e
+  sobre a linha em hover. Fundo com alfa que sobra fora de botão é medido COMPOSTO, sobre
+  a superfície real; antes de medir, confira no CSS gerado se a classe pinta mesmo (o
+  `bg-primary/10` do "Trocar lançamento" nunca pintava: o `data-[state=selected]:bg-muted`
+  do `TableRow` vence pela especificidade do seletor de atributo).
 - **Estado de HOVER é um par próprio, e sólido** (86e36ed1d). `hover:bg-destructive/90`
   parece inofensivo e não é: a composição com **alfa** mistura o token com a superfície,
   e o par resultante não é um token — `theme-contrast.test.ts` não consegue travá-lo. Nos
@@ -341,7 +362,8 @@ viewportSize().width` (padrão em `spec:2147-2165` e `:2190-2205`). Antes de med
   secundário com cor da paleta (`variant="secondary"` → `bg-secondary`, `:28`), nunca
   cinza indistinguível. `variant="brand"` (verde da marca, texto navy, token `--brand`,
   86e3h1h75) é o primário das PÁGINAS PÚBLICAS (landing e login, tema Hologram fixo);
-  no app autenticado o primário continua o `default`.
+  no app autenticado o primário continua o `default`, que no Hologram também é o verde
+  (86e3h578n) e no claro e no escuro segue o navy.
 - **Campo de arquivo é `components/shared/file-input-field.tsx`, nunca `<Input type="file">`
   cru** (86e3gkd4y): o botão nativo do input não muda o cursor nem reage ao hover, e na
   demo de 29/09 ninguém via que era clicável. O componente esconde o input (`peer
