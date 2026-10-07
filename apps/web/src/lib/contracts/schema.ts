@@ -765,6 +765,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clients/{client_id}/titles/flow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fluxo previsto da carteira pelos VENCIMENTOS (86e3k1q4g): soma e contagem dos títulos em aberto em seis faixas em relação ao 'hoje' do servidor (`vencidos`, `ate_7`, `8_30`, `31_60`, `61_90`, `90_mais`), a receber e a pagar separados, com o líquido de cada faixa (`net = aReceber - aPagar`). Sempre as seis faixas, zeradas quando vazias; as seis somam o total em aberto do `/summary` de cada lado, e `vencidos` é o total vencido do aging. Calculado no servidor sobre a carteira inteira; só valores e contagens, nenhum nome. NÃO é saldo de conta. `neverSynced=true` devolve as faixas zeradas para a tela oferecer sincronizar. Mesma permissão de leitura da carteira. */
+        get: operations["get_client_titles_flow_api_v1_clients__client_id__titles_flow_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clients/{client_id}/titles/sync": {
         parameters: {
             query?: never;
@@ -4277,6 +4294,45 @@ export interface components {
             data: components["schemas"]["FileImportItem"][];
         };
         /**
+         * FlowBucket
+         * @description Faixa de vencimento do fluxo previsto — enum FECHADO.
+         *
+         *     A ordem de declaração é a ordem da resposta e do gráfico.
+         * @enum {string}
+         */
+        FlowBucket: "vencidos" | "ate_7" | "8_30" | "31_60" | "61_90" | "90_mais";
+        /**
+         * FlowBucketResponse
+         * @description Uma faixa de vencimento do fluxo previsto, com os dois lados e o líquido.
+         */
+        FlowBucketResponse: {
+            /** @description Faixa pelo vencimento em relação a `referenceDate`: `vencidos` (antes de hoje), `ate_7` (hoje a 7 dias), `8_30`, `31_60`, `61_90`, `90_mais`. */
+            bucket: components["schemas"]["FlowBucket"];
+            aReceber: components["schemas"]["FlowSideResponse"];
+            aPagar: components["schemas"]["FlowSideResponse"];
+            /**
+             * Net
+             * @description `aReceber.total - aPagar.total`: o que entra menos o que sai na faixa.
+             */
+            net: string;
+        };
+        /**
+         * FlowSideResponse
+         * @description Um lado (a pagar ou a receber) numa faixa do fluxo previsto.
+         */
+        FlowSideResponse: {
+            /**
+             * Total
+             * @description Soma dos títulos em aberto do lado nesta faixa.
+             */
+            total: string;
+            /**
+             * Count
+             * @description Quantos títulos.
+             */
+            count: number;
+        };
+        /**
          * GenerateAccountingFileRequest
          * @description Corpo de `POST /clients/{id}/accounting-files`.
          */
@@ -6728,6 +6784,40 @@ export interface components {
          * @enum {string}
          */
         TitleType: "a_pagar" | "a_receber";
+        /**
+         * TitlesFlowEnvelope
+         * @description Envelope `{data: ...}` de `GET /clients/{client_id}/titles/flow`.
+         */
+        TitlesFlowEnvelope: {
+            data: components["schemas"]["TitlesFlowResponse"];
+        };
+        /**
+         * TitlesFlowResponse
+         * @description Fluxo previsto da carteira por faixa de vencimento (86e3k1q4g).
+         *
+         *     Sempre as seis faixas, na ordem de `FlowBucket`, zeradas quando vazias. Não
+         *     é saldo de conta: é a soma dos títulos em aberto por vencimento.
+         */
+        TitlesFlowResponse: {
+            /**
+             * Referencedate
+             * Format: date
+             * @description Data do SERVIDOR usada para as faixas (a mesma do aging).
+             */
+            referenceDate: string;
+            /**
+             * Syncedat
+             * @description Última sincronização ÍNTEGRA da carteira. `null` = nunca houve uma.
+             */
+            syncedAt?: string | null;
+            /**
+             * Neversynced
+             * @description `true` = a carteira NUNCA foi sincronizada: as faixas vêm zeradas e a tela oferece sincronizar, em vez de desenhar zeros como resultado.
+             */
+            neverSynced: boolean;
+            /** Buckets */
+            buckets: components["schemas"]["FlowBucketResponse"][];
+        };
         /** TitlesSideSummary */
         TitlesSideSummary: {
             /** Overduecount */
@@ -9043,6 +9133,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TitlesSummaryEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_client_titles_flow_api_v1_clients__client_id__titles_flow_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TitlesFlowEnvelope"];
                 };
             };
             /** @description Validation Error */

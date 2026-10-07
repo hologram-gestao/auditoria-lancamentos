@@ -686,6 +686,14 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         "filtra por client_id na própria query",
     ),
     SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/titles/flow",
+        ScopeKind.COLLECTION,
+        "app/modules/client_titles/routes.py",
+        f"{_VIA_CLIENT_PATH} + ViewClientReceivablesDep; o fluxo previsto agrega "
+        "por faixa com client_id e scoped_by_tenant na própria query",
+    ),
+    SensitiveEndpoint(
         "POST",
         "/api/v1/clients/{client_id}/titles/sync",
         ScopeKind.COLLECTION,

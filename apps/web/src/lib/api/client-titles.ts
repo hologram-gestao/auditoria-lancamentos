@@ -27,6 +27,7 @@ import type {
   ReceivablesReport,
   TitleContext,
   TitleContextCreateRequest,
+  TitlesFlow,
   TitlesSummary,
   TitlesSyncResult,
 } from '@/lib/contracts';
@@ -82,6 +83,15 @@ export async function listClientTitles(
  */
 export async function getClientTitlesSummary(clientId: string): Promise<TitlesSummary> {
   return apiGet<TitlesSummary>(`${basePath(clientId)}/summary`);
+}
+
+/**
+ * Fluxo previsto (86e3k1q4g): as seis faixas de vencimento, a receber e a pagar,
+ * com o líquido de cada uma. Tudo calculado no servidor com o "hoje" dele; não é
+ * saldo de conta.
+ */
+export async function getClientTitlesFlow(clientId: string): Promise<TitlesFlow> {
+  return apiGet<TitlesFlow>(`${basePath(clientId)}/flow`);
 }
 
 /**

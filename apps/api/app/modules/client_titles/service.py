@@ -51,7 +51,12 @@ from app.modules.client_connections.origin import (
     build_origin_provider,
     resolve_capable_connection,
 )
-from app.modules.client_titles.repository import ReceivablesReport, TitlesSummary
+from app.modules.client_titles.repository import (
+    ReceivablesReport,
+    TitlesFlow,
+    TitlesSummary,
+    zeroed_flow,
+)
 from app.modules.client_titles.schemas import (
     TITLE_CONTEXT_UNDECIPHERABLE,
     TitleContextResponse,
@@ -288,6 +293,39 @@ class ClientTitlesReadService:
             sync_failed_at=failed_at,
             referencia=reference,
         )
+
+    async def flow(
+        self, client: Client, *, user: CurrentUser, today: date | None = None
+    ) -> TitlesFlowResult:
+        """O fluxo previsto por faixa de vencimento, com a MESMA data de
+        referência do `summary` (o "hoje" do servidor; `today` existe só para o
+        teste plantar títulos em cada faixa).
+
+        Carteira nunca sincronizada devolve as seis faixas zeradas sem consultar
+        a tabela: a tela lê `neverSynced` e oferece sincronizar, em vez de
+        desenhar zeros como se fossem resultado.
+        """
+        reference = today or datetime.now(UTC).date()
+        synced_at, _failed_at = await self._repo.get_sync_state(client.id)
+        if synced_at is None:
+            buckets = zeroed_flow()
+        else:
+            buckets = await self._repo.flow(client.id, today=reference, user=user)
+        return TitlesFlowResult(buckets=buckets, synced_at=synced_at, referencia=reference)
+
+
+@dataclass(frozen=True, slots=True)
+class TitlesFlowResult:
+    """O fluxo previsto com o estado da sincronização (86e3k1q4g)."""
+
+    buckets: TitlesFlow
+    synced_at: datetime | None
+    referencia: date
+
+    @property
+    def nunca_sincronizada(self) -> bool:
+        """A mesma pergunta de `TitlesSummary.nunca_sincronizada`."""
+        return self.synced_at is None
 
 
 class ReceivablesReportService:
