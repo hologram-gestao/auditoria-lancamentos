@@ -158,6 +158,15 @@ const SETTINGS_ITEMS: ReadonlyArray<{
   },
 ];
 
+/**
+ * Rota da LISTA de conciliações do cliente. Fonte única: quem manda para a
+ * lista (painel, detalhe após excluir, processamento) chama esta função, e a
+ * rota muda num lugar só.
+ */
+export function reconciliationsPath(clientId: string): string {
+  return `/clientes/${clientId}`;
+}
+
 /** Rota da aba "Origem por arquivo" (S14) — a mesma que o link do de-para aponta. */
 export function fileOriginPath(clientId: string, competence?: string | null): string {
   const base = `/clientes/${clientId}/origem-arquivo`;

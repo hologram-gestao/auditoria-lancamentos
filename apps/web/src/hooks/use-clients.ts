@@ -225,11 +225,15 @@ const LIST_POLL_INTERVAL_MS = 3000;
  *
  * `refetchIntervalInBackground: false` — aba fora de foco não gera tráfego.
  */
-export function useReconciliationsList(id: string, params: ReconciliationsListParams) {
+export function useReconciliationsList(
+  id: string,
+  params: ReconciliationsListParams,
+  options: { enabled?: boolean } = {},
+) {
   return useQuery<ReconciliationsListResponse>({
     queryKey: clientsKeys.reconciliations(id, params),
     queryFn: () => listReconciliations(id, params),
-    enabled: id.length > 0,
+    enabled: (options.enabled ?? true) && id.length > 0,
     placeholderData: keepPreviousData,
     refetchInterval: (query) => {
       const rows = query.state.data?.data;
