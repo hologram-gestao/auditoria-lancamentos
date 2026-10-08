@@ -84,12 +84,19 @@ flex-col overflow-hidden`) + `<Table fill>` (`:27`, `:43`). Nunca `overflow` no
   entre o alvo e o fundo do `<main>` rolado até o fim ≥ o padding), no cenário
   "a página termina com o respiro do <main>" de `TELAS_COM_TABELA` e no do plano contábil.
   Tela nova pageScroll entra em `TELAS_COM_TABELA` com `pageScroll: true`.
-- **Rota de entrada do cliente** (86e3k1q5n): `/clientes/{id}` é o PAINEL; a lista de
-  conciliações mora em `/clientes/{id}/conciliacoes` e todo link para ela sai de
-  `reconciliationsPath()` (`navigation/nav-items.tsx`). No menu do cliente cada item casa
-  pela PRÓPRIA rota (`isPathActive`), sem item "ativo por exclusão": rota nova que nenhum
-  item reivindica fica sem item aceso. O `/painel` antigo é um 308 do `redirects()` do `next.config.mjs` (leva a query);
-  `permanentRedirect()` numa página responde 200 e redireciona no navegador com refresh de 1 s.
+- **Rota de entrada do cliente** (decisão do Pedro, 08/10/2026): `/clientes/{id}` é a
+  LISTA de conciliações e o painel mora em `/clientes/{id}/painel`; todo link sai de
+  `reconciliationsPath()` ou `dashboardPath()` (`navigation/nav-items.tsx`). No menu do
+  cliente cada item casa pela PRÓPRIA rota (Conciliações na raiz e em `/conciliacao/*`,
+  Painel por `isPathActive`), sem item "ativo por exclusão": rota nova que nenhum item
+  reivindica fica sem item aceso. O `/conciliacoes` da semana em que o painel foi a raiz é
+  um 308 do `redirects()` do `next.config.mjs` (leva a query); `permanentRedirect()` numa
+  página responde 200 e redireciona no navegador com refresh de 1 s.
+- **A gestão de origens mora em Contas Bancárias**: `originFixPath()` (`lib/origin-state.ts`)
+  devolve `/clientes/{id}/contas?conectar=<tipo>`, e a `ClientConnectionsSection` lê o
+  `?conectar=` onde estiver montada. O painel a mostra inteira só quando
+  `origin_status !== 'ativa'` (e nunca para encerrado); com origem ativa, uma linha de
+  estado na faixa "Atividade". Decide o `origin_status`, nunca o `provider_type`.
 - **Shell**: só o `<main>` rola — `app/(app)/layout.tsx:121` (`h-dvh overflow-hidden`)
   e `:168` (`main … overflow-y-auto`). Proibido `h-screen`/`min-h-screen`/`100vh`.
 - Travas no browser: "a barra de paginação NUNCA cobre um card" (`e2e/a11y-mocked.spec.ts:1081`)
