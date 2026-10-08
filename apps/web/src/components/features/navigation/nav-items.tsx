@@ -41,11 +41,14 @@ export interface NavItem {
   /**
    * Contador de pendência ao lado do rótulo (épico 86e3k1q1u). Sem `count`,
    * nada renderiza. Quem preenche é o resumo do cliente (subtask 4); o número
-   * nunca vai sozinho: `countLabel` é o nome acessível ("12 títulos vencidos").
+   * nunca vai sozinho: `countLabel` é o nome acessível e `countDetail` o texto do
+   * tooltip, os dois com o detalhe inteiro ("12 títulos vencidos: 9 a receber · 3
+   * a pagar").
    */
   count?: number;
   countTone?: NavCountTone;
   countLabel?: string;
+  countDetail?: string;
 }
 
 export interface NavSection {
@@ -201,15 +204,24 @@ export function mappingPreviewPath(clientId: string, competence: string): string
   return `/clientes/${clientId}/de-para?view=previa&competence=${encodeURIComponent(competence)}`;
 }
 
-/** O contador de UM item: número, tom e o nome acessível que diz do que é. */
+/**
+ * O contador de UM item: número, tom, e o detalhe que diz do que ele é e de onde ele
+ * vem. O detalhe é o tooltip e também o nome acessível da pílula (`countLabel`):
+ * quem não vê o tooltip ouve a mesma frase.
+ */
 export interface NavCount {
   count: number;
   countTone: NavCountTone;
   countLabel: string;
+  countDetail: string;
 }
 
 function plural(count: number, singular: string, pluralForm: string): string {
   return `${count} ${count === 1 ? singular : pluralForm}`;
+}
+
+function navCount(count: number, countTone: NavCountTone, countDetail: string): NavCount {
+  return { count, countTone, countLabel: countDetail, countDetail };
 }
 
 /**
@@ -217,13 +229,23 @@ function plural(count: number, singular: string, pluralForm: string): string {
  * e só três têm contador, cada um na cor do badge que a tela de destino já usa:
  * Conciliações em `info` (em andamento: processando ou em revisão), Carteira em
  * `destructive` (títulos vencidos) e De-para em `warning` (categorias sem
- * decisão, somadas sobre os destinos). Zero não é pendência: o item fica sem
- * pílula. `titles` nulo (papel que não lê a carteira) também.
+ * decisão). Zero não é pendência: o item fica sem pílula. `titles` nulo (papel
+ * que não lê a carteira) também.
  *
- * Nenhum número é calculado aqui além da soma do que o servidor contou: o mês,
- * o "em andamento" e o "vencido" são decisões do `/summary`.
+ * O De-para conta o MAIOR "sem decisão" entre os destinos, não a soma (decisão do
+ * Pedro, 08/10/2026): a tela do de-para mostra um destino por vez, e a mesma
+ * categoria sem decisão em cinco destinos somava cinco vezes (o menu dizia 1325
+ * onde a tela dizia 265). O detalhe por destino vai no tooltip, do mais pendente
+ * para o menos, com o nome do catálogo (`destinationNames`, tipo → nome) ou, sem
+ * ele, o código.
+ *
+ * Nenhum número é calculado aqui além do máximo e da soma do que o servidor
+ * contou: o mês, o "em andamento" e o "vencido" são decisões do `/summary`.
  */
-export function clientNavCounts(summary: ClientSummary): {
+export function clientNavCounts(
+  summary: ClientSummary,
+  destinationNames: ReadonlyMap<string, string> = new Map(),
+): {
   reconciliations?: NavCount;
   titles?: NavCount;
   mapping?: NavCount;
@@ -232,27 +254,38 @@ export function clientNavCounts(summary: ClientSummary): {
   const { byStatus } = summary.reconciliations;
   const inProgress = byStatus.processing + byStatus.reviewing;
   if (inProgress > 0) {
-    counts.reconciliations = {
-      count: inProgress,
-      countTone: 'info',
-      countLabel: `${inProgress} em andamento`,
-    };
+    counts.reconciliations = navCount(
+      inProgress,
+      'info',
+      `${inProgress} em andamento: ${byStatus.processing} em processamento · ${byStatus.reviewing} em revisão`,
+    );
   }
-  const overdue = summary.titles?.overdueCount ?? 0;
-  if (overdue > 0) {
-    counts.titles = {
-      count: overdue,
-      countTone: 'destructive',
-      countLabel: plural(overdue, 'título vencido', 'títulos vencidos'),
-    };
+  const titles = summary.titles;
+  const overdue = titles?.overdueCount ?? 0;
+  if (titles && overdue > 0) {
+    counts.titles = navCount(
+      overdue,
+      'destructive',
+      `${plural(overdue, 'título vencido', 'títulos vencidos')}: ${titles.aReceber.overdueCount} a receber · ${titles.aPagar.overdueCount} a pagar`,
+    );
   }
-  const withoutDecision = summary.mapping.reduce((sum, item) => sum + item.withoutDecision, 0);
-  if (withoutDecision > 0) {
-    counts.mapping = {
-      count: withoutDecision,
-      countTone: 'warning',
-      countLabel: plural(withoutDecision, 'categoria sem decisão', 'categorias sem decisão'),
-    };
+  const pending = summary.mapping
+    .filter((item) => item.withoutDecision > 0)
+    // `sort` é estável: no empate, a ordem do servidor.
+    .sort((a, b) => b.withoutDecision - a.withoutDecision);
+  const largest = pending[0]?.withoutDecision ?? 0;
+  if (largest > 0) {
+    const perDestination = pending
+      .map(
+        (item) =>
+          `${destinationNames.get(item.destinationCode) ?? item.destinationCode}: ${item.withoutDecision}`,
+      )
+      .join(', ');
+    counts.mapping = navCount(
+      largest,
+      'warning',
+      `${plural(largest, 'categoria sem decisão', 'categorias sem decisão')} · ${perDestination}`,
+    );
   }
   return counts;
 }
@@ -268,10 +301,12 @@ export function clientNavSections(
   clientId: string,
   pathname: string,
   summary?: ClientSummary | undefined,
+  destinationNames?: ReadonlyMap<string, string>,
 ): NavSection[] {
   // Sem resumo (carregando, erro, sem acesso), nenhum contador: o menu nunca
-  // espera o resumo para aparecer.
-  const counts = summary ? clientNavCounts(summary) : {};
+  // espera o resumo para aparecer. Sem os nomes dos destinos, o detalhe do
+  // De-para sai com o código.
+  const counts = summary ? clientNavCounts(summary, destinationNames) : {};
   const base = `/clientes/${clientId}`;
   const accountsHref = `${base}/contas`;
   const reconciliationsHref = reconciliationsPath(clientId);

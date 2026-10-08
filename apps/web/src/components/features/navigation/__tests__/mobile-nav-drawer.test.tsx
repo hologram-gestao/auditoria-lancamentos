@@ -35,6 +35,11 @@ vi.mock('@/hooks/use-client-summary', () => ({
   useClientSummary: () => ({ data: undefined, isLoading: false, isError: false }),
 }));
 
+// Catálogo de destinos (nome no detalhe do contador do De-para): sem dado aqui.
+vi.mock('@/hooks/use-client-mapping', () => ({
+  useMappingDestinations: () => ({ data: undefined }),
+}));
+
 // Imports do SUT DEPOIS dos `vi.mock` (as factories fecham sobre variáveis
 // deste módulo — importar no topo as avaliaria antes da inicialização).
 import { MobileNavDrawer } from '@/components/features/navigation/mobile-nav-drawer';
