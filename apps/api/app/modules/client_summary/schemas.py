@@ -40,6 +40,14 @@ class ReconciliationsSummary(_CamelModel):
         description="Contas distintas com conciliação ativa no mês.",
     )
     by_status: ReconciliationStatusCounts = Field(alias="byStatus")
+    habitual_account_ids: list[int] = Field(
+        alias="habitualAccountIds",
+        description=(
+            "As contas HABITUAIS (`omie_conta_id`, só números): com conciliação ativa no "
+            "mês de referência ou em algum dos meses anteriores da janela do servidor. "
+            "É a meta do card de conciliações; o cache de contas não serve para isso."
+        ),
+    )
 
 
 class AnomalyTypeCount(_CamelModel):

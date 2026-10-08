@@ -234,7 +234,7 @@ function NoFileOrigin({
           {state === 'encerrado'
             ? 'Cliente encerrado é só leitura: não é possível conectar uma origem nem enviar arquivos.'
             : state === 'outra-origem'
-              ? `Cada cliente tem um tipo de origem de lançamentos só. Para passar a receber arquivos, a conexão ${ledgerLabel} precisa ser removida antes, no painel do cliente.`
+              ? `Cada cliente tem um tipo de origem de lançamentos só. Para passar a receber arquivos, a conexão ${ledgerLabel} precisa ser removida antes, em Contas Bancárias.`
               : canConnect
                 ? 'Para começar, conecte uma origem do tipo "Arquivo".'
                 : 'Para começar, uma origem do tipo "Arquivo" precisa ser conectada. Peça ao administrador ou ao gerente responsável pela conta.'}
@@ -242,7 +242,7 @@ function NoFileOrigin({
       </div>
       {state === 'sem-origem' && canConnect && (
         <Button asChild variant="outline">
-          {/* Leva ao painel com a gaveta já aberta no tipo Arquivo: quem clica
+          {/* Leva a Contas Bancárias com a gaveta já aberta no tipo Arquivo: quem clica
               aqui está justamente atrás dessa origem. */}
           <a href={originFixPath(clientId, FILE_PROVIDER_TYPE)}>Conectar origem por arquivo</a>
         </Button>

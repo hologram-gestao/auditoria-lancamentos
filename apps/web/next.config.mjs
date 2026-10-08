@@ -60,15 +60,17 @@ const nextConfig = {
   // Transpile workspace packages (shared-types)
   transpilePackages: ['@auditoria/shared-types'],
 
-  // `/clientes/{id}/painel` é o endereço ANTIGO do painel (86e3k1q5n): o painel
-  // virou a raiz do cliente. Redirect de CONFIG, e não `permanentRedirect()` numa
+  // `/clientes/{id}/conciliacoes` foi o endereço da lista entre a 86e3k1q5n e
+  // 08/10/2026, quando o painel era a raiz do cliente. A lista voltou a ser a raiz
+  // (decisão do Pedro depois do uso com dado real) e o endereço da semana
+  // redireciona para ela. Redirect de CONFIG, e não `permanentRedirect()` numa
   // página: a página responde 200 (o layout já começou a transmitir) e redireciona
   // no navegador com um refresh de 1 s; aqui sai um 308 de verdade, sem JS, e o
-  // Next leva a query junto (o `?conectar=<tipo>` da gaveta nasceu apontando para cá).
+  // Next leva a query junto (filtros e paginação da lista).
   async redirects() {
     return [
       {
-        source: '/clientes/:clientId/painel',
+        source: '/clientes/:clientId/conciliacoes',
         destination: '/clientes/:clientId',
         permanent: true,
       },

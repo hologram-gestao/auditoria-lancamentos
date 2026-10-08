@@ -51,7 +51,14 @@ describe('escala do eixo', () => {
   it('rótulos "R$ N mil" e abaixo de mil em reais', () => {
     expect(axisLabel(5000)).toBe('R$ 5 mil');
     expect(axisLabel(2500)).toBe('R$ 2,5 mil');
+    expect(axisLabel(500_000)).toBe('R$ 500 mil');
     expect(axisLabel(800)).toBe('R$ 800');
+  });
+
+  it('a partir de um milhão o rótulo é "R$ N mi", nunca "R$ 1.500 mil"', () => {
+    expect(axisLabel(1_000_000)).toBe('R$ 1 mi');
+    expect(axisLabel(1_500_000)).toBe('R$ 1,5 mi');
+    expect(axisLabel(2_000_000)).toBe('R$ 2 mi');
   });
 });
 

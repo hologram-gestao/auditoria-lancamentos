@@ -356,6 +356,9 @@ async def test_caminho_feliz_conta_so_o_que_e_do_mes_e_do_tenant(
         "accountsTotal": 3,
         "accountsWithSession": 2,
         "byStatus": {"processing": 0, "reviewing": 1, "done": 1, "error": 0},
+        # Conta 3: só a sessão APAGADA no mês e uma de mês POSTERIOR. Nenhuma das
+        # duas a faz habitual.
+        "habitualAccountIds": [1, 2],
     }
     assert data["anomalies"] == {
         "openTotal": 3,
@@ -390,6 +393,45 @@ async def test_caminho_feliz_conta_so_o_que_e_do_mes_e_do_tenant(
     assert CLIENT_NAME not in resp.text
     assert "COMPRA SIGILOSA" not in resp.text
     assert CLIENT_NAME not in repr(logs)
+
+
+async def test_contas_habituais_sao_as_do_mes_e_dos_tres_anteriores(
+    client_with_db: AsyncClient, world: World, db_session: AsyncSession
+) -> None:
+    """A janela é o mês de referência e os três anteriores, só sessões ativas."""
+    seeds = (
+        (10, date(2026, 7, 1), False),  # dois meses antes: entra
+        (11, date(2026, 6, 1), False),  # três meses antes, o limite: entra
+        (20, date(2026, 5, 1), False),  # quatro meses antes: fora
+        (30, MONTH, False),  # o próprio mês: entra
+        (40, date(2026, 11, 1), False),  # mês posterior: fora
+        (50, date(2026, 8, 1), True),  # apagada: fora
+    )
+    for conta, month, deleted in seeds:
+        await _seed_session(
+            db_session,
+            client=world.client,
+            creator=world.admin,
+            status=ReconciliationStatus.DONE,
+            omie_conta_id=conta,
+            month=month,
+            deleted=deleted,
+        )
+    # O vizinho conciliou outra conta dentro da janela: nada dele entra aqui.
+    await _seed_session(
+        db_session,
+        client=world.neighbor,
+        creator=world.admin,
+        status=ReconciliationStatus.DONE,
+        omie_conta_id=60,
+        month=date(2026, 8, 1),
+    )
+    await db_session.flush()
+
+    await _login(client_with_db, world.admin)
+    resp = await client_with_db.get(_url(world.client))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["reconciliations"]["habitualAccountIds"] == [1, 2, 10, 11, 30]
 
 
 async def test_mes_padrao_e_o_corrente_do_servidor(

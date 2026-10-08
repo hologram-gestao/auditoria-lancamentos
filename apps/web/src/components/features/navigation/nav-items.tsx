@@ -73,15 +73,15 @@ export function globalNavSections(user: AuthenticatedUser, pathname: string): Na
   // Gating por perfil (R4): usuário DE tenant não tem lista global de clientes —
   // a casa dele é o próprio cliente. Mostrar "Clientes" para ele seria oferecer
   // uma rota que o servidor nega.
-  // A casa do tenant é a raiz do próprio cliente, que desde a 86e3k1q5n é o
-  // PAINEL: o rótulo acompanha o destino (§7 Frontend).
+  // A casa do tenant é a raiz do próprio cliente, que é a LISTA de conciliações
+  // (de novo, desde 08/10/2026): o rótulo acompanha o destino (§7 Frontend).
   const home = homePathFor(user);
   const main: NavItem[] = isClientScoped(user)
     ? [
         {
           href: home,
-          label: 'Painel',
-          icon: <LayoutDashboard className="h-4 w-4" aria-hidden="true" />,
+          label: 'Conciliações',
+          icon: <ListChecks className="h-4 w-4" aria-hidden="true" />,
           active: isPathActive(pathname, home),
         },
       ]
@@ -161,12 +161,17 @@ const SETTINGS_ITEMS: ReadonlyArray<{
 ];
 
 /**
- * Rota da LISTA de conciliações do cliente. Fonte única: quem manda para a
- * lista (painel, detalhe após excluir, processamento) chama esta função, e a
- * rota muda num lugar só.
+ * Rota da LISTA de conciliações do cliente, que é a tela de entrada dele
+ * (`/clientes/{id}`). Fonte única: quem manda para a lista (painel, detalhe após
+ * excluir, processamento) chama esta função, e a rota muda num lugar só.
  */
 export function reconciliationsPath(clientId: string): string {
-  return `/clientes/${clientId}/conciliacoes`;
+  return `/clientes/${clientId}`;
+}
+
+/** Rota do PAINEL do cliente (86e3k1q54). Fonte única, como a da lista. */
+export function dashboardPath(clientId: string): string {
+  return `/clientes/${clientId}/painel`;
 }
 
 /** Rota da aba "Origem por arquivo" (S14) — a mesma que o link do de-para aponta. */
@@ -270,6 +275,7 @@ export function clientNavSections(
   const base = `/clientes/${clientId}`;
   const accountsHref = `${base}/contas`;
   const reconciliationsHref = reconciliationsPath(clientId);
+  const dashboardHref = dashboardPath(clientId);
   const usersHref = `${base}/usuarios`;
   const glossaryHref = `${base}/glossario`;
   const chartOfAccountsHref = `${base}/plano-de-contas`;
@@ -277,15 +283,14 @@ export function clientNavSections(
   const titlesHref = `${base}/carteira`;
   const mappingHref = `${base}/de-para`;
   const fileOriginHref = fileOriginPath(clientId);
-  // Cada item casa pela PRÓPRIA rota (86e3k1q5n): não existe mais item ativo
-  // "por exclusão". O Painel é a raiz do cliente e só ela; "Conciliações" é a
-  // lista e também o detalhe e o processamento de uma conciliação
-  // (`/conciliacao/{id}/**`), que são a mesma área um nível abaixo. Rota que
-  // nenhum item reivindica fica sem item ativo, em vez de acender um item que
-  // não é dela.
-  const isDashboard = pathname === base;
+  // Cada item casa pela PRÓPRIA rota (86e3k1q5n): não existe item ativo "por
+  // exclusão". "Conciliações" é a raiz do cliente (a lista) e só ela, mais o
+  // detalhe e o processamento de uma conciliação (`/conciliacao/{id}/**`), que
+  // são a mesma área um nível abaixo; o Painel é `/painel`. Rota que nenhum item
+  // reivindica fica sem item ativo, em vez de acender um item que não é dela.
+  const isDashboard = isPathActive(pathname, dashboardHref);
   const isReconciliations =
-    isPathActive(pathname, reconciliationsHref) || pathname.startsWith(`${base}/conciliacao/`);
+    pathname === reconciliationsHref || pathname.startsWith(`${base}/conciliacao/`);
   const isAccounts = isPathActive(pathname, accountsHref);
   const isUsers = isPathActive(pathname, usersHref);
   const isGlossary = isPathActive(pathname, glossaryHref);
@@ -295,12 +300,12 @@ export function clientNavSections(
   const isMapping = isPathActive(pathname, mappingHref);
   const isFileOrigin = isPathActive(pathname, fileOriginHref);
 
-  // Operação: o trabalho do mês. O Painel é a tela de entrada do cliente
-  // (`/clientes/{id}`, decisão do Pedro em 07/10/2026, 86e3k1q5n); a lista de
-  // conciliações mora em `/conciliacoes`.
+  // Operação: o trabalho do mês. A lista de conciliações é a tela de entrada do
+  // cliente (`/clientes/{id}`, decisão do Pedro em 08/10/2026, depois do uso com
+  // dado real); o Painel mora em `/painel` e continua o primeiro item da seção.
   const operation: NavItem[] = [
     {
-      href: base,
+      href: dashboardHref,
       label: 'Painel',
       icon: <LayoutDashboard className="h-4 w-4" aria-hidden="true" />,
       active: isDashboard,

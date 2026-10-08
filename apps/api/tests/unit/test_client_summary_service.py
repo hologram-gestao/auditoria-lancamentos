@@ -23,7 +23,7 @@ from app.core.authz import CurrentUser
 from app.db.models import DecisionOrigin, DecisionType, UserRole, UserScope
 from app.modules.client_mapping.listing import SituationCounts, situation_counts, situation_of
 from app.modules.client_summary.repository import AnomalyCount, CategoryTotal
-from app.modules.client_summary.service import ClientSummaryService
+from app.modules.client_summary.service import HABITUAL_MONTHS, ClientSummaryService
 from app.modules.client_titles.aging import OVERDUE_BUCKETS
 from app.modules.client_titles.repository import AgingTotals, TitlesSummary
 
@@ -115,6 +115,7 @@ def _empty_repo() -> AsyncMock:
     repo.session_status_counts.return_value = {}
     repo.accounts_total.return_value = 0
     repo.accounts_with_session.return_value = 0
+    repo.habitual_account_ids.return_value = []
     repo.anomaly_counts.return_value = []
     repo.card_purchases_to_post.return_value = (0, Decimal("0.00"))
     repo.latest_session.return_value = None
@@ -135,6 +136,7 @@ async def test_cliente_sem_nada_responde_zeros_e_nulos() -> None:
         "accountsTotal": 0,
         "accountsWithSession": 0,
         "byStatus": {"processing": 0, "reviewing": 0, "done": 0, "error": 0},
+        "habitualAccountIds": [],
     }
     assert data["anomalies"] == {"openTotal": 0, "byType": [], "resolvedInMonth": 0}
     assert data["cardPurchasesToPost"] == {"count": 0, "totalAmount": "0.00"}
@@ -162,6 +164,35 @@ async def test_status_ausente_vira_zero_e_as_quatro_chaves_existem() -> None:
     }
     assert data["reconciliations"]["accountsTotal"] == 3
     assert data["reconciliations"]["accountsWithSession"] == 2
+
+
+async def test_contas_habituais_pedem_a_janela_de_tres_meses_e_saem_so_numeros() -> None:
+    repo = _empty_repo()
+    repo.habitual_account_ids.return_value = [101, 202, 303]
+    service, _m, _t = _service(repo=repo)
+    user = _user()
+    client = _client()
+
+    data = _dump(await service.summary(client, user, MONTH))
+
+    # A janela é o mês de referência e os três anteriores, inclusivos.
+    assert HABITUAL_MONTHS == 3
+    repo.habitual_account_ids.assert_awaited_once_with(client.id, date(2026, 6, 1), MONTH, user)
+    assert data["reconciliations"]["habitualAccountIds"] == [101, 202, 303]
+    assert all(isinstance(i, int) for i in data["reconciliations"]["habitualAccountIds"])
+
+
+async def test_janela_das_contas_habituais_atravessa_a_virada_do_ano() -> None:
+    repo = _empty_repo()
+    service, _m, _t = _service(repo=repo)
+    user = _user()
+    client = _client()
+
+    await service.summary(client, user, date(2026, 2, 1))
+
+    repo.habitual_account_ids.assert_awaited_once_with(
+        client.id, date(2025, 11, 1), date(2026, 2, 1), user
+    )
 
 
 async def test_anomalias_abertas_por_codigo_e_resolvidas_no_mes() -> None:

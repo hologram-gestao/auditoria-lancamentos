@@ -90,9 +90,10 @@ describe('OriginStateNotice — copy distinta por código', () => {
   it('SEM_CONEXAO manda CONECTAR', () => {
     render(<OriginStateNotice error={apiError('SEM_CONEXAO')} clientId={CLIENT_ID} />);
     expect(screen.getByText('Este cliente não tem origem conectada')).toBeVisible();
+    // A gestão de origens mora em Contas Bancárias (08/10/2026).
     expect(screen.getByRole('link', { name: 'Conectar origem' })).toHaveAttribute(
       'href',
-      `/clientes/${CLIENT_ID}`,
+      `/clientes/${CLIENT_ID}/contas`,
     );
   });
 

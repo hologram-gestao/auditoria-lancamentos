@@ -146,7 +146,7 @@ export function ProcessingScreen({ clientId, sessionId }: ProcessingScreenProps)
   }
 
   function handleBackToClient() {
-    // "Voltar para o cliente" é a raiz do cliente, que desde a 86e3k1q5n é o painel.
+    // "Voltar para o cliente" é a raiz do cliente, que é a lista de conciliações.
     router.push(`/clientes/${clientId}`);
   }
 
