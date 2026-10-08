@@ -7,9 +7,11 @@ Decisões de design:
     - Pagar = saída → sinal negativo. Receber = entrada → sinal positivo.
     - Período do extrato JÁ vem expandido pelo caller (CLAUDE.md §5.3 +
       doc §13). Aqui só repassamos para o cliente.
-    - Para títulos (pagar/receber), usamos `[reference_month, last_day_of_month]`.
+    - Para títulos (pagar/receber), usamos `[reference_month, last_day_of_month]`
+      nos filtros de data (que são de inclusão/alteração, não de vencimento).
       Valores de `data_vencimento` fora desse intervalo não são problema do
-      matcher — `tolerance_days` é o filtro real lá adiante.
+      matcher — `tolerance_days` é o filtro real lá adiante. No modo
+      "vencimento da fatura" do cartão a regra é outra: ver `fetch_pending`.
     - Cada status é uma chamada separada ao Omie. CLAUDE.md TODO em
       `todo_omie_sandbox_credentials`: validar com Galhardo se
       `filtrar_por_status` aceita múltiplos valores; até lá, 2 chamadas.
@@ -19,7 +21,7 @@ from __future__ import annotations
 
 import asyncio
 from calendar import monthrange
-from datetime import date, timedelta
+from datetime import date
 
 from app.db.models import OmieEntryStatus
 from app.integrations.omie.client import OmieClient
@@ -69,14 +71,14 @@ async def fetch_realized(
     omie_client: OmieClient,
     *,
     omie_conta_id: int,
-    period_start: date,
-    period_end: date,
-    tolerance_days: int,
+    window_start: date,
+    window_end: date,
 ) -> list[OmieMovement]:
     """BACK 8.2 — busca lançamentos REALIZADOS via `ListarExtrato`.
 
-    Período expandido (CLAUDE.md §5.3):
-        [period_start - tolerance_days, period_end + tolerance_days]
+    A janela chega PRONTA de `omie_window.omie_window_for_session` (86e3n70p0): é
+    a mesma decisão que a tela de revisão, o export e o `omie_data` consultam, e
+    no modo "vencimento da fatura" do cartão ela é o lote, não o período ampliado.
 
     Mapeamento de campos (nomes refletem o response real do Omie —
     auditoria CRÍTICO-1/2, corrigido em 19/05/2026):
@@ -90,22 +92,15 @@ async def fetch_realized(
         omie_client: cliente Omie já autenticado (factory descriptografa
             credenciais).
         omie_conta_id: nCodCC da conta a conciliar.
-        period_start/period_end: período do arquivo (datas em claro do
-            ParsedStatement). Tolerância é aplicada AQUI para que o caller
-            não precise duplicar a regra.
-        tolerance_days: dias subtraídos/adicionados ao período. Mesmo valor
-            usado depois pelo matcher (CLAUDE.md §5.2 + §5.3).
+        window_start/window_end: janela inclusiva já decidida para a sessão.
 
     Returns:
         Lista (possivelmente vazia) de `OmieMovement`. Não persiste nada.
     """
-    expanded_start = period_start - timedelta(days=tolerance_days)
-    expanded_end = period_end + timedelta(days=tolerance_days)
-
     raw = await omie_client.listar_extrato(
         n_cod_cc=omie_conta_id,
-        data_inicial=expanded_start,
-        data_final=expanded_end,
+        data_inicial=window_start,
+        data_final=window_end,
     )
     return [
         OmieMovement(
@@ -139,9 +134,22 @@ async def fetch_pending(
     *,
     omie_conta_id: int,
     reference_month: date,
+    due_window: tuple[date, date] | None = None,
 ) -> list[OmieMovement]:
     """BACK 8.3 — busca lançamentos PENDENTES (Atrasado + Previsto) em
     `ListarContasPagar` e `ListarContasReceber`.
+
+    **Modo "vencimento da fatura" do cartão (86e3n70p0) — `due_window`.** O
+    `filtrar_por_data_de/ate` desses endpoints filtra por data de INCLUSÃO ou
+    ALTERAÇÃO do título (doc oficial, `lcpListarRequest`), não por vencimento: a
+    parcela 4/6 do Anydesk, incluída em julho com vencimento em 10/10, nunca
+    entraria num filtro de outubro. Com `due_window`, as chamadas vão SEM filtro
+    de data (só status + conta; a captura real em
+    `tests/fixtures/omie/listar_contas_pagar.request.json` prova que o `param`
+    sem as datas é aceito, e a carteira da S11 chama assim todo dia) e o recorte
+    é feito AQUI por `data_vencimento` dentro da janela — é assim que as parcelas
+    com vencimento no lote entram e a de 10/11 fica fora. Sem `due_window`, nada
+    muda: mês de referência nos dois filtros, como sempre.
 
     Faz 4 chamadas: pagar(ATRASADO), pagar(PREVISTO), receber(ATRASADO),
     receber(PREVISTO). Cada uma já pagina internamente até esgotar.
@@ -157,11 +165,17 @@ async def fetch_pending(
         omie_conta_id: nCodCC.
         reference_month: 1º dia do mês de referência (como salvo no DB).
             Convertido em [reference_month, último_dia_do_mês].
+        due_window: `(início, fim)` inclusivos do lote da fatura, no modo
+            vencimento; `None` no processo de sempre.
 
     Returns:
         Lista combinada — `is_realized=False` para todos.
     """
-    last_day = _last_day_of_month(reference_month)
+    if due_window is None:
+        data_de: date | None = reference_month
+        data_ate: date | None = _last_day_of_month(reference_month)
+    else:
+        data_de = data_ate = None
     movements: list[OmieMovement] = []
 
     # Ordem otimizada pra rate limit Omie: alterna PAGAR/RECEBER pra
@@ -183,8 +197,8 @@ async def fetch_pending(
         if kind == "pagar":
             pagar = await omie_client.listar_contas_pagar(
                 conta_corrente_id=omie_conta_id,
-                data_de=reference_month,
-                data_ate=last_day,
+                data_de=data_de,
+                data_ate=data_ate,
                 status=status,
             )
             movements.extend(
@@ -203,8 +217,8 @@ async def fetch_pending(
         else:
             receber = await omie_client.listar_contas_receber(
                 conta_corrente_id=omie_conta_id,
-                data_de=reference_month,
-                data_ate=last_day,
+                data_de=data_de,
+                data_ate=data_ate,
                 status=status,
             )
             movements.extend(
@@ -221,6 +235,9 @@ async def fetch_pending(
                 for t in receber
             )
 
+    if due_window is not None:
+        lot_start, lot_end = due_window
+        movements = [m for m in movements if lot_start <= m.transaction_date <= lot_end]
     return movements
 
 

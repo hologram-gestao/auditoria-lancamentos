@@ -208,6 +208,8 @@ from app.db.models.reconciliation_omie_posting import (
     ReconciliationOmiePosting,
 )
 from app.db.models.reconciliation_session import (
+    CARD_DUE_DATE_COHERENT_CHECK,
+    CARD_DUE_DATE_COHERENT_CK_LABEL,
     ReconciliationSession,
     ReconciliationStatus,
     SessionAccountType,
@@ -240,6 +242,8 @@ __all__ = [
     "ACCOUNTING_ACCOUNT_TYPE_CONSTRAINT",
     "ACCOUNTING_DESTINATION_TYPE",
     "ACCOUNTING_FILE_GENERATION_CHECKS",
+    "CARD_DUE_DATE_COHERENT_CHECK",
+    "CARD_DUE_DATE_COHERENT_CK_LABEL",
     "CARD_POSTING_DATE_MODE_CK_LABEL",
     "CARD_POSTING_DATE_MODE_LENGTH",
     "CHART_OF_ACCOUNTS_STATUS_CONSTRAINT",

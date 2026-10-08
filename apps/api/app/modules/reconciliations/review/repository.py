@@ -19,7 +19,6 @@ Decisões:
 
 from __future__ import annotations
 
-from datetime import date
 from uuid import UUID
 
 from sqlalchemy import asc, func, select
@@ -460,19 +459,3 @@ class ReviewRepository:
         stmt = select(ReconciliationOmieEntry).where(ReconciliationOmieEntry.id.in_(ids))
         rows = (await self._session.execute(stmt)).scalars().all()
         return {row.id: row for row in rows}
-
-    # Helpers utilitários
-
-    @staticmethod
-    def expand_period(
-        period_start: date,
-        period_end: date,
-        tolerance_days: int,
-    ) -> tuple[date, date]:
-        """Aplica tolerância ao período (CLAUDE.md §5.3) — reuso do worker."""
-        from datetime import timedelta
-
-        return (
-            period_start - timedelta(days=tolerance_days),
-            period_end + timedelta(days=tolerance_days),
-        )

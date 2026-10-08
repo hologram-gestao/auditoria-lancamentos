@@ -27,6 +27,7 @@ from uuid import UUID
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -43,6 +44,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.db.models._mixins import TimestampMixin, UUIDPrimaryKeyMixin
+from app.db.models.client import (
+    CARD_POSTING_DATE_MODE_CK_LABEL,
+    CARD_POSTING_DATE_MODE_LENGTH,
+    card_posting_date_mode_check,
+)
 
 if TYPE_CHECKING:
     from app.db.models.client import Client
@@ -82,6 +88,14 @@ class SessionAccountType(StrEnum):
     INVESTMENT = "investment"
 
 
+#: 86e3n70p0 — sessão no modo "vencimento da fatura" SEM o vencimento não tem
+#: lote para cruzar. A criação recusa com 422; o banco garante o mesmo.
+CARD_DUE_DATE_COHERENT_CK_LABEL = "card_due_date_coherent"
+CARD_DUE_DATE_COHERENT_CHECK = (
+    "card_posting_date_mode IS DISTINCT FROM 'invoice_due_date' OR invoice_due_date IS NOT NULL"
+)
+
+
 class ReconciliationSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "reconciliation_sessions"
     # UNIQUE PARCIAL: a idempotência só vale para sessões ATIVAS
@@ -110,6 +124,12 @@ class ReconciliationSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         # num índice em uso, para trocar só a grafia. `ix_recon_*` é o estilo da
         # casa (`ix_recon_file_entry_session_omie_unique`).
         Index("ix_recon_sessions_deleted_at", "deleted_at"),
+        # 86e3n70p0 — o snapshot do modo de lançamento do cartão (nulável).
+        CheckConstraint(
+            text(card_posting_date_mode_check(nullable=True)),
+            name=CARD_POSTING_DATE_MODE_CK_LABEL,
+        ),
+        CheckConstraint(text(CARD_DUE_DATE_COHERENT_CHECK), name=CARD_DUE_DATE_COHERENT_CK_LABEL),
     )
 
     client_id: Mapped[UUID] = mapped_column(
@@ -142,6 +162,21 @@ class ReconciliationSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # ficam fora do período Omie consultado em /available-omie-entries.
     period_start: Mapped[date | None] = mapped_column(SQLDate, nullable=True)
     period_end: Mapped[date | None] = mapped_column(SQLDate, nullable=True)
+    # 86e3n70p0 — vencimento da fatura de CARTÃO, extraído pelo parser e
+    # CONFIRMADO pelo usuário na prévia. No modo `invoice_due_date` é o centro da
+    # janela do Omie (o lote da fatura); no modo `purchase_date` é informativo.
+    # NULL em sessão antiga, em conta corrente/aplicação e em fatura cujo
+    # vencimento ninguém informou (só permitido no modo `purchase_date`).
+    invoice_due_date: Mapped[date | None] = mapped_column(SQLDate, nullable=True)
+    # 86e3n70p0 — SNAPSHOT do modo de lançamento do cartão USADO nesta sessão
+    # (`CardPostingDateMode`): o do cliente na criação, ou a troca pontual feita
+    # na gaveta. Snapshot e não leitura do cliente: mudar a configuração depois
+    # não pode reescrever o cruzamento de uma conciliação antiga (nem no
+    # reprocessamento, nem na revisão). NULL em sessão antiga e em sessão que
+    # não é de cartão — ali o modo não se aplica, e NULL lê como `purchase_date`.
+    card_posting_date_mode: Mapped[str | None] = mapped_column(
+        String(CARD_POSTING_DATE_MODE_LENGTH), nullable=True
+    )
     # FASE 1: tolerância de data deixou de ser parametrizável — é fixa no
     # matcher (DATE_DIVERGENCE_RANGE=3). Coluna mantida só por histórico (não-
     # destrutivo); novas sessões gravam 0 e o job NÃO lê mais este valor.

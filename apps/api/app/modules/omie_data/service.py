@@ -16,7 +16,7 @@ from uuid import UUID
 from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
 from app.modules.omie_data.schemas import OmieLancamentoItem
-from app.modules.reconciliations.processing.matcher import DATE_DIVERGENCE_RANGE
+from app.modules.reconciliations.processing.omie_window import omie_window_for_session
 from app.modules.reconciliations.review.repository import ReviewRepository
 from app.modules.reconciliations.review.service import _month_bounds
 
@@ -85,11 +85,15 @@ class OmieLancamentoService:
             # o período da sessão. Quando o usuário abre /omie-entries pela
             # 1ª vez, esse caminho aquece o cache pra toda a sessão.
             period_start, period_end = _month_bounds(sess.reference_month)
-            # FASE 1: range fixo (não mais a tolerância por sessão) — garante
-            # que sessões novas (date_tolerance_days=0) ainda busquem a janela
-            # ±3 dias necessária pra achar lançamentos com data divergente.
-            expanded_start, expanded_end = self._repo.expand_period(
-                period_start, period_end, DATE_DIVERGENCE_RANGE
+            # §5.3 (86e3n70p0): a MESMA decisão do processamento — range fixo
+            # (sessões novas gravam date_tolerance_days=0) no processo de
+            # sempre, o lote da fatura no modo vencimento do cartão.
+            expanded_start, expanded_end = omie_window_for_session(
+                account_type=sess.account_type,
+                card_posting_date_mode=sess.card_posting_date_mode,
+                invoice_due_date=sess.invoice_due_date,
+                period_start=period_start,
+                period_end=period_end,
             )
             omie_client = await omie_client_factory()
             try:
