@@ -8813,6 +8813,50 @@ async function exigirSemRolagemHorizontal(page: Page, label: string): Promise<vo
   expect(scrollWidth, `${label}: a página rola na horizontal`).toBeLessThanOrEqual(innerWidth);
 }
 
+/** Altura do header fixo da landing (`h-16`) e a folga mínima abaixo dele. */
+const LANDING_HEADER_HEIGHT = 64;
+const LANDING_HEADER_GAP = 8;
+
+/**
+ * Devolve a caixa do alvo só quando ela está inteira na janela e, se a página tem o
+ * header fixo da landing (`[data-lp-header]`, `fixed top-0`, 64px, com sombra verde
+ * quando rolado), com o topo pelo menos 8px abaixo dele. Fora disso, centraliza o
+ * alvo e confere de novo, até 3 vezes, e reprova com mensagem clara se não
+ * conseguir: nunca mede um clip que caiu sob o header (flake de 06/10/2026, run
+ * 37532515798 do CI: 2,85:1 num título que dá 8,1:1).
+ *
+ * Só rola quando precisa: o cenário do "Como funciona" congela o passo ativo com o
+ * ponteiro em cima do bloco, e uma rolagem sem motivo poderia tirar o bloco de
+ * baixo do ponteiro. Quem rola espera dois quadros, para a foto não pegar o header
+ * no meio da troca de fundo.
+ */
+async function garantirAbaixoDoHeaderFixo(
+  page: Page,
+  locator: Locator,
+): Promise<{ x: number; y: number; width: number; height: number }> {
+  const temHeader = (await page.locator('[data-lp-header]').count()) > 0;
+  const minimo = temHeader ? LANDING_HEADER_HEIGHT + LANDING_HEADER_GAP : 0;
+  const altura = page.viewportSize()?.height ?? Number.POSITIVE_INFINITY;
+  for (let tentativa = 0; tentativa <= 3; tentativa += 1) {
+    const box = await locator.boundingBox();
+    expect(box, 'elemento sem caixa').not.toBeNull();
+    if (box && box.y >= minimo && box.y + box.height <= altura) return box;
+    if (tentativa === 3) break;
+    await locator.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+  }
+  const box = await locator.boundingBox();
+  throw new Error(
+    `contraste por pixel: o alvo ficou sob o header fixo ou fora da janela depois de 3 ` +
+      `rolagens (topo em ${box?.y ?? '?'}px, mínimo ${minimo}px, janela de ${altura}px)`,
+  );
+}
+
 /**
  * Contraste do texto contra o fundo que a página REALMENTE pinta atrás dele (aurora
  * no hero, pastilha acesa do "Como funciona", moldura do tour).
@@ -8834,6 +8878,10 @@ async function exigirSemRolagemHorizontal(page: Page, label: string): Promise<vo
  * 1,00). O fundo atrás da caixa não depende do texto, então esconder o bloco inteiro
  * não muda a medição. A caixa fotografada ainda encolhe 1 px por lado, e um pixel
  * mais claro com a cor EXATA do texto reprova com erro explícito em vez de 1,00 mudo.
+ *
+ * Antes da foto, o alvo é posto ABAIXO do header fixo da landing
+ * (`garantirAbaixoDoHeaderFixo`): o header também é fundo pintado por cima, e um
+ * clip sob ele (ou sob a sombra verde dele) mediu 2,85:1 num passo que dá 8,1:1.
  */
 async function contrasteSobreAurora(
   page: Page,
@@ -8843,7 +8891,7 @@ async function contrasteSobreAurora(
   const color = textColor ?? (await locator.evaluate((el) => getComputedStyle(el).color));
   // Caixa e handle ANTES de esconder: escondido, o elemento sai da árvore de
   // acessibilidade e um locator por papel (`getByRole`) deixa de achá-lo.
-  const box = await locator.boundingBox();
+  const box = await garantirAbaixoDoHeaderFixo(page, locator);
   expect(box, 'elemento sem caixa').not.toBeNull();
   const handle = await locator.elementHandle();
   expect(handle, 'elemento sem handle').not.toBeNull();
@@ -9212,7 +9260,10 @@ test.describe('Landing pública (86e3fr9vz)', () => {
         await page.clock.install();
         await abrirLanding(page, context, { reducedMotion: false });
         const bloco = page.locator('#como-funciona [data-lp-stepper]');
-        await bloco.scrollIntoViewIfNeeded();
+        // Centralizado, e não "se precisar": encostado no topo, o bloco fica sob o
+        // header fixo da landing, e o ponteiro que congela o passo é posto em cima
+        // DEPOIS, então a medição não precisa rolar de novo.
+        await bloco.evaluate((el) => el.scrollIntoView({ block: 'center' }));
         await expect(bloco).toHaveAttribute('data-lp-stepper-on', '');
         const passos = bloco.locator('[data-lp-step]');
         await expect(passos.nth(3)).toHaveAttribute('data-revealed', '');
