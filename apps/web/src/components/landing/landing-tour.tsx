@@ -4,9 +4,8 @@
  *
  * Os prints são cópias otimizadas de `Docs/manual/fonte/img/` (dado fictício de
  * "Cliente Exemplo Ltda"; figura com nome de dado de teste não entra), todos no tema
- * Hologram: anomalias e lançamento, que no manual estão no tema escuro, foram
- * recapturados no Hologram pelos cenários do gate de a11y que os geraram (86e3h0xcr,
- * mesmo dado mockado e mesmo recorte). Largura e
+ * Hologram, como as figuras do manual: desde a 86e3mz74x as duas vêm da mesma captura
+ * (cenários do gate de a11y com `E2E_SHOTS=1`, roteiro em `Docs/manual/README.md`). Largura e
  * altura abaixo são as REAIS do arquivo em `public/landing/tour/` (um teste confere
  * o cabeçalho do PNG), então o `<Image>` reserva o espaço certo e não há salto.
  *
@@ -21,9 +20,9 @@ type TourId = (typeof tour.items)[number]['id'];
 
 export const TOUR_IMAGES: Record<TourId, { src: string; width: number; height: number }> = {
   conciliacao: { src: '/landing/tour/conciliacao.png', width: 1600, height: 929 },
-  anomalias: { src: '/landing/tour/anomalias.png', width: 1600, height: 625 },
-  lancamento: { src: '/landing/tour/lancamento.png', width: 1600, height: 710 },
-  'de-para': { src: '/landing/tour/de-para.png', width: 1600, height: 929 },
+  anomalias: { src: '/landing/tour/anomalias.png', width: 1600, height: 618 },
+  lancamento: { src: '/landing/tour/lancamento.png', width: 1600, height: 715 },
+  'de-para': { src: '/landing/tour/de-para.png', width: 1600, height: 754 },
   carteira: { src: '/landing/tour/carteira.png', width: 1600, height: 674 },
 };
 

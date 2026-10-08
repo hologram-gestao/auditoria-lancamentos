@@ -2,7 +2,7 @@
  * Link de download do manual (86e3gr6k5): botão secundário no fim da seção de segurança
  * e link de texto na confirmação do formulário. Mesmo destino, mesmo `download`, e o
  * tamanho ao lado, ligado ao link por `aria-describedby` (quem usa leitor de tela ouve
- * "PDF, 3 MB" antes de baixar 3 MB). Sem `target`: baixa na mesma aba.
+ * "PDF, 4 MB" antes de baixar 4 MB). Sem `target`: baixa na mesma aba.
  */
 import { Download } from 'lucide-react';
 

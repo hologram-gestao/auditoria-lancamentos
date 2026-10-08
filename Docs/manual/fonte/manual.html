@@ -15,7 +15,7 @@
   <h1>Manual da<br>plataforma</h1>
   <p class="sub">Conciliação bancária, classificação contábil e geração do arquivo que o sistema contábil importa. Guia completo para escritórios contábeis e BPOs financeiros.</p>
   <div class="foot">
-    <span>Versão 1.1 · Setembro de 2026</span>
+    <span>Versão 1.2 · Outubro de 2026</span>
     <span>Hologram Gestão · Material de apoio comercial e operacional</span>
   </div>
 </section>
@@ -251,7 +251,7 @@
 </ul>
 
 <h2>A tela</h2>
-<p>A navegação tem dois níveis. Fora de um cliente, o menu mostra a lista de clientes e, para quem administra, a seção <span class="ui">Configurações</span>. Ao entrar em um cliente, o menu passa a mostrar as seções daquele cliente: conciliações, contas bancárias, painel, glossário, os dois planos de contas, carteira, de-para e usuários.</p>
+<p>A navegação tem dois níveis. Fora de um cliente, o menu mostra a lista de clientes e, para quem administra, a seção <span class="ui">Configurações</span>. Ao entrar em um cliente, o menu passa a mostrar as seções daquele cliente em três grupos: <span class="ui">Operação</span> (painel, conciliações, carteira, de-para e origem por arquivo), <span class="ui">Cadastros</span> (contas bancárias, glossário e os dois planos de contas) e <span class="ui">Acesso</span> (usuários). Um número ao lado de conciliações, carteira e de-para mostra o que está pendente em cada uma.</p>
 
 <figure>
   <img src="img/clientes.png" alt="Lista de clientes">
@@ -262,7 +262,7 @@
 <p>O sino no alto da tela avisa quando um processamento termina, com ou sem erro. É por isso que não é preciso ficar esperando na tela de uma conciliação: envia-se o arquivo, sai-se da tela e o sino chama de volta.</p>
 
 <h3>Temas</h3>
-<p>A interface tem três temas: Hologram, no azul-marinho da marca, que é o padrão; claro; e escuro. A escolha fica salva no navegador. As imagens deste manual estão no tema Hologram, com exceção das seções 6.5 e 6.6, capturadas no tema escuro.</p>
+<p>A interface tem três temas: Hologram, no azul-marinho da marca, que é o padrão; claro; e escuro. A escolha fica salva no navegador. Todas as imagens deste manual estão no tema Hologram.</p>
 
 <!-- ============================ CAP 5 ============================ -->
 <header class="chead" id="cap5">
@@ -282,12 +282,7 @@
 
 <h2 id="s52">5.2 Conectar a origem dos dados</h2>
 
-<p>A origem é de onde vêm as contas e os lançamentos. Ela é configurada no <span class="ui">Painel</span> do cliente, na seção <span class="ui">Origens de dado</span>.</p>
-
-<figure>
-  <img src="img/painel.png" alt="Painel do cliente com a seção de origens de dado">
-  <figcaption>O painel do cliente reúne o resumo do mês e o estado da origem. A tabela mostra o tipo, a situação e quando a conexão foi verificada pela última vez.</figcaption>
-</figure>
+<p>A origem é de onde vêm as contas e os lançamentos. Ela é configurada em <span class="ui">Contas Bancárias</span>, na seção <span class="ui">Origens de dado</span>, no topo da tela: lá ficam o tipo, a situação e quando a conexão foi verificada pela última vez.</p>
 
 <h3>Os dois tipos</h3>
 <dl class="kv">
@@ -490,7 +485,12 @@
 
 <p>O botão <span class="ui">Exportar relatório</span> gera a planilha completa da conciliação: as movimentações com a situação de cada uma, as divergências, as anomalias e o resumo. É o arquivo que se arquiva no fechamento ou se envia a quem pediu explicação.</p>
 
-<p>O <span class="ui">Painel</span> do cliente resume o mês corrente: quantas conciliações foram feitas, quantas anomalias apareceram, quantas contas estão sincronizadas e quando foi a última conciliação.</p>
+<p>O <span class="ui">Painel</span> do cliente resume o fechamento do mês corrente: as conciliações do mês, as anomalias em aberto, as compras do cartão ainda não lançadas no Omie e o andamento do de-para em cada destino. Abaixo vêm a carteira em aberto, o fluxo previsto pelos vencimentos e a atividade recente, com o estado da origem.</p>
+
+<figure>
+  <img src="img/painel.png" alt="Painel do cliente com o fechamento do mês e a carteira em aberto">
+  <figcaption>O painel do cliente. No alto, o fechamento do mês em quatro blocos; abaixo, a carteira em aberto, a receber e a pagar, com a abertura por faixa de atraso.</figcaption>
+</figure>
 
 <!-- ============================ CAP 7 ============================ -->
 <header class="chead" id="cap7">
@@ -756,7 +756,7 @@
     <tr><td>Arquivo já enviado nesta conciliação</td><td>A mesma parte foi anexada duas vezes.</td><td>Conferir as partes já anexadas na lista de arquivos.</td></tr>
     <tr><td>O saldo extraído não fecha</td><td>A soma das linhas lidas não bate com o saldo declarado no documento.</td><td>Conferir se o arquivo está completo. Extrato com páginas faltando é a causa mais comum.</td></tr>
     <tr><td>O arquivo excede o limite</td><td>Arquivo acima de 20 MB.</td><td>Dividir o extrato em partes e anexar todas à mesma conciliação.</td></tr>
-    <tr><td>Este cliente não tem origem conectada</td><td>Falta conectar o ERP ou a origem por arquivo.</td><td>Ir ao painel do cliente e conectar a origem.</td></tr>
+    <tr><td>Este cliente não tem origem conectada</td><td>Falta conectar o ERP ou a origem por arquivo.</td><td>Ir a Contas Bancárias do cliente e conectar a origem.</td></tr>
     <tr><td>A origem está com erro</td><td>A credencial foi recusada, em geral porque mudou no ERP.</td><td>Reconectar com a credencial atual.</td></tr>
     <tr><td>Cabeçalho divergente no envio de arquivo</td><td>As colunas do arquivo não batem com o mapeamento configurado.</td><td>Ajustar o mapeamento ou pedir ao cliente o arquivo no formato de sempre.</td></tr>
     <tr><td>Total declarado divergente</td><td>A soma das linhas não bate com o total informado no envio.</td><td>Conferir o arquivo antes de reenviar. Nada foi gravado.</td></tr>
