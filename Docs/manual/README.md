@@ -1,21 +1,26 @@
 # Manual do Hologram OS (PDF)
 
-**[Manual-Hologram-OS.pdf](Manual-Hologram-OS.pdf)**: versão 1.1, 37 páginas, A4, com 14
-capturas de tela do produto. Material de apoio para apresentação a escritórios contábeis e BPOs,
-e manual de operação para quem usa o sistema. Produto: **Hologram OS**; empresa: Hologram Gestão.
+**[Manual-Hologram-OS.pdf](Manual-Hologram-OS.pdf)**: versão 1.2, 37 páginas, A4, com 14
+capturas de tela do produto, todas no tema Hologram. Material de apoio para apresentação a
+escritórios contábeis e BPOs, e manual de operação para quem usa o sistema. Produto:
+**Hologram OS**; empresa: Hologram Gestão. A landing serve uma cópia idêntica byte a byte em
+`apps/web/public/manual-hologram-os.pdf`, com o tamanho ao lado do botão (`content.ts`, travado
+por teste): ao regerar, copie o PDF e confira o tamanho.
 
-## Fonte alterada depois da 1.1, PDF ainda não regerado (05/10/2026, task 86e3anx75)
+## O que mudou na 1.2 (08/10/2026, task 86e3mz74x)
 
-O bloco "Processamento por inteligência artificial" do cap. 10, em `fonte/manual.html`,
-ganhou o que os termos da Anthropic sustentam, conferido em 05/10/2026: o conteúdo enviado
-não é usado para treinar modelos, é apagado pelo provedor em até 30 dias (com as exceções
-de conteúdo sinalizado e de exigência legal) e é processado fora do Brasil. A frase "o arquivo
-não fica armazenado" passou a dizer que isso vale para a plataforma. As fontes estão em
-[../seguranca/SUBPROCESSADORES.md](../seguranca/SUBPROCESSADORES.md).
-
-**O PDF não foi regerado nesta entrega**: a imagem do WeasyPrint não estava na máquina. Ao
-regerar, atualize também a cópia servida pela landing (`apps/web/public/manual-hologram-os.pdf`,
-idêntica byte a byte a este PDF), cujo teste falha se o tamanho mudar e o texto do botão não.
+- **As 14 figuras recapturadas no tema Hologram** com a estética atual (verde de ação, cards,
+  menu do cliente em Operação, Cadastros e Acesso, contadores no menu, painel novo). As de 6.5 e
+  6.6 eram do tema escuro. Saem em DPR 2 e são reduzidas a 2000 px com paleta de 256 cores.
+- **Texto que as telas novas desmentiam:** a nota de temas do cap. 4 (agora todas no Hologram); o
+  menu do cliente em três grupos (cap. 4); a origem se configura em Contas Bancárias, não no
+  painel (5.2 e a tabela de recusas); o painel descrito como ele é hoje (6.7), e a figura dele
+  saiu de 5.2 para 6.7, onde o texto fala dele.
+- **Entrou no PDF o bloco de IA do cap. 10 revisado em 05/10/2026** (task 86e3anx75), que estava
+  só na fonte: conteúdo não usado para treino, apagado pelo provedor em até 30 dias e processado
+  fora do Brasil, com as fontes em [../seguranca/SUBPROCESSADORES.md](../seguranca/SUBPROCESSADORES.md).
+- O PDF passou de 3,0 para 3,9 MB: o WeasyPrint embute as figuras em RGB (a paleta não chega ao
+  PDF) e as do app real agora têm o dobro da resolução.
 
 ## O que mudou na 1.1 (30/09/2026, task 86e3gqfmj)
 
@@ -45,28 +50,34 @@ idêntica byte a byte a este PDF), cujo teste falha se o tamanho mudar e o texto
 
 ## Decisões deste documento
 
-- **A barra superior das telas foi recortada** de todas as capturas: é onde aparece o nome
-  antigo ("Auditoria de Lançamentos").
+- **A barra superior das telas foi recortada** das capturas (na 1.1 ela trazia o nome antigo;
+  hoje traz o e-mail e o papel de quem capturou). A exceção é a gaveta de mapeamento, que a cobre.
 - **Dados das capturas são fictícios** ("Padaria Aurora Ltda", "Comercial Horizonte Ltda",
   "Cliente Exemplo Ltda", "Ana Souza"). Nenhuma captura veio de cliente real; o plano contábil e
   o extrato do Comercial Horizonte são a amostra anonimizada de
   `apps/api/tests/fixtures/accounting_sample/`.
 - **Público:** equipe do escritório (sócio, gerente, analista), com um capítulo sobre o
   acesso concedido ao cliente final.
-- O conteúdo reflete o produto na `origin/develop` em 30/09/2026, incluindo as Sprints 13 e 16
-  e o épico de layout das telas do cliente.
+- O conteúdo reflete o produto na `origin/develop` em 08/10/2026 (texto revisto na 1.1, em
+  30/09; na 1.2, só o que as telas novas desmentiam).
 
 ## Como regerar
 
 ```bash
-# 1. figuras (recorta a barra superior dos prints em screenshots/; fonte ausente = figura mantida)
-uv run --with pillow python Docs/manual/fonte/recortar-imagens.py
+# 1. figuras (recorta e reduz os prints de screenshots/pr-shots-86e3mz74x/; fonte ausente =
+#    figura mantida). Num worktree, SHOTS_DIR aponta a pasta screenshots/ do checkout principal.
+SHOTS_DIR=<checkout>/screenshots uv run --with pillow python Docs/manual/fonte/recortar-imagens.py
 
-# 2. PDF (WeasyPrint em container; não há toolchain de PDF no host)
-docker run --rm -v "$PWD/Docs/manual/fonte":/w minidocks/weasyprint \
+# 2. PDF (WeasyPrint em container; não há toolchain de PDF no host) e a cópia da landing
+docker run --rm -u $(id -u):$(id -g) -v "$PWD/Docs/manual/fonte":/w minidocks/weasyprint \
   weasyprint /w/manual.html /w/manual.pdf
 mv Docs/manual/fonte/manual.pdf Docs/manual/Manual-Hologram-OS.pdf
+cp Docs/manual/Manual-Hologram-OS.pdf apps/web/public/manual-hologram-os.pdf
 ```
+
+O tour da landing (`apps/web/public/landing/tour/`) são cinco destas figuras reduzidas a
+1600 px e quantizadas com `sharp` (instalado fora do repo: o web não tem `sharp` no lockfile);
+largura e altura ficam em `landing-tour.tsx`, conferidas por teste.
 
 Para conferir o resultado sem abrir o PDF:
 
@@ -77,38 +88,51 @@ d = pdfium.PdfDocument('Docs/manual/Manual-Hologram-OS.pdf')
 [d[i].render(scale=1.4).to_pil().save(f'/tmp/p{i+1:02d}.png') for i in range(len(d))]"
 ```
 
-### Recapturar as figuras da 1.1
+### Recapturar as figuras
 
-`screenshots/` não é versionado; o roteiro que produziu as sete figuras novas fica em
-`fonte/capturas/`. Os caminhos absolutos dentro dos dois scripts são desta máquina: ajuste antes.
+Duas fontes, as duas em 1440x900 com DPR 2 e tema Hologram:
 
-1. Banco isolado: `createdb adl_manual`, `alembic upgrade head` e `scripts/seed_dev.py`, com a
-   API apontada para ele por variável de ambiente (chaves de desenvolvimento descartáveis, nunca
-   o `.env` real). Nomes fictícios para os dois usuários do seed, por SQL.
+**Sete do e2e com a API interceptada** (`mock/`: clientes, conciliação, anomalias, lançamento,
+plano de contas, de-para, carteira; "Cliente Exemplo Ltda"). `next build` do web, `.next/static`
+e `public/` copiados para o standalone, e no container Playwright o `server.js` em 3100 mais os
+cenários do `apps/web/e2e/a11y-mocked.spec.ts` com `E2E_THEME=hologram E2E_SHOTS=1` e uma config
+local com `deviceScaleFactor: 2`. Os prints saem em `apps/web/a11y-shots/hologram/` com os
+nomes que o `recortar-imagens.py` espera (`*-desktop.png`).
+
+**Sete da tela real** (`app/`: painel, recebíveis, plano contábil, prévia, arquivo contábil,
+layouts, mapeamento), pelo roteiro de `fonte/capturas/`:
+
+1. Banco NOVO (`createdb`, `alembic upgrade head`, `scripts/seed_dev.py`), com a API apontada
+   para ele por variável de ambiente e as chaves fake do CI (`.github/workflows/ci.yml`), nunca
+   o `.env` real. Um banco antigo não serve: o dado cifrado só abre com as chaves que o gravaram.
+   Nomes fictícios para os dois usuários do seed, por SQL (Rafael Mendes e Marina Alves).
 2. API em `127.0.0.1:8031` e `next dev -H 0.0.0.0 -p 3031` com `INTERNAL_API_URL` apontando
    para ela.
 3. `uv run --directory apps/api python Docs/manual/fonte/capturas/dados_demo.py`: cria a
    Padaria Aurora (Omie simulado, carteira com dois contextos), o Comercial Horizonte (origem
    por arquivo, plano contábil, 23 decisões, materialização), os dois layouts, a gerente Ana
-   Souza e três gerações do arquivo.
-4. Playwright em container, 1440x900, tema Hologram (o padrão). No Docker Desktop a rede
-   `host` não alcança o WSL: use `host.docker.internal` e `--add-host`.
+   Souza e três gerações do arquivo, e imprime os IDs.
+4. Playwright em container. No Docker Desktop a rede `host` não alcança o WSL: use
+   `host.docker.internal` e `--add-host`. `LANG=pt_BR.UTF-8` e o Chromium completo (o roteiro
+   já pede `channel: 'chromium'`), senão o campo de competência sai "August 2026".
 
 ```bash
-docker run --rm --add-host=host.docker.internal:host-gateway --user $(id -u):$(id -g) \
-  -e HOME=/tmp -e SHOTS_BASE=http://host.docker.internal:3031 -v <web>:<web>:ro \
-  -v <screenshots>:<screenshots> -v <capturas>:<capturas>:ro \
-  mcr.microsoft.com/playwright:v1.59.1-noble node <capturas>/shots.mjs <padariaId> <horizonteId>
+docker run --rm --ipc=host --add-host=host.docker.internal:host-gateway -u $(id -u):$(id -g) \
+  -e HOME=/tmp -e LANG=pt_BR.UTF-8 -e LANGUAGE=pt_BR \
+  -e SHOTS_BASE=http://host.docker.internal:3031 -e WEB_DIR=<repo>/apps/web \
+  -e SHOTS_OUT=<checkout>/screenshots/pr-shots-86e3mz74x/app -v <repo>:<repo> -v <saída>:<saída> \
+  mcr.microsoft.com/playwright:v1.59.1-noble \
+  node <repo>/Docs/manual/fonte/capturas/shots.mjs <padariaId> <horizonteId>
 ```
 
 ## Arquivos
 
-| Caminho | O que é |
-| --- | --- |
-| `Manual-Hologram-OS.pdf` | O documento final |
-| `fonte/manual.html` | Todo o texto do manual |
-| `fonte/manual.css` | Folha de estilo de impressão (capa, cabeçalhos, sumário com páginas, figuras) |
-| `fonte/img/` | As 14 figuras já recortadas |
-| `fonte/fonts/` | IBM Plex Serif/Mono e Fira Sans (licença OFL), embutidas no PDF |
-| `fonte/recortar-imagens.py` | Gera `fonte/img/` a partir de `screenshots/` |
-| `fonte/capturas/` | Roteiro das capturas da 1.1: dados de demonstração pela API e Playwright |
+| Caminho                     | O que é                                                                        |
+| --------------------------- | ------------------------------------------------------------------------------ |
+| `Manual-Hologram-OS.pdf`    | O documento final                                                              |
+| `fonte/manual.html`         | Todo o texto do manual                                                         |
+| `fonte/manual.css`          | Folha de estilo de impressão (capa, cabeçalhos, sumário com páginas, figuras)  |
+| `fonte/img/`                | As 14 figuras já recortadas                                                    |
+| `fonte/fonts/`              | IBM Plex Serif/Mono e Fira Sans (licença OFL), embutidas no PDF                |
+| `fonte/recortar-imagens.py` | Gera `fonte/img/` a partir de `screenshots/pr-shots-86e3mz74x/`                |
+| `fonte/capturas/`           | Roteiro das capturas da tela real: dados de demonstração pela API e Playwright |
