@@ -115,36 +115,98 @@ export function MonthClosing({
   );
 }
 
+/**
+ * Ordem da lista visível do card: quem tem sessão primeiro, pelo que pede mais
+ * atenção (em processamento, em revisão, erro, concluída), e por último as
+ * habituais ainda sem conciliação no mês.
+ */
+const CLOSING_ORDER: Record<ClosingState, number> = {
+  processing: 0,
+  reviewing: 1,
+  error: 2,
+  done: 3,
+  none: 4,
+};
+
+/**
+ * Quantos meses definem as contas habituais. Espelho do `HABITUAL_MONTHS` do
+ * resumo (`apps/api/app/modules/client_summary/service.py`): quem decide quais
+ * contas são habituais é o servidor; aqui só o texto da explicação usa o número.
+ */
+const HABITUAL_MONTHS = 3;
+
+interface ClosingRow {
+  id: number;
+  name: string;
+  state: ClosingState;
+}
+
+/**
+ * A meta do card é o conjunto HABITUAL (`habitualAccountIds`, decidido no
+ * servidor): as contas conciliadas no mês ou nos meses anteriores da janela. O
+ * cache de contas não serve de meta: ele traz caixinha, adiantamento, reembolso
+ * e cartões que ninguém concilia todo mês. As demais contas do cache ficam
+ * recolhidas num `<details>`, só pelo nome.
+ */
 function ReconciliationsCard({
   summary,
   accounts,
   monthSessions,
   emptyState,
 }: Pick<MonthClosingProps, 'summary' | 'accounts' | 'monthSessions' | 'emptyState'>) {
-  const { accountsTotal, byStatus } = summary.reconciliations;
+  const habitual = new Set(summary.reconciliations.habitualAccountIds);
   const byAccount = new Map(monthSessions.map((s) => [s.omie_conta_id, s]));
-  const rows = accounts.map((account) => ({
-    account,
-    state: closingStateOf(byAccount.get(account.omie_conta_id)),
-  }));
+  const names = new Map(accounts.map((a) => [a.omie_conta_id, a.name]));
+  // Visível: as habituais e, sem assumir a definição do servidor, qualquer
+  // conta com sessão no mês. Conta fora do cache aparece pelo código: a linha
+  // não some.
+  const visibleIds = new Set([...habitual, ...byAccount.keys()]);
+  const rows: ClosingRow[] = [...visibleIds]
+    .map((id) => ({
+      id,
+      name: names.get(id) ?? `Conta ${id}`,
+      state: closingStateOf(byAccount.get(id)),
+    }))
+    .sort(
+      (a, b) =>
+        CLOSING_ORDER[a.state] - CLOSING_ORDER[b.state] || a.name.localeCompare(b.name, 'pt-BR'),
+    );
+  const others = accounts
+    .filter((a) => !visibleIds.has(a.omie_conta_id))
+    .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  const habitualTotal = habitual.size;
+  const habitualDone = rows.filter((r) => habitual.has(r.id) && r.state === 'done').length;
+
   return (
     <DashboardCard title="Conciliações do mês" titleId="dashboard-card-reconciliations">
       {emptyState ?? (
         <>
-          <p className="text-sm">
-            <span className="text-2xl font-semibold tabular-nums">{byStatus.done}</span>{' '}
-            <span className="text-muted-foreground">
-              de {accountsTotal} {accountsTotal === 1 ? 'conta concluída' : 'contas concluídas'}
-            </span>
-          </p>
+          {rows.length === 0 ? (
+            <p className="text-sm font-medium" data-testid="closing-headline">
+              Nenhuma conciliação neste mês ainda
+            </p>
+          ) : (
+            <div className="space-y-0.5">
+              <p className="text-sm" data-testid="closing-headline">
+                <span className="text-2xl font-semibold tabular-nums">{habitualDone}</span>{' '}
+                <span className="text-muted-foreground">
+                  de {habitualTotal}{' '}
+                  {habitualTotal === 1 ? 'conta habitual concluída' : 'contas habituais concluídas'}
+                </span>
+              </p>
+              <p className="text-muted-foreground text-xs">
+                Habituais: contas conciliadas nos últimos {HABITUAL_MONTHS} meses
+              </p>
+            </div>
+          )}
           {rows.length > 0 && (
             <div
               aria-hidden="true"
               className="flex h-2 w-full gap-0.5 overflow-hidden rounded-full"
             >
-              {rows.map(({ account, state }) => (
+              {rows.map(({ id, state }) => (
                 <div
-                  key={account.id}
+                  key={id}
                   data-testid="closing-segment"
                   data-state={state}
                   className={cn('h-full flex-1', CLOSING_SEGMENT[state])}
@@ -152,21 +214,38 @@ function ReconciliationsCard({
               ))}
             </div>
           )}
-          <ul className="space-y-1.5 text-sm">
-            {rows.map(({ account, state }) => (
-              <li key={account.id} className="flex min-w-0 items-center justify-between gap-2">
-                <span className="truncate">{account.name}</span>
-                <span
-                  className={cn(
-                    'shrink-0 rounded-full px-2 py-0.5 text-xs font-medium',
-                    CLOSING_PILL[state],
-                  )}
-                >
-                  {CLOSING_LABEL[state]}
-                </span>
-              </li>
-            ))}
-          </ul>
+          {rows.length > 0 && (
+            <ul className="space-y-1.5 text-sm" data-testid="closing-accounts">
+              {rows.map(({ id, name, state }) => (
+                <li key={id} className="flex min-w-0 items-center justify-between gap-2">
+                  <span className="truncate">{name}</span>
+                  <span
+                    className={cn(
+                      'shrink-0 rounded-full px-2 py-0.5 text-xs font-medium',
+                      CLOSING_PILL[state],
+                    )}
+                  >
+                    {CLOSING_LABEL[state]}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {others.length > 0 && (
+            <details className="group text-sm" data-testid="closing-other-accounts">
+              <summary className="text-muted-foreground hover:text-foreground cursor-pointer rounded-sm">
+                Outras {others.length}{' '}
+                {others.length === 1 ? 'conta sem conciliação' : 'contas sem conciliação'} neste mês
+              </summary>
+              <ul className="mt-2 space-y-1">
+                {others.map((account) => (
+                  <li key={account.id} className="text-muted-foreground truncate">
+                    {account.name}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
         </>
       )}
     </DashboardCard>
