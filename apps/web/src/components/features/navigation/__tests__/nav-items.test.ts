@@ -4,7 +4,11 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { clientNavCounts } from '@/components/features/navigation/nav-items';
+import {
+  clientNavCounts,
+  dashboardPath,
+  reconciliationsPath,
+} from '@/components/features/navigation/nav-items';
 import type { ClientSummary } from '@/lib/contracts';
 
 const BASE: ClientSummary = {
@@ -13,6 +17,7 @@ const BASE: ClientSummary = {
     accountsTotal: 2,
     accountsWithSession: 0,
     byStatus: { processing: 0, reviewing: 0, done: 0, error: 0 },
+    habitualAccountIds: [],
   },
   anomalies: { openTotal: 0, byType: [], resolvedInMonth: 0 },
   cardPurchasesToPost: { count: 0, totalAmount: '0.00' },
@@ -27,6 +32,13 @@ const BASE: ClientSummary = {
   },
   latestSession: null,
 };
+
+describe('rotas do cliente (08/10/2026)', () => {
+  it('a lista de conciliações é a raiz do cliente e o painel mora em /painel', () => {
+    expect(reconciliationsPath('c1')).toBe('/clientes/c1');
+    expect(dashboardPath('c1')).toBe('/clientes/c1/painel');
+  });
+});
 
 describe('clientNavCounts', () => {
   it('sem pendência nenhuma, nenhum contador', () => {

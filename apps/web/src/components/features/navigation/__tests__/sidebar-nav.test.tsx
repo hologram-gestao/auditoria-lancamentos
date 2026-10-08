@@ -117,6 +117,7 @@ const SUMMARY: ClientSummary = {
     accountsTotal: 4,
     accountsWithSession: 3,
     byStatus: { processing: 1, reviewing: 2, done: 1, error: 0 },
+    habitualAccountIds: [1, 2, 3],
   },
   anomalies: { openTotal: 7, byType: [{ code: 'wrong_date', count: 7 }], resolvedInMonth: 2 },
   cardPurchasesToPost: { count: 3, totalAmount: '-420.00' },
@@ -247,11 +248,13 @@ describe('SidebarNav — camada global', () => {
     expect(screen.queryByRole('navigation', { name: 'Seções do cliente' })).not.toBeInTheDocument();
     const nav = screen.getByRole('navigation', { name: 'Navegação principal' });
     expect(within(nav).queryByRole('link', { name: 'Clientes' })).not.toBeInTheDocument();
-    // A casa do tenant é a raiz do próprio cliente, que é o PAINEL (86e3k1q5n).
-    expect(within(nav).getByRole('link', { name: 'Painel' })).toHaveAttribute(
+    // A casa do tenant é a raiz do próprio cliente, que é a LISTA de
+    // conciliações (de novo desde 08/10/2026): o rótulo acompanha o destino.
+    expect(within(nav).getByRole('link', { name: 'Conciliações' })).toHaveAttribute(
       'href',
       '/clientes/c1',
     );
+    expect(within(nav).queryByRole('link', { name: 'Painel' })).not.toBeInTheDocument();
   });
 });
 
@@ -365,19 +368,20 @@ describe('SidebarNav — camada do cliente', () => {
       'Acesso',
       'Usuários',
     ]);
-    // A raiz do cliente é o PAINEL (86e3k1q5n): ele é o ativo, e só ele.
+    // A raiz do cliente é a LISTA de conciliações (08/10/2026): "Conciliações"
+    // é o ativo, e só ele; o Painel continua o primeiro item, em `/painel`.
     const current = within(nav)
       .getAllByRole('link')
       .filter((link) => link.getAttribute('aria-current') === 'page')
       .map((link) => link.textContent);
-    expect(current).toEqual(['Painel']);
+    expect(current).toEqual(['Conciliações']);
     expect(within(nav).getByRole('link', { name: 'Painel' })).toHaveAttribute(
       'href',
-      '/clientes/c1',
+      '/clientes/c1/painel',
     );
     expect(within(nav).getByRole('link', { name: 'Conciliações' })).toHaveAttribute(
       'href',
-      '/clientes/c1/conciliacoes',
+      '/clientes/c1',
     );
   });
 
@@ -391,7 +395,7 @@ describe('SidebarNav — camada do cliente', () => {
 
   it('"Conciliações" casa pela própria rota: a lista, o detalhe e o processamento', () => {
     for (const path of [
-      '/clientes/c1/conciliacoes',
+      '/clientes/c1',
       '/clientes/c1/conciliacao/s9',
       '/clientes/c1/conciliacao/processando/s9',
     ]) {
@@ -400,6 +404,12 @@ describe('SidebarNav — camada do cliente', () => {
       expect(activeItems()).toEqual(['Conciliações']);
       unmount();
     }
+  });
+
+  it('"Painel" casa pela própria rota, sem acender "Conciliações"', () => {
+    currentPathname = '/clientes/c1/painel';
+    render(<SidebarNav user={ADMIN} />);
+    expect(activeItems()).toEqual(['Painel']);
   });
 
   it('rota que nenhum item reivindica não acende item nenhum (sem ativo por exclusão)', () => {
