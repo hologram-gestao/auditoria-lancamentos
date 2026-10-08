@@ -26,7 +26,9 @@
 import { Plus } from 'lucide-react';
 import { useEffect, useMemo } from 'react';
 
+import { EmptyState } from '@/components/shared/empty-state';
 import { OriginStateBlock } from '@/components/shared/origin-state-notice';
+import { ReconciliationsVignette } from '@/components/shared/vignettes';
 import { Button } from '@/components/ui/button';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { ScrollRegion } from '@/components/ui/scroll-region';
@@ -270,7 +272,11 @@ export function ReconciliationsList({
             onRetry={() => void refetch()}
           />
         ) : sessions.length === 0 ? (
-          <EmptyState hasFilters={hasFilters} canCreate={canCreate} onCreateClick={onCreateClick} />
+          <ReconciliationsEmpty
+            hasFilters={hasFilters}
+            canCreate={canCreate}
+            onCreateClick={onCreateClick}
+          />
         ) : (
           sessions.map((session) => (
             <ReconciliationListItem
@@ -326,7 +332,11 @@ function ListSkeleton() {
   );
 }
 
-function EmptyState({
+/**
+ * Lista vazia (86e3h57b5: a moldura e a vinheta são as do `EmptyState`). O botão de
+ * criar só para quem pode criar (`canCreate`, a mesma decisão do cabeçalho).
+ */
+function ReconciliationsEmpty({
   hasFilters,
   canCreate,
   onCreateClick,
@@ -337,28 +347,32 @@ function EmptyState({
 }) {
   if (hasFilters) {
     return (
-      <div className="text-muted-foreground rounded-lg border border-dashed p-8 text-center text-sm">
-        Nenhuma conciliação encontrada com esses filtros.
-      </div>
+      <EmptyState
+        announce
+        vignette={<ReconciliationsVignette />}
+        description="Nenhuma conciliação encontrada com esses filtros."
+      />
     );
   }
   if (!canCreate) {
     return (
-      <div className="text-muted-foreground rounded-lg border border-dashed p-8 text-center text-sm">
-        Nenhuma conciliação neste cliente.
-      </div>
+      <EmptyState
+        vignette={<ReconciliationsVignette />}
+        description="Nenhuma conciliação neste cliente."
+      />
     );
   }
   return (
-    <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed p-8 text-center">
-      <p className="text-muted-foreground text-sm">
-        Nenhuma conciliação. Clique em &quot;Criar conciliação&quot; para começar.
-      </p>
-      <Button type="button" onClick={onCreateClick}>
-        <Plus className="h-4 w-4" aria-hidden="true" />
-        Criar conciliação
-      </Button>
-    </div>
+    <EmptyState
+      vignette={<ReconciliationsVignette />}
+      description='Nenhuma conciliação. Clique em "Criar conciliação" para começar.'
+      action={
+        <Button type="button" onClick={onCreateClick}>
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          Criar conciliação
+        </Button>
+      }
+    />
   );
 }
 

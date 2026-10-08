@@ -109,8 +109,10 @@ export function FlowChart({ buckets }: { buckets: readonly TitlesFlowBucket[] })
     )
     .join('; ');
 
+  // `relative` (08/10/2026): a tabela acessível é `sr-only`, que é `position:
+  // absolute`; sem ancestral posicionado ela ancorava no documento abaixo da dobra.
   return (
-    <div className="flex flex-col gap-2">
+    <div className="relative flex flex-col gap-2">
       {/* O eixo tem CALHA própria à esquerda (`pl-14`): rótulo de grade nunca
           cobre o topo de uma barra. A linha de faixas abaixo usa a mesma calha
           para as colunas alinharem com os grupos. */}

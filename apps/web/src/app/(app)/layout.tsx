@@ -135,7 +135,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           temas). Agora o grupo é `min-w-0`: quem absorve o aperto é o texto do
           papel (`truncate`), e os botões seguem no tamanho do conteúdo, então
           "Sair" continua sem sumir. */}
-      <header className="bg-card flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 sm:px-6">
+      {/* Filete de luz sob o header (86e3h57a5): o `.lp-header::after` da landing em
+          `--primary`, por pseudo-elemento sobre a borda de baixo (`.header-filament`
+          no `globals.css`). Decorativo e fora do texto; parado, sem animação. */}
+      <header className="header-filament bg-card relative flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 sm:px-6">
         <div className="flex min-w-0 items-center gap-1 sm:gap-2">
           {/* Hambúrguer só abaixo de `md`, onde o aside não existe (86e2n4pf9). */}
           <MobileNavDrawer user={user} />
@@ -194,8 +197,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             empurre o shell e reintroduza scroll horizontal na página. */}
         {/* `--page-scroll-padding` = o `p-6` daqui: é o que `<Table stickyHeader="page">`
             desconta para o cabeçalho grudar no TOPO da área visível do `<main>`, e não
-            24px abaixo dele, com linhas aparecendo por cima na faixa do padding. */}
-        <main className="min-w-0 flex-1 overflow-y-auto p-6 [--page-scroll-padding:1.5rem]">
+            24px abaixo dele, com linhas aparecendo por cima na faixa do padding.
+            `relative` (08/10/2026): todo descendente `absolute` sem ancestral posicionado
+            (o `sr-only`, por exemplo) ancorava no DOCUMENTO e o esticava abaixo do shell,
+            com uma segunda barra de rolagem; com o `<main>` posicionado, ele fica dentro
+            da área rolável. */}
+        <main className="relative min-w-0 flex-1 overflow-y-auto p-6 [--page-scroll-padding:1.5rem]">
           {children}
         </main>
       </div>

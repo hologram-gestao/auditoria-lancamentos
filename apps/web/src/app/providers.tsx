@@ -25,6 +25,8 @@ import { ThemeProvider, useTheme } from 'next-themes';
 import { useState } from 'react';
 import { Toaster } from 'sonner';
 
+import { AnimatedCheck } from '@/components/ui/animated-check';
+
 /**
  * Cores do toast pelos TOKENS do tema, não pela paleta `richColors` do Sonner.
  *
@@ -80,6 +82,10 @@ function AppToaster() {
       closeButton
       theme={resolvedTheme === 'light' ? 'light' : 'dark'}
       toastOptions={{ classNames: TOAST_CLASSNAMES }}
+      // Sucesso responde com o check que se desenha (86e3h57a5), na cor do tipo
+      // (`text-success` do `TOAST_CLASSNAMES`, por `currentColor`); parado sob
+      // movimento reduzido. Traço mais grosso: o ícone tem 16 px. Erro não muda.
+      icons={{ success: <AnimatedCheck className="h-4 w-4" strokeWidth={4.5} /> }}
     />
   );
 }

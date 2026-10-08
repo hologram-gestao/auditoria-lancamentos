@@ -30,9 +30,10 @@ import { ArrowLeft } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import { Fragment } from 'react';
 
+import { useMappingDestinations } from '@/hooks/use-client-mapping';
 import { useClientSummary } from '@/hooks/use-client-summary';
 import { useClientDetail } from '@/hooks/use-clients';
-import { canAccessClient, canSeeSystemArea } from '@/lib/authz';
+import { canAccessClient, canSeeSystemArea, isPlatformScoped } from '@/lib/authz';
 import type { AuthenticatedUser } from '@/lib/contracts';
 import { cn } from '@/lib/utils';
 
@@ -64,6 +65,17 @@ export function SidebarNav({ user, onNavigate }: SidebarNavProps) {
   // Contadores de pendência (86e3k1q3x): o mesmo resumo do painel, do mês que o
   // SERVIDOR decide. Sem dado (carregando, erro), o menu sai sem pílula.
   const summaryQuery = useClientSummary(clientId ?? '', undefined, { enabled: canAccess });
+  // Nomes dos destinos para o detalhe do contador do De-para (ajuste de 08/10/2026):
+  // o catálogo da organização DO CLIENTE, pela mesma regra do painel e da tela do
+  // de-para (só a plataforma diz qual organização). Mesma chave de cache.
+  const platform = isPlatformScoped(user);
+  const clientOrganizationId = detailQuery.data?.organization?.id ?? null;
+  const destinationsQuery = useMappingDestinations(platform ? clientOrganizationId : null, {
+    enabled: canAccess && (!platform || clientOrganizationId !== null),
+  });
+  const destinationNames = new Map(
+    (destinationsQuery.data ?? []).map((destination) => [destination.type, destination.name]),
+  );
 
   if (clientId === null || !canAccess) {
     return (
@@ -103,7 +115,7 @@ export function SidebarNav({ user, onNavigate }: SidebarNavProps) {
         </div>
       )}
       <NavSections
-        sections={clientNavSections(user, clientId, pathname, summaryQuery.data)}
+        sections={clientNavSections(user, clientId, pathname, summaryQuery.data, destinationNames)}
         onNavigate={onNavigate}
       />
     </nav>
@@ -146,6 +158,7 @@ function NavSections({
               count={item.count}
               countTone={item.countTone}
               countLabel={item.countLabel}
+              countDetail={item.countDetail}
               onClick={onNavigate}
             >
               {item.label}

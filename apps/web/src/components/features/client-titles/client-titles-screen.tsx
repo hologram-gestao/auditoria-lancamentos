@@ -59,7 +59,9 @@ import { Loader2, MessageSquareText, RefreshCw, X } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
+import { EmptyState } from '@/components/shared/empty-state';
 import { OriginStateBlock } from '@/components/shared/origin-state-notice';
+import { PortfolioVignette } from '@/components/shared/vignettes';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { PaginationBar } from '@/components/ui/pagination-bar';
@@ -880,20 +882,21 @@ function NeverSyncedState({
   canSync: boolean;
   isClosed: boolean;
 }) {
+  // Vinheta do `EmptyState` (86e3h57b5), sem borda: o `TableEmpty` é a moldura.
   return (
-    <div className="flex flex-col items-center gap-3 text-center">
-      <div className="space-y-1">
-        <p className="text-sm font-medium">A carteira deste cliente ainda não foi sincronizada</p>
-        <p className="text-muted-foreground text-sm">
-          {isClosed
-            ? 'O cliente foi encerrado antes de sincronizar, e a sincronização não fica disponível para clientes encerrados.'
-            : canSync
-              ? 'Traga os títulos em aberto da origem para ver o total devido e o atraso por faixa.'
-              : 'Quando alguém da equipe sincronizar, os títulos em aberto da origem aparecem aqui.'}
-        </p>
-      </div>
-      {action}
-    </div>
+    <EmptyState
+      framed={false}
+      vignette={<PortfolioVignette />}
+      title="A carteira deste cliente ainda não foi sincronizada"
+      description={
+        isClosed
+          ? 'O cliente foi encerrado antes de sincronizar, e a sincronização não fica disponível para clientes encerrados.'
+          : canSync
+            ? 'Traga os títulos em aberto da origem para ver o total devido e o atraso por faixa.'
+            : 'Quando alguém da equipe sincronizar, os títulos em aberto da origem aparecem aqui.'
+      }
+      action={action}
+    />
   );
 }
 

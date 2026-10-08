@@ -9,7 +9,8 @@
  * O tenant que abre deep link de OUTRO tenant cai na camada global — quem
  * explica a negação é o conteúdo (`AccessDenied`), não o menu.
  */
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 let currentPathname = '/clientes';
@@ -22,6 +23,7 @@ const detailState = {
   data: undefined as
     | {
         name: string;
+        organization?: { id: string };
         connections?: Array<{
           id: string;
           provider_type: string;
@@ -47,6 +49,22 @@ vi.mock('@/hooks/use-client-summary', () => ({
   useClientSummary: (clientId: string, _month?: string, options: { enabled?: boolean } = {}) => {
     summaryCalls.push({ clientId, enabled: options.enabled });
     return summaryState;
+  },
+}));
+
+// Catálogo de destinos (ajuste de 08/10/2026): o nome de cada destino no detalhe
+// do contador do De-para. `organizationId` é registrado para provar a regra da
+// plataforma (só ela diz qual organização).
+const destinationCalls: Array<{ organizationId: string | null; enabled: boolean | undefined }> = [];
+vi.mock('@/hooks/use-client-mapping', () => ({
+  useMappingDestinations: (organizationId: string | null, options: { enabled?: boolean } = {}) => {
+    destinationCalls.push({ organizationId, enabled: options.enabled });
+    return {
+      data: [
+        { type: 'conta_contabil', name: 'Conta contábil' },
+        { type: 'fluxo_de_caixa', name: 'Fluxo de caixa' },
+      ],
+    };
   },
 }));
 
@@ -150,6 +168,7 @@ beforeEach(() => {
   summaryState.data = undefined;
   summaryState.isError = false;
   summaryCalls.length = 0;
+  destinationCalls.length = 0;
   currentPathname = '/clientes';
   detailState.data = { name: 'Cliente Exemplo Ltda' };
   detailState.isLoading = false;
@@ -590,11 +609,19 @@ describe('SidebarNav — contadores de pendência (86e3k1q3x)', () => {
     const { container } = render(<SidebarNav user={ADMIN} />);
 
     const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
-    // processando + em revisão; vencidos; sem decisão somado nos destinos.
-    expect(countOf(nav, 'Conciliações')).toHaveAccessibleName('3 em andamento');
+    // processando + em revisão; vencidos; o MAIOR sem decisão entre os destinos
+    // (ajuste de 08/10/2026: 4, e não 4 + 1). O nome acessível é o detalhe inteiro.
+    expect(countOf(nav, 'Conciliações')).toHaveAccessibleName(
+      '3 em andamento: 1 em processamento · 2 em revisão',
+    );
     expect(countOf(nav, 'Conciliações')).toHaveTextContent('3');
-    expect(countOf(nav, 'Carteira')).toHaveAccessibleName('12 títulos vencidos');
-    expect(countOf(nav, 'De-para')).toHaveAccessibleName('5 categorias sem decisão');
+    expect(countOf(nav, 'Carteira')).toHaveAccessibleName(
+      '12 títulos vencidos: 9 a receber · 3 a pagar',
+    );
+    expect(countOf(nav, 'De-para')).toHaveTextContent('4');
+    expect(countOf(nav, 'De-para')).toHaveAccessibleName(
+      '4 categorias sem decisão · Conta contábil: 4, Fluxo de caixa: 1',
+    );
     // Tom de cada um: a cor do badge que a tela de destino já usa.
     expect(countOf(nav, 'Conciliações')).toHaveClass('text-info');
     expect(countOf(nav, 'Carteira')).toHaveClass('text-destructive');
@@ -603,6 +630,51 @@ describe('SidebarNav — contadores de pendência (86e3k1q3x)', () => {
     expect(within(nav).getAllByRole('img')).toHaveLength(3);
     expect(summaryCalls.at(-1)).toEqual({ clientId: 'c1', enabled: true });
     await assertNoA11yViolations(container);
+  });
+
+  it('o detalhe abre num tooltip no hover e no foco do link; item sem contador não tem', async () => {
+    const user = userEvent.setup();
+    currentPathname = '/clientes/c1/contas';
+    summaryState.data = SUMMARY;
+    render(<SidebarNav user={ADMIN} />);
+    const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
+
+    await user.hover(within(nav).getByRole('link', { name: /^Carteira/ }));
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      '12 títulos vencidos: 9 a receber · 3 a pagar',
+    );
+    await user.unhover(within(nav).getByRole('link', { name: /^Carteira/ }));
+
+    // Foco do teclado no De-para: o mesmo tooltip, sem pílula focável.
+    within(nav)
+      .getByRole('link', { name: /^De-para/ })
+      .focus();
+    await waitFor(() =>
+      expect(screen.getByRole('tooltip')).toHaveTextContent(
+        '4 categorias sem decisão · Conta contábil: 4, Fluxo de caixa: 1',
+      ),
+    );
+    expect(
+      within(nav)
+        .getAllByRole('img')
+        .every((pill) => !pill.hasAttribute('tabindex')),
+    ).toBe(true);
+
+    // Contas Bancárias não tem contador: nem gatilho de tooltip.
+    expect(within(nav).getByRole('link', { name: 'Contas Bancárias' })).not.toHaveAttribute(
+      'data-state',
+    );
+  });
+
+  it('a plataforma pede o catálogo da organização DO CLIENTE; o staff, o da própria', () => {
+    currentPathname = '/clientes/c1';
+    detailState.data = { name: 'Cliente Exemplo Ltda', organization: { id: 'org-1' } };
+    render(<SidebarNav user={PLATFORM} />);
+    expect(destinationCalls.at(-1)).toEqual({ organizationId: 'org-1', enabled: true });
+
+    destinationCalls.length = 0;
+    render(<SidebarNav user={ADMIN} />);
+    expect(destinationCalls.at(-1)).toEqual({ organizationId: null, enabled: true });
   });
 
   it('papel sem a carteira (`titles` nulo) fica sem o contador da Carteira', () => {

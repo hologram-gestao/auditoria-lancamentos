@@ -230,3 +230,147 @@
     @apply bg-background text-foreground;
   }
 }
+
+/*
+ * Primitivos de moldura e de movimento (86e3h579d), divididos entre o app e as páginas
+ * públicas. Cor SÓ por token: no app a cor de ação é `--primary` (o verde no Hologram,
+ * navy e índigo no claro e no escuro), nunca `--brand`. A landing e o login trocam os
+ * valores pelas variáveis `--card-*` no `.lp-public` (`app/public-brand.css`), e ficam
+ * como eram.
+ *
+ * Movimento só na entrada de um bloco e na resposta a uma ação, uma vez, sem loop.
+ * Toda regra que mexe (sobe, aparece, se desenha) mora sob
+ * `prefers-reduced-motion: no-preference`; o teste `motion-css.test.ts` lê este arquivo
+ * e reprova regra de movimento fora desse bloco.
+ */
+@layer components {
+  /* Borda em gradiente: um retângulo com o gradiente, recortado por máscara para
+     sobrar só o anel de 1 px (`padding`) sobre a borda. Mais forte no canto de cima.
+     Decorativa: fica fora de baixo do texto. */
+  .edge-gradient,
+  .card-elevated {
+    position: relative;
+  }
+
+  .edge-gradient::before,
+  .card-elevated::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    padding: 1px;
+    border-radius: inherit;
+    background: linear-gradient(
+      160deg,
+      var(--card-edge-strong, hsl(var(--primary) / 0.3)),
+      transparent 35%,
+      transparent 65%,
+      var(--card-edge-soft, hsl(var(--border)))
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+    opacity: 0.8;
+  }
+
+  /* Card elevado: no hover, a borda e a sombra na cor de ação. A cor responde ao
+     ponteiro em qualquer aparelho; quem SOBE é só o bloco de baixo. */
+  .card-elevated:hover {
+    border-color: var(--card-edge-strong, hsl(var(--primary) / 0.3));
+    box-shadow: var(--card-lift-shadow, 0 10px 28px -14px hsl(var(--primary) / 0.25));
+  }
+
+  .card-elevated:hover::before {
+    opacity: 1;
+  }
+
+  /* Check que se desenha (`AnimatedCheck`): sem movimento, nasce desenhado. */
+  @keyframes animated-check-draw {
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+
+  /* Entrada do bloco (`Reveal`): por animação, para não brigar com a transição de
+     hover do card quando os dois vestem o mesmo elemento. */
+  @keyframes reveal-in {
+    from {
+      opacity: 0;
+      translate: 0 8px;
+    }
+  }
+
+  /* Vinheta de estado vazio (`components/shared/vignettes.tsx`): cada parte entra
+     uma vez e para. */
+  @keyframes vignette-in {
+    from {
+      opacity: 0;
+      translate: 0 4px;
+    }
+  }
+
+  /* Filete de luz sob o header do app: o `.lp-header::after` da landing em
+     `--primary`. Decorativo, por pseudo-elemento, sobre a borda de baixo. */
+  .header-filament::after {
+    content: '';
+    position: absolute;
+    inset: auto 0 -1px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, hsl(var(--primary) / 0.45), transparent);
+    pointer-events: none;
+  }
+}
+
+/* No app, o card só sobe de `md` para cima; as páginas públicas redefinem. */
+@media (max-width: 767px) {
+  :root {
+    --card-lift: 0px;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .card-elevated {
+    transition-property: transform, box-shadow, border-color;
+    transition-duration: var(--card-motion, 200ms);
+    transition-timing-function: ease-out;
+  }
+
+  .card-elevated::before {
+    transition: opacity var(--card-motion, 200ms) ease-out;
+  }
+
+  .animated-check circle {
+    stroke-dasharray: 160;
+    stroke-dashoffset: 160;
+    animation: animated-check-draw 700ms ease-out forwards;
+  }
+
+  .animated-check path {
+    stroke-dasharray: 48;
+    stroke-dashoffset: 48;
+    animation: animated-check-draw 600ms ease-out 150ms forwards;
+  }
+
+  [data-reveal-armed]:not([data-revealed]) {
+    opacity: 0;
+  }
+
+  [data-reveal-armed][data-revealed] {
+    animation: reveal-in 350ms ease-out backwards;
+    animation-delay: var(--reveal-delay, 0ms);
+  }
+
+  .vignette [data-vig-part] {
+    animation: vignette-in 600ms ease-out backwards;
+    animation-delay: calc(var(--vig-i, 0) * 120ms);
+  }
+}
+
+/* Sobe só com ponteiro de verdade: no toque o `:hover` gruda depois do toque. */
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .card-elevated:hover {
+    transform: translate3d(0, var(--card-lift, -2px), 0);
+  }
+}

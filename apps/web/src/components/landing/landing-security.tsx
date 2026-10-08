@@ -5,6 +5,8 @@
  */
 import Link from 'next/link';
 
+import { Card } from '@/components/ui/card';
+
 import { security } from './content';
 import { LandingIcon } from './landing-icon';
 import { LandingSection, revealDelay } from './landing-section';
@@ -21,18 +23,22 @@ export function LandingSecurity() {
     >
       <ul className="grid gap-4 sm:grid-cols-2 lg:gap-6">
         {security.items.map((item, index) => (
-          <li
+          <Card
+            asChild
+            variant="elevated"
             key={item.title}
             data-reveal
             style={revealDelay(index)}
-            className="lp-card bg-card flex gap-4 rounded-xl border p-6"
+            className="flex gap-4 rounded-xl p-6"
           >
-            <LandingIcon name={item.icon} />
-            <div className="min-w-0">
-              <h3 className="font-semibold">{item.title}</h3>
-              <p className="text-muted-foreground mt-2 leading-relaxed">{item.text}</p>
-            </div>
-          </li>
+            <li>
+              <LandingIcon name={item.icon} />
+              <div className="min-w-0">
+                <h3 className="font-semibold">{item.title}</h3>
+                <p className="text-muted-foreground mt-2 leading-relaxed">{item.text}</p>
+              </div>
+            </li>
+          </Card>
         ))}
       </ul>
       <div
