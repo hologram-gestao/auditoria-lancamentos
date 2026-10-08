@@ -3,6 +3,8 @@
  * pastilha do ícone cresce um pouco (`.lp-audience` no `landing.css`). Sem vinheta
  * ao lado do título desde a 86e3h0xcr.
  */
+import { Card } from '@/components/ui/card';
+
 import { audience } from './content';
 import { LandingIcon } from './landing-icon';
 import { LandingImage } from './landing-image';
@@ -13,16 +15,20 @@ export function LandingAudience() {
     <LandingSection id="para-quem" eyebrow={audience.eyebrow} title={audience.title}>
       <ul className="lp-audience grid gap-4 md:grid-cols-3 md:gap-6">
         {audience.items.map((item, index) => (
-          <li
+          <Card
+            asChild
+            variant="elevated"
             key={item.title}
             data-reveal
             style={revealDelay(index)}
-            className="lp-card bg-card rounded-xl border p-6"
+            className="rounded-xl p-6"
           >
-            <LandingIcon name={item.icon} />
-            <h3 className="mt-5 text-lg font-semibold">{item.title}</h3>
-            <p className="text-muted-foreground mt-2 leading-relaxed">{item.text}</p>
-          </li>
+            <li>
+              <LandingIcon name={item.icon} />
+              <h3 className="mt-5 text-lg font-semibold">{item.title}</h3>
+              <p className="text-muted-foreground mt-2 leading-relaxed">{item.text}</p>
+            </li>
+          </Card>
         ))}
       </ul>
       <LandingImage slot="standard" className="mt-10 max-w-3xl" />

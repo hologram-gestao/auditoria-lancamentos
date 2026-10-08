@@ -31,6 +31,7 @@
  */
 import { CollapsibleSummary, SummaryInline } from '@/components/shared/collapsible-summary';
 import { Money, type MoneyTone } from '@/components/shared/money';
+import { Card } from '@/components/ui/card';
 import type { AgingBucket, AgingTotals, TitleType } from '@/lib/contracts';
 import { formatBRDate, formatBRL } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -192,75 +193,77 @@ function TotalsCard({
   ] as const;
 
   return (
-    <section aria-labelledby={headingId} className="bg-card space-y-1.5 rounded-lg border p-2.5">
-      <h3 id={headingId} className="text-sm font-semibold">
-        {typeLabel}
-      </h3>
+    <Card asChild variant="elevated" className="space-y-1.5 p-2.5">
+      <section aria-labelledby={headingId}>
+        <h3 id={headingId} className="text-sm font-semibold">
+          {typeLabel}
+        </h3>
 
-      {/* Uma coluna até `sm`, três a partir dali. Em 390px as três parcelas em
+        {/* Uma coluna até `sm`, três a partir dali. Em 390px as três parcelas em
           colunas de ~95px imprimiam os três valores UM POR CIMA DO OUTRO
           (`R$ 107.413R$10.000,0R$ 97.413,10`): `text-lg` + `whitespace-nowrap`
           não cabem em 95px, e o `nowrap` NÃO sai — valor monetário que quebra
           depois do hífen vira outro número (defeito da S7). Quem cede é a
           contagem de colunas, não o valor. */}
-      <dl className="grid grid-cols-1 gap-1 sm:grid-cols-3">
-        {totalsRows.map((row) => {
-          const isActive = isSummaryFilterActive(active, titleType, row.key);
-          return (
-            <div key={row.key}>
-              <dt className="text-muted-foreground px-2 text-xs font-medium">
-                {TOTAL_LABELS[row.key]}
-              </dt>
-              <dd>
-                <FilterValueButton
-                  active={isActive}
-                  label={`${typeLabel}, ${TOTAL_LABELS[row.key]}: ${formatBRL(row.amount)}, ${countLabel(row.count)}. Filtrar a lista`}
-                  onClick={() => onSelect(titleType, row.key)}
-                >
-                  {/* O `<Money>` traz o `whitespace-nowrap`, que não é enfeite: valor
+        <dl className="grid grid-cols-1 gap-1 sm:grid-cols-3">
+          {totalsRows.map((row) => {
+            const isActive = isSummaryFilterActive(active, titleType, row.key);
+            return (
+              <div key={row.key}>
+                <dt className="text-muted-foreground px-2 text-xs font-medium">
+                  {TOTAL_LABELS[row.key]}
+                </dt>
+                <dd>
+                  <FilterValueButton
+                    active={isActive}
+                    label={`${typeLabel}, ${TOTAL_LABELS[row.key]}: ${formatBRL(row.amount)}, ${countLabel(row.count)}. Filtrar a lista`}
+                    onClick={() => onSelect(titleType, row.key)}
+                  >
+                    {/* O `<Money>` traz o `whitespace-nowrap`, que não é enfeite: valor
                       monetário que quebra depois do hífen é lido como outra coisa
                       (defeito da S7). Ativo, o tom sai e vale o `accent-foreground`
                       do botão: o vermelho sobre `accent` seria par sem teste. */}
-                  <span data-summary="total" className="block text-base font-semibold">
-                    <Money value={row.amount} tone={isActive ? 'neutral' : row.tone} />
-                  </span>
-                  <span className={cn('text-xs', !isActive && 'text-muted-foreground')}>
-                    {countLabel(row.count)}
-                  </span>
-                </FilterValueButton>
-              </dd>
-            </div>
-          );
-        })}
-      </dl>
+                    <span data-summary="total" className="block text-base font-semibold">
+                      <Money value={row.amount} tone={isActive ? 'neutral' : row.tone} />
+                    </span>
+                    <span className={cn('text-xs', !isActive && 'text-muted-foreground')}>
+                      {countLabel(row.count)}
+                    </span>
+                  </FilterValueButton>
+                </dd>
+              </div>
+            );
+          })}
+        </dl>
 
-      <dl className="grid grid-cols-2 gap-1 border-t pt-1.5 sm:grid-cols-4">
-        {OVERDUE_BUCKETS.map((bucket) => {
-          const isActive = isSummaryFilterActive(active, titleType, bucket);
-          return (
-            <div key={bucket}>
-              <dt className="text-muted-foreground px-2 text-xs font-medium">
-                {BUCKET_LABELS[bucket]}
-              </dt>
-              <dd>
-                <FilterValueButton
-                  active={isActive}
-                  label={`${typeLabel}, ${BUCKET_LABELS[bucket]}: ${formatBRL(bucketValue(totals, bucket))}. Filtrar a lista`}
-                  onClick={() => onSelect(titleType, bucket)}
-                >
-                  <span className="block text-sm font-medium">
-                    <Money
-                      value={bucketValue(totals, bucket)}
-                      tone={isActive ? 'neutral' : BUCKET_TONE[bucket]}
-                    />
-                  </span>
-                </FilterValueButton>
-              </dd>
-            </div>
-          );
-        })}
-      </dl>
-    </section>
+        <dl className="grid grid-cols-2 gap-1 border-t pt-1.5 sm:grid-cols-4">
+          {OVERDUE_BUCKETS.map((bucket) => {
+            const isActive = isSummaryFilterActive(active, titleType, bucket);
+            return (
+              <div key={bucket}>
+                <dt className="text-muted-foreground px-2 text-xs font-medium">
+                  {BUCKET_LABELS[bucket]}
+                </dt>
+                <dd>
+                  <FilterValueButton
+                    active={isActive}
+                    label={`${typeLabel}, ${BUCKET_LABELS[bucket]}: ${formatBRL(bucketValue(totals, bucket))}. Filtrar a lista`}
+                    onClick={() => onSelect(titleType, bucket)}
+                  >
+                    <span className="block text-sm font-medium">
+                      <Money
+                        value={bucketValue(totals, bucket)}
+                        tone={isActive ? 'neutral' : BUCKET_TONE[bucket]}
+                      />
+                    </span>
+                  </FilterValueButton>
+                </dd>
+              </div>
+            );
+          })}
+        </dl>
+      </section>
+    </Card>
   );
 }
 

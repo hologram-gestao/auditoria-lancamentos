@@ -28,6 +28,7 @@
  * `<dd>`; um `<p>` solto ao lado do `<dd>` reprova no axe (`definition-list`).
  */
 import { CollapsibleSummary, SummaryInline } from '@/components/shared/collapsible-summary';
+import { Card } from '@/components/ui/card';
 import type { ChartOfAccountsCoverage, ChartOfAccountsStatus } from '@/lib/contracts';
 import { formatCreatedAt } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -163,7 +164,7 @@ export function ChartOfAccountsCoverageBlock({
             // A `<div>` entre o `<dl>` e o par é permitida; um `<p>` solto ao lado
             // do `<dd>` NÃO é (axe `definition-list`, SERIOUS) — por isso a frase
             // de apoio vive DENTRO do `<dd>`, junto do número que ela explica.
-            <div key={stat.key} className="bg-card rounded-lg border p-1.5">
+            <Card key={stat.key} variant="elevated" className="p-1.5">
               <dt className="text-muted-foreground px-2 pt-1 text-xs font-medium">{stat.label}</dt>
               <dd>
                 {/* Ativo = `aria-pressed` + anel + fundo `accent`, com TODO o texto
@@ -187,7 +188,7 @@ export function ChartOfAccountsCoverageBlock({
                   </span>
                 </button>
               </dd>
-            </div>
+            </Card>
           );
         })}
       </dl>

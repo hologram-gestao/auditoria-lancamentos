@@ -6,8 +6,8 @@
  *
  *   1. marca a raiz `.landing` com `data-lp-js`, que é o que autoriza o CSS a
  *      esconder os blocos `[data-reveal]` (sem JS, tudo aparece);
- *   2. revela cada `[data-reveal]` quando ele entra na tela (`IntersectionObserver`),
- *      uma vez só;
+ *   2. revela cada `[data-reveal]` quando ele entra na tela, uma vez só, pelo
+ *      `observeReveal` do primitivo `components/shared/reveal.tsx` (86e3h579d);
  *   3. liga `data-scrolled` no header (`[data-lp-header]`) quando a página sai do topo;
  *   4. "Como funciona" vivo (86e3gwzj0): em cada `[data-lp-stepper]`, o passo ativo
  *      (`data-active` no `[data-lp-step]`) avança a cada 3 s, um ciclo de 12 s para os
@@ -22,7 +22,14 @@
  */
 import { useEffect } from 'react';
 
+import { observeReveal } from '@/components/shared/reveal';
+
 const SCROLLED_AFTER_PX = 8;
+
+const LANDING_REVEAL_OPTIONS: IntersectionObserverInit = {
+  rootMargin: '0px 0px -10% 0px',
+  threshold: 0.08,
+};
 
 /** Tempo de cada passo aceso: quatro passos, um ciclo de 12 s. */
 export const STEPPER_STEP_MS = 3000;
@@ -121,23 +128,12 @@ export function LandingEffects() {
     if (!root) return undefined;
     root.setAttribute('data-lp-js', '');
 
-    const targets = Array.from(root.querySelectorAll<HTMLElement>('[data-reveal]'));
-    let observer: IntersectionObserver | undefined;
-    if ('IntersectionObserver' in window) {
-      observer = new IntersectionObserver(
-        (entries) => {
-          for (const entry of entries) {
-            if (!entry.isIntersecting) continue;
-            entry.target.setAttribute('data-revealed', '');
-            observer?.unobserve(entry.target);
-          }
-        },
-        { rootMargin: '0px 0px -10% 0px', threshold: 0.08 },
-      );
-      targets.forEach((el) => observer?.observe(el));
-    } else {
-      targets.forEach((el) => el.setAttribute('data-revealed', ''));
-    }
+    // A revelação é a do primitivo compartilhado (`observeReveal`, 86e3h579d); a
+    // margem, o limiar e o desenho (600 ms, 16 px no `landing.css`) são da landing.
+    const stopReveal = observeReveal(
+      Array.from(root.querySelectorAll<HTMLElement>('[data-reveal]')),
+      LANDING_REVEAL_OPTIONS,
+    );
 
     const header = root.querySelector<HTMLElement>('[data-lp-header]');
     const onScroll = () => {
@@ -154,7 +150,7 @@ export function LandingEffects() {
 
     return () => {
       stopSteppers.forEach((stop) => stop());
-      observer?.disconnect();
+      stopReveal();
       window.removeEventListener('scroll', onScroll);
       root.removeAttribute('data-lp-js');
     };

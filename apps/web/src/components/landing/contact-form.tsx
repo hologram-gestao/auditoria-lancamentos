@@ -17,6 +17,7 @@ import { Loader2 } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 
+import { AnimatedCheck } from '@/components/ui/animated-check';
 import { Button } from '@/components/ui/button';
 import {
   Form,
@@ -96,19 +97,7 @@ export function ContactForm() {
       >
         {sent && (
           <div className="flex flex-col items-center gap-4 py-10 text-center">
-            <svg
-              aria-hidden="true"
-              viewBox="0 0 56 56"
-              className="lp-check text-success h-14 w-14"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={3}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <circle cx="28" cy="28" r="25" />
-              <path d="M17 29l7 7 15-16" />
-            </svg>
+            <AnimatedCheck className="text-success h-14 w-14" />
             <p className="text-xl font-semibold">{contact.successTitle}</p>
             <p className="text-muted-foreground">{contact.successText}</p>
             <div className="mt-2">

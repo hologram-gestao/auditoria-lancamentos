@@ -17,6 +17,7 @@
  * no axe (`definition-list`).
  */
 import { CollapsibleSummary, SummaryInline } from '@/components/shared/collapsible-summary';
+import { Card } from '@/components/ui/card';
 import type { MappingListResponse, MappingSituation } from '@/lib/contracts';
 import { cn } from '@/lib/utils';
 
@@ -111,7 +112,7 @@ export function MappingSituationCountsBlock({
         {items.map((stat) => {
           const isActive = isMappingCountActive(active, stat.key);
           return (
-            <div key={stat.key} className="bg-card rounded-lg border p-1.5">
+            <Card key={stat.key} variant="elevated" className="p-1.5">
               <dt className="text-muted-foreground px-2 pt-1 text-xs font-medium">{stat.label}</dt>
               <dd>
                 {/* Ativo = `aria-pressed` + anel + fundo `accent`, com TODO o texto
@@ -135,7 +136,7 @@ export function MappingSituationCountsBlock({
                   </span>
                 </button>
               </dd>
-            </div>
+            </Card>
           );
         })}
       </dl>

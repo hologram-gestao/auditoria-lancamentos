@@ -1,7 +1,7 @@
 /*
  * A "cara pública" da marca, dividida entre a landing (`(public)/layout.tsx`) e o login
  * (`(auth)/layout.tsx`), 86e3h1h75: as variáveis de brilho e borda, a aurora, a grade,
- * a palavra em gradiente e a borda em gradiente dos cards. Tudo escopado em
+ * a palavra em gradiente e as cores da borda em gradiente dos cards. Tudo escopado em
  * `.lp-public`, a classe que os dois wrappers levam junto de `.hologram` (tema fixo). O
  * app autenticado não carrega este arquivo.
  *
@@ -28,6 +28,18 @@
    * fundo pintado, no hero da landing e no painel do login.
    */
   --lp-gradient-end: color-mix(in srgb, hsl(var(--brand)) 60%, hsl(var(--foreground)));
+
+  /*
+   * O `Card variant="elevated"` e a `.edge-gradient` (86e3h579d, no `globals.css`) com
+   * os valores que a borda e o hover dos cards da landing sempre tiveram: borda em
+   * verde a 40 % e branco a 14 %, a sombra verde da landing, 300 ms, e o card sobe em
+   * qualquer largura (no app ele só sobe de `md` para cima).
+   */
+  --card-edge-strong: var(--lp-edge-strong);
+  --card-edge-soft: var(--lp-edge);
+  --card-lift-shadow: var(--lp-shadow);
+  --card-motion: 300ms;
+  --card-lift: -2px;
 }
 
 /* ---------- Aurora ---------- */
@@ -143,35 +155,10 @@
 /* ---------- Borda em gradiente dos cards ---------- */
 
 /*
- * Um retângulo com o gradiente, recortado por máscara para sobrar só a faixa de 1 px
- * (`padding`) em volta. Mais clara no topo, como um filete de luz. Decorativa, fora de
- * baixo do texto. Vale para os cards da landing (`.lp-card`), a moldura do tour
- * (`.lp-frame`) e o card do login (`.lp-auth-card`).
+ * A borda em gradiente dos cards da landing (`Card variant="elevated"`), da moldura do
+ * tour (`.lp-frame`) e do card do login (`.lp-auth-card`) é a `.edge-gradient` do
+ * `globals.css` (86e3h579d), com as cores das variáveis `--card-*` acima.
  */
-.lp-card::before,
-.lp-frame::before,
-.lp-auth-card::before {
-  content: '';
-  position: absolute;
-  inset: -1px;
-  padding: 1px;
-  border-radius: inherit;
-  background: linear-gradient(
-    160deg,
-    var(--lp-edge-strong),
-    transparent 35%,
-    transparent 65%,
-    var(--lp-edge)
-  );
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
-  opacity: 0.8;
-  transition: opacity 300ms ease-out;
-}
 
 /*
  * Card do login: a borda e a sombra dos cards da landing, parado. Formulário não sobe
@@ -188,11 +175,5 @@
 @media (prefers-reduced-motion: reduce) {
   .lp-aurora__blob {
     animation: none;
-  }
-
-  .lp-card::before,
-  .lp-frame::before,
-  .lp-auth-card::before {
-    transition: none;
   }
 }

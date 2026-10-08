@@ -17,11 +17,15 @@
  * O conteúdo recolhido continua montado com `hidden`: os botões que filtram
  * saem da ordem de tabulação e o `aria-controls` aponta sempre para um id que
  * existe.
+ *
+ * Os cards de dentro são `Card variant="elevated"` (quem chama), e o bloco entra
+ * pelo `Reveal` (86e3h57a5): uma vez, parado sob movimento reduzido.
  */
 
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 
+import { Reveal } from '@/components/shared/reveal';
 import { Button } from '@/components/ui/button';
 
 const STORAGE_PREFIX = 'adl:totais-recolhidos:';
@@ -78,9 +82,10 @@ export function CollapsibleSummary({
 
   return (
     <div className="space-y-2">
-      <div id={contentId} hidden={isCollapsed}>
+      {/* Os cards entram uma vez, ao montar ou ao reabrir, pelo primitivo (86e3h57a5). */}
+      <Reveal id={contentId} hidden={isCollapsed}>
         {children}
-      </div>
+      </Reveal>
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         {isCollapsed ? (
           <div className="min-w-0 text-sm" data-testid="summary-collapsed">

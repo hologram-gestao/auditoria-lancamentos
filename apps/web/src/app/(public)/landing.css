@@ -247,24 +247,11 @@
 
 /* ---------- Cards ---------- */
 
-/* Hover do card: sobe 2 px, borda e sombra na cor da marca. Nada pinta atrás do texto. */
-.lp-card {
-  position: relative;
-  transition:
-    transform 300ms ease-out,
-    box-shadow 300ms ease-out,
-    border-color 300ms ease-out;
-}
-
-.lp-card:hover {
-  transform: translate3d(0, -2px, 0);
-  border-color: var(--lp-edge-strong);
-  box-shadow: var(--lp-shadow);
-}
-
-.lp-card:hover::before {
-  opacity: 1;
-}
+/*
+ * Os cards de conteúdo são o `Card variant="elevated"` (86e3h579d): o hover que sobe
+ * 2 px com borda e sombra na cor da marca mora no `globals.css`, com os valores da
+ * landing nas variáveis `--card-*` do `public-brand.css`. Nada pinta atrás do texto.
+ */
 
 .lp-icon {
   background: linear-gradient(135deg, hsl(var(--accent)), hsl(var(--secondary)));
@@ -281,13 +268,10 @@
 /* ---------- Tour do produto (86e3gqfkf) ---------- */
 
 /*
- * Moldura de navegador em volta do print: a inclinação é a da vinheta do hero
- * (`.lp-tilt__card`, zera no hover) e a borda é a dos cards (`::before` em
- * `app/public-brand.css`).
+ * Moldura de navegador em volta do print (`.lp-frame`): a inclinação é a da vinheta do
+ * hero (`.lp-tilt__card`, zera no hover) e a borda é a `.edge-gradient` dos cards
+ * (`globals.css`, com as cores do `public-brand.css`).
  */
-.lp-frame {
-  position: relative;
-}
 
 /*
  * Linha de progresso da aba ativa (86e3h0xcr): 2 px na base, no verde da marca. Cheia
@@ -449,7 +433,7 @@
   transition: transform 300ms ease-out;
 }
 
-.lp-audience .lp-card:hover .lp-icon {
+.lp-audience .card-elevated:hover .lp-icon {
   transform: scale(1.06);
 }
 
@@ -593,25 +577,7 @@
   box-shadow: 0 0 28px -4px hsl(var(--brand) / 0.55);
 }
 
-/* ---------- Sucesso do formulário: check que se desenha ---------- */
-
-.lp-check path {
-  stroke-dasharray: 48;
-  stroke-dashoffset: 48;
-  animation: lp-draw 600ms ease-out 150ms forwards;
-}
-
-.lp-check circle {
-  stroke-dasharray: 160;
-  stroke-dashoffset: 160;
-  animation: lp-draw 700ms ease-out forwards;
-}
-
-@keyframes lp-draw {
-  to {
-    stroke-dashoffset: 0;
-  }
-}
+/* O check que se desenha na confirmação do formulário é o `AnimatedCheck` (86e3h579d). */
 
 /* ---------- Movimento reduzido: estado final, nada se mexe ---------- */
 
@@ -625,19 +591,12 @@
   .lp-tab-progress[data-lp-tab-progress='running'],
   .lp-pulse-dot::after,
   .lp-float,
-  .lp-progress,
-  .lp-check path,
-  .lp-check circle {
+  .lp-progress {
     animation: none;
   }
 
   .lp-progress {
     transform: none;
-  }
-
-  .lp-check path,
-  .lp-check circle {
-    stroke-dashoffset: 0;
   }
 
   .lp-badge--done,
@@ -666,12 +625,6 @@
     transition: none;
   }
 
-  .lp-card,
-  .lp-card:hover {
-    transform: none;
-    transition: none;
-  }
-
   .lp-pulse-dot::after {
     display: none;
   }
@@ -689,7 +642,7 @@
     transition: none;
   }
 
-  .lp-audience .lp-card:hover .lp-icon {
+  .lp-audience .card-elevated:hover .lp-icon {
     transform: none;
   }
 
