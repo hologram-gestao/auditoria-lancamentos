@@ -139,9 +139,9 @@ export function ClientConnectionsSection({
     <section aria-labelledby="connections-heading" className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
-          <h3 id="connections-heading" className="text-base font-semibold">
+          <h2 id="connections-heading" className="text-base font-semibold">
             Origens de dado
-          </h3>
+          </h2>
           <p className="text-muted-foreground text-sm">
             De onde este cliente traz contas e lançamentos. Um cliente pode ter nenhuma, uma ou
             várias.

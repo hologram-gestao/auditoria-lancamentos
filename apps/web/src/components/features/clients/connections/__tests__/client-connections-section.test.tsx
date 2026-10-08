@@ -26,7 +26,8 @@ let searchParams = '';
 const routerReplace = vi.fn();
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: routerReplace, push: vi.fn() }),
-  usePathname: () => '/clientes/c1',
+  // A seção mora em Contas Bancárias desde 08/10/2026 (é de onde as contas vêm).
+  usePathname: () => '/clientes/c1/contas',
   useSearchParams: () => new URLSearchParams(searchParams),
 }));
 
@@ -50,8 +51,20 @@ vi.mock('@/hooks/use-client-connections', () => ({
   useUpdateConnection: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
+// O detalhe só é lido pelo bloco que monta a tela Contas Bancárias inteira.
+const detailState = {
+  data: undefined as Record<string, unknown> | undefined,
+  isLoading: false,
+  isFetching: false,
+  isError: false,
+  error: null as unknown,
+  refetch: vi.fn(),
+};
+
 vi.mock('@/hooks/use-clients', () => ({
   useTestConnection: () => ({ mutateAsync: vi.fn(), reset: vi.fn(), isPending: false }),
+  useClientDetail: () => detailState,
+  useSyncAccounts: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 const authState = { user: null as AuthenticatedUser | null };
@@ -63,6 +76,7 @@ vi.mock('@/stores/auth', () => ({
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 // Imports do SUT DEPOIS dos `vi.mock`.
+import { BankAccountsScreen } from '@/components/features/clients/bank-accounts-screen';
 import { ClientConnectionsSection } from '@/components/features/clients/connections/client-connections-section';
 import type { AuthenticatedUser, ClientConnection } from '@/lib/contracts';
 import { assertNoA11yViolations } from '@/test/a11y';
@@ -320,7 +334,7 @@ describe('Origens — `?conectar=<tipo>` abre a gaveta no tipo pedido (86e3fqnc9
     const drawer = await screen.findByRole('dialog');
     expect(within(drawer).getByRole('combobox', { name: /Tipo/ })).toHaveTextContent('Arquivo');
     // O parâmetro sai da URL: senão o refresh e o voltar reabririam a gaveta.
-    expect(routerReplace).toHaveBeenCalledWith('/clientes/c1', { scroll: false });
+    expect(routerReplace).toHaveBeenCalledWith('/clientes/c1/contas', { scroll: false });
   });
 
   it('sem o parâmetro a gaveta fica fechada', () => {
@@ -339,7 +353,7 @@ describe('Origens — `?conectar=<tipo>` abre a gaveta no tipo pedido (86e3fqnc9
       <ClientConnectionsSection clientId={CLIENT_ID} originStatus="sem_origem" isClosed={false} />,
     );
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(routerReplace).toHaveBeenCalledWith('/clientes/c1', { scroll: false });
+    expect(routerReplace).toHaveBeenCalledWith('/clientes/c1/contas', { scroll: false });
   });
 
   it('tipo desconhecido na URL cai no padrão, nunca num valor que o schema recusa', async () => {
@@ -397,6 +411,48 @@ describe('Origens — a gaveta não oferece tipo que o servidor recusaria (86e3g
       .getAllByRole('option')
       .map((o) => o.textContent);
     expect(opcoes).toEqual(['Omie']);
+  });
+});
+
+describe('Origens — montada no topo de Contas Bancárias (08/10/2026)', () => {
+  beforeEach(() => {
+    detailState.data = {
+      accounts: [
+        {
+          id: 'a1',
+          omie_conta_id: 1,
+          name: 'Itaú CC',
+          bank_name: 'Itaú',
+          account_type: 'CC',
+          synced_at: '2026-09-22T12:00:00Z',
+        },
+      ],
+      accounts_synced_at: '2026-09-22T12:00:00Z',
+      origin_status: 'ativa',
+      connections: [connection()],
+    };
+  });
+
+  it('a seção de origens vem ANTES da lista de contas, sob o <h1> da tela', () => {
+    render(<BankAccountsScreen clientId={CLIENT_ID} />);
+
+    const title = screen.getByRole('heading', { level: 1, name: 'Contas Bancárias' });
+    const origins = screen.getByRole('heading', { level: 2, name: 'Origens de dado' });
+    const table = screen.getByRole('region', { name: 'Contas bancárias (rolável)' });
+    expect(title.compareDocumentPosition(origins) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(origins.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Conectar origem' })).toBeVisible();
+  });
+
+  it('`?conectar=arquivo` abre a gaveta ali, no tipo Arquivo', async () => {
+    searchParams = 'conectar=arquivo';
+    listState.data = [];
+    detailState.data = { ...detailState.data!, origin_status: 'sem_origem', connections: [] };
+    render(<BankAccountsScreen clientId={CLIENT_ID} />);
+
+    const drawer = await screen.findByRole('dialog');
+    expect(within(drawer).getByRole('combobox', { name: /Tipo/ })).toHaveTextContent('Arquivo');
+    expect(routerReplace).toHaveBeenCalledWith('/clientes/c1/contas', { scroll: false });
   });
 });
 

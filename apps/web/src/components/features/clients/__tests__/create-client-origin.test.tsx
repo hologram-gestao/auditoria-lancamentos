@@ -240,9 +240,10 @@ describe('Editar cliente — a credencial saiu (R5)', () => {
 
   it('aponta a seção de origens como o caminho para trocar a credencial', () => {
     render(<EditClientModal open onOpenChange={vi.fn()} client={client} />);
+    // A gestão de origens mora em Contas Bancárias desde 08/10/2026.
     expect(screen.getByRole('link', { name: 'Origens de dado' })).toHaveAttribute(
       'href',
-      '/clientes/c1',
+      '/clientes/c1/contas',
     );
   });
 

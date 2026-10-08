@@ -83,7 +83,7 @@ export const ORIGIN_ERROR_COPY: Record<OriginErrorCode, OriginCopy> = {
 };
 
 /**
- * Copy do BLOCO de origem no painel do cliente, por `origin_status`.
+ * Copy do BLOCO de origem da seção de origens, por `origin_status`.
  *
  * `erro` diz **"origem com erro"** e oferece **Reconectar** — nunca "sem
  * origem", que mandaria o usuário criar uma conexão que já existe (R7).
@@ -112,21 +112,23 @@ export const ORIGIN_STATUS_COPY: Record<
 };
 
 /**
- * O parâmetro que o painel lê para já abrir a gaveta de conexão no tipo pedido.
- * Quem manda é uma tela que sabe QUAL origem falta (hoje a "Origem por
- * arquivo"); o painel abre, escolhe o tipo e limpa o parâmetro da URL, para o
- * refresh não reabrir a gaveta.
+ * O parâmetro que a seção de origens lê para já abrir a gaveta de conexão no
+ * tipo pedido, onde quer que ela esteja montada (Contas Bancárias sempre; o
+ * painel quando não há origem ativa). Quem manda é uma tela que sabe QUAL origem
+ * falta (hoje a "Origem por arquivo"); a seção abre, escolhe o tipo e limpa o
+ * parâmetro da URL, para o refresh não reabrir a gaveta.
  */
 export const CONNECT_PARAM = 'conectar';
 
 /**
- * Para onde o usuário vai resolver — o painel do cliente, que é a tela onde a
- * origem se conecta (e a única que responde 200 sem origem, por decisão do R6).
+ * Para onde o usuário vai resolver — a tela Contas Bancárias do cliente, que
+ * desde 08/10/2026 é onde a gestão de origens mora (é de lá que as contas vêm).
+ * A seção de origens responde 200 sem origem, por decisão do R6.
  *
- * `providerType` é opcional: sem ele o painel só abre (o caller genérico não
+ * `providerType` é opcional: sem ele a tela só abre (o caller genérico não
  * sabe qual origem falta); com ele, a gaveta já nasce no tipo certo.
  */
 export function originFixPath(clientId: string, providerType?: string): string {
-  const base = `/clientes/${clientId}`;
+  const base = `/clientes/${clientId}/contas`;
   return providerType ? `${base}?${CONNECT_PARAM}=${encodeURIComponent(providerType)}` : base;
 }
