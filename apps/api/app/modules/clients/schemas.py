@@ -21,7 +21,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.db.models import ReconciliationStatus
+from app.db.models import CardPostingDateMode, ReconciliationStatus
 from app.modules.client_connections.schemas import ClientConnectionResponse
 from app.modules.reconciliations.schemas import SessionAuthor
 from app.modules.users.schemas import PaginationMeta
@@ -59,6 +59,15 @@ class CreateClientRequest(BaseModel):
     )
     category_id: UUID | None = Field(
         None, description="Categoria do catálogo (86e34jd8m). Ausente ou null = sem categoria."
+    )
+    # 86e3n70p0 — em que data o cliente lança no Omie as compras do cartão.
+    # DECLARADO (nunca inferido); ausente = `purchase_date`, o processo de sempre.
+    card_posting_date_mode: CardPostingDateMode = Field(
+        CardPostingDateMode.PURCHASE_DATE,
+        description=(
+            "Em que data as compras do cartão entram no Omie: `purchase_date` (na data "
+            "da compra) ou `invoice_due_date` (em lote, no vencimento da fatura)."
+        ),
     )
     # Camada de organizações (86e36ecjp): a plataforma ESCOLHE onde o cliente
     # nasce (obrigatório para ela). Para o staff de organização, ou é omitido
@@ -100,6 +109,12 @@ class UpdateClientRequest(BaseModel):
     # A rota distingue omitido de null via `model_fields_set`.
     category_id: UUID | None = Field(
         None, description="Omitir mantém a categoria; `null` limpa; UUID troca."
+    )
+
+    # 86e3n70p0 — omitido mantém. `null` não é estado (a coluna é NOT NULL).
+    card_posting_date_mode: CardPostingDateMode | None = Field(
+        None,
+        description="Omitir mantém. Vale para as conciliações de cartão criadas DEPOIS.",
     )
 
     # Credencial no corpo do PATCH é recusada NA ROTA com
@@ -264,6 +279,9 @@ class ClientResponse(BaseModel):
     manager_count: int = Field(
         0, ge=0, description="Pessoas com acesso ao cliente, responsável incluído."
     )
+    # 86e3n70p0 — processo de lançamento das compras do cartão no Omie. A gaveta
+    # de criação da conciliação lê daqui o modo em vigor.
+    card_posting_date_mode: CardPostingDateMode = CardPostingDateMode.PURCHASE_DATE
     # S9 (BACK 09.4) — estado da ORIGEM de dado, derivado das conexões. Está no
     # `ClientResponse` (e não só no detalhe) de propósito: a lista do escritório
     # parceiro precisa mostrar quem está sem origem, e o custo é uma subquery
