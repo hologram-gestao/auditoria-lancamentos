@@ -122,6 +122,28 @@ class ClientSummaryRepository:
         stmt = scoped_by_tenant(stmt, ReconciliationSession.client_id, user)
         return int((await self._session.execute(stmt)).scalar_one())
 
+    async def habitual_account_ids(
+        self, client_id: UUID, start: date, end: date, user: CurrentUser
+    ) -> list[int]:
+        """Contas distintas (`omie_conta_id`) com sessão ativa entre `start` e `end`.
+
+        Os dois limites são competências (dia 1) e entram INCLUSIVOS. Só os
+        números saem: nenhum nome de conta, que é do cache de contas, no front.
+        """
+        stmt = (
+            select(ReconciliationSession.omie_conta_id)
+            .where(
+                ReconciliationSession.client_id == client_id,
+                ReconciliationSession.deleted_at.is_(None),
+                ReconciliationSession.reference_month >= start,
+                ReconciliationSession.reference_month <= end,
+            )
+            .distinct()
+            .order_by(ReconciliationSession.omie_conta_id)
+        )
+        stmt = scoped_by_tenant(stmt, ReconciliationSession.client_id, user)
+        return [int(conta_id) for conta_id in (await self._session.execute(stmt)).scalars()]
+
     async def accounts_total(self, client_id: UUID, user: CurrentUser) -> int:
         """Contas do cliente no cache de contas (o que a gaveta de conciliação oferece)."""
         stmt = select(func.count(OmieAccountCache.id)).where(
