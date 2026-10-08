@@ -45,6 +45,7 @@ const detailState = {
         // S9: sem origem ATIVA o sync responderia 409 — a tela deixa de
         // oferecer "Extrair contas" e explica o estado (R7).
         origin_status?: 'sem_origem' | 'ativa' | 'erro';
+        connections?: Array<Record<string, unknown>>;
       }
     | undefined,
   isLoading: false,
@@ -55,12 +56,44 @@ const detailState = {
 };
 const syncState = { mutateAsync: vi.fn(), isPending: false };
 
+// A seção de origens (S9) mora no topo da tela desde 08/10/2026 e tem suíte
+// própria; aqui ela só precisa montar.
+vi.mock('@/hooks/use-client-connections', () => ({
+  useClientConnections: () => ({
+    data: [],
+    isLoading: false,
+    isFetching: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+  useTestStoredConnection: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useCreateConnection: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUpdateConnection: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteConnection: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: (selector: (state: { user: unknown }) => unknown) =>
+    selector({
+      user: {
+        id: 'u-admin',
+        email: 'admin@hologram.com.br',
+        name: 'Admin',
+        role: 'admin',
+        scope: 'system',
+        client_id: null,
+      },
+    }),
+}));
+
 vi.mock('@/hooks/use-clients', () => ({
   // O ClientShell agora monta o diálogo de exclusão (86e34jd1d).
   // O ClientShell/lista agora renderiza o coração de favorito (86e34jd5a).
   useSetFavorite: () => ({ mutate: vi.fn(), isPending: false }),
   useClientDetail: () => detailState,
   useSyncAccounts: () => syncState,
+  useTestConnection: () => ({ mutateAsync: vi.fn(), reset: vi.fn(), isPending: false }),
 }));
 
 // Imports do SUT DEPOIS dos `vi.mock` (as factories fecham sobre variáveis
@@ -93,14 +126,15 @@ beforeEach(() => {
   detailState.isError = false;
 });
 
-describe('BankAccountsScreen — área rolável (86e2uca1d)', () => {
-  it('a tabela é o scroller vertical da área, e a barra fica fora dela', () => {
-    render(<BankAccountsScreen clientId="c1" />);
+describe('BankAccountsScreen — a página rola (08/10/2026)', () => {
+  it('com a seção de origens acima, a tela é do padrão em que a PÁGINA rola', () => {
+    const { container } = render(<BankAccountsScreen clientId="c1" />);
 
-    // `fill` é o que impede a tabela de vazar por baixo da barra de paginação
-    // (opaca). A medição da sobreposição é do browser (`e2e/a11y-mocked`).
+    // `data-page-scroll` solta a altura fixa do `ClientShell` (86e3gkd80); a
+    // geometria (cabeçalho grudado, respiro no fim) é medida no browser.
+    expect(container.querySelector('section[data-page-scroll]')).not.toBeNull();
     const region = screen.getByRole('region', { name: 'Contas bancárias (rolável)' });
-    expect(region).toHaveClass('overflow-auto', 'min-h-0');
+    expect(region).not.toHaveClass('min-h-0');
     expect(region).not.toContainElement(
       screen.getByRole('navigation', { name: 'Paginação de contas bancárias' }),
     );
@@ -110,7 +144,7 @@ describe('BankAccountsScreen — área rolável (86e2uca1d)', () => {
 describe('BankAccountsScreen — lista', () => {
   it('mostra nome, banco, tipo e sincronização de cada conta', () => {
     render(<BankAccountsScreen clientId="c1" />);
-    const rows = screen.getAllByRole('row');
+    const rows = within(accountsRegion()).getAllByRole('row');
     // 1 header + 2 contas.
     expect(rows).toHaveLength(3);
     const first = within(rows[1]!);
@@ -133,14 +167,14 @@ describe('BankAccountsScreen — lista', () => {
     const footer = screen.getByRole('navigation', { name: 'Paginação de contas bancárias' });
     expect(within(footer).getByText('11–20 de 25')).toBeVisible();
     expect(within(footer).getByText('Página 2 de 3')).toBeVisible();
-    expect(screen.getAllByRole('row')).toHaveLength(11);
+    expect(within(accountsRegion()).getAllByRole('row')).toHaveLength(11);
   });
 
   it('página fora do intervalo cai na última válida em vez de tabela vazia', () => {
     currentSearch = 'page=99';
     render(<BankAccountsScreen clientId="c1" />);
     expect(screen.getByText('Página 1 de 1')).toBeVisible();
-    expect(screen.getAllByRole('row')).toHaveLength(3);
+    expect(within(accountsRegion()).getAllByRole('row')).toHaveLength(3);
   });
 });
 
@@ -176,7 +210,7 @@ describe('BankAccountsScreen — extrair contas do Omie', () => {
     // ficou preso num estado terminal de erro.
     expect(button).toBeEnabled();
     // A lista do cache continua legível abaixo do alerta.
-    expect(screen.getByRole('table')).toBeInTheDocument();
+    expect(accountsRegion()).toBeInTheDocument();
   });
 
   it('mostra a mensagem do servidor (Omie fora do ar) e limpa o alerta quando a próxima tentativa dá certo', async () => {
@@ -232,12 +266,13 @@ describe('BankAccountsScreen — estados', () => {
  * ambígua. E a ação que o servidor negaria com 409 não é oferecida (§4.9).
  */
 describe('BankAccountsScreen — estado de origem (S9)', () => {
-  it('sem origem: explica o estado e NÃO oferece "Extrair contas"', () => {
+  it('sem origem: a seção de origens explica e convida; NÃO oferece "Extrair contas"', () => {
     detailState.data = { accounts: [], accounts_synced_at: null, origin_status: 'sem_origem' };
     render(<BankAccountsScreen clientId="c1" />);
 
-    const notice = screen.getByText('Este cliente não tem origem conectada');
-    expect(notice).toBeVisible();
+    expect(screen.getByText('Sem origem conectada')).toBeVisible();
+    // A caixa de estado da lista não repete a mesma frase da seção logo acima.
+    expect(screen.queryByText('Este cliente não tem origem conectada')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Extrair contas do Omie' })).toBeNull();
     expect(screen.getByText(/ainda não tem uma origem de onde buscá-las/)).toBeVisible();
   });
@@ -246,8 +281,31 @@ describe('BankAccountsScreen — estado de origem (S9)', () => {
     detailState.data = { accounts: [], accounts_synced_at: null, origin_status: 'erro' };
     render(<BankAccountsScreen clientId="c1" />);
 
-    expect(screen.getByText('A origem deste cliente está com erro')).toBeVisible();
+    expect(screen.getByText('Origem com erro')).toBeVisible();
+    expect(screen.queryByText('Sem origem conectada')).toBeNull();
     expect(screen.queryByText('Este cliente não tem origem conectada')).toBeNull();
+  });
+
+  it('origem por arquivo (ativa, não lista contas): explica, sem link para a própria página', () => {
+    detailState.data = {
+      accounts: [],
+      accounts_synced_at: null,
+      origin_status: 'ativa',
+      connections: [
+        {
+          id: 'arq-1',
+          provider_type: 'arquivo',
+          label: 'Arquivo',
+          status: 'ativa',
+          capabilities: ['listar_lancamentos'],
+        },
+      ],
+    };
+    render(<BankAccountsScreen clientId="c1" />);
+
+    const notice = screen.getByText('A origem conectada não faz esta operação');
+    expect(notice).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Extrair contas do Omie' })).toBeNull();
   });
 
   it('cliente encerrado não ganha estado de origem (já é só-leitura)', () => {
@@ -261,6 +319,10 @@ describe('BankAccountsScreen — estado de origem (S9)', () => {
     expect(screen.queryByText('Este cliente não tem origem conectada')).toBeNull();
   });
 });
+
+function accountsRegion(): HTMLElement {
+  return screen.getByRole('region', { name: 'Contas bancárias (rolável)' });
+}
 
 describe('BankAccountsScreen — acessibilidade', () => {
   it('não tem violações critical/serious do axe-core', async () => {

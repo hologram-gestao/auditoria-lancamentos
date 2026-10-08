@@ -178,6 +178,8 @@ const SUMMARY: ClientSummary = {
     accountsTotal: 3,
     accountsWithSession: 2,
     byStatus: { processing: 0, reviewing: 1, done: 1, error: 0 },
+    // A conta 30 (aplicação) está no cache, mas ninguém a concilia: não é meta.
+    habitualAccountIds: [10, 20],
   },
   anomalies: {
     openTotal: 7,
@@ -356,29 +358,98 @@ describe('ClientDashboard — blocos', () => {
     ).toBeVisible();
     expect(screen.getByRole('link', { name: 'Ver conciliações' })).toHaveAttribute(
       'href',
-      '/clientes/c1/conciliacoes',
+      '/clientes/c1',
     );
     await user.click(screen.getByRole('button', { name: 'Nova conciliação' }));
     expect(openDrawer).toHaveBeenCalledTimes(1);
   });
 
-  it('conciliações do mês: X de Y, uma fatia por conta e o status de cada conta', () => {
+  it('conciliações do mês: meta pelas contas HABITUAIS, uma fatia por habitual e as outras recolhidas', () => {
     render(<ClientDashboard clientId="c1" />);
     const block = card('Conciliações do mês');
 
-    expect(block).toHaveTextContent('1 de 3 contas concluídas');
+    expect(within(block).getByTestId('closing-headline')).toHaveTextContent(
+      '1 de 2 contas habituais concluídas',
+    );
+    expect(block).toHaveTextContent('Habituais: contas conciliadas nos últimos 3 meses');
     const states = Array.from(block.querySelectorAll('[data-testid="closing-segment"]')).map((el) =>
       el.getAttribute('data-state'),
     );
-    expect(states).toEqual(['done', 'reviewing', 'none']);
-    const items = within(block)
+    // Quem pede atenção primeiro: em revisão antes de concluída.
+    expect(states).toEqual(['reviewing', 'done']);
+    const items = within(within(block).getByTestId('closing-accounts'))
+      .getAllByRole('listitem')
+      .map((li) => li.textContent);
+    expect(items).toEqual(['Cartão InterEm revisão', 'Itaú CCConcluída']);
+    const others = within(block).getByTestId('closing-other-accounts');
+    expect(others.tagName).toBe('DETAILS');
+    expect(others).not.toHaveAttribute('open');
+    expect(others).toHaveTextContent('Outras 1 conta sem conciliação neste mês');
+    expect(others).toHaveTextContent('BB Aplicação');
+    expect(others).not.toHaveTextContent('Sem conciliação');
+  });
+
+  it('conciliações do mês: 22 contas no cache e 3 habituais, ordenadas por status', () => {
+    const accounts = Array.from({ length: 22 }, (_, i) => ({
+      id: `acc-${i + 1}`,
+      omie_conta_id: i + 1,
+      name: `Conta ${String(i + 1).padStart(2, '0')}`,
+      bank_name: 'Banco',
+      account_type: 'CC',
+    }));
+    detailState.data = { ...detailState.data!, accounts };
+    summaryState.data = {
+      ...SUMMARY,
+      reconciliations: { ...SUMMARY.reconciliations, habitualAccountIds: [3, 7, 15] },
+    };
+    monthState.data = {
+      data: [
+        session({ id: 'sa', omie_conta_id: 3, status: 'done', anomaly_count: 0 }),
+        session({ id: 'sb', omie_conta_id: 15, status: 'processing', anomaly_count: 0 }),
+      ],
+      pagination: { page: 1, pageSize: 100, total: 2, totalPages: 1 },
+    };
+    render(<ClientDashboard clientId="c1" />);
+    const block = card('Conciliações do mês');
+
+    expect(within(block).getByTestId('closing-headline')).toHaveTextContent(
+      '1 de 3 contas habituais concluídas',
+    );
+    expect(block.querySelectorAll('[data-testid="closing-segment"]')).toHaveLength(3);
+    const items = within(within(block).getByTestId('closing-accounts'))
       .getAllByRole('listitem')
       .map((li) => li.textContent);
     expect(items).toEqual([
-      'Itaú CCConcluída',
-      'Cartão InterEm revisão',
-      'BB AplicaçãoSem conciliação',
+      'Conta 15Em processamento',
+      'Conta 03Concluída',
+      'Conta 07Sem conciliação',
     ]);
+    const others = within(block).getByTestId('closing-other-accounts');
+    expect(others).not.toHaveAttribute('open');
+    expect(others).toHaveTextContent('Outras 19 contas sem conciliação neste mês');
+    expect(within(others).getAllByRole('listitem', { hidden: true })).toHaveLength(19);
+  });
+
+  it('conciliações do mês: sem habituais e sem sessão no mês, nada de "0 de N"', () => {
+    summaryState.data = {
+      ...SUMMARY,
+      reconciliations: { ...SUMMARY.reconciliations, habitualAccountIds: [] },
+    };
+    monthState.data = {
+      data: [],
+      pagination: { page: 1, pageSize: 100, total: 0, totalPages: 0 },
+    };
+    render(<ClientDashboard clientId="c1" />);
+    const block = card('Conciliações do mês');
+
+    expect(within(block).getByTestId('closing-headline')).toHaveTextContent(
+      'Nenhuma conciliação neste mês ainda',
+    );
+    expect(block).not.toHaveTextContent(/\d+ de \d+/);
+    expect(block.querySelectorAll('[data-testid="closing-segment"]')).toHaveLength(0);
+    expect(within(block).getByTestId('closing-other-accounts')).toHaveTextContent(
+      'Outras 3 contas sem conciliação neste mês',
+    );
   });
 
   it('anomalias: total em destaque, nome do catálogo (sem nome fica o código), resolvidas e link', () => {
@@ -471,21 +542,109 @@ describe('ClientDashboard — blocos', () => {
     expect(block).toHaveTextContent('Não é saldo de conta');
   });
 
-  it('origem e atividade: última conciliação do resumo e o glossário', () => {
+  it('atividade: origem, última conciliação do resumo e o glossário', () => {
     render(<ClientDashboard clientId="c1" />);
     const block = card('Atividade');
     expect(within(block).getByRole('link', { name: /Abrir a última conciliação/ })).toHaveAttribute(
       'href',
       '/clientes/c1/conciliacao/s2',
     );
+    expect(block).toHaveTextContent('Glossário');
     expect(within(block).getByTestId('dashboard-glossary-line')).toHaveTextContent(
-      'Glossário: 42 termos · versão 7',
+      '42 termos · versão 7',
     );
+  });
+
+  it('fluxo em largura inteira, ANTES da faixa de atividade', () => {
+    render(<ClientDashboard clientId="c1" />);
+    const flow = card('Fluxo previsto pelos vencimentos');
+    const activity = card('Atividade');
+    // Irmãos diretos do mesmo contêiner, sem coluna lateral.
+    expect(flow.parentElement).toBe(activity.parentElement);
+    expect(flow.compareDocumentPosition(activity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('não tem violações critical/serious do axe-core', async () => {
     const { container } = render(<ClientDashboard clientId="c1" />);
     await assertNoA11yViolations(container);
+  });
+});
+
+describe('ClientDashboard — origem', () => {
+  const OMIE_ATIVA = {
+    id: 'omie-1',
+    provider_type: 'omie',
+    label: 'Omie principal',
+    status: 'ativa',
+    capabilities: ['listar_contas', 'listar_lancamentos', 'verificar_credencial'],
+    last_checked_at: '2026-10-04T12:00:00Z',
+    accounts_synced_at: '2026-10-04T12:00:00Z',
+  };
+
+  it('origem ativa: só a linha de estado e o link para Contas Bancárias, sem a seção', () => {
+    detailState.data = { ...detailState.data!, connections: [OMIE_ATIVA] };
+    render(<ClientDashboard clientId="c1" />);
+
+    expect(screen.queryByRole('heading', { name: 'Origens de dado' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Conectar origem' })).toBeNull();
+    const line = screen.getByTestId('dashboard-origin-line');
+    expect(line).toHaveTextContent('Omie · Ativa · verificada há 3 dias');
+    expect(within(line).getByRole('link', { name: /Gerir origens/ })).toHaveAttribute(
+      'href',
+      '/clientes/c1/contas',
+    );
+  });
+
+  it('quem não gere conexões lê "Ver origens" no link', () => {
+    authState.user = OPERATOR;
+    detailState.data = { ...detailState.data!, connections: [OMIE_ATIVA] };
+    render(<ClientDashboard clientId="c1" />);
+    expect(
+      within(screen.getByTestId('dashboard-origin-line')).getByRole('link', {
+        name: /Ver origens/,
+      }),
+    ).toBeVisible();
+  });
+
+  it('sem origem: a seção completa aparece antes do fechamento do mês', () => {
+    detailState.data = { ...detailState.data!, origin_status: 'sem_origem', connections: [] };
+    render(<ClientDashboard clientId="c1" />);
+
+    const heading = screen.getByRole('heading', { name: 'Origens de dado' });
+    const closing = screen.getByRole('heading', { name: 'Fechamento do mês' });
+    expect(
+      heading.compareDocumentPosition(closing) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'Conectar origem' }).length).toBeGreaterThan(0);
+    expect(screen.getByTestId('dashboard-origin-line')).toHaveTextContent(
+      'Nenhuma origem conectada',
+    );
+  });
+
+  it('origem com erro: a seção completa aparece, com o reconectar', () => {
+    detailState.data = {
+      ...detailState.data!,
+      origin_status: 'erro',
+      connections: [{ ...OMIE_ATIVA, status: 'erro' }],
+    };
+    render(<ClientDashboard clientId="c1" />);
+    expect(screen.getByRole('heading', { name: 'Origens de dado' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Reconectar' })).toBeVisible();
+    expect(screen.getByTestId('dashboard-origin-line')).toHaveTextContent('Omie · Com erro');
+  });
+
+  it('cliente encerrado: nem seção nem link, só a linha de estado', () => {
+    detailState.data = {
+      ...detailState.data!,
+      origin_status: 'sem_origem',
+      connections: [],
+      closed_at: '2026-09-01T00:00:00Z',
+    };
+    render(<ClientDashboard clientId="c1" />);
+    expect(screen.queryByRole('heading', { name: 'Origens de dado' })).toBeNull();
+    const line = screen.getByTestId('dashboard-origin-line');
+    expect(line).toHaveTextContent('Nenhuma origem conectada');
+    expect(within(line).queryByRole('link')).toBeNull();
   });
 });
 
@@ -542,7 +701,7 @@ describe('ClientDashboard — estados', () => {
     expect(vazio).toHaveAttribute('data-state', 'pronto');
     expect(within(vazio).getByRole('link', { name: /Ir para conciliações/ })).toHaveAttribute(
       'href',
-      '/clientes/c1/conciliacoes',
+      '/clientes/c1',
     );
     expect(card('Atividade')).toHaveTextContent('Nenhuma conciliação ainda.');
   });

@@ -46,9 +46,10 @@ interface OriginStateNoticeProps {
   error: unknown;
   clientId: string;
   /**
-   * Quando o estado aparece DENTRO de uma gaveta/modal que já leva ao painel,
-   * o link seria uma armadilha (navegar fecharia o contexto). Nesses casos a
-   * tela passa `false` e fica só a explicação.
+   * Quando o estado aparece DENTRO de uma gaveta/modal, o link seria uma
+   * armadilha (navegar fecharia o contexto); na própria tela das origens
+   * (Contas Bancárias) ele apontaria para a página aberta. Nesses casos a tela
+   * passa `false` e fica só a explicação.
    */
   showAction?: boolean;
 }

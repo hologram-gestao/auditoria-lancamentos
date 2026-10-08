@@ -20,6 +20,7 @@ from app.core.authz import Permission, has_permission
 from app.db.models import ReconciliationStatus
 from app.modules.client_mapping.apply import apply_mapping
 from app.modules.client_mapping.listing import situation_counts
+from app.modules.client_mapping.vigencia import add_months
 from app.modules.client_movements.competence import format_competence
 from app.modules.client_summary.schemas import (
     AnomaliesSummary,
@@ -48,6 +49,15 @@ if TYPE_CHECKING:
 
 #: A cobertura no resumo tem uma casa: é contador de menu, não relatório.
 _COVERAGE_QUANTUM = Decimal("0.1")
+
+#: Quantos meses ANTERIORES ao de referência definem as contas habituais (o mês de
+#: referência entra sempre). A meta do card "Conciliações do mês" é o conjunto
+#: habitual, e não o cache de contas do Omie: o cache traz caixinha,
+#: adiantamento, reembolso e cartões que ninguém concilia todo mês, e com ele o
+#: card media o fechamento contra contas que nunca entram nele. Conta conciliada
+#: em algum destes meses é conta que o escritório concilia; a que ficou de fora
+#: por mais tempo volta para o habitual na primeira conciliação.
+HABITUAL_MONTHS = 3
 
 
 class ClientSummaryService:
@@ -99,6 +109,9 @@ class ClientSummaryService:
         return ReconciliationsSummary(
             accounts_total=await self._repo.accounts_total(client.id, user),
             accounts_with_session=await self._repo.accounts_with_session(client.id, month, user),
+            habitual_account_ids=await self._repo.habitual_account_ids(
+                client.id, add_months(month, -HABITUAL_MONTHS), month, user
+            ),
             by_status=ReconciliationStatusCounts(
                 processing=by_status.get(ReconciliationStatus.PROCESSING.value, 0),
                 reviewing=by_status.get(ReconciliationStatus.REVIEWING.value, 0),

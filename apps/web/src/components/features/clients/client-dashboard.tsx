@@ -17,6 +17,12 @@
  *
  * "Nova conciliação" abre a MESMA gaveta da lista, só para quem a lista também
  * oferece (`reconciliationCreation`); cliente encerrado é só leitura.
+ *
+ * **A gestão de origens mora em Contas Bancárias** (08/10/2026). Aqui ela vira
+ * uma linha de estado na faixa "Atividade", e a seção inteira (S9) só aparece,
+ * em largura total e antes do fechamento, quando não há origem ATIVA: aí ela é
+ * a ação necessária. A decisão é o `origin_status` do detalhe, nunca o
+ * `provider_type`. Encerrado não ganha a seção (não há o que conectar).
  */
 
 import { Plus } from 'lucide-react';
@@ -42,6 +48,7 @@ import { formatReferenceMonth } from '@/lib/format';
 import { originCodeFor } from '@/lib/origin-capabilities';
 import { useAuthStore } from '@/stores/auth';
 
+import { ClientConnectionsSection } from './connections/client-connections-section';
 import { ActivitySection } from './dashboard/activity-section';
 import { BlockError, CardSkeleton } from './dashboard/dashboard-card';
 import { MonthClosing } from './dashboard/month-closing';
@@ -96,6 +103,10 @@ export function ClientDashboard({ clientId }: { clientId: string }) {
 
   const { isClosed, canCreate } = reconciliationCreation(detail);
   const summary = summaryQuery.data;
+  const originStatus = detail?.origin_status ?? 'sem_origem';
+  // A seção completa só sem origem ativa, e nunca antes do detalhe chegar: o
+  // padrão `sem_origem` piscaria a seção para quem tem origem.
+  const showOriginSection = detail !== undefined && !isClosed && originStatus !== 'ativa';
 
   const anomalyTypeNames = new Map(
     (anomalyTypesQuery.data?.data ?? []).map((type) => [type.code, type.name]),
@@ -145,6 +156,14 @@ export function ClientDashboard({ clientId }: { clientId: string }) {
           )}
         </div>
       </header>
+
+      {showOriginSection && (
+        <ClientConnectionsSection
+          clientId={clientId}
+          originStatus={originStatus}
+          isClosed={isClosed}
+        />
+      )}
 
       <section aria-labelledby="dashboard-closing-heading" className="space-y-3">
         <h2 id="dashboard-closing-heading" className="text-base font-semibold">
@@ -211,48 +230,40 @@ export function ClientDashboard({ clientId }: { clientId: string }) {
         </section>
       )}
 
-      <div className="flex flex-wrap items-start gap-3">
-        {showPortfolio && titlesSummaryQuery.data?.neverSynced !== true && (
-          <div className="min-w-0" style={{ flex: '2 1 480px' }}>
-            {flowQuery.isLoading || titlesSummaryQuery.isLoading ? (
-              <CardSkeleton label="Carregando o fluxo previsto" className="h-72" />
-            ) : flowQuery.isError || flowQuery.data === undefined ? (
-              isForbidden(flowQuery.error) ? null : (
-                <BlockError
-                  error={flowQuery.error}
-                  fallback="Não foi possível carregar o fluxo previsto."
-                  onRetry={() => void flowQuery.refetch()}
-                />
-              )
-            ) : (
-              <FlowCard flow={flowQuery.data} />
-            )}
-          </div>
-        )}
-        <section
-          aria-labelledby="dashboard-activity-heading"
-          className="min-w-0 space-y-3"
-          style={{ flex: '1 1 280px' }}
-        >
-          <h2 id="dashboard-activity-heading" className="text-base font-semibold">
-            Origem e atividade
-          </h2>
-          <ActivitySection
-            clientId={clientId}
-            originStatus={detail?.origin_status ?? 'sem_origem'}
-            isClosed={isClosed}
-            latestSession={summary?.latestSession}
-            glossary={
-              glossaryQuery.data !== undefined
-                ? {
-                    total: glossaryQuery.data.pagination.total,
-                    version: glossaryQuery.data.data.version,
-                  }
-                : undefined
-            }
-          />
-        </section>
-      </div>
+      {/* O fluxo em LARGURA INTEIRA (08/10/2026): cinco faixas com dois valores
+          cada não cabem numa coluna de dois terços. */}
+      {showPortfolio &&
+        titlesSummaryQuery.data?.neverSynced !== true &&
+        (flowQuery.isLoading || titlesSummaryQuery.isLoading ? (
+          <CardSkeleton label="Carregando o fluxo previsto" className="h-72" />
+        ) : flowQuery.isError || flowQuery.data === undefined ? (
+          isForbidden(flowQuery.error) ? null : (
+            <BlockError
+              error={flowQuery.error}
+              fallback="Não foi possível carregar o fluxo previsto."
+              onRetry={() => void flowQuery.refetch()}
+            />
+          )
+        ) : (
+          <FlowCard flow={flowQuery.data} />
+        ))}
+
+      <ActivitySection
+        clientId={clientId}
+        originStatus={originStatus}
+        connections={detail?.connections ?? []}
+        isClosed={isClosed}
+        canManageOrigins={hasPermission(user, 'manage_client_connections')}
+        latestSession={summary?.latestSession}
+        glossary={
+          glossaryQuery.data !== undefined
+            ? {
+                total: glossaryQuery.data.pagination.total,
+                version: glossaryQuery.data.data.version,
+              }
+            : undefined
+        }
+      />
 
       {canCreate && creation.drawer}
     </div>

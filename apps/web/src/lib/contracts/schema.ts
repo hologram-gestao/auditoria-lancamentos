@@ -6249,6 +6249,11 @@ export interface components {
              */
             accountsWithSession: number;
             byStatus: components["schemas"]["ReconciliationStatusCounts"];
+            /**
+             * Habitualaccountids
+             * @description As contas HABITUAIS (`omie_conta_id`, só números): com conciliação ativa no mês de referência ou em algum dos meses anteriores da janela do servidor. É a meta do card de conciliações; o cache de contas não serve para isso.
+             */
+            habitualAccountIds: number[];
         };
         /**
          * RefreshResponse

@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Orquestrador da lista de conciliações do cliente (`/clientes/{id}/conciliacoes`):
+ * Orquestrador da lista de conciliações do cliente (`/clientes/{id}`, a entrada):
  * Lista + gaveta de criação (Sprint 4 / R1 + R2).
  *
  * O fluxo desacoplado inteiro (gaveta → toast → lista invalidada → polling de

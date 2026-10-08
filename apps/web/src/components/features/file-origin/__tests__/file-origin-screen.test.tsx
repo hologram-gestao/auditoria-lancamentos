@@ -23,7 +23,8 @@
  *   - editor: alterar mapeamento existente exige `AlertDialog`; criar não; a
  *     convenção de sinal é obrigatória e os campos dependentes seguem a escolha;
  *   - lista de processados: vazio (`TableEmpty`) e com linhas (autor mascarado);
- *   - deep link sem conexão `arquivo` explica e leva ao painel;
+ *   - deep link sem conexão `arquivo` explica e leva a Contas Bancárias, onde as
+ *     origens se conectam;
  *   - axe-core sem `critical`/`serious`.
  */
 import { render, screen, waitFor, within } from '@testing-library/react';
@@ -342,7 +343,7 @@ describe('Mapeamento — estados e gating (R1 · R5)', () => {
     expect(screen.queryByRole('link', { name: /Conectar origem/ })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Ver origem do cliente' })).toHaveAttribute(
       'href',
-      `/clientes/${CLIENT_ID}`,
+      `/clientes/${CLIENT_ID}/contas`,
     );
     expect(screen.queryByTestId('file-upload-section')).not.toBeInTheDocument();
   });
@@ -355,7 +356,7 @@ describe('Mapeamento — estados e gating (R1 · R5)', () => {
     expect(empty).toHaveTextContent('não tem sistema contábil');
     expect(screen.getByRole('link', { name: 'Conectar origem por arquivo' })).toHaveAttribute(
       'href',
-      `/clientes/${CLIENT_ID}?conectar=arquivo`,
+      `/clientes/${CLIENT_ID}/contas?conectar=arquivo`,
     );
   });
 

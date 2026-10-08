@@ -1,13 +1,35 @@
 /**
- * Tela de entrada do cliente — `/clientes/{clientId}`: o **painel** (86e3k1q54 /
- * 86e3k1q5n, decisão do Pedro em 07/10/2026). A lista de conciliações mora em
- * `/clientes/{clientId}/conciliacoes`.
+ * Tela de entrada do cliente — `/clientes/{clientId}`: a **lista de
+ * conciliações** (Sprint 4 / R1). Entre a 86e3k1q5n e 08/10/2026 a raiz foi o
+ * painel; depois do uso com dado real o Pedro decidiu que a lista volta a ser a
+ * entrada e o painel mora em `/clientes/{clientId}/painel`.
  *
- * Server component fino: extrai o `clientId` e delega.
+ * Server component fino: extrai o `clientId` e delega. O `<Suspense>` é
+ * obrigatório — a lista usa `useSearchParams` (filtros/paginação na URL) e o
+ * Next exige um boundary para não forçar a rota inteira a client-side rendering.
  */
 
-import { ClientDashboard } from '@/components/features/clients/client-dashboard';
+import { Suspense } from 'react';
 
-export default function ClientDashboardPage({ params }: { params: { clientId: string } }) {
-  return <ClientDashboard clientId={params.clientId} />;
+import { ReconciliationsScreen } from '@/components/features/reconciliations/list/reconciliations-screen';
+
+export default function ClientReconciliationsPage({ params }: { params: { clientId: string } }) {
+  return (
+    <Suspense fallback={<ListFallback />}>
+      <ReconciliationsScreen clientId={params.clientId} />
+    </Suspense>
+  );
+}
+
+function ListFallback() {
+  return (
+    <div role="status" className="space-y-3" aria-busy="true" aria-label="Carregando conciliações">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="bg-card space-y-3 rounded-lg border p-4 shadow-sm">
+          <div className="bg-muted h-4 w-1/3 animate-pulse rounded" />
+          <div className="bg-muted h-3 w-2/3 animate-pulse rounded" />
+        </div>
+      ))}
+    </div>
+  );
 }

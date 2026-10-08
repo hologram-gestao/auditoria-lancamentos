@@ -10,7 +10,7 @@
  * com a credencial velha **em silêncio**. O backend agora responde **422** só
  * pela presença de `omieAppKey`/`omieAppSecret` no corpo do PATCH — então os
  * campos sumiram da tela, e no lugar deles há o caminho para a seção de
- * origens, na tela do cliente.
+ * origens, em Contas Bancárias.
  *
  * Comportamento:
  *   - Nome pré-preenchido editável; status (Ativo/Inativo) também.
@@ -152,7 +152,7 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
           <DialogTitle>Editar Cliente</DialogTitle>
           <DialogDescription>
             Nome, situação e categoria. As credenciais da origem são alteradas na seção
-            &quot;Origens de dado&quot;, na tela do cliente.
+            &quot;Origens de dado&quot;, em Contas Bancárias.
           </DialogDescription>
         </DialogHeader>
 
@@ -190,7 +190,7 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
                   >
                     Origens de dado
                   </Link>{' '}
-                  na tela do cliente.
+                  em Contas Bancárias.
                 </p>
               )}
 

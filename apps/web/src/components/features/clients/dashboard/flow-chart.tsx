@@ -6,8 +6,8 @@
  *   em `warning`. **Vencidos ficam FORA das barras**: o acumulado vencido
  *   esmagaria as faixas futuras, e ele entra numa linha de texto à parte.
  * - Escala linear a partir do máximo da série, com três linhas de grade e
- *   rótulos "R$ N mil". O único cálculo aqui é a GEOMETRIA (altura da barra); todo
- *   número exibido veio do servidor.
+ *   rótulos "R$ N mil" ("R$ N mi" a partir de um milhão). O único cálculo aqui
+ *   é a GEOMETRIA (altura da barra); todo número exibido veio do servidor.
  * - O SVG estica na largura (`preserveAspectRatio="none"`) e só desenha
  *   retângulos e linhas; todo TEXTO é HTML posicionado por porcentagem, para não
  *   encolher a 5px em 390px nem se deformar com o esticamento.
@@ -57,8 +57,12 @@ export function niceStep(raw: number): number {
 
 const AXIS_FORMATTER = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 });
 
-/** Rótulo do eixo: "R$ 12 mil", "R$ 2,5 mil" ou "R$ 800" abaixo de mil. */
+/**
+ * Rótulo do eixo: "R$ 1,5 mi" a partir de um milhão (nunca "R$ 1.500 mil"),
+ * "R$ 500 mil" a partir de mil e "R$ 800" abaixo disso.
+ */
 export function axisLabel(value: number): string {
+  if (value >= 1_000_000) return `R$ ${AXIS_FORMATTER.format(value / 1_000_000)} mi`;
   if (value >= 1000) return `R$ ${AXIS_FORMATTER.format(value / 1000)} mil`;
   return `R$ ${AXIS_FORMATTER.format(value)}`;
 }
