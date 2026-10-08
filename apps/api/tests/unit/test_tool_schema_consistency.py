@@ -39,3 +39,15 @@ def test_investment_is_supported_end_to_end() -> None:
     # Guarda específica do bug: conta aplicação existe desde a FASE 1.
     assert "investment" in _tool_account_type_enum()
     assert "investment" in _pydantic_account_types()
+
+
+def test_invoice_due_date_esta_na_tool_no_prompt_e_no_schema() -> None:
+    """86e3n70p0 — o vencimento da fatura: tool, regra do prompt e campo opcional."""
+    schema = cast("dict[str, Any]", EXTRACT_MOVEMENTS_TOOL["input_schema"])
+    prop = schema["properties"]["invoice_due_date"]
+    assert prop["format"] == "date"
+    assert "invoice_due_date" not in schema["required"]
+    assert "Nunca inventar" in prop["description"]
+    assert "`invoice_due_date`" in SYSTEM_PROMPT
+    assert "Nunca invente" in SYSTEM_PROMPT
+    assert ExtractedStatement.model_fields["invoice_due_date"].is_required() is False

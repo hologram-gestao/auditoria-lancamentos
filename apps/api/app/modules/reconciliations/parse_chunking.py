@@ -139,6 +139,8 @@ def merge_statements(
         - sem `identity` (texto): `bank_name` é o primeiro identificado
           ("Desconhecido" só se todos) e `account_type` divergente é
           `AnthropicParseError` acionável.
+        - `invoice_due_date` (86e3n70p0): o primeiro que algum bloco trouxe —
+          o vencimento mora no cabeçalho; blocos que divergem só são logados.
         - com `identity` (PDF dividido): `bank_name` e `account_type` vêm dela;
           bloco que divergir NÃO derruba o arquivo — a divergência é contada e
           logada (`parse_pdf_block_divergence`, só números).
@@ -185,6 +187,15 @@ def merge_statements(
 
     dated = [part for part in parts if part.transactions]
     first, last = parts[0], parts[-1]
+    # 86e3n70p0 — o vencimento da fatura costuma estar só no cabeçalho (1º
+    # bloco), então vale o PRIMEIRO que algum bloco trouxe. Blocos que discordam
+    # não derrubam o arquivo: o usuário confirma a data na prévia de qualquer
+    # jeito. A divergência é contada e logada (só números, nunca a data).
+    due_dates = [part.invoice_due_date for part in parts if part.invoice_due_date is not None]
+    if len(set(due_dates)) > 1:
+        log.warning(
+            "parse_invoice_due_date_divergence", blocks=len(parts), distinct=len(set(due_dates))
+        )
     return ExtractedStatement(
         bank_name=bank_name,
         account_type=account_type,
@@ -193,6 +204,7 @@ def merge_statements(
         opening_balance=first.opening_balance,
         closing_balance=last.closing_balance,
         transactions=transactions,
+        invoice_due_date=due_dates[0] if due_dates else None,
     )
 
 
