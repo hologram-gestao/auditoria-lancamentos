@@ -1159,6 +1159,9 @@ let dashboardExtraAccounts = false;
  */
 let mappingSecondDestinationPending = false;
 
+/** Estados vazios (86e3h57b5): a lista do de-para vem vazia na competência. */
+let mappingListEmpty = false;
+
 /** As contas do cache que não são habituais (só com `dashboardExtraAccounts`). */
 const NON_HABITUAL_ACCOUNTS = [
   { omie_conta_id: 21, name: 'Caixinha' },
@@ -2376,17 +2379,26 @@ async function fulfillApi(route: Route): Promise<void> {
       return route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          data: tableListsOverflow ? MANY_MAPPING_ITEMS : MAPPING_ITEMS,
-          pagination: {
-            page: 1,
-            pageSize: 50,
-            total: tableListsOverflow ? MANY_MAPPING_ITEMS.length : MAPPING_ITEMS.length,
-            totalPages: 1,
-          },
-          competence: '2026-09',
-          counts: MAPPING_COUNTS,
-        }),
+        body: JSON.stringify(
+          mappingListEmpty
+            ? {
+                data: [],
+                pagination: { page: 1, pageSize: 50, total: 0, totalPages: 0 },
+                competence: '2026-09',
+                counts: { total: 0, herdada: 0, confirmada: 0, naoMapear: 0, semDecisao: 0 },
+              }
+            : {
+                data: tableListsOverflow ? MANY_MAPPING_ITEMS : MAPPING_ITEMS,
+                pagination: {
+                  page: 1,
+                  pageSize: 50,
+                  total: tableListsOverflow ? MANY_MAPPING_ITEMS.length : MAPPING_ITEMS.length,
+                  totalPages: 1,
+                },
+                competence: '2026-09',
+                counts: MAPPING_COUNTS,
+              },
+        ),
       });
     }
   }
@@ -2702,7 +2714,11 @@ async function fulfillApi(route: Route): Promise<void> {
       ? [{ ...CLIENT_DETAIL, is_favorite: favorited, origin_status: originState }, OTHER_ORG_CLIENT]
       : [{ ...CLIENT_DETAIL, is_favorite: favorited, origin_status: originState }];
     const org = url.searchParams.get('organizationId');
-    const data = org === null ? alcance : alcance.filter((c) => c.organization.id === org);
+    // A busca casa por nome, sem caixa, como o servidor (estado vazio da busca, 86e3h57b5).
+    const busca = url.searchParams.get('search')?.toLowerCase() ?? '';
+    const data = (org === null ? alcance : alcance.filter((c) => c.organization.id === org)).filter(
+      (c) => String(c.name).toLowerCase().includes(busca),
+    );
     return json({
       data,
       pagination: {
@@ -3333,6 +3349,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   noSessions = false;
   dashboardExtraAccounts = false;
   mappingSecondDestinationPending = false;
+  mappingListEmpty = false;
   inputMappingState = 'salvo';
   fileProcessOutcome = 'sucesso';
   // S16: o cliente TEM plano contábil e a importação dá certo, por padrão.
@@ -4697,12 +4714,17 @@ test.describe('Movimento discreto no app (86e3h57a5)', () => {
     console.log(`título do card elevado · tema ${THEME}: ${razao.toFixed(2)}:1`);
     expect(razao, 'título do card elevado depois da entrada').toBeGreaterThanOrEqual(4.5);
 
-    // Hover com ponteiro: o card sobe 2 px (só de `md` para cima) e a cor do título não muda.
+    // Hover: com ponteiro de verdade o card sobe 2 px (de `md` para cima); no projeto de
+    // toque (`hover: none`) ele NÃO se mexe. A cor do título não muda em nenhum dos dois.
+    const comPonteiro = await page.evaluate(() => window.matchMedia('(hover: hover)').matches);
     const antes = await card.boundingBox();
     await card.hover();
     await aguardarAnimacao(card);
     const depois = await card.boundingBox();
-    expect(antes!.y - depois!.y, 'o card sobe 2 px no hover').toBeCloseTo(2, 0);
+    expect(
+      antes!.y - depois!.y,
+      comPonteiro ? 'o card sobe 2 px no hover' : 'no toque o card não se mexe',
+    ).toBeCloseTo(comPonteiro ? 2 : 0, 0);
     const razaoHover = await contrasteDoTextoPorPixel(page, titulo);
     expect(razaoHover, 'título do card elevado em hover').toBeGreaterThanOrEqual(4.5);
 
@@ -4753,6 +4775,83 @@ test.describe('Movimento discreto no app (86e3h57a5)', () => {
     await analyze(page, 'menu com movimento');
   });
 });
+
+/**
+ * 86e3h57b5 — os cinco estados vazios com vinheta. O texto de cada um é o de antes; o
+ * que o cenário prova é que a vinheta aparece DENTRO da tela (em 390px a tabela rola na
+ * horizontal, e uma vinheta numa célula `colSpan` sumiria à direita), que a ação só
+ * existe para quem pode, e o axe em cada um.
+ */
+for (const vp of VIEWPORTS) {
+  const slugV = vp.label.replace(/\s+/g, '-');
+  test.describe(`Estados vazios com vinheta (86e3h57b5) — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    async function exigirVinheta(page: Page, nome: string, contexto: string): Promise<void> {
+      const vinheta = page.locator(`svg[data-vignette="${nome}"]`).first();
+      await vinheta.scrollIntoViewIfNeeded();
+      await expect(vinheta).toHaveAttribute('aria-hidden', 'true');
+      await exigirDentroDaViewport(page, vinheta, contexto);
+    }
+
+    test('lista de conciliações, origens e painel sem conciliação', async ({ page }) => {
+      noSessions = true;
+      await page.goto(`/clientes/${CLIENT_ID}`);
+      await expect(
+        page.getByText('Nenhuma conciliação. Clique em "Criar conciliação" para começar.'),
+      ).toBeVisible();
+      await exigirVinheta(page, 'reconciliations', `lista de conciliações vazia (${vp.label})`);
+      await analyze(page, `lista de conciliações vazia (${vp.label})`);
+      await shot(page, `vazio-conciliacoes-${slugV}`);
+
+      await page.goto(`/clientes/${CLIENT_ID}/painel`);
+      await expect(page.getByTestId('dashboard-no-reconciliations')).toBeVisible();
+      await exigirVinheta(page, 'reconciliations', `painel sem conciliação (${vp.label})`);
+
+      originState = 'sem_origem';
+      await page.goto(`/clientes/${CLIENT_ID}/contas`);
+      await expect(page.getByText('Nenhuma origem conectada')).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Conectar origem' }).first()).toBeVisible();
+      await exigirVinheta(page, 'origin', `sem origem (${vp.label})`);
+      await analyze(page, `sem origem conectada (${vp.label})`);
+      await shot(page, `vazio-origens-${slugV}`);
+    });
+
+    test('carteira nunca sincronizada (tela e painel) e de-para sem categoria', async ({
+      page,
+    }) => {
+      titlesNeverSynced = true;
+      await page.goto(`/clientes/${CLIENT_ID}/carteira`);
+      await expect(
+        page.getByText('A carteira deste cliente ainda não foi sincronizada'),
+      ).toBeVisible();
+      await exigirVinheta(page, 'portfolio', `carteira nunca sincronizada (${vp.label})`);
+      await analyze(page, `carteira nunca sincronizada (${vp.label})`);
+      await shot(page, `vazio-carteira-${slugV}`);
+
+      await page.goto(`/clientes/${CLIENT_ID}/painel`);
+      await expect(page.getByTestId('dashboard-portfolio-never-synced')).toBeVisible();
+      await exigirVinheta(page, 'portfolio', `painel, carteira nunca sincronizada (${vp.label})`);
+      await shot(page, `vazio-carteira-painel-${slugV}`);
+
+      mappingListEmpty = true;
+      await page.goto(`/clientes/${CLIENT_ID}/de-para`);
+      await expect(page.getByText('Ainda não há categorias para classificar')).toBeVisible();
+      await exigirVinheta(page, 'mapping', `de-para sem categoria (${vp.label})`);
+      await analyze(page, `de-para sem categoria (${vp.label})`);
+      await shot(page, `vazio-de-para-${slugV}`);
+    });
+
+    test('lista de clientes: busca sem resultado', async ({ page }) => {
+      await page.goto('/clientes');
+      await page.getByPlaceholder(/Buscar/i).fill('zzz');
+      await expect(page.getByText('Nenhum cliente encontrado para "zzz".')).toBeVisible();
+      await exigirVinheta(page, 'clients', `clientes, busca sem resultado (${vp.label})`);
+      await analyze(page, `clientes, busca sem resultado (${vp.label})`);
+      await shot(page, `vazio-clientes-busca-${slugV}`);
+    });
+  });
+}
 
 /**
  * 86e3k1q30 — a "Diferença" do Resumo passa pelo `<Money tone="sign">`: o sinal

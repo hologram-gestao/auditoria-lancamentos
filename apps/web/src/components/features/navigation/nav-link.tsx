@@ -104,7 +104,16 @@ export function NavLink({
     <TooltipProvider delayDuration={150}>
       <Tooltip>
         <TooltipTrigger asChild>{link}</TooltipTrigger>
-        <TooltipContent side="right">{countDetail ?? countLabel}</TooltipContent>
+        {/* Abaixo do link e com folga de colisão: à direita não cabe no menu do
+            celular (390px), e o gate pegou o tooltip cortado na borda. */}
+        <TooltipContent
+          side="bottom"
+          align="start"
+          collisionPadding={16}
+          className="max-w-[min(20rem,calc(100vw-2rem))]"
+        >
+          {countDetail ?? countLabel}
+        </TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );
