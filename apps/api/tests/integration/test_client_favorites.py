@@ -6,6 +6,8 @@ Cobre:
     - Favorito de quem pede vai para o TOPO da lista — inclusive vindo de
       outra página, porque a ordenação é do SELECT, não da página já cortada.
     - Favorito é POR USUÁRIO: o do manager não muda a lista do admin.
+    - Cliente ENCERRADO vai para o FIM da lista assim que é encerrado — mesmo
+      vindo da primeira página e mesmo favoritado depois do encerramento.
     - Manager fora da carteira → 403 (`AccessibleClientDep`); sem login → 401;
       cliente inexistente → 404.
 
@@ -212,6 +214,74 @@ class TestFavoriteOrdering:
         assert pagina1.json()["pagination"]["total"] == 3
         pagina2 = await client_with_db.get("/api/v1/clients", params={"pageSize": 2, "page": 2})
         assert _names(pagina2) == ["C2"]
+
+
+# ----------------------------------------------------------------------
+# Encerrado vai para o fim da lista
+# ----------------------------------------------------------------------
+
+
+def _ids(resp: Response) -> list[str]:
+    assert resp.status_code == 200, resp.text
+    return [row["id"] for row in resp.json()["data"]]
+
+
+class TestClosedClientsLast:
+    async def test_encerrado_desce_para_o_fim_na_hora(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """O mais novo (primeiro da lista) é encerrado e a próxima leitura já o
+        traz por último. Por id: o encerramento troca o nome por um rótulo."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        c1, c2, c3 = await _seed_three(db_session, creator=admin, manager=None)
+        await _login_as(client_with_db, ADMIN_EMAIL)
+
+        antes = await client_with_db.get("/api/v1/clients")
+        assert _ids(antes) == [str(c3.id), str(c2.id), str(c1.id)]
+
+        close = await client_with_db.post(f"/api/v1/clients/{c3.id}/close")
+        assert close.status_code == 204, close.text
+
+        depois = await client_with_db.get("/api/v1/clients")
+        assert _ids(depois) == [str(c2.id), str(c1.id), str(c3.id)]
+        assert depois.json()["data"][-1]["closed_at"] is not None
+
+    async def test_encerrado_da_primeira_pagina_vai_para_a_ultima(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """A ordem é do SELECT, não da página já cortada: o encerrado sai da
+        página 1 e o cliente que estava na 2 sobe."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        c1, c2, c3 = await _seed_three(db_session, creator=admin, manager=None)
+        await _login_as(client_with_db, ADMIN_EMAIL)
+
+        close = await client_with_db.post(f"/api/v1/clients/{c3.id}/close")
+        assert close.status_code == 204, close.text
+
+        pagina1 = await client_with_db.get("/api/v1/clients", params={"pageSize": 2, "page": 1})
+        assert _ids(pagina1) == [str(c2.id), str(c1.id)]
+        assert pagina1.json()["pagination"]["total"] == 3
+        pagina2 = await client_with_db.get("/api/v1/clients", params={"pageSize": 2, "page": 2})
+        assert _ids(pagina2) == [str(c3.id)]
+
+    async def test_encerrado_favoritado_continua_no_fim(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Favoritar é leitura e aceita encerrado; o favorito não o traz de volta
+        para cima — encerrado vence favorito."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        c1, c2, c3 = await _seed_three(db_session, creator=admin, manager=None)
+        await _login_as(client_with_db, ADMIN_EMAIL)
+
+        close = await client_with_db.post(f"/api/v1/clients/{c3.id}/close")
+        assert close.status_code == 204, close.text
+        put = await client_with_db.put(f"/api/v1/clients/{c3.id}/favorite")
+        assert put.status_code == 200, put.text
+        put = await client_with_db.put(f"/api/v1/clients/{c1.id}/favorite")
+        assert put.status_code == 200, put.text
+
+        lista = await client_with_db.get("/api/v1/clients")
+        assert _ids(lista) == [str(c1.id), str(c2.id), str(c3.id)]
 
 
 # ----------------------------------------------------------------------

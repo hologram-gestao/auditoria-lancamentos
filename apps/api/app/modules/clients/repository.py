@@ -347,11 +347,20 @@ class ClientRepository:
             base = base.where(Client.organization_id == organization_id)
             count_base = count_base.where(Client.organization_id == organization_id)
 
-        # Favoritos de quem pede primeiro (86e34jd5a); depois a ordem estável de
-        # sempre: created_at desc, id desc (desempate determinístico). O favorito
-        # da página 3 sobe para a página 1 porque a ordenação é do SELECT, não
-        # da página já cortada.
-        base = base.order_by(query.is_favorite.desc(), Client.created_at.desc(), Client.id.desc())
+        # Encerrados vão para o FIM da lista, sempre — inclusive um encerrado que
+        # alguém marcou como favorito depois do encerramento (o purge da §4.12
+        # apaga os favoritos, mas a rota de favoritar é leitura e aceita
+        # encerrado). Entre os abertos, favoritos de quem pede primeiro
+        # (86e34jd5a); depois a ordem estável de sempre: created_at desc, id desc
+        # (desempate determinístico). O favorito da página 3 sobe para a página 1
+        # (e o encerrado da página 1 desce para a última) porque a ordenação é do
+        # SELECT, não da página já cortada.
+        base = base.order_by(
+            Client.closed_at.is_not(None).asc(),
+            query.is_favorite.desc(),
+            Client.created_at.desc(),
+            Client.id.desc(),
+        )
         offset = (page - 1) * page_size
         base = base.offset(offset).limit(page_size)
 
