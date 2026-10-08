@@ -1,20 +1,33 @@
-// Figuras do manual (task 86e3gqfmj), pela tela real: next dev em 3031 → API em 8031, banco
-// `adl_manual`. Roda DENTRO do container mcr.microsoft.com/playwright:v1.59.1-noble com
-// --network host:  node shots.mjs <padariaId> <horizonteId>
-// 1440x900, tema Hologram (o padrão: localStorage vazio). Um login só.
+// Figuras do manual (86e3gqfmj; recapturadas na 1.2, 86e3mz74x), pela tela real: next dev em
+// 3031 → API em 8031, banco novo com os dados de `dados_demo.py`. Roda DENTRO do container
+// mcr.microsoft.com/playwright:v1.59.1-noble:
+//   LANG=pt_BR.UTF-8 WEB_DIR=<repo>/apps/web SHOTS_OUT=<pasta> \
+//     node shots.mjs <padariaId> <horizonteId> [nomes]
+// O Chromium COMPLETO (`channel: 'chromium'`), não o headless shell: só ele traz o pacote pt-BR.
+// 1440x900 em DPR 2, tema Hologram FORÇADO no localStorage (todas as figuras são do Hologram,
+// mesmo se o padrão do produto mudar). Um login só.
 import { createRequire } from 'node:module';
 import { mkdirSync } from 'node:fs';
 
-const require = createRequire('/home/phaos93/auditoria-landing/apps/web/package.json');
+const require = createRequire(`${process.env.WEB_DIR}/package.json`);
 const { chromium } = require('@playwright/test');
 
 const [PADARIA, HORIZONTE, ONLY] = process.argv.slice(2);
 const BASE = process.env.SHOTS_BASE ?? 'http://127.0.0.1:3031';
-const OUT = '/home/phaos93/auditoria-manual/screenshots/pr-shots-86e3gqfmj';
+const OUT = process.env.SHOTS_OUT;
 mkdirSync(OUT, { recursive: true });
 
-const browser = await chromium.launch();
-const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+// O texto do <input type="month"> segue o idioma do PROCESSO, não o `locale` do contexto.
+const browser = await chromium.launch({ channel: 'chromium', args: ['--lang=pt-BR'] });
+const ctx = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+  deviceScaleFactor: 2,
+  reducedMotion: 'reduce',
+  // Sem isto o Chromium do container escreve "August 2026" no campo de competência.
+  locale: 'pt-BR',
+  timezoneId: 'America/Sao_Paulo',
+});
+await ctx.addInitScript(() => window.localStorage.setItem('theme', 'hologram'));
 const page = await ctx.newPage();
 page.setDefaultTimeout(60_000);
 
@@ -28,6 +41,9 @@ await page.getByRole('button', { name: 'Entrar' }).click();
 await page.waitForURL((u) => !u.pathname.startsWith('/login'));
 
 async function settle() {
+  // O ponteiro fica onde estava o botão Entrar, em cima de um card do painel: o hover do
+  // card elevado (86e3h57a5) acenderia na figura.
+  await page.mouse.move(0, 0);
   await page.waitForLoadState('networkidle').catch(() => undefined);
   await page.waitForTimeout(1200);
 }
@@ -43,10 +59,13 @@ async function go(url) {
 }
 
 if (want('painel')) {
+  // O painel (86e3k1q54) é mais alto que 900: janela alta para caber carteira e fluxo.
+  await page.setViewportSize({ width: 1440, height: 1700 });
   await go(`${BASE}/clientes/${PADARIA}/painel`);
-  await page.getByText('Origens de dado').waitFor();
+  await page.getByText('Atividade').first().waitFor();
   await settle();
   await page.screenshot({ path: `${OUT}/painel.png` });
+  await page.setViewportSize({ width: 1440, height: 900 });
 }
 
 if (want('recebiveis')) {

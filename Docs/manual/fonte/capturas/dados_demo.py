@@ -1,7 +1,8 @@
 """Dados de demonstração para as figuras do manual (task 86e3gqfmj), pela API local.
 
-API em 127.0.0.1:8031, banco isolado `adl_manual` (migrations + seed_dev). Nomes fictícios desde a
-criação. Preparação contábil copiada do cenário da validação da Sprint 13.
+API em 127.0.0.1:8031, banco isolado e NOVO (migrations + seed_dev; na 1.2, `adl_manual_v12`):
+o dado cifrado só se lê com as chaves que o gravaram. Nomes fictícios desde a criação.
+Preparação contábil copiada do cenário da validação da Sprint 13.
 """
 
 from __future__ import annotations
@@ -16,9 +17,8 @@ from typing import Any
 import httpx
 
 BASE = "http://127.0.0.1:8031/api/v1"
-SAMPLE = Path(
-    "/home/phaos93/auditoria-landing/apps/api/tests/fixtures/accounting_sample/cliente_exemplo_2026_08"
-)
+RAIZ = Path(__file__).resolve().parents[4]
+SAMPLE = RAIZ / "apps/api/tests/fixtures/accounting_sample/cliente_exemplo_2026_08"
 EXTRATO = (SAMPLE / "extrato_cliente.csv").read_bytes()
 PLANO = (SAMPLE / "plano_contabil.csv").read_bytes()
 DECISOES = list(
