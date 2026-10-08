@@ -91,7 +91,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="lp-auth-card bg-card w-full max-w-sm rounded-xl border p-8">
+    <div className="lp-auth-card edge-gradient bg-card w-full max-w-sm rounded-xl border p-8">
       <div className="mb-8">
         {/* Logomark e título DENTRO do card (86e3h1h75): num lugar só, em qualquer
             largura. `text-logo` é branco no tema Hologram fixo da página. */}

@@ -1,4 +1,6 @@
 /** Bloco do formulário de contato (86e3fr9vz): âncora `#contato` da página. */
+import { Card } from '@/components/ui/card';
+
 import { ContactForm } from './contact-form';
 import { CONTACT_ANCHOR, contact } from './content';
 import { LandingEyebrow } from './landing-section';
@@ -24,9 +26,9 @@ export function LandingContact() {
             {contact.lead}
           </p>
         </div>
-        <div data-reveal className="lp-card bg-card rounded-xl border p-6 sm:p-8">
+        <Card variant="elevated" data-reveal className="rounded-xl p-6 sm:p-8">
           <ContactForm />
-        </div>
+        </Card>
       </div>
     </section>
   );

@@ -170,7 +170,7 @@ export function LandingTourTabs({ items, labels }: { items: TourItemView[]; labe
                 </ul>
               </div>
               <figure className="lp-tilt min-w-0">
-                <div className="lp-tilt__card lp-frame bg-card relative rounded-xl border">
+                <div className="lp-tilt__card lp-frame edge-gradient bg-card relative rounded-xl border">
                   {/* Barra de navegador de mentira: decorativa, o `alt` diz o que é a tela. */}
                   <div
                     aria-hidden="true"

@@ -9,6 +9,8 @@
  */
 import { ArrowRight } from 'lucide-react';
 
+import { Card } from '@/components/ui/card';
+
 import { pains } from './content';
 import { LandingIcon } from './landing-icon';
 import { LandingSection, revealDelay } from './landing-section';
@@ -18,32 +20,36 @@ export function LandingPains() {
     <LandingSection id="dores" eyebrow={pains.eyebrow} title={pains.title}>
       <ol className="grid gap-4 lg:gap-6">
         {pains.items.map((item, index) => (
-          <li
+          <Card
+            asChild
+            variant="elevated"
             key={item.pain}
             data-reveal
             style={revealDelay(index)}
-            className="lp-card bg-card grid gap-4 rounded-xl border p-6 md:grid-cols-[1fr_auto_1fr] md:items-start md:gap-8"
+            className="grid gap-4 rounded-xl p-6 md:grid-cols-[1fr_auto_1fr] md:items-start md:gap-8"
           >
-            <div className="flex gap-4">
-              <LandingIcon name={item.icon} />
-              <div className="min-w-0">
-                <p className="text-muted-foreground text-xs font-semibold uppercase tracking-wider">
-                  {pains.painLabel}
-                </p>
-                <p className="mt-2 leading-relaxed">{item.pain}</p>
+            <li>
+              <div className="flex gap-4">
+                <LandingIcon name={item.icon} />
+                <div className="min-w-0">
+                  <p className="text-muted-foreground text-xs font-semibold uppercase tracking-wider">
+                    {pains.painLabel}
+                  </p>
+                  <p className="mt-2 leading-relaxed">{item.pain}</p>
+                </div>
               </div>
-            </div>
-            <ArrowRight
-              aria-hidden="true"
-              className="lp-draw text-muted-foreground hidden h-5 w-5 md:mt-7 md:block"
-            />
-            <div className="lp-pair-answer">
-              <p className="text-muted-foreground text-xs font-semibold uppercase tracking-wider">
-                {pains.answerLabel}
-              </p>
-              <p className="mt-2 leading-relaxed">{item.answer}</p>
-            </div>
-          </li>
+              <ArrowRight
+                aria-hidden="true"
+                className="lp-draw text-muted-foreground hidden h-5 w-5 md:mt-7 md:block"
+              />
+              <div className="lp-pair-answer">
+                <p className="text-muted-foreground text-xs font-semibold uppercase tracking-wider">
+                  {pains.answerLabel}
+                </p>
+                <p className="mt-2 leading-relaxed">{item.answer}</p>
+              </div>
+            </li>
+          </Card>
         ))}
       </ol>
     </LandingSection>
