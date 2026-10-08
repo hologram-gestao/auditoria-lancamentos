@@ -4,7 +4,9 @@
  * carteira não pode esconder o fechamento do mês, e o "Tentar novamente" refaz
  * só o que falhou.
  */
+import { Reveal } from '@/components/shared/reveal';
 import { Button } from '@/components/ui/button';
+import { cardVariants } from '@/components/ui/card';
 import { ApiError } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
 
@@ -29,11 +31,15 @@ export function DashboardCard({
   className,
 }: DashboardCardProps) {
   const Heading = level === 2 ? 'h2' : 'h3';
+  // Card elevado e entrada única (86e3h57a5): o bloco sobe no hover com ponteiro e
+  // aparece ao entrar na tela; sob movimento reduzido, parado.
   return (
-    <section
+    <Reveal
+      as="section"
       aria-labelledby={titleId}
       className={cn(
-        'bg-card flex min-w-0 flex-col gap-3 rounded-lg border p-4 shadow-sm',
+        cardVariants({ variant: 'elevated' }),
+        'flex min-w-0 flex-col gap-3 p-4 shadow-sm',
         className,
       )}
     >
@@ -42,7 +48,7 @@ export function DashboardCard({
       </Heading>
       <div className="flex min-w-0 flex-1 flex-col gap-3">{children}</div>
       {footer !== undefined && <div className="pt-1 text-sm">{footer}</div>}
-    </section>
+    </Reveal>
   );
 }
 

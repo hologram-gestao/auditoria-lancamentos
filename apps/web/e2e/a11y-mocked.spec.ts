@@ -1152,6 +1152,13 @@ let noSessions = false;
  */
 let dashboardExtraAccounts = false;
 
+/**
+ * Contadores do menu (ajuste de 08/10/2026): com `true`, o segundo destino do resumo
+ * (fluxo de caixa) também tem categorias sem decisão (2, contra 4 do demonstrativo).
+ * O menu conta o MAIOR (4), não a soma (6), e lista os dois no tooltip.
+ */
+let mappingSecondDestinationPending = false;
+
 /** As contas do cache que não são habituais (só com `dashboardExtraAccounts`). */
 const NON_HABITUAL_ACCOUNTS = [
   { omie_conta_id: 21, name: 'Caixinha' },
@@ -1399,12 +1406,19 @@ function clientSummaryDoCenario(): Record<string, unknown> {
       coveragePct: '76.4',
       materialized: false,
     },
-    {
-      destinationCode: 'fluxo_de_caixa',
-      withoutDecision: 0,
-      coveragePct: '100.0',
-      materialized: true,
-    },
+    mappingSecondDestinationPending
+      ? {
+          destinationCode: 'fluxo_de_caixa',
+          withoutDecision: 2,
+          coveragePct: '91.3',
+          materialized: false,
+        }
+      : {
+          destinationCode: 'fluxo_de_caixa',
+          withoutDecision: 0,
+          coveragePct: '100.0',
+          materialized: true,
+        },
   ];
   if (noSessions) {
     return {
@@ -3318,6 +3332,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   clientFileOrigin = false;
   noSessions = false;
   dashboardExtraAccounts = false;
+  mappingSecondDestinationPending = false;
   inputMappingState = 'salvo';
   fileProcessOutcome = 'sucesso';
   // S16: o cliente TEM plano contábil e a importação dá certo, por padrão.
@@ -4353,6 +4368,25 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByRole('button', { name: 'Nova conciliação' })).toBeVisible();
       await expect(page.locator('#__next_error__')).toHaveCount(0);
       await exigirSemRolagemHorizontal(page, `painel (${vp.label})`);
+      // O DOCUMENTO cabe na janela (08/10/2026): quem rola é só o `<main>`. O `sr-only`
+      // da tabela do fluxo é `absolute` e, sem ancestral posicionado, ancorava no
+      // documento abaixo da dobra (1137 para uma janela de 864, com segunda barra).
+      const documento = await page.evaluate(() => ({
+        altura: document.documentElement.scrollHeight,
+        janela: window.innerHeight,
+      }));
+      expect(
+        documento.altura,
+        `painel (${vp.label}): o documento estica além da janela`,
+      ).toBeLessThanOrEqual(documento.janela);
+      // O último card termina com o respiro do `<main>` (a regra da 86e3gkd80): a raiz
+      // do painel declara `data-page-scroll`.
+      await exigirFimDaPaginaComRespiro(
+        page,
+        page.getByRole('region', { name: 'Atividade' }),
+        `painel (${vp.label})`,
+      );
+      await page.locator('main').evaluate((el) => el.scrollTo({ top: 0 }));
       await analyze(page, `painel completo (${vp.label})`);
       await shot(page, `painel-completo-${slugP}`);
       // O print de página inteira não pinta abaixo da dobra em 390px: um print
@@ -4432,18 +4466,40 @@ for (const vp of VIEWPORTS) {
     });
 
     test('menu com contadores: nome acessível em cada um, só nos três itens', async ({ page }) => {
+      // Dois destinos com pendência (4 e 2): o De-para mostra o MAIOR, não a soma.
+      mappingSecondDestinationPending = true;
       await page.goto(`/clientes/${CLIENT_ID}`);
       if (vp.label !== 'desktop') {
         await page.getByRole('button', { name: 'Abrir menu de navegação' }).click();
         await aguardarAnimacao(page.getByRole('dialog', { name: 'Menu' }));
       }
       const nav = page.getByRole('navigation', { name: 'Seções do cliente' });
-      await expect(nav.getByRole('img', { name: '1 em andamento' })).toBeVisible();
-      await expect(nav.getByRole('img', { name: '139 títulos vencidos' })).toBeVisible();
-      await expect(nav.getByRole('img', { name: '4 categorias sem decisão' })).toBeVisible();
+      const detalheDePara =
+        '4 categorias sem decisão · Demonstrativo contábil: 4, Fluxo de caixa: 2';
+      await expect(
+        nav.getByRole('img', { name: '1 em andamento: 0 em processamento · 1 em revisão' }),
+      ).toBeVisible();
+      await expect(
+        nav.getByRole('img', { name: '139 títulos vencidos: 136 a receber · 3 a pagar' }),
+      ).toBeVisible();
+      const pilulaDePara = nav.getByRole('img', { name: detalheDePara });
+      await expect(pilulaDePara).toHaveText('4');
       await expect(nav.getByRole('img')).toHaveCount(3);
       await analyze(page, `menu com contadores (${vp.label})`);
       await shot(page, `menu-contadores-${slugP}`);
+
+      // O detalhe abre no FOCO do teclado (o link é o gatilho; a pílula não é focável).
+      const dePara = nav.getByRole('link', { name: /^De-para/ });
+      await dePara.focus();
+      await expect(dePara).toBeFocused();
+      const tooltip = page.getByRole('tooltip');
+      await expect(tooltip).toHaveText(detalheDePara);
+      const conteudo = page.locator('[data-radix-popper-content-wrapper]').last();
+      await expect(conteudo).toBeVisible();
+      await aguardarAnimacao(conteudo.locator('[data-side]').first());
+      await exigirDentroDaViewport(page, conteudo, `tooltip do De-para (${vp.label})`);
+      await analyze(page, `menu com o tooltip do contador aberto (${vp.label})`);
+      await shot(page, `menu-contadores-tooltip-${slugP}`);
     });
 
     test('painel sem origem: a seção de origens completa vem antes do fechamento', async ({
@@ -4485,6 +4541,218 @@ for (const vp of VIEWPORTS) {
     });
   });
 }
+
+/**
+ * 86e3h57a5 — movimento discreto no app, COM movimento (o padrão do gate é `reduce`).
+ *
+ * Os cenários abaixo pedem `no-preference` e medem o estado depois que a entrada
+ * terminou: o card elevado do painel revelado (por animação, `[data-reveal-armed]`) e o
+ * item ativo do menu com a barra de 3 px e o brilho. O contraste é medido POR PIXEL,
+ * com o texto escondido e contra o pior pixel do fundo pintado atrás dele: o brilho do
+ * item ativo e a borda em gradiente do card são fundo pintado que o axe não enxerga. E o
+ * filete sob o header (pseudo-elemento) não pode cruzar texto nenhum do header.
+ */
+async function aguardarAnimacoesFinitas(page: Page): Promise<void> {
+  // Spinner e skeleton são animação infinita: o `finished` deles nunca resolveria.
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((a) => a.finished),
+    ),
+  );
+}
+
+/**
+ * Contraste do texto contra o PIOR pixel do fundo dentro da caixa dele: o texto some
+ * (`color: transparent`, sem transição), a caixa encolhida em 1 px por lado é
+ * fotografada, e a razão é a menor contra todos os pixels. Serve a texto claro e a
+ * texto escuro (o critério do `contrasteDoBotao`, com a caixa inteira).
+ */
+async function contrasteDoTextoPorPixel(page: Page, locator: Locator): Promise<number> {
+  const color = await locator.evaluate((el) => getComputedStyle(el).color);
+  const box = await locator.boundingBox();
+  expect(box, 'texto sem caixa').not.toBeNull();
+  let png: Buffer;
+  try {
+    await locator.evaluate((el) => {
+      (el as HTMLElement).style.setProperty('transition', 'none', 'important');
+      (el as HTMLElement).style.setProperty('color', 'transparent', 'important');
+    });
+    const clip = box
+      ? {
+          x: box.x + 1,
+          y: box.y + 1,
+          width: Math.max(1, box.width - 2),
+          height: Math.max(1, box.height - 2),
+        }
+      : undefined;
+    png = await page.screenshot({ clip }).catch(() => page.screenshot({ clip }));
+  } finally {
+    await locator.evaluate((el) => {
+      (el as HTMLElement).style.removeProperty('color');
+      (el as HTMLElement).style.removeProperty('transition');
+    });
+  }
+  return page.evaluate(
+    async ({ b64, textColor }) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${b64}`;
+      await img.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('sem canvas 2d');
+      ctx.drawImage(img, 0, 0);
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      const lin = (v: number) => {
+        const c = v / 255;
+        return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      };
+      const lum = (r: number, g: number, b: number) =>
+        0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+      const probe = document.createElement('canvas').getContext('2d');
+      if (!probe) throw new Error('sem canvas 2d');
+      probe.fillStyle = textColor;
+      probe.fillRect(0, 0, 1, 1);
+      const [r = 0, g = 0, b = 0] = probe.getImageData(0, 0, 1, 1).data;
+      const text = lum(r, g, b);
+      let pior = Infinity;
+      for (let i = 0; i < data.length; i += 4) {
+        const fundo = lum(data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0);
+        const [hi, lo] = text > fundo ? [text, fundo] : [fundo, text];
+        pior = Math.min(pior, (hi + 0.05) / (lo + 0.05));
+      }
+      return pior;
+    },
+    { b64: png.toString('base64'), textColor: color },
+  );
+}
+
+/**
+ * Geometria do filete do header do app (`.header-filament::after`) e o ponto mais baixo
+ * de todo texto do header. O pseudo-elemento não tem locator: a caixa sai do estilo
+ * computado dele (absoluto no padding box do header, `bottom` e `height`).
+ */
+async function filetedoHeader(page: Page): Promise<{
+  conteudo: string;
+  topoDoFilete: number;
+  alturaDoFilete: number;
+  textoMaisBaixo: number;
+  textos: number;
+}> {
+  return page.evaluate(() => {
+    const header = document.querySelector<HTMLElement>('header.header-filament');
+    if (!header) throw new Error('header sem o filete');
+    const caixa = header.getBoundingClientRect();
+    const estilo = getComputedStyle(header);
+    const depois = getComputedStyle(header, '::after');
+    const fundoDoPadding = caixa.bottom - parseFloat(estilo.borderBottomWidth);
+    const altura = parseFloat(depois.height);
+    const baseDoFilete = fundoDoPadding - parseFloat(depois.bottom);
+    let textoMaisBaixo = -Infinity;
+    let textos = 0;
+    const walker = document.createTreeWalker(header, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (!node.textContent?.trim()) continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      for (const rect of Array.from(range.getClientRects())) {
+        if (rect.width === 0 || rect.height === 0) continue;
+        textos += 1;
+        textoMaisBaixo = Math.max(textoMaisBaixo, rect.bottom);
+      }
+    }
+    return {
+      conteudo: depois.content,
+      topoDoFilete: baseDoFilete - altura,
+      alturaDoFilete: altura,
+      textoMaisBaixo,
+      textos,
+    };
+  });
+}
+
+test.describe('Movimento discreto no app (86e3h57a5)', () => {
+  test.use({
+    viewport: { width: 1440, height: 900 },
+    contextOptions: { reducedMotion: 'no-preference' },
+  });
+
+  test('painel com movimento: card elevado revelado, título legível e filete fora do texto', async ({
+    page,
+  }) => {
+    await page.goto(`/clientes/${CLIENT_ID}/painel`);
+    const card = page.locator('section[aria-labelledby="dashboard-card-reconciliations"]');
+    await expect(card).toHaveClass(/\bcard-elevated\b/);
+    // A entrada aconteceu (o bloco está na tela) e terminou: só então se mede cor.
+    await expect(card).toHaveAttribute('data-revealed', '');
+    await aguardarAnimacao(card);
+    expect(await card.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+
+    const titulo = card.getByRole('heading', { name: 'Conciliações do mês' });
+    const razao = await contrasteDoTextoPorPixel(page, titulo);
+    console.log(`título do card elevado · tema ${THEME}: ${razao.toFixed(2)}:1`);
+    expect(razao, 'título do card elevado depois da entrada').toBeGreaterThanOrEqual(4.5);
+
+    // Hover com ponteiro: o card sobe 2 px (só de `md` para cima) e a cor do título não muda.
+    const antes = await card.boundingBox();
+    await card.hover();
+    await aguardarAnimacao(card);
+    const depois = await card.boundingBox();
+    expect(antes!.y - depois!.y, 'o card sobe 2 px no hover').toBeCloseTo(2, 0);
+    const razaoHover = await contrasteDoTextoPorPixel(page, titulo);
+    expect(razaoHover, 'título do card elevado em hover').toBeGreaterThanOrEqual(4.5);
+
+    const filete = await filetedoHeader(page);
+    expect(filete.conteudo, 'o filete existe').not.toBe('none');
+    expect(filete.alturaDoFilete).toBe(1);
+    expect(filete.textos, 'o header tem texto para comparar').toBeGreaterThan(0);
+    expect(filete.textoMaisBaixo, 'nenhum texto do header desce até o filete').toBeLessThanOrEqual(
+      filete.topoDoFilete,
+    );
+
+    await aguardarAnimacoesFinitas(page);
+    await analyze(page, 'painel com movimento, card em hover');
+    await shot(page, 'movimento-painel-desktop');
+  });
+
+  test('menu com movimento: barra do item ativo fora do texto e rótulo legível', async ({
+    page,
+  }) => {
+    await page.goto(`/clientes/${CLIENT_ID}/painel`);
+    const nav = page.getByRole('navigation', { name: 'Seções do cliente' });
+    const ativo = nav.locator('a[aria-current="page"]');
+    await expect(ativo).toHaveText('Painel');
+    await aguardarAnimacao(ativo);
+
+    const barra = await ativo.evaluate((el) => {
+      const antes = getComputedStyle(el, '::before');
+      const rotulo = el.querySelector('span');
+      return {
+        largura: antes.width,
+        esquerda: el.getBoundingClientRect().left + parseFloat(antes.left),
+        inicioDoRotulo: rotulo?.getBoundingClientRect().left ?? 0,
+      };
+    });
+    expect(barra.largura, 'barra de 3 px no item ativo').toBe('3px');
+    expect(barra.esquerda + 3, 'a barra fica antes do rótulo').toBeLessThan(barra.inicioDoRotulo);
+
+    const rotulo = ativo.locator('span').first();
+    const razao = await contrasteDoTextoPorPixel(page, rotulo);
+    console.log(`rótulo do item ativo · tema ${THEME}: ${razao.toFixed(2)}:1`);
+    expect(razao, 'rótulo do item ativo').toBeGreaterThanOrEqual(4.5);
+
+    // O item que não é o ativo não tem barra.
+    const outro = nav.getByRole('link', { name: 'Contas Bancárias' });
+    expect(await outro.evaluate((el) => getComputedStyle(el, '::before').content)).toBe('none');
+
+    await aguardarAnimacoesFinitas(page);
+    await analyze(page, 'menu com movimento');
+  });
+});
 
 /**
  * 86e3k1q30 — a "Diferença" do Resumo passa pelo `<Money tone="sign">`: o sinal
@@ -9076,7 +9344,9 @@ test.describe('Landing pública (86e3fr9vz)', () => {
     { reducedMotion = true } = {},
   ): Promise<void> {
     await context.clearCookies();
-    if (reducedMotion) await page.emulateMedia({ reducedMotion: 'reduce' });
+    // O padrão do gate já é `reduce` (`playwright.config.ts`); o cenário que prova o
+    // movimento pede `no-preference` aqui.
+    await page.emulateMedia({ reducedMotion: reducedMotion ? 'reduce' : 'no-preference' });
     await page.goto('/');
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
   }

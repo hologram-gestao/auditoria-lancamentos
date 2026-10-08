@@ -25,6 +25,14 @@ export default defineConfig({
   use: {
     baseURL,
     trace: 'on-first-retry',
+    /**
+     * Movimento reduzido por padrão (86e3h57a5): o app ganhou entrada de bloco e hover
+     * que sobe, e o axe que mede no meio de um fade mede cor mesclada (a lição do toast,
+     * `aguardarToastEstavel`). Com `reduce`, cada cenário mede o estado FINAL, o mesmo
+     * que a pessoa com movimento reduzido vê. Os cenários que provam o movimento pedem
+     * `no-preference` explicitamente (landing, "Movimento discreto no app").
+     */
+    contextOptions: { reducedMotion: 'reduce' },
   },
   /**
    * Desktop **e** mobile. O defeito 86e2gwuxn (`scrollable-region-focusable`,
