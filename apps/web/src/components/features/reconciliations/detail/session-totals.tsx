@@ -23,8 +23,8 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
+import { Money } from '@/components/shared/money';
 import type { SessionDetail } from '@/lib/api/reconciliations';
-import { formatBRL } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 /** Tolerância de R$ 0,01 — a MESMA regra do matcher (CLAUDE.md §5.1). */
@@ -156,7 +156,9 @@ function BalanceCell({
         {value == null ? (
           <span className="text-muted-foreground">Indisponível</span>
         ) : (
-          formatBRL(value)
+          // A "Diferença" escreve o sinal e a cor como a aba Resumo (`<Money
+          // tone="sign">`): mesmo valor, mesma tela, um jeito só de escrever.
+          <Money value={value} tone={emphasize ? 'sign' : 'neutral'} />
         )}
       </dd>
     </div>

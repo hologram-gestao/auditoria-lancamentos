@@ -15,10 +15,10 @@
 
 | | |
 | --- | --- |
-| Endpoints sensíveis (denominador) | **119** |
-| Com caso negativo cross-tenant verde | **119** |
+| Endpoints sensíveis (denominador) | **120** |
+| Com caso negativo cross-tenant verde | **120** |
 | Pendentes (implementação em outra task) | **0** |
-| Cobertura | **119/119 = 100%** |
+| Cobertura | **120/120 = 100%** |
 
 ## Lista canônica
 
@@ -103,6 +103,7 @@ Legenda de `tipo`: **coleção** = vaza forjando `client_id` na URL/payload · *
 | `GET` | `/api/v1/clients/{client_id}/titles` | coleção | `app/modules/client_titles/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + ViewClientReceivablesDep; todo SELECT nasce de _base_query, que já leva AND client_id | ✅ verde |
 | `GET` | `/api/v1/clients/{client_id}/summary` | coleção | `app/modules/client_summary/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); cada contagem com client_id no próprio SELECT + scoped_by_tenant; o bloco da carteira só com view_client_receivables (sem ela, null) | ✅ verde |
 | `GET` | `/api/v1/clients/{client_id}/titles/summary` | coleção | `app/modules/client_titles/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + ViewClientReceivablesDep; a agregação do aging filtra por client_id na própria query | ✅ verde |
+| `GET` | `/api/v1/clients/{client_id}/titles/flow` | coleção | `app/modules/client_titles/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + ViewClientReceivablesDep; o fluxo previsto agrega por faixa com client_id e scoped_by_tenant na própria query | ✅ verde |
 | `POST` | `/api/v1/clients/{client_id}/titles/sync` | coleção | `app/modules/client_titles/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + OpenClientDep + SyncClientReceivablesDep; cliente encerrado = 409 e a leitura segue 200 | ✅ verde |
 | `POST` | `/api/v1/clients/{client_id}/titles/{title_id}/context` | coleção | `app/modules/client_titles/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + OpenClientDep + ManageTitleContextDep; título buscado por get_title_for_client (AND client_id = tenant); título de outro cliente = 404 sem vazar | ✅ verde |
 | `GET` | `/api/v1/clients/{client_id}/titles/{title_id}/context` | coleção | `app/modules/client_titles/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + ViewTitleContextDep; título buscado por get_title_for_client (AND client_id = tenant); título de outro cliente = 404 sem vazar | ✅ verde |

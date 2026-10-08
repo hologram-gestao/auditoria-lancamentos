@@ -28,6 +28,7 @@ from sqlalchemy import cast as sa_cast
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.core.authz import scoped_by_tenant
 from app.db.models.client import Client
 from app.db.models.client_title import (
     UQ_CLIENT_TITLE_CLIENT_EXTERNAL_ID,
@@ -42,11 +43,14 @@ from app.modules.client_titles.aging import (
     OVERDUE_BUCKETS,
     AgingBucket,
 )
+from app.modules.client_titles.flow import FLOW_BUCKET_BOUNDS, FlowBucket
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.core.authz import CurrentUser
 
 #: Linhas por comando no upsert. 12 placeholders por linha contra o teto de
 #: 65.535 do protocolo do Postgres dá ~5.400; 1.000 é folga de 5x — e a carteira
@@ -160,6 +164,27 @@ class TitlesSummary:
         plano de contas faz, e duas implementações divergiriam.
         """
         return self.synced_at is None
+
+
+@dataclass(frozen=True, slots=True)
+class FlowSideTotals:
+    """Soma e contagem de UM lado (a pagar ou a receber) numa faixa do fluxo."""
+
+    total: Decimal
+    count: int
+
+
+#: O fluxo previsto inteiro: as seis faixas, cada uma com os DOIS lados. Toda
+#: chave presente, zerada quando vazia — a tela nunca recebe meia resposta.
+type TitlesFlow = dict[FlowBucket, dict[TitleType, FlowSideTotals]]
+
+
+def zeroed_flow() -> TitlesFlow:
+    """As seis faixas zeradas nos dois lados (carteira nunca sincronizada ou vazia)."""
+    return {
+        bucket: {title_type: FlowSideTotals(total=ZERO_MONEY, count=0) for title_type in TitleType}
+        for bucket in FlowBucket
+    }
 
 
 #: Os DOIS grupos do relatório de recebíveis (Sprint 15, BACK 15.2). Strings —
@@ -396,6 +421,46 @@ class ClientTitlesRepository:
         for title_type in TitleType:
             by_type.setdefault(title_type, _zeroed_totals())
         return by_type
+
+    async def flow(self, client_id: UUID, *, today: date, user: CurrentUser) -> TitlesFlow:
+        """O fluxo previsto (86e3k1q4g): soma e contagem por faixa de vencimento,
+        dos dois lados, numa query de agregação no BANCO.
+
+        Mesmo desenho do `aging`: `GROUP BY title_type` com `FILTER` por faixa,
+        sobre a MESMA base (`status = em_aberto`), então as seis faixas somam o
+        `total_em_aberto` do aging para cada lado, e `vencidos` é o
+        `total_vencido` dele. Nenhuma linha é carregada e nenhum nome é lido.
+
+        O tenant entra DUAS vezes no `WHERE`: o `client_id` já validado pela rota
+        e `scoped_by_tenant`, que para usuário de cliente força o tenant DA LINHA
+        dele (§3.15) — um consumidor futuro que esqueça o guard não vaza.
+        """
+        columns: list[Any] = [ClientTitle.title_type.label("title_type")]
+        for bucket in FlowBucket:
+            predicates = _flow_predicates(bucket, today)
+            columns.append(_sum_amount(*predicates).label(f"valor_{bucket.name}"))
+            columns.append(func.count().filter(*predicates).label(f"qtd_{bucket.name}"))
+
+        stmt = (
+            select(*columns)
+            .where(
+                ClientTitle.client_id == client_id,
+                ClientTitle.status == TitleStatus.EM_ABERTO.value,
+            )
+            .group_by(ClientTitle.title_type)
+        )
+        stmt = scoped_by_tenant(stmt, ClientTitle.client_id, user)
+        rows = (await self._session.execute(stmt)).all()
+
+        result = zeroed_flow()
+        for row in rows:
+            title_type = TitleType(row.title_type)
+            for bucket in FlowBucket:
+                result[bucket][title_type] = FlowSideTotals(
+                    total=getattr(row, f"valor_{bucket.name}"),
+                    count=getattr(row, f"qtd_{bucket.name}"),
+                )
+        return result
 
     async def receivables_report(self, client_id: UUID, *, today: date) -> ReceivablesReport:
         """O relatório de recebíveis (BACK 15.2, R4) — sobre a carteira INTEIRA.
@@ -796,4 +861,23 @@ def _bucket_predicates(bucket: AgingBucket, today: date) -> list[ColumnElement[b
     predicates: list[ColumnElement[bool]] = [aberto, days >= low]
     if high is not None:
         predicates.append(days <= high)
+    return predicates
+
+
+def _flow_predicates(bucket: FlowBucket, today: date) -> list[ColumnElement[bool]]:
+    """Traduz uma faixa do fluxo previsto para `FILTER`, a partir dos limites
+    únicos de `FLOW_BUCKET_BOUNDS` (dias ATÉ o vencimento = `-dias de atraso`).
+
+    `vencidos` sai como `due_date < hoje`, a régua literal do aging, para os dois
+    totais serem o mesmo número por construção.
+    """
+    if bucket is FlowBucket.VENCIDOS:
+        return [ClientTitle.due_date < today]
+    days_until_due = -_days_overdue(today)
+    low, high = FLOW_BUCKET_BOUNDS[bucket]
+    predicates: list[ColumnElement[bool]] = []
+    if low is not None:
+        predicates.append(days_until_due >= low)
+    if high is not None:
+        predicates.append(days_until_due <= high)
     return predicates

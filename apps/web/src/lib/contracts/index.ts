@@ -353,6 +353,10 @@ export type ClientTitlesListResponse = Schemas['ClientTitlesListResponse'];
 export type TitlesSummary = Schemas['TitlesSummaryResponse'];
 /** `{ data: {...} }` — chave ÚNICA: o `apiGet` já entrega o miolo. */
 export type TitlesSummaryEnvelope = Schemas['TitlesSummaryEnvelope'];
+/** Fluxo previsto dos títulos em aberto por faixa de vencimento (86e3k1q4g). */
+export type TitlesFlow = Schemas['TitlesFlowResponse'];
+export type TitlesFlowBucket = Schemas['FlowBucketResponse'];
+export type TitlesFlowBucketCode = Schemas['FlowBucket'];
 /** Os totais de UM tipo (a pagar OU a receber), com os quatro baldes nomeados. */
 export type AgingTotals = Schemas['AgingTotalsResponse'];
 /**

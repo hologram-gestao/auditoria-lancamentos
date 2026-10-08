@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.db.models.client_title import TitleStatus, TitleType
 from app.db.models.title_context import TitleContextType
 from app.modules.client_titles.aging import AgingBucket, bucket_for_days
+from app.modules.client_titles.flow import FlowBucket
 from app.modules.reconciliations.schemas import SessionAuthor
 from app.modules.users.schemas import PaginationMeta
 
@@ -34,11 +35,13 @@ if TYPE_CHECKING:
     from app.integrations.providers.base import ProviderOpenTitle
     from app.modules.client_titles.repository import (
         AgingTotals,
+        FlowSideTotals,
         ReceivablesGroupTotals,
         ReceivablesReport,
         ReceivablesSideReport,
         TitlesSummary,
     )
+    from app.modules.client_titles.service import TitlesFlowResult
 
 #: Teto do texto livre do contexto — mesmo teto de `resolution_note` da revisão
 #: de anomalias (`reconciliations/review/schemas.py`), convenção da casa para
@@ -380,6 +383,91 @@ class TitlesSummaryEnvelope(BaseModel):
     """Envelope `{data: ...}` de `GET /clients/{client_id}/titles/summary`."""
 
     data: TitlesSummaryResponse
+
+
+class FlowSideResponse(BaseModel):
+    """Um lado (a pagar ou a receber) numa faixa do fluxo previsto."""
+
+    total: Decimal = Field(description="Soma dos títulos em aberto do lado nesta faixa.")
+    count: int = Field(ge=0, description="Quantos títulos.")
+
+    @classmethod
+    def from_totals(cls, totals: FlowSideTotals) -> FlowSideResponse:
+        return cls(total=totals.total, count=totals.count)
+
+
+class FlowBucketResponse(BaseModel):
+    """Uma faixa de vencimento do fluxo previsto, com os dois lados e o líquido."""
+
+    bucket: FlowBucket = Field(
+        description=(
+            "Faixa pelo vencimento em relação a `referenceDate`: `vencidos` (antes "
+            "de hoje), `ate_7` (hoje a 7 dias), `8_30`, `31_60`, `61_90`, `90_mais`."
+        )
+    )
+    a_receber: FlowSideResponse = Field(alias="aReceber")
+    a_pagar: FlowSideResponse = Field(alias="aPagar")
+    net: Decimal = Field(
+        description="`aReceber.total - aPagar.total`: o que entra menos o que sai na faixa."
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class TitlesFlowResponse(BaseModel):
+    """Fluxo previsto da carteira por faixa de vencimento (86e3k1q4g).
+
+    Sempre as seis faixas, na ordem de `FlowBucket`, zeradas quando vazias. Não
+    é saldo de conta: é a soma dos títulos em aberto por vencimento.
+    """
+
+    reference_date: date = Field(
+        alias="referenceDate",
+        description="Data do SERVIDOR usada para as faixas (a mesma do aging).",
+    )
+    synced_at: datetime | None = Field(
+        default=None,
+        alias="syncedAt",
+        description="Última sincronização ÍNTEGRA da carteira. `null` = nunca houve uma.",
+    )
+    never_synced: bool = Field(
+        alias="neverSynced",
+        description=(
+            "`true` = a carteira NUNCA foi sincronizada: as faixas vêm zeradas e "
+            "a tela oferece sincronizar, em vez de desenhar zeros como resultado."
+        ),
+    )
+    buckets: list[FlowBucketResponse]
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def from_result(cls, result: TitlesFlowResult) -> TitlesFlowResponse:
+        buckets = []
+        for bucket in FlowBucket:
+            sides = result.buckets[bucket]
+            a_receber = sides[TitleType.A_RECEBER]
+            a_pagar = sides[TitleType.A_PAGAR]
+            buckets.append(
+                FlowBucketResponse(
+                    bucket=bucket,
+                    a_receber=FlowSideResponse.from_totals(a_receber),
+                    a_pagar=FlowSideResponse.from_totals(a_pagar),
+                    net=a_receber.total - a_pagar.total,
+                )
+            )
+        return cls(
+            reference_date=result.referencia,
+            synced_at=result.synced_at,
+            never_synced=result.nunca_sincronizada,
+            buckets=buckets,
+        )
+
+
+class TitlesFlowEnvelope(BaseModel):
+    """Envelope `{data: ...}` de `GET /clients/{client_id}/titles/flow`."""
+
+    data: TitlesFlowResponse
 
 
 class TitlesSyncResponse(BaseModel):

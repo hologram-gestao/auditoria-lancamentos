@@ -26,6 +26,7 @@ import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 import { ReconciliationStatusBadge } from '@/components/features/clients/reconciliation-status-badge';
+import { reconciliationsPath } from '@/components/features/navigation/nav-items';
 import { AuthorLabel } from '@/components/features/reconciliations/author-label';
 import { Button } from '@/components/ui/button';
 import {
@@ -298,7 +299,7 @@ function ErrorPanel({
     try {
       await discard.mutateAsync();
       toast.success('Conciliação excluída.');
-      router.push(`/clientes/${clientId}`);
+      router.push(reconciliationsPath(clientId));
     } catch (err) {
       toast.error(
         err instanceof ApiError ? err.userMessage : 'Não foi possível excluir a conciliação.',

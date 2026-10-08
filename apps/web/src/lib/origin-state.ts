@@ -127,6 +127,6 @@ export const CONNECT_PARAM = 'conectar';
  * sabe qual origem falta); com ele, a gaveta já nasce no tipo certo.
  */
 export function originFixPath(clientId: string, providerType?: string): string {
-  const base = `/clientes/${clientId}/painel`;
+  const base = `/clientes/${clientId}`;
   return providerType ? `${base}?${CONNECT_PARAM}=${encodeURIComponent(providerType)}` : base;
 }

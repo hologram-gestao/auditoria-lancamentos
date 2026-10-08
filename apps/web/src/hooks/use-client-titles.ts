@@ -14,7 +14,9 @@
  */
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { invalidateClientSummary } from '@/hooks/use-client-summary';
 import {
+  getClientTitlesFlow,
   getClientTitlesSummary,
   getReceivablesReport,
   listClientTitles,
@@ -28,6 +30,7 @@ import type {
   ReceivablesReport,
   TitleContext,
   TitleContextCreateRequest,
+  TitlesFlow,
   TitlesSummary,
   TitlesSyncResult,
 } from '@/lib/contracts';
@@ -37,6 +40,7 @@ export const clientTitlesKeys = {
   list: (clientId: string, params: ListClientTitlesParams) =>
     ['client-titles', clientId, 'list', params] as const,
   summary: (clientId: string) => ['client-titles', clientId, 'summary'] as const,
+  flow: (clientId: string) => ['client-titles', clientId, 'flow'] as const,
   receivablesReport: (clientId: string) =>
     ['client-titles', clientId, 'receivables-report'] as const,
 };
@@ -68,6 +72,18 @@ export function useClientTitlesSummary(clientId: string, options: { enabled?: bo
 }
 
 /**
+ * Fluxo previsto por faixa de vencimento (86e3k1q4g). Sob `clientTitlesKeys.all`,
+ * então sincronizar a carteira o invalida junto com a lista e o resumo.
+ */
+export function useClientTitlesFlow(clientId: string, options: { enabled?: boolean } = {}) {
+  return useQuery<TitlesFlow>({
+    queryKey: clientTitlesKeys.flow(clientId),
+    queryFn: () => getClientTitlesFlow(clientId),
+    enabled: options.enabled ?? true,
+  });
+}
+
+/**
  * "Sincronizar agora". Não tem `force`: ao contrário do plano de contas, o
  * servidor não serve a carteira de uma janela de validade — cada chamada vai à
  * origem, e a cadência automática é do job diário (R5), não desta tela.
@@ -78,6 +94,7 @@ export function useSyncClientTitles(clientId: string) {
     mutationFn: () => syncClientTitles(clientId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: clientTitlesKeys.all(clientId) });
+      invalidateClientSummary(qc, clientId);
     },
   });
 }

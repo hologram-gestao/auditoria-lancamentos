@@ -3,6 +3,7 @@ do contexto/relatório de recebíveis (Sprint 15, BACK 15.1/15.2).
 
     - GET  /api/v1/clients/{client_id}/titles
     - GET  /api/v1/clients/{client_id}/titles/summary
+    - GET  /api/v1/clients/{client_id}/titles/flow
     - POST /api/v1/clients/{client_id}/titles/sync
     - GET  /api/v1/clients/{client_id}/titles/receivables-report
     - POST /api/v1/clients/{client_id}/titles/{title_id}/context
@@ -23,7 +24,7 @@ E a terceira, na camada de dados: todo `SELECT` da carteira nasce de `_base_quer
 que já carrega `AND client_id = <tenant>`.
 
 ⚠️ **As rotas literais vêm ANTES de qualquer rota com path param.** `/summary`,
-`/sync` e `/receivables-report` são declaradas aqui sem ambiguidade porque
+`/flow`, `/sync` e `/receivables-report` são declaradas aqui sem ambiguidade porque
 vêm antes de `/{title_id}/context` (Sprint 15) — o FastAPI casa por ordem de
 declaração.
 
@@ -76,6 +77,8 @@ from app.modules.client_titles.schemas import (
     TitleContextCreateRequest,
     TitleContextEnvelope,
     TitleContextListResponse,
+    TitlesFlowEnvelope,
+    TitlesFlowResponse,
     TitleSituationFilter,
     TitleSortFieldFilter,
     TitleSortOrderFilter,
@@ -280,6 +283,30 @@ async def get_client_titles_summary(
     return TitlesSummaryEnvelope(data=TitlesSummaryResponse.from_summary(summary))
 
 
+@router.get(
+    "/flow",
+    summary=(
+        "Fluxo previsto da carteira pelos VENCIMENTOS (86e3k1q4g): soma e "
+        "contagem dos títulos em aberto em seis faixas em relação ao 'hoje' do "
+        "servidor (`vencidos`, `ate_7`, `8_30`, `31_60`, `61_90`, `90_mais`), a "
+        "receber e a pagar separados, com o líquido de cada faixa "
+        "(`net = aReceber - aPagar`). Sempre as seis faixas, zeradas quando "
+        "vazias; as seis somam o total em aberto do `/summary` de cada lado, e "
+        "`vencidos` é o total vencido do aging. Calculado no servidor sobre a "
+        "carteira inteira; só valores e contagens, nenhum nome. NÃO é saldo de "
+        "conta. `neverSynced=true` devolve as faixas zeradas para a tela "
+        "oferecer sincronizar. Mesma permissão de leitura da carteira."
+    ),
+)
+async def get_client_titles_flow(
+    user: ViewClientReceivablesDep,
+    client: AccessibleClientDep,
+    service: ReadServiceDep,
+) -> TitlesFlowEnvelope:
+    result = await service.flow(client, user=user)
+    return TitlesFlowEnvelope(data=TitlesFlowResponse.from_result(result))
+
+
 @router.post(
     "/sync",
     summary=(
@@ -340,8 +367,8 @@ async def get_receivables_report(
 
 
 # ⚠️ As duas rotas abaixo têm `{title_id}` — vêm DEPOIS de "", "/summary",
-# "/sync" e "/receivables-report" de propósito (nenhuma delas tem path param
-# depois do prefixo; o FastAPI casa por ordem de declaração).
+# "/flow", "/sync" e "/receivables-report" de propósito (nenhuma delas tem path
+# param depois do prefixo; o FastAPI casa por ordem de declaração).
 
 
 @router.post(
