@@ -507,7 +507,9 @@ let clientFileOrigin = false;
 function clientDetailComOrigem(): Record<string, unknown> {
   const aberto = tableListsOverflow
     ? { ...CLIENT_DETAIL, accounts: MANY_ACCOUNTS }
-    : { ...CLIENT_DETAIL };
+    : dashboardExtraAccounts
+      ? { ...CLIENT_DETAIL, accounts: [...ACCOUNTS, ...NON_HABITUAL_ACCOUNTS] }
+      : { ...CLIENT_DETAIL };
   const base = clientClosed ? { ...aberto, closed_at: '2026-09-20T12:00:00Z' } : aberto;
   if (originState === 'ativa' && clientFileOrigin) {
     // Cliente sem sistema: nenhuma conta sincronizada — a base vem do arquivo.
@@ -1142,6 +1144,27 @@ let listOverflows = false;
  */
 let noSessions = false;
 
+/**
+ * Painel (08/10/2026): com `true`, o cache de contas do cliente traz, além das
+ * duas contas conciliadas, três que ninguém concilia todo mês (caixinha,
+ * adiantamento, reembolso). Elas ficam FORA das contas habituais do resumo, e o
+ * card do fechamento as recolhe num `<details>`.
+ */
+let dashboardExtraAccounts = false;
+
+/** As contas do cache que não são habituais (só com `dashboardExtraAccounts`). */
+const NON_HABITUAL_ACCOUNTS = [
+  { omie_conta_id: 21, name: 'Caixinha' },
+  { omie_conta_id: 22, name: 'Adiantamento a fornecedores' },
+  { omie_conta_id: 23, name: 'Reembolso de despesas' },
+].map((account, index) => ({
+  id: `66666666-6666-4666-8666-66666666666${index}`,
+  bank_name: 'Itaú Unibanco',
+  account_type: 'CC',
+  synced_at: '2026-07-20T12:00:00Z',
+  ...account,
+}));
+
 /** 12 linhas: transborda com folga em 900px de altura e em 390×844. */
 const OVERFLOW_SESSIONS = Array.from({ length: 12 }, (_, i) =>
   session({ id: `22222222-2222-4222-8222-3000000000${String(i).padStart(2, '0')}` }),
@@ -1390,6 +1413,7 @@ function clientSummaryDoCenario(): Record<string, unknown> {
         accountsTotal: ACCOUNTS.length,
         accountsWithSession: 0,
         byStatus: { processing: 0, reviewing: 0, done: 0, error: 0 },
+        habitualAccountIds: [],
       },
       anomalies: { openTotal: 0, byType: [], resolvedInMonth: 0 },
       cardPurchasesToPost: { count: 0, totalAmount: '0.00' },
@@ -1401,9 +1425,11 @@ function clientSummaryDoCenario(): Record<string, unknown> {
   return {
     referenceMonth: DASHBOARD_MONTH,
     reconciliations: {
-      accountsTotal: ACCOUNTS.length,
+      accountsTotal: ACCOUNTS.length + (dashboardExtraAccounts ? NON_HABITUAL_ACCOUNTS.length : 0),
       accountsWithSession: 2,
       byStatus: { processing: 0, reviewing: 1, done: 1, error: 0 },
+      // As duas contas conciliadas no mês; as do cache que ninguém concilia não.
+      habitualAccountIds: ACCOUNTS.map((account) => account.omie_conta_id),
     },
     anomalies: {
       openTotal: 5,
@@ -3291,6 +3317,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   // mapeamento salvo e o envio bem-sucedido são o ponto de partida do bloco.
   clientFileOrigin = false;
   noSessions = false;
+  dashboardExtraAccounts = false;
   inputMappingState = 'salvo';
   fileProcessOutcome = 'sucesso';
   // S16: o cliente TEM plano contábil e a importação dá certo, por padrão.
@@ -3360,7 +3387,7 @@ test.describe('CSP de produção sem unsafe-eval (86e3anx7y)', () => {
     await context.addCookies([
       { name: 'access_token', value: 'e2e-mock', url: baseURL ?? 'http://localhost:3000' },
     ]);
-    const authenticated = await page.goto(`/clientes/${CLIENT_ID}/conciliacoes`);
+    const authenticated = await page.goto(`/clientes/${CLIENT_ID}`);
     expect(authenticated?.status()).toBe(200);
     const authenticatedScriptSrc = scriptSrc(authenticated?.headers()['content-security-policy']);
     expect(authenticatedScriptSrc).toContain("'self'");
@@ -3417,7 +3444,7 @@ for (const vp of VIEWPORTS) {
     test.use({ viewport: vp.size });
 
     test('Lista de Conciliações (R1)', async ({ page }) => {
-      await page.goto(`/clientes/${CLIENT_ID}/conciliacoes`);
+      await page.goto(`/clientes/${CLIENT_ID}`);
       await expect(page.getByRole('heading', { name: 'Conciliações' })).toBeVisible();
       await expect(page.getByText('Processada').first()).toBeVisible();
       await analyze(page, `lista de conciliações (${vp.label})`);
@@ -3441,7 +3468,7 @@ for (const vp of VIEWPORTS) {
      */
     test('a barra de paginação NUNCA cobre um card (86e2u4nxg)', async ({ page }) => {
       listOverflows = true;
-      await page.goto(`/clientes/${CLIENT_ID}/conciliacoes`);
+      await page.goto(`/clientes/${CLIENT_ID}`);
       await expect(page.getByRole('heading', { name: 'Conciliações', level: 1 })).toBeVisible();
       const bar = page.getByRole('navigation', { name: 'Paginação de conciliações' });
       await expect(bar).toBeVisible();
@@ -3474,7 +3501,7 @@ for (const vp of VIEWPORTS) {
         page,
       }) => {
         listOverflows = true;
-        await page.goto(`/clientes/${CLIENT_ID}/conciliacoes`);
+        await page.goto(`/clientes/${CLIENT_ID}`);
         const lista = page.getByRole('region', { name: 'Lista de conciliações' });
         await expect(lista).toBeVisible();
 
@@ -3531,13 +3558,15 @@ for (const vp of VIEWPORTS) {
       const alerta = page.getByRole('alert').filter({ hasText: 'fora do ar' });
       await expect(alerta).toContainText('O Omie está fora do ar neste momento.');
       await expect(alerta.getByRole('button', { name: 'Tentar novamente' })).toBeEnabled();
-      await expect(page.getByRole('table')).toBeVisible();
+      // A tela tem DUAS tabelas desde 08/10/2026 (origens e contas): a das contas
+      // pelo nome da região.
+      await expect(page.getByRole('region', { name: 'Contas bancárias (rolável)' })).toBeVisible();
       await shot(page, `contas-extracao-falha-${vp.label.replace(/\s+/g, '-')}`);
       await analyze(page, `contas bancárias com extração falha (${vp.label})`);
     });
 
     test('Gaveta de criação (R2)', async ({ page }) => {
-      await page.goto(`/clientes/${CLIENT_ID}/conciliacoes`);
+      await page.goto(`/clientes/${CLIENT_ID}`);
       await page.getByRole('button', { name: 'Criar conciliação' }).first().click();
       await expect(page.getByRole('dialog')).toBeVisible();
       await aguardarAnimacao(page.getByRole('dialog'));
@@ -3546,7 +3575,7 @@ for (const vp of VIEWPORTS) {
     });
 
     test('Sino de notificações aberto (R4)', async ({ page }) => {
-      await page.goto(`/clientes/${CLIENT_ID}/conciliacoes`);
+      await page.goto(`/clientes/${CLIENT_ID}`);
       await page.getByRole('button', { name: /Notificações/ }).click();
       const menu = page.getByRole('menu');
       await expect(menu).toBeVisible();
@@ -3614,7 +3643,7 @@ for (const vp of VIEWPORTS) {
     });
 
     test('badge de status é LEGÍVEL (contraste medido ≥ 4.5:1)', async ({ page }) => {
-      await page.goto(`/clientes/${CLIENT_ID}/conciliacoes`);
+      await page.goto(`/clientes/${CLIENT_ID}`);
       const badge = page.getByText('Processada').first();
       await expect(badge).toBeVisible();
       // O rótulo tem que existir como texto visível — badge vazio não é badge.
@@ -3707,6 +3736,9 @@ const TELAS_COM_TABELA = [
     rota: `/clientes/${CLIENT_ID}/contas`,
     regiao: 'Contas bancárias (rolável)',
     usuario: (): Record<string, unknown> => USER,
+    // 08/10/2026: a gestão de origens subiu para o topo da tela, e a tabela
+    // passou ao desenho da carteira (a página rola, a tabela não).
+    pageScroll: true,
   },
   {
     key: 'usuarios',
@@ -4054,10 +4086,12 @@ test.describe('Sidebar em camadas (86e2n39h7)', () => {
   test('menu do cliente substitui o global, e Voltar restaura a lista', async ({ page }) => {
     await page.goto(`/clientes/${CLIENT_ID}`);
     const clientNav = page.getByRole('navigation', { name: 'Seções do cliente' });
-    // 86e3k1q5n: a raiz do cliente é o PAINEL, e cada item casa pela própria rota.
+    // A raiz do cliente é a LISTA de conciliações (de novo desde 08/10/2026), e
+    // cada item casa pela própria rota.
     const ativos = clientNav.locator('a[aria-current="page"]');
     await expect(ativos).toHaveCount(1);
-    await expect(ativos).toHaveText('Painel');
+    await expect(ativos).toHaveText(/^Conciliações/);
+    await expect(page.getByRole('heading', { name: 'Conciliações', level: 1 })).toBeVisible();
     await expect(clientNav.getByRole('link', { name: 'Contas Bancárias' })).toBeVisible();
     await expect(clientNav.getByText('Cliente Exemplo Ltda')).toBeVisible();
     // 86e3k1q2j: o menu do cliente vem em seções, com o Painel abrindo a Operação.
@@ -4070,11 +4104,15 @@ test.describe('Sidebar em camadas (86e2n39h7)', () => {
     await analyze(page, 'sidebar contextual do cliente (desktop)');
     await shot(page, 'sidebar-camadas-cliente-desktop');
 
-    // "Conciliações" leva à lista e fica ativo nela e no detalhe de uma conciliação.
-    await clientNav.getByRole('link', { name: /^Conciliações/ }).click();
-    await expect(page).toHaveURL(new RegExp(`/clientes/${CLIENT_ID}/conciliacoes$`));
-    await expect(page.getByRole('heading', { name: 'Conciliações', level: 1 })).toBeVisible();
+    // "Painel" leva a `/painel` e fica ativo só lá.
+    await clientNav.getByRole('link', { name: 'Painel' }).click();
+    await expect(page).toHaveURL(new RegExp(`/clientes/${CLIENT_ID}/painel$`));
+    await expect(page.getByRole('heading', { name: 'Painel', level: 1 })).toBeVisible();
     await expect(ativos).toHaveCount(1);
+    await expect(ativos).toHaveText('Painel');
+    // "Conciliações" volta à raiz e fica ativo nela e no detalhe de uma conciliação.
+    await clientNav.getByRole('link', { name: /^Conciliações/ }).click();
+    await expect(page).toHaveURL(new RegExp(`/clientes/${CLIENT_ID}$`));
     await expect(ativos).toHaveText(/^Conciliações/);
     await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}`);
     await expect(ativos).toHaveCount(1);
@@ -4251,14 +4289,31 @@ for (const vp of VIEWPORTS) {
     test.use({ viewport: vp.size });
 
     test('painel completo: os cinco blocos, o gráfico e o rodapé honesto', async ({ page }) => {
-      await page.goto(`/clientes/${CLIENT_ID}`);
+      dashboardExtraAccounts = true;
+      await page.goto(`/clientes/${CLIENT_ID}/painel`);
       await expect(page.getByRole('heading', { name: 'Painel', level: 1 })).toBeVisible();
       await expect(page.getByText(/fechamento de setembro de 2026/)).toBeVisible();
-      for (const bloco of ['Fechamento do mês', 'Carteira em aberto', 'Origem e atividade']) {
+      for (const bloco of ['Fechamento do mês', 'Carteira em aberto', 'Atividade']) {
         await expect(page.getByRole('heading', { name: bloco, level: 2 })).toBeVisible();
       }
+      // Origem ativa: a gestão de origens NÃO está no painel (mora em Contas
+      // Bancárias); fica a linha de estado na faixa de atividade.
+      await expect(page.getByRole('heading', { name: 'Origens de dado' })).toHaveCount(0);
+      const origem = page.getByTestId('dashboard-origin-line');
+      await expect(origem).toContainText('Omie · Ativa');
+      await expect(origem.getByRole('link', { name: /Gerir origens/ })).toHaveAttribute(
+        'href',
+        `/clientes/${CLIENT_ID}/contas`,
+      );
+      // Meta pelas contas HABITUAIS; as três do cache que ninguém concilia ficam
+      // recolhidas, fechadas por padrão.
       const fechamento = page.getByRole('region', { name: 'Conciliações do mês' });
-      await expect(fechamento).toContainText('1 de 2 contas concluídas');
+      await expect(fechamento).toContainText('1 de 2 contas habituais concluídas');
+      await expect(fechamento.getByTestId('closing-segment')).toHaveCount(2);
+      const outras = fechamento.getByTestId('closing-other-accounts');
+      await expect(outras).toContainText('Outras 3 contas sem conciliação neste mês');
+      await expect(outras).not.toHaveAttribute('open');
+      await expect(outras.getByText('Caixinha')).toBeHidden();
       await expect(page.getByRole('region', { name: 'Anomalias em aberto' })).toContainText(
         'Data divergente',
       );
@@ -4273,8 +4328,28 @@ for (const vp of VIEWPORTS) {
       await expect(fluxo).toContainText('Não é saldo de conta');
       await expect(page.getByRole('link', { name: 'Ver conciliações' })).toHaveAttribute(
         'href',
-        `/clientes/${CLIENT_ID}/conciliacoes`,
+        `/clientes/${CLIENT_ID}`,
       );
+      // Fluxo em LARGURA INTEIRA e "Atividade" abaixo dele, em três colunas no
+      // desktop e empilhada em 390px.
+      const atividade = page.getByRole('region', { name: 'Atividade' });
+      const caixaFluxo = await fluxo.boundingBox();
+      const caixaAtividade = await atividade.boundingBox();
+      const caixaFechamento = await page
+        .getByRole('heading', { name: 'Fechamento do mês', level: 2 })
+        .boundingBox();
+      expect(caixaFluxo && caixaAtividade && caixaFechamento).toBeTruthy();
+      expect(caixaAtividade!.y, 'Atividade vem DEPOIS do fluxo').toBeGreaterThanOrEqual(
+        caixaFluxo!.y + caixaFluxo!.height - 1,
+      );
+      expect(
+        Math.abs(caixaFluxo!.width - caixaAtividade!.width),
+        'o fluxo ocupa a largura inteira, como a faixa de atividade',
+      ).toBeLessThanOrEqual(1);
+      // O eixo nunca escreve "R$ 1.500 mil": milhar abaixo de um milhão, "mi" acima.
+      for (const rotulo of await fluxo.getByTestId('flow-chart-axis-label').allTextContents()) {
+        expect(rotulo).not.toMatch(/\d\.\d{3} mil/);
+      }
       await expect(page.getByRole('button', { name: 'Nova conciliação' })).toBeVisible();
       await expect(page.locator('#__next_error__')).toHaveCount(0);
       await exigirSemRolagemHorizontal(page, `painel (${vp.label})`);
@@ -4285,12 +4360,17 @@ for (const vp of VIEWPORTS) {
       const blocos = [
         ['carteira', page.getByRole('heading', { name: 'Carteira em aberto', level: 2 })],
         ['fluxo', page.getByRole('region', { name: 'Fluxo previsto pelos vencimentos' })],
-        ['origem', page.getByRole('heading', { name: 'Origem e atividade', level: 2 })],
+        ['atividade', page.getByRole('region', { name: 'Atividade' })],
       ] as const;
       for (const [nome, alvo] of blocos) {
         await alvo.scrollIntoViewIfNeeded();
         await shotTela(page, `painel-completo-${nome}-${slugP}`);
       }
+
+      // As contas recolhidas abrem no clique, só pelo nome.
+      await outras.locator('summary').click();
+      await expect(outras.getByText('Caixinha')).toBeVisible();
+      await analyze(page, `painel com as outras contas abertas (${vp.label})`);
 
       // "Nova conciliação" abre a MESMA gaveta da lista.
       await page.getByRole('button', { name: 'Nova conciliação' }).click();
@@ -4305,7 +4385,7 @@ for (const vp of VIEWPORTS) {
     }) => {
       sessionUser = CLIENT_OPERATOR_USER;
       titlesForbidden = true;
-      await page.goto(`/clientes/${CLIENT_ID}`);
+      await page.goto(`/clientes/${CLIENT_ID}/painel`);
       await expect(
         page.getByRole('heading', { name: 'Fechamento do mês', level: 2 }),
       ).toBeVisible();
@@ -4324,12 +4404,12 @@ for (const vp of VIEWPORTS) {
       page,
     }) => {
       noSessions = true;
-      await page.goto(`/clientes/${CLIENT_ID}`);
+      await page.goto(`/clientes/${CLIENT_ID}/painel`);
       const vazio = page.getByTestId('dashboard-no-reconciliations');
       await expect(vazio).toHaveAttribute('data-state', 'pronto');
       await expect(vazio.getByRole('link', { name: /Ir para conciliações/ })).toHaveAttribute(
         'href',
-        `/clientes/${CLIENT_ID}/conciliacoes`,
+        `/clientes/${CLIENT_ID}`,
       );
       await exigirSemRolagemHorizontal(page, `painel sem conciliação (${vp.label})`);
       await analyze(page, `painel sem conciliação (${vp.label})`);
@@ -4338,9 +4418,12 @@ for (const vp of VIEWPORTS) {
 
     test('cliente encerrado: só leitura, sem criar nem sincronizar', async ({ page }) => {
       clientClosed = true;
-      await page.goto(`/clientes/${CLIENT_ID}`);
+      await page.goto(`/clientes/${CLIENT_ID}/painel`);
       await expect(page.getByText('Cliente encerrado: somente leitura')).toBeVisible();
       await expect(page.getByRole('heading', { name: 'Painel', level: 1 })).toBeVisible();
+      // Encerrado: nem a seção de origens nem o link para geri-las.
+      await expect(page.getByRole('heading', { name: 'Origens de dado' })).toHaveCount(0);
+      await expect(page.getByTestId('dashboard-origin-line').getByRole('link')).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Nova conciliação' })).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Sincronizar agora' })).toHaveCount(0);
       await exigirSemRolagemHorizontal(page, `painel encerrado (${vp.label})`);
@@ -4349,7 +4432,7 @@ for (const vp of VIEWPORTS) {
     });
 
     test('menu com contadores: nome acessível em cada um, só nos três itens', async ({ page }) => {
-      await page.goto(`/clientes/${CLIENT_ID}/conciliacoes`);
+      await page.goto(`/clientes/${CLIENT_ID}`);
       if (vp.label !== 'desktop') {
         await page.getByRole('button', { name: 'Abrir menu de navegação' }).click();
         await aguardarAnimacao(page.getByRole('dialog', { name: 'Menu' }));
@@ -4363,23 +4446,42 @@ for (const vp of VIEWPORTS) {
       await shot(page, `menu-contadores-${slugP}`);
     });
 
-    test('o endereço antigo /painel redireciona para a raiz, com a query', async ({ page }) => {
-      // `?conectar=arquivo` nasceu apontando para `/painel` (86e3fqnc9): a gaveta
-      // abrir já no tipo pedido prova que a query sobreviveu ao redirect.
+    test('painel sem origem: a seção de origens completa vem antes do fechamento', async ({
+      page,
+    }) => {
       originState = 'sem_origem';
+      await page.goto(`/clientes/${CLIENT_ID}/painel`);
+      const secao = page.getByRole('heading', { name: 'Origens de dado', level: 2 });
+      await expect(secao).toBeVisible();
+      await expect(page.locator('[data-origin-status="sem_origem"]')).toContainText(
+        'Sem origem conectada',
+      );
+      const caixaSecao = await secao.boundingBox();
+      const caixaFechamento = await page
+        .getByRole('heading', { name: 'Fechamento do mês', level: 2 })
+        .boundingBox();
+      expect(caixaSecao!.y, 'a seção de origens vem ANTES do fechamento').toBeLessThan(
+        caixaFechamento!.y,
+      );
+      await exigirSemRolagemHorizontal(page, `painel sem origem (${vp.label})`);
+      await analyze(page, `painel sem origem (${vp.label})`);
+      await shot(page, `painel-sem-origem-secao-${slugP}`);
+    });
+
+    test('o endereço /conciliacoes da semana redireciona para a raiz, com a query', async ({
+      page,
+    }) => {
       // 308 de verdade, do servidor (redirect do `next.config`), com a query no destino.
-      const resposta = await page.request.get(`/clientes/${CLIENT_ID}/painel?conectar=arquivo`, {
+      const resposta = await page.request.get(`/clientes/${CLIENT_ID}/conciliacoes?mes=2026-09`, {
         maxRedirects: 0,
       });
       expect(resposta.status()).toBe(308);
       expect(resposta.headers()['location']).toMatch(
-        new RegExp(`/clientes/${CLIENT_ID}\\?conectar=arquivo$`),
+        new RegExp(`/clientes/${CLIENT_ID}\\?mes=2026-09$`),
       );
-      await page.goto(`/clientes/${CLIENT_ID}/painel?conectar=arquivo`);
-      await expect(page).toHaveURL(new RegExp(`/clientes/${CLIENT_ID}(\\?|$)`));
-      await expect(page).not.toHaveURL(/\/painel/);
-      const gaveta = page.getByRole('dialog').filter({ hasText: 'Conectar origem' });
-      await expect(gaveta).toBeVisible();
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacoes?mes=2026-09`);
+      await expect(page).toHaveURL(new RegExp(`/clientes/${CLIENT_ID}\\?mes=2026-09$`));
+      await expect(page.getByRole('heading', { name: 'Conciliações', level: 1 })).toBeVisible();
     });
   });
 }
@@ -5880,7 +5982,7 @@ for (const vp of VIEWPORTS) {
     for (const profile of PROFILES) {
       test(`${profile.key}: navegação e ações conforme a matriz (R4)`, async ({ page }) => {
         sessionUser = profile.user();
-        await page.goto(`/clientes/${CLIENT_ID}/conciliacoes`);
+        await page.goto(`/clientes/${CLIENT_ID}`);
         await expect(page.getByRole('heading', { name: 'Conciliações', level: 1 })).toBeVisible();
 
         // No mobile a navegação do cliente mora no DRAWER (86e2n4pf9): abrir
@@ -6663,7 +6765,7 @@ for (const vp of VIEWPORTS) {
       await shot(page, `lista-clientes-acoes-${slug}`);
       await analyze(page, `lista de clientes com as ações da linha (${vp.label})`);
 
-      await page.goto(`/clientes/${CLIENT_ID}/conciliacoes`);
+      await page.goto(`/clientes/${CLIENT_ID}`);
       await expect(page.getByRole('heading', { level: 1, name: 'Conciliações' })).toBeVisible();
       for (const acao of ['Ações do cliente', 'Editar cliente', 'Encerrar cliente']) {
         await expect(page.getByRole('button', { name: acao })).toHaveCount(0);
@@ -6851,7 +6953,8 @@ for (const vp of VIEWPORTS) {
       sessionUser = CLIENT_OPERATOR_USER;
       await page.goto('/clientes');
       await page.waitForURL(`**/clientes/${CLIENT_ID}`);
-      await expect(page.getByRole('heading', { name: 'Painel', level: 1 })).toBeVisible();
+      // A casa do tenant é a raiz do cliente: a lista de conciliações.
+      await expect(page.getByRole('heading', { name: 'Conciliações', level: 1 })).toBeVisible();
     });
   });
 }
@@ -6900,42 +7003,69 @@ for (const vp of VIEWPORTS) {
   test.describe(`Origem do cliente — ${vp.label}`, () => {
     test.use({ viewport: vp.size });
 
-    test('painel: os TRÊS estados de origem, com copy própria em cada um', async ({ page }) => {
+    // A seção de origens mora em Contas Bancárias desde 08/10/2026; o painel a
+    // repete só sem origem ativa (cenário próprio no bloco do painel).
+    test('Contas Bancárias: os TRÊS estados de origem, com copy própria em cada um', async ({
+      page,
+    }) => {
       // 1) SEM ORIGEM — convida a conectar.
       originState = 'sem_origem';
-      await page.goto(`/clientes/${CLIENT_ID}`);
+      await page.goto(`/clientes/${CLIENT_ID}/contas`);
       const bloco = page.locator('[data-origin-status]');
       await expect(bloco).toHaveAttribute('data-origin-status', 'sem_origem');
       await expect(bloco).toContainText('Sem origem conectada');
       await expect(page.getByRole('heading', { name: 'Origens de dado' })).toBeVisible();
-      await shot(page, `painel-sem-origem-${slug}`);
-      await analyze(page, `painel sem origem conectada (${vp.label})`);
+      await shot(page, `contas-sem-origem-secao-${slug}`);
+      await analyze(page, `contas bancárias sem origem conectada (${vp.label})`);
 
       // 2) ORIGEM EM ERRO — diz "com erro" e manda RECONECTAR. Mandar "conectar"
       // aqui faria o usuário criar uma conexão que já existe (o defeito do R7).
       originState = 'erro';
-      await page.goto(`/clientes/${CLIENT_ID}`);
+      await page.goto(`/clientes/${CLIENT_ID}/contas`);
       await expect(bloco).toHaveAttribute('data-origin-status', 'erro');
       await expect(bloco).toContainText('Origem com erro');
       await expect(bloco).not.toContainText('Sem origem conectada');
       await expect(bloco.getByRole('button', { name: 'Reconectar' })).toBeVisible();
       // `exact`: sem ele casaria também com o parágrafo "Origem com erro" (strict mode).
       await expect(page.getByText('Com erro', { exact: true })).toBeVisible();
-      await shot(page, `painel-origem-com-erro-${slug}`);
-      await analyze(page, `painel com origem em erro (${vp.label})`);
+      await shot(page, `contas-origem-com-erro-${slug}`);
+      await analyze(page, `contas bancárias com origem em erro (${vp.label})`);
 
       // 3) ORIGEM ATIVA — nada a consertar, nenhuma ação corretiva oferecida.
       originState = 'ativa';
-      await page.goto(`/clientes/${CLIENT_ID}`);
+      await page.goto(`/clientes/${CLIENT_ID}/contas`);
       await expect(bloco).toHaveAttribute('data-origin-status', 'ativa');
       await expect(bloco).toContainText('Origem ativa');
       await expect(page.getByRole('button', { name: 'Reconectar' })).toHaveCount(0);
-      await analyze(page, `painel com origem ativa (${vp.label})`);
+      // A seção vem ANTES da lista de contas.
+      const caixaSecao = await page
+        .getByRole('heading', { name: 'Origens de dado', level: 2 })
+        .boundingBox();
+      const caixaContas = await page
+        .getByRole('region', { name: 'Contas bancárias (rolável)' })
+        .boundingBox();
+      expect(caixaSecao!.y, 'a seção de origens vem antes das contas').toBeLessThan(caixaContas!.y);
+      await exigirSemRolagemHorizontal(page, `contas bancárias com origens (${vp.label})`);
+      await analyze(page, `contas bancárias com origem ativa (${vp.label})`);
+      await shot(page, `contas-com-origens-${slug}`);
+    });
+
+    test('Contas Bancárias: `?conectar=arquivo` abre a gaveta ali, no tipo Arquivo', async ({
+      page,
+    }) => {
+      originState = 'sem_origem';
+      await page.goto(`/clientes/${CLIENT_ID}/contas?conectar=arquivo`);
+      const gaveta = page.getByRole('dialog').filter({ hasText: 'Conectar origem' });
+      await expect(gaveta).toBeVisible();
+      await aguardarAnimacao(gaveta);
+      await expect(gaveta.getByRole('combobox', { name: /Tipo/ })).toContainText('Arquivo');
+      // Lido uma vez e apagado da URL: o refresh não reabre a gaveta.
+      await expect(page).toHaveURL(new RegExp(`/clientes/${CLIENT_ID}/contas$`));
     });
 
     test('gaveta de conexão: Cancelar à esquerda e nada cortado na borda', async ({ page }) => {
       originState = 'sem_origem';
-      await page.goto(`/clientes/${CLIENT_ID}`);
+      await page.goto(`/clientes/${CLIENT_ID}/contas`);
 
       await page.getByRole('button', { name: 'Conectar origem' }).first().click();
       const gaveta = page.getByRole('dialog').filter({ hasText: 'Conectar origem' });
@@ -6971,7 +7101,7 @@ for (const vp of VIEWPORTS) {
 
       // Conciliações: o histórico continua, mas "Criar conciliação" some — o
       // servidor responderia 409 `SEM_CONEXAO`.
-      await page.goto(`/clientes/${CLIENT_ID}/conciliacoes`);
+      await page.goto(`/clientes/${CLIENT_ID}`);
       const estadoLista = page.locator('[data-origin-state="SEM_CONEXAO"]');
       await expect(estadoLista).toBeVisible();
       await expect(estadoLista).toContainText('Este cliente não tem origem conectada');
@@ -6980,9 +7110,11 @@ for (const vp of VIEWPORTS) {
       await analyze(page, `lista de conciliações sem origem (${vp.label})`);
 
       // Contas: nem a tabela vazia ("o Omie não tem contas?") nem o botão que
-      // daria 409 — o estado explica e leva ao painel.
+      // daria 409. Quem explica é a seção de origens no topo da própria tela
+      // (08/10/2026); a caixa da lista não repete a mesma frase.
       await page.goto(`/clientes/${CLIENT_ID}/contas`);
-      await expect(page.locator('[data-origin-state="SEM_CONEXAO"]')).toBeVisible();
+      await expect(page.locator('[data-origin-status="sem_origem"]')).toBeVisible();
+      await expect(page.locator('[data-origin-state="SEM_CONEXAO"]')).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Extrair contas do Omie' })).toHaveCount(0);
       await shot(page, `contas-sem-origem-${slug}`);
       await analyze(page, `contas bancárias sem origem (${vp.label})`);
@@ -6991,7 +7123,7 @@ for (const vp of VIEWPORTS) {
     test('operador do cliente vê o estado da origem e NENHUMA ação (R5)', async ({ page }) => {
       sessionUser = CLIENT_OPERATOR_USER;
       originState = 'sem_origem';
-      await page.goto(`/clientes/${CLIENT_ID}`);
+      await page.goto(`/clientes/${CLIENT_ID}/painel`);
 
       // Ele precisa SABER por que a conciliação dele não roda...
       await expect(page.locator('[data-origin-status="sem_origem"]')).toContainText(
@@ -7093,17 +7225,20 @@ for (const vp of VIEWPORTS) {
         vazio,
       );
       const conectar = page.getByRole('link', { name: 'Conectar origem por arquivo' });
-      await expect(conectar).toHaveAttribute('href', `/clientes/${CLIENT_ID}?conectar=arquivo`);
+      await expect(conectar).toHaveAttribute(
+        'href',
+        `/clientes/${CLIENT_ID}/contas?conectar=arquivo`,
+      );
 
       await shot(page, `origem-arquivo-sem-origem-${slugF}`);
       await analyze(page, `origem por arquivo — cliente sem origem (${vp.label})`);
 
-      // O link entrega o que promete: o painel abre a gaveta já no tipo Arquivo.
+      // O link entrega o que promete: Contas Bancárias abre a gaveta já no tipo Arquivo.
       await conectar.click();
       const gaveta = page.getByRole('dialog');
       await aguardarAnimacao(gaveta);
       await expect(gaveta.getByRole('combobox', { name: /Tipo/ })).toContainText('Arquivo');
-      await analyze(page, `painel — gaveta aberta no tipo Arquivo (${vp.label})`);
+      await analyze(page, `contas bancárias — gaveta aberta no tipo Arquivo (${vp.label})`);
     });
 
     test('aba com mapeamento salvo: resumo campo ← coluna, "Alterar" e a aba no menu', async ({
@@ -7293,7 +7428,7 @@ for (const vp of VIEWPORTS) {
     // 86e3g9u3w: um cliente tem um tipo de origem de lançamentos só (§4.8), e
     // oferecer o outro é oferecer um 409 depois do formulário inteiro preenchido.
     test('gaveta num cliente com Omie: o tipo "Arquivo" nem é oferecido', async ({ page }) => {
-      await page.goto(`/clientes/${CLIENT_ID}`);
+      await page.goto(`/clientes/${CLIENT_ID}/contas`);
 
       await page.getByRole('button', { name: 'Conectar origem' }).first().click();
       const gaveta = page.getByRole('dialog').filter({ hasText: 'Conectar origem' });
@@ -7302,7 +7437,7 @@ for (const vp of VIEWPORTS) {
       const opcoes = page.getByRole('option');
       await expect(opcoes).toHaveCount(1);
       await expect(opcoes.first()).toHaveText('Omie');
-      await analyze(page, `painel — gaveta sem o tipo conflitante (${vp.label})`);
+      await analyze(page, `contas bancárias — gaveta sem o tipo conflitante (${vp.label})`);
     });
 
     // 86e3g9uku: o painel não promete ação que a tela de destino não oferece.
@@ -7311,7 +7446,7 @@ for (const vp of VIEWPORTS) {
     }) => {
       noSessions = true;
       clientFileOrigin = true;
-      await page.goto(`/clientes/${CLIENT_ID}`);
+      await page.goto(`/clientes/${CLIENT_ID}/painel`);
 
       const vazio = page.getByTestId('dashboard-no-reconciliations');
       await expect(vazio).toHaveAttribute('data-state', 'arquivo');
@@ -7335,7 +7470,7 @@ for (const vp of VIEWPORTS) {
       page,
     }) => {
       originState = 'sem_origem';
-      await page.goto(`/clientes/${CLIENT_ID}`);
+      await page.goto(`/clientes/${CLIENT_ID}/contas`);
 
       await page.getByRole('button', { name: 'Conectar origem' }).first().click();
       const gaveta = page.getByRole('dialog').filter({ hasText: 'Conectar origem' });
