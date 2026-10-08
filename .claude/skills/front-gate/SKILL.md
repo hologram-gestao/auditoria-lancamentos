@@ -84,6 +84,16 @@ flex-col overflow-hidden`) + `<Table fill>` (`:27`, `:43`). Nunca `overflow` no
   entre o alvo e o fundo do `<main>` rolado até o fim ≥ o padding), no cenário
   "a página termina com o respiro do <main>" de `TELAS_COM_TABELA` e no do plano contábil.
   Tela nova pageScroll entra em `TELAS_COM_TABELA` com `pageScroll: true`.
+  **Tela do cliente sem tabela `fill` declara `data-page-scroll` na raiz, senão o último
+  bloco cola na borda** (08/10/2026): o painel (`client-dashboard.tsx`) rolava como página
+  sem o atributo e o card "Atividade" terminava sem o respiro do `<main>`. Trava: o cenário
+  "painel completo" chama `exigirFimDaPaginaComRespiro` no último card, desktop e 390px.
+- **`sr-only` é `position: absolute`; dentro do `<main>` só com ancestral `relative`, senão
+  estica o documento** (08/10/2026). A tabela acessível do fluxo previsto ancorava no
+  documento, abaixo da dobra: documento de 1137px numa janela de 864, segunda barra de
+  rolagem e faixa de fundo abaixo do shell. O `<main>` do `app/(app)/layout.tsx` é
+  `relative` (trava geral) e a raiz do `FlowChart` também. Trava: o cenário "painel
+  completo" afirma `document.documentElement.scrollHeight <= window.innerHeight`.
 - **Rota de entrada do cliente** (decisão do Pedro, 08/10/2026): `/clientes/{id}` é a
   LISTA de conciliações e o painel mora em `/clientes/{id}/painel`; todo link sai de
   `reconciliationsPath()` ou `dashboardPath()` (`navigation/nav-items.tsx`). No menu do
@@ -287,6 +297,30 @@ viewportSize().width` (padrão em `spec:2147-2165` e `:2190-2205`). Antes de med
   com `countLabel` presente, porque o número sozinho não diz do que é ("12 títulos
   vencidos"). A pílula é `role="img"` + `aria-label`, fundo `-muted` com o texto no token
   sólido do tom (`info` em andamento, `warning` decisão pendente, `destructive` atraso).
+  Desde 08/10/2026 o nome acessível é o DETALHE inteiro (`countDetail`: "12 títulos
+  vencidos: 9 a receber · 3 a pagar"), mostrado também num tooltip cujo gatilho é o LINK
+  (`TooltipTrigger asChild`): abre no hover e no foco do teclado, sem `tabIndex` na pílula
+  (focável dentro de focável). A contagem do De-para é o MAIOR "sem decisão" entre os
+  destinos, nunca a soma (a tela mostra um destino por vez); o detalhe lista os destinos
+  pendentes do maior para o menor, com o nome do catálogo (`useMappingDestinations`, a regra
+  da plataforma do painel). Trava: "menu com contadores" abre o tooltip pelo foco e roda o axe.
+- **Movimento no app: só pelos primitivos, só na entrada de um bloco e na resposta a uma
+  ação** (86e3h579d, 86e3h57a5). `ui/card.tsx` (`Card variant="elevated"`: borda em
+  gradiente `card-elevated`, hover que sobe 2 px só com `hover: hover` e de `md` para cima),
+  `ui/animated-check.tsx` (o check que se desenha; também é o ícone de sucesso do `<Toaster>`)
+  e `shared/reveal.tsx` (`Reveal`/`useReveal`: entrada de 350 ms, uma vez, por ANIMAÇÃO, para
+  não brigar com a transição de hover do card no mesmo elemento; `observeReveal` é o
+  observer que a landing também usa). As regras moram no `globals.css` sob
+  `prefers-reduced-motion: no-preference`, e `app/__tests__/motion-css.test.ts` reprova
+  animação, transição, `transform` ou o "antes" invisível fora desse bloco. Proibido no app:
+  aurora, ruído, loop, fade de rota, efeito em `TableRow` ou em lista virtualizada. A cor do
+  efeito é `--primary` (o verde só no Hologram), nunca `--brand`; o brilho do item ativo e a
+  barra de 3 px ficam FORA do texto. **O gate roda com `reducedMotion: 'reduce'` por padrão**
+  (`contextOptions` no `playwright.config.ts`): o axe no meio de um fade mede cor mesclada.
+  Cenário que prova movimento pede `contextOptions: { reducedMotion: 'no-preference' }` (ou
+  `emulateMedia`), espera `data-revealed` e o fim da animação (`aguardarAnimacao`,
+  `aguardarAnimacoesFinitas`) e mede por pixel (`contrasteDoTextoPorPixel`): bloco
+  "Movimento discreto no app".
 - **Cor só por token semântico** (`success`/`warning`/`info`/`destructive` + `-foreground`/
   `-muted`, neutros `muted`/`border`/`input`), definidos nos três blocos de
   `app/globals.css` (`:root` `:6`, `.dark` `:106`, `.hologram` `:168`). Nada de
@@ -419,9 +453,14 @@ viewportSize().width` (padrão em `spec:2147-2165` e `:2190-2205`). Antes de med
   miolo rola, **Cancelar à esquerda** e primária à direita (`justify-between`,
   `components/ui/sheet.tsx:91-96`); exemplo `glossary-form-drawer.tsx:227-241`, ambos
   os botões `disabled` no loading. Nunca modal fullscreen para criar/editar.
-- **Estados loading / vazio / erro em todo dado assíncrono.** Não há `EmptyState`
-  compartilhado: três telas definem o seu — copie o de `glossary-screen.tsx:269`
-  (mensagem + ação sugerida) em vez de inventar um quarto. `loading.tsx`/`error.tsx`
+- **Estados loading / vazio / erro em todo dado assíncrono.** O vazio é o
+  `shared/empty-state.tsx` (86e3h57b5) com uma vinheta de `shared/vignettes.tsx`
+  (conciliações, origem, carteira, de-para, clientes; até 20 elementos SVG, cor por classe de
+  token, entrada de 600 ms e parada): `framed` (borda tracejada) quando ocupa o lugar de um
+  bloco, `framed={false}` dentro de `TableEmpty` ou de card; `action` é um slot que quem
+  chama já decidiu pela permissão; `announce` liga `role="status"` quando o vazio substitui
+  um resultado carregado (sem ele se já há um `aria-live` ao lado). O texto é sempre o da
+  tela. Vinheta nova entra em `vignettes.tsx` e no `vignettes.test.tsx`. `loading.tsx`/`error.tsx`
   de rota existem só em `app/(app)/clientes/[clientId]/{glossario,usuarios}/`.
 - **Data**: não existe date picker no `ui/`. Mês de referência é `<input type="month"
 lang="pt-BR">` (`reconciliations/list/reconciliations-list.tsx:184-189`) ou `Select`

@@ -983,6 +983,24 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   `components/shared/collapsible-summary.tsx`, com estado por tela no `localStorage`
   (try/catch, sem armazenamento abre aberto) e o conteúdo recolhido montado com `hidden`.
   Tela nova com cards de totais usa ela, nunca um "ocultar" próprio.
+- **Movimento no app autenticado só na entrada de um bloco e na resposta a uma ação, pelos
+  primitivos** (86e3h579d e 86e3h57a5): `ui/card.tsx` (`Card variant="elevated"`, borda em
+  gradiente e hover que sobe 2 px só com ponteiro e de `md` para cima), `ui/animated-check.tsx`
+  (o check que se desenha, também no toast de sucesso) e `shared/reveal.tsx` (`Reveal` e
+  `useReveal`, entrada única ao aparecer; a landing usa o mesmo `observeReveal`). Toda regra
+  que mexe mora em `globals.css` sob `prefers-reduced-motion: no-preference`
+  (`motion-css.test.ts` reprova a que escapa); nunca aurora, ruído, loop, fade de rota, nem
+  efeito em linha de tabela ou lista virtualizada. A cor de efeito no app é `--primary` (o
+  verde só no Hologram), nunca `--brand`. O gate de a11y roda com `reducedMotion: 'reduce'`
+  por padrão (`playwright.config.ts`); cenário que prova movimento pede `no-preference` e
+  mede depois que a animação termina. Contador do menu do cliente: a contagem do De-para é
+  o MAIOR "sem decisão" entre destinos, e o detalhe (por destino, por lado, por status) vai
+  num tooltip com o link inteiro como gatilho (hover e foco, sem `tabIndex` na pílula).
+- **Estado vazio é o `EmptyState` com vinheta** (86e3h57b5, `shared/empty-state.tsx` +
+  `shared/vignettes.tsx`): moldura tracejada no bloco, sem borda dentro de `TableEmpty` ou
+  de card; a ação é um slot que quem chama já decidiu pela permissão; `announce` liga
+  `role="status"` quando o vazio substitui um resultado. Vazio de tabela de lista continua
+  no `TableEmpty` depois da `<Table>`, nunca numa célula `colSpan` (a vinheta sumiria em 390px).
 - **Dinheiro com sinal e cor é o `<Money>` de `components/shared/money.tsx`** (86e3k1q30;
   dois eixos: sinal do valor, cor do `tone`), nunca classe solta.
 - **Campo de arquivo é o `FileInputField` compartilhado** (`components/shared/file-input-field.tsx`,
@@ -1475,6 +1493,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.83, 08/10/2026. **A identidade entrou no app autenticado sem virar enfeite: primitivos compartilhados com a landing, movimento discreto, estados vazios com vinheta (86e3h579d, 86e3h57a5, 86e3h57b5 e 86e3h57ch, subtasks 3 a 6 do épico 86e3h56nk), e dois acabamentos do menu e do painel sem task.** Nasceram `Card variant="elevated"` (o `.lp-card` em tokens, por `--card-*`), `AnimatedCheck` (o `.lp-check`) e `Reveal`/`useReveal`/`observeReveal` (a revelação na rolagem); a landing os consome e ficou igual (as cores dela entram pelas variáveis `--card-*` do `public-brand.css`; dos 20 prints da landing e do login, 19 saíram idênticos pixel a pixel ao da base e o 20º difere só na faixa do header rolado, por timing de captura; no toque o card não sobe mais, por regra). No app: cards de totais da carteira, do de-para e do plano de contas e os blocos do painel elevados e com entrada única, item ativo do menu com barra de 3 px em `--primary` e brilho fora do texto, filete de 1 px sob o header (`.header-filament`) e o check que se desenha no toast de sucesso. A entrada é por ANIMAÇÃO (e não transição) para não brigar com o hover do card no mesmo elemento. Cinco vinhetas (`shared/vignettes.tsx`, até 20 elementos, cor por classe de token) no `EmptyState` novo; os vazios de origens e de clientes saíram da célula `colSpan` para o `TableEmpty`. O gate de a11y passou a rodar com movimento reduzido por padrão e ganhou dois cenários com movimento (painel e menu, contraste por pixel depois da animação, filete fora do texto). Sem task (decisão do Pedro): o contador do De-para no menu é o MAIOR "sem decisão" entre destinos (265, não 1325 = 265 × 5), com tooltip de detalhe nos três contadores; o `<main>` e a raiz do `FlowChart` são `relative` (o `sr-only` da tabela do fluxo esticava o documento para 1137px numa janela de 864) e o painel declara `data-page-scroll` (o último card colava na borda). Lista canônica (**120**), matriz (**29**) e pares de AAD (**17**) não mudaram._
 
 _Versão 1.82, 08/10/2026. **A lista de conciliações volta a ser a entrada do cliente e o painel repaginado fica em `/painel` (decisão do Pedro depois do uso com dado real; acabamento dos PRs #297 e #299, sem task).** `/clientes/{id}` é a lista, `/painel` o painel, `/conciliacoes` virou 308 para a raiz levando a query, e o menu segue casando cada item pela própria rota. A gestão de origens saiu do painel para o topo de Contas Bancárias (`originFixPath()` aponta para lá e o `?conectar=` abre a gaveta onde a seção estiver); no painel ficou uma linha de estado na faixa "Atividade", e a seção inteira só aparece, antes do fechamento, quando não há origem ativa. Com uma seção acima da tabela, Contas Bancárias passou ao padrão em que a página rola. O fluxo previsto ocupa a largura inteira, "Atividade" virou faixa de três colunas e o eixo escreve "R$ 1,5 mi" a partir de um milhão. O card "Conciliações do mês" deixou de medir contra o cache de contas (que traz caixinha, adiantamento, reembolso e cartões que ninguém concilia todo mês) e passou às **contas habituais**: `habitualAccountIds` no `/summary`, contas com sessão ativa no mês ou nos 3 anteriores (`HABITUAL_MONTHS`, num lugar só), calculadas no servidor; as demais contas ficam recolhidas. O contraste por pixel da landing no e2e passou a garantir o alvo abaixo do header fixo antes da foto (o flake de 2,85:1), sem mexer no limite de 4,5. Lista canônica (**120**), matriz e pares de AAD não mudaram._
 
