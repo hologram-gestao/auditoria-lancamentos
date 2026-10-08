@@ -25,7 +25,7 @@ export const CONTACT_ANCHOR = 'contato';
 export const manual = {
   href: '/manual-hologram-os.pdf',
   label: 'Baixar o manual (PDF)',
-  size: 'PDF, 3 MB',
+  size: 'PDF, 4 MB',
   successLead: 'Enquanto respondemos, leia o manual',
 } as const;
 
@@ -161,8 +161,8 @@ export const how = {
 
 /**
  * Tour do produto (86e3gqfkf): cinco telas REAIS, em abas, no tema Hologram. Os prints
- * vêm de `Docs/manual/fonte/img/` (dado fictício: "Cliente Exemplo Ltda"; anomalias e
- * lançamento recapturados no Hologram na 86e3h0xcr); figura com nome
+ * vêm de `Docs/manual/fonte/img/` (dado fictício: "Cliente Exemplo Ltda"; todas
+ * recapturadas no Hologram com a estética nova na 86e3mz74x); figura com nome
  * de dado de teste não entra. Arquivo, largura e altura moram em `landing-tour.tsx`.
  * Tetos: frase até 120 caracteres, bullet até 80 (`content.test.ts`).
  */

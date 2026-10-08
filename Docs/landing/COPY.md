@@ -150,7 +150,7 @@ Rótulo: **Segurança e privacidade** · Título do bloco: **O dado do seu clien
 | 4    | Encerrou, acabou                     | Quando um cliente sai, a chave dele é destruída e o conteúdo cifrado deixa de poder ser lido.                            |
 
 Link ao final: **Leia o aviso de privacidade** (`/privacidade`). Ao lado, botão secundário
-**Baixar o manual (PDF)** com "PDF, 3 MB" (`/manual-hologram-os.pdf`, cópia de
+**Baixar o manual (PDF)** com "PDF, 4 MB" (`/manual-hologram-os.pdf`, cópia de
 `Docs/manual/Manual-Hologram-OS.pdf`); o mesmo link aparece na confirmação do formulário
 como **Enquanto respondemos, leia o manual**.
 

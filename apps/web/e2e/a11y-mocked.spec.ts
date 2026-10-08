@@ -9845,7 +9845,7 @@ test.describe('Landing pública (86e3fr9vz)', () => {
       .locator('#seguranca')
       .getByRole('link', { name: 'Baixar o manual (PDF)', exact: true });
     await expect(link).toHaveAttribute('download', '');
-    await expect(link).toHaveAccessibleDescription('PDF, 3 MB');
+    await expect(link).toHaveAccessibleDescription('PDF, 4 MB');
     const href = await link.getAttribute('href');
     expect(href).toBe('/manual-hologram-os.pdf');
     // Nova aba só com `rel=noopener`; hoje o link nem abre aba (baixa na mesma).
