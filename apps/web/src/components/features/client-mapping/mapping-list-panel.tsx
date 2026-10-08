@@ -39,6 +39,8 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 
 import { accountingChartPath } from '@/components/features/navigation/nav-items';
+import { EmptyState } from '@/components/shared/empty-state';
+import { MappingVignette } from '@/components/shared/vignettes';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -622,20 +624,20 @@ function SkeletonRows({ columnCount }: { columnCount: number }) {
  * movimento com categoria — não há o que classificar ainda. A saída é o plano
  * de contas, e o estado diz isso em vez de mostrar uma tabela muda.
  */
+/** De-para sem categoria (86e3h57b5: vinheta do `EmptyState`, o `TableEmpty` é a moldura). */
 function EmptyUniverseState({ clientId }: { clientId: string }) {
   return (
-    <div className="flex flex-col items-center gap-3 text-center">
-      <div className="space-y-1">
-        <p className="text-sm font-medium">Ainda não há categorias para classificar</p>
-        <p className="text-muted-foreground text-sm">
-          O de-para lista as categorias do plano de contas sincronizado e as que aparecem nos
-          movimentos do cliente. Sincronize o plano de contas para começar.
-        </p>
-      </div>
-      <Button asChild variant="outline" size="sm">
-        <Link href={`/clientes/${clientId}/plano-de-contas`}>Ir para o plano de contas</Link>
-      </Button>
-    </div>
+    <EmptyState
+      framed={false}
+      vignette={<MappingVignette />}
+      title="Ainda não há categorias para classificar"
+      description="O de-para lista as categorias do plano de contas sincronizado e as que aparecem nos movimentos do cliente. Sincronize o plano de contas para começar."
+      action={
+        <Button asChild variant="outline" size="sm">
+          <Link href={`/clientes/${clientId}/plano-de-contas`}>Ir para o plano de contas</Link>
+        </Button>
+      }
+    />
   );
 }
 

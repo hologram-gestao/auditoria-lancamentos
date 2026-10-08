@@ -26,12 +26,15 @@ import { Loader2, Plus, RefreshCw, SquarePen, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
+import { EmptyState } from '@/components/shared/empty-state';
+import { OriginVignette } from '@/components/shared/vignettes';
 import { Button } from '@/components/ui/button';
 import {
   Table,
   TableBody,
   TableCard,
   TableCell,
+  TableEmpty,
   TableHead,
   TableHeader,
   TableRow,
@@ -207,12 +210,6 @@ export function ClientConnectionsSection({
               <TableBody>
                 {isLoading ? (
                   <SkeletonRows columnCount={columnCount} />
-                ) : connections.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={columnCount} className="py-12">
-                      <EmptyState canManage={canManage} onConnect={() => openCreate()} />
-                    </TableCell>
-                  </TableRow>
                 ) : (
                   connections.map((connection) => (
                     <TableRow key={connection.id}>
@@ -285,6 +282,13 @@ export function ClientConnectionsSection({
                 )}
               </TableBody>
             </Table>
+            {/* Fora do `<Table>` (86e3h57b5): em 390px a tabela rola na horizontal e uma
+                célula `colSpan` cortaria a vinheta e o texto (ver `TableEmpty`). */}
+            {!isLoading && connections.length === 0 && (
+              <TableEmpty>
+                <OriginEmpty canManage={canManage} onConnect={() => openCreate()} />
+              </TableEmpty>
+            )}
           </TableCard>
         )}
       </div>
@@ -333,30 +337,26 @@ function SkeletonRows({ columnCount }: { columnCount: number }) {
   );
 }
 
-function EmptyState({ canManage, onConnect }: { canManage: boolean; onConnect: () => void }) {
-  if (!canManage) {
-    return (
-      <div className="space-y-1 text-center">
-        <p className="text-sm font-medium">Nenhuma origem conectada</p>
-        <p className="text-muted-foreground text-sm">
-          Enquanto não houver origem, as telas que dependem dela ficam indisponíveis. Fale com quem
-          administra este cliente.
-        </p>
-      </div>
-    );
-  }
+/** Sem origem (86e3h57b5: vinheta do `EmptyState`). Conectar só para quem gere origens. */
+function OriginEmpty({ canManage, onConnect }: { canManage: boolean; onConnect: () => void }) {
   return (
-    <div className="flex flex-col items-center gap-3 text-center">
-      <div className="space-y-1">
-        <p className="text-sm font-medium">Nenhuma origem conectada</p>
-        <p className="text-muted-foreground text-sm">
-          Conecte o sistema de onde este cliente traz contas e lançamentos.
-        </p>
-      </div>
-      <Button type="button" onClick={onConnect}>
-        <Plus className="h-4 w-4" aria-hidden="true" />
-        Conectar origem
-      </Button>
-    </div>
+    <EmptyState
+      framed={false}
+      vignette={<OriginVignette />}
+      title="Nenhuma origem conectada"
+      description={
+        canManage
+          ? 'Conecte o sistema de onde este cliente traz contas e lançamentos.'
+          : 'Enquanto não houver origem, as telas que dependem dela ficam indisponíveis. Fale com quem administra este cliente.'
+      }
+      action={
+        canManage ? (
+          <Button type="button" onClick={onConnect}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Conectar origem
+          </Button>
+        ) : undefined
+      }
+    />
   );
 }

@@ -19,7 +19,9 @@ import {
   BUCKET_TONE,
   OVERDUE_BUCKETS,
 } from '@/components/features/client-titles/client-titles-summary';
+import { EmptyState } from '@/components/shared/empty-state';
 import { Money } from '@/components/shared/money';
+import { PortfolioVignette } from '@/components/shared/vignettes';
 import { Button } from '@/components/ui/button';
 import { useSyncClientTitles } from '@/hooks/use-client-titles';
 import { ApiError } from '@/lib/api/client';
@@ -210,31 +212,34 @@ export function PortfolioNeverSynced({
     }
   }
 
+  // Moldura e vinheta do `EmptyState` (86e3h57b5); o texto e as ações não mudaram.
   return (
-    <div
+    <EmptyState
       data-testid="dashboard-portfolio-never-synced"
-      className="bg-card flex flex-col items-start gap-3 rounded-lg border border-dashed p-4 text-sm sm:flex-row sm:items-center sm:justify-between"
-    >
-      <p className="text-muted-foreground">
-        {canSync
+      className="bg-card"
+      vignette={<PortfolioVignette />}
+      description={
+        canSync
           ? 'A carteira deste cliente ainda não foi sincronizada. Sincronize para ver os títulos em aberto e o fluxo previsto.'
-          : 'A carteira deste cliente ainda não foi sincronizada. Quem gerencia o cliente pode sincronizá-la na Carteira.'}
-      </p>
-      {canSync ? (
-        <Button type="button" onClick={() => void handleSync()} disabled={isSyncing}>
-          {isSyncing ? (
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-          ) : (
-            <RefreshCw className="h-4 w-4" aria-hidden="true" />
-          )}
-          {isSyncing ? 'Sincronizando…' : 'Sincronizar agora'}
-        </Button>
-      ) : (
-        <Button asChild variant="outline">
-          <Link href={`/clientes/${clientId}/carteira`}>Ir para a Carteira</Link>
-        </Button>
-      )}
-    </div>
+          : 'A carteira deste cliente ainda não foi sincronizada. Quem gerencia o cliente pode sincronizá-la na Carteira.'
+      }
+      action={
+        canSync ? (
+          <Button type="button" onClick={() => void handleSync()} disabled={isSyncing}>
+            {isSyncing ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+            )}
+            {isSyncing ? 'Sincronizando…' : 'Sincronizar agora'}
+          </Button>
+        ) : (
+          <Button asChild variant="outline">
+            <Link href={`/clientes/${clientId}/carteira`}>Ir para a Carteira</Link>
+          </Button>
+        )
+      }
+    />
   );
 }
 

@@ -48,6 +48,8 @@ import {
   ALL_ORGANIZATIONS,
   OrganizationFilterSelect,
 } from '@/components/features/organizations/organization-select';
+import { EmptyState } from '@/components/shared/empty-state';
+import { ClientsVignette } from '@/components/shared/vignettes';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -61,6 +63,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableEmpty,
   TableHead,
   TableHeader,
   TableRow,
@@ -262,21 +265,6 @@ export default function ClientesPage() {
                     : 'Não foi possível carregar a lista.'}
                 </TableCell>
               </TableRow>
-            ) : rows.length === 0 ? (
-              <TableRow>
-                <TableCell
-                  colSpan={colCount}
-                  className="text-muted-foreground py-10 text-center text-sm"
-                >
-                  {hasSearch
-                    ? `Nenhum cliente encontrado para "${debouncedSearch}".`
-                    : hasCategoryFilter
-                      ? 'Nenhum cliente nesta categoria.'
-                      : hasOrganizationFilter
-                        ? 'Nenhum cliente nesta organização.'
-                        : "Nenhum cliente cadastrado. Crie o primeiro cliente clicando em 'Novo Cliente'."}
-                </TableCell>
-              </TableRow>
             ) : (
               rows.map((c) => (
                 <TableRow
@@ -390,6 +378,26 @@ export default function ClientesPage() {
             )}
           </TableBody>
         </Table>
+        {/* Lista vazia (86e3h57b5): fora do `<Table>`, porque em 390px a tabela rola na
+            horizontal e uma célula `colSpan` cortaria a vinheta e o texto (ver
+            `TableEmpty`). Sem `announce`: a contagem abaixo da tabela já é `aria-live`. */}
+        {!isLoading && !isError && rows.length === 0 && (
+          <TableEmpty>
+            <EmptyState
+              framed={false}
+              vignette={<ClientsVignette />}
+              description={
+                hasSearch
+                  ? `Nenhum cliente encontrado para "${debouncedSearch}".`
+                  : hasCategoryFilter
+                    ? 'Nenhum cliente nesta categoria.'
+                    : hasOrganizationFilter
+                      ? 'Nenhum cliente nesta organização.'
+                      : "Nenhum cliente cadastrado. Crie o primeiro cliente clicando em 'Novo Cliente'."
+              }
+            />
+          </TableEmpty>
+        )}
       </div>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
