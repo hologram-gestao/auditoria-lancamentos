@@ -1,261 +1,260 @@
 'use client';
 
 /**
- * Painel de entrada do cliente — Sprint 4 / R7 (**desejável**, não bloqueante).
+ * Painel do cliente (86e3k1q54): o fechamento do mês, a carteira com atraso e o
+ * fluxo previsto, a origem e a atividade.
  *
- * Vive numa rota própria (`/clientes/{id}/painel`) para não disputar a rota da
- * Lista, que continua sendo a tela principal do cliente.
+ * **Nenhum número é calculado no navegador.** As contagens vêm do resumo do
+ * cliente (`/summary`, do mês que o SERVIDOR decide), os valores da carteira do
+ * `/titles/summary`, do relatório de recebíveis e do `/titles/flow`. O painel
+ * cruza só o que é exibição: o status de cada conta (lista do mês) e os NOMES
+ * (conta, tipo de anomalia, destino), que vêm dos catálogos de sempre porque o
+ * resumo só carrega códigos.
  *
- * **Só dados já persistidos, nenhuma consulta cara nova.** As duas queries que
- * ele faz já existem e já estão no cache do TanStack:
- *   - `useClientDetail` (o `<ClientShell>` já buscou) → contas sincronizadas;
- *   - `useReconciliationsList` filtrada pelo mês corrente → conciliações do mês
- *     e a soma de anomalias; a última conciliação sai do 1º item da lista sem
- *     filtro (o backend ordena por `created_at DESC`).
+ * **Cada bloco carrega e falha SOZINHO**: skeleton e `role="alert"` com "Tentar
+ * novamente" por bloco. Quem não lê a carteira (`view_client_receivables`, ou um
+ * 403 do servidor) não vê o bloco da carteira nem o do fluxo, e o resto segue.
  *
- * ⚠️ **Rótulo honesto:** o card diz "Anomalias no mês", não "anomalias em
- * aberto". O `anomaly_count` da sessão conta TODAS as anomalias, resolvidas ou
- * não, e não existe endpoint cross-sessão de anomalias abertas. Chamar isso de
- * "em aberto" seria um número errado com nome bonito.
+ * "Nova conciliação" abre a MESMA gaveta da lista, só para quem a lista também
+ * oferece (`reconciliationCreation`); cliente encerrado é só leitura.
  */
 
-import { ArrowRight, CalendarCheck, Landmark, ListChecks, ShieldAlert } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import Link from 'next/link';
 
-import { fileOriginPath } from '@/components/features/navigation/nav-items';
+import { reconciliationsPath } from '@/components/features/navigation/nav-items';
+import { reconciliationCreation } from '@/components/features/reconciliations/create/creation-availability';
+import { useCreateReconciliationDrawer } from '@/components/features/reconciliations/create/use-create-reconciliation-drawer';
 import { Button } from '@/components/ui/button';
+import { useAnomalyTypesList } from '@/hooks/use-anomaly-types';
+import { useMappingDestinations } from '@/hooks/use-client-mapping';
+import { useClientSummary } from '@/hooks/use-client-summary';
+import {
+  useClientTitlesFlow,
+  useClientTitlesSummary,
+  useReceivablesReport,
+} from '@/hooks/use-client-titles';
 import { useClientDetail, useReconciliationsList } from '@/hooks/use-clients';
+import { useGlossaryList } from '@/hooks/use-glossary';
 import { ApiError } from '@/lib/api/client';
-import type { ClientConnection, OriginStatus } from '@/lib/contracts';
-import { formatReferenceMonth, formatSyncedAt } from '@/lib/format';
-import { originCodeFor, originIsFileBased } from '@/lib/origin-capabilities';
-import { currentMonth } from '@/lib/validation/reconciliations';
+import { hasPermission, isPlatformScoped } from '@/lib/authz';
+import { formatReferenceMonth } from '@/lib/format';
+import { originCodeFor } from '@/lib/origin-capabilities';
+import { useAuthStore } from '@/stores/auth';
 
-import { ClientConnectionsSection } from './connections/client-connections-section';
-import { ReconciliationStatusBadge } from './reconciliation-status-badge';
+import { ActivitySection } from './dashboard/activity-section';
+import { BlockError, CardSkeleton } from './dashboard/dashboard-card';
+import { MonthClosing } from './dashboard/month-closing';
+import { NoReconciliations } from './dashboard/no-reconciliations';
+import { FlowCard, PortfolioCards, PortfolioNeverSynced } from './dashboard/portfolio-section';
 
-/** Teto de leitura do mês — o painel é um resumo, não um relatório. */
+/** Teto da lista do mês: uma conciliação por conta, e o cache de contas é pequeno. */
 const MONTH_PAGE_SIZE = 100;
 
+/** "Outubro de 2026" → "outubro de 2026", para caber no meio da frase. */
+function monthInSentence(referenceMonth: string): string {
+  const label = formatReferenceMonth(referenceMonth);
+  return label.charAt(0).toLowerCase() + label.slice(1);
+}
+
+function timeOf(epochMs: number): string {
+  const date = new Date(epochMs);
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function isForbidden(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 403;
+}
+
 export function ClientDashboard({ clientId }: { clientId: string }) {
-  const month = currentMonth();
+  const user = useAuthStore((s) => s.user);
   const detailQuery = useClientDetail(clientId);
-  const monthQuery = useReconciliationsList(clientId, {
-    page: 1,
-    pageSize: MONTH_PAGE_SIZE,
-    month,
+  const summaryQuery = useClientSummary(clientId);
+  const referenceMonth = summaryQuery.data?.referenceMonth;
+  const monthQuery = useReconciliationsList(
+    clientId,
+    { page: 1, pageSize: MONTH_PAGE_SIZE, month: referenceMonth ?? '' },
+    { enabled: referenceMonth !== undefined },
+  );
+
+  const canViewTitles = hasPermission(user, 'view_client_receivables');
+  const titlesSummaryQuery = useClientTitlesSummary(clientId, { enabled: canViewTitles });
+  const reportQuery = useReceivablesReport(clientId, { enabled: canViewTitles });
+  const flowQuery = useClientTitlesFlow(clientId, { enabled: canViewTitles });
+
+  const detail = detailQuery.data;
+  // Nomes dos destinos: o catálogo da organização DO CLIENTE, pela mesma regra
+  // da tela do de-para (só a plataforma precisa dizer qual organização).
+  const platform = isPlatformScoped(user);
+  const clientOrganizationId = detail?.organization.id ?? null;
+  const destinationsQuery = useMappingDestinations(platform ? clientOrganizationId : null, {
+    enabled: user !== null && (!platform || clientOrganizationId !== null),
   });
-  const latestQuery = useReconciliationsList(clientId, { page: 1, pageSize: 1 });
+  const anomalyTypesQuery = useAnomalyTypesList({ page: 1, pageSize: 100 });
+  const glossaryQuery = useGlossaryList(clientId, { page: 1, pageSize: 1 });
+  const creation = useCreateReconciliationDrawer(clientId);
 
-  const isLoading = detailQuery.isLoading || monthQuery.isLoading || latestQuery.isLoading;
-  const isError = detailQuery.isError || monthQuery.isError || latestQuery.isError;
+  const { isClosed, canCreate } = reconciliationCreation(detail);
+  const summary = summaryQuery.data;
 
-  if (isLoading) return <DashboardSkeleton />;
+  const anomalyTypeNames = new Map(
+    (anomalyTypesQuery.data?.data ?? []).map((type) => [type.code, type.name]),
+  );
+  const destinationNames = new Map(
+    (destinationsQuery.data ?? []).map((destination) => [destination.type, destination.name]),
+  );
 
-  if (isError) {
-    const err = monthQuery.error ?? detailQuery.error ?? latestQuery.error;
-    return (
-      <div
-        role="alert"
-        className="bg-destructive/5 border-destructive/30 text-destructive flex flex-col items-start gap-3 rounded-lg border p-4 text-sm sm:flex-row sm:items-center sm:justify-between"
-      >
-        <span>
-          {err instanceof ApiError ? err.userMessage : 'Não foi possível carregar o painel.'}
-        </span>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            void detailQuery.refetch();
-            void monthQuery.refetch();
-            void latestQuery.refetch();
-          }}
+  // A carteira some INTEIRA (e o fluxo junto) para quem não a lê: pela matriz,
+  // antes de qualquer request, ou por um 403 do servidor.
+  const showPortfolio = canViewTitles && !isForbidden(titlesSummaryQuery.error);
+  const canSyncTitles =
+    hasPermission(user, 'sync_client_receivables') &&
+    !isClosed &&
+    detail !== undefined &&
+    originCodeFor(detail.origin_status, detail.connections, 'listar_titulos_em_aberto') === null;
+
+  const subtitle = [
+    detail?.name,
+    referenceMonth !== undefined ? `fechamento de ${monthInSentence(referenceMonth)}` : undefined,
+    summaryQuery.dataUpdatedAt > 0
+      ? `atualizado às ${timeOf(summaryQuery.dataUpdatedAt)}`
+      : undefined,
+  ].filter((part): part is string => part !== undefined);
+
+  const closingLoading = summaryQuery.isLoading || detailQuery.isLoading || monthQuery.isLoading;
+  const closingError = summaryQuery.error ?? detailQuery.error ?? monthQuery.error;
+
+  return (
+    <div className="space-y-6">
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 space-y-1">
+          <h1 className="text-xl font-semibold">Painel</h1>
+          {subtitle.length > 0 && (
+            <p className="text-muted-foreground text-sm">{subtitle.join(' · ')}</p>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline">
+            <Link href={reconciliationsPath(clientId)}>Ver conciliações</Link>
+          </Button>
+          {detail !== undefined && canCreate && (
+            <Button type="button" onClick={creation.open}>
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Nova conciliação
+            </Button>
+          )}
+        </div>
+      </header>
+
+      <section aria-labelledby="dashboard-closing-heading" className="space-y-3">
+        <h2 id="dashboard-closing-heading" className="text-base font-semibold">
+          Fechamento do mês
+        </h2>
+        {closingLoading ? (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {['conciliações', 'anomalias', 'compras do cartão', 'de-para'].map((label) => (
+              <CardSkeleton key={label} label={`Carregando ${label}`} />
+            ))}
+          </div>
+        ) : closingError !== null || summary === undefined || detail === undefined ? (
+          <BlockError
+            error={closingError}
+            fallback="Não foi possível carregar o fechamento do mês."
+            onRetry={() => {
+              void summaryQuery.refetch();
+              void detailQuery.refetch();
+              void monthQuery.refetch();
+            }}
+          />
+        ) : (
+          <MonthClosing
+            clientId={clientId}
+            summary={summary}
+            accounts={detail.accounts ?? []}
+            monthSessions={monthQuery.data?.data ?? []}
+            anomalyTypeNames={anomalyTypeNames}
+            destinationNames={destinationNames}
+            emptyState={
+              summary.latestSession === null ? (
+                <NoReconciliations clientId={clientId} detail={detail} />
+              ) : undefined
+            }
+          />
+        )}
+      </section>
+
+      {showPortfolio && (
+        <section aria-labelledby="dashboard-portfolio-heading" className="space-y-3">
+          <h2 id="dashboard-portfolio-heading" className="text-base font-semibold">
+            Carteira em aberto
+          </h2>
+          {titlesSummaryQuery.isLoading ? (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <CardSkeleton label="Carregando a receber" />
+              <CardSkeleton label="Carregando a pagar" />
+            </div>
+          ) : titlesSummaryQuery.isError || titlesSummaryQuery.data === undefined ? (
+            <BlockError
+              error={titlesSummaryQuery.error}
+              fallback="Não foi possível carregar a carteira."
+              onRetry={() => void titlesSummaryQuery.refetch()}
+            />
+          ) : titlesSummaryQuery.data.neverSynced ? (
+            <PortfolioNeverSynced clientId={clientId} canSync={canSyncTitles} />
+          ) : (
+            <PortfolioCards
+              summary={titlesSummaryQuery.data}
+              report={reportQuery.data}
+              flow={flowQuery.data}
+            />
+          )}
+        </section>
+      )}
+
+      <div className="flex flex-wrap items-start gap-3">
+        {showPortfolio && titlesSummaryQuery.data?.neverSynced !== true && (
+          <div className="min-w-0" style={{ flex: '2 1 480px' }}>
+            {flowQuery.isLoading || titlesSummaryQuery.isLoading ? (
+              <CardSkeleton label="Carregando o fluxo previsto" className="h-72" />
+            ) : flowQuery.isError || flowQuery.data === undefined ? (
+              isForbidden(flowQuery.error) ? null : (
+                <BlockError
+                  error={flowQuery.error}
+                  fallback="Não foi possível carregar o fluxo previsto."
+                  onRetry={() => void flowQuery.refetch()}
+                />
+              )
+            ) : (
+              <FlowCard flow={flowQuery.data} />
+            )}
+          </div>
+        )}
+        <section
+          aria-labelledby="dashboard-activity-heading"
+          className="min-w-0 space-y-3"
+          style={{ flex: '1 1 280px' }}
         >
-          Tentar novamente
-        </Button>
-      </div>
-    );
-  }
-
-  const monthSessions = monthQuery.data?.data ?? [];
-  const monthTotal = monthQuery.data?.pagination.total ?? 0;
-  const anomaliesInMonth = monthSessions.reduce((sum, s) => sum + s.anomaly_count, 0);
-  const accounts = detailQuery.data?.accounts ?? [];
-  const latest = latestQuery.data?.data[0];
-
-  return (
-    <section aria-labelledby="dashboard-heading" className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 id="dashboard-heading" className="text-xl font-semibold">
-          Painel — {formatReferenceMonth(month)}
-        </h1>
-        <Button asChild>
-          <Link href={`/clientes/${clientId}`}>
-            <ListChecks className="h-4 w-4" aria-hidden="true" />
-            Ir para as conciliações
-          </Link>
-        </Button>
+          <h2 id="dashboard-activity-heading" className="text-base font-semibold">
+            Origem e atividade
+          </h2>
+          <ActivitySection
+            clientId={clientId}
+            originStatus={detail?.origin_status ?? 'sem_origem'}
+            isClosed={isClosed}
+            latestSession={summary?.latestSession}
+            glossary={
+              glossaryQuery.data !== undefined
+                ? {
+                    total: glossaryQuery.data.pagination.total,
+                    version: glossaryQuery.data.data.version,
+                  }
+                : undefined
+            }
+          />
+        </section>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatTile
-          icon={<ListChecks className="text-muted-foreground h-5 w-5" aria-hidden="true" />}
-          label="Conciliações no mês"
-          value={String(monthTotal)}
-        />
-        <StatTile
-          icon={<ShieldAlert className="text-warning h-5 w-5" aria-hidden="true" />}
-          label="Anomalias no mês"
-          value={String(anomaliesInMonth)}
-          hint={
-            monthTotal > MONTH_PAGE_SIZE
-              ? `Soma das ${MONTH_PAGE_SIZE} conciliações mais recentes do mês.`
-              : undefined
-          }
-        />
-        <StatTile
-          icon={<Landmark className="text-muted-foreground h-5 w-5" aria-hidden="true" />}
-          label="Contas sincronizadas"
-          value={String(accounts.length)}
-          hint={formatSyncedAt(detailQuery.data?.accounts_synced_at)}
-        />
-        <StatTile
-          icon={<CalendarCheck className="text-muted-foreground h-5 w-5" aria-hidden="true" />}
-          label="Última conciliação"
-          value={latest === undefined ? '—' : formatReferenceMonth(latest.reference_month)}
-          badge={
-            latest === undefined ? undefined : <ReconciliationStatusBadge status={latest.status} />
-          }
-        />
-      </div>
-
-      {/* Origem (S9 / R4 · R7): o bloco de estado + a gestão das conexões. Fica
-          no painel porque é a tela que responde 200 SEM origem — a exceção
-          deliberada do R6 à taxonomia 409. */}
-      <ClientConnectionsSection
-        clientId={clientId}
-        originStatus={detailQuery.data?.origin_status ?? 'sem_origem'}
-        isClosed={detailQuery.data?.closed_at != null}
-      />
-
-      {latest === undefined ? (
-        <NoReconciliations
-          clientId={clientId}
-          originStatus={detailQuery.data?.origin_status ?? 'sem_origem'}
-          connections={detailQuery.data?.connections ?? []}
-          isClosed={detailQuery.data?.closed_at != null}
-        />
-      ) : (
-        <Button variant="outline" asChild>
-          <Link href={`/clientes/${clientId}/conciliacao/${latest.id}`}>
-            Abrir a última conciliação
-            <ArrowRight className="h-4 w-4" aria-hidden="true" />
-          </Link>
-        </Button>
-      )}
-    </section>
-  );
-}
-
-interface StatTileProps {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  hint?: string;
-  badge?: React.ReactNode;
-}
-
-/**
- * Cliente sem nenhuma conciliação (86e3g9uku).
- *
- * O texto antigo era uma promessa falsa: "Criar conciliação" é um `Link` para a
- * LISTA, e lá a criação já está escondida para quem não pode conciliar — cliente
- * sem origem (S9) e cliente só-arquivo (S14, `CAPACIDADE_AUSENTE`). A pessoa
- * clicava e chegava numa tela sem o botão prometido.
- *
- * Quem decide é `originCodeFor(..., 'listar_contas')` — a MESMA chamada que a
- * lista faz para esconder a criação (`reconciliations/list/reconciliations-list.tsx`).
- * Perguntar diferente aqui faria as duas telas discordarem sobre o mesmo cliente.
- */
-function NoReconciliations({
-  clientId,
-  originStatus,
-  connections,
-  isClosed,
-}: {
-  clientId: string;
-  originStatus: OriginStatus;
-  connections: readonly ClientConnection[];
-  isClosed: boolean;
-}) {
-  const fileOrigin = originIsFileBased(connections);
-  const originCode = originCodeFor(originStatus, connections, 'listar_contas');
-  const state = isClosed
-    ? 'encerrado'
-    : fileOrigin
-      ? 'arquivo'
-      : originCode === null
-        ? 'pronto'
-        : 'sem-origem';
-  return (
-    <div
-      data-testid="dashboard-no-reconciliations"
-      data-state={state}
-      className="flex flex-col items-center gap-4 rounded-lg border border-dashed p-8 text-center"
-    >
-      <p className="text-muted-foreground mx-auto max-w-prose text-sm">
-        {state === 'encerrado'
-          ? 'Este cliente foi encerrado e não tem conciliações. O histórico fica disponível só para leitura.'
-          : state === 'arquivo'
-            ? 'Este cliente não concilia: os lançamentos dele entram pelo envio do arquivo do mês e são classificados no de-para.'
-            : state === 'sem-origem'
-              ? 'Este cliente ainda não tem conciliações. Para conciliar, ele precisa de uma origem conectada e ativa — o estado da origem está logo acima.'
-              : 'Este cliente ainda não tem conciliações. Comece pela lista de conciliações.'}
-      </p>
-      {state === 'pronto' && (
-        <Button asChild>
-          {/* Rótulo honesto: o link leva à LISTA, onde a gaveta de criação vive. */}
-          <Link href={`/clientes/${clientId}`}>
-            Ir para conciliações
-            <ArrowRight className="h-4 w-4" aria-hidden="true" />
-          </Link>
-        </Button>
-      )}
-      {state === 'arquivo' && (
-        <Button asChild variant="outline">
-          <Link href={fileOriginPath(clientId)}>
-            Ir para Origem por arquivo
-            <ArrowRight className="h-4 w-4" aria-hidden="true" />
-          </Link>
-        </Button>
-      )}
-    </div>
-  );
-}
-
-function StatTile({ icon, label, value, hint, badge }: StatTileProps) {
-  return (
-    <div className="bg-card space-y-2 rounded-lg border p-4 shadow-sm">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-muted-foreground text-xs">{label}</p>
-        {icon}
-      </div>
-      <p className="truncate text-2xl font-semibold tabular-nums">{value}</p>
-      {badge}
-      {hint !== undefined && <p className="text-muted-foreground text-xs">{hint}</p>}
-    </div>
-  );
-}
-
-function DashboardSkeleton() {
-  return (
-    <div role="status" className="space-y-6" aria-busy="true" aria-label="Carregando painel">
-      <div className="bg-muted h-6 w-56 animate-pulse rounded" />
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="bg-card h-24 animate-pulse rounded-lg border" />
-        ))}
-      </div>
+      {canCreate && creation.drawer}
     </div>
   );
 }

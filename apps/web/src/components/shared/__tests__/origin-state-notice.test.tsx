@@ -92,7 +92,7 @@ describe('OriginStateNotice — copy distinta por código', () => {
     expect(screen.getByText('Este cliente não tem origem conectada')).toBeVisible();
     expect(screen.getByRole('link', { name: 'Conectar origem' })).toHaveAttribute(
       'href',
-      `/clientes/${CLIENT_ID}/painel`,
+      `/clientes/${CLIENT_ID}`,
     );
   });
 

@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 **S0–S19 + Sprints 0–5 do agents-hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **119/119** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **120/120** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
 > **O que cada sprint do agents-hub entregou** (todas na `main`):
 >
@@ -193,7 +193,7 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**119** hoje — o arquivo é a fonte, confira com
+      (**120** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant E cross-org**: a bateria
       (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
@@ -201,7 +201,7 @@
       organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
-      (`PENDING_ENDPOINTS` está vazio: cobertura **119/119**). As 3 rotas do
+      (`PENDING_ENDPOINTS` está vazio: cobertura **120/120**). As 3 rotas do
       **plano de contas** (S10) e as 3 da **carteira de títulos** (S11 — lista,
       agregados e sincronizar) e as 3 da S15 (relatório de recebíveis, leitura e
       registro do contexto do título) entraram como coleção; as 20 da S12 também:
@@ -227,7 +227,8 @@
       exportação (`GET`/`POST /export-layouts`, `POST /export-layouts/from-template`,
       `GET /export-layouts/{id}`, `POST /export-layouts/{id}/versions`), estas por
       ORGANIZAÇÃO como o catálogo da S12 (alvo da bateria numa terceira org). O
-      resumo do cliente (`GET /clients/{id}/summary`, 86e3k1q3j) também é coleção. Só
+      resumo do cliente (`GET /clients/{id}/summary`, 86e3k1q3j) e o fluxo previsto da
+      carteira (`GET /clients/{id}/titles/flow`, 86e3k1q4g) também são coleção. Só
       auth, tipos de anomalia, `test-connection`, `alert-test`, as 5 rotas de
       `/organizations` (plataforma, sem dado de cliente), `GET /export-layout-templates`
       (modelos declarados no código, iguais para toda organização) e o `POST /leads`
@@ -966,6 +967,9 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   do plano contábil parecia cortado, e carteira, de-para e plano de contas perdiam o
   respiro abaixo da paginação. A guarda é `exigirFimDaPaginaComRespiro` no e2e
   (`toBeInViewport` não pega: a borda colada está "na viewport").
+- **A tela de entrada do cliente é o painel (`/clientes/{id}`); a lista mora em
+  `/conciliacoes`; item do menu ativo casa pela própria rota, sem fallback** (86e3k1q5n).
+  Link para a lista sai de `reconciliationsPath()`, nunca de `/clientes/${id}` à mão.
 - **Tela dentro do cliente traz o PRÓPRIO `<h1>`** (86e3fr9q3): o `ClientShell` não tem
   cabeçalho (sem breadcrumb, nome do cliente, selos nem menu de ações; o nome está no menu
   lateral, e Editar e Encerrar moram na linha da lista de clientes). Tela nova sob
@@ -1467,6 +1471,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.81, 07/10/2026. **O painel virou a tela de entrada do cliente, com os contadores no menu e o fluxo previsto da carteira (86e3k1q3x, 86e3k1q4g, 86e3k1q54 e 86e3k1q5n, subtasks 4 a 7 do épico 86e3k1q1u; a 7 decidida pelo Pedro em 07/10).** `/clientes/{id}` renderiza o painel, a lista de conciliações foi para `/clientes/{id}/conciliacoes` e o `/painel` antigo é um 308 do `redirects()` do `next.config.mjs`, levando a query (um `permanentRedirect()` na página respondia 200 e redirecionava no navegador com refresh de 1 s) (o `?conectar=<tipo>` da gaveta de conexão nasceu apontando para ele); `homePathFor` e o `middleware.ts` não mudaram, e o item da casa do tenant na camada global passou a se chamar "Painel". No menu do cliente o "ativo por exclusão" acabou: cada item casa pela própria rota (Conciliações na lista, no detalhe e no processamento), e rota sem dono não acende nada. O menu lê o resumo do cliente e mostra três contadores, cada um no tom do badge da tela de destino: Conciliações em `info` (processando + em revisão), Carteira em `destructive` (títulos vencidos, ausente com `titles` nulo) e De-para em `warning` (sem decisão somado nos destinos); zero, carregando e erro ficam sem pílula, e as mutações que mudam as contagens invalidam o resumo (sem polling). Nasceu `GET /clients/{id}/titles/flow`: seis faixas fechadas por vencimento contra o "hoje" do servidor (`vencidos`, `ate_7`, `8_30`, `31_60`, `61_90`, `90_mais`, limites em `client_titles/flow.py`), a receber e a pagar com o líquido, numa query agregada com `client_id` e `scoped_by_tenant`; `vencidos` é a régua do aging (`due_date < hoje`), então as faixas somam o em aberto do `/summary` e `vencidos` é o vencido, provado contra o banco. O painel (`features/clients/dashboard/`) não calcula número no navegador: fechamento do mês (contas concluídas por conta do cache, anomalias com nome do catálogo, compras do cartão, de-para com "—" na cobertura nula), carteira com a barra de atraso e os rodapés de inadimplência e do vence-em-7-dias, fluxo previsto em SVG inline (cor por `style="fill: hsl(var(--token))"`, `role="img"` + tabela `sr-only`, vencidos fora das barras e o rótulo "não é saldo de conta") e origem e atividade; cada bloco carrega e falha sozinho, e um 403 da carteira esconde só carteira e fluxo. "Nova conciliação" usa a MESMA gaveta e a MESMA decisão da lista (`useCreateReconciliationDrawer`, `reconciliationCreation`). O "Resumo geral" do cabeçalho da conciliação passou a escrever a Diferença com `<Money tone="sign">`. O print de 390px achou dois defeitos que o axe não vê: a `<table className="sr-only">` ignorava o `width: 1px` (tabela cresce até o conteúdo) e empurrava a página para 422px, e os cinco líquidos sob as barras encostavam um no outro; o `sr-only` foi para um `div` e, abaixo de `sm`, o líquido vira lista. Lista canônica 119 → **120**, matriz (**29**) e pares de AAD (**17**) não mudaram._
 
 _Versão 1.80, 07/10/2026. **O menu do cliente virou três seções, o dinheiro com sinal ganhou um componente só, e nasceu o resumo do cliente (86e3k1q2j, 86e3k1q30 e 86e3k1q3j, subtasks 1 a 3 do épico 86e3k1q1u).** O menu do cliente (`clientNavSections`, em `nav-items.tsx`) devolve `NavSection[]` em Operação (Painel, Conciliações, Carteira, De-para, Origem por arquivo), Cadastros (Contas Bancárias, Glossário, Plano de Contas, Plano contábil) e Acesso (Usuários), renderizadas pelo MESMO `NavSections` da camada global; seção sem item some inteira (o operador não vê Acesso), o gating de cada item e a rota de entrada não mudaram (a lista de conciliações continua em `/clientes/{id}`, decisão da subtask 7) e "Conciliações" segue ativo por exclusão. O `NavItem` ganhou `count`, `countTone` e `countLabel`, ainda sem uso: o `NavLink` só desenha a pílula com o nome acessível presente (o número sozinho não diz do que é). Nasceu `components/shared/money.tsx` (`<Money>`, `moneyToneClass`, `formatMoney`): `tone="sign"` escreve `+` e o menos tipográfico U+2212 sobre `formatBRL(|valor|)`, zero no centavo sem sinal nem cor; `overdue`/`warning` colorem pela situação; `formatBRL` não mudou. Migraram o "Vencido" e os baldes da carteira, o total do relatório de recebíveis, a "Diferença" da aba Resumo e o valor da gaveta de lançamento no Omie (os dois últimos passaram a mostrar o sinal e a cor). O cenário e2e novo da Diferença (saldo divergente, que nenhum cenário montava) achou um defeito ANTERIOR: a nota da "Diferença" e o `hint` do `Indicator` eram `<p>` dentro do grupo do `<dl>` (axe `definition-list`, serious); viraram um segundo `<dd>`. Os pares `success`, `destructive` e `warning` sobre `background` e `card` entraram no `theme-contrast.test.ts`; o mais justo é `destructive` sobre `card` no Hologram, 5,00:1. `GET /clients/{id}/summary` (módulo `client_summary/`, `AccessibleClientDep`, `?month=YYYY-MM` validado por `COMPETENCE_PATTERN`) devolve só contagens: conciliações do mês por status e contas cobertas, anomalias abertas por código do tipo e resolvidas, compras de cartão elegíveis ao lançamento (`sem_omie`, sem vínculo, valor negativo, sem posting `confirmed`), categorias sem decisão e cobertura por destino ativo, se o destino está materializado, títulos vencidos (`null` sem `view_client_receivables`) e a conciliação mais recente. O de-para não tem segunda implementação: `listing.py` ganhou `universe_keys` e `situation_counts` (a mesma vigência e o mesmo universo da lista, sem decifrar histórico), e a cobertura é a `apply_mapping` sobre Σ|valor| por categoria somado no banco, com uma casa. Lista canônica 118 → **119**, matriz (**29**) e pares de AAD (**17**) não mudaram._
 

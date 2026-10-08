@@ -1291,9 +1291,196 @@ let titlesNeverSynced = false;
 /** Com `true`, a última tentativa falhou e a última BOA é de quatro dias antes. */
 let titlesSyncFailed = false;
 
+/**
+ * Painel do cliente (86e3k1q54): com `true`, as rotas `/titles/*` respondem 403
+ * e o resumo traz `titles: null` — o papel sem a célula da carteira. O painel
+ * esconde a carteira e o fluxo, e o resto segue.
+ */
+let titlesForbidden = false;
+
+/** O mês do fechamento do painel: o "hoje" fictício da carteira (2026-09-24). */
+const DASHBOARD_MONTH = '2026-09';
+
+/**
+ * As conciliações do mês do painel, uma por conta do cache: o cartão em revisão
+ * (o `SESSION_ID`, para os links abrirem o detalhe mockado) e a conta corrente
+ * concluída. Só a lista filtrada por `month=2026-09` as devolve.
+ */
+const DASHBOARD_MONTH_SESSIONS = [
+  session({
+    reference_month: '2026-09-01',
+    account_type: 'credit_card',
+    status: 'reviewing',
+    anomaly_count: 5,
+    created_at: '2026-09-23T14:00:00Z',
+  }),
+  session({
+    id: '22222222-2222-4222-8222-222222222299',
+    omie_conta_id: 11,
+    account_type: 'checking',
+    reference_month: '2026-09-01',
+    status: 'done',
+    anomaly_count: 0,
+    created_at: '2026-09-20T10:00:00Z',
+  }),
+];
+
+/** Catálogo de tipos de anomalia com nome (só para o pedido paginado do painel). */
+const DASHBOARD_ANOMALY_TYPES = [
+  {
+    id: 'a0000000-0000-4000-8000-000000000001',
+    code: 'wrong_date',
+    name: 'Data divergente',
+    description: null,
+    active: true,
+  },
+  {
+    id: 'a0000000-0000-4000-8000-000000000002',
+    code: 'missing_in_omie',
+    name: 'Sem lançamento no Omie',
+    description: null,
+    active: true,
+  },
+];
+
+/** O resumo do cliente (`GET /clients/{id}/summary`) coerente com o cenário. */
+function clientSummaryDoCenario(): Record<string, unknown> {
+  const titles = titlesSummaryDoCenario() as {
+    aPagar: { qtdVencido: number; totalVencido: string };
+    aReceber: { qtdVencido: number; totalVencido: string };
+    syncedAt: string | null;
+    neverSynced: boolean;
+  };
+  const titlesBlock = titlesForbidden
+    ? null
+    : {
+        overdueCount: titles.aReceber.qtdVencido + titles.aPagar.qtdVencido,
+        overdueTotal: (
+          Number(titles.aReceber.totalVencido) + Number(titles.aPagar.totalVencido)
+        ).toFixed(2),
+        aPagar: {
+          overdueCount: titles.aPagar.qtdVencido,
+          overdueTotal: titles.aPagar.totalVencido,
+        },
+        aReceber: {
+          overdueCount: titles.aReceber.qtdVencido,
+          overdueTotal: titles.aReceber.totalVencido,
+        },
+        syncedAt: titles.syncedAt,
+        neverSynced: titles.neverSynced,
+      };
+  const mapping = [
+    {
+      destinationCode: 'demonstrativo_contabil',
+      withoutDecision: 4,
+      coveragePct: '76.4',
+      materialized: false,
+    },
+    {
+      destinationCode: 'fluxo_de_caixa',
+      withoutDecision: 0,
+      coveragePct: '100.0',
+      materialized: true,
+    },
+  ];
+  if (noSessions) {
+    return {
+      referenceMonth: DASHBOARD_MONTH,
+      reconciliations: {
+        accountsTotal: ACCOUNTS.length,
+        accountsWithSession: 0,
+        byStatus: { processing: 0, reviewing: 0, done: 0, error: 0 },
+      },
+      anomalies: { openTotal: 0, byType: [], resolvedInMonth: 0 },
+      cardPurchasesToPost: { count: 0, totalAmount: '0.00' },
+      mapping,
+      titles: titlesBlock,
+      latestSession: null,
+    };
+  }
+  return {
+    referenceMonth: DASHBOARD_MONTH,
+    reconciliations: {
+      accountsTotal: ACCOUNTS.length,
+      accountsWithSession: 2,
+      byStatus: { processing: 0, reviewing: 1, done: 1, error: 0 },
+    },
+    anomalies: {
+      openTotal: 5,
+      byType: [
+        { code: 'missing_in_omie', count: 2 },
+        { code: 'wrong_date', count: 3 },
+      ],
+      resolvedInMonth: 2,
+    },
+    cardPurchasesToPost: { count: 3, totalAmount: '-1284.90' },
+    mapping,
+    titles: titlesBlock,
+    latestSession: {
+      id: SESSION_ID,
+      referenceMonth: '2026-09-01',
+      status: 'reviewing',
+      accountType: 'credit_card',
+      createdAt: '2026-09-23T14:00:00Z',
+    },
+  };
+}
+
+/**
+ * O fluxo previsto (`GET /clients/{id}/titles/flow`), coerente com o resumo da
+ * carteira: `vencidos` é o total vencido de cada lado, e as outras cinco faixas
+ * somam o a vencer (10.000,00 a receber em 12 títulos; 17.092,70 a pagar em 27).
+ * A faixa 61 a 90 vem vazia de propósito: é o "sem títulos" do gráfico.
+ */
+function titlesFlowDoCenario(): Record<string, unknown> {
+  const side = (total: string, count: number) => ({ total, count });
+  const faixa = (bucket: string, receber: [string, number], pagar: [string, number]) => ({
+    bucket,
+    aReceber: side(...receber),
+    aPagar: side(...pagar),
+    net: (Number(receber[0]) - Number(pagar[0])).toFixed(2),
+  });
+  if (titlesNeverSynced) {
+    return {
+      referenceDate: '2026-09-24',
+      syncedAt: null,
+      neverSynced: true,
+      buckets: ['vencidos', 'ate_7', '8_30', '31_60', '61_90', '90_mais'].map((b) =>
+        faixa(b, ['0.00', 0], ['0.00', 0]),
+      ),
+    };
+  }
+  return {
+    referenceDate: '2026-09-24',
+    syncedAt: '2026-09-24T09:00:00Z',
+    neverSynced: false,
+    buckets: [
+      faixa('vencidos', ['97413.10', 136], ['2907.30', 3]),
+      faixa('ate_7', ['2500.00', 3], ['3100.00', 6]),
+      faixa('8_30', ['4200.00', 5], ['6892.70', 12]),
+      faixa('31_60', ['1800.00', 2], ['4600.00', 5]),
+      faixa('61_90', ['0.00', 0], ['0.00', 0]),
+      faixa('90_mais', ['1500.00', 2], ['2500.00', 4]),
+    ],
+  };
+}
+
 function titlesSummaryDoCenario(): Record<string, unknown> {
   const base = {
-    aPagar: agingTotals({ totalEmAberto: '20000.00', qtdEmAberto: 30 }),
+    // A pagar COERENTE (86e3k1q54): vencido = soma dos baldes = os dois grupos do
+    // relatório de recebíveis (2.017,30 + 890,00), e a vencer + vencido = em aberto.
+    aPagar: agingTotals({
+      totalEmAberto: '20000.00',
+      totalAVencer: '17092.70',
+      totalVencido: '2907.30',
+      bucket1a30: '0.00',
+      bucket31a60: '0.00',
+      bucket61a90: '0.00',
+      bucket90Mais: '2907.30',
+      qtdEmAberto: 30,
+      qtdAVencer: 27,
+      qtdVencido: 3,
+    }),
     aReceber: agingTotals(),
     neverSynced: false,
     syncedAt: '2026-09-24T09:00:00Z',
@@ -2166,8 +2353,22 @@ async function fulfillApi(route: Route): Promise<void> {
   // Carteira de títulos (S11/R3·R4). Mesma ordem do FastAPI: as rotas LITERAIS
   // vêm antes da lista, senão `/summary` e `/sync` casariam com um `startsWith`
   // da lista e a tela receberia um array onde espera os agregados.
+  // Painel (86e3k1q54): o papel sem a célula da carteira recebe 403 em toda
+  // rota `/titles/*` e `titles: null` no resumo.
+  if (titlesForbidden && path.startsWith(`/api/v1/clients/${CLIENT_ID}/titles`)) {
+    return route.fulfill({
+      status: 403,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: { code: 'FORBIDDEN', message: 'forbidden', userMessage: 'Sem acesso.' },
+      }),
+    });
+  }
   if (path === `/api/v1/clients/${CLIENT_ID}/titles/summary`) {
     return json(titlesSummaryDoCenario());
+  }
+  if (path === `/api/v1/clients/${CLIENT_ID}/titles/flow`) {
+    return json(titlesFlowDoCenario());
   }
   if (path === `/api/v1/clients/${CLIENT_ID}/titles/sync`) {
     titlesNeverSynced = false;
@@ -2558,7 +2759,36 @@ async function fulfillApi(route: Route): Promise<void> {
     }
     return json(CLIENT_DETAIL);
   }
+  // Resumo do cliente (86e3k1q3j): o menu (contadores) e o painel o leem em
+  // TODA tela do cliente. Sem este mock o fallback devolveria uma lista vazia
+  // onde o menu espera as contagens.
+  if (path === `/api/v1/clients/${CLIENT_ID}/summary`) {
+    return json(clientSummaryDoCenario());
+  }
+  // O painel pede o catálogo PAGINADO com 100 por página para dar nome aos tipos
+  // de anomalia do resumo; os outros pedidos seguem no fallback de sempre.
+  if (path === '/api/v1/anomaly-types' && url.searchParams.get('pageSize') === '100') {
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: DASHBOARD_ANOMALY_TYPES,
+        pagination: {
+          page: 1,
+          pageSize: 100,
+          total: DASHBOARD_ANOMALY_TYPES.length,
+          totalPages: 1,
+        },
+      }),
+    });
+  }
   if (path === `/api/v1/clients/${CLIENT_ID}/reconciliations`) {
+    // A lista filtrada pelo mês do painel devolve as conciliações do mês, uma por
+    // conta; sem o filtro, a lista de sempre.
+    if (url.searchParams.get('month') === DASHBOARD_MONTH) {
+      const list = noSessions ? [] : DASHBOARD_MONTH_SESSIONS;
+      return json({ data: list, pagination: { ...PAGINATION, total: list.length } });
+    }
     const list = noSessions ? [] : listOverflows ? OVERFLOW_SESSIONS : SESSIONS;
     return json({ data: list, pagination: { ...PAGINATION, total: list.length } });
   }
@@ -3054,6 +3284,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   // S11: a carteira está sincronizada e a última tentativa deu certo, por padrão.
   titlesNeverSynced = false;
   titlesSyncFailed = false;
+  titlesForbidden = false;
   // S12: a competência da prévia do de-para está sincronizada, por padrão.
   mappingNeverSynced = false;
   // S14: a origem é o Omie por padrão; o cliente sem sistema (arquivo), o
@@ -3129,7 +3360,7 @@ test.describe('CSP de produção sem unsafe-eval (86e3anx7y)', () => {
     await context.addCookies([
       { name: 'access_token', value: 'e2e-mock', url: baseURL ?? 'http://localhost:3000' },
     ]);
-    const authenticated = await page.goto(`/clientes/${CLIENT_ID}`);
+    const authenticated = await page.goto(`/clientes/${CLIENT_ID}/conciliacoes`);
     expect(authenticated?.status()).toBe(200);
     const authenticatedScriptSrc = scriptSrc(authenticated?.headers()['content-security-policy']);
     expect(authenticatedScriptSrc).toContain("'self'");
@@ -3186,7 +3417,7 @@ for (const vp of VIEWPORTS) {
     test.use({ viewport: vp.size });
 
     test('Lista de Conciliações (R1)', async ({ page }) => {
-      await page.goto(`/clientes/${CLIENT_ID}`);
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacoes`);
       await expect(page.getByRole('heading', { name: 'Conciliações' })).toBeVisible();
       await expect(page.getByText('Processada').first()).toBeVisible();
       await analyze(page, `lista de conciliações (${vp.label})`);
@@ -3210,7 +3441,7 @@ for (const vp of VIEWPORTS) {
      */
     test('a barra de paginação NUNCA cobre um card (86e2u4nxg)', async ({ page }) => {
       listOverflows = true;
-      await page.goto(`/clientes/${CLIENT_ID}`);
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacoes`);
       await expect(page.getByRole('heading', { name: 'Conciliações', level: 1 })).toBeVisible();
       const bar = page.getByRole('navigation', { name: 'Paginação de conciliações' });
       await expect(bar).toBeVisible();
@@ -3243,7 +3474,7 @@ for (const vp of VIEWPORTS) {
         page,
       }) => {
         listOverflows = true;
-        await page.goto(`/clientes/${CLIENT_ID}`);
+        await page.goto(`/clientes/${CLIENT_ID}/conciliacoes`);
         const lista = page.getByRole('region', { name: 'Lista de conciliações' });
         await expect(lista).toBeVisible();
 
@@ -3306,7 +3537,7 @@ for (const vp of VIEWPORTS) {
     });
 
     test('Gaveta de criação (R2)', async ({ page }) => {
-      await page.goto(`/clientes/${CLIENT_ID}`);
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacoes`);
       await page.getByRole('button', { name: 'Criar conciliação' }).first().click();
       await expect(page.getByRole('dialog')).toBeVisible();
       await aguardarAnimacao(page.getByRole('dialog'));
@@ -3315,7 +3546,7 @@ for (const vp of VIEWPORTS) {
     });
 
     test('Sino de notificações aberto (R4)', async ({ page }) => {
-      await page.goto(`/clientes/${CLIENT_ID}`);
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacoes`);
       await page.getByRole('button', { name: /Notificações/ }).click();
       const menu = page.getByRole('menu');
       await expect(menu).toBeVisible();
@@ -3383,7 +3614,7 @@ for (const vp of VIEWPORTS) {
     });
 
     test('badge de status é LEGÍVEL (contraste medido ≥ 4.5:1)', async ({ page }) => {
-      await page.goto(`/clientes/${CLIENT_ID}`);
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacoes`);
       const badge = page.getByText('Processada').first();
       await expect(badge).toBeVisible();
       // O rótulo tem que existir como texto visível — badge vazio não é badge.
@@ -3823,6 +4054,10 @@ test.describe('Sidebar em camadas (86e2n39h7)', () => {
   test('menu do cliente substitui o global, e Voltar restaura a lista', async ({ page }) => {
     await page.goto(`/clientes/${CLIENT_ID}`);
     const clientNav = page.getByRole('navigation', { name: 'Seções do cliente' });
+    // 86e3k1q5n: a raiz do cliente é o PAINEL, e cada item casa pela própria rota.
+    const ativos = clientNav.locator('a[aria-current="page"]');
+    await expect(ativos).toHaveCount(1);
+    await expect(ativos).toHaveText('Painel');
     await expect(clientNav.getByRole('link', { name: 'Contas Bancárias' })).toBeVisible();
     await expect(clientNav.getByText('Cliente Exemplo Ltda')).toBeVisible();
     // 86e3k1q2j: o menu do cliente vem em seções, com o Painel abrindo a Operação.
@@ -3834,6 +4069,16 @@ test.describe('Sidebar em camadas (86e2n39h7)', () => {
     await expect(page.getByRole('button', { name: 'Abrir menu de navegação' })).toHaveCount(0);
     await analyze(page, 'sidebar contextual do cliente (desktop)');
     await shot(page, 'sidebar-camadas-cliente-desktop');
+
+    // "Conciliações" leva à lista e fica ativo nela e no detalhe de uma conciliação.
+    await clientNav.getByRole('link', { name: /^Conciliações/ }).click();
+    await expect(page).toHaveURL(new RegExp(`/clientes/${CLIENT_ID}/conciliacoes$`));
+    await expect(page.getByRole('heading', { name: 'Conciliações', level: 1 })).toBeVisible();
+    await expect(ativos).toHaveCount(1);
+    await expect(ativos).toHaveText(/^Conciliações/);
+    await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}`);
+    await expect(ativos).toHaveCount(1);
+    await expect(ativos).toHaveText(/^Conciliações/);
 
     await clientNav.getByRole('link', { name: 'Voltar para clientes' }).click();
     await expect(page).toHaveURL(/\/clientes$/);
@@ -3990,6 +4235,156 @@ test.describe('Menu mobile — drawer (86e2n4pf9)', () => {
 });
 
 /**
+ * 86e3k1q3x · 86e3k1q54 · 86e3k1q5n — o painel do cliente como tela de entrada,
+ * com os contadores do menu.
+ *
+ * O resumo, a carteira e o fluxo vêm dos mocks coerentes (`clientSummaryDoCenario`,
+ * `titlesSummaryDoCenario`, `titlesFlowDoCenario`): os baldes somam o vencido e as
+ * faixas somam o a vencer. Os quatro estados que mudam o desenho (completo,
+ * operador sem a carteira, sem conciliação, encerrado) são medidos nos dois
+ * viewports, com print, e o 390px não pode rolar na horizontal (o SVG e os cards
+ * de totais são o que costuma estourar; o axe não mede transbordo).
+ */
+for (const vp of VIEWPORTS) {
+  const slugP = vp.label.replace(/\s+/g, '-');
+  test.describe(`Painel do cliente (86e3k1q54) — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('painel completo: os cinco blocos, o gráfico e o rodapé honesto', async ({ page }) => {
+      await page.goto(`/clientes/${CLIENT_ID}`);
+      await expect(page.getByRole('heading', { name: 'Painel', level: 1 })).toBeVisible();
+      await expect(page.getByText(/fechamento de setembro de 2026/)).toBeVisible();
+      for (const bloco of ['Fechamento do mês', 'Carteira em aberto', 'Origem e atividade']) {
+        await expect(page.getByRole('heading', { name: bloco, level: 2 })).toBeVisible();
+      }
+      const fechamento = page.getByRole('region', { name: 'Conciliações do mês' });
+      await expect(fechamento).toContainText('1 de 2 contas concluídas');
+      await expect(page.getByRole('region', { name: 'Anomalias em aberto' })).toContainText(
+        'Data divergente',
+      );
+      await expect(
+        page
+          .getByRole('region', { name: 'Compras do cartão a lançar' })
+          .getByText(/\u2212R\$\s*1\.284,90/),
+      ).toHaveClass(/text-destructive/);
+      const fluxo = page.getByRole('region', { name: 'Fluxo previsto pelos vencimentos' });
+      await expect(fluxo.getByRole('img', { name: /Fluxo previsto por faixa/ })).toBeVisible();
+      await expect(fluxo).toContainText('sem títulos');
+      await expect(fluxo).toContainText('Não é saldo de conta');
+      await expect(page.getByRole('link', { name: 'Ver conciliações' })).toHaveAttribute(
+        'href',
+        `/clientes/${CLIENT_ID}/conciliacoes`,
+      );
+      await expect(page.getByRole('button', { name: 'Nova conciliação' })).toBeVisible();
+      await expect(page.locator('#__next_error__')).toHaveCount(0);
+      await exigirSemRolagemHorizontal(page, `painel (${vp.label})`);
+      await analyze(page, `painel completo (${vp.label})`);
+      await shot(page, `painel-completo-${slugP}`);
+      // O print de página inteira não pinta abaixo da dobra em 390px: um print
+      // de JANELA por bloco, rolado até ele, para conferir o resto do painel.
+      const blocos = [
+        ['carteira', page.getByRole('heading', { name: 'Carteira em aberto', level: 2 })],
+        ['fluxo', page.getByRole('region', { name: 'Fluxo previsto pelos vencimentos' })],
+        ['origem', page.getByRole('heading', { name: 'Origem e atividade', level: 2 })],
+      ] as const;
+      for (const [nome, alvo] of blocos) {
+        await alvo.scrollIntoViewIfNeeded();
+        await shotTela(page, `painel-completo-${nome}-${slugP}`);
+      }
+
+      // "Nova conciliação" abre a MESMA gaveta da lista.
+      await page.getByRole('button', { name: 'Nova conciliação' }).click();
+      const gaveta = page.getByRole('dialog');
+      await expect(gaveta).toBeVisible();
+      await aguardarAnimacao(gaveta);
+      await analyze(page, `painel com a gaveta de criação (${vp.label})`);
+    });
+
+    test('operador sem a carteira (403 + titles nulo): somem carteira e fluxo', async ({
+      page,
+    }) => {
+      sessionUser = CLIENT_OPERATOR_USER;
+      titlesForbidden = true;
+      await page.goto(`/clientes/${CLIENT_ID}`);
+      await expect(
+        page.getByRole('heading', { name: 'Fechamento do mês', level: 2 }),
+      ).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Carteira em aberto' })).toHaveCount(0);
+      await expect(
+        page.getByRole('region', { name: 'Fluxo previsto pelos vencimentos' }),
+      ).toHaveCount(0);
+      // Só dentro do <main>: o anunciador de rota do Next também é um `alert` (vazio).
+      await expect(page.locator('main').getByRole('alert')).toHaveCount(0);
+      await exigirSemRolagemHorizontal(page, `painel do operador (${vp.label})`);
+      await analyze(page, `painel do operador sem carteira (${vp.label})`);
+      await shot(page, `painel-operador-sem-carteira-${slugP}`);
+    });
+
+    test('cliente sem conciliação: o card mostra o estado vazio pela regra de origem', async ({
+      page,
+    }) => {
+      noSessions = true;
+      await page.goto(`/clientes/${CLIENT_ID}`);
+      const vazio = page.getByTestId('dashboard-no-reconciliations');
+      await expect(vazio).toHaveAttribute('data-state', 'pronto');
+      await expect(vazio.getByRole('link', { name: /Ir para conciliações/ })).toHaveAttribute(
+        'href',
+        `/clientes/${CLIENT_ID}/conciliacoes`,
+      );
+      await exigirSemRolagemHorizontal(page, `painel sem conciliação (${vp.label})`);
+      await analyze(page, `painel sem conciliação (${vp.label})`);
+      await shot(page, `painel-sem-conciliacao-${slugP}`);
+    });
+
+    test('cliente encerrado: só leitura, sem criar nem sincronizar', async ({ page }) => {
+      clientClosed = true;
+      await page.goto(`/clientes/${CLIENT_ID}`);
+      await expect(page.getByText('Cliente encerrado: somente leitura')).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Painel', level: 1 })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Nova conciliação' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Sincronizar agora' })).toHaveCount(0);
+      await exigirSemRolagemHorizontal(page, `painel encerrado (${vp.label})`);
+      await analyze(page, `painel de cliente encerrado (${vp.label})`);
+      await shot(page, `painel-encerrado-${slugP}`);
+    });
+
+    test('menu com contadores: nome acessível em cada um, só nos três itens', async ({ page }) => {
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacoes`);
+      if (vp.label !== 'desktop') {
+        await page.getByRole('button', { name: 'Abrir menu de navegação' }).click();
+        await aguardarAnimacao(page.getByRole('dialog', { name: 'Menu' }));
+      }
+      const nav = page.getByRole('navigation', { name: 'Seções do cliente' });
+      await expect(nav.getByRole('img', { name: '1 em andamento' })).toBeVisible();
+      await expect(nav.getByRole('img', { name: '139 títulos vencidos' })).toBeVisible();
+      await expect(nav.getByRole('img', { name: '4 categorias sem decisão' })).toBeVisible();
+      await expect(nav.getByRole('img')).toHaveCount(3);
+      await analyze(page, `menu com contadores (${vp.label})`);
+      await shot(page, `menu-contadores-${slugP}`);
+    });
+
+    test('o endereço antigo /painel redireciona para a raiz, com a query', async ({ page }) => {
+      // `?conectar=arquivo` nasceu apontando para `/painel` (86e3fqnc9): a gaveta
+      // abrir já no tipo pedido prova que a query sobreviveu ao redirect.
+      originState = 'sem_origem';
+      // 308 de verdade, do servidor (redirect do `next.config`), com a query no destino.
+      const resposta = await page.request.get(`/clientes/${CLIENT_ID}/painel?conectar=arquivo`, {
+        maxRedirects: 0,
+      });
+      expect(resposta.status()).toBe(308);
+      expect(resposta.headers()['location']).toMatch(
+        new RegExp(`/clientes/${CLIENT_ID}\\?conectar=arquivo$`),
+      );
+      await page.goto(`/clientes/${CLIENT_ID}/painel?conectar=arquivo`);
+      await expect(page).toHaveURL(new RegExp(`/clientes/${CLIENT_ID}(\\?|$)`));
+      await expect(page).not.toHaveURL(/\/painel/);
+      const gaveta = page.getByRole('dialog').filter({ hasText: 'Conectar origem' });
+      await expect(gaveta).toBeVisible();
+    });
+  });
+}
+
+/**
  * 86e3k1q30 — a "Diferença" do Resumo passa pelo `<Money tone="sign">`: o sinal
  * é o menos tipográfico (U+2212) e a cor vem do token. Só aparece com o saldo
  * DIVERGENTE, que nenhum outro cenário monta; o axe mede o contraste do valor
@@ -4011,6 +4406,11 @@ for (const vp of VIEWPORTS) {
       const valor = resumo.getByText(/^\u2212R\$\s*20,00$/);
       await expect(valor).toBeVisible();
       await expect(valor).toHaveClass(/text-destructive/);
+      // O "Resumo geral" do cabeçalho escreve a MESMA Diferença do mesmo jeito.
+      const cabecalho = page.getByRole('region', { name: 'Resumo geral' });
+      const valorCabecalho = cabecalho.getByText(/^\u2212R\$\s*20,00$/);
+      await expect(valorCabecalho).toBeVisible();
+      await expect(valorCabecalho).toHaveClass(/text-destructive/);
       await expect(page.locator('#__next_error__')).toHaveCount(0);
       await analyze(page, `resumo com saldo divergente (${vp.label})`);
       await shot(page, `resumo-diferenca-${slugD}`);
@@ -5480,7 +5880,7 @@ for (const vp of VIEWPORTS) {
     for (const profile of PROFILES) {
       test(`${profile.key}: navegação e ações conforme a matriz (R4)`, async ({ page }) => {
         sessionUser = profile.user();
-        await page.goto(`/clientes/${CLIENT_ID}`);
+        await page.goto(`/clientes/${CLIENT_ID}/conciliacoes`);
         await expect(page.getByRole('heading', { name: 'Conciliações', level: 1 })).toBeVisible();
 
         // No mobile a navegação do cliente mora no DRAWER (86e2n4pf9): abrir
@@ -6263,7 +6663,7 @@ for (const vp of VIEWPORTS) {
       await shot(page, `lista-clientes-acoes-${slug}`);
       await analyze(page, `lista de clientes com as ações da linha (${vp.label})`);
 
-      await page.goto(`/clientes/${CLIENT_ID}`);
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacoes`);
       await expect(page.getByRole('heading', { level: 1, name: 'Conciliações' })).toBeVisible();
       for (const acao of ['Ações do cliente', 'Editar cliente', 'Encerrar cliente']) {
         await expect(page.getByRole('button', { name: acao })).toHaveCount(0);
@@ -6451,7 +6851,7 @@ for (const vp of VIEWPORTS) {
       sessionUser = CLIENT_OPERATOR_USER;
       await page.goto('/clientes');
       await page.waitForURL(`**/clientes/${CLIENT_ID}`);
-      await expect(page.getByRole('heading', { name: 'Conciliações', level: 1 })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Painel', level: 1 })).toBeVisible();
     });
   });
 }
@@ -6503,7 +6903,7 @@ for (const vp of VIEWPORTS) {
     test('painel: os TRÊS estados de origem, com copy própria em cada um', async ({ page }) => {
       // 1) SEM ORIGEM — convida a conectar.
       originState = 'sem_origem';
-      await page.goto(`/clientes/${CLIENT_ID}/painel`);
+      await page.goto(`/clientes/${CLIENT_ID}`);
       const bloco = page.locator('[data-origin-status]');
       await expect(bloco).toHaveAttribute('data-origin-status', 'sem_origem');
       await expect(bloco).toContainText('Sem origem conectada');
@@ -6514,7 +6914,7 @@ for (const vp of VIEWPORTS) {
       // 2) ORIGEM EM ERRO — diz "com erro" e manda RECONECTAR. Mandar "conectar"
       // aqui faria o usuário criar uma conexão que já existe (o defeito do R7).
       originState = 'erro';
-      await page.goto(`/clientes/${CLIENT_ID}/painel`);
+      await page.goto(`/clientes/${CLIENT_ID}`);
       await expect(bloco).toHaveAttribute('data-origin-status', 'erro');
       await expect(bloco).toContainText('Origem com erro');
       await expect(bloco).not.toContainText('Sem origem conectada');
@@ -6526,7 +6926,7 @@ for (const vp of VIEWPORTS) {
 
       // 3) ORIGEM ATIVA — nada a consertar, nenhuma ação corretiva oferecida.
       originState = 'ativa';
-      await page.goto(`/clientes/${CLIENT_ID}/painel`);
+      await page.goto(`/clientes/${CLIENT_ID}`);
       await expect(bloco).toHaveAttribute('data-origin-status', 'ativa');
       await expect(bloco).toContainText('Origem ativa');
       await expect(page.getByRole('button', { name: 'Reconectar' })).toHaveCount(0);
@@ -6535,7 +6935,7 @@ for (const vp of VIEWPORTS) {
 
     test('gaveta de conexão: Cancelar à esquerda e nada cortado na borda', async ({ page }) => {
       originState = 'sem_origem';
-      await page.goto(`/clientes/${CLIENT_ID}/painel`);
+      await page.goto(`/clientes/${CLIENT_ID}`);
 
       await page.getByRole('button', { name: 'Conectar origem' }).first().click();
       const gaveta = page.getByRole('dialog').filter({ hasText: 'Conectar origem' });
@@ -6571,7 +6971,7 @@ for (const vp of VIEWPORTS) {
 
       // Conciliações: o histórico continua, mas "Criar conciliação" some — o
       // servidor responderia 409 `SEM_CONEXAO`.
-      await page.goto(`/clientes/${CLIENT_ID}`);
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacoes`);
       const estadoLista = page.locator('[data-origin-state="SEM_CONEXAO"]');
       await expect(estadoLista).toBeVisible();
       await expect(estadoLista).toContainText('Este cliente não tem origem conectada');
@@ -6591,7 +6991,7 @@ for (const vp of VIEWPORTS) {
     test('operador do cliente vê o estado da origem e NENHUMA ação (R5)', async ({ page }) => {
       sessionUser = CLIENT_OPERATOR_USER;
       originState = 'sem_origem';
-      await page.goto(`/clientes/${CLIENT_ID}/painel`);
+      await page.goto(`/clientes/${CLIENT_ID}`);
 
       // Ele precisa SABER por que a conciliação dele não roda...
       await expect(page.locator('[data-origin-status="sem_origem"]')).toContainText(
@@ -6693,10 +7093,7 @@ for (const vp of VIEWPORTS) {
         vazio,
       );
       const conectar = page.getByRole('link', { name: 'Conectar origem por arquivo' });
-      await expect(conectar).toHaveAttribute(
-        'href',
-        `/clientes/${CLIENT_ID}/painel?conectar=arquivo`,
-      );
+      await expect(conectar).toHaveAttribute('href', `/clientes/${CLIENT_ID}?conectar=arquivo`);
 
       await shot(page, `origem-arquivo-sem-origem-${slugF}`);
       await analyze(page, `origem por arquivo — cliente sem origem (${vp.label})`);
@@ -6896,7 +7293,7 @@ for (const vp of VIEWPORTS) {
     // 86e3g9u3w: um cliente tem um tipo de origem de lançamentos só (§4.8), e
     // oferecer o outro é oferecer um 409 depois do formulário inteiro preenchido.
     test('gaveta num cliente com Omie: o tipo "Arquivo" nem é oferecido', async ({ page }) => {
-      await page.goto(`/clientes/${CLIENT_ID}/painel`);
+      await page.goto(`/clientes/${CLIENT_ID}`);
 
       await page.getByRole('button', { name: 'Conectar origem' }).first().click();
       const gaveta = page.getByRole('dialog').filter({ hasText: 'Conectar origem' });
@@ -6914,7 +7311,7 @@ for (const vp of VIEWPORTS) {
     }) => {
       noSessions = true;
       clientFileOrigin = true;
-      await page.goto(`/clientes/${CLIENT_ID}/painel`);
+      await page.goto(`/clientes/${CLIENT_ID}`);
 
       const vazio = page.getByTestId('dashboard-no-reconciliations');
       await expect(vazio).toHaveAttribute('data-state', 'arquivo');
@@ -6938,7 +7335,7 @@ for (const vp of VIEWPORTS) {
       page,
     }) => {
       originState = 'sem_origem';
-      await page.goto(`/clientes/${CLIENT_ID}/painel`);
+      await page.goto(`/clientes/${CLIENT_ID}`);
 
       await page.getByRole('button', { name: 'Conectar origem' }).first().click();
       const gaveta = page.getByRole('dialog').filter({ hasText: 'Conectar origem' });

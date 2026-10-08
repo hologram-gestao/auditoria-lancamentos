@@ -84,6 +84,12 @@ flex-col overflow-hidden`) + `<Table fill>` (`:27`, `:43`). Nunca `overflow` no
   entre o alvo e o fundo do `<main>` rolado até o fim ≥ o padding), no cenário
   "a página termina com o respiro do <main>" de `TELAS_COM_TABELA` e no do plano contábil.
   Tela nova pageScroll entra em `TELAS_COM_TABELA` com `pageScroll: true`.
+- **Rota de entrada do cliente** (86e3k1q5n): `/clientes/{id}` é o PAINEL; a lista de
+  conciliações mora em `/clientes/{id}/conciliacoes` e todo link para ela sai de
+  `reconciliationsPath()` (`navigation/nav-items.tsx`). No menu do cliente cada item casa
+  pela PRÓPRIA rota (`isPathActive`), sem item "ativo por exclusão": rota nova que nenhum
+  item reivindica fica sem item aceso. O `/painel` antigo é um 308 do `redirects()` do `next.config.mjs` (leva a query);
+  `permanentRedirect()` numa página responde 200 e redireciona no navegador com refresh de 1 s.
 - **Shell**: só o `<main>` rola — `app/(app)/layout.tsx:121` (`h-dvh overflow-hidden`)
   e `:168` (`main … overflow-y-auto`). Proibido `h-screen`/`min-h-screen`/`100vh`.
 - Travas no browser: "a barra de paginação NUNCA cobre um card" (`e2e/a11y-mocked.spec.ts:1081`)
@@ -417,6 +423,15 @@ lang="pt-BR">` (`reconciliations/list/reconciliations-list.tsx:184-189`) ou `Sel
   ```bash
   grep -rn 'type="date"' apps/web/src --include=*.tsx | wc -l   # esperado: 0
   ```
+- **Gráfico é SVG inline, sem biblioteca** (86e3k1q54, `clients/dashboard/flow-chart.tsx`):
+  cor por `style={{ fill: 'hsl(var(--info))' }}` (token, nunca hex nem classe de paleta);
+  `<svg role="img" aria-label="…">` com o resumo da série e uma tabela com os mesmos
+  números para leitor de tela, embrulhada num `<div className="sr-only">` — **nunca**
+  `sr-only` na própria `<table>`: tabela ignora o `width: 1px`, cresce até o conteúdo e
+  empurrou a página para 422px em 390px. Texto (eixo, faixas, valores) é HTML posicionado
+  por porcentagem sobre o SVG esticado (`preserveAspectRatio="none"`), senão encolhe a 5px
+  no celular; o eixo tem calha própria para o rótulo nunca cobrir uma barra. Confira o
+  print de 390px: cinco valores com sinal lado a lado não cabem.
 - **Tabela > 100 linhas virtualizada** (`@tanstack/react-virtual` está instalado e HOJE
   não é usado): toda lista é paginada com `pageSize ≤ 100` (teto do backend), então
   nenhuma tabela ultrapassa. Tabela nova que renderize mais que 100 linhas sem paginação

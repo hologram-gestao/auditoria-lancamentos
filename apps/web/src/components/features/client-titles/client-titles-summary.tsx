@@ -38,17 +38,19 @@ import { cn } from '@/lib/utils';
 import { BUCKET_LABELS, TITLE_TYPE_LABELS } from './client-titles-badges';
 
 /** Os QUATRO baldes de atraso, na ordem da segmentação do escritório. */
-const OVERDUE_BUCKETS = ['1_30', '31_60', '61_90', '90_mais'] as const satisfies readonly Exclude<
-  AgingBucket,
-  'a_vencer'
->[];
+export const OVERDUE_BUCKETS = [
+  '1_30',
+  '31_60',
+  '61_90',
+  '90_mais',
+] as const satisfies readonly Exclude<AgingBucket, 'a_vencer'>[];
 
 /**
  * O tom de cada balde no `<Money>`: só o 90+ é atraso destacado (é o dinheiro
  * que a reunião procura primeiro), o 61 a 90 é aviso, e os dois primeiros não
  * colorem. O rótulo do balde, ao lado, diz o que a cor quer dizer.
  */
-const BUCKET_TONE: Record<(typeof OVERDUE_BUCKETS)[number], MoneyTone> = {
+export const BUCKET_TONE: Record<(typeof OVERDUE_BUCKETS)[number], MoneyTone> = {
   '1_30': 'neutral',
   '31_60': 'neutral',
   '61_90': 'warning',

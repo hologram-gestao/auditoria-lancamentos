@@ -242,7 +242,7 @@ describe('Editar cliente — a credencial saiu (R5)', () => {
     render(<EditClientModal open onOpenChange={vi.fn()} client={client} />);
     expect(screen.getByRole('link', { name: 'Origens de dado' })).toHaveAttribute(
       'href',
-      '/clientes/c1/painel',
+      '/clientes/c1',
     );
   });
 
