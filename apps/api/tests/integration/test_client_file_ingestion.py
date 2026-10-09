@@ -73,6 +73,7 @@ from app.db.session import get_db_session
 from app.main import app as fastapi_app
 from app.modules.client_file_ingestion.repository import ClientFileImportRepository
 from app.modules.mapping_catalog.repository import MappingCatalogRepository
+from tests.xls_builder import XlsBook
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -83,6 +84,7 @@ pytestmark = pytest.mark.integration
 
 PLAIN_PASSWORD = "Senh@Arquivo#1"
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+XLS_MIME = "application/vnd.ms-excel"
 SECRET_DESCRIPTION = "PAGTO ACME LTDA SEGREDO DA CELULA"
 SECRET_CATEGORY = "Aluguel Sala Rua das Flores"
 HEADER = ["Data", "Histórico", "Valor", "Categoria", "Documento"]
@@ -461,6 +463,26 @@ class TestProcessamentoAceito:
         assert sorted(r.amount for r in movements) == [Decimal("-1500.00"), Decimal("-320.45")]
         assert {r.document for r in movements} == {"NF 1", "2"}
 
+    async def test_xls_valido_no_mesmo_mapeamento_de_planilha(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
+    ) -> None:
+        """O `.xls` usa o mapeamento `xlsx` (planilha) do cliente, sem mudar nada nele."""
+        rows: list[list[Any]] = [
+            [datetime(2026, 6, 5), SECRET_DESCRIPTION, -1500.0, SECRET_CATEGORY, "NF 1"],
+            [datetime(2026, 6, 10), "Energia", -320.45, "Energia", 2],
+        ]
+        content = XlsBook(rows=[HEADER, *rows]).to_bytes()
+        await _login(client_with_db, world.admin)
+        resp = await _process(
+            client_with_db, world.client_xlsx, content, name="planilha.xls", mime=XLS_MIME
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["data"]["rows"] == 2
+        movements = await _movements(db_session, world.client_xlsx.id)
+        assert sorted(r.amount for r in movements) == [Decimal("-1500.00"), Decimal("-320.45")]
+        assert {r.movement_date for r in movements} == {date(2026, 6, 5), date(2026, 6, 10)}
+        assert {r.document for r in movements} == {"NF 1", "2"}
+
     async def test_duas_linhas_identicas_sao_dois_movimentos(
         self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
     ) -> None:
@@ -664,7 +686,7 @@ class TestRecusasSemProcessamentoParcial:
         error = _error(resp)
         assert error["code"] == "FORMATO_NAO_SUPORTADO"
         assert "PDF" in error["userMessage"]
-        assert "CSV ou XLSX" in error["userMessage"]
+        assert "CSV, XLSX ou XLS" in error["userMessage"]
         await _assert_nothing_processed(db_session, world.client, "formato_nao_suportado")
 
     @pytest.mark.parametrize("caso", ["zip_quebrado", "bomba"])
@@ -687,6 +709,40 @@ class TestRecusasSemProcessamentoParcial:
         assert error["code"] == "ARQUIVO_INVALIDO"
         assert error["userMessage"].startswith("Não foi possível ler o arquivo.")
         await _assert_nothing_processed(db_session, world.client_xlsx, "arquivo_invalido")
+
+    @pytest.mark.parametrize("caso", ["html_salvo_como_xls", "xls_truncado"])
+    async def test_xls_que_nao_e_planilha_e_422_com_motivo_sem_500(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: World, caso: str
+    ) -> None:
+        if caso == "html_salvo_como_xls":
+            content = b"<html><body><table><tr><td>Data;Valor</td></tr>\n</table></body></html>"
+            esperado = "HTML ou XML"
+        else:
+            content = XlsBook(rows=[HEADER, *ROWS]).to_bytes()[:1024]
+            esperado = "não é uma planilha do Excel legível"
+        await _login(client_with_db, world.admin)
+        resp = await _process(
+            client_with_db, world.client_xlsx, content, name="planilha.xls", mime=XLS_MIME
+        )
+        assert resp.status_code == 422, resp.text
+        error = _error(resp)
+        assert error["code"] == "FORMATO_NAO_SUPORTADO"
+        assert esperado in error["userMessage"]
+        await _assert_nothing_processed(db_session, world.client_xlsx, "formato_nao_suportado")
+
+    async def test_xls_em_mapeamento_csv_e_422_nomeando_a_planilha(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
+    ) -> None:
+        content = XlsBook(rows=[HEADER, *ROWS]).to_bytes()
+        await _login(client_with_db, world.admin)
+        resp = await _process(
+            client_with_db, world.client, content, name="planilha.xls", mime=XLS_MIME
+        )
+        assert resp.status_code == 422, resp.text
+        error = _error(resp)
+        assert error["code"] == "FORMATO_NAO_SUPORTADO"
+        assert "planilha do Excel (XLSX ou XLS)" in error["userMessage"]
+        await _assert_nothing_processed(db_session, world.client, "formato_nao_suportado")
 
     async def test_a_recusa_sobrevive_ao_rollback_real_da_request(
         self, client_with_request_rollback: AsyncClient, db_session: AsyncSession, world: World
@@ -902,6 +958,20 @@ class TestInspecao:
         assert await _movements(db_session, world.client.id) == []
         assert await _imports(db_session, world.client.id) == []
         assert await _events(db_session, world.client.id) == []
+
+    async def test_xls_e_inspecionado_como_planilha(
+        self, client_with_db: AsyncClient, world: World
+    ) -> None:
+        rows: list[list[Any]] = [[datetime(2026, 6, 5), "Energia", -320.45, "Energia", 2]]
+        content = XlsBook(rows=[HEADER, *rows]).to_bytes()
+        await _login(client_with_db, world.admin)
+        resp = await _inspect(client_with_db, world.client_xlsx, content)
+        assert resp.status_code == 200, resp.text
+        data = resp.json()["data"]
+        # O formato do MAPEAMENTO: `.xlsx` e `.xls` são a mesma planilha.
+        assert data["format"] == "xlsx"
+        assert data["columns"] == HEADER
+        assert data["sample"] == [["2026-06-05", "Energia", "-320.45", "Energia", "2"]]
 
     async def test_sem_mapeamento_le_com_o_delimitador_do_pedido(
         self, client_with_db: AsyncClient, world: World

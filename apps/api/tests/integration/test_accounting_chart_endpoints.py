@@ -20,7 +20,10 @@ O que este módulo afirma (critérios de aceite da 16.1):
   - nenhum nome, código ou célula em log (`structlog.testing.capture_logs`);
   - o plano EXPORTADO do Domínio (fixture anonimizada, 86e3gkd7y) entra pela mesma
     rota: 563 contas, 143 sintéticas, evento com `layout=dominio`; e uma conta
-    depois do rodapé recusa o arquivo inteiro com ZERO linhas gravadas.
+    depois do rodapé recusa o arquivo inteiro com ZERO linhas gravadas;
+  - o `.xls` que o Domínio grava (fixture anonimizada do arquivo real, 86e3n70p6), sem
+    edição: 370 contas, 141 sintéticas, `layout=dominio`; `.xls` truncado recusa com
+    `FORMATO_NAO_SUPORTADO` e motivo, sem gravar nada.
 
 O cross-tenant e o cross-org das duas rotas rodam na bateria dos três atacantes
 (`test_sensitive_endpoints.py`), que lê a lista canônica.
@@ -74,6 +77,12 @@ _DOMINIO = (
     / "fixtures"
     / "accounting_chart_dominio"
     / "plano_dominio.xlsx"
+)
+_DOMINIO_XLS = (
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "accounting_chart_dominio_xls"
+    / "plano_dominio.xls"
 )
 
 
@@ -596,4 +605,44 @@ class TestPlanoExportadoDoDominio:
         }
         assert "exemplo" not in resp.text
         assert "Conta extra" not in resp.text
+        assert await _count(db_session, world.client.id) == 0
+
+
+class TestPlanoDoDominioEmXls:
+    async def test_o_xls_do_dominio_entra_sem_edicao(
+        self, client_with_db: AsyncClient, world: World, db_session: AsyncSession
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        with capture_logs() as logs:
+            resp = await _import(
+                client_with_db, world.client, _DOMINIO_XLS.read_bytes(), filename="plano.xls"
+            )
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"data": {"contas": 370, "contasNovas": 370, "contasInativadas": 0}}
+        assert "exemplo" not in repr(logs)
+
+        accounts = await _accounts(db_session, world.client.id)
+        assert len(accounts) == 370
+        assert sum(a.account_type == "sintetica" for a in accounts.values()) == 141
+        assert all("exemplo" not in a.name_encrypted for a in accounts.values())
+        (raiz,) = (
+            await client_with_db.get(_url(world.client), params={"code": "1", "pageSize": 1})
+        ).json()["data"]
+        assert raiz["classification"] == "1"
+
+        stmt = select(UsageEvent).where(UsageEvent.event == "plano_contabil_importado")
+        (event,) = (await db_session.execute(stmt)).scalars().all()
+        assert event.props["layout"] == "dominio"
+        assert event.props["contas"] == 370
+
+    async def test_xls_truncado_recusa_422_com_motivo_sem_gravar(
+        self, client_with_db: AsyncClient, world: World, db_session: AsyncSession
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        content = _DOMINIO_XLS.read_bytes()[:1024]
+        resp = await _import(client_with_db, world.client, content, filename="plano.xls")
+        assert resp.status_code == 422, resp.text
+        error = resp.json()["error"]
+        assert error["code"] == "FORMATO_NAO_SUPORTADO"
+        assert "não é uma planilha do Excel legível" in error["userMessage"]
         assert await _count(db_session, world.client.id) == 0

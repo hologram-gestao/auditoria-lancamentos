@@ -52,6 +52,11 @@ vi.mock('@/hooks/use-clients', () => ({
   useCloseClient: noopMutation,
 }));
 
+// O modal de editar consulta as conexões (campo do cartão, 86e3n70p6).
+vi.mock('@/hooks/use-client-connections', () => ({
+  useClientConnections: () => ({ data: [], isLoading: false }),
+}));
+
 vi.mock('@/hooks/use-client-categories', () => ({
   useClientCategories: () => ({ data: [], isLoading: false, isError: false, error: null }),
 }));

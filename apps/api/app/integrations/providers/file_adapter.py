@@ -1,7 +1,7 @@
 """Adaptador ARQUIVO — o primeiro `OriginProvider` que não é um ERP (Sprint 14, BACK 14.1 — R1).
 
 A Sprint 9 escreveu o contrato para que o segundo provedor CABESSE; este é ele. A
-origem é a planilha (CSV/XLSX) que o cliente manda, lida pelo **mapeamento de
+origem é a planilha (CSV, XLSX ou XLS) que o cliente manda, lida pelo **mapeamento de
 entrada** dele (`client_input_mappings`) — declarativo, sem IA, sem heurística.
 
 **O que este adaptador declara, e o que NÃO declara.** Só `LISTAR_LANCAMENTOS`:

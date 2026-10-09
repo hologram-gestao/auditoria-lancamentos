@@ -5,8 +5,9 @@
  * Transcrito de `apps/api/docs/plano-contabil-modelo-de-planilha.md` e da
  * descrição da rota de importação no OpenAPI — é o modelo PRÓPRIO da plataforma
  * (S-1 assumida: o escritório exporta o plano do sistema contábil numa
- * planilha e a ajusta a estas colunas). O plano exportado do Domínio em .xlsx
- * também é aceito sem ajuste (86e3gkd7y): o backend reconhece o layout e o
+ * planilha e a ajusta a estas colunas). O plano exportado do Domínio, em .xlsx
+ * (86e3gkd7y) ou no .xls que o sistema grava (86e3n70p6), também é aceito sem
+ * ajuste: o backend reconhece o layout e o
  * converte para este modelo, e a última linha da seção diz isso. Se o leitor do
  * backend mudar, a doc muda e este componente muda junto.
  *
@@ -46,8 +47,8 @@ export function AccountingChartModel({ headingId }: { headingId: string }) {
         Modelo da planilha
       </h3>
       <p className="text-muted-foreground">
-        CSV em UTF-8 separado por <code className="font-mono">;</code> ou XLSX (só a primeira aba).
-        Cabeçalho na linha 1, colunas em qualquer ordem e nenhuma coluna além destas:
+        CSV em UTF-8 separado por <code className="font-mono">;</code>, XLSX ou XLS (só a primeira
+        aba). Cabeçalho na linha 1, colunas em qualquer ordem e nenhuma coluna além destas:
       </p>
       <dl className="space-y-2">
         {COLUMNS.map((column) => (
@@ -73,8 +74,8 @@ export function AccountingChartModel({ headingId }: { headingId: string }) {
         </pre>
       </div>
       <p className="text-muted-foreground">
-        O plano de contas exportado do Domínio em .xlsx também é aceito, do jeito que sai do
-        sistema: a plataforma reconhece o arquivo e o converte para este modelo.
+        O plano de contas exportado do Domínio, em .xls ou .xlsx, também é aceito do jeito que sai
+        do sistema: a plataforma reconhece o arquivo e o converte para este modelo.
       </p>
     </section>
   );

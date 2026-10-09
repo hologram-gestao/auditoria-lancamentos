@@ -46,6 +46,7 @@ dependencies = [
     "pdfplumber>=0.11.4",             # fallback para PDFs complexos
     "openpyxl>=3.1.5",                # XLSX + geração de relatórios
     "pandas>=2.2.3",                  # apoio em CSV/XLSX quando necessário
+    "xlrd>=2.0.2",                    # .xls (BIFF/OLE2) só leitura: plano de contas do Domínio
 
     # --- Anthropic Claude ---
     "anthropic>=0.39.0",
@@ -70,6 +71,7 @@ dev = [
     "mypy>=1.13.0",
     "types-python-jose>=3.3.4.20240106",
     "types-cachetools>=5.3",
+    "types-xlrd>=2.0.0",
     "pip-audit>=2.7.3",
 ]
 

@@ -1,9 +1,11 @@
 """O leitor determinístico do arquivo do cliente, sem banco (BACK 14.3 — R1/R2).
 
 O que este módulo afirma sobre as partes PURAS:
-  - formato pelo CONTÊINER (magic bytes): PDF, XLS e desconhecido são recusados com
-    motivo acionável (`FORMATO_NAO_SUPORTADO`), e o arquivo precisa ser do formato
-    que o mapeamento declara;
+  - formato pelo CONTÊINER (magic bytes): CSV, XLSX e XLS são lidos (os dois do Excel
+    são o mesmo formato "planilha" do mapeamento); PDF, HTML/XML com cara de planilha,
+    OLE2 que não é planilha e desconhecido são recusados com motivo acionável
+    (`FORMATO_NAO_SUPORTADO`), e o arquivo precisa ser do formato que o mapeamento
+    declara;
   - o cabeçalho é conferido ANTES da primeira linha (o gancho `on_header` roda com
     zero células processadas);
   - qualquer falha de abertura/iteração é a MESMA recusa `ARQUIVO_INVALIDO`, com
@@ -18,6 +20,7 @@ O que este módulo afirma sobre as partes PURAS:
 from __future__ import annotations
 
 import io
+import struct
 import zipfile
 from datetime import date, datetime
 from decimal import Decimal
@@ -25,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import xlrd
 from openpyxl import Workbook
 
 from app.core.exceptions import (
@@ -53,6 +57,7 @@ from app.modules.client_file_ingestion.reader import (
     MAX_FILE_UNCOMPRESSED_BYTES,
     MAX_INVALID_LINES_REPORTED,
     SAMPLE_ROWS,
+    XLS_MAGIC,
     LineProblem,
     MappingSpec,
     ParsedTable,
@@ -62,9 +67,11 @@ from app.modules.client_file_ingestion.reader import (
     detect_format,
     parse_amount,
     parse_date,
+    read_sheet_raw_rows,
     read_table,
     sample_text,
 )
+from tests.xls_builder import BOOLERR, NUMBER, XF_DATE, XF_GENERAL, XlsBook, ole2, record
 
 SEGREDO = "PAGTO ACME LTDA SEGREDO DA CELULA"
 JUN_INI = date(2026, 6, 1)
@@ -148,13 +155,52 @@ class TestFormato:
         assert exc.value.status_code == 422
         assert exc.value.code.value == "FORMATO_NAO_SUPORTADO"
         assert "PDF" in exc.value.user_message
-        assert "CSV ou XLSX" in exc.value.user_message
+        assert "CSV, XLSX ou XLS" in exc.value.user_message
 
-    def test_xls_antigo_e_recusado_com_motivo(self) -> None:
+    def test_xls_e_o_mesmo_formato_planilha_do_xlsx(self) -> None:
+        # O valor do CHECK e do contrato fica `xlsx`; o contêiner é do leitor.
+        assert detect_format(XlsBook(rows=[HEADER]).to_bytes()) is InputFileFormat.XLSX
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            # Cabeçalho OLE2 e nada mais: o contêiner nem abre.
+            XLS_MAGIC + b"\x00" * 32,
+            # Contêiner íntegro com a tabela de setores corrompida.
+            XlsBook(rows=[HEADER]).to_bytes()[:512] + b"\xff" * 2048,
+            # Documento OLE2 que não é planilha (um `.doc` renomeado).
+            ole2(b"\x00" * 64, name="WordDocument"),
+        ],
+        ids=["so_cabecalho", "setores_corrompidos", "outro_documento_office"],
+    )
+    def test_ole2_que_nao_e_planilha_legivel_e_recusado_com_motivo(self, content: bytes) -> None:
         with pytest.raises(FileFormatNotSupportedError) as exc:
-            detect_format(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 32)
-        assert "XLS" in exc.value.user_message
+            detect_format(content)
+        assert exc.value.status_code == 422
+        assert "não é uma planilha do Excel legível" in exc.value.user_message
+        assert exc.value.__cause__ is None
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            b"<html xmlns:x='urn:schemas-microsoft-com:office:excel'><table><tr><td>Data;Valor"
+            b"</td></tr>\n</table></html>",
+            b"\xef\xbb\xbf  <!DOCTYPE html>\n<html><body><table>,;\n",
+            b'<?xml version="1.0"?>\n<?mso-application progid="Excel.Sheet"?>\n<Workbook>;,\n',
+            # `encode("utf-16")` já grava o BOM.
+            "<html><table><tr><td>a;b</td></tr>\n".encode("utf-16"),
+        ],
+        ids=["html", "html_com_bom", "xml_2003", "html_utf16"],
+    )
+    def test_html_ou_xml_com_cara_de_planilha_e_recusado_com_motivo(self, content: bytes) -> None:
+        with pytest.raises(FileFormatNotSupportedError) as exc:
+            detect_format(content)
+        assert "HTML ou XML" in exc.value.user_message
         assert "XLSX ou CSV" in exc.value.user_message
+
+    def test_csv_com_sinal_de_menor_no_meio_continua_csv(self) -> None:
+        content = _csv([["Data", "Histórico <obs>", "Valor"], ["01/06/2026", "<x>", "1,00"]])
+        assert detect_format(content) is InputFileFormat.CSV
 
     def test_desconhecido_e_recusado(self) -> None:
         with pytest.raises(FileFormatNotSupportedError):
@@ -173,6 +219,121 @@ class TestFormato:
 # ---------------------------------------------------------------------------
 # Leitura
 # ---------------------------------------------------------------------------
+
+
+def _xls(rows: list[list[Any]], **kwargs: Any) -> bytes:
+    return XlsBook(rows=rows, **kwargs).to_bytes()
+
+
+class TestLeituraXls:
+    """O `.xls` pelo MESMO `read_table` do XLSX, com os mesmos tipos de célula."""
+
+    def test_le_a_primeira_planilha_com_datas_e_numeros_como_no_xlsx(self) -> None:
+        rows = [HEADER, [datetime(2026, 6, 1), " Aluguel ", -1234.56, "Ocupação"], [None, "x", 12]]
+        xls = read_table(_xls(rows), XLSX_OPTIONS)
+        xlsx = read_table(_xlsx(rows), XLSX_OPTIONS)
+        assert xls == xlsx
+        (_, cells), (_, second) = xls.rows
+        assert cells == [datetime(2026, 6, 1), "Aluguel", -1234.56, "Ocupação"]
+        # O xlrd guarda todo número como float: inteiro volta `int`, como no openpyxl.
+        assert second[2] == 12
+        assert isinstance(second[2], int)
+
+    @pytest.mark.parametrize("datemode", [0, 1], ids=["1900", "1904"])
+    def test_data_pelo_calendario_da_pasta(self, datemode: int) -> None:
+        table = read_table(_xls([["Data"], [date(2026, 9, 30)]], datemode=datemode), XLSX_OPTIONS)
+        assert table.rows == [(2, [datetime(2026, 9, 30)])]
+
+    def test_numero_em_celula_sem_formato_de_data_continua_numero(self) -> None:
+        # 46000 é um serial de data plausível: sem o formato de data na célula, é número.
+        table = read_table(_xls([["Valor"], [46000]]), XLSX_OPTIONS)
+        assert table.rows == [(2, [46000])]
+
+    def test_serial_de_data_fora_do_calendario_recusa_so_a_linha(self) -> None:
+        # Além do ano 9999 o `datetime` estoura: a célula segue como número e a
+        # LINHA é recusada, nunca o arquivo inteiro.
+        raw = record(NUMBER, struct.pack("<HHHd", 1, 0, XF_DATE, 1e7))
+        raw += record(NUMBER, struct.pack("<HHHd", 1, 2, XF_GENERAL, -1.0))
+        table = read_table(_xls([HEADER], raw_cells=raw), XLSX_OPTIONS)
+        spec = _spec(file_format=InputFileFormat.XLSX, category_column=None)
+        lines, problems = convert_lines(table, spec, start=JUN_INI, end=JUN_FIM)
+        assert lines == []
+        assert problems == [LineProblem(2, "data_invalida")]
+
+    def test_booleano_e_erro_chegam_como_o_openpyxl_entrega(self) -> None:
+        div_zero = record(BOOLERR, struct.pack("<HHHBB", 1, 1, XF_GENERAL, 0x07, 1))
+        table = read_table(_xls([["A", "B"], [True]], raw_cells=div_zero), XLSX_OPTIONS)
+        assert table.rows == [(2, [True, "#DIV/0!"])]
+
+    def test_s14_converte_o_xls_pelo_mapeamento(self) -> None:
+        rows = [
+            HEADER,
+            [date(2026, 6, 10), "Aluguel", -1500, "Ocupação"],
+            ["11/06/2026", "Venda", "2.000,50", "Receita"],
+        ]
+        table = read_table(_xls(rows), XLSX_OPTIONS)
+        spec = _spec(file_format=InputFileFormat.XLSX)
+        lines, problems = convert_lines(table, spec, start=JUN_INI, end=JUN_FIM)
+        assert problems == []
+        assert [(x.entry_date, x.amount, x.description, x.category_label) for x in lines] == [
+            (date(2026, 6, 10), Decimal("-1500.00"), "Aluguel", "Ocupação"),
+            (date(2026, 6, 11), Decimal("2000.50"), "Venda", "Receita"),
+        ]
+
+    def test_blank_orfao_antes_da_aba_e_reparado_sem_perder_valor(self) -> None:
+        rows = [HEADER, [date(2026, 6, 1), "Aluguel", -10, "Ocupação"]]
+        content = _xls(rows, orphan_blanks=200)
+        # O xlrd sozinho recusa (é o defeito do export do Domínio)...
+        with pytest.raises(xlrd.XLRDError):
+            xlrd.open_workbook(file_contents=content, logfile=io.StringIO())
+        # ...e o leitor lê exatamente o que o arquivo sem o defeito daria.
+        assert read_table(content, XLSX_OPTIONS) == read_table(_xls(rows), XLSX_OPTIONS)
+
+    def test_registro_que_nao_e_blank_antes_da_aba_e_arquivo_invalido(self) -> None:
+        extra = record(NUMBER, struct.pack("<HHHd", 0, 0, XF_GENERAL, 1.0))
+        content = _xls([HEADER], orphan_blanks=3, orphan_extra=extra)
+        with pytest.raises(FileInvalidError) as exc:
+            read_table(content, XLSX_OPTIONS)
+        assert exc.value.__cause__ is None
+
+    def test_biff_corrompido_dentro_do_ole2_e_arquivo_invalido_sem_causa(self) -> None:
+        stream = XlsBook(rows=[HEADER, [SEGREDO]]).stream()
+        content = ole2(stream[:40] + b"\xff" * 200)
+        assert detect_format(content) is InputFileFormat.XLSX  # o contêiner abre
+        with pytest.raises(FileInvalidError) as exc:
+            read_table(content, XLSX_OPTIONS)
+        assert exc.value.__cause__ is None
+        assert exc.value.user_message == FileInvalidError.default_user_message
+        assert SEGREDO not in str(exc.value)
+
+    def test_um_milhao_de_linhas_declaradas_nao_e_confiado(self) -> None:
+        # O DIMENSIONS diz 1.000.000 de linhas; o arquivo tem 2: lê as 2.
+        table = read_table(_xls([HEADER, ["x"]], declared_rows=1_000_000), XLSX_OPTIONS)
+        assert len(table.rows) == 1
+
+    def test_aba_ate_a_ultima_linha_da_biff8_e_recusada_antes_de_iterar(self) -> None:
+        # Uma célula na linha 65.536 (o teto da BIFF8) e 1.000.000 declaradas.
+        content = _xls([HEADER], declared_rows=1_000_000, extra_cells=[(65_535, 0, "x")])
+        with pytest.raises(FileInvalidError):
+            read_table(content, XLSX_OPTIONS)
+        with pytest.raises(FileInvalidError):
+            read_sheet_raw_rows(content)
+
+    def test_colunas_alem_do_teto_sao_cortadas_como_no_xlsx(self) -> None:
+        content = _xls([["A"]], extra_cells=[(0, MAX_FILE_COLUMNS + 10, "longe")])
+        (_, cells) = read_sheet_raw_rows(content)[0]
+        assert cells == ["A"]
+
+    def test_espiada_le_so_as_primeiras_linhas(self) -> None:
+        content = _xls([["a"], ["b"], ["c"]])
+        assert read_sheet_raw_rows(content, limit=2) == [(1, ["a"]), (2, ["b"])]
+
+    def test_o_aviso_do_xlrd_nao_vai_para_a_saida(self, capsys: pytest.CaptureFixture[str]) -> None:
+        # O xlrd escreve avisos no `logfile` (stdout por padrão).
+        read_table(_xls([HEADER], orphan_blanks=10), XLSX_OPTIONS)
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
 
 
 class TestLeituraCsv:

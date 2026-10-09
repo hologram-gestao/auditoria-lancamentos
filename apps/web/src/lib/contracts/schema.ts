@@ -566,7 +566,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** O mapeamento de entrada do arquivo deste cliente — qual coluna é data, descrição, valor, categoria, conta e documento, o formato (CSV/XLSX), o delimitador e a codificação do CSV, o formato de data, o separador decimal e a convenção de sinal. Visível a todo papel com acesso ao cliente, inclusive o operador (ele precisa ver o resumo do que será aplicado antes de enviar). Cliente sem mapeamento responde 200 com `mapping: null` — é estado normal, e a tela conduz a criação a partir dele; nunca 404. Cliente encerrado continua legível. */
+        /** O mapeamento de entrada do arquivo deste cliente — qual coluna é data, descrição, valor, categoria, conta e documento, o formato (CSV ou planilha XLSX/XLS), o delimitador e a codificação do CSV, o formato de data, o separador decimal e a convenção de sinal. Visível a todo papel com acesso ao cliente, inclusive o operador (ele precisa ver o resumo do que será aplicado antes de enviar). Cliente sem mapeamento responde 200 com `mapping: null` — é estado normal, e a tela conduz a criação a partir dele; nunca 404. Cliente encerrado continua legível. */
         get: operations["get_input_mapping_api_v1_clients__client_id__input_mapping_get"];
         /** Declara ou SUBSTITUI o mapeamento de entrada do cliente (um por cliente; configuração, não vigência — alterá-lo muda como TODOS os próximos arquivos serão lidos, e a tela pede confirmação explícita). Requer a permissão `manage_input_mapping` (plataforma, admin, gerente da carteira e gerente do cliente; o operador do cliente recebe 403 e a negação fica na trilha). Tudo é DECLARADO, nada é inferido: a convenção de sinal é obrigatória, e os campos exigidos por cada convenção (`valor_com_sinal`: só a coluna de valor; `coluna_natureza`: coluna de valor + coluna de natureza + literais de débito e crédito; `colunas_separadas`: colunas de débito e de crédito, SEM coluna de valor) são verificados na borda e no banco. CSV exige delimitador e codificação; XLSX não os aceita. Forma inválida: 400 `VALIDATION_ERROR`. Cliente encerrado: 409. `created` diz se o cliente não tinha mapeamento (`true`) ou se o anterior foi substituído (`false`). */
         put: operations["put_input_mapping_api_v1_clients__client_id__input_mapping_put"];
@@ -603,7 +603,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Importa (ou reimporta) o plano de contas contábil do cliente a partir de uma planilha no MODELO DA PLATAFORMA — tudo ou nada. Modelo: CSV UTF-8 separado por `;` ou XLSX (primeira aba), cabeçalho na linha 1 com as colunas `codigo_reduzido`, `nome` e `tipo` (obrigatórias) e `classificacao` (opcional), em qualquer ordem e sem outras colunas; `tipo` é `analitica` ou `sintetica`; código reduzido com letras, dígitos, `.` e `-` (até 20), nome até 200 caracteres, classificação até 40. Exemplo: `codigo_reduzido;nome;tipo` / `649;Banco conta movimento;analitica`. Também aceita o plano de contas EXPORTADO do Domínio em XLSX, reconhecido pelo cabeçalho `Código`/`T`/`Classificação`/`Nome`/`Grau` nas 10 primeiras linhas e convertido para o modelo (código, `S` = sintética e vazio = analítica, classificação, nome e grau, que tem de ser a profundidade da classificação); o CSV nativo do Domínio não é aceito. A reimportação casa por código: conta nova entra, conta existente atualiza nome, tipo e classificação (e volta a ativa), conta que sumiu da planilha vira INATIVA — nunca é apagada. Responde as contagens `contas`, `contasNovas`, `contasInativadas`. O nome é cifrado com a chave do cliente. Requer `manage_client_accounting_chart` (plataforma, admin e gerente da carteira; usuários do cliente recebem 403 e a negação fica na trilha). Cliente encerrado: 409. Recusas, todas 422 e sem gravar nada: `FORMATO_NAO_SUPORTADO` (não é CSV nem XLSX pelo CONTEÚDO), `ARQUIVO_INVALIDO` (não abre, ou planilha sem nenhuma conta com `details.reason=sem_contas`), `CABECALHO_DIVERGENTE` (`details.missingColumns`/`repeatedColumns` — só colunas do MODELO — mais `details.unexpectedColumnCount`/`foundColumnCount`) e `LINHAS_INVALIDAS` (`details.lines=[{line, reason}]` com `reason` ∈ `codigo_vazio`, `codigo_longo`, `codigo_invalido`, `codigo_repetido`, `nome_vazio`, `nome_longo`, `tipo_invalido`, `classificacao_longa` e, no export do Domínio, também `codigo_ausente`, `classificacao_ausente`, `classificacao_repetida`, `grau_ausente`, `grau_divergente`, `linha_irreconhecivel` e `conta_fora_do_bloco` (linha com cara de conta depois do fim das contas: o arquivo inteiro é recusado), e `details.total`) — a resposta nunca traz o conteúdo de uma célula. */
+        /** Importa (ou reimporta) o plano de contas contábil do cliente a partir de uma planilha no MODELO DA PLATAFORMA — tudo ou nada. Modelo: CSV UTF-8 separado por `;`, XLSX ou XLS (primeira aba), cabeçalho na linha 1 com as colunas `codigo_reduzido`, `nome` e `tipo` (obrigatórias) e `classificacao` (opcional), em qualquer ordem e sem outras colunas; `tipo` é `analitica` ou `sintetica`; código reduzido com letras, dígitos, `.` e `-` (até 20), nome até 200 caracteres, classificação até 40. Exemplo: `codigo_reduzido;nome;tipo` / `649;Banco conta movimento;analitica`. Também aceita o plano de contas EXPORTADO do Domínio em XLSX ou no XLS que o sistema grava, reconhecido pelo cabeçalho `Código`/`T`/`Classificação`/`Nome`/`Grau` nas 10 primeiras linhas e convertido para o modelo (código, `S` = sintética e vazio = analítica, classificação, nome e grau, que tem de ser a profundidade da classificação); o CSV nativo do Domínio não é aceito. A reimportação casa por código: conta nova entra, conta existente atualiza nome, tipo e classificação (e volta a ativa), conta que sumiu da planilha vira INATIVA — nunca é apagada. Responde as contagens `contas`, `contasNovas`, `contasInativadas`. O nome é cifrado com a chave do cliente. Requer `manage_client_accounting_chart` (plataforma, admin e gerente da carteira; usuários do cliente recebem 403 e a negação fica na trilha). Cliente encerrado: 409. Recusas, todas 422 e sem gravar nada: `FORMATO_NAO_SUPORTADO` (não é CSV nem XLSX pelo CONTEÚDO), `ARQUIVO_INVALIDO` (não abre, ou planilha sem nenhuma conta com `details.reason=sem_contas`), `CABECALHO_DIVERGENTE` (`details.missingColumns`/`repeatedColumns` — só colunas do MODELO — mais `details.unexpectedColumnCount`/`foundColumnCount`) e `LINHAS_INVALIDAS` (`details.lines=[{line, reason}]` com `reason` ∈ `codigo_vazio`, `codigo_longo`, `codigo_invalido`, `codigo_repetido`, `nome_vazio`, `nome_longo`, `tipo_invalido`, `classificacao_longa` e, no export do Domínio, também `codigo_ausente`, `classificacao_ausente`, `classificacao_repetida`, `grau_ausente`, `grau_divergente`, `linha_irreconhecivel` e `conta_fora_do_bloco` (linha com cara de conta depois do fim das contas: o arquivo inteiro é recusado), e `details.total`) — a resposta nunca traz o conteúdo de uma célula. */
         post: operations["import_accounting_chart_api_v1_clients__client_id__accounting_chart_import_post"];
         delete?: never;
         options?: never;
@@ -638,7 +638,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Inspeciona o arquivo (CSV ou XLSX) de um cliente com origem por arquivo: devolve o formato detectado, as colunas do cabeçalho e uma amostra das primeiras linhas, para a pessoa confirmar o mapeamento salvo ou criar um. NADA é persistido nem logado — a amostra só existe nesta resposta. Requer a permissão `upload_client_file` (os 5 papéis) e conexão `arquivo` ativa (409 `SEM_CONEXAO`, `ORIGEM_COM_ERRO` ou `CAPACIDADE_AUSENTE`). Sem mapeamento salvo, o CSV é lido com `csvDelimiter`/`encoding` do pedido (padrão `;` e `utf-8-sig`) — declarados, nunca farejados. PDF e XLS: 422 `FORMATO_NAO_SUPORTADO`; arquivo que não abre: 422 `ARQUIVO_INVALIDO`. */
+        /** Inspeciona o arquivo (CSV, XLSX ou XLS) de um cliente com origem por arquivo: devolve o formato detectado, as colunas do cabeçalho e uma amostra das primeiras linhas, para a pessoa confirmar o mapeamento salvo ou criar um. NADA é persistido nem logado — a amostra só existe nesta resposta. Requer a permissão `upload_client_file` (os 5 papéis) e conexão `arquivo` ativa (409 `SEM_CONEXAO`, `ORIGEM_COM_ERRO` ou `CAPACIDADE_AUSENTE`). Sem mapeamento salvo, o CSV é lido com `csvDelimiter`/`encoding` do pedido (padrão `;` e `utf-8-sig`) — declarados, nunca farejados. XLSX e XLS (contêiner pelos magic bytes) são o mesmo formato `xlsx` (planilha). PDF, HTML/XML com extensão de planilha e documento do Office que não é planilha: 422 `FORMATO_NAO_SUPORTADO`; arquivo que não abre: 422 `ARQUIVO_INVALIDO`. */
         post: operations["inspect_file_api_v1_clients__client_id__file_origin_inspect_post"];
         delete?: never;
         options?: never;
@@ -2680,7 +2680,7 @@ export interface components {
         Body_import_accounting_chart_api_v1_clients__client_id__accounting_chart_import_post: {
             /**
              * File
-             * @description CSV (`;`, UTF-8) ou XLSX no modelo, ou o XLSX exportado do Domínio.
+             * @description CSV (`;`, UTF-8), XLSX ou XLS no modelo, ou o plano exportado do Domínio.
              */
             file: string;
         };
@@ -2688,7 +2688,7 @@ export interface components {
         Body_inspect_file_api_v1_clients__client_id__file_origin_inspect_post: {
             /**
              * File
-             * @description CSV ou XLSX.
+             * @description CSV, XLSX ou XLS.
              */
             file: string;
             csvDelimiter?: components["schemas"]["CsvDelimiter"] | null;
@@ -2725,7 +2725,7 @@ export interface components {
         Body_process_file_api_v1_clients__client_id__file_origin_process_post: {
             /**
              * File
-             * @description CSV ou XLSX no formato do mapeamento.
+             * @description CSV ou planilha (XLSX ou XLS), no formato do mapeamento.
              */
             file: string;
             /**

@@ -52,6 +52,11 @@ vi.mock('@/stores/auth', () => ({
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
+// O editar consulta as conexões só para o campo do cartão (86e3n70p6), testado à parte.
+vi.mock('@/hooks/use-client-connections', () => ({
+  useClientConnections: () => ({ data: [], isLoading: false }),
+}));
+
 import { CreateClientModal } from '@/components/features/clients/create-client-modal';
 import { EditClientModal } from '@/components/features/clients/edit-client-modal';
 import type { Client } from '@/lib/api/clients';
