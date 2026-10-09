@@ -118,8 +118,8 @@ export function SituationBadge({ situation, title }: SituationBadgeProps) {
 }
 
 /**
- * "Lançada no Omie" (Sprint 7 / FRONT 07.6) — o desfecho do lançamento na
- * própria linha, ao lado da situação.
+ * "Lançado no Omie · nº X" (Sprint 7 / FRONT 07.6; número visível desde a
+ * 86e3n70qj) — o desfecho do lançamento na própria linha, ao lado da situação.
  *
  * **Pinta por TOKEN semântico** (`bg-success-muted`/`text-success`, o par que o
  * `theme-contrast.test.ts` cobre nos dois temas), e não pela paleta crua que os
@@ -129,27 +129,29 @@ export function SituationBadge({ situation, title }: SituationBadgeProps) {
  * campo de "lançada pelo ADL": depois do envio ela vira `conciliado` com
  * `omie_lancamento_id`, indistinguível de uma linha que o matcher conciliou.
  * Por isso este badge é alimentado pelo RESUMO do lote (fato observado nesta
- * visita), nunca inferido da listagem — inferir marcaria de "lançada" uma linha
+ * visita, `usePostedInSession`), nunca inferido da listagem — inferir marcaria de "lançada" uma linha
  * conciliada pelo cruzamento, que é dizer ao operador que o ADL escreveu no ERP
  * quando não escreveu. O sinal PERSISTENTE do vínculo continua sendo a ação
  * indisponível com o motivo "já está vinculada a um lançamento do Omie".
  * Fechar isso de vez pede um campo no backend (ver HANDOFF).
  */
 export function LancadaNoOmieBadge({ omieLancamentoId }: { omieLancamentoId: number | null }) {
+  // `whitespace-nowrap`: "nº" e o número não podem se separar numa coluna estreita.
   const classes =
-    'bg-success-muted text-success inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium';
+    'bg-success-muted text-success inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium';
+  // 86e3n70qj — o número fica VISÍVEL no selo, não só na dica: depois de lançar,
+  // a pessoa foi ao Omie conferir porque a linha não dizia qual lançamento era.
+  const rotulo =
+    omieLancamentoId === null ? 'Lançado no Omie' : `Lançado no Omie · nº ${omieLancamentoId}`;
   const conteudo = (
     <>
       <Upload className="h-3 w-3" aria-hidden="true" />
-      Lançada no Omie
+      {rotulo}
     </>
   );
-  if (omieLancamentoId === null) {
-    return <span className={classes}>{conteudo}</span>;
-  }
-  const dica = `Lançamento Omie nº ${omieLancamentoId} criado pelo ${PRODUCT_SHORT_NAME} nesta sessão.`;
+  const dica = `Criado pelo ${PRODUCT_SHORT_NAME} nesta visita, na conta do cartão no Omie, na data da compra.`;
   return (
-    <BadgeComDica dica={dica} ariaLabel={`Lançada no Omie — ${dica}`} className={classes}>
+    <BadgeComDica dica={dica} ariaLabel={`${rotulo}. ${dica}`} className={classes}>
       {conteudo}
     </BadgeComDica>
   );

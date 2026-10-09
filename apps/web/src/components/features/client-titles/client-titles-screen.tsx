@@ -59,7 +59,7 @@ import { Loader2, MessageSquareText, RefreshCw, X } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
-import { EmptyState } from '@/components/shared/empty-state';
+import { NeverSyncedState } from '@/components/shared/never-synced-state';
 import { OriginStateBlock } from '@/components/shared/origin-state-notice';
 import { PortfolioVignette } from '@/components/shared/vignettes';
 import { Button } from '@/components/ui/button';
@@ -660,14 +660,26 @@ export function ClientTitlesScreen({ clientId }: { clientId: string }) {
                 </Table>
                 {/* Fora do `<Table>` de propósito: a tabela rola na horizontal em 390px e
                     uma célula `colSpan` cortaria o texto à direita (ver `TableEmpty`). */}
-                {!listQuery.isLoading && rows.length === 0 && (
+                {/* 86e3n70qj: o vazio só decide o que dizer com o resumo em mãos. Sem
+                    ele, a carteira nunca sincronizada aparecia como "Nenhum título
+                    nesta carteira." enquanto o resumo carregava (ou se falhava), e
+                    era isso que a pessoa via antes de clicar em "Sincronizar". */}
+                {!listQuery.isLoading && !summaryQuery.isLoading && rows.length === 0 && (
                   <TableEmpty>
                     {neverSynced ? (
                       <NeverSyncedState
+                        title="Esta carteira ainda não foi sincronizada com o Omie"
+                        purpose="Sincronizar agora traz do Omie os títulos a pagar e a receber em aberto, com o total devido e o atraso por faixa."
                         action={showSyncAction ? syncButton : null}
                         canSync={canSync}
                         isClosed={isClosed}
+                        vignette={<PortfolioVignette />}
                       />
+                    ) : summary === undefined ? (
+                      <p className="text-muted-foreground text-center text-sm">
+                        Não foi possível ler o estado da carteira. Recarregue a página para saber se
+                        ela já foi sincronizada.
+                      </p>
                     ) : hasFilters ? (
                       <FilteredEmptyState onClear={clearFilters} />
                     ) : (
@@ -865,38 +877,6 @@ function TableSkeletonRows({ columnCount }: { columnCount: number }) {
         </TableRow>
       ))}
     </>
-  );
-}
-
-/**
- * Carteira que NUNCA foi sincronizada. Três textos porque são três situações
- * com saídas diferentes — e oferecer "Sincronizar agora" a quem o servidor nega
- * seria o defeito que a §4.9 descreve.
- */
-function NeverSyncedState({
-  action,
-  canSync,
-  isClosed,
-}: {
-  action: React.ReactNode;
-  canSync: boolean;
-  isClosed: boolean;
-}) {
-  // Vinheta do `EmptyState` (86e3h57b5), sem borda: o `TableEmpty` é a moldura.
-  return (
-    <EmptyState
-      framed={false}
-      vignette={<PortfolioVignette />}
-      title="A carteira deste cliente ainda não foi sincronizada"
-      description={
-        isClosed
-          ? 'O cliente foi encerrado antes de sincronizar, e a sincronização não fica disponível para clientes encerrados.'
-          : canSync
-            ? 'Traga os títulos em aberto da origem para ver o total devido e o atraso por faixa.'
-            : 'Quando alguém da equipe sincronizar, os títulos em aberto da origem aparecem aqui.'
-      }
-      action={action}
-    />
   );
 }
 

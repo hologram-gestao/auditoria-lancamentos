@@ -55,6 +55,7 @@ import {
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { useOpenLancarDrawer, usePostedInSession } from '@/hooks/use-omie-postings';
 import {
   useAllSessionAnomalies,
   useFileEntries,
@@ -243,12 +244,19 @@ export function MovementsTab({ sessionId, isCard, canPostToOmie }: MovementsTabP
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   /**
-   * Resumo do último lote, por linha. Vive aqui (e não na gaveta) porque é o
-   * que pinta o badge "Lançada no Omie" DEPOIS que a gaveta fecha — e some no
-   * recarregamento da tela, que é o alcance honesto do dado (ver o badge).
+   * Resumo dos lotes desta visita, por linha (id → nº do lançamento). Mora no
+   * cache da sessão (`usePostedInSession`), não aqui: é o que pinta "Lançado no
+   * Omie · nº X" DEPOIS que a gaveta fecha, nesta aba e na de Anomalias — e some
+   * no recarregamento da tela, que é o alcance honesto do dado (ver o badge).
    */
-  const [postedById, setPostedById] = useState<Record<string, number | null>>({});
+  const postedById = usePostedInSession(sessionId);
   const [launchTargets, setLaunchTargets] = useState<FileEntryItem[] | null>(null);
+  // 86e3n70qj — o botão clicado fica em "carregando" até as categorias chegarem.
+  const { open: openLaunch, openingTargets } = useOpenLancarDrawer<FileEntryItem>(
+    sessionId,
+    setLaunchTargets,
+  );
+  const openingIds = new Set((openingTargets ?? []).map((e) => e.id));
 
   // A seleção é da PÁGINA: trocar de página/filtro com ids pendurados faria o
   // lote enviar compras que o operador não está mais vendo. Podar contra os
@@ -351,7 +359,8 @@ export function MovementsTab({ sessionId, isCard, canPostToOmie }: MovementsTabP
       {showPosting && selectedIds.length > 0 && (
         <LancarLoteBar
           selectedCount={selectedIds.length}
-          onLaunch={() => setLaunchTargets(selectedEntries)}
+          pending={openingTargets !== null}
+          onLaunch={() => void openLaunch(selectedEntries)}
           onClear={() => setSelectedIds([])}
         />
       )}
@@ -420,9 +429,10 @@ export function MovementsTab({ sessionId, isCard, canPostToOmie }: MovementsTabP
                     postingBlock={getPostingBlock(entry, { isCard: showPosting })}
                     posted={Object.prototype.hasOwnProperty.call(postedById, entry.id)}
                     postedOmieId={postedById[entry.id] ?? null}
+                    opening={openingIds.has(entry.id)}
                     selected={selectedIds.includes(entry.id)}
                     onSelectedChange={(checked) => toggleEntry(entry.id, checked)}
-                    onLancar={() => setLaunchTargets([entry])}
+                    onLancar={() => void openLaunch([entry])}
                     amountNum={amountNum}
                     supplier={omieData?.supplier ?? null}
                     category={omieData?.category ?? null}
@@ -481,9 +491,8 @@ export function MovementsTab({ sessionId, isCard, canPostToOmie }: MovementsTabP
             if (!open) setLaunchTargets(null);
           }}
           onPosted={(results) => {
-            // O resumo é do LOTE; guardamos só o par (linha → lançamento) que
-            // pinta o badge, e limpamos da seleção o que saiu das pendências.
-            setPostedById((prev) => ({ ...prev, ...results }));
+            // O par (linha → lançamento) que pinta o badge já foi para o cache da
+            // sessão no sucesso do envio; aqui só sai da seleção o que foi lançado.
             setSelectedIds((prev) => prev.filter((id) => !(id in results)));
           }}
         />
@@ -546,6 +555,8 @@ interface RowFragmentProps {
   /** Lançada no lote desta visita (fato observado, não inferido da listagem). */
   posted: boolean;
   postedOmieId: number | null;
+  /** A gaveta desta linha está abrindo (categorias a caminho): botão em carregando. */
+  opening: boolean;
   selected: boolean;
   onSelectedChange: (checked: boolean) => void;
   onLancar: () => void;
@@ -577,6 +588,7 @@ function RowFragment({
   postingBlock,
   posted,
   postedOmieId,
+  opening,
   selected,
   onSelectedChange,
   onLancar,
@@ -657,7 +669,9 @@ function RowFragment({
                 ação que grava na contabilidade do cliente não se esconde
                 dentro de um menu. Em linha inelegível ela continua no lugar,
                 inerte e com o motivo, em vez de sumir sem explicação. */}
-            {isCard && <LancarNoOmieButton block={postingBlock} onClick={onLancar} />}
+            {isCard && (
+              <LancarNoOmieButton block={postingBlock} pending={opening} onClick={onLancar} />
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" aria-label="Abrir ações">

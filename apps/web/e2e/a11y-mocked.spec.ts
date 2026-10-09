@@ -3758,6 +3758,54 @@ for (const vp of VIEWPORTS) {
       await analyze(page, `gaveta de criação (${vp.label})`);
     });
 
+    // 86e3n70qj — no passo 2 a caixa do topo foi lida como "o nome do arquivo".
+    // Ela diz que é a conciliação (conta + mês) e a frase das partes mora junto
+    // da lista de arquivos, depois dela.
+    test('Gaveta de criação: o passo 2 diz o que é cada bloco (86e3n70qj)', async ({ page }) => {
+      const slug = vp.label.replace(/\s+/g, '-');
+      await page.goto(`/clientes/${CLIENT_ID}`);
+      await page.getByRole('button', { name: 'Criar conciliação' }).first().click();
+      const dialog = page.getByRole('dialog');
+      await aguardarAnimacao(dialog);
+      await dialog.getByRole('combobox', { name: 'Conta bancária' }).click();
+      await page.getByRole('option', { name: /Cartão Itaú/ }).click();
+      await dialog.getByLabel('Mês de referência').fill('2026-09');
+      await dialog.getByRole('button', { name: /Avançar/ }).click();
+      await dialog.locator('#reconciliation-files').setInputFiles({
+        name: 'fatura-parte-1.pdf',
+        mimeType: 'application/pdf',
+        buffer: Buffer.from('%PDF-1.4 fatura de teste'),
+      });
+
+      const resumo = dialog.getByRole('region', { name: 'Conciliação' });
+      await expect(resumo).toBeVisible();
+      await expect(resumo.getByText('Conta', { exact: true })).toBeVisible();
+      await expect(resumo.getByText(/Cartão Itaú/)).toBeVisible();
+      await expect(resumo.getByText(/nome do arquivo não entra nela/)).toBeVisible();
+      await expect(resumo.getByText(/partes/)).toHaveCount(0);
+
+      const lista = dialog.getByRole('list', { name: 'Arquivos desta conciliação' });
+      await expect(lista).toBeVisible();
+      const dica = dialog.getByText(/A fatura veio quebrada em partes\?/);
+      await expect(dica).toBeVisible();
+      const caixaLista = await lista.boundingBox();
+      const caixaDica = await dica.boundingBox();
+      expect(
+        caixaDica?.y ?? 0,
+        'a frase das partes tem de vir DEPOIS da lista de arquivos',
+      ).toBeGreaterThan((caixaLista?.y ?? 0) + (caixaLista?.height ?? 0) - 1);
+
+      // O resumo cabe na gaveta em 390px — medido, não olhado.
+      const caixaResumo = await resumo.boundingBox();
+      expect(
+        (caixaResumo?.x ?? 0) + (caixaResumo?.width ?? 0),
+        'resumo da conciliação cortado pela borda direita da viewport',
+      ).toBeLessThanOrEqual(vp.size.width);
+
+      await shot(page, `gaveta-passo2-blocos-${slug}`);
+      await analyze(page, `gaveta de criação, passo 2 com os blocos rotulados (${vp.label})`);
+    });
+
     // 86e3n70p0 — fatura de cartão de cliente que lança no vencimento: o bloco
     // "Fatura do cartão" com o processo em vigor e o vencimento lido do PDF.
     test('Gaveta de criação: fatura de cartão no vencimento (86e3n70p0)', async ({ page }) => {
@@ -5036,7 +5084,7 @@ for (const vp of VIEWPORTS) {
       titlesNeverSynced = true;
       await page.goto(`/clientes/${CLIENT_ID}/carteira`);
       await expect(
-        page.getByText('A carteira deste cliente ainda não foi sincronizada'),
+        page.getByText('Esta carteira ainda não foi sincronizada com o Omie'),
       ).toBeVisible();
       await exigirVinheta(page, 'portfolio', `carteira nunca sincronizada (${vp.label})`);
       await analyze(page, `carteira nunca sincronizada (${vp.label})`);
@@ -5413,13 +5461,22 @@ for (const vp of VIEWPORTS) {
       await gaveta.getByRole('button', { name: /Confirmar e lançar 2 de 2/ }).click();
 
       // Resumo por linha, com a mensagem VERBATIM do provedor na que falhou.
-      await expect(gaveta.getByText('Lançada no Omie')).toBeVisible();
+      // `exact`: o resumo do lote (86e3n70qj) também diz "lançada no Omie", e o
+      // `getByText` do Playwright casa substring sem caixa.
+      await expect(gaveta.getByText('Lançada no Omie', { exact: true })).toBeVisible();
       await expect(gaveta.getByText(/lançamento nº 5001/)).toBeVisible();
       await expect(
         gaveta.getByText(/Categoria informada nao existe para o cliente\./),
       ).toBeVisible();
       // A gaveta NÃO fecha no parcial: é dela que o operador reexecuta.
       await expect(gaveta.getByRole('button', { name: /Tentar novamente 1 de 1/ })).toBeVisible();
+      // 86e3n70qj — o desfecho fica na gaveta (o toast some) e diz ONDE entrou.
+      await expect(
+        gaveta.getByRole('status').filter({ hasText: '1 compra lançada no Omie.' }),
+      ).toBeVisible();
+      await expect(
+        gaveta.getByText(/^Na conta do cartão no Omie, na data da compra/),
+      ).toBeVisible();
 
       // TOAST montado e MEDIDO — parcial é aviso, e a cor vem dos tokens.
       await expect(
@@ -5431,6 +5488,24 @@ for (const vp of VIEWPORTS) {
       await expect(page.locator('#__next_error__')).toHaveCount(0);
       await shot(page, `lancamento-resumo-${slugP}`);
       await analyze(page, `resumo parcial do lote + toast de aviso (${vp.label})`);
+
+      // 86e3n70qj — fechada a gaveta, a linha lançada diz QUAL lançamento é,
+      // visível na tabela (a pessoa ia ao Omie conferir porque não dizia).
+      await gaveta.getByRole('button', { name: 'Cancelar' }).click();
+      await expect(gaveta).toHaveCount(0);
+      const selo = page.getByRole('img', { name: /Lançado no Omie · nº 5001/ });
+      await expect(selo).toBeVisible();
+      await expect(selo).toHaveText(/Lançado no Omie · nº 5001/);
+      // Em 390px a tabela rola na horizontal e a coluna Situação começa fora da
+      // tela: o que se mede é o selo INTEIRO cabendo quando trazido à vista.
+      await selo.scrollIntoViewIfNeeded();
+      const caixaSelo = await selo.boundingBox();
+      expect(
+        (caixaSelo?.x ?? 0) + (caixaSelo?.width ?? 0),
+        'selo "Lançado no Omie" pintando fora da viewport',
+      ).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0);
+      await shot(page, `lancamento-selo-na-linha-${slugP}`);
+      await analyze(page, `linha com o selo do lançamento (${vp.label})`);
     });
 
     test('conta corrente: nem seleção nem ação, em nenhuma aba (R1)', async ({ page }) => {
@@ -6115,7 +6190,7 @@ for (const vp of VIEWPORTS) {
       await page.goto(`/clientes/${CLIENT_ID}/carteira`);
 
       await expect(
-        page.getByText('A carteira deste cliente ainda não foi sincronizada'),
+        page.getByText('Esta carteira ainda não foi sincronizada com o Omie'),
       ).toBeVisible();
       // Zeros ali seriam lidos como "este cliente não deve nada": o bloco de
       // agregados não pode existir neste estado.
@@ -6127,7 +6202,7 @@ for (const vp of VIEWPORTS) {
       // caixa, e inteiro dentro da viewport.
       await exigirEstadoVazioLegivel(
         page,
-        'A carteira deste cliente ainda não foi sincronizada',
+        'Esta carteira ainda não foi sincronizada com o Omie',
         `${vp.label} · nunca sincronizada`,
       );
       await shot(page, `carteira-nunca-sincronizada-${slugC}`);

@@ -192,6 +192,36 @@ describe('Gaveta — estrutura e navegação', () => {
   });
 });
 
+describe('Gaveta — o que é cada bloco do Step 2 (86e3n70qj)', () => {
+  it('o resumo do topo diz que é a conciliação, com conta e mês rotulados', async () => {
+    const user = userEvent.setup();
+    renderDrawer();
+    await advanceToStep2(user);
+
+    const resumo = screen.getByRole('region', { name: 'Conciliação' });
+    expect(within(resumo).getByText('Conta')).toBeVisible();
+    expect(within(resumo).getByText(/Cartão Itaú/)).toBeVisible();
+    expect(within(resumo).getByText('Mês')).toBeVisible();
+    expect(within(resumo).getByText('Junho de 2026')).toBeVisible();
+    expect(within(resumo).getByText(/nome do arquivo não entra nela/)).toBeVisible();
+    // A frase dos múltiplos arquivos NÃO mora no resumo (foi o que confundiu).
+    expect(within(resumo).queryByText(/partes/)).toBeNull();
+  });
+
+  it('a frase das partes fica junto da lista de arquivos, depois dela', async () => {
+    const user = userEvent.setup();
+    renderDrawer();
+    await advanceToStep2(user);
+    await addFile(user, pdf('parte-1.pdf'));
+    await waitFor(() => expect(parseStatementMock).toHaveBeenCalledTimes(1));
+
+    const list = screen.getByRole('list', { name: 'Arquivos desta conciliação' });
+    const hint = screen.getByText(/A fatura veio quebrada em partes\?/);
+    expect(list.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(list.parentElement).toBe(hint.parentElement);
+  });
+});
+
 describe('Gaveta — múltiplos arquivos', () => {
   it('processa cada arquivo e mostra o resultado individual', async () => {
     const user = userEvent.setup();
