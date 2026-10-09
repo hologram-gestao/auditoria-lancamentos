@@ -48,6 +48,7 @@ from app.core.crypto_service import (
 from app.core.exceptions import AppError, ErrorCode, OmieAuthError
 from app.core.logging import get_logger
 from app.db.models import (
+    CardPostingDateMode,
     FileEntrySituation,
     ReconciliationOmieEntry,
     ReconciliationSession,
@@ -73,6 +74,7 @@ from app.modules.reconciliations.processing.matcher import (
     DATE_DIVERGENCE_RANGE,
     FileEntryForMatch,
     match,
+    match_invoice_lot,
 )
 from app.modules.reconciliations.processing.omie_fetch import (
     deduplicate_by_id,
@@ -437,9 +439,19 @@ async def _execute_processing(
         deduped=len(omie_movements),
     )
 
-    # 3. Match — função pura, sem I/O. Usa o range fixo DATE_DIVERGENCE_RANGE
-    #    (default do matcher) — não há mais tolerância parametrizável (FASE 1).
-    result = match(file_entries_for_matcher, omie_movements)
+    # 3. Match — função pura, sem I/O. Processo de sempre: range fixo
+    #    DATE_DIVERGENCE_RANGE (default do matcher, FASE 1). Modo "vencimento da
+    #    fatura" do cartão (86e3n70p0): `omie_movements` já é o LOTE da fatura, a
+    #    data da compra não decide, e o par é por valor dentro dele.
+    match_mode = (
+        CardPostingDateMode.INVOICE_DUE_DATE.value
+        if lot_date is not None
+        else CardPostingDateMode.PURCHASE_DATE.value
+    )
+    if lot_date is not None:
+        result = match_invoice_lot(file_entries_for_matcher, omie_movements)
+    else:
+        result = match(file_entries_for_matcher, omie_movements)
 
     # Mapas data-por-id p/ classificar e montar o contexto da anomalia
     # wrong_date (BACK 1.7: "Data arquivo / Data Omie").
@@ -469,6 +481,9 @@ async def _execute_processing(
     log.info(
         "reconciliation_matched",
         session_id=str(session_id),
+        # 86e3n70p0 — qual processo do cartão cruzou (`purchase_date` também
+        # para conta corrente e sessão antiga: é o processo de sempre).
+        match_mode=match_mode,
         total_file=len(file_entries_for_matcher),
         matched=len(result.matches),
         divergent=len(divergent_matches),
