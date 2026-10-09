@@ -24,6 +24,8 @@ O que este módulo afirma (critérios de aceite da 16.1):
   - o plano EXPORTADO do Domínio (fixture anonimizada, 86e3gkd7y) entra pela mesma
     rota: 563 contas, 143 sintéticas, evento com `layout=dominio`; e uma conta
     depois do rodapé recusa o arquivo inteiro com ZERO linhas gravadas;
+  - as duas amostras do Domínio saem da lista na ORDEM DO ARQUIVO (a classificação
+    ordena como texto, como no Domínio, em collation `C`; 86e3n70p9);
   - o `.xls` que o Domínio grava (fixture anonimizada do arquivo real, 86e3n70p6), sem
     edição: 370 contas, 141 sintéticas, `layout=dominio`; `.xls` truncado recusa com
     `FORMATO_NAO_SUPORTADO` e motivo, sem gravar nada.
@@ -34,6 +36,7 @@ O cross-tenant e o cross-org das duas rotas rodam na bateria dos três atacantes
 
 from __future__ import annotations
 
+import csv
 import io
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -443,23 +446,27 @@ class TestListagem:
     async def test_lista_na_ordem_da_classificacao_paginada_e_o_combobox_herda(
         self, client_with_db: AsyncClient, world: World, db_session: AsyncSession
     ) -> None:
-        """86e3n70p9: `1.1.2` antes de `1.1.10`, sintética antes das analíticas dela, e a
-        ordem atravessa a paginação (é SQL, não o cliente). Sem classificação, o código
-        ordena numericamente (`9` antes de `10`), não como texto."""
+        """86e3n70p9: a classificação ordena como TEXTO, como no Domínio — sintética antes
+        das filhas, e sob o mesmo pai a família `00001…` inteira antes da `001…`, nunca
+        intercaladas. A ordem atravessa a paginação (é SQL, não o cliente). Sem
+        classificação, o código ordena numericamente (`20` antes de `100`); a chave dele
+        começa por zeros, então num plano misto essas contas vêm antes das classificadas."""
         await _login(client_with_db, world.admin)
         planilha = _csv(
             "codigo_reduzido;nome;tipo;classificacao",
             "10;Caixa e bancos;sintetica;1.1.10",
             "2;Ativo;sintetica;1",
-            "9;Clientes;analitica;1.1.2",
+            "867;A receber 001;analitica;1.1.02.001",
             "3;Ativo circulante;sintetica;1.1",
-            "11;Banco conta movimento;analitica;1.1.10.01",
+            "773;A receber 00001;analitica;1.1.02.00001",
+            "12;Clientes;sintetica;1.1.02",
+            "721;A receber 00002;analitica;1.1.02.00002",
             "100;Fornecedor sem classificacao;analitica;",
             "20;Outro sem classificacao;sintetica;",
         )
         assert (await _import(client_with_db, world.client, planilha)).status_code == 200
 
-        esperado = ["2", "3", "9", "10", "11", "20", "100"]
+        esperado = ["20", "100", "2", "3", "12", "773", "721", "867", "10"]
         tudo = await client_with_db.get(_url(world.client), params={"pageSize": 100})
         assert [i["code"] for i in tudo.json()["data"]] == esperado
 
@@ -475,7 +482,7 @@ class TestListagem:
         seletor = await client_with_db.get(
             _url(world.client), params={"type": "analitica", "status": "ativa"}
         )
-        assert [i["code"] for i in seletor.json()["data"]] == ["9", "11", "100"]
+        assert [i["code"] for i in seletor.json()["data"]] == ["100", "773", "721", "867"]
 
         # A chave é DERIVADA na gravação (nunca nula depois da importação) e a
         # reimportação que troca a classificação a reescreve.
@@ -488,8 +495,8 @@ class TestListagem:
                 )
             ).all()
         )
-        assert chaves["10"] == "000001.000001.000010"
-        assert chaves["100"] == "000100"
+        assert chaves["10"] == "1.1.10", "a classificação entra crua, sem preenchimento"
+        assert chaves["100"] == "000100", "só o código é preenchido"
         assert None not in chaves.values()
         await _import(
             client_with_db,
@@ -505,7 +512,7 @@ class TestListagem:
             .where(ClientAccountingAccount.code == "100")
             .execution_options(populate_existing=True)
         )
-        assert chave.scalar_one() == "000001.000002"
+        assert chave.scalar_one() == "1.2"
 
     async def test_cabecalho_como_gente_escreve_e_tipo_s_a_entram_pela_rota(
         self, client_with_db: AsyncClient, world: World
@@ -714,6 +721,60 @@ class TestPlanoExportadoDoDominio:
         assert "exemplo" not in resp.text
         assert "Conta extra" not in resp.text
         assert await _count(db_session, world.client.id) == 0
+
+
+def _dominio_file_order(fixture: Path, filename: str) -> tuple[bytes, str, list[str]]:
+    """Os bytes da amostra e os códigos na ORDEM DO ARQUIVO (`linha` crescente do
+    `plano_esperado.csv` ao lado dela). Lido fora do teste `async` (ASYNC240)."""
+    with (fixture.parent / "plano_esperado.csv").open(encoding="utf-8") as handle:
+        rows = sorted(csv.DictReader(handle, delimiter=";"), key=lambda r: int(r["linha"]))
+    return fixture.read_bytes(), filename, [r["codigo_reduzido"] for r in rows]
+
+
+class TestOrdemDoArquivoDoDominio:
+    """86e3n70p9 — a prova contra o REAL. As duas amostras anonimizadas são o plano como
+    o Domínio o exporta; importadas pela rota, a lista tem de sair na ORDEM DO ARQUIVO
+    (a coluna `linha` do `plano_esperado.csv`, crescente), página a página. É o guarda
+    contra uma regra "mais inteligente" (preencher a classificação com zeros intercala
+    as famílias `00001…` e `001…` e põe 87 contas do plano do Gabriel fora do lugar)."""
+
+    @pytest.mark.parametrize(
+        ("content", "filename", "esperado"),
+        [
+            _dominio_file_order(_DOMINIO, "plano.xlsx"),
+            _dominio_file_order(_DOMINIO_XLS, "plano.xls"),
+        ],
+        ids=["xlsx-gabriel-563", "xls-murilo-370"],
+    )
+    async def test_a_lista_sai_na_ordem_do_arquivo(
+        self,
+        client_with_db: AsyncClient,
+        world: World,
+        content: bytes,
+        filename: str,
+        esperado: list[str],
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        resp = await _import(client_with_db, world.client, content, filename=filename)
+        assert resp.status_code == 200, resp.text
+
+        lidos: list[str] = []
+        page = 1
+        while True:
+            body = (
+                await client_with_db.get(_url(world.client), params={"pageSize": 100, "page": page})
+            ).json()
+            lidos += [i["code"] for i in body["data"]]
+            if page >= body["pagination"]["totalPages"]:
+                break
+            page += 1
+        assert len(lidos) == len(esperado)
+        primeira_diferenca = next(
+            (n for n, (a, b) in enumerate(zip(lidos, esperado, strict=True)) if a != b), None
+        )
+        assert primeira_diferenca is None, (
+            f"fora da ordem do Domínio a partir da posição {primeira_diferenca}"
+        )
 
 
 class TestPlanoDoDominioEmXls:

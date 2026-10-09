@@ -19,6 +19,10 @@ describe('AccountingChartModel', () => {
     expect(section).toHaveTextContent(/"Código Reduzido" vale como codigo_reduzido/);
     expect(section).toHaveTextContent(/outros nomes não são aceitos/);
     expect(section).toHaveTextContent(/"analitico"\/"sintetico" ou só a inicial, "A"\/"S"/);
+    // A classificação ordena como texto (a ordem do Domínio): o texto ensina a largura fixa.
+    expect(section).toHaveTextContent(/A lista segue a ordem dela como texto, como no Domínio/);
+    expect(section).toHaveTextContent(/use a mesma largura em cada nível \(01, 02… 10\)/);
+    expect(section).toHaveTextContent(/senão 1\.1\.10 vem antes de 1\.1\.2/);
     // As quatro colunas do modelo continuam nomeadas pela grafia canônica.
     for (const column of ['codigo_reduzido', 'nome', 'tipo', 'classificacao']) {
       expect(screen.getAllByText(column, { exact: true }).length).toBeGreaterThan(0);
