@@ -597,6 +597,16 @@ export type ListAccountingChartQuery = NonNullable<
 export type AccountingAccountStatusFilter = NonNullable<ListAccountingChartQuery['status']>;
 /** `{ data: {contas, contasNovas, contasInativadas} }` — chave ÚNICA: chega desempacotado. */
 export type AccountingChartImportResult = Schemas['ChartImportPayload'];
+/**
+ * Inclusão manual de UMA conta (86e3nb816): `code`, `name`, `type` e
+ * `classification` opcional; a conta nasce ativa. Resposta `{ data: conta }`.
+ */
+export type AccountingAccountCreateRequest = Schemas['AccountingAccountCreateRequest'];
+/**
+ * Edição de UMA conta (86e3nb816): todo campo opcional, o código não se edita e
+ * `classification: null` limpa.
+ */
+export type AccountingAccountUpdateRequest = Schemas['AccountingAccountUpdateRequest'];
 
 /**
  * Uma conta de ORIGEM (ou o slot da conta PADRÃO, `sourceAccountId: null`) com

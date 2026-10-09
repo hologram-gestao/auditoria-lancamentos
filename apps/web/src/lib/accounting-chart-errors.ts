@@ -155,3 +155,47 @@ export function readNotPostableMessage(error: unknown): string | null {
   }
   return error.userMessage;
 }
+
+/** Os campos do formulário de conta que uma recusa do servidor pode apontar. */
+export type AccountFormField = 'code' | 'name' | 'type' | 'classification' | 'active';
+
+export interface AccountFormRefusal {
+  field: AccountFormField;
+  message: string;
+}
+
+const ACCOUNT_INVALID_FIELDS: readonly AccountFormField[] = [
+  'code',
+  'name',
+  'type',
+  'classification',
+];
+
+/**
+ * As recusas da inclusão e da edição manual (86e3nb816), no CAMPO certo do
+ * formulário:
+ *   - 409 `CONTA_CONTABIL_CODIGO_EXISTENTE` → `code`;
+ *   - 422 `CONTA_CONTABIL_INVALIDA` → o `details.field` do servidor;
+ *   - 422 `CONTA_CONTABIL_EM_USO` → `type` (virar sintética) ou `active` (inativar).
+ *
+ * A mensagem é a `userMessage` do servidor, que já traz as contagens da conta em
+ * uso. Qualquer outro erro → `null`: o caller cai no toast.
+ */
+export function readAccountFormRefusal(error: unknown): AccountFormRefusal | null {
+  if (!(error instanceof ApiError)) return null;
+  if (error.code === 'CONTA_CONTABIL_CODIGO_EXISTENTE') {
+    return { field: 'code', message: error.userMessage };
+  }
+  if (error.code === 'CONTA_CONTABIL_INVALIDA') {
+    const field = error.details.field;
+    const known = ACCOUNT_INVALID_FIELDS.find((f) => f === field);
+    return known ? { field: known, message: error.userMessage } : null;
+  }
+  if (error.code === 'CONTA_CONTABIL_EM_USO') {
+    return {
+      field: error.details.reason === 'inativa' ? 'active' : 'type',
+      message: error.userMessage,
+    };
+  }
+  return null;
+}

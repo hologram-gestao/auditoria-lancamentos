@@ -71,6 +71,8 @@ const sourceState = {
   refetch: vi.fn(),
 };
 const bindingState = { mutateAsync: vi.fn(), isPending: false };
+const createAccountState = { mutateAsync: vi.fn(), isPending: false };
+const updateAccountState = { mutateAsync: vi.fn(), isPending: false };
 
 vi.mock('@/hooks/use-client-accounting-chart', () => ({
   useAccountingChartList: (_clientId: string, params: ListAccountingChartParams) => {
@@ -89,6 +91,8 @@ vi.mock('@/hooks/use-client-accounting-chart', () => ({
   useImportAccountingChart: () => importState,
   useSourceAccounts: () => sourceState,
   useSetSourceAccountBinding: () => bindingState,
+  useCreateAccountingAccount: () => createAccountState,
+  useUpdateAccountingAccount: () => updateAccountState,
 }));
 
 const clientDetailState = {
@@ -253,6 +257,8 @@ beforeEach(() => {
   sourceState.isError = false;
   bindingState.mutateAsync = vi.fn();
   bindingState.isPending = false;
+  createAccountState.mutateAsync = vi.fn();
+  updateAccountState.mutateAsync = vi.fn();
   toastSuccess.mockClear();
   toastError.mockClear();
 });
@@ -336,7 +342,8 @@ describe('lista', () => {
     const headers = within(table)
       .getAllByRole('columnheader')
       .map((th) => th.textContent);
-    expect(headers).toEqual(['Código', 'Classificação', 'Nome', 'Tipo', 'Situação']);
+    // "Ações" (o Editar da linha, 86e3nb816) só para quem gere o plano — o padrão é o gerente.
+    expect(headers).toEqual(['Código', 'Classificação', 'Nome', 'Tipo', 'Situação', 'Ações']);
     expect(screen.getByText('Nome indisponível (indecifrável)')).toBeInTheDocument();
     expect(screen.queryByText('[indecifrável]')).not.toBeInTheDocument();
     // Badge com prefixo sr-only: o leitor de tela ouve "Situação: Inativa".
@@ -387,7 +394,8 @@ describe('lista', () => {
     const headers = within(table)
       .getAllByRole('columnheader')
       .map((th) => th.textContent);
-    expect(headers).toEqual(['Código', 'Classificação', 'Nome', 'Tipo', 'Situação']);
+    // "Ações" (o Editar da linha, 86e3nb816) só para quem gere o plano — o padrão é o gerente.
+    expect(headers).toEqual(['Código', 'Classificação', 'Nome', 'Tipo', 'Situação', 'Ações']);
   });
 
   it('a busca é só por código (o nome é cifrado) e os filtros vêm da URL', () => {
@@ -823,5 +831,161 @@ describe('conta do banco', () => {
     expect(within(section).getByTestId('bank-accounts-pending')).toHaveTextContent(
       'O plano contábil do cliente ainda não foi importado pelo escritório.',
     );
+  });
+});
+
+describe('conta manual (86e3nb816)', () => {
+  it.each([
+    ['plataforma', platform],
+    ['admin', admin],
+    ['gerente da organização', manager],
+  ])('%s vê "Nova conta" e "Editar" na linha', (_label, user) => {
+    authState.user = user;
+    render(<AccountingChartScreen clientId="c1" />);
+    expect(screen.getByRole('button', { name: 'Nova conta' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Editar conta 649' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['gerente do cliente', clientManager],
+    ['operador do cliente', clientOperator],
+  ])('%s não vê "Nova conta" nem "Editar"', (_label, user) => {
+    authState.user = user;
+    render(<AccountingChartScreen clientId="c1" />);
+    expect(screen.queryByRole('button', { name: 'Nova conta' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Editar conta/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Ações' })).not.toBeInTheDocument();
+  });
+
+  it('cliente encerrado: sem "Nova conta" nem "Editar", com o motivo', () => {
+    authState.user = admin;
+    clientDetailState.data = { closed_at: '2026-09-01T00:00:00Z', accounts: [] };
+    render(<AccountingChartScreen clientId="c1" />);
+    expect(screen.queryByRole('button', { name: 'Nova conta' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Editar conta/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/assim como incluir e editar contas/)).toBeInTheDocument();
+  });
+
+  it('sem plano, "Nova conta" continua no topo (dá para montar o plano à mão)', () => {
+    withoutPlan();
+    render(<AccountingChartScreen clientId="c1" />);
+    expect(screen.getByRole('button', { name: 'Nova conta' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /Importar planilha/ })).toHaveLength(1);
+  });
+
+  it('inclui a conta com o código e o nome aparados e a classificação vazia como nula', async () => {
+    const user = userEvent.setup();
+    createAccountState.mutateAsync = vi.fn().mockResolvedValue(account({ id: 'n', code: '663' }));
+    render(<AccountingChartScreen clientId="c1" />);
+
+    await user.click(screen.getByRole('button', { name: 'Nova conta' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).queryByRole('switch')).not.toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText('Código reduzido'), ' 663 ');
+    await user.type(within(dialog).getByLabelText('Nome'), '  Aluguéis a receber  ');
+    await user.click(within(dialog).getByRole('button', { name: 'Incluir conta' }));
+
+    await waitFor(() =>
+      expect(createAccountState.mutateAsync).toHaveBeenCalledWith({
+        code: '663',
+        name: 'Aluguéis a receber',
+        type: 'analitica',
+        classification: null,
+      }),
+    );
+    expect(toastSuccess).toHaveBeenCalledWith('Conta 663 incluída no plano.');
+  });
+
+  it('código com separador é recusado no formulário, sem request', async () => {
+    const user = userEvent.setup();
+    render(<AccountingChartScreen clientId="c1" />);
+    await user.click(screen.getByRole('button', { name: 'Nova conta' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText('Código reduzido'), '66;3');
+    await user.type(within(dialog).getByLabelText('Nome'), 'Conta');
+    await user.click(within(dialog).getByRole('button', { name: 'Incluir conta' }));
+    expect(
+      await within(dialog).findByText(/Use letras, números, ponto e hífen/),
+    ).toBeInTheDocument();
+    expect(createAccountState.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('código repetido (409) aparece NO CAMPO do código, sem toast', async () => {
+    const user = userEvent.setup();
+    createAccountState.mutateAsync = vi.fn().mockRejectedValue(
+      new ApiError(409, {
+        code: 'CONTA_CONTABIL_CODIGO_EXISTENTE',
+        message: 'x',
+        userMessage: 'Já existe uma conta com este código no plano contábil do cliente.',
+        details: { code: '649', accountId: 'acc-649' },
+      }),
+    );
+    render(<AccountingChartScreen clientId="c1" />);
+    await user.click(screen.getByRole('button', { name: 'Nova conta' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText('Código reduzido'), '649');
+    await user.type(within(dialog).getByLabelText('Nome'), 'Outra');
+    await user.click(within(dialog).getByRole('button', { name: 'Incluir conta' }));
+
+    const code = within(dialog).getByLabelText('Código reduzido');
+    await waitFor(() => expect(code).toHaveAttribute('aria-invalid', 'true'));
+    expect(within(dialog).getByText(/Já existe uma conta com este código/)).toBeInTheDocument();
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it('a edição bloqueia o código e manda só o que mudou', async () => {
+    const user = userEvent.setup();
+    updateAccountState.mutateAsync = vi.fn().mockResolvedValue(account({ name: 'Banco novo' }));
+    render(<AccountingChartScreen clientId="c1" />);
+
+    await user.click(screen.getByRole('button', { name: 'Editar conta 649' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: 'Editar conta 649' })).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Código reduzido')).toBeDisabled();
+    const name = within(dialog).getByLabelText('Nome');
+    await user.clear(name);
+    await user.type(name, 'Banco novo');
+    await user.click(within(dialog).getByRole('button', { name: 'Salvar alterações' }));
+
+    await waitFor(() =>
+      expect(updateAccountState.mutateAsync).toHaveBeenCalledWith({
+        accountId: 'acc-649',
+        payload: { name: 'Banco novo' },
+      }),
+    );
+    expect(toastSuccess).toHaveBeenCalledWith('Conta 649 atualizada.');
+  });
+
+  it('inativar conta em uso (422) aparece NO CAMPO da situação, com as contagens', async () => {
+    const user = userEvent.setup();
+    updateAccountState.mutateAsync = vi.fn().mockRejectedValue(
+      new ApiError(422, {
+        code: 'CONTA_CONTABIL_EM_USO',
+        message: 'x',
+        userMessage:
+          'Esta conta não pode ficar inativa: ela está em uso por 2 decisões do de-para.',
+        details: { reason: 'inativa', decisionCount: 2, bindingCount: 0 },
+      }),
+    );
+    render(<AccountingChartScreen clientId="c1" />);
+    await user.click(screen.getByRole('button', { name: 'Editar conta 649' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('switch', { name: 'Conta ativa' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Salvar alterações' }));
+
+    expect(await within(dialog).findByText(/em uso por 2 decisões do de-para/)).toBeInTheDocument();
+    expect(updateAccountState.mutateAsync).toHaveBeenCalledWith({
+      accountId: 'acc-649',
+      payload: { active: false },
+    });
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it('gaveta aberta sem violações de a11y', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<AccountingChartScreen clientId="c1" />);
+    await user.click(screen.getByRole('button', { name: 'Editar conta 649' }));
+    await screen.findByRole('dialog');
+    await assertNoA11yViolations(container.ownerDocument.body);
   });
 });
