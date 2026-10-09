@@ -8,6 +8,12 @@ vazar existência (§3.15). O tenant vem do `Client` já validado pela rota.
 sobre `ClientAccountingAccount.__table__`, com `client_id` no WHERE da atualização.
 O ORM com lista de parâmetros e WHERE além da pk levanta `InvalidRequestError: bulk
 synchronize…` com sessão real — foi um 500 em todo envio de arquivo na S14.
+
+**A ordem é a da CLASSIFICAÇÃO** (86e3n70p9): toda listagem ordena por `sort_key`
+(derivada na gravação por `sort_key.chart_sort_key`, `NULLS LAST` para a linha que
+código anterior tenha gravado sem ela), depois `code` e `id` para a página ser
+estável. A ordem mora AQUI, num lugar só: o seletor de conta do de-para e a conta do
+banco leem a mesma lista e herdam.
 """
 
 from __future__ import annotations
@@ -24,7 +30,8 @@ if TYPE_CHECKING:
     from collections.abc import Collection, Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
-    from sqlalchemy.sql import Select
+    from sqlalchemy.orm import InstrumentedAttribute
+    from sqlalchemy.sql import ColumnElement, Select
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +50,20 @@ def _escape_like(term: str) -> str:
 
 def _table() -> Table:
     return cast(Table, ClientAccountingAccount.__table__)
+
+
+def _chart_order() -> tuple[ColumnElement[Any] | InstrumentedAttribute[Any], ...]:
+    """O `ORDER BY` ÚNICO do plano: classificação (`sort_key`), depois código e id.
+
+    `NULLS LAST` cobre a linha gravada sem a chave por código anterior à coluna
+    (janela de deploy): ela vai para o fim, ordenada pelo código, em vez de sumir
+    ou de vir na frente.
+    """
+    return (
+        ClientAccountingAccount.sort_key.nulls_last(),
+        ClientAccountingAccount.code,
+        ClientAccountingAccount.id,
+    )
 
 
 class AccountingChartRepository:
@@ -69,8 +90,9 @@ class AccountingChartRepository:
         return list((await self._session.execute(stmt)).scalars().all())
 
     async def list_all(self, client_id: UUID) -> list[ClientAccountingAccount]:
-        """O plano inteiro do cliente (a reimportação casa por código sobre ele)."""
-        stmt = self._base_query(client_id).order_by(ClientAccountingAccount.code)
+        """O plano inteiro do cliente, na ordem da classificação (a reimportação casa
+        por código sobre ele)."""
+        stmt = self._base_query(client_id).order_by(*_chart_order())
         return list((await self._session.execute(stmt)).scalars().all())
 
     async def get_by_codes(
@@ -96,7 +118,7 @@ class AccountingChartRepository:
         limit: int,
         offset: int,
     ) -> tuple[list[ClientAccountingAccount], int]:
-        """Página + total que casa com os MESMOS filtros, ordem estável por código.
+        """Página + total que casa com os MESMOS filtros, na ordem da classificação.
 
         A busca é por PREFIXO de CÓDIGO: nome é cifrado (§4.5) e não é buscável no
         servidor. Curingas do `LIKE` são literais.
@@ -112,11 +134,7 @@ class AccountingChartRepository:
 
         total_stmt = select(func.count()).select_from(stmt.order_by(None).subquery())
         total = int((await self._session.execute(total_stmt)).scalar_one())
-        page_stmt = (
-            stmt.order_by(ClientAccountingAccount.code, ClientAccountingAccount.id)
-            .limit(limit)
-            .offset(offset)
-        )
+        page_stmt = stmt.order_by(*_chart_order()).limit(limit).offset(offset)
         rows = list((await self._session.execute(page_stmt)).scalars().all())
         return rows, total
 
@@ -146,11 +164,11 @@ class AccountingChartRepository:
         await self._session.execute(insert(_table()), list(rows))
 
     async def update_accounts(self, updates: Sequence[dict[str, Any]]) -> None:
-        """Atualiza nome/tipo/classificação e REATIVA, por pk, em lote (Core).
+        """Atualiza nome/tipo/classificação/chave de ordem e REATIVA, por pk, em lote (Core).
 
         Cada item: `{"b_client", "b_id", "b_ct", "b_iv", "b_type", "b_class",
-        "b_author"}`. `client_id` no WHERE junto da pk (§3.15). `updated_at` pelo
-        `clock_timestamp()`: o `onupdate` do ORM não vale para UPDATE de Core.
+        "b_sort", "b_author"}`. `client_id` no WHERE junto da pk (§3.15). `updated_at`
+        pelo `clock_timestamp()`: o `onupdate` do ORM não vale para UPDATE de Core.
         """
         if not updates:
             return
@@ -163,6 +181,7 @@ class AccountingChartRepository:
                 name_iv=bindparam("b_iv"),
                 account_type=bindparam("b_type"),
                 classification=bindparam("b_class"),
+                sort_key=bindparam("b_sort"),
                 active=True,
                 updated_by=bindparam("b_author"),
                 updated_at=func.clock_timestamp(),

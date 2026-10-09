@@ -24,6 +24,11 @@
  * **A página rola, a tabela não** (padrão das listas do cliente, 86e3f55bc):
  * `<TableCard pageScroll>` + `<Table stickyHeader="page">`, paginação no fluxo,
  * e a seção da conta do banco depois dela.
+ *
+ * **A hierarquia aparece** (86e3n70p9): a lista chega do servidor na ordem da
+ * classificação (sintética em cima, as analíticas dela abaixo), e a linha mostra
+ * isso com o nome recuado pelo grau (`chart-hierarchy.ts`) e a sintética em peso
+ * maior. As outras colunas não mudam; nada é ordenado no cliente.
  */
 
 import { CheckCircle2, Search, Upload, X } from 'lucide-react';
@@ -62,6 +67,7 @@ import { useAuthStore } from '@/stores/auth';
 import { AccountingChartImportSheet, importSuccessMessage } from './accounting-chart-import-sheet';
 import { AccountingChartModel } from './accounting-chart-model';
 import { BankAccountsSection } from './bank-accounts-section';
+import { classificationDepth, indentClassFor } from './chart-hierarchy';
 
 const PARAM = {
   page: 'page',
@@ -432,20 +438,34 @@ function FilterGroup<T extends string>({
 
 function AccountRow({ account }: { account: AccountingAccount }) {
   const typeLabel = ACCOUNT_TYPE_LABELS[account.type] ?? account.type;
+  const depth = classificationDepth(account.classification);
+  const isSynthetic = account.type === 'sintetica';
   return (
     <TableRow>
       <TableCell className="whitespace-nowrap font-medium tabular-nums">{account.code}</TableCell>
       <TableCell className="text-muted-foreground whitespace-nowrap tabular-nums">
         {account.classification ?? '—'}
       </TableCell>
-      <TableCell className="min-w-48 whitespace-normal">
-        {/* Nome que a chave do cliente não abre (cliente encerrado): texto
-            NEUTRO, sem cara de nome de conta. */}
-        {account.nameResolved ? (
-          account.name
-        ) : (
-          <span className="text-muted-foreground">Nome indisponível (indecifrável)</span>
-        )}
+      {/* `min-w-72`: o recuo mais fundo (5rem) sai da largura do nome, não da
+          linha — em 390px a tabela rola na horizontal e o nome continua legível
+          sem virar quatro linhas. */}
+      <TableCell className="min-w-72 whitespace-normal">
+        {/* O recuo pelo grau e o peso da sintética são a hierarquia que a ordem
+            do servidor já traz; o `data-depth` é o que o teste e o e2e leem. */}
+        <span
+          data-depth={depth}
+          className={cn('block', indentClassFor(depth), isSynthetic && 'font-semibold')}
+        >
+          {/* Nome que a chave do cliente não abre (cliente encerrado): texto
+              NEUTRO, sem cara de nome de conta. */}
+          {account.nameResolved ? (
+            account.name
+          ) : (
+            <span className="text-muted-foreground font-normal">
+              Nome indisponível (indecifrável)
+            </span>
+          )}
+        </span>
       </TableCell>
       <TableCell>
         <span

@@ -1985,6 +1985,9 @@ class TestPlanoContabilRoundTrip:
             "updated_by",
             "created_at",
             "updated_at",
+            # 86e3n70p9 (`b2f7c9e41d06`): a chave da ordem da classificação, em claro
+            # como o código (é derivada dele e da classificação, nunca do nome).
+            "sort_key",
         )
         assert _columns(url, "client_accounting_accounts", *columns) == len(columns)
         assert _scalar(
@@ -2390,3 +2393,180 @@ class TestGeracoesDoArquivoContabilRoundTrip:
             alembic_cfg
         )
         assert ACCOUNTING_FILES_REV in _revisions_in_chain(alembic_cfg)
+
+
+# ----------------------------------------------------------------------
+# 86e3n70p9 — a ordem da classificação no plano contábil (`sort_key`).
+# ----------------------------------------------------------------------
+
+PRE_CHART_SORT_KEY_REV = "d881eabdceb7"
+CHART_SORT_KEY_REV = "b2f7c9e41d06"
+
+_INSERT_CLASSIFIED_ACCOUNT = (
+    "INSERT INTO client_accounting_accounts (id, client_id, code, classification, "
+    "name_encrypted, name_iv, account_type, created_by, updated_by) VALUES "
+    "(gen_random_uuid(), :cid, :code, :classification, 'v1:k1:00', :iv, 'analitica', :uid, :uid)"
+)
+
+#: A amostra da paridade Python x SQL: cada caso da regra, inclusive os que uma
+#: implementação ingênua erra (segmento largo, letra, vazio, sem classificação).
+_SORT_KEY_SAMPLE: tuple[tuple[str, str | None], ...] = (
+    ("1", "1"),
+    ("3", "1.1"),
+    ("9", "1.1.2"),
+    ("10", "1.1.10"),
+    ("649", "1.1.1.02.001"),
+    ("7", "1.1.A"),
+    ("8", "1.1234567"),
+    ("6", "1..2"),
+    ("100", None),
+    ("20", ""),
+    ("2.04.78", None),
+    ("AB-12", None),
+)
+
+
+def _sort_keys(url: str, client_id: str) -> dict[str, str | None]:
+    engine = sa.create_engine(url)
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                sa.text(
+                    "SELECT code, sort_key FROM client_accounting_accounts WHERE client_id = :cid"
+                ),
+                {"cid": client_id},
+            ).all()
+    finally:
+        engine.dispose()
+    return dict(rows)
+
+
+class TestOrdemDoPlanoContabilRoundTrip:
+    """86e3n70p9 — `sort_key` sobe com backfill, desce de verdade e sobe de novo."""
+
+    def test_backfill_em_sql_produz_o_mesmo_valor_que_a_funcao_python(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        """A migration repete a regra em SQL (não importa `app.*`): as duas fontes têm
+        de concordar em TODA a amostra, e a ordem de texto resultante é a da
+        classificação."""
+        from app.modules.client_accounting_chart import chart_sort_key
+
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, PRE_CHART_SORT_KEY_REV)
+        client_id = _seed_client_row(url)
+        uid = _creator_of(url, client_id)
+        for code, classification in _SORT_KEY_SAMPLE:
+            _execute(
+                url,
+                _INSERT_CLASSIFIED_ACCOUNT,
+                cid=client_id,
+                code=code,
+                classification=classification,
+                iv="0" * 24,
+                uid=uid,
+            )
+
+        command.upgrade(alembic_cfg, "head")
+
+        keys = _sort_keys(url, client_id)
+        assert len(keys) == len(_SORT_KEY_SAMPLE)
+        for code, classification in _SORT_KEY_SAMPLE:
+            assert keys[code] == chart_sort_key(classification, code), (code, classification)
+        assert None not in keys.values(), "o backfill alcança TODA linha existente"
+
+        # A ordem de TEXTO das chaves gravadas é a da classificação: sintética em cima,
+        # as filhas abaixo, `1.1.2` antes de `1.1.10`.
+        hierarchy = ["1", "3", "649", "9", "10"]  # 1 < 1.1 < 1.1.1.02.001 < 1.1.2 < 1.1.10
+        assert sorted(hierarchy, key=lambda c: keys[c] or "") == hierarchy
+
+    def test_indice_e_coluna_existem_e_o_backfill_e_idempotente(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        assert _columns(url, "client_accounting_accounts", "sort_key") == 1
+        assert (
+            _scalar(
+                url,
+                "SELECT count(*) FROM pg_indexes WHERE indexname = "
+                "'ix_client_accounting_accounts_client_id_sort_key'",
+            )
+            == 1
+        )
+        client_id = _seed_client_row(url)
+        _execute(
+            url,
+            _INSERT_CLASSIFIED_ACCOUNT,
+            cid=client_id,
+            code="10",
+            classification="1.1.10",
+            iv="0" * 24,
+            uid=_creator_of(url, client_id),
+        )
+        # Linha gravada SEM a chave (código anterior à coluna): rodar o backfill de
+        # novo a preenche, e rodar sobre linha já preenchida não a altera.
+        mig_backfill = _backfill_sql()
+        _execute(url, mig_backfill)
+        assert _sort_keys(url, client_id) == {"10": "000001.000001.000010"}
+        _execute(url, "UPDATE client_accounting_accounts SET classification = '9'")
+        _execute(url, mig_backfill)
+        assert _sort_keys(url, client_id) == {"10": "000001.000001.000010"}, (
+            "convergente: só preenche onde está NULL"
+        )
+
+    def test_downgrade_e_real_e_o_ciclo_converge(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        _execute(
+            url,
+            _INSERT_CLASSIFIED_ACCOUNT,
+            cid=client_id,
+            code="649",
+            classification="1.1.1.02.001",
+            iv="0" * 24,
+            uid=_creator_of(url, client_id),
+        )
+
+        command.downgrade(alembic_cfg, PRE_CHART_SORT_KEY_REV)
+        assert _columns(url, "client_accounting_accounts", "sort_key") == 0
+        assert (
+            _scalar(
+                url,
+                "SELECT count(*) FROM pg_indexes WHERE indexname = "
+                "'ix_client_accounting_accounts_client_id_sort_key'",
+            )
+            == 0
+        )
+        assert _scalar(url, "SELECT count(*) FROM client_accounting_accounts") == 1, (
+            "a conta FICA: o downgrade só tira a chave"
+        )
+
+        for _ in range(2):
+            command.upgrade(alembic_cfg, "head")
+            command.downgrade(alembic_cfg, PRE_CHART_SORT_KEY_REV)
+
+        command.upgrade(alembic_cfg, "head")
+        assert _sort_keys(url, client_id) == {"649": "000001.000001.000001.000002.000001"}
+        assert _scalar(url, "SELECT version_num FROM alembic_version") == _head_revision(
+            alembic_cfg
+        )
+        assert CHART_SORT_KEY_REV in _revisions_in_chain(alembic_cfg)
+
+
+def _backfill_sql() -> str:
+    """O `UPDATE` do backfill, lido da PRÓPRIA migration (fonte única da regra em SQL)."""
+    import importlib.util
+
+    path = (
+        API_ROOT / "alembic" / "versions" / f"{CHART_SORT_KEY_REV}_s16_accounting_chart_sort_key.py"
+    )
+    spec = importlib.util.spec_from_file_location("_migration_sort_key", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return str(module._BACKFILL)

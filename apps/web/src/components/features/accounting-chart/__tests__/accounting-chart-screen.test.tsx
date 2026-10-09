@@ -344,6 +344,52 @@ describe('lista', () => {
     await assertNoA11yViolations(container);
   });
 
+  it('a hierarquia aparece: recuo do nome pelo grau e sintética em peso maior (86e3n70p9)', () => {
+    // A ORDEM vem do servidor (sort_key); a tela só mostra o grau e o peso. A lista
+    // chega como o servidor a devolve e é renderizada NESSA ordem, sem reordenar.
+    withPlan([
+      account({ id: 'g0', code: '1', classification: '1', name: 'Ativo', type: 'sintetica' }),
+      account({
+        id: 'g1',
+        code: '3',
+        classification: '1.1',
+        name: 'Circulante',
+        type: 'sintetica',
+      }),
+      account({ id: 'g4', code: '649', classification: '1.1.1.02.001', name: 'Banco' }),
+      account({ id: 'sem', code: '100', classification: null, name: 'Sem classificação' }),
+      account({ id: 'fundo', code: '7', classification: '1.2.3.4.5.6.7.8', name: 'Muito fundo' }),
+    ]);
+    render(<AccountingChartScreen clientId="c1" />);
+
+    const table = screen.getAllByRole('table')[0]!;
+    const names = within(table)
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => within(row).getAllByRole('cell')[2]!.querySelector('[data-depth]')!);
+    expect(names.map((n) => n.textContent)).toEqual([
+      'Ativo',
+      'Circulante',
+      'Banco',
+      'Sem classificação',
+      'Muito fundo',
+    ]);
+    expect(names.map((n) => n.getAttribute('data-depth'))).toEqual(['0', '1', '4', '0', '7']);
+    expect(names[0]).toHaveClass('pl-0', 'font-semibold');
+    expect(names[1]).toHaveClass('pl-4', 'font-semibold');
+    expect(names[2]).toHaveClass('pl-16');
+    expect(names[2]).not.toHaveClass('font-semibold');
+    expect(names[3]).toHaveClass('pl-0');
+    expect(names[3]).not.toHaveClass('font-semibold');
+    // Acima do teto, recua como a mais funda (nunca some da tela).
+    expect(names[4]).toHaveClass('pl-20');
+    // As demais colunas não mudam: código, classificação, tipo e situação seguem iguais.
+    const headers = within(table)
+      .getAllByRole('columnheader')
+      .map((th) => th.textContent);
+    expect(headers).toEqual(['Código', 'Classificação', 'Nome', 'Tipo', 'Situação']);
+  });
+
   it('a busca é só por código (o nome é cifrado) e os filtros vêm da URL', () => {
     currentSearch = 'type=sintetica&status=inativa&code=1';
     render(<AccountingChartScreen clientId="c1" />);
