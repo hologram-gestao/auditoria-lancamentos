@@ -792,16 +792,21 @@ const ACCOUNTING_IMPORT_DOMINIO_REFUSAL = {
 };
 
 /**
- * 86e3gkd50 — o `.xls` legado. O servidor decide pelos magic bytes (OLE/CFB) e
- * recusa com 422 `FORMATO_NAO_SUPORTADO`; o `userMessage` é o LITERAL de
+ * 86e3gkd50 e 86e3n70p6 — o `.xls`. O servidor lê o `.xls` de verdade desde
+ * 86e3n70p6; o que ele recusa é o contêiner OLE2 que não abre como planilha, com
+ * 422 `FORMATO_NAO_SUPORTADO` e o `userMessage` LITERAL de
  * `client_file_ingestion/reader.py::detect_format`, que o plano contábil (S16)
  * reusa. O mock não lê magic bytes: decide pelo nome do arquivo no multipart, e
- * vale nas três rotas que recebem arquivo do cliente (inspeção, envio e plano).
+ * vale nas três rotas que recebem arquivo do cliente (inspeção, envio e plano). Os
+ * cenários que usam isto enviam justamente um `.xls` ilegível (`XLS_ILEGIVEL`).
  */
 const XLS_REFUSAL = {
   code: 'FORMATO_NAO_SUPORTADO',
-  message: 'arquivo XLS (formato antigo)',
-  userMessage: 'O formato XLS (Excel antigo) não é aceito. Salve a planilha como XLSX ou CSV.',
+  message: 'contêiner OLE2 sem pasta de trabalho legível',
+  userMessage:
+    'O arquivo parece um documento do Office, mas não é uma planilha do Excel legível: ' +
+    'pode estar corrompido ou ser outro tipo de documento. Abra no Excel, confira e salve ' +
+    'de novo em XLSX, XLS ou CSV.',
 };
 
 function enviouXls(route: Route): boolean {
@@ -7846,7 +7851,7 @@ for (const vp of VIEWPORTS) {
       await aguardarAnimacao(gaveta);
       // Sem colunas ainda, Salvar fica bloqueado e a instrução aparece.
       await expect(gaveta.getByRole('button', { name: 'Salvar mapeamento' })).toBeDisabled();
-      await gaveta.getByLabel('Arquivo (.csv ou .xlsx)').setInputFiles(XLSX_EXEMPLO);
+      await gaveta.getByLabel('Arquivo (.csv, .xlsx ou .xls)').setInputFiles(XLSX_EXEMPLO);
       await gaveta.getByRole('button', { name: 'Inspecionar arquivo' }).click();
 
       const amostra = gaveta.getByTestId('inspection-sample');
@@ -8031,7 +8036,7 @@ for (const vp of VIEWPORTS) {
     /** Escolhe o arquivo na seção de envio (não na gaveta) e clica em Enviar. */
     async function enviar(page: Page): Promise<void> {
       const secao = page.getByTestId('file-upload-section');
-      await secao.getByLabel('Arquivo (.csv ou .xlsx)').setInputFiles(XLSX_EXEMPLO);
+      await secao.getByLabel('Arquivo (.csv, .xlsx ou .xls)').setInputFiles(XLSX_EXEMPLO);
       await secao.getByRole('button', { name: 'Enviar arquivo' }).click();
     }
 
@@ -8580,7 +8585,7 @@ for (const vp of VIEWPORTS) {
       const gaveta = page.getByRole('dialog');
       await aguardarAnimacao(gaveta);
       await expect(gaveta.getByRole('heading', { name: 'Modelo da planilha' })).toBeVisible();
-      await gaveta.getByLabel('Planilha (.csv ou .xlsx)').setInputFiles(PLANILHA_PLANO);
+      await gaveta.getByLabel('Planilha (.csv, .xlsx ou .xls)').setInputFiles(PLANILHA_PLANO);
       await gaveta.getByRole('button', { name: 'Importar', exact: true }).click();
 
       const recusa = gaveta.locator('[data-refusal-code="LINHAS_INVALIDAS"]');
@@ -8614,13 +8619,13 @@ for (const vp of VIEWPORTS) {
       const gaveta = page.getByRole('dialog');
       await aguardarAnimacao(gaveta);
       const linhaDominio = gaveta.getByText(
-        /O plano de contas exportado do Domínio em \.xlsx também é aceito/,
+        /O plano de contas exportado do Domínio, em \.xls ou \.xlsx, também é aceito/,
       );
       await linhaDominio.scrollIntoViewIfNeeded();
       await expect(linhaDominio).toBeVisible();
       await analyze(page, `plano contábil — gaveta com a linha do Domínio (${vp.label})`);
 
-      await gaveta.getByLabel('Planilha (.csv ou .xlsx)').setInputFiles(PLANILHA_PLANO);
+      await gaveta.getByLabel('Planilha (.csv, .xlsx ou .xls)').setInputFiles(PLANILHA_PLANO);
       await gaveta.getByRole('button', { name: 'Importar', exact: true }).click();
       const recusa = gaveta.locator('[data-refusal-code="LINHAS_INVALIDAS"]');
       await expect(recusa).toBeVisible();
@@ -8642,7 +8647,7 @@ for (const vp of VIEWPORTS) {
       await page.getByRole('button', { name: 'Reimportar planilha' }).click();
       const gaveta = page.getByRole('dialog');
       await aguardarAnimacao(gaveta);
-      await gaveta.getByLabel('Planilha (.csv ou .xlsx)').setInputFiles(PLANILHA_PLANO);
+      await gaveta.getByLabel('Planilha (.csv, .xlsx ou .xls)').setInputFiles(PLANILHA_PLANO);
       await gaveta.getByRole('button', { name: 'Reimportar', exact: true }).click();
       await expect(gaveta.getByTestId('accounting-chart-reimport-warning')).toHaveAttribute(
         'role',
@@ -9199,7 +9204,7 @@ const ARQUIVO_TELAS: {
   {
     slug: 'plano-contabil-importar',
     nome: 'importar plano contábil',
-    campo: 'Planilha (.csv ou .xlsx)',
+    campo: 'Planilha (.csv, .xlsx ou .xls)',
     arquivo: PLANILHA_PLANO,
     abrir: async (page) => {
       accountingChartEmpty = true;
@@ -9229,7 +9234,7 @@ const ARQUIVO_TELAS: {
   {
     slug: 'origem-arquivo-envio',
     nome: 'enviar arquivo do mês',
-    campo: 'Arquivo (.csv ou .xlsx)',
+    campo: 'Arquivo (.csv, .xlsx ou .xls)',
     arquivo: XLSX_EXEMPLO,
     abrir: async (page) => {
       clientFileOrigin = true;
@@ -9243,7 +9248,7 @@ const ARQUIVO_TELAS: {
   {
     slug: 'origem-arquivo-editor',
     nome: 'editor de mapeamento',
-    campo: 'Arquivo (.csv ou .xlsx)',
+    campo: 'Arquivo (.csv, .xlsx ou .xls)',
     arquivo: XLSX_EXEMPLO,
     abrir: async (page) => {
       clientFileOrigin = true;
@@ -10249,20 +10254,21 @@ test.describe('Login: a ponte entre a landing e o sistema (86e3h1h75)', () => {
 });
 
 /**
- * `.xls` legado: aparece no seletor e recebe a recusa ACIONÁVEL do servidor
- * (86e3gkd50). Na demo de 29/09 o plano de contas exportado do Domínio (.xls)
- * nem aparecia no seletor das telas de importação: o `accept` o filtrava em
- * silêncio, e a pessoa concluiu que o arquivo tinha sumido. Aqui: o `accept` do
- * input REAL mostra o `.xls`, o navegador não o barra antes de enviar, e a
- * recusa `FORMATO_NAO_SUPORTADO` aparece com a instrução de salvar como XLSX ou
- * CSV, em `destructive-muted`, dentro da viewport e nos três temas.
+ * `.xls`: aparece no seletor e, quando não é planilha legível, recebe a recusa
+ * ACIONÁVEL do servidor (86e3gkd50, 86e3n70p6). Na demo de 29/09 o plano de contas
+ * exportado do Domínio (.xls) nem aparecia no seletor das telas de importação: o
+ * `accept` o filtrava em silêncio. Hoje o servidor lê o `.xls` (o caminho feliz é
+ * provado na integração do backend, com o arquivo real anonimizado); aqui: o
+ * `accept` do input REAL mostra o `.xls`, o navegador não o barra antes de enviar,
+ * e a recusa `FORMATO_NAO_SUPORTADO` de um `.xls` ilegível aparece com o motivo e o
+ * que fazer, em `destructive-muted`, dentro da viewport e nos três temas.
  *
  * Bloco próprio no fim do arquivo, pelo motivo do bloco 86e3f55bc.
  */
-const XLS_LEGADO = {
+const XLS_ILEGIVEL = {
   name: 'plano-dominio.xls',
   mimeType: 'application/vnd.ms-excel',
-  // Magic bytes OLE/CFB do Excel antigo + enchimento: o servidor recusa ANTES de ler.
+  // Magic bytes OLE/CFB + zeros: o contêiner não abre, o servidor recusa ANTES de ler.
   buffer: Buffer.concat([
     Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]),
     Buffer.alloc(504),
@@ -10279,7 +10285,7 @@ const XLS_TELAS: {
   {
     slug: 'origem-arquivo-envio',
     nome: 'enviar arquivo do mês',
-    campo: 'Arquivo (.csv ou .xlsx)',
+    campo: 'Arquivo (.csv, .xlsx ou .xls)',
     acao: 'Enviar arquivo',
     abrir: async (page) => {
       clientFileOrigin = true;
@@ -10293,7 +10299,7 @@ const XLS_TELAS: {
   {
     slug: 'origem-arquivo-editor',
     nome: 'editor de mapeamento',
-    campo: 'Arquivo (.csv ou .xlsx)',
+    campo: 'Arquivo (.csv, .xlsx ou .xls)',
     acao: 'Inspecionar arquivo',
     abrir: async (page) => {
       clientFileOrigin = true;
@@ -10313,7 +10319,7 @@ const XLS_TELAS: {
   {
     slug: 'plano-contabil-importar',
     nome: 'importar plano contábil',
-    campo: 'Planilha (.csv ou .xlsx)',
+    campo: 'Planilha (.csv, .xlsx ou .xls)',
     acao: 'Importar',
     abrir: async (page) => {
       accountingChartEmpty = true;
@@ -10329,7 +10335,7 @@ const XLS_TELAS: {
 
 for (const vp of VIEWPORTS) {
   const slugXls = vp.label.replace(/\s+/g, '-');
-  test.describe(`.xls legado: selecionável e recusado com instrução (86e3gkd50) — ${vp.label}`, () => {
+  test.describe(`.xls: selecionável e, ilegível, recusado com motivo (86e3n70p6) — ${vp.label}`, () => {
     test.use({ viewport: vp.size });
 
     for (const tela of XLS_TELAS) {
@@ -10342,15 +10348,16 @@ for (const vp of VIEWPORTS) {
         await expect(campo).toHaveAttribute('accept', /(^|,)\.xls(,|$)/);
         await expect(campo).toHaveAttribute('accept', /application\/vnd\.ms-excel/);
 
-        await campo.setInputFiles(XLS_LEGADO);
-        await expect(escopo.getByText(XLS_LEGADO.name, { exact: true })).toBeVisible();
+        await campo.setInputFiles(XLS_ILEGIVEL);
+        await expect(escopo.getByText(XLS_ILEGIVEL.name, { exact: true })).toBeVisible();
         await escopo.getByRole('button', { name: tela.acao, exact: true }).click();
 
         const recusa = escopo.locator('[data-refusal-code="FORMATO_NAO_SUPORTADO"]');
         await expect(recusa).toBeVisible();
         await expect(recusa).toHaveAttribute('role', 'alert');
         await expect(recusa).toContainText('Formato de arquivo não suportado');
-        await expect(recusa).toContainText('Salve a planilha como XLSX ou CSV');
+        await expect(recusa).toContainText('não é uma planilha do Excel legível');
+        await expect(recusa).toContainText('salve de novo em XLSX, XLS ou CSV');
         // Nenhuma recusa do NAVEGADOR no lugar da do servidor, e nada de toast genérico.
         await expect(escopo.getByText(/Envie (o arquivo|a planilha) em CSV/)).toHaveCount(0);
         await expect(page.locator('[data-sonner-toast]')).toHaveCount(0);

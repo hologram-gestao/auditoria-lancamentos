@@ -4,8 +4,8 @@
  * A planilha é validada pelo SERVIDOR (tipo pelo conteúdo, cabeçalho, linha a
  * linha — recusas tipadas). Aqui só o que dá para dizer antes de enviar: que há
  * um arquivo e que a extensão é selecionável; o `accept` do input sai da mesma
- * lista (`hasSelectableExtension`, o da S14). O `.xls` passa daqui e é o
- * servidor quem o recusa com a instrução de salvar como XLSX ou CSV.
+ * lista (`hasSelectableExtension`, o da S14), com o `.xls` que o Domínio grava
+ * (lido pelo servidor desde 86e3n70p6).
  */
 import { z } from 'zod';
 
@@ -24,7 +24,7 @@ export const accountingChartImportSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['file'],
-        message: 'Escolha a planilha do plano contábil (.csv ou .xlsx).',
+        message: 'Escolha a planilha do plano contábil (.csv, .xlsx ou .xls).',
       });
       return;
     }
@@ -32,7 +32,7 @@ export const accountingChartImportSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['file'],
-        message: 'Envie a planilha em CSV (separado por ;) ou XLSX.',
+        message: 'Envie a planilha em CSV (separado por ;), XLSX ou XLS.',
       });
     }
   });

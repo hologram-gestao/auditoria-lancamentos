@@ -448,6 +448,15 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
      `arquivo` nasce `ativa` com o par cifrado nulo, e **a DEK é provisionada mesmo
      sem segredo**, na criação da conexão: "a DEK nasce na primeira conexão" continua
      valendo, e a descrição das linhas do arquivo é cifrada com ela (§4.1).
+     **Formatos lidos: CSV, XLSX e XLS** (o `.xls` desde 86e3n70p6, pelo `xlrd`, só
+     leitura). **O contêiner é decidido pelos magic bytes, nunca pela extensão**, no
+     leitor compartilhado (`client_file_ingestion/reader.py`, o mesmo da importação do
+     plano contábil da S16): zip é `.xlsx`, OLE2 com pasta de trabalho é `.xls`, e os
+     dois são o MESMO formato `xlsx` ("planilha") do mapeamento, então o CHECK do banco e
+     o contrato não mudaram. HTML ou XML salvo com extensão `.xls`, OLE2 que não é
+     planilha (ou não abre) e PDF são 422 `FORMATO_NAO_SUPORTADO` com motivo. O export do
+     Domínio em `.xls` traz BLANKs órfãos antes da aba (o índice aponta para eles); o
+     leitor pula SÓ registro BLANK nesse trecho, que não tem valor, e recusa o resto.
    - **Um cliente, UM tipo de origem de lançamentos** (ADR-083-BE). Conectar um tipo
      que lista lançamentos num cliente que já tem conexão de OUTRO tipo que também
      lista (em qualquer estado, e a sintetizada do fallback legado conta) é 409
@@ -1251,6 +1260,9 @@ Bancárias` e `Despesas bancárias` são DUAS categorias, de propósito: a inges
   funde grafias, e cada uma recebe a própria decisão no de-para;
 - **um cliente, um tipo de origem de lançamentos** (§4.8), e as telas escondem pela
   CAPACIDADE (`lib/origin-capabilities.ts`), nunca por `provider_type === 'arquivo'`;
+- **o arquivo é CSV, XLSX ou XLS, e o contêiner sai dos magic bytes, nunca da extensão**
+  (§4.8; o `.xls` desde 86e3n70p6): `.xlsx` e `.xls` são o mesmo formato "planilha" do
+  mapeamento, e o que não é planilha recusa com `FORMATO_NAO_SUPORTADO` e motivo;
 - a métrica é `fechamento_produzido{tipo_origem}` (uma linha por competência
   materializada) e a instrumentação da ingestão é `arquivo_processado` (seis chaves, só
   IDs, contagens e um motivo fechado; nunca nome de coluna nem conteúdo de célula).
@@ -1531,6 +1543,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.86, 09/10/2026. **O `.xls` passou a ser lido de verdade (86e3n70p6, subtask 2 do épico 86e3n70nv): o plano de contas que o Domínio grava importa sem edição, e a origem por arquivo da S14 aceita o mesmo formato.** O leitor compartilhado (`client_file_ingestion/reader.py`) decide o contêiner pelos magic bytes (zip → openpyxl, OLE2 → `xlrd` 2.0.2, BSD, só `.xls`, sem macro nem fórmula avaliada) e entrega as mesmas células nos dois (número inteiro como `int`, data pelo `datemode` só em célula de data). Decisão de modelagem: o `.xls` é o MESMO formato `xlsx` ("planilha") do mapeamento, então CHECK, migration e tipos do contrato não mudaram (só 6 descrições de rota). A amostra real (147.995 bytes, BIFF8, 370 contas, cabeçalho na linha 5 como o `.xlsx` do PR #279, código e grau numéricos, classificação texto) revelou um defeito do export: 5.919 registros BLANK entre os globais e a aba, com o BOUNDSHEET apontando para eles; o Excel tolera, o `xlrd` recusa. O reparo (`_first_sheet_at_bof`) só pula BLANK, que não tem valor, e recusa qualquer outro registro no trecho. A fixture `tests/fixtures/accounting_chart_dominio_xls/` foi anonimizada NO LUGAR (`scripts/anonymize_dominio_chart_sample_xls.py`: mesmo comprimento por string, nenhum byte muda de posição, então o defeito fica e o teste-ouro o prova), e `tests/xls_builder.py` fabrica `.xls` para os testes (corrompido, 1 milhão de linhas declaradas, célula na última linha da BIFF8, data 1900/1904). HTML ou XML com cara de planilha e OLE2 que não é planilha recusam com `FORMATO_NAO_SUPORTADO` e motivo; `read_xlsx_raw_rows` virou `read_sheet_raw_rows`. Pior caso medido: 7 MB de `.xls` em 0,46 s (o `xlrd` lê a aba inteira; o teto é o de bytes da rota e o da BIFF8). Na tela, rótulos e mensagens passaram a citar `.xls`, e o cenário do e2e mockado afirma a recusa do `.xls` ilegível. Lista canônica (**120**), matriz (**29**) e pares de AAD (**17**) não mudaram._
 
 _Versão 1.85, 08/10/2026. **O cartão ganhou um segundo processo de lançamento: o lote no vencimento da fatura (86e3n70p0, subtask 1 do épico 86e3n70nv).** A fatura Cora da PCTEX (cliente da Prospecta) conciliou 0 de 5 compras em dev: na Prospecta as compras entram no Omie em lote na data de vencimento da fatura, e o cruzamento só conhecia o processo da Hologram (compra na data da compra). Decisões do Pedro: o processo é configuração POR CLIENTE, nunca inferida, com troca pontual na gaveta; o vencimento é extraído pelo parser (regra 15 do prompt, só cartão) e confirmado na prévia. Nasceram `clients.card_posting_date_mode` e, na sessão, o snapshot do modo e `invoice_due_date` (duas migrations reversíveis, ciclo provado), o 422 `VENCIMENTO_DA_FATURA_OBRIGATORIO`, a janela única `omie_window_for_session` (os cinco pontos da §5.3 passaram a consultá-la; `ReviewRepository.expand_period` saiu), o modo lote do `fetch_pending` (títulos abertos sem filtro de data, recorte por vencimento) e `match_invoice_lot` ao lado do `match`, sem tocar no caminho de sempre. Duas decisões tomadas no meio da task: lançar no Omie fica BLOQUEADO no modo vencimento (§3.16, o `IncluirLancCC` grava a data da compra) e mesmo valor no lote é 1-para-1 (§5.8). Na tela: o campo "Compras do cartão no Omie" no novo cliente e no editar, o bloco "Fatura do cartão" na gaveta (processo em vigor, troca pontual, vencimento `DD/MM/AAAA` proposto pelo parser) e a linha "Lote da fatura" no cabeçalho da revisão. Lista canônica (**120**), matriz (**29**) e pares de AAD (**17**) não mudaram._
 

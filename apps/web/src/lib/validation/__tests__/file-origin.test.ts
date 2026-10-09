@@ -1,11 +1,11 @@
 /**
- * O `.xls` legado é SELECIONÁVEL e chega ao servidor (86e3gkd50).
+ * O `.xls` é SELECIONÁVEL e chega ao servidor (86e3gkd50, lido desde 86e3n70p6).
  *
  * Na demo de 29/09 o plano de contas exportado do Domínio (.xls) nem aparecia no
- * seletor: o `accept` o filtrava em silêncio. Quem recusa é o servidor, com
- * `FORMATO_NAO_SUPORTADO` e a instrução de salvar como XLSX ou CSV. Estes testes
- * travam as duas metades: o `accept` mostra o `.xls`, e a validação do navegador
- * não o barra antes do envio (senão a recusa acionável do servidor nunca aparece).
+ * seletor: o `accept` o filtrava em silêncio. Hoje o servidor lê o `.xls`; o que
+ * não é planilha (HTML salvo como `.xls`, documento corrompido) é recusado lá com
+ * `FORMATO_NAO_SUPORTADO` e motivo. Estes testes travam as duas metades: o
+ * `accept` mostra o `.xls`, e a validação do navegador não o barra antes do envio.
  */
 import { describe, expect, it } from 'vitest';
 

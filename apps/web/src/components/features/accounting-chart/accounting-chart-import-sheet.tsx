@@ -154,7 +154,7 @@ export function AccountingChartImportSheet({
                 name="file"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Planilha (.csv ou .xlsx)</FormLabel>
+                    <FormLabel>Planilha (.csv, .xlsx ou .xls)</FormLabel>
                     <FormControl>
                       <FileInputField
                         accept={FILE_ACCEPT}
