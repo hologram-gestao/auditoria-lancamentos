@@ -61,7 +61,7 @@ ServiceDep = Annotated[ClientInputMappingService, Depends(_get_service)]
     "",
     summary=(
         "O mapeamento de entrada do arquivo deste cliente — qual coluna é data, "
-        "descrição, valor, categoria, conta e documento, o formato (CSV/XLSX), o "
+        "descrição, valor, categoria, conta e documento, o formato (CSV ou planilha XLSX/XLS), o "
         "delimitador e a codificação do CSV, o formato de data, o separador decimal "
         "e a convenção de sinal. Visível a todo papel com acesso ao cliente, "
         "inclusive o operador (ele precisa ver o resumo do que será aplicado antes "

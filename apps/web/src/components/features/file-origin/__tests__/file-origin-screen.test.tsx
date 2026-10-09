@@ -262,7 +262,7 @@ beforeEach(() => {
 });
 
 async function uploadFile(user: ReturnType<typeof userEvent.setup>, file = xlsxFile()) {
-  const input = screen.getByLabelText('Arquivo (.csv ou .xlsx)', { selector: 'input' });
+  const input = screen.getByLabelText('Arquivo (.csv, .xlsx ou .xls)', { selector: 'input' });
   await user.upload(input, file);
   return file;
 }
@@ -447,7 +447,9 @@ describe('Envio — com mapeamento é um passo só (R1 · R5)', () => {
     const user = userEvent.setup();
     render(<FileOriginScreen clientId={CLIENT_ID} />);
     await user.click(screen.getByRole('button', { name: 'Enviar arquivo' }));
-    expect(await screen.findByText('Escolha o arquivo do mês (.csv ou .xlsx).')).toBeVisible();
+    expect(
+      await screen.findByText('Escolha o arquivo do mês (.csv, .xlsx ou .xls).'),
+    ).toBeVisible();
     expect(processState.mutateAsync).not.toHaveBeenCalled();
   });
 });
@@ -529,7 +531,7 @@ describe('Envio sem mapeamento conduz ao editor (R1)', () => {
 
     await user.click(screen.getByRole('button', { name: 'Configurar mapeamento' }));
     const drawer = await screen.findByRole('dialog');
-    await user.upload(within(drawer).getByLabelText('Arquivo (.csv ou .xlsx)'), xlsxFile());
+    await user.upload(within(drawer).getByLabelText('Arquivo (.csv, .xlsx ou .xls)'), xlsxFile());
     await user.click(within(drawer).getByRole('button', { name: 'Inspecionar arquivo' }));
     await within(drawer).findByTestId('inspection-sample');
     await pickColumn(user, drawer, 'Data', 'Data');
@@ -638,7 +640,7 @@ describe('Editor — convenção obrigatória, dependentes e confirmação (R1 �
       within(drawer).getByText('Inspecione um arquivo para escolher as colunas.'),
     ).toBeVisible();
 
-    await user.upload(within(drawer).getByLabelText('Arquivo (.csv ou .xlsx)'), xlsxFile());
+    await user.upload(within(drawer).getByLabelText('Arquivo (.csv, .xlsx ou .xls)'), xlsxFile());
     await user.click(within(drawer).getByRole('button', { name: 'Inspecionar arquivo' }));
     await within(drawer).findByTestId('inspection-sample');
     expect(salvar).toBeEnabled();

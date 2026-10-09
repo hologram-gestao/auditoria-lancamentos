@@ -3,7 +3,8 @@
 **O modelo** (decisão do planejador, ADR-086-BE; é o formato de `plano_contabil.csv`
 da amostra anonimizada):
 
-    - CSV UTF-8 (com ou sem BOM) separado por `;`, ou XLSX (primeira aba);
+    - CSV UTF-8 (com ou sem BOM) separado por `;`, ou planilha do Excel, XLSX ou XLS
+      (primeira aba);
     - cabeçalho na linha 1, com as colunas obrigatórias `codigo_reduzido`, `nome` e
       `tipo`, e a opcional `classificacao` — em qualquer ordem, sem outras colunas;
     - `tipo` ∈ {`analitica`, `sintetica`} (maiúscula e acento indiferentes:
@@ -16,8 +17,9 @@ da amostra anonimizada):
         649;Banco conta movimento;analitica;1.1.1.02.001
         662;Alugueis a receber - Inquilino D;analitica;1.1.2.01.004
 
-**O export nativo do plano de contas do Domínio (.xlsx) também é aceito** (86e3gkd7y,
-quando a amostra chegou): `parse_chart_sheet` reconhece o layout pelo cabeçalho
+**O export nativo do plano de contas do Domínio também é aceito**, no `.xlsx`
+(86e3gkd7y) e no `.xls` que o Domínio grava (86e3n70p6), com a MESMA regra: o leitor
+compartilhado entrega as duas como linhas cruas, e `parse_chart_sheet` reconhece o layout pelo cabeçalho
 (`dominio.find_dominio_header`, nas primeiras linhas) e o CONVERTE para as linhas deste
 modelo (`dominio.convert_dominio`), que passam pelo MESMO `validate_rows`. Sem a
 assinatura do Domínio, o caminho do modelo é o de sempre, intocado. O CSV nativo do
@@ -62,8 +64,8 @@ from app.modules.client_file_ingestion.reader import (
     MAX_INVALID_LINES_REPORTED,
     ReadOptions,
     detect_format,
+    read_sheet_raw_rows,
     read_table,
-    read_xlsx_raw_rows,
 )
 
 if TYPE_CHECKING:
@@ -108,7 +110,8 @@ type ChartLineReason = Literal[
 
 _INVALID_FILE_MESSAGE = (
     "Não foi possível ler a planilha do plano de contas. Envie um CSV (UTF-8, separado "
-    "por ponto e vírgula) ou um XLSX, no modelo da plataforma."
+    "por ponto e vírgula), um XLSX ou um XLS, no modelo da plataforma ou como o Domínio "
+    "exporta."
 )
 _EMPTY_MESSAGE = (
     "A planilha não tem nenhuma conta. Importar um plano vazio inativaria o plano "
@@ -328,15 +331,15 @@ def _require_accounts(valid: list[ChartSheetRow]) -> list[ChartSheetRow]:
 
 
 def _dominio_header_line(content: bytes, file_format: InputFileFormat) -> int | None:
-    """A linha do cabeçalho do Domínio, se o XLSX tiver um nas primeiras linhas.
+    """A linha do cabeçalho do Domínio, se a planilha tiver um nas primeiras linhas.
 
-    Só XLSX (o CSV nativo do Domínio não tem amostra). A espiada lê no máximo
+    Só planilha, XLSX ou XLS (o CSV nativo do Domínio não tem amostra). A espiada lê no máximo
     `DOMINIO_HEADER_SEARCH_ROWS` linhas, com os guardas do leitor.
     """
     if file_format is not InputFileFormat.XLSX:
         return None
     try:
-        peek = read_xlsx_raw_rows(content, limit=DOMINIO_HEADER_SEARCH_ROWS)
+        peek = read_sheet_raw_rows(content, limit=DOMINIO_HEADER_SEARCH_ROWS)
     except FileInvalidError:
         _raise_invalid_file()
     return find_dominio_header(peek)
@@ -344,7 +347,7 @@ def _dominio_header_line(content: bytes, file_format: InputFileFormat) -> int | 
 
 def _parse_dominio(content: bytes, header_line: int) -> list[ChartSheetRow]:
     try:
-        raw = read_xlsx_raw_rows(content)
+        raw = read_sheet_raw_rows(content)
     except FileInvalidError:
         _raise_invalid_file()
     conversion = convert_dominio(raw, header_line)
@@ -365,11 +368,12 @@ def parse_chart_sheet(content: bytes) -> ParsedChartSheet:
     (`LINHAS_INVALIDAS`, `details.lines=[{line, reason}]` limitado + `total`) →
     planilha sem nenhuma conta (`ARQUIVO_INVALIDO`, `details.reason=sem_contas`).
 
-    Layout: XLSX com o cabeçalho do Domínio nas primeiras linhas vai pelo conversor
+    Layout: planilha com o cabeçalho do Domínio nas primeiras linhas vai pelo conversor
     (`dominio.py`); todo o resto é o modelo da plataforma, e o que não é nenhum dos
     dois recebe a recusa de cabeçalho DO MODELO, como sempre.
     """
-    # CSV ou XLSX pelo CONTEÚDO; PDF, XLS e o resto viram `FORMATO_NAO_SUPORTADO`.
+    # CSV ou planilha (XLSX ou XLS) pelo CONTEÚDO; PDF, HTML e o resto viram
+    # `FORMATO_NAO_SUPORTADO`.
     file_format = detect_format(content)
     header_line = _dominio_header_line(content, file_format)
     if header_line is not None:

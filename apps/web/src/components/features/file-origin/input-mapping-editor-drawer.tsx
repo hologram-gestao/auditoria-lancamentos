@@ -305,7 +305,7 @@ export function InputMappingEditorDrawer({
                   1. Arquivo de exemplo
                 </h3>
                 <div className="space-y-1.5">
-                  <Label htmlFor="mapping-inspect-file">Arquivo (.csv ou .xlsx)</Label>
+                  <Label htmlFor="mapping-inspect-file">Arquivo (.csv, .xlsx ou .xls)</Label>
                   <FileInputField
                     id="mapping-inspect-file"
                     accept={FILE_ACCEPT}

@@ -16,7 +16,8 @@ contas da origem da Sprint 10 (`/chart-of-accounts`, categorias do Omie).
 
 ## O modelo
 
-- **Formato:** CSV em UTF-8 (com ou sem BOM) separado por `;`, ou XLSX (só a primeira aba).
+- **Formato:** CSV em UTF-8 (com ou sem BOM) separado por `;`, ou planilha do Excel, XLSX
+  ou XLS (só a primeira aba). O contêiner é decidido pelos magic bytes, nunca pela extensão.
   O tipo é detectado pelo **conteúdo** (magic bytes), nunca pela extensão.
 - **Cabeçalho na linha 1.** Colunas casadas pelo nome (espaços nas pontas e maiúsculas
   ignorados), em qualquer ordem, **sem outras colunas**:
@@ -39,14 +40,19 @@ codigo_reduzido;nome;tipo;classificacao
 662;Alugueis a receber - Inquilino D;analitica;1.1.2.01.004
 ```
 
-## Plano exportado do Domínio (.xlsx)
+## Plano exportado do Domínio (.xls ou .xlsx)
 
 Desde 02/10/2026 (86e3gkd7y) o arquivo que o Domínio exporta também é aceito, sem
 reescrever: a importação reconhece o layout e o converte para o modelo acima, que passa
 pelas MESMAS validações e pela mesma gravação. Leitor: `client_accounting_chart/dominio.py`.
-Fixture anonimizada e teste-ouro: `tests/fixtures/accounting_chart_dominio/`.
+Fixture anonimizada e teste-ouro: `tests/fixtures/accounting_chart_dominio/`. Desde
+09/10/2026 (86e3n70p6) o `.xls` que o Domínio grava também entra, sem edição, pelo MESMO
+conversor (fixture: `tests/fixtures/accounting_chart_dominio_xls/`). O export do Domínio
+em `.xls` traz milhares de células vazias de formatação antes da aba, com o índice da aba
+apontando para elas; o leitor compartilhado (`client_file_ingestion/reader.py`) pula só
+esse tipo de registro, que não tem valor, e recusa o arquivo se houver qualquer outro ali.
 
-- **Detecção:** só XLSX; uma das **10 primeiras linhas** tem exatamente as células
+- **Detecção:** só planilha (XLSX ou XLS); uma das **10 primeiras linhas** tem exatamente as células
   `Código`, `T`, `Classificação`, `Nome` e `Grau`, nessa ordem (espaços nas pontas,
   maiúsculas e acentos ignorados, nenhuma célula a mais). Sem isso, vale o modelo da
   plataforma, e o arquivo que não é nenhum dos dois recebe o `CABECALHO_DIVERGENTE` de
@@ -76,7 +82,7 @@ Resposta: `{"data": {"contas": N, "contasNovas": N, "contasInativadas": N}}` —
 
 | `error.code`            | Quando                                                                                 | `error.details`                                                                                                        |
 | ----------------------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `FORMATO_NAO_SUPORTADO` | não é CSV nem XLSX pelo conteúdo (PDF, XLS, texto sem estrutura)                       | —                                                                                                                      |
+| `FORMATO_NAO_SUPORTADO` | não é CSV nem planilha pelo conteúdo (PDF, HTML/XML, OLE2 que não é planilha)          | —                                                                                                                      |
 | `ARQUIVO_INVALIDO`      | não abre ou não itera (zip quebrado, fora de UTF-8, limites de tamanho/linhas/colunas) | —                                                                                                                      |
 | `ARQUIVO_INVALIDO`      | a planilha não tem nenhuma conta                                                       | `{"reason": "sem_contas"}`                                                                                             |
 | `CABECALHO_DIVERGENTE`  | falta coluna obrigatória, sobra coluna desconhecida ou coluna repetida                 | `missingColumns`, `repeatedColumns` e `expectedColumns` (nomes do MODELO), `unexpectedColumnCount`, `foundColumnCount` |

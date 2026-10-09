@@ -33,7 +33,7 @@ import type {
 
 export const FILE_FORMAT_LABELS: Record<InputFileFormat, string> = {
   csv: 'CSV',
-  xlsx: 'XLSX (Excel)',
+  xlsx: 'Excel (XLSX ou XLS)',
 };
 
 export const CSV_DELIMITER_LABELS: Record<CsvDelimiter, string> = {

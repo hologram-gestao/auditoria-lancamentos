@@ -837,8 +837,8 @@ class FileOriginSyncNotApplicableError(ConflictError):
 
 
 class FileFormatNotSupportedError(AppError):
-    """422 — o arquivo não é CSV nem XLSX (PDF, XLS, desconhecido), ou não é o
-    formato que o mapeamento do cliente declara.
+    """422 — o arquivo não é CSV nem planilha do Excel (PDF, HTML/XML, OLE2 que não é
+    planilha, desconhecido), ou não é o formato que o mapeamento do cliente declara.
 
     422 e não 400: o corpo da requisição está bem formado; é o CONTEÚDO que não
     serve, e a mensagem precisa dizer o que enviar (R5).
@@ -847,8 +847,8 @@ class FileFormatNotSupportedError(AppError):
     code = ErrorCode.FORMATO_NAO_SUPORTADO
     status_code = 422
     default_user_message = (
-        "Este formato não tem colunas para mapear (PDF, XLS ou formato desconhecido). "
-        "Envie o arquivo em CSV ou XLSX."
+        "Este formato não tem colunas para mapear (PDF ou formato desconhecido). "
+        "Envie o arquivo em CSV, XLSX ou XLS."
     )
 
 

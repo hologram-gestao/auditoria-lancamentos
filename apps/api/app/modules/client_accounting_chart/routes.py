@@ -126,13 +126,13 @@ async def list_accounting_chart(
     summary=(
         "Importa (ou reimporta) o plano de contas contábil do cliente a partir de uma "
         "planilha no MODELO DA PLATAFORMA — tudo ou nada. Modelo: CSV UTF-8 separado "
-        "por `;` ou XLSX (primeira aba), cabeçalho na linha 1 com as colunas "
+        "por `;`, XLSX ou XLS (primeira aba), cabeçalho na linha 1 com as colunas "
         "`codigo_reduzido`, `nome` e `tipo` (obrigatórias) e `classificacao` "
         "(opcional), em qualquer ordem e sem outras colunas; `tipo` é `analitica` ou "
         "`sintetica`; código reduzido com letras, dígitos, `.` e `-` (até 20), nome até "
         "200 caracteres, classificação até 40. Exemplo: `codigo_reduzido;nome;tipo` / "
         "`649;Banco conta movimento;analitica`. Também aceita o plano de contas EXPORTADO "
-        "do Domínio em XLSX, reconhecido pelo cabeçalho `Código`/`T`/`Classificação`/"
+        "do Domínio em XLSX ou no XLS que o sistema grava, reconhecido pelo cabeçalho `Código`/`T`/`Classificação`/"
         "`Nome`/`Grau` nas 10 primeiras linhas e convertido para o modelo (código, `S` = "
         "sintética e vazio = analítica, classificação, nome e grau, que tem de ser a "
         "profundidade da classificação); o CSV nativo do Domínio não é aceito. "
@@ -164,7 +164,9 @@ async def import_accounting_chart(
     service: ServiceDep,
     file: Annotated[
         UploadFile,
-        File(description="CSV (`;`, UTF-8) ou XLSX no modelo, ou o XLSX exportado do Domínio."),
+        File(
+            description="CSV (`;`, UTF-8), XLSX ou XLS no modelo, ou o plano exportado do Domínio."
+        ),
     ],
 ) -> ChartImportEnvelope:
     content = await read_upload_within_limit(

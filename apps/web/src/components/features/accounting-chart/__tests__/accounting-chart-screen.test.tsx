@@ -381,9 +381,9 @@ describe('sem plano', () => {
       expect(within(empty).getAllByText(column).length).toBeGreaterThan(0);
     }
     expect(within(empty).getByText(/649;Banco conta movimento;analitica/)).toBeInTheDocument();
-    // 86e3gkd7y: o export nativo do Domínio também entra, e o modelo diz isso.
+    // 86e3gkd7y e 86e3n70p6: o export nativo do Domínio também entra, e o modelo diz isso.
     expect(
-      within(empty).getByText(/plano de contas exportado do Domínio em \.xlsx também é aceito/),
+      within(empty).getByText(/plano de contas exportado do Domínio, em \.xls ou \.xlsx, também/),
     ).toBeInTheDocument();
     // Um botão só na tela: sem plano ele mora no estado vazio.
     expect(screen.getAllByRole('button', { name: 'Importar planilha' })).toHaveLength(1);
@@ -444,7 +444,7 @@ describe('importação', () => {
     const user = userEvent.setup({ applyAccept: false });
     await user.click(screen.getByRole('button', { name: buttonName }));
     const dialog = await screen.findByRole('dialog');
-    await user.upload(within(dialog).getByLabelText('Planilha (.csv ou .xlsx)'), file);
+    await user.upload(within(dialog).getByLabelText('Planilha (.csv, .xlsx ou .xls)'), file);
     return { user, dialog };
   }
 
@@ -542,7 +542,7 @@ describe('importação', () => {
     expect(toastError).not.toHaveBeenCalled();
   });
 
-  it('a gaveta diz que o plano exportado do Domínio em .xlsx também é aceito', async () => {
+  it('a gaveta diz que o plano exportado do Domínio, em .xls ou .xlsx, também é aceito', async () => {
     withoutPlan();
     render(<AccountingChartScreen clientId="c1" />);
     const { dialog } = await openAndPick(/Importar planilha/);
@@ -550,11 +550,11 @@ describe('importação', () => {
     const model = within(dialog).getByRole('region', { name: 'Modelo da planilha' });
     expect(
       within(model).getByText(
-        'O plano de contas exportado do Domínio em .xlsx também é aceito, do jeito que sai do sistema: a plataforma reconhece o arquivo e o converte para este modelo.',
+        'O plano de contas exportado do Domínio, em .xls ou .xlsx, também é aceito do jeito que sai do sistema: a plataforma reconhece o arquivo e o converte para este modelo.',
       ),
     ).toBeInTheDocument();
-    // O rótulo do campo não muda: continua sendo a planilha .csv ou .xlsx.
-    expect(within(dialog).getByText(/Planilha \(\.csv ou \.xlsx\)/)).toBeInTheDocument();
+    // O rótulo do campo nomeia os três formatos que o servidor lê.
+    expect(within(dialog).getByText(/Planilha \(\.csv, \.xlsx ou \.xls\)/)).toBeInTheDocument();
   });
 
   it('LINHAS_INVALIDAS do plano do Domínio: os sete motivos novos saem em português', async () => {

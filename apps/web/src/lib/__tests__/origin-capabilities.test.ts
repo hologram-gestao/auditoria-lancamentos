@@ -17,6 +17,7 @@ import {
   fileConnectionOf,
   connectableProviderTypes,
   hasFileConnection,
+  hasOmieConnection,
   originCodeFor,
   originHasCapability,
   originIsFileBased,
@@ -81,6 +82,14 @@ describe('origem por arquivo', () => {
     expect(fileConnectionOf([omie(), arquivo({ status: 'erro' })])?.id).toBe('arq-1');
     expect(hasFileConnection([arquivo({ status: 'inativa' })])).toBe(true);
     expect(hasFileConnection([])).toBe(false);
+  });
+
+  it('hasOmieConnection: o campo do cartão (86e3n70p6) vale para Omie em qualquer estado', () => {
+    expect(hasOmieConnection([omie()])).toBe(true);
+    expect(hasOmieConnection([omie({ status: 'erro' })])).toBe(true);
+    expect(hasOmieConnection([omie({ status: 'inativa' })])).toBe(true);
+    expect(hasOmieConnection([arquivo()])).toBe(false);
+    expect(hasOmieConnection([])).toBe(false);
   });
 
   it('originIsFileBased: a conexão capaz de listar lançamentos é `arquivo`', () => {

@@ -41,7 +41,7 @@ from app.modules.client_accounting_chart.sheet import parse_chart_sheet
 from app.modules.client_file_ingestion import reader
 from app.modules.client_file_ingestion.reader import (
     MAX_INVALID_LINES_REPORTED,
-    read_xlsx_raw_rows,
+    read_sheet_raw_rows,
 )
 
 _FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "accounting_chart_dominio"
@@ -141,7 +141,7 @@ class TestTesteOuro:
         )
 
     def test_o_rodape_nao_vira_conta_nem_recusa(self) -> None:
-        raw = read_xlsx_raw_rows(_fixture_bytes())
+        raw = read_sheet_raw_rows(_fixture_bytes())
         conversion = convert_dominio(raw, header_line=5)
         assert conversion.problems == []
         assert all(line <= _LAST_ACCOUNT_ROW for line, _ in conversion.rows)
@@ -149,7 +149,7 @@ class TestTesteOuro:
         assert [line for line, cells in raw if line > _LAST_ACCOUNT_ROW and cells] == [570, 572]
 
     def test_repr_nao_carrega_nome(self) -> None:
-        raw = read_xlsx_raw_rows(_fixture_bytes())
+        raw = read_sheet_raw_rows(_fixture_bytes())
         conversion = convert_dominio(raw, header_line=5)
         assert "exemplo" not in repr(conversion)
         assert "exemplo" not in repr(parse_chart_sheet(_fixture_bytes()))
@@ -285,17 +285,17 @@ class TestRegressaoDoModelo:
 
 class TestLeitorCru:
     def test_linha_vazia_volta_como_lista_vazia_e_sem_none_no_fim(self) -> None:
-        rows = read_xlsx_raw_rows(_xlsx([["a", None, "b", None], [], [1]]))
+        rows = read_sheet_raw_rows(_xlsx([["a", None, "b", None], [], [1]]))
         assert rows == [(1, ["a", None, "b"]), (2, []), (3, [1])]
 
     def test_limit_recorta_as_linhas_percorridas(self) -> None:
-        rows = read_xlsx_raw_rows(_fixture_bytes(), limit=dominio.DOMINIO_HEADER_SEARCH_ROWS)
+        rows = read_sheet_raw_rows(_fixture_bytes(), limit=dominio.DOMINIO_HEADER_SEARCH_ROWS)
         assert [line for line, _ in rows] == list(range(1, dominio.DOMINIO_HEADER_SEARCH_ROWS + 1))
 
     def test_linhas_demais_e_arquivo_invalido(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(reader, "MAX_FILE_SCANNED_ROWS", 100)
         with pytest.raises(FileInvalidError):
-            read_xlsx_raw_rows(_fixture_bytes())
+            read_sheet_raw_rows(_fixture_bytes())
 
     def test_zip_quebrado_e_a_recusa_do_plano(self) -> None:
         with pytest.raises(FileInvalidError) as caught:

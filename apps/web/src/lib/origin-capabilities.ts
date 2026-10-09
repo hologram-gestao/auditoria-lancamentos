@@ -19,7 +19,7 @@
  * tipo repetiria a tabela de capacidades do adaptador à mão. Perguntar pela
  * capacidade é o que faz o terceiro provedor entrar sem tocar em tela nenhuma.
  */
-import { FILE_PROVIDER_TYPE } from '@/lib/api/client-connections';
+import { FILE_PROVIDER_TYPE, OMIE_PROVIDER_TYPE } from '@/lib/api/client-connections';
 import type { ClientConnection, OriginStatus, ProviderCapability } from '@/lib/contracts';
 import type { OriginErrorCode } from '@/lib/origin-state';
 
@@ -82,6 +82,18 @@ export function fileConnectionOf<T extends ConnectionLike>(connections: readonly
  */
 export function hasFileConnection(connections: readonly ConnectionLike[]): boolean {
   return fileConnectionOf(connections) !== null;
+}
+
+/**
+ * O cliente tem uma conexão OMIE (em qualquer estado)? Decide se o campo "Compras do
+ * cartão no Omie" (86e3n70p0) aparece no editar cliente (86e3n70p6). Não é
+ * capacidade: o campo descreve o PROCESSO do escritório dentro do Omie (em que data
+ * as compras entram), e só faz sentido para quem tem Omie. Em qualquer estado, como
+ * `hasFileConnection`: uma Omie com erro continua sendo o ERP do cliente. Como lá, é
+ * o ÚNICO lugar que compara o tipo para isso.
+ */
+export function hasOmieConnection(connections: readonly ConnectionLike[]): boolean {
+  return connections.some((c) => c.provider_type === OMIE_PROVIDER_TYPE);
 }
 
 /**

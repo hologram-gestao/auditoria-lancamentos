@@ -43,10 +43,9 @@ import { SELECTABLE_FILE_EXTENSIONS } from '@/lib/validation/file-origin';
 
 /**
  * `accept` do input de arquivo: as extensões SELECIONÁVEIS (fonte única em
- * `lib/validation/file-origin.ts`) e os MIME de cada uma. O `.xls` entra para
- * aparecer no seletor e receber a recusa tipada do servidor
- * (`FORMATO_NAO_SUPORTADO`, "salve como XLSX ou CSV"), nunca para ser filtrado
- * em silêncio (86e3gkd50). Formato aceito continua sendo CSV e XLSX.
+ * `lib/validation/file-origin.ts`) e os MIME de cada uma. CSV, XLSX e XLS são
+ * aceitos (o `.xls` desde 86e3n70p6); o contêiner é decidido pelo servidor pelos
+ * magic bytes, nunca pela extensão.
  */
 export const FILE_ACCEPT = [
   ...SELECTABLE_FILE_EXTENSIONS,

@@ -94,14 +94,16 @@ async def _read_file(request: Request, file: UploadFile, settings: SettingsDep) 
 @router.post(
     "/inspect",
     summary=(
-        "Inspeciona o arquivo (CSV ou XLSX) de um cliente com origem por arquivo: devolve "
+        "Inspeciona o arquivo (CSV, XLSX ou XLS) de um cliente com origem por arquivo: devolve "
         "o formato detectado, as colunas do cabeçalho e uma amostra das primeiras linhas, "
         "para a pessoa confirmar o mapeamento salvo ou criar um. NADA é persistido nem "
         "logado — a amostra só existe nesta resposta. Requer a permissão "
         "`upload_client_file` (os 5 papéis) e conexão `arquivo` ativa (409 `SEM_CONEXAO`, "
         "`ORIGEM_COM_ERRO` ou `CAPACIDADE_AUSENTE`). Sem mapeamento salvo, o CSV é lido "
         "com `csvDelimiter`/`encoding` do pedido (padrão `;` e `utf-8-sig`) — declarados, "
-        "nunca farejados. PDF e XLS: 422 `FORMATO_NAO_SUPORTADO`; arquivo que não abre: "
+        "nunca farejados. XLSX e XLS (contêiner pelos magic bytes) são o mesmo formato "
+        "`xlsx` (planilha). PDF, HTML/XML com extensão de planilha e documento do Office "
+        "que não é planilha: 422 `FORMATO_NAO_SUPORTADO`; arquivo que não abre: "
         "422 `ARQUIVO_INVALIDO`."
     ),
 )
@@ -111,7 +113,7 @@ async def inspect_file(
     _actor: UploadClientFileDep,
     settings: SettingsDep,
     service: ServiceDep,
-    file: Annotated[UploadFile, File(description="CSV ou XLSX.")],
+    file: Annotated[UploadFile, File(description="CSV, XLSX ou XLS.")],
     csv_delimiter: Annotated[CsvDelimiter | None, Form(alias="csvDelimiter")] = None,
     encoding: Annotated[InputEncoding | None, Form()] = None,
 ) -> InspectEnvelope:
@@ -159,7 +161,9 @@ async def process_file(
     actor: UploadClientFileDep,
     settings: SettingsDep,
     service: ServiceDep,
-    file: Annotated[UploadFile, File(description="CSV ou XLSX no formato do mapeamento.")],
+    file: Annotated[
+        UploadFile, File(description="CSV ou planilha (XLSX ou XLS), no formato do mapeamento.")
+    ],
     competence: Annotated[
         str,
         Form(pattern=COMPETENCE_FORM_PATTERN, description="Competência do arquivo, `YYYY-MM`."),

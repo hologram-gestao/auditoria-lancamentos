@@ -15,7 +15,8 @@ Pipeline para cada formato suportado:
     PDF   → bytes brutos   →   AnthropicClient (document base64).
     CSV   → decode utf-8   →   AnthropicClient (text block).
     XLSX  → openpyxl       →   render TSV   →   AnthropicClient (text block).
-    XLS   → não suportado nesta versão (xlrd não está nas deps).
+    XLS   → não suportado neste caminho (o xlrd lê o `.xls` só no leitor da origem
+            por arquivo e do plano contábil, 86e3n70p6).
 
 Arquivo grande é dividido em blocos extraídos em paralelo e juntados: o tempo
 de uma chamada cresce com o número de linhas e estourava o teto de forma
@@ -56,8 +57,9 @@ from app.utils.magic_bytes import FileType, validate_upload_type
 log = get_logger(__name__)
 
 # Conjunto aceito pelo endpoint de parse. Mantém XLS de fora — o checklist da
-# UI lista XLS, mas para BACK 7.1 não temos um decoder confiável (xlrd<2.0
-# não está nas deps). Se o cliente subir .xls, recusamos com mensagem clara.
+# UI lista XLS, mas o parse por IA (BACK 7.1) não renderiza `.xls` para texto (o
+# xlrd entrou nas deps em 86e3n70p6, só para o leitor determinístico da origem por
+# arquivo). Se o cliente subir .xls, recusamos com mensagem clara.
 _ALLOWED_FOR_PARSE: set[FileType] = {
     FileType.PDF,
     FileType.CSV,

@@ -245,7 +245,7 @@ export function FileUploadSection({
                 name="file"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Arquivo (.csv ou .xlsx)</FormLabel>
+                    <FormLabel>Arquivo (.csv, .xlsx ou .xls)</FormLabel>
                     <FormControl>
                       <FileInputField
                         accept={FILE_ACCEPT}
