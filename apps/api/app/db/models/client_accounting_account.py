@@ -19,6 +19,10 @@ A reimportação casa por código reduzido: conta nova entra, conta existente at
 nome/tipo/classificação (e volta a ativa), conta que sumiu da planilha vira INATIVA —
 **nunca é apagada**, porque pode haver decisão do de-para apontando para ela (16.2).
 
+**A lista sai na ordem da CLASSIFICAÇÃO** (86e3n70p9): `sort_key` é derivada em toda
+escrita (`sort_key.chart_sort_key`) e a listagem só ordena por ela. Sintética em cima,
+as analíticas dela abaixo, na ordem de TEXTO da classificação, que é a do Domínio.
+
 **Só conta ANALÍTICA e ATIVA recebe decisão nova** — a regra mora num validador
 único (`AccountingChartService.require_postable_account`), consumido pelo de-para
 (16.2) e pela conta do banco (16.3).
@@ -38,6 +42,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     ForeignKey,
+    Index,
     String,
     Text,
     UniqueConstraint,
@@ -72,12 +77,23 @@ class AccountingAccountType(StrEnum):
 MAX_ACCOUNTING_ACCOUNT_CODE_CHARS = 20
 #: Teto da classificação hierárquica opcional (`1.1.1.02.001`).
 MAX_ACCOUNTING_ACCOUNT_CLASSIFICATION_CHARS = 40
+#: Teto da chave de ordenação (`sort_key`, 86e3n70p9): a própria classificação (até
+#: 40) ou o código reduzido (até 20) com os segmentos numéricos preenchidos até 6
+#: dígitos, cujo pior caso (11 segmentos de 1 dígito) dá 11 x 6 + 10 = 76. 160 é a
+#: largura que a coluna já tem; `tests/unit/test_accounting_chart_sort_key.py` prova
+#: que cabe.
+MAX_ACCOUNTING_ACCOUNT_SORT_KEY_CHARS = 160
+#: A collation da coluna `sort_key`: `C` compara por BYTE. A do sistema (`en_US.utf8`
+#: da glibc) ignora a pontuação e embaralha a classificação (`11 < 1.10 < 1.1.2`).
+ACCOUNTING_ACCOUNT_SORT_KEY_COLLATION = "C"
 #: Teto do NOME em claro, antes de cifrar — o mesmo do rótulo de categoria do arquivo
 #: (`MAX_CATEGORY_LABEL_CHARS` da S14): nome de conta é rótulo, não texto livre.
 MAX_ACCOUNTING_ACCOUNT_NAME_CHARS = 200
 
 #: A UNIQUE que faz "um código por cliente" — a reimportação casa por ela.
 UQ_ACCOUNTING_ACCOUNT_CLIENT_CODE = "uq_client_accounting_accounts_client_id_code"
+#: O índice da LISTAGEM (86e3n70p9): toda página é `WHERE client_id ORDER BY sort_key`.
+IX_ACCOUNTING_ACCOUNT_CLIENT_SORT_KEY = "ix_client_accounting_accounts_client_id_sort_key"
 
 #: Rótulos (não os nomes finais) dos CHECKs — a `NAMING_CONVENTION` prefixa
 #: `ck_client_accounting_accounts_`.
@@ -116,6 +132,7 @@ class ClientAccountingAccount(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint(
             text(accounting_account_type_check()), name=ACCOUNTING_ACCOUNT_TYPE_CK_LABEL
         ),
+        Index(IX_ACCOUNTING_ACCOUNT_CLIENT_SORT_KEY, "client_id", "sort_key"),
     )
 
     #: CASCADE: a exclusão DEFINITIVA do cliente leva o plano. O ENCERRAMENTO o
@@ -134,6 +151,20 @@ class ClientAccountingAccount(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     #: Classificação hierárquica (`1.1.1.02.001`), opcional. Estrutura, em claro.
     classification: Mapped[str | None] = mapped_column(
         String(MAX_ACCOUNTING_ACCOUNT_CLASSIFICATION_CHARS), nullable=True
+    )
+
+    #: A chave da ORDEM DA CLASSIFICAÇÃO (86e3n70p9), DERIVADA na gravação por
+    #: `client_accounting_chart.sort_key.chart_sort_key` (a classificação como TEXTO,
+    #: que é a ordem do Domínio; sem ela, o código com os segmentos numéricos
+    #: preenchidos até 6 dígitos) e nunca inferida na leitura: a listagem só ordena por
+    #: ela (`NULLS LAST`, depois código e id), em collation `C` (byte). Nula só em linha
+    #: gravada por código anterior a esta coluna, na janela de deploy; a migration
+    #: `b2f7c9e41d06` preencheu as existentes com a MESMA regra em SQL.
+    sort_key: Mapped[str | None] = mapped_column(
+        String(
+            MAX_ACCOUNTING_ACCOUNT_SORT_KEY_CHARS, collation=ACCOUNTING_ACCOUNT_SORT_KEY_COLLATION
+        ),
+        nullable=True,
     )
 
     # ---- nome: SEMPRE cifrado, envelope com DEK do cliente + AAD ------------

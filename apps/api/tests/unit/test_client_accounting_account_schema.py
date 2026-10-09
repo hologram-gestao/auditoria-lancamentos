@@ -75,11 +75,14 @@ class TestModeloEMigrationBatem:
         assert mig._IV_HEX_LENGTH == IV_HEX_LENGTH
 
     def test_colunas_do_modelo_e_da_migration_batem(self) -> None:
-        """Drift de coluna: o conjunto criado pela migration é EXATAMENTE o do modelo."""
+        """Drift de coluna: o conjunto criado pela migration, mais o que as migrations
+        SEGUINTES da tabela acrescentaram, é EXATAMENTE o do modelo."""
         upgrade = _upgrade_source()
         model_columns = {column.name for column in ClientAccountingAccount.__table__.c}
         migration_columns = set(re.findall(r'sa\.Column\(\s*"([a-z_]+)"', upgrade))
-        assert migration_columns == model_columns
+        # `sort_key` nasceu depois, em `b2f7c9e41d06` (86e3n70p9); a comparação dela
+        # com o modelo é de `tests/unit/test_accounting_chart_sort_key.py`.
+        assert migration_columns | {"sort_key"} == model_columns
 
     def test_nomes_de_constraint_cabem_no_postgres(self) -> None:
         """Nome > 63 caracteres é truncado em SILÊNCIO pelo Postgres (ADR-074-BE)."""
