@@ -53,6 +53,7 @@ from app.modules.client_accounting_chart.sheet import (
     ChartSheetRow,
     parse_chart_sheet,
 )
+from app.modules.client_accounting_chart.sort_key import chart_sort_key
 from app.modules.usage_events.repository import UsageEventRepository
 from app.modules.usage_events.service import UsageEventService
 
@@ -366,6 +367,8 @@ def _plan_writes(
 
     O nome é cifrado com a pk da linha no AAD — por isso a conta nova tem o `id`
     gerado AQUI, antes do INSERT. IV novo por operação, inclusive na atualização.
+    A chave da ORDEM (`sort_key`) é derivada aqui, em toda inserção E atualização:
+    a reimportação pode trocar a classificação de uma conta, e a chave acompanha.
     """
     inserts: list[dict[str, object]] = []
     updates: list[dict[str, object]] = []
@@ -382,6 +385,7 @@ def _plan_writes(
                     "client_id": client_id,
                     "code": row.code,
                     "classification": row.classification,
+                    "sort_key": chart_sort_key(row.classification, row.code),
                     "name_encrypted": envelope,
                     "name_iv": iv,
                     "account_type": row.account_type.value,
@@ -399,6 +403,7 @@ def _plan_writes(
                     "b_iv": iv,
                     "b_type": row.account_type.value,
                     "b_class": row.classification,
+                    "b_sort": chart_sort_key(row.classification, row.code),
                     "b_author": author_id,
                 }
             )

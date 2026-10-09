@@ -8565,6 +8565,21 @@ for (const vp of VIEWPORTS) {
       await expect(
         regiao.getByRole('cell', { name: 'Banco conta movimento', exact: true }),
       ).toBeVisible();
+      // 86e3n70p9: a hierarquia aparece — a lista chega na ordem da classificação,
+      // o nome recua pelo grau e a sintética sai em peso maior. As demais colunas
+      // continuam as mesmas.
+      const nomes = regiao.locator('td [data-depth]');
+      await expect(nomes).toHaveText(ACCOUNTING_ACCOUNTS.map((a) => String(a.name)));
+      await expect(nomes.first()).toHaveAttribute('data-depth', '1'); // 1.1 (sintética)
+      await expect(nomes.first()).toHaveClass(/font-semibold/);
+      await expect(nomes.nth(1)).toHaveAttribute('data-depth', '4'); // 1.1.1.02.001
+      await expect(nomes.nth(1)).not.toHaveClass(/font-semibold/);
+      const recuoSintetica = await nomes.first().evaluate((el) => getComputedStyle(el).paddingLeft);
+      const recuoAnalitica = await nomes.nth(1).evaluate((el) => getComputedStyle(el).paddingLeft);
+      expect(
+        parseFloat(recuoAnalitica),
+        'a analítica de grau 4 recua mais que a sintética de grau 1',
+      ).toBeGreaterThan(parseFloat(recuoSintetica));
       await expect(page.getByLabel('Buscar por código')).toBeVisible();
       // Nenhum campo de busca por nome: o nome é cifrado.
       await expect(page.getByLabel(/buscar por nome/i)).toHaveCount(0);

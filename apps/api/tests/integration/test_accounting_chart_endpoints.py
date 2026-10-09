@@ -13,7 +13,10 @@ O que este módulo afirma (critérios de aceite da 16.1):
     (nunca apagada), inativa que volta reativa — contagens da resposta conferidas;
   - validador único: outro cliente → 404, sintética/inativa → 422 tipado;
   - lista paginada com `pageSize` pelo alias, busca por prefixo de código, filtros
-    de tipo e situação; plano de outro cliente nunca aparece;
+    de tipo e situação; plano de outro cliente nunca aparece; a ordem é a da
+    CLASSIFICAÇÃO (`1.1.2` antes de `1.1.10`, por `sort_key` derivada na gravação) e
+    atravessa a paginação; o cabeçalho casa por grafia normalizada e `S`/`A` valem
+    como tipo (86e3n70p9);
   - `client_manager` LÊ 200 e IMPORTA 403 com 1 linha `denied` (desenho da S10);
   - cliente encerrado: importar 409, ler 200; purga no encerramento e exclusão
     definitiva com autor do tenant (ordem da FK RESTRICT);
@@ -436,6 +439,73 @@ class TestListagem:
         )
         assert seletor.json()["pagination"]["total"] == 20
         assert all(i["postable"] for i in seletor.json()["data"])
+
+    async def test_lista_na_ordem_da_classificacao_paginada_e_o_combobox_herda(
+        self, client_with_db: AsyncClient, world: World, db_session: AsyncSession
+    ) -> None:
+        """86e3n70p9: `1.1.2` antes de `1.1.10`, sintética antes das analíticas dela, e a
+        ordem atravessa a paginação (é SQL, não o cliente). Sem classificação, o código
+        ordena numericamente (`9` antes de `10`), não como texto."""
+        await _login(client_with_db, world.admin)
+        planilha = _csv(
+            "codigo_reduzido;nome;tipo;classificacao",
+            "10;Caixa e bancos;sintetica;1.1.10",
+            "2;Ativo;sintetica;1",
+            "9;Clientes;analitica;1.1.2",
+            "3;Ativo circulante;sintetica;1.1",
+            "11;Banco conta movimento;analitica;1.1.10.01",
+            "100;Fornecedor sem classificacao;analitica;",
+            "20;Outro sem classificacao;sintetica;",
+        )
+        assert (await _import(client_with_db, world.client, planilha)).status_code == 200
+
+        esperado = ["2", "3", "9", "10", "11", "20", "100"]
+        tudo = await client_with_db.get(_url(world.client), params={"pageSize": 100})
+        assert [i["code"] for i in tudo.json()["data"]] == esperado
+
+        paginado: list[str] = []
+        for page in (1, 2, 3):
+            resp = await client_with_db.get(
+                _url(world.client), params={"pageSize": 3, "page": page}
+            )
+            paginado += [i["code"] for i in resp.json()["data"]]
+        assert paginado == esperado, "a ordem atravessa as páginas"
+
+        # O seletor do de-para (analíticas ativas) lê a MESMA lista: herda a ordem.
+        seletor = await client_with_db.get(
+            _url(world.client), params={"type": "analitica", "status": "ativa"}
+        )
+        assert [i["code"] for i in seletor.json()["data"]] == ["9", "11", "100"]
+
+        # A chave é DERIVADA na gravação (nunca nula depois da importação) e a
+        # reimportação que troca a classificação a reescreve.
+        chaves = dict(
+            (
+                await db_session.execute(
+                    select(ClientAccountingAccount.code, ClientAccountingAccount.sort_key).where(
+                        ClientAccountingAccount.client_id == world.client.id
+                    )
+                )
+            ).all()
+        )
+        assert chaves["10"] == "000001.000001.000010"
+        assert chaves["100"] == "000100"
+        assert None not in chaves.values()
+        await _import(
+            client_with_db,
+            world.client,
+            _csv("codigo_reduzido;nome;tipo;classificacao", "100;Fornecedor;analitica;1.2"),
+        )
+        reimportada = await client_with_db.get(_url(world.client), params={"status": "ativa"})
+        assert [i["code"] for i in reimportada.json()["data"]] == ["100"]
+        assert reimportada.json()["data"][0]["classification"] == "1.2"
+        chave = await db_session.execute(
+            select(ClientAccountingAccount.sort_key)
+            .where(ClientAccountingAccount.client_id == world.client.id)
+            .where(ClientAccountingAccount.code == "100")
+            .execution_options(populate_existing=True)
+        )
+        assert chave.scalar_one() == "000001.000002"
 
     async def test_curinga_de_like_e_literal_e_filtro_invalido_nao_vira_lista_vazia(
         self, client_with_db: AsyncClient, world: World
