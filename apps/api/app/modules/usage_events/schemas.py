@@ -222,6 +222,16 @@ class UsageEventName(StrEnum):
     # A métrica da SPRINT (completude de partida) NÃO é evento: sai da própria
     # materialização por consulta (ver HANDOFF, BACK 16.4).
     PLANO_CONTABIL_IMPORTADO = "plano_contabil_importado"
+    # 86e3nb816 — inclusão e edição MANUAL de uma conta do plano contábil. De
+    # BACKEND, sem `session_id`, fora da dedup: cada gravação bem-sucedida é uma
+    # linha, depois do commit (recusa e edição sem mudança não emitem). Só IDs, a
+    # operação e QUAIS campos mudaram, em vocabulário fechado: nunca o código, o
+    # nome nem a classificação.
+    #
+    # Leitura (quanto o escritório mantém o plano sem reimportar):
+    #     count(*) WHERE event = 'plano_contabil_conta_editada'
+    #       GROUP BY props->>'operacao'
+    PLANO_CONTABIL_CONTA_EDITADA = "plano_contabil_conta_editada"
     # Sprint 13 (BACK 13.1, emitido pela geração do arquivo contábil da 13.4) —
     # **a métrica da Sprint 13**. De BACKEND, sem `session_id`, fora da dedup:
     # cada geração (inclusive a segunda da mesma materialização) é uma linha.
@@ -644,6 +654,25 @@ class PlanoContabilImportadoProps(_StrictProps):
     contas_novas: int = Field(ge=0)
     contas_inativadas: int = Field(ge=0)
     layout: ChartImportLayout
+
+
+#: O que a edição manual mudou (86e3nb816). Espelho de
+#: `client_accounting_chart.service.AccountChange` (o teste do evento compara os dois).
+AccountChangeField = Literal["nome", "tipo", "classificacao", "situacao"]
+
+
+class PlanoContabilContaEditadaProps(_StrictProps):
+    """`plano_contabil_conta_editada` (86e3nb816) — só IDs e o campo alterado.
+
+    `operacao` é `criada` (inclusão manual; `campos` vazio) ou `editada` (`campos`
+    com o que mudou, sem repetição). Nenhum `str` livre: código, nome e
+    classificação não têm onde caber.
+    """
+
+    client_id: UUID
+    account_id: UUID
+    operacao: Literal["criada", "editada"]
+    campos: list[AccountChangeField] = Field(max_length=4)
 
 
 class OrganizacaoCriadaProps(_StrictProps):

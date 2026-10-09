@@ -93,6 +93,14 @@ class ErrorCode(StrEnum):
     # de conta: sintética ou inativa não recebe decisão nova (422, conteúdo do
     # pedido, com `details.reason` fechado).
     CONTA_CONTABIL_NAO_LANCAVEL = "CONTA_CONTABIL_NAO_LANCAVEL"
+    #: 86e3nb816 — inclusão e edição MANUAL de conta do plano. O código reduzido é
+    #: único por cliente (409, com o código: ele é estrutura em claro, §4.5); campo
+    #: que a planilha recusaria é 422 com `details.field` e `details.reason` no MESMO
+    #: vocabulário da importação; e a conta que decisões ou a conta do banco usam não
+    #: vira sintética nem inativa (422 com as CONTAGENS, nunca quais categorias).
+    CONTA_CONTABIL_CODIGO_EXISTENTE = "CONTA_CONTABIL_CODIGO_EXISTENTE"
+    CONTA_CONTABIL_INVALIDA = "CONTA_CONTABIL_INVALIDA"
+    CONTA_CONTABIL_EM_USO = "CONTA_CONTABIL_EM_USO"
     # Sprint 16 (BACK 16.2) — o de-para no destino `conta_contabil` aponta para o
     # plano do CLIENTE, e só ele: catálogo da org nesse destino, conta do plano em
     # outro destino e a importação da planilha nesse destino são recusas tipadas.
@@ -964,6 +972,53 @@ class CatalogTargetInAccountingDestinationError(AppError):
     default_user_message = (
         "No destino Conta contábil a decisão aponta para uma conta do plano contábil do "
         "cliente, não para o catálogo da organização. Escolha a conta no plano do cliente."
+    )
+
+
+class AccountingAccountCodeExistsError(ConflictError):
+    """409 — já existe conta com este código reduzido no plano DESTE cliente (86e3nb816).
+
+    O código é a chave da reimportação e o que vai no arquivo contábil: dois iguais
+    no mesmo plano seriam a mesma conta. `details.code` (estrutura em claro, §4.5) e
+    `details.accountId` da existente, para a tela oferecer editá-la (inclusive
+    reativar, quando ela está inativa). Nunca o nome.
+    """
+
+    code = ErrorCode.CONTA_CONTABIL_CODIGO_EXISTENTE
+    default_user_message = (
+        "Já existe uma conta com este código no plano contábil do cliente. Edite a conta "
+        "existente em vez de criar outra."
+    )
+
+
+class AccountingAccountInvalidError(AppError):
+    """422 — campo da conta que a importação da planilha também recusaria (86e3nb816).
+
+    `details.field` ∈ {`code`, `name`, `classification`} e `details.reason` no
+    vocabulário FECHADO da planilha (`codigo_invalido`, `nome_vazio`…): as duas
+    portas de entrada do plano obedecem à MESMA regra (`sheet.validate_account`).
+    """
+
+    code = ErrorCode.CONTA_CONTABIL_INVALIDA
+    status_code = 422
+    default_user_message = "Confira os dados da conta: um dos campos não é aceito."
+
+
+class AccountingAccountInUseError(AppError):
+    """422 — a conta não pode virar sintética nem inativa enquanto está em uso (86e3nb816).
+
+    Decisões do de-para no destino `conta_contabil` e a conta do banco apontam para
+    ela; tirá-la do conjunto lançável por edição manual deixaria essas
+    configurações paradas sem aviso. `details` leva só `reason` (`sintetica` ou
+    `inativa`), `decisionCount` e `bindingCount`: CONTAGENS, nunca quais
+    categorias, contas de origem ou nomes.
+    """
+
+    code = ErrorCode.CONTA_CONTABIL_EM_USO
+    status_code = 422
+    default_user_message = (
+        "Esta conta está em uso no de-para ou como conta do banco e precisa continuar "
+        "analítica e ativa. Troque essas configurações para outra conta antes."
     )
 
 
