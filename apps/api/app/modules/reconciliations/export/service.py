@@ -66,7 +66,7 @@ from app.modules.reconciliations.export.schemas import (
     SemOmieRow,
     SummarySheetData,
 )
-from app.modules.reconciliations.processing.matcher import DATE_DIVERGENCE_RANGE
+from app.modules.reconciliations.processing.omie_window import omie_window_for_session
 from app.modules.reconciliations.qualification.service import (
     ANOMALY_CODE_PADRAO_QUEBRADO,
     ANOMALY_CODE_QUALIF_INCOERENTE,
@@ -380,10 +380,16 @@ class ExportService:
         # Popula via extrato do período expandido (mesma estratégia do
         # ReviewService.list_available_omie_entries).
         period_start, period_end = _resolve_session_period(session)
-        # FASE 1: range fixo (não mais a tolerância por sessão) — sessões novas
-        # gravam date_tolerance_days=0, então usar a coluna encolheria a janela.
-        expanded_start = period_start - timedelta(days=DATE_DIVERGENCE_RANGE)
-        expanded_end = period_end + timedelta(days=DATE_DIVERGENCE_RANGE)
+        # §5.3 (86e3n70p0): a janela é a MESMA decisão do processamento — range
+        # fixo no processo de sempre (a coluna date_tolerance_days grava 0 e
+        # encolheria a janela), o lote da fatura no modo vencimento do cartão.
+        expanded_start, expanded_end = omie_window_for_session(
+            account_type=session.account_type,
+            card_posting_date_mode=session.card_posting_date_mode,
+            invoice_due_date=session.invoice_due_date,
+            period_start=period_start,
+            period_end=period_end,
+        )
 
         try:
             populated = await self._cache.populate_from_extrato(

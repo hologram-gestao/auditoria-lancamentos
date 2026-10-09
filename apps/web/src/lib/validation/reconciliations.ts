@@ -82,3 +82,68 @@ export const newReconciliationSchema = reconciliationMetaSchema.extend({
 });
 
 export type NewReconciliationFormValues = z.infer<typeof newReconciliationSchema>;
+
+/**
+ * `DD/MM/AAAA` → `AAAA-MM-DD`, ou `null` se não é uma data real (31/02, 00/10,
+ * formato errado). Parse MANUAL, sem `new Date(texto)`: o navegador lê datas
+ * locais de jeitos diferentes, e `new Date('2026-10-10')` é UTC (volta um dia no
+ * Brasil) — mesmo motivo do `formatBRDate`.
+ */
+export function parseBrDate(value: string): string | null {
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value.trim());
+  if (!match) return null;
+  const [, dd, mm, yyyy] = match;
+  const day = Number(dd);
+  const month = Number(mm);
+  const year = Number(yyyy);
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  if (
+    probe.getUTCFullYear() !== year ||
+    probe.getUTCMonth() !== month - 1 ||
+    probe.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+export const INVOICE_DUE_DATE_REQUIRED_MESSAGE =
+  'Informe o vencimento da fatura: este processo procura as compras no lote do vencimento.';
+export const INVOICE_DUE_DATE_INVALID_MESSAGE = 'Use o formato DD/MM/AAAA, com uma data válida.';
+
+/**
+ * Fatura de CARTÃO na gaveta (86e3n70p0): o processo do cartão desta
+ * conciliação (o do cliente, ou a troca pontual) e o vencimento da fatura, que
+ * vem do parser e a pessoa confirma ou corrige.
+ *
+ * Espelha o 422 `VENCIMENTO_DA_FATURA_OBRIGATORIO` do servidor: no modo
+ * vencimento, sem data não há lote para cruzar. No modo compra o vencimento é
+ * informativo e pode ficar vazio — mas, preenchido, tem de ser uma data real.
+ */
+export const cardInvoiceSchema = z
+  .object({
+    card_posting_date_mode: z.enum(['purchase_date', 'invoice_due_date']),
+    invoice_due_date: z.string(),
+  })
+  .superRefine((vals, ctx) => {
+    const raw = vals.invoice_due_date.trim();
+    if (raw === '') {
+      if (vals.card_posting_date_mode === 'invoice_due_date') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['invoice_due_date'],
+          message: INVOICE_DUE_DATE_REQUIRED_MESSAGE,
+        });
+      }
+      return;
+    }
+    if (parseBrDate(raw) === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['invoice_due_date'],
+        message: INVOICE_DUE_DATE_INVALID_MESSAGE,
+      });
+    }
+  });
+
+export type CardInvoiceValues = z.infer<typeof cardInvoiceSchema>;

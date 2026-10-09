@@ -159,6 +159,7 @@ async def create_client(
         # LINHA do ator e recusa divergência (§3.15).
         requested_organization_id=payload.organization_id,
         category_id=payload.category_id,
+        card_posting_date_mode=payload.card_posting_date_mode,
     )
 
 
@@ -450,6 +451,7 @@ async def update_client(
         # Tri-estado (86e34jd8m): só mexe na categoria se o campo veio no body.
         category_id=payload.category_id,
         category_set="category_id" in payload.model_fields_set,
+        card_posting_date_mode=payload.card_posting_date_mode,
     )
 
 

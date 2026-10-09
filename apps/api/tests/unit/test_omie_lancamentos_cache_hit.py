@@ -49,6 +49,11 @@ class _SessionStub:
     client_id = CLIENT_ID
     omie_conta_id = 4214850
     reference_month = date(2026, 4, 1)
+    # 86e3n70p0: a janela do miss é `omie_window_for_session`, que lê o processo
+    # do cartão. Conta corrente: o cálculo de sempre.
+    account_type = "checking"
+    card_posting_date_mode = None
+    invoice_due_date = None
 
 
 class _RepoStub:
@@ -57,15 +62,6 @@ class _RepoStub:
     async def get_session(self, session_id: UUID) -> _SessionStub:
         assert session_id == SESSION_ID
         return _SessionStub()
-
-    @staticmethod
-    def expand_period(period_start: date, period_end: date, tolerance_days: int) -> Any:
-        from datetime import timedelta
-
-        return (
-            period_start - timedelta(days=tolerance_days),
-            period_end + timedelta(days=tolerance_days),
-        )
 
 
 class _CacheStub:

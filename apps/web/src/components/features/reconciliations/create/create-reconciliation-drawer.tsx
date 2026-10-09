@@ -24,7 +24,7 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { AlertTriangle, ArrowLeft, ArrowRight, Info, Loader2, Upload } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { toast } from 'sonner';
 
@@ -58,17 +58,22 @@ import {
 import { ApiError } from '@/lib/api/client';
 import { isCreditCardAccount, listReconciliations, type BankAccount } from '@/lib/api/clients';
 import { attachSessionFiles, createReconciliation } from '@/lib/api/reconciliations';
-import { formatReferenceMonth } from '@/lib/format';
+import type { CardPostingDateMode } from '@/lib/contracts';
+import { formatBRDate, formatReferenceMonth } from '@/lib/format';
 import { isOriginError } from '@/lib/origin-state';
 import { cn } from '@/lib/utils';
 import {
   ALLOWED_EXTENSIONS,
   MAX_FILE_SIZE_LABEL,
+  cardInvoiceSchema,
   currentMonth,
+  parseBrDate,
   reconciliationMetaSchema,
+  type CardInvoiceValues,
   type ReconciliationMetaValues,
 } from '@/lib/validation/reconciliations';
 
+import { CardInvoiceFields } from './card-invoice-fields';
 import { UploadItemRow } from './upload-item-row';
 import { useFilePipeline } from './use-file-pipeline';
 
@@ -86,6 +91,11 @@ interface CreateReconciliationDrawerProps {
   onOpenChange: (open: boolean) => void;
   clientId: string;
   accounts: BankAccount[];
+  /**
+   * 86e3n70p0 — o processo do cartão configurado no cliente. É o que vale na
+   * conciliação de cartão, salvo troca pontual na própria gaveta.
+   */
+  clientCardPostingDateMode: CardPostingDateMode;
   /** Chamado após a criação/anexação — o pai fecha, dá o toast e refetcha. */
   onCreated: (created: CreatedReconciliation) => void;
 }
@@ -104,6 +114,7 @@ function DrawerContent({
   onOpenChange,
   clientId,
   accounts,
+  clientCardPostingDateMode,
   onCreated,
 }: CreateReconciliationDrawerProps) {
   const [step, setStep] = useState<1 | 2>(1);
@@ -123,6 +134,14 @@ function DrawerContent({
     mode: 'onSubmit',
   });
 
+  // 86e3n70p0 — fatura de cartão: processo desta conciliação + vencimento.
+  const cardForm = useForm<CardInvoiceValues>({
+    resolver: zodResolver(cardInvoiceSchema),
+    defaultValues: { card_posting_date_mode: clientCardPostingDateMode, invoice_due_date: '' },
+    mode: 'onTouched',
+  });
+  const cardMode = useWatch({ control: cardForm.control, name: 'card_posting_date_mode' });
+
   const sortedAccounts = [...accounts].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
   const hasAccounts = sortedAccounts.length > 0;
 
@@ -134,6 +153,20 @@ function DrawerContent({
   const selectedAccount = sortedAccounts.find(
     (a) => a.omie_conta_id === Number(meta.omie_conta_id),
   );
+  const isCard = selectedAccount !== undefined && isCreditCardAccount(selectedAccount.account_type);
+  // O vencimento que o parser leu (primeira parte que trouxe) vira a PROPOSTA do
+  // campo, uma vez: depois que a pessoa mexeu nele, a extração não sobrescreve.
+  const extractedDueDate = pipeline.items.find(
+    (it) => it.status === 'parsed' && it.result?.statement.invoice_due_date,
+  )?.result?.statement.invoice_due_date;
+  useEffect(() => {
+    if (extractedDueDate == null) return;
+    if (cardForm.getFieldState('invoice_due_date').isDirty) return;
+    if (cardForm.getValues('invoice_due_date') !== '') return;
+    cardForm.setValue('invoice_due_date', formatBRDate(extractedDueDate), {
+      shouldValidate: true,
+    });
+  }, [extractedDueDate, cardForm]);
   const parsedCount = pipeline.items.filter((it) => it.status === 'parsed').length;
   const canConfirm = parsedCount > 0 && !pipeline.isProcessing && !submitting;
 
@@ -191,6 +224,12 @@ function DrawerContent({
       return;
     }
 
+    // Fatura de cartão: o vencimento é obrigatório no processo "no vencimento"
+    // (o servidor responderia 422) e, preenchido, tem de ser uma data real.
+    if (isCard && !(await cardForm.trigger())) return;
+    const card = cardForm.getValues();
+    const dueDate = parseBrDate(card.invoice_due_date);
+
     setSubmitting(true);
     try {
       const result = await createReconciliation({
@@ -199,6 +238,9 @@ function DrawerContent({
         // O contrato quer `date`: dia 1 do mês de referência.
         reference_month: `${meta.reference_month}-01`,
         files: parts,
+        // O processo que a pessoa VIU na gaveta (o do cliente ou a troca).
+        ...(isCard ? { card_posting_date_mode: card.card_posting_date_mode } : {}),
+        ...(isCard && dueDate !== null ? { invoice_due_date: dueDate } : {}),
       });
       onCreated({ sessionId: result.session_id, totalFiles: result.total_files });
     } catch (err) {
@@ -391,6 +433,7 @@ function DrawerContent({
                   <UploadItemRow
                     key={item.id}
                     item={item}
+                    isCard={isCard}
                     onRemove={() => pipeline.remove(item.id)}
                     disabled={submitting}
                   />
@@ -405,7 +448,16 @@ function DrawerContent({
               </p>
             )}
 
-            {selectedAccount !== undefined && isCreditCardAccount(selectedAccount.account_type) && (
+            {isCard && (
+              <CardInvoiceFields
+                form={cardForm}
+                clientMode={clientCardPostingDateMode}
+                mode={cardMode}
+                disabled={submitting}
+              />
+            )}
+
+            {isCard && (
               <p role="note" className="text-muted-foreground flex items-start gap-2 text-xs">
                 <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 <span>

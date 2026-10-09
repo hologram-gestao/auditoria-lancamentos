@@ -46,7 +46,13 @@ from app.core.exceptions import (
     OmieServerError,
     OmieTimeoutError,
 )
-from app.db.models import Client, ClientAssignment, OmieAccountCache, User
+from app.db.models import (
+    CardPostingDateMode,
+    Client,
+    ClientAssignment,
+    OmieAccountCache,
+    User,
+)
 from app.db.models.client_connection import ClientConnection, ProviderType
 from app.integrations.omie.client import OmieCredentials
 from app.integrations.providers.base import Capability
@@ -107,6 +113,7 @@ def _row_to_response(row: ClientRow) -> ClientResponse:
         manager_count=row.manager_count,
         # 86e36pm1z — encerrado: o front esconde ações e mostra o selo.
         closed_at=row.client.closed_at,
+        card_posting_date_mode=CardPostingDateMode(row.client.card_posting_date_mode),
         category=(
             ClientCategorySummary(
                 id=row.category.id, name=row.category.name, tone=row.category.tone
@@ -237,6 +244,7 @@ class ClientService:
         actor: CurrentUser,
         requested_organization_id: UUID | None,
         category_id: UUID | None = None,
+        card_posting_date_mode: CardPostingDateMode = CardPostingDateMode.PURCHASE_DATE,
     ) -> ClientResponse:
         """Cria o cliente. A credencial é OPCIONAL desde a Sprint 9 (BACK 09.4).
 
@@ -282,6 +290,7 @@ class ClientService:
             created_by=current_user_id,
             category_id=category_id,
             organization_id=organization_id,
+            card_posting_date_mode=card_posting_date_mode.value,
         )
         tipo_conexao: str | None = None
         # SAVEPOINT em volta de cliente + carteira + conexão: a credencial é
@@ -346,6 +355,7 @@ class ClientService:
         viewer_user_id: UUID | None = None,
         category_id: UUID | None = None,
         category_set: bool = False,
+        card_posting_date_mode: CardPostingDateMode | None = None,
     ) -> ClientResponse:
         """Atualiza campos parciais do cliente (PATCH).
 
@@ -367,6 +377,10 @@ class ClientService:
         if category_set:
             await self._assert_category_exists(category_id, organization_id=client.organization_id)
             client.category_id = category_id
+        if card_posting_date_mode is not None:
+            # 86e3n70p0: vale para as conciliações criadas DEPOIS. As existentes
+            # guardam o modo com que foram criadas (snapshot na sessão).
+            client.card_posting_date_mode = card_posting_date_mode.value
 
         await self._repo.add_client(client)
         return await self.get_client_detail(client.id, viewer_user_id=viewer_user_id)

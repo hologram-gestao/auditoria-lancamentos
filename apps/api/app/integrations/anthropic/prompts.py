@@ -88,6 +88,14 @@ NEGATIVO. NÃO emita IOF, IR nem rendimento como transações separadas: eles j�
 estão embutidos na diferença entre bruto e líquido e são lançados à parte pela \
 contabilidade (último dia do mês).
 
+Vencimento da FATURA DE CARTÃO (quando `account_type` = `credit_card`):
+
+15. **`invoice_due_date`: a data de VENCIMENTO da fatura, como impressa.** Faturas \
+trazem "Vencimento", "Data de vencimento", "Vence em" ou "Pagar até": emita essa \
+data em ISO 8601. Nunca invente: se o documento não mostrar o vencimento, omita o \
+campo. Não confunda com a data de fechamento/corte da fatura nem com a data de uma \
+compra. Para conta corrente e conta de aplicação, omita o campo.
+
 Você DEVE responder chamando a tool `extract_movements`. Não escreva \
 explicações em texto livre.
 """
@@ -116,7 +124,7 @@ nunca invente linhas.\
 """
 
 # Documento já identificado numa chamada curta com a primeira página (86e3ff8xd,
-# D2). Página do meio não tem cabeçalho, e as regras 9 a 14 do system prompt
+# D2). Página do meio não tem cabeçalho, e as regras 9 a 15 do system prompt
 # dependem do tipo de conta: a nota fixa os dois campos para todo bloco.
 IDENTITY_NOTE_TEMPLATE = """ \
 O documento já foi identificado como banco "{bank_name}", tipo de conta \

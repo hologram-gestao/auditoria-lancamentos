@@ -19,7 +19,7 @@ from datetime import date as _date_type
 from decimal import Decimal, InvalidOperation
 from typing import Any, Literal, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def _to_decimal(value: Any) -> Decimal:
@@ -105,11 +105,26 @@ class ExtractedStatement(BaseModel):
     opening_balance: Decimal
     closing_balance: Decimal
     transactions: list[ExtractedTransaction] = Field(min_length=1)
+    # 86e3n70p0 — vencimento da fatura de CARTÃO, como impresso (regra 15 do
+    # prompt). É a proposta que a prévia mostra para o usuário CONFIRMAR: no
+    # modo "vencimento da fatura" ele vira o centro da janela do Omie. `None`
+    # quando o documento não mostra, e SEMPRE fora do cartão (ver validador).
+    invoice_due_date: _date_type | None = Field(
+        default=None, description="Vencimento da fatura do cartão (YYYY-MM-DD)."
+    )
 
     @field_validator("opening_balance", "closing_balance", mode="before")
     @classmethod
     def _coerce_balances(cls, v: Any) -> Decimal:
         return _to_decimal(v)
+
+    @model_validator(mode="after")
+    def _due_date_only_for_card(self) -> ExtractedStatement:
+        # Nada muda para conta corrente e aplicação: um vencimento que o modelo
+        # emitisse ali por engano não chega à prévia nem à sessão.
+        if self.account_type != "credit_card":
+            self.invoice_due_date = None
+        return self
 
 
 class ExtractedStatementBlock(ExtractedStatement):

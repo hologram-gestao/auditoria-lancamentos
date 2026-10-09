@@ -30,7 +30,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -48,6 +48,7 @@ from app.core.crypto_service import (
 from app.core.exceptions import AppError, ErrorCode, OmieAuthError
 from app.core.logging import get_logger
 from app.db.models import (
+    CardPostingDateMode,
     FileEntrySituation,
     ReconciliationOmieEntry,
     ReconciliationSession,
@@ -73,11 +74,16 @@ from app.modules.reconciliations.processing.matcher import (
     DATE_DIVERGENCE_RANGE,
     FileEntryForMatch,
     match,
+    match_invoice_lot,
 )
 from app.modules.reconciliations.processing.omie_fetch import (
     deduplicate_by_id,
     fetch_pending,
     fetch_realized,
+)
+from app.modules.reconciliations.processing.omie_window import (
+    invoice_lot_date,
+    omie_window_for_session,
 )
 from app.modules.reconciliations.processing.split_payment_probe import probe_split_payments
 from app.modules.reconciliations.repository import ReconciliationRepository
@@ -306,6 +312,11 @@ async def _execute_processing(
         omie_conta_id = session_obj.omie_conta_id
         reference_month = session_obj.reference_month
         account_type = session_obj.account_type
+        # 86e3n70p0 — o processo do cartão GRAVADO na sessão (snapshot da
+        # criação), nunca o atual do cliente: reprocessar uma conciliação antiga
+        # não pode trocar o cruzamento dela.
+        card_posting_date_mode = session_obj.card_posting_date_mode
+        invoice_due_date = session_obj.invoice_due_date
 
         # Provisiona a DEK do cliente (gera+embrulha via KMS se legado) DENTRO
         # desta sessão, onde `client` está anexado. O processamento ESCREVE
@@ -349,6 +360,22 @@ async def _execute_processing(
         origin_provider_type = origin_connection.provider_type
         origin_credentials = await credentials_for(client, origin_connection, settings=settings)
 
+    # Janela do Omie: a MESMA decisão da revisão, do export e do `omie_data`
+    # (§5.3). No modo "vencimento da fatura" do cartão é o lote da fatura, e os
+    # títulos em aberto são buscados pelo vencimento (`due_window`), não pelo mês.
+    window_start, window_end = omie_window_for_session(
+        account_type=account_type,
+        card_posting_date_mode=card_posting_date_mode,
+        invoice_due_date=invoice_due_date,
+        period_start=period_start,
+        period_end=period_end,
+    )
+    lot_date = invoice_lot_date(
+        account_type=account_type,
+        card_posting_date_mode=card_posting_date_mode,
+        invoice_due_date=invoice_due_date,
+    )
+
     # 2. Fetch Omie data — toda a interação com credencial em claro
     #    acontece dentro do `async with` do OmieClient.
     omie_client = client_from_credentials(
@@ -365,26 +392,26 @@ async def _execute_processing(
             realized = await fetch_realized(
                 omie_client,
                 omie_conta_id=omie_conta_id,
-                period_start=period_start,
-                period_end=period_end,
-                tolerance_days=DATE_DIVERGENCE_RANGE,
+                window_start=window_start,
+                window_end=window_end,
             )
             pending = await fetch_pending(
                 omie_client,
                 omie_conta_id=omie_conta_id,
                 reference_month=reference_month,
+                due_window=(window_start, window_end) if lot_date is not None else None,
             )
             if settings.QUALIFICATION_ENABLED:
-                # Popula cache com supplier/category. Mesma janela expandida
-                # que `fetch_realized` consumiu — 1 chamada Omie redundante
+                # Popula cache com supplier/category. Mesma janela que
+                # `fetch_realized` consumiu — 1 chamada Omie redundante
                 # mas isolada (vide TODO no docstring do módulo).
                 try:
                     await lancamento_cache.populate_from_extrato(
                         client_id=client.id,
                         omie_client=omie_client,
                         omie_conta_id=omie_conta_id,
-                        period_start=period_start - timedelta(days=DATE_DIVERGENCE_RANGE),
-                        period_end=period_end + timedelta(days=DATE_DIVERGENCE_RANGE),
+                        period_start=window_start,
+                        period_end=window_end,
                     )
                 except Exception:
                     log.warning(
@@ -412,9 +439,19 @@ async def _execute_processing(
         deduped=len(omie_movements),
     )
 
-    # 3. Match — função pura, sem I/O. Usa o range fixo DATE_DIVERGENCE_RANGE
-    #    (default do matcher) — não há mais tolerância parametrizável (FASE 1).
-    result = match(file_entries_for_matcher, omie_movements)
+    # 3. Match — função pura, sem I/O. Processo de sempre: range fixo
+    #    DATE_DIVERGENCE_RANGE (default do matcher, FASE 1). Modo "vencimento da
+    #    fatura" do cartão (86e3n70p0): `omie_movements` já é o LOTE da fatura, a
+    #    data da compra não decide, e o par é por valor dentro dele.
+    match_mode = (
+        CardPostingDateMode.INVOICE_DUE_DATE.value
+        if lot_date is not None
+        else CardPostingDateMode.PURCHASE_DATE.value
+    )
+    if lot_date is not None:
+        result = match_invoice_lot(file_entries_for_matcher, omie_movements)
+    else:
+        result = match(file_entries_for_matcher, omie_movements)
 
     # Mapas data-por-id p/ classificar e montar o contexto da anomalia
     # wrong_date (BACK 1.7: "Data arquivo / Data Omie").
@@ -444,6 +481,9 @@ async def _execute_processing(
     log.info(
         "reconciliation_matched",
         session_id=str(session_id),
+        # 86e3n70p0 — qual processo do cartão cruzou (`purchase_date` também
+        # para conta corrente e sessão antiga: é o processo de sempre).
+        match_mode=match_mode,
         total_file=len(file_entries_for_matcher),
         matched=len(result.matches),
         divergent=len(divergent_matches),

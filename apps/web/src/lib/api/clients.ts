@@ -16,6 +16,7 @@
 import type {
   AddClientManagerRequest,
   BankAccountResponse,
+  CardPostingDateMode,
   ClientCategorySummary as ClientCategorySummaryContract,
   ClientManagerResponse,
   ClientDetailResponse,
@@ -67,6 +68,8 @@ export interface CreateClientPayload {
    * dele; valor divergente é 403).
    */
   organization_id?: string;
+  /** 86e3n70p0 — omitido = `purchase_date`, o processo de sempre. */
+  card_posting_date_mode?: CardPostingDateMode;
 }
 
 /**
@@ -80,6 +83,8 @@ export interface UpdateClientPayload {
   active?: boolean;
   /** Tri-estado no backend: omitido mantém, `null` limpa, UUID troca. */
   category_id?: string | null;
+  /** 86e3n70p0 — omitido mantém. Vale para as conciliações de cartão criadas DEPOIS. */
+  card_posting_date_mode?: CardPostingDateMode;
 }
 
 export interface TestConnectionPayload {

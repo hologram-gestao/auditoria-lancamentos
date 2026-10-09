@@ -46,13 +46,18 @@ import {
 } from '@/hooks/use-reconciliations';
 import { ApiError } from '@/lib/api/client';
 import type { SessionDetail } from '@/lib/api/reconciliations';
-import { formatCreatedAt, formatReferenceMonth } from '@/lib/format';
+import { sessionCardProcessLine } from '@/lib/card-posting-date-mode';
+import { formatBRDate, formatCreatedAt, formatReferenceMonth } from '@/lib/format';
 
 import { AnomaliesTab } from '../review/anomalies-tab';
 import { GlossarySeal } from '../review/glossary-seal';
 import { MovementsTab } from '../review/movements-tab';
 import { OmieDivergencesTab } from '../review/omie-divergences-tab';
-import { originCanWrite } from '../review/omie-posting-eligibility';
+import {
+  INVOICE_DUE_DATE_POSTING_BLOCK_MESSAGE,
+  originCanWrite,
+  processAllowsPosting,
+} from '../review/omie-posting-eligibility';
 import { SummaryTab } from '../review/summary-tab';
 import { accountNameFor } from '../session-label';
 
@@ -94,7 +99,11 @@ export function SessionDetailScreen({ clientId, sessionId }: SessionDetailScreen
   // S9 (R6): lançar no Omie exige a capacidade `escrever` de uma conexão ATIVA.
   // `capabilities` vem do contrato (é DADO, não exceção), e o predicado é o
   // mesmo do servidor — a ação some em vez de devolver `CAPACIDADE_AUSENTE`.
-  const canPostToOmie = originCanWrite(clientQuery.data?.connections ?? []);
+  // 86e3n70p0: e o processo do cartão desta conciliação precisa ser o "na data
+  // da compra" — no modo vencimento o servidor recusa o lote inteiro.
+  const canPostToOmie =
+    originCanWrite(clientQuery.data?.connections ?? []) &&
+    (detailQuery.data === undefined || processAllowsPosting(detailQuery.data));
   // Fonte única do rótulo (86e2u513w): o breadcrumb do ClientShell deriva o
   // mesmo nome do mesmo helper — divergir aqui é mostrar duas contas diferentes
   // na mesma tela.
@@ -131,6 +140,9 @@ export function SessionDetailScreen({ clientId, sessionId }: SessionDetailScreen
   }
 
   const referenceLabel = formatReferenceMonth(detail.reference_month);
+  const cardProcessLine = sessionCardProcessLine(detail, formatBRDate);
+  const postingBlockedByProcess =
+    detail.account_type === 'credit_card' && !processAllowsPosting(detail);
   const isProcessing = detail.status === 'processing';
   const isError = detail.status === 'error';
 
@@ -149,6 +161,16 @@ export function SessionDetailScreen({ clientId, sessionId }: SessionDetailScreen
             <p className="text-muted-foreground text-sm">
               Conciliado por <AuthorLabel author={detail.created_by} />
               {detail.created_at ? ` · ${formatCreatedAt(detail.created_at)}` : ''}
+            </p>
+          )}
+          {/* 86e3n70p0 — como esta fatura foi cruzada: o processo gravado na
+              conciliação e o vencimento (no processo do vencimento, o lote). */}
+          {cardProcessLine !== null && (
+            <p className="text-muted-foreground text-sm">{cardProcessLine}</p>
+          )}
+          {postingBlockedByProcess && (
+            <p className="text-muted-foreground text-xs">
+              {INVOICE_DUE_DATE_POSTING_BLOCK_MESSAGE}
             </p>
           )}
           <div className="flex flex-wrap items-center gap-2">

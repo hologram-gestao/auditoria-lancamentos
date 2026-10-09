@@ -77,9 +77,8 @@ async def test_fetch_realized_carries_category_code() -> None:
     movements = await fetch_realized(
         client,  # type: ignore[arg-type]
         omie_conta_id=42,
-        period_start=date(2026, 4, 1),
-        period_end=date(2026, 4, 30),
-        tolerance_days=3,
+        window_start=date(2026, 3, 29),
+        window_end=date(2026, 5, 3),
     )
 
     assert len(movements) == 1
@@ -141,3 +140,92 @@ async def test_fetch_pending_carries_category_code_and_signs(
     assert by_id[602].amount == Decimal("120.00")
     assert by_id[602].category_code == "1.01.02"
     assert by_id[602].supplier_code == 200002
+
+
+class _RecordingOmieClient(_StubOmieClient):
+    """Registra os filtros de cada chamada de títulos (86e3n70p0)."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.title_calls: list[dict[str, Any]] = []
+
+    async def listar_contas_pagar(
+        self, *, status: OmieTituloStatus, **kwargs: Any
+    ) -> list[TituloAPagarReceber]:
+        self.title_calls.append({"kind": "pagar", "status": status, **kwargs})
+        return await super().listar_contas_pagar(status=status)
+
+    async def listar_contas_receber(
+        self, *, status: OmieTituloStatus, **kwargs: Any
+    ) -> list[TituloAPagarReceber]:
+        self.title_calls.append({"kind": "receber", "status": status, **kwargs})
+        return await super().listar_contas_receber(status=status)
+
+
+def _titulo(omie_id: int, vencimento: str, valor: str) -> TituloAPagarReceber:
+    return TituloAPagarReceber.model_validate(
+        {
+            "codigo_lancamento_omie": omie_id,
+            "data_vencimento": vencimento,
+            "valor_documento": Decimal(valor),
+            "codigo_categoria": "2.04.78",
+            "codigo_cliente_fornecedor": 100001,
+        }
+    )
+
+
+class TestFetchPendingNoLoteDaFatura:
+    """Modo "vencimento da fatura" do cartão: títulos ABERTOS da conta, sem filtro
+    de data (o filtro do Omie é de inclusão/alteração), recortados aqui pelo
+    vencimento dentro da janela do lote."""
+
+    @pytest.fixture(autouse=True)
+    def _no_sleep(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        async def _sleep(_: float) -> None:
+            return None
+
+        monkeypatch.setattr(
+            "app.modules.reconciliations.processing.omie_fetch.asyncio.sleep", _sleep
+        )
+
+    @pytest.mark.asyncio
+    async def test_busca_sem_data_e_recorta_pelo_vencimento(self) -> None:
+        # Parcelas do Anydesk: a de 10/10 está no lote, as seguintes não.
+        pagar = [
+            _titulo(701, "10/10/2026", "199.84"),
+            _titulo(702, "10/11/2026", "199.84"),
+            _titulo(703, "10/12/2026", "199.84"),
+        ]
+        client = _RecordingOmieClient(pagar=pagar)
+
+        movements = await fetch_pending(
+            client,  # type: ignore[arg-type]
+            omie_conta_id=42,
+            reference_month=date(2026, 9, 1),
+            due_window=(date(2026, 10, 7), date(2026, 10, 13)),
+        )
+
+        assert [m.omie_id for m in movements] == [701]
+        assert movements[0].amount == Decimal("-199.84")
+        assert movements[0].transaction_date == date(2026, 10, 10)
+        assert len(client.title_calls) == 4
+        for call in client.title_calls:
+            assert call["data_de"] is None
+            assert call["data_ate"] is None
+            assert call["conta_corrente_id"] == 42
+
+    @pytest.mark.asyncio
+    async def test_sem_lote_o_filtro_continua_sendo_o_mes(self) -> None:
+        client = _RecordingOmieClient(pagar=[_titulo(801, "10/10/2026", "10.00")])
+
+        movements = await fetch_pending(
+            client,  # type: ignore[arg-type]
+            omie_conta_id=42,
+            reference_month=date(2026, 9, 1),
+        )
+
+        # O processo de sempre: mês nos dois filtros e nenhum recorte por vencimento.
+        assert [m.omie_id for m in movements] == [801]
+        for call in client.title_calls:
+            assert call["data_de"] == date(2026, 9, 1)
+            assert call["data_ate"] == date(2026, 9, 30)

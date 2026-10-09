@@ -19,6 +19,7 @@ NÃO cobre o agendamento via BackgroundTasks — o `run_reconciliation_processin
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -908,3 +909,222 @@ class TestJobOmieAuthError:
             ).scalar_one()
             assert entry.situation == FileEntrySituation.SEM_OMIE.value
             assert entry.omie_lancamento_id is None
+
+
+# ----------------------------------------------------------------------
+# 86e3n70p0 — cartão no modo "vencimento da fatura"
+# ----------------------------------------------------------------------
+
+# A fatura da PCTEX (anonimizada): 5 compras, a 1ª é uma parcela de julho.
+_PCTEX_FATURA = [
+    (date(2026, 7, 22), "ANYDESK 3/6", Decimal("-199.84")),
+    (date(2026, 9, 8), "ANTHROPIC", Decimal("-591.91")),
+    (date(2026, 9, 13), "FIREFLIES.AI", Decimal("-88.79")),
+    (date(2026, 9, 29), "MICROSOFT", Decimal("-87.68")),
+    (date(2026, 10, 1), "GOOGLE WORKSPACE", Decimal("-196.00")),
+]
+
+
+def _cartao(n_cod: int, dia: str, valor: float, fornecedor: str) -> dict[str, Any]:
+    """Linha de extrato de CARTÃO: natureza `P` com valor já negativo (skill `omie`)."""
+    return {
+        "nCodLancamento": n_cod,
+        "cNatureza": "P",
+        "dDataLancamento": dia,
+        "nValorDocumento": valor,
+        "cRazCliente": fornecedor,
+        "cSituacao": "Conciliado",
+    }
+
+
+def _titulo_pagar(n_cod: int, vencimento: str, valor: float) -> dict[str, Any]:
+    return {
+        "codigo_lancamento_omie": n_cod,
+        "data_vencimento": vencimento,
+        "valor_documento": valor,
+        "codigo_cliente_fornecedor": 5001,
+        "codigo_categoria": "2.04.78",
+    }
+
+
+async def _set_card_mode(
+    factory: async_sessionmaker[AsyncSession],
+    session_id: UUID,
+    *,
+    mode: str,
+    due: date,
+) -> None:
+    async with factory() as s, s.begin():
+        sess = (
+            await s.execute(
+                select(ReconciliationSession).where(ReconciliationSession.id == session_id)
+            )
+        ).scalar_one()
+        sess.account_type = "credit_card"
+        sess.reference_month = date(2026, 9, 1)
+        sess.card_posting_date_mode = mode
+        sess.invoice_due_date = due
+
+
+def _param(call: Any) -> dict[str, Any]:
+    body = json.loads(call.request.content)
+    param: dict[str, Any] = body["param"][0]
+    return param
+
+
+@pytest.mark.integration
+class TestJobCardInvoiceDueDateMode:
+    @respx.mock
+    async def test_modo_vencimento_busca_o_lote_e_concilia_as_cinco(
+        self, factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        await _seed_anomaly_types(factory)
+        admin = await _seed_admin(factory, "job-card-lot-admin@hologram.com.br")
+        cliente = await _seed_client(factory, admin.id, "PCTEX")
+        session_id = await _seed_session_with_entries(
+            factory,
+            client_id=cliente.id,
+            created_by=admin.id,
+            transactions=_PCTEX_FATURA,
+            file_hash=_hex64("card-lot"),
+        )
+        await _set_card_mode(factory, session_id, mode="invoice_due_date", due=date(2026, 10, 10))
+
+        extrato = respx.post(OMIE_EXTRATO_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_ok_extrato_payload(
+                    [
+                        _cartao(2002, "10/10/2026", -196.00, "Google"),
+                        _cartao(2003, "10/10/2026", -87.68, "Microsoft"),
+                        _cartao(2004, "10/10/2026", -88.79, "Fireflies"),
+                        _cartao(2005, "10/10/2026", -591.91, "Anthropic"),
+                    ]
+                ),
+            )
+        )
+        # Títulos ABERTOS da conta, sem filtro de data: a parcela 4/6 vence no
+        # lote (10/10) e a 5/6 não (10/11) — o recorte é pelo vencimento.
+        pagar = respx.post(OMIE_PAGAR_URL).mock(
+            side_effect=[
+                httpx.Response(200, json=_empty_pagar_payload()),  # ATRASADO
+                httpx.Response(
+                    200,
+                    json=_ok_pagar_payload(
+                        [
+                            _titulo_pagar(2001, "10/10/2026", 199.84),
+                            _titulo_pagar(2101, "10/11/2026", 199.84),
+                        ]
+                    ),
+                ),  # AVENCER
+            ]
+        )
+        respx.post(OMIE_RECEBER_URL).mock(
+            side_effect=[
+                httpx.Response(200, json=_empty_receber_payload()),
+                httpx.Response(200, json=_empty_receber_payload()),
+            ]
+        )
+
+        await run_reconciliation_processing(
+            str(session_id), settings=get_settings(), session_factory=factory
+        )
+
+        # A janela consultada é o lote: vencimento ± 3.
+        assert _param(extrato.calls[0])["dPeriodoInicial"] == "07/10/2026"
+        assert _param(extrato.calls[0])["dPeriodoFinal"] == "13/10/2026"
+        for call in pagar.calls:
+            assert "filtrar_por_data_de" not in _param(call)
+            assert "filtrar_por_data_ate" not in _param(call)
+            assert _param(call)["filtrar_conta_corrente"] == 42
+
+        async with factory() as s:
+            sess = (
+                await s.execute(
+                    select(ReconciliationSession).where(ReconciliationSession.id == session_id)
+                )
+            ).scalar_one()
+            assert sess.status == "reviewing", sess.error_message
+            assert sess.conciliated_count == 5
+            assert sess.sem_omie_count == 0
+            assert sess.omie_sem_arquivo_count == 0
+            assert sess.anomaly_count == 0
+            entries = (
+                (
+                    await s.execute(
+                        select(ReconciliationFileEntry).where(
+                            ReconciliationFileEntry.session_id == session_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            by_amount = {e.amount: e for e in entries}
+            assert {e.situation for e in entries} == {FileEntrySituation.CONCILIADO.value}
+            assert by_amount[Decimal("-199.84")].omie_lancamento_id == 2001
+            assert by_amount[Decimal("-87.68")].omie_lancamento_id == 2003
+
+    @respx.mock
+    async def test_modo_compra_mesma_fatura_nao_concilia_nada(
+        self, factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        """O comportamento de antes, e o de quem lança na data da compra: a janela
+        pela data das compras traz os lotes de agosto e setembro, longe de tudo."""
+        await _seed_anomaly_types(factory)
+        admin = await _seed_admin(factory, "job-card-purchase-admin@hologram.com.br")
+        cliente = await _seed_client(factory, admin.id, "PCTEX compra")
+        session_id = await _seed_session_with_entries(
+            factory,
+            client_id=cliente.id,
+            created_by=admin.id,
+            transactions=_PCTEX_FATURA,
+            file_hash=_hex64("card-purchase"),
+        )
+        await _set_card_mode(factory, session_id, mode="purchase_date", due=date(2026, 10, 10))
+
+        extrato = respx.post(OMIE_EXTRATO_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_ok_extrato_payload(
+                    [
+                        _cartao(3001, "10/08/2026", -199.84, "AnyDesk Software"),
+                        _cartao(3002, "10/09/2026", -87.68, "Microsoft"),
+                        _cartao(3003, "10/09/2026", -199.84, "AnyDesk Software"),
+                    ]
+                ),
+            )
+        )
+        pagar = respx.post(OMIE_PAGAR_URL).mock(
+            side_effect=[
+                httpx.Response(200, json=_empty_pagar_payload()),
+                httpx.Response(200, json=_empty_pagar_payload()),
+            ]
+        )
+        respx.post(OMIE_RECEBER_URL).mock(
+            side_effect=[
+                httpx.Response(200, json=_empty_receber_payload()),
+                httpx.Response(200, json=_empty_receber_payload()),
+            ]
+        )
+
+        await run_reconciliation_processing(
+            str(session_id), settings=get_settings(), session_factory=factory
+        )
+
+        # A janela de sempre: das compras, ± 3.
+        assert _param(extrato.calls[0])["dPeriodoInicial"] == "19/07/2026"
+        assert _param(extrato.calls[0])["dPeriodoFinal"] == "04/10/2026"
+        for call in pagar.calls:
+            assert _param(call)["filtrar_por_data_de"] == "01/09/2026"
+
+        async with factory() as s:
+            sess = (
+                await s.execute(
+                    select(ReconciliationSession).where(ReconciliationSession.id == session_id)
+                )
+            ).scalar_one()
+            assert sess.status == "reviewing", sess.error_message
+            assert sess.conciliated_count == 0
+            assert sess.sem_omie_count == 5
+            assert sess.omie_sem_arquivo_count == 3

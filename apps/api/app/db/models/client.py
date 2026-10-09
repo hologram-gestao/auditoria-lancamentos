@@ -21,10 +21,21 @@ claro. Sempre descriptografar em memória, usar e descartar.
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text, text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -48,8 +59,50 @@ if TYPE_CHECKING:
 IV_HEX_LENGTH = 24
 
 
+class CardPostingDateMode(StrEnum):
+    """Em que data o cliente lança no Omie as compras do cartão (86e3n70p0).
+
+    Fonte ÚNICA do CHECK de `clients.card_posting_date_mode` e do snapshot em
+    `reconciliation_sessions.card_posting_date_mode`. É configuração DECLARADA
+    por cliente, nunca inferida dos dados — como a convenção de sinal da origem
+    por arquivo (S14): adivinhar o processo pelo que o Omie devolve casaria
+    recorrências de mesmo valor (Microsoft 87,68 todo mês) com a fatura errada.
+
+    - `purchase_date`: cada compra entra no Omie na DATA DA COMPRA (Hologram,
+      cartão Inter). É o processo que o cruzamento sempre conheceu.
+    - `invoice_due_date`: as compras da fatura entram em LOTE na data de
+      VENCIMENTO da fatura (Prospecta, cartão Cora). A data da compra não decide
+      o par; o lote é buscado pelo vencimento.
+    """
+
+    PURCHASE_DATE = "purchase_date"
+    INVOICE_DUE_DATE = "invoice_due_date"
+
+
+#: Largura da coluna do modo, nos dois lugares que o guardam.
+CARD_POSTING_DATE_MODE_LENGTH = 20
+
+#: Rótulo (não o nome final) do CHECK — a `NAMING_CONVENTION` do `Base` prefixa
+#: `ck_<tabela>_`. O mesmo rótulo serve às duas tabelas.
+CARD_POSTING_DATE_MODE_CK_LABEL = "card_posting_date_mode"
+
+
+def card_posting_date_mode_check(*, nullable: bool = False) -> str:
+    """Predicado do CHECK do modo — a MESMA string vai nas migrations.
+
+    `nullable=True` é a forma do snapshot na sessão: NULL em sessão antiga e em
+    sessão que não é de cartão (o modo não se aplica a elas).
+    """
+    valores = ", ".join(f"'{member.value}'" for member in CardPostingDateMode)
+    predicate = f"card_posting_date_mode IN ({valores})"
+    return f"card_posting_date_mode IS NULL OR {predicate}" if nullable else predicate
+
+
 class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "clients"
+    __table_args__ = (
+        CheckConstraint(text(card_posting_date_mode_check()), name=CARD_POSTING_DATE_MODE_CK_LABEL),
+    )
 
     name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
 
@@ -189,6 +242,18 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
         index=True,
         server_default=text(organization_id_server_default()),
+    )
+
+    # 86e3n70p0 — em que data este cliente lança no Omie as compras do cartão
+    # (ver `CardPostingDateMode`). NOT NULL com `server_default` = processo que o
+    # cruzamento sempre assumiu: toda linha existente nasce `purchase_date` e
+    # nada muda para ela. É lido na CRIAÇÃO da conciliação e copiado para a
+    # sessão (snapshot), então trocar aqui não reescreve conciliação antiga.
+    card_posting_date_mode: Mapped[str] = mapped_column(
+        String(CARD_POSTING_DATE_MODE_LENGTH),
+        nullable=False,
+        default=CardPostingDateMode.PURCHASE_DATE.value,
+        server_default=text(f"'{CardPostingDateMode.PURCHASE_DATE.value}'"),
     )
 
     # Relationships

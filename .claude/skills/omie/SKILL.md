@@ -205,6 +205,16 @@ TTL:
 
 Persistir nome, CNPJ ou descrição em claro é violação da §4.5 — código pode, nome não.
 
+**O filtro de data dos títulos NÃO é vencimento.** `filtrar_por_data_de/ate` de
+`ListarContasPagar/Receber` filtra pela data de INCLUSÃO ou ALTERAÇÃO do título (doc
+oficial, `lcpListarRequest`, junto de `filtrar_apenas_inclusao/alteracao`). A conciliação
+de sempre manda o mês de referência nele (`fetch_pending`) e trata o resultado pela
+`data_vencimento` — parcela incluída em julho com vencimento em outubro nunca entra num
+filtro de outubro. O modo "vencimento da fatura" do cartão (86e3n70p0) chama SEM filtro
+de data (só `filtrar_por_status` + `filtrar_conta_corrente`; a captura
+`listar_contas_pagar.request.json` prova que o `param` sem datas é aceito, e a carteira da
+S11 chama assim todo dia) e recorta por `data_vencimento` no cliente.
+
 ```bash
 grep -c '"razao_social"\|"nome_fornecedor"' apps/api/tests/fixtures/omie/listar_contas_pagar.response.json   # esperado: 0
 grep -n "DEFAULT_TTL_SECONDS\|UNRESOLVED_TTL_SECONDS" apps/api/app/integrations/omie/*_cache.py
@@ -229,6 +239,9 @@ O que protege essa escrita (CLAUDE.md §3.16; tudo em
   `_require_enabled` (`service.py:263`) → 409 `OmiePostingDisabledError`. Ligar é por
   ambiente, via `--update-env-vars`.
 - **Só cartão**: `_require_credit_card` (`:269`) — `account_type == 'credit_card'` = `CR`.
+- **E só no processo "na data da compra"** (86e3n70p0): `_require_purchase_date_process`
+  recusa o lote de sessão no modo `invoice_due_date` com 400 — o `dDtLanc` seria a data
+  da compra num cliente que lança no vencimento da fatura. Desenho em aberto.
 - **Estorno bloqueado**: valor positivo → `estorno_nao_verificado` (`_eligibility_block`,
   `:717-740`). O contrato não tem `cNatureza`; o crédito segue sem captura.
 - **Dedup é do ADL**: intenção em `reconciliation_omie_postings` ANTES do POST (`_send`,

@@ -18,6 +18,13 @@ CLAUDE.md §5 — regras invioláveis:
     5. Guloso dentro de cada passada (não global ótimo) — determinístico e
        auditável, sem heurística e sem IA (§5.9).
 
+Dois processos de lançamento do cartão (86e3n70p0), duas funções: `match` é o
+de sempre (compra lançada na data da compra; vale também para conta corrente e
+aplicação); `match_invoice_lot` é o do cliente que lança as compras em LOTE no
+vencimento da fatura — lá a data da compra não decide, o par é por valor dentro
+do lote e todo par é conciliado. Quem escolhe é o job, pelo modo gravado na
+sessão; as regras 1, 3 e 4 acima valem para as duas.
+
 Função pura: sem I/O, sem ORM, sem logging — facilita testar exaustivamente
 matrizes de casos. O caller (`job.py`) é quem aplica o resultado no DB.
 """
@@ -383,6 +390,136 @@ def match(
     return MatchResult(
         matches=matches,
         unmatched_omie_indices=unmatched_omie_indices,
+        days_diff_by_file_id=days_diff_by_file_id,
+        tie_stats=TieStats(
+            ties=ties,
+            broken_by_supplier=broken_by_supplier,
+            steals_prevented_by_supplier=steals_prevented_by_supplier,
+        ),
+    )
+
+
+def _lot_line_key(candidate: _Candidate) -> tuple[Decimal, int, int]:
+    """Critério de UMA linha entre os candidatos dela, dentro do lote da fatura.
+
+    Igual ao `evidence_key` sem a data do lançamento: no lote ela é a do
+    vencimento para todos, e a da compra não diz nada (CLAUDE.md §5.2, modo
+    vencimento). Sobram valor → afinidade de fornecedor → posição na lista.
+    """
+    return (candidate.amount_diff, -candidate.affinity, candidate.omie_index)
+
+
+def match_invoice_lot(
+    file_entries: list[FileEntryForMatch],
+    omie_movements: list[OmieMovement],
+) -> MatchResult:
+    """Cruza a fatura de cartão com o LOTE dela no Omie (modo vencimento, 86e3n70p0).
+
+    Clientes que lançam as compras do cartão no Omie em lote, na data de
+    VENCIMENTO da fatura (a Prospecta), não guardam a data da compra em lugar
+    nenhum do Omie: a parcela 3/6 do Anydesk, comprada em 22/07, está no lote de
+    10/10. Para eles a data da compra não decide o par — o caller já recortou
+    `omie_movements` pela janela do lote (`omie_window.omie_window_for_session`),
+    e aqui o par é por VALOR dentro dele.
+
+    Algoritmo (uma passada só, pares por evidência — o mesmo desenho do `match`):
+        1. Monta todos os pares (linha, lançamento) com |amount_diff| ≤ 0.01.
+        2. Ordena por `(|amount_diff|, -afinidade de fornecedor, ordem (data, id)
+           da linha, posição na lista)`.
+        3. Fecha na ordem, pulando o que já foi consumido.
+
+    O que continua igual ao `match` (CLAUDE.md §5): tolerância de valor de
+    0,01 hard-coded, cruzamento 1-para-1 (duas compras de mesmo valor com UM
+    lançamento no lote: uma casa, a outra fica `sem_omie` — decisão do Pedro,
+    08/10/2026), afinidade só ordena e nunca exclui, determinístico e sem IA.
+    O que muda: todo par é `days_diff = 0` (conciliado, nunca `wrong_date`: a
+    distância entre compra e vencimento não é divergência, é o processo do
+    cliente) e não há passadas por data.
+
+    Returns:
+        `MatchResult` na MESMA forma do `match` — o job não muda de forma.
+        `TieStats` com as mesmas definições, avaliadas pelo critério do lote.
+    """
+    used_omie_indices: set[int] = set()
+    matched_file_ids: set[str] = set()
+    matches: list[tuple[str, int]] = []
+    days_diff_by_file_id: dict[str, int] = {}
+    ties = 0
+    broken_by_supplier = 0
+    steals_prevented_by_supplier = 0
+
+    ordered_entries = sorted(file_entries, key=lambda fe: (fe.transaction_date, fe.id))
+
+    candidates_by_line: dict[int, list[_Candidate]] = {}
+    for position, file_entry in enumerate(ordered_entries):
+        for idx, omie in enumerate(omie_movements):
+            if not _amount_within_tolerance(file_entry.amount, omie.amount):
+                continue
+            candidates_by_line.setdefault(position, []).append(
+                _Candidate(
+                    amount_diff=abs(file_entry.amount - omie.amount),
+                    affinity=supplier_affinity(omie.supplier, file_entry.description),
+                    omie_date=omie.transaction_date,
+                    omie_index=idx,
+                )
+            )
+
+    pairs = sorted(
+        (
+            (candidate.amount_diff, -candidate.affinity, position, candidate.omie_index),
+            position,
+            candidate,
+        )
+        for position, candidates in candidates_by_line.items()
+        for candidate in candidates
+    )
+
+    for _evidence, position, candidate in pairs:
+        file_entry = ordered_entries[position]
+        if file_entry.id in matched_file_ids or candidate.omie_index in used_omie_indices:
+            continue
+
+        free = [
+            other
+            for other in candidates_by_line[position]
+            if other.omie_index not in used_omie_indices
+        ]
+        best_amount_diff = min(other.amount_diff for other in free)
+        if sum(1 for other in free if other.amount_diff == best_amount_diff) > 1:
+            ties += 1
+            blind = min(free, key=lambda other: (other.amount_diff, other.omie_index))
+            if blind.omie_index != candidate.omie_index:
+                broken_by_supplier += 1
+
+        if candidate.affinity > 0:
+            for earlier in range(position):
+                if ordered_entries[earlier].id in matched_file_ids:
+                    continue
+                earlier_free = [
+                    other
+                    for other in candidates_by_line.get(earlier, [])
+                    if other.omie_index not in used_omie_indices
+                ]
+                if (
+                    earlier_free
+                    and min(earlier_free, key=_lot_line_key).omie_index == candidate.omie_index
+                ):
+                    steals_prevented_by_supplier += 1
+                    break
+
+        used_omie_indices.add(candidate.omie_index)
+        matched_file_ids.add(file_entry.id)
+        matches.append((file_entry.id, omie_movements[candidate.omie_index].omie_id))
+        days_diff_by_file_id[file_entry.id] = 0
+
+    order_by_file_id = {fe.id: pos for pos, fe in enumerate(ordered_entries)}
+    matches.sort(key=lambda pair: order_by_file_id[pair[0]])
+
+    return MatchResult(
+        matches=matches,
+        unmatched_omie_indices=[
+            idx for idx in range(len(omie_movements)) if idx not in used_omie_indices
+        ],
         days_diff_by_file_id=days_diff_by_file_id,
         tie_stats=TieStats(
             ties=ties,
