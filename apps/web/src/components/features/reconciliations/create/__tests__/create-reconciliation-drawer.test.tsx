@@ -104,13 +104,19 @@ function checksum(ok = true) {
 const onCreated = vi.fn();
 const onOpenChange = vi.fn();
 
-function renderDrawer() {
+function renderDrawer(
+  options: {
+    clientMode?: 'purchase_date' | 'invoice_due_date';
+    accounts?: typeof ACCOUNTS;
+  } = {},
+) {
   return render(
     <CreateReconciliationDrawer
       open
       onOpenChange={onOpenChange}
       clientId="c1"
-      accounts={ACCOUNTS}
+      accounts={options.accounts ?? ACCOUNTS}
+      clientCardPostingDateMode={options.clientMode ?? 'purchase_date'}
       onCreated={onCreated}
     />,
   );
@@ -381,6 +387,123 @@ describe('Gaveta — acessibilidade', () => {
     await advanceToStep2(user);
     await addFile(user, pdf('parte-1.pdf'));
     await screen.findByRole('button', { name: 'Confirmar (1)' });
+    await assertNoA11yViolations(screen.getByRole('dialog'));
+  });
+});
+
+describe('Gaveta — fatura do cartão (86e3n70p0)', () => {
+  function withDueDate(due: string | null) {
+    parseStatementMock.mockImplementation(async (params: { file: File }) => ({
+      statement: { ...statement(), invoice_due_date: due },
+      checksum: checksum(),
+      fileHash: `server-${params.file.name}`,
+    }));
+  }
+
+  it('mostra o processo do cliente e propõe o vencimento lido da fatura', async () => {
+    const user = userEvent.setup();
+    withDueDate('2026-07-10');
+    renderDrawer({ clientMode: 'invoice_due_date' });
+    await advanceToStep2(user);
+    await addFile(user, pdf('fatura.pdf'));
+
+    const due = await screen.findByLabelText('Vencimento da fatura');
+    await waitFor(() => expect(due).toHaveValue('10/07/2026'));
+    expect(
+      screen.getByText('Lançadas no vencimento da fatura, configuração do cliente.'),
+    ).toBeVisible();
+    expect(screen.getByText(/Vencimento da fatura: 10\/07\/2026/)).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: 'Confirmar (1)' }));
+    await waitFor(() => expect(createReconciliationMock).toHaveBeenCalledTimes(1));
+    const payload = createReconciliationMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(payload.card_posting_date_mode).toBe('invoice_due_date');
+    expect(payload.invoice_due_date).toBe('2026-07-10');
+  });
+
+  it('no processo do vencimento, sem data não confirma e diz o que falta', async () => {
+    const user = userEvent.setup();
+    withDueDate(null);
+    renderDrawer({ clientMode: 'invoice_due_date' });
+    await advanceToStep2(user);
+    await addFile(user, pdf('fatura.pdf'));
+
+    await user.click(await screen.findByRole('button', { name: 'Confirmar (1)' }));
+
+    expect(await screen.findByText(/Informe o vencimento da fatura/)).toBeVisible();
+    expect(screen.getByText(/não encontrado no arquivo/)).toBeVisible();
+    expect(createReconciliationMock).not.toHaveBeenCalled();
+  });
+
+  it('a data corrigida vale, e data impossível é recusada', async () => {
+    const user = userEvent.setup();
+    withDueDate('2026-07-10');
+    renderDrawer({ clientMode: 'invoice_due_date' });
+    await advanceToStep2(user);
+    await addFile(user, pdf('fatura.pdf'));
+    const due = await screen.findByLabelText('Vencimento da fatura');
+    await waitFor(() => expect(due).toHaveValue('10/07/2026'));
+
+    await user.clear(due);
+    await user.type(due, '31/02/2026');
+    await user.click(screen.getByRole('button', { name: 'Confirmar (1)' }));
+    expect(await screen.findByText(/Use o formato DD\/MM\/AAAA/)).toBeVisible();
+    expect(createReconciliationMock).not.toHaveBeenCalled();
+
+    await user.clear(due);
+    await user.type(due, '11/07/2026');
+    await user.click(screen.getByRole('button', { name: 'Confirmar (1)' }));
+    await waitFor(() => expect(createReconciliationMock).toHaveBeenCalledTimes(1));
+    const payload = createReconciliationMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(payload.invoice_due_date).toBe('2026-07-11');
+  });
+
+  it('troca pontual: só nesta conciliação, e o vencimento vira opcional', async () => {
+    const user = userEvent.setup();
+    withDueDate(null);
+    renderDrawer({ clientMode: 'invoice_due_date' });
+    await advanceToStep2(user);
+    await addFile(user, pdf('fatura.pdf'));
+
+    await user.click(await screen.findByRole('combobox', { name: 'Compras do cartão no Omie' }));
+    await user.click(screen.getByRole('option', { name: 'Na data da compra' }));
+    expect(await screen.findByText(/só nesta conciliação/)).toBeVisible();
+    expect(screen.getByLabelText('Vencimento da fatura (opcional)')).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: 'Confirmar (1)' }));
+    await waitFor(() => expect(createReconciliationMock).toHaveBeenCalledTimes(1));
+    const payload = createReconciliationMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(payload.card_posting_date_mode).toBe('purchase_date');
+    expect(payload).not.toHaveProperty('invoice_due_date');
+  });
+
+  it('conta corrente: nada de fatura na gaveta nem no payload', async () => {
+    const user = userEvent.setup();
+    renderDrawer({
+      clientMode: 'invoice_due_date',
+      accounts: [{ ...ACCOUNTS[0]!, name: 'Conta Itaú', account_type: 'CC' }],
+    });
+    await user.click(screen.getByRole('combobox', { name: 'Conta bancária' }));
+    await user.click(screen.getByRole('option', { name: /Conta Itaú/ }));
+    await user.type(screen.getByLabelText('Mês de referência'), '2026-06');
+    await user.click(screen.getByRole('button', { name: /Avançar/ }));
+    await addFile(user, pdf('extrato.pdf'));
+
+    await user.click(await screen.findByRole('button', { name: 'Confirmar (1)' }));
+    await waitFor(() => expect(createReconciliationMock).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('Fatura do cartão')).toBeNull();
+    const payload = createReconciliationMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty('card_posting_date_mode');
+    expect(payload).not.toHaveProperty('invoice_due_date');
+  });
+
+  it('não tem violações critical/serious com o bloco da fatura', async () => {
+    const user = userEvent.setup();
+    withDueDate('2026-07-10');
+    renderDrawer({ clientMode: 'invoice_due_date' });
+    await advanceToStep2(user);
+    await addFile(user, pdf('fatura.pdf'));
+    await screen.findByText('Fatura do cartão');
     await assertNoA11yViolations(screen.getByRole('dialog'));
   });
 });

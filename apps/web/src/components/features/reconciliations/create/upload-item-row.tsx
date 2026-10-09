@@ -13,7 +13,7 @@ import { AlertCircle, CheckCircle2, CopyX, FileText, Loader2, X } from 'lucide-r
 
 import { formatFileSize } from '@/components/shared/file-input-field';
 import { Button } from '@/components/ui/button';
-import { formatBRL } from '@/lib/format';
+import { formatBRDate, formatBRL } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 import type { UploadItem, UploadStatus } from './use-file-pipeline';
@@ -27,11 +27,13 @@ const RUNNING_LABEL: Partial<Record<UploadStatus, string>> = {
 
 interface UploadItemRowProps {
   item: UploadItem;
+  /** 86e3n70p0 — fatura de cartão: mostra o período e o vencimento lido. */
+  isCard: boolean;
   onRemove: () => void;
   disabled: boolean;
 }
 
-export function UploadItemRow({ item, onRemove, disabled }: UploadItemRowProps) {
+export function UploadItemRow({ item, isCard, onRemove, disabled }: UploadItemRowProps) {
   const running = RUNNING_LABEL[item.status];
   const isParsed = item.status === 'parsed';
   const isDuplicate = item.status === 'duplicate';
@@ -65,6 +67,15 @@ export function UploadItemRow({ item, onRemove, disabled }: UploadItemRowProps) 
               {item.result.statement.transactions.length === 1 ? 'ão' : 'ões'} extraída
               {item.result.statement.transactions.length === 1 ? '' : 's'}
             </p>
+            {isCard && (
+              <p className="text-muted-foreground text-xs">
+                Período: {formatBRDate(item.result.statement.period_start)} a{' '}
+                {formatBRDate(item.result.statement.period_end)} · Vencimento da fatura:{' '}
+                {item.result.statement.invoice_due_date
+                  ? formatBRDate(item.result.statement.invoice_due_date)
+                  : 'não encontrado no arquivo'}
+              </p>
+            )}
             {/* Checksum de saldos (BACK 02.3). AVISO, não bloqueio: numa fatura
                 quebrada em partes, a identidade de saldo só fecha no CONJUNTO —
                 barrar parte a parte impediria justamente o caso de uso do

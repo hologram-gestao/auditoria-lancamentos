@@ -58,6 +58,7 @@ export function useCreateReconciliationDrawer(clientId: string): {
         onOpenChange={setDrawerOpen}
         clientId={clientId}
         accounts={accounts}
+        clientCardPostingDateMode={detailQuery.data?.card_posting_date_mode ?? 'purchase_date'}
         onCreated={handleCreated}
       />
     ),

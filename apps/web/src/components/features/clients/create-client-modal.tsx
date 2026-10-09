@@ -74,6 +74,7 @@ import { hasPermission, isPlatformScoped } from '@/lib/authz';
 import { makeCreateClientSchema, type CreateClientFormValues } from '@/lib/validation/clients';
 import { useAuthStore } from '@/stores/auth';
 
+import { CardPostingDateModeField } from './card-posting-date-mode-field';
 import { PasswordInput } from './password-input';
 import { TestConnectionButton, type TestConnectionState } from './test-connection-button';
 
@@ -126,6 +127,7 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
       omie_app_key: '',
       omie_app_secret: '',
       category_id: 'none',
+      card_posting_date_mode: 'purchase_date',
       organization_id: '',
     },
     mode: 'onSubmit',
@@ -236,6 +238,10 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
         // como credencial presente (e `min_length=1` recusaria com 422).
         ...(wantsOrigin ? { omie_app_key: key, omie_app_secret: secret } : {}),
         ...(categoryId ? { category_id: categoryId } : {}),
+        // 86e3n70p0 — omitido É `purchase_date` no servidor: só vai quando difere.
+        ...(values.card_posting_date_mode !== 'purchase_date'
+          ? { card_posting_date_mode: values.card_posting_date_mode }
+          : {}),
         // Só a plataforma manda o campo: o staff omitindo é o que faz o
         // backend usar a organização da própria linha.
         ...(values.organization_id ? { organization_id: values.organization_id } : {}),
@@ -386,6 +392,8 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
                   </FormItem>
                 )}
               />
+
+              <CardPostingDateModeField control={form.control} disabled={inputsDisabled} />
 
               {/* Origem é OPCIONAL (R4) e fica visualmente destacada como um
                 bloco à parte, para o cadastro não parecer incompleto sem ela.

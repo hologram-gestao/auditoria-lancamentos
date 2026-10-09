@@ -90,6 +90,7 @@ const client: Client = {
   manager_count: 2,
   // S9: campo obrigatório do contrato; irrelevante para esta suíte.
   origin_status: 'ativa',
+  card_posting_date_mode: 'purchase_date',
 };
 
 function user(id: string, name: string, over: Partial<User> = {}): User {

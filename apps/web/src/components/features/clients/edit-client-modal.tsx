@@ -70,6 +70,7 @@ import { originFixPath } from '@/lib/origin-state';
 import { updateClientSchema, type UpdateClientFormValues } from '@/lib/validation/clients';
 import { useAuthStore } from '@/stores/auth';
 
+import { CardPostingDateModeField } from './card-posting-date-mode-field';
 import { ClientManagersSection } from './client-managers-section';
 
 interface EditClientModalProps {
@@ -100,6 +101,7 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
       name: '',
       active: 'active',
       category_id: 'none',
+      card_posting_date_mode: 'purchase_date',
     },
     mode: 'onSubmit',
   });
@@ -111,6 +113,7 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
         name: client.name,
         active: client.active ? 'active' : 'inactive',
         category_id: client.category?.id ?? 'none',
+        card_posting_date_mode: client.card_posting_date_mode,
       });
       updateMutation.reset();
     }
@@ -125,6 +128,7 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
       active: values.active === 'active',
       // Sempre enviado: 'none' vira `null` (limpa), uuid troca — tri-estado do backend.
       category_id: values.category_id && values.category_id !== 'none' ? values.category_id : null,
+      card_posting_date_mode: values.card_posting_date_mode,
     };
 
     try {
@@ -151,8 +155,8 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
         <DialogHeader>
           <DialogTitle>Editar Cliente</DialogTitle>
           <DialogDescription>
-            Nome, situação e categoria. As credenciais da origem são alteradas na seção
-            &quot;Origens de dado&quot;, em Contas Bancárias.
+            Nome, situação, categoria e como as compras do cartão entram no Omie. As credenciais da
+            origem são alteradas na seção &quot;Origens de dado&quot;, em Contas Bancárias.
           </DialogDescription>
         </DialogHeader>
 
@@ -249,6 +253,8 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
                   </FormItem>
                 )}
               />
+
+              <CardPostingDateModeField control={form.control} disabled={inputsDisabled} />
 
               {isAdmin && client && (
                 <ClientManagersSection client={client} disabled={inputsDisabled} />

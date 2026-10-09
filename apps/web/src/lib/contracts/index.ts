@@ -129,6 +129,12 @@ export type BankAccountResponse = Schemas['app__modules__clients__schemas__BankA
 export type ManagerSummary = Schemas['ManagerSummary'];
 /** Categoria do cliente como sai na lista/detalhe (86e34jd8m); `null` = sem categoria. */
 export type ClientCategorySummary = Schemas['ClientCategorySummary'];
+/**
+ * Em que data o cliente lança no Omie as compras do cartão (86e3n70p0):
+ * `purchase_date` (na data da compra) ou `invoice_due_date` (em lote, no
+ * vencimento da fatura). Declarado por cliente, copiado para a conciliação.
+ */
+export type CardPostingDateMode = Schemas['CardPostingDateMode'];
 
 // ---------------------------------------------------------------------------
 // Origens de dado do cliente — `client_connections` (Sprint 9 / R1 · R3 · R5)

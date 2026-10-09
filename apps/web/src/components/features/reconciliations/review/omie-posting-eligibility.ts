@@ -32,6 +32,23 @@ export function originCanWrite(connections: readonly ClientConnection[]): boolea
   return connections.some((c) => c.status === 'ativa' && c.capabilities.includes('escrever'));
 }
 
+/**
+ * O processo do cartão desta conciliação permite lançar no Omie? (86e3n70p0)
+ *
+ * Espelho de `_require_purchase_date_process` do servidor: o `IncluirLancCC`
+ * grava a data da COMPRA, e o cliente que lança em lote no vencimento da fatura
+ * não usa essa data. Decisão do Pedro (08/10/2026): bloquear o lote inteiro até
+ * o lançamento no lote ser desenhado. Sessão antiga (sem o processo gravado)
+ * é o processo de sempre.
+ */
+export function processAllowsPosting(session: { card_posting_date_mode?: string | null }): boolean {
+  return session.card_posting_date_mode !== 'invoice_due_date';
+}
+
+/** Mensagem VERBATIM do servidor (`INVOICE_DUE_DATE_POSTING_BLOCK_MESSAGE`). */
+export const INVOICE_DUE_DATE_POSTING_BLOCK_MESSAGE =
+  'Esta conciliação cruza as compras pelo vencimento da fatura. O lançamento no Omie ainda não é feito neste processo: lance as compras diretamente no Omie.';
+
 export type PostingBlockReason =
   | Extract<
       OmiePostingLineReason,

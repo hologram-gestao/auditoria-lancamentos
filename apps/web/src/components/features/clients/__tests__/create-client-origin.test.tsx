@@ -85,6 +85,7 @@ const client: Client = {
   manager_count: 1,
   category: null,
   origin_status: 'sem_origem',
+  card_posting_date_mode: 'purchase_date',
 };
 
 beforeAll(() => {
