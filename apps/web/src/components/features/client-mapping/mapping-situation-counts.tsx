@@ -54,7 +54,7 @@ function stats(counts: MappingSituationCounts): CountStat[] {
       key: 'herdada',
       label: 'Herdadas da origem',
       value: counts.herdada,
-      hint: 'Propostas pelo plano de contas',
+      hint: 'Propostas pelas categorias do Omie',
     },
     {
       key: 'confirmada',

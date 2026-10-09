@@ -106,6 +106,14 @@ const syncMovementsState = mutationState();
 const exportState = mutationState();
 const importPreviewState = mutationState();
 const importApplyState = mutationState();
+const createTargetsState = mutationState();
+const originPreviewState = {
+  data: undefined as OriginTargetsPreview | undefined,
+  isLoading: false,
+  isError: false,
+  error: null as unknown,
+  refetch: vi.fn(),
+};
 
 vi.mock('@/hooks/use-client-mapping', () => ({
   useMappingDestinations: () => destinationsState,
@@ -132,16 +140,20 @@ vi.mock('@/hooks/use-client-mapping', () => ({
   useExportClientMapping: () => exportState,
   usePreviewMappingImport: () => importPreviewState,
   useApplyMappingImport: () => importApplyState,
+  useOriginTargetsPreview: () => originPreviewState,
+  useCreateMappingTargets: () => createTargetsState,
 }));
 
 // S16: `AccountingPlanNotice` (lista) e `AccountingDecisionSheet` (gaveta) usam
 // esta sonda incondicionalmente quando o destino é `conta_contabil` — sem o
 // mock, `useQuery` explode por falta de `QueryClientProvider` (este arquivo
 // não envolve `render()` num provider de verdade, como os outros hooks acima).
-// `total: 1` = "tem plano": nenhum teste aqui afirma o aviso "sem plano".
+// `total: 1` = "tem plano" (padrão); o destino padrão (86e3n70pn) também lê a
+// sonda, e os testes dele trocam o total.
+const accountingProbe = { total: 1 };
 vi.mock('@/hooks/use-client-accounting-chart', () => ({
   useAccountingChartList: () => ({
-    data: { data: [], pagination: { page: 1, pageSize: 1, total: 1 } },
+    data: { data: [], pagination: { page: 1, pageSize: 1, total: accountingProbe.total } },
     isLoading: false,
   }),
 }));
@@ -187,6 +199,7 @@ vi.mock('@/lib/authz', async (importOriginal) => {
 import {
   ClientMappingScreen,
   DEFAULT_PAGE_SIZE,
+  defaultDestinationType,
 } from '@/components/features/client-mapping/client-mapping-screen';
 import {
   isMappingCountActive,
@@ -206,6 +219,7 @@ import type {
   MappingTarget,
   MaterializationSummary,
   MovementsSyncState,
+  OriginTargetsPreview,
 } from '@/lib/contracts';
 import { assertNoA11yViolations } from '@/test/a11y';
 
@@ -217,6 +231,16 @@ const manager: AuthenticatedUser = {
   email: 'contador@parceiro.com.br',
   name: 'Contador Parceiro',
   role: 'manager',
+  scope: 'system',
+  client_id: null,
+  organization_id: ORG,
+  organization_name: 'Hologram',
+};
+const orgAdmin: AuthenticatedUser = {
+  id: 'a',
+  email: 'admin@prospecta.com.br',
+  name: 'Admin da Organização',
+  role: 'admin',
   scope: 'system',
   client_id: null,
   organization_id: ORG,
@@ -327,6 +351,11 @@ beforeEach(() => {
   lastListParams = undefined;
   previewEnabled = undefined;
   authState.user = manager;
+  accountingProbe.total = 1;
+  originPreviewState.data = undefined;
+  originPreviewState.isLoading = false;
+  originPreviewState.isError = false;
+  createTargetsState.mutateAsync.mockReset();
   clientDetailState.data = {
     closed_at: null,
     origin_status: 'ativa',
@@ -554,6 +583,196 @@ describe('ClientMappingScreen — destino padrão', () => {
     render(<ClientMappingScreen clientId={TENANT} />);
     expect(screen.getByRole('combobox', { name: 'Destino' })).toHaveTextContent('Fluxo de caixa');
   });
+
+  // 86e3n70pn: escritório novo, demonstrativo sem alvos, plano contábil já importado.
+  const semAlvos = () => [
+    destination({ targetsCount: 0 }),
+    destination({ id: 'd-conta', type: 'conta_contabil', name: 'Conta contábil', targetsCount: 0 }),
+  ];
+
+  it('demonstrativo sem alvos e cliente COM plano contábil: abre na conta contábil', () => {
+    destinationsState.data = semAlvos();
+    accountingProbe.total = 120;
+    render(<ClientMappingScreen clientId={TENANT} />);
+    expect(screen.getByRole('combobox', { name: 'Destino' })).toHaveTextContent('Conta contábil');
+  });
+
+  it('demonstrativo sem alvos e cliente SEM plano contábil: abre no demonstrativo', () => {
+    destinationsState.data = semAlvos();
+    accountingProbe.total = 0;
+    render(<ClientMappingScreen clientId={TENANT} />);
+    expect(screen.getByRole('combobox', { name: 'Destino' })).toHaveTextContent(
+      'Demonstrativo contábil',
+    );
+  });
+
+  it('defaultDestinationType: os dois casos da exceção, e o demonstrativo com alvos', () => {
+    const withPlan = { clientHasAccountingChart: true };
+    expect(defaultDestinationType(semAlvos(), withPlan)).toBe('conta_contabil');
+    expect(defaultDestinationType(semAlvos(), { clientHasAccountingChart: false })).toBe(
+      'demonstrativo_contabil',
+    );
+    expect(defaultDestinationType(semAlvos())).toBe('demonstrativo_contabil');
+    expect(
+      defaultDestinationType(
+        [destination(), destination({ id: 'd-conta', type: 'conta_contabil', name: 'Conta' })],
+        withPlan,
+      ),
+    ).toBe('demonstrativo_contabil');
+    expect(defaultDestinationType([], withPlan)).toBe('');
+  });
+});
+
+describe('ClientMappingScreen — catálogo vazio e alvos da origem (86e3n70pn)', () => {
+  it('quem administra o catálogo vê "Cadastrar alvos" apontando o destino na tela nova', () => {
+    authState.user = orgAdmin;
+    destinationsState.data = [destination({ targetsCount: 0 })];
+    render(<ClientMappingScreen clientId={TENANT} />);
+    const notice = screen.getByTestId('mapping-empty-catalog');
+    expect(within(notice).queryByText(/Peça ao administrador/)).not.toBeInTheDocument();
+    expect(within(notice).getByRole('link', { name: 'Cadastrar alvos' })).toHaveAttribute(
+      'href',
+      '/configuracoes/destinos-de-para?destino=d-contabil',
+    );
+    expect(
+      within(notice).getByRole('button', {
+        name: 'Criar alvos a partir das contas de demonstrativo deste cliente',
+      }),
+    ).toBeVisible();
+  });
+
+  it('fora do demonstrativo, o aviso não oferece criar a partir da origem', () => {
+    authState.user = orgAdmin;
+    destinationsState.data = [
+      destination({
+        id: 'd-caixa',
+        type: 'fluxo_de_caixa',
+        name: 'Fluxo de caixa',
+        targetsCount: 0,
+      }),
+    ];
+    render(<ClientMappingScreen clientId={TENANT} />);
+    const notice = screen.getByTestId('mapping-empty-catalog');
+    expect(within(notice).getByRole('link', { name: 'Cadastrar alvos' })).toBeVisible();
+    expect(within(notice).queryByRole('button', { name: /a partir/ })).not.toBeInTheDocument();
+  });
+
+  it('o gerente (sem a permissão do catálogo) lê o texto de sempre, sem botão', () => {
+    destinationsState.data = [destination({ targetsCount: 0 })];
+    render(<ClientMappingScreen clientId={TENANT} />);
+    const notice = screen.getByTestId('mapping-empty-catalog');
+    expect(within(notice).getByText(/Peça ao administrador da organização/)).toBeVisible();
+    expect(within(notice).queryByRole('link')).not.toBeInTheDocument();
+    expect(within(notice).queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('a prévia mostra o que entra e cria SÓ os faltantes, depois de confirmar', async () => {
+    const user = userEvent.setup();
+    authState.user = orgAdmin;
+    destinationsState.data = [destination({ targetsCount: 0 })];
+    originPreviewState.data = {
+      state: 'ok',
+      destinationId: 'd-contabil',
+      namesResolved: false,
+      candidates: [
+        {
+          code: '1.01',
+          name: 'Receita bruta',
+          categories: 3,
+          exists: false,
+          active: null,
+          creatable: true,
+        },
+        {
+          code: '2.01',
+          name: 'Despesas',
+          categories: 1,
+          exists: true,
+          active: true,
+          creatable: false,
+        },
+        { code: '2.02', name: null, categories: 2, exists: false, active: null, creatable: false },
+      ],
+    };
+    createTargetsState.mutateAsync.mockResolvedValue([
+      { id: 't1', code: '1.01', name: 'Receita bruta', active: true },
+    ]);
+    render(<ClientMappingScreen clientId={TENANT} />);
+
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Criar alvos a partir das contas de demonstrativo deste cliente',
+      }),
+    );
+    const dialog = await screen.findByRole('dialog', { name: 'Criar alvos a partir da origem' });
+    expect(within(dialog).getByTestId('origin-targets-summary')).toHaveTextContent(
+      '1 conta nova será criada como alvo; 2 já existem ou ficam de fora.',
+    );
+    expect(within(dialog).getByText(/não respondeu agora com o nome/)).toBeVisible();
+    expect(within(dialog).getByText('Já no catálogo')).toBeVisible();
+    expect(within(dialog).getByText('Sem nome agora')).toBeVisible();
+    // Nada foi gravado só por abrir: a criação espera o clique.
+    expect(createTargetsState.mutateAsync).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole('button', { name: 'Criar alvo' }));
+    expect(createTargetsState.mutateAsync).toHaveBeenCalledWith({
+      targets: [{ code: '1.01', name: 'Receita bruta' }],
+    });
+  });
+
+  it('cliente sem as categorias do Omie sincronizadas: aponta a tela de categorias', async () => {
+    const user = userEvent.setup();
+    authState.user = orgAdmin;
+    destinationsState.data = [destination({ targetsCount: 0 })];
+    originPreviewState.data = {
+      state: 'sem_plano_de_contas',
+      destinationId: 'd-contabil',
+      namesResolved: true,
+      candidates: [],
+    };
+    render(<ClientMappingScreen clientId={TENANT} />);
+    await user.click(screen.getByRole('button', { name: /a partir das contas de demonstrativo/ }));
+    const dialog = await screen.findByRole('dialog');
+    expect(
+      within(dialog).getByRole('link', { name: 'Ir para Categorias do Omie' }),
+    ).toHaveAttribute('href', `/clientes/${TENANT}/plano-de-contas`);
+    expect(within(dialog).getByRole('button', { name: 'Criar alvo' })).toBeDisabled();
+  });
+
+  it('com alvos no catálogo, a ação fica na barra ao lado de "Iniciar de-para"', () => {
+    authState.user = orgAdmin;
+    render(<ClientMappingScreen clientId={TENANT} />);
+    expect(screen.getByRole('button', { name: 'Criar alvos a partir da origem' })).toBeVisible();
+    expect(screen.queryByTestId('mapping-empty-catalog')).not.toBeInTheDocument();
+  });
+
+  it('o gerente não vê a ação na barra', () => {
+    render(<ClientMappingScreen clientId={TENANT} />);
+    expect(
+      screen.queryByRole('button', { name: 'Criar alvos a partir da origem' }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe('ClientMappingScreen — "Como funciona" (86e3n70pn)', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('explica destino, alvo, decisão e herdada, e recolhe lembrando a escolha', async () => {
+    const user = userEvent.setup();
+    render(<ClientMappingScreen clientId={TENANT} />);
+    const block = screen.getByRole('region', { name: 'Como funciona' });
+    for (const term of ['Destino', 'Alvo', 'Decisão', 'Herdada']) {
+      expect(within(block).getByText(term, { selector: 'dt' })).toBeVisible();
+    }
+    await user.click(screen.getByRole('button', { name: 'Ocultar como funciona' }));
+    expect(screen.getByRole('button', { name: 'Mostrar como funciona' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    expect(window.localStorage.getItem('adl:totais-recolhidos:de-para-como-funciona')).toBe('1');
+  });
 });
 
 describe('ClientMappingScreen — lista, filtros e busca (R6)', () => {
@@ -598,7 +817,7 @@ describe('ClientMappingScreen — lista, filtros e busca (R6)', () => {
     expect(within(rows[4]!).getByText('Nome indisponível agora')).toBeVisible();
   });
 
-  it('universo vazio sem filtro: estado explicativo apontando o plano de contas', () => {
+  it('universo vazio sem filtro: estado explicativo apontando as categorias do Omie', () => {
     listState.data = {
       ...listState.data!,
       data: [],
@@ -606,7 +825,7 @@ describe('ClientMappingScreen — lista, filtros e busca (R6)', () => {
     };
     render(<ClientMappingScreen clientId={TENANT} />);
     expect(screen.getByText('Ainda não há categorias para classificar')).toBeVisible();
-    expect(screen.getByRole('link', { name: 'Ir para o plano de contas' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Ir para Categorias do Omie' })).toHaveAttribute(
       'href',
       `/clientes/${TENANT}/plano-de-contas`,
     );

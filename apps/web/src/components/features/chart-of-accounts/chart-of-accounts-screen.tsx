@@ -1,7 +1,9 @@
 'use client';
 
 /**
- * Tela "Plano de Contas" do cliente — Sprint 10 / R3 (FRONT 10.5).
+ * Tela "Categorias do Omie" do cliente — Sprint 10 / R3 (FRONT 10.5). Chamava-se
+ * "Plano de Contas" até 86e3n70pn: ao lado de "Plano contábil" (S16), o escritório
+ * confundia as duas. A rota `/plano-de-contas` ficou.
  *
  * Mostra a classificação que a ORIGEM já tem, dentro do produto: código,
  * hierarquia, situação e — o insumo do de-para da Sprint 12 — a conta de
@@ -228,7 +230,7 @@ export function ChartOfAccountsScreen({ clientId }: { clientId: string }) {
     setOriginError(null);
     try {
       await syncMutation.mutateAsync();
-      toast.success('Plano de contas sincronizado.');
+      toast.success('Categorias do Omie sincronizadas.');
     } catch (err) {
       if (isOriginError(err)) {
         setOriginError(err);
@@ -237,7 +239,7 @@ export function ChartOfAccountsScreen({ clientId }: { clientId: string }) {
       toast.error(
         err instanceof ApiError
           ? err.userMessage
-          : 'Não foi possível sincronizar o plano de contas.',
+          : 'Não foi possível sincronizar as categorias do Omie.',
       );
     }
   }
@@ -350,11 +352,12 @@ export function ChartOfAccountsScreen({ clientId }: { clientId: string }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
           <h1 id="chart-of-accounts-heading" className="text-xl font-semibold">
-            Plano de Contas
+            Categorias do Omie
           </h1>
           <p className="text-muted-foreground text-sm">
-            A classificação que a origem deste cliente já tem. A conta de demonstrativo vinculada a
-            cada categoria é o que o de-para aproveita pronto.
+            As categorias que o Omie deste cliente declara. A conta de demonstrativo vinculada a
+            cada categoria é o que o de-para aproveita pronto. Não confundir com o Plano contábil,
+            que é o do sistema contábil onde o escritório lança.
           </p>
         </div>
         {/* Parte E: a data da última sincronização íntegra ao lado da ação (ou
@@ -370,8 +373,8 @@ export function ChartOfAccountsScreen({ clientId }: { clientId: string }) {
               silêncio e deixar a pessoa procurando o botão (§4.12). */}
           {canSync && isClosed && (
             <p className="text-muted-foreground max-w-xs text-sm">
-              Cliente encerrado: a sincronização está indisponível. O plano de contas já
-              sincronizado continua disponível para leitura.
+              Cliente encerrado: a sincronização está indisponível. As categorias já sincronizadas
+              continuam disponíveis para leitura.
             </p>
           )}
         </div>
@@ -400,7 +403,7 @@ export function ChartOfAccountsScreen({ clientId }: { clientId: string }) {
         >
           <p className="font-medium">A última tentativa de sincronização falhou</p>
           <p>
-            O plano de contas abaixo é o da última sincronização bem-sucedida
+            As categorias abaixo são as da última sincronização bem-sucedida
             {coverage.syncedAt != null
               ? `, de ${formatCreatedAt(coverage.syncedAt)}.`
               : ' — que ainda não aconteceu.'}
@@ -531,7 +534,7 @@ export function ChartOfAccountsScreen({ clientId }: { clientId: string }) {
             message={
               listQuery.error instanceof ApiError
                 ? listQuery.error.userMessage
-                : 'Não foi possível carregar o plano de contas.'
+                : 'Não foi possível carregar as categorias do Omie.'
             }
             onRetry={() => void listQuery.refetch()}
           />
@@ -542,7 +545,7 @@ export function ChartOfAccountsScreen({ clientId }: { clientId: string }) {
           <TableCard pageScroll>
             <Table
               stickyHeader="page"
-              scrollRegionLabel="Categorias do plano de contas (rolável)"
+              scrollRegionLabel="Lista de categorias do Omie (rolável)"
               // Linha mais baixa (Parte D): ~40px sem segunda linha de texto. O
               // `p-4` padrão da célula dava 72px.
               className="[&_td]:py-2 [&_th]:h-10"
@@ -578,7 +581,7 @@ export function ChartOfAccountsScreen({ clientId }: { clientId: string }) {
                   <FilteredEmptyState onClear={clearFilters} />
                 ) : (
                   <p className="text-muted-foreground text-center text-sm">
-                    Nenhuma categoria neste plano de contas.
+                    Nenhuma categoria sincronizada.
                   </p>
                 )}
               </TableEmpty>
@@ -686,7 +689,9 @@ function NeverSyncedState({
   return (
     <div className="flex flex-col items-center gap-3 text-center">
       <div className="space-y-1">
-        <p className="text-sm font-medium">Este cliente ainda não sincronizou o plano de contas</p>
+        <p className="text-sm font-medium">
+          Este cliente ainda não sincronizou as categorias do Omie
+        </p>
         <p className="text-muted-foreground text-sm">
           {isClosed
             ? 'O cliente foi encerrado antes de sincronizar, e a sincronização não fica disponível para clientes encerrados.'
@@ -719,7 +724,7 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
       role="alert"
       className="border-destructive/30 bg-destructive/5 text-destructive space-y-3 rounded-lg border p-6"
     >
-      <p className="text-sm font-medium">Não foi possível carregar o plano de contas</p>
+      <p className="text-sm font-medium">Não foi possível carregar as categorias do Omie</p>
       <p className="text-sm">{message}</p>
       <Button variant="outline" size="sm" onClick={onRetry}>
         Tentar novamente

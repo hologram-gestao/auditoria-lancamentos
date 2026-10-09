@@ -1,6 +1,6 @@
 /**
- * Plano de contas do cliente — `/clientes/{clientId}/plano-de-contas`
- * (Sprint 10 / R3).
+ * Categorias do Omie do cliente — `/clientes/{clientId}/plano-de-contas`
+ * (Sprint 10 / R3; "Plano de Contas" na tela até 86e3n70pn, a rota ficou).
  *
  * Server component fino: extrai o `clientId` e delega, como `glossario/` e
  * `usuarios/`. O `<Suspense>` é obrigatório — a tela usa `useSearchParams`

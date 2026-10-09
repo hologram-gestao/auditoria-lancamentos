@@ -56,6 +56,9 @@ export interface NavSection {
   items: NavItem[];
 }
 
+/** Rota da tela de Configurações do catálogo do de-para (86e3n70pn). */
+const MAPPING_CATALOG_PATH = '/configuracoes/destinos-de-para';
+
 /** Ativo quando a rota é o próprio href ou desce dele (`/x` cobre `/x/y`). */
 function isPathActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
@@ -101,9 +104,9 @@ export function globalNavSections(user: AuthenticatedUser, pathname: string): Na
 
   // Configurações item a item pela MATRIZ (86e36ecwa): com organizações, o
   // "quem vê Configurações" deixou de ser uma pergunta só. O admin da
-  // organização vê as três primeiras; a plataforma vê as quatro; o gerente não
-  // vê a seção — e ela some inteira quando nenhum item sobra, em vez de virar
-  // um cabeçalho órfão.
+  // organização vê Usuários, Categorias, Destinos do de-para e Layouts; a
+  // plataforma vê todos; o gerente não vê a seção — e ela some inteira quando
+  // nenhum item sobra, em vez de virar um cabeçalho órfão.
   const settings = SETTINGS_ITEMS.filter((item) => hasPermission(user, item.permission)).map(
     (item) => ({
       href: item.href,
@@ -146,6 +149,15 @@ const SETTINGS_ITEMS: ReadonlyArray<{
     icon: <Tags className="h-4 w-4" aria-hidden="true" />,
     permission: 'manage_client_categories',
   },
+  // 86e3n70pn: o catálogo do de-para (destinos e alvos) é configuração da
+  // ORGANIZAÇÃO — plataforma e admin. O gerente decide o de-para dos clientes da
+  // carteira, mas não escreve no catálogo que vale para todos eles.
+  {
+    href: MAPPING_CATALOG_PATH,
+    label: 'Destinos do de-para',
+    icon: <ArrowRightLeft className="h-4 w-4" aria-hidden="true" />,
+    permission: 'manage_mapping_catalog',
+  },
   // S13 (R3): os layouts do arquivo contábil são configuração da ORGANIZAÇÃO —
   // plataforma e admin. O gerente GERA o arquivo (`generate_accounting_file`, no
   // de-para) mas não administra layout, então não vê o item.
@@ -162,6 +174,17 @@ const SETTINGS_ITEMS: ReadonlyArray<{
     permission: 'manage_platform',
   },
 ];
+
+/**
+ * A tela do catálogo com um destino já aberto (`?destino=<id>`, o parâmetro que
+ * `mapping-catalog-screen.tsx` lê). É para onde o aviso de catálogo vazio do de-para
+ * manda quem pode cadastrar os alvos.
+ */
+export function mappingCatalogPath(destinationId?: string): string {
+  return destinationId
+    ? `${MAPPING_CATALOG_PATH}?destino=${encodeURIComponent(destinationId)}`
+    : MAPPING_CATALOG_PATH;
+}
 
 /**
  * Rota da LISTA de conciliações do cliente, que é a tela de entrada dele
@@ -184,8 +207,16 @@ export function fileOriginPath(clientId: string, competence?: string | null): st
 }
 
 /**
+ * Rota da tela "Categorias do Omie" (S10; "Plano de Contas" até 86e3n70pn). A rota
+ * `/plano-de-contas` ficou: link salvo continua abrindo a mesma tela.
+ */
+export function chartOfAccountsPath(clientId: string): string {
+  return `/clientes/${clientId}/plano-de-contas`;
+}
+
+/**
  * Rota da tela "Plano contábil" (S16) — o plano do sistema contábil de DESTINO,
- * distinto do "Plano de Contas" da origem (S10). `section=conta-do-banco` leva
+ * distinto das "Categorias do Omie" da origem (S10). `section=conta-do-banco` leva
  * direto à seção da conta do banco: é para onde o de-para manda quando a
  * materialização em `conta_contabil` fica sem um lado da partida.
  */
@@ -313,7 +344,7 @@ export function clientNavSections(
   const dashboardHref = dashboardPath(clientId);
   const usersHref = `${base}/usuarios`;
   const glossaryHref = `${base}/glossario`;
-  const chartOfAccountsHref = `${base}/plano-de-contas`;
+  const chartOfAccountsHref = chartOfAccountsPath(clientId);
   const accountingChartHref = accountingChartPath(clientId);
   const titlesHref = `${base}/carteira`;
   const mappingHref = `${base}/de-para`;
@@ -413,19 +444,21 @@ export function clientNavSections(
       active: isGlossary,
     },
   ];
-  // S10 (R4): "Plano de Contas" pela MESMA regra da Carteira: a célula de LER é
+  // S10 (R4): "Categorias do Omie" pela MESMA regra da Carteira: a célula de LER é
   // ✅ nos cinco papéis hoje, e o gating faz rota e item sumirem JUNTOS no dia
   // em que ela fechar. Quem pede permissão separada é SINCRONIZAR, dentro da tela.
   if (hasPermission(user, 'view_client_chart_of_accounts')) {
     registry.push({
       href: chartOfAccountsHref,
-      label: 'Plano de Contas',
+      // "Plano de Contas" até 09/10/2026 (86e3n70pn): ao lado de "Plano contábil" o
+      // escritório confundia as duas. A tela é a das CATEGORIAS que o Omie declara.
+      label: 'Categorias do Omie',
       icon: <ListTree className="h-4 w-4" aria-hidden="true" />,
       active: isChartOfAccounts,
     });
   }
   // S16 (R1): "Plano contábil", o plano do sistema contábil de DESTINO, ao lado
-  // do "Plano de Contas" da origem (nomes distintos de propósito). NÃO é gated,
+  // das "Categorias do Omie" da origem (nomes distintos de propósito). NÃO é gated,
   // pela regra do De-para: a LEITURA é `AccessibleClientDep` no backend, sem
   // permissão própria. Quem pede permissão (`manage_client_accounting_chart`) é
   // importar e associar a conta do banco, dentro da tela.

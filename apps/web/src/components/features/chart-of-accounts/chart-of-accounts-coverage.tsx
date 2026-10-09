@@ -149,7 +149,7 @@ export function ChartOfAccountsCoverageBlock({
       }
       footnote={
         <>
-          Contagens do plano de contas inteiro
+          Contagens de todas as categorias do Omie
           {coverage.syncedAt != null
             ? `, com referência em ${formatCreatedAt(coverage.syncedAt)}`
             : ''}
@@ -201,7 +201,7 @@ export function ChartOfAccountsCoverageSkeleton() {
     <div
       role="status"
       aria-busy="true"
-      aria-label="Carregando a cobertura do plano de contas"
+      aria-label="Carregando a cobertura das categorias do Omie"
       className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5"
     >
       {Array.from({ length: 5 }).map((_, index) => (

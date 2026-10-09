@@ -38,15 +38,25 @@ import type {
   MappingListResponse,
   MappingPreview,
   MappingTarget,
+  MappingTargetBatchCreate,
   MappingTargetListResponse,
+  MappingTargetUpdate,
   MaterializationRequest,
   MaterializationResult,
   MaterializationSummary,
   MovementsSyncResult,
   MovementsSyncState,
+  OriginTargetsPreview,
 } from '@/lib/contracts';
 
-import { apiGet, apiGetBlob, apiPost, apiPostMultipart, type BlobResponse } from './client';
+import {
+  apiGet,
+  apiGetBlob,
+  apiPatch,
+  apiPost,
+  apiPostMultipart,
+  type BlobResponse,
+} from './client';
 
 export type ListClientMappingParams = ListClientMappingQuery;
 
@@ -98,6 +108,61 @@ export async function listAllActiveMappingTargets(destinationId: string): Promis
     if (page >= res.pagination.totalPages) return all;
     page += 1;
   }
+}
+
+/** Parâmetros da lista PAGINADA de alvos (tela do catálogo, 86e3n70pn). */
+export interface ListMappingTargetsParams {
+  page: number;
+  pageSize: number;
+  /** `true` só ativos, `false` só inativos, `null` todos. */
+  active: boolean | null;
+  codePrefix: string | null;
+}
+
+/** Uma página dos alvos do destino — `{ data, pagination }`, o envelope chega inteiro. */
+export async function listMappingTargets(
+  destinationId: string,
+  params: ListMappingTargetsParams,
+): Promise<MappingTargetListResponse> {
+  const sp = new URLSearchParams({
+    page: String(params.page),
+    pageSize: String(Math.min(params.pageSize, MAX_PAGE_SIZE)),
+  });
+  if (params.active !== null) sp.set('active', String(params.active));
+  if (params.codePrefix) sp.set('codePrefix', params.codePrefix);
+  return apiGet<MappingTargetListResponse>(
+    `/api/v1/mapping-destinations/${encodeURIComponent(destinationId)}/targets?${sp.toString()}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Catálogo (escrita) — `manage_mapping_catalog`, configuração da ORGANIZAÇÃO
+// ---------------------------------------------------------------------------
+
+/**
+ * Cria alvos EM LOTE (atômico): um código repetido no lote ou já existente no
+ * destino recusa TUDO com 409 `CONFLICT`, e a `userMessage` lista os códigos.
+ */
+export async function createMappingTargets(
+  destinationId: string,
+  payload: MappingTargetBatchCreate,
+): Promise<MappingTarget[]> {
+  return apiPost<MappingTarget[]>(
+    `/api/v1/mapping-destinations/${encodeURIComponent(destinationId)}/targets`,
+    payload,
+  );
+}
+
+/** Edita nome e/ou situação do alvo. Inativar é o caminho (o código não muda). */
+export async function updateMappingTarget(
+  destinationId: string,
+  targetId: string,
+  payload: MappingTargetUpdate,
+): Promise<MappingTarget> {
+  return apiPatch<MappingTarget>(
+    `/api/v1/mapping-destinations/${encodeURIComponent(destinationId)}/targets/${encodeURIComponent(targetId)}`,
+    payload,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -186,6 +251,18 @@ export async function inheritMapping(
   payload: InheritRequest,
 ): Promise<InheritResult> {
   return apiPost<InheritResult>(`${mappingBase(clientId, destinationType)}/inherit`, payload);
+}
+
+/**
+ * PRÉVIA dos alvos do demonstrativo a partir da origem do cliente (86e3n70pn).
+ * Só LÊ: os confirmados entram por `createMappingTargets` no `destinationId` que
+ * ela devolve. Pede `manage_mapping_catalog` (403 para os demais).
+ */
+export async function getOriginTargetsPreview(
+  clientId: string,
+  destinationType: string,
+): Promise<OriginTargetsPreview> {
+  return apiGet<OriginTargetsPreview>(`${mappingBase(clientId, destinationType)}/origin-targets`);
 }
 
 // ---------------------------------------------------------------------------
