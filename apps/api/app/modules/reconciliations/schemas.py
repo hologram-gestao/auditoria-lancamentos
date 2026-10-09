@@ -24,6 +24,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.core.exceptions import ErrorCode
+from app.db.models import CardPostingDateMode
 from app.integrations.anthropic.schemas import ExtractedStatement, ExtractedTransaction
 
 #: Códigos aceitos em `ReconciliationFileInput.error_code`. Fechado por
@@ -242,6 +243,22 @@ class CreateReconciliationRequest(BaseModel):
         max_length=MAX_FILES_PER_REQUEST,
         description="Partes da conciliação. Forma canônica (BACK 04.2).",
     )
+    # 86e3n70p0 — só para fatura de CARTÃO (ignorados em conta corrente e
+    # aplicação: o tipo da sessão vem da conta do Omie, não do pedido).
+    invoice_due_date: _date | None = Field(
+        default=None,
+        description=(
+            "Vencimento da fatura do cartão, como confirmado na prévia. Obrigatório "
+            "quando o modo em vigor é `invoice_due_date`."
+        ),
+    )
+    card_posting_date_mode: CardPostingDateMode | None = Field(
+        default=None,
+        description=(
+            "Troca pontual do modo de lançamento do cartão SÓ nesta conciliação. "
+            "Ausente = a configuração do cliente."
+        ),
+    )
     # --- Forma LEGADA (1 arquivo). Não usar em código novo. ---
     file_hash: str | None = Field(default=None, description="LEGADO: use `files`.")
     statement: ReconciliationStatementInput | None = Field(
@@ -437,6 +454,12 @@ class SessionDetailPayload(BaseModel):
     # as colunas são NOT NULL.
     created_by: SessionAuthor | None = None
     created_at: datetime | None = None
+    # 86e3n70p0 — SÓ em sessão de cartão: o modo de lançamento usado no
+    # cruzamento (snapshot) e o vencimento da fatura. A tela mostra "Lote da
+    # fatura: dd/mm/aaaa" no modo `invoice_due_date`. None fora do cartão e em
+    # sessão antiga (lê como `purchase_date`).
+    card_posting_date_mode: CardPostingDateMode | None = None
+    invoice_due_date: _date | None = None
     # BACK 06.4/06.5 — a qualificação desta sessão considerou o GLOSSÁRIO do
     # cliente? Vem da coluna escrita por `qualify_session` a partir do bloco
     # realmente injetado no prompt (não é hard-coded, nem recalculado aqui).

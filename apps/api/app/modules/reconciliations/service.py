@@ -21,11 +21,17 @@ from app.core.crypto_service import (
     field_locator,
     load_client_cipher,
 )
-from app.core.exceptions import ConflictError, DuplicateFileError, NotFoundError
+from app.core.exceptions import (
+    ConflictError,
+    DuplicateFileError,
+    InvoiceDueDateRequiredError,
+    NotFoundError,
+)
 from app.core.logging import get_logger
 from app.core.search_index import compute_search_hmac
 from app.db.models import (
     HOLOGRAM_ORGANIZATION_NAME,
+    CardPostingDateMode,
     FileEntrySituation,
     OmieAccountType,
     ReconciliationFile,
@@ -88,6 +94,36 @@ def session_account_type_from_omie_tipo(omie_tipo: str | None) -> str:
 #: cliente final. Com organizações (86e36ecqz) o rótulo é "Equipe {org do
 #: cliente}" — a Hologram chama-se "Hologram", então continua "Equipe Hologram".
 TEAM_LABEL_PREFIX = "Equipe"
+
+
+def resolve_card_posting(
+    *,
+    account_type: str,
+    client_mode: str,
+    requested_mode: CardPostingDateMode | None,
+    invoice_due_date: date | None,
+) -> tuple[str | None, date | None]:
+    """Modo de lançamento do cartão e vencimento que a sessão GRAVA (86e3n70p0).
+
+    - Conta que não é cartão: `(None, None)`. O modo não se aplica, e o que o
+      pedido trouxer é ignorado (o tipo vem da conta do Omie, §3.8).
+    - Cartão: a troca pontual da gaveta vence; sem ela, a configuração do
+      cliente. O vencimento é gravado nos DOIS modos (no `purchase_date` é
+      informativo), e no `invoice_due_date` é obrigatório: é o centro da janela
+      do Omie, e sem ele a conciliação nasceria sem lote para cruzar.
+
+    Raises:
+        InvoiceDueDateRequiredError: cartão no modo `invoice_due_date` sem
+            vencimento (422, antes de gravar qualquer coisa).
+    """
+    if account_type != SessionAccountType.CREDIT_CARD.value:
+        return None, None
+    mode = requested_mode or CardPostingDateMode(client_mode)
+    if mode is CardPostingDateMode.INVOICE_DUE_DATE and invoice_due_date is None:
+        raise InvoiceDueDateRequiredError(
+            "Cartão no modo invoice_due_date sem vencimento da fatura no pedido."
+        )
+    return mode.value, invoice_due_date
 
 
 def team_label(organization_name: str | None) -> str:
@@ -272,6 +308,7 @@ class ReconciliationService:
         created_by: UUID,
         cipher: ClientCipher,
         search_blind_index_key: SecretStr,
+        client_card_posting_date_mode: str = CardPostingDateMode.PURCHASE_DATE.value,
     ) -> tuple[UUID, int]:
         """Cria a conciliação `status='processing'` com **N partes** e suas linhas.
 
@@ -295,6 +332,8 @@ class ReconciliationService:
                 `filename` no envelope corrente + AAD (client_id‖tabela‖coluna‖pk).
                 Construído no route com `provision_client_cipher` (mesma regra
                 que `omie_factory`: cripto no boundary async, service recebe pronto).
+            client_card_posting_date_mode: `clients.card_posting_date_mode` do
+                cliente (86e3n70p0) — o modo em vigor quando a gaveta não troca.
             search_blind_index_key: `SEARCH_BLIND_INDEX_KEY` em SecretStr. Usada
                 para computar o índice de busca paralelo
                 (`description_search_hmac`) que viabiliza filtro `search` em SQL
@@ -322,6 +361,14 @@ class ReconciliationService:
             omie_conta_id=request.omie_conta_id,
         )
         account_type = session_account_type_from_omie_tipo(omie_tipo)
+        # 86e3n70p0 — antes de qualquer escrita: o 422 do vencimento não deixa
+        # sessão nem arquivo para trás.
+        card_posting_date_mode, invoice_due_date = resolve_card_posting(
+            account_type=account_type,
+            client_mode=client_card_posting_date_mode,
+            requested_mode=request.card_posting_date_mode,
+            invoice_due_date=request.invoice_due_date,
+        )
 
         existing = await self._repo.find_active_session_for_account_month(
             client_id=request.client_id,
@@ -342,6 +389,9 @@ class ReconciliationService:
             # (extratos quebrados, faturas de cartão, atrasos).
             period_start=period_start,
             period_end=period_end,
+            # 86e3n70p0 — snapshot do processo do cartão (None fora do cartão).
+            invoice_due_date=invoice_due_date,
+            card_posting_date_mode=card_posting_date_mode,
             # FASE 1: tolerância de data agora é fixa no matcher
             # (DATE_DIVERGENCE_RANGE). Novas sessões gravam 0; a coluna é
             # mantida só por histórico (sessões antigas guardam o valor antigo).
@@ -377,6 +427,7 @@ class ReconciliationService:
             session_id=str(session_obj.id),
             client_id=str(request.client_id),
             account_type=account_type,
+            card_posting_date_mode=card_posting_date_mode,
             total_files=len(parts),
             total_file_entries=total_entries,
             month=request.reference_month.isoformat(),
@@ -666,6 +717,12 @@ class ReconciliationService:
             balance_difference=session_obj.balance_difference,
             total_files=total_files,
             qualification_used_glossary=session_obj.qualification_used_glossary,
+            card_posting_date_mode=(
+                CardPostingDateMode(session_obj.card_posting_date_mode)
+                if session_obj.card_posting_date_mode is not None
+                else None
+            ),
+            invoice_due_date=session_obj.invoice_due_date,
             created_by=author_for_viewer(session_obj.user, viewer),
             created_at=session_obj.created_at,
             credits_total=amounts.credits_total,

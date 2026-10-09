@@ -394,6 +394,8 @@ async def create_reconciliation(
         created_by=UUID(user.id),
         cipher=cipher,
         search_blind_index_key=settings.SEARCH_BLIND_INDEX_KEY,
+        # 86e3n70p0 — o processo do cartão em vigor vem da LINHA do cliente.
+        client_card_posting_date_mode=client.card_posting_date_mode,
     )
     # BACK 04.1 — `conciliacao_criada` é o DENOMINADOR da métrica de outcome da
     # Sprint 4. Emitido aqui, no ponto real do fluxo, e ANTES do commit abaixo:

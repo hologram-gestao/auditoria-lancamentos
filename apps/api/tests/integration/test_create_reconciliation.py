@@ -25,6 +25,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -1275,6 +1276,159 @@ class TestCancelReconciliation:
 
 
 # ----------------------------------------------------------------------
+@pytest.mark.integration
+class TestCreateReconciliationCardPostingDateMode:
+    """86e3n70p0 — o processo do cartão vira SNAPSHOT na sessão, e o modo
+    "vencimento da fatura" sem o vencimento é 422 tipado, sem gravar nada."""
+
+    async def _setup(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, *, mode: str
+    ) -> Client:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="Prospecta", creator=admin)
+        cliente.card_posting_date_mode = mode
+        await _seed_account(db_session, client=cliente, omie_conta_id=777, tipo="CR")
+        await _seed_account(db_session, client=cliente, omie_conta_id=42, tipo="CC")
+        await db_session.flush()
+        await _login(client_with_db, ADMIN_EMAIL)
+        return cliente
+
+    async def _load(self, db_session: AsyncSession, session_id: str) -> ReconciliationSession:
+        return (
+            await db_session.execute(
+                select(ReconciliationSession)
+                .where(ReconciliationSession.id == UUID(session_id))
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one()
+
+    async def test_cartao_no_vencimento_sem_data_e_422_e_nao_grava(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        cliente = await self._setup(client_with_db, db_session, mode="invoice_due_date")
+
+        resp = await client_with_db.post(
+            "/api/v1/reconciliations",
+            json=_create_payload(client_id=cliente.id, omie_conta_id=777),
+        )
+
+        assert resp.status_code == 422, resp.text
+        erro = resp.json()["error"]
+        assert erro["code"] == "VENCIMENTO_DA_FATURA_OBRIGATORIO"
+        assert "vencimento da fatura" in erro["userMessage"]
+        assert stub_enqueue == []
+        sessoes = (
+            await db_session.execute(
+                select(ReconciliationSession).where(ReconciliationSession.client_id == cliente.id)
+            )
+        ).all()
+        assert sessoes == []
+
+    async def test_cartao_grava_o_modo_do_cliente_e_o_vencimento(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        cliente = await self._setup(client_with_db, db_session, mode="invoice_due_date")
+        payload = _create_payload(client_id=cliente.id, omie_conta_id=777)
+        payload["invoice_due_date"] = "2026-05-10"
+
+        resp = await client_with_db.post("/api/v1/reconciliations", json=payload)
+
+        assert resp.status_code == 201, resp.text
+        sess = await self._load(db_session, resp.json()["data"]["session_id"])
+        assert sess.card_posting_date_mode == "invoice_due_date"
+        assert sess.invoice_due_date == date(2026, 5, 10)
+        detalhe = await client_with_db.get(f"/api/v1/reconciliations/{sess.id}")
+        assert detalhe.status_code == 200, detalhe.text
+        assert detalhe.json()["data"]["card_posting_date_mode"] == "invoice_due_date"
+        assert detalhe.json()["data"]["invoice_due_date"] == "2026-05-10"
+
+    async def test_troca_pontual_da_gaveta_vence_o_cliente(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        cliente = await self._setup(client_with_db, db_session, mode="invoice_due_date")
+        payload = _create_payload(client_id=cliente.id, omie_conta_id=777)
+        payload["card_posting_date_mode"] = "purchase_date"
+
+        resp = await client_with_db.post("/api/v1/reconciliations", json=payload)
+
+        # Sem vencimento e sem 422: nesta conciliação o processo é o da compra.
+        assert resp.status_code == 201, resp.text
+        sess = await self._load(db_session, resp.json()["data"]["session_id"])
+        assert sess.card_posting_date_mode == "purchase_date"
+        assert sess.invoice_due_date is None
+        await db_session.refresh(cliente)
+        assert cliente.card_posting_date_mode == "invoice_due_date"
+
+    async def test_snapshot_nao_acompanha_a_troca_do_cliente(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        cliente = await self._setup(client_with_db, db_session, mode="purchase_date")
+        resp = await client_with_db.post(
+            "/api/v1/reconciliations",
+            json=_create_payload(client_id=cliente.id, omie_conta_id=777),
+        )
+        assert resp.status_code == 201, resp.text
+
+        patch = await client_with_db.patch(
+            f"/api/v1/clients/{cliente.id}", json={"card_posting_date_mode": "invoice_due_date"}
+        )
+        assert patch.status_code == 200, patch.text
+
+        sess = await self._load(db_session, resp.json()["data"]["session_id"])
+        assert sess.card_posting_date_mode == "purchase_date"
+
+    async def test_o_banco_recusa_modo_vencimento_sem_a_data(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+    ) -> None:
+        """O CHECK de coerência garante no BANCO o que o 422 garante na rota."""
+        cliente = await self._setup(client_with_db, db_session, mode="invoice_due_date")
+        sessao = ReconciliationSession(
+            client_id=cliente.id,
+            created_by=cliente.created_by,
+            omie_conta_id=777,
+            account_type="credit_card",
+            reference_month=date(2026, 9, 1),
+            card_posting_date_mode="invoice_due_date",
+            invoice_due_date=None,
+        )
+        async with db_session.begin_nested():
+            db_session.add(sessao)
+            with pytest.raises(IntegrityError, match="card_due_date_coherent"):
+                await db_session.flush()
+
+    async def test_conta_corrente_ignora_o_modo_e_o_vencimento(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        cliente = await self._setup(client_with_db, db_session, mode="invoice_due_date")
+        payload = _create_payload(client_id=cliente.id, omie_conta_id=42)
+        payload["invoice_due_date"] = "2026-05-10"
+
+        resp = await client_with_db.post("/api/v1/reconciliations", json=payload)
+
+        assert resp.status_code == 201, resp.text
+        sess = await self._load(db_session, resp.json()["data"]["session_id"])
+        assert sess.account_type == "checking"
+        assert sess.card_posting_date_mode is None
+        assert sess.invoice_due_date is None
+
+
 # Garantia de fixture do app: as rotas estão registradas no FastAPI app.
 # (sanity check para evitar falsos passes se o include_router for esquecido)
 # ----------------------------------------------------------------------

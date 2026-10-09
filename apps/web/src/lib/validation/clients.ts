@@ -42,6 +42,11 @@ export const INCOMPLETE_CREDENTIALS_MESSAGE =
  * S9: as credenciais são **opcionais** — sem elas o cliente nasce pleno e sem
  * origem. Preencher UMA só é o mesmo 400 do backend, antecipado aqui.
  */
+/** As opções vêm do vocabulário único; o default é o processo de sempre. */
+const cardPostingDateModeField = z
+  .enum(['purchase_date', 'invoice_due_date'])
+  .default('purchase_date');
+
 export function makeCreateClientSchema({ requireOrganization = false } = {}) {
   return z
     .object({
@@ -57,6 +62,8 @@ export function makeCreateClientSchema({ requireOrganization = false } = {}) {
         .default(''),
       // 86e34jd8m — id do catálogo ou a sentinela 'none' (o Select não aceita '').
       category_id: z.string().optional(),
+      // 86e3n70p0 — processo do cartão no Omie, declarado (nunca inferido).
+      card_posting_date_mode: cardPostingDateModeField,
       organization_id: organizationTargetField(requireOrganization),
     })
     .superRefine((vals, ctx) => {
@@ -97,6 +104,7 @@ export const updateClientSchema = z.object({
   // 86e390m4c: é gerida na seção "Gerentes com acesso", ação a ação.
   // 86e34jd8m — id do catálogo ou a sentinela 'none'.
   category_id: z.string().optional(),
+  card_posting_date_mode: cardPostingDateModeField,
 });
 
 export type UpdateClientFormValues = z.infer<typeof updateClientSchema>;

@@ -276,6 +276,28 @@ class TestKillSwitchAndEligibility:
         assert await _posting_count(db_session, entry.id) == 0
 
     @pytest.mark.usefixtures("posting_enabled")
+    async def test_card_session_in_invoice_due_date_mode_is_refused(
+        self, client_with_db: AsyncClient, scenario: Scenario, db_session: AsyncSession
+    ) -> None:
+        """86e3n70p0 (decisão do Pedro, 08/10/2026): o `IncluirLancCC` grava a data
+        da COMPRA, e o cliente no modo vencimento lança em lote no vencimento.
+        Até isso ser decidido, o lote é recusado com motivo e nada é escrito."""
+        scenario.session.card_posting_date_mode = "invoice_due_date"
+        scenario.session.invoice_due_date = date(2026, 5, 10)
+        await db_session.flush()
+        entry = await _seed_entry(db_session, sess=scenario.session)
+        await _login(client_with_db, scenario.admin.email)
+
+        resp = await client_with_db.post(
+            POSTING_URL.format(session_id=scenario.session.id),
+            json=_body((entry.id, "1.01.01")),
+        )
+
+        assert resp.status_code == 400, resp.text
+        assert "vencimento da fatura" in resp.json()["error"]["userMessage"]
+        assert await _posting_count(db_session, entry.id) == 0
+
+    @pytest.mark.usefixtures("posting_enabled")
     async def test_batch_over_the_server_cap_is_refused(
         self, client_with_db: AsyncClient, scenario: Scenario, db_session: AsyncSession
     ) -> None:

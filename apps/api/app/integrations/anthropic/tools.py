@@ -70,6 +70,15 @@ EXTRACT_MOVEMENTS_TOOL: dict[str, Any] = {
                 "type": "number",
                 "description": "Saldo final conforme o documento (pode ser zero).",
             },
+            "invoice_due_date": {
+                "type": "string",
+                "format": "date",
+                "description": (
+                    "SÓ fatura de cartão: data de vencimento da fatura, como impressa "
+                    "(YYYY-MM-DD). Nunca inventar: omita se o documento não mostrar, e "
+                    "omita sempre em conta corrente e conta de aplicação."
+                ),
+            },
             "transactions": {
                 "type": "array",
                 "description": (

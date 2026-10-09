@@ -124,6 +124,10 @@ class ErrorCode(StrEnum):
     # download cujo conteúdo regenerado não bate com o SHA-256 registrado.
     ARQUIVO_SEM_MATERIALIZACAO = "ARQUIVO_SEM_MATERIALIZACAO"
     ARQUIVO_DIVERGENTE = "ARQUIVO_DIVERGENTE"
+    # 86e3n70p0 — conciliação de cartão de cliente que lança as compras no
+    # VENCIMENTO da fatura, sem o vencimento informado: a janela do Omie é o lote
+    # da fatura, e sem a data não há lote para buscar. 422, com instrução.
+    VENCIMENTO_DA_FATURA_OBRIGATORIO = "VENCIMENTO_DA_FATURA_OBRIGATORIO"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
@@ -561,6 +565,25 @@ class CredentialsMovedToConnectionsError(AppError):
         "POST /api/v1/clients/{id}/connections para conectar uma origem, ou "
         "PATCH /api/v1/clients/{id}/connections/{connectionId} para trocar as "
         "credenciais de uma existente."
+    )
+
+
+class InvoiceDueDateRequiredError(AppError):
+    """422 — fatura de cartão no modo "vencimento da fatura" sem o vencimento (86e3n70p0).
+
+    No modo `invoice_due_date` as compras estão no Omie em LOTE, na data de
+    vencimento da fatura, e é por essa data que o cruzamento busca o lote. Sem
+    ela não há janela a consultar: criar a conciliação assim daria 0 pares e uma
+    anomalia falsa por compra. Exceção TIPADA, não validador Pydantic (§4.8): o
+    400 genérico do handler não diria o que fazer, e a gaveta precisa dizer.
+    """
+
+    code = ErrorCode.VENCIMENTO_DA_FATURA_OBRIGATORIO
+    status_code = 422
+    default_user_message = (
+        "Informe a data de vencimento da fatura. Este cliente lança as compras do "
+        "cartão no Omie no vencimento da fatura, e é por essa data que a conciliação "
+        "procura o lote."
     )
 
 

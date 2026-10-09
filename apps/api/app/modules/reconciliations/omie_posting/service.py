@@ -63,6 +63,7 @@ from app.core.exceptions import (
 from app.core.logging import get_logger
 from app.db.models import (
     AnomalyType,
+    CardPostingDateMode,
     FileEntrySituation,
     OmiePostingStatus,
     ReconciliationAnomaly,
@@ -181,6 +182,7 @@ class OmiePostingService:
         """
         self._require_enabled()
         self._require_credit_card(session)
+        self._require_purchase_date_process(session)
         self._require_batch_within_cap(lines)
 
         started = time.monotonic()
@@ -273,6 +275,22 @@ class OmiePostingService:
         if session.account_type != SessionAccountType.CREDIT_CARD.value:
             raise OmiePostingNotEligibleError(
                 f"Sessão {session.id} é '{session.account_type}', não 'credit_card'.",
+            )
+
+    @staticmethod
+    def _require_purchase_date_process(session: ReconciliationSession) -> None:
+        """Só o processo "na data da compra" (86e3n70p0, decisão do Pedro 08/10/2026).
+
+        O `IncluirLancCC` grava `dDtLanc` = data da COMPRA. Num cliente que lança
+        as compras do cartão em LOTE no vencimento da fatura, isso escreveria na
+        contabilidade dele uma data que o processo dele não usa. Até a forma de
+        lançar no lote ser decidida (subtask própria), o lote inteiro é recusado
+        com motivo — e a tela nem oferece a ação.
+        """
+        if session.card_posting_date_mode == CardPostingDateMode.INVOICE_DUE_DATE.value:
+            raise OmiePostingNotEligibleError(
+                f"Sessão {session.id} cruza no modo invoice_due_date; lançamento bloqueado.",
+                user_message=INVOICE_DUE_DATE_POSTING_BLOCK_MESSAGE,
             )
 
     def _require_batch_within_cap(self, lines: list[OmiePostingLineRequest]) -> None:
@@ -708,6 +726,13 @@ class OmiePostingService:
 # ----------------------------------------------------------------------
 # Helpers de resultado
 # ----------------------------------------------------------------------
+
+#: Mensagem do bloqueio do modo vencimento — VERBATIM no front
+#: (`omie-posting-eligibility.ts`), para o operador ler o mesmo motivo nos dois.
+INVOICE_DUE_DATE_POSTING_BLOCK_MESSAGE = (
+    "Esta conciliação cruza as compras pelo vencimento da fatura. O lançamento no Omie "
+    "ainda não é feito neste processo: lance as compras diretamente no Omie."
+)
 
 _UNAVAILABLE_MSG = (
     "O Omie não respondeu. Nenhum lançamento foi confirmado para esta linha — "

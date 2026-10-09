@@ -478,6 +478,14 @@ let originState: 'ativa' | 'sem_origem' | 'erro' = 'ativa';
  * cabeçalho de cliente encerrado o liga — o resto mede o cliente aberto.
  */
 let clientClosed = false;
+/**
+ * 86e3n70p0 — o cliente lança as compras do cartão no VENCIMENTO da fatura
+ * (`clientCardDueDate`), e a conciliação aberta foi cruzada nesse processo
+ * (`sessionCardDueDate`). Os dois começam desligados: as telas anteriores medem
+ * o processo de sempre.
+ */
+let clientCardDueDate = false;
+let sessionCardDueDate = false;
 
 /**
  * Sprint 14 (R1 · R5): a origem por ARQUIVO — o primeiro provedor que não é um
@@ -510,7 +518,10 @@ function clientDetailComOrigem(): Record<string, unknown> {
     : dashboardExtraAccounts
       ? { ...CLIENT_DETAIL, accounts: [...ACCOUNTS, ...NON_HABITUAL_ACCOUNTS] }
       : { ...CLIENT_DETAIL };
-  const base = clientClosed ? { ...aberto, closed_at: '2026-09-20T12:00:00Z' } : aberto;
+  const fechado = clientClosed ? { ...aberto, closed_at: '2026-09-20T12:00:00Z' } : aberto;
+  const base = clientCardDueDate
+    ? { ...fechado, card_posting_date_mode: 'invoice_due_date' }
+    : fechado;
   if (originState === 'ativa' && clientFileOrigin) {
     // Cliente sem sistema: nenhuma conta sincronizada — a base vem do arquivo.
     return {
@@ -1081,6 +1092,8 @@ const CLIENT_DETAIL = {
   // mediam; os três estados são exercitados no bloco de origem, adiante.
   origin_status: 'ativa',
   connections: [OMIE_CONNECTION],
+  // 86e3n70p0 — processo do cartão no Omie: o de sempre por padrão.
+  card_posting_date_mode: 'purchase_date',
 };
 
 /**
@@ -1835,6 +1848,37 @@ const MANY_GLOSSARY_ENTRIES = Array.from({ length: 20 }, (_, i) => ({
   description: `Descrição de uso da entrada ${i}.`,
   decryptFailed: false,
 }));
+
+/** 86e3n70p0 — a fatura de cartão como `/parse` devolve (vencimento incluído). */
+const CARD_INVOICE_PARSE = {
+  data: {
+    bank_name: 'Cora',
+    account_type: 'credit_card',
+    period_start: '2026-07-22',
+    period_end: '2026-10-01',
+    opening_balance: '0.00',
+    closing_balance: '1164.22',
+    invoice_due_date: '2026-10-10',
+    transactions: [
+      { date: '2026-07-22', description: 'ANYDESK 3/6', amount: '-199.84', is_payment: false },
+      { date: '2026-09-08', description: 'ANTHROPIC', amount: '-591.91', is_payment: false },
+      { date: '2026-09-13', description: 'FIREFLIES.AI', amount: '-88.79', is_payment: false },
+      { date: '2026-09-29', description: 'MICROSOFT', amount: '-87.68', is_payment: false },
+      { date: '2026-10-01', description: 'GOOGLE WORKSPACE', amount: '-196.00', is_payment: false },
+    ],
+  },
+  checksum: {
+    ok: true,
+    applicable: true,
+    account_type: 'credit_card',
+    expected: '1164.22',
+    computed: '1164.22',
+    difference: '0.00',
+    tolerance: '0.01',
+    reason: null,
+  },
+  file_hash: 'a'.repeat(64),
+};
 
 const DETAIL = {
   session_id: SESSION_ID,
@@ -2710,9 +2754,13 @@ async function fulfillApi(route: Route): Promise<void> {
     const ehPlataforma = sessionUser['scope'] === 'platform';
     // `origin_status` acompanha o `originState` do cenário: o `CLIENT_DETAIL`
     // fixo diz `ativa`, e com ele o selo "Sem origem" da lista nunca apareceria.
-    const alcance = ehPlataforma
-      ? [{ ...CLIENT_DETAIL, is_favorite: favorited, origin_status: originState }, OTHER_ORG_CLIENT]
-      : [{ ...CLIENT_DETAIL, is_favorite: favorited, origin_status: originState }];
+    const proprio = {
+      ...CLIENT_DETAIL,
+      is_favorite: favorited,
+      origin_status: originState,
+      ...(clientCardDueDate ? { card_posting_date_mode: 'invoice_due_date' } : {}),
+    };
+    const alcance = ehPlataforma ? [proprio, OTHER_ORG_CLIENT] : [proprio];
     const org = url.searchParams.get('organizationId');
     // A busca casa por nome, sem caixa, como o servidor (estado vazio da busca, 86e3h57b5).
     const busca = url.searchParams.get('search')?.toLowerCase() ?? '';
@@ -2848,9 +2896,25 @@ async function fulfillApi(route: Route): Promise<void> {
     const list = noSessions ? [] : listOverflows ? OVERFLOW_SESSIONS : SESSIONS;
     return json({ data: list, pagination: { ...PAGINATION, total: list.length } });
   }
+  // 86e3n70p0 — o passo 2 da gaveta: verificação de duplicata e a extração da
+  // fatura do cartão (com o vencimento lido do documento).
+  if (path === '/api/v1/reconciliations/check-duplicate') {
+    return json({ duplicate: false });
+  }
+  if (path === '/api/v1/reconciliations/parse') {
+    // `{ data, checksum, file_hash }` é o corpo REAL desta rota — `fulfill` cru.
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(CARD_INVOICE_PARSE),
+    });
+  }
   if (path === `/api/v1/reconciliations/${SESSION_ID}`) {
     return json({
       ...DETAIL,
+      ...(sessionCardDueDate
+        ? { card_posting_date_mode: 'invoice_due_date', invoice_due_date: '2026-10-10' }
+        : {}),
       ...(sessionAccountType === null ? {} : { account_type: sessionAccountType }),
       ...(sessionErrorDetail ? { status: 'error', error_code: 'ADL-PARSE-LIMIT' } : {}),
       ...(sessionBalanceDivergent
@@ -3335,6 +3399,8 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   // S9: origem ativa é o estado de partida — só o bloco de origem a troca.
   originState = 'ativa';
   clientClosed = false;
+  clientCardDueDate = false;
+  sessionCardDueDate = false;
   // S10: a última sincronização do plano de contas deu certo, por padrão.
   chartSyncFailed = false;
   // S11: a carteira está sincronizada e a última tentativa deu certo, por padrão.
@@ -3604,6 +3670,67 @@ for (const vp of VIEWPORTS) {
       await aguardarAnimacao(page.getByRole('dialog'));
       await shot(page, `gaveta-criacao-${vp.label.replace(/\s+/g, '-')}`);
       await analyze(page, `gaveta de criação (${vp.label})`);
+    });
+
+    // 86e3n70p0 — fatura de cartão de cliente que lança no vencimento: o bloco
+    // "Fatura do cartão" com o processo em vigor e o vencimento lido do PDF.
+    test('Gaveta de criação: fatura de cartão no vencimento (86e3n70p0)', async ({ page }) => {
+      clientCardDueDate = true;
+      const slug = vp.label.replace(/\s+/g, '-');
+      await page.goto(`/clientes/${CLIENT_ID}`);
+      await page.getByRole('button', { name: 'Criar conciliação' }).first().click();
+      const dialog = page.getByRole('dialog');
+      await aguardarAnimacao(dialog);
+      await dialog.getByRole('combobox', { name: 'Conta bancária' }).click();
+      await page.getByRole('option', { name: /Cartão Itaú/ }).click();
+      await dialog.getByLabel('Mês de referência').fill('2026-09');
+      await dialog.getByRole('button', { name: /Avançar/ }).click();
+      await dialog.locator('#reconciliation-files').setInputFiles({
+        name: 'fatura-cora-setembro.pdf',
+        mimeType: 'application/pdf',
+        buffer: Buffer.from('%PDF-1.4 fatura de teste'),
+      });
+
+      const vencimento = dialog.getByLabel('Vencimento da fatura');
+      await expect(vencimento).toHaveValue('10/10/2026');
+      await expect(
+        dialog.getByText('Lançadas no vencimento da fatura, configuração do cliente.'),
+      ).toBeVisible();
+      await expect(dialog.getByText(/Vencimento da fatura: 10\/10\/2026/)).toBeVisible();
+      await expect(dialog.getByRole('button', { name: 'Confirmar (1)' })).toBeEnabled();
+
+      // O campo do vencimento cabe na gaveta em 390px — medido, não olhado.
+      await vencimento.scrollIntoViewIfNeeded();
+      const caixa = await vencimento.boundingBox();
+      expect(caixa, 'o campo do vencimento precisa ter caixa visível').not.toBeNull();
+      expect(
+        (caixa?.x ?? 0) + (caixa?.width ?? 0),
+        'campo do vencimento cortado pela borda direita da viewport',
+      ).toBeLessThanOrEqual(vp.size.width);
+
+      await shot(page, `pr-gaveta-fatura-vencimento-${slug}`);
+      await analyze(page, `gaveta com a fatura no vencimento (${vp.label})`);
+    });
+
+    // 86e3n70p0 — revisão de uma fatura cruzada no lote do vencimento: o
+    // cabeçalho diz o processo e o lote, e "Lançar no Omie" não é oferecido
+    // (o servidor recusaria o lote inteiro; decisão do Pedro, 08/10/2026).
+    test('Revisão de cartão no vencimento: lote no cabeçalho e sem lançar (86e3n70p0)', async ({
+      page,
+    }) => {
+      sessionAccountType = 'credit_card';
+      sessionCardDueDate = true;
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}`);
+      await expect(
+        page.getByText('Compras lançadas no vencimento da fatura · Lote da fatura: 10/10/2026'),
+      ).toBeVisible();
+      await expect(page.getByText(/lance as compras diretamente no Omie/)).toBeVisible();
+      // A MESMA linha que no processo da compra oferece a ação (cenário R1 do
+      // bloco "Lançamento no Omie"): aqui, carregada, e sem a ação.
+      await expect(page.getByRole('row', { name: /Posto Shell 1234/ })).toBeVisible();
+      await expect(page.getByRole('button', { name: /Lançar no Omie/ })).toHaveCount(0);
+      await shot(page, `pr-revisao-cartao-vencimento-${vp.label.replace(/\s+/g, '-')}`);
+      await analyze(page, `revisão de cartão no vencimento (${vp.label})`);
     });
 
     test('Sino de notificações aberto (R4)', async ({ page }) => {
@@ -7201,6 +7328,27 @@ for (const vp of VIEWPORTS) {
       await expect(acao).toBeEnabled();
       await acao.click();
       await expect(confirm).toBeHidden();
+    });
+
+    // 86e3n70p0 — "Compras do cartão no Omie" no editar cliente: o processo
+    // declarado do cliente (aqui, o da Prospecta: no vencimento da fatura).
+    test('editar cliente: compras do cartão no Omie (86e3n70p0)', async ({ page }) => {
+      clientCardDueDate = true;
+      await page.goto('/clientes');
+      await page.getByRole('button', { name: 'Editar Cliente Exemplo Ltda' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Editar Cliente' });
+      await aguardarAnimacao(dialog);
+      const campo = dialog.getByRole('combobox', { name: 'Compras do cartão no Omie' });
+      await campo.scrollIntoViewIfNeeded();
+      await expect(campo).toHaveText(/No vencimento da fatura/);
+      const caixa = await campo.boundingBox();
+      expect(caixa, 'o seletor precisa ter caixa visível').not.toBeNull();
+      expect(
+        (caixa?.x ?? 0) + (caixa?.width ?? 0),
+        'seletor cortado pela borda direita da viewport',
+      ).toBeLessThanOrEqual(vp.size.width);
+      await shot(page, `pr-editar-cliente-cartao-${vp.label.replace(/\s+/g, '-')}`);
+      await analyze(page, `editar cliente com o processo do cartão (${vp.label})`);
     });
 
     /**

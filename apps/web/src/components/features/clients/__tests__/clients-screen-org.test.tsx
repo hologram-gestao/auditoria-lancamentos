@@ -136,6 +136,7 @@ function client(over: Partial<Client> = {}): Client {
     // S9: `origin_status` é obrigatório no contrato — o default aqui é
     // "tem origem", para os casos desta suíte não medirem o selo novo.
     origin_status: 'ativa',
+    card_posting_date_mode: 'purchase_date',
     ...over,
   };
 }

@@ -17,7 +17,7 @@ Princípios:
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -49,7 +49,7 @@ from app.db.models import (
 )
 from app.integrations.omie.schemas import unescape_omie_text
 from app.integrations.omie.supplier_names import resolve_supplier_names
-from app.modules.reconciliations.processing.matcher import DATE_DIVERGENCE_RANGE
+from app.modules.reconciliations.processing.omie_window import omie_window_for_session
 from app.modules.reconciliations.qualification.service import (
     QUALIFICATION_FLAG_CODES,
 )
@@ -1181,19 +1181,25 @@ def _month_bounds(reference_month: date) -> tuple[date, date]:
 
 
 def _expanded_session_period(session: ReconciliationSession) -> tuple[date, date]:
-    """Período Omie da sessão expandido pelo range FIXO (§5.3).
+    """Janela Omie da sessão — a MESMA decisão do processamento (§5.3, 86e3n70p0).
 
-    Período REAL do statement quando persistido (cobre extrato quebrado tipo
-    15/04→14/05); fallback `[reference_month, último dia do mês]` para sessões
-    pré-migration `4a2f9e8b1c3d`. A expansão é SEMPRE `DATE_DIVERGENCE_RANGE`
-    (3 dias fixos, FASE 1) — a coluna `date_tolerance_days` grava 0 nas
-    sessões novas e usá-la ENCOLHERIA a janela (mesma decisão do export).
+    A BASE é o período REAL do statement quando persistido (cobre extrato
+    quebrado tipo 15/04→14/05); fallback `[reference_month, último dia do mês]`
+    para sessões pré-migration `4a2f9e8b1c3d`. Quem amplia é
+    `omie_window_for_session`: `DATE_DIVERGENCE_RANGE` fixo no processo de
+    sempre (a coluna `date_tolerance_days` grava 0 e usá-la ENCOLHERIA a janela),
+    e o lote da fatura no modo "vencimento da fatura" do cartão — senão a aba
+    Divergências Omie e a troca de lançamento olhariam outra janela que não a
+    que o matcher viu.
     """
     if session.period_start is not None and session.period_end is not None:
         period_start, period_end = session.period_start, session.period_end
     else:
         period_start, period_end = _month_bounds(session.reference_month)
-    return (
-        period_start - timedelta(days=DATE_DIVERGENCE_RANGE),
-        period_end + timedelta(days=DATE_DIVERGENCE_RANGE),
+    return omie_window_for_session(
+        account_type=session.account_type,
+        card_posting_date_mode=session.card_posting_date_mode,
+        invoice_due_date=session.invoice_due_date,
+        period_start=period_start,
+        period_end=period_end,
     )

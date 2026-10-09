@@ -2749,6 +2749,24 @@ export interface components {
          * @enum {string}
          */
         Capability: "verificar_credencial" | "listar_contas" | "listar_lancamentos" | "escrever" | "listar_titulos_em_aberto";
+        /**
+         * CardPostingDateMode
+         * @description Em que data o cliente lança no Omie as compras do cartão (86e3n70p0).
+         *
+         *     Fonte ÚNICA do CHECK de `clients.card_posting_date_mode` e do snapshot em
+         *     `reconciliation_sessions.card_posting_date_mode`. É configuração DECLARADA
+         *     por cliente, nunca inferida dos dados — como a convenção de sinal da origem
+         *     por arquivo (S14): adivinhar o processo pelo que o Omie devolve casaria
+         *     recorrências de mesmo valor (Microsoft 87,68 todo mês) com a fatura errada.
+         *
+         *     - `purchase_date`: cada compra entra no Omie na DATA DA COMPRA (Hologram,
+         *       cartão Inter). É o processo que o cruzamento sempre conheceu.
+         *     - `invoice_due_date`: as compras da fatura entram em LOTE na data de
+         *       VENCIMENTO da fatura (Prospecta, cartão Cora). A data da compra não decide
+         *       o par; o lote é buscado pelo vencimento.
+         * @enum {string}
+         */
+        CardPostingDateMode: "purchase_date" | "invoice_due_date";
         /** CardPurchasesToPost */
         CardPurchasesToPost: {
             /** Count */
@@ -3199,6 +3217,8 @@ export interface components {
              * @default 0
              */
             manager_count: number;
+            /** @default purchase_date */
+            card_posting_date_mode: components["schemas"]["CardPostingDateMode"];
             /**
              * @description `sem_origem` = nenhuma conexão; `ativa` = há conexão ativa; `erro` = há conexão, nenhuma ativa.
              * @default sem_origem
@@ -3309,6 +3329,8 @@ export interface components {
              * @default 0
              */
             manager_count: number;
+            /** @default purchase_date */
+            card_posting_date_mode: components["schemas"]["CardPostingDateMode"];
             /**
              * @description `sem_origem` = nenhuma conexão; `ativa` = há conexão ativa; `erro` = há conexão, nenhuma ativa.
              * @default sem_origem
@@ -3629,6 +3651,11 @@ export interface components {
              */
             category_id?: string | null;
             /**
+             * @description Em que data as compras do cartão entram no Omie: `purchase_date` (na data da compra) ou `invoice_due_date` (em lote, no vencimento da fatura).
+             * @default purchase_date
+             */
+            card_posting_date_mode: components["schemas"]["CardPostingDateMode"];
+            /**
              * Organization Id
              * @description Organização dona do cliente. Obrigatória para a plataforma; para o staff de organização, omitir (usa a própria) ou repetir a própria.
              */
@@ -3765,6 +3792,13 @@ export interface components {
              * @description Partes da conciliação. Forma canônica (BACK 04.2).
              */
             files?: components["schemas"]["ReconciliationFileInput"][];
+            /**
+             * Invoice Due Date
+             * @description Vencimento da fatura do cartão, como confirmado na prévia. Obrigatório quando o modo em vigor é `invoice_due_date`.
+             */
+            invoice_due_date?: string | null;
+            /** @description Troca pontual do modo de lançamento do cartão SÓ nesta conciliação. Ausente = a configuração do cliente. */
+            card_posting_date_mode?: components["schemas"]["CardPostingDateMode"] | null;
             /**
              * File Hash
              * @description LEGADO: use `files`.
@@ -4182,6 +4216,11 @@ export interface components {
             closing_balance: string;
             /** Transactions */
             transactions: components["schemas"]["ExtractedTransaction-Output"][];
+            /**
+             * Invoice Due Date
+             * @description Vencimento da fatura do cartão (YYYY-MM-DD).
+             */
+            invoice_due_date?: string | null;
         };
         /**
          * ExtractedTransaction
@@ -6426,6 +6465,9 @@ export interface components {
             created_by?: components["schemas"]["SessionAuthor"] | null;
             /** Created At */
             created_at?: string | null;
+            card_posting_date_mode?: components["schemas"]["CardPostingDateMode"] | null;
+            /** Invoice Due Date */
+            invoice_due_date?: string | null;
             /**
              * Qualification Used Glossary
              * @default false
@@ -6986,6 +7028,8 @@ export interface components {
              * @description Omitir mantém a categoria; `null` limpa; UUID troca.
              */
             category_id?: string | null;
+            /** @description Omitir mantém. Vale para as conciliações de cartão criadas DEPOIS. */
+            card_posting_date_mode?: components["schemas"]["CardPostingDateMode"] | null;
         };
         /**
          * UpdateClientUserRequest
