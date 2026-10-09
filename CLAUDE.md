@@ -1469,6 +1469,18 @@ roteiro em [Docs/landing/DOMINIO_E_NOME.md](Docs/landing/DOMINIO_E_NOME.md)): o
 mapeamento de domínio do Cloud Run não atende `southamerica-east1`, então o caminho é Load
 Balancer HTTPS.
 
+**Reprocessar uma conciliação CONCLUÍDA (86e3n70q9, épico 86e3n70nv)** é o mesmo
+`POST /reconciliations/{id}/reprocess` do "tentar de novo": aceita `error`, `reviewing` e
+`done`; `processing` é 409 decidido no UPDATE condicional (dois cliques nunca agendam dois
+jobs) e cliente encerrado é 409. FICAM as linhas do arquivo (o parse pago) e as intenções de
+lançamento em `reconciliation_omie_postings`, **nunca tocadas** (§4.11: a linha lançada
+continua lançada, o cruzamento a reencontra no extrato e reenviá-la é `ja_lancada`). SAI, na
+sessão concluída, a revisão inteira: anomalias com resolução, nota e veredito, lançamentos do
+Omie da sessão com as notas deles, contadores, o selo do glossário e a ação e a nota de cada
+linha do arquivo; a tela diz isso no diálogo antes de confirmar. A sessão em `error` não
+ganha essa limpeza (o anexo de parte preserva o trabalho do analista de propósito). Evento
+`conciliacao_reprocessada` (IDs e o status de origem, sem dedup).
+
 ---
 
 ## 9. Comandos Frequentes
@@ -1577,6 +1589,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.89, 09/10/2026. **Reprocessar uma conciliação concluída e três ajustes de tela da reunião com o Murilo (86e3n70q9 e 86e3n70qj, subtasks 6 e 8 do épico 86e3n70nv).** Depois de lançar no Omie a conciliação não se atualizava ("tem que excluir e fazer de novo"): o `POST /reprocess` passou a aceitar `reviewing` e `done`, com o 409 de `processing` decidido no UPDATE condicional, cliente encerrado em 409, e a limpeza da revisão só na sessão concluída (parágrafo novo na §8); `reconciliation_omie_postings` não é tocada. A revisão ganhou "Reprocessar com o Omie" no cabeçalho, num `AlertDialog` que lista o que se perde. Na tela: a caixa do passo 2 da gaveta de criação virou a região "Conciliação" (conta e mês rotulados) e a frase das partes foi para junto da lista de arquivos; carteira e categorias do Omie dividem `shared/never-synced-state.tsx` (o vazio diz que não sincronizou, "Sincronizar agora" dentro dele para quem pode, "peça a alguém com acesso" para os demais, e nada de "nenhum título" enquanto o estado carrega; sem sincronização automática, regra na skill `front-gate`); "Lançar no Omie" mostra carregando no botão até as categorias chegarem, a gaveta diz no topo e em cada linha o número e onde entrou, e o "lançado nesta visita" virou cache por sessão (`usePostedInSession`), de onde as abas Movimentações e Anomalias pintam "Lançado no Omie · nº X" visível. Sem rota nova: endpoints sensíveis (**121**), matriz (**29**) e pares de AAD (**17**) não mudaram._
 
 _Versão 1.88, 09/10/2026. **O catálogo do de-para ganhou tela, e o primeiro uso por um escritório novo deixou de terminar em "peça ao administrador" lido pelo administrador (86e3n70pn, subtask 4 do épico 86e3n70nv; reunião com o Murilo de 08/10).** Configurações → Destinos do de-para (`manage_mapping_catalog`, plataforma e admin; as 7 rotas do catálogo já existiam) lista os destinos com a contagem e, por destino, os alvos paginados com criar em lote colando `código;nome` (ponto e vírgula ou TAB; 409 de código repetido no CAMPO), editar o nome e inativar/reativar; o `conta_contabil` aparece explicado. Nasceu `GET /clients/{id}/mapping/{tipo}/origin-targets` (lista canônica 120 → **121**, coleção, na bateria dos três atacantes; guard `ManageMappingCatalogForClientDep`, auditado): a prévia dos alvos do demonstrativo a partir dos `dre_code` das categorias ativas do cliente, com o nome pelo mapa `dre` do `resolve_names` da S10. Só lê; os confirmados entram pelo lote existente, por decisão explícita, nunca automático. No de-para: o aviso de catálogo vazio dá "Cadastrar alvos" (`?destino=<id>`) e a ação da origem a quem tem a permissão; sem destino na URL, demonstrativo sem alvos e cliente com plano contábil abre na conta contábil; o topo ganhou "Como funciona" recolhível (o `CollapsibleSummary` aceita `showLabel`/`hideLabel`). Na tela, "Plano de Contas" virou "Categorias do Omie" (h1, menu, toasts, região rolável, textos do de-para que apontam para ela; rota mantida, helper `chartOfAccountsPath`). Matriz (**29**) e pares de AAD (**17**) não mudaram._
 
