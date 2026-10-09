@@ -56,6 +56,9 @@ export interface NavSection {
   items: NavItem[];
 }
 
+/** Rota da tela de Configurações do catálogo do de-para (86e3n70pn). */
+const MAPPING_CATALOG_PATH = '/configuracoes/destinos-de-para';
+
 /** Ativo quando a rota é o próprio href ou desce dele (`/x` cobre `/x/y`). */
 function isPathActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
@@ -101,9 +104,9 @@ export function globalNavSections(user: AuthenticatedUser, pathname: string): Na
 
   // Configurações item a item pela MATRIZ (86e36ecwa): com organizações, o
   // "quem vê Configurações" deixou de ser uma pergunta só. O admin da
-  // organização vê as três primeiras; a plataforma vê as quatro; o gerente não
-  // vê a seção — e ela some inteira quando nenhum item sobra, em vez de virar
-  // um cabeçalho órfão.
+  // organização vê Usuários, Categorias, Destinos do de-para e Layouts; a
+  // plataforma vê todos; o gerente não vê a seção — e ela some inteira quando
+  // nenhum item sobra, em vez de virar um cabeçalho órfão.
   const settings = SETTINGS_ITEMS.filter((item) => hasPermission(user, item.permission)).map(
     (item) => ({
       href: item.href,
@@ -146,6 +149,15 @@ const SETTINGS_ITEMS: ReadonlyArray<{
     icon: <Tags className="h-4 w-4" aria-hidden="true" />,
     permission: 'manage_client_categories',
   },
+  // 86e3n70pn: o catálogo do de-para (destinos e alvos) é configuração da
+  // ORGANIZAÇÃO — plataforma e admin. O gerente decide o de-para dos clientes da
+  // carteira, mas não escreve no catálogo que vale para todos eles.
+  {
+    href: MAPPING_CATALOG_PATH,
+    label: 'Destinos do de-para',
+    icon: <ArrowRightLeft className="h-4 w-4" aria-hidden="true" />,
+    permission: 'manage_mapping_catalog',
+  },
   // S13 (R3): os layouts do arquivo contábil são configuração da ORGANIZAÇÃO —
   // plataforma e admin. O gerente GERA o arquivo (`generate_accounting_file`, no
   // de-para) mas não administra layout, então não vê o item.
@@ -162,6 +174,17 @@ const SETTINGS_ITEMS: ReadonlyArray<{
     permission: 'manage_platform',
   },
 ];
+
+/**
+ * A tela do catálogo com um destino já aberto (`?destino=<id>`, o parâmetro que
+ * `mapping-catalog-screen.tsx` lê). É para onde o aviso de catálogo vazio do de-para
+ * manda quem pode cadastrar os alvos.
+ */
+export function mappingCatalogPath(destinationId?: string): string {
+  return destinationId
+    ? `${MAPPING_CATALOG_PATH}?destino=${encodeURIComponent(destinationId)}`
+    : MAPPING_CATALOG_PATH;
+}
 
 /**
  * Rota da LISTA de conciliações do cliente, que é a tela de entrada dele

@@ -452,6 +452,10 @@ export type MappingDestinationListResponse = Schemas['MappingDestinationListResp
 export type MappingTarget = Schemas['MappingTargetItem'];
 /** `{ data, pagination }` — DUAS chaves: o envelope chega inteiro. */
 export type MappingTargetListResponse = Schemas['MappingTargetListResponse'];
+/** Lote ATÔMICO de alvos (código + nome): um código repetido recusa tudo com 409. */
+export type MappingTargetBatchCreate = Schemas['MappingTargetBatchCreate'];
+/** Edição de alvo: nome e/ou situação. O código não muda. */
+export type MappingTargetUpdate = Schemas['MappingTargetUpdate'];
 
 /**
  * Uma categoria do universo do cliente com a decisão VIGENTE no destino. O nome
