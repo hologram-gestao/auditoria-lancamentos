@@ -195,9 +195,9 @@ export function AccountingChartScreen({ clientId }: { clientId: string }) {
             Plano contábil
           </h1>
           <p className="text-muted-foreground max-w-3xl text-sm">
-            O plano de contas do sistema contábil onde o escritório lança — diferente do Plano de
-            Contas da origem. É dele que o de-para escolhe a conta de cada categoria e a conta do
-            banco de cada conta de origem.
+            O plano de contas do sistema contábil onde o escritório lança — diferente das Categorias
+            do Omie, que são a classificação da origem. É dele que o de-para escolhe a conta de cada
+            categoria e a conta do banco de cada conta de origem.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">

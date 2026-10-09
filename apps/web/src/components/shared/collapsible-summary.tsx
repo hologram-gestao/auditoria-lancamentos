@@ -59,6 +59,12 @@ interface CollapsibleSummaryProps {
   footnote: React.ReactNode;
   /** Os cards de totais. */
   children: React.ReactNode;
+  /**
+   * Rótulos do botão. O padrão é o dos totais; outro bloco recolhível que usa a
+   * mesma moldura (o "Como funciona" do de-para, 86e3n70pn) diz o que esconde.
+   */
+  showLabel?: string;
+  hideLabel?: string;
 }
 
 export function CollapsibleSummary({
@@ -66,6 +72,8 @@ export function CollapsibleSummary({
   collapsed,
   footnote,
   children,
+  showLabel = 'Mostrar totais',
+  hideLabel = 'Ocultar totais',
 }: CollapsibleSummaryProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const contentId = useId();
@@ -108,7 +116,7 @@ export function CollapsibleSummary({
           ) : (
             <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
           )}
-          {isCollapsed ? 'Mostrar totais' : 'Ocultar totais'}
+          {isCollapsed ? showLabel : hideLabel}
         </Button>
       </div>
     </div>

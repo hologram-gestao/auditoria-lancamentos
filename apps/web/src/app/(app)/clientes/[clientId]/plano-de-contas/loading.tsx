@@ -1,5 +1,5 @@
 /**
- * Skeleton da rota "Plano de Contas" do cliente.
+ * Skeleton da rota "Categorias do Omie" do cliente (`/plano-de-contas`).
  *
  * Proporcional ao layout real (cabeçalho + bloco de cobertura de 5 cartões +
  * barra de filtros + tabela de 5 colunas + rodapé de paginação) — um spinner
@@ -12,7 +12,7 @@ export default function ChartOfAccountsLoading() {
     <div
       role="status"
       aria-busy="true"
-      aria-label="Carregando o plano de contas do cliente"
+      aria-label="Carregando as categorias do Omie do cliente"
       className="flex h-full flex-col gap-4"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">

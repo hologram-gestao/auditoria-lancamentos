@@ -1180,6 +1180,45 @@ let mappingSecondDestinationPending = false;
 /** Estados vazios (86e3h57b5): a lista do de-para vem vazia na competência. */
 let mappingListEmpty = false;
 
+/**
+ * 86e3n70pn: organização nova, o demonstrativo SEM alvos no catálogo. Liga o aviso
+ * de catálogo vazio do de-para e a lista vazia na tela "Destinos do de-para".
+ */
+let mappingCatalogEmpty = false;
+
+/** A prévia dos alvos do demonstrativo a partir da origem do cliente (86e3n70pn). */
+const ORIGIN_TARGETS_PREVIEW = {
+  state: 'ok',
+  destinationId: 'dddddddd-0000-4000-8000-000000000001',
+  namesResolved: true,
+  candidates: [
+    {
+      code: '1.01',
+      name: 'Receita bruta de vendas',
+      categories: 3,
+      exists: false,
+      active: null,
+      creatable: true,
+    },
+    {
+      code: '1.02',
+      name: 'Deduções da receita',
+      categories: 1,
+      exists: false,
+      active: null,
+      creatable: true,
+    },
+    {
+      code: '2.01',
+      name: 'Despesas administrativas',
+      categories: 7,
+      exists: true,
+      active: true,
+      creatable: false,
+    },
+  ],
+};
+
 /** As contas do cache que não são habituais (só com `dashboardExtraAccounts`). */
 const NON_HABITUAL_ACCOUNTS = [
   { omie_conta_id: 21, name: 'Caixinha' },
@@ -2327,21 +2366,50 @@ async function fulfillApi(route: Route): Promise<void> {
   // chave ÚNICA (o `apiGet` desembrulha); alvos e lista do de-para são pares
   // `{ data, pagination[, competence] }` REAIS — `fulfill` cru, não `json()`.
   if (path === '/api/v1/mapping-destinations') {
+    const destinos = mappingCatalogEmpty
+      ? MAPPING_DESTINATIONS.map((d) =>
+          d.type === 'demonstrativo_contabil' ? { ...d, targetsCount: 0 } : d,
+        )
+      : MAPPING_DESTINATIONS;
     return json(
-      mappingAccountingDestination
-        ? [...MAPPING_DESTINATIONS, ACCOUNTING_MAPPING_DESTINATION]
-        : MAPPING_DESTINATIONS,
+      mappingAccountingDestination ? [...destinos, ACCOUNTING_MAPPING_DESTINATION] : destinos,
     );
   }
+  // 86e3n70pn: editar/inativar um alvo e criar em lote (a tela do catálogo e a
+  // prévia da origem). O lote responde `{ data: [...] }` com chave ÚNICA.
+  if (/^\/api\/v1\/mapping-destinations\/[^/]+\/targets\/[^/]+$/.test(path)) {
+    const id = path.split('/').pop();
+    const alvo = MAPPING_TARGETS.find((t) => t.id === id) ?? MAPPING_TARGETS[0];
+    return json({ ...alvo, ...(route.request().postDataJSON() as Record<string, unknown>) });
+  }
   if (/^\/api\/v1\/mapping-destinations\/[^/]+\/targets$/.test(path)) {
+    if (route.request().method() === 'POST') {
+      const body = route.request().postDataJSON() as { targets: { code: string; name: string }[] };
+      return route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: body.targets.map((t, i) => ({ id: `novo-${i}`, active: true, ...t })),
+        }),
+      });
+    }
+    const alvos = mappingCatalogEmpty ? [] : MAPPING_TARGETS;
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        data: MAPPING_TARGETS,
-        pagination: { page: 1, pageSize: 100, total: MAPPING_TARGETS.length, totalPages: 1 },
+        data: alvos,
+        pagination: {
+          page: 1,
+          pageSize: 100,
+          total: alvos.length,
+          totalPages: alvos.length ? 1 : 0,
+        },
       }),
     });
+  }
+  if (path === `/api/v1/clients/${CLIENT_ID}/mapping/demonstrativo_contabil/origin-targets`) {
+    return json(ORIGIN_TARGETS_PREVIEW);
   }
   if (path === `/api/v1/clients/${CLIENT_ID}/movements/sync-state`) {
     return json(mappingSyncState(url.searchParams.get('competence') ?? '2026-09'));
@@ -3421,6 +3489,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   dashboardExtraAccounts = false;
   mappingSecondDestinationPending = false;
   mappingListEmpty = false;
+  mappingCatalogEmpty = false;
   inputMappingState = 'salvo';
   fileProcessOutcome = 'sucesso';
   // S16: o cliente TEM plano contábil e a importação dá certo, por padrão.
@@ -3920,11 +3989,11 @@ const TELAS_COM_TABELA = [
   },
   {
     key: 'plano-de-contas',
-    titulo: 'Plano de Contas',
+    titulo: 'Categorias do Omie',
     rota: `/clientes/${CLIENT_ID}/plano-de-contas`,
     // O rótulo da região é DIFERENTE do `<h2>` da seção de propósito: dois
     // nomes iguais aninhados quebram o `getByRole` no strict mode.
-    regiao: 'Categorias do plano de contas (rolável)',
+    regiao: 'Lista de categorias do Omie (rolável)',
     usuario: (): Record<string, unknown> => CLIENT_MANAGER_USER,
     // 86e3f55bc: o plano de contas passou ao desenho da carteira (a página
     // rola, a tabela não). Continua no teste da barra e sai só do de rolagem
@@ -5484,7 +5553,9 @@ for (const vp of VIEWPORTS) {
       sessionUser = CLIENT_MANAGER_USER;
       await page.goto(`/clientes/${CLIENT_ID}/plano-de-contas`);
 
-      await expect(page.getByRole('heading', { name: 'Plano de Contas', level: 1 })).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: 'Categorias do Omie', level: 1 }),
+      ).toBeVisible();
 
       // As cinco contagens, cada uma no seu PAR — e todas vindas da rota de
       // cobertura: a página lista 2 linhas e o bloco continua dizendo 50.
@@ -5542,7 +5613,9 @@ for (const vp of VIEWPORTS) {
       await page.goto(`/clientes/${CLIENT_ID}/plano-de-contas`);
 
       // A rota NÃO é negada para ele: ler é ✅ nos cinco papéis.
-      await expect(page.getByRole('heading', { name: 'Plano de Contas', level: 1 })).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: 'Categorias do Omie', level: 1 }),
+      ).toBeVisible();
       await expect(page.getByRole('cell', { name: 'BPO Controller - RB' })).toBeVisible();
       await expect(
         page.getByRole('heading', { name: 'Você não tem acesso a esta página' }),
@@ -5573,7 +5646,7 @@ for (const vp of VIEWPORTS) {
       ).toBeLessThanOrEqual(largura);
 
       await botao.click();
-      await expect(page.getByText('Plano de contas sincronizado.')).toBeVisible();
+      await expect(page.getByText('Categorias do Omie sincronizadas.')).toBeVisible();
       await aguardarToastEstavel(page);
       await shot(page, `plano-de-contas-sincronizado-${slugP}`);
       await analyze(page, `plano de contas — depois de sincronizar (${vp.label})`);
@@ -8348,7 +8421,7 @@ for (const vp of VIEWPORTS) {
 
         const main = page.locator('main');
         const regiao = page.getByRole('region', {
-          name: 'Categorias do plano de contas (rolável)',
+          name: 'Lista de categorias do Omie (rolável)',
         });
         expect(
           await regiao.evaluate((el) => el.scrollHeight - el.clientHeight),
@@ -10420,5 +10493,131 @@ for (const vp of VIEWPORTS) {
         await analyze(page, `${tela.nome} — .xls recusado (${vp.label})`);
       });
     }
+  });
+}
+
+/**
+ * 86e3n70pn (reunião com o Murilo, 08/10/2026) — o primeiro uso do de-para por um
+ * escritório novo. Três telas: Configurações → Destinos do de-para (o catálogo da
+ * organização, que não tinha tela), o aviso de catálogo vazio do de-para com a ação
+ * para quem administra o catálogo (cadastrar e criar a partir da origem), e o bloco
+ * recolhível "Como funciona". Medido em desktop e 390px, com o axe em cada estado.
+ */
+for (const vp of VIEWPORTS) {
+  const slugCat = vp.label.replace(/\s+/g, '-');
+  test.describe(`Destinos do de-para e primeiro uso (86e3n70pn) — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('configurações: destinos, alvos, adicionar e a conta contábil sem catálogo', async ({
+      page,
+    }) => {
+      mappingAccountingDestination = true;
+      await page.goto('/configuracoes/destinos-de-para');
+      await expect(
+        page.getByRole('heading', { name: 'Destinos do de-para', level: 1 }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: 'Alvos de Demonstrativo contábil' }),
+      ).toBeVisible();
+      await expect(page.getByRole('cell', { name: 'Despesas administrativas' })).toBeVisible();
+      await exigirDentroDaViewport(
+        page,
+        page.getByRole('button', { name: 'Adicionar alvos', exact: true }),
+        `${vp.label}: "Adicionar alvos"`,
+      );
+      await exigirDentroDaViewport(
+        page,
+        page.getByRole('button', { name: 'Inativar o alvo 3.1' }),
+        `${vp.label}: ação da linha do alvo`,
+      );
+      await exigirDentroDaViewport(
+        page,
+        page.getByRole('button', { name: 'Ver alvos de Fluxo de caixa' }),
+        `${vp.label}: ação da linha do destino`,
+      );
+      await shot(page, `destinos-de-para-${slugCat}`);
+      await analyze(page, `destinos do de-para — lista e alvos (${vp.label})`);
+
+      await page.getByRole('button', { name: 'Adicionar alvos', exact: true }).click();
+      const dialog = page.getByRole('dialog', { name: 'Adicionar alvos' });
+      await expect(dialog).toBeVisible();
+      await aguardarAnimacao(dialog);
+      await dialog.getByLabel('Alvos').fill('3.01;Receita bruta\n3.02;Deduções da receita');
+      await expect(dialog.getByText(/2 alvos prontos para criar/)).toBeVisible();
+      await shot(page, `destinos-de-para-adicionar-${slugCat}`);
+      await analyze(page, `destinos do de-para — adicionar alvos (${vp.label})`);
+      await dialog.getByRole('button', { name: 'Criar 2 alvos' }).click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+
+      await page.getByRole('button', { name: 'Ver alvos de Conta contábil' }).click();
+      await expect(
+        page.getByRole('heading', { name: 'Conta contábil: sem alvos de catálogo' }),
+      ).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Adicionar alvos', exact: true })).toHaveCount(
+        0,
+      );
+      await analyze(page, `destinos do de-para — conta contábil (${vp.label})`);
+    });
+
+    test('de-para: catálogo vazio oferece cadastrar e criar a partir da origem ao admin', async ({
+      page,
+    }) => {
+      mappingCatalogEmpty = true;
+      await page.goto(`/clientes/${CLIENT_ID}/de-para`);
+      const aviso = page.getByTestId('mapping-empty-catalog');
+      await expect(aviso).toBeVisible();
+      await expect(aviso.getByRole('link', { name: 'Cadastrar alvos' })).toHaveAttribute(
+        'href',
+        '/configuracoes/destinos-de-para?destino=dddddddd-0000-4000-8000-000000000001',
+      );
+      const criar = aviso.getByRole('button', {
+        name: 'Criar alvos a partir das contas de demonstrativo deste cliente',
+      });
+      await exigirDentroDaViewport(page, criar, `${vp.label}: ação do aviso`);
+      await aviso.scrollIntoViewIfNeeded();
+      await shot(page, `de-para-catalogo-vazio-admin-${slugCat}`);
+      await analyze(page, `de-para — catálogo vazio, admin (${vp.label})`);
+
+      await criar.click();
+      const dialog = page.getByRole('dialog', { name: 'Criar alvos a partir da origem' });
+      await expect(dialog).toBeVisible();
+      await aguardarAnimacao(dialog);
+      await expect(dialog.getByTestId('origin-targets-summary')).toContainText(
+        '2 contas novas serão criadas como alvo',
+      );
+      await exigirDentroDaViewport(
+        page,
+        dialog.getByRole('button', { name: 'Criar 2 alvos' }),
+        `${vp.label}: confirmar a prévia da origem`,
+      );
+      await shot(page, `de-para-alvos-da-origem-${slugCat}`);
+      await analyze(page, `de-para — prévia dos alvos da origem (${vp.label})`);
+      await dialog.getByRole('button', { name: 'Criar 2 alvos' }).click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+    });
+
+    test('de-para: o gerente lê o aviso sem ação; "Como funciona" recolhe', async ({ page }) => {
+      sessionUser = SYSTEM_MANAGER_USER;
+      mappingCatalogEmpty = true;
+      await page.goto(`/clientes/${CLIENT_ID}/de-para`);
+      const aviso = page.getByTestId('mapping-empty-catalog');
+      await expect(aviso.getByText(/Peça ao administrador da organização/)).toBeVisible();
+      await expect(aviso.getByRole('link')).toHaveCount(0);
+      await expect(aviso.getByRole('button')).toHaveCount(0);
+
+      const comoFunciona = page.getByRole('region', { name: 'Como funciona' });
+      for (const termo of ['Destino', 'Alvo', 'Decisão', 'Herdada']) {
+        await expect(comoFunciona.getByText(termo, { exact: true })).toBeVisible();
+      }
+      await shot(page, `de-para-como-funciona-${slugCat}`);
+      await analyze(page, `de-para — como funciona aberto (${vp.label})`);
+
+      await page.getByRole('button', { name: 'Ocultar como funciona' }).click();
+      await expect(page.getByRole('button', { name: 'Mostrar como funciona' })).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      );
+      await analyze(page, `de-para — como funciona recolhido (${vp.label})`);
+    });
   });
 }

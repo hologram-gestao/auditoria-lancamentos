@@ -38,7 +38,11 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
-import { accountingChartPath } from '@/components/features/navigation/nav-items';
+import {
+  accountingChartPath,
+  chartOfAccountsPath,
+  mappingCatalogPath,
+} from '@/components/features/navigation/nav-items';
 import { EmptyState } from '@/components/shared/empty-state';
 import { MappingVignette } from '@/components/shared/vignettes';
 import { Button } from '@/components/ui/button';
@@ -87,6 +91,7 @@ import {
   MappingSituationCountsSkeleton,
   type MappingCountKey,
 } from './mapping-situation-counts';
+import { OriginTargetsAction } from './origin-targets-dialog';
 import { VigenciaActionDialog } from './vigencia-action-dialog';
 
 export const SITUATION_FILTERS: readonly MappingSituation[] = [
@@ -134,6 +139,11 @@ interface MappingListPanelProps {
   canManage: boolean;
   /** `manage_client_accounting_chart` — só quem a tem é mandado importar o plano. */
   canManageChart: boolean;
+  /**
+   * `manage_mapping_catalog` (86e3n70pn): só quem escreve no catálogo da organização
+   * é mandado cadastrar alvos e vê a ação de criá-los a partir da origem.
+   */
+  canManageCatalog: boolean;
   isClosed: boolean;
 }
 
@@ -156,6 +166,7 @@ export function MappingListPanel({
   serverCompetence,
   canManage,
   canManageChart,
+  canManageCatalog,
   isClosed,
 }: MappingListPanelProps) {
   const [editing, setEditing] = useState<MappingListItem | null>(null);
@@ -209,17 +220,12 @@ export function MappingListPanel({
       )}
 
       {!accounting && destination.targetsCount === 0 && (
-        <div
-          role="status"
-          className="bg-warning-muted text-warning ring-warning/30 space-y-1 rounded-lg p-4 text-sm ring-1 ring-inset"
-        >
-          <p className="font-medium">O catálogo de alvos deste destino está vazio</p>
-          <p>
-            Sem alvos cadastrados, a única decisão possível é &quot;Não mapear&quot;. Peça ao
-            administrador da organização para cadastrar os alvos (código e nome) do destino{' '}
-            {destination.name}.
-          </p>
-        </div>
+        <EmptyCatalogNotice
+          clientId={clientId}
+          destination={destination}
+          canManageCatalog={canManageCatalog}
+          isClosed={isClosed}
+        />
       )}
 
       {/* Contadores ANTES da barra: são o recorte por situação (Parte B). */}
@@ -303,6 +309,11 @@ export function MappingListPanel({
             com "Confirmar" desabilitado (validação humana da S12). */}
         {showWriteActions && inherits && (
           <div className="flex flex-wrap gap-2 xl:ml-auto">
+            {/* Catálogo já com alvos: a ação continua à mão para completar os que
+                faltam (um cliente novo da organização declara contas novas). */}
+            {canManageCatalog && destination.targetsCount > 0 && (
+              <OriginTargetsAction clientId={clientId} destination={destination} />
+            )}
             <InheritAction
               clientId={clientId}
               destination={destination}
@@ -561,6 +572,69 @@ function AccountingDecisionCell({ item }: { item: MappingListItem }) {
 }
 
 /**
+ * Destino com o catálogo de alvos VAZIO (86e3n70pn). Organização nova nasce assim, e
+ * o texto antigo mandava "pedir ao administrador da organização" a quem era o
+ * administrador. Agora o aviso se ramifica pela permissão do catálogo
+ * (`manage_mapping_catalog`), a mesma que libera a tela de destino (§7 Frontend: a
+ * ação oferecida existe no destino, pela MESMA pergunta dos dois lados):
+ *   - quem pode cadastrar vê "Cadastrar alvos" (a tela do catálogo com o destino já
+ *     aberto) e, no demonstrativo, a ação de criar os alvos a partir das contas que a
+ *     origem deste cliente declara;
+ *   - os demais leem o texto de sempre, sem verbo de ação que a matriz nega.
+ */
+function EmptyCatalogNotice({
+  clientId,
+  destination,
+  canManageCatalog,
+  isClosed,
+}: {
+  clientId: string;
+  destination: MappingDestination;
+  canManageCatalog: boolean;
+  isClosed: boolean;
+}) {
+  const inherits = destination.type === INHERITING_DESTINATION_TYPE;
+  return (
+    <div
+      role="status"
+      data-testid="mapping-empty-catalog"
+      className="bg-warning-muted text-warning ring-warning/30 space-y-2 rounded-lg p-4 text-sm ring-1 ring-inset"
+    >
+      <p className="font-medium">O catálogo de alvos deste destino está vazio</p>
+      {canManageCatalog ? (
+        <>
+          <p>
+            Sem alvos, a única decisão possível é &quot;Não mapear&quot;.{' '}
+            {inherits
+              ? 'Cadastre os alvos (código e nome) do destino ou crie-os a partir das contas de demonstrativo que as categorias do Omie deste cliente já declaram; depois, "Iniciar de-para" herda as decisões.'
+              : `Cadastre os alvos (código e nome) do destino ${destination.name}.`}{' '}
+            O catálogo vale para todos os clientes da organização.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline" size="sm">
+              <Link href={mappingCatalogPath(destination.id)}>Cadastrar alvos</Link>
+            </Button>
+            {inherits && !isClosed && (
+              <OriginTargetsAction
+                clientId={clientId}
+                destination={destination}
+                label="Criar alvos a partir das contas de demonstrativo deste cliente"
+              />
+            )}
+          </div>
+        </>
+      ) : (
+        <p>
+          Sem alvos cadastrados, a única decisão possível é &quot;Não mapear&quot;. Peça ao
+          administrador da organização para cadastrar os alvos (código e nome) do destino{' '}
+          {destination.name}.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
  * Cliente SEM plano contábil no destino `conta_contabil`: não há conta para
  * escolher. Quem pode importar (`manage_client_accounting_chart`, cliente
  * aberto) é orientado a importar em "Plano contábil"; os demais leem só o
@@ -620,7 +694,7 @@ function SkeletonRows({ columnCount }: { columnCount: number }) {
 }
 
 /**
- * Universo vazio (R7): o cliente não tem plano de contas sincronizado nem
+ * Universo vazio (R7): o cliente não tem categorias do Omie sincronizadas nem
  * movimento com categoria — não há o que classificar ainda. A saída é o plano
  * de contas, e o estado diz isso em vez de mostrar uma tabela muda.
  */
@@ -631,10 +705,10 @@ function EmptyUniverseState({ clientId }: { clientId: string }) {
       framed={false}
       vignette={<MappingVignette />}
       title="Ainda não há categorias para classificar"
-      description="O de-para lista as categorias do plano de contas sincronizado e as que aparecem nos movimentos do cliente. Sincronize o plano de contas para começar."
+      description="O de-para lista as categorias do Omie sincronizadas e as que aparecem nos movimentos do cliente. Sincronize as categorias do Omie para começar."
       action={
         <Button asChild variant="outline" size="sm">
-          <Link href={`/clientes/${clientId}/plano-de-contas`}>Ir para o plano de contas</Link>
+          <Link href={chartOfAccountsPath(clientId)}>Ir para Categorias do Omie</Link>
         </Button>
       }
     />
@@ -810,7 +884,7 @@ function InheritAction({
         open={open}
         onOpenChange={onOpenChange}
         title="Iniciar de-para"
-        description={`Pré-preenche "${destination.name}" com a conta de demonstrativo que o plano de contas da origem já traz. Cada decisão entra como herdada, para você confirmar ou alterar. Decisões existentes não são tocadas.`}
+        description={`Pré-preenche "${destination.name}" com a conta de demonstrativo que as categorias do Omie já trazem. Cada decisão entra como herdada, para você confirmar ou alterar. Decisões existentes não são tocadas.`}
         confirmLabel="Iniciar de-para"
         continuityNote="Só as categorias sem decisão recebem a herdada; quem já tem decisão não é tocado."
         serverCompetence={serverCompetence}
@@ -819,10 +893,10 @@ function InheritAction({
           const result = await inheritMutation.mutateAsync({ effectiveFrom, confirmRetroactive });
           if (result.state === 'sem_plano_de_contas') {
             toast.info(
-              'O cliente não tem plano de contas sincronizado: não há o que herdar. Sincronize o plano de contas e tente de novo.',
+              'O cliente não tem as categorias do Omie sincronizadas: não há o que herdar. Sincronize em "Categorias do Omie" e tente de novo.',
             );
           } else if (result.state === 'destino_sem_heranca') {
-            toast.info('Este destino não herda do plano de contas: ele começa sem decisão.');
+            toast.info('Este destino não herda das categorias do Omie: ele começa sem decisão.');
           } else {
             toast.success(
               `${result.created} ${result.created === 1 ? 'decisão herdada' : 'decisões herdadas'} a partir de ${formatReferenceMonth(result.effectiveFrom)}.`,

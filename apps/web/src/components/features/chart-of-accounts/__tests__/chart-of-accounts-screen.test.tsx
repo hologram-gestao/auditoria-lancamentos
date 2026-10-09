@@ -1,5 +1,5 @@
 /**
- * Testes da tela "Plano de Contas" do cliente (FRONT 10.5 / R3 · R4).
+ * Testes da tela "Categorias do Omie" do cliente (FRONT 10.5 / R3 · R4).
  *
  * **Executor:** job `Web (lint · type · test)` do `.github/workflows/ci.yml`
  * (`pnpm test:web` → vitest). Não é o `web_a11y` — aquele roda só
@@ -236,7 +236,9 @@ describe('ChartOfAccountsScreen — bloco de cobertura (R3)', () => {
     coverageState.isLoading = true;
     coverageState.data = undefined;
     render(<ChartOfAccountsScreen clientId="c1" />);
-    expect(screen.getByLabelText('Carregando a cobertura do plano de contas')).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Carregando a cobertura das categorias do Omie'),
+    ).toBeInTheDocument();
   });
 });
 
@@ -278,7 +280,7 @@ describe('ChartOfAccountsScreen — lista', () => {
   it('a página rola e a tabela não: sem fill, cabeçalho grudado na rolagem da página', () => {
     render(<ChartOfAccountsScreen clientId="c1" />);
     const region = screen.getByRole('region', {
-      name: 'Categorias do plano de contas (rolável)',
+      name: 'Lista de categorias do Omie (rolável)',
     });
     expect(region).toHaveClass('overflow-auto', 'xl:overflow-clip');
     expect(region).not.toHaveClass('min-h-0');
@@ -536,7 +538,7 @@ describe('ChartOfAccountsScreen — cards de cobertura que filtram (86e3f55bc)',
   it('a nota diz que as contagens são do plano inteiro, com a data de referência', () => {
     render(<ChartOfAccountsScreen clientId="c1" />);
     expect(
-      screen.getByText(/^Contagens do plano de contas inteiro, com referência em 23\/09\/2026/),
+      screen.getByText(/^Contagens de todas as categorias do Omie, com referência em 23\/09\/2026/),
     ).toBeVisible();
   });
 });
@@ -653,7 +655,7 @@ describe('ChartOfAccountsScreen — sincronizar (R4, §4.9)', () => {
     render(<ChartOfAccountsScreen clientId="c1" />);
     await user.click(screen.getByRole('button', { name: 'Sincronizar agora' }));
     await waitFor(() =>
-      expect(toast.success).toHaveBeenCalledWith('Plano de contas sincronizado.'),
+      expect(toast.success).toHaveBeenCalledWith('Categorias do Omie sincronizadas.'),
     );
   });
 
@@ -701,7 +703,9 @@ describe('ChartOfAccountsScreen — estados (R3)', () => {
     };
     render(<ChartOfAccountsScreen clientId="c1" />);
 
-    expect(screen.getByText('Este cliente ainda não sincronizou o plano de contas')).toBeVisible();
+    expect(
+      screen.getByText('Este cliente ainda não sincronizou as categorias do Omie'),
+    ).toBeVisible();
     // Duas ocorrências: o botão do cabeçalho e o do estado vazio.
     expect(screen.getAllByRole('button', { name: 'Sincronizar agora' })).toHaveLength(2);
   });
@@ -742,7 +746,9 @@ describe('ChartOfAccountsScreen — estados (R3)', () => {
     render(<ChartOfAccountsScreen clientId="c1" />);
 
     expect(screen.getByText('Nenhuma categoria encontrada para este recorte.')).toBeVisible();
-    expect(screen.queryByText('Este cliente ainda não sincronizou o plano de contas')).toBeNull();
+    expect(
+      screen.queryByText('Este cliente ainda não sincronizou as categorias do Omie'),
+    ).toBeNull();
   });
 
   it('carregando mostra o skeleton da tabela', () => {

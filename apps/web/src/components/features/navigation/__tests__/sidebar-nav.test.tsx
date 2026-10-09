@@ -215,6 +215,11 @@ describe('SidebarNav — camada global', () => {
       'href',
       '/configuracoes/layouts-exportacao',
     );
+    // 86e3n70pn: o catálogo do de-para é da organização — o admin o administra.
+    expect(within(nav).getByRole('link', { name: 'Destinos do de-para' })).toHaveAttribute(
+      'href',
+      '/configuracoes/destinos-de-para',
+    );
     await assertNoA11yViolations(container);
   });
 
@@ -231,6 +236,7 @@ describe('SidebarNav — camada global', () => {
     expect(within(nav).getByRole('link', { name: 'Categorias de Cliente' })).toBeInTheDocument();
     expect(within(nav).getByRole('link', { name: 'Tipos de Anomalia' })).toBeInTheDocument();
     expect(within(nav).getByRole('link', { name: 'Layouts de exportação' })).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: 'Destinos do de-para' })).toBeInTheDocument();
     expect(within(nav).getByRole('link', { name: 'Clientes' })).toBeInTheDocument();
     await assertNoA11yViolations(container);
   });
@@ -246,14 +252,21 @@ describe('SidebarNav — camada global', () => {
     expect(
       within(nav).queryByRole('link', { name: 'Layouts de exportação' }),
     ).not.toBeInTheDocument();
+    // 86e3n70pn: o gerente DECIDE o de-para da carteira, mas não escreve no catálogo.
+    expect(
+      within(nav).queryByRole('link', { name: 'Destinos do de-para' }),
+    ).not.toBeInTheDocument();
   });
 
-  it('usuários do cliente não veem "Layouts de exportação" (S13)', () => {
+  it('usuários do cliente não veem "Layouts de exportação" (S13) nem "Destinos do de-para"', () => {
     for (const user of [CLIENT_MANAGER, CLIENT_OPERATOR]) {
       const { unmount } = render(<SidebarNav user={user} />);
       const nav = screen.getByRole('navigation', { name: 'Navegação principal' });
       expect(
         within(nav).queryByRole('link', { name: 'Layouts de exportação' }),
+      ).not.toBeInTheDocument();
+      expect(
+        within(nav).queryByRole('link', { name: 'Destinos do de-para' }),
       ).not.toBeInTheDocument();
       unmount();
     }
@@ -336,7 +349,7 @@ describe('SidebarNav — camada do cliente', () => {
 
     const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
     const links = within(nav).getAllByRole('link');
-    // "Plano de Contas" entrou na S10, "Carteira" na S11, "De-para" na S12,
+    // "Categorias do Omie" ("Plano de Contas" até 86e3n70pn) entrou na S10, "Carteira" na S11, "De-para" na S12,
     // "Plano contábil" na S16 e "Origem por arquivo" (que era condicional)
     // virou fixa no follow-up 86e3fqnc9: LER é de todo papel que alcança o
     // cliente nos cinco casos (o operador inclusive, que ENVIA o arquivo).
@@ -350,7 +363,7 @@ describe('SidebarNav — camada do cliente', () => {
       'Origem por arquivo',
       'Contas Bancárias',
       'Glossário',
-      'Plano de Contas',
+      'Categorias do Omie',
       'Plano contábil',
     ]);
     // Sem `manage_client_users`, a seção Acesso some INTEIRA: nada de cabeçalho órfão.
@@ -382,7 +395,7 @@ describe('SidebarNav — camada do cliente', () => {
       'Cadastros',
       'Contas Bancárias',
       'Glossário',
-      'Plano de Contas',
+      'Categorias do Omie',
       'Plano contábil',
       'Acesso',
       'Usuários',
@@ -445,7 +458,7 @@ describe('SidebarNav — camada do cliente', () => {
     expect(within(nav).queryAllByRole('img')).toHaveLength(0);
   });
 
-  it('"Plano contábil" (S16) fica ativo na própria rota, sem marcar "Plano de Contas" nem "Conciliações"', () => {
+  it('"Plano contábil" (S16) fica ativo na própria rota, sem marcar "Categorias do Omie" nem "Conciliações"', () => {
     currentPathname = '/clientes/c1/plano-contabil';
     render(<SidebarNav user={CLIENT_OPERATOR} />);
 
@@ -550,14 +563,14 @@ describe('SidebarNav — camada do cliente', () => {
     );
   });
 
-  it('a rota do plano de contas não deixa "Conciliações" ativo junto', () => {
+  it('a rota das categorias do Omie não deixa "Conciliações" ativo junto', () => {
     // Desde a 86e3k1q5n cada item casa pela própria rota; o teste fica como
     // trava contra a volta do "ativo por exclusão".
     currentPathname = '/clientes/c1/plano-de-contas';
     render(<SidebarNav user={ADMIN} />);
 
     const nav = screen.getByRole('navigation', { name: 'Seções do cliente' });
-    expect(within(nav).getByRole('link', { name: 'Plano de Contas' })).toHaveAttribute(
+    expect(within(nav).getByRole('link', { name: 'Categorias do Omie' })).toHaveAttribute(
       'aria-current',
       'page',
     );

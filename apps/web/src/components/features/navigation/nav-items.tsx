@@ -216,7 +216,7 @@ export function chartOfAccountsPath(clientId: string): string {
 
 /**
  * Rota da tela "Plano contábil" (S16) — o plano do sistema contábil de DESTINO,
- * distinto do "Plano de Contas" da origem (S10). `section=conta-do-banco` leva
+ * distinto das "Categorias do Omie" da origem (S10). `section=conta-do-banco` leva
  * direto à seção da conta do banco: é para onde o de-para manda quando a
  * materialização em `conta_contabil` fica sem um lado da partida.
  */
@@ -344,7 +344,7 @@ export function clientNavSections(
   const dashboardHref = dashboardPath(clientId);
   const usersHref = `${base}/usuarios`;
   const glossaryHref = `${base}/glossario`;
-  const chartOfAccountsHref = `${base}/plano-de-contas`;
+  const chartOfAccountsHref = chartOfAccountsPath(clientId);
   const accountingChartHref = accountingChartPath(clientId);
   const titlesHref = `${base}/carteira`;
   const mappingHref = `${base}/de-para`;
@@ -444,19 +444,21 @@ export function clientNavSections(
       active: isGlossary,
     },
   ];
-  // S10 (R4): "Plano de Contas" pela MESMA regra da Carteira: a célula de LER é
+  // S10 (R4): "Categorias do Omie" pela MESMA regra da Carteira: a célula de LER é
   // ✅ nos cinco papéis hoje, e o gating faz rota e item sumirem JUNTOS no dia
   // em que ela fechar. Quem pede permissão separada é SINCRONIZAR, dentro da tela.
   if (hasPermission(user, 'view_client_chart_of_accounts')) {
     registry.push({
       href: chartOfAccountsHref,
-      label: 'Plano de Contas',
+      // "Plano de Contas" até 09/10/2026 (86e3n70pn): ao lado de "Plano contábil" o
+      // escritório confundia as duas. A tela é a das CATEGORIAS que o Omie declara.
+      label: 'Categorias do Omie',
       icon: <ListTree className="h-4 w-4" aria-hidden="true" />,
       active: isChartOfAccounts,
     });
   }
   // S16 (R1): "Plano contábil", o plano do sistema contábil de DESTINO, ao lado
-  // do "Plano de Contas" da origem (nomes distintos de propósito). NÃO é gated,
+  // das "Categorias do Omie" da origem (nomes distintos de propósito). NÃO é gated,
   // pela regra do De-para: a LEITURA é `AccessibleClientDep` no backend, sem
   // permissão própria. Quem pede permissão (`manage_client_accounting_chart`) é
   // importar e associar a conta do banco, dentro da tela.
