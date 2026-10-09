@@ -15,10 +15,10 @@
 
 | | |
 | --- | --- |
-| Endpoints sensíveis (denominador) | **120** |
-| Com caso negativo cross-tenant verde | **120** |
+| Endpoints sensíveis (denominador) | **121** |
+| Com caso negativo cross-tenant verde | **121** |
 | Pendentes (implementação em outra task) | **0** |
-| Cobertura | **120/120 = 100%** |
+| Cobertura | **121/121 = 100%** |
 
 ## Lista canônica
 
@@ -122,6 +122,7 @@ Legenda de `tipo`: **coleção** = vaza forjando `client_id` na URL/payload · *
 | `POST` | `/api/v1/clients/{client_id}/mapping/{destination_type}/decisions/confirm-inherited` | coleção | `app/modules/client_mapping/routes.py` | AccessibleClientDep -> resolve_client_access + OpenClientDep + ManageClientMappingDep (guard auditado); destino resolvido na org DO CLIENTE; toda query de decisão filtra client_id | ✅ verde |
 | `GET` | `/api/v1/clients/{client_id}/mapping/{destination_type}/decisions/history` | coleção | `app/modules/client_mapping/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); decisões lidas por client_id + destino da org do cliente | ✅ verde |
 | `POST` | `/api/v1/clients/{client_id}/mapping/{destination_type}/inherit` | coleção | `app/modules/client_mapping/routes.py` | AccessibleClientDep -> resolve_client_access + OpenClientDep + ManageClientMappingDep (guard auditado); destino resolvido na org DO CLIENTE; toda query de decisão filtra client_id | ✅ verde |
+| `GET` | `/api/v1/clients/{client_id}/mapping/{destination_type}/origin-targets` | coleção | `app/modules/client_mapping/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); plano de contas lido por client_id, catálogo pela org do cliente; manage_mapping_catalog auditado | ✅ verde |
 | `GET` | `/api/v1/clients/{client_id}/mapping/{destination_type}` | coleção | `app/modules/client_mapping/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); universo e decisões lidos por client_id | ✅ verde |
 | `GET` | `/api/v1/clients/{client_id}/mapping/{destination_type}/export` | coleção | `app/modules/client_mapping/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); 1 linha `export` em access_audit | ✅ verde |
 | `POST` | `/api/v1/clients/{client_id}/mapping/{destination_type}/import/preview` | coleção | `app/modules/client_mapping/routes.py` | AccessibleClientDep -> resolve_client_access + OpenClientDep + ManageClientMappingDep (guard auditado); destino resolvido na org DO CLIENTE; toda query de decisão filtra client_id; não grava nada | ✅ verde |

@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Error boundary da rota "Plano de Contas" do cliente.
+ * Error boundary da rota "Categorias do Omie" do cliente (`/plano-de-contas`).
  *
  * Regra do design-system: **nunca** vazar o erro interno do framework. O
  * `error.message` do Next em produção é uma mensagem genérica com um digest, e
@@ -38,7 +38,7 @@ export default function ChartOfAccountsError({
       <div className="space-y-1.5">
         {/* `h2` pelo mesmo motivo do `AccessDenied`: o shell do cliente já
             rende o `h1`. */}
-        <h2 className="text-lg font-semibold">Não foi possível carregar o plano de contas</h2>
+        <h2 className="text-lg font-semibold">Não foi possível carregar as categorias do Omie</h2>
         <p className="text-muted-foreground text-sm">
           Algo deu errado ao abrir esta página. Tente novamente em instantes.
         </p>

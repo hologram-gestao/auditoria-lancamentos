@@ -45,6 +45,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useAccountingChartList } from '@/hooks/use-client-accounting-chart';
 import {
   useClientMappingList,
   useExportClientMapping,
@@ -62,6 +63,8 @@ import { triggerBrowserDownload } from '@/lib/download';
 import { originIsFileBased } from '@/lib/origin-capabilities';
 import { useAuthStore } from '@/stores/auth';
 
+import { isAccountingDestination } from './accounting-destination';
+import { MappingHowItWorks } from './mapping-how-it-works';
 import { MappingImportSheet } from './mapping-import-sheet';
 import {
   INHERITING_DESTINATION_TYPE,
@@ -107,12 +110,35 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
       (clientOrganizationId === null || item.organizationId === clientOrganizationId),
   );
 
+  const destinationParam = readEnum(
+    get(PARAM.destination),
+    destinations.map((item) => item.type),
+  );
+  // Sem destino na URL e com o demonstrativo SEM alvos (organização nova), o padrão
+  // depende de o cliente ter plano contábil (86e3n70pn): só então se pergunta. A
+  // sonda é a MESMA do aviso do `conta_contabil` (mesma chave, mesmo cache).
+  const needsChartProbe =
+    destinationParam === undefined &&
+    destinations.some(
+      (item) => item.type === INHERITING_DESTINATION_TYPE && item.targetsCount === 0,
+    ) &&
+    destinations.some((item) => isAccountingDestination(item.type));
+  const chartProbe = useAccountingChartList(
+    clientId,
+    { page: 1, pageSize: 1 },
+    { enabled: needsChartProbe },
+  );
+  // Enquanto a sonda não responde, a tela não abre em destino nenhum: abrir no
+  // demonstrativo e pular para a conta contábil um instante depois trocaria a lista.
+  const resolvingDefault = needsChartProbe && chartProbe.isLoading;
   const destinationType =
-    readEnum(
-      get(PARAM.destination),
-      destinations.map((item) => item.type),
-    ) ?? defaultDestinationType(destinations);
-  const destination = destinations.find((item) => item.type === destinationType) ?? null;
+    destinationParam ??
+    defaultDestinationType(destinations, {
+      clientHasAccountingChart: (chartProbe.data?.pagination.total ?? 0) > 0,
+    });
+  const destination = resolvingDefault
+    ? null
+    : (destinations.find((item) => item.type === destinationType) ?? null);
 
   const view = readEnum(get(PARAM.view), VIEW_VALUES) ?? DEFAULT_VIEW;
   const page = readPositiveInt(get(PARAM.page), 1);
@@ -157,6 +183,9 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
   // Importar o plano e associar a conta do banco (S16): é OUTRA permissão, e os
   // avisos do destino `conta_contabil` só mandam agir quem a tem.
   const canManageChart = hasPermission(currentUser, 'manage_client_accounting_chart');
+  // O catálogo de destinos e alvos da ORGANIZAÇÃO (86e3n70pn): só quem escreve nele é
+  // mandado cadastrar alvos pelo aviso de catálogo vazio.
+  const canManageCatalog = hasPermission(currentUser, 'manage_mapping_catalog');
   const canSync = hasPermission(currentUser, 'sync_client_movements');
   const canUpload = hasPermission(currentUser, 'upload_client_file');
   // S13: gerar/baixar o arquivo contábil e (para o texto do "sem layout")
@@ -224,13 +253,17 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
         </p>
       </div>
 
+      <MappingHowItWorks />
+
       {canManage && isClosed && (
         <p className="text-muted-foreground text-sm">
           Cliente encerrado: o de-para fica disponível só para leitura e exportação.
         </p>
       )}
 
-      {destinationsQuery.isLoading || (platform && clientOrganizationId === null) ? (
+      {destinationsQuery.isLoading ||
+      resolvingDefault ||
+      (platform && clientOrganizationId === null) ? (
         <div className="bg-muted h-10 w-full animate-pulse rounded-md sm:w-72" aria-hidden="true" />
       ) : destinationsQuery.isError ? (
         <div
@@ -346,6 +379,7 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
                 serverCompetence={serverCompetence}
                 canManage={canManage}
                 canManageChart={canManageChart}
+                canManageCatalog={canManageCatalog}
                 isClosed={isClosed}
               />
             </TabsContent>
@@ -393,11 +427,20 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
  * catálogo (validação humana da S12): é o destino principal do PRD, o único que
  * herda e o que a Sprint 13 lê. Abrir no primeiro do catálogo ("Conta contábil")
  * levava a um destino vazio com o aviso amarelo. O primeiro é só o fallback.
+ *
+ * A exceção (86e3n70pn): demonstrativo SEM alvos e cliente COM plano contábil
+ * importado abre na conta contábil. É o escritório novo que já importou o plano do
+ * cliente e ainda não cadastrou o catálogo: no demonstrativo ele só leria o aviso de
+ * catálogo vazio, enquanto na conta contábil já pode decidir.
  */
-export function defaultDestinationType(destinations: readonly MappingDestination[]): string {
-  return (
-    destinations.find((item) => item.type === INHERITING_DESTINATION_TYPE)?.type ??
-    destinations[0]?.type ??
-    ''
-  );
+export function defaultDestinationType(
+  destinations: readonly MappingDestination[],
+  { clientHasAccountingChart = false }: { clientHasAccountingChart?: boolean } = {},
+): string {
+  const inheriting = destinations.find((item) => item.type === INHERITING_DESTINATION_TYPE);
+  const accounting = destinations.find((item) => isAccountingDestination(item.type));
+  if (inheriting?.targetsCount === 0 && accounting !== undefined && clientHasAccountingChart) {
+    return accounting.type;
+  }
+  return inheriting?.type ?? destinations[0]?.type ?? '';
 }

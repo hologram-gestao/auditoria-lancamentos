@@ -41,6 +41,7 @@ if TYPE_CHECKING:
         MappingPreview,
         MaterializationOutcome,
     )
+    from app.modules.client_mapping.origin_targets import OriginTargetsPreview
     from app.modules.client_mapping.portability import ImportPlan
     from app.modules.client_mapping.service import (
         DecisionView,
@@ -275,6 +276,71 @@ class InheritResponse(BaseModel):
 
 class InheritEnvelope(BaseModel):
     data: InheritResponse
+
+
+class OriginTargetCandidateResponse(BaseModel):
+    """Uma conta de demonstrativo declarada pela origem, e o que o catálogo já tem dela."""
+
+    code: str
+    name: str | None = Field(
+        description=(
+            "Nome do alvo existente ou, se não existe, o `descricaoDRE` da origem "
+            "resolvido agora. `null` = a origem não respondeu (nunca persistido aqui)."
+        )
+    )
+    categories: int = Field(ge=0, description="Categorias ativas do cliente com esta conta.")
+    exists: bool = Field(description="O catálogo do destino já tem um alvo com este código.")
+    active: bool | None = Field(description="Situação do alvo existente; `null` se não existe.")
+    creatable: bool = Field(
+        description=(
+            "Pode entrar no lote de criação: não existe, tem nome e cabe nas colunas do catálogo."
+        )
+    )
+
+
+class OriginTargetsPreviewResponse(BaseModel):
+    state: Literal["ok", "sem_plano_de_contas", "destino_sem_heranca"] = Field(
+        description=(
+            "`ok` = prévia montada (pode vir sem candidato, se nenhuma categoria declara "
+            "conta de demonstrativo); `sem_plano_de_contas` = o cliente não tem plano de "
+            "contas sincronizado; `destino_sem_heranca` = só o `demonstrativo_contabil` "
+            "tem alvos na origem."
+        )
+    )
+    destination_id: UUID | None = Field(
+        alias="destinationId",
+        description="O destino do catálogo onde os alvos confirmados são criados (lote).",
+    )
+    names_resolved: bool = Field(
+        alias="namesResolved",
+        description="`false` = alguma conta sem nome: a origem não respondeu agora.",
+    )
+    candidates: list[OriginTargetCandidateResponse]
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def build(cls, preview: OriginTargetsPreview) -> OriginTargetsPreviewResponse:
+        return cls(
+            state=preview.state,
+            destination_id=preview.destination_id,
+            names_resolved=preview.names_resolved,
+            candidates=[
+                OriginTargetCandidateResponse(
+                    code=c.code,
+                    name=c.name,
+                    categories=c.categories,
+                    exists=c.exists,
+                    active=c.active,
+                    creatable=c.creatable,
+                )
+                for c in preview.candidates
+            ],
+        )
+
+
+class OriginTargetsPreviewEnvelope(BaseModel):
+    data: OriginTargetsPreviewResponse
 
 
 class DecisionViewResponse(BaseModel):

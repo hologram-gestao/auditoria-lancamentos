@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 **S0–S19 + Sprints 0–5 do agents-hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **120/120** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **121/121** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
 > **O que cada sprint do agents-hub entregou** (todas na `main`):
 >
@@ -193,7 +193,7 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**120** hoje — o arquivo é a fonte, confira com
+      (**121** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant E cross-org**: a bateria
       (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
@@ -201,7 +201,7 @@
       organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
-      (`PENDING_ENDPOINTS` está vazio: cobertura **120/120**). As 3 rotas do
+      (`PENDING_ENDPOINTS` está vazio: cobertura **121/121**). As 3 rotas do
       **plano de contas** (S10) e as 3 da **carteira de títulos** (S11 — lista,
       agregados e sincronizar) e as 3 da S15 (relatório de recebíveis, leitura e
       registro do contexto do título) entraram como coleção; as 20 da S12 também:
@@ -228,7 +228,11 @@
       `GET /export-layouts/{id}`, `POST /export-layouts/{id}/versions`), estas por
       ORGANIZAÇÃO como o catálogo da S12 (alvo da bateria numa terceira org). O
       resumo do cliente (`GET /clients/{id}/summary`, 86e3k1q3j) e o fluxo previsto da
-      carteira (`GET /clients/{id}/titles/flow`, 86e3k1q4g) também são coleção. Só
+      carteira (`GET /clients/{id}/titles/flow`, 86e3k1q4g) também são coleção, e a
+      prévia dos alvos do demonstrativo a partir da origem
+      (`GET /clients/{id}/mapping/{tipo}/origin-targets`, 86e3n70pn) também: só LÊ (plano
+      de contas do cliente e catálogo da org dele), e o guard é `manage_mapping_catalog`
+      AUDITADO depois do alcance ao cliente. Só
       auth, tipos de anomalia, `test-connection`, `alert-test`, as 5 rotas de
       `/organizations` (plataforma, sem dado de cliente), `GET /export-layout-templates`
       (modelos declarados no código, iguais para toda organização) e o `POST /leads`
@@ -514,8 +518,9 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    fontes divergindo é o que esse teste existe para pegar. A seção
    **Configurações** do menu é montada item a item pela matriz
    (`nav-items.tsx`), não por um "quem vê Configurações" único: o admin da
-   organização vê TRÊS itens (Usuários, Categorias e Layouts de exportação), a
-   plataforma vê cinco (Organizações e Tipos de Anomalia são dela), o gerente não vê a
+   organização vê QUATRO itens (Usuários, Categorias, Destinos do de-para e Layouts de
+   exportação), a plataforma vê seis (Organizações e Tipos de Anomalia são dela), o
+   gerente não vê a
    seção.
 
    | Ação                                | platform_admin | admin (org)      | manager (org)         | client_manager | client_operator |
@@ -1231,7 +1236,25 @@ demonstrativo e alvo real no fluxo de caixa). O que vale como lei, não como det
   retroativa sobre competência materializada é 409;
 - **alvo é código de catálogo por organização** (5 tipos semeados; o 6º é cadastro,
   não migration); herança só no `demonstrativo_contabil`, a partir do `dre_code` do
-  plano de contas (S10);
+  plano de contas (S10). Organização nova nasce com os 5 destinos e ZERO alvos, então a
+  herança encontra zero até alguém cadastrar o catálogo (86e3n70pn, primeiro uso pela
+  Prospecta). O catálogo tem tela própria, **Configurações → Destinos do de-para**
+  (`/configuracoes/destinos-de-para?destino=<id>`, `manage_mapping_catalog`: listar
+  destinos com a contagem, criar alvos em LOTE colando `código;nome`, editar o nome,
+  inativar; o `conta_contabil` aparece explicado, sem alvos de catálogo). Os alvos do
+  demonstrativo também podem nascer **da origem do cliente**: a prévia
+  (`GET …/mapping/{tipo}/origin-targets`) lê os `dre_code` distintos das categorias
+  ativas e o nome de cada um pelo MESMO `resolve_names` da S10 (mapa `dre`, separado do
+  de categorias) e só LÊ; quem cria é o lote do catálogo, depois de a pessoa confirmar.
+  É dado do Omie virando configuração da ORGANIZAÇÃO por decisão explícita de quem tem
+  a permissão, **nunca automático** (o catálogo vale para todos os clientes dela). Sem
+  nome resolvido (origem fora do ar) a conta fica fora do lote, nunca com o código no
+  lugar do nome. Na tela, o aviso de catálogo vazio dá "Cadastrar alvos" e "Criar alvos
+  a partir das contas de demonstrativo deste cliente" só a quem tem
+  `manage_mapping_catalog`; os demais leem o texto de sempre. Sem destino na URL, o
+  de-para abre na conta contábil quando o demonstrativo não tem alvos e o cliente já
+  tem plano contábil; senão, no demonstrativo. O topo do de-para tem o bloco recolhível
+  "Como funciona" (destino, alvo, decisão, herdada), na moldura `collapsible-summary`;
 - **materialização imutável** `(cliente, destino, competência, versão)`, gravada só com o
   hash da prévia confirmada — é o que a Sprint 13 lê. `depara_aplicado` e
   `movimentos_sincronizados` são os eventos da métrica (sem dedup, só IDs e números).
@@ -1397,7 +1420,10 @@ Cada sprint do hub termina com **validação humana** fora do sandbox: é a úni
 rodada real da suíte de integração, do gate de a11y e do cenário pela tela, e nas
 duas primeiras ela achou o que o QA do hub não podia achar.
 
-A Sprint 10 trouxe o **plano de contas do cliente** para dentro do produto —
+A Sprint 10 trouxe o **plano de contas do cliente** para dentro do produto (na TELA,
+desde 86e3n70pn, **"Categorias do Omie"**, rota `/plano-de-contas` mantida: ao lado de
+"Plano contábil", da S16, o escritório confundia as duas; código, permissões e o resto
+deste primer seguem chamando-o de plano de contas) —
 códigos, hierarquia, situação, flags e, principalmente, o vínculo que a origem
 **já declara** com a conta de demonstrativo (`dadosDRE.codigoDRE`), que é o
 insumo do de-para da Sprint 12. Três coisas dela valem como lei, não como
@@ -1551,6 +1577,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.88, 09/10/2026. **O catálogo do de-para ganhou tela, e o primeiro uso por um escritório novo deixou de terminar em "peça ao administrador" lido pelo administrador (86e3n70pn, subtask 4 do épico 86e3n70nv; reunião com o Murilo de 08/10).** Configurações → Destinos do de-para (`manage_mapping_catalog`, plataforma e admin; as 7 rotas do catálogo já existiam) lista os destinos com a contagem e, por destino, os alvos paginados com criar em lote colando `código;nome` (ponto e vírgula ou TAB; 409 de código repetido no CAMPO), editar o nome e inativar/reativar; o `conta_contabil` aparece explicado. Nasceu `GET /clients/{id}/mapping/{tipo}/origin-targets` (lista canônica 120 → **121**, coleção, na bateria dos três atacantes; guard `ManageMappingCatalogForClientDep`, auditado): a prévia dos alvos do demonstrativo a partir dos `dre_code` das categorias ativas do cliente, com o nome pelo mapa `dre` do `resolve_names` da S10. Só lê; os confirmados entram pelo lote existente, por decisão explícita, nunca automático. No de-para: o aviso de catálogo vazio dá "Cadastrar alvos" (`?destino=<id>`) e a ação da origem a quem tem a permissão; sem destino na URL, demonstrativo sem alvos e cliente com plano contábil abre na conta contábil; o topo ganhou "Como funciona" recolhível (o `CollapsibleSummary` aceita `showLabel`/`hideLabel`). Na tela, "Plano de Contas" virou "Categorias do Omie" (h1, menu, toasts, região rolável, textos do de-para que apontam para ela; rota mantida, helper `chartOfAccountsPath`). Matriz (**29**) e pares de AAD (**17**) não mudaram._
 
 _Versão 1.87, 09/10/2026. **A lista do plano contábil saiu da ordem do código como texto e passou à ordem da classificação, e a planilha do modelo aceita o cabeçalho como gente escreve (86e3n70p9, subtask 3 do épico 86e3n70nv; reunião com o Murilo de 08/10 e WhatsApp de 09/10).** Ordem: nasceu `client_accounting_accounts.sort_key` (VARCHAR(160) em collation `C`, nullable, índice `(client_id, sort_key)`), DERIVADA na gravação pela função única `client_accounting_chart/sort_key.py::chart_sort_key` e gravada em toda inserção e atualização dos dois caminhos de importação. Com classificação, a chave é a PRÓPRIA classificação como TEXTO, sem preenchimento, que é a ordem do Domínio: a primeira versão preenchia cada segmento com zeros e, sob `1.1.2.01` do plano real do Gabriel, intercalava as famílias `00001` e `001`, 87 contas fora do lugar (decisão do Pedro na revisão do PR, medida nas duas amostras). Só o código reduzido, na conta sem classificação, tem os segmentos numéricos preenchidos até 6 dígitos (`10` vira `000010`), para não cair em `1, 10, 101, 11`. A collation `C` é parte da regra: com a do sistema (`en_US.utf8` da glibc, a do Postgres em Debian) a comparação ignora o ponto e ordena `11 < 1.10 < 1.1.10 < 1.1.2`; o alpine do CI compara por byte e não mostraria o defeito, então o unitário e o teste de migration conferem a collation, e a prova negativa rodou num `postgres:16` Debian. A migration `b2f7c9e41d06` faz o backfill em SQL puro com a mesma regra (`COALESCE(NULLIF(classification, ''), …)` com `lpad` só sobre o código, `WHERE sort_key IS NULL`) e foi editada no lugar antes de existir na `main`; `TestOrdemDoPlanoContabilRoundTrip` prova a paridade Python x SQL e a ordem do banco, e `TestOrdemDoArquivoDoDominio` importa as duas fixtures do Domínio e exige a lista na ordem do arquivo. `list_all` e `list_page` ordenam por `sort_key NULLS LAST, code, id` num `ORDER BY` só (`_chart_order`), e o seletor do de-para herda. Na tela, o nome recua pelo grau (`chart-hierarchy.ts`) e a sintética sai em `font-semibold`; nada é ordenado no cliente. Planilha feita à mão usa largura fixa por nível (`01`, `02`… `10`), senão `1.1.10` vem antes de `1.1.2`, como no próprio Domínio; a doc do modelo e a tela dizem isso. Cabeçalho: `_normalized_header` virou grafia normalizada (sem acento, minúsculas, espaços e hífens internos como sublinhado, asterisco e dois-pontos finais fora), sem sinônimo de propósito; `parse_account_type` aceita `analitico`/`sintetico` e as iniciais `a`/`s`, e `sint` continua `tipo_invalido`. Sem rota nova: endpoints sensíveis (**120**), matriz (**29**) e pares de AAD (**17**) não mudaram._
 

@@ -21,19 +21,24 @@ import type { BlobResponse } from '@/lib/api/client';
 import {
   applyMappingImport,
   confirmInheritedDecisions,
+  createMappingTargets,
   exportClientMapping,
   getMappingPreview,
   getMovementsSyncState,
+  getOriginTargetsPreview,
   inheritMapping,
   listAllActiveMappingTargets,
   listClientMapping,
   listMappingDestinations,
   listMappingMaterializations,
+  listMappingTargets,
   materializeMapping,
   previewMappingImport,
   syncMovements,
+  updateMappingTarget,
   writeMappingDecision,
   type ListClientMappingParams,
+  type ListMappingTargetsParams,
   type MappingImportApplyInput,
   type MappingImportInput,
 } from '@/lib/api/client-mapping';
@@ -50,11 +55,15 @@ import type {
   MappingListResponse,
   MappingPreview,
   MappingTarget,
+  MappingTargetBatchCreate,
+  MappingTargetListResponse,
+  MappingTargetUpdate,
   MaterializationRequest,
   MaterializationResult,
   MaterializationSummary,
   MovementsSyncResult,
   MovementsSyncState,
+  OriginTargetsPreview,
 } from '@/lib/contracts';
 
 export const clientMappingKeys = {
@@ -75,6 +84,10 @@ export const mappingCatalogKeys = {
   destinations: (organizationId: string | null) =>
     ['mapping-destinations', organizationId ?? 'own'] as const,
   targets: (destinationId: string) => ['mapping-targets', destinationId] as const,
+  targetsPage: (destinationId: string, params: ListMappingTargetsParams) =>
+    ['mapping-targets', destinationId, 'page', params] as const,
+  originTargets: (clientId: string, destinationType: string) =>
+    ['client-mapping', clientId, destinationType, 'origin-targets'] as const,
 };
 
 export function useMappingDestinations(
@@ -93,6 +106,68 @@ export function useMappingTargets(destinationId: string, options: { enabled?: bo
     queryKey: mappingCatalogKeys.targets(destinationId),
     queryFn: () => listAllActiveMappingTargets(destinationId),
     enabled: (options.enabled ?? true) && destinationId !== '',
+  });
+}
+
+/** Uma página dos alvos do destino, com filtros — a tela do catálogo (86e3n70pn). */
+export function useMappingTargetsPage(
+  destinationId: string,
+  params: ListMappingTargetsParams,
+  options: { enabled?: boolean } = {},
+) {
+  return useQuery<MappingTargetListResponse>({
+    queryKey: mappingCatalogKeys.targetsPage(destinationId, params),
+    queryFn: () => listMappingTargets(destinationId, params),
+    placeholderData: keepPreviousData,
+    enabled: (options.enabled ?? true) && destinationId !== '',
+  });
+}
+
+/**
+ * Escrever no catálogo muda a contagem de alvos do destino, o seletor da decisão e
+ * o aviso de catálogo vazio do de-para de TODO cliente da organização: invalida as
+ * três árvores (catálogo, alvos e de-para), não só a do destino.
+ */
+function useInvalidateCatalog(destinationId: string) {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: mappingCatalogKeys.targets(destinationId) });
+    void qc.invalidateQueries({ queryKey: ['mapping-destinations'] });
+    void qc.invalidateQueries({ queryKey: ['client-mapping'] });
+  };
+}
+
+export function useCreateMappingTargets(destinationId: string) {
+  const invalidate = useInvalidateCatalog(destinationId);
+  return useMutation<MappingTarget[], Error, MappingTargetBatchCreate>({
+    mutationFn: (payload) => createMappingTargets(destinationId, payload),
+    onSuccess: invalidate,
+  });
+}
+
+export function useUpdateMappingTarget(destinationId: string) {
+  const invalidate = useInvalidateCatalog(destinationId);
+  return useMutation<MappingTarget, Error, { targetId: string; patch: MappingTargetUpdate }>({
+    mutationFn: ({ targetId, patch }) => updateMappingTarget(destinationId, targetId, patch),
+    onSuccess: invalidate,
+  });
+}
+
+/**
+ * A prévia dos alvos do demonstrativo a partir da origem (só LÊ). Pedida quando o
+ * diálogo abre e sempre fresca: o catálogo pode ter mudado em outra aba.
+ */
+export function useOriginTargetsPreview(
+  clientId: string,
+  destinationType: string,
+  options: { enabled?: boolean } = {},
+) {
+  return useQuery<OriginTargetsPreview>({
+    queryKey: mappingCatalogKeys.originTargets(clientId, destinationType),
+    queryFn: () => getOriginTargetsPreview(clientId, destinationType),
+    enabled: options.enabled ?? true,
+    staleTime: 0,
+    retry: false,
   });
 }
 

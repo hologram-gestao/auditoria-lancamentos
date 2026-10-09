@@ -1041,6 +1041,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clients/{client_id}/mapping/{destination_type}/origin-targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** PRÉVIA dos alvos do demonstrativo a partir da origem do cliente: as contas de demonstrativo DISTINTAS das categorias ativas do plano de contas sincronizado, com o nome resolvido agora na origem e se o catálogo do destino já tem o alvo. Só LÊ: os alvos confirmados entram pelo lote do catálogo (`POST /mapping-destinations/{id}/targets`), por decisão explícita de quem tem `manage_mapping_catalog` — nunca automaticamente. Outros destinos respondem `destino_sem_heranca`; cliente sem plano, `sem_plano_de_contas`. */
+        get: operations["preview_origin_targets_api_v1_clients__client_id__mapping__destination_type__origin_targets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clients/{client_id}/mapping/{destination_type}": {
         parameters: {
             query?: never;
@@ -5900,6 +5917,64 @@ export interface components {
          */
         OriginStatus: "sem_origem" | "ativa" | "erro";
         /**
+         * OriginTargetCandidateResponse
+         * @description Uma conta de demonstrativo declarada pela origem, e o que o catálogo já tem dela.
+         */
+        OriginTargetCandidateResponse: {
+            /** Code */
+            code: string;
+            /**
+             * Name
+             * @description Nome do alvo existente ou, se não existe, o `descricaoDRE` da origem resolvido agora. `null` = a origem não respondeu (nunca persistido aqui).
+             */
+            name: string | null;
+            /**
+             * Categories
+             * @description Categorias ativas do cliente com esta conta.
+             */
+            categories: number;
+            /**
+             * Exists
+             * @description O catálogo do destino já tem um alvo com este código.
+             */
+            exists: boolean;
+            /**
+             * Active
+             * @description Situação do alvo existente; `null` se não existe.
+             */
+            active: boolean | null;
+            /**
+             * Creatable
+             * @description Pode entrar no lote de criação: não existe, tem nome e cabe nas colunas do catálogo.
+             */
+            creatable: boolean;
+        };
+        /** OriginTargetsPreviewEnvelope */
+        OriginTargetsPreviewEnvelope: {
+            data: components["schemas"]["OriginTargetsPreviewResponse"];
+        };
+        /** OriginTargetsPreviewResponse */
+        OriginTargetsPreviewResponse: {
+            /**
+             * State
+             * @description `ok` = prévia montada (pode vir sem candidato, se nenhuma categoria declara conta de demonstrativo); `sem_plano_de_contas` = o cliente não tem plano de contas sincronizado; `destino_sem_heranca` = só o `demonstrativo_contabil` tem alvos na origem.
+             * @enum {string}
+             */
+            state: "ok" | "sem_plano_de_contas" | "destino_sem_heranca";
+            /**
+             * Destinationid
+             * @description O destino do catálogo onde os alvos confirmados são criados (lote).
+             */
+            destinationId: string | null;
+            /**
+             * Namesresolved
+             * @description `false` = alguma conta sem nome: a origem não respondeu agora.
+             */
+            namesResolved: boolean;
+            /** Candidates */
+            candidates: components["schemas"]["OriginTargetCandidateResponse"][];
+        };
+        /**
          * PaginationMeta
          * @description Metadados de paginação. Compartilhado entre módulos no futuro.
          */
@@ -9912,6 +9987,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InheritEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_origin_targets_api_v1_clients__client_id__mapping__destination_type__origin_targets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Tipo do destino (slug, ex.: `demonstrativo_contabil`). */
+                destination_type: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OriginTargetsPreviewEnvelope"];
                 };
             };
             /** @description Validation Error */
