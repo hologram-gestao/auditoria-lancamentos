@@ -7,7 +7,7 @@ S9 (BACK 7.1):
 S10 (BACK 8.1 + 8.6):
     - POST /api/v1/reconciliations
     - GET /api/v1/reconciliations/{session_id}/status
-S11.fix (retry de sessão em erro):
+S11.fix (retry de sessão em erro; 86e3n70q9: também sessão concluída):
     - POST /api/v1/reconciliations/{session_id}/reprocess
     - POST /api/v1/reconciliations/{session_id}/discard  (soft-delete)
 S7 (BACK 07.4 — lançamento no Omie):
@@ -576,20 +576,34 @@ async def get_reconciliation_status(
 
 # ----------------------------------------------------------------------
 # S11.fix — POST /reconciliations/{id}/reprocess (retry de sessão em erro)
+# 86e3n70q9 — e reprocessar uma sessão concluída depois de lançar no Omie
 # ----------------------------------------------------------------------
+
+#: Status de onde uma sessão pode ser reprocessada. `processing` fica de fora: o
+#: job ainda escreve nela, e um segundo agendamento seria processamento duplicado.
+_REPROCESSABLE_STATUSES = frozenset(
+    {
+        ReconciliationStatus.ERROR.value,
+        ReconciliationStatus.REVIEWING.value,
+        ReconciliationStatus.DONE.value,
+    }
+)
 
 
 @router.post(
     "/{session_id}/reprocess",
     summary=(
-        "Reprocessa uma sessão que terminou em `status='error'`. Mantém "
-        "as `file_entries` (resultado do parse Anthropic, vale dinheiro), "
-        "limpa dados parciais de matching/anomalias, reset da sessão pra "
-        "`status='processing'`, e reagenda o processamento em background. "
-        "Rate limit: 10/min/usuário (igual ao create) — uma sessão = 1 "
-        "processamento em background + várias chamadas Omie. "
-        "Conflito (409): se a sessão NÃO está em error (já processando, "
-        "em revisão ou concluída), recusamos pra não duplicar processamento."
+        "Reprocessa uma sessão em `error` (tentar de novo) ou concluída "
+        "(`reviewing`/`done`: cruzar de novo com o Omie, por exemplo depois de "
+        "lançar compras do cartão). Mantém as `file_entries` (resultado do parse "
+        "Anthropic, vale dinheiro) e NUNCA toca nas intenções de lançamento no "
+        "Omie (a dedup do que já foi lançado). Limpa pares, anomalias (com "
+        "resolução, nota e veredito), lançamentos do Omie da sessão, contadores e "
+        "a qualificação; numa sessão concluída, também a ação e a nota do analista "
+        "em cada linha. Volta a sessão para `processing` e reagenda o "
+        "processamento em background. Rate limit: 10/min/usuário (igual ao "
+        "create). Conflito (409): sessão em `processing` (não duplicamos o "
+        "processamento) ou cliente encerrado."
     ),
 )
 @limiter.limit("10/minute", key_func=user_id_key_func)
@@ -601,26 +615,59 @@ async def reprocess_reconciliation(
     db: DbSessionDep,
     session_id: UUID,
 ) -> CreateReconciliationResponse:
-    """Endpoint de "Tentar novamente" da tela de revisão / lista de conciliações."""
+    """ "Tentar novamente" (erro) e "Reprocessar com o Omie" (sessão concluída)."""
     repo = ReconciliationRepository(db)
 
     # Existência + tenant + carteira numa tacada (SELECT já filtrado por tenant).
     sess = await require_session_access(db, user, session_id)
 
-    # 3. Só faz sentido reprocessar quando o estado atual é error.
-    if sess.status != ReconciliationStatus.ERROR.value:
+    if sess.status not in _REPROCESSABLE_STATUSES:
         raise ConflictError(
-            f"Sessão {session_id} não está em erro (status={sess.status}).",
+            f"Sessão {session_id} não pode ser reprocessada (status={sess.status}).",
             user_message=(
-                "Esta conciliação não está em estado de erro — só sessões "
-                "que terminaram com erro podem ser reprocessadas."
+                "Esta conciliação já está em processamento. Aguarde o fim antes de reprocessar."
             ),
         )
 
-    # 4. Reset + agendamento. Idem create: commit explícito ANTES de agendar pra
-    #    a BackgroundTask (mesmo processo, session própria) enxergar o reset já
-    #    persistido — a task roda antes do commit de teardown do `get_db_session`.
-    await repo.reset_session_for_reprocess(session_id)
+    # 86e36pm1z — encerrado não escreve (§4.12): as credenciais do Omie foram
+    # removidas no encerramento, e o job só falharia mais adiante.
+    client = (
+        await db.execute(select(Client).where(Client.id == sess.client_id))
+    ).scalar_one_or_none()
+    if client is None:  # pragma: no cover  -- FK garante a existência
+        raise NotFoundError("Conciliação não encontrada.")
+    if client.closed_at is not None:
+        raise ClientClosedError(f"Cliente {client.id} está encerrado; reprocessamento recusado.")
+
+    status_origem = sess.status
+    # O 409 de verdade é o do UPDATE condicional: a leitura acima é de antes, e
+    # dois cliques simultâneos passariam os dois por ela.
+    claimed = await repo.claim_session_for_reprocess(
+        session_id, allowed_statuses=_REPROCESSABLE_STATUSES
+    )
+    if not claimed:
+        raise ConflictError(
+            f"Sessão {session_id} mudou de status antes do reprocessamento.",
+            user_message=(
+                "Esta conciliação já está em processamento. Aguarde o fim antes de reprocessar."
+            ),
+        )
+
+    # Sessão em erro nunca teve revisão (e a que voltou de um anexo guarda o
+    # trabalho do analista de propósito); a concluída recomeça a revisão do zero.
+    await repo.reset_session_for_reprocess(
+        session_id,
+        clear_review_work=status_origem != ReconciliationStatus.ERROR.value,
+    )
+    await UsageEventService(UsageEventRepository(db)).emit_conciliacao_reprocessada(
+        session_id=session_id,
+        client_id=sess.client_id,
+        reprocessado_por=UUID(user.id),
+        status_origem=status_origem,
+    )
+    # Idem create: commit explícito ANTES de agendar pra a BackgroundTask (mesmo
+    # processo, session própria) enxergar o reset já persistido — a task roda
+    # antes do commit de teardown do `get_db_session`.
     await db.commit()
 
     _schedule_reconciliation_processing(background_tasks, session_id)

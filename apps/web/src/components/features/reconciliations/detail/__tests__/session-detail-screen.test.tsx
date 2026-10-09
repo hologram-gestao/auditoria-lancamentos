@@ -33,6 +33,8 @@ const detailState = {
   refetch: vi.fn(),
 };
 
+const clientState = { closedAt: null as string | null };
+
 vi.mock('@/hooks/use-clients', () => ({
   // O ClientShell agora monta o diálogo de exclusão (86e34jd1d).
   // O ClientShell/lista agora renderiza o coração de favorito (86e34jd5a).
@@ -40,15 +42,22 @@ vi.mock('@/hooks/use-clients', () => ({
   useClientDetail: () => ({
     data: {
       accounts: [{ id: 'a1', omie_conta_id: 10, name: 'Cartão Itaú', bank_name: 'Itaú' }],
+      closed_at: clientState.closedAt,
     },
   }),
 }));
+
+const reprocessMock = vi.fn();
+const reprocessState = { isPending: false };
 
 vi.mock('@/hooks/use-reconciliations', () => ({
   useSessionDetail: () => detailState,
   useSessionFiles: () => ({ data: undefined, isLoading: false, isError: true }),
   useDeleteSessionFile: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useReprocessReconciliation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useReprocessReconciliation: () => ({
+    mutateAsync: reprocessMock,
+    isPending: reprocessState.isPending,
+  }),
   useDiscardReconciliation: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useExportReconciliation: () => ({ mutate: vi.fn(), isPending: false }),
 }));
@@ -69,8 +78,40 @@ vi.mock('@/components/features/reconciliations/review/summary-tab', () => ({
   ),
 }));
 
+const authState = { user: null as AuthenticatedUser | null };
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: (selector: (state: { user: AuthenticatedUser | null }) => unknown) =>
+    selector(authState),
+}));
+
+const toastSuccess = vi.fn();
+const toastError = vi.fn();
+vi.mock('sonner', () => ({
+  toast: {
+    success: (...args: unknown[]) => toastSuccess(...args),
+    error: (...args: unknown[]) => toastError(...args),
+  },
+}));
+
+import {
+  REPROCESS_LOSSES,
+  REPROCESS_SUCCESS_TOAST,
+} from '@/components/features/reconciliations/detail/reprocess-reconciliation-button';
 import { SessionDetailScreen } from '@/components/features/reconciliations/detail/session-detail-screen';
+import type { AuthenticatedUser } from '@/lib/api/auth';
 import { assertNoA11yViolations } from '@/test/a11y';
+
+const operator: AuthenticatedUser = {
+  id: 'op',
+  email: 'operador@cliente.com.br',
+  name: 'Operador do Cliente',
+  role: 'client_operator',
+  scope: 'client',
+  client_id: 'c1',
+  organization_id: '0706eeb5-9718-4d03-bcda-ef615789e6ac',
+  organization_name: 'Hologram',
+};
 
 function detail(over: Record<string, unknown> = {}) {
   return {
@@ -114,6 +155,10 @@ beforeAll(() => {
 beforeEach(() => {
   vi.clearAllMocks();
   currentSearch = '';
+  authState.user = operator;
+  clientState.closedAt = null;
+  reprocessState.isPending = false;
+  reprocessMock.mockResolvedValue({ session_id: 's1', status: 'processing' });
   detailState.data = detail();
   detailState.isLoading = false;
   detailState.isError = false;
@@ -314,6 +359,102 @@ describe('Detalhe — estados por status', () => {
     renderScreen();
     expect(screen.getByRole('alert')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Tentar novamente' })).toBeVisible();
+  });
+});
+
+describe('Detalhe — reprocessar com o Omie (86e3n70q9)', () => {
+  const REPROCESS_BUTTON = { name: 'Reprocessar com o Omie' } as const;
+
+  it('conciliação concluída oferece o botão no cabeçalho, ao lado da exportação', () => {
+    renderScreen();
+    expect(screen.getByRole('button', REPROCESS_BUTTON)).toBeVisible();
+    expect(screen.getByRole('button', { name: /Exportar/ })).toBeVisible();
+  });
+
+  it('status `done` também oferece', () => {
+    detailState.data = detail({ status: 'done' });
+    renderScreen();
+    expect(screen.getByRole('button', REPROCESS_BUTTON)).toBeVisible();
+  });
+
+  it('em processamento e em erro o botão não existe (erro tem o "Tentar novamente")', () => {
+    detailState.data = detail({ status: 'processing' });
+    const { unmount } = renderScreen();
+    expect(screen.queryByRole('button', REPROCESS_BUTTON)).toBeNull();
+    unmount();
+
+    detailState.data = detail({ status: 'error', error_code: 'PARSE_ERROR' });
+    renderScreen();
+    expect(screen.queryByRole('button', REPROCESS_BUTTON)).toBeNull();
+  });
+
+  it('cliente encerrado não reprocessa (o servidor responde 409)', () => {
+    clientState.closedAt = '2026-10-01T12:00:00Z';
+    renderScreen();
+    expect(screen.queryByRole('button', REPROCESS_BUTTON)).toBeNull();
+  });
+
+  it('sem usuário com `run_reconciliation` o botão some', () => {
+    authState.user = null;
+    renderScreen();
+    expect(screen.queryByRole('button', REPROCESS_BUTTON)).toBeNull();
+  });
+
+  it('o diálogo diz o que se perde ANTES de confirmar, e cancelar não chama o servidor', async () => {
+    const user = userEvent.setup();
+    renderScreen();
+    await user.click(screen.getByRole('button', REPROCESS_BUTTON));
+
+    const dialog = screen.getByRole('alertdialog', { name: 'Reprocessar com o Omie?' });
+    for (const loss of REPROCESS_LOSSES) {
+      expect(within(dialog).getByText(loss)).toBeVisible();
+    }
+    expect(within(dialog).getByText(/continua lançado/)).toBeVisible();
+    // O foco inicial é o Cancelar (Enter reflexo não apaga a revisão).
+    expect(within(dialog).getByRole('button', { name: 'Cancelar' })).toHaveFocus();
+
+    await user.click(within(dialog).getByRole('button', { name: 'Cancelar' }));
+    expect(reprocessMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('confirmar chama o servidor, avisa e fecha o diálogo', async () => {
+    const user = userEvent.setup();
+    renderScreen();
+    await user.click(screen.getByRole('button', REPROCESS_BUTTON));
+    const dialog = screen.getByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Reprocessar' }));
+
+    expect(reprocessMock).toHaveBeenCalledTimes(1);
+    expect(toastSuccess).toHaveBeenCalledWith(REPROCESS_SUCCESS_TOAST);
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('409 do servidor vira o toast com a mensagem dele e o diálogo fica aberto', async () => {
+    const { ApiError } = await import('@/lib/api/client');
+    reprocessMock.mockRejectedValueOnce(
+      new ApiError(409, {
+        code: 'CONFLICT',
+        message: 'conflict',
+        userMessage: 'Esta conciliação já está em processamento.',
+      }),
+    );
+    const user = userEvent.setup();
+    renderScreen();
+    await user.click(screen.getByRole('button', REPROCESS_BUTTON));
+    await user.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Reprocessar' }),
+    );
+
+    expect(toastError).toHaveBeenCalledWith('Esta conciliação já está em processamento.');
+    expect(screen.getByRole('alertdialog')).toBeVisible();
+  });
+
+  it('o diálogo aberto não tem violações critical/serious do axe-core', async () => {
+    const user = userEvent.setup();
+    renderScreen();
+    await user.click(screen.getByRole('button', REPROCESS_BUTTON));
+    await assertNoA11yViolations(screen.getByRole('alertdialog'));
   });
 });
 

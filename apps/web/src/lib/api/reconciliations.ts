@@ -235,17 +235,20 @@ export async function deleteSessionFile(
 // ----------------------------------------------------------------------
 
 /**
- * "Tentar novamente" de uma sessão que terminou em `status='error'`.
+ * "Tentar novamente" de uma sessão em `status='error'` e, desde a 86e3n70q9,
+ * "Reprocessar com o Omie" de uma sessão concluída (`reviewing`/`done`).
  *
  * Backend reseta a sessão pra `status='processing'`, mantém as `file_entries`
- * (resultado do parse Anthropic) e reagenda o processamento em background.
+ * (resultado do parse Anthropic), nunca toca no registro do que já foi lançado
+ * no Omie e reagenda o processamento em background. Numa sessão concluída a
+ * revisão recomeça: notas, ações, anomalias (com resolução e veredito) saem.
  * Resposta é idêntica ao create — front pode reusar a UI de processing/polling.
  *
  * Erros relevantes:
  *   - 404: sessão não existe / manager fora da carteira.
- *   - 409 (`CONFLICT`): sessão NÃO está em `error` (já processando, em
- *     revisão ou concluída) — caller deve refrescar o detail antes de
- *     mostrar o botão de novo.
+ *   - 409 (`CONFLICT`): sessão em `processing` (não duplica o processamento) ou
+ *     cliente encerrado — caller deve refrescar o detail antes de mostrar o
+ *     botão de novo.
  */
 export async function reprocessReconciliation(
   sessionId: string,

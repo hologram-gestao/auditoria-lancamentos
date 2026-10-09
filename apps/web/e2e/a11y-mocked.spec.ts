@@ -1992,6 +1992,12 @@ let sessionAccountType: string | null = null;
  * em hover o liga.
  */
 let sessionErrorDetail = false;
+/**
+ * 86e3n70q9: o `POST /reprocess` liga esta chave, e o detalhe passa a voltar em
+ * `processing` (é o que o servidor faz). Prova que a tela volta ao estado
+ * "processando" depois de confirmar, sem navegar.
+ */
+let sessionReprocessed = false;
 
 /**
  * Linhas `sem_omie` de uma fatura de cartão: são as únicas lançáveis. A
@@ -2982,6 +2988,10 @@ async function fulfillApi(route: Route): Promise<void> {
       body: JSON.stringify(CARD_INVOICE_PARSE),
     });
   }
+  if (path === `/api/v1/reconciliations/${SESSION_ID}/reprocess`) {
+    sessionReprocessed = true;
+    return json({ session_id: SESSION_ID, status: 'processing' });
+  }
   if (path === `/api/v1/reconciliations/${SESSION_ID}`) {
     return json({
       ...DETAIL,
@@ -2990,6 +3000,7 @@ async function fulfillApi(route: Route): Promise<void> {
         : {}),
       ...(sessionAccountType === null ? {} : { account_type: sessionAccountType }),
       ...(sessionErrorDetail ? { status: 'error', error_code: 'ADL-PARSE-LIMIT' } : {}),
+      ...(sessionReprocessed ? { status: 'processing' } : {}),
       ...(sessionBalanceDivergent
         ? { balance_end_omie: '1520.00', balance_difference: '-20.00' }
         : {}),
@@ -3464,6 +3475,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   // lançamento ligam o cartão.
   sessionAccountType = null;
   sessionErrorDetail = false;
+  sessionReprocessed = false;
   reviewVerdict = null;
   patchAnomalyFails = false;
   accountsSyncFails = false;
@@ -5432,6 +5444,67 @@ for (const vp of VIEWPORTS) {
       await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}?tab=anomalias`);
       await expect(page.getByRole('button', { name: /Lançar no Omie/ })).toHaveCount(0);
       await analyze(page, `revisão de conta corrente sem lançamento (${vp.label})`);
+    });
+  });
+}
+
+/**
+ * 86e3n70q9 — "Reprocessar com o Omie" numa conciliação CONCLUÍDA.
+ *
+ * O que só o browser mede: o `alertdialog` montado de verdade (foco inicial no
+ * Cancelar, lista do que se perde dentro da viewport em 390px, contraste da
+ * ação com o ponteiro em cima) e a volta da tela para "processando" depois de
+ * confirmar, pelo polling de sempre, sem navegar.
+ */
+for (const vp of VIEWPORTS) {
+  const slugR = vp.label.replace(/\s+/g, '-');
+  test.describe(`Reprocessar conciliação concluída (86e3n70q9) — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('diálogo diz o que se perde e a tela volta a processar', async ({ page }) => {
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}`);
+
+      const abrir = page.getByRole('button', { name: 'Reprocessar com o Omie' });
+      await expect(abrir).toBeVisible();
+      await abrir.click();
+
+      const dialogo = page.getByRole('alertdialog', { name: 'Reprocessar com o Omie?' });
+      await expect(dialogo).toBeVisible();
+      await aguardarAnimacao(dialogo);
+      // `Enter` reflexo não pode apagar a revisão.
+      await expect(dialogo.getByRole('button', { name: 'Cancelar' })).toBeFocused();
+      await expect(dialogo.getByText(/notas e as ações registradas/)).toBeVisible();
+      await expect(dialogo.getByText(/continua lançado/)).toBeVisible();
+
+      // Nada do diálogo passa da borda da viewport (390px é o caso apertado).
+      const largura = page.viewportSize()?.width ?? 0;
+      const caixa = await dialogo.boundingBox();
+      expect((caixa?.x ?? 0) + (caixa?.width ?? 0), 'diálogo cortado na borda').toBeLessThanOrEqual(
+        largura,
+      );
+      const confirmar = dialogo.getByRole('button', { name: 'Reprocessar', exact: true });
+      const caixaConfirmar = await confirmar.boundingBox();
+      expect(
+        (caixaConfirmar?.x ?? 0) + (caixaConfirmar?.width ?? 0),
+        'ação do diálogo cortada na borda',
+      ).toBeLessThanOrEqual(largura);
+
+      // O axe só vê o hover com o ponteiro lá (skill front-gate §4).
+      await confirmar.hover();
+      await expect(page.locator('#__next_error__')).toHaveCount(0);
+      await shot(page, `reprocessar-dialogo-${slugR}`);
+      await analyze(page, `diálogo de reprocessar com o Omie (${vp.label})`);
+
+      await confirmar.click();
+      await expect(
+        page.getByRole('status').filter({ hasText: 'Conciliação em processamento' }),
+      ).toBeVisible();
+      await expect(page.getByRole('alertdialog')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Reprocessar com o Omie' })).toHaveCount(0);
+      // O toast entra em fade: medir antes de estabilizar mede cor mesclada.
+      await aguardarToastEstavel(page);
+      await shot(page, `reprocessar-processando-${slugR}`);
+      await analyze(page, `revisão de volta a processar (${vp.label})`);
     });
   });
 }

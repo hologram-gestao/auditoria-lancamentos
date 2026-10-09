@@ -1001,26 +1001,30 @@ class TestReprocessReconciliation:
         # Job foi enfileirado.
         assert sess.id in stub_enqueue
 
-    async def test_reprocess_non_error_session_returns_409(
+    async def test_reprocess_processing_session_returns_409(
         self,
         client_with_db: AsyncClient,
         db_session: AsyncSession,
         stub_enqueue: list[UUID],
     ) -> None:
-        """Sessão em status diferente de error não pode ser reprocessada."""
+        """Sessão em processamento não é reprocessada (não duplica o job).
+
+        86e3n70q9: `reviewing`/`done` passaram a ser reprocessáveis (ver
+        `test_reconciliation_reprocess_reviewed.py`); só `processing` fica 409.
+        """
         admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
         cliente = await _seed_client(db_session, name="Y", creator=admin)
         sess = await _seed_session(
             db_session,
             cliente=cliente,
             creator=admin,
-            status_value="reviewing",
+            status_value="processing",
             file_hash=_hex64("reprocess-conflict"),
         )
         await _login(client_with_db, ADMIN_EMAIL)
         resp = await client_with_db.post(f"/api/v1/reconciliations/{sess.id}/reprocess")
         assert resp.status_code == 409, resp.text
-        assert "estado de erro" in resp.json()["error"]["userMessage"].lower()
+        assert "em processamento" in resp.json()["error"]["userMessage"].lower()
         # Não enfileira.
         assert stub_enqueue == []
 

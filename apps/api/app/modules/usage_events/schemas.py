@@ -48,6 +48,11 @@ class UsageEventName(StrEnum):
     # Emitidos pelo BACKEND, no ponto real do fluxo.
     CONCILIACAO_CRIADA = "conciliacao_criada"
     CONCILIACAO_CONCLUIDA = "conciliacao_concluida"
+    #: 86e3n70q9 — alguém pediu para reprocessar uma conciliação (tentar de novo
+    #: depois de erro, ou cruzar de novo com o Omie uma sessão já concluída). De
+    #: BACKEND e FORA da dedup: a mesma sessão pode ser reprocessada N vezes, e
+    #: cada pedido é uma linha. Só IDs e o status de onde a sessão saiu.
+    CONCILIACAO_REPROCESSADA = "conciliacao_reprocessada"
     # Emitidos pelo FRONTEND (só o browser observa navegação e entrega visual).
     NOTIFICACAO_ENTREGUE = "notificacao_entregue"
     AUTOR_NAVEGOU_FORA = "autor_navegou_fora"
@@ -675,6 +680,20 @@ class SenhaRedefinidaPelaPlataformaProps(_StrictProps):
     actor_user_id: UUID
     target_user_id: UUID
     target_scope: Literal["platform", "system", "client"]
+
+
+class ConciliacaoReprocessadaProps(_StrictProps):
+    """`conciliacao_reprocessada` (86e3n70q9) — pedido de reprocessar uma sessão.
+
+    A sessão vai na COLUNA `session_id`; aqui só o tenant, quem pediu e o status
+    de onde a sessão saiu (`error` é o "tentar de novo"; `reviewing`/`done` é
+    cruzar de novo uma conciliação concluída, a pergunta da reunião de 08/10).
+    Só IDs e um enum (§4.7).
+    """
+
+    client_id: UUID
+    reprocessado_por: UUID
+    status_origem: Literal["error", "reviewing", "done"]
 
 
 class SessoesEncerradasProps(_StrictProps):

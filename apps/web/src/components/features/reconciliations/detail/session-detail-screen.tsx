@@ -46,8 +46,10 @@ import {
 } from '@/hooks/use-reconciliations';
 import { ApiError } from '@/lib/api/client';
 import type { SessionDetail } from '@/lib/api/reconciliations';
+import { hasPermission } from '@/lib/authz';
 import { sessionCardProcessLine } from '@/lib/card-posting-date-mode';
 import { formatBRDate, formatCreatedAt, formatReferenceMonth } from '@/lib/format';
+import { useAuthStore } from '@/stores/auth';
 
 import { AnomaliesTab } from '../review/anomalies-tab';
 import { GlossarySeal } from '../review/glossary-seal';
@@ -62,6 +64,7 @@ import { SummaryTab } from '../review/summary-tab';
 import { accountNameFor } from '../session-label';
 
 import { ExportReportButton } from './export-report-button';
+import { ReprocessReconciliationButton } from './reprocess-reconciliation-button';
 import { SessionFilesPanel } from './session-files-panel';
 import { BalanceSummary, SessionTotals } from './session-totals';
 
@@ -84,6 +87,7 @@ export function SessionDetailScreen({ clientId, sessionId }: SessionDetailScreen
   const searchParams = useSearchParams();
   const detailQuery = useSessionDetail(sessionId);
   const clientQuery = useClientDetail(clientId);
+  const currentUser = useAuthStore((s) => s.user);
 
   const rawTab = searchParams.get('tab');
   const activeTab: TabId =
@@ -145,6 +149,15 @@ export function SessionDetailScreen({ clientId, sessionId }: SessionDetailScreen
     detail.account_type === 'credit_card' && !processAllowsPosting(detail);
   const isProcessing = detail.status === 'processing';
   const isError = detail.status === 'error';
+  // 86e3n70q9 — cruzar de novo uma conciliação concluída. O servidor recusa
+  // `processing` (409) e cliente encerrado (409, §4.12); a tela esconde os dois,
+  // e a permissão é a da rota (`run_reconciliation`).
+  const canReprocess =
+    !isProcessing &&
+    !isError &&
+    clientQuery.data !== undefined &&
+    clientQuery.data.closed_at == null &&
+    hasPermission(currentUser, 'run_reconciliation');
 
   return (
     <div className="space-y-6">
@@ -181,11 +194,16 @@ export function SessionDetailScreen({ clientId, sessionId }: SessionDetailScreen
           </div>
         </div>
         {!isProcessing && !isError && (
-          <ExportReportButton
-            sessionId={sessionId}
-            clientId={clientId}
-            referenceMonthLabel={referenceLabel}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            {canReprocess && (
+              <ReprocessReconciliationButton sessionId={sessionId} clientId={clientId} />
+            )}
+            <ExportReportButton
+              sessionId={sessionId}
+              clientId={clientId}
+              referenceMonthLabel={referenceLabel}
+            />
+          </div>
         )}
       </header>
 
