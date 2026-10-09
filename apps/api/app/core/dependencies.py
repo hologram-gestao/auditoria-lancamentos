@@ -394,6 +394,13 @@ SyncClientMovementsDep = Annotated[
 ManageMappingCatalogDep = Annotated[
     CurrentUser, Depends(require_permission(Permission.MANAGE_MAPPING_CATALOG))
 ]
+# A prévia dos alvos do demonstrativo a partir da origem de UM cliente (86e3n70pn):
+# a permissão é a do catálogo (é ele que vai mudar), mas a rota tem `client_id`, então
+# o guard é o AUDITADO — o alcance ao cliente vem antes, e a negação de quem alcança
+# o cliente sem poder escrever no catálogo vira 1 linha `denied`.
+ManageMappingCatalogForClientDep = Annotated[
+    CurrentUser, Depends(require_client_permission(Permission.MANAGE_MAPPING_CATALOG))
+]
 # De-para do cliente (BACK 12.4+): guard AUDITADO — a negação vira 1 linha em
 # `access_audit` (R6: "negar a rota, registrando a negação").
 ManageClientMappingDep = Annotated[

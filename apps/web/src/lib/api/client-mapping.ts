@@ -46,6 +46,7 @@ import type {
   MaterializationSummary,
   MovementsSyncResult,
   MovementsSyncState,
+  OriginTargetsPreview,
 } from '@/lib/contracts';
 
 import {
@@ -250,6 +251,18 @@ export async function inheritMapping(
   payload: InheritRequest,
 ): Promise<InheritResult> {
   return apiPost<InheritResult>(`${mappingBase(clientId, destinationType)}/inherit`, payload);
+}
+
+/**
+ * PRÉVIA dos alvos do demonstrativo a partir da origem do cliente (86e3n70pn).
+ * Só LÊ: os confirmados entram por `createMappingTargets` no `destinationId` que
+ * ela devolve. Pede `manage_mapping_catalog` (403 para os demais).
+ */
+export async function getOriginTargetsPreview(
+  clientId: string,
+  destinationType: string,
+): Promise<OriginTargetsPreview> {
+  return apiGet<OriginTargetsPreview>(`${mappingBase(clientId, destinationType)}/origin-targets`);
 }
 
 // ---------------------------------------------------------------------------

@@ -849,6 +849,17 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         "app/modules/client_mapping/routes.py",
         _VIA_CLIENT_MAPPING_WRITE,
     ),
+    # 86e3n70pn (bloco B): a prévia dos alvos do demonstrativo a partir da origem.
+    # Só LÊ (plano de contas do cliente + catálogo da org do cliente); o guard é a
+    # permissão do catálogo, auditado, depois do alcance ao cliente.
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/mapping/{destination_type}/origin-targets",
+        ScopeKind.COLLECTION,
+        "app/modules/client_mapping/routes.py",
+        f"{_VIA_CLIENT_PATH}; plano de contas lido por client_id, catálogo pela org do "
+        "cliente; manage_mapping_catalog auditado",
+    ),
     # ------------------------- leitura e portabilidade do de-para (S12, BACK 12.5)
     SensitiveEndpoint(
         "GET",

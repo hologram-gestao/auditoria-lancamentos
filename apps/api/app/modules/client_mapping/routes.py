@@ -10,6 +10,7 @@
     POST /api/v1/clients/{client_id}/mapping/{destination_type}/import/preview  (12.5)
     POST /api/v1/clients/{client_id}/mapping/{destination_type}/import          (12.5)
     GET  /api/v1/clients/{client_id}/mapping/{destination_type}/preview         (12.6)
+    GET  /api/v1/clients/{client_id}/mapping/{destination_type}/origin-targets  (86e3n70pn)
     POST /api/v1/clients/{client_id}/mapping/{destination_type}/materializations (12.6)
 
 **Duas travas.** A MATRIZ: `manage_client_mapping` (células do PRD, R6) na escrita,
@@ -39,6 +40,7 @@ from app.core.dependencies import (
     CurrentUserDep,
     DbSessionDep,
     ManageClientMappingDep,
+    ManageMappingCatalogForClientDep,
     OpenClientDep,
     SettingsDep,
 )
@@ -52,6 +54,7 @@ from app.modules.client_file_categories.registry import FileCategoryRegistry
 from app.modules.client_mapping.accounting import AccountingDecisionSupport
 from app.modules.client_mapping.listing import ClientMappingListService, NamedRow
 from app.modules.client_mapping.materialization import ClientMappingApplyService
+from app.modules.client_mapping.origin_targets import OriginTargetsPreviewService
 from app.modules.client_mapping.portability import (
     MAX_IMPORT_BYTES,
     ClientMappingPortabilityService,
@@ -87,6 +90,8 @@ from app.modules.client_mapping.schemas import (
     MaterializationRequest,
     MaterializationResponse,
     MaterializationSummaryResponse,
+    OriginTargetsPreviewEnvelope,
+    OriginTargetsPreviewResponse,
 )
 from app.modules.client_mapping.service import ClientMappingDecisionService, DecisionInput
 from app.modules.client_movements.competence import (
@@ -132,26 +137,32 @@ def _get_decision_service(db: DbSessionDep, settings: SettingsDep) -> ClientMapp
 DecisionServiceDep = Annotated[ClientMappingDecisionService, Depends(_get_decision_service)]
 
 
-def _get_list_service(
-    request: Request, db: DbSessionDep, settings: SettingsDep, decisions: DecisionServiceDep
-) -> ClientMappingListService:
-    """A leitura, com o nome de categoria pelo MESMO acessor do plano de contas.
+def _names_service(
+    request: Request, db: DbSessionDep, settings: SettingsDep
+) -> ChartOfAccountsSyncService:
+    """O acessor de NOMES do plano de contas (categoria e conta de demonstrativo).
 
     O cache de categorias vive em `app.state` — um por processo, o mesmo da tela de
     revisão e do plano de contas (construir um aqui daria um cache por request).
     """
     cache: OmieCategoriasCache = request.app.state.omie_categorias_cache
-    names = ChartOfAccountsSyncService(
+    return ChartOfAccountsSyncService(
         db,
         repository=ClientChartOfAccountsRepository(db),
         categorias_service=OmieCategoriasService(cache),
         settings=settings,
     )
+
+
+def _get_list_service(
+    request: Request, db: DbSessionDep, settings: SettingsDep, decisions: DecisionServiceDep
+) -> ClientMappingListService:
+    """A leitura, com o nome de categoria pelo MESMO acessor do plano de contas."""
     return ClientMappingListService(
         ClientMappingRepository(db),
         decisions=decisions,
         catalog=MappingCatalogRepository(db),
-        names=names,
+        names=_names_service(request, db, settings),
         # S14 (BACK 14.4): o rótulo das categorias derivadas do arquivo.
         file_names=FileCategoryRegistry(db, settings=settings),
     )
@@ -170,6 +181,22 @@ def _get_portability_service(
 
 PortabilityServiceDep = Annotated[
     ClientMappingPortabilityService, Depends(_get_portability_service)
+]
+
+
+def _get_origin_targets_service(
+    request: Request, db: DbSessionDep, settings: SettingsDep, decisions: DecisionServiceDep
+) -> OriginTargetsPreviewService:
+    return OriginTargetsPreviewService(
+        decisions=decisions,
+        repository=ClientMappingRepository(db),
+        catalog=MappingCatalogRepository(db),
+        names=_names_service(request, db, settings),
+    )
+
+
+OriginTargetsServiceDep = Annotated[
+    OriginTargetsPreviewService, Depends(_get_origin_targets_service)
 ]
 
 
@@ -340,6 +367,28 @@ async def inherit_mapping(
         confirm_retroactive=payload.confirm_retroactive,
     )
     return InheritEnvelope(data=InheritResponse.build(result))
+
+
+@router.get(
+    "/origin-targets",
+    summary=(
+        "PRÉVIA dos alvos do demonstrativo a partir da origem do cliente: as contas de "
+        "demonstrativo DISTINTAS das categorias ativas do plano de contas sincronizado, "
+        "com o nome resolvido agora na origem e se o catálogo do destino já tem o alvo. "
+        "Só LÊ: os alvos confirmados entram pelo lote do catálogo "
+        "(`POST /mapping-destinations/{id}/targets`), por decisão explícita de quem tem "
+        "`manage_mapping_catalog` — nunca automaticamente. Outros destinos respondem "
+        "`destino_sem_heranca`; cliente sem plano, `sem_plano_de_contas`."
+    ),
+)
+async def preview_origin_targets(
+    client: AccessibleClientDep,
+    _user: ManageMappingCatalogForClientDep,
+    destination_type: DestinationTypePath,
+    service: OriginTargetsServiceDep,
+) -> OriginTargetsPreviewEnvelope:
+    preview = await service.preview(client, destination_type)
+    return OriginTargetsPreviewEnvelope(data=OriginTargetsPreviewResponse.build(preview))
 
 
 # ---------------------------------------------------------------------------

@@ -207,6 +207,14 @@ export function fileOriginPath(clientId: string, competence?: string | null): st
 }
 
 /**
+ * Rota da tela "Categorias do Omie" (S10; "Plano de Contas" até 86e3n70pn). A rota
+ * `/plano-de-contas` ficou: link salvo continua abrindo a mesma tela.
+ */
+export function chartOfAccountsPath(clientId: string): string {
+  return `/clientes/${clientId}/plano-de-contas`;
+}
+
+/**
  * Rota da tela "Plano contábil" (S16) — o plano do sistema contábil de DESTINO,
  * distinto do "Plano de Contas" da origem (S10). `section=conta-do-banco` leva
  * direto à seção da conta do banco: é para onde o de-para manda quando a

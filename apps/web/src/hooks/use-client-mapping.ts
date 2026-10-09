@@ -25,6 +25,7 @@ import {
   exportClientMapping,
   getMappingPreview,
   getMovementsSyncState,
+  getOriginTargetsPreview,
   inheritMapping,
   listAllActiveMappingTargets,
   listClientMapping,
@@ -62,6 +63,7 @@ import type {
   MaterializationSummary,
   MovementsSyncResult,
   MovementsSyncState,
+  OriginTargetsPreview,
 } from '@/lib/contracts';
 
 export const clientMappingKeys = {
@@ -84,6 +86,8 @@ export const mappingCatalogKeys = {
   targets: (destinationId: string) => ['mapping-targets', destinationId] as const,
   targetsPage: (destinationId: string, params: ListMappingTargetsParams) =>
     ['mapping-targets', destinationId, 'page', params] as const,
+  originTargets: (clientId: string, destinationType: string) =>
+    ['client-mapping', clientId, destinationType, 'origin-targets'] as const,
 };
 
 export function useMappingDestinations(
@@ -146,6 +150,24 @@ export function useUpdateMappingTarget(destinationId: string) {
   return useMutation<MappingTarget, Error, { targetId: string; patch: MappingTargetUpdate }>({
     mutationFn: ({ targetId, patch }) => updateMappingTarget(destinationId, targetId, patch),
     onSuccess: invalidate,
+  });
+}
+
+/**
+ * A prévia dos alvos do demonstrativo a partir da origem (só LÊ). Pedida quando o
+ * diálogo abre e sempre fresca: o catálogo pode ter mudado em outra aba.
+ */
+export function useOriginTargetsPreview(
+  clientId: string,
+  destinationType: string,
+  options: { enabled?: boolean } = {},
+) {
+  return useQuery<OriginTargetsPreview>({
+    queryKey: mappingCatalogKeys.originTargets(clientId, destinationType),
+    queryFn: () => getOriginTargetsPreview(clientId, destinationType),
+    enabled: options.enabled ?? true,
+    staleTime: 0,
+    retry: false,
   });
 }
 
