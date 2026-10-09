@@ -74,15 +74,24 @@ esse tipo de registro, que não tem valor, e recusa o arquivo se houver qualquer
 ## Ordem da lista
 
 A lista (`GET …/accounting-chart`) sai na **ordem da classificação** (86e3n70p9): a sintética
-em cima e as analíticas dela abaixo, `1.1.2` antes de `1.1.10`. A chave é **derivada na
-gravação**, nunca inferida na leitura: `client_accounting_accounts.sort_key`, calculada por
+em cima e as analíticas dela abaixo. **A classificação ordena como TEXTO, como no Domínio**:
+sob o mesmo pai, `00001…` e `001…` são famílias distintas e saem uma inteira depois da outra,
+e `1.1.10` vem antes de `1.1.2`. Por isso a planilha feita à mão usa **largura fixa por
+nível** (`1.1.01`, `1.1.02`… `1.1.10`); sem isso, `1.1.10` aparece antes de `1.1.2`, como
+apareceria no próprio Domínio. Conta **sem** classificação ordena pelo código reduzido com os
+segmentos numéricos preenchidos com zeros (`9` antes de `10`); a chave dela começa por zeros,
+então num plano misto essas contas vêm antes das classificadas.
+
+A chave é **derivada na gravação**, nunca inferida na leitura:
+`client_accounting_accounts.sort_key` (collation `C`, comparação por byte), calculada por
 `client_accounting_chart/sort_key.py::chart_sort_key` em toda inserção e atualização (modelo e
-Domínio), e a listagem só faz `ORDER BY sort_key NULLS LAST, code, id`. A regra: a classificação
-(ou o código reduzido, sem ela) partida por `.`; segmento só de dígitos preenchido com zeros à
-esquerda até 6 (`1.1.10` → `000001.000001.000010`); segmento com letra em minúsculas, como está.
+Domínio), e a listagem só faz `ORDER BY sort_key NULLS LAST, code, id`. A collation `C` é parte
+da regra: a do sistema (`en_US.utf8` da glibc) ignora o ponto e embaralharia a classificação.
 A migration `b2f7c9e41d06` preencheu as linhas existentes com a mesma regra em SQL. Quem gravar
 conta por outro caminho (inclusão manual) chama `chart_sort_key` e persiste o resultado. A
-ordem atravessa a paginação (é SQL) e o seletor de conta do de-para a herda.
+ordem atravessa a paginação (é SQL) e o seletor de conta do de-para a herda. As duas amostras
+do Domínio (`tests/fixtures/accounting_chart_dominio/` e `…_dominio_xls/`) saem na ordem do
+arquivo, e um teste de integração exige isso.
 
 ## Reimportação
 

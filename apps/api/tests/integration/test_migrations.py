@@ -2409,20 +2409,27 @@ _INSERT_CLASSIFIED_ACCOUNT = (
 )
 
 #: A amostra da paridade Python x SQL: cada caso da regra, inclusive os que uma
-#: implementação ingênua erra (segmento largo, letra, vazio, sem classificação).
+#: implementação ingênua erra. Com classificação, a chave é a classificação CRUA (as
+#: famílias `00001…` e `001…` sob o mesmo pai, do plano real do Gabriel); sem ela,
+#: o código preenchido (segmento largo, letra, vazio).
 _SORT_KEY_SAMPLE: tuple[tuple[str, str | None], ...] = (
     ("1", "1"),
     ("3", "1.1"),
     ("9", "1.1.2"),
     ("10", "1.1.10"),
     ("649", "1.1.1.02.001"),
+    ("13", "1.1.2.01"),
+    ("773", "1.1.2.01.00001"),
+    ("721", "1.1.2.01.00002"),
+    ("867", "1.1.2.01.001"),
+    ("868", "1.1.2.01.002"),
     ("7", "1.1.A"),
-    ("8", "1.1234567"),
-    ("6", "1..2"),
     ("100", None),
     ("20", ""),
     ("2.04.78", None),
     ("AB-12", None),
+    ("1234567", None),
+    ("1..2", None),
 )
 
 
@@ -2475,10 +2482,44 @@ class TestOrdemDoPlanoContabilRoundTrip:
             assert keys[code] == chart_sort_key(classification, code), (code, classification)
         assert None not in keys.values(), "o backfill alcança TODA linha existente"
 
-        # A ordem de TEXTO das chaves gravadas é a da classificação: sintética em cima,
-        # as filhas abaixo, `1.1.2` antes de `1.1.10`.
-        hierarchy = ["1", "3", "649", "9", "10"]  # 1 < 1.1 < 1.1.1.02.001 < 1.1.2 < 1.1.10
-        assert sorted(hierarchy, key=lambda c: keys[c] or "") == hierarchy
+        # A ordem do BANCO (collation `C` da coluna) é a do Domínio: sintética em cima, e
+        # sob `1.1.2.01` a família `00001…` inteira antes da `001…`, sem intercalar.
+        engine = sa.create_engine(url)
+        try:
+            with engine.connect() as conn:
+                ordered = list(
+                    conn.execute(
+                        sa.text(
+                            "SELECT code FROM client_accounting_accounts "
+                            "WHERE client_id = :cid AND classification <> '' "
+                            "ORDER BY sort_key, code"
+                        ),
+                        {"cid": client_id},
+                    ).scalars()
+                )
+        finally:
+            engine.dispose()
+        assert ordered == [
+            "1",  # 1
+            "3",  # 1.1
+            "649",  # 1.1.1.02.001
+            "10",  # 1.1.10 (texto, como no Domínio)
+            "9",  # 1.1.2
+            "13",  # 1.1.2.01
+            "773",  # 1.1.2.01.00001
+            "721",  # 1.1.2.01.00002
+            "867",  # 1.1.2.01.001
+            "868",  # 1.1.2.01.002
+            "7",  # 1.1.A
+        ]
+        assert (
+            _scalar(
+                url,
+                "SELECT collation_name FROM information_schema.columns "
+                "WHERE table_name = 'client_accounting_accounts' AND column_name = 'sort_key'",
+            )
+            == "C"
+        ), "a collation do sistema ignora a pontuação e embaralha a classificação"
 
     def test_indice_e_coluna_existem_e_o_backfill_e_idempotente(
         self, alembic_cfg: Config, migrations_db_url: str
@@ -2508,10 +2549,10 @@ class TestOrdemDoPlanoContabilRoundTrip:
         # novo a preenche, e rodar sobre linha já preenchida não a altera.
         mig_backfill = _backfill_sql()
         _execute(url, mig_backfill)
-        assert _sort_keys(url, client_id) == {"10": "000001.000001.000010"}
+        assert _sort_keys(url, client_id) == {"10": "1.1.10"}
         _execute(url, "UPDATE client_accounting_accounts SET classification = '9'")
         _execute(url, mig_backfill)
-        assert _sort_keys(url, client_id) == {"10": "000001.000001.000010"}, (
+        assert _sort_keys(url, client_id) == {"10": "1.1.10"}, (
             "convergente: só preenche onde está NULL"
         )
 
@@ -2550,7 +2591,7 @@ class TestOrdemDoPlanoContabilRoundTrip:
             command.downgrade(alembic_cfg, PRE_CHART_SORT_KEY_REV)
 
         command.upgrade(alembic_cfg, "head")
-        assert _sort_keys(url, client_id) == {"649": "000001.000001.000001.000002.000001"}
+        assert _sort_keys(url, client_id) == {"649": "1.1.1.02.001"}
         assert _scalar(url, "SELECT version_num FROM alembic_version") == _head_revision(
             alembic_cfg
         )

@@ -30,7 +30,7 @@ const COLUMNS: ReadonlyArray<{ name: string; required: boolean; rule: string }> 
   {
     name: 'classificacao',
     required: false,
-    rule: 'A classificação hierárquica (ex.: 1.1.1.02.001), até 40 caracteres.',
+    rule: 'A classificação hierárquica (ex.: 1.1.1.02.001), até 40 caracteres. A lista segue a ordem dela como texto, como no Domínio: use a mesma largura em cada nível (01, 02… 10), senão 1.1.10 vem antes de 1.1.2.',
   },
 ];
 
