@@ -507,6 +507,44 @@ class TestListagem:
         )
         assert chave.scalar_one() == "000001.000002"
 
+    async def test_cabecalho_como_gente_escreve_e_tipo_s_a_entram_pela_rota(
+        self, client_with_db: AsyncClient, world: World
+    ) -> None:
+        """86e3n70p9 (bloco B): "Código Reduzido", "Nome", "Tipo", "Classificação" e o
+        tipo `S`/`A` entram; sinônimo (`conta`) continua a recusa de cabeçalho, nomeando
+        só o vocabulário NOSSO."""
+        await _login(client_with_db, world.admin)
+        aceita = await _import(
+            client_with_db,
+            world.client,
+            _csv(
+                "Código Reduzido;Nome;Tipo;Classificação",
+                "1;Ativo;S;1",
+                "649;Banco conta movimento;a;1.1.1.02.001",
+                "650;Aplicacoes;Analítico;1.1.1.02.002",
+            ),
+        )
+        assert aceita.status_code == 200, aceita.text
+        assert aceita.json()["data"]["contas"] == 3
+        lista = await client_with_db.get(_url(world.client))
+        assert [(i["code"], i["type"]) for i in lista.json()["data"]] == [
+            ("1", "sintetica"),
+            ("649", "analitica"),
+            ("650", "analitica"),
+        ]
+
+        recusa = await _import(
+            client_with_db,
+            world.client,
+            _csv("Conta;Nome;Tipo", "651;Outra;analitica"),
+        )
+        assert recusa.status_code == 422, recusa.text
+        body = recusa.json()["error"]
+        assert body["code"] == "CABECALHO_DIVERGENTE"
+        assert body["details"]["missingColumns"] == ["codigo_reduzido"]
+        assert body["details"]["unexpectedColumnCount"] == 1
+        assert "Conta" not in recusa.text.replace("CABECALHO", "")
+
     async def test_curinga_de_like_e_literal_e_filtro_invalido_nao_vira_lista_vazia(
         self, client_with_db: AsyncClient, world: World
     ) -> None:

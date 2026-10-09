@@ -6,9 +6,14 @@ da amostra anonimizada):
     - CSV UTF-8 (com ou sem BOM) separado por `;`, ou planilha do Excel, XLSX ou XLS
       (primeira aba);
     - cabeçalho na linha 1, com as colunas obrigatórias `codigo_reduzido`, `nome` e
-      `tipo`, e a opcional `classificacao` — em qualquer ordem, sem outras colunas;
-    - `tipo` ∈ {`analitica`, `sintetica`} (maiúscula e acento indiferentes:
-      `Analítica` vale);
+      `tipo`, e a opcional `classificacao` — em qualquer ordem, sem outras colunas.
+      O nome da coluna casa por GRAFIA NORMALIZADA (86e3n70p9): maiúsculas, acentos,
+      espaços e hífens no lugar do `_`, e `*` ou `:` no fim não importam (`Código
+      Reduzido`, `codigo reduzido` e `Classificação` valem). Sinônimo NÃO vale
+      (`codigo` sozinho ou `conta` é coluna desconhecida): a regra é de grafia, não
+      de vocabulário, para a recusa continuar previsível;
+    - `tipo` ∈ {`analitica`, `sintetica`}, aceitando também `analitico`/`sintetico` e
+      as iniciais `a`/`s` (maiúscula e acento indiferentes: `Analítica`, `S` valem);
     - uma linha por conta, sem código repetido, e pelo menos uma conta.
 
     Exemplo::
@@ -71,7 +76,7 @@ from app.modules.client_file_ingestion.reader import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-#: Colunas do modelo. Casadas pelo NOME (aparado, sem distinção de caixa), nunca
+#: Colunas do modelo. Casadas pelo NOME normalizado (`_normalized_header`), nunca
 #: pela posição.
 COLUMN_CODE = "codigo_reduzido"
 COLUMN_NAME = "nome"
@@ -119,7 +124,8 @@ _EMPTY_MESSAGE = (
 )
 _HEADER_MESSAGE = (
     "O cabeçalho da planilha não segue o modelo do plano de contas: as colunas são "
-    "codigo_reduzido, nome e tipo (obrigatórias) e classificacao (opcional)."
+    "codigo_reduzido, nome e tipo (obrigatórias) e classificacao (opcional). Maiúsculas, "
+    "acentos, espaços e hífens não importam; outros nomes não são aceitos."
 )
 _LINES_MESSAGE = (
     "A planilha tem linhas inválidas. Corrija as linhas apontadas e envie de novo — "
@@ -153,8 +159,22 @@ class ChartLineProblem:
     reason: ChartLineReason
 
 
+#: O que a normalização do cabeçalho apaga: espaços e hífens INTERNOS viram `_`
+#: (`Código Reduzido` → `codigo_reduzido`); `*` e `:` no FIM somem (`Nome*`, `Tipo:`,
+#: marcas de "obrigatório" que planilha de gente traz).
+_HEADER_SEPARATORS = re.compile(r"[\s\-]+")
+_HEADER_TRAILING_MARKS = re.compile(r"[*:]+$")
+
+
 def _normalized_header(name: str) -> str:
-    return name.strip().lower()
+    """A grafia normalizada de um nome de coluna — só grafia, nunca sinônimo.
+
+    Minúsculas sem acento (`_fold`), espaços e hífens internos como `_`, e `*` ou
+    `:` finais removidos. É a MESMA função que o `validate_rows` usa para achar a
+    coluna: o que `check_header` aceita, `validate_rows` encontra.
+    """
+    stripped = _HEADER_TRAILING_MARKS.sub("", name.strip()).strip()
+    return _HEADER_SEPARATORS.sub("_", _fold(stripped))
 
 
 def check_header(columns: Sequence[str]) -> None:
@@ -207,20 +227,32 @@ def _cell_text(value: Any) -> str | None:
 
 
 def _fold(text: str) -> str:
-    """Minúsculas e sem acento — só para casar o `tipo` (`Analítica` → `analitica`)."""
+    """Minúsculas e sem acento — para casar o `tipo` (`Analítica` → `analitica`) e o
+    nome de coluna (`Classificação` → `classificacao`)."""
     decomposed = unicodedata.normalize("NFKD", text.strip().lower())
     return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
 
 
+#: As grafias aceitas do `tipo`, já normalizadas por `_fold`: o nome do enum, a forma
+#: no masculino e a inicial (86e3n70p9: "pode ser S/A?" — pode). Qualquer outra coisa
+#: é `tipo_invalido`: `sint` não é abreviação aceita, de propósito.
+_ACCOUNT_TYPE_SPELLINGS: dict[str, AccountingAccountType] = {
+    "analitica": AccountingAccountType.ANALITICA,
+    "analitico": AccountingAccountType.ANALITICA,
+    "a": AccountingAccountType.ANALITICA,
+    "sintetica": AccountingAccountType.SINTETICA,
+    "sintetico": AccountingAccountType.SINTETICA,
+    "s": AccountingAccountType.SINTETICA,
+}
+
+
 def parse_account_type(value: Any) -> AccountingAccountType | None:
-    """`analitica`/`sintetica`, indiferente a caixa e acento. Fora disso, `None`."""
+    """`analitica`/`sintetica` (também `analitico`/`sintetico` e `a`/`s`), indiferente
+    a caixa e acento. Fora disso, `None`."""
     text = _cell_text(value)
     if text is None:
         return None
-    try:
-        return AccountingAccountType(_fold(text))
-    except ValueError:
-        return None
+    return _ACCOUNT_TYPE_SPELLINGS.get(_fold(text))
 
 
 def _validate_row(

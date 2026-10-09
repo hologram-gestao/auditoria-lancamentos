@@ -133,13 +133,59 @@ class TestModelo:
             ("analitica", AccountingAccountType.ANALITICA),
             ("Analítica", AccountingAccountType.ANALITICA),
             (" SINTÉTICA ", AccountingAccountType.SINTETICA),
-            ("A", None),
-            ("analitico", None),
+            # 86e3n70p9: o masculino e as iniciais valem ("pode ser S/A?" — pode).
+            ("analitico", AccountingAccountType.ANALITICA),
+            ("Analítico", AccountingAccountType.ANALITICA),
+            ("sintetico", AccountingAccountType.SINTETICA),
+            ("A", AccountingAccountType.ANALITICA),
+            ("a", AccountingAccountType.ANALITICA),
+            (" S ", AccountingAccountType.SINTETICA),
+            ("s", AccountingAccountType.SINTETICA),
+            # Rejeitados: só grafia aceita, nunca abreviação ou sinônimo.
+            ("x", None),
+            ("sint", None),
+            ("", None),
+            ("   ", None),
+            ("anal.", None),
             (None, None),
         ],
     )
     def test_tipo(self, raw: object, expected: AccountingAccountType | None) -> None:
         assert parse_account_type(raw) is expected
+
+    @pytest.mark.parametrize(
+        "header",
+        [
+            "Código Reduzido;Nome;Tipo;Classificação",
+            "codigo reduzido;nome;tipo;classificacao",
+            "CODIGO-REDUZIDO;NOME;TIPO;CLASSIFICACAO",
+            "Código  Reduzido*;Nome*;Tipo:;Classificação",
+            "\ufeffCódigo Reduzido ; Nome ; Tipo ; Classificação ",
+        ],
+    )
+    def test_cabecalho_casa_por_grafia_normalizada(self, header: str) -> None:
+        """86e3n70p9: maiúsculas, acentos, espaços, hífens e `*`/`:` finais não importam —
+        e as colunas continuam sendo ENCONTRADAS na leitura das linhas."""
+        parsed = parse_chart_sheet(_csv(header, "649;Banco;S;1.1.1.02.001"))
+        assert [(r.code, r.name, r.account_type, r.classification) for r in parsed.rows] == [
+            ("649", "Banco", AccountingAccountType.SINTETICA, "1.1.1.02.001")
+        ]
+
+    @pytest.mark.parametrize(
+        ("header", "missing"),
+        [
+            ("codigo;nome;tipo", ["codigo_reduzido"]),
+            ("conta;nome;tipo", ["codigo_reduzido"]),
+            ("codigo_reduzido;nome da conta;tipo", ["nome"]),
+            ("codigo_reduzido;nome;tipo;classificação hierárquica", []),
+        ],
+    )
+    def test_sinonimo_nao_e_grafia(self, header: str, missing: list[str]) -> None:
+        """Só grafia: `codigo`, `conta` e `nome da conta` continuam coluna desconhecida."""
+        with pytest.raises(FileHeaderMismatchError) as excinfo:
+            parse_chart_sheet(_csv(header, "649;Banco;analitica;1"))
+        assert excinfo.value.details["missingColumns"] == missing
+        assert excinfo.value.details["unexpectedColumnCount"] == 1
 
 
 class TestRecusasSemGravarNada:
@@ -168,7 +214,8 @@ class TestRecusasSemGravarNada:
             ('"64;9";Banco;analitica', "codigo_invalido"),
             ("649;;analitica", "nome_vazio"),
             ("649;" + "x" * 201 + ";analitica", "nome_longo"),
-            ("649;Banco;analitico", "tipo_invalido"),
+            ("649;Banco;x", "tipo_invalido"),
+            ("649;Banco;sint", "tipo_invalido"),
             ("649;Banco;", "tipo_invalido"),
         ],
     )

@@ -9,7 +9,8 @@
  * (86e3gkd7y) ou no .xls que o sistema grava (86e3n70p6), também é aceito sem
  * ajuste: o backend reconhece o layout e o
  * converte para este modelo, e a última linha da seção diz isso. Se o leitor do
- * backend mudar, a doc muda e este componente muda junto.
+ * backend mudar, a doc muda e este componente muda junto. O nome da coluna casa
+ * por GRAFIA normalizada, nunca por sinônimo (86e3n70p9): é o que o texto diz.
  *
  * Server component: só renderiza texto.
  */
@@ -24,7 +25,7 @@ const COLUMNS: ReadonlyArray<{ name: string; required: boolean; rule: string }> 
   {
     name: 'tipo',
     required: true,
-    rule: '"analitica" (recebe lançamento) ou "sintetica" (só agrupa).',
+    rule: '"analitica" (recebe lançamento) ou "sintetica" (só agrupa); vale também "analitico"/"sintetico" ou só a inicial, "A"/"S".',
   },
   {
     name: 'classificacao',
@@ -48,7 +49,10 @@ export function AccountingChartModel({ headingId }: { headingId: string }) {
       </h3>
       <p className="text-muted-foreground">
         CSV em UTF-8 separado por <code className="font-mono">;</code>, XLSX ou XLS (só a primeira
-        aba). Cabeçalho na linha 1, colunas em qualquer ordem e nenhuma coluna além destas:
+        aba). Cabeçalho na linha 1, colunas em qualquer ordem e nenhuma coluna além destas.
+        Maiúsculas, acentos, espaços e hífens no nome da coluna não importam (&quot;Código
+        Reduzido&quot; vale como <code className="font-mono">codigo_reduzido</code>); outros nomes
+        não são aceitos.
       </p>
       <dl className="space-y-2">
         {COLUMNS.map((column) => (

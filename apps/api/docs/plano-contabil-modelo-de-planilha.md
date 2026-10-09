@@ -19,15 +19,19 @@ contas da origem da Sprint 10 (`/chart-of-accounts`, categorias do Omie).
 - **Formato:** CSV em UTF-8 (com ou sem BOM) separado por `;`, ou planilha do Excel, XLSX
   ou XLS (só a primeira aba). O contêiner é decidido pelos magic bytes, nunca pela extensão.
   O tipo é detectado pelo **conteúdo** (magic bytes), nunca pela extensão.
-- **Cabeçalho na linha 1.** Colunas casadas pelo nome (espaços nas pontas e maiúsculas
-  ignorados), em qualquer ordem, **sem outras colunas**:
+- **Cabeçalho na linha 1.** Colunas casadas pelo nome, em qualquer ordem, **sem outras
+  colunas**. O nome casa por **grafia normalizada** (86e3n70p9): maiúsculas, acentos, espaços
+  e hífens no lugar do `_`, e `*` ou `:` no fim não importam (`Código Reduzido`,
+  `codigo reduzido`, `CODIGO-REDUZIDO` e `Classificação` valem). **Sinônimo não vale**:
+  `codigo` sozinho, `conta` ou `nome da conta` são coluna desconhecida e recusam o arquivo. A
+  regra é de grafia, não de vocabulário, para a recusa continuar previsível.
 
-| Coluna            | Obrigatória | Regra                                                                                                                           |
-| ----------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `codigo_reduzido` | sim         | o código que vai no arquivo contábil; letras, dígitos, `.` e `-` (sem espaço nem `;`), até 20 caracteres, **único** na planilha |
-| `nome`            | sim         | até 200 caracteres; gravado **cifrado** com a chave do cliente                                                                  |
-| `tipo`            | sim         | `analitica` (recebe lançamento) ou `sintetica` (só agrupa); maiúscula e acento indiferentes (`Analítica` vale)                  |
-| `classificacao`   | não         | a classificação hierárquica (`1.1.1.02.001`), até 40 caracteres                                                                 |
+| Coluna            | Obrigatória | Regra                                                                                                                                                                                                                       |
+| ----------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `codigo_reduzido` | sim         | o código que vai no arquivo contábil; letras, dígitos, `.` e `-` (sem espaço nem `;`), até 20 caracteres, **único** na planilha                                                                                             |
+| `nome`            | sim         | até 200 caracteres; gravado **cifrado** com a chave do cliente                                                                                                                                                              |
+| `tipo`            | sim         | `analitica` (recebe lançamento) ou `sintetica` (só agrupa); vale também `analitico`/`sintetico` e a inicial `a`/`s`; maiúscula e acento indiferentes (`Analítica`, `S` valem). `sint` ou outra abreviação é `tipo_invalido` |
+| `classificacao`   | não         | a classificação hierárquica (`1.1.1.02.001`), até 40 caracteres                                                                                                                                                             |
 
 - Linha totalmente vazia é pulada. Pelo menos **uma** conta é obrigatória.
 
@@ -66,6 +70,19 @@ esse tipo de registro, que não tem valor, e recusa o arquivo se houver qualquer
   depois (o rodapé com assinaturas) não é lido, só conferido: linha com cara de conta ali
   recusa o arquivo **inteiro** (`conta_fora_do_bloco`), para nenhuma conta ficar de fora
   calada.
+
+## Ordem da lista
+
+A lista (`GET …/accounting-chart`) sai na **ordem da classificação** (86e3n70p9): a sintética
+em cima e as analíticas dela abaixo, `1.1.2` antes de `1.1.10`. A chave é **derivada na
+gravação**, nunca inferida na leitura: `client_accounting_accounts.sort_key`, calculada por
+`client_accounting_chart/sort_key.py::chart_sort_key` em toda inserção e atualização (modelo e
+Domínio), e a listagem só faz `ORDER BY sort_key NULLS LAST, code, id`. A regra: a classificação
+(ou o código reduzido, sem ela) partida por `.`; segmento só de dígitos preenchido com zeros à
+esquerda até 6 (`1.1.10` → `000001.000001.000010`); segmento com letra em minúsculas, como está.
+A migration `b2f7c9e41d06` preencheu as linhas existentes com a mesma regra em SQL. Quem gravar
+conta por outro caminho (inclusão manual) chama `chart_sort_key` e persiste o resultado. A
+ordem atravessa a paginação (é SQL) e o seletor de conta do de-para a herda.
 
 ## Reimportação
 
