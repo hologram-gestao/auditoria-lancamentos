@@ -6848,16 +6848,27 @@ for (const vp of VIEWPORTS) {
       // 86e3fr9r6 — a credencial fica atrás do switch "Conectar com o Omie":
       // desligado por padrão (campos sempre abertos pareciam obrigatórios).
       const conectar = dialog.getByRole('switch', { name: 'Conectar com o Omie' });
+      // 86e3n70p6 — o processo do cartão é pergunta SOBRE o Omie: some junto.
+      const cartao = dialog.getByRole('combobox', { name: 'Compras do cartão no Omie' });
       await expect(conectar).not.toBeChecked();
       await expect(dialog.getByLabel('App Key Omie')).toHaveCount(0);
+      await expect(cartao).toHaveCount(0);
       await conectar.click();
       await expect(dialog.getByLabel('App Key Omie')).toBeVisible();
       await expect(dialog.getByLabel('App Secret Omie')).toBeVisible();
+      await expect(cartao).toHaveText(/Na data da compra/);
       // Com a seção aberta, o "Salvar" continua dentro da viewport (o miolo rola).
       const salvar = dialog.getByRole('button', { name: 'Salvar' });
       await expect(salvar).toBeInViewport();
       await shot(page, `novo-cliente-omie-ligado-${slug}`);
       await analyze(page, `novo cliente com o switch do Omie ligado (${vp.label})`);
+      await cartao.scrollIntoViewIfNeeded();
+      const caixaCartao = await cartao.boundingBox();
+      expect(
+        (caixaCartao?.x ?? 0) + (caixaCartao?.width ?? 0),
+        'seletor do cartão cortado pela borda direita da viewport',
+      ).toBeLessThanOrEqual(vp.size.width);
+      await shot(page, `pr-novo-cliente-cartao-${slug}`);
     });
 
     test('usuários: coluna e filtro de organização para a plataforma (86e36ed1d)', async ({
@@ -7354,6 +7365,29 @@ for (const vp of VIEWPORTS) {
       ).toBeLessThanOrEqual(vp.size.width);
       await shot(page, `pr-editar-cliente-cartao-${vp.label.replace(/\s+/g, '-')}`);
       await analyze(page, `editar cliente com o processo do cartão (${vp.label})`);
+    });
+
+    // 86e3n70p6 — cliente só-arquivo não tem processo no Omie: o editar não
+    // pergunta. A ausência só vale depois de as conexões chegarem (enquanto
+    // carregam o campo também não aparece).
+    test('editar cliente só-arquivo: sem o campo do cartão no Omie (86e3n70p6)', async ({
+      page,
+    }) => {
+      clientFileOrigin = true;
+      await page.goto('/clientes');
+      const conexoes = page.waitForResponse((r) =>
+        r.url().endsWith(`/api/v1/clients/${CLIENT_ID}/connections`),
+      );
+      await page.getByRole('button', { name: 'Editar Cliente Exemplo Ltda' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Editar Cliente' });
+      await aguardarAnimacao(dialog);
+      await conexoes;
+      await expect(dialog.getByLabel('Nome do cliente')).toBeVisible();
+      await expect(dialog.getByRole('combobox', { name: 'Compras do cartão no Omie' })).toHaveCount(
+        0,
+      );
+      await shot(page, `pr-editar-cliente-so-arquivo-${vp.label.replace(/\s+/g, '-')}`);
+      await analyze(page, `editar cliente só-arquivo, sem o campo do cartão (${vp.label})`);
     });
 
     /**

@@ -16,7 +16,12 @@
  *      Desligado por padrão; desligar limpa App Key e App Secret;
  *   3. preencheu QUALQUER um dos dois campos → o gate do "Testar conexão"
  *      volta a valer, como sempre valeu;
- *   4. editar key/secret depois do teste invalida o sucesso e exige novo teste.
+ *   4. editar key/secret depois do teste invalida o sucesso e exige novo teste;
+ *   5. "Compras do cartão no Omie" (86e3n70p0) só aparece com o switch ligado
+ *      (86e3n70p6, pedido do Pedro em 09/10/2026): é o processo do cliente DENTRO
+ *      do Omie, e sem Omie a pergunta não existe. Desligar volta o campo ao padrão
+ *      (`purchase_date`), pelo mesmo motivo de limpar a credencial: nada escondido
+ *      atrás do switch sai no POST.
  *
  * O gate do front continua existindo, mas **não é mais a única barreira**: o
  * servidor verifica a credencial contra o provedor antes de persistir, e
@@ -183,13 +188,15 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
     }
   }, [watchedKey, watchedSecret]);
 
-  // Desligar o switch LIMPA a credencial: o cliente volta a nascer sem origem,
-  // e nada digitado fica escondido atrás do switch para sair no POST.
+  // Desligar o switch LIMPA a credencial e volta o processo do cartão ao padrão:
+  // o cliente volta a nascer sem origem, e nada escolhido fica escondido atrás do
+  // switch para sair no POST.
   function handleConnectOmieChange(checked: boolean) {
     setConnectOmie(checked);
     if (checked) return;
     form.setValue('omie_app_key', '');
     form.setValue('omie_app_secret', '');
+    form.setValue('card_posting_date_mode', 'purchase_date');
     setShowKey(false);
     setShowSecret(false);
     setTestState({ kind: 'idle' });
@@ -393,8 +400,6 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
                 )}
               />
 
-              <CardPostingDateModeField control={form.control} disabled={inputsDisabled} />
-
               {/* Origem é OPCIONAL (R4) e fica visualmente destacada como um
                 bloco à parte, para o cadastro não parecer incompleto sem ela.
                 Some para quem não tem `manage_client_connections`: conectar
@@ -477,6 +482,8 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
                           Com credencial preenchida, o teste é obrigatório antes de salvar.
                         </p>
                       )}
+
+                      <CardPostingDateModeField control={form.control} disabled={inputsDisabled} />
                     </>
                   )}
                 </fieldset>

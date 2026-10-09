@@ -21,6 +21,10 @@
  *     responsável (sem remover ninguém). As ações da carteira são IMEDIATAS,
  *     cada uma com a própria confirmação — o "Salvar" só grava os campos.
  *   - Manager (não-admin) não vê a seção; só nome/status/categoria.
+ *   - "Compras do cartão no Omie" (86e3n70p0) só para cliente com conexão Omie, em
+ *     qualquer estado (86e3n70p6): cliente só-arquivo ou sem origem não tem
+ *     processo no Omie para declarar. Enquanto as conexões carregam (ou se a
+ *     leitura falhar) o campo não aparece, e o valor salvo segue intacto no PATCH.
  *   - O corpo do formulário rola dentro do modal (`ScrollRegion`), com header e
  *     rodapé fixos: em 390px a seção de gerentes empurraria o "Salvar" para fora
  *     da viewport — o defeito que o gate de a11y NÃO mede (CLAUDE.md §7).
@@ -62,10 +66,12 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useClientCategories } from '@/hooks/use-client-categories';
+import { useClientConnections } from '@/hooks/use-client-connections';
 import { useUpdateClient } from '@/hooks/use-clients';
 import { ApiError } from '@/lib/api/client';
 import type { Client, UpdateClientPayload } from '@/lib/api/clients';
 import { hasPermission } from '@/lib/authz';
+import { hasOmieConnection } from '@/lib/origin-capabilities';
 import { originFixPath } from '@/lib/origin-state';
 import { updateClientSchema, type UpdateClientFormValues } from '@/lib/validation/clients';
 import { useAuthStore } from '@/stores/auth';
@@ -94,6 +100,9 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
   // Catálogo de categorias (86e34jd8m) — só busca com o modal aberto.
   const categoriesQuery = useClientCategories({ enabled: open });
   const categories = categoriesQuery.data ?? [];
+  // As conexões só com o modal aberto: decidem se o campo do cartão aparece.
+  const connectionsQuery = useClientConnections(client?.id ?? '', { enabled: open });
+  const showCardPostingMode = hasOmieConnection(connectionsQuery.data ?? []);
 
   const form = useForm<UpdateClientFormValues>({
     resolver: zodResolver(updateClientSchema),
@@ -155,8 +164,11 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
         <DialogHeader>
           <DialogTitle>Editar Cliente</DialogTitle>
           <DialogDescription>
-            Nome, situação, categoria e como as compras do cartão entram no Omie. As credenciais da
-            origem são alteradas na seção &quot;Origens de dado&quot;, em Contas Bancárias.
+            {showCardPostingMode
+              ? 'Nome, situação, categoria e como as compras do cartão entram no Omie.'
+              : 'Nome, situação e categoria.'}{' '}
+            As credenciais da origem são alteradas na seção &quot;Origens de dado&quot;, em Contas
+            Bancárias.
           </DialogDescription>
         </DialogHeader>
 
@@ -254,7 +266,9 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
                 )}
               />
 
-              <CardPostingDateModeField control={form.control} disabled={inputsDisabled} />
+              {showCardPostingMode && (
+                <CardPostingDateModeField control={form.control} disabled={inputsDisabled} />
+              )}
 
               {isAdmin && client && (
                 <ClientManagersSection client={client} disabled={inputsDisabled} />
