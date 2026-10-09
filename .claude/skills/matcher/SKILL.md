@@ -38,7 +38,7 @@ invariantes verificáveis e num protocolo de mudança. Números de linha conferi
 ls apps/api/app/modules/reconciliations/processing/
 ```
 
-## As 8 invariantes (nenhuma muda sem decisão explícita do stakeholder)
+## As 9 invariantes (nenhuma muda sem decisão explícita do stakeholder)
 
 ### 1. Valor: `|a − b| ≤ 0.01`, hard-coded, com sinal
 
@@ -69,25 +69,28 @@ grep -n "DATE_DIVERGENCE_RANGE: int\|tolerance_days: int = DATE_DIVERGENCE_RANGE
 grep -n "days_diff_by_file_id\[file_id\] == 0\|CONCILIADO_DATA_DIVERGENTE" apps/api/app/modules/reconciliations/processing/job.py
 ```
 
-### 3. Período Omie expandido em 3 dias — em CINCO pontos, não três
+### 3. A janela do Omie é UMA função — consultada pelos CINCO pontos
 
-A spec desta skill (14/08) falava em três lugares; o código tem cinco pontos em
-quatro consumidores, todos importando a MESMA constante:
+Até 08/10/2026 cada um dos cinco pontos (quatro consumidores) recalculava
+`período ± DATE_DIVERGENCE_RANGE`. Desde a 86e3n70p0 a decisão é uma só,
+`omie_window_for_session` (`processing/omie_window.py:43`), e os cinco a consultam,
+cada um passando a BASE de período que sempre usou:
 
-- processamento: `fetch_realized` (`omie_fetch.py:102-103`) e o cache da qualificação
-  (`job.py:348-349`);
-- tela de revisão (`/available-omie-entries`): `_expanded_session_period`
-  (`app/modules/reconciliations/review/service.py:1209-1225`);
-- export: `app/modules/reconciliations/export/service.py:386-387`;
-- detalhe de lançamento (`omie_data`): `expand_period`
-  (`app/modules/omie_data/service.py:84-86` → `review/repository.py:467`).
+- processamento: `job.py:366` (as linhas do arquivo), que alimenta `fetch_realized`
+  e o cache da qualificação;
+- tela de revisão (`/available-omie-entries` e a aba Divergências Omie):
+  `_expanded_session_period` (`review/service.py:1199`, período da sessão);
+- export: `export/service.py:386`;
+- detalhe de lançamento (`omie_data`): `omie_data/service.py:91` (o mês).
 
-Mudar num só cria divergência silenciosa entre o que o matcher viu e o que a tela ou
-o relatório mostram. O grep abaixo é a lista completa — linha nova aqui exige os
-outros quatro revisados:
+No processo de sempre ela devolve a base ± 3, bit a bit o cálculo antigo
+(`tests/unit/test_omie_window.py`). No modo "vencimento da fatura" do cartão devolve o
+LOTE (invariante 9). Janela calculada fora dela é divergência silenciosa entre o que o
+matcher viu e o que a tela ou o relatório mostram:
 
 ```bash
-grep -rn "timedelta(days=DATE_DIVERGENCE_RANGE)\|expand_period(\|fetch_realized(" apps/api/app --include=*.py | grep -v "def "   # esperado: 8 linhas em 4 arquivos (job ×3, review ×2, omie_data ×1, export ×2)
+grep -rn "omie_window_for_session(" apps/api/app --include=*.py | grep -v "def "   # esperado: 4 linhas (job, review, export, omie_data)
+grep -rn "timedelta(days=DATE_DIVERGENCE_RANGE)" apps/api/app --include=*.py         # esperado: nada (a margem mora em omie_window.py)
 ```
 
 ### 4. Um lançamento Omie casa com UMA linha (1-para-1)
@@ -172,6 +175,27 @@ processamento). `FileEntryForMatch.description` (`matcher.py:56`) e
 
 ```bash
 grep -rn "log\.\(info\|warning\|debug\)(" apps/api/app/modules/reconciliations/processing/ --include=*.py | grep -i "description=\|supplier=" ; echo "esperado: nada (exit 1)"
+```
+
+### 9. Cartão no modo "vencimento da fatura": a data da compra NÃO decide
+
+Quando a SESSÃO foi gravada com `card_posting_date_mode = invoice_due_date` (CLAUDE.md
+§4.8 e §5.8), o job (`job.py:452`) chama `match_invoice_lot` (`matcher.py:412`) em vez
+de `match`: uma passada só, par por valor (0,01), 1-para-1, fechado por evidência
+`(|amount_diff|, -afinidade, ordem (data, id) da linha, posição na lista)`, todo par com
+`days_diff = 0` (nunca `wrong_date`). A janela já é o lote (`[vencimento − 3,
+vencimento + 3]`) e os títulos abertos vêm sem filtro de data, recortados por
+`data_vencimento` (`fetch_pending(due_window=...)`). Por que a janela é parte do modo:
+sem ela, o matcher do lote veria a recorrência do mês anterior (Microsoft 87,68 no lote
+de 10/09) com o mesmo valor — `test_sem_a_janela_o_valor_sozinho_poderia_errar_de_mes`.
+O modo é DECLARADO por cliente e copiado para a sessão, nunca inferido. Caso real que
+originou a regra: fatura Cora da PCTEX, 0 de 5 pares em dev (sessão 7ac383a9) →
+`tests/unit/test_matcher_invoice_lot.py::TestCasoPctex` (5 pares no modo vencimento,
+0 no modo compra). `reconciliation_matched` carrega `match_mode`.
+
+```bash
+grep -n "def match_invoice_lot\|days_diff_by_file_id\[file_entry.id\] = 0" apps/api/app/modules/reconciliations/processing/matcher.py
+grep -n "match_invoice_lot(\|match_mode=" apps/api/app/modules/reconciliations/processing/job.py
 ```
 
 ## Protocolo de mudança

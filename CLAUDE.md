@@ -283,7 +283,12 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
     livre de terceiro e a Omie ecoa o `cObs`, que carrega a descrição da compra
     (§4.5). No `usage_events` entra só uma **categoria fechada**, nunca o texto. - **Só cartão.** Elegibilidade é `session.account_type == 'credit_card'`
     (o `CR` do Omie). ⚠️ O PRD chama a conta de cartão de `CA` e **está errado**:
-    `CA` é Conta Aplicação. Filtrar por `CA` lança na conta errada.
+    `CA` é Conta Aplicação. Filtrar por `CA` lança na conta errada. - **E só no processo "na data da compra"** (86e3n70p0, decisão do Pedro de
+    08/10/2026): o `IncluirLancCC` grava `dDtLanc` = data da COMPRA, e o cliente que
+    lança o cartão em lote no VENCIMENTO da fatura (§4.8, §5.8) não usa essa data. Sessão
+    com `card_posting_date_mode = invoice_due_date` recusa o lote inteiro com 400
+    (`_require_purchase_date_process`) e a tela não oferece a ação. Lançar no lote é
+    desenho em aberto, não "trocar a data".
 17. **O limite do login é por IDENTIDADE, não por IP (86e3anx10).** Atrás do BFF do Next
     a API vê o IP do PROXY para todo mundo (o uvicorn sobe sem `--forwarded-allow-ips`),
     então um limite por IP é um balde da plataforma inteira. O que distingue pessoas é
@@ -457,6 +462,21 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
      `TOTAL_DIVERGENTE`, `FORMATO_NAO_SUPORTADO`, `ARQUIVO_INVALIDO`) são 422 tipados
      e não gravam movimento nenhum; o mesmo arquivo duas vezes é 409
      `ARQUIVO_JA_PROCESSADO`.
+   - **Em que data o cliente lança no Omie as compras do cartão é DECLARADO, nunca
+     inferido** (86e3n70p0): `clients.card_posting_date_mode` ∈ {`purchase_date`,
+     `invoice_due_date`} (`CardPostingDateMode`, CHECK copiado na migration, default do
+     banco `purchase_date`, que é o processo de sempre). A Hologram lança cada compra na
+     data dela; a Prospecta lança a fatura inteira em LOTE no vencimento, com o pagamento
+     como "Entrada de Transferência" no mesmo dia. Inferir pelo que o Omie devolve
+     casaria recorrências de mesmo valor (Microsoft 87,68 todo mês) com a fatura errada,
+     pelo mesmo motivo de a convenção de sinal da S14 ser declarada. A conciliação grava
+     um SNAPSHOT (`reconciliation_sessions.card_posting_date_mode`, NULL fora do cartão e
+     em sessão antiga, lido como `purchase_date`) com o modo do cliente ou a troca pontual
+     da gaveta, e o vencimento da fatura (`invoice_due_date`, extraído pelo parser e
+     confirmado na prévia). Cartão no modo vencimento sem vencimento é 422 tipado
+     `VENCIMENTO_DA_FATURA_OBRIGATORIO` antes de gravar, e o CHECK
+     `ck_reconciliation_sessions_card_due_date_coherent` garante o mesmo no banco. Trocar
+     o modo do cliente não reescreve conciliação antiga, nem no reprocessamento.
    - **Credencial no `PATCH /clients/{id}` é 422 `CREDENTIALS_MOVED`**, um `AppError`
      próprio cuja `userMessage` aponta as rotas de conexão. Não é validador Pydantic:
      `ValueError` de validador vira o **400 `VALIDATION_ERROR` genérico** do handler
@@ -754,10 +774,13 @@ is_primary`) — um responsável por cliente; o predicado é COPIADO na migratio
    `conciliado_data_divergente` (+ anomalia `wrong_date`); `> 3` → sem match
    (`sem_omie`). Vale para conta corrente **e** cartão. O request não aceita mais
    `date_tolerance_days`; a coluna homônima é histórico e novas sessões gravam 0.
-3. **Período Omie expandido** em `DATE_DIVERGENCE_RANGE` nas duas pontas — e isso vale em
-   **cinco pontos de chamada, quatro consumidores**: processamento, cache da
-   qualificação, tela de revisão, export e detalhe de lançamento. Mudar num só cria
-   divergência silenciosa entre o que o matcher viu e o que a tela mostra.
+3. **A janela do Omie é UMA decisão: `omie_window_for_session`** (`processing/omie_window.py`,
+   86e3n70p0), consultada pelos **cinco pontos de chamada, quatro consumidores**:
+   processamento (`fetch_realized`), cache da qualificação, tela de revisão, export e
+   detalhe de lançamento (`omie_data`). Cada um passa a base de período que sempre usou;
+   no processo de sempre ela devolve essa base expandida em `DATE_DIVERGENCE_RANGE` nas
+   duas pontas, no modo vencimento do cartão devolve o lote (§5.8). Recalcular a janela
+   fora dela cria divergência silenciosa entre o que o matcher viu e o que a tela mostra.
 4. **Um OmieEntry só matcha uma Movement** — cruzamento 1-para-1, garantido no banco pelo
    índice parcial `ix_recon_file_entry_session_omie_unique`.
 5. **Idempotência:** `UNIQUE(client_id, omie_conta_id, reference_month, file_hash)`.
@@ -766,6 +789,18 @@ is_primary`) — um responsável por cliente; o predicado é COPIADO na migratio
    determinístico, sem heurística e sem modelo.
 7. **Fornecedor e descrição trafegam em memória** durante o cruzamento — não são
    persistidos nem logados (§4.5).
+8. **Cartão no modo "vencimento da fatura" (86e3n70p0): a data da compra NÃO decide.**
+   Quando a sessão foi gravada com `card_posting_date_mode = invoice_due_date` (§4.8), a
+   janela é `[vencimento − 3, vencimento + 3]` (o lote), os títulos em aberto são buscados
+   SEM filtro de data (o `filtrar_por_data_de/ate` de `ListarContasPagar/Receber` é de
+   INCLUSÃO/ALTERAÇÃO, não de vencimento) e recortados por `data_vencimento` dentro do
+   lote, e o cruzamento é `match_invoice_lot`: par por valor (0,01), 1-para-1, fechado por
+   evidência (afinidade de fornecedor, depois ordem da linha). Todo par é `conciliado`
+   (`days_diff = 0`): **`wrong_date` não existe nesse modo**, porque a distância entre a
+   compra e o vencimento é o processo do cliente, não divergência. Duas compras de mesmo
+   valor com um lançamento no lote: uma casa, a outra fica `sem_omie` (decisão do Pedro,
+   08/10/2026). `sem_omie` e `omie_sem_arquivo` continuam, só dentro do lote. O job
+   escolhe o matcher pelo modo da SESSÃO e loga `match_mode` em `reconciliation_matched`.
 
 ---
 
@@ -1496,6 +1531,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.85, 08/10/2026. **O cartão ganhou um segundo processo de lançamento: o lote no vencimento da fatura (86e3n70p0, subtask 1 do épico 86e3n70nv).** A fatura Cora da PCTEX (cliente da Prospecta) conciliou 0 de 5 compras em dev: na Prospecta as compras entram no Omie em lote na data de vencimento da fatura, e o cruzamento só conhecia o processo da Hologram (compra na data da compra). Decisões do Pedro: o processo é configuração POR CLIENTE, nunca inferida, com troca pontual na gaveta; o vencimento é extraído pelo parser (regra 15 do prompt, só cartão) e confirmado na prévia. Nasceram `clients.card_posting_date_mode` e, na sessão, o snapshot do modo e `invoice_due_date` (duas migrations reversíveis, ciclo provado), o 422 `VENCIMENTO_DA_FATURA_OBRIGATORIO`, a janela única `omie_window_for_session` (os cinco pontos da §5.3 passaram a consultá-la; `ReviewRepository.expand_period` saiu), o modo lote do `fetch_pending` (títulos abertos sem filtro de data, recorte por vencimento) e `match_invoice_lot` ao lado do `match`, sem tocar no caminho de sempre. Duas decisões tomadas no meio da task: lançar no Omie fica BLOQUEADO no modo vencimento (§3.16, o `IncluirLancCC` grava a data da compra) e mesmo valor no lote é 1-para-1 (§5.8). Na tela: o campo "Compras do cartão no Omie" no novo cliente e no editar, o bloco "Fatura do cartão" na gaveta (processo em vigor, troca pontual, vencimento `DD/MM/AAAA` proposto pelo parser) e a linha "Lote da fatura" no cabeçalho da revisão. Lista canônica (**120**), matriz (**29**) e pares de AAD (**17**) não mudaram._
 
 _Versão 1.84, 08/10/2026. **Os prints da landing e do manual foram recapturados com a estética nova, todos no tema Hologram (86e3mz74x, subtask do épico 86e3h56nk).** Decisão do Pedro: nenhum print em claro ou escuro, na landing nem no manual (as figuras de anomalias e de lançamento do manual eram do escuro); a regra entrou na §7 Frontend, no parágrafo do tour. As 14 figuras do manual saem em DPR 2 de duas fontes, sete do `a11y-mocked.spec.ts` com `E2E_SHOTS=1` e sete da tela real com os dados de `Docs/manual/fonte/capturas/dados_demo.py` num banco NOVO (o dado cifrado só abre com as chaves que o gravaram), e o roteiro de captura deixou de ter caminho absoluto da máquina. Dois detalhes que custam tempo redescobrir: o `<input type="month">` só sai em português no Chromium COMPLETO com `LANG=pt_BR` (o headless shell do Playwright escreve "August 2026"), e a quantização das figuras usa MAXCOVERAGE porque o MEDIANCUT fundiu o âmbar de atenção no vermelho. O manual virou a 1.2: além das figuras, só o texto que as telas novas desmentiam (origem em Contas Bancárias, painel descrito como é, menu em três grupos); o PDF passou de 3 para 4 MB e a cópia da landing acompanha, com o rótulo do botão. Lista canônica (**120**), matriz (**29**) e pares de AAD (**17**) não mudaram._
 
