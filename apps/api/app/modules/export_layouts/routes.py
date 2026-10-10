@@ -6,6 +6,7 @@
     - POST /api/v1/export-layouts/from-template            manage_export_layouts
     - GET  /api/v1/export-layouts/{layout_id}              ler layouts (com as versões)
     - POST /api/v1/export-layouts/{layout_id}/versions     manage_export_layouts
+    - DELETE /api/v1/export-layouts/{layout_id}            manage_export_layouts (86e3nuuub)
 
 **Layout POR ORGANIZAÇÃO.** ESCREVER é `manage_export_layouts` (plataforma e admin).
 LER é de quem tem `manage_export_layouts` OU `generate_accounting_file` — o gerente
@@ -20,7 +21,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from app.core.dependencies import DbSessionDep, ManageExportLayoutsDep, ReadExportLayoutsDep
 from app.modules.export_layouts.repository import ExportLayoutRepository
@@ -169,3 +170,23 @@ async def create_export_layout_version(
             layout_id, actor=actor, definition_raw=payload.definition.to_raw()
         )
     )
+
+
+@router.delete(
+    "/export-layouts/{layout_id}",
+    status_code=204,
+    summary=(
+        "Exclui um layout que NUNCA gerou arquivo contábil, com todas as versões. Se "
+        "qualquer versão gerou arquivo: 409 `LAYOUT_EM_USO` com a contagem (o download "
+        "regenera o arquivo a partir da versão, então o layout usado fica). 404 fora da "
+        "própria organização; 409 se a organização estiver suspensa. Requer "
+        "`manage_export_layouts`."
+    ),
+)
+async def delete_export_layout(
+    layout_id: UUID,
+    actor: ManageExportLayoutsDep,
+    service: ServiceDep,
+) -> Response:
+    await service.delete_layout(layout_id, actor=actor)
+    return Response(status_code=204)

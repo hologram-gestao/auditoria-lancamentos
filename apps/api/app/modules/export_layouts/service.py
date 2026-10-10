@@ -9,6 +9,9 @@
 - **Validar ANTES de gravar.** A definição passa por `parse_definition` (422 nomeando o
   campo) antes de qualquer escrita — nada é gravado numa definição recusada.
 - **Organização suspensa não recebe escrita** (409), como o catálogo do de-para.
+- **Excluir só o que nunca gerou arquivo** (86e3nuuub). A geração aponta para a VERSÃO
+  com RESTRICT e o download regenera por ela: layout usado é 409 `LAYOUT_EM_USO` com a
+  contagem; a corrida cai na FK e vira o MESMO 409. Arquivar o usado é outra task.
 - **Resposta depois do commit.** As escritas commitam no serviço antes de devolver: a
   tela que relê logo em seguida vê o que acabou de gravar (a correção geral 86e3fxqqa não
   é desta sprint; ADR-091-BE).
@@ -26,6 +29,7 @@ from app.core.authz import (
 )
 from app.core.exceptions import (
     ConflictError,
+    ExportLayoutInUseError,
     ExportLayoutNameAlreadyExistsError,
     NotFoundError,
     OrganizationInactiveError,
@@ -163,7 +167,44 @@ class ExportLayoutService:
         )
         return await self._detail(layout, viewer=actor)
 
+    async def delete_layout(self, layout_id: UUID, *, actor: CurrentUser) -> None:
+        """Apaga o layout e as versões dele, só se NENHUMA versão gerou arquivo.
+
+        O `FOR UPDATE` do layout serializa com `create_version` (a versão nova não
+        nasce no meio da exclusão); a geração não trava o layout, e a FK RESTRICT da
+        geração para a versão é a rede da corrida.
+        """
+        layout = await self._repo.lock_layout(layout_id, viewer=actor)
+        if layout is None:
+            raise NotFoundError(_LAYOUT_NOT_FOUND)
+        await self._ensure_organization_active(layout.organization_id)
+        generations = await self._repo.count_generations(layout.id)
+        if generations > 0:
+            raise self._in_use(layout.id, generations)
+        if not await self._repo.delete_layout(layout):
+            # Corrida: a geração que a FK barrou já está gravada, e a recontagem a
+            # enxerga (READ COMMITTED). O piso de 1 é o que a FK já provou.
+            generations = max(await self._repo.count_generations(layout.id), 1)
+            raise self._in_use(layout.id, generations)
+        await self._repo.commit()
+        log.info(
+            "export_layout_deleted",
+            layout_id=str(layout_id),
+            organization_id=str(layout.organization_id),
+        )
+
     # ------------------------------ internals -------------------------
+
+    @staticmethod
+    def _in_use(layout_id: UUID, generations: int) -> ExportLayoutInUseError:
+        files = "arquivo contábil" if generations == 1 else "arquivos contábeis"
+        return ExportLayoutInUseError(
+            f"Layout {layout_id} referenciado por {generations} geração(ões).",
+            user_message=(
+                f"Este layout já gerou {generations} {files} e por isso não pode ser "
+                "excluído: o download de cada arquivo é refeito a partir dele."
+            ),
+        )
 
     async def _insert(
         self,

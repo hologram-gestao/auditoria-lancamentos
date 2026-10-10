@@ -13,13 +13,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, delete, func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.core.authz import CurrentUser, scoped_by_organization
 from app.db.models import (
+    FK_ACCOUNTING_FILE_GENERATION_LAYOUT_VERSION,
     UQ_EXPORT_LAYOUT_ORG_NAME,
     UQ_EXPORT_LAYOUT_VERSION,
+    AccountingFileGeneration,
     ExportLayout,
     ExportLayoutVersion,
     Organization,
@@ -107,6 +109,13 @@ class ExportLayoutRepository:
         )
         return int((await self._session.execute(stmt)).scalar_one() or 0)
 
+    async def count_generations(self, layout_id: UUID) -> int:
+        """Arquivos contábeis gerados por QUALQUER versão do layout (86e3nuuub)."""
+        stmt = select(func.count(AccountingFileGeneration.id)).where(
+            AccountingFileGeneration.layout_id == layout_id
+        )
+        return int((await self._session.execute(stmt)).scalar_one())
+
     # ------------------------------ READ (organização já decidida) ----
 
     async def get_layout_for_organization(
@@ -170,6 +179,28 @@ class ExportLayoutRepository:
                 raise
             return False
         await self._session.refresh(version)
+        return True
+
+    async def delete_layout(self, layout: ExportLayout) -> bool:
+        """Apaga as versões e depois o layout, tudo ou nada, num SAVEPOINT (86e3nuuub).
+
+        As duas FKs são RESTRICT: `export_layout_versions.layout_id` exige as versões
+        fora antes do layout, e a FK composta da geração para a versão é a rede contra
+        a corrida (arquivo gerado entre a contagem do serviço e este DELETE). Devolve
+        `False` se ESSA FK barrou: nada foi apagado e a transação de quem chamou segue
+        viva; o serviço responde 409. Outra violação re-levanta (é defeito).
+        """
+        try:
+            async with self._session.begin_nested():
+                await self._session.execute(
+                    delete(ExportLayoutVersion).where(ExportLayoutVersion.layout_id == layout.id)
+                )
+                await self._session.delete(layout)
+                await self._session.flush()
+        except IntegrityError as exc:
+            if _violated_constraint(exc) != FK_ACCOUNTING_FILE_GENERATION_LAYOUT_VERSION:
+                raise
+            return False
         return True
 
     async def commit(self) -> None:

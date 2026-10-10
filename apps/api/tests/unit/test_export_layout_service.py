@@ -21,6 +21,7 @@ from app.core.dependencies import require_org_permission
 from app.core.exceptions import (
     ConflictError,
     ExportLayoutDefinitionError,
+    ExportLayoutInUseError,
     ExportLayoutNameAlreadyExistsError,
     ForbiddenError,
     NotFoundError,
@@ -85,6 +86,10 @@ class _Repo:
             ORG_B: Organization(id=ORG_B, name="B", active=True),
         }
         self.name_taken = name_taken
+        #: Arquivos gerados por layout; `race` simula a geração gravada entre a
+        #: contagem do serviço e o DELETE (a FK RESTRICT barra o DELETE).
+        self.generations: dict[UUID, int] = {}
+        self.race = False
         self.author = User(
             name="Autor",
             email="autor@x.com",
@@ -141,6 +146,19 @@ class _Repo:
         self.calls.append("insert_version")
         version.created_at = datetime.now(UTC)
         self.versions.append(version)
+        return True
+
+    async def count_generations(self, layout_id: UUID) -> int:
+        self.calls.append("count_generations")
+        return self.generations.get(layout_id, 0)
+
+    async def delete_layout(self, layout: ExportLayout) -> bool:
+        self.calls.append("delete_layout")
+        if self.race:
+            self.generations[layout.id] = 1
+            return False
+        self.versions = [v for v in self.versions if v.layout_id != layout.id]
+        del self.layouts[layout.id]
         return True
 
     async def commit(self) -> None:
@@ -335,6 +353,80 @@ class TestVersionar:
         repo.insert_version = _lost  # type: ignore[method-assign]
         with pytest.raises(ConflictError):
             await service.create_version(created.id, actor=_actor(), definition_raw=_definition())
+
+
+class TestExcluir:
+    async def _created(self, repo: _Repo) -> UUID:
+        service = _service(repo)
+        created = await service.create_from_template(
+            actor=_actor(), template_key="dominio_lancamentos_csv"
+        )
+        await service.create_version(created.id, actor=_actor(), definition_raw=_definition())
+        repo.calls.clear()
+        return created.id
+
+    async def test_sem_geracao_apaga_versoes_e_layout_e_commita(self) -> None:
+        repo = _Repo()
+        layout_id = await self._created(repo)
+        await _service(repo).delete_layout(layout_id, actor=_actor())
+        assert repo.calls == ["lock", "count_generations", "delete_layout", "commit"]
+        assert repo.layouts == {}
+        assert repo.versions == []
+
+    async def test_com_geracao_e_409_com_a_contagem_e_nada_apagado(self) -> None:
+        repo = _Repo()
+        layout_id = await self._created(repo)
+        repo.generations[layout_id] = 3
+        with pytest.raises(ExportLayoutInUseError) as exc:
+            await _service(repo).delete_layout(layout_id, actor=_actor())
+        assert exc.value.code == "LAYOUT_EM_USO"
+        assert exc.value.status_code == 409
+        assert "3 arquivos contábeis" in exc.value.user_message
+        assert "delete_layout" not in repo.calls
+        assert "commit" not in repo.calls
+        assert layout_id in repo.layouts
+        assert len(repo.versions) == 2
+
+    async def test_uma_geracao_no_singular(self) -> None:
+        repo = _Repo()
+        layout_id = await self._created(repo)
+        repo.generations[layout_id] = 1
+        with pytest.raises(ExportLayoutInUseError) as exc:
+            await _service(repo).delete_layout(layout_id, actor=_actor())
+        assert "1 arquivo contábil " in exc.value.user_message
+
+    async def test_corrida_barrada_pela_fk_vira_o_mesmo_409_sem_commit(self) -> None:
+        repo = _Repo()
+        layout_id = await self._created(repo)
+        repo.race = True
+        with pytest.raises(ExportLayoutInUseError) as exc:
+            await _service(repo).delete_layout(layout_id, actor=_actor())
+        assert "1 arquivo contábil " in exc.value.user_message
+        assert repo.calls == ["lock", "count_generations", "delete_layout", "count_generations"]
+        assert layout_id in repo.layouts
+
+    async def test_layout_de_outra_organizacao_e_404_e_nada_apagado(self) -> None:
+        repo = _Repo()
+        layout_id = await self._created(repo)
+        with pytest.raises(NotFoundError):
+            await _service(repo).delete_layout(layout_id, actor=_actor(organization_id=ORG_B))
+        assert layout_id in repo.layouts
+        assert "delete_layout" not in repo.calls
+
+    async def test_plataforma_exclui_layout_de_qualquer_organizacao(self) -> None:
+        repo = _Repo()
+        layout_id = await self._created(repo)
+        await _service(repo).delete_layout(layout_id, actor=_platform())
+        assert repo.layouts == {}
+
+    async def test_organizacao_suspensa_e_409_e_nada_apagado(self) -> None:
+        repo = _Repo()
+        layout_id = await self._created(repo)
+        repo.orgs[ORG_A].active = False
+        with pytest.raises(OrganizationInactiveError):
+            await _service(repo).delete_layout(layout_id, actor=_actor())
+        assert "delete_layout" not in repo.calls
+        assert layout_id in repo.layouts
 
 
 class _Db:

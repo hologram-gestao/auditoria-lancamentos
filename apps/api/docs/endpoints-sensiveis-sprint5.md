@@ -15,10 +15,10 @@
 
 | | |
 | --- | --- |
-| Endpoints sensíveis (denominador) | **123** |
-| Com caso negativo cross-tenant verde | **123** |
+| Endpoints sensíveis (denominador) | **124** |
+| Com caso negativo cross-tenant verde | **124** |
 | Pendentes (implementação em outra task) | **0** |
-| Cobertura | **123/123 = 100%** |
+| Cobertura | **124/124 = 100%** |
 
 ## Lista canônica
 
@@ -147,6 +147,7 @@ Legenda de `tipo`: **coleção** = vaza forjando `client_id` na URL/payload · *
 | `POST` | `/api/v1/export-layouts/from-template` | coleção | `app/modules/export_layouts/routes.py` | ReadExportLayoutsDep/ManageExportLayoutsDep (guard de organização: usuário de cliente = 403 com linha denied) + scoped_by_organization no SELECT do layout (AND organization_id = <org da LINHA do observador>; plataforma: todas); layout de outra organização = 404; o layout novo nasce na org da LINHA do ator (resolve_organization_for_creation) | ✅ verde |
 | `GET` | `/api/v1/export-layouts/{layout_id}` | detalhe (PK) | `app/modules/export_layouts/routes.py` | ReadExportLayoutsDep/ManageExportLayoutsDep (guard de organização: usuário de cliente = 403 com linha denied) + scoped_by_organization no SELECT do layout (AND organization_id = <org da LINHA do observador>; plataforma: todas); layout de outra organização = 404; o layout novo nasce na org da LINHA do ator (resolve_organization_for_creation) | ✅ verde |
 | `POST` | `/api/v1/export-layouts/{layout_id}/versions` | detalhe (PK) | `app/modules/export_layouts/routes.py` | ReadExportLayoutsDep/ManageExportLayoutsDep (guard de organização: usuário de cliente = 403 com linha denied) + scoped_by_organization no SELECT do layout (AND organization_id = <org da LINHA do observador>; plataforma: todas); layout de outra organização = 404; o layout novo nasce na org da LINHA do ator (resolve_organization_for_creation); SELECT ... FOR UPDATE já restrito ao alcance | ✅ verde |
+| `DELETE` | `/api/v1/export-layouts/{layout_id}` | detalhe (PK) | `app/modules/export_layouts/routes.py` | ReadExportLayoutsDep/ManageExportLayoutsDep (guard de organização: usuário de cliente = 403 com linha denied) + scoped_by_organization no SELECT do layout (AND organization_id = <org da LINHA do observador>; plataforma: todas); layout de outra organização = 404; o layout novo nasce na org da LINHA do ator (resolve_organization_for_creation); SELECT ... FOR UPDATE já restrito ao alcance (86e3nuuub) | ✅ verde |
 | `GET` | `/api/v1/clients/{client_id}/source-accounts` | coleção | `app/modules/client_source_accounts/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); associações, base de movimentos e conexões lidas por client_id; o JOIN com o plano carrega client_id dos dois lados | ✅ verde |
 | `PUT` | `/api/v1/clients/{client_id}/source-accounts` | coleção | `app/modules/client_source_accounts/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + OpenClientDep + ManageClientAccountingChartDep (guard auditado); a conta do banco passa pelo validador único (SELECT com client_id do path: outro cliente = 404); upsert ON CONFLICT com o client_id validado | ✅ verde |
 
