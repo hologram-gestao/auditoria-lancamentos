@@ -17,7 +17,7 @@ nunca o texto da exceção do driver (pode conter fragmento do statement).
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
 
 from app.core.authz import CurrentUser
@@ -36,6 +36,7 @@ from app.modules.usage_events.schemas import (
     ClienteCriadoProps,
     ClienteEncerradoProps,
     ClienteExcluidoProps,
+    ConciliacaoReprocessadaProps,
     ContextoTituloRegistradoProps,
     DeparaAplicadoProps,
     FechamentoProduzidoProps,
@@ -47,6 +48,7 @@ from app.modules.usage_events.schemas import (
     OmieLancamentoRejeitadoProps,
     OrganizacaoCriadaProps,
     OrganizacaoDesativadaProps,
+    PlanoContabilContaEditadaProps,
     PlanoContabilImportadoProps,
     PlanoContasSincronizadoProps,
     QualificacaoEmitidaProps,
@@ -65,6 +67,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from app.modules.usage_events.schemas import (
+        AccountChangeField,
         AutorNavegouForaRequest,
         FileRejectionReason,
         NotificacaoEntregueRequest,
@@ -192,6 +195,37 @@ class UsageEventService:
             UsageEventName.CONCILIACAO_CONCLUIDA,
             session_id=session_id,
             props={"duracao_s": duracao_s, "status": status},
+        )
+
+    async def emit_conciliacao_reprocessada(
+        self,
+        *,
+        session_id: UUID,
+        client_id: UUID,
+        reprocessado_por: UUID,
+        status_origem: str,
+    ) -> bool:
+        """86e3n70q9 — pedido de reprocessar uma sessão. Só IDs e o status de origem.
+
+        Emitido ANTES do commit do reset, como o `conciliacao_criada`: o evento é
+        atômico com o pedido (fail-soft com SAVEPOINT no repositório).
+        """
+        props = self._props_or_none(
+            UsageEventName.CONCILIACAO_REPROCESSADA,
+            lambda: ConciliacaoReprocessadaProps.model_validate(
+                {
+                    "client_id": client_id,
+                    "reprocessado_por": reprocessado_por,
+                    "status_origem": status_origem,
+                }
+            ),
+        )
+        if props is None:
+            return False
+        return await self.emit(
+            UsageEventName.CONCILIACAO_REPROCESSADA,
+            session_id=session_id,
+            props=props,
         )
 
     # ------------------------------------------------------------------
@@ -645,6 +679,33 @@ class UsageEventService:
                 contas_novas=contas_novas,
                 contas_inativadas=contas_inativadas,
                 layout=layout,
+            ),
+        )
+        if props is None:
+            return False
+        return await self.emit(event, props=props)
+
+    async def emit_plano_contabil_conta_editada(
+        self,
+        *,
+        client_id: UUID,
+        account_id: UUID,
+        operacao: Literal["criada", "editada"],
+        campos: Sequence[AccountChangeField],
+    ) -> bool:
+        """86e3nb816 — uma conta do plano contábil incluída ou editada à mão.
+
+        O ponto de chamada é `AccountingChartService.create_account`/`update_account`,
+        DEPOIS do commit. Props no caminho fail-soft, sem `session_id`, sem dedup.
+        """
+        event = UsageEventName.PLANO_CONTABIL_CONTA_EDITADA
+        props = self._props_or_none(
+            event,
+            lambda: PlanoContabilContaEditadaProps(
+                client_id=client_id,
+                account_id=account_id,
+                operacao=operacao,
+                campos=list(campos),
             ),
         )
         if props is None:

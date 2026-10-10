@@ -731,6 +731,22 @@ const ACCOUNTING_ACCOUNTS = [
   }),
 ];
 
+/** 86e3nb816 — as duas recusas da gaveta de conta manual, no formato do servidor. */
+const ACCOUNTING_CODE_EXISTS_REFUSAL = {
+  code: 'CONTA_CONTABIL_CODIGO_EXISTENTE',
+  message: 'código já existe',
+  userMessage:
+    'Já existe uma conta com este código no plano contábil do cliente. Edite a conta existente em vez de criar outra.',
+  details: { code: '649', accountId: 'acc-649' },
+};
+const ACCOUNTING_IN_USE_REFUSAL = {
+  code: 'CONTA_CONTABIL_EM_USO',
+  message: 'conta em uso',
+  userMessage:
+    'Esta conta não pode ficar inativa: ela está em uso por 3 decisões do de-para e 1 conta do banco. Aponte essas configurações para outra conta antes.',
+  details: { reason: 'inativa', decisionCount: 3, bindingCount: 1 },
+};
+
 /** Contas de origem: uma Omie associada, uma Omie PENDENTE e o slot padrão pendente. */
 const SOURCE_ACCOUNTS = [
   {
@@ -1992,6 +2008,12 @@ let sessionAccountType: string | null = null;
  * em hover o liga.
  */
 let sessionErrorDetail = false;
+/**
+ * 86e3n70q9: o `POST /reprocess` liga esta chave, e o detalhe passa a voltar em
+ * `processing` (é o que o servidor faz). Prova que a tela volta ao estado
+ * "processando" depois de confirmar, sem navegar.
+ */
+let sessionReprocessed = false;
 
 /**
  * Linhas `sem_omie` de uma fatura de cartão: são as únicas lançáveis. A
@@ -2305,6 +2327,34 @@ async function fulfillApi(route: Route): Promise<void> {
     }
     accountingChartEmpty = false;
     return json({ contas: 5, contasNovas: 5, contasInativadas: 0 });
+  }
+  // 86e3nb816 — conta manual. Código que o plano já tem = 409 no campo; inativar
+  // = 422 da conta em uso (com as contagens), para a gaveta mostrar os dois erros.
+  if (path === `/api/v1/clients/${CLIENT_ID}/accounting-chart/accounts`) {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    if (ACCOUNTING_ACCOUNTS.some((a) => a.code === body.code)) {
+      return route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: ACCOUNTING_CODE_EXISTS_REFUSAL }),
+      });
+    }
+    return route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ data: accountingAccount({ id: 'acc-nova', ...body }) }),
+    });
+  }
+  if (path.startsWith(`/api/v1/clients/${CLIENT_ID}/accounting-chart/accounts/`)) {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    if (body.active === false) {
+      return route.fulfill({
+        status: 422,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: ACCOUNTING_IN_USE_REFUSAL }),
+      });
+    }
+    return json(accountingAccount(body));
   }
   if (path === `/api/v1/clients/${CLIENT_ID}/accounting-chart`) {
     const tipo = url.searchParams.get('type');
@@ -2982,6 +3032,10 @@ async function fulfillApi(route: Route): Promise<void> {
       body: JSON.stringify(CARD_INVOICE_PARSE),
     });
   }
+  if (path === `/api/v1/reconciliations/${SESSION_ID}/reprocess`) {
+    sessionReprocessed = true;
+    return json({ session_id: SESSION_ID, status: 'processing' });
+  }
   if (path === `/api/v1/reconciliations/${SESSION_ID}`) {
     return json({
       ...DETAIL,
@@ -2990,6 +3044,7 @@ async function fulfillApi(route: Route): Promise<void> {
         : {}),
       ...(sessionAccountType === null ? {} : { account_type: sessionAccountType }),
       ...(sessionErrorDetail ? { status: 'error', error_code: 'ADL-PARSE-LIMIT' } : {}),
+      ...(sessionReprocessed ? { status: 'processing' } : {}),
       ...(sessionBalanceDivergent
         ? { balance_end_omie: '1520.00', balance_difference: '-20.00' }
         : {}),
@@ -3464,6 +3519,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   // lançamento ligam o cartão.
   sessionAccountType = null;
   sessionErrorDetail = false;
+  sessionReprocessed = false;
   reviewVerdict = null;
   patchAnomalyFails = false;
   accountsSyncFails = false;
@@ -3744,6 +3800,54 @@ for (const vp of VIEWPORTS) {
       await aguardarAnimacao(page.getByRole('dialog'));
       await shot(page, `gaveta-criacao-${vp.label.replace(/\s+/g, '-')}`);
       await analyze(page, `gaveta de criação (${vp.label})`);
+    });
+
+    // 86e3n70qj — no passo 2 a caixa do topo foi lida como "o nome do arquivo".
+    // Ela diz que é a conciliação (conta + mês) e a frase das partes mora junto
+    // da lista de arquivos, depois dela.
+    test('Gaveta de criação: o passo 2 diz o que é cada bloco (86e3n70qj)', async ({ page }) => {
+      const slug = vp.label.replace(/\s+/g, '-');
+      await page.goto(`/clientes/${CLIENT_ID}`);
+      await page.getByRole('button', { name: 'Criar conciliação' }).first().click();
+      const dialog = page.getByRole('dialog');
+      await aguardarAnimacao(dialog);
+      await dialog.getByRole('combobox', { name: 'Conta bancária' }).click();
+      await page.getByRole('option', { name: /Cartão Itaú/ }).click();
+      await dialog.getByLabel('Mês de referência').fill('2026-09');
+      await dialog.getByRole('button', { name: /Avançar/ }).click();
+      await dialog.locator('#reconciliation-files').setInputFiles({
+        name: 'fatura-parte-1.pdf',
+        mimeType: 'application/pdf',
+        buffer: Buffer.from('%PDF-1.4 fatura de teste'),
+      });
+
+      const resumo = dialog.getByRole('region', { name: 'Conciliação' });
+      await expect(resumo).toBeVisible();
+      await expect(resumo.getByText('Conta', { exact: true })).toBeVisible();
+      await expect(resumo.getByText(/Cartão Itaú/)).toBeVisible();
+      await expect(resumo.getByText(/nome do arquivo não entra nela/)).toBeVisible();
+      await expect(resumo.getByText(/partes/)).toHaveCount(0);
+
+      const lista = dialog.getByRole('list', { name: 'Arquivos desta conciliação' });
+      await expect(lista).toBeVisible();
+      const dica = dialog.getByText(/A fatura veio quebrada em partes\?/);
+      await expect(dica).toBeVisible();
+      const caixaLista = await lista.boundingBox();
+      const caixaDica = await dica.boundingBox();
+      expect(
+        caixaDica?.y ?? 0,
+        'a frase das partes tem de vir DEPOIS da lista de arquivos',
+      ).toBeGreaterThan((caixaLista?.y ?? 0) + (caixaLista?.height ?? 0) - 1);
+
+      // O resumo cabe na gaveta em 390px — medido, não olhado.
+      const caixaResumo = await resumo.boundingBox();
+      expect(
+        (caixaResumo?.x ?? 0) + (caixaResumo?.width ?? 0),
+        'resumo da conciliação cortado pela borda direita da viewport',
+      ).toBeLessThanOrEqual(vp.size.width);
+
+      await shot(page, `gaveta-passo2-blocos-${slug}`);
+      await analyze(page, `gaveta de criação, passo 2 com os blocos rotulados (${vp.label})`);
     });
 
     // 86e3n70p0 — fatura de cartão de cliente que lança no vencimento: o bloco
@@ -5024,7 +5128,7 @@ for (const vp of VIEWPORTS) {
       titlesNeverSynced = true;
       await page.goto(`/clientes/${CLIENT_ID}/carteira`);
       await expect(
-        page.getByText('A carteira deste cliente ainda não foi sincronizada'),
+        page.getByText('Esta carteira ainda não foi sincronizada com o Omie'),
       ).toBeVisible();
       await exigirVinheta(page, 'portfolio', `carteira nunca sincronizada (${vp.label})`);
       await analyze(page, `carteira nunca sincronizada (${vp.label})`);
@@ -5401,13 +5505,22 @@ for (const vp of VIEWPORTS) {
       await gaveta.getByRole('button', { name: /Confirmar e lançar 2 de 2/ }).click();
 
       // Resumo por linha, com a mensagem VERBATIM do provedor na que falhou.
-      await expect(gaveta.getByText('Lançada no Omie')).toBeVisible();
+      // `exact`: o resumo do lote (86e3n70qj) também diz "lançada no Omie", e o
+      // `getByText` do Playwright casa substring sem caixa.
+      await expect(gaveta.getByText('Lançada no Omie', { exact: true })).toBeVisible();
       await expect(gaveta.getByText(/lançamento nº 5001/)).toBeVisible();
       await expect(
         gaveta.getByText(/Categoria informada nao existe para o cliente\./),
       ).toBeVisible();
       // A gaveta NÃO fecha no parcial: é dela que o operador reexecuta.
       await expect(gaveta.getByRole('button', { name: /Tentar novamente 1 de 1/ })).toBeVisible();
+      // 86e3n70qj — o desfecho fica na gaveta (o toast some) e diz ONDE entrou.
+      await expect(
+        gaveta.getByRole('status').filter({ hasText: '1 compra lançada no Omie.' }),
+      ).toBeVisible();
+      await expect(
+        gaveta.getByText(/^Na conta do cartão no Omie, na data da compra/),
+      ).toBeVisible();
 
       // TOAST montado e MEDIDO — parcial é aviso, e a cor vem dos tokens.
       await expect(
@@ -5419,6 +5532,24 @@ for (const vp of VIEWPORTS) {
       await expect(page.locator('#__next_error__')).toHaveCount(0);
       await shot(page, `lancamento-resumo-${slugP}`);
       await analyze(page, `resumo parcial do lote + toast de aviso (${vp.label})`);
+
+      // 86e3n70qj — fechada a gaveta, a linha lançada diz QUAL lançamento é,
+      // visível na tabela (a pessoa ia ao Omie conferir porque não dizia).
+      await gaveta.getByRole('button', { name: 'Cancelar' }).click();
+      await expect(gaveta).toHaveCount(0);
+      const selo = page.getByRole('img', { name: /Lançado no Omie · nº 5001/ });
+      await expect(selo).toBeVisible();
+      await expect(selo).toHaveText(/Lançado no Omie · nº 5001/);
+      // Em 390px a tabela rola na horizontal e a coluna Situação começa fora da
+      // tela: o que se mede é o selo INTEIRO cabendo quando trazido à vista.
+      await selo.scrollIntoViewIfNeeded();
+      const caixaSelo = await selo.boundingBox();
+      expect(
+        (caixaSelo?.x ?? 0) + (caixaSelo?.width ?? 0),
+        'selo "Lançado no Omie" pintando fora da viewport',
+      ).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0);
+      await shot(page, `lancamento-selo-na-linha-${slugP}`);
+      await analyze(page, `linha com o selo do lançamento (${vp.label})`);
     });
 
     test('conta corrente: nem seleção nem ação, em nenhuma aba (R1)', async ({ page }) => {
@@ -5432,6 +5563,67 @@ for (const vp of VIEWPORTS) {
       await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}?tab=anomalias`);
       await expect(page.getByRole('button', { name: /Lançar no Omie/ })).toHaveCount(0);
       await analyze(page, `revisão de conta corrente sem lançamento (${vp.label})`);
+    });
+  });
+}
+
+/**
+ * 86e3n70q9 — "Reprocessar com o Omie" numa conciliação CONCLUÍDA.
+ *
+ * O que só o browser mede: o `alertdialog` montado de verdade (foco inicial no
+ * Cancelar, lista do que se perde dentro da viewport em 390px, contraste da
+ * ação com o ponteiro em cima) e a volta da tela para "processando" depois de
+ * confirmar, pelo polling de sempre, sem navegar.
+ */
+for (const vp of VIEWPORTS) {
+  const slugR = vp.label.replace(/\s+/g, '-');
+  test.describe(`Reprocessar conciliação concluída (86e3n70q9) — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('diálogo diz o que se perde e a tela volta a processar', async ({ page }) => {
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}`);
+
+      const abrir = page.getByRole('button', { name: 'Reprocessar com o Omie' });
+      await expect(abrir).toBeVisible();
+      await abrir.click();
+
+      const dialogo = page.getByRole('alertdialog', { name: 'Reprocessar com o Omie?' });
+      await expect(dialogo).toBeVisible();
+      await aguardarAnimacao(dialogo);
+      // `Enter` reflexo não pode apagar a revisão.
+      await expect(dialogo.getByRole('button', { name: 'Cancelar' })).toBeFocused();
+      await expect(dialogo.getByText(/notas e as ações registradas/)).toBeVisible();
+      await expect(dialogo.getByText(/continua lançado/)).toBeVisible();
+
+      // Nada do diálogo passa da borda da viewport (390px é o caso apertado).
+      const largura = page.viewportSize()?.width ?? 0;
+      const caixa = await dialogo.boundingBox();
+      expect((caixa?.x ?? 0) + (caixa?.width ?? 0), 'diálogo cortado na borda').toBeLessThanOrEqual(
+        largura,
+      );
+      const confirmar = dialogo.getByRole('button', { name: 'Reprocessar', exact: true });
+      const caixaConfirmar = await confirmar.boundingBox();
+      expect(
+        (caixaConfirmar?.x ?? 0) + (caixaConfirmar?.width ?? 0),
+        'ação do diálogo cortada na borda',
+      ).toBeLessThanOrEqual(largura);
+
+      // O axe só vê o hover com o ponteiro lá (skill front-gate §4).
+      await confirmar.hover();
+      await expect(page.locator('#__next_error__')).toHaveCount(0);
+      await shot(page, `reprocessar-dialogo-${slugR}`);
+      await analyze(page, `diálogo de reprocessar com o Omie (${vp.label})`);
+
+      await confirmar.click();
+      await expect(
+        page.getByRole('status').filter({ hasText: 'Conciliação em processamento' }),
+      ).toBeVisible();
+      await expect(page.getByRole('alertdialog')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Reprocessar com o Omie' })).toHaveCount(0);
+      // O toast entra em fade: medir antes de estabilizar mede cor mesclada.
+      await aguardarToastEstavel(page);
+      await shot(page, `reprocessar-processando-${slugR}`);
+      await analyze(page, `revisão de volta a processar (${vp.label})`);
     });
   });
 }
@@ -6042,7 +6234,7 @@ for (const vp of VIEWPORTS) {
       await page.goto(`/clientes/${CLIENT_ID}/carteira`);
 
       await expect(
-        page.getByText('A carteira deste cliente ainda não foi sincronizada'),
+        page.getByText('Esta carteira ainda não foi sincronizada com o Omie'),
       ).toBeVisible();
       // Zeros ali seriam lidos como "este cliente não deve nada": o bloco de
       // agregados não pode existir neste estado.
@@ -6054,7 +6246,7 @@ for (const vp of VIEWPORTS) {
       // caixa, e inteiro dentro da viewport.
       await exigirEstadoVazioLegivel(
         page,
-        'A carteira deste cliente ainda não foi sincronizada',
+        'Esta carteira ainda não foi sincronizada com o Omie',
         `${vp.label} · nunca sincronizada`,
       );
       await shot(page, `carteira-nunca-sincronizada-${slugC}`);
@@ -10618,6 +10810,83 @@ for (const vp of VIEWPORTS) {
         'false',
       );
       await analyze(page, `de-para — como funciona recolhido (${vp.label})`);
+    });
+  });
+}
+
+/**
+ * 86e3nb816 — conta do plano contábil incluída e editada à mão, nos três temas e
+ * nos dois viewports: "Nova conta" e "Editar" para o gerente, a gaveta com o
+ * código repetido no campo do código e a conta em uso no campo da situação, e
+ * nenhum dos dois botões para o gerente do cliente.
+ *
+ * Bloco próprio no FIM do arquivo, pelo motivo do bloco 86e3f55bc.
+ */
+for (const vp of VIEWPORTS) {
+  const slugManual = vp.label.replace(/\s+/g, '-');
+  test.describe(`Plano contábil: conta manual (86e3nb816) — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('nova conta: gaveta, código repetido no campo e ações na tela', async ({ page }) => {
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+      await expect(page.getByRole('heading', { name: 'Plano contábil', level: 1 })).toBeVisible();
+      const nova = page.getByRole('button', { name: 'Nova conta' });
+      await exigirDentroDaViewport(page, nova, `${vp.label}: "Nova conta"`);
+      const regiao = page.getByRole('region', { name: 'Contas do plano contábil (rolável)' });
+      await expect(regiao.getByRole('button', { name: /^Editar conta / })).toHaveCount(
+        ACCOUNTING_ACCOUNTS.length,
+      );
+      await shot(page, `plano-contabil-conta-manual-lista-${slugManual}`);
+
+      await nova.click();
+      const gaveta = page.getByRole('dialog');
+      await aguardarAnimacao(gaveta);
+      await gaveta.getByLabel('Código reduzido').fill('649');
+      await gaveta.getByLabel('Nome').fill('Banco repetido');
+      const incluir = gaveta.getByRole('button', { name: 'Incluir conta' });
+      await exigirDentroDaViewport(page, incluir, `${vp.label}: "Incluir conta"`);
+      await incluir.click();
+      await expect(gaveta.getByLabel('Código reduzido')).toHaveAttribute('aria-invalid', 'true');
+      await expect(gaveta.getByText(/Já existe uma conta com este código/)).toBeVisible();
+      await shot(page, `plano-contabil-conta-manual-codigo-repetido-${slugManual}`);
+      await analyze(page, `plano contábil — nova conta com código repetido (${vp.label})`);
+
+      await gaveta.getByLabel('Código reduzido').fill('663');
+      await incluir.click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(page.locator(TOAST_TITLE)).toContainText('Conta 663 incluída no plano.');
+    });
+
+    test('editar conta: código travado e a conta em uso no campo da situação', async ({ page }) => {
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+      const regiao = page.getByRole('region', { name: 'Contas do plano contábil (rolável)' });
+      await regiao.getByRole('button', { name: 'Editar conta 649' }).click();
+      const gaveta = page.getByRole('dialog');
+      await aguardarAnimacao(gaveta);
+      await expect(gaveta.getByLabel('Código reduzido')).toBeDisabled();
+      await gaveta.getByRole('switch', { name: 'Conta ativa' }).click();
+      const salvar = gaveta.getByRole('button', { name: 'Salvar alterações' });
+      await exigirDentroDaViewport(page, salvar, `${vp.label}: "Salvar alterações"`);
+      await salvar.click();
+      await expect(
+        gaveta.getByText(/em uso por 3 decisões do de-para e 1 conta do banco/),
+      ).toBeVisible();
+      await shot(page, `plano-contabil-conta-manual-em-uso-${slugManual}`);
+      await analyze(page, `plano contábil — editar conta em uso (${vp.label})`);
+    });
+
+    test('gerente do cliente não vê "Nova conta" nem "Editar"', async ({ page }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+      await expect(page.getByRole('heading', { name: 'Plano contábil', level: 1 })).toBeVisible();
+      await expect(
+        page.getByRole('cell', { name: 'Banco conta movimento', exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Nova conta' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: /^Editar conta / })).toHaveCount(0);
+      await analyze(page, `plano contábil — gerente do cliente sem conta manual (${vp.label})`);
     });
   });
 }

@@ -391,14 +391,33 @@ function DrawerContent({
 
         {step === 2 && (
           <div className="space-y-4">
-            <div className="bg-muted/40 rounded-md border p-3 text-sm">
-              <p className="font-medium">{selectedAccount?.name ?? '—'}</p>
+            {/* 86e3n70qj — na reunião de 08/10 esta caixa foi lida como "o nome do
+                arquivo": só trazia o nome da conta, com cara de campo e sem rótulo.
+                Agora diz o que é (a conciliação, identificada por conta + mês do
+                passo anterior) e que o arquivo não muda o nome dela. */}
+            <section
+              aria-labelledby="reconciliation-identity-title"
+              className="bg-muted/40 space-y-2 rounded-md border p-3 text-sm"
+            >
+              <h3 id="reconciliation-identity-title" className="font-medium">
+                Conciliação
+              </h3>
+              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                <dt className="text-muted-foreground">Conta</dt>
+                <dd className="min-w-0 break-words font-medium">{selectedAccount?.name ?? '—'}</dd>
+                <dt className="text-muted-foreground">Mês</dt>
+                <dd className="font-medium">{formatReferenceMonth(meta.reference_month)}</dd>
+              </dl>
               <p className="text-muted-foreground text-xs">
-                {formatReferenceMonth(meta.reference_month)}
+                Escolhidos no passo anterior. É por conta e mês que a conciliação aparece na lista;
+                o nome do arquivo não entra nela.
               </p>
-            </div>
+            </section>
 
             <div className="space-y-2">
+              <h3 id="reconciliation-files-title" className="text-sm font-medium">
+                Arquivos do extrato ou da fatura
+              </h3>
               <input
                 id="reconciliation-files"
                 type="file"
@@ -421,25 +440,30 @@ function DrawerContent({
                 Adicionar arquivos
               </label>
               <p className="text-muted-foreground text-xs">
-                Uma fatura grande pode vir quebrada em partes — envie todas aqui e elas viram um
-                resumo só. Formatos: {ALLOWED_EXTENSIONS.join(', ').toUpperCase()} · máx.{' '}
-                {MAX_FILE_SIZE_LABEL} por arquivo · até {MAX_FILES} arquivos.
+                Formatos: {ALLOWED_EXTENSIONS.join(', ').toUpperCase()} · máx. {MAX_FILE_SIZE_LABEL}{' '}
+                por arquivo · até {MAX_FILES} arquivos.
+              </p>
+
+              {pipeline.items.length > 0 && (
+                <ul className="space-y-2" aria-label="Arquivos desta conciliação">
+                  {pipeline.items.map((item) => (
+                    <UploadItemRow
+                      key={item.id}
+                      item={item}
+                      isCard={isCard}
+                      onRemove={() => pipeline.remove(item.id)}
+                      disabled={submitting}
+                    />
+                  ))}
+                </ul>
+              )}
+              {/* A frase dos múltiplos arquivos mora AQUI, junto da lista: é sobre
+                  ela que fala, e longe dela confundia o resumo da conciliação. */}
+              <p className="text-muted-foreground text-xs">
+                A fatura veio quebrada em partes? Adicione todas: elas entram nesta mesma
+                conciliação.
               </p>
             </div>
-
-            {pipeline.items.length > 0 && (
-              <ul className="space-y-2" aria-label="Arquivos desta conciliação">
-                {pipeline.items.map((item) => (
-                  <UploadItemRow
-                    key={item.id}
-                    item={item}
-                    isCard={isCard}
-                    onRemove={() => pipeline.remove(item.id)}
-                    disabled={submitting}
-                  />
-                ))}
-              </ul>
-            )}
 
             {pipeline.isProcessing && (
               <p role="status" className="text-muted-foreground flex items-center gap-2 text-sm">

@@ -292,6 +292,47 @@ def _validate_row(
     )
 
 
+#: Os campos de UMA conta, como a inclusão e a edição manual (86e3nb816) os nomeiam.
+type AccountField = Literal["code", "name", "type", "classification"]
+
+#: Que campo cada motivo de linha aponta: a recusa manual cai no campo certo do
+#: formulário, com o MESMO motivo que a planilha daria.
+REASON_FIELD: dict[ChartLineReason, AccountField] = {
+    "codigo_vazio": "code",
+    "codigo_longo": "code",
+    "codigo_invalido": "code",
+    "codigo_repetido": "code",
+    "nome_vazio": "name",
+    "nome_longo": "name",
+    "tipo_invalido": "type",
+    "classificacao_longa": "classification",
+}
+
+
+def validate_account(
+    *,
+    code: str,
+    name: str,
+    account_type: AccountingAccountType,
+    classification: str | None,
+) -> tuple[ChartSheetRow | None, ChartLineReason | None]:
+    """UMA conta pela MESMA regra de linha da planilha — a porta manual (86e3nb816).
+
+    Função PURA: o plano tem duas portas de entrada (planilha e formulário) e uma
+    regra só. Aparar espaço, recusar código com separador, nome vazio ou longo:
+    tudo vem de `_validate_row`, nunca de uma segunda cópia.
+    """
+    return _validate_row(
+        0,
+        {
+            COLUMN_CODE: code,
+            COLUMN_NAME: name,
+            COLUMN_TYPE: account_type.value,
+            COLUMN_CLASSIFICATION: classification,
+        },
+    )
+
+
 def validate_rows(
     columns: Sequence[str], rows: Sequence[tuple[int, Sequence[Any]]]
 ) -> tuple[list[ChartSheetRow], list[ChartLineProblem]]:

@@ -13,6 +13,8 @@
  *                                                     chaves: o envelope chega inteiro
  *   - `POST /clients/{id}/accounting-chart/import` → multipart `file`; `{ data: {contas,
  *                                                     contasNovas, contasInativadas} }`
+ *   - `POST  /clients/{id}/accounting-chart/accounts`       → `{ data: conta }` (86e3nb816)
+ *   - `PATCH /clients/{id}/accounting-chart/accounts/{id}`  → `{ data: conta }` (86e3nb816)
  *   - `GET  /clients/{id}/source-accounts`         → `{ data: [...] }` — chave única: o array
  *   - `PUT  /clients/{id}/source-accounts`         → `{ data: { entry, created } }`
  *
@@ -22,6 +24,9 @@
  * rota (§3.15).
  */
 import type {
+  AccountingAccount,
+  AccountingAccountCreateRequest,
+  AccountingAccountUpdateRequest,
   AccountingChartImportResult,
   AccountingChartListResponse,
   ListAccountingChartQuery,
@@ -31,7 +36,7 @@ import type {
 } from '@/lib/contracts';
 import type { components } from '@/lib/contracts/schema';
 
-import { apiGet, apiPostMultipart, apiPutJson } from './client';
+import { apiGet, apiPatch, apiPost, apiPostMultipart, apiPutJson } from './client';
 
 export type ListAccountingChartParams = ListAccountingChartQuery;
 
@@ -86,6 +91,33 @@ export async function importAccountingChart(
   return apiPostMultipart<AccountingChartImportResult>(
     `${clientBase(clientId)}/accounting-chart/import`,
     form,
+  );
+}
+
+/**
+ * Inclui UMA conta no plano sem reimportar a planilha (86e3nb816). Código que o
+ * cliente já tem: 409 `CONTA_CONTABIL_CODIGO_EXISTENTE`; campo que a planilha
+ * recusaria: 422 `CONTA_CONTABIL_INVALIDA` com `details.field`.
+ */
+export async function createAccountingAccount(
+  clientId: string,
+  payload: AccountingAccountCreateRequest,
+): Promise<AccountingAccount> {
+  return apiPost<AccountingAccount>(`${clientBase(clientId)}/accounting-chart/accounts`, payload);
+}
+
+/**
+ * Edita nome, tipo, classificação e situação de UMA conta (86e3nb816). Conta em
+ * uso que viraria sintética ou inativa: 422 `CONTA_CONTABIL_EM_USO`.
+ */
+export async function updateAccountingAccount(
+  clientId: string,
+  accountId: string,
+  payload: AccountingAccountUpdateRequest,
+): Promise<AccountingAccount> {
+  return apiPatch<AccountingAccount>(
+    `${clientBase(clientId)}/accounting-chart/accounts/${encodeURIComponent(accountId)}`,
+    payload,
   );
 }
 

@@ -48,6 +48,11 @@ class UsageEventName(StrEnum):
     # Emitidos pelo BACKEND, no ponto real do fluxo.
     CONCILIACAO_CRIADA = "conciliacao_criada"
     CONCILIACAO_CONCLUIDA = "conciliacao_concluida"
+    #: 86e3n70q9 — alguém pediu para reprocessar uma conciliação (tentar de novo
+    #: depois de erro, ou cruzar de novo com o Omie uma sessão já concluída). De
+    #: BACKEND e FORA da dedup: a mesma sessão pode ser reprocessada N vezes, e
+    #: cada pedido é uma linha. Só IDs e o status de onde a sessão saiu.
+    CONCILIACAO_REPROCESSADA = "conciliacao_reprocessada"
     # Emitidos pelo FRONTEND (só o browser observa navegação e entrega visual).
     NOTIFICACAO_ENTREGUE = "notificacao_entregue"
     AUTOR_NAVEGOU_FORA = "autor_navegou_fora"
@@ -222,6 +227,16 @@ class UsageEventName(StrEnum):
     # A métrica da SPRINT (completude de partida) NÃO é evento: sai da própria
     # materialização por consulta (ver HANDOFF, BACK 16.4).
     PLANO_CONTABIL_IMPORTADO = "plano_contabil_importado"
+    # 86e3nb816 — inclusão e edição MANUAL de uma conta do plano contábil. De
+    # BACKEND, sem `session_id`, fora da dedup: cada gravação bem-sucedida é uma
+    # linha, depois do commit (recusa e edição sem mudança não emitem). Só IDs, a
+    # operação e QUAIS campos mudaram, em vocabulário fechado: nunca o código, o
+    # nome nem a classificação.
+    #
+    # Leitura (quanto o escritório mantém o plano sem reimportar):
+    #     count(*) WHERE event = 'plano_contabil_conta_editada'
+    #       GROUP BY props->>'operacao'
+    PLANO_CONTABIL_CONTA_EDITADA = "plano_contabil_conta_editada"
     # Sprint 13 (BACK 13.1, emitido pela geração do arquivo contábil da 13.4) —
     # **a métrica da Sprint 13**. De BACKEND, sem `session_id`, fora da dedup:
     # cada geração (inclusive a segunda da mesma materialização) é uma linha.
@@ -646,6 +661,25 @@ class PlanoContabilImportadoProps(_StrictProps):
     layout: ChartImportLayout
 
 
+#: O que a edição manual mudou (86e3nb816). Espelho de
+#: `client_accounting_chart.service.AccountChange` (o teste do evento compara os dois).
+AccountChangeField = Literal["nome", "tipo", "classificacao", "situacao"]
+
+
+class PlanoContabilContaEditadaProps(_StrictProps):
+    """`plano_contabil_conta_editada` (86e3nb816) — só IDs e o campo alterado.
+
+    `operacao` é `criada` (inclusão manual; `campos` vazio) ou `editada` (`campos`
+    com o que mudou, sem repetição). Nenhum `str` livre: código, nome e
+    classificação não têm onde caber.
+    """
+
+    client_id: UUID
+    account_id: UUID
+    operacao: Literal["criada", "editada"]
+    campos: list[AccountChangeField] = Field(max_length=4)
+
+
 class OrganizacaoCriadaProps(_StrictProps):
     """`organizacao_criada` (86e36ecnp) — a plataforma cadastrou um BPO. Só o id."""
 
@@ -675,6 +709,20 @@ class SenhaRedefinidaPelaPlataformaProps(_StrictProps):
     actor_user_id: UUID
     target_user_id: UUID
     target_scope: Literal["platform", "system", "client"]
+
+
+class ConciliacaoReprocessadaProps(_StrictProps):
+    """`conciliacao_reprocessada` (86e3n70q9) — pedido de reprocessar uma sessão.
+
+    A sessão vai na COLUNA `session_id`; aqui só o tenant, quem pediu e o status
+    de onde a sessão saiu (`error` é o "tentar de novo"; `reviewing`/`done` é
+    cruzar de novo uma conciliação concluída, a pergunta da reunião de 08/10).
+    Só IDs e um enum (§4.7).
+    """
+
+    client_id: UUID
+    reprocessado_por: UUID
+    status_origem: Literal["error", "reviewing", "done"]
 
 
 class SessoesEncerradasProps(_StrictProps):

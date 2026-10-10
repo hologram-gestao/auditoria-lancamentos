@@ -15,10 +15,10 @@
 
 | | |
 | --- | --- |
-| Endpoints sensíveis (denominador) | **121** |
-| Com caso negativo cross-tenant verde | **121** |
+| Endpoints sensíveis (denominador) | **123** |
+| Com caso negativo cross-tenant verde | **123** |
 | Pendentes (implementação em outra task) | **0** |
-| Cobertura | **121/121 = 100%** |
+| Cobertura | **123/123 = 100%** |
 
 ## Lista canônica
 
@@ -137,6 +137,8 @@ Legenda de `tipo`: **coleção** = vaza forjando `client_id` na URL/payload · *
 | `GET` | `/api/v1/clients/{client_id}/file-origin/imports` | coleção | `app/modules/client_file_ingestion/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); registros lidos por client_id, autor por author_for_viewer | ✅ verde |
 | `GET` | `/api/v1/clients/{client_id}/accounting-chart` | coleção | `app/modules/client_accounting_chart/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); toda query do plano filtra client_id no próprio SELECT; nome decifrado com a DEK do cliente do path | ✅ verde |
 | `POST` | `/api/v1/clients/{client_id}/accounting-chart/import` | coleção | `app/modules/client_accounting_chart/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + OpenClientDep + ManageClientAccountingChartDep (guard auditado); contas gravadas e inativadas com o client_id do path validado, sob trava por cliente; cliente encerrado = 409 | ✅ verde |
+| `POST` | `/api/v1/clients/{client_id}/accounting-chart/accounts` | coleção | `app/modules/client_accounting_chart/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + OpenClientDep + ManageClientAccountingChartDep (guard auditado); a conta nasce com o client_id do path validado, sob a trava por cliente da importação; código repetido = 409 só com o código | ✅ verde |
+| `PATCH` | `/api/v1/clients/{client_id}/accounting-chart/accounts/{account_id}` | detalhe (PK) | `app/modules/client_accounting_chart/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + OpenClientDep + ManageClientAccountingChartDep; a conta é lida com client_id no próprio SELECT (FOR UPDATE): conta de outro cliente = 404 sem vazar existência | ✅ verde |
 | `POST` | `/api/v1/clients/{client_id}/accounting-files` | coleção | `app/modules/accounting_files/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + GenerateAccountingFileDep (guard auditado) + OpenClientDep; layout só da organização DO CLIENTE (outra org = 404); materialização carregada com client_id no WHERE; geração gravada com o client_id do path validado | ✅ verde |
 | `GET` | `/api/v1/clients/{client_id}/accounting-files` | coleção | `app/modules/accounting_files/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + GenerateAccountingFileDep (guard auditado); gerações lidas por client_id no próprio SELECT; autor por author_for_viewer | ✅ verde |
 | `GET` | `/api/v1/clients/{client_id}/accounting-files/{generation_id}/download` | detalhe (PK) | `app/modules/accounting_files/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + GenerateAccountingFileDep (guard auditado) + OpenClientDep; geração por PK com AND client_id no SELECT (outro cliente = 404); regenera e confere o SHA-256 | ✅ verde |

@@ -34,6 +34,9 @@ from app.core.crypto_service import (
     provision_client_cipher,
 )
 from app.core.exceptions import (
+    AccountingAccountCodeExistsError,
+    AccountingAccountInUseError,
+    AccountingAccountInvalidError,
     AccountingAccountNotFoundError,
     AccountingAccountNotPostableError,
     ClientClosedError,
@@ -49,9 +52,11 @@ from app.modules.client_accounting_chart.repository import (
     AccountingChartRepository,
 )
 from app.modules.client_accounting_chart.sheet import (
+    REASON_FIELD,
     ChartLayout,
     ChartSheetRow,
     parse_chart_sheet,
+    validate_account,
 )
 from app.modules.client_accounting_chart.sort_key import chart_sort_key
 from app.modules.usage_events.repository import UsageEventRepository
@@ -73,6 +78,10 @@ ACCOUNTING_ACCOUNT_UNDECIPHERABLE = "[indecifrável]"
 
 #: Por que uma conta não recebe decisão nova — vocabulário FECHADO (vai em `details`).
 type NotPostableReason = Literal["sintetica", "inativa"]
+
+#: O que a edição manual mudou numa conta (86e3nb816) — vocabulário FECHADO, vai
+#: para o evento `plano_contabil_conta_editada` (nunca o valor, só o campo).
+type AccountChange = Literal["nome", "tipo", "classificacao", "situacao"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +114,22 @@ class AccountRef:
     name: str
     name_resolved: bool
     postable: bool
+
+
+@dataclass(frozen=True, slots=True)
+class AccountPatch:
+    """A edição de UMA conta (86e3nb816). `None` = o campo não veio no pedido.
+
+    O CÓDIGO não se edita: é a chave da reimportação e o que já foi para o snapshot
+    das materializações e para o arquivo contábil. A classificação precisa de
+    `classification_set` porque `null` explícito LIMPA, e ausência mantém.
+    """
+
+    name: str | None = None
+    account_type: AccountingAccountType | None = None
+    classification: str | None = None
+    classification_set: bool = False
+    active: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -302,6 +327,192 @@ class AccountingChartService:
         await self._emit_imported(client, result)
         return result
 
+    async def create_account(
+        self,
+        client: Client,
+        *,
+        actor: CurrentUser,
+        code: str,
+        name: str,
+        account_type: AccountingAccountType,
+        classification: str | None,
+    ) -> tuple[ClientAccountingAccount, DecryptedNames]:
+        """Inclui UMA conta no plano, sem reimportar a planilha (86e3nb816).
+
+        A MESMA regra de linha da planilha (`validate_account`), a MESMA trava por
+        cliente da importação (as duas portas não se cruzam), o MESMO caminho de
+        gravação (`_plan_writes`: nome cifrado com a pk no AAD, `sort_key` derivada)
+        e a conta nasce ATIVA. Código que o cliente já tem, ativo ou inativo, é 409:
+        a conta inativa se reativa pela edição, não por uma segunda conta.
+        """
+        _require_open(client)
+        row = _validated(
+            code=code, name=name, account_type=account_type, classification=classification
+        )
+
+        await self._repo.lock_client_chart(client.id)
+        existing = await self._repo.get_by_codes(client.id, [row.code])
+        if existing:
+            raise AccountingAccountCodeExistsError(
+                f"código já existe no plano do cliente {client.id}",
+                details={"code": row.code, "accountId": str(existing[0].id)},
+            )
+        cipher = await self._write_cipher(client)
+        inserts, _ = _plan_writes(client.id, [row], {}, cipher=cipher, author_id=UUID(actor.id))
+        await self._repo.insert_accounts(inserts)
+        await self._db.commit()
+
+        account_id = _as_uuid(inserts[0]["id"])
+        account = await self._repo.get(client.id, account_id)
+        if account is None:  # pragma: no cover - acabou de ser gravada na mesma conexão
+            raise AccountingAccountNotFoundError(f"conta {account_id} sumiu depois do commit")
+        log.info("accounting_account_created", client_id=str(client.id), account_id=str(account.id))
+        await self._emit_edited(client, account.id, operation="criada", changes=[])
+        return account, DecryptedNames(names={account.id: row.name}, failed=frozenset())
+
+    async def update_account(
+        self,
+        client: Client,
+        account_id: UUID,
+        *,
+        actor: CurrentUser,
+        patch: AccountPatch,
+    ) -> tuple[ClientAccountingAccount, DecryptedNames]:
+        """Edita nome, tipo, classificação e situação de UMA conta (86e3nb816).
+
+        Conta de outro cliente ou inexistente → 404 (o `SELECT` carrega `client_id`).
+        Campo que a planilha recusaria → 422 tipado no campo. Conta que decisões do
+        de-para ou a conta do banco usam não passa a sintética nem a inativa (422
+        com as contagens). Sem mudança nenhuma: nada é gravado nem emitido.
+        """
+        _require_open(client)
+        await self._repo.lock_client_chart(client.id)
+        account = await self._repo.get_for_update(client.id, account_id)
+        if account is None:
+            raise AccountingAccountNotFoundError(
+                f"conta contábil {account_id} não pertence ao cliente {client.id}"
+            )
+        current = await self.decrypt_names(client, [account])
+        old_name = None if account.id in current.failed else current.names.get(account.id)
+
+        new_type = patch.account_type or AccountingAccountType(account.account_type)
+        new_classification = (
+            patch.classification if patch.classification_set else account.classification
+        )
+        # O nome que não veio no pedido não é revalidado: o que está gravado já passou
+        # pela regra (e pode estar indecifrável, num caso de chave perdida).
+        row = _validated(
+            code=account.code,
+            name=patch.name if patch.name is not None else _NAME_NOT_EDITED,
+            account_type=new_type,
+            classification=new_classification,
+        )
+        new_active = account.active if patch.active is None else patch.active
+
+        changes: list[AccountChange] = []
+        if patch.name is not None and row.name != old_name:
+            changes.append("nome")
+        if new_type.value != account.account_type:
+            changes.append("tipo")
+        if row.classification != account.classification:
+            changes.append("classificacao")
+        if new_active != account.active:
+            changes.append("situacao")
+        if not changes:
+            return account, current
+
+        await self._refuse_if_in_use(
+            client.id,
+            account,
+            to_synthetic=new_type is AccountingAccountType.SINTETICA,
+            to_inactive=not new_active,
+        )
+
+        values: dict[str, object] = {
+            "account_type": new_type.value,
+            "classification": row.classification,
+            "sort_key": chart_sort_key(row.classification, account.code),
+            "active": new_active,
+            "updated_by": UUID(actor.id),
+        }
+        name = old_name
+        if "nome" in changes:
+            cipher = await self._write_cipher(client)
+            envelope, iv = cipher.encrypt(
+                row.name, field_locator(AAD_ACCOUNTING_ACCOUNT_NAME, account.id)
+            )
+            values["name_encrypted"] = envelope
+            values["name_iv"] = iv
+            name = row.name
+        await self._repo.update_account(client.id, account.id, values)
+        await self._db.commit()
+        await self._db.refresh(account)
+
+        log.info(
+            "accounting_account_updated",
+            client_id=str(client.id),
+            account_id=str(account.id),
+            changes=changes,
+        )
+        await self._emit_edited(client, account.id, operation="editada", changes=changes)
+        names = (
+            DecryptedNames(names={account.id: name}, failed=frozenset())
+            if name is not None
+            else current
+        )
+        return account, names
+
+    async def _refuse_if_in_use(
+        self,
+        client_id: UUID,
+        account: ClientAccountingAccount,
+        *,
+        to_synthetic: bool,
+        to_inactive: bool,
+    ) -> None:
+        """422 se a edição tira do conjunto lançável uma conta que alguém usa.
+
+        Só a TRANSIÇÃO conta: a conta que já era sintética ou inativa não é
+        recontada (a importação pode tê-la inativado, e isso a planilha decide).
+        """
+        reason: NotPostableReason | None = None
+        if to_synthetic and account.account_type != AccountingAccountType.SINTETICA.value:
+            reason = "sintetica"
+        elif to_inactive and account.active:
+            reason = "inativa"
+        if reason is None:
+            return
+        decision_count, binding_count = await self._repo.count_usage(client_id, account.id)
+        if decision_count or binding_count:
+            raise AccountingAccountInUseError(
+                f"conta {account.id} em uso: {decision_count} decisões, {binding_count} bancos",
+                user_message=_in_use_message(reason, decision_count, binding_count),
+                details={
+                    "reason": reason,
+                    "decisionCount": decision_count,
+                    "bindingCount": binding_count,
+                },
+            )
+
+    async def _emit_edited(
+        self,
+        client: Client,
+        account_id: UUID,
+        *,
+        operation: Literal["criada", "editada"],
+        changes: list[AccountChange],
+    ) -> None:
+        """`plano_contabil_conta_editada` DEPOIS do commit — nunca derruba a escrita."""
+        try:
+            await self._usage_events.emit_plano_contabil_conta_editada(
+                client_id=client.id,
+                account_id=account_id,
+                operacao=operation,
+                campos=changes,
+            )
+        except Exception:
+            log.warning("plano_contabil_conta_editada_emit_failed", client_id=str(client.id))
+
     async def _emit_imported(self, client: Client, result: ChartImportResult) -> None:
         """A métrica da 16.4 DEPOIS do commit — e ela nunca derruba a importação gravada.
 
@@ -353,6 +564,73 @@ _NOT_POSTABLE_MESSAGES: dict[NotPostableReason, str] = {
         "importada. Escolha uma conta ativa ou reimporte o plano com ela."
     ),
 }
+
+
+#: Marcador do nome que NÃO veio na edição: só serve para a validação conferir os
+#: outros campos. Nunca é gravado (o nome só é cifrado quando `nome` mudou).
+_NAME_NOT_EDITED = "-"
+
+
+def _as_uuid(value: object) -> UUID:
+    """O `id` que `_plan_writes` gerou, de volta ao tipo (o dicionário é `object`)."""
+    if not isinstance(value, UUID):  # pragma: no cover - `_plan_writes` sempre gera UUID
+        raise TypeError("id da conta não é UUID")
+    return value
+
+
+def _require_open(client: Client) -> None:
+    """Cliente encerrado é só-leitura (§4.12): a escrita recusa ANTES de tocar a DEK."""
+    if client.closed_at is not None:
+        raise ClientClosedError(
+            f"Cliente {client.id} está encerrado desde {client.closed_at.isoformat()}."
+        )
+
+
+def _validated(
+    *,
+    code: str,
+    name: str,
+    account_type: AccountingAccountType,
+    classification: str | None,
+) -> ChartSheetRow:
+    """A conta pela regra da planilha, ou o 422 no CAMPO certo."""
+    row, reason = validate_account(
+        code=code, name=name, account_type=account_type, classification=classification
+    )
+    if reason is not None or row is None:
+        reason = reason or "codigo_vazio"
+        field = REASON_FIELD[reason]
+        raise AccountingAccountInvalidError(
+            f"conta contábil inválida: {field} {reason}",
+            user_message=_INVALID_MESSAGES[field],
+            details={"field": field, "reason": reason},
+        )
+    return row
+
+
+_INVALID_MESSAGES: dict[str, str] = {
+    "code": (
+        "O código reduzido aceita letras, números, ponto e hífen (até 20 caracteres), "
+        "começando e terminando com letra ou número."
+    ),
+    "name": "Informe o nome da conta (até 200 caracteres).",
+    "type": "O tipo da conta é analítica ou sintética.",
+    "classification": "A classificação tem até 40 caracteres.",
+}
+
+
+def _in_use_message(reason: NotPostableReason, decisions: int, bindings: int) -> str:
+    """A recusa da conta em uso, com as CONTAGENS (nunca quais categorias)."""
+    uses: list[str] = []
+    if decisions:
+        uses.append(f"{decisions} {'decisão' if decisions == 1 else 'decisões'} do de-para")
+    if bindings:
+        uses.append(f"{bindings} {'conta' if bindings == 1 else 'contas'} do banco")
+    state = "sintética" if reason == "sintetica" else "inativa"
+    return (
+        f"Esta conta não pode ficar {state}: ela está em uso por {' e '.join(uses)}. "
+        "Aponte essas configurações para outra conta antes."
+    )
 
 
 def _plan_writes(

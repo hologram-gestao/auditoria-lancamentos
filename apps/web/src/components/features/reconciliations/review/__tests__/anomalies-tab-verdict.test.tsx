@@ -29,6 +29,17 @@ const listState = {
 const patchMock = vi.fn();
 const patchState = { mutateAsync: patchMock, isPending: false };
 
+vi.mock('@/hooks/use-omie-postings', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  // 86e3n70qj — o estado "lançado nesta visita" e a abertura da gaveta com
+  // carregando: aqui a gaveta abre na hora e nada foi lançado ainda.
+  usePostedInSession: () => ({}),
+  useOpenLancarDrawer: (_sessionId: string, onReady: (targets: unknown[]) => void) => ({
+    open: async (targets: unknown[]) => onReady(targets),
+    openingTargets: null,
+  }),
+}));
+
 vi.mock('@/hooks/use-reconciliations', () => ({
   useAnomalies: () => listState,
   usePatchAnomaly: () => patchState,

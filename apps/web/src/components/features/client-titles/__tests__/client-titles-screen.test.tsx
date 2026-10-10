@@ -848,7 +848,7 @@ describe('ClientTitlesScreen — estados (R3)', () => {
     listState.data = { data: [], pagination: { page: 1, pageSize: 20, total: 0, totalPages: 0 } };
     render(<ClientTitlesScreen clientId="c1" />);
 
-    expect(screen.getByText('A carteira deste cliente ainda não foi sincronizada')).toBeVisible();
+    expect(screen.getByText('Esta carteira ainda não foi sincronizada com o Omie')).toBeVisible();
     // Duas ocorrências: o botão do cabeçalho e o do estado vazio.
     expect(screen.getAllByRole('button', { name: 'Sincronizar agora' })).toHaveLength(2);
     // O bloco de agregados NÃO aparece: `R$ 0,00` ali seria lido como
@@ -866,7 +866,7 @@ describe('ClientTitlesScreen — estados (R3)', () => {
     });
     listState.data = { data: [], pagination: { page: 1, pageSize: 20, total: 0, totalPages: 0 } };
     render(<ClientTitlesScreen clientId="c1" />);
-    expect(screen.getByText(/ver o total devido e o atraso por faixa/)).toBeVisible();
+    expect(screen.getByText(/com o total devido e o atraso por faixa/)).toBeVisible();
     expect(screen.queryByText(/aging/i)).toBeNull();
   });
 
@@ -881,8 +881,30 @@ describe('ClientTitlesScreen — estados (R3)', () => {
     listState.data = { data: [], pagination: { page: 1, pageSize: 20, total: 0, totalPages: 0 } };
     render(<ClientTitlesScreen clientId="c1" />);
 
-    expect(screen.getByText(/Quando alguém da equipe sincronizar/)).toBeVisible();
+    expect(screen.getByText(/Peça a alguém com acesso de sincronização/)).toBeVisible();
     expect(screen.queryByRole('button', { name: /sincronizar/i })).toBeNull();
+  });
+
+  // 86e3n70qj — era o que a pessoa via antes de clicar em "Sincronizar": com o
+  // resumo ainda carregando, a carteira vazia dizia "Nenhum título nesta carteira."
+  it('com o resumo carregando, o vazio não diz "nenhum título" (ainda não se sabe)', () => {
+    summaryState.isLoading = true;
+    summaryState.data = undefined;
+    listState.data = { data: [], pagination: { page: 1, pageSize: 20, total: 0, totalPages: 0 } };
+    render(<ClientTitlesScreen clientId="c1" />);
+
+    expect(screen.queryByText('Nenhum título nesta carteira.')).toBeNull();
+    expect(screen.queryByText('Esta carteira ainda não foi sincronizada com o Omie')).toBeNull();
+  });
+
+  it('resumo indisponível: o vazio não afirma que a carteira está vazia', () => {
+    summaryState.isError = true;
+    summaryState.data = undefined;
+    listState.data = { data: [], pagination: { page: 1, pageSize: 20, total: 0, totalPages: 0 } };
+    render(<ClientTitlesScreen clientId="c1" />);
+
+    expect(screen.queryByText('Nenhum título nesta carteira.')).toBeNull();
+    expect(screen.getByText(/Não foi possível ler o estado da carteira/)).toBeVisible();
   });
 
   it('última tentativa falhou: agregados da ÍNTEGRA anterior + data + aviso', () => {
@@ -906,7 +928,7 @@ describe('ClientTitlesScreen — estados (R3)', () => {
     render(<ClientTitlesScreen clientId="c1" />);
 
     expect(screen.getByText('Nenhum título encontrado para este recorte.')).toBeVisible();
-    expect(screen.queryByText('A carteira deste cliente ainda não foi sincronizada')).toBeNull();
+    expect(screen.queryByText('Esta carteira ainda não foi sincronizada com o Omie')).toBeNull();
   });
 
   it('carregando mostra o skeleton da tabela', () => {
