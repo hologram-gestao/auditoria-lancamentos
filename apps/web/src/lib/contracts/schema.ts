@@ -611,6 +611,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clients/{client_id}/accounting-chart/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Inclui UMA conta no plano contábil do cliente, sem reimportar a planilha (a conta que o escritório acabou de criar no sistema contábil). As MESMAS regras da planilha: `code` com letras, dígitos, `.` e `-` (até 20), `name` até 200, `type` `analitica` ou `sintetica`, `classification` opcional até 40 (decide a posição na lista). A conta nasce ativa e o nome é cifrado com a chave do cliente. Requer `manage_client_accounting_chart` (plataforma, admin e gerente da carteira; usuários do cliente recebem 403 e a negação fica na trilha). Recusas: 409 `CONTA_CONTABIL_CODIGO_EXISTENTE` quando o cliente já tem o código, ativo ou inativo (`details.code` e `details.accountId` da existente); 422 `CONTA_CONTABIL_INVALIDA` com `details.field` (`code`, `name`, `classification`) e `details.reason` no vocabulário da planilha; cliente encerrado 409. */
+        post: operations["create_accounting_account_api_v1_clients__client_id__accounting_chart_accounts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/accounting-chart/accounts/{account_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Edita nome, tipo, classificação e situação (`active`) de UMA conta do plano contábil do cliente; o código reduzido não se edita. Campo ausente fica como está; `classification: null` limpa. Conta de outro cliente ou inexistente: 404. A conta que decisões do de-para ou a conta do banco usam não passa a sintética nem a inativa: 422 `CONTA_CONTABIL_EM_USO` com `details.reason` (`sintetica`/`inativa`), `details.decisionCount` e `details.bindingCount` (só contagens). Campo inválido: 422 `CONTA_CONTABIL_INVALIDA`, como na inclusão. Mesma permissão da inclusão; cliente encerrado 409. */
+        patch: operations["update_accounting_account_api_v1_clients__client_id__accounting_chart_accounts__account_id__patch"];
+        trace?: never;
+    };
     "/api/v1/clients/{client_id}/source-accounts": {
         parameters: {
             query?: never;
@@ -2012,6 +2046,41 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AccountingAccountCreateRequest
+         * @description Body de `POST /clients/{client_id}/accounting-chart/accounts` (86e3nb816).
+         *
+         *     Os tetos são os das COLUNAS (§7 Backend: o limite do schema é o da coluna de
+         *     destino), e a forma do código, o nome vazio depois de aparar e o resto da regra
+         *     de linha vêm de `sheet.validate_account`, a MESMA da planilha (422 no campo).
+         *     A conta nasce ativa.
+         */
+        AccountingAccountCreateRequest: {
+            /**
+             * Code
+             * @description Código reduzido: letras, números, `.` e `-`; único no plano do cliente.
+             */
+            code: string;
+            /**
+             * Name
+             * @description Nome da conta. Cifrado com a chave do cliente.
+             */
+            name: string;
+            /** @description `analitica` recebe lançamento; `sintetica` só agrupa. */
+            type: components["schemas"]["AccountingAccountType"];
+            /**
+             * Classification
+             * @description Classificação hierárquica opcional (`1.1.1.02.001`); decide a ordem.
+             */
+            classification?: string | null;
+        };
+        /**
+         * AccountingAccountEnvelope
+         * @description Body da inclusão e da edição manual de UMA conta (86e3nb816).
+         */
+        AccountingAccountEnvelope: {
+            data: components["schemas"]["AccountingAccountResponse"];
+        };
+        /**
          * AccountingAccountResponse
          * @description Uma conta do plano contábil, como a API a devolve.
          */
@@ -2070,6 +2139,26 @@ export interface components {
          * @enum {string}
          */
         AccountingAccountType: "analitica" | "sintetica";
+        /**
+         * AccountingAccountUpdateRequest
+         * @description Body de `PATCH /clients/{client_id}/accounting-chart/accounts/{account_id}`.
+         *
+         *     Todo campo é opcional; o que não vem fica como está. O CÓDIGO não se edita (é a
+         *     chave da reimportação e o que já foi para as materializações). `classification:
+         *     null` LIMPA a classificação; ausente, mantém.
+         */
+        AccountingAccountUpdateRequest: {
+            /** Name */
+            name?: string | null;
+            type?: components["schemas"]["AccountingAccountType"] | null;
+            /** Classification */
+            classification?: string | null;
+            /**
+             * Active
+             * @description `false` inativa a conta (ela fica, sem receber decisão nova); `true` reativa.
+             */
+            active?: boolean | null;
+        };
         /**
          * AccountingCategoryResponse
          * @description S16 — uma categoria com ALVO no destino `conta_contabil`, na prévia.
@@ -8877,6 +8966,81 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChartImportEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_accounting_account_api_v1_clients__client_id__accounting_chart_accounts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountingAccountCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountingAccountEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_accounting_account_api_v1_clients__client_id__accounting_chart_accounts__account_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountingAccountUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountingAccountEnvelope"];
                 };
             };
             /** @description Validation Error */

@@ -731,6 +731,22 @@ const ACCOUNTING_ACCOUNTS = [
   }),
 ];
 
+/** 86e3nb816 — as duas recusas da gaveta de conta manual, no formato do servidor. */
+const ACCOUNTING_CODE_EXISTS_REFUSAL = {
+  code: 'CONTA_CONTABIL_CODIGO_EXISTENTE',
+  message: 'código já existe',
+  userMessage:
+    'Já existe uma conta com este código no plano contábil do cliente. Edite a conta existente em vez de criar outra.',
+  details: { code: '649', accountId: 'acc-649' },
+};
+const ACCOUNTING_IN_USE_REFUSAL = {
+  code: 'CONTA_CONTABIL_EM_USO',
+  message: 'conta em uso',
+  userMessage:
+    'Esta conta não pode ficar inativa: ela está em uso por 3 decisões do de-para e 1 conta do banco. Aponte essas configurações para outra conta antes.',
+  details: { reason: 'inativa', decisionCount: 3, bindingCount: 1 },
+};
+
 /** Contas de origem: uma Omie associada, uma Omie PENDENTE e o slot padrão pendente. */
 const SOURCE_ACCOUNTS = [
   {
@@ -2305,6 +2321,34 @@ async function fulfillApi(route: Route): Promise<void> {
     }
     accountingChartEmpty = false;
     return json({ contas: 5, contasNovas: 5, contasInativadas: 0 });
+  }
+  // 86e3nb816 — conta manual. Código que o plano já tem = 409 no campo; inativar
+  // = 422 da conta em uso (com as contagens), para a gaveta mostrar os dois erros.
+  if (path === `/api/v1/clients/${CLIENT_ID}/accounting-chart/accounts`) {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    if (ACCOUNTING_ACCOUNTS.some((a) => a.code === body.code)) {
+      return route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: ACCOUNTING_CODE_EXISTS_REFUSAL }),
+      });
+    }
+    return route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ data: accountingAccount({ id: 'acc-nova', ...body }) }),
+    });
+  }
+  if (path.startsWith(`/api/v1/clients/${CLIENT_ID}/accounting-chart/accounts/`)) {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    if (body.active === false) {
+      return route.fulfill({
+        status: 422,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: ACCOUNTING_IN_USE_REFUSAL }),
+      });
+    }
+    return json(accountingAccount(body));
   }
   if (path === `/api/v1/clients/${CLIENT_ID}/accounting-chart`) {
     const tipo = url.searchParams.get('type');
@@ -10618,6 +10662,83 @@ for (const vp of VIEWPORTS) {
         'false',
       );
       await analyze(page, `de-para — como funciona recolhido (${vp.label})`);
+    });
+  });
+}
+
+/**
+ * 86e3nb816 — conta do plano contábil incluída e editada à mão, nos três temas e
+ * nos dois viewports: "Nova conta" e "Editar" para o gerente, a gaveta com o
+ * código repetido no campo do código e a conta em uso no campo da situação, e
+ * nenhum dos dois botões para o gerente do cliente.
+ *
+ * Bloco próprio no FIM do arquivo, pelo motivo do bloco 86e3f55bc.
+ */
+for (const vp of VIEWPORTS) {
+  const slugManual = vp.label.replace(/\s+/g, '-');
+  test.describe(`Plano contábil: conta manual (86e3nb816) — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('nova conta: gaveta, código repetido no campo e ações na tela', async ({ page }) => {
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+      await expect(page.getByRole('heading', { name: 'Plano contábil', level: 1 })).toBeVisible();
+      const nova = page.getByRole('button', { name: 'Nova conta' });
+      await exigirDentroDaViewport(page, nova, `${vp.label}: "Nova conta"`);
+      const regiao = page.getByRole('region', { name: 'Contas do plano contábil (rolável)' });
+      await expect(regiao.getByRole('button', { name: /^Editar conta / })).toHaveCount(
+        ACCOUNTING_ACCOUNTS.length,
+      );
+      await shot(page, `plano-contabil-conta-manual-lista-${slugManual}`);
+
+      await nova.click();
+      const gaveta = page.getByRole('dialog');
+      await aguardarAnimacao(gaveta);
+      await gaveta.getByLabel('Código reduzido').fill('649');
+      await gaveta.getByLabel('Nome').fill('Banco repetido');
+      const incluir = gaveta.getByRole('button', { name: 'Incluir conta' });
+      await exigirDentroDaViewport(page, incluir, `${vp.label}: "Incluir conta"`);
+      await incluir.click();
+      await expect(gaveta.getByLabel('Código reduzido')).toHaveAttribute('aria-invalid', 'true');
+      await expect(gaveta.getByText(/Já existe uma conta com este código/)).toBeVisible();
+      await shot(page, `plano-contabil-conta-manual-codigo-repetido-${slugManual}`);
+      await analyze(page, `plano contábil — nova conta com código repetido (${vp.label})`);
+
+      await gaveta.getByLabel('Código reduzido').fill('663');
+      await incluir.click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(page.locator(TOAST_TITLE)).toContainText('Conta 663 incluída no plano.');
+    });
+
+    test('editar conta: código travado e a conta em uso no campo da situação', async ({ page }) => {
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+      const regiao = page.getByRole('region', { name: 'Contas do plano contábil (rolável)' });
+      await regiao.getByRole('button', { name: 'Editar conta 649' }).click();
+      const gaveta = page.getByRole('dialog');
+      await aguardarAnimacao(gaveta);
+      await expect(gaveta.getByLabel('Código reduzido')).toBeDisabled();
+      await gaveta.getByRole('switch', { name: 'Conta ativa' }).click();
+      const salvar = gaveta.getByRole('button', { name: 'Salvar alterações' });
+      await exigirDentroDaViewport(page, salvar, `${vp.label}: "Salvar alterações"`);
+      await salvar.click();
+      await expect(
+        gaveta.getByText(/em uso por 3 decisões do de-para e 1 conta do banco/),
+      ).toBeVisible();
+      await shot(page, `plano-contabil-conta-manual-em-uso-${slugManual}`);
+      await analyze(page, `plano contábil — editar conta em uso (${vp.label})`);
+    });
+
+    test('gerente do cliente não vê "Nova conta" nem "Editar"', async ({ page }) => {
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+      await expect(page.getByRole('heading', { name: 'Plano contábil', level: 1 })).toBeVisible();
+      await expect(
+        page.getByRole('cell', { name: 'Banco conta movimento', exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Nova conta' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: /^Editar conta / })).toHaveCount(0);
+      await analyze(page, `plano contábil — gerente do cliente sem conta manual (${vp.label})`);
     });
   });
 }

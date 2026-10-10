@@ -2,6 +2,8 @@
 
     - GET  /api/v1/clients/{client_id}/accounting-chart
     - POST /api/v1/clients/{client_id}/accounting-chart/import   (multipart)
+    - POST  /api/v1/clients/{client_id}/accounting-chart/accounts               (86e3nb816)
+    - PATCH /api/v1/clients/{client_id}/accounting-chart/accounts/{account_id}  (86e3nb816)
 
 ⚠️ Não é o plano da ORIGEM da S10 (`/chart-of-accounts`, categorias do Omie): este é
 o do sistema contábil de DESTINO, onde o escritório lança.
@@ -25,6 +27,7 @@ param depois do prefixo.
 from __future__ import annotations
 
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 
@@ -41,8 +44,11 @@ from app.db.models.client_accounting_account import (
 )
 from app.modules.client_accounting_chart.repository import AccountingChartFilters
 from app.modules.client_accounting_chart.schemas import (
+    AccountingAccountCreateRequest,
+    AccountingAccountEnvelope,
     AccountingAccountResponse,
     AccountingAccountStatusFilter,
+    AccountingAccountUpdateRequest,
     AccountingChartListResponse,
     ChartImportEnvelope,
     ChartImportPayload,
@@ -179,3 +185,64 @@ async def import_accounting_chart(
     )
     result = await service.import_sheet(client, actor=actor, content=content)
     return ChartImportEnvelope(data=ChartImportPayload.from_result(result))
+
+
+@router.post(
+    "/accounts",
+    status_code=201,
+    summary=(
+        "Inclui UMA conta no plano contábil do cliente, sem reimportar a planilha (a "
+        "conta que o escritório acabou de criar no sistema contábil). As MESMAS regras "
+        "da planilha: `code` com letras, dígitos, `.` e `-` (até 20), `name` até 200, "
+        "`type` `analitica` ou `sintetica`, `classification` opcional até 40 (decide a "
+        "posição na lista). A conta nasce ativa e o nome é cifrado com a chave do "
+        "cliente. Requer `manage_client_accounting_chart` (plataforma, admin e gerente "
+        "da carteira; usuários do cliente recebem 403 e a negação fica na trilha). "
+        "Recusas: 409 `CONTA_CONTABIL_CODIGO_EXISTENTE` quando o cliente já tem o código, "
+        "ativo ou inativo (`details.code` e `details.accountId` da existente); 422 "
+        "`CONTA_CONTABIL_INVALIDA` com `details.field` (`code`, `name`, "
+        "`classification`) e `details.reason` no vocabulário da planilha; cliente "
+        "encerrado 409."
+    ),
+)
+async def create_accounting_account(
+    client: OpenClientDep,
+    actor: ManageClientAccountingChartDep,
+    service: ServiceDep,
+    body: AccountingAccountCreateRequest,
+) -> AccountingAccountEnvelope:
+    account, names = await service.create_account(
+        client,
+        actor=actor,
+        code=body.code,
+        name=body.name,
+        account_type=body.account_type,
+        classification=body.classification,
+    )
+    return AccountingAccountEnvelope(data=AccountingAccountResponse.from_row(account, names=names))
+
+
+@router.patch(
+    "/accounts/{account_id}",
+    summary=(
+        "Edita nome, tipo, classificação e situação (`active`) de UMA conta do plano "
+        "contábil do cliente; o código reduzido não se edita. Campo ausente fica como "
+        "está; `classification: null` limpa. Conta de outro cliente ou inexistente: 404. "
+        "A conta que decisões do de-para ou a conta do banco usam não passa a sintética "
+        "nem a inativa: 422 `CONTA_CONTABIL_EM_USO` com `details.reason` (`sintetica`/"
+        "`inativa`), `details.decisionCount` e `details.bindingCount` (só contagens). "
+        "Campo inválido: 422 `CONTA_CONTABIL_INVALIDA`, como na inclusão. Mesma permissão "
+        "da inclusão; cliente encerrado 409."
+    ),
+)
+async def update_accounting_account(
+    client: OpenClientDep,
+    actor: ManageClientAccountingChartDep,
+    service: ServiceDep,
+    account_id: UUID,
+    body: AccountingAccountUpdateRequest,
+) -> AccountingAccountEnvelope:
+    account, names = await service.update_account(
+        client, account_id, actor=actor, patch=body.to_patch()
+    )
+    return AccountingAccountEnvelope(data=AccountingAccountResponse.from_row(account, names=names))

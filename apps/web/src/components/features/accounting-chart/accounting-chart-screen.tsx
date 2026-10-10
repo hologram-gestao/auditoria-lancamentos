@@ -25,13 +25,18 @@
  * `<TableCard pageScroll>` + `<Table stickyHeader="page">`, paginação no fluxo,
  * e a seção da conta do banco depois dela.
  *
+ * **Conta à mão** (86e3nb816): "Nova conta" e "Editar" na linha, para quem
+ * tem `manage_client_accounting_chart` e cliente aberto (os demais não veem os
+ * botões). A conta nova aparece no lugar da classificação porque a ordem é do
+ * servidor (`sort_key` derivada na gravação): a tela só invalida a lista.
+ *
  * **A hierarquia aparece** (86e3n70p9): a lista chega do servidor na ordem da
  * classificação (sintética em cima, as analíticas dela abaixo), e a linha mostra
  * isso com o nome recuado pelo grau (`chart-hierarchy.ts`) e a sintética em peso
  * maior. As outras colunas não mudam; nada é ordenado no cliente.
  */
 
-import { CheckCircle2, Search, Upload, X } from 'lucide-react';
+import { CheckCircle2, Pencil, Plus, Search, Upload, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -64,6 +69,7 @@ import type {
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth';
 
+import { AccountingAccountFormSheet } from './accounting-account-form-sheet';
 import { AccountingChartImportSheet, importSuccessMessage } from './accounting-chart-import-sheet';
 import { AccountingChartModel } from './accounting-chart-model';
 import { BankAccountsSection } from './bank-accounts-section';
@@ -138,6 +144,9 @@ export function AccountingChartScreen({ clientId }: { clientId: string }) {
   const [importOpen, setImportOpen] = useState(false);
   const [importKey, setImportKey] = useState(0);
   const [lastImport, setLastImport] = useState<AccountingChartImportResult | null>(null);
+  // A gaveta da conta: `undefined` fechada, `null` nova conta, conta = edição.
+  const [accountForm, setAccountForm] = useState<AccountingAccount | null | undefined>(undefined);
+  const [accountFormKey, setAccountFormKey] = useState(0);
 
   if (currentUser === null) return null;
 
@@ -161,6 +170,11 @@ export function AccountingChartScreen({ clientId }: { clientId: string }) {
   function openImport() {
     setImportKey((k) => k + 1);
     setImportOpen(true);
+  }
+
+  function openAccountForm(account: AccountingAccount | null) {
+    setAccountFormKey((k) => k + 1);
+    setAccountForm(account);
   }
 
   function clearFilters() {
@@ -202,11 +216,17 @@ export function AccountingChartScreen({ clientId }: { clientId: string }) {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {/* Sem plano, o botão mora no estado vazio, junto do modelo — um só na tela. */}
+          {showImport && (
+            <Button type="button" variant="outline" onClick={() => openAccountForm(null)}>
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Nova conta
+            </Button>
+          )}
           {showImport && !noPlan && !showsNoPlanState && importButton}
           {canManage && isClosed && (
             <p className="text-muted-foreground max-w-xs text-sm">
-              Cliente encerrado: a importação está indisponível. O plano já importado continua
-              disponível para leitura.
+              Cliente encerrado: a importação está indisponível, assim como incluir e editar contas.
+              O plano já importado continua disponível para leitura.
             </p>
           )}
         </div>
@@ -319,13 +339,24 @@ export function AccountingChartScreen({ clientId }: { clientId: string }) {
                   <TableHead>Nome</TableHead>
                   <TableHead>Tipo</TableHead>
                   <TableHead>Situação</TableHead>
+                  {showImport && (
+                    <TableHead className="w-12">
+                      <span className="sr-only">Ações</span>
+                    </TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {listQuery.isLoading ? (
-                  <TableSkeletonRows />
+                  <TableSkeletonRows columns={COLUMN_COUNT + (showImport ? 1 : 0)} />
                 ) : (
-                  rows.map((account) => <AccountRow key={account.id} account={account} />)
+                  rows.map((account) => (
+                    <AccountRow
+                      key={account.id}
+                      account={account}
+                      onEdit={showImport ? () => openAccountForm(account) : null}
+                    />
+                  ))
                 )}
               </TableBody>
             </Table>
@@ -374,6 +405,18 @@ export function AccountingChartScreen({ clientId }: { clientId: string }) {
         isClosed={isClosed}
         hasPlan={hasPlan}
       />
+
+      {showImport && accountForm !== undefined && (
+        <AccountingAccountFormSheet
+          key={accountFormKey}
+          clientId={clientId}
+          open
+          onOpenChange={(open) => {
+            if (!open) setAccountForm(undefined);
+          }}
+          account={accountForm}
+        />
+      )}
 
       {showImport && (
         <AccountingChartImportSheet
@@ -436,7 +479,14 @@ function FilterGroup<T extends string>({
   );
 }
 
-function AccountRow({ account }: { account: AccountingAccount }) {
+function AccountRow({
+  account,
+  onEdit,
+}: {
+  account: AccountingAccount;
+  /** `null` = quem vê não edita (permissão ou cliente encerrado): sem coluna. */
+  onEdit: (() => void) | null;
+}) {
   const typeLabel = ACCOUNT_TYPE_LABELS[account.type] ?? account.type;
   const depth = classificationDepth(account.classification);
   const isSynthetic = account.type === 'sintetica';
@@ -493,16 +543,30 @@ function AccountRow({ account }: { account: AccountingAccount }) {
           {account.active ? 'Ativa' : 'Inativa'}
         </span>
       </TableCell>
+      {onEdit !== null && (
+        <TableCell className="text-right">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            aria-label={`Editar conta ${account.code}`}
+            onClick={onEdit}
+          >
+            <Pencil className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        </TableCell>
+      )}
     </TableRow>
   );
 }
 
-function TableSkeletonRows() {
+function TableSkeletonRows({ columns }: { columns: number }) {
   return (
     <>
       {Array.from({ length: 5 }).map((_, index) => (
         <TableRow key={index} aria-hidden="true">
-          {Array.from({ length: COLUMN_COUNT }).map((__, cell) => (
+          {Array.from({ length: columns }).map((__, cell) => (
             <TableCell key={cell}>
               <div className="bg-muted h-4 w-full animate-pulse rounded" />
             </TableCell>

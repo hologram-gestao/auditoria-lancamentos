@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 **S0–S19 + Sprints 0–5 do agents-hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **121/121** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **123/123** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
 > **O que cada sprint do agents-hub entregou** (todas na `main`):
 >
@@ -193,7 +193,7 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**121** hoje — o arquivo é a fonte, confira com
+      (**123** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant E cross-org**: a bateria
       (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
@@ -201,7 +201,7 @@
       organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
-      (`PENDING_ENDPOINTS` está vazio: cobertura **121/121**). As 3 rotas do
+      (`PENDING_ENDPOINTS` está vazio: cobertura **123/123**). As 3 rotas do
       **plano de contas** (S10) e as 3 da **carteira de títulos** (S11 — lista,
       agregados e sincronizar) e as 3 da S15 (relatório de recebíveis, leitura e
       registro do contexto do título) entraram como coleção; as 20 da S12 também:
@@ -220,7 +220,10 @@
       da S16 também: leitura e importação do plano contábil do cliente
       (`GET /clients/{id}/accounting-chart`, `POST …/accounting-chart/import`) e
       leitura e escrita da conta do banco por conta de origem
-      (`GET`/`PUT /clients/{id}/source-accounts`). As 8 da S13 (arquivo contábil)
+      (`GET`/`PUT /clients/{id}/source-accounts`), mais a inclusão e a edição manual de
+      UMA conta do plano (86e3nb816: `POST …/accounting-chart/accounts`, coleção, e
+      `PATCH …/accounting-chart/accounts/{account_id}`, `DETAIL_PK` com `client_id` no
+      próprio SELECT). As 8 da S13 (arquivo contábil)
       também: gerar, listar e baixar
       (`POST`/`GET /clients/{id}/accounting-files`,
       `GET …/accounting-files/{generation_id}/download`) e as 5 dos layouts de
@@ -1320,7 +1323,16 @@ que vale como lei:
   da glibc ignora o ponto; sintética em cima das analíticas dela, a tela recua o nome pelo
   grau, e nada é inferido na leitura; **o cabeçalho do modelo casa por grafia
   normalizada, nunca por sinônimo** (`Código Reduzido` vale, `conta` não) e o `tipo`
-  aceita `analitico`/`sintetico` e as iniciais `a`/`s` (86e3n70p9);
+  aceita `analitico`/`sintetico` e as iniciais `a`/`s` (86e3n70p9); **a conta também
+  entra e se edita À MÃO, sem reimportar** (86e3nb816: `POST`/`PATCH
+…/accounting-chart/accounts`, mesma permissão da importação), pela MESMA regra de linha
+  da planilha (`sheet.validate_account`), sob a MESMA trava por cliente e com a `sort_key`
+  derivada em toda gravação; o código reduzido não se edita (é a chave da reimportação e o
+  que já foi para o snapshot), código que o cliente já tem é 409
+  `CONTA_CONTABIL_CODIGO_EXISTENTE`, e a conta que decisões do de-para (de qualquer
+  vigência) ou a conta do banco usam não passa a sintética nem a inativa pela edição (422
+  `CONTA_CONTABIL_EM_USO`, só com as contagens); a importação continua livre para
+  inativar, como sempre;
 - **no destino `conta_contabil`, e só nele, o alvo é conta ANALÍTICA e ATIVA do plano do
   próprio cliente** (`accounting_account_id`, validador único `require_postable_account`:
   outro cliente 404, sintética ou inativa 422); o catálogo da organização é recusado nesse
@@ -1577,6 +1589,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.89, 09/10/2026. **A conta do plano contábil passou a entrar e a se editar à mão, sem reimportar a planilha (86e3nb816, subtask 9 do épico 86e3n70nv; WhatsApp do Murilo de 09/10: o escritório cria a conta no Domínio e quer usá-la na hora).** Duas rotas: `POST /clients/{id}/accounting-chart/accounts` (cria; nasce ativa) e `PATCH /clients/{id}/accounting-chart/accounts/{account_id}` (nome, tipo, classificação e situação; campo ausente fica, `classification: null` limpa, o código não se edita), as duas com `OpenClientDep` e `ManageClientAccountingChartDep` (o `client_manager` toma 403 com 1 linha `denied`, molde da S16). Lista canônica 121 → **123** (coleção e `DETAIL_PK`, na bateria dos três atacantes: 377 verdes). A regra de campo é a da planilha, chamada pela função pública nova `sheet.validate_account` (que reusa `_validate_row`), e a recusa cai no CAMPO: 422 `CONTA_CONTABIL_INVALIDA` com `details.field` e o motivo no vocabulário da importação; texto acima da coluna é o 400 de forma. Código repetido, ativo ou inativo, é 409 `CONTA_CONTABIL_CODIGO_EXISTENTE` com o código e o id da existente (a inativa se reativa pela edição). Conta usada por decisão do de-para no `conta_contabil` (toda vigência conta: a substituída ainda decide as competências anteriores não materializadas) ou pela conta do banco não vira sintética nem inativa pela edição: 422 `CONTA_CONTABIL_EM_USO` com `reason`, `decisionCount` e `bindingCount`, nunca as categorias. **A conta do banco entrou na proteção, além das decisões que a task pedia**: ela também exige conta lançável (`require_postable_account`) e ficaria parada do mesmo jeito. A importação não mudou e continua inativando livremente. Escrita sob a MESMA trava por cliente da importação (`lock_client_chart`), nome cifrado pelo `_write_cipher` (provisiona a DEK do cliente sem origem) e `sort_key` derivada em toda gravação, então a conta nova aparece no lugar da classificação sem a tela ordenar nada. Evento `plano_contabil_conta_editada` (sem dedup), com `client_id`, `account_id`, `operacao` (`criada`/`editada`) e `campos` em vocabulário fechado; edição sem mudança não grava nem emite. Na tela, "Nova conta" ao lado de "Importar planilha" e "Editar" na linha, só para `manage_client_accounting_chart` com cliente aberto, numa gaveta react-hook-form + zod (`lib/validation/accounting-account.ts`, espelho da regra do servidor) que manda só o que mudou e põe o 409 no código e o 422 da conta em uso no tipo ou na situação (`readAccountFormRefusal`). Matriz (**29**) e pares de AAD (**17**) não mudaram._
 
 _Versão 1.88, 09/10/2026. **O catálogo do de-para ganhou tela, e o primeiro uso por um escritório novo deixou de terminar em "peça ao administrador" lido pelo administrador (86e3n70pn, subtask 4 do épico 86e3n70nv; reunião com o Murilo de 08/10).** Configurações → Destinos do de-para (`manage_mapping_catalog`, plataforma e admin; as 7 rotas do catálogo já existiam) lista os destinos com a contagem e, por destino, os alvos paginados com criar em lote colando `código;nome` (ponto e vírgula ou TAB; 409 de código repetido no CAMPO), editar o nome e inativar/reativar; o `conta_contabil` aparece explicado. Nasceu `GET /clients/{id}/mapping/{tipo}/origin-targets` (lista canônica 120 → **121**, coleção, na bateria dos três atacantes; guard `ManageMappingCatalogForClientDep`, auditado): a prévia dos alvos do demonstrativo a partir dos `dre_code` das categorias ativas do cliente, com o nome pelo mapa `dre` do `resolve_names` da S10. Só lê; os confirmados entram pelo lote existente, por decisão explícita, nunca automático. No de-para: o aviso de catálogo vazio dá "Cadastrar alvos" (`?destino=<id>`) e a ação da origem a quem tem a permissão; sem destino na URL, demonstrativo sem alvos e cliente com plano contábil abre na conta contábil; o topo ganhou "Como funciona" recolhível (o `CollapsibleSummary` aceita `showLabel`/`hideLabel`). Na tela, "Plano de Contas" virou "Categorias do Omie" (h1, menu, toasts, região rolável, textos do de-para que apontam para ela; rota mantida, helper `chartOfAccountsPath`). Matriz (**29**) e pares de AAD (**17**) não mudaram._
 

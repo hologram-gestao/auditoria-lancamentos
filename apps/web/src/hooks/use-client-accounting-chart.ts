@@ -9,19 +9,26 @@
  *   - importar invalida a árvore INTEIRA do plano E as contas de origem (o nome
  *     da conta do banco associada pode ter mudado), e o de-para do cliente
  *     (a prévia do `conta_contabil` lê código e nome do plano);
+ *   - incluir ou editar UMA conta (86e3nb816) invalida o mesmo que importar: a
+ *     lista, as contas de origem (nome da conta do banco) e o de-para;
  *   - associar a conta do banco atualiza as contas de origem e o de-para (a
  *     prévia lista as contas de origem pendentes).
  */
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
+  createAccountingAccount,
   importAccountingChart,
   listAccountingChart,
   listSourceAccounts,
   setSourceAccountBinding,
+  updateAccountingAccount,
   type ListAccountingChartParams,
 } from '@/lib/api/client-accounting-chart';
 import type {
+  AccountingAccount,
+  AccountingAccountCreateRequest,
+  AccountingAccountUpdateRequest,
   AccountingChartImportResult,
   AccountingChartListResponse,
   SourceAccountBindingPayload,
@@ -55,6 +62,33 @@ export function useImportAccountingChart(clientId: string) {
   const qc = useQueryClient();
   return useMutation<AccountingChartImportResult, Error, File>({
     mutationFn: (file) => importAccountingChart(clientId, file),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: accountingChartKeys.all(clientId) });
+      void qc.invalidateQueries({ queryKey: clientMappingKeys.all(clientId) });
+    },
+  });
+}
+
+export function useCreateAccountingAccount(clientId: string) {
+  const qc = useQueryClient();
+  return useMutation<AccountingAccount, Error, AccountingAccountCreateRequest>({
+    mutationFn: (payload) => createAccountingAccount(clientId, payload),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: accountingChartKeys.all(clientId) });
+      void qc.invalidateQueries({ queryKey: clientMappingKeys.all(clientId) });
+    },
+  });
+}
+
+export interface UpdateAccountingAccountVariables {
+  accountId: string;
+  payload: AccountingAccountUpdateRequest;
+}
+
+export function useUpdateAccountingAccount(clientId: string) {
+  const qc = useQueryClient();
+  return useMutation<AccountingAccount, Error, UpdateAccountingAccountVariables>({
+    mutationFn: ({ accountId, payload }) => updateAccountingAccount(clientId, accountId, payload),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: accountingChartKeys.all(clientId) });
       void qc.invalidateQueries({ queryKey: clientMappingKeys.all(clientId) });

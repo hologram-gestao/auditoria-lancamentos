@@ -278,6 +278,16 @@ _BODIES: dict[str, dict[str, Any]] = {
         "sourceAccountId": None,
         "accountingAccountId": "{uuid}",
     },
+    # 86e3nb816 — conta manual do plano contábil. Bodies VÁLIDOS (ADR-012): a negação
+    # vem pelo `client_id`, antes de a conta (aleatória, no PATCH) ser consultada.
+    "POST /api/v1/clients/{client_id}/accounting-chart/accounts": {
+        "code": "649",
+        "name": "Conta da bateria",
+        "type": "analitica",
+    },
+    "PATCH /api/v1/clients/{client_id}/accounting-chart/accounts/{account_id}": {
+        "name": "Sequestrada pela bateria"
+    },
     "PUT /api/v1/clients/{client_id}/input-mapping": {
         "fileFormat": "csv",
         "csvDelimiter": ";",
@@ -594,6 +604,8 @@ async def test_cross_tenant_por_endpoint(
         "target_id": str(tenants["target_c"].id),
         # S13 (BACK 13.4): a rota nega pelo `client_id` ANTES de buscar a geração.
         "generation_id": str(uuid4()),
+        # 86e3nb816: a rota nega pelo `client_id` ANTES de buscar a conta.
+        "account_id": str(uuid4()),
         # S13 (BACK 13.2): layout de exportação da TERCEIRA organização.
         "layout_id": str(tenants["layout_c"].id),
         "uuid": str(uuid4()),

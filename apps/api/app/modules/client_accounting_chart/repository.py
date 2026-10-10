@@ -25,6 +25,8 @@ from uuid import UUID
 from sqlalchemy import Table, bindparam, func, insert, select, text, update
 
 from app.db.models.client_accounting_account import ClientAccountingAccount
+from app.db.models.client_mapping import ClientMappingDecision
+from app.db.models.client_source_account_binding import ClientSourceAccountBinding
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Sequence
@@ -79,6 +81,42 @@ class AccountingChartRepository:
         """A conta pela pk, SÓ se for do cliente — a de outro cliente não é carregada."""
         stmt = self._base_query(client_id).where(ClientAccountingAccount.id == account_id)
         return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def get_for_update(
+        self, client_id: UUID, account_id: UUID
+    ) -> ClientAccountingAccount | None:
+        """A conta pela pk, SÓ se for do cliente, travada até o fim da transação.
+
+        A edição manual (86e3nb816) lê, decide e grava: a linha não muda no meio.
+        `populate_existing` porque a mesma conta pode já estar na sessão.
+        """
+        stmt = (
+            self._base_query(client_id)
+            .where(ClientAccountingAccount.id == account_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def count_usage(self, client_id: UUID, account_id: UUID) -> tuple[int, int]:
+        """Quantas decisões do de-para e quantas contas do banco apontam para a conta.
+
+        Toda decisão conta, de qualquer vigência: a vigência substituída continua
+        decidindo as competências anteriores ainda não materializadas, então ela
+        também quebraria. As duas contagens com `client_id` no próprio `WHERE`
+        (§3.15), mesmo a FK já sendo do plano deste cliente.
+        """
+        decisions = select(func.count()).where(
+            ClientMappingDecision.client_id == client_id,
+            ClientMappingDecision.accounting_account_id == account_id,
+        )
+        bindings = select(func.count()).where(
+            ClientSourceAccountBinding.client_id == client_id,
+            ClientSourceAccountBinding.accounting_account_id == account_id,
+        )
+        decision_count = int((await self._session.execute(decisions)).scalar_one())
+        binding_count = int((await self._session.execute(bindings)).scalar_one())
+        return decision_count, binding_count
 
     async def get_many(
         self, client_id: UUID, account_ids: Collection[UUID]
@@ -188,6 +226,22 @@ class AccountingChartRepository:
             )
         )
         await self._session.execute(stmt, list(updates))
+
+    async def update_account(
+        self, client_id: UUID, account_id: UUID, values: dict[str, Any]
+    ) -> None:
+        """Atualiza UMA conta (edição manual, 86e3nb816) — Core, com `client_id` no WHERE.
+
+        `values` traz só as colunas que mudam (e `updated_by`); `updated_at` sai do
+        `clock_timestamp()`, como em `update_accounts`.
+        """
+        table = _table()
+        stmt = (
+            update(table)
+            .where(table.c.client_id == client_id, table.c.id == account_id)
+            .values(**values, updated_at=func.clock_timestamp())
+        )
+        await self._session.execute(stmt)
 
     async def deactivate_absent(
         self, client_id: UUID, *, present_codes: Collection[str], author_id: UUID
