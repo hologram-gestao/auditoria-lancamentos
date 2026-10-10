@@ -8,6 +8,7 @@ from app.db.base import Base
 from app.db.models.access_audit import AccessAudit
 from app.db.models.accounting_file_generation import (
     ACCOUNTING_FILE_GENERATION_CHECKS,
+    FK_ACCOUNTING_FILE_GENERATION_LAYOUT_VERSION,
     AccountingFileGeneration,
 )
 from app.db.models.anomaly_type import AnomalySeverity, AnomalyType
@@ -263,6 +264,7 @@ __all__ = [
     "FILE_HASH_HEX_LENGTH",
     "FILE_IMPORT_COMPETENCE_CHECK",
     "FILE_IMPORT_COMPETENCE_CONSTRAINT",
+    "FK_ACCOUNTING_FILE_GENERATION_LAYOUT_VERSION",
     "HOLOGRAM_ORGANIZATION_ID",
     "HOLOGRAM_ORGANIZATION_NAME",
     "INHERITING_DESTINATION_TYPE",
