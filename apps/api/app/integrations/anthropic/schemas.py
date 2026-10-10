@@ -146,9 +146,39 @@ class DocumentIdentity(BaseModel):
     Vem de uma chamada curta só com a primeira página (`identify_document`) e
     entra como nota no user prompt de TODO bloco: página do meio não tem
     cabeçalho, e as regras de extração dependem do tipo de conta.
+
+    86e3n70qf — numa fatura de CARTÃO, o total e o vencimento moram no
+    cabeçalho (páginas 1 e 2), e a última página costuma ter só compras: o
+    bloco final não vê o total. Por isso a identidade também traz, só para
+    `credit_card`, o total a pagar (`closing_balance`) e o vencimento, que
+    `merge_statements` usa no lugar dos blocos. Fora do cartão os dois são
+    sempre `None` (ver validador): extrato tem saldo final no fim, e ali o
+    último bloco continua valendo.
     """
 
     model_config = ConfigDict(strict=False)
 
     bank_name: str = Field(min_length=1)
     account_type: AccountType
+    closing_balance: Decimal | None = Field(
+        default=None, description="Total a pagar da fatura do cartão, como impresso."
+    )
+    invoice_due_date: _date_type | None = Field(
+        default=None, description="Vencimento da fatura do cartão (YYYY-MM-DD)."
+    )
+
+    @field_validator("closing_balance", mode="before")
+    @classmethod
+    def _coerce_total(cls, v: Any) -> Decimal | None:
+        if v is None:
+            return None
+        return _to_decimal(v)
+
+    @model_validator(mode="after")
+    def _invoice_fields_only_for_card(self) -> DocumentIdentity:
+        # Nada muda para conta corrente e aplicação: um total ou vencimento que
+        # o modelo emitisse ali por engano não chega à junção.
+        if self.account_type != "credit_card":
+            self.closing_balance = None
+            self.invoice_due_date = None
+        return self

@@ -20,7 +20,8 @@ Duas funções puras, sem I/O:
   preâmbulo e o cabeçalho em todo bloco, e deixa o rodapé (linhas depois da
   última linha de dados, ex.: "Saldo final") só no último.
 - `merge_statements`: concatena as movimentações na ordem dos blocos; saldo
-  inicial do primeiro, final do último; período pela união dos blocos COM
+  inicial do primeiro, final do último (na fatura de cartão de PDF, o total
+  vem da identidade da página 1, 86e3n70qf); período pela união dos blocos COM
   movimentação (bloco vazio não alarga o período, D4). Sem `identity` (texto),
   `account_type` divergente entre blocos é erro acionável, nunca escolha
   silenciosa; com `identity` (PDF), banco e tipo vêm dela e a divergência é só
@@ -37,6 +38,7 @@ import re
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import date
 
 from app.core.exceptions import AnthropicParseError
 from app.core.logging import get_logger
@@ -134,13 +136,21 @@ def merge_statements(
           cada bloco vê o mesmo preâmbulo (onde o saldo declarado costuma estar)
           ou o saldo por linha das próprias linhas; a identidade
           `inicial + movimentações = final` é conferida depois pelo checksum.
+          Exceção (86e3n70qf): FATURA DE CARTÃO com `identity` que trouxe o
+          total usa o total da identidade. Numa fatura o total está no
+          cabeçalho (páginas 1 e 2) e a última página costuma ter só compras,
+          então o último bloco não vê o total e o checksum compararia a soma
+          das compras com o número errado. Extrato (saldo final no fim) e
+          arquivo sem `identity` (texto) seguem com o último bloco.
         - período: união (`min` dos inícios, `max` dos fins) dos blocos COM
           movimentação — um bloco vazio não alarga o período com data inventada.
         - sem `identity` (texto): `bank_name` é o primeiro identificado
           ("Desconhecido" só se todos) e `account_type` divergente é
           `AnthropicParseError` acionável.
-        - `invoice_due_date` (86e3n70p0): o primeiro que algum bloco trouxe —
-          o vencimento mora no cabeçalho; blocos que divergem só são logados.
+        - `invoice_due_date` (86e3n70p0): o da `identity` quando ela trouxe
+          (86e3n70qf, leu o cabeçalho de propósito); senão, o primeiro que algum
+          bloco trouxe — o vencimento mora no cabeçalho; blocos que divergem só
+          são logados. Ano impossível é corrigido por `correct_invoice_due_year`.
         - com `identity` (PDF dividido): `bank_name` e `account_type` vêm dela;
           bloco que divergir NÃO derruba o arquivo — a divergência é contada e
           logada (`parse_pdf_block_divergence`, só números).
@@ -196,16 +206,65 @@ def merge_statements(
         log.warning(
             "parse_invoice_due_date_divergence", blocks=len(parts), distinct=len(set(due_dates))
         )
-    return ExtractedStatement(
-        bank_name=bank_name,
-        account_type=account_type,
-        period_start=min(part.period_start for part in dated),
-        period_end=max(part.period_end for part in dated),
-        opening_balance=first.opening_balance,
-        closing_balance=last.closing_balance,
-        transactions=transactions,
-        invoice_due_date=due_dates[0] if due_dates else None,
+    # 86e3n70qf — total e vencimento da identidade só existem em cartão (o
+    # validador de `DocumentIdentity` os zera fora dele), então a precedência
+    # abaixo nunca toca conta corrente nem aplicação.
+    closing_balance = last.closing_balance
+    invoice_due_date = due_dates[0] if due_dates else None
+    if identity is not None:
+        if identity.closing_balance is not None:
+            closing_balance = identity.closing_balance
+        if identity.invoice_due_date is not None:
+            invoice_due_date = identity.invoice_due_date
+    return correct_invoice_due_year(
+        ExtractedStatement(
+            bank_name=bank_name,
+            account_type=account_type,
+            period_start=min(part.period_start for part in dated),
+            period_end=max(part.period_end for part in dated),
+            opening_balance=first.opening_balance,
+            closing_balance=closing_balance,
+            transactions=transactions,
+            invoice_due_date=invoice_due_date,
+        )
     )
+
+
+def correct_invoice_due_year(statement: ExtractedStatement) -> ExtractedStatement:
+    """Corrige o ANO do vencimento da fatura quando ele é impossível (86e3n70qf).
+
+    Fatura que imprime o vencimento sem ano ("13 de outubro") faz o modelo
+    preencher um ano por conta própria — no PDF real da Cora veio 2024 para
+    compras de 2026. A regra é determinística e só olha o que é impossível: o
+    vencimento de uma fatura nunca vem ANTES da compra mais antiga dela. Nesse
+    caso o ano foi inventado, e o vencimento passa a ser a primeira ocorrência
+    daquele dia/mês na data da compra mais recente ou depois dela. Ano
+    plausível não muda (dia e mês são o que estava impresso). Fora do cartão
+    não há vencimento (`ExtractedStatement` o zera), então nada muda ali.
+
+    Loga `parse_invoice_due_year_corrected` com o deslocamento em anos — só o
+    número, nunca a data.
+    """
+    due = statement.invoice_due_date
+    if due is None or not statement.transactions:
+        return statement
+    dates = [tx.date for tx in statement.transactions]
+    if due >= min(dates):
+        return statement
+    latest = max(dates)
+    corrected: date | None = None
+    for year in range(latest.year, latest.year + 9):  # 29/02 cabe em até 8 anos
+        try:
+            candidate = due.replace(year=year)
+        except ValueError:  # 29/02 em ano não bissexto
+            continue
+        if candidate >= latest:
+            corrected = candidate
+            break
+    if corrected is None:  # inalcançável na prática; sem palpite, mantém o original
+        return statement
+    log.warning("parse_invoice_due_year_corrected", years_shifted=corrected.year - due.year)
+    return statement.model_copy(update={"invoice_due_date": corrected})
 
 
 # ----------------------------------------------------------------------

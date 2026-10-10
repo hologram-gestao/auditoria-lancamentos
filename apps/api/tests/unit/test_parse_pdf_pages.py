@@ -3,15 +3,29 @@
 Os PDFs são gerados com o próprio `pypdf` (páginas em branco, sem dependência
 nova). A LARGURA de cada página codifica o índice global (100 + i): é assim que
 a ordem e a composição de cada bloco são verificadas depois do recorte.
+
+`TestCardInvoiceTotalFromHeader` (86e3n70qf) leva o mesmo PDF fictício pelo
+`ParseService` inteiro, no desenho da fatura de cartão que disparou o defeito:
+total impresso nas páginas 1 e 2, compras só na última, 3 blocos.
 """
 
 from __future__ import annotations
 
+from datetime import date
+from decimal import Decimal
 from io import BytesIO
 
 import pytest
 from pypdf import PdfReader, PdfWriter
+from structlog.testing import capture_logs
 
+from app.integrations.anthropic.schemas import (
+    DocumentIdentity,
+    ExtractedStatement,
+    ExtractedStatementBlock,
+    ExtractedTransaction,
+)
+from app.modules.reconciliations.parse_chunking import merge_statements
 from app.modules.reconciliations.parse_pdf_pages import (
     PDF_SKIP_ENCRYPTED,
     PDF_SKIP_TOO_FEW_PAGES,
@@ -20,6 +34,8 @@ from app.modules.reconciliations.parse_pdf_pages import (
     PdfTooManyPagesError,
     plan_pdf_blocks,
 )
+from app.modules.reconciliations.parse_service import ParseService
+from app.modules.reconciliations.processing.checksum import compute_checksum
 
 
 def pdf_with_pages(n: int, *, password: str | None = None) -> bytes:
@@ -132,3 +148,129 @@ class TestPlanPdfBlocks:
         plan = _plan(pdf_with_pages(5), pages_per_block=1)
 
         assert [page_indexes(block) for block in plan.blocks] == [[0], [1], [2], [3], [4]]
+
+
+# ----------------------------------------------------------------------
+# 86e3n70qf — total da fatura de cartão vem da identidade da página 1
+# ----------------------------------------------------------------------
+
+# Fatura fictícia: nenhum valor, data ou descrição vem de documento real.
+_INVOICE_TOTAL = Decimal("612.40")
+_INVOICE_DUE = date(2026, 10, 13)
+_TOTAL_PAGES = {0, 1}  # o total está impresso nas páginas 1 e 2
+_PURCHASE_PAGE = 4  # as compras estão só na última página
+_PURCHASES = [
+    (date(2026, 9, 3), Decimal("-120.00")),
+    (date(2026, 9, 9), Decimal("-75.90")),
+    (date(2026, 9, 14), Decimal("-300.00")),
+    (date(2026, 9, 21), Decimal("-66.50")),
+    (date(2026, 9, 28), Decimal("-50.00")),
+]
+
+
+class _FakeInvoiceReader:
+    """Fake do `AnthropicClient` que "lê" a fatura fictícia como o modelo leu a real.
+
+    A página é reconhecida pela largura (`pdf_with_pages`). O bloco que contém a
+    página 1 ou 2 vê o total; o bloco da última página vê as compras e, como na
+    fatura real, nenhum total (devolve 0). A identidade lê a primeira página.
+    """
+
+    def __init__(self, *, identity_has_total: bool = True) -> None:
+        self.blocks: list[ExtractedStatement] = []
+        self._identity_has_total = identity_has_total
+
+    async def identify_document(self, content: bytes) -> DocumentIdentity:
+        assert page_indexes(content) == [0]
+        return DocumentIdentity(
+            bank_name="Banco Ficticio",
+            account_type="credit_card",
+            closing_balance=_INVOICE_TOTAL if self._identity_has_total else None,
+            invoice_due_date=_INVOICE_DUE,
+        )
+
+    async def extract_movements(
+        self,
+        *,
+        content: bytes,
+        mime_type: str,
+        document_kind: str,
+        model: str | None = None,
+        part: tuple[int, int] | None = None,
+        identity: DocumentIdentity | None = None,
+    ) -> ExtractedStatement:
+        pages = set(page_indexes(content))
+        purchases = _PURCHASES if _PURCHASE_PAGE in pages else []
+        block = ExtractedStatementBlock(
+            bank_name="Banco Ficticio",
+            account_type="credit_card",
+            period_start=date(2026, 9, 1),
+            period_end=date(2026, 9, 30),
+            opening_balance=Decimal("0"),
+            closing_balance=_INVOICE_TOTAL if pages & _TOTAL_PAGES else Decimal("0"),
+            transactions=[
+                ExtractedTransaction(date=d, description=f"COMPRA FICTICIA {i}", amount=amount)
+                for i, (d, amount) in enumerate(purchases)
+            ],
+            invoice_due_date=_INVOICE_DUE if 0 in pages else None,
+        )
+        self.blocks.append(block)
+        return block
+
+
+async def _parse_invoice(reader: _FakeInvoiceReader) -> ExtractedStatement:
+    service = ParseService(
+        reader,  # type: ignore[arg-type]
+        chunk_concurrency=1,  # ordem determinística em `reader.blocks`
+        pdf_pages_per_block=2,
+        pdf_min_pages=4,
+        pdf_max_pages=30,
+    )
+    return await service.parse_statement(
+        file_bytes=pdf_with_pages(5), filename="fatura.pdf", max_upload_bytes=10_000_000
+    )
+
+
+@pytest.mark.unit
+class TestCardInvoiceTotalFromHeader:
+    async def test_total_da_identidade_fecha_o_checksum(self) -> None:
+        reader = _FakeInvoiceReader()
+
+        with capture_logs() as events:
+            statement = await _parse_invoice(reader)
+
+        # O desenho do defeito: 3 blocos, 0 + 0 + 5 compras, último bloco sem total.
+        assert [len(block.transactions) for block in reader.blocks] == [0, 0, 5]
+        assert reader.blocks[-1].closing_balance == Decimal("0")
+        assert sum(-amount for _, amount in _PURCHASES) == _INVOICE_TOTAL
+
+        assert statement.closing_balance == _INVOICE_TOTAL
+        assert statement.invoice_due_date == _INVOICE_DUE
+        assert len(statement.transactions) == 5
+        checksum = compute_checksum(statement)
+        assert checksum.ok is True
+        assert checksum.difference == Decimal("0")
+
+        logged = [e for e in events if e["event"] == "parse_checksum"]
+        assert len(logged) == 1
+        assert logged[0]["ok"] is True
+        assert logged[0]["blocks"] == 3
+        assert logged[0]["expected"] == "612.40"
+        assert logged[0]["difference"] == "0.00"
+
+    async def test_mesmo_desenho_sem_identidade_toma_o_ultimo_bloco(self) -> None:
+        reader = _FakeInvoiceReader()
+        await _parse_invoice(reader)
+
+        merged = merge_statements(reader.blocks)  # sem identidade, como o texto
+
+        assert merged.closing_balance == Decimal("0")
+        checksum = compute_checksum(merged)
+        assert checksum.ok is False
+        assert checksum.difference == -_INVOICE_TOTAL
+
+    async def test_identidade_sem_total_impresso_tambem_toma_o_ultimo_bloco(self) -> None:
+        statement = await _parse_invoice(_FakeInvoiceReader(identity_has_total=False))
+
+        assert statement.closing_balance == Decimal("0")
+        assert compute_checksum(statement).ok is False

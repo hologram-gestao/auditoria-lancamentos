@@ -37,7 +37,7 @@ from app.core.exceptions import (
     AnthropicTimeoutError,
 )
 from app.integrations.anthropic.client import AnthropicClient
-from app.integrations.anthropic.prompts import SYSTEM_PROMPT
+from app.integrations.anthropic.prompts import IDENTIFY_USER_PROMPT, SYSTEM_PROMPT
 from app.integrations.anthropic.schemas import (
     DocumentIdentity,
     ExtractedStatement,
@@ -719,6 +719,66 @@ class TestIdentifyDocument:
         assert len(ok) == 1
         assert set(ok[0]) >= {"model", "duration_ms", "bytes_in"}
         assert "Banco do Brasil" not in str(ok[0])
+
+    async def test_fatura_de_cartao_traz_total_e_vencimento(self) -> None:
+        # 86e3n70qf — o total da fatura mora no cabeçalho; a junção o toma daqui.
+        fake = _FakeAnthropic(
+            side_effect=_identity_message(
+                {
+                    "bank_name": "Banco Ficticio",
+                    "account_type": "credit_card",
+                    "closing_balance": 1234.56,
+                    "invoice_due_date": "2026-10-13",
+                }
+            )
+        )
+
+        identity = await _make_client(fake).identify_document(b"%PDF-")
+
+        assert identity.closing_balance == Decimal("1234.56")
+        assert isinstance(identity.closing_balance, Decimal)
+        assert identity.invoice_due_date == date(2026, 10, 13)
+
+    async def test_fora_do_cartao_total_e_vencimento_sao_descartados(self) -> None:
+        # Nada muda para conta corrente: o que o modelo emitir por engano não chega.
+        fake = _FakeAnthropic(
+            side_effect=_identity_message(
+                {
+                    "bank_name": "Banco do Brasil",
+                    "account_type": "checking",
+                    "closing_balance": 999.0,
+                    "invoice_due_date": "2026-10-13",
+                }
+            )
+        )
+
+        identity = await _make_client(fake).identify_document(b"%PDF-")
+
+        assert identity.closing_balance is None
+        assert identity.invoice_due_date is None
+
+    async def test_cartao_sem_total_impresso_fica_none(self) -> None:
+        fake = _FakeAnthropic(
+            side_effect=_identity_message({"bank_name": "X", "account_type": "credit_card"})
+        )
+
+        identity = await _make_client(fake).identify_document(b"%PDF-")
+
+        assert identity.closing_balance is None
+        assert identity.invoice_due_date is None
+
+    def test_tool_declara_total_e_vencimento_opcionais_e_o_prompt_os_pede(self) -> None:
+        schema = IDENTIFY_DOCUMENT_TOOL["input_schema"]
+        assert schema["properties"]["closing_balance"]["type"] == "number"
+        assert schema["properties"]["invoice_due_date"]["format"] == "date"
+        assert schema["required"] == ["bank_name", "account_type"]
+        for field in ("closing_balance", "invoice_due_date"):
+            description = schema["properties"][field]["description"]
+            assert "SÓ fatura de cartão" in description
+            assert "Nunca inventar" in description
+        assert "closing_balance" in IDENTIFY_USER_PROMPT
+        assert "invoice_due_date" in IDENTIFY_USER_PROMPT
+        assert "nunca inventados" in IDENTIFY_USER_PROMPT
 
 
 @pytest.mark.unit
