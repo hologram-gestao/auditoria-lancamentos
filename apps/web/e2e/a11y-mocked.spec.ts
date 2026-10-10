@@ -896,6 +896,8 @@ function exportLayoutsIniciais(): Record<string, unknown>[] {
   ];
 }
 let exportLayouts: Record<string, unknown>[] = exportLayoutsIniciais();
+/** 86e3nuuub: o DELETE do layout responde 409 `LAYOUT_EM_USO` (layout já gerou arquivo). */
+let exportLayoutInUse = false;
 
 /**
  * Sprint 13 (FRONT 13.6): o arquivo contábil no de-para. `accountingFiles` é o
@@ -3177,6 +3179,26 @@ async function fulfillApi(route: Route): Promise<void> {
         : exportLayouts.filter((l) => l.organizationId === ORGANIZATION_ID);
     return json(org === null ? visiveis : visiveis.filter((l) => l.organizationId === org));
   }
+  if (path.startsWith('/api/v1/export-layouts/') && route.request().method() === 'DELETE') {
+    // 86e3nuuub: só sai o layout que nunca gerou arquivo.
+    if (exportLayoutInUse) {
+      return route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: {
+            code: 'LAYOUT_EM_USO',
+            message: 'layout in use',
+            userMessage:
+              'Este layout já gerou 2 arquivos contábeis e por isso não pode ser excluído: o download de cada arquivo é refeito a partir dele.',
+          },
+        }),
+      });
+    }
+    const id = path.split('/').pop();
+    exportLayouts = exportLayouts.filter((l) => l.id !== id);
+    return route.fulfill({ status: 204 });
+  }
   if (path.startsWith('/api/v1/export-layouts/')) {
     const id = path.split('/').pop();
     const alvo = exportLayouts.find((l) => l.id === id) ?? exportLayout();
@@ -3555,6 +3577,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   mappingBankPending = false;
   // S13: a organização tem dois layouts, por padrão.
   exportLayouts = exportLayoutsIniciais();
+  exportLayoutInUse = false;
   // S13 (13.6): uma geração no histórico; gerar e baixar dão certo, por padrão.
   accountingFiles = [accountingFileGeneration()];
   accountingFileOutcome = 'sucesso';
@@ -9309,6 +9332,65 @@ for (const vp of VIEWPORTS) {
       await dialogo.getByRole('combobox', { name: 'Organização do layout' }).click();
       await expect(page.getByRole('option', { name: /Prospecta/ })).toHaveCount(0);
       await page.getByRole('option', { name: ORGANIZATION_NAME }).click();
+    });
+
+    test('admin: excluir layout sem arquivo gerado (86e3nuuub)', async ({ page }) => {
+      await page.goto('/configuracoes/layouts-exportacao');
+
+      const excluir = page.getByRole('button', {
+        name: 'Excluir Domínio: lançamentos contábeis (CSV)',
+      });
+      // Em 390px a coluna de ações fica depois da rolagem horizontal da tabela
+      // (como o "Ver versões"): o botão tem de ser ALCANÇÁVEL, não visível de cara.
+      await excluir.scrollIntoViewIfNeeded();
+      await exigirDentroDaViewport(page, excluir, `${vp.label}: "Excluir" na linha`);
+      // O axe só mede o `:hover` com o ponteiro EM CIMA (skill front-gate §4).
+      await excluir.hover();
+      await analyze(page, `layouts de exportação — ação excluir em hover (${vp.label})`);
+      await excluir.click();
+
+      const dialogo = page.getByRole('alertdialog');
+      await aguardarAnimacao(dialogo);
+      await expect(dialogo).toContainText('Domínio: lançamentos contábeis (CSV)');
+      await expect(dialogo).toContainText('nunca gerou arquivo contábil');
+      const confirmar = dialogo.getByRole('button', { name: 'Excluir', exact: true });
+      await exigirDentroDaViewport(page, confirmar, `${vp.label}: "Excluir" do diálogo`);
+      await confirmar.hover();
+      await shot(page, `layouts-exportacao-excluir-${slugEL}`);
+      await analyze(page, `layouts de exportação — confirmar exclusão (${vp.label})`);
+
+      await confirmar.click();
+      await expect(dialogo).toBeHidden();
+      await expect(
+        page.getByRole('button', { name: 'Excluir Domínio: lançamentos contábeis (CSV)' }),
+      ).toHaveCount(0);
+    });
+
+    test('admin: layout que já gerou arquivo é recusado no diálogo (86e3nuuub)', async ({
+      page,
+    }) => {
+      exportLayoutInUse = true;
+      await page.goto('/configuracoes/layouts-exportacao');
+
+      await page
+        .getByRole('button', { name: 'Excluir Domínio: lançamentos contábeis (CSV)' })
+        .click();
+      const dialogo = page.getByRole('alertdialog');
+      await aguardarAnimacao(dialogo);
+      await dialogo.getByRole('button', { name: 'Excluir', exact: true }).click();
+
+      const recusa = dialogo.getByRole('alert');
+      await expect(recusa).toContainText('já gerou 2 arquivos contábeis');
+      await expect(page.locator('[data-sonner-toast]')).toHaveCount(0);
+      await expect(dialogo.getByRole('button', { name: 'Excluir', exact: true })).toHaveCount(0);
+      const fechar = dialogo.getByRole('button', { name: 'Fechar' });
+      await exigirDentroDaViewport(page, fechar, `${vp.label}: "Fechar" da recusa`);
+      await shot(page, `layouts-exportacao-excluir-409-${slugEL}`);
+      await analyze(page, `layouts de exportação — exclusão recusada (${vp.label})`);
+
+      await fechar.click();
+      await expect(dialogo).toBeHidden();
+      await expect(page.getByRole('cell', { name: 'v2', exact: true })).toBeVisible();
     });
 
     test('gerente da organização: sem item de menu e deep link negado', async ({ page }) => {

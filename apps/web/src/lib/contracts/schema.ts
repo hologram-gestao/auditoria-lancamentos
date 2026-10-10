@@ -1258,7 +1258,8 @@ export interface paths {
         get: operations["get_export_layout_api_v1_export_layouts__layout_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** Exclui um layout que NUNCA gerou arquivo contábil, com todas as versões. Se qualquer versão gerou arquivo: 409 `LAYOUT_EM_USO` com a contagem (o download regenera o arquivo a partir da versão, então o layout usado fica). 404 fora da própria organização; 409 se a organização estiver suspensa. Requer `manage_export_layouts`. */
+        delete: operations["delete_export_layout_api_v1_export_layouts__layout_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -10627,6 +10628,37 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ExportLayoutEnvelope"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_export_layout_api_v1_export_layouts__layout_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                layout_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

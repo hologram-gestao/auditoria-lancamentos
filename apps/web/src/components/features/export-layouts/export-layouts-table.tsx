@@ -5,14 +5,16 @@
  *
  * Nome, sistema alvo, versão atual e data da última versão; para a plataforma,
  * a coluna Organização (o nome vem das opções de organização — o contrato da
- * lista traz só o `organizationId`). "Ver versões" abre a gaveta só leitura.
+ * lista traz só o `organizationId`). "Ver versões" abre a gaveta só leitura;
+ * "Excluir" (86e3nuuub) só aparece para quem tem `manage_export_layouts` — a
+ * regra de que só sai layout sem arquivo gerado é do servidor.
  *
  * `<TableCard>` + `<Table fill>` (a tela é uma lista só, a tabela enche a área)
  * e o estado vazio em `<TableEmpty>` DEPOIS do `<Table>` — nunca numa célula
  * `colSpan`, que em 390px fica com a metade direita fora da tela.
  */
 
-import { Plus } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -38,6 +40,9 @@ interface ExportLayoutsTableProps {
   showOrganization: boolean;
   organizationName: (organizationId: string) => string;
   onOpenVersions: (layout: ExportLayoutItem) => void;
+  /** `manage_export_layouts`: sem ela a ação de excluir não é renderizada. */
+  canDelete: boolean;
+  onDelete: (layout: ExportLayoutItem) => void;
   /** Ação do estado vazio (a mesma do topo da tela). */
   onCreate: () => void;
   /** Com filtro de organização ativo, o vazio fala do recorte. */
@@ -54,6 +59,8 @@ export function ExportLayoutsTable({
   showOrganization,
   organizationName,
   onOpenVersions,
+  canDelete,
+  onDelete,
   onCreate,
   filtered,
 }: ExportLayoutsTableProps) {
@@ -115,14 +122,28 @@ export function ExportLayoutsTable({
                     {formatCreatedAt(layout.updatedAt)}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => onOpenVersions(layout)}
-                      aria-label={`Ver versões de ${layout.name}`}
-                    >
-                      Ver versões
-                    </Button>
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onOpenVersions(layout)}
+                        aria-label={`Ver versões de ${layout.name}`}
+                      >
+                        Ver versões
+                      </Button>
+                      {canDelete && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onDelete(layout)}
+                          className="text-destructive hover:text-destructive hover:bg-destructive-muted"
+                          aria-label={`Excluir ${layout.name}`}
+                        >
+                          <Trash2 className="h-4 w-4" aria-hidden="true" />
+                          Excluir
+                        </Button>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

@@ -119,6 +119,9 @@ class ErrorCode(StrEnum):
     # NOMEANDO o campo em `details.field`; a FORMA do JSON segue o 400 genérico.
     LAYOUT_INVALIDO = "LAYOUT_INVALIDO"
     LAYOUT_NOME_DUPLICADO = "LAYOUT_NOME_DUPLICADO"
+    #: 86e3nuuub: excluir layout que já gerou arquivo contábil. A geração aponta para a
+    #: VERSÃO com RESTRICT e o download regenera por ela: o layout usado fica.
+    LAYOUT_EM_USO = "LAYOUT_EM_USO"
     # Sprint 13 (BACK 13.3) — recusas da GERAÇÃO do arquivo contábil. Todas 409 (estado
     # da materialização/configuração, não forma do pedido), levantadas ANTES de montar
     # qualquer byte, e `details` só com CÓDIGOS (categoria de origem, parcelas em
@@ -1096,6 +1099,19 @@ class ExportLayoutNameAlreadyExistsError(ConflictError):
 
     code = ErrorCode.LAYOUT_NOME_DUPLICADO
     default_user_message = "Já existe um layout com este nome nesta organização."
+
+
+class ExportLayoutInUseError(ConflictError):
+    """409 — excluir layout que já gerou arquivo contábil (86e3nuuub).
+
+    Cada geração aponta para a VERSÃO do layout que a produziu (RESTRICT) e o download
+    regenera o arquivo a partir dela: apagar um layout usado quebraria o download e a
+    explicação do que foi entregue. Só o layout que nunca gerou arquivo sai. A mensagem
+    nomeia só a CONTAGEM de arquivos, nunca cliente, arquivo ou organização.
+    """
+
+    code = ErrorCode.LAYOUT_EM_USO
+    default_user_message = "Este layout já gerou arquivo contábil e por isso não pode ser excluído."
 
 
 class AccountingFileWrongDestinationError(ConflictError):

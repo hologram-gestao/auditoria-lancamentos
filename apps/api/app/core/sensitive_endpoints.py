@@ -1070,6 +1070,13 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         "app/modules/export_layouts/routes.py",
         _VIA_EXPORT_LAYOUT_ORG + "; SELECT ... FOR UPDATE já restrito ao alcance",
     ),
+    SensitiveEndpoint(
+        "DELETE",
+        "/api/v1/export-layouts/{layout_id}",
+        ScopeKind.DETAIL_PK,
+        "app/modules/export_layouts/routes.py",
+        _VIA_EXPORT_LAYOUT_ORG + "; SELECT ... FOR UPDATE já restrito ao alcance (86e3nuuub)",
+    ),
     # ------------- conta contábil do BANCO de cada conta de origem (S16, BACK 16.3 — R3)
     SensitiveEndpoint(
         "GET",

@@ -6,7 +6,8 @@
  * O layout define o formato do arquivo que o sistema contábil importa (colunas,
  * separador, codificação...). É configuração da ORGANIZAÇÃO, versionada: a tela
  * lista os layouts, mostra as versões só leitura e cria o layout a partir do
- * modelo Domínio numa ação só. Sem editor visual (fora de escopo).
+ * modelo Domínio numa ação só, e exclui o layout que nunca gerou arquivo
+ * (86e3nuuub). Sem editor visual (fora de escopo).
  *
  * Gating presentacional via `lib/authz` (`manage_export_layouts` — a permissão
  * DESTA tela, a mesma do item de menu); a barreira real é o 403 do backend. A
@@ -18,6 +19,7 @@
 import { Plus } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
+import { ExportLayoutDeleteConfirm } from '@/components/features/export-layouts/export-layout-delete-confirm';
 import { ExportLayoutFromTemplateDialog } from '@/components/features/export-layouts/export-layout-from-template-dialog';
 import { ExportLayoutVersionsSheet } from '@/components/features/export-layouts/export-layout-versions-sheet';
 import { ExportLayoutsTable } from '@/components/features/export-layouts/export-layouts-table';
@@ -32,6 +34,7 @@ import { useExportLayouts } from '@/hooks/use-export-layouts';
 import { useUrlState } from '@/hooks/use-url-state';
 import { ApiError } from '@/lib/api/client';
 import { hasPermission, homePathFor, isPlatformScoped } from '@/lib/authz';
+import type { ExportLayoutItem } from '@/lib/contracts';
 import { useAuthStore } from '@/stores/auth';
 
 /** Parâmetro da URL com o recorte de organização (só a plataforma). */
@@ -56,6 +59,8 @@ export default function ExportLayoutsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [versionsLayoutId, setVersionsLayoutId] = useState<string | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteLayout, setDeleteLayout] = useState<ExportLayoutItem | null>(null);
 
   if (currentUser === null) return null;
 
@@ -120,6 +125,11 @@ export default function ExportLayoutsPage() {
             setVersionsLayoutId(layout.id);
             setVersionsOpen(true);
           }}
+          canDelete={hasPermission(currentUser, 'manage_export_layouts')}
+          onDelete={(layout) => {
+            setDeleteLayout(layout);
+            setDeleteOpen(true);
+          }}
           onCreate={() => setCreateOpen(true)}
           filtered={organizationFilter !== null}
         />
@@ -137,6 +147,11 @@ export default function ExportLayoutsPage() {
         open={createOpen}
         onOpenChange={setCreateOpen}
         requireOrganization={isPlatform}
+      />
+      <ExportLayoutDeleteConfirm
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        layout={deleteLayout}
       />
       <ExportLayoutVersionsSheet
         open={versionsOpen}

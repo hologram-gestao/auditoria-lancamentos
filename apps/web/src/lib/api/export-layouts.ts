@@ -15,7 +15,8 @@
  *     linha; outra é 403).
  *   - Erros que orientam: 409 `LAYOUT_NOME_DUPLICADO` (nome repetido na
  *     organização), 409 de organização suspensa, 404 de modelo inexistente,
- *     422 `LAYOUT_INVALIDO` com `details.field`. A tela mostra o `userMessage`.
+ *     422 `LAYOUT_INVALIDO` com `details.field`, 409 `LAYOUT_EM_USO` ao excluir
+ *     layout que já gerou arquivo (86e3nuuub). A tela mostra o `userMessage`.
  */
 import type {
   ExportLayoutDetail,
@@ -25,7 +26,7 @@ import type {
   ListExportLayoutsQuery,
 } from '@/lib/contracts';
 
-import { apiGet, apiPost } from './client';
+import { apiDelete, apiGet, apiPost } from './client';
 
 export type {
   ExportLayoutDetail,
@@ -58,4 +59,9 @@ export async function createExportLayoutFromTemplate(
   payload: ExportLayoutFromTemplate,
 ): Promise<ExportLayoutDetail> {
   return apiPost<ExportLayoutDetail>(`${BASE}/from-template`, payload);
+}
+
+/** Exclui um layout que nunca gerou arquivo (204). Com geração: 409 `LAYOUT_EM_USO`. */
+export async function deleteExportLayout(layoutId: string): Promise<void> {
+  await apiDelete<void>(`${BASE}/${encodeURIComponent(layoutId)}`);
 }
