@@ -15,7 +15,11 @@
  *     plataforma é OBRIGADA a escolher a organização, e ela vai no payload;
  *   - erro tipado aparece pelo `userMessage` dentro do diálogo (nunca toast
  *     genérico) e o nome repetido marca o campo;
- *   - as versões abrem na gaveta, só leitura, com os parâmetros legíveis.
+ *   - as versões abrem na gaveta, só leitura, com os parâmetros legíveis;
+ *   - excluir (86e3nuuub): a ação só existe com `manage_export_layouts`; o
+ *     diálogo nomeia o layout e diz a regra; confirmar manda o id ao DELETE e
+ *     fecha com toast; o 409 `LAYOUT_EM_USO` mostra o `userMessage` do servidor
+ *     DENTRO do diálogo, sem toast, e tira a ação de excluir.
  */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -55,6 +59,7 @@ const templatesState = {
 const createMock = vi.fn();
 // O POST do "criar a partir do modelo" em andamento (86e3fyjbm, item 3).
 const createState = { isPending: false };
+const deleteMock = vi.fn();
 
 vi.mock('@/hooks/use-export-layouts', () => ({
   useExportLayouts: (organizationId: string | null, options?: { enabled?: boolean }) => {
@@ -69,6 +74,7 @@ vi.mock('@/hooks/use-export-layouts', () => ({
     isPending: createState.isPending,
     reset: vi.fn(),
   }),
+  useDeleteExportLayout: () => ({ mutateAsync: deleteMock, isPending: false }),
 }));
 
 const organizationsState = {
@@ -94,6 +100,7 @@ vi.mock('sonner', () => ({ toast: { success: toastSuccess, error: toastError } }
 
 // Imports do SUT DEPOIS dos `vi.mock`.
 import ExportLayoutsPage from '@/app/(app)/configuracoes/layouts-exportacao/export-layouts-page';
+import { ExportLayoutsTable } from '@/components/features/export-layouts/export-layouts-table';
 import { ApiError } from '@/lib/api/client';
 import type { OrganizationItem } from '@/lib/api/organizations';
 import type {
@@ -209,6 +216,7 @@ beforeEach(() => {
   replaceMock.mockReset();
   createMock.mockReset().mockResolvedValue({ ...layout(), versions: [] });
   createState.isPending = false;
+  deleteMock.mockReset().mockResolvedValue(undefined);
   toastSuccess.mockReset();
   toastError.mockReset();
   lastListOrganization = undefined;
@@ -525,5 +533,83 @@ describe('Layouts de exportação — versões (só leitura)', () => {
       within(sheet).getByText('Não foi possível ler os parâmetros desta versão.'),
     ).toBeInTheDocument();
     expect(sheet).not.toHaveTextContent('undefined');
+  });
+});
+
+describe('Layouts de exportação — excluir', () => {
+  function tableProps(canDelete: boolean) {
+    return {
+      rows: [layout()],
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      errorMessage: '',
+      onRetry: vi.fn(),
+      showOrganization: false,
+      organizationName: () => '—',
+      onOpenVersions: vi.fn(),
+      canDelete,
+      onDelete: vi.fn(),
+      onCreate: vi.fn(),
+      filtered: false,
+    };
+  }
+
+  it('sem manage_export_layouts a ação de excluir não é renderizada', () => {
+    render(<ExportLayoutsTable {...tableProps(false)} />);
+    expect(screen.getByRole('button', { name: /Ver versões/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Excluir/ })).not.toBeInTheDocument();
+  });
+
+  it('com a permissão a ação aparece na linha, nomeando o layout', async () => {
+    const props = tableProps(true);
+    const ui = userEvent.setup();
+    render(<ExportLayoutsTable {...props} />);
+    await ui.click(
+      screen.getByRole('button', { name: 'Excluir Domínio: lançamentos contábeis (CSV)' }),
+    );
+    expect(props.onDelete).toHaveBeenCalledWith(layout());
+  });
+
+  it('confirmar manda o id ao DELETE, avisa e fecha o diálogo', async () => {
+    authState.user = ORG_ADMIN;
+    const ui = userEvent.setup();
+    render(<ExportLayoutsPage />);
+
+    await ui.click(screen.getByRole('button', { name: /^Excluir / }));
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog).toHaveTextContent('Domínio: lançamentos contábeis (CSV)');
+    expect(dialog).toHaveTextContent('só vale para layout que nunca gerou arquivo contábil');
+    await ui.click(within(dialog).getByRole('button', { name: 'Excluir' }));
+
+    expect(deleteMock).toHaveBeenCalledWith('lay-1');
+    expect(toastSuccess).toHaveBeenCalledWith('Layout excluído.');
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+  });
+
+  it('409 LAYOUT_EM_USO: a mensagem do servidor fica no diálogo, sem toast nem nova tentativa', async () => {
+    authState.user = ORG_ADMIN;
+    deleteMock.mockRejectedValue(
+      new ApiError(409, {
+        code: 'LAYOUT_EM_USO',
+        message: 'em uso',
+        userMessage: 'Este layout já gerou 2 arquivos contábeis e por isso não pode ser excluído.',
+      }),
+    );
+    const ui = userEvent.setup();
+    render(<ExportLayoutsPage />);
+
+    await ui.click(screen.getByRole('button', { name: /^Excluir / }));
+    const dialog = await screen.findByRole('alertdialog');
+    await ui.click(within(dialog).getByRole('button', { name: 'Excluir' }));
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      'Este layout já gerou 2 arquivos contábeis e por isso não pode ser excluído.',
+    );
+    expect(toastError).not.toHaveBeenCalled();
+    expect(toastSuccess).not.toHaveBeenCalled();
+    expect(within(dialog).queryByRole('button', { name: 'Excluir' })).not.toBeInTheDocument();
+    await ui.click(within(dialog).getByRole('button', { name: 'Fechar' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   });
 });

@@ -4,12 +4,15 @@
  * A chave da lista carrega o recorte de organização: a plataforma troca o
  * filtro e cada recorte tem o seu cache (o filtro é SERVER-SIDE). Criar
  * invalida a raiz, para a lista de qualquer recorte — e o seletor de layout da
- * geração do arquivo, que consome a mesma lista — verem o layout novo.
+ * geração do arquivo, que consome a mesma lista — verem o layout novo. Excluir
+ * faz o mesmo, depois de tirar do cache o detalhe do layout que deixou de existir
+ * (refazê-lo daria 404).
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
   createExportLayoutFromTemplate,
+  deleteExportLayout,
   getExportLayout,
   listExportLayouts,
   listExportLayoutTemplates,
@@ -61,6 +64,17 @@ export function useCreateExportLayoutFromTemplate() {
   return useMutation<ExportLayoutDetail, Error, ExportLayoutFromTemplate>({
     mutationFn: createExportLayoutFromTemplate,
     onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: exportLayoutsKeys.all });
+    },
+  });
+}
+
+export function useDeleteExportLayout() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: deleteExportLayout,
+    onSuccess: (_data, layoutId) => {
+      qc.removeQueries({ queryKey: exportLayoutsKeys.detail(layoutId) });
       void qc.invalidateQueries({ queryKey: exportLayoutsKeys.all });
     },
   });
