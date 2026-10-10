@@ -484,3 +484,59 @@ class TestParseCompletedEvent:
             assert isinstance(value, (int, bool, str)), key
             if isinstance(value, str):
                 assert key == "file_type", key
+
+
+@pytest.mark.unit
+class TestParseChecksumEvent:
+    """86e3n70qf — o checksum vai para o log, só com números e o tipo de conta."""
+
+    async def test_um_evento_por_parse_com_as_chaves_fechadas(self) -> None:
+        fake = _FakeExtractor()
+
+        with capture_logs() as events:
+            statement = await _parse_pdf(fake, pdf_with_pages(7))
+
+        logged = [e for e in events if e["event"] == "parse_checksum"]
+        assert len(logged) == 1
+        event = logged[0]
+        assert set(event) == {
+            "event",
+            "log_level",
+            "applicable",
+            "ok",
+            "expected",
+            "computed",
+            "difference",
+            "blocks",
+            "account_type",
+        }
+        assert event["blocks"] == 4
+        assert event["account_type"] == "checking"
+        assert isinstance(event["applicable"], bool)
+        assert isinstance(event["ok"], bool)
+        # Valores como texto com 2 casas (nunca float): conferíveis contra a resposta.
+        assert event["expected"] == f"{statement.closing_balance:.2f}"
+        for key in ("expected", "computed", "difference"):
+            assert re.fullmatch(r"-?\d+\.\d{2}", event[key]), key
+
+    async def test_arquivo_inteiro_tambem_loga(self) -> None:
+        fake = _FakeExtractor()
+
+        with capture_logs() as events:
+            await _parse_pdf(fake, pdf_with_pages(3))
+
+        logged = [e for e in events if e["event"] == "parse_checksum"]
+        assert len(logged) == 1
+        assert logged[0]["blocks"] == 1
+
+    async def test_nenhuma_descricao_no_evento(self) -> None:
+        fake = _FakeExtractor()
+
+        with capture_logs() as events:
+            await _service(fake).parse_statement(
+                file_bytes=_inter_csv(350), filename="extrato.csv", max_upload_bytes=_MAX_UPLOAD
+            )
+
+        logged = [e for e in events if e["event"] == "parse_checksum"]
+        assert len(logged) == 1
+        assert "PIX ENVIADO" not in json.dumps(logged, ensure_ascii=False, default=str)

@@ -50,8 +50,13 @@ from app.integrations.anthropic.schemas import (
     ExtractedStatement,
     ExtractedTransaction,
 )
-from app.modules.reconciliations.parse_chunking import merge_statements, plan_blocks
+from app.modules.reconciliations.parse_chunking import (
+    correct_invoice_due_year,
+    merge_statements,
+    plan_blocks,
+)
 from app.modules.reconciliations.parse_pdf_pages import plan_pdf_blocks
+from app.modules.reconciliations.processing.checksum import compute_checksum
 from app.utils.magic_bytes import FileType, validate_upload_type
 
 log = get_logger(__name__)
@@ -262,10 +267,14 @@ class ParseService:
                 return statement
             size_fields = {"data_records": text_plan.data_records}
 
-        statement = await self._anthropic.extract_movements(
-            content=content,
-            mime_type=mime_type,
-            document_kind=document_kind,
+        # Arquivo inteiro: a junção não roda, mas o ano inventado do vencimento
+        # (86e3n70qf) aparece igual — a mesma correção da junção vale aqui.
+        statement = correct_invoice_due_year(
+            await self._anthropic.extract_movements(
+                content=content,
+                mime_type=mime_type,
+                document_kind=document_kind,
+            )
         )
         self._log_completed(
             file_type=file_type,
@@ -287,7 +296,14 @@ class ParseService:
         started: float,
         **size_fields: int,
     ) -> None:
-        """Evento `parse_completed`, um por `/parse` (D7): só contadores."""
+        """Eventos `parse_completed` (D7) e `parse_checksum`, um de cada por `/parse`.
+
+        `parse_completed` leva só contadores. `parse_checksum` (86e3n70qf) leva o
+        resultado da identidade de saldos que a rota devolve ao front, para que
+        um "os saldos não fecham" seja lido no log de dev sem depender de print:
+        só números e o tipo de conta, nunca descrição (§3.3, §4.5). Valor em
+        claro não é PII (§4.3) e sai como texto com 2 casas, nunca `float`.
+        """
         log.info(
             "parse_completed",
             file_type=file_type,
@@ -297,6 +313,17 @@ class ParseService:
             transaction_count=len(statement.transactions),
             duration_ms=round((time.monotonic() - started) * 1000),
             **size_fields,
+        )
+        checksum = compute_checksum(statement)
+        log.info(
+            "parse_checksum",
+            applicable=checksum.applicable,
+            ok=checksum.ok,
+            expected=f"{checksum.expected:.2f}",
+            computed=f"{checksum.computed:.2f}",
+            difference=f"{checksum.difference:.2f}",
+            blocks=blocks,
+            account_type=checksum.account_type,
         )
 
     async def _extract_in_blocks(

@@ -20,7 +20,12 @@ from app.integrations.anthropic.schemas import (
     ExtractedStatementBlock,
     ExtractedTransaction,
 )
-from app.modules.reconciliations.parse_chunking import merge_statements, plan_blocks
+from app.modules.reconciliations.parse_chunking import (
+    correct_invoice_due_year,
+    merge_statements,
+    plan_blocks,
+)
+from app.modules.reconciliations.processing.checksum import compute_checksum
 
 PREAMBLE = "Extrato Conta Corrente\nConta: 1234-5\nPeríodo: 01/08/2026 a 31/08/2026\n\n"
 HEADER = "Data Lançamento;Histórico;Descrição;Valor;Saldo\n"
@@ -344,3 +349,191 @@ class TestMergeStatementsPdf:
             merge_statements([empty, empty], identity=_IDENTITY)
 
         assert "Nenhuma movimentação" in exc_info.value.user_message
+
+
+def _card_block(
+    *,
+    purchases: list[tuple[date, str]],
+    total: str,
+    due: date | None = None,
+) -> ExtractedStatement:
+    """Bloco de uma fatura de cartão: compras são débitos (negativos)."""
+    dates = [d for d, _ in purchases] or [date(2026, 9, 1)]
+    return ExtractedStatementBlock(
+        bank_name="Banco Ficticio",
+        account_type="credit_card",
+        period_start=min(dates),
+        period_end=max(dates),
+        opening_balance=Decimal("0"),
+        closing_balance=Decimal(total),
+        transactions=[
+            ExtractedTransaction(date=d, description=f"COMPRA {i}", amount=Decimal(amount))
+            for i, (d, amount) in enumerate(purchases)
+        ],
+        invoice_due_date=due,
+    )
+
+
+_PURCHASES = [
+    (date(2026, 9, 5), "-100.00"),
+    (date(2026, 9, 12), "-250.50"),
+    (date(2026, 9, 30), "-49.50"),
+]
+
+
+@pytest.mark.unit
+class TestMergeStatementsCardTotal:
+    """86e3n70qf — total da fatura vem da identidade, saldo de extrato do último bloco."""
+
+    def _blocks(self) -> list[ExtractedStatement]:
+        # Total impresso nas páginas 1 e 2; a última só tem compras e não vê o total.
+        return [
+            _card_block(purchases=[], total="400.00", due=date(2026, 10, 13)),
+            _card_block(purchases=[], total="400.00"),
+            _card_block(purchases=_PURCHASES, total="0"),
+        ]
+
+    def test_identidade_de_cartao_com_total_vence_o_ultimo_bloco(self) -> None:
+        identity = DocumentIdentity(
+            bank_name="Banco Ficticio",
+            account_type="credit_card",
+            closing_balance=Decimal("400.00"),
+            invoice_due_date=date(2026, 10, 13),
+        )
+
+        merged = merge_statements(self._blocks(), identity=identity)
+
+        assert merged.closing_balance == Decimal("400.00")
+        checksum = compute_checksum(merged)
+        assert checksum.ok is True
+        assert checksum.difference == Decimal("0")
+
+    def test_sem_identidade_continua_tomando_o_ultimo_bloco(self) -> None:
+        merged = merge_statements(self._blocks())
+
+        assert merged.closing_balance == Decimal("0")
+        assert compute_checksum(merged).ok is False
+
+    def test_identidade_de_cartao_sem_total_cai_no_ultimo_bloco(self) -> None:
+        identity = DocumentIdentity(bank_name="Banco Ficticio", account_type="credit_card")
+
+        merged = merge_statements(self._blocks(), identity=identity)
+
+        assert merged.closing_balance == Decimal("0")
+
+    def test_vencimento_da_identidade_tem_precedencia_sobre_o_dos_blocos(self) -> None:
+        identity = DocumentIdentity(
+            bank_name="Banco Ficticio",
+            account_type="credit_card",
+            closing_balance=Decimal("400.00"),
+            invoice_due_date=date(2026, 10, 20),
+        )
+
+        merged = merge_statements(self._blocks(), identity=identity)
+
+        assert merged.invoice_due_date == date(2026, 10, 20)
+
+    def test_sem_vencimento_na_identidade_vale_o_do_primeiro_bloco(self) -> None:
+        identity = DocumentIdentity(
+            bank_name="Banco Ficticio",
+            account_type="credit_card",
+            closing_balance=Decimal("400.00"),
+        )
+
+        merged = merge_statements(self._blocks(), identity=identity)
+
+        assert merged.invoice_due_date == date(2026, 10, 13)
+
+    @pytest.mark.parametrize("account_type", ["checking", "investment"])
+    def test_conta_corrente_e_aplicacao_nao_mudam(self, account_type: str) -> None:
+        # Mesmo que o modelo emita total e vencimento na identidade, fora do
+        # cartão o validador os zera e o saldo final segue do último bloco.
+        identity = DocumentIdentity(
+            bank_name="Banco do Brasil",
+            account_type=account_type,  # type: ignore[arg-type]
+            closing_balance=Decimal("999.99"),
+            invoice_due_date=date(2026, 10, 13),
+        )
+        a = _statement(
+            txs=[("A", "-1")],
+            opening="100",
+            closing="99",
+            start=date(2026, 8, 1),
+            end=date(2026, 8, 15),
+            account_type=account_type,
+        )
+        b = _statement(
+            txs=[("B", "-2")],
+            opening="99",
+            closing="97",
+            start=date(2026, 8, 16),
+            end=date(2026, 8, 31),
+            account_type=account_type,
+        )
+
+        merged = merge_statements([a, b], identity=identity)
+
+        assert identity.closing_balance is None
+        assert identity.invoice_due_date is None
+        assert merged.opening_balance == Decimal("100")
+        assert merged.closing_balance == Decimal("97")
+        assert merged.invoice_due_date is None
+
+
+@pytest.mark.unit
+class TestCorrectInvoiceDueYear:
+    """86e3n70qf — vencimento sem ano impresso: o modelo inventa o ano."""
+
+    def _statement(self, due: date | None, purchases: list[date]) -> ExtractedStatement:
+        return _card_block(purchases=[(d, "-10") for d in purchases], total="0", due=due)
+
+    def test_ano_antes_da_compra_mais_antiga_e_corrigido(self) -> None:
+        statement = self._statement(date(2024, 10, 13), [date(2026, 9, 5), date(2026, 9, 30)])
+
+        with capture_logs() as events:
+            fixed = correct_invoice_due_year(statement)
+
+        assert fixed.invoice_due_date == date(2026, 10, 13)
+        corrected = [e for e in events if e["event"] == "parse_invoice_due_year_corrected"]
+        assert len(corrected) == 1
+        assert corrected[0]["years_shifted"] == 2
+        assert "2026" not in str(corrected[0])
+
+    def test_dia_mes_antes_da_compra_mais_recente_vai_para_o_ano_seguinte(self) -> None:
+        # Fatura de janeiro com compras de dezembro: "10 de janeiro" é 2027.
+        statement = self._statement(date(2024, 1, 10), [date(2026, 12, 3), date(2026, 12, 28)])
+
+        assert correct_invoice_due_year(statement).invoice_due_date == date(2027, 1, 10)
+
+    def test_ano_plausivel_nao_muda(self) -> None:
+        statement = self._statement(date(2026, 10, 13), [date(2026, 9, 5)])
+
+        with capture_logs() as events:
+            fixed = correct_invoice_due_year(statement)
+
+        assert fixed is statement
+        assert not events
+
+    def test_vencimento_entre_as_compras_nao_muda(self) -> None:
+        # Só o impossível é corrigido: depois da compra mais antiga já é plausível.
+        statement = self._statement(date(2026, 9, 20), [date(2026, 9, 5), date(2026, 9, 30)])
+
+        assert correct_invoice_due_year(statement).invoice_due_date == date(2026, 9, 20)
+
+    def test_29_de_fevereiro_pula_para_o_proximo_bissexto(self) -> None:
+        statement = self._statement(date(2024, 2, 29), [date(2026, 2, 1)])
+
+        assert correct_invoice_due_year(statement).invoice_due_date == date(2028, 2, 29)
+
+    def test_sem_vencimento_nao_faz_nada(self) -> None:
+        statement = self._statement(None, [date(2026, 9, 5)])
+
+        assert correct_invoice_due_year(statement) is statement
+
+    def test_juncao_aplica_a_correcao(self) -> None:
+        blocks = [
+            _card_block(purchases=[], total="400.00", due=date(2024, 10, 13)),
+            _card_block(purchases=_PURCHASES, total="0"),
+        ]
+
+        assert merge_statements(blocks).invoice_due_date == date(2026, 10, 13)

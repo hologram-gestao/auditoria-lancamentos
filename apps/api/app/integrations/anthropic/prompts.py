@@ -133,11 +133,13 @@ aplique as regras desse tipo de conta, mesmo que este bloco não traga cabeçalh
 """
 
 # Chamada de identificação: só a primeira página, tool `identify_document`.
+# 86e3n70qf: numa fatura de cartão ela também lê o total e o vencimento, que
+# moram no cabeçalho e não chegam ao último bloco.
 IDENTIFY_SYSTEM_PROMPT = """\
 Você identifica extratos bancários e faturas de cartão de crédito brasileiros. \
 Sua única tarefa é chamar a tool `identify_document` informando o banco e o \
-tipo de conta do documento recebido. Não extraia movimentações e não escreva \
-texto livre.\
+tipo de conta do documento recebido e, só em fatura de cartão, o total a pagar \
+e o vencimento. Não extraia movimentações e não escreva texto livre.\
 """
 
 IDENTIFY_USER_PROMPT = """\
@@ -145,7 +147,10 @@ Esta é a primeira página de um extrato/fatura brasileiro. Identifique o \
 banco/instituição e o tipo de conta chamando a tool `identify_document`: \
 `checking` para conta corrente ou poupança, `investment` para conta de \
 aplicação/investimento, `credit_card` para fatura de cartão de crédito. Se não \
-conseguir identificar o banco, use "Desconhecido".\
+conseguir identificar o banco, use "Desconhecido". Se for fatura de cartão, \
+informe também `closing_balance` (o TOTAL A PAGAR desta fatura) e \
+`invoice_due_date` (o VENCIMENTO), como impressos, nunca inventados nem \
+calculados: omita o que a página não mostrar. Fora do cartão, omita os dois.\
 """
 
 
