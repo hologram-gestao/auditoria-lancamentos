@@ -493,6 +493,24 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
      `VENCIMENTO_DA_FATURA_OBRIGATORIO` antes de gravar, e o CHECK
      `ck_reconciliation_sessions_card_due_date_coherent` garante o mesmo no banco. Trocar
      o modo do cliente não reescreve conciliação antiga, nem no reprocessamento.
+   - **No PDF dividido em blocos, o total da fatura de cartão vem da identidade da
+     página 1; o saldo final de extrato vem do último bloco** (86e3n70qf). A fatura
+     imprime o total no cabeçalho (páginas 1 e 2) e a última página costuma ter só
+     compras, então o último bloco não vê total, e o `merge_statements` antigo tomava o
+     total de lá: o checksum comparava a soma das compras com zero ("os saldos não
+     fecham" com diferença igual ao total, fatura da Cora em 08 e 10/10). A
+     `identify_document` devolve, só em `credit_card`, `closing_balance` (o total) e
+     `invoice_due_date`, como impressos; o validador de `DocumentIdentity` zera os dois
+     fora do cartão, e é isso que garante que conta corrente e aplicação seguem com o
+     último bloco. Sem identidade (CSV, XLSX) ou cartão sem total impresso, vale o último
+     bloco. O vencimento da identidade tem precedência sobre o dos blocos. **Vencimento
+     impresso sem ano** ("13 de outubro") faz o modelo inventar o ano (veio 2024 para
+     compras de 2026): `correct_invoice_due_year` (junção e arquivo inteiro) troca só o
+     ano IMPOSSÍVEL, o que cai antes da compra mais antiga, pela primeira ocorrência
+     daquele dia e mês a partir da compra mais recente (decisão do Pedro, 09/10). Todo
+     `/parse` loga `parse_checksum` (`applicable`, `ok`, `expected`, `computed`,
+     `difference` como texto de 2 casas, `blocks`, `account_type`): o próximo "não
+     fecha" se lê no log de dev, sem print.
    - **Credencial no `PATCH /clients/{id}` é 422 `CREDENTIALS_MOVED`**, um `AppError`
      próprio cuja `userMessage` aponta as rotas de conexão. Não é validador Pydantic:
      `ValueError` de validador vira o **400 `VALIDATION_ERROR` genérico** do handler
@@ -1601,6 +1619,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.91, 09/10/2026. **O total da fatura de cartão em PDF dividido passou a vir da página 1, e o checksum vai para o log (86e3n70qf, subtask 7 do épico 86e3n70nv).** A fatura da Cora (5 páginas, 3 blocos com 0 + 0 + 5 compras) dava "os saldos deste arquivo não fecham" com diferença igual ao total: reproduzido com o PDF real, os blocos 1 e 2 liam o total e o 3 lia 0, e o `merge_statements` tomava o do último bloco (checksum `expected=0 computed=1164.22`). A `identify_document` ganhou `closing_balance` e `invoice_due_date` opcionais (só cartão, "como impresso, nunca inventar"), a junção usa o total e o vencimento dela, e nada muda para conta corrente e aplicação (teste parametrizado prova). A mesma prova achou o vencimento sem ano impresso virando 2024; `correct_invoice_due_year` corrige o ano impossível de forma determinística. Depois: `ok=True`, 1164.22 = 1164.22, vencimento 2026-10-13, 5 compras. Evento novo `parse_checksum`, só números. Regra nova na §4.8. Sem rota, permissão nem campo cifrado novo: endpoints sensíveis (**123**), matriz (**29**) e pares de AAD (**17**) não mudaram; a tool `extract_movements` e o `SYSTEM_PROMPT` ficaram iguais byte a byte._
 
 _Versão 1.90, 09/10/2026. **Reprocessar uma conciliação concluída e três ajustes de tela da reunião com o Murilo (86e3n70q9 e 86e3n70qj, subtasks 6 e 8 do épico 86e3n70nv).** Depois de lançar no Omie a conciliação não se atualizava ("tem que excluir e fazer de novo"): o `POST /reprocess` passou a aceitar `reviewing` e `done`, com o 409 de `processing` decidido no UPDATE condicional, cliente encerrado em 409, e a limpeza da revisão só na sessão concluída (parágrafo novo na §8); `reconciliation_omie_postings` não é tocada. A revisão ganhou "Reprocessar com o Omie" no cabeçalho, num `AlertDialog` que lista o que se perde. Na tela: a caixa do passo 2 da gaveta de criação virou a região "Conciliação" (conta e mês rotulados) e a frase das partes foi para junto da lista de arquivos; carteira e categorias do Omie dividem `shared/never-synced-state.tsx` (o vazio diz que não sincronizou, "Sincronizar agora" dentro dele para quem pode, "peça a alguém com acesso" para os demais, e nada de "nenhum título" enquanto o estado carrega; sem sincronização automática, regra na skill `front-gate`); "Lançar no Omie" mostra carregando no botão até as categorias chegarem, a gaveta diz no topo e em cada linha o número e onde entrou, e o "lançado nesta visita" virou cache por sessão (`usePostedInSession`), de onde as abas Movimentações e Anomalias pintam "Lançado no Omie · nº X" visível. Sem rota nova: endpoints sensíveis (**121**), matriz (**29**) e pares de AAD (**17**) não mudaram._
 

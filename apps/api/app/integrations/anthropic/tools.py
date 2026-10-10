@@ -145,7 +145,8 @@ EXTRACT_MOVEMENTS_TOOL: dict[str, Any] = {
 
 # 86e3ff8xd (D2) — identificação de um PDF dividido em blocos de páginas. Só
 # a primeira página vai nesta chamada; o resultado entra como nota no prompt de
-# todo bloco. `max_tokens` pequeno no client: a resposta são dois campos.
+# todo bloco. `max_tokens` pequeno no client: a resposta são dois campos (quatro
+# numa fatura de cartão, 86e3n70qf).
 IDENTIFY_DOCUMENT_TOOL: dict[str, Any] = {
     "name": IDENTIFY_DOCUMENT_TOOL_NAME,
     "description": (
@@ -167,6 +168,27 @@ IDENTIFY_DOCUMENT_TOOL: dict[str, Any] = {
                 "type": "string",
                 "enum": list(ACCOUNT_TYPES),
                 "description": _ACCOUNT_TYPE_DESCRIPTION,
+            },
+            # 86e3n70qf — o total da fatura mora no cabeçalho, não no fim do
+            # documento: a junção dos blocos o toma daqui.
+            "closing_balance": {
+                "type": "number",
+                "description": (
+                    "SÓ fatura de cartão: o TOTAL A PAGAR desta fatura, como impresso "
+                    '("Total a pagar", "Valor da fatura", "Total desta fatura"), '
+                    "positivo. Nunca inventar nem calcular: omita se a página não "
+                    "mostrar, e omita sempre em conta corrente e conta de aplicação. "
+                    "Não confunda com limite, pagamento mínimo ou saldo anterior."
+                ),
+            },
+            "invoice_due_date": {
+                "type": "string",
+                "format": "date",
+                "description": (
+                    "SÓ fatura de cartão: data de vencimento da fatura, como impressa "
+                    "(YYYY-MM-DD). Nunca inventar: omita se a página não mostrar, e "
+                    "omita sempre em conta corrente e conta de aplicação."
+                ),
             },
         },
         "required": ["bank_name", "account_type"],
