@@ -12,9 +12,15 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.db.models.client_accounting_account import AccountingAccountType
+from app.db.models.client_accounting_account import (
+    MAX_ACCOUNTING_ACCOUNT_CLASSIFICATION_CHARS,
+    MAX_ACCOUNTING_ACCOUNT_CODE_CHARS,
+    MAX_ACCOUNTING_ACCOUNT_NAME_CHARS,
+    AccountingAccountType,
+)
 from app.modules.client_accounting_chart.service import (
     ACCOUNTING_ACCOUNT_UNDECIPHERABLE,
+    AccountPatch,
     not_postable_reason,
 )
 from app.modules.users.schemas import PaginationMeta
@@ -121,3 +127,74 @@ class ChartImportEnvelope(BaseModel):
     """Body de `POST /clients/{client_id}/accounting-chart/import`."""
 
     data: ChartImportPayload
+
+
+class AccountingAccountEnvelope(BaseModel):
+    """Body da inclusão e da edição manual de UMA conta (86e3nb816)."""
+
+    data: AccountingAccountResponse
+
+
+class AccountingAccountCreateRequest(BaseModel):
+    """Body de `POST /clients/{client_id}/accounting-chart/accounts` (86e3nb816).
+
+    Os tetos são os das COLUNAS (§7 Backend: o limite do schema é o da coluna de
+    destino), e a forma do código, o nome vazio depois de aparar e o resto da regra
+    de linha vêm de `sheet.validate_account`, a MESMA da planilha (422 no campo).
+    A conta nasce ativa.
+    """
+
+    code: str = Field(
+        min_length=1,
+        max_length=MAX_ACCOUNTING_ACCOUNT_CODE_CHARS,
+        description="Código reduzido: letras, números, `.` e `-`; único no plano do cliente.",
+    )
+    name: str = Field(
+        min_length=1,
+        max_length=MAX_ACCOUNTING_ACCOUNT_NAME_CHARS,
+        description="Nome da conta. Cifrado com a chave do cliente.",
+    )
+    account_type: AccountingAccountType = Field(
+        alias="type", description="`analitica` recebe lançamento; `sintetica` só agrupa."
+    )
+    classification: str | None = Field(
+        default=None,
+        max_length=MAX_ACCOUNTING_ACCOUNT_CLASSIFICATION_CHARS,
+        description="Classificação hierárquica opcional (`1.1.1.02.001`); decide a ordem.",
+    )
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+
+class AccountingAccountUpdateRequest(BaseModel):
+    """Body de `PATCH /clients/{client_id}/accounting-chart/accounts/{account_id}`.
+
+    Todo campo é opcional; o que não vem fica como está. O CÓDIGO não se edita (é a
+    chave da reimportação e o que já foi para as materializações). `classification:
+    null` LIMPA a classificação; ausente, mantém.
+    """
+
+    name: str | None = Field(
+        default=None, min_length=1, max_length=MAX_ACCOUNTING_ACCOUNT_NAME_CHARS
+    )
+    account_type: AccountingAccountType | None = Field(default=None, alias="type")
+    classification: str | None = Field(
+        default=None, max_length=MAX_ACCOUNTING_ACCOUNT_CLASSIFICATION_CHARS
+    )
+    active: bool | None = Field(
+        default=None,
+        description=(
+            "`false` inativa a conta (ela fica, sem receber decisão nova); `true` reativa."
+        ),
+    )
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    def to_patch(self) -> AccountPatch:
+        return AccountPatch(
+            name=self.name,
+            account_type=self.account_type,
+            classification=self.classification,
+            classification_set="classification" in self.model_fields_set,
+            active=self.active,
+        )

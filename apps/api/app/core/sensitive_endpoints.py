@@ -985,6 +985,25 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         "auditado); contas gravadas e inativadas com o client_id do path validado, sob "
         "trava por cliente; cliente encerrado = 409",
     ),
+    # 86e3nb816 — inclusão e edição manual de UMA conta, sem reimportar a planilha.
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients/{client_id}/accounting-chart/accounts",
+        ScopeKind.COLLECTION,
+        "app/modules/client_accounting_chart/routes.py",
+        f"{_VIA_CLIENT_PATH} + OpenClientDep + ManageClientAccountingChartDep (guard "
+        "auditado); a conta nasce com o client_id do path validado, sob a trava por "
+        "cliente da importação; código repetido = 409 só com o código",
+    ),
+    SensitiveEndpoint(
+        "PATCH",
+        "/api/v1/clients/{client_id}/accounting-chart/accounts/{account_id}",
+        ScopeKind.DETAIL_PK,
+        "app/modules/client_accounting_chart/routes.py",
+        f"{_VIA_CLIENT_PATH} + OpenClientDep + ManageClientAccountingChartDep; a conta "
+        "é lida com client_id no próprio SELECT (FOR UPDATE): conta de outro cliente = "
+        "404 sem vazar existência",
+    ),
     # ------------- arquivo contábil do cliente (S13, BACK 13.4 — R3)
     # Gerar, listar e baixar: o arquivo leva o histórico do cliente final.
     SensitiveEndpoint(
