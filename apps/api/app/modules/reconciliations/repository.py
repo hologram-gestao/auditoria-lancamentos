@@ -504,7 +504,39 @@ class ReconciliationRepository:
             )
         )
 
-    async def reset_session_for_reprocess(self, session_id: UUID) -> None:
+    async def claim_session_for_reprocess(
+        self,
+        session_id: UUID,
+        *,
+        allowed_statuses: frozenset[str],
+    ) -> bool:
+        """Passa a sessão a `processing` SÓ se o status atual está em `allowed_statuses`.
+
+        86e3n70q9 — o 409 do reprocessamento é decidido pelo estado ATUAL, no
+        próprio UPDATE, não pela leitura anterior da rota: dois cliques (ou duas
+        abas) leem `reviewing` ao mesmo tempo, e só o primeiro UPDATE casa a
+        linha. O segundo espera o lock da linha, reavalia o `WHERE` com a
+        sessão já em `processing` e devolve `False`, em vez de agendar um
+        segundo processamento sobre a mesma sessão.
+        """
+        result = await self._session.execute(
+            update(ReconciliationSession)
+            .where(
+                ReconciliationSession.id == session_id,
+                ReconciliationSession.deleted_at.is_(None),
+                ReconciliationSession.status.in_(allowed_statuses),
+            )
+            .values(status=ReconciliationStatus.PROCESSING.value)
+            .returning(ReconciliationSession.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def reset_session_for_reprocess(
+        self,
+        session_id: UUID,
+        *,
+        clear_review_work: bool = False,
+    ) -> None:
         """Reset a sessão para `status='processing'` pra ser re-enfileirada.
 
         Caso de uso: sessão entrou em `error` (ex.: Omie devolveu 5xx),
@@ -527,6 +559,21 @@ class ReconciliationRepository:
         invariante preservada (sessão em erro nunca permitiu revisão),
         e se algum dia esse invariante quebrar, preservar trabalho do
         analista é o comportamento certo.
+
+        **`clear_review_work=True` (86e3n70q9): reprocessar uma sessão
+        CONCLUÍDA** (`reviewing`/`done`) depois de lançar no Omie. Ali a revisão
+        existiu e recomeça do zero: além do que já sai acima (anomalias com
+        resolução, nota e veredito; lançamentos do Omie da sessão com as notas
+        deles), as linhas do arquivo perdem a ação do analista (`ignore` não
+        sobrevive à volta para `sem_omie`, e deixá-la seria uma linha "ignorada"
+        com situação de pendente) e a nota; o selo do glossário volta a falso
+        até a qualificação rodar de novo. O caminho de anexar/remover parte não
+        passa o flag e continua preservando o trabalho do analista.
+
+        **Nunca toca `reconciliation_omie_postings`** (§4.11): é a dedup do que
+        já foi lançado. A linha lançada perde aqui só o reflexo (situação e
+        lançamento vinculado); o cruzamento seguinte a reencontra no extrato, e
+        um novo envio dela é bloqueado pela intenção `confirmed` que ficou.
         """
         from app.db.models import ReconciliationFileEntry
 
@@ -549,6 +596,17 @@ class ReconciliationRepository:
                 omie_lancamento_id=None,
             )
         )
+        if clear_review_work:
+            await self._session.execute(
+                update(ReconciliationFileEntry)
+                .where(ReconciliationFileEntry.session_id == session_id)
+                .values(user_action=None, user_note_encrypted=None, user_note_iv=None)
+            )
+            await self._session.execute(
+                update(ReconciliationSession)
+                .where(ReconciliationSession.id == session_id)
+                .values(qualification_used_glossary=False)
+            )
         # 3. Reset da sessão.
         await self._session.execute(
             update(ReconciliationSession)

@@ -704,7 +704,7 @@ describe('ChartOfAccountsScreen — estados (R3)', () => {
     render(<ChartOfAccountsScreen clientId="c1" />);
 
     expect(
-      screen.getByText('Este cliente ainda não sincronizou as categorias do Omie'),
+      screen.getByText('As categorias do Omie deste cliente ainda não foram sincronizadas'),
     ).toBeVisible();
     // Duas ocorrências: o botão do cabeçalho e o do estado vazio.
     expect(screen.getAllByRole('button', { name: 'Sincronizar agora' })).toHaveLength(2);
@@ -723,8 +723,17 @@ describe('ChartOfAccountsScreen — estados (R3)', () => {
     listState.data = { data: [], pagination: { page: 1, pageSize: 20, total: 0, totalPages: 0 } };
     render(<ChartOfAccountsScreen clientId="c1" />);
 
-    expect(screen.getByText(/Quando alguém da equipe sincronizar/)).toBeVisible();
+    expect(screen.getByText(/Peça a alguém com acesso de sincronização/)).toBeVisible();
     expect(screen.queryByRole('button', { name: /sincronizar/i })).toBeNull();
+  });
+
+  it('com a cobertura carregando, o vazio não diz "nenhuma categoria" (86e3n70qj)', () => {
+    coverageState.isLoading = true;
+    coverageState.data = undefined;
+    listState.data = { data: [], pagination: { page: 1, pageSize: 20, total: 0, totalPages: 0 } };
+    render(<ChartOfAccountsScreen clientId="c1" />);
+
+    expect(screen.queryByText('Nenhuma categoria sincronizada.')).toBeNull();
   });
 
   it('última tentativa falhou: aviso com a data da última BEM-SUCEDIDA', () => {

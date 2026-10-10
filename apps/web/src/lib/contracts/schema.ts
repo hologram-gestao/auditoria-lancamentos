@@ -1465,8 +1465,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Reprocessa uma sessão que terminou em `status='error'`. Mantém as `file_entries` (resultado do parse Anthropic, vale dinheiro), limpa dados parciais de matching/anomalias, reset da sessão pra `status='processing'`, e reagenda o processamento em background. Rate limit: 10/min/usuário (igual ao create) — uma sessão = 1 processamento em background + várias chamadas Omie. Conflito (409): se a sessão NÃO está em error (já processando, em revisão ou concluída), recusamos pra não duplicar processamento.
-         * @description Endpoint de "Tentar novamente" da tela de revisão / lista de conciliações.
+         * Reprocessa uma sessão em `error` (tentar de novo) ou concluída (`reviewing`/`done`: cruzar de novo com o Omie, por exemplo depois de lançar compras do cartão). Mantém as `file_entries` (resultado do parse Anthropic, vale dinheiro) e NUNCA toca nas intenções de lançamento no Omie (a dedup do que já foi lançado). Limpa pares, anomalias (com resolução, nota e veredito), lançamentos do Omie da sessão, contadores e a qualificação; numa sessão concluída, também a ação e a nota do analista em cada linha. Volta a sessão para `processing` e reagenda o processamento em background. Rate limit: 10/min/usuário (igual ao create). Conflito (409): sessão em `processing` (não duplicamos o processamento) ou cliente encerrado.
+         * @description "Tentar novamente" (erro) e "Reprocessar com o Omie" (sessão concluída).
          */
         post: operations["reprocess_reconciliation_api_v1_reconciliations__session_id__reprocess_post"];
         delete?: never;

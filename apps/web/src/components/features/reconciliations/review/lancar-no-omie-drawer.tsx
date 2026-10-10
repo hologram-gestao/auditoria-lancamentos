@@ -37,7 +37,11 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
-import { useOmieCategorias, usePostOmieLancamentos } from '@/hooks/use-omie-postings';
+import {
+  collectPosted,
+  useOmieCategorias,
+  usePostOmieLancamentos,
+} from '@/hooks/use-omie-postings';
 import { ApiError, NetworkError } from '@/lib/api/client';
 import type {
   OmiePostingBatchPayload,
@@ -170,6 +174,10 @@ export function LancarNoOmieDrawer({
 
         <SheetBody>
           <div className="space-y-4">
+            {/* 86e3n70qj — depois do envio, o desfecho fica DENTRO da gaveta, no
+                topo: o toast some em segundos, e "cliquei e não sei o que
+                aconteceu" foi o relato. Diz quantas entraram e onde. */}
+            {result !== null && <ResultadoDoLote result={result} />}
             {categoriasIndisponiveis && (
               <div
                 role="alert"
@@ -273,7 +281,7 @@ export function LancarNoOmieDrawer({
                         )}
                       </div>
                     ) : (
-                      <LinhaResultado line={linha} />
+                      <LinhaResultado line={linha} purchaseDate={entry.transaction_date} />
                     )}
                   </li>
                 );
@@ -345,19 +353,73 @@ export function LancarNoOmieDrawer({
  * em `erro_omie` ela é a frase VERBATIM do provedor, que é o que a torna
  * acionável.
  */
-function LinhaResultado({ line }: { line: OmiePostingLineResult }) {
+function LinhaResultado({
+  line,
+  purchaseDate,
+}: {
+  line: OmiePostingLineResult;
+  purchaseDate: string;
+}) {
   const { icon: Icon, tone, rotulo } = RESULT_PRESENTATION[line.status];
   return (
-    <p className={cn('flex items-start gap-2 pl-20 text-xs', tone)}>
-      <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <span>
-        <strong className="font-medium">{rotulo}</strong>
-        {line.omie_lancamento_id !== null && line.omie_lancamento_id !== undefined && (
-          <> · lançamento nº {line.omie_lancamento_id}</>
-        )}
-        {line.message !== null && line.message !== undefined && <> — {line.message}</>}
-      </span>
-    </p>
+    <div className="space-y-0.5 pl-20 text-xs">
+      <p className={cn('flex items-start gap-2', tone)}>
+        <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span>
+          <strong className="font-medium">{rotulo}</strong>
+          {line.omie_lancamento_id !== null && line.omie_lancamento_id !== undefined && (
+            <> · lançamento nº {line.omie_lancamento_id}</>
+          )}
+          {line.message !== null && line.message !== undefined && <> — {line.message}</>}
+        </span>
+      </p>
+      {/* ONDE entrou, que é o que a pessoa foi conferir no Omie: o servidor lança
+          na conta do cartão da conciliação, na data da compra (só esse processo
+          libera o lançamento, 86e3n70p0). */}
+      {line.status === 'lancada' && (
+        <p className="text-muted-foreground pl-5">
+          Na conta do cartão no Omie, na data da compra ({formatBRDate(purchaseDate)}).
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Resumo do lote no topo da gaveta (86e3n70qj). `role="status"`: quem opera por
+ * teclado ou leitor ouve o desfecho sem procurar o toast, que já foi embora.
+ */
+function ResultadoDoLote({ result }: { result: OmiePostingBatchPayload }) {
+  const { lancadas } = result;
+  const falhas = result.bloqueadas + result.com_erro;
+  const tone =
+    falhas === 0
+      ? 'bg-success-muted text-success'
+      : lancadas === 0
+        ? 'bg-destructive-muted text-destructive'
+        : 'bg-warning-muted text-warning';
+  const Icon = falhas === 0 ? CheckCircle2 : lancadas === 0 ? XCircle : AlertTriangle;
+  return (
+    <div role="status" className={cn('flex items-start gap-2 rounded-md p-3 text-sm', tone)}>
+      <Icon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+      <div className="space-y-1">
+        <p className="font-medium">
+          {lancadas === 0
+            ? 'Nenhuma compra foi lançada no Omie.'
+            : lancadas === 1
+              ? '1 compra lançada no Omie.'
+              : `${lancadas} compras lançadas no Omie.`}
+        </p>
+        <p>
+          {lancadas === 0
+            ? 'O motivo de cada compra está na linha dela, abaixo.'
+            : lancadas === 1
+              ? 'Entrou na conta do cartão, na data da compra; o número do lançamento está na linha dela, abaixo.'
+              : 'Entraram na conta do cartão, cada uma na data da compra; o número de cada lançamento está na linha dela, abaixo.'}
+          {lancadas > 0 && falhas > 0 && ' As que não entraram mostram o motivo.'}
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -367,17 +429,6 @@ const RESULT_PRESENTATION = {
   bloqueada: { icon: AlertTriangle, tone: 'text-warning', rotulo: 'Não lançada' },
   erro: { icon: XCircle, tone: 'text-destructive', rotulo: 'Erro no lançamento' },
 } as const;
-
-/** Linhas com lançamento confirmado — inclui a que já estava lançada. */
-function collectPosted(payload: OmiePostingBatchPayload): Record<string, number | null> {
-  const out: Record<string, number | null> = {};
-  payload.lines.forEach((line) => {
-    if (line.status === 'lancada' || line.reason === 'ja_lancada') {
-      out[line.file_entry_id] = line.omie_lancamento_id ?? null;
-    }
-  });
-  return out;
-}
 
 /**
  * Sucesso verde, parcial em aviso, nada lançado em destrutivo — nunca a cor

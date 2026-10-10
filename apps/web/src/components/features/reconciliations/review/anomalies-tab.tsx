@@ -48,6 +48,11 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  type PostedInSession,
+  useOpenLancarDrawer,
+  usePostedInSession,
+} from '@/hooks/use-omie-postings';
 import { useAllSemOmieEntries, useAnomalies } from '@/hooks/use-reconciliations';
 import type { AnomalyItem, FileEntryItem } from '@/lib/api/reconciliations';
 import { hasPermission } from '@/lib/authz';
@@ -61,6 +66,7 @@ import { LancarNoOmieDrawer } from './lancar-no-omie-drawer';
 import { getPostingBlock, type PostingBlockReason } from './omie-posting-eligibility';
 import { ResolveAnomalyDialog } from './resolve-anomaly-dialog';
 import { SeverityBadge } from './severity-badge';
+import { LancadaNoOmieBadge } from './situation-badge';
 
 interface AnomaliesTabProps {
   sessionId: string;
@@ -137,8 +143,15 @@ export function AnomaliesTab({ sessionId, isCard, canPostToOmie }: AnomaliesTabP
   }, [items, semOmieById, showPosting]);
 
   const [selectedAnomalyIds, setSelectedAnomalyIds] = useState<string[]>([]);
-  const [postedEntryIds, setPostedEntryIds] = useState<string[]>([]);
+  // 86e3n70qj — o que foi lançado nesta visita, venha o lote desta aba ou da de
+  // Movimentações (cache da sessão): é o que pinta "Lançado no Omie · nº X".
+  const postedById = usePostedInSession(sessionId);
   const [launchTargets, setLaunchTargets] = useState<FileEntryItem[] | null>(null);
+  const { open: openLaunch, openingTargets } = useOpenLancarDrawer<FileEntryItem>(
+    sessionId,
+    setLaunchTargets,
+  );
+  const openingEntryIds = new Set((openingTargets ?? []).map((e) => e.id));
 
   const selectableAnomalyIds = useMemo(
     () => items.filter((a) => entryByAnomaly.has(a.id)).map((a) => a.id),
@@ -213,7 +226,8 @@ export function AnomaliesTab({ sessionId, isCard, canPostToOmie }: AnomaliesTabP
       {showPosting && selectedAnomalyIds.length > 0 && (
         <LancarLoteBar
           selectedCount={selectedEntries.length}
-          onLaunch={() => setLaunchTargets(selectedEntries)}
+          pending={openingTargets !== null}
+          onLaunch={() => void openLaunch(selectedEntries)}
           onClear={() => setSelectedAnomalyIds([])}
         />
       )}
@@ -306,8 +320,10 @@ export function AnomaliesTab({ sessionId, isCard, canPostToOmie }: AnomaliesTabP
                     isCard={showPosting}
                     postingBlock={resolvePostingBlock(anomaly, entry, {
                       isCard: showPosting,
-                      posted: postedEntryIds,
+                      posted: postedById,
                     })}
+                    postedOmieId={postedOmieIdFor(anomaly, postedById)}
+                    opening={entry !== undefined && openingEntryIds.has(entry.id)}
                     selected={selectedAnomalyIds.includes(anomaly.id)}
                     onSelectedChange={(checked) =>
                       setSelectedAnomalyIds((prev) =>
@@ -317,7 +333,7 @@ export function AnomaliesTab({ sessionId, isCard, canPostToOmie }: AnomaliesTabP
                       )
                     }
                     onLancar={() => {
-                      if (entry !== undefined) setLaunchTargets([entry]);
+                      if (entry !== undefined) void openLaunch([entry]);
                     }}
                     onResolve={() => setResolvingId(anomaly.id)}
                   />
@@ -348,7 +364,6 @@ export function AnomaliesTab({ sessionId, isCard, canPostToOmie }: AnomaliesTabP
           }}
           onPosted={(results) => {
             const ids = Object.keys(results);
-            setPostedEntryIds((prev) => [...new Set([...prev, ...ids])]);
             setSelectedAnomalyIds((prev) =>
               prev.filter((anomalyId) => {
                 const entry = entryByAnomaly.get(anomalyId);
@@ -384,13 +399,24 @@ export function AnomaliesTab({ sessionId, isCard, canPostToOmie }: AnomaliesTabP
 function resolvePostingBlock(
   anomaly: AnomalyItem,
   entry: FileEntryItem | undefined,
-  options: { isCard: boolean; posted: string[] },
+  options: { isCard: boolean; posted: PostedInSession },
 ): PostingBlockReason | null {
   if (!options.isCard) return 'sessao_nao_e_cartao';
   if (entry !== undefined) return getPostingBlock(entry, { isCard: true });
-  const relatedId = anomaly.related_file_entry?.id;
-  if (relatedId !== undefined && options.posted.includes(relatedId)) return 'ja_lancada';
+  if (postedOmieIdFor(anomaly, options.posted) !== undefined) return 'ja_lancada';
   return 'nao_e_sem_omie';
+}
+
+/**
+ * Nº do lançamento da linha desta anomalia, se ela foi lançada nesta visita
+ * (`undefined` = não foi; `null` = foi, sem o número na resposta).
+ */
+function postedOmieIdFor(anomaly: AnomalyItem, posted: PostedInSession): number | null | undefined {
+  const relatedId = anomaly.related_file_entry?.id;
+  if (relatedId === undefined || !Object.prototype.hasOwnProperty.call(posted, relatedId)) {
+    return undefined;
+  }
+  return posted[relatedId] ?? null;
 }
 
 interface AnomalyRowProps {
@@ -399,6 +425,10 @@ interface AnomalyRowProps {
   canReview: boolean;
   isCard: boolean;
   postingBlock: PostingBlockReason | null;
+  /** Nº do lançamento feito nesta visita (`undefined` = a linha não foi lançada). */
+  postedOmieId: number | null | undefined;
+  /** A gaveta desta linha está abrindo (categorias a caminho): botão em carregando. */
+  opening: boolean;
   selected: boolean;
   onSelectedChange: (checked: boolean) => void;
   onLancar: () => void;
@@ -411,6 +441,8 @@ function AnomalyRow({
   canReview,
   isCard,
   postingBlock,
+  postedOmieId,
+  opening,
   selected,
   onSelectedChange,
   onLancar,
@@ -461,7 +493,11 @@ function AnomalyRow({
       </TableCell>
       <TableCell className="text-muted-foreground text-sm">{detectedByLabel}</TableCell>
       <TableCell>
-        <StatusPill resolved={anomaly.resolved} />
+        <div className="flex flex-col items-start gap-1">
+          <StatusPill resolved={anomaly.resolved} />
+          {/* 86e3n70qj — visível na linha, não só no texto da resolução. */}
+          {postedOmieId !== undefined && <LancadaNoOmieBadge omieLancamentoId={postedOmieId} />}
+        </div>
       </TableCell>
       <TableCell className="text-right">
         {/* Só flag da Camada 1 aceita veredito — nos demais tipos o servidor
@@ -475,7 +511,9 @@ function AnomalyRow({
       </TableCell>
       <TableCell className="text-right">
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {showPosting && <LancarNoOmieButton block={postingBlock} onClick={onLancar} />}
+          {showPosting && (
+            <LancarNoOmieButton block={postingBlock} pending={opening} onClick={onLancar} />
+          )}
           {!anomaly.resolved ? (
             <Button size="sm" variant="outline" onClick={onResolve}>
               Marcar como resolvida

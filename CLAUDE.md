@@ -1481,6 +1481,18 @@ roteiro em [Docs/landing/DOMINIO_E_NOME.md](Docs/landing/DOMINIO_E_NOME.md)): o
 mapeamento de domínio do Cloud Run não atende `southamerica-east1`, então o caminho é Load
 Balancer HTTPS.
 
+**Reprocessar uma conciliação CONCLUÍDA (86e3n70q9, épico 86e3n70nv)** é o mesmo
+`POST /reconciliations/{id}/reprocess` do "tentar de novo": aceita `error`, `reviewing` e
+`done`; `processing` é 409 decidido no UPDATE condicional (dois cliques nunca agendam dois
+jobs) e cliente encerrado é 409. FICAM as linhas do arquivo (o parse pago) e as intenções de
+lançamento em `reconciliation_omie_postings`, **nunca tocadas** (§4.11: a linha lançada
+continua lançada, o cruzamento a reencontra no extrato e reenviá-la é `ja_lancada`). SAI, na
+sessão concluída, a revisão inteira: anomalias com resolução, nota e veredito, lançamentos do
+Omie da sessão com as notas deles, contadores, o selo do glossário e a ação e a nota de cada
+linha do arquivo; a tela diz isso no diálogo antes de confirmar. A sessão em `error` não
+ganha essa limpeza (o anexo de parte preserva o trabalho do analista de propósito). Evento
+`conciliacao_reprocessada` (IDs e o status de origem, sem dedup).
+
 ---
 
 ## 9. Comandos Frequentes
@@ -1589,6 +1601,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.90, 09/10/2026. **Reprocessar uma conciliação concluída e três ajustes de tela da reunião com o Murilo (86e3n70q9 e 86e3n70qj, subtasks 6 e 8 do épico 86e3n70nv).** Depois de lançar no Omie a conciliação não se atualizava ("tem que excluir e fazer de novo"): o `POST /reprocess` passou a aceitar `reviewing` e `done`, com o 409 de `processing` decidido no UPDATE condicional, cliente encerrado em 409, e a limpeza da revisão só na sessão concluída (parágrafo novo na §8); `reconciliation_omie_postings` não é tocada. A revisão ganhou "Reprocessar com o Omie" no cabeçalho, num `AlertDialog` que lista o que se perde. Na tela: a caixa do passo 2 da gaveta de criação virou a região "Conciliação" (conta e mês rotulados) e a frase das partes foi para junto da lista de arquivos; carteira e categorias do Omie dividem `shared/never-synced-state.tsx` (o vazio diz que não sincronizou, "Sincronizar agora" dentro dele para quem pode, "peça a alguém com acesso" para os demais, e nada de "nenhum título" enquanto o estado carrega; sem sincronização automática, regra na skill `front-gate`); "Lançar no Omie" mostra carregando no botão até as categorias chegarem, a gaveta diz no topo e em cada linha o número e onde entrou, e o "lançado nesta visita" virou cache por sessão (`usePostedInSession`), de onde as abas Movimentações e Anomalias pintam "Lançado no Omie · nº X" visível. Sem rota nova: endpoints sensíveis (**121**), matriz (**29**) e pares de AAD (**17**) não mudaram._
 
 _Versão 1.89, 09/10/2026. **A conta do plano contábil passou a entrar e a se editar à mão, sem reimportar a planilha (86e3nb816, subtask 9 do épico 86e3n70nv; WhatsApp do Murilo de 09/10: o escritório cria a conta no Domínio e quer usá-la na hora).** Duas rotas: `POST /clients/{id}/accounting-chart/accounts` (cria; nasce ativa) e `PATCH /clients/{id}/accounting-chart/accounts/{account_id}` (nome, tipo, classificação e situação; campo ausente fica, `classification: null` limpa, o código não se edita), as duas com `OpenClientDep` e `ManageClientAccountingChartDep` (o `client_manager` toma 403 com 1 linha `denied`, molde da S16). Lista canônica 121 → **123** (coleção e `DETAIL_PK`, na bateria dos três atacantes: 377 verdes). A regra de campo é a da planilha, chamada pela função pública nova `sheet.validate_account` (que reusa `_validate_row`), e a recusa cai no CAMPO: 422 `CONTA_CONTABIL_INVALIDA` com `details.field` e o motivo no vocabulário da importação; texto acima da coluna é o 400 de forma. Código repetido, ativo ou inativo, é 409 `CONTA_CONTABIL_CODIGO_EXISTENTE` com o código e o id da existente (a inativa se reativa pela edição). Conta usada por decisão do de-para no `conta_contabil` (toda vigência conta: a substituída ainda decide as competências anteriores não materializadas) ou pela conta do banco não vira sintética nem inativa pela edição: 422 `CONTA_CONTABIL_EM_USO` com `reason`, `decisionCount` e `bindingCount`, nunca as categorias. **A conta do banco entrou na proteção, além das decisões que a task pedia**: ela também exige conta lançável (`require_postable_account`) e ficaria parada do mesmo jeito. A importação não mudou e continua inativando livremente. Escrita sob a MESMA trava por cliente da importação (`lock_client_chart`), nome cifrado pelo `_write_cipher` (provisiona a DEK do cliente sem origem) e `sort_key` derivada em toda gravação, então a conta nova aparece no lugar da classificação sem a tela ordenar nada. Evento `plano_contabil_conta_editada` (sem dedup), com `client_id`, `account_id`, `operacao` (`criada`/`editada`) e `campos` em vocabulário fechado; edição sem mudança não grava nem emite. Na tela, "Nova conta" ao lado de "Importar planilha" e "Editar" na linha, só para `manage_client_accounting_chart` com cliente aberto, numa gaveta react-hook-form + zod (`lib/validation/accounting-account.ts`, espelho da regra do servidor) que manda só o que mudou e põe o 409 no código e o 422 da conta em uso no tipo ou na situação (`readAccountFormRefusal`). Matriz (**29**) e pares de AAD (**17**) não mudaram._
 

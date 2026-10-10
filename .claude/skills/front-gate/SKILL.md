@@ -460,7 +460,16 @@ viewportSize().width` (padrão em `spec:2147-2165` e `:2190-2205`). Antes de med
   bloco, `framed={false}` dentro de `TableEmpty` ou de card; `action` é um slot que quem
   chama já decidiu pela permissão; `announce` liga `role="status"` quando o vazio substitui
   um resultado carregado (sem ele se já há um `aria-live` ao lado). O texto é sempre o da
-  tela. Vinheta nova entra em `vignettes.tsx` e no `vignettes.test.tsx`. `loading.tsx`/`error.tsx`
+  tela. Vinheta nova entra em `vignettes.tsx` e no `vignettes.test.tsx`.
+  **Tela que só tem dado depois de ir à origem** (carteira, categorias do Omie) usa
+  `shared/never-synced-state.tsx` no `TableEmpty` (86e3n70qj): o título diz que ainda
+  não sincronizou, "Sincronizar agora" vem DENTRO do vazio para quem tem a permissão, e
+  a frase de apoio é uma decisão só (`neverSyncedDescription`: encerrado → sem permissão
+  "peça a alguém com acesso" → origem barrando → o que a sincronização traz). O vazio só
+  decide o que dizer com o estado da sincronização EM MÃOS: com o resumo carregando, a
+  carteira nunca sincronizada dizia "Nenhum título nesta carteira." (o relato da reunião
+  de 08/10). Sincronizar sozinho na primeira abertura não entra: gasta chamada à origem
+  sem ninguém pedir. `loading.tsx`/`error.tsx`
   de rota existem só em `app/(app)/clientes/[clientId]/{glossario,usuarios}/`.
 - **Data**: não existe date picker no `ui/`. Mês de referência é `<input type="month"
 lang="pt-BR">` (`reconciliations/list/reconciliations-list.tsx:184-189`) ou `Select`

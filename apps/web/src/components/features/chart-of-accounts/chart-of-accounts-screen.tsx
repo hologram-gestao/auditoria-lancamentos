@@ -55,7 +55,9 @@ import { Loader2, RefreshCw, Search, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
+import { NeverSyncedState } from '@/components/shared/never-synced-state';
 import { OriginStateBlock } from '@/components/shared/origin-state-notice';
+import { MappingVignette } from '@/components/shared/vignettes';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -569,13 +571,19 @@ export function ChartOfAccountsScreen({ clientId }: { clientId: string }) {
             </Table>
             {/* Fora do `<Table>` de propósito: a tabela rola na horizontal em 390px e
                 uma célula `colSpan` cortaria o texto à direita (ver `TableEmpty`). */}
-            {!listQuery.isLoading && rows.length === 0 && (
+            {/* 86e3n70qj: o vazio só decide o que dizer com a cobertura em mãos —
+                sem ela, o "nunca sincronizou" virava "Nenhuma categoria
+                sincronizada." enquanto a cobertura carregava. */}
+            {!listQuery.isLoading && !coverageQuery.isLoading && rows.length === 0 && (
               <TableEmpty>
                 {neverSynced ? (
                   <NeverSyncedState
+                    title="As categorias do Omie deste cliente ainda não foram sincronizadas"
+                    purpose="Sincronizar agora traz do Omie as categorias do cliente, para ver quanto da classificação já vem pronta."
                     action={showSyncAction ? syncButton : null}
                     canSync={canSync}
                     isClosed={isClosed}
+                    vignette={<MappingVignette />}
                   />
                 ) : hasFilters ? (
                   <FilteredEmptyState onClear={clearFilters} />
@@ -669,39 +677,6 @@ function TableSkeletonRows() {
         </TableRow>
       ))}
     </>
-  );
-}
-
-/**
- * Cliente que NUNCA sincronizou. Três textos porque são três situações com
- * saídas diferentes — e oferecer "Sincronizar agora" a quem o servidor nega
- * seria o defeito que a §4.9 descreve.
- */
-function NeverSyncedState({
-  action,
-  canSync,
-  isClosed,
-}: {
-  action: React.ReactNode;
-  canSync: boolean;
-  isClosed: boolean;
-}) {
-  return (
-    <div className="flex flex-col items-center gap-3 text-center">
-      <div className="space-y-1">
-        <p className="text-sm font-medium">
-          Este cliente ainda não sincronizou as categorias do Omie
-        </p>
-        <p className="text-muted-foreground text-sm">
-          {isClosed
-            ? 'O cliente foi encerrado antes de sincronizar, e a sincronização não fica disponível para clientes encerrados.'
-            : canSync
-              ? 'Traga as categorias da origem para ver quanto da classificação já vem pronta.'
-              : 'Quando alguém da equipe sincronizar, as categorias da origem aparecem aqui.'}
-        </p>
-      </div>
-      {action}
-    </div>
   );
 }
 
