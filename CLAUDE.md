@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 **S0–S19 + Sprints 0–5 do agents-hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **123/123** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **124/124** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
 > **O que cada sprint do agents-hub entregou** (todas na `main`):
 >
@@ -193,7 +193,7 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**123** hoje — o arquivo é a fonte, confira com
+      (**124** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant E cross-org**: a bateria
       (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
@@ -201,7 +201,7 @@
       organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
-      (`PENDING_ENDPOINTS` está vazio: cobertura **123/123**). As 3 rotas do
+      (`PENDING_ENDPOINTS` está vazio: cobertura **124/124**). As 3 rotas do
       **plano de contas** (S10) e as 3 da **carteira de títulos** (S11 — lista,
       agregados e sincronizar) e as 3 da S15 (relatório de recebíveis, leitura e
       registro do contexto do título) entraram como coleção; as 20 da S12 também:
@@ -229,7 +229,9 @@
       `GET …/accounting-files/{generation_id}/download`) e as 5 dos layouts de
       exportação (`GET`/`POST /export-layouts`, `POST /export-layouts/from-template`,
       `GET /export-layouts/{id}`, `POST /export-layouts/{id}/versions`), estas por
-      ORGANIZAÇÃO como o catálogo da S12 (alvo da bateria numa terceira org). O
+      ORGANIZAÇÃO como o catálogo da S12 (alvo da bateria numa terceira org), mais a
+      exclusão do layout nunca usado (`DELETE /export-layouts/{id}`, 86e3nuuub,
+      `DETAIL_PK` pelo mesmo `SELECT ... FOR UPDATE` restrito à organização). O
       resumo do cliente (`GET /clients/{id}/summary`, 86e3k1q3j) e o fluxo previsto da
       carteira (`GET /clients/{id}/titles/flow`, 86e3k1q4g) também são coleção, e a
       prévia dos alvos do demonstrativo a partir da origem
@@ -674,6 +676,12 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
    MATERIALIZAÇÃO, não a do layout, e o layout aceita de 2 a 4 casas decimais. O usuário de
    cliente negado nas rotas de layout (sem `client_id`) grava `denied` com o PRÓPRIO
    tenant (`require_org_permission`).
+
+   **Excluir layout (86e3nuuub) é `manage_export_layouts`, e só para layout SEM geração.**
+   Cada arquivo gerado aponta para a VERSÃO que o produziu (FK RESTRICT) e o download
+   regenera por ela: layout com geração em qualquer versão é 409 `LAYOUT_EM_USO` com a
+   contagem (nunca nome de cliente nem de arquivo), e a corrida que passa da contagem cai
+   na FK e vira o mesmo 409 por SAVEPOINT. Arquivar o layout usado está fora de escopo.
 
    "(carteira)" e "(própria org)" **não** são células: são `resolve_client_access`
    e os filtros de coleção. **Tipos de anomalia é a única linha só-plataforma
@@ -1619,6 +1627,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.92, 10/10/2026. **Layout de exportação nunca usado passou a ter saída (86e3nuuub, pedido do Pedro: "criei esse layout apenas para testar, não seria interessante poder deletar?").** Nasceu `DELETE /api/v1/export-layouts/{layout_id}` (204, `manage_export_layouts`, alcance pelo mesmo `SELECT ... FOR UPDATE` restrito à organização das rotas irmãs; outra organização ou inexistente = 404; organização suspensa = 409). Só sai o layout sem nenhuma geração em `accounting_file_generations` apontando para qualquer versão: com geração é 409 `LAYOUT_EM_USO` (`ExportLayoutInUseError`) com a contagem e nada sai, porque o download regenera o arquivo pela versão. Versões e layout saem na mesma transação, num SAVEPOINT; a corrida (geração gravada entre a contagem e o DELETE) cai na FK RESTRICT `fk_accounting_file_generations_layout_version` e vira o MESMO 409, nunca 500. Nenhuma FK nem migration mudou. Na tela, "Excluir" na linha da lista só para quem tem a permissão, `AlertDialog` que diz a regra antes de confirmar, e o 409 aparece DENTRO do diálogo com a mensagem do servidor e só "Fechar" (sem toast). Lista canônica 123 → **124** (bateria dos três atacantes sem fixture nova); matriz (**29**) e pares de AAD seguem iguais. Arquivar layout usado ficou fora de escopo._
 
 _Versão 1.91, 09/10/2026. **O total da fatura de cartão em PDF dividido passou a vir da página 1, e o checksum vai para o log (86e3n70qf, subtask 7 do épico 86e3n70nv).** A fatura da Cora (5 páginas, 3 blocos com 0 + 0 + 5 compras) dava "os saldos deste arquivo não fecham" com diferença igual ao total: reproduzido com o PDF real, os blocos 1 e 2 liam o total e o 3 lia 0, e o `merge_statements` tomava o do último bloco (checksum `expected=0 computed=1164.22`). A `identify_document` ganhou `closing_balance` e `invoice_due_date` opcionais (só cartão, "como impresso, nunca inventar"), a junção usa o total e o vencimento dela, e nada muda para conta corrente e aplicação (teste parametrizado prova). A mesma prova achou o vencimento sem ano impresso virando 2024; `correct_invoice_due_year` corrige o ano impossível de forma determinística. Depois: `ok=True`, 1164.22 = 1164.22, vencimento 2026-10-13, 5 compras. Evento novo `parse_checksum`, só números. Regra nova na §4.8. Sem rota, permissão nem campo cifrado novo: endpoints sensíveis (**123**), matriz (**29**) e pares de AAD (**17**) não mudaram; a tool `extract_movements` e o `SYSTEM_PROMPT` ficaram iguais byte a byte._
 
