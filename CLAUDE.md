@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 **S0–S19 + Sprints 0–5 do agents-hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **124/124** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **126/126** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
 > **O que cada sprint do agents-hub entregou** (todas na `main`):
 >
@@ -19,10 +19,13 @@
 > | **7**  | **Escrita no Omie**: lançamento das compras `sem_omie` da fatura de cartão (`IncluirLancCC`)                 |
 >
 > ⚠️ **O invariante "Omie read-only" acabou na Sprint 7.** O ADL agora **grava movimento
-> financeiro na contabilidade do cliente**. Antes de encostar nesse fluxo, leia **§3.16**:
-> ele nasce **desligado** (`OMIE_POSTING_ENABLED=false`), o contrato do `IncluirLancCC`
-> segue **NÃO-VERIFICADO** contra a API real, e o critério de rollback é **um único
-> lançamento duplicado em produção**.
+> financeiro na contabilidade do cliente**, em duas formas escolhidas por linha: o
+> lançamento direto (`IncluirLancCC`) e, desde a 86e3n70q0, o título no Contas a Pagar
+> (fornecedor, título e baixa, uma máquina de estados com retomada). Antes de encostar
+> nesse fluxo, leia **§3.16** e **§4.11**: as duas nascem **desligadas**
+> (`OMIE_POSTING_ENABLED`, `OMIE_PAYABLE_POSTING_ENABLED`), os contratos foram verificados
+> contra a API real, e o critério de rollback é **um único lançamento duplicado em
+> produção**.
 >
 > **Roadmap (PRD 15/06/2026 → FASE 0–5):** plano em [Docs/PLANO_PROXIMOS_PASSOS.md](Docs/PLANO_PROXIMOS_PASSOS.md). **FASE 0 ✅** (Redis/ARQ removido, `BackgroundTasks`). **FASE 1 ✅ na `main`** — tolerância de data fixa (`DATE_DIVERGENCE_RANGE = 3` em `processing/matcher.py`) e cartão. **FASE 2** lançamento de fatura no Omie (Sprint 7). **FASE 3** glossário por cliente (**Sprint 6 — a próxima**). **FASE 4** Open Finance (Pluggy). **FASE 5** rotinas automáticas de auditoria.
 
@@ -193,7 +196,7 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**124** hoje — o arquivo é a fonte, confira com
+      (**126** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant E cross-org**: a bateria
       (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
@@ -201,7 +204,7 @@
       organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
-      (`PENDING_ENDPOINTS` está vazio: cobertura **124/124**). As 3 rotas do
+      (`PENDING_ENDPOINTS` está vazio: cobertura **126/126**). As 3 rotas do
       **plano de contas** (S10) e as 3 da **carteira de títulos** (S11 — lista,
       agregados e sincronizar) e as 3 da S15 (relatório de recebíveis, leitura e
       registro do contexto do título) entraram como coleção; as 20 da S12 também:
@@ -237,7 +240,10 @@
       prévia dos alvos do demonstrativo a partir da origem
       (`GET /clients/{id}/mapping/{tipo}/origin-targets`, 86e3n70pn) também: só LÊ (plano
       de contas do cliente e catálogo da org dele), e o guard é `manage_mapping_catalog`
-      AUDITADO depois do alcance ao cliente. Só
+      AUDITADO depois do alcance ao cliente. As 2 leituras do lançamento como Contas a
+      Pagar (86e3n70q0: `GET /clients/{id}/omie/departamentos` e
+      `GET /clients/{id}/omie/fornecedores?cnpj=`) também são coleção, sem permissão
+      própria (`AccessibleClientDep`, como as categorias), e a busca nunca grava. Só
       auth, tipos de anomalia, `test-connection`, `alert-test`, as 5 rotas de
       `/organizations` (plataforma, sem dado de cliente), `GET /export-layout-templates`
       (modelos declarados no código, iguais para toda organização) e o `POST /leads`
@@ -257,62 +263,80 @@
       esquecendo a organização. A máscara é do SERVIDOR — payload com o nome
       real e UI escondendo não é barreira (§4.9). Vale para qualquer endpoint
       novo que exponha autoria.
-16. **Escrita no Omie (Sprint 7) — a única no sistema, e a mais cara de errar:** - **Nasce desligada.** `OMIE_POSTING_ENABLED` tem default **`False`**
-    (diferente de `QUALIFICATION_ENABLED`): ligar é decisão explícita **por
-    ambiente**, via `--update-env-vars` no Cloud Run, sem deploy. Ligar num
-    ambiente exige que ele rode o código do contrato verificado (abaixo) —
-    o payload antigo (plano) é recusado pela Omie. - **O contrato do `IncluirLancCC` foi VERIFICADO contra a API real em
-    21/08/2026** (captura na conta Hologram; fixtures em
-    `apps/api/tests/fixtures/omie/`, anonimizadas). O que a evidência diz:
-    `param` **ANINHADO** (`cCodIntLanc` no topo + `cabecalho{nCodCC, dDtLanc,
-nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
-    **NÚMERO JSON** (string dá `3102`); `cTipo` é obrigatório na prática
-    (enviamos `DIN`); **não existe `cNatureza` na escrita** — valor absoluto
-    com categoria de despesa aterrissa como **débito** (extrato devolve
-    natureza `P` e valor negativo). O formato plano anterior foi recusado com
-    `5001` — evidência preservada no histórico da captura. O gate
-    `apps/api/tests/unit/test_omie_fixtures.py` agora **roda verde contra as
-    fixtures reais** e FALHA se o DTO divergir delas. - **Estorno é BLOQUEADO** (`estorno_nao_verificado`, servidor + UI): sem
-    campo de sinal no contrato, a representação do **crédito** segue
-    não-verificada — lançar estorno no palpite poderia registrá-lo como
-    segunda despesa. Só compra (valor negativo) é elegível. - **A dedup primária é do ADL — e a do fornecedor agora é FATO:** o
-    `IncluirLancCC` é **idempotente sobre `cCodIntLanc`** (2º POST devolve o
-    MESMO `nCodLanc`, status 0, sem criar nada — verificado 21/08/2026).
-    Ainda assim, antes de qualquer POST o serviço registra a INTENÇÃO em
-    `reconciliation_omie_postings` e consulta o **próprio** estado.
-    `cCodIntLanc` é derivado da **identidade da linha** (`file_entry_id`),
-    **nunca do conteúdo**: duas compras idênticas na mesma fatura têm de
-    virar **dois** lançamentos. - **Timeout nunca reenvia às cegas.** ⚠️ Verificado 21/08/2026: o
-    `ListarExtrato` **NÃO devolve `cCodIntLanc`**, então a reconciliação
-    pós-timeout por esse caminho é sempre **inconclusiva ⇒ não reenvia**
-    (linha fica travada com "confira no Omie"). A idempotência provada acima
-    permitiria reenviar com segurança — **mudar isso é decisão em aberto
-    (§10), não implementada**. `faultstring` (a Omie responde **HTTP 200** em
-    erro) é falha: **nada** é marcado como lançado. - **A mensagem de erro do provedor é persistida e NUNCA logada** — é texto
-    livre de terceiro e a Omie ecoa o `cObs`, que carrega a descrição da compra
-    (§4.5). No `usage_events` entra só uma **categoria fechada**, nunca o texto. - **Só cartão.** Elegibilidade é `session.account_type == 'credit_card'`
-    (o `CR` do Omie). ⚠️ O PRD chama a conta de cartão de `CA` e **está errado**:
-    `CA` é Conta Aplicação. Filtrar por `CA` lança na conta errada. - **E só no processo "na data da compra"** (86e3n70p0, decisão do Pedro de
-    08/10/2026): o `IncluirLancCC` grava `dDtLanc` = data da COMPRA, e o cliente que
-    lança o cartão em lote no VENCIMENTO da fatura (§4.8, §5.8) não usa essa data. Sessão
-    com `card_posting_date_mode = invoice_due_date` recusa o lote inteiro com 400
-    (`_require_purchase_date_process`) e a tela não oferece a ação. Lançar no lote é
-    desenho em aberto, não "trocar a data". - **O contrato do CONTAS A PAGAR foi
-    CAPTURADO em 13/10/2026 (86e3n70q0), mas NENHUM serviço o consome ainda** — é a
-    evidência do bloco B da 86e3b6n78, não código de produto. Fixtures anonimizadas e DTOs
-    mínimos (`OmieWriteParam`) por chamada, cada uma verificada contra a conta real da
-    Hologram em 13/10/2026: `ListarDepartamentos` (sem `nivel_totalizador` na resposta,
-    apesar da doc); busca de fornecedor por CNPJ é `ListarClientes` + `clientesFiltro`
-    (inexistente = fault `5113`); `IncluirCliente` exige `email` (`1040`) e é idempotente em
-    `codigo_cliente_integracao`; `IncluirContaPagar` aceita `categorias` com duas categorias
-    e `distribuicao` com valor e percentual, idempotente em `codigo_lancamento_integracao`;
-    a baixa é `LancarPagamento` (devolve `codigo_baixa`; repetir devolve a mesma) e no
-    extrato do cartão vira natureza `P` com `nCodLancamento` próprio e sem `cCodIntLanc`;
-    `CancelarPagamento`, `ExcluirContaPagar` e `ExcluirLancCC` funcionam por id;
-    `ExcluirCliente` de fornecedor que já teve título é recusado (`21`). **O CRÉDITO no
-    `IncluirLancCC` é categoria de RECEITA com valor absoluto (natureza `R` no extrato);
-    valor negativo é recusado (`106`)** — o `estorno_nao_verificado` continua bloqueado até
-    task própria usar essa evidência. Detalhe por chamada na skill `omie`.
+16. **Escrita no Omie — DUAS formas, escolhidas por linha, e a mais cara de errar:**
+    - **Duas formas, dois kill-switches, os dois nascem desligados.** `direto` é o
+      `IncluirLancCC` da Sprint 7 (`OMIE_POSTING_ENABLED`); `provisionar` é o título no
+      Contas a Pagar (86e3n70q0, `OMIE_PAYABLE_POSTING_ENABLED`). Default **`False`** nos
+      dois (diferente de `QUALIFICATION_ENABLED`): ligar é decisão explícita **por
+      ambiente**, via `--update-env-vars` no Cloud Run, sem deploy. Uma forma desligada
+      bloqueia só as linhas dela (`direto_desligado`, `provisao_desligada`); as duas
+      desligadas recusam o lote com 409. O pedido de cada linha traz `modo`, e o padrão
+      do SERVIDOR é `provisionar` (a gaveta atual manda `direto` explícito até a tela do
+      bloco C).
+    - **Contratos VERIFICADOS contra a API real** (fixtures anonimizadas em
+      `apps/api/tests/fixtures/omie/`, gate `tests/unit/test_omie_fixtures.py`, que FALHA
+      se o DTO divergir). `IncluirLancCC` (21/08/2026): `param` **ANINHADO**
+      (`cCodIntLanc` + `cabecalho{nCodCC, dDtLanc, nValorLanc}` +
+      `detalhes{cCodCateg, cTipo, cObs}`), `nValorLanc` **NÚMERO JSON** (string dá
+      `3102`), `cTipo` obrigatório na prática (`DIN`), **sem `cNatureza`**: valor absoluto
+      com categoria de despesa é débito. Contas a Pagar (13/10/2026): busca de
+      fornecedor por CNPJ é `ListarClientes` + `clientesFiltro` (inexistente é fault
+      `5113`, nunca lista vazia); `IncluirCliente` exige `email` (`1040`);
+      `IncluirContaPagar` aceita uma categoria, `categorias` (N) e `distribuicao` (valor E
+      percentual); a baixa é `LancarPagamento`; `ListarDepartamentos` NÃO traz
+      `nivel_totalizador` (departamento é escolhido, nunca inferido). **A Omie cria
+      sozinha uma conta contábil para fornecedor novo no primeiro título**, e por isso
+      `ExcluirCliente` dele passa a ser recusado (`21`): cadastrar fornecedor é escrita
+      que não se desfaz pela API.
+    - **A dedup primária é do ADL; a do fornecedor é FATO nas quatro escritas.** Antes de
+      qualquer POST o serviço registra a INTENÇÃO em `reconciliation_omie_postings` e
+      consulta o **próprio** estado (§4.11). Toda chave de integração é derivada da
+      **identidade da linha** (`file_entry_id`), **nunca do conteúdo** — duas compras
+      idênticas na mesma fatura são DOIS lançamentos — em `omie_posting/keys.py`: `ADL`
+      (`cCodIntLanc`), `HCP` (título) e `HBX` (baixa) com o MESMO sufixo base32 (20
+      caracteres, o teto do `codigo_baixa_integracao`), e `HFN` (fornecedor), a única
+      que vem do **CNPJ normalizado**: um fornecedor por CNPJ no Omie do cliente. As
+      quatro escritas são idempotentes sobre a chave (2º envio devolve o MESMO id).
+    - **A provisão não é atômica: é máquina de estados com RETOMADA.** Fornecedor (só
+      se o CNPJ não tem cadastro: cadastra com razão social e e-mail da linha; senão o
+      `omie_default_supplier_code` do cliente; senão `fornecedor_pendente`) → título
+      (emissão = data da compra; vencimento e previsão = `invoice_due_date` da sessão,
+      ou a data da compra se a sessão não tem; categorias somando o valor dentro de
+      0,01, o centavo vai para a última; rateio obrigatório se
+      `omie_department_required`) → baixa, **SÓ no processo "na data da compra"**, valor
+      total na data da compra. No processo "vencimento da fatura" a provisão PARA no
+      título: a baixa depende do pagamento efetivo da fatura (bloco 0, 11/10/2026). Cada
+      passo grava o id e COMMITA antes do próximo; a retomada pula o que já tem id.
+      Sucesso parcial (título criado, baixa recusada) é estado legítimo e a resposta
+      diz o passo e os ids. A provisão concluída fecha a anomalia `missing_in_omie` com
+      os ids e **não** casa a linha (o id da baixa no extrato só aparece depois; o
+      reprocessamento acha o par).
+    - **Timeout: o `direto` nunca reenvia às cegas; a provisão reenvia com a MESMA
+      chave.** O `ListarExtrato` **NÃO devolve `cCodIntLanc`**, então a reconciliação
+      pós-timeout do `direto` é sempre inconclusiva e a linha trava em "confira no
+      Omie" (reenviar o `direto` com a idempotência provada segue decisão em aberto,
+      §10). Na provisão, envio sem confirmação de um passo é reenviado na execução
+      seguinte, até **3 envios por passo** (`MAX_STEP_SENDS`); depois,
+      `envio_anterior_sem_confirmacao` com a chave para achar no Omie.
+    - **Trocar de forma só quando nenhum dinheiro pode ter sido escrito** (provisão ainda
+      no passo `fornecedor`, ou `direto` recusado por `faultstring` na única tentativa);
+      no resto é `modo_divergente`. `faultstring` (HTTP 200 em erro) é falha: **nada** é
+      marcado como lançado; o `757` (competência fechada) vira `competencia_fechada`.
+    - **A mensagem de erro do provedor é persistida e NUNCA logada** — texto livre de
+      terceiro, e a Omie ecoa a observação, que carrega a descrição da compra (§4.5).
+      CNPJ, razão social e e-mail do fornecedor trafegam em memória até a Omie e não
+      persistem nem vão para log; no `usage_events` só contagens e categorias fechadas.
+    - **Estorno é BLOQUEADO** (`estorno_nao_verificado`, servidor + UI) nas duas formas.
+      A captura de 13/10/2026 mostrou que o CRÉDITO no `IncluirLancCC` é categoria de
+      RECEITA com valor absoluto (natureza `R`; valor negativo dá `106`); destravar é
+      task própria (item 2 do épico 86e2xweaf).
+    - **Só cartão.** Elegibilidade é `session.account_type == 'credit_card'` (o `CR` do
+      Omie). ⚠️ O PRD chama a conta de cartão de `CA` e **está errado**: `CA` é Conta
+      Aplicação. Filtrar por `CA` lança na conta errada.
+    - **O `direto` só no processo "na data da compra"** (86e3n70p0): o `IncluirLancCC`
+      grava `dDtLanc` = data da COMPRA, que o cliente do lote no vencimento não usa.
+      Nesse processo o `direto` volta `direto_indisponivel_no_modo_vencimento` por linha
+      e a `provisionar` funciona (o lote inteiro não é mais recusado).
 17. **O limite do login é por IDENTIDADE, não por IP (86e3anx10).** Atrás do BFF do Next
     a API vê o IP do PROXY para todo mundo (o uvicorn sobe sem `--forwarded-allow-ips`),
     então um limite por IP é um balde da plataforma inteira. O que distingue pessoas é
@@ -510,6 +534,17 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
      `VENCIMENTO_DA_FATURA_OBRIGATORIO` antes de gravar, e o CHECK
      `ck_reconciliation_sessions_card_due_date_coherent` garante o mesmo no banco. Trocar
      o modo do cliente não reescreve conciliação antiga, nem no reprocessamento.
+   - **Como o cliente provisiona no Contas a Pagar também é DECLARADO** (86e3n70q0,
+     bloco 0 de 11/10/2026), em duas colunas de `clients`, só código e flag:
+     `omie_default_supplier_code` (BIGINT nulável, CHECK `> 0`: o `codigo_cliente_omie`
+     do fornecedor que recebe o título quando a linha não traz CNPJ, ou traz um sem
+     cadastro e sem dados para cadastrar; NULL = a linha bloqueia com
+     `fornecedor_pendente`) e `omie_department_required` (BOOLEAN, default `false`; a
+     PCTAX usa departamento em todo gasto, então para ela o título só sai com rateio).
+     Escrita pelo `edit_client` (criação e PATCH, o fornecedor padrão tri-estado como a
+     categoria). O código do fornecedor padrão não é conferido no Omie ao gravar: quem o
+     escolhe é a busca por CNPJ da tela, e um código que sumir falha no título com a
+     mensagem da Omie.
    - **No PDF dividido em blocos, o total da fatura de cartão vem da identidade da
      página 1; o saldo final de extrato vem do último bloco** (86e3n70qf). A fatura
      imprime o total no cabeçalho (páginas 1 e 2) e a última página costuma ter só
@@ -725,6 +760,21 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
     `ON CONFLICT DO NOTHING` — e `UNIQUE(client_id, cod_int_lanc)`. `client_id` é
     desnormalizado de propósito: toda query filtra por ele (§3.15) sem depender
     de um JOIN que alguém pode esquecer.
+    **Desde a 86e3n70q0 a intenção é uma MÁQUINA DE ESTADOS** (migration
+    `d9f3b6a2e815`): `kind` (`direto` | `provisao`; linha anterior é `direto` pelo
+    `server_default`), `step` (o PRÓXIMO passo da provisão: `fornecedor`, `titulo`,
+    `baixa`, `concluido`; NULL no `direto`) e os ids que cada passo devolveu
+    (`supplier_code`, `payable_id`, `payment_id`; só códigos da Omie, §4.5). Três
+    CHECKs no banco: status conhecido; forma (`direto` sem passo nem ids da provisão;
+    `provisao` sem `omie_lancamento_id`); e passos coerentes (um passo só existe com o
+    id do anterior gravado, e `confirmed` é exatamente `concluido`). `attempts` é UM
+    contador: no `direto`, todas as tentativas; na provisão, os envios sem confirmação
+    do PASSO CORRENTE, zerado quando o passo avança ou a Omie responde `faultstring`.
+    **O downgrade aborta enquanto houver linha `provisao`**: derrubar `payable_id`
+    apagaria a memória de um título já criado, e o código anterior lançaria a mesma
+    compra de novo como direto. A linha provisionada NÃO muda de situação na
+    conciliação (segue `sem_omie`, sem `omie_lancamento_id`); quem diz "já lançada" é a
+    intenção `confirmed`.
 
 12. **Dois modos de saída de cliente (86e34jd1d + 86e36pm1z) — e nunca um terceiro
     improvisado:**
@@ -1579,11 +1629,17 @@ Quando o usuário não tiver decidido, **pergunte** antes de presumir:
       confirmada (2º POST devolve o mesmo `nCodLanc`), fixtures anonimizadas no repo e
       gate rodando verde. Ver **§3.16**. ⚠️ **O que ficou em aberto:**
       (a) **representação de ESTORNO** (crédito) na escrita — hoje bloqueado
-      (`estorno_nao_verificado`); precisa de captura própria (categoria de receita?
-      valor com sinal?); (b) **reenvio pós-timeout** — o `ListarExtrato` não devolve
+      (`estorno_nao_verificado`); a captura de 13/10/2026 mostrou que é categoria de
+      RECEITA com valor absoluto, e destravar é task própria (item 2 do épico 86e2xweaf);
+      (b) **reenvio pós-timeout do `direto`** — o `ListarExtrato` não devolve
       `cCodIntLanc`, então a reconciliação atual é sempre inconclusiva; a idempotência
-      provada permitiria reenviar com segurança — decidir com o Pedro; (c) ligar
-      `OMIE_POSTING_ENABLED` em dev **só depois** deste código deployado. _FASE 2 / S24_
+      provada permitiria reenviar com segurança — decidir com o Pedro (a PROVISÃO já
+      reenvia, até 3 envios por passo, 86e3n70q0); (c) ligar `OMIE_POSTING_ENABLED` em
+      dev **só depois** deste código deployado; (d) **título com várias `categorias` E
+      `distribuicao` ao mesmo tempo** não foi exercitado pela captura (cada forma foi
+      aceita sozinha): conferir no primeiro uso real antes de ligar
+      `OMIE_PAYABLE_POSTING_ENABLED` para cliente que divide categorias e exige rateio.
+      _FASE 2 / S24_
 - [ ] **Cloud Run `--no-cpu-throttling` + `min-instances ≥ 1`** na API após remover Redis (senão BackgroundTasks congela). Custo aceitável? _FASE 0 / S20_
 - [ ] **Pluggy interna vs Cubos** (proposta Arthur Souza, 16/06) + cobertura de Sicredi/BNB/Cora + primeiro endpoint público (webhook). _FASE 4_
 - [ ] **Campo de departamento/rateio** na response Omie (bloqueia check `sem_departamento`); Slack (app vs webhook) e provedor de email; persona supervisor (role nova vs reuso). _FASE 5_
@@ -1642,6 +1698,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.94, 13/10/2026. **As compras do cartão passaram a poder ir ao Omie como Contas a Pagar, escolhido por linha (86e3n70q0, bloco B: o backend; a tela é o bloco C).** Cinco métodos novos no `OmieClient` sobre os DTOs da captura (`listar_departamentos` paginando, `listar_clientes_por_cnpj` com o `5113` virando "não encontrado", `incluir_cliente`, `incluir_conta_pagar`, `lancar_pagamento`), `omie_error_code` para ler o código da Omie nos dois formatos em que ele chega (header `OmieAPI-Error` e `faultcode` SOAP), o mock coerente e `core/cnpj.py` (normalizar, dígito verificador, a máscara da captura). Duas leituras para a tela: `GET /clients/{id}/omie/departamentos` (cache em memória por cliente, 6 h, só ativos) e `GET /clients/{id}/omie/fornecedores?cnpj=` (404 `FORNECEDOR_NAO_ENCONTRADO`, nunca grava), as duas `AccessibleClientDep`, só-arquivo 409 `CAPACIDADE_AUSENTE`; lista canônica 124 → **126**. Cliente ganhou `omie_default_supplier_code` e `omie_department_required` (§4.8, migration `c4e8a1f7b3d2`). A intenção virou máquina de estados (§4.11, migration `d9f3b6a2e815`, downgrade que aborta com provisão gravada) e as chaves por passo (`HCP`, `HBX`, `HFN`) nasceram em `keys.py`. O pedido por linha ganhou `modo` (padrão `provisionar`), fornecedor, categorias e departamentos; a provisão tem flag própria (`OMIE_PAYABLE_POSTING_ENABLED`, default `False`); no processo "vencimento da fatura" ela para no título e o `direto` é bloqueado por linha, então o lote não é mais recusado inteiro. Timeout de passo reenvia com a mesma chave até 3 vezes; `757` é `competencia_fechada`; evento `lancamento_omie_provisao`. A gaveta atual manda `modo: 'direto'` explícito, então nada muda na tela até o bloco C. §3.16 reescrita como lei atual (também desfez os marcadores colapsados numa linha). Matriz (**29**) e pares de AAD (**17**) não mudaram: nenhum campo cifrado nasceu, porque CNPJ, razão social e e-mail do fornecedor não persistem._
 
 _Versão 1.93, 13/10/2026. **O contrato do Contas a Pagar da Omie foi capturado contra a conta real da Hologram (86e3n70q0, subtask 5 do épico 86e3n70nv; bloco A da 86e3b6n78), sem nenhum código de produto.** Mesma receita da S-1: `scripts/capture_omie_payables.py` (um passo por chamada, 2º envio de cada escrita, recusas em `.refusals.json`, limpeza pela API como passo próprio), DTOs mínimos em `schemas.py` sobre a base `OmieWriteParam` (a mesma `omie_param_aliases` do `IncluirLancCCRequest`, agora herdada) e 25 testes novos no gate de fixtures (39 no total, 49 arquivos de fixture novos, anonimizados). O que a Omie respondeu está na §3.16 e na skill `omie`: `ListarDepartamentos` sem `nivel_totalizador`; busca por CNPJ é `ListarClientes` + `clientesFiltro`, inexistente é fault `5113`; `IncluirCliente` exige `email` (`1040`, única recusa de payload do dia) e é idempotente; `IncluirContaPagar` aceitou de primeira as três formas (simples, duas `categorias`, `distribuicao` com valor e percentual) e é idempotente; a baixa é `LancarPagamento`, repetir devolve a mesma baixa, e no extrato ela é natureza `P` com id próprio; o CRÉDITO do `IncluirLancCC` é categoria de receita (natureza `R`), valor negativo é `106`; o extrato leva segundos para refletir o recém-criado. Tudo que a captura criou saiu pela API, exceto o fornecedor de teste (`ExcluirCliente` recusado com `21` por dependência): fica para apagar à mão. Sem rota nem permissão nova: endpoints sensíveis (**124**), matriz (**29**) e pares de AAD (**17**) não mudaram._
 
