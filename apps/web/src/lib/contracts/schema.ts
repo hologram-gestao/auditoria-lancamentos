@@ -1767,7 +1767,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Busca no Omie do cliente o fornecedor de um CNPJ (14 dígitos, com ou sem máscara). Devolve código, razão social e nome fantasia, ou 404 FORNECEDOR_NAO_ENCONTRADO. Nunca grava nada. CNPJ inválido: 400. Cliente só-arquivo: 409 CAPACIDADE_AUSENTE. */
+        /** Busca no Omie do cliente o fornecedor de um CNPJ (14 dígitos, com ou sem máscara) OU de um código (`codigo_cliente_omie`): exatamente um dos dois. Por CNPJ devolve código, razão social e nome fantasia; por código, o nome de exibição do cadastro em `razao_social`. Sem cadastro: 404 FORNECEDOR_NAO_ENCONTRADO. Nunca grava nada. CNPJ inválido, os dois ou nenhum: 400. Cliente só-arquivo: 409 CAPACIDADE_AUSENTE. */
         get: operations["get_client_omie_fornecedor_api_v1_clients__client_id__omie_fornecedores_get"];
         put?: never;
         post?: never;
@@ -2507,6 +2507,7 @@ export interface components {
             description: string;
             /** Amount */
             amount: string;
+            omie_posting?: components["schemas"]["OmiePostingState"] | null;
         };
         /**
          * AnomalyRelatedOmieEntry
@@ -5142,6 +5143,7 @@ export interface components {
             user_note: string | null;
             /** Omie Lancamento Id */
             omie_lancamento_id: number | null;
+            omie_posting?: components["schemas"]["OmiePostingState"] | null;
         };
         /**
          * LoginRequest
@@ -6086,6 +6088,42 @@ export interface components {
             payable_id?: number | null;
             /** Payment Id */
             payment_id?: number | null;
+        };
+        /**
+         * OmiePostingState
+         * @description O que o sistema JÁ escreveu (ou tentou escrever) no Omie por esta linha.
+         *
+         *     86e3n70q0 (bloco C): espelho da linha de `reconciliation_omie_postings`, a
+         *     intenção registrada ANTES de qualquer envio (§4.11). Sem ela a tela não sabia
+         *     se uma linha `sem_omie` já tinha um título provisionado — a provisão não casa
+         *     a linha, e o selo "lançado" vivia num cache da visita. Agora o selo é verdade
+         *     do banco.
+         *
+         *     Só códigos e ids do Omie, mais a mensagem do provedor: ela é persistida de
+         *     propósito para a pessoa ler (ADR-022-BE) e continua NUNCA logada. Tipos
+         *     lenientes (str), como o resto das respostas da revisão.
+         */
+        OmiePostingState: {
+            /** Kind */
+            kind: string;
+            /** Status */
+            status: string;
+            /** Step */
+            step: string | null;
+            /** Attempts */
+            attempts: number;
+            /** Supplier Code */
+            supplier_code: number | null;
+            /** Payable Id */
+            payable_id: number | null;
+            /** Payment Id */
+            payment_id: number | null;
+            /** Omie Lancamento Id */
+            omie_lancamento_id: number | null;
+            /** Error Code */
+            error_code: string | null;
+            /** Error Message */
+            error_message: string | null;
         };
         /**
          * OrganizationCreate
@@ -12006,9 +12044,11 @@ export interface operations {
     };
     get_client_omie_fornecedor_api_v1_clients__client_id__omie_fornecedores_get: {
         parameters: {
-            query: {
+            query?: {
                 /** @description CNPJ do fornecedor. */
-                cnpj: string;
+                cnpj?: string | null;
+                /** @description Código do cadastro no Omie (`codigo_cliente_omie`). */
+                codigo?: number | null;
             };
             header?: never;
             path: {
