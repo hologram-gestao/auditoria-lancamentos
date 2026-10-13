@@ -70,6 +70,8 @@ export interface CreateClientPayload {
   organization_id?: string;
   /** 86e3n70p0 — omitido = `purchase_date`, o processo de sempre. */
   card_posting_date_mode?: CardPostingDateMode;
+  /** 86e3n70q0 — omitido = `false`. */
+  omie_department_required?: boolean;
 }
 
 /**
@@ -85,6 +87,10 @@ export interface UpdateClientPayload {
   category_id?: string | null;
   /** 86e3n70p0 — omitido mantém. Vale para as conciliações de cartão criadas DEPOIS. */
   card_posting_date_mode?: CardPostingDateMode;
+  /** 86e3n70q0 — omitido mantém. */
+  omie_department_required?: boolean;
+  /** 86e3n70q0 — tri-estado: omitido mantém, `null` remove, código troca. */
+  omie_default_supplier_code?: number | null;
 }
 
 export interface TestConnectionPayload {

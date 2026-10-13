@@ -53,13 +53,10 @@ import { useAuthStore } from '@/stores/auth';
 
 import { AnomaliesTab } from '../review/anomalies-tab';
 import { GlossarySeal } from '../review/glossary-seal';
+import type { PostingClientContext } from '../review/lancar-no-omie-drawer';
 import { MovementsTab } from '../review/movements-tab';
 import { OmieDivergencesTab } from '../review/omie-divergences-tab';
-import {
-  INVOICE_DUE_DATE_POSTING_BLOCK_MESSAGE,
-  originCanWrite,
-  processAllowsPosting,
-} from '../review/omie-posting-eligibility';
+import { originCanWrite } from '../review/omie-posting-eligibility';
 import { SummaryTab } from '../review/summary-tab';
 import { accountNameFor } from '../session-label';
 
@@ -103,11 +100,17 @@ export function SessionDetailScreen({ clientId, sessionId }: SessionDetailScreen
   // S9 (R6): lançar no Omie exige a capacidade `escrever` de uma conexão ATIVA.
   // `capabilities` vem do contrato (é DADO, não exceção), e o predicado é o
   // mesmo do servidor — a ação some em vez de devolver `CAPACIDADE_AUSENTE`.
-  // 86e3n70p0: e o processo do cartão desta conciliação precisa ser o "na data
-  // da compra" — no modo vencimento o servidor recusa o lote inteiro.
-  const canPostToOmie =
-    originCanWrite(clientQuery.data?.connections ?? []) &&
-    (detailQuery.data === undefined || processAllowsPosting(detailQuery.data));
+  // 86e3n70q0 (bloco C): o processo do cartão NÃO esconde mais a ação. No
+  // processo do vencimento a gaveta oferece só a provisão (o servidor recusa o
+  // direto por linha, `direto_indisponivel_no_modo_vencimento`).
+  const canPostToOmie = originCanWrite(clientQuery.data?.connections ?? []);
+  const postingContext: PostingClientContext = {
+    clientId,
+    cardPostingDateMode: detailQuery.data?.card_posting_date_mode,
+    invoiceDueDate: detailQuery.data?.invoice_due_date,
+    departmentRequired: clientQuery.data?.omie_department_required ?? false,
+    defaultSupplierCode: clientQuery.data?.omie_default_supplier_code ?? null,
+  };
   // Fonte única do rótulo (86e2u513w): o breadcrumb do ClientShell deriva o
   // mesmo nome do mesmo helper — divergir aqui é mostrar duas contas diferentes
   // na mesma tela.
@@ -145,8 +148,6 @@ export function SessionDetailScreen({ clientId, sessionId }: SessionDetailScreen
 
   const referenceLabel = formatReferenceMonth(detail.reference_month);
   const cardProcessLine = sessionCardProcessLine(detail, formatBRDate);
-  const postingBlockedByProcess =
-    detail.account_type === 'credit_card' && !processAllowsPosting(detail);
   const isProcessing = detail.status === 'processing';
   const isError = detail.status === 'error';
   // 86e3n70q9 — cruzar de novo uma conciliação concluída. O servidor recusa
@@ -180,11 +181,6 @@ export function SessionDetailScreen({ clientId, sessionId }: SessionDetailScreen
               conciliação e o vencimento (no processo do vencimento, o lote). */}
           {cardProcessLine !== null && (
             <p className="text-muted-foreground text-sm">{cardProcessLine}</p>
-          )}
-          {postingBlockedByProcess && (
-            <p className="text-muted-foreground text-xs">
-              {INVOICE_DUE_DATE_POSTING_BLOCK_MESSAGE}
-            </p>
           )}
           <div className="flex flex-wrap items-center gap-2">
             <ReconciliationStatusBadge status={detail.status} />
@@ -234,6 +230,7 @@ export function SessionDetailScreen({ clientId, sessionId }: SessionDetailScreen
                 sessionId={sessionId}
                 isCard={detail.account_type === 'credit_card'}
                 canPostToOmie={canPostToOmie}
+                postingContext={postingContext}
               />
             </TabsContent>
             <TabsContent value="divergencias">
@@ -244,6 +241,7 @@ export function SessionDetailScreen({ clientId, sessionId }: SessionDetailScreen
                 sessionId={sessionId}
                 isCard={detail.account_type === 'credit_card'}
                 canPostToOmie={canPostToOmie}
+                postingContext={postingContext}
               />
             </TabsContent>
             <TabsContent value="resumo">

@@ -5,8 +5,8 @@
  * lê o Omie; este módulo grava movimento financeiro na contabilidade do
  * cliente. O backend é quem monta o `IncluirLancCC` (ou, desde a 86e3n70q0, o
  * título no Contas a Pagar), deduplica por linha e decide o desfecho — daqui
- * sai `{file_entry_id, cod_categoria, modo}`. A gaveta atual manda sempre
- * `modo: 'direto'`; a provisão ganha tela no bloco C.
+ * sai a linha com a forma (`modo`) e a classificação que a pessoa escolheu
+ * (`lib/validation/omie-posting.ts` monta o pedido).
  *
  * Contrato (tipos gerados, nunca redigitados — ver `lib/contracts/index.ts`):
  *   - `POST /reconciliations/{id}/omie-postings` → `{ data: {...} }` com chave
@@ -20,6 +20,8 @@
  */
 import type {
   OmieCategoriaListResponse,
+  OmieDepartamentoListResponse,
+  OmieFornecedorItem,
   OmiePostingBatchPayload,
   OmiePostingLineRequest,
 } from '@/lib/contracts';
@@ -27,8 +29,15 @@ import type {
 import { apiGet, apiPost } from './client';
 
 export type {
+  CategoriaRateio,
+  DepartamentoRateio,
   OmieCategoriaItem,
   OmieCategoriaListResponse,
+  OmieDepartamentoItem,
+  OmieDepartamentoListResponse,
+  OmieFornecedorItem,
+  OmiePostingMode,
+  OmiePostingState,
   OmiePostingBatchPayload,
   OmiePostingLineReason,
   OmiePostingLineRequest,
@@ -80,4 +89,41 @@ export async function postOmieLancamentos(
   return apiPost<OmiePostingBatchPayload>(`/api/v1/reconciliations/${sessionId}/omie-postings`, {
     lines,
   });
+}
+
+/**
+ * Departamentos ATIVOS do Omie do cliente, para o rateio do título (86e3n70q0).
+ *
+ * `{ data, total }` — duas chaves, o objeto chega inteiro. Lista COMPLETA (o
+ * servidor cacheia 6 h por cliente): a escolha busca por texto no navegador. O
+ * nome do departamento carrega nome de cliente final — fica só em memória, nunca
+ * em log nem em armazenamento do navegador.
+ */
+export async function listOmieDepartamentos(
+  clientId: string,
+): Promise<OmieDepartamentoListResponse> {
+  return apiGet<OmieDepartamentoListResponse>(`/api/v1/clients/${clientId}/omie/departamentos`);
+}
+
+/** CNPJ (com ou sem máscara) OU código do cadastro — exatamente um dos dois. */
+export type FornecedorLookup = { cnpj: string } | { codigo: number };
+
+/**
+ * O fornecedor no Omie do cliente: por CNPJ (o cadastro que vai receber o título)
+ * ou por código (o nome do fornecedor PADRÃO já gravado no cliente). Nunca grava.
+ *
+ * 404 `FORNECEDOR_NAO_ENCONTRADO` = sem cadastro: na gaveta, a tela pede razão
+ * social e e-mail para cadastrar no lançamento. `{ data }` com chave única: o
+ * `apiGet` desembrulha e devolve o item.
+ */
+export async function findOmieFornecedor(
+  clientId: string,
+  lookup: FornecedorLookup,
+): Promise<OmieFornecedorItem> {
+  const sp = new URLSearchParams(
+    'cnpj' in lookup ? { cnpj: lookup.cnpj } : { codigo: String(lookup.codigo) },
+  );
+  return apiGet<OmieFornecedorItem>(
+    `/api/v1/clients/${clientId}/omie/fornecedores?${sp.toString()}`,
+  );
 }

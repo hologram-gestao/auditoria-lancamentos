@@ -31,13 +31,29 @@ import { POSTING_BLOCK_MESSAGE, type PostingBlockReason } from './omie-posting-e
 interface LancarNoOmieButtonProps {
   /** `null` = elegível. Qualquer outro valor desabilita e vira o motivo lido. */
   block: PostingBlockReason | null;
+  /**
+   * Texto lido do bloqueio quando ele é mais específico que o motivo (a provisão
+   * concluída diz o número do título — `postingBlockMessage`).
+   */
+  blockMessage?: string;
+  /**
+   * A linha tem uma provisão começada e não terminada (86e3n70q0, bloco C): a
+   * ação é RETOMAR, e a gaveta abre travada na forma gravada.
+   */
+  resume?: boolean;
   /** Um lote desta sessão está em voo — nenhuma porta de entrada abre. */
   pending?: boolean;
   onClick: () => void;
 }
 
 /** Ação individual da linha: abre a gaveta de lançamento com uma compra só. */
-export function LancarNoOmieButton({ block, pending = false, onClick }: LancarNoOmieButtonProps) {
+export function LancarNoOmieButton({
+  block,
+  blockMessage,
+  resume = false,
+  pending = false,
+  onClick,
+}: LancarNoOmieButtonProps) {
   const reasonId = useId();
   const blocked = block !== null;
   return (
@@ -60,11 +76,11 @@ export function LancarNoOmieButton({ block, pending = false, onClick }: LancarNo
         ) : (
           <Upload className="h-4 w-4" aria-hidden="true" />
         )}
-        Lançar no Omie
+        {resume && !blocked ? 'Retomar lançamento' : 'Lançar no Omie'}
       </Button>
       {blocked && (
         <span id={reasonId} className="sr-only">
-          {POSTING_BLOCK_MESSAGE[block]}
+          {blockMessage ?? POSTING_BLOCK_MESSAGE[block]}
         </span>
       )}
     </>

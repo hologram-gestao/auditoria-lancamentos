@@ -80,6 +80,7 @@ import { makeCreateClientSchema, type CreateClientFormValues } from '@/lib/valid
 import { useAuthStore } from '@/stores/auth';
 
 import { CardPostingDateModeField } from './card-posting-date-mode-field';
+import { DepartmentRequiredField } from './client-omie-payables-fields';
 import { PasswordInput } from './password-input';
 import { TestConnectionButton, type TestConnectionState } from './test-connection-button';
 
@@ -133,6 +134,7 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
       omie_app_secret: '',
       category_id: 'none',
       card_posting_date_mode: 'purchase_date',
+      omie_department_required: false,
       organization_id: '',
     },
     mode: 'onSubmit',
@@ -197,6 +199,7 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
     form.setValue('omie_app_key', '');
     form.setValue('omie_app_secret', '');
     form.setValue('card_posting_date_mode', 'purchase_date');
+    form.setValue('omie_department_required', false);
     setShowKey(false);
     setShowSecret(false);
     setTestState({ kind: 'idle' });
@@ -249,6 +252,8 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
         ...(values.card_posting_date_mode !== 'purchase_date'
           ? { card_posting_date_mode: values.card_posting_date_mode }
           : {}),
+        // 86e3n70q0 — omitido é `false` no servidor: só vai quando ligado.
+        ...(values.omie_department_required ? { omie_department_required: true } : {}),
         // Só a plataforma manda o campo: o staff omitindo é o que faz o
         // backend usar a organização da própria linha.
         ...(values.organization_id ? { organization_id: values.organization_id } : {}),
@@ -484,6 +489,11 @@ export function CreateClientModal({ open, onOpenChange }: CreateClientModalProps
                       )}
 
                       <CardPostingDateModeField control={form.control} disabled={inputsDisabled} />
+                      <DepartmentRequiredField control={form.control} disabled={inputsDisabled} />
+                      <p className="text-muted-foreground text-sm">
+                        O fornecedor padrão no Omie é escolhido depois de criar, em Editar cliente:
+                        a busca pelo CNPJ pergunta ao Omie do cliente.
+                      </p>
                     </>
                   )}
                 </fieldset>

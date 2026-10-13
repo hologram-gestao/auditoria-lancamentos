@@ -67,6 +67,7 @@ import {
 } from '@/components/features/reconciliations/review/omie-posting-eligibility';
 import type { FileEntryItem } from '@/lib/api/reconciliations';
 import { assertNoA11yViolations } from '@/test/a11y';
+import { TEST_POSTING_CONTEXT } from '@/test/posting-context';
 
 const SESSION_ID = 's1';
 
@@ -142,7 +143,14 @@ describe('Elegibilidade — espelho declarado do servidor', () => {
 
 describe('Aba de Movimentações — cartão', () => {
   it('linha sem_omie exibe a ação e pode ser selecionada', () => {
-    render(<MovementsTab sessionId={SESSION_ID} isCard canPostToOmie />);
+    render(
+      <MovementsTab
+        sessionId={SESSION_ID}
+        isCard
+        canPostToOmie
+        postingContext={TEST_POSTING_CONTEXT}
+      />,
+    );
 
     const acao = launchButtons()[0];
     expect(acao).toBeDefined();
@@ -159,7 +167,14 @@ describe('Aba de Movimentações — cartão', () => {
     'linha %s tem a ação indisponível, com o motivo alcançável, e não entra na seleção',
     (_nome, over, motivo) => {
       setEntries([entry(over)]);
-      render(<MovementsTab sessionId={SESSION_ID} isCard canPostToOmie />);
+      render(
+        <MovementsTab
+          sessionId={SESSION_ID}
+          isCard
+          canPostToOmie
+          postingContext={TEST_POSTING_CONTEXT}
+        />,
+      );
 
       const acao = launchButtons()[0];
       expect(acao).toHaveAttribute('aria-disabled', 'true');
@@ -176,7 +191,14 @@ describe('Aba de Movimentações — cartão', () => {
 
   it('a barra de lote aparece com a contagem ao marcar uma compra', async () => {
     const ui = userEvent.setup();
-    render(<MovementsTab sessionId={SESSION_ID} isCard canPostToOmie />);
+    render(
+      <MovementsTab
+        sessionId={SESSION_ID}
+        isCard
+        canPostToOmie
+        postingContext={TEST_POSTING_CONTEXT}
+      />,
+    );
 
     expect(screen.queryByRole('button', { name: /Lançar 1 compra no Omie/ })).toBeNull();
     await ui.click(screen.getByRole('checkbox', { name: /Selecionar a compra de/ }));
@@ -190,7 +212,14 @@ describe('Aba de Movimentações — cartão', () => {
       entry({ id: 'e2', situation: 'ignorado' }),
       entry({ id: 'e3', description: 'Uber 998' }),
     ]);
-    render(<MovementsTab sessionId={SESSION_ID} isCard canPostToOmie />);
+    render(
+      <MovementsTab
+        sessionId={SESSION_ID}
+        isCard
+        canPostToOmie
+        postingContext={TEST_POSTING_CONTEXT}
+      />,
+    );
 
     await ui.click(
       screen.getByRole('checkbox', { name: /Selecionar todas as compras desta página/ }),
@@ -205,7 +234,14 @@ describe('Aba de Movimentações — cartão', () => {
       entry({ id: 'e1' }),
       entry({ id: 'e2', description: 'Assinatura anual', situation: 'ignorado' }),
     ]);
-    const view = render(<MovementsTab sessionId={SESSION_ID} isCard canPostToOmie />);
+    const view = render(
+      <MovementsTab
+        sessionId={SESSION_ID}
+        isCard
+        canPostToOmie
+        postingContext={TEST_POSTING_CONTEXT}
+      />,
+    );
 
     await ui.click(screen.getByRole('checkbox', { name: /Posto Shell 1234/ }));
 
@@ -216,7 +252,14 @@ describe('Aba de Movimentações — cartão', () => {
 describe('Aba de Movimentações — conta corrente', () => {
   it('não expõe seleção nem ação de lançamento em lugar nenhum', () => {
     setEntries([entry(), entry({ id: 'e2', situation: 'conciliado', omie_lancamento_id: 9001 })]);
-    render(<MovementsTab sessionId={SESSION_ID} isCard={false} canPostToOmie />);
+    render(
+      <MovementsTab
+        sessionId={SESSION_ID}
+        isCard={false}
+        canPostToOmie
+        postingContext={TEST_POSTING_CONTEXT}
+      />,
+    );
 
     expect(launchButtons()).toHaveLength(0);
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
@@ -231,7 +274,14 @@ describe('Aba de Movimentações — conta corrente', () => {
 describe('Aba de Movimentações — origem sem a capacidade de escrever (S9)', () => {
   it('cartão + origem que não escreve: nenhuma porta de entrada de lançamento', () => {
     setEntries([entry()]);
-    render(<MovementsTab sessionId={SESSION_ID} isCard canPostToOmie={false} />);
+    render(
+      <MovementsTab
+        sessionId={SESSION_ID}
+        isCard
+        canPostToOmie={false}
+        postingContext={TEST_POSTING_CONTEXT}
+      />,
+    );
 
     expect(launchButtons()).toHaveLength(0);
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
@@ -239,7 +289,14 @@ describe('Aba de Movimentações — origem sem a capacidade de escrever (S9)', 
 
   it('a mesma sessão COM origem capaz volta a oferecer a ação', () => {
     setEntries([entry()]);
-    render(<MovementsTab sessionId={SESSION_ID} isCard canPostToOmie />);
+    render(
+      <MovementsTab
+        sessionId={SESSION_ID}
+        isCard
+        canPostToOmie
+        postingContext={TEST_POSTING_CONTEXT}
+      />,
+    );
 
     expect(launchButtons().length).toBeGreaterThan(0);
   });

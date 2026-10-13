@@ -519,9 +519,12 @@ function clientDetailComOrigem(): Record<string, unknown> {
       ? { ...CLIENT_DETAIL, accounts: [...ACCOUNTS, ...NON_HABITUAL_ACCOUNTS] }
       : { ...CLIENT_DETAIL };
   const fechado = clientClosed ? { ...aberto, closed_at: '2026-09-20T12:00:00Z' } : aberto;
-  const base = clientCardDueDate
+  const comCartao = clientCardDueDate
     ? { ...fechado, card_posting_date_mode: 'invoice_due_date' }
     : fechado;
+  const base = clientPayablesConfigured
+    ? { ...comCartao, omie_department_required: true, omie_default_supplier_code: 700000001 }
+    : comCartao;
   if (originState === 'ativa' && clientFileOrigin) {
     // Cliente sem sistema: nenhuma conta sincronizada — a base vem do arquivo.
     return {
@@ -1117,6 +1120,9 @@ const CLIENT_DETAIL = {
   connections: [OMIE_CONNECTION],
   // 86e3n70p0 — processo do cartão no Omie: o de sempre por padrão.
   card_posting_date_mode: 'purchase_date',
+  // 86e3n70q0 (bloco C) — Contas a Pagar: sem rateio obrigatório e sem padrão.
+  omie_department_required: false,
+  omie_default_supplier_code: null,
 };
 
 /**
@@ -2016,6 +2022,16 @@ let sessionErrorDetail = false;
  * "processando" depois de confirmar, sem navegar.
  */
 let sessionReprocessed = false;
+/**
+ * 86e3n70q0 (bloco C): com `true`, as compras do cartão voltam com a intenção de
+ * lançamento do SERVIDOR (`omie_posting`) — uma provisionada e uma parada no passo
+ * da baixa. Prova o selo persistente e o "Retomar lançamento".
+ */
+let cardEntriesWithPostings = false;
+/** Resposta do lote: o parcial de sempre (direto) ou a provisão que parou na baixa. */
+let postingResponse: 'direto-parcial' | 'provisao-parcial' = 'direto-parcial';
+/** O cliente tem rateio obrigatório e um fornecedor padrão gravado (código). */
+let clientPayablesConfigured = false;
 
 /**
  * Linhas `sem_omie` de uma fatura de cartão: são as únicas lançáveis. A
@@ -2056,7 +2072,64 @@ const CARD_FILE_ENTRIES = [
     user_note: null,
     omie_lancamento_id: null,
   },
+].map((entry) => ({ ...entry, omie_posting: null as Record<string, unknown> | null }));
+
+/** As compras do cartão com a intenção gravada no servidor (86e3n70q0, bloco C). */
+function cardFileEntries() {
+  if (!cardEntriesWithPostings) return CARD_FILE_ENTRIES;
+  const base = {
+    kind: 'provisao',
+    attempts: 0,
+    supplier_code: 700000001,
+    payment_id: null,
+    omie_lancamento_id: null,
+    error_code: null,
+    error_message: null,
+  };
+  return CARD_FILE_ENTRIES.map((entry, index) => {
+    if (index === 0) {
+      return {
+        ...entry,
+        omie_posting: {
+          ...base,
+          status: 'confirmed',
+          step: 'concluido',
+          payable_id: 8800001,
+          payment_id: 9900001,
+        },
+      };
+    }
+    if (index === 1) {
+      return {
+        ...entry,
+        omie_posting: {
+          ...base,
+          status: 'failed',
+          step: 'baixa',
+          payable_id: 8800002,
+          error_code: 'OMIE_FAULT',
+          error_message: 'Ocorreu um erro ao acessar o Omie: 1234 - conta corrente bloqueada.',
+        },
+      };
+    }
+    return entry;
+  });
+}
+
+/** Departamentos ativos do Omie do cliente (86e3n70q0): a escolha busca por texto. */
+const OMIE_DEPARTAMENTOS = [
+  { codigo: '800000001', descricao: 'Comercial', estrutura: '001' },
+  { codigo: '800000002', descricao: 'Comercial / Vendas internas', estrutura: '001.001' },
+  { codigo: '800000003', descricao: 'Loja', estrutura: '001.002' },
+  { codigo: '800000004', descricao: 'Administrativo', estrutura: '002' },
 ];
+
+/** O fornecedor do mock do Omie (o mesmo CNPJ do `MockOmieClient`). */
+const OMIE_FORNECEDOR = {
+  codigo: 700000001,
+  razao_social: 'PAPELARIA DEMO LTDA',
+  nome_fantasia: 'Papelaria Demo',
+};
 
 /**
  * Uma anomalia da Camada 1 (o único tipo que aceita veredito) e uma
@@ -2266,6 +2339,30 @@ const POSTING_BATCH_PARTIAL = {
     },
   ],
   lancadas: 1,
+  bloqueadas: 0,
+  com_erro: 1,
+};
+
+/**
+ * 86e3n70q0 (bloco C): a provisão que criou o título e parou na baixa. É o
+ * sucesso PARCIAL que a gaveta tem de explicar (passo, ids, "tentar de novo").
+ */
+const POSTING_BATCH_PROVISION_PARTIAL = {
+  lines: [
+    {
+      file_entry_id: '99999999-9999-4999-8999-999999999801',
+      status: 'erro',
+      reason: 'erro_omie',
+      message: 'Ocorreu um erro ao acessar o Omie: 1234 - conta corrente bloqueada.',
+      omie_lancamento_id: null,
+      kind: 'provisao',
+      step: 'baixa',
+      supplier_code: 700000001,
+      payable_id: 8800001,
+      payment_id: null,
+    },
+  ],
+  lancadas: 0,
   bloqueadas: 0,
   com_erro: 1,
 };
@@ -2884,6 +2981,9 @@ async function fulfillApi(route: Route): Promise<void> {
       is_favorite: favorited,
       origin_status: originState,
       ...(clientCardDueDate ? { card_posting_date_mode: 'invoice_due_date' } : {}),
+      ...(clientPayablesConfigured
+        ? { omie_department_required: true, omie_default_supplier_code: 700000001 }
+        : {}),
     };
     const alcance = ehPlataforma ? [proprio, OTHER_ORG_CLIENT] : [proprio];
     const org = url.searchParams.get('organizationId');
@@ -3106,7 +3206,7 @@ async function fulfillApi(route: Route): Promise<void> {
     // pode ser lançada). O filtro é do servidor — aqui ele é aplicado no mock,
     // senão a lista "sem_omie" traria a linha ignorada e a tela ofereceria
     // lançar o que o backend recusa.
-    const rows = sessionAccountType === 'credit_card' ? CARD_FILE_ENTRIES : FILE_ENTRIES;
+    const rows = sessionAccountType === 'credit_card' ? cardFileEntries() : FILE_ENTRIES;
     const situation = url.searchParams.get('situation');
     const filtered = situation === null ? rows : rows.filter((r) => r.situation === situation);
     return json({
@@ -3127,7 +3227,44 @@ async function fulfillApi(route: Route): Promise<void> {
   // Sprint 7 (BACK 07.4): o lote responde 200 mesmo com falha parcial — quem
   // conta o desfecho é `lines[]`.
   if (path === `/api/v1/reconciliations/${SESSION_ID}/omie-postings`) {
-    return json(POSTING_BATCH_PARTIAL);
+    return json(
+      postingResponse === 'provisao-parcial'
+        ? POSTING_BATCH_PROVISION_PARTIAL
+        : POSTING_BATCH_PARTIAL,
+    );
+  }
+  // 86e3n70q0 (bloco C): `{data, total}` — duas chaves, como as categorias.
+  if (path === `/api/v1/clients/${CLIENT_ID}/omie/departamentos`) {
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ data: OMIE_DEPARTAMENTOS, total: OMIE_DEPARTAMENTOS.length }),
+    });
+  }
+  // Por CNPJ (o do mock acha; outro é 404) ou por código (o padrão gravado).
+  if (path === `/api/v1/clients/${CLIENT_ID}/omie/fornecedores`) {
+    const cnpj = (url.searchParams.get('cnpj') ?? '').replace(/\D/g, '');
+    const codigo = url.searchParams.get('codigo');
+    if (codigo !== null) {
+      return json({
+        codigo: Number(codigo),
+        razao_social: OMIE_FORNECEDOR.razao_social,
+        nome_fantasia: null,
+      });
+    }
+    if (cnpj === '12345678000195') return json(OMIE_FORNECEDOR);
+    return route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: {
+          code: 'FORNECEDOR_NAO_ENCONTRADO',
+          message: 'not found',
+          userMessage:
+            'Nenhum fornecedor com este CNPJ no Omie do cliente. Informe razão social e e-mail para cadastrá-lo no lançamento.',
+        },
+      }),
+    });
   }
   if (path === `/api/v1/reconciliations/${SESSION_ID}/available-omie-entries`) {
     return json(OMIE_CANDIDATES);
@@ -3542,6 +3679,9 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   sessionAccountType = null;
   sessionErrorDetail = false;
   sessionReprocessed = false;
+  cardEntriesWithPostings = false;
+  postingResponse = 'direto-parcial';
+  clientPayablesConfigured = false;
   reviewVerdict = null;
   patchAnomalyFails = false;
   accountsSyncFails = false;
@@ -3913,10 +4053,10 @@ for (const vp of VIEWPORTS) {
       await analyze(page, `gaveta com a fatura no vencimento (${vp.label})`);
     });
 
-    // 86e3n70p0 — revisão de uma fatura cruzada no lote do vencimento: o
-    // cabeçalho diz o processo e o lote, e "Lançar no Omie" não é oferecido
-    // (o servidor recusaria o lote inteiro; decisão do Pedro, 08/10/2026).
-    test('Revisão de cartão no vencimento: lote no cabeçalho e sem lançar (86e3n70p0)', async ({
+    // 86e3n70p0 + 86e3n70q0 (bloco C) — revisão de uma fatura cruzada no lote do
+    // vencimento: o cabeçalho diz o processo e o lote, e "Lançar no Omie" EXISTE,
+    // mas a gaveta oferece só a provisão (o servidor recusa o direto por linha).
+    test('Revisão de cartão no vencimento: lote no cabeçalho e só a provisão (86e3n70q0)', async ({
       page,
     }) => {
       sessionAccountType = 'credit_card';
@@ -3925,13 +4065,17 @@ for (const vp of VIEWPORTS) {
       await expect(
         page.getByText('Compras lançadas no vencimento da fatura · Lote da fatura: 10/10/2026'),
       ).toBeVisible();
-      await expect(page.getByText(/lance as compras diretamente no Omie/)).toBeVisible();
-      // A MESMA linha que no processo da compra oferece a ação (cenário R1 do
-      // bloco "Lançamento no Omie"): aqui, carregada, e sem a ação.
-      await expect(page.getByRole('row', { name: /Posto Shell 1234/ })).toBeVisible();
-      await expect(page.getByRole('button', { name: /Lançar no Omie/ })).toHaveCount(0);
+      const linha = page.getByRole('row', { name: /Posto Shell 1234/ });
+      await linha.getByRole('button', { name: /Lançar no Omie/ }).click();
+      const gaveta = page.getByRole('dialog', { name: 'Lançar no Omie' });
+      await aguardarAnimacao(gaveta);
+      await expect(gaveta.getByRole('radio')).toHaveCount(0);
+      await expect(
+        gaveta.getByText(/o lançamento direto gravaria a data da compra\. Provisione a compra/),
+      ).toBeVisible();
+      await expect(gaveta.getByLabel(/CNPJ do fornecedor/)).toBeVisible();
       await shot(page, `pr-revisao-cartao-vencimento-${vp.label.replace(/\s+/g, '-')}`);
-      await analyze(page, `revisão de cartão no vencimento (${vp.label})`);
+      await analyze(page, `gaveta no processo do vencimento, só provisão (${vp.label})`);
     });
 
     test('Sino de notificações aberto (R4)', async ({ page }) => {
@@ -5524,14 +5668,21 @@ for (const vp of VIEWPORTS) {
       await analyze(page, `gaveta de lançamento com o combobox aberto (${vp.label})`);
 
       await lista.getByRole('option', { name: /Combustível/ }).click();
+      // 86e3n70q0 (bloco C): o padrão passou a ser provisionar; este cenário é o
+      // do lançamento DIRETO, escolhido explicitamente para o lote.
+      await gaveta
+        .getByRole('region', { name: 'Classificar todas de uma vez' })
+        .getByRole('radio', { name: /Lançar direto/ })
+        .check();
       await gaveta.getByRole('button', { name: 'Aplicar a 2 compras' }).click();
       await gaveta.getByRole('button', { name: /Confirmar e lançar 2 de 2/ }).click();
 
       // Resumo por linha, com a mensagem VERBATIM do provedor na que falhou.
       // `exact`: o resumo do lote (86e3n70qj) também diz "lançada no Omie", e o
       // `getByText` do Playwright casa substring sem caixa.
-      await expect(gaveta.getByText('Lançada no Omie', { exact: true })).toBeVisible();
-      await expect(gaveta.getByText(/lançamento nº 5001/)).toBeVisible();
+      await expect(
+        gaveta.getByText('Lançada no Omie · lançamento nº 5001', { exact: true }),
+      ).toBeVisible();
       await expect(
         gaveta.getByText(/Categoria informada nao existe para o cliente\./),
       ).toBeVisible();
@@ -5573,6 +5724,143 @@ for (const vp of VIEWPORTS) {
       ).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0);
       await shot(page, `lancamento-selo-na-linha-${slugP}`);
       await analyze(page, `linha com o selo do lançamento (${vp.label})`);
+    });
+
+    /**
+     * 86e3n70q0 (bloco C) + 86e3nb818: a provisão COMPLETA numa linha — compra
+     * dividida em 2 categorias (gasto + IOF), rateio em 2 departamentos e o
+     * fornecedor achado pelo CNPJ — tem de caber em 390px sem rolagem horizontal.
+     * O axe não mede transbordo: mede-se o `scrollWidth` do miolo da gaveta e a
+     * borda direita de cada controle.
+     */
+    test('gaveta: provisão com 2 categorias, 2 departamentos e fornecedor (86e3n70q0)', async ({
+      page,
+    }) => {
+      sessionAccountType = 'credit_card';
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}`);
+      const linha = page.getByRole('row', { name: /Posto Shell 1234/ });
+      await linha.getByRole('button', { name: /Lançar no Omie/ }).click();
+      const gaveta = page.getByRole('dialog', { name: 'Lançar no Omie' });
+      await aguardarAnimacao(gaveta);
+
+      await expect(
+        gaveta.getByRole('radio', { name: /Provisionar no Contas a Pagar/ }),
+      ).toBeChecked();
+      await gaveta.getByRole('button', { name: /Categoria da compra de/ }).click();
+      await page.getByRole('option', { name: /Combustível/ }).click();
+      await gaveta.getByRole('switch', { name: /Dividir em categorias/ }).click();
+      const valor1 = gaveta.getByLabel(/Valor da parte 1/);
+      await valor1.fill('');
+      await valor1.pressSequentially('14670');
+      await gaveta.getByRole('button', { name: /Categoria da parte 2/ }).click();
+      await page.getByRole('option', { name: /Serviços de software/ }).click();
+      await gaveta.getByLabel(/Valor da parte 2/).pressSequentially('380');
+      await expect(gaveta.getByText('Fecha com o valor da compra.')).toBeVisible();
+
+      await gaveta.getByRole('switch', { name: /Ratear por departamento/ }).click();
+      await gaveta.getByRole('button', { name: /Departamento da parte 1 do rateio/ }).click();
+      await page.getByRole('combobox').fill('loja');
+      await page.getByRole('option', { name: /Loja/ }).click();
+      const pct1 = gaveta.getByLabel(/Percentual da parte 1 do rateio/);
+      await pct1.fill('');
+      await pct1.pressSequentially('6000');
+      await gaveta.getByRole('button', { name: 'Adicionar departamento' }).click();
+      await gaveta.getByRole('button', { name: /Departamento da parte 2 do rateio/ }).click();
+      await page.getByRole('option', { name: /Administrativo/ }).click();
+      await expect(gaveta.getByText('Soma 100%.')).toBeVisible();
+
+      await gaveta.getByLabel(/CNPJ do fornecedor/).pressSequentially('12345678000195');
+      await gaveta.getByRole('button', { name: 'Buscar no Omie' }).click();
+      await expect(gaveta.getByText('PAPELARIA DEMO LTDA')).toBeVisible();
+      await expect(gaveta.getByRole('button', { name: /Confirmar e lançar 1 de 1/ })).toBeEnabled();
+
+      // Sem rolagem horizontal no miolo (o único scroller da gaveta), e nenhum
+      // controle passando da borda direita da viewport.
+      const miolo = await gaveta.evaluate((el) => {
+        const body = Array.from(el.querySelectorAll<HTMLElement>('div')).find(
+          (d) => getComputedStyle(d).overflowY === 'auto',
+        );
+        return { scroll: body?.scrollWidth ?? 0, client: body?.clientWidth ?? 0 };
+      });
+      expect(miolo.client, 'miolo da gaveta não encontrado').toBeGreaterThan(0);
+      expect(miolo.scroll, 'a gaveta rola na horizontal').toBeLessThanOrEqual(miolo.client + 1);
+      const bordas = await gaveta
+        .locator('input, button[aria-haspopup="listbox"], button[role="switch"]')
+        .evaluateAll((els) =>
+          els
+            .filter((el) => el.getBoundingClientRect().width > 0)
+            .map((el) => Math.round(el.getBoundingClientRect().right)),
+        );
+      const larguraViewport = page.viewportSize()?.width ?? 0;
+      for (const borda of bordas) {
+        expect(borda, 'controle da gaveta passando da borda direita').toBeLessThanOrEqual(
+          larguraViewport,
+        );
+      }
+      await shot(page, `pr-gaveta-provisao-completa-${slugP}`);
+      await analyze(page, `gaveta com provisão completa (${vp.label})`);
+    });
+
+    test('gaveta: provisão que parou na baixa mostra o passo e os ids (86e3n70q0)', async ({
+      page,
+    }) => {
+      sessionAccountType = 'credit_card';
+      postingResponse = 'provisao-parcial';
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}`);
+      const linha = page.getByRole('row', { name: /Posto Shell 1234/ });
+      await linha.getByRole('button', { name: /Lançar no Omie/ }).click();
+      const gaveta = page.getByRole('dialog', { name: 'Lançar no Omie' });
+      await aguardarAnimacao(gaveta);
+      await gaveta.getByRole('button', { name: /Categoria da compra de/ }).click();
+      await page.getByRole('option', { name: /Combustível/ }).click();
+      await gaveta.getByLabel(/CNPJ do fornecedor/).pressSequentially('11222333000181');
+      await gaveta.getByRole('button', { name: 'Buscar no Omie' }).click();
+      await gaveta.getByLabel('Razão social').fill('Loja Nova Ltda');
+      await gaveta.getByLabel('E-mail').fill('financeiro@lojanova.com.br');
+      await gaveta.getByRole('button', { name: /Confirmar e lançar 1 de 1/ }).click();
+
+      await expect(gaveta.getByText('Parou no passo: baixa')).toBeVisible();
+      await expect(gaveta.getByText(/Já gravado no Omie: título nº 8800001/)).toBeVisible();
+      await expect(gaveta.getByRole('button', { name: /Tentar novamente 1 de 1/ })).toBeVisible();
+      // A linha passa a estar travada na provisão, sem pedir o fornecedor de novo.
+      await expect(gaveta.getByRole('radio')).toHaveCount(0);
+      await expect(gaveta.getByLabel(/CNPJ do fornecedor/)).toHaveCount(0);
+      await aguardarToastEstavel(page);
+      await shot(page, `pr-gaveta-provisao-parcial-${slugP}`);
+      await analyze(page, `resumo da provisão parada na baixa (${vp.label})`);
+    });
+
+    test('linha da revisão: selo do servidor, provisionada e parada (86e3n70q0)', async ({
+      page,
+    }) => {
+      sessionAccountType = 'credit_card';
+      cardEntriesWithPostings = true;
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}`);
+
+      const provisionada = page.getByRole('row', { name: /Posto Shell 1234/ });
+      await expect(
+        provisionada.getByRole('img', { name: /Provisionado · título nº 8800001/ }),
+      ).toBeVisible();
+      await expect(provisionada.getByRole('button', { name: /Lançar no Omie/ })).toHaveAttribute(
+        'aria-disabled',
+        'true',
+      );
+      const parada = page.getByRole('row', { name: /Assinatura de software/ });
+      const selo = parada.getByRole('img', { name: /Lançamento parado · passo baixa/ });
+      await expect(selo).toBeVisible();
+      await expect(selo).toHaveAccessibleName(/conta corrente bloqueada/);
+      await expect(parada.getByRole('button', { name: 'Retomar lançamento' })).toBeVisible();
+      await selo.scrollIntoViewIfNeeded();
+      await shot(page, `pr-revisao-selo-servidor-${slugP}`);
+      await analyze(page, `selos do servidor na revisão (${vp.label})`);
+
+      await parada.getByRole('button', { name: 'Retomar lançamento' }).click();
+      const gaveta = page.getByRole('dialog', { name: 'Lançar no Omie' });
+      await aguardarAnimacao(gaveta);
+      await expect(gaveta.getByText(/parou no passo baixa/)).toBeVisible();
+      await expect(gaveta.getByRole('radio')).toHaveCount(0);
+      await shot(page, `pr-gaveta-retomada-${slugP}`);
+      await analyze(page, `gaveta da retomada, travada na provisão (${vp.label})`);
     });
 
     test('conta corrente: nem seleção nem ação, em nenhuma aba (R1)', async ({ page }) => {
@@ -7676,6 +7964,35 @@ for (const vp of VIEWPORTS) {
       );
       await shot(page, `pr-editar-cliente-so-arquivo-${vp.label.replace(/\s+/g, '-')}`);
       await analyze(page, `editar cliente só-arquivo, sem o campo do cartão (${vp.label})`);
+    });
+
+    // 86e3n70q0 (bloco C) — rateio obrigatório e fornecedor padrão no editar
+    // cliente: o padrão aparece pelo NOME (busca por código) e se troca pela
+    // mesma busca por CNPJ da gaveta.
+    test('editar cliente: rateio obrigatório e fornecedor padrão (86e3n70q0)', async ({ page }) => {
+      clientPayablesConfigured = true;
+      await page.goto('/clientes');
+      await page.getByRole('button', { name: 'Editar Cliente Exemplo Ltda' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Editar Cliente' });
+      await aguardarAnimacao(dialog);
+      const rateio = dialog.getByRole('switch', {
+        name: 'Exigir rateio por departamento nos títulos',
+      });
+      await rateio.scrollIntoViewIfNeeded();
+      await expect(rateio).toHaveAttribute('aria-checked', 'true');
+      await expect(dialog.getByText('PAPELARIA DEMO LTDA')).toBeVisible();
+      await dialog.getByRole('button', { name: 'Trocar' }).click();
+      const cnpj = dialog.getByLabel('CNPJ do fornecedor padrão');
+      await expect(cnpj).toBeVisible();
+      const buscar = dialog.getByRole('button', { name: 'Buscar no Omie' });
+      await buscar.scrollIntoViewIfNeeded();
+      const caixa = await buscar.boundingBox();
+      expect(
+        (caixa?.x ?? 0) + (caixa?.width ?? 0),
+        '"Buscar no Omie" cortado pela borda direita da viewport',
+      ).toBeLessThanOrEqual(vp.size.width);
+      await shot(page, `pr-editar-cliente-contas-a-pagar-${vp.label.replace(/\s+/g, '-')}`);
+      await analyze(page, `editar cliente com rateio e fornecedor padrão (${vp.label})`);
     });
 
     /**
