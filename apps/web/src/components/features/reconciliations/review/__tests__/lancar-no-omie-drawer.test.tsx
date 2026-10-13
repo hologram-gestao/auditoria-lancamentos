@@ -157,7 +157,9 @@ describe('Classificação', () => {
     postMock.mockResolvedValue(payload([line('e1', 'lancada', { omie_lancamento_id: 5001 })]));
     await ui.click(confirmar);
 
-    expect(postMock).toHaveBeenCalledWith([{ file_entry_id: 'e1', cod_categoria: '1.01.01' }]);
+    expect(postMock).toHaveBeenCalledWith([
+      { file_entry_id: 'e1', cod_categoria: '1.01.01', modo: 'direto' },
+    ]);
   });
 
   it('aplicar em lote classifica todas, e a escolha da linha prevalece depois', async () => {
@@ -181,8 +183,8 @@ describe('Classificação', () => {
     await ui.click(screen.getByRole('button', { name: /Confirmar e lançar 2 de 2/ }));
 
     expect(postMock).toHaveBeenCalledWith([
-      { file_entry_id: 'e1', cod_categoria: '1.01.01' },
-      { file_entry_id: 'e2', cod_categoria: '2.02.02' },
+      { file_entry_id: 'e1', cod_categoria: '1.01.01', modo: 'direto' },
+      { file_entry_id: 'e2', cod_categoria: '2.02.02', modo: 'direto' },
     ]);
   });
 
@@ -239,7 +241,9 @@ describe('Resumo do lote', () => {
     postMock.mockResolvedValue(payload([line('e2', 'lancada', { omie_lancamento_id: 5002 })]));
     await ui.click(screen.getByRole('button', { name: /Tentar novamente 1 de 1/ }));
 
-    expect(postMock).toHaveBeenCalledWith([{ file_entry_id: 'e2', cod_categoria: '1.01.01' }]);
+    expect(postMock).toHaveBeenCalledWith([
+      { file_entry_id: 'e2', cod_categoria: '1.01.01', modo: 'direto' },
+    ]);
   });
 
   it('tudo lançado: toast de sucesso e a linha volta para a tabela como lançada', async () => {

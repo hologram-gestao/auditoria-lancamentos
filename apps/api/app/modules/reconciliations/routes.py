@@ -818,10 +818,15 @@ async def get_reconciliation_detail(
     status_code=status.HTTP_200_OK,
     summary=(
         "Lança no Omie, em lote, as compras `sem_omie` de uma conciliação de "
-        "CARTÃO. Body = lista de {file_entry_id, cod_categoria}. Devolve o "
-        "resumo por linha (lançada / bloqueada / erro + motivo) e os "
-        "agregados. Idempotente por linha: reenviar não duplica. Desligável "
-        "por `OMIE_POSTING_ENABLED` sem deploy."
+        "CARTÃO. Cada linha escolhe `modo`: `provisionar` (padrão; título no "
+        "Contas a Pagar com fornecedor, categorias e rateio, e baixa na data da "
+        "compra só no processo 'na data da compra') ou `direto` (IncluirLancCC, "
+        "só no processo 'na data da compra'). Devolve o resumo por linha "
+        "(lançada / bloqueada / erro + motivo, e na provisão o passo onde parou "
+        "com os ids) e os agregados. Idempotente por linha: reenviar não "
+        "duplica e retoma a provisão do passo gravado. Desligável por "
+        "`OMIE_POSTING_ENABLED` (direto) e `OMIE_PAYABLE_POSTING_ENABLED` "
+        "(provisão), sem deploy."
     ),
 )
 async def post_omie_lancamentos(
@@ -877,5 +882,5 @@ async def post_omie_lancamentos(
         omie_client_factory=build_client,
         cipher=cipher,
     )
-    payload = await service.post_batch(session=session_obj, lines=body.lines)
+    payload = await service.post_batch(session=session_obj, client=client, lines=body.lines)
     return OmiePostingBatchResponse(data=payload)

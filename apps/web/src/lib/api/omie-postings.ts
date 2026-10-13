@@ -3,8 +3,10 @@
  *
  * ⚠️ **É a única escrita do ADL no ERP do cliente.** Todo o resto do sistema
  * lê o Omie; este módulo grava movimento financeiro na contabilidade do
- * cliente. O backend é quem monta o `IncluirLancCC`, deduplica por linha e
- * decide o desfecho — daqui sai apenas `{file_entry_id, cod_categoria}`.
+ * cliente. O backend é quem monta o `IncluirLancCC` (ou, desde a 86e3n70q0, o
+ * título no Contas a Pagar), deduplica por linha e decide o desfecho — daqui
+ * sai `{file_entry_id, cod_categoria, modo}`. A gaveta atual manda sempre
+ * `modo: 'direto'`; a provisão ganha tela no bloco C.
  *
  * Contrato (tipos gerados, nunca redigitados — ver `lib/contracts/index.ts`):
  *   - `POST /reconciliations/{id}/omie-postings` → `{ data: {...} }` com chave

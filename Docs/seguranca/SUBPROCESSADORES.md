@@ -14,12 +14,12 @@ memória (task ClickUp 86e3anx75, épico 86e3anwzu).
 
 ## Resumo
 
-| Terceiro | Papel | O que recebe | Onde roda |
-| --- | --- | --- | --- |
-| Anthropic | Leitura do arquivo e análise de classificação por IA | Arquivo da conciliação inteiro; descrição, valor, fornecedor e categoria de movimentações conciliadas; glossário do cliente | Fora do Brasil (ver seção) |
-| Google Cloud | Hospedagem: aplicação, banco, chaves, imagens, segredos | Tudo que a plataforma guarda e processa | `southamerica-east1` (São Paulo), banco **a confirmar** |
-| Omie | ERP do próprio cliente, leitura e escrita | Credencial do cliente; na escrita, a compra do cartão | Infraestrutura da Omie |
-| Slack | Aviso de lead da landing e alertas de plantão | Dados do formulário público; alertas só com IDs | Infraestrutura do Slack |
+| Terceiro     | Papel                                                   | O que recebe                                                                                                                | Onde roda                                               |
+| ------------ | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Anthropic    | Leitura do arquivo e análise de classificação por IA    | Arquivo da conciliação inteiro; descrição, valor, fornecedor e categoria de movimentações conciliadas; glossário do cliente | Fora do Brasil (ver seção)                              |
+| Google Cloud | Hospedagem: aplicação, banco, chaves, imagens, segredos | Tudo que a plataforma guarda e processa                                                                                     | `southamerica-east1` (São Paulo), banco **a confirmar** |
+| Omie         | ERP do próprio cliente, leitura e escrita               | Credencial do cliente; na escrita, a compra do cartão                                                                       | Infraestrutura da Omie                                  |
+| Slack        | Aviso de lead da landing e alertas de plantão           | Dados do formulário público; alertas só com IDs                                                                             | Infraestrutura do Slack                                 |
 
 ## Anthropic
 
@@ -142,11 +142,22 @@ pela própria aplicação antes de chegar ao banco (ver "O que não sai da plata
 **O que é.** O ERP do próprio cliente. A plataforma fala com ele com a credencial que o
 cliente fornece, guardada cifrada (`client_connections.credentials_encrypted`).
 
-**O que vai para lá.** Na leitura (extrato, contas, categorias, títulos, cadastro de
-fornecedor), só a credencial e os filtros da consulta. Na escrita, que só existe para
-fatura de cartão e nasce desligada (`OMIE_POSTING_ENABLED`, CLAUDE.md §3.16), vão conta,
-data, valor, categoria e a descrição da compra no campo de observação
-(`apps/api/app/modules/reconciliations/omie_posting/service.py:30`).
+**O que vai para lá.** Na leitura (extrato, contas, categorias, títulos, departamentos,
+cadastro de fornecedor), só a credencial e os filtros da consulta; a busca de fornecedor
+manda o CNPJ digitado na tela (`GET /clients/{id}/omie/fornecedores`). Na escrita, que só
+existe para fatura de cartão e nasce desligada (CLAUDE.md §3.16), há duas formas:
+
+- **lançamento direto** (`OMIE_POSTING_ENABLED`): conta, data, valor, categoria e a
+  descrição da compra no campo de observação;
+- **Contas a Pagar** (`OMIE_PAYABLE_POSTING_ENABLED`, 86e3n70q0): o mesmo conteúdo no
+  título (fornecedor, emissão, vencimento, valor, categorias, rateio por departamento e
+  a descrição na observação) e, no processo "na data da compra", a baixa (conta, valor,
+  data). Quando o CNPJ do fornecedor não tem cadastro, a plataforma o cadastra com CNPJ,
+  razão social e e-mail informados na linha.
+
+Nada disso persiste na plataforma além dos códigos que a Omie devolve: CNPJ, razão
+social e e-mail trafegam em memória até a Omie
+(`apps/api/app/modules/reconciliations/omie_posting/service.py`).
 
 **Por que é diferente dos outros.** Tudo que vai para a Omie já é dado do próprio cliente,
 no sistema que ele mesmo contratou. A Omie é escolha e contrato do cliente, não da

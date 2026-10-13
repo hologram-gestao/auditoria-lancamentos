@@ -251,6 +251,17 @@ class Settings(BaseSettings):
         default=False,
         description="Ativa o lançamento de linhas da fatura no Omie (Sprint 7).",
     )
+    # Kill-switch PRÓPRIO do lançamento como Contas a Pagar (86e3n70q0, bloco B):
+    # fornecedor, título e, no processo "na data da compra", a baixa. Separado do
+    # `OMIE_POSTING_ENABLED` de propósito: é outra escrita (até três chamadas por
+    # linha, com sucesso parcial possível), com outro critério de pronto, e ligar
+    # uma não pode ligar a outra sem decisão. Default `False`, ligado por ambiente
+    # via `--update-env-vars`, sem deploy. Desligado, a linha pedida como provisão
+    # volta `bloqueada/provisao_desligada` e nada vai ao Omie.
+    OMIE_PAYABLE_POSTING_ENABLED: bool = Field(
+        default=False,
+        description="Ativa o lançamento das compras da fatura como Contas a Pagar (86e3n70q0).",
+    )
     # Teto de linhas por lote, validado NO SERVIDOR.
     #
     # O lote é enviado à Omie **em sequência**, nunca em paralelo: a Omie impõe

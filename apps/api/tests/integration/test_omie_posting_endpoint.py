@@ -217,9 +217,14 @@ async def _login(client: AsyncClient, email: str) -> None:
 
 
 def _body(*pairs: tuple[UUID, str]) -> dict:
+    """Lote no modo `direto` — o `IncluirLancCC` da Sprint 7, que este arquivo prova.
+
+    Desde o bloco B da 86e3n70q0 o padrão do `modo` é `provisionar`; a provisão
+    tem o próprio arquivo (`test_omie_payables_posting.py`).
+    """
     return {
         "lines": [
-            {"file_entry_id": str(entry_id), "cod_categoria": categoria}
+            {"file_entry_id": str(entry_id), "cod_categoria": categoria, "modo": "direto"}
             for entry_id, categoria in pairs
         ]
     }
@@ -276,12 +281,14 @@ class TestKillSwitchAndEligibility:
         assert await _posting_count(db_session, entry.id) == 0
 
     @pytest.mark.usefixtures("posting_enabled")
-    async def test_card_session_in_invoice_due_date_mode_is_refused(
+    @pytest.mark.usefixtures("posting_enabled")
+    async def test_direct_line_in_invoice_due_date_mode_is_blocked(
         self, client_with_db: AsyncClient, scenario: Scenario, db_session: AsyncSession
     ) -> None:
-        """86e3n70p0 (decisão do Pedro, 08/10/2026): o `IncluirLancCC` grava a data
-        da COMPRA, e o cliente no modo vencimento lança em lote no vencimento.
-        Até isso ser decidido, o lote é recusado com motivo e nada é escrito."""
+        """86e3n70p0 + 86e3n70q0: o `IncluirLancCC` grava a data da COMPRA, e o
+        cliente no modo vencimento lança no vencimento. O lançamento DIRETO segue
+        bloqueado nesse processo, agora por LINHA e com motivo próprio (o lote
+        não é mais recusado inteiro: a provisão funciona nele). Nada é escrito."""
         scenario.session.card_posting_date_mode = "invoice_due_date"
         scenario.session.invoice_due_date = date(2026, 5, 10)
         await db_session.flush()
@@ -293,8 +300,10 @@ class TestKillSwitchAndEligibility:
             json=_body((entry.id, "1.01.01")),
         )
 
-        assert resp.status_code == 400, resp.text
-        assert "vencimento da fatura" in resp.json()["error"]["userMessage"]
+        assert resp.status_code == 200, resp.text
+        line = resp.json()["data"]["lines"][0]
+        assert line["status"] == "bloqueada"
+        assert line["reason"] == "direto_indisponivel_no_modo_vencimento"
         assert await _posting_count(db_session, entry.id) == 0
 
     @pytest.mark.usefixtures("posting_enabled")

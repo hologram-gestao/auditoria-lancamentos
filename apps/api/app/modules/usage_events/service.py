@@ -42,6 +42,7 @@ from app.modules.usage_events.schemas import (
     FechamentoProduzidoProps,
     FlagRevisadoProps,
     GlossarioEditadoProps,
+    LancamentoOmieProvisaoProps,
     LeadRecebidoProps,
     MovimentosSincronizadosProps,
     OmieLancamentoEnviadoProps,
@@ -892,6 +893,41 @@ class UsageEventService:
                 sucesso=sucesso,
                 falha=falha,
                 duracao_ms=duracao_ms,
+            ).model_dump(mode="json"),
+        )
+
+    async def emit_lancamento_omie_provisao(
+        self,
+        *,
+        session_id: UUID,
+        processo: str,
+        linhas: int,
+        concluidas: int,
+        parciais: int,
+        bloqueadas: int,
+        com_erro: int,
+        fornecedores_criados: int,
+        titulos_criados: int,
+        baixas_criadas: int,
+        duracao_ms: int,
+    ) -> bool:
+        """86e3n70q0 (bloco B): um lote com linhas de PROVISÃO. Uma linha por lote."""
+        return await self.emit(
+            UsageEventName.LANCAMENTO_OMIE_PROVISAO,
+            session_id=session_id,
+            props=LancamentoOmieProvisaoProps.model_validate(
+                {
+                    "processo": processo,
+                    "linhas": linhas,
+                    "concluidas": concluidas,
+                    "parciais": parciais,
+                    "bloqueadas": bloqueadas,
+                    "com_erro": com_erro,
+                    "fornecedores_criados": fornecedores_criados,
+                    "titulos_criados": titulos_criados,
+                    "baixas_criadas": baixas_criadas,
+                    "duracao_ms": duracao_ms,
+                }
             ).model_dump(mode="json"),
         )
 

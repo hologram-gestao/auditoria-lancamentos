@@ -91,6 +91,7 @@ const client: Client = {
   category: null,
   origin_status: 'sem_origem',
   card_posting_date_mode: 'purchase_date',
+  omie_department_required: false,
 };
 
 beforeAll(() => {
