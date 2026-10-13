@@ -1,0 +1,6 @@
+{
+  "call_name": "ExcluirContaPagar",
+  "param": {
+    "codigo_lancamento_omie": 3105843602
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "_adl_capture_note": "ListarClientes recusado pela Omie. Texto preservado VERBATIM; o param recusado está em .refusals.json.",
+  "_adl_capture_exception_type": "OmieFaultError",
+  "_adl_capture_exception_message": "5xx permanente em ListarClientes (geral/clientes): 5113 - Não existem registros para a página [1]!"
+}

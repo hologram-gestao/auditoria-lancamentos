@@ -1,0 +1,146 @@
+{
+  "pagina": 1,
+  "total_de_paginas": 1,
+  "registros": 3,
+  "total_de_registros": 3,
+  "conta_pagar_cadastro": [
+    {
+      "bloquear_exclusao": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.01.90",
+          "percentual": 100,
+          "valor": 0.01
+        }
+      ],
+      "codigo_categoria": "2.01.90",
+      "codigo_cliente_fornecedor": 3105843586,
+      "codigo_lancamento_integracao": "HOSCAP1013-CP-A",
+      "codigo_lancamento_omie": 3105843596,
+      "codigo_tipo_documento": "CTR",
+      "data_emissao": "13/10/2026",
+      "data_entrada": "13/10/2026",
+      "data_previsao": "12/11/2026",
+      "data_vencimento": "12/11/2026",
+      "distribuicao": [],
+      "id_conta_corrente": 2625046958,
+      "id_origem": "APIP",
+      "info": {
+        "cImpAPI": "S",
+        "dAlt": "13/10/2026",
+        "dInc": "13/10/2026",
+        "hAlt": "07:59:52",
+        "hInc": "07:59:21",
+        "uAlt": "WEBSERVICE",
+        "uInc": "WEBSERVICE"
+      },
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "PAGO",
+      "valor_documento": 0.01
+    },
+    {
+      "bloquear_exclusao": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.01.01",
+          "percentual": 50,
+          "valor": 0.01
+        },
+        {
+          "codigo_categoria": "2.01.90",
+          "percentual": 50,
+          "valor": 0.01
+        }
+      ],
+      "codigo_categoria": null,
+      "codigo_cliente_fornecedor": 3105843586,
+      "codigo_lancamento_integracao": "HOSCAP1013-CP-B",
+      "codigo_lancamento_omie": 3105843599,
+      "codigo_tipo_documento": "CTR",
+      "data_emissao": "13/10/2026",
+      "data_entrada": "13/10/2026",
+      "data_previsao": "12/11/2026",
+      "data_vencimento": "12/11/2026",
+      "distribuicao": [],
+      "id_conta_corrente": 2625046958,
+      "id_origem": "APIP",
+      "info": {
+        "cImpAPI": "S",
+        "dAlt": "13/10/2026",
+        "dInc": "13/10/2026",
+        "hAlt": "07:59:37",
+        "hInc": "07:59:37",
+        "uAlt": "WEBSERVICE",
+        "uInc": "WEBSERVICE"
+      },
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "A VENCER",
+      "valor_documento": 0.02
+    },
+    {
+      "bloquear_exclusao": "N",
+      "categorias": [
+        {
+          "codigo_categoria": "2.01.90",
+          "percentual": 100,
+          "valor": 0.02
+        }
+      ],
+      "codigo_categoria": "2.01.90",
+      "codigo_cliente_fornecedor": 3105843586,
+      "codigo_lancamento_integracao": "HOSCAP1013-CP-C",
+      "codigo_lancamento_omie": 3105843602,
+      "codigo_tipo_documento": "CTR",
+      "data_emissao": "13/10/2026",
+      "data_entrada": "13/10/2026",
+      "data_previsao": "12/11/2026",
+      "data_vencimento": "12/11/2026",
+      "distribuicao": [
+        {
+          "cCodDep": "2787858088",
+          "cDesDep": "DEPARTAMENTO FICTICIO 036",
+          "nPerDep": 50,
+          "nValDep": 0.01
+        },
+        {
+          "cCodDep": "2787890853",
+          "cDesDep": "DEPARTAMENTO FICTICIO 044",
+          "nPerDep": 50,
+          "nValDep": 0.01
+        }
+      ],
+      "id_conta_corrente": 2625046958,
+      "id_origem": "APIP",
+      "info": {
+        "cImpAPI": "S",
+        "dAlt": "13/10/2026",
+        "dInc": "13/10/2026",
+        "hAlt": "07:59:39",
+        "hInc": "07:59:39",
+        "uAlt": "WEBSERVICE",
+        "uInc": "WEBSERVICE"
+      },
+      "numero_parcela": "001/001",
+      "retem_cofins": "N",
+      "retem_csll": "N",
+      "retem_inss": "N",
+      "retem_ir": "N",
+      "retem_iss": "N",
+      "retem_pis": "N",
+      "status_titulo": "A VENCER",
+      "valor_documento": 0.02
+    }
+  ]
+}

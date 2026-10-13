@@ -1,0 +1,21 @@
+[
+  {
+    "call_name": "IncluirLancCC",
+    "captured_at": "2026-10-13T11:00:44+00:00",
+    "param": {
+      "cCodIntLanc": "HOSCAP1013-LC-NEG",
+      "cabecalho": {
+        "nCodCC": 2625046958,
+        "dDtLanc": "13/10/2026",
+        "nValorLanc": -0.01
+      },
+      "detalhes": {
+        "cCodCateg": "2.01.90",
+        "cObs": "TESTE HOLOGRAM OS CAPTURA credito via valor negativo",
+        "cTipo": "DIN"
+      }
+    },
+    "_adl_capture_exception_type": "OmieFaultError",
+    "_adl_capture_exception_message": "5xx permanente em IncluirLancCC (financas/contacorrentelancamentos): 106 - O preenchimento da tag [nValorLanc] deve ser maior ou igual que zero!"
+  }
+]

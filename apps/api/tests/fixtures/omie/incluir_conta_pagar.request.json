@@ -1,0 +1,14 @@
+{
+  "call_name": "IncluirContaPagar",
+  "param": {
+    "codigo_lancamento_integracao": "HOSCAP1013-CP-A",
+    "codigo_cliente_fornecedor": 3105843586,
+    "data_vencimento": "12/11/2026",
+    "valor_documento": 0.01,
+    "codigo_categoria": "2.01.90",
+    "data_previsao": "12/11/2026",
+    "id_conta_corrente": 2625046958,
+    "data_emissao": "13/10/2026",
+    "observacao": "TESTE HOLOGRAM OS CAPTURA titulo simples (a)"
+  }
+}
