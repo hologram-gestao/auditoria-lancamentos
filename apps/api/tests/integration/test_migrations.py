@@ -2611,3 +2611,53 @@ def _backfill_sql() -> str:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return str(module._BACKFILL)
+
+
+# ----------------------------------------------------------------------
+# 86e3n70q0 (bloco B) — configuração do lançamento como Contas a Pagar.
+# ----------------------------------------------------------------------
+
+CLIENT_PAYABLES_CONFIG_REV = "c4e8a1f7b3d2"
+
+
+class TestConfiguracaoDoContasAPagarRoundTrip:
+    """As duas colunas do cliente sobem com o CHECK, descem e sobem; o cliente fica."""
+
+    def test_sobe_desce_e_sobe_sem_perder_o_cliente(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, CLIENT_PAYABLES_CONFIG_REV)
+        client_id = _seed_client_row(url)
+        assert (
+            _columns(url, "clients", "omie_default_supplier_code", "omie_department_required") == 2
+        )
+        # Cliente existente nasce como antes: sem padrão, rateio opcional.
+        assert (
+            _scalar(
+                url,
+                "SELECT omie_department_required FROM clients WHERE id = :cid",
+                cid=client_id,
+            )
+            is False
+        )
+        assert (
+            _scalar(
+                url,
+                "SELECT count(*) FROM pg_constraint "
+                "WHERE conname = 'ck_clients_omie_default_supplier_code_positive'",
+            )
+            == 1
+        )
+
+        command.downgrade(alembic_cfg, CHART_SORT_KEY_REV)
+        assert (
+            _columns(url, "clients", "omie_default_supplier_code", "omie_department_required") == 0
+        )
+        assert _scalar(url, "SELECT count(*) FROM clients WHERE id = :cid", cid=client_id) == 1
+
+        for _ in range(2):
+            command.upgrade(alembic_cfg, CLIENT_PAYABLES_CONFIG_REV)
+            command.downgrade(alembic_cfg, CHART_SORT_KEY_REV)
+        command.upgrade(alembic_cfg, "head")
+        assert CLIENT_PAYABLES_CONFIG_REV in _revisions_in_chain(alembic_cfg)

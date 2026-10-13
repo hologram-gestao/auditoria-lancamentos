@@ -69,6 +69,19 @@ class CreateClientRequest(BaseModel):
             "da compra) ou `invoice_due_date` (em lote, no vencimento da fatura)."
         ),
     )
+    # 86e3n70q0 — lançamento como Contas a Pagar. Código e flag; nada de nome.
+    omie_default_supplier_code: int | None = Field(
+        None,
+        gt=0,
+        description=(
+            "`codigo_cliente_omie` do fornecedor padrão do título quando a linha da "
+            "fatura não traz CNPJ. Ausente ou null = sem padrão (a linha bloqueia)."
+        ),
+    )
+    omie_department_required: bool = Field(
+        False,
+        description="O título a pagar só sai com rateio por departamento.",
+    )
     # Camada de organizações (86e36ecjp): a plataforma ESCOLHE onde o cliente
     # nasce (obrigatório para ela). Para o staff de organização, ou é omitido
     # (a org da LINHA do ator) ou é a própria org — outro valor é 403.
@@ -115,6 +128,19 @@ class UpdateClientRequest(BaseModel):
     card_posting_date_mode: CardPostingDateMode | None = Field(
         None,
         description="Omitir mantém. Vale para as conciliações de cartão criadas DEPOIS.",
+    )
+
+    # 86e3n70q0 — tri-estado, como `category_id`: OMITIDO mantém; `null` explícito
+    # tira o padrão; inteiro troca. A rota distingue pelo `model_fields_set`.
+    omie_default_supplier_code: int | None = Field(
+        None,
+        gt=0,
+        description="Omitir mantém o fornecedor padrão; `null` remove; código troca.",
+    )
+    # Omitido mantém. `null` não é estado (a coluna é NOT NULL).
+    omie_department_required: bool | None = Field(
+        None,
+        description="Omitir mantém. Liga ou desliga o rateio obrigatório por departamento.",
     )
 
     # Credencial no corpo do PATCH é recusada NA ROTA com
@@ -282,6 +308,9 @@ class ClientResponse(BaseModel):
     # 86e3n70p0 — processo de lançamento das compras do cartão no Omie. A gaveta
     # de criação da conciliação lê daqui o modo em vigor.
     card_posting_date_mode: CardPostingDateMode = CardPostingDateMode.PURCHASE_DATE
+    # 86e3n70q0 — configuração do lançamento como Contas a Pagar (só código e flag).
+    omie_default_supplier_code: int | None = None
+    omie_department_required: bool = False
     # S9 (BACK 09.4) — estado da ORIGEM de dado, derivado das conexões. Está no
     # `ClientResponse` (e não só no detalhe) de propósito: a lista do escritório
     # parceiro precisa mostrar quem está sem origem, e o custo é uma subquery

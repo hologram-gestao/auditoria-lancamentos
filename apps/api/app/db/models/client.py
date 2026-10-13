@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -98,10 +99,19 @@ def card_posting_date_mode_check(*, nullable: bool = False) -> str:
     return f"card_posting_date_mode IS NULL OR {predicate}" if nullable else predicate
 
 
+#: 86e3n70q0 — o fornecedor padrão do lançamento como Contas a Pagar é um
+#: `codigo_cliente_omie`, sempre positivo. Rótulo e predicado são copiados na
+#: migration `c4e8a1f7b3d2`; `tests/unit/test_client_payables_config_schema.py`
+#: compara as duas fontes.
+OMIE_DEFAULT_SUPPLIER_CK_LABEL = "omie_default_supplier_code_positive"
+OMIE_DEFAULT_SUPPLIER_CK = "omie_default_supplier_code IS NULL OR omie_default_supplier_code > 0"
+
+
 class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "clients"
     __table_args__ = (
         CheckConstraint(text(card_posting_date_mode_check()), name=CARD_POSTING_DATE_MODE_CK_LABEL),
+        CheckConstraint(text(OMIE_DEFAULT_SUPPLIER_CK), name=OMIE_DEFAULT_SUPPLIER_CK_LABEL),
     )
 
     name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
@@ -254,6 +264,21 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
         default=CardPostingDateMode.PURCHASE_DATE.value,
         server_default=text(f"'{CardPostingDateMode.PURCHASE_DATE.value}'"),
+    )
+
+    # 86e3n70q0 — lançamento como Contas a Pagar. CÓDIGOS e flag, nada de nome
+    # (§4.5): o nome do fornecedor é resolvido no Omie na hora.
+    #
+    # `omie_default_supplier_code`: o `codigo_cliente_omie` do fornecedor que
+    # recebe o título quando a linha não traz CNPJ (ou traz um sem cadastro e sem
+    # razão social/e-mail para cadastrar). NULL = não há padrão, e a linha
+    # bloqueia com `fornecedor_pendente`.
+    omie_default_supplier_code: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # `omie_department_required`: o título só sai com rateio por departamento
+    # (`distribuicao`). Ligado na PCTAX, que usa departamento em todo gasto
+    # (decisão de 11/10/2026); desligado por padrão, que é o processo de sempre.
+    omie_department_required: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
     )
 
     # Relationships

@@ -114,6 +114,8 @@ def _row_to_response(row: ClientRow) -> ClientResponse:
         # 86e36pm1z — encerrado: o front esconde ações e mostra o selo.
         closed_at=row.client.closed_at,
         card_posting_date_mode=CardPostingDateMode(row.client.card_posting_date_mode),
+        omie_default_supplier_code=row.client.omie_default_supplier_code,
+        omie_department_required=row.client.omie_department_required,
         category=(
             ClientCategorySummary(
                 id=row.category.id, name=row.category.name, tone=row.category.tone
@@ -245,6 +247,8 @@ class ClientService:
         requested_organization_id: UUID | None,
         category_id: UUID | None = None,
         card_posting_date_mode: CardPostingDateMode = CardPostingDateMode.PURCHASE_DATE,
+        omie_default_supplier_code: int | None = None,
+        omie_department_required: bool = False,
     ) -> ClientResponse:
         """Cria o cliente. A credencial é OPCIONAL desde a Sprint 9 (BACK 09.4).
 
@@ -291,6 +295,8 @@ class ClientService:
             category_id=category_id,
             organization_id=organization_id,
             card_posting_date_mode=card_posting_date_mode.value,
+            omie_default_supplier_code=omie_default_supplier_code,
+            omie_department_required=omie_department_required,
         )
         tipo_conexao: str | None = None
         # SAVEPOINT em volta de cliente + carteira + conexão: a credencial é
@@ -356,6 +362,9 @@ class ClientService:
         category_id: UUID | None = None,
         category_set: bool = False,
         card_posting_date_mode: CardPostingDateMode | None = None,
+        omie_default_supplier_code: int | None = None,
+        omie_default_supplier_set: bool = False,
+        omie_department_required: bool | None = None,
     ) -> ClientResponse:
         """Atualiza campos parciais do cliente (PATCH).
 
@@ -381,6 +390,13 @@ class ClientService:
             # 86e3n70p0: vale para as conciliações criadas DEPOIS. As existentes
             # guardam o modo com que foram criadas (snapshot na sessão).
             client.card_posting_date_mode = card_posting_date_mode.value
+        if omie_default_supplier_set:
+            # 86e3n70q0: tri-estado — `None` explícito tira o padrão. O código não é
+            # conferido no Omie aqui: quem o escolhe é a busca por CNPJ da tela, e o
+            # título que o usar falha com a mensagem da Omie se ele sumir.
+            client.omie_default_supplier_code = omie_default_supplier_code
+        if omie_department_required is not None:
+            client.omie_department_required = omie_department_required
 
         await self._repo.add_client(client)
         return await self.get_client_detail(client.id, viewer_user_id=viewer_user_id)
