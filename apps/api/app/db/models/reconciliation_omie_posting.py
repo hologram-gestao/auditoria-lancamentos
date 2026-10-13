@@ -35,7 +35,17 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import BigInteger, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -65,6 +75,65 @@ class OmiePostingStatus(StrEnum):
     FAILED = "failed"
 
 
+class OmiePostingKind(StrEnum):
+    """COMO a linha vai para o Omie (86e3n70q0, bloco B).
+
+    - `direto`: `IncluirLancCC` na própria conta do cartão (Sprint 7). Um passo,
+      uma chave (`cod_int_lanc`), um id (`omie_lancamento_id`).
+    - `provisao`: título no Contas a Pagar — fornecedor, título e, só no processo
+      "na data da compra", a baixa. Até três passos no Omie, cada um com chave
+      própria derivada da linha, e por isso uma máquina de estados com retomada.
+    """
+
+    DIRETO = "direto"
+    PROVISAO = "provisao"
+
+
+class OmiePostingStep(StrEnum):
+    """Em que passo a PROVISÃO está. Só existe para `kind = provisao`.
+
+    O passo é o PRÓXIMO a fazer; o id do passo anterior já está gravado
+    (`supplier_code` antes de `titulo`, `payable_id` antes de `baixa`). No
+    processo "vencimento da fatura" não há baixa: depois do título o passo vai
+    direto a `concluido` (decisão do bloco 0, 11/10/2026: a baixa depende do
+    pagamento efetivo da fatura, que é do cliente).
+    """
+
+    FORNECEDOR = "fornecedor"
+    TITULO = "titulo"
+    BAIXA = "baixa"
+    CONCLUIDO = "concluido"
+
+
+#: Larguras das colunas novas (a maior palavra de cada enum, com folga).
+POSTING_KIND_LENGTH = 10
+POSTING_STEP_LENGTH = 12
+
+#: Rótulos (não nomes finais: a `NAMING_CONVENTION` prefixa `ck_<tabela>_`) e
+#: predicados dos CHECKs. Copiados na migration `d9f3b6a2e815`;
+#: `tests/unit/test_omie_payables_schema.py` compara as duas fontes.
+POSTING_STATUS_CK_LABEL = "status_known"
+POSTING_STATUS_CK = "status IN ('pending', 'confirmed', 'failed')"
+POSTING_KIND_CK_LABEL = "kind_shape"
+POSTING_KIND_CK = (
+    "(kind = 'direto' AND step IS NULL AND supplier_code IS NULL "
+    "AND payable_id IS NULL AND payment_id IS NULL) "
+    "OR (kind = 'provisao' AND step IN ('fornecedor', 'titulo', 'baixa', 'concluido') "
+    "AND omie_lancamento_id IS NULL)"
+)
+#: A provisão não pula passo nem se diz concluída sem o título: o id de cada
+#: passo feito está gravado antes do passo seguinte, e `confirmed` é exatamente
+#: `concluido`. É o que a retomada lê — e o banco garante, não só a aplicação.
+POSTING_STEPS_CK_LABEL = "provisao_steps_coherent"
+POSTING_STEPS_CK = (
+    "kind <> 'provisao' OR ("
+    "(step <> 'titulo' OR supplier_code IS NOT NULL) "
+    "AND (step NOT IN ('baixa', 'concluido') "
+    "OR (supplier_code IS NOT NULL AND payable_id IS NOT NULL)) "
+    "AND ((status = 'confirmed') = (step = 'concluido')))"
+)
+
+
 class ReconciliationOmiePosting(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "reconciliation_omie_postings"
 
@@ -78,6 +147,9 @@ class ReconciliationOmiePosting(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UniqueConstraint("client_id", "cod_int_lanc", name="uq_recon_omie_postings_client_cod_int"),
         # Leitura do lote: "as intenções desta sessão", por status.
         Index("ix_recon_omie_postings_session_status", "session_id", "status"),
+        CheckConstraint(text(POSTING_STATUS_CK), name=POSTING_STATUS_CK_LABEL),
+        CheckConstraint(text(POSTING_KIND_CK), name=POSTING_KIND_CK_LABEL),
+        CheckConstraint(text(POSTING_STEPS_CK), name=POSTING_STEPS_CK_LABEL),
     )
 
     session_id: Mapped[UUID] = mapped_column(
@@ -116,7 +188,33 @@ class ReconciliationOmiePosting(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     #: `reconciliation_file_entries.omie_lancamento_id` — o ID do Omie não cabe
     #: em `Integer` com folga garantida.
     omie_lancamento_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    #: Envios ao Omie ainda SEM resposta conclusiva, contados ANTES do POST.
+    #:
+    #: - `direto`: todas as tentativas da linha (um passo só), como desde a
+    #:   Sprint 7 — `> 0` em `pending` dispara a reconciliação pós-timeout.
+    #: - `provisao`: os envios do PASSO CORRENTE. Zera quando o passo avança (o id
+    #:   gravado prova o passo feito) e quando a Omie responde com `faultstring`
+    #:   (resposta definitiva: nada foi criado). Um contador por passo seria três
+    #:   colunas das quais duas estariam sempre mortas: a pergunta "posso reenviar
+    #:   este passo?" é sempre sobre o passo atual.
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    #: `direto` ou `provisao` (`OmiePostingKind`). Linha anterior ao bloco B é
+    #: `direto` pelo `server_default`, que é o que ela sempre foi.
+    kind: Mapped[str] = mapped_column(
+        String(POSTING_KIND_LENGTH),
+        nullable=False,
+        default=OmiePostingKind.DIRETO.value,
+        server_default=text(f"'{OmiePostingKind.DIRETO.value}'"),
+    )
+    #: Próximo passo da provisão (`OmiePostingStep`); NULL no `direto`.
+    step: Mapped[str | None] = mapped_column(String(POSTING_STEP_LENGTH), nullable=True)
+    #: `codigo_cliente_omie` do fornecedor do título. Só o CÓDIGO: o CNPJ, a razão
+    #: social e o e-mail da linha trafegam em memória e não persistem (§4.5).
+    supplier_code: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    #: `codigo_lancamento_omie` do título a pagar criado.
+    payable_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    #: `codigo_baixa` do `LancarPagamento` (só no processo "na data da compra").
+    payment_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(60), nullable=True)
     #: Mensagem do provedor, VERBATIM. Decisão registrada (ADR-022-BE): fica
     #: guardada porque o usuário precisa vê-la inline para agir, e **nunca é
