@@ -224,7 +224,9 @@ async def _events(db: AsyncSession, event: UsageEventName) -> list[UsageEvent]:
 
 
 def _body(entry_id: object, categoria: str = "2.01.03") -> dict:
-    return {"lines": [{"file_entry_id": str(entry_id), "cod_categoria": categoria}]}
+    return {
+        "lines": [{"file_entry_id": str(entry_id), "cod_categoria": categoria, "modo": "direto"}]
+    }
 
 
 # ----------------------------------------------------------------------
@@ -246,8 +248,8 @@ class TestEmittedOnTheRealPath:
             POSTING_URL.format(session_id=scenario.session.id),
             json={
                 "lines": [
-                    {"file_entry_id": str(first.id), "cod_categoria": "2.01.03"},
-                    {"file_entry_id": str(second.id), "cod_categoria": "2.01.03"},
+                    {"file_entry_id": str(first.id), "cod_categoria": "2.01.03", "modo": "direto"},
+                    {"file_entry_id": str(second.id), "cod_categoria": "2.01.03", "modo": "direto"},
                 ]
             },
         )
