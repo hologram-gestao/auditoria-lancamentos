@@ -1,7 +1,7 @@
 /**
  * Hooks do lançamento no Omie (Sprint 7 / FRONT 07.6 · 07.7).
  *
- * Duas peças:
+ * Peças:
  *   - `useOmieCategorias` — lista COMPLETA das categorias do cliente da sessão,
  *     usada pelo combobox de classificação. `staleTime` alto de propósito: o
  *     backend já cacheia por 6 h por cliente, e o combobox filtra localmente;
@@ -9,9 +9,13 @@
  *   - `usePostOmieLancamentos` — o envio do lote. `useMutation` (e não query)
  *     porque é ação do usuário, com `isPending` para o botão async e efeito
  *     externo IRREVERSÍVEL: nunca pode ser disparado por prefetch/refetch.
+ *   - 86e3n70q0 (bloco C): `useOmieDepartamentos` (rateio), `useFindOmieFornecedor`
+ *     (busca por CNPJ, ação do botão) e `useOmieFornecedorByCode` (nome do
+ *     fornecedor padrão do cliente).
  *
- * Invalidação após o envio: o backend muda a linha (`sem_omie` → `conciliado`
- * com `omie_lancamento_id`), resolve a anomalia `missing_in_omie` e recalcula
+ * Invalidação após o envio: o backend muda a linha (no direto, `sem_omie` →
+ * `conciliado` com `omie_lancamento_id`; na provisão, a linha segue `sem_omie` e
+ * muda o `omie_posting`), resolve a anomalia `missing_in_omie` e recalcula
  * os contadores da sessão. Por isso invalida o prefixo `['review', sessionId]`
  * (movimentações + anomalias) **e** `['reconciliations', sessionId]` (detalhe/
  * status, que alimentam os totalizadores do topo).
@@ -21,53 +25,96 @@ import { useCallback, useRef, useState } from 'react';
 
 import { invalidateClientSummary } from '@/hooks/use-client-summary';
 import {
+  findOmieFornecedor,
   listOmieCategorias,
+  listOmieDepartamentos,
   postOmieLancamentos,
+  type FornecedorLookup,
   type OmieCategoriaListResponse,
+  type OmieDepartamentoListResponse,
+  type OmieFornecedorItem,
   type OmiePostingBatchPayload,
   type OmiePostingLineRequest,
+  type OmiePostingLineResult,
+  type OmiePostingState,
 } from '@/lib/api/omie-postings';
 
 export const omiePostingKeys = {
   categorias: (sessionId: string) => ['omie-categorias', sessionId] as const,
+  departamentos: (clientId: string) => ['omie-departamentos', clientId] as const,
+  fornecedorByCode: (clientId: string, codigo: number) =>
+    ['omie-fornecedor', clientId, codigo] as const,
   /**
-   * 86e3n70qj — linhas lançadas NESTA visita (id da linha → nº do lançamento).
-   * Fora dos prefixos `['review', …]` e `['reconciliations', …]` de propósito: a
+   * 86e3n70qj — linhas concluídas NESTA visita (id da linha → estado). Fora dos
+   * prefixos `['review', …]` e `['reconciliations', …]` de propósito: a
    * invalidação depois do envio não pode apagar o que acabou de acontecer.
    */
   postedInSession: (sessionId: string) => ['omie-posted', sessionId] as const,
 };
 
-/** Linha → nº do lançamento no Omie (`null` quando o servidor não devolveu o número). */
-export type PostedInSession = Record<string, number | null>;
+/** Linha → estado da intenção concluída, montado a partir do resumo do lote. */
+export type PostedInSession = Record<string, OmiePostingState>;
 
 /**
- * Linhas com lançamento confirmado no lote — inclui a que já estava lançada
- * (`ja_lancada`), cujo número o servidor devolve junto.
+ * O resultado de uma linha CONCLUÍDA, na forma do estado que o servidor manda na
+ * listagem (`omie_posting`). É o que deixa o selo pintar igual antes e depois do
+ * refetch.
  */
+export function postingStateFromResult(line: OmiePostingLineResult): OmiePostingState {
+  return {
+    kind: line.kind ?? 'direto',
+    status: 'confirmed',
+    step: line.step ?? null,
+    attempts: 0,
+    supplier_code: line.supplier_code ?? null,
+    payable_id: line.payable_id ?? null,
+    payment_id: line.payment_id ?? null,
+    omie_lancamento_id: line.omie_lancamento_id ?? null,
+    error_code: null,
+    error_message: null,
+  };
+}
+
+/**
+ * A linha está concluída no Omie depois deste lote: lançada agora, ou já estava
+ * (`ja_lancada` — direto vinculado, ou provisão com título).
+ */
+export function isPostingResultConcluded(line: OmiePostingLineResult): boolean {
+  return line.status === 'lancada' || line.reason === 'ja_lancada';
+}
+
+/** Linhas concluídas no lote, no formato do estado da listagem. */
 export function collectPosted(payload: OmiePostingBatchPayload): PostedInSession {
   const out: PostedInSession = {};
   payload.lines.forEach((line) => {
-    if (line.status === 'lancada' || line.reason === 'ja_lancada') {
-      out[line.file_entry_id] = line.omie_lancamento_id ?? null;
-    }
+    if (isPostingResultConcluded(line)) out[line.file_entry_id] = postingStateFromResult(line);
   });
   return out;
+}
+
+/**
+ * O estado que a linha mostra: o do SERVIDOR (verdade do banco), salvo quando o
+ * cache desta visita já sabe que ela terminou e o refetch ainda não chegou.
+ */
+export function pickPostingState(
+  server: OmiePostingState | null | undefined,
+  cached: OmiePostingState | undefined,
+): OmiePostingState | null {
+  if (server?.status === 'confirmed') return server;
+  return cached ?? server ?? null;
 }
 
 const EMPTY_POSTED: PostedInSession = {};
 
 /**
- * O que foi lançado no Omie nesta visita à sessão, para as DUAS abas que oferecem
- * "Lançar no Omie" (Movimentações e Anomalias) mostrarem "Lançado no Omie · nº X"
- * na linha, não importa de qual delas o lote saiu.
+ * O que foi concluído no Omie nesta visita, para as DUAS abas que oferecem
+ * "Lançar no Omie" pintarem o selo NO INSTANTE do envio, antes de a listagem
+ * voltar do refetch.
  *
- * ⚠️ Alcance declarado: o contrato da linha não diz "lançada pelo sistema"
- * (depois do envio ela é `conciliado` com `omie_lancamento_id`, igual a uma que o
- * cruzamento achou), então o dado é o RESUMO do lote observado aqui, nunca
- * inferido da listagem. Recarregar a página o esquece; o sinal persistente segue
- * sendo a ação indisponível com o motivo "já está vinculada a um lançamento".
- * É cache de cliente sem `queryFn` de rede: só o envio escreve nele.
+ * Desde o bloco C da 86e3n70q0 o selo persistente vem do SERVIDOR (`omie_posting`
+ * na linha, lido de `reconciliation_omie_postings`). Este cache é só a ponte entre
+ * o envio e o refetch (`pickPostingState`); recarregar a página o esquece sem
+ * perder nada. É cache de cliente sem `queryFn` de rede: só o envio escreve nele.
  */
 export function usePostedInSession(sessionId: string): PostedInSession {
   const query = useQuery<PostedInSession>({
@@ -95,6 +142,51 @@ export function useOmieCategorias(sessionId: string, options: UseOmieCategoriasO
     enabled: sessionId.length > 0 && (options.enabled ?? true),
     staleTime: CATEGORIAS_STALE_MS,
     refetchOnWindowFocus: false,
+  });
+}
+
+/** 30 min, como as categorias: o servidor mantém 6 h; aqui só não refazemos por navegação. */
+const DEPARTAMENTOS_STALE_MS = 30 * 60 * 1000;
+
+/**
+ * Departamentos ativos do cliente para o rateio (86e3n70q0, bloco C). Só busca com
+ * a gaveta aberta: no MISS do cache do servidor custa uma ida ao Omie.
+ */
+export function useOmieDepartamentos(clientId: string, options: { enabled?: boolean } = {}) {
+  return useQuery<OmieDepartamentoListResponse>({
+    queryKey: omiePostingKeys.departamentos(clientId),
+    queryFn: () => listOmieDepartamentos(clientId),
+    enabled: clientId.length > 0 && (options.enabled ?? true),
+    staleTime: DEPARTAMENTOS_STALE_MS,
+    refetchOnWindowFocus: false,
+  });
+}
+
+/**
+ * Busca do fornecedor por CNPJ: AÇÃO da pessoa (botão "Buscar no Omie"), nunca
+ * por tecla. `retry: false`: o 404 "sem cadastro" é resposta, não falha.
+ */
+export function useFindOmieFornecedor(clientId: string) {
+  return useMutation<OmieFornecedorItem, Error, FornecedorLookup>({
+    mutationFn: (lookup) => findOmieFornecedor(clientId, lookup),
+    retry: false,
+  });
+}
+
+/** O fornecedor PADRÃO gravado no cliente, resolvido pelo código para mostrar o nome. */
+export function useOmieFornecedorByCode(
+  clientId: string,
+  codigo: number | null | undefined,
+  options: { enabled?: boolean } = {},
+) {
+  return useQuery<OmieFornecedorItem>({
+    queryKey: omiePostingKeys.fornecedorByCode(clientId, codigo ?? 0),
+    queryFn: () => findOmieFornecedor(clientId, { codigo: codigo ?? 0 }),
+    enabled:
+      clientId.length > 0 && codigo !== null && codigo !== undefined && (options.enabled ?? true),
+    staleTime: DEPARTAMENTOS_STALE_MS,
+    refetchOnWindowFocus: false,
+    retry: false,
   });
 }
 
@@ -136,7 +228,11 @@ export function usePostOmieLancamentos(sessionId: string) {
  *
  * Um pedido por vez: clique repetido enquanto carrega não abre duas gavetas.
  */
-export function useOpenLancarDrawer<T>(sessionId: string, onReady: (targets: T[]) => void) {
+export function useOpenLancarDrawer<T>(
+  sessionId: string,
+  onReady: (targets: T[]) => void,
+  clientId?: string,
+) {
   const qc = useQueryClient();
   const [openingTargets, setOpeningTargets] = useState<T[] | null>(null);
   const inFlight = useRef(false);
@@ -147,20 +243,32 @@ export function useOpenLancarDrawer<T>(sessionId: string, onReady: (targets: T[]
       inFlight.current = true;
       setOpeningTargets(targets);
       try {
-        await qc.ensureQueryData({
-          queryKey: omiePostingKeys.categorias(sessionId),
-          queryFn: () => listOmieCategorias(sessionId),
-          staleTime: CATEGORIAS_STALE_MS,
-        });
-      } catch {
-        // A gaveta tem o estado de erro das categorias, com "Tentar novamente".
+        // Categorias e departamentos em paralelo (são métodos diferentes no Omie,
+        // sem disputa de rate limit). Falha de qualquer um não prende a gaveta:
+        // cada um tem o próprio estado de erro, com "Tentar novamente".
+        await Promise.allSettled([
+          qc.ensureQueryData({
+            queryKey: omiePostingKeys.categorias(sessionId),
+            queryFn: () => listOmieCategorias(sessionId),
+            staleTime: CATEGORIAS_STALE_MS,
+          }),
+          ...(clientId
+            ? [
+                qc.ensureQueryData({
+                  queryKey: omiePostingKeys.departamentos(clientId),
+                  queryFn: () => listOmieDepartamentos(clientId),
+                  staleTime: DEPARTAMENTOS_STALE_MS,
+                }),
+              ]
+            : []),
+        ]);
       } finally {
         inFlight.current = false;
         setOpeningTargets(null);
         onReady(targets);
       }
     },
-    [qc, sessionId, onReady],
+    [qc, sessionId, onReady, clientId],
   );
 
   return { open, openingTargets };

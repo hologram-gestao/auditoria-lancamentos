@@ -365,6 +365,11 @@ _MOCK_FORNECEDORES_SEED: dict[str, ClienteOmie] = {
 }
 _MOCK_FORNECEDORES: dict[str, ClienteOmie] = dict(_MOCK_FORNECEDORES_SEED)
 
+#: Código que o `consultar_cliente` do mock responde com `faultstring`, como a Omie
+#: real faz para cadastro excluído (86e3n70q0, bloco C): é o 404 da busca de
+#: fornecedor por código, para a tela e o teste exercitarem o padrão que sumiu.
+MOCK_FORNECEDOR_EXCLUIDO_CODIGO = 799_999_999
+
 
 def reset_mock_payables_state() -> None:
     """Volta o cadastro de fornecedores do mock ao seed (isolamento de teste)."""
@@ -451,6 +456,24 @@ class MockOmieClient(OmieClient):
         `codigo_cliente_fornecedor` (100001…), então a resolução de fornecedor
         da aba Divergências (86e33bmkb) roda de ponta a ponta no demo."""
         log.info("omie_mock_call", call="consultar_cliente", codigo=codigo_cliente_omie)
+        if codigo_cliente_omie == MOCK_FORNECEDOR_EXCLUIDO_CODIGO:
+            raise OmieFaultError(
+                "Fault em ConsultarCliente (MOCK): cadastro inexistente",
+                user_message="Ocorreu um erro ao acessar o Omie: cliente não cadastrado.",
+            )
+        # O fornecedor cadastrado (seed ou criado pelo lançamento) resolve pelo
+        # nome dele: a busca por código (fornecedor padrão do cliente, bloco C)
+        # mostra o mesmo cadastro que a busca por CNPJ achou.
+        known = next(
+            (
+                c
+                for c in _MOCK_FORNECEDORES.values()
+                if c.codigo_cliente_omie == codigo_cliente_omie
+            ),
+            None,
+        )
+        if known is not None:
+            return known
         return ClienteOmie(
             codigo_cliente_omie=codigo_cliente_omie,
             razao_social=f"FORNECEDOR DEMO {codigo_cliente_omie}",

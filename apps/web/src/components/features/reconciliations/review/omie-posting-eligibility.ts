@@ -14,7 +14,12 @@
  * LINHA, é um erro do lote inteiro (400), e aqui vira o silêncio da coluna.
  */
 import type { FileEntryItem } from '@/lib/api/reconciliations';
-import type { ClientConnection, OmiePostingLineReason } from '@/lib/contracts';
+import type {
+  ClientConnection,
+  OmiePostingLineReason,
+  OmiePostingMode,
+  OmiePostingState,
+} from '@/lib/contracts';
 
 /**
  * A origem do cliente sabe ESCREVER? (Sprint 9 / R3 · R6)
@@ -37,18 +42,82 @@ export function originCanWrite(connections: readonly ClientConnection[]): boolea
  *
  * Espelho do motivo `direto_indisponivel_no_modo_vencimento` do servidor: o
  * `IncluirLancCC` grava a data da COMPRA, e o cliente que lança em lote no
- * vencimento da fatura não usa essa data. Esta gaveta só faz o lançamento
- * direto; a PROVISÃO no Contas a Pagar (86e3n70q0), que funciona nesse
- * processo, ganha tela no bloco C. Sessão antiga (sem o processo gravado) é o
- * processo de sempre.
+ * vencimento da fatura não usa essa data. Nesse processo a gaveta oferece só a
+ * PROVISÃO no Contas a Pagar (86e3n70q0, bloco C), que põe o vencimento da fatura
+ * no título. Sessão antiga (sem o processo gravado) é o processo de sempre.
  */
-export function processAllowsPosting(session: { card_posting_date_mode?: string | null }): boolean {
+export function processAllowsDirectPosting(session: {
+  card_posting_date_mode?: string | null;
+}): boolean {
   return session.card_posting_date_mode !== 'invoice_due_date';
 }
 
-/** Aviso da gaveta no processo do vencimento (o servidor bloqueia o direto por linha). */
-export const INVOICE_DUE_DATE_POSTING_BLOCK_MESSAGE =
-  'Esta conciliação cruza as compras pelo vencimento da fatura. O lançamento no Omie ainda não é feito neste processo: lance as compras diretamente no Omie.';
+/**
+ * VERBATIM de `DIRECT_IN_DUE_DATE_PROCESS_MESSAGE`
+ * (`apps/api/app/modules/reconciliations/omie_posting/service.py`): o texto que o
+ * servidor devolveria ao recusar o direto neste processo.
+ */
+export const DIRECT_IN_DUE_DATE_PROCESS_MESSAGE =
+  'Esta conciliação cruza as compras pelo vencimento da fatura: o lançamento direto gravaria a data da compra. Provisione a compra no Contas a Pagar.';
+
+/**
+ * VERBATIM de `_MODE_LOCKED_MSG` do mesmo arquivo (motivo `modo_divergente`).
+ */
+export const MODE_LOCKED_MESSAGE =
+  'Esta compra já teve um envio ao Omie na outra forma de lançamento. Continue por ela, ou confira no Omie antes: trocar agora poderia lançar a mesma compra duas vezes.';
+
+/** A forma da intenção gravada, na palavra do pedido (`provisao` → `provisionar`). */
+export function postingModeOf(posting: Pick<OmiePostingState, 'kind'>): OmiePostingMode {
+  return posting.kind === 'provisao' ? 'provisionar' : 'direto';
+}
+
+/**
+ * Trocar de forma é permitido? Espelho de `_kind_switch_allowed`
+ * (`apps/api/app/modules/reconciliations/omie_posting/service.py`): só quando
+ * NENHUM dinheiro pode ter sido escrito no Omie.
+ *
+ * - provisão ainda no passo `fornecedor`: no máximo um cadastro de fornecedor
+ *   existiu, nunca título nem baixa;
+ * - direto recusado por `faultstring` na ÚNICA tentativa (`OMIE_FAULT`, sem
+ *   lançamento vinculado).
+ *
+ * Fora disso o servidor responde `modo_divergente`, e a gaveta abre a linha
+ * TRAVADA na forma gravada.
+ */
+export function kindSwitchAllowed(
+  posting: Pick<OmiePostingState, 'kind' | 'status' | 'step' | 'attempts' | 'error_code'> &
+    Pick<OmiePostingState, 'omie_lancamento_id'>,
+): boolean {
+  if (posting.status === 'confirmed') return false;
+  if (posting.kind === 'provisao') return posting.step === 'fornecedor';
+  return (
+    posting.status === 'failed' &&
+    posting.attempts === 1 &&
+    posting.error_code === 'OMIE_FAULT' &&
+    posting.omie_lancamento_id === null
+  );
+}
+
+/** A forma em que a linha está TRAVADA (`null` = a pessoa escolhe). */
+export function lockedPostingMode(
+  posting: OmiePostingState | null | undefined,
+): OmiePostingMode | null {
+  if (posting === null || posting === undefined) return null;
+  return kindSwitchAllowed(posting) ? null : postingModeOf(posting);
+}
+
+/**
+ * Provisão que começou e não terminou (`pending` ou `failed`): a linha mostra
+ * "Lançamento parado" e a ação vira "Retomar lançamento".
+ */
+export function isProvisionStalled(posting: OmiePostingState | null | undefined): boolean {
+  return (
+    posting !== null &&
+    posting !== undefined &&
+    posting.kind === 'provisao' &&
+    posting.status !== 'confirmed'
+  );
+}
 
 export type PostingBlockReason =
   | Extract<
@@ -72,19 +141,28 @@ export const POSTING_BLOCK_MESSAGE: Record<PostingBlockReason, string> = {
     'Só é possível lançar no Omie a partir de uma conciliação de cartão de crédito.',
 };
 
+type PostingEntry = Pick<FileEntryItem, 'situation' | 'omie_lancamento_id' | 'amount'> & {
+  omie_posting?: OmiePostingState | null;
+};
+
 /**
  * `null` = a linha pode ser lançada. Qualquer outro valor é o motivo do
- * bloqueio, na MESMA ordem de precedência do servidor: ignorada vence "já
- * lançada", que vence "não é sem Omie", que vence o estorno. A ordem importa
- * porque é ela que decide qual motivo o operador lê quando dois valem ao
- * mesmo tempo.
+ * bloqueio, na MESMA ordem de precedência do servidor (`_eligibility_block`,
+ * depois o estado da intenção): ignorada vence "já lançada", que vence "não é
+ * sem Omie", que vence o estorno, que vence a intenção CONFIRMADA. A ordem
+ * importa porque é ela que decide qual motivo o operador lê quando dois valem
+ * ao mesmo tempo.
+ *
+ * A intenção confirmada (86e3n70q0, bloco C) é o que pega a PROVISÃO: ela não
+ * casa a linha, que continua `sem_omie` sem `omie_lancamento_id` — só o
+ * `omie_posting` vindo do servidor diz que o título existe.
  *
  * Estorno (valor positivo): o contrato real do `IncluirLancCC` não tem campo
  * de sinal e a representação do crédito segue não-verificada (S-1) — o
  * servidor bloqueia, então a UI não oferece (§4.9).
  */
 export function getPostingBlock(
-  entry: Pick<FileEntryItem, 'situation' | 'omie_lancamento_id' | 'amount'>,
+  entry: PostingEntry,
   options: { isCard: boolean },
 ): PostingBlockReason | null {
   if (!options.isCard) return 'sessao_nao_e_cartao';
@@ -92,13 +170,26 @@ export function getPostingBlock(
   if (entry.omie_lancamento_id !== null) return 'ja_lancada';
   if (entry.situation !== 'sem_omie') return 'nao_e_sem_omie';
   if (Number(entry.amount) > 0) return 'estorno_nao_verificado';
+  if (entry.omie_posting?.status === 'confirmed') return 'ja_lancada';
   return null;
 }
 
 /** Açúcar para filtros/contadores — mesma decisão, sem repetir o `=== null`. */
-export function isPostingEligible(
-  entry: Pick<FileEntryItem, 'situation' | 'omie_lancamento_id' | 'amount'>,
-  options: { isCard: boolean },
-): boolean {
+export function isPostingEligible(entry: PostingEntry, options: { isCard: boolean }): boolean {
   return getPostingBlock(entry, options) === null;
+}
+
+/**
+ * O texto lido do bloqueio. Igual ao `POSTING_BLOCK_MESSAGE`, salvo a provisão
+ * concluída, que o servidor descreve com o número do título
+ * (`_provision_already_done`).
+ */
+export function postingBlockMessage(
+  block: PostingBlockReason,
+  posting?: OmiePostingState | null,
+): string {
+  if (block === 'ja_lancada' && posting?.kind === 'provisao' && posting.status === 'confirmed') {
+    return `Esta compra já foi provisionada no Omie (título nº ${posting.payable_id}).`;
+  }
+  return POSTING_BLOCK_MESSAGE[block];
 }

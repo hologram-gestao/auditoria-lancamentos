@@ -1,7 +1,9 @@
 /**
  * Hooks do lançamento no Omie — o que a 86e3n70qj acrescentou:
- *   - o envio grava, no cache da sessão, o par linha → nº do lançamento, e ele
- *     sobrevive à invalidação da revisão (é o que pinta o selo nas duas abas);
+ *   - o envio grava, no cache da sessão, a linha → estado concluído (na forma do
+ *     `omie_posting` da listagem), e ele sobrevive à invalidação da revisão: é a
+ *     ponte até o refetch, quando o selo passa a vir do servidor (86e3n70q0);
+ *   - `pickPostingState`: o servidor confirmado vence; o cache só preenche o vão;
  *   - "Lançar no Omie" espera as categorias antes de abrir a gaveta, com o
  *     carregando exposto, e não abre duas vezes num clique repetido;
  *   - falha das categorias não prende a gaveta fechada.
@@ -20,6 +22,7 @@ vi.mock('@/lib/api/omie-postings', () => ({
 import {
   collectPosted,
   omiePostingKeys,
+  pickPostingState,
   useOpenLancarDrawer,
   usePostedInSession,
   usePostOmieLancamentos,
@@ -68,9 +71,63 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+const E1 = expect.objectContaining({
+  kind: 'direto',
+  status: 'confirmed',
+  omie_lancamento_id: 5001,
+});
+const E2 = expect.objectContaining({ status: 'confirmed', omie_lancamento_id: 4999 });
+
 describe('collectPosted', () => {
   it('lançada e já-lançada entram com o número; erro não entra', () => {
-    expect(collectPosted(PAYLOAD as never)).toEqual({ e1: 5001, e2: 4999 });
+    expect(collectPosted(PAYLOAD as never)).toEqual({ e1: E1, e2: E2 });
+  });
+
+  it('provisão entra com o título e a baixa', () => {
+    const posted = collectPosted({
+      lines: [
+        {
+          file_entry_id: 'p1',
+          status: 'lancada',
+          kind: 'provisao',
+          step: 'concluido',
+          supplier_code: 7,
+          payable_id: 88,
+          payment_id: 99,
+        },
+      ],
+      lancadas: 1,
+      bloqueadas: 0,
+      com_erro: 0,
+    });
+    expect(posted.p1).toEqual({
+      kind: 'provisao',
+      status: 'confirmed',
+      step: 'concluido',
+      attempts: 0,
+      supplier_code: 7,
+      payable_id: 88,
+      payment_id: 99,
+      omie_lancamento_id: null,
+      error_code: null,
+      error_message: null,
+    });
+  });
+});
+
+describe('pickPostingState', () => {
+  const confirmed = collectPosted(PAYLOAD as never).e1;
+  it('o servidor confirmado vence o cache', () => {
+    const server = { ...confirmed!, omie_lancamento_id: 1 };
+    expect(pickPostingState(server, confirmed)).toBe(server);
+  });
+  it('o cache preenche o vão até o refetch', () => {
+    const server = { ...confirmed!, status: 'pending' };
+    expect(pickPostingState(server, confirmed)).toBe(confirmed);
+    expect(pickPostingState(null, confirmed)).toBe(confirmed);
+  });
+  it('sem nada, nada', () => {
+    expect(pickPostingState(undefined, undefined)).toBeNull();
   });
 });
 
@@ -90,14 +147,14 @@ describe('usePostOmieLancamentos + usePostedInSession', () => {
       ]);
     });
 
-    await waitFor(() => expect(result.current.posted).toEqual({ e1: 5001, e2: 4999 }));
+    await waitFor(() => expect(result.current.posted).toEqual({ e1: E1, e2: E2 }));
     await act(async () => {
       await client.invalidateQueries({ queryKey: ['review', 's1'] });
       await client.invalidateQueries({ queryKey: ['reconciliations', 's1'] });
     });
     expect(client.getQueryData(omiePostingKeys.postedInSession('s1'))).toEqual({
-      e1: 5001,
-      e2: 4999,
+      e1: E1,
+      e2: E2,
     });
   });
 

@@ -41,6 +41,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 // Imports do SUT DEPOIS dos `vi.mock`.
 import { AnomaliesTab } from '@/components/features/reconciliations/review/anomalies-tab';
 import type { AnomalyItem } from '@/lib/api/reconciliations';
+import { TEST_POSTING_CONTEXT } from '@/test/posting-context';
 
 function setEmptyList() {
   listState.data = {
@@ -64,14 +65,28 @@ beforeEach(() => {
 
 describe('Anomalias — estado vazio', () => {
   it('sem filtro, afirma sobre a conciliação', () => {
-    render(<AnomaliesTab sessionId="s1" isCard={false} canPostToOmie />);
+    render(
+      <AnomaliesTab
+        sessionId="s1"
+        isCard={false}
+        canPostToOmie
+        postingContext={TEST_POSTING_CONTEXT}
+      />,
+    );
     expect(screen.getByText('Nenhuma anomalia registrada.')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Limpar filtros' })).not.toBeInTheDocument();
   });
 
   it('com filtro de severidade, cita o filtro e oferece a saída', async () => {
     const ui = userEvent.setup();
-    render(<AnomaliesTab sessionId="s1" isCard={false} canPostToOmie />);
+    render(
+      <AnomaliesTab
+        sessionId="s1"
+        isCard={false}
+        canPostToOmie
+        postingContext={TEST_POSTING_CONTEXT}
+      />,
+    );
 
     await ui.click(screen.getByRole('combobox', { name: 'Severidade' }));
     await ui.click(screen.getByRole('option', { name: 'Críticas' }));

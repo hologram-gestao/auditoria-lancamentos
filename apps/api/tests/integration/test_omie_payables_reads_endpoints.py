@@ -31,7 +31,11 @@ from app.db.models import (
     UserScope,
 )
 from app.integrations.omie import mock_client
-from app.integrations.omie.mock_client import FAKE_DEMO_KEY_PREFIX, reset_mock_payables_state
+from app.integrations.omie.mock_client import (
+    FAKE_DEMO_KEY_PREFIX,
+    MOCK_FORNECEDOR_EXCLUIDO_CODIGO,
+    reset_mock_payables_state,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -176,6 +180,64 @@ class TestFornecedor:
         )
         assert resp.status_code == 400, resp.text
         assert "12.345.678" not in resp.text
+
+
+class TestFornecedorPorCodigo:
+    """`?codigo=` (bloco C): o nome do fornecedor padrão gravado no cliente."""
+
+    async def test_found_by_code_resolves_the_same_cadastro(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        admin = await _seed_user(db_session)
+        client = await _seed_omie_client(db_session, admin)
+        await _login(client_with_db, admin)
+
+        resp = await client_with_db.get(
+            f"/api/v1/clients/{client.id}/omie/fornecedores", params={"codigo": 700_000_001}
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["data"] == {
+            "codigo": 700_000_001,
+            "razao_social": "PAPELARIA DEMO LTDA",
+            "nome_fantasia": None,
+        }
+
+    async def test_unknown_code_is_typed_404(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        admin = await _seed_user(db_session)
+        client = await _seed_omie_client(db_session, admin)
+        await _login(client_with_db, admin)
+
+        url = f"/api/v1/clients/{client.id}/omie/fornecedores"
+        params = {"codigo": MOCK_FORNECEDOR_EXCLUIDO_CODIGO}
+        resp = await client_with_db.get(url, params=params)
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["error"]["code"] == "FORNECEDOR_NAO_ENCONTRADO"
+        # O cache negativo responde a 2ª busca sem perguntar à Omie de novo.
+        again = await client_with_db.get(url, params=params)
+        assert again.status_code == 404, again.text
+
+    @pytest.mark.parametrize(
+        "params",
+        [{}, {"cnpj": "12345678000195", "codigo": "700000001"}],
+        ids=["nenhum", "os-dois"],
+    )
+    async def test_cnpj_xor_codigo(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        params: dict[str, str],
+    ) -> None:
+        admin = await _seed_user(db_session)
+        client = await _seed_omie_client(db_session, admin)
+        await _login(client_with_db, admin)
+
+        resp = await client_with_db.get(
+            f"/api/v1/clients/{client.id}/omie/fornecedores", params=params
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
 class TestClienteSoArquivo:

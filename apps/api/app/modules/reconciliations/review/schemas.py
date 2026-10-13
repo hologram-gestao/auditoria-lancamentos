@@ -45,6 +45,36 @@ def field_provided(body: BaseModel, field: str) -> bool:
 # ----------------------------------------------------------------------
 
 
+class OmiePostingState(BaseModel):
+    """O que o sistema JÁ escreveu (ou tentou escrever) no Omie por esta linha.
+
+    86e3n70q0 (bloco C): espelho da linha de `reconciliation_omie_postings`, a
+    intenção registrada ANTES de qualquer envio (§4.11). Sem ela a tela não sabia
+    se uma linha `sem_omie` já tinha um título provisionado — a provisão não casa
+    a linha, e o selo "lançado" vivia num cache da visita. Agora o selo é verdade
+    do banco.
+
+    Só códigos e ids do Omie, mais a mensagem do provedor: ela é persistida de
+    propósito para a pessoa ler (ADR-022-BE) e continua NUNCA logada. Tipos
+    lenientes (str), como o resto das respostas da revisão.
+    """
+
+    #: `direto` (IncluirLancCC) ou `provisao` (Contas a Pagar).
+    kind: str
+    #: `pending` | `confirmed` | `failed`.
+    status: str
+    #: Só na provisão: o PRÓXIMO passo (`fornecedor`, `titulo`, `baixa`, `concluido`).
+    step: str | None
+    #: Envios sem confirmação (no direto, do lançamento; na provisão, do passo corrente).
+    attempts: int
+    supplier_code: int | None
+    payable_id: int | None
+    payment_id: int | None
+    omie_lancamento_id: int | None
+    error_code: str | None
+    error_message: str | None
+
+
 class ListedFileEntry(BaseModel):
     """Item de GET /api/v1/reconciliations/{id}/file-entries."""
 
@@ -57,6 +87,9 @@ class ListedFileEntry(BaseModel):
     user_action: str | None
     user_note: str | None
     omie_lancamento_id: int | None
+    #: 86e3n70q0 (bloco C): a intenção de lançamento no Omie desta linha, ou
+    #: `null` quando o sistema nunca tentou lançá-la.
+    omie_posting: OmiePostingState | None = None
 
     model_config = ConfigDict(from_attributes=False)
 
@@ -214,6 +247,9 @@ class AnomalyRelatedFileEntry(BaseModel):
     transaction_date: _date
     description: str
     amount: Decimal
+    #: 86e3n70q0 (bloco C): o MESMO objeto da listagem de movimentações, pelo
+    #: MESMO helper — a aba Anomalias também oferece "Lançar no Omie".
+    omie_posting: OmiePostingState | None = None
 
 
 class AnomalyRelatedOmieEntry(BaseModel):

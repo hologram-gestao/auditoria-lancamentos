@@ -31,6 +31,7 @@ import type {
   CreateReconciliationPayload as CreateReconciliationContract,
   CreateReconciliationRequest,
   ExtractedStatement,
+  OmiePostingState,
   PaginationMeta,
   ReconciliationFileInput,
   ResolveAnomalyRequest,
@@ -379,6 +380,12 @@ export interface FileEntryItem {
   user_action: string | null;
   user_note: string | null;
   omie_lancamento_id: number | null;
+  /**
+   * 86e3n70q0 (bloco C) — a intenção de lançamento no Omie desta linha, ou
+   * `null` quando o sistema nunca tentou lançá-la. Opcional no TIPO só para os
+   * objetos montados à mão (testes): o servidor sempre manda a chave.
+   */
+  omie_posting?: OmiePostingState | null;
 }
 
 export interface ListFileEntriesParams {

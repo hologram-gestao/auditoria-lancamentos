@@ -49,24 +49,30 @@ import {
 } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
-  type PostedInSession,
+  pickPostingState,
   useOpenLancarDrawer,
   usePostedInSession,
 } from '@/hooks/use-omie-postings';
 import { useAllSemOmieEntries, useAnomalies } from '@/hooks/use-reconciliations';
 import type { AnomalyItem, FileEntryItem } from '@/lib/api/reconciliations';
 import { hasPermission } from '@/lib/authz';
+import type { OmiePostingState } from '@/lib/contracts';
 import { formatBRDate, formatBRL } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth';
 
 import { acceptsReviewVerdict, AnomalyVerdictControl } from './anomaly-verdict-control';
 import { LancarLoteBar, LancarNoOmieButton, PostingCheckbox } from './lancar-no-omie-controls';
-import { LancarNoOmieDrawer } from './lancar-no-omie-drawer';
-import { getPostingBlock, type PostingBlockReason } from './omie-posting-eligibility';
+import { LancarNoOmieDrawer, type PostingClientContext } from './lancar-no-omie-drawer';
+import {
+  getPostingBlock,
+  isProvisionStalled,
+  postingBlockMessage,
+  type PostingBlockReason,
+} from './omie-posting-eligibility';
 import { ResolveAnomalyDialog } from './resolve-anomaly-dialog';
 import { SeverityBadge } from './severity-badge';
-import { LancadaNoOmieBadge } from './situation-badge';
+import { OmiePostingBadge } from './situation-badge';
 
 interface AnomaliesTabProps {
   sessionId: string;
@@ -78,6 +84,8 @@ interface AnomaliesTabProps {
    * Ver `originCanWrite` — a UI reflete o contrato, não decide.
    */
   canPostToOmie: boolean;
+  /** Cliente e processo da conciliação, para a gaveta (86e3n70q0, bloco C). */
+  postingContext: PostingClientContext;
 }
 
 type SeverityFilter = 'all' | 'critical' | 'moderate' | 'info';
@@ -87,7 +95,12 @@ const DEFAULT_PAGE_SIZE = 20;
 /** Severidade · Tipo · Linha · Origem · Status · Veredito · Ações. */
 const BASE_COLUMN_COUNT = 7;
 
-export function AnomaliesTab({ sessionId, isCard, canPostToOmie }: AnomaliesTabProps) {
+export function AnomaliesTab({
+  sessionId,
+  isCard,
+  canPostToOmie,
+  postingContext,
+}: AnomaliesTabProps) {
   /** Cartão **e** origem capaz de escrever — daqui em diante é este booleano. */
   const showPosting = isCard && canPostToOmie;
   // Matriz do R4 numa consulta só (`lib/authz`), no topo da aba — cada linha
@@ -118,12 +131,18 @@ export function AnomaliesTab({ sessionId, isCard, canPostToOmie }: AnomaliesTabP
   // Sprint 7 / FRONT 07.6 — lançamento a partir da anomalia
   // ---------------------------------------------------------------------
 
+  // 86e3n70qj / 86e3n70q0 — o que foi concluído nesta visita, venha o lote desta
+  // aba ou da de Movimentações: só a ponte até o refetch, o selo é do servidor.
+  const postedById = usePostedInSession(sessionId);
   const semOmieQuery = useAllSemOmieEntries(sessionId, { enabled: showPosting });
   const semOmieById = useMemo(() => {
     const map = new Map<string, FileEntryItem>();
-    semOmieQuery.data?.forEach((entry) => map.set(entry.id, entry));
+    semOmieQuery.data?.forEach((entry) => {
+      const posting = pickPostingState(entry.omie_posting, postedById[entry.id]);
+      map.set(entry.id, { ...entry, omie_posting: posting });
+    });
     return map;
-  }, [semOmieQuery.data]);
+  }, [semOmieQuery.data, postedById]);
 
   /**
    * Linha lançável por trás de cada anomalia da página. `null` quando a
@@ -143,18 +162,23 @@ export function AnomaliesTab({ sessionId, isCard, canPostToOmie }: AnomaliesTabP
   }, [items, semOmieById, showPosting]);
 
   const [selectedAnomalyIds, setSelectedAnomalyIds] = useState<string[]>([]);
-  // 86e3n70qj — o que foi lançado nesta visita, venha o lote desta aba ou da de
-  // Movimentações (cache da sessão): é o que pinta "Lançado no Omie · nº X".
-  const postedById = usePostedInSession(sessionId);
   const [launchTargets, setLaunchTargets] = useState<FileEntryItem[] | null>(null);
   const { open: openLaunch, openingTargets } = useOpenLancarDrawer<FileEntryItem>(
     sessionId,
     setLaunchTargets,
+    postingContext.clientId,
   );
   const openingEntryIds = new Set((openingTargets ?? []).map((e) => e.id));
 
+  /** Só a anomalia cuja linha o servidor aceitaria lançar (a provisionada já não). */
   const selectableAnomalyIds = useMemo(
-    () => items.filter((a) => entryByAnomaly.has(a.id)).map((a) => a.id),
+    () =>
+      items
+        .filter((a) => {
+          const entry = entryByAnomaly.get(a.id);
+          return entry !== undefined && getPostingBlock(entry, { isCard: true }) === null;
+        })
+        .map((a) => a.id),
     [items, entryByAnomaly],
   );
 
@@ -318,11 +342,11 @@ export function AnomaliesTab({ sessionId, isCard, canPostToOmie }: AnomaliesTabP
                     anomaly={anomaly}
                     canReview={canReview}
                     isCard={showPosting}
-                    postingBlock={resolvePostingBlock(anomaly, entry, {
-                      isCard: showPosting,
-                      posted: postedById,
-                    })}
-                    postedOmieId={postedOmieIdFor(anomaly, postedById)}
+                    postingBlock={resolvePostingBlock(entry, { isCard: showPosting })}
+                    posting={
+                      entry?.omie_posting ??
+                      postingStateFor(anomaly, postedById[anomaly.related_file_entry?.id ?? ''])
+                    }
                     opening={entry !== undefined && openingEntryIds.has(entry.id)}
                     selected={selectedAnomalyIds.includes(anomaly.id)}
                     onSelectedChange={(checked) =>
@@ -357,6 +381,7 @@ export function AnomaliesTab({ sessionId, isCard, canPostToOmie }: AnomaliesTabP
       {launchTargets !== null && (
         <LancarNoOmieDrawer
           sessionId={sessionId}
+          context={postingContext}
           entries={launchTargets}
           open
           onOpenChange={(open) => {
@@ -392,31 +417,30 @@ export function AnomaliesTab({ sessionId, isCard, canPostToOmie }: AnomaliesTabP
  * Motivo do bloqueio da ação numa linha de anomalia.
  *
  * A anomalia não conhece o estado da linha — quem conhece é a lista de
- * `sem_omie`. "Não achei a linha ali" significa que ela deixou de ser lançável
- * (conciliada, ignorada ou já lançada); `posted` distingue o caso que acabou de
- * acontecer nesta tela, em que o motivo exato é conhecido.
+ * `sem_omie`, que já traz a intenção de lançamento do servidor. "Não achei a
+ * linha ali" significa que ela deixou de ser lançável (conciliada, ignorada ou
+ * lançada direto, que casa a linha).
  */
 function resolvePostingBlock(
-  anomaly: AnomalyItem,
   entry: FileEntryItem | undefined,
-  options: { isCard: boolean; posted: PostedInSession },
+  options: { isCard: boolean },
 ): PostingBlockReason | null {
   if (!options.isCard) return 'sessao_nao_e_cartao';
   if (entry !== undefined) return getPostingBlock(entry, { isCard: true });
-  if (postedOmieIdFor(anomaly, options.posted) !== undefined) return 'ja_lancada';
   return 'nao_e_sem_omie';
 }
 
 /**
- * Nº do lançamento da linha desta anomalia, se ela foi lançada nesta visita
- * (`undefined` = não foi; `null` = foi, sem o número na resposta).
+ * O estado da intenção da linha desta anomalia quando ela não está mais na lista
+ * de `sem_omie` (o direto confirmado casa a linha): o servidor manda o mesmo
+ * objeto em `related_file_entry`, e o cache da visita cobre o intervalo até o
+ * refetch.
  */
-function postedOmieIdFor(anomaly: AnomalyItem, posted: PostedInSession): number | null | undefined {
-  const relatedId = anomaly.related_file_entry?.id;
-  if (relatedId === undefined || !Object.prototype.hasOwnProperty.call(posted, relatedId)) {
-    return undefined;
-  }
-  return posted[relatedId] ?? null;
+function postingStateFor(
+  anomaly: AnomalyItem,
+  cached: OmiePostingState | undefined,
+): OmiePostingState | null {
+  return pickPostingState(anomaly.related_file_entry?.omie_posting, cached);
 }
 
 interface AnomalyRowProps {
@@ -425,8 +449,8 @@ interface AnomalyRowProps {
   canReview: boolean;
   isCard: boolean;
   postingBlock: PostingBlockReason | null;
-  /** Nº do lançamento feito nesta visita (`undefined` = a linha não foi lançada). */
-  postedOmieId: number | null | undefined;
+  /** Intenção de lançamento da linha (servidor, ou a visita até o refetch). */
+  posting: OmiePostingState | null;
   /** A gaveta desta linha está abrindo (categorias a caminho): botão em carregando. */
   opening: boolean;
   selected: boolean;
@@ -441,7 +465,7 @@ function AnomalyRow({
   canReview,
   isCard,
   postingBlock,
-  postedOmieId,
+  posting,
   opening,
   selected,
   onSelectedChange,
@@ -496,7 +520,7 @@ function AnomalyRow({
         <div className="flex flex-col items-start gap-1">
           <StatusPill resolved={anomaly.resolved} />
           {/* 86e3n70qj — visível na linha, não só no texto da resolução. */}
-          {postedOmieId !== undefined && <LancadaNoOmieBadge omieLancamentoId={postedOmieId} />}
+          <OmiePostingBadge posting={posting} />
         </div>
       </TableCell>
       <TableCell className="text-right">
@@ -512,7 +536,15 @@ function AnomalyRow({
       <TableCell className="text-right">
         <div className="flex flex-wrap items-center justify-end gap-2">
           {showPosting && (
-            <LancarNoOmieButton block={postingBlock} pending={opening} onClick={onLancar} />
+            <LancarNoOmieButton
+              block={postingBlock}
+              blockMessage={
+                postingBlock === null ? undefined : postingBlockMessage(postingBlock, posting)
+              }
+              resume={isProvisionStalled(posting)}
+              pending={opening}
+              onClick={onLancar}
+            />
           )}
           {!anomaly.resolved ? (
             <Button size="sm" variant="outline" onClick={onResolve}>

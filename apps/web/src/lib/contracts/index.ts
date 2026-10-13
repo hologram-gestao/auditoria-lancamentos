@@ -657,6 +657,25 @@ export type OmiePostingLineStatus = Schemas['OmiePostingLineResult']['status'];
  */
 export type OmiePostingLineReason = NonNullable<Schemas['OmiePostingLineResult']['reason']>;
 
+/**
+ * 86e3n70q0 (bloco C) — o que o sistema já escreveu (ou tentou) no Omie por uma
+ * linha: a intenção de `reconciliation_omie_postings`, vinda do SERVIDOR na
+ * listagem. É ela que pinta o selo persistente e trava a forma do lançamento.
+ */
+export type OmiePostingState = Schemas['OmiePostingState'];
+/** Uma parte da compra numa categoria (`{codigo, valor}`), só na provisão. */
+export type CategoriaRateio = Schemas['CategoriaRateio'];
+/** Uma parte do rateio por departamento (`{codigo, percentual}`), só na provisão. */
+export type DepartamentoRateio = Schemas['DepartamentoRateio'];
+/** `provisionar` (Contas a Pagar, padrão do servidor) ou `direto` (IncluirLancCC). */
+export type OmiePostingMode = OmiePostingLineRequest['modo'];
+/** Departamento ATIVO do Omie do cliente: `codigo` vai no rateio, `descricao` é lida. */
+export type OmieDepartamentoItem = Schemas['OmieDepartamentoItem'];
+/** `{ data, total }` — DUAS chaves: o `apiGet` entrega o objeto inteiro. */
+export type OmieDepartamentoListResponse = Schemas['OmieDepartamentoListResponse'];
+/** O cadastro de um fornecedor no Omie do cliente (busca por CNPJ ou por código). */
+export type OmieFornecedorItem = Schemas['OmieFornecedorItem'];
+
 /** Query real de `GET /omie/categorias` (`session_id` obrigatório, `refresh`). */
 export type ListOmieCategoriasQuery = NonNullable<
   paths['/api/v1/omie/categorias']['get']['parameters']['query']

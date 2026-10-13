@@ -286,6 +286,21 @@ viewportSize().width` (padrão em `spec:2147-2165` e `:2190-2205`). Antes de med
 
 ## 4. Padrões de componente (cada um com o grep)
 
+- **Estado de escrita externa vem do servidor, na linha** (86e3n70q0, bloco C): o selo
+  "Lançado/Provisionado/Lançamento parado" lê `omie_posting` da listagem
+  (`OmiePostingBadge` em `reconciliations/review/situation-badge.tsx`); o cache da visita
+  só cobre o vão até o refetch (`pickPostingState`). Tela nova que mostre "o sistema já
+  fez X lá fora" pede o campo no contrato, nunca um cache da tela como fonte.
+- **Lista editável dentro de formulário (partes de valor/percentual) tem chave por item**
+  (`newPartKey()` em `lib/validation/omie-posting.ts`), nunca o índice, e a regra da soma
+  mora no zod do módulo de validação, com "Falta/Sobra" ao vivo (`aria-live="polite"`)
+  ao lado do botão de adicionar. Em 390px o seletor ocupa a linha inteira e valor +
+  lixeira descem juntos (`w-full sm:w-auto sm:flex-1`): o cenário "provisão com 2
+  categorias, 2 departamentos e fornecedor" mede o `scrollWidth` do miolo da gaveta.
+- **Busca de fornecedor no Omie é UM componente** (`omie-suppliers/omie-supplier-lookup.tsx`),
+  controlado pelo valor (`SupplierValue`) para o "aplicar a todas" copiar; busca é AÇÃO
+  (botão "Buscar no Omie"), nunca por tecla, e o CNPJ é conferido em `lib/cnpj.ts` antes
+  de sair. `allowRegister` liga o cadastro na hora (gaveta) ou não (fornecedor padrão).
 - **Dinheiro com sinal e cor é o `<Money>`** de `components/shared/money.tsx` (86e3k1q30),
   nunca classe solta: dois eixos, o SINAL vem do valor e a COR vem do `tone` (`sign` colore
   pelo sinal e escreve `+` e o menos U+2212; `overdue`/`warning` pela situação; `neutral` não

@@ -53,6 +53,7 @@ from app.modules.reconciliations.processing.omie_window import omie_window_for_s
 from app.modules.reconciliations.qualification.service import (
     QUALIFICATION_FLAG_CODES,
 )
+from app.modules.reconciliations.review.omie_posting_state import load_omie_posting_states
 from app.modules.reconciliations.review.repository import ReviewRepository
 from app.modules.reconciliations.review.schemas import (
     AnomalyItem,
@@ -63,6 +64,7 @@ from app.modules.reconciliations.review.schemas import (
     CreateAnomalyRequest,
     ListedFileEntry,
     OmieEntryItem,
+    OmiePostingState,
     ResolveAnomalyRequest,
     UpdateFileEntryRequest,
     UpdateOmieEntryRequest,
@@ -175,11 +177,35 @@ class ReviewService:
             return await provision_client_cipher(client, settings=self._settings)
         return await load_client_cipher(client, settings=self._settings)
 
-    async def _cipher_for_session_id(self, session_id: UUID, *, provision: bool) -> ClientCipher:
+    async def _session_or_404(self, session_id: UUID) -> ReconciliationSession:
         session = await self._repo.get_session(session_id)
         if session is None:
             raise NotFoundError("Sessão de conciliação não encontrada.")
+        return session
+
+    async def _cipher_for_session_id(self, session_id: UUID, *, provision: bool) -> ClientCipher:
+        session = await self._session_or_404(session_id)
         return await self._cipher_for_client(session.client_id, provision=provision)
+
+    async def _posting_states_for_session(
+        self, session_id: UUID, file_entry_ids: list[UUID]
+    ) -> dict[UUID, OmiePostingState]:
+        if not file_entry_ids:
+            return {}
+        session = await self._session_or_404(session_id)
+        return await self._posting_states(session.client_id, file_entry_ids)
+
+    async def _posting_states(
+        self, client_id: UUID, file_entry_ids: list[UUID]
+    ) -> dict[UUID, OmiePostingState]:
+        """Intenção de lançamento no Omie de cada linha (86e3n70q0, bloco C).
+
+        Uma query para o conjunto inteiro, com o `client_id` da sessão no WHERE —
+        a MESMA leitura para Movimentações e Anomalias.
+        """
+        return await load_omie_posting_states(
+            self._repo.session, client_id=client_id, file_entry_ids=file_entry_ids
+        )
 
     # ------------------------------------------------------------------
     # BACK 9.1 — Listar movimentações com filtros + paginação Python
@@ -247,7 +273,9 @@ class ReviewService:
         start = (page - 1) * page_size
         page_rows = rows[start : start + page_size]
 
-        cipher = await self._cipher_for_session_id(session_id, provision=False)
+        session = await self._session_or_404(session_id)
+        cipher = await self._cipher_for_client(session.client_id, provision=False)
+        postings = await self._posting_states(session.client_id, [row.id for row in page_rows])
         decrypted: list[ListedFileEntry] = []
         for row in page_rows:
             description = self._decrypt_optional(
@@ -275,6 +303,7 @@ class ReviewService:
                     user_action=row.user_action,
                     user_note=user_note,
                     omie_lancamento_id=row.omie_lancamento_id,
+                    omie_posting=postings.get(row.id),
                 )
             )
 
@@ -312,7 +341,8 @@ class ReviewService:
         entry = await self._repo.get_file_entry(session_id=session_id, entry_id=entry_id)
         if entry is None:
             raise NotFoundError("Linha não encontrada nesta sessão de conciliação.")
-        cipher = await self._cipher_for_session_id(session_id, provision=True)
+        session = await self._session_or_404(session_id)
+        cipher = await self._cipher_for_client(session.client_id, provision=True)
 
         # Trocar Omie
         if omie_lancamento_provided:
@@ -396,7 +426,8 @@ class ReviewService:
             omie_lancamento_changed=omie_lancamento_provided,
         )
 
-        return self._file_entry_to_listed(cipher, entry)
+        postings = await self._posting_states(session.client_id, [entry.id])
+        return self._file_entry_to_listed(cipher, entry, postings.get(entry.id))
 
     # ------------------------------------------------------------------
     # BACK 9.4 — Lançamentos disponíveis para "Trocar"
@@ -791,7 +822,9 @@ class ReviewService:
         file_entries = await self._repo.get_file_entries_by_ids(file_entry_ids)
         omie_entries = await self._repo.get_omie_entries_by_ids(omie_entry_ids)
 
-        cipher = await self._cipher_for_session_id(session_id, provision=False)
+        session = await self._session_or_404(session_id)
+        cipher = await self._cipher_for_client(session.client_id, provision=False)
+        postings = await self._posting_states(session.client_id, list(file_entries))
         items = [
             self._anomaly_to_item(
                 cipher=cipher,
@@ -799,6 +832,7 @@ class ReviewService:
                 anomaly_type_row=atype,
                 file_entries=file_entries,
                 omie_entries=omie_entries,
+                postings=postings,
             )
             for anomaly, atype in rows
         ]
@@ -906,6 +940,7 @@ class ReviewService:
             anomaly_type_row=anomaly_type,
             file_entries=file_entries,
             omie_entries=omie_entries,
+            postings=await self._posting_states_for_session(session_id, list(file_entries)),
         )
 
     # ------------------------------------------------------------------
@@ -994,6 +1029,7 @@ class ReviewService:
             anomaly_type_row=anomaly_type,
             file_entries=file_entries,
             omie_entries=omie_entries,
+            postings=await self._posting_states_for_session(session_id, list(file_entries)),
         )
 
     @staticmethod
@@ -1082,7 +1118,10 @@ class ReviewService:
             )
 
     def _file_entry_to_listed(
-        self, cipher: ClientCipher, entry: ReconciliationFileEntry
+        self,
+        cipher: ClientCipher,
+        entry: ReconciliationFileEntry,
+        omie_posting: OmiePostingState | None,
     ) -> ListedFileEntry:
         return ListedFileEntry(
             id=entry.id,
@@ -1106,6 +1145,7 @@ class ReviewService:
                 entry.id,
             ),
             omie_lancamento_id=entry.omie_lancamento_id,
+            omie_posting=omie_posting,
         )
 
     def _anomaly_to_item(
@@ -1116,6 +1156,7 @@ class ReviewService:
         anomaly_type_row: object,
         file_entries: dict[UUID, ReconciliationFileEntry],
         omie_entries: dict[UUID, ReconciliationOmieEntry],
+        postings: dict[UUID, OmiePostingState],
     ) -> AnomalyItem:
         related_file: AnomalyRelatedFileEntry | None = None
         if anomaly.file_entry_id is not None and (fe := file_entries.get(anomaly.file_entry_id)):
@@ -1130,6 +1171,7 @@ class ReviewService:
                     fe.id,
                 ),
                 amount=fe.amount,
+                omie_posting=postings.get(fe.id),
             )
         related_omie: AnomalyRelatedOmieEntry | None = None
         if anomaly.omie_entry_id is not None and (oe := omie_entries.get(anomaly.omie_entry_id)):

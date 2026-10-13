@@ -25,6 +25,9 @@
  *     qualquer estado (86e3n70p6): cliente só-arquivo ou sem origem não tem
  *     processo no Omie para declarar. Enquanto as conexões carregam (ou se a
  *     leitura falhar) o campo não aparece, e o valor salvo segue intacto no PATCH.
+ *     Com o MESMO gate (86e3n70q0, bloco C): "Exigir rateio por departamento nos
+ *     títulos" e "Fornecedor padrão no Omie" (busca por CNPJ; "Remover" manda
+ *     `null`, e o campo só vai no PATCH quando a pessoa mexeu nele).
  *   - O corpo do formulário rola dentro do modal (`ScrollRegion`), com header e
  *     rodapé fixos: em 390px a seção de gerentes empurraria o "Salvar" para fora
  *     da viewport — o defeito que o gate de a11y NÃO mede (CLAUDE.md §7).
@@ -78,6 +81,7 @@ import { useAuthStore } from '@/stores/auth';
 
 import { CardPostingDateModeField } from './card-posting-date-mode-field';
 import { ClientManagersSection } from './client-managers-section';
+import { DefaultSupplierField, DepartmentRequiredField } from './client-omie-payables-fields';
 
 interface EditClientModalProps {
   open: boolean;
@@ -111,6 +115,8 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
       active: 'active',
       category_id: 'none',
       card_posting_date_mode: 'purchase_date',
+      omie_department_required: false,
+      omie_default_supplier_code: null,
     },
     mode: 'onSubmit',
   });
@@ -123,6 +129,8 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
         active: client.active ? 'active' : 'inactive',
         category_id: client.category?.id ?? 'none',
         card_posting_date_mode: client.card_posting_date_mode,
+        omie_department_required: client.omie_department_required,
+        omie_default_supplier_code: client.omie_default_supplier_code ?? null,
       });
       updateMutation.reset();
     }
@@ -138,6 +146,12 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
       // Sempre enviado: 'none' vira `null` (limpa), uuid troca — tri-estado do backend.
       category_id: values.category_id && values.category_id !== 'none' ? values.category_id : null,
       card_posting_date_mode: values.card_posting_date_mode,
+      // 86e3n70q0 — só com o campo na tela (cliente com conexão Omie).
+      ...(showCardPostingMode ? { omie_department_required: values.omie_department_required } : {}),
+      // Tri-estado: omitido mantém. Só vai quando a pessoa trocou ou removeu.
+      ...(showCardPostingMode && form.formState.dirtyFields.omie_default_supplier_code
+        ? { omie_default_supplier_code: values.omie_default_supplier_code }
+        : {}),
     };
 
     try {
@@ -266,8 +280,16 @@ export function EditClientModal({ open, onOpenChange, client }: EditClientModalP
                 )}
               />
 
-              {showCardPostingMode && (
-                <CardPostingDateModeField control={form.control} disabled={inputsDisabled} />
+              {showCardPostingMode && client && (
+                <>
+                  <CardPostingDateModeField control={form.control} disabled={inputsDisabled} />
+                  <DepartmentRequiredField control={form.control} disabled={inputsDisabled} />
+                  <DefaultSupplierField
+                    control={form.control}
+                    disabled={inputsDisabled}
+                    clientId={client.id}
+                  />
+                </>
               )}
 
               {isAdmin && client && (
