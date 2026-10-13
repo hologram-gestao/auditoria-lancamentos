@@ -362,6 +362,15 @@ figure img {
   border: 0.5pt solid #c8ccd8;
   border-radius: 2pt;
 }
+/* Gaveta ou diálogo recortado sozinho: em largura cheia a figura ocuparia a página. */
+figure.narrow img,
+figure.narrow figcaption {
+  width: 60%;
+}
+figure.slim img,
+figure.slim figcaption {
+  width: 46%;
+}
 figcaption {
   width: 94%;
   margin: 0 auto;

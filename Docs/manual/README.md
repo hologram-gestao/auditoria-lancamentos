@@ -1,11 +1,44 @@
 # Manual do Hologram OS (PDF)
 
-**[Manual-Hologram-OS.pdf](Manual-Hologram-OS.pdf)**: versão 1.2, 37 páginas, A4, com 14
+**[Manual-Hologram-OS.pdf](Manual-Hologram-OS.pdf)**: versão 1.3, 45 páginas, A4, com 18
 capturas de tela do produto, todas no tema Hologram. Material de apoio para apresentação a
 escritórios contábeis e BPOs, e manual de operação para quem usa o sistema. Produto:
 **Hologram OS**; empresa: Hologram Gestão. A landing serve uma cópia idêntica byte a byte em
 `apps/web/public/manual-hologram-os.pdf`, com o tamanho ao lado do botão (`content.ts`, travado
 por teste): ao regerar, copie o PDF e confira o tamanho.
+
+## O que mudou na 1.3 (13/10/2026, task 86e3ndj0p)
+
+Os capítulos que o épico de ajustes da reunião com o Murilo (86e3n70nv, PRs #309 a #331) e a
+exclusão de layout (#323) mudaram. O que estava certo ficou como estava.
+
+- **5.1:** o interruptor "Conectar com o Omie" e os três campos que só existem com ele:
+  "Compras do cartão no Omie" (na data da compra ou no vencimento da fatura), "Exigir rateio
+  por departamento nos títulos" e "Fornecedor padrão no Omie" (só no editar, pela busca por
+  CNPJ), com um quadro do passo a passo do cliente que lança no vencimento.
+- **5.4** passou a se chamar "Categorias do Omie: o plano da origem", como a tela.
+- **5.5:** o `.xls` do Domínio sem edição, a ordem da classificação, o cabeçalho pela grafia
+  comum e "Nova conta"/editar, com o que a edição não deixa fazer.
+- **6.1 a 6.4:** o bloco "Fatura do cartão" da criação e a recusa sem vencimento; o lote da
+  fatura no cruzamento e por que o cabeçalho diz "Lote da fatura"; os selos da linha
+  ("Lançado no Omie", "Provisionado", "Lançamento parado") e "Reprocessar com o Omie".
+- **6.6 reescrita:** provisionar no Contas a Pagar (o padrão, com ou sem baixa conforme o
+  processo) ou lançar direto; fornecedor por CNPJ ou o padrão, cadastro na hora (que não se
+  desfaz), rateio, compra dividida em categorias (o caso do IOF), retomada e os limites.
+- **7.3:** destino, alvo, decisão e herdada ("Como funciona"); o catálogo em Configurações >
+  Destinos do de-para e a criação dos alvos a partir da origem.
+- **Cap. 2, 3, 9, 11 e apêndices:** o nome da tela do plano da origem; a linha do catálogo
+  de destinos na tabela de perfis; excluir layout nunca usado; dois limites novos; nove
+  recusas novas; os passos do cartão e da provisão no checklist; três termos no glossário.
+- **Figuras:** sete do e2e de novo (`screenshots/pr-shots-86e3ndj0p/mock/`): `conciliacao`
+  (com "Reprocessar com o Omie"), `lancamento` (a gaveta na provisão, no lugar da barra de
+  seleção), `de-para` (com "Como funciona"), `plano-contabil` (na ordem da classificação, com
+  "Nova conta"; antes vinha da tela real) e `layouts` (com "Excluir"; antes vinha da tela
+  real), mais quatro novas: `editar-cliente`, `fatura-cartao`, `selos` e `destinos-de-para`.
+  Gaveta e diálogo recortados sozinhos saem mais estreitos na página (`figure.narrow` e
+  `figure.slim` no CSS).
+- O PDF passou de 3,9 para 4,9 MB (oito páginas e quatro figuras a mais); o botão da landing
+  diz "PDF, 5 MB".
 
 ## O que mudou na 1.2 (08/10/2026, task 86e3mz74x)
 
@@ -58,14 +91,16 @@ por teste): ao regerar, copie o PDF e confira o tamanho.
   `apps/api/tests/fixtures/accounting_sample/`.
 - **Público:** equipe do escritório (sócio, gerente, analista), com um capítulo sobre o
   acesso concedido ao cliente final.
-- O conteúdo reflete o produto na `origin/develop` em 08/10/2026 (texto revisto na 1.1, em
-  30/09; na 1.2, só o que as telas novas desmentiam).
+- O conteúdo reflete o produto na `origin/develop` em 13/10/2026 (texto revisto na 1.1, em
+  30/09; na 1.2, só o que as telas novas desmentiam; na 1.3, os capítulos tocados pelo épico
+  86e3n70nv).
 
 ## Como regerar
 
 ```bash
-# 1. figuras (recorta e reduz os prints de screenshots/pr-shots-86e3mz74x/; fonte ausente =
-#    figura mantida). Num worktree, SHOTS_DIR aponta a pasta screenshots/ do checkout principal.
+# 1. figuras (recorta e reduz os prints de screenshots/pr-shots-86e3mz74x/ e
+#    screenshots/pr-shots-86e3ndj0p/; fonte ausente = figura mantida). Num worktree, SHOTS_DIR
+#    aponta a pasta screenshots/ do checkout principal.
 SHOTS_DIR=<checkout>/screenshots uv run --with pillow python Docs/manual/fonte/recortar-imagens.py
 
 # 2. PDF (WeasyPrint em container; não há toolchain de PDF no host) e a cópia da landing
@@ -92,15 +127,20 @@ d = pdfium.PdfDocument('Docs/manual/Manual-Hologram-OS.pdf')
 
 Duas fontes, as duas em 1440x900 com DPR 2 e tema Hologram:
 
-**Sete do e2e com a API interceptada** (`mock/`: clientes, conciliação, anomalias, lançamento,
-plano de contas, de-para, carteira; "Cliente Exemplo Ltda"). `next build` do web, `.next/static`
-e `public/` copiados para o standalone, e no container Playwright o `server.js` em 3100 mais os
-cenários do `apps/web/e2e/a11y-mocked.spec.ts` com `E2E_THEME=hologram E2E_SHOTS=1` e uma config
-local com `deviceScaleFactor: 2`. Os prints saem em `apps/web/a11y-shots/hologram/` com os
-nomes que o `recortar-imagens.py` espera (`*-desktop.png`).
+**Treze do e2e com a API interceptada** ("Cliente Exemplo Ltda"): em
+`pr-shots-86e3mz74x/mock/`, clientes, anomalias, plano de contas e carteira; em
+`pr-shots-86e3ndj0p/mock/`, editar cliente, fatura do cartão, conciliação, selos, lançamento,
+plano contábil, de-para, destinos do de-para e layouts. `next build` do web, `.next/static` e
+`public/` copiados para o standalone, e no container Playwright o `server.js` em 3100 mais os
+cenários do `apps/web/e2e/a11y-mocked.spec.ts` com `E2E_THEME=hologram E2E_SHOTS=1`, uma config
+local com um projeto só e `deviceScaleFactor: 2` (`apps/web/a11y-shots/shots.config.ts`,
+gitignorada) e `--grep` com os títulos dos cenários. Os prints saem em
+`apps/web/a11y-shots/hologram/` com os nomes que o `recortar-imagens.py` espera
+(`*-desktop.png`, a origem de cada figura está no `JOBS` dele).
 
-**Sete da tela real** (`app/`: painel, recebíveis, plano contábil, prévia, arquivo contábil,
-layouts, mapeamento), pelo roteiro de `fonte/capturas/`:
+**Cinco da tela real** (`app/`: painel, recebíveis, prévia, arquivo contábil, mapeamento), pelo
+roteiro de `fonte/capturas/` (que ainda captura também plano contábil e layouts, hoje vindos do
+e2e):
 
 1. Banco NOVO (`createdb`, `alembic upgrade head`, `scripts/seed_dev.py`), com a API apontada
    para ele por variável de ambiente e as chaves fake do CI (`.github/workflows/ci.yml`), nunca
@@ -127,12 +167,12 @@ docker run --rm --ipc=host --add-host=host.docker.internal:host-gateway -u $(id 
 
 ## Arquivos
 
-| Caminho                     | O que é                                                                        |
-| --------------------------- | ------------------------------------------------------------------------------ |
-| `Manual-Hologram-OS.pdf`    | O documento final                                                              |
-| `fonte/manual.html`         | Todo o texto do manual                                                         |
-| `fonte/manual.css`          | Folha de estilo de impressão (capa, cabeçalhos, sumário com páginas, figuras)  |
-| `fonte/img/`                | As 14 figuras já recortadas                                                    |
-| `fonte/fonts/`              | IBM Plex Serif/Mono e Fira Sans (licença OFL), embutidas no PDF                |
-| `fonte/recortar-imagens.py` | Gera `fonte/img/` a partir de `screenshots/pr-shots-86e3mz74x/`                |
-| `fonte/capturas/`           | Roteiro das capturas da tela real: dados de demonstração pela API e Playwright |
+| Caminho                     | O que é                                                                         |
+| --------------------------- | ------------------------------------------------------------------------------- |
+| `Manual-Hologram-OS.pdf`    | O documento final                                                               |
+| `fonte/manual.html`         | Todo o texto do manual                                                          |
+| `fonte/manual.css`          | Folha de estilo de impressão (capa, cabeçalhos, sumário com páginas, figuras)   |
+| `fonte/img/`                | As 18 figuras já recortadas                                                     |
+| `fonte/fonts/`              | IBM Plex Serif/Mono e Fira Sans (licença OFL), embutidas no PDF                 |
+| `fonte/recortar-imagens.py` | Gera `fonte/img/` a partir de `screenshots/pr-shots-86e3mz74x/` e `…86e3ndj0p/` |
+| `fonte/capturas/`           | Roteiro das capturas da tela real: dados de demonstração pela API e Playwright  |
