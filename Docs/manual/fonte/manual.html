@@ -15,7 +15,7 @@
   <h1>Manual da<br>plataforma</h1>
   <p class="sub">Conciliação bancária, classificação contábil e geração do arquivo que o sistema contábil importa. Guia completo para escritórios contábeis e BPOs financeiros.</p>
   <div class="foot">
-    <span>Versão 1.2 · Outubro de 2026</span>
+    <span>Versão 1.3 · Outubro de 2026</span>
     <span>Hologram Gestão · Material de apoio comercial e operacional</span>
   </div>
 </section>
@@ -54,7 +54,7 @@
     <li class="sub"><a href="#s51">5.1 Cadastrar o cliente</a></li>
     <li class="sub"><a href="#s52">5.2 Conectar a origem dos dados</a></li>
     <li class="sub"><a href="#s53">5.3 Contas bancárias</a></li>
-    <li class="sub"><a href="#s54">5.4 Plano de Contas da origem</a></li>
+    <li class="sub"><a href="#s54">5.4 Categorias do Omie: o plano da origem</a></li>
     <li class="sub"><a href="#s55">5.5 Plano contábil e a conta do banco</a></li>
     <li class="sub"><a href="#s56">5.6 Glossário do cliente</a></li>
     <li class="part"><a href="#cap6">6. O fechamento: conciliação</a></li>
@@ -160,9 +160,9 @@
 
 <dl class="kv">
   <dt>Plano de Contas</dt>
-  <dd>É o plano da <em>origem</em>, ou seja, a classificação que o ERP do cliente já usa. A plataforma lê, não edita.</dd>
+  <dd>É o plano da <em>origem</em>, ou seja, a classificação que o ERP do cliente já usa. A plataforma lê, não edita. Na tela, ele se chama <span class="ui">Categorias do Omie</span>.</dd>
   <dt>Plano contábil</dt>
-  <dd>É o plano do <em>destino</em>, ou seja, o plano de contas do sistema contábil onde o escritório lança. Ele é importado por planilha, por cliente, e é dele que saem as contas de débito e crédito do arquivo final.</dd>
+  <dd>É o plano do <em>destino</em>, ou seja, o plano de contas do sistema contábil onde o escritório lança. Ele é importado por planilha, por cliente (ou incluído conta a conta pela tela), e é dele que saem as contas de débito e crédito do arquivo final.</dd>
 </dl>
 
 <p>O de-para é exatamente a ponte entre os dois: pega a categoria que veio da origem e diz em que conta do plano contábil ela entra.</p>
@@ -213,12 +213,13 @@
     <tr><td>Registrar contexto de título</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td></tr>
     <tr><td>Gerir os usuários do cliente</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td></tr>
     <tr><td>Gerar o arquivo contábil</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td></tr>
-    <tr><td>Importar o plano contábil</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td></tr>
+    <tr><td>Importar e editar o plano contábil</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td></tr>
     <tr><td>Gerir conexões de origem</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td></tr>
     <tr><td>Criar cliente</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td></tr>
     <tr><td>Editar e encerrar cliente</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td><td class="c no">não</td></tr>
     <tr><td>Gerir a equipe da organização</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td><td class="c no">não</td></tr>
     <tr><td>Configurar layouts de exportação</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td><td class="c no">não</td></tr>
+    <tr><td>Configurar o catálogo de destinos do de-para</td><td class="c yes">sim</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td><td class="c no">não</td></tr>
     <tr><td>Redefinir a senha de um usuário</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td><td class="c no">não</td><td class="c no">não</td></tr>
     <tr><td>Cadastrar organizações</td><td class="c yes">sim</td><td class="c no">não</td><td class="c no">não</td><td class="c no">não</td><td class="c no">não</td></tr>
   </tbody>
@@ -276,7 +277,29 @@
 
 <p>Em <span class="ui">Clientes</span>, o botão <span class="ui">Novo Cliente</span> abre o formulário. Só o nome é obrigatório; a categoria é opcional e serve para organizar a lista (por exemplo, Fintech, Comércio, Serviços). As categorias disponíveis são definidas pela organização, em <span class="ui">Configurações</span>.</p>
 
-<p>O cadastro tem um interruptor para conectar o ERP Omie na hora. Se a credencial ainda não estiver em mãos, basta deixá-lo desligado: o cliente nasce sem origem, e a conexão pode ser feita depois. Um cliente sem origem é um cliente válido, ele apenas ainda não tem de onde puxar lançamentos.</p>
+<p>O cadastro tem um interruptor, <span class="ui">Conectar com o Omie</span>, para conectar o ERP na hora. Se a credencial ainda não estiver em mãos, basta deixá-lo desligado: o cliente nasce sem origem, e a conexão pode ser feita depois. Um cliente sem origem é um cliente válido, ele apenas ainda não tem de onde puxar lançamentos.</p>
+
+<h3>Como o cliente lança no Omie</h3>
+<p>Com o Omie ligado, o formulário pergunta como o escritório lança as compras do cartão de crédito daquele cliente no ERP. Esses campos não aparecem para cliente sem Omie (só por arquivo ou sem origem), porque descrevem um processo de dentro do Omie.</p>
+
+<dl class="kv">
+  <dt>Compras do cartão no Omie</dt>
+  <dd><span class="ui">Na data da compra</span> (o padrão): cada compra entra no Omie na data em que foi feita. <span class="ui">No vencimento da fatura</span>: as compras da fatura entram em lote, na data de vencimento, e o pagamento da fatura aparece no mesmo dia. A escolha muda a forma como a conciliação do cartão procura os lançamentos (seção 6.3), e por isso é declarada aqui: o sistema nunca tenta adivinhar o processo. Vale para as conciliações de cartão criadas a partir da alteração; as antigas não mudam.</dd>
+  <dt>Exigir rateio por departamento nos títulos</dt>
+  <dd>Ligado, a compra provisionada no Contas a Pagar só é lançada com o rateio por departamento escolhido (seção 6.6). Desligado, o rateio é opcional.</dd>
+  <dt>Fornecedor padrão no Omie</dt>
+  <dd>Só no <span class="ui">Editar Cliente</span>. É o fornecedor que recebe o título quando a compra não traz CNPJ, ou traz um CNPJ sem cadastro no Omie e sem dados para cadastrar. Escolhe-se em <span class="ui">Escolher fornecedor padrão</span>, informando o CNPJ e usando <span class="ui">Buscar no Omie</span>; nunca se digita um código. No cadastro novo ele não aparece, porque a busca precisa do Omie de um cliente que já existe.</dd>
+</dl>
+
+<figure class="slim">
+  <img src="img/editar-cliente.png" alt="Formulário de edição do cliente com o processo do cartão, o rateio e o fornecedor padrão">
+  <figcaption>O <span class="ui">Editar Cliente</span>, aberto pelo lápis na linha da lista de clientes. Este cliente lança as compras do cartão no vencimento da fatura.</figcaption>
+</figure>
+
+<div class="callout">
+  <span class="label">Cliente que lança o cartão no vencimento da fatura</span>
+  <p>No cadastro: <span class="ui">Novo Cliente</span>, ligar <span class="ui">Conectar com o Omie</span>, informar a credencial e escolher <span class="ui">No vencimento da fatura</span> em <span class="ui">Compras do cartão no Omie</span>. Num cliente que já existe, o mesmo campo está no <span class="ui">Editar Cliente</span>. A partir daí, toda conciliação de cartão desse cliente procura as compras no lote do vencimento (seção 6.3).</p>
+</div>
 
 <p>Quando um gerente cria o cliente, ele já entra como responsável. Quando um administrador cria, o cliente nasce sem responsável e o primeiro gerente adicionado assume o posto.</p>
 
@@ -311,12 +334,12 @@
 
 <p>A lista é atualizada automaticamente uma vez por dia e pode ser forçada a qualquer momento. Contas novas criadas no ERP aparecem na próxima sincronização.</p>
 
-<h2 id="s54">5.4 Plano de Contas da origem</h2>
+<h2 id="s54">5.4 Categorias do Omie: o plano da origem</h2>
 
-<p>Esta tela mostra a classificação que o ERP do cliente já tem: o código de cada categoria, o nome, a situação e, principalmente, a conta de demonstrativo que a própria origem já vincula a ela.</p>
+<p>A tela <span class="ui">Categorias do Omie</span> mostra a classificação que o ERP do cliente já tem, o plano de contas da origem: o código de cada categoria, o nome, a situação e, principalmente, a conta de demonstrativo que a própria origem já vincula a ela. Enquanto o cliente nunca sincronizou, a tela diz isso e oferece <span class="ui">Sincronizar agora</span> a quem pode sincronizar.</p>
 
 <figure>
-  <img src="img/plano-de-contas.png" alt="Plano de Contas da origem">
+  <img src="img/plano-de-contas.png" alt="Categorias do Omie, o plano de contas da origem">
   <figcaption>Cinco indicadores resumem o plano: quantas categorias vieram, quantas estão ativas, quantas já trazem conta de demonstrativo, quantas não trazem e quantas têm conta contábil. Clicar num número filtra a lista por ele.</figcaption>
 </figure>
 
@@ -326,11 +349,11 @@
 
 <h2 id="s55">5.5 Plano contábil e a conta do banco</h2>
 
-<p>O plano contábil é o plano de contas do sistema onde o escritório de fato lança, e ele é importado por planilha, por cliente. O modelo tem quatro colunas: código reduzido, nome, tipo (analítica ou sintética) e, opcionalmente, classificação.</p>
+<p>O plano contábil é o plano de contas do sistema onde o escritório de fato lança, e ele é importado por planilha, por cliente. Entram o plano exportado do Domínio, como ele sai, e a planilha no modelo da plataforma (CSV, XLSX ou XLS), com quatro colunas: código reduzido, nome, tipo (analítica ou sintética) e, opcionalmente, classificação.</p>
 
 <figure>
   <img src="img/plano-contabil.png" alt="Plano contábil do cliente">
-  <figcaption>O plano contábil importado, com filtros por tipo e por situação. Só contas analíticas e ativas podem receber lançamento.</figcaption>
+  <figcaption>O plano contábil na ordem da classificação, com a sintética em cima das analíticas dela, <span class="ui">Nova conta</span> no topo e o lápis de editar em cada linha. Abaixo, a conta do banco de cada conta de origem. Só contas analíticas e ativas podem receber lançamento.</figcaption>
 </figure>
 
 <h3>Como a importação se comporta</h3>
@@ -338,7 +361,14 @@
   <li>A planilha entra inteira ou não entra. Se uma linha estiver inválida, o arquivo é recusado e nada é gravado, com o motivo indicado linha a linha.</li>
   <li>Reimportar não duplica: o sistema casa pelo código reduzido, atualiza o que mudou e marca como inativa a conta que sumiu da planilha. Nada é apagado, porque pode haver decisão antiga apontando para aquela conta.</li>
   <li>Só conta analítica e ativa pode ser escolhida como destino. Conta sintética é recusada, com a explicação.</li>
+  <li><strong>O plano exportado do Domínio entra sem edição</strong>, em .xls ou .xlsx, do jeito que o sistema grava. Um arquivo que só tem cara de planilha (uma página salva com a extensão .xls, por exemplo) é recusado com o motivo e a instrução de salvá-lo como .xlsx ou CSV.</li>
+  <li><strong>Na planilha do modelo, o cabeçalho é lido pela grafia comum</strong>: maiúsculas, acentos e espaços não importam, e “Código Reduzido” vale por “codigo_reduzido”. O tipo aceita analítica, sintética ou só a inicial, A ou S. Sinônimo não vale: uma coluna chamada “conta” não é lida como código.</li>
+  <li><strong>A lista sai na ordem da classificação, como no Domínio</strong>: cada sintética em cima, as analíticas dela logo abaixo, com o nome recuado pelo nível. Em planilha feita à mão, use a mesma largura em cada nível (01, 02… 10); senão 1.1.10 vem antes de 1.1.2, como no próprio Domínio.</li>
 </ul>
+
+<h3>Incluir ou editar uma conta sem reimportar</h3>
+<p>A conta criada no sistema contábil depois da importação entra pelo botão <span class="ui">Nova conta</span>, com as mesmas regras da planilha, e aparece na lista no lugar da classificação. O lápis da linha edita nome, tipo, classificação e situação. Quem faz isso é a equipe do escritório, a mesma que importa o plano.</p>
+<p>Duas coisas a edição não deixa fazer. O código reduzido não se edita, porque é ele que vai no arquivo contábil e que casa a reimportação. E uma conta usada por alguma decisão do de-para, ou como conta do banco, não vira sintética nem inativa pela edição: a recusa diz quantas decisões e associações dependem dela. Um código que o cliente já tem é recusado no próprio campo; se a conta existente estiver inativa, ela se reativa pela edição.</p>
 
 <h3>A conta do banco</h3>
 <p>Uma partida tem dois lados. O lado da categoria vem do de-para; o lado do banco vem daqui: para cada conta de origem do cliente (cada conta corrente, cartão ou aplicação), indica-se qual conta contábil a representa. Há ainda a possibilidade de definir uma conta padrão, usada quando o arquivo enviado pelo cliente não traz a informação de conta.</p>
@@ -382,6 +412,23 @@
   <li>Confirme. Daí em diante o processamento roda sozinho e o sino avisa quando terminar.</li>
 </ol>
 
+<h3>Fatura de cartão</h3>
+<p>Quando a conta escolhida é um cartão de crédito, o passo dos arquivos ganha o bloco <span class="ui">Fatura do cartão</span>:</p>
+<ul class="tight">
+  <li><span class="ui">Compras do cartão no Omie</span> vem com o processo do cliente (seção 5.1) e pode ser trocado só para esta conciliação, sem mudar o cadastro.</li>
+  <li><span class="ui">Vencimento da fatura</span> vem lido do próprio arquivo, para conferir ou corrigir. No processo do vencimento ele é obrigatório, porque é por ele que as compras são procuradas; no processo da data da compra, é só informativo.</li>
+</ul>
+
+<figure class="slim">
+  <img src="img/fatura-cartao.png" alt="Gaveta de criação com o bloco Fatura do cartão">
+  <figcaption>O passo dos arquivos numa fatura de cartão de um cliente que lança no vencimento. O vencimento foi lido do PDF e pode ser corrigido antes de confirmar.</figcaption>
+</figure>
+
+<div class="callout warn">
+  <span class="label">Sem vencimento, não há lote para procurar</span>
+  <p>No processo do vencimento, uma conciliação de cartão sem a data de vencimento é recusada antes de gravar qualquer coisa, com o pedido de informar a data. Quando a fatura imprime o vencimento sem o ano, o sistema completa o ano pela data das compras.</p>
+</div>
+
 <h3>Formatos e limites</h3>
 <ul class="tight">
   <li>Aceita PDF, XLSX e CSV. Planilha no formato antigo .xls é recusada, com a orientação de salvá-la como .xlsx ou .csv.</li>
@@ -392,7 +439,7 @@
 
 <div class="callout">
   <span class="label">A trava do saldo</span>
-  <p>Depois de ler o arquivo, o sistema soma o que extraiu e confere contra o saldo declarado no próprio documento. Se a conta não fechar, a confirmação da prévia é bloqueada e o motivo é exibido. É a rede que pega o arquivo truncado, a página que faltou e o PDF que veio cortado, antes que uma conciliação incompleta entre no sistema.</p>
+  <p>Depois de ler o arquivo, o sistema soma o que extraiu e confere contra o saldo declarado no próprio documento. Se a conta não fechar, a confirmação da prévia é bloqueada e o motivo é exibido. É a rede que pega o arquivo truncado, a página que faltou e o PDF que veio cortado, antes que uma conciliação incompleta entre no sistema. Na fatura de cartão, o total conferido é o impresso nas primeiras páginas, mesmo quando um PDF longo é lido em partes.</p>
 </div>
 
 <h2 id="s62">6.2 O que o sistema faz sozinho</h2>
@@ -400,7 +447,7 @@
 <p>Confirmada a criação, três coisas acontecem em segundo plano, nesta ordem:</p>
 
 <ol class="steps">
-  <li><strong>Busca no ERP</strong> os lançamentos daquela conta no período, incluindo alguns dias antes e depois do mês, para alcançar o lançamento que caiu na virada.</li>
+  <li><strong>Busca no ERP</strong> os lançamentos daquela conta no período, incluindo alguns dias antes e depois do mês, para alcançar o lançamento que caiu na virada. No cartão lançado no vencimento da fatura, a busca é o lote do vencimento (seção 6.3).</li>
   <li><strong>Cruza</strong> cada movimentação do arquivo com os lançamentos encontrados, segundo as regras da próxima seção.</li>
   <li><strong>Analisa a classificação</strong> do que foi conciliado, usando o glossário do cliente como referência, e registra as anomalias encontradas.</li>
 </ol>
@@ -428,13 +475,28 @@
   <p>Três dias cobrem o caso real de pagamento feito na sexta e compensado na segunda. O valor não é configurável de propósito: uma tolerância ajustável vira uma discussão por cliente, e o resultado de uma conciliação deixaria de ser comparável com o de outra.</p>
 </div>
 
+<h3>Cartão lançado no vencimento da fatura: o lote</h3>
+<p>Quando o cliente lança as compras do cartão em lote, no vencimento da fatura (seção 5.1), a data da compra não diz em que dia ela está no Omie: uma parcela comprada em julho pode estar no lote de outubro. Nesse processo, e só nele, a regra muda:</p>
+<ul class="tight">
+  <li>O Omie é lido no <strong>lote da fatura</strong>: de 3 dias antes a 3 dias depois do vencimento confirmado na criação. Os títulos em aberto entram pelo vencimento deles, no mesmo intervalo.</li>
+  <li>O par sai pelo <strong>valor</strong> (até R$ 0,01), dentro do lote, e continua exclusivo. Entre dois candidatos de mesmo valor, decide a semelhança do fornecedor e, empatando, a ordem das linhas.</li>
+  <li>Todo par é <strong>conciliado</strong>. Não existe data divergente nesse processo: a distância entre a compra e o vencimento é o jeito de o cliente lançar, não um erro.</li>
+  <li>Duas compras de mesmo valor com um único lançamento no lote: uma casa, e a outra fica sem lançamento no Omie.</li>
+</ul>
+<p>É por isso que a revisão de uma conciliação assim mostra, no cabeçalho, <span class="ui">Compras lançadas no vencimento da fatura · Lote da fatura</span> com a data: ela avisa que o cruzamento foi feito pelo lote, e não pela data de cada compra. A conciliação de cartão no processo de sempre mostra <span class="ui">Compras lançadas na data da compra</span>.</p>
+
+<div class="callout">
+  <span class="label">Por que não aumentar a tolerância</span>
+  <p>Ampliar os 3 dias para alcançar o vencimento casaria compras recorrentes de mesmo valor (a mesma assinatura, todo mês) com a fatura errada. O processo do cliente é declarado no cadastro, e o cruzamento segue o que foi declarado.</p>
+</div>
+
 <h2 id="s64">6.4 Revisar o resultado</h2>
 
 <p>A tela da conciliação abre com o resumo em cartões, o confronto de saldos e os arquivos que a compõem. Abaixo, quatro abas organizam o que precisa de atenção.</p>
 
 <figure>
   <img src="img/conciliacao.png" alt="Tela de uma conciliação processada">
-  <figcaption>A conciliação processada. Os cartões do topo dão o retrato imediato; o bloco <span class="ui">Resumo geral</span> confronta o saldo do arquivo com o do ERP e marca <span class="ui">Conferido</span> quando a diferença é zero.</figcaption>
+  <figcaption>A conciliação processada. Os cartões do topo dão o retrato imediato; o bloco <span class="ui">Resumo geral</span> confronta o saldo do arquivo com o do ERP e marca <span class="ui">Conferido</span> quando a diferença é zero. No cabeçalho, <span class="ui">Reprocessar com o Omie</span> e <span class="ui">Exportar relatório</span>.</figcaption>
 </figure>
 
 <table>
@@ -448,6 +510,28 @@
 </table>
 
 <p>Cada aba tem filtros próprios e busca por descrição. Qualquer linha aceita uma observação escrita pelo revisor, que fica salva na conciliação e sai no relatório.</p>
+
+<h3>O que a plataforma já escreveu no Omie</h3>
+<p>Na aba <span class="ui">Movimentações</span>, e na linha de <span class="ui">Anomalias</span> que aponta para ela, a situação ganha um segundo selo quando a plataforma já escreveu algo no Omie para aquela compra:</p>
+<ul class="tight">
+  <li><span class="ui">Lançado no Omie · nº</span>: lançamento direto na conta do cartão, com o número dele.</li>
+  <li><span class="ui">Provisionado · título nº</span>: título criado no Contas a Pagar, com o número (e a baixa, quando houve, no detalhe do selo).</li>
+  <li><span class="ui">Lançamento parado · passo</span>: a provisão começou e parou num passo; a linha oferece <span class="ui">Retomar lançamento</span>, que continua de onde parou sem criar nada em dobro (seção 6.6).</li>
+</ul>
+<p>O selo vem do registro guardado no servidor, não de uma lembrança da tela: aparece igual para qualquer pessoa, em qualquer dia. A compra lançada continua <span class="ui">Sem Omie</span> até um reprocessamento encontrar o par no Omie.</p>
+
+<figure>
+  <img src="img/selos.png" alt="Linhas da revisão com os selos Provisionado e Lançamento parado">
+  <figcaption>Duas compras com escrita no Omie: a primeira provisionada, com o número do título; a segunda parada no passo da baixa, com <span class="ui">Retomar lançamento</span>.</figcaption>
+</figure>
+
+<h3>Reprocessar com o Omie</h3>
+<p>Depois de lançar ou corrigir algo no Omie, o botão <span class="ui">Reprocessar com o Omie</span>, no cabeçalho da conciliação, busca os lançamentos de novo e refaz o cruzamento com as mesmas linhas do arquivo, sem excluir a conciliação nem ler o arquivo outra vez. Vale também para a conciliação já concluída. Dois cliques não disparam dois processamentos, e cliente encerrado não reprocessa.</p>
+
+<div class="callout warn">
+  <span class="label">A revisão recomeça do zero</span>
+  <p>Antes de confirmar, a tela diz o que se perde: as anomalias, com as resoluções e os vereditos dados a elas; as notas e as ações registradas nas movimentações e nas divergências do Omie; e a análise da IA, que roda de novo no fim do cruzamento. O que a plataforma já lançou no Omie continua lançado: nenhuma compra é enviada de novo, e o cruzamento volta a encontrá-la.</p>
+</div>
 
 <h2 id="s65">6.5 Anomalias e o veredito do revisor</h2>
 
@@ -464,22 +548,45 @@
 
 <h2 id="s66">6.6 Lançar no Omie o que faltou</h2>
 
-<p>As compras de fatura de cartão que não têm lançamento correspondente no ERP costumavam virar uma lista para alguém redigitar. O Hologram OS lança essas linhas diretamente na conta do cartão no Omie.</p>
+<p>As compras de fatura de cartão sem lançamento correspondente no ERP costumavam virar uma lista para alguém redigitar. O Hologram OS lança essas compras no Omie do cliente, de duas formas, escolhidas compra a compra, no processo da data da compra e no do vencimento da fatura.</p>
 
-<figure>
-  <img src="img/lancamento.png" alt="Seleção de compras para lançar no Omie">
-  <figcaption>Na aba de movimentações, as linhas sem correspondência podem ser selecionadas em lote. A barra superior confirma quantas estão selecionadas e oferece o lançamento em uma ação.</figcaption>
+<p>Na aba de movimentações, as linhas sem correspondência podem ser selecionadas em lote; <span class="ui">Lançar no Omie</span> abre a gaveta onde cada compra é classificada, uma a uma ou com <span class="ui">Aplicar a todas</span>. Nada sai antes de <span class="ui">Confirmar e lançar</span>, e o resumo final diz, em cada linha, o número e onde ela entrou.</p>
+
+<h3>As duas formas</h3>
+<dl class="kv">
+  <dt>Provisionar no Contas a Pagar</dt>
+  <dd>O padrão. Cria um título com fornecedor e vencimento, que aparece no fluxo de caixa do cliente. A emissão é a data da compra e o vencimento é o da fatura (ou a data da compra, se a conciliação não tem vencimento). No processo da data da compra, o título é baixado na conta do cartão, na data da compra. No processo do vencimento, o título fica a vencer, sem baixa: a baixa depende do pagamento efetivo da fatura, que é feito pelo cliente.</dd>
+  <dt>Lançar direto na conta do cartão</dt>
+  <dd>Um lançamento avulso na conta do cartão, sem título, na data da compra, com uma categoria só. Só existe no processo da data da compra: no do vencimento ele gravaria uma data que o cliente não usa, e a gaveta oferece só a provisão, explicando por quê.</dd>
+</dl>
+
+<h3>O que a provisão pede</h3>
+<ul class="tight">
+  <li><strong>Categoria.</strong> Uma, ou <span class="ui">Dividir em categorias</span> para repartir a compra em valor, de 2 a 10 partes, num título só. O caso típico é a compra internacional: R$ 103,80 viram R$ 100,00 na categoria do gasto e R$ 3,80 em IOF. A tela mostra quanto falta ou sobra, e a soma tem de fechar com o valor da compra.</li>
+  <li><strong>Fornecedor.</strong> O CNPJ, procurado no Omie do cliente com <span class="ui">Buscar no Omie</span>. Se o CNPJ não tem cadastro, informam-se razão social e e-mail, e o fornecedor é cadastrado na hora do lançamento. Sem CNPJ, vale o fornecedor padrão do cliente (seção 5.1). Sem nenhum dos dois, a compra fica de fora, com o motivo.</li>
+  <li><strong>Rateio por departamento.</strong> Em percentual, somando 100%, com o valor de cada parte só para conferência. Obrigatório quando o cliente exige (seção 5.1); opcional nos demais.</li>
+</ul>
+
+<figure class="narrow">
+  <img src="img/lancamento.png" alt="Gaveta Lançar no Omie com a provisão de uma compra">
+  <figcaption>A gaveta <span class="ui">Lançar no Omie</span> na provisão: a compra dividida em duas categorias, o fornecedor encontrado pelo CNPJ e o rateio em dois departamentos.</figcaption>
 </figure>
 
-<p>O fluxo é: selecionar as linhas, classificar a categoria (o que pode ser feito em lote), conferir o resumo e confirmar. Cada linha vira um lançamento, com data, valor, categoria e a descrição da compra como observação.</p>
-
 <div class="callout warn">
-  <span class="label">Dois limites deliberados</span>
-  <p><strong>Estorno é bloqueado.</strong> A representação de crédito na API do ERP ainda não foi validada pela equipe, e lançar um estorno no palpite poderia registrá-lo como uma segunda despesa. Enquanto não houver certeza, o sistema recusa.</p>
-  <p><strong>Falha de comunicação nunca reenvia às cegas.</strong> Se a resposta do ERP não chegar, a linha fica marcada para conferência manual em vez de ser lançada de novo. O critério interno é explícito: um único lançamento duplicado em produção e o recurso é desligado inteiro.</p>
+  <span class="label">Cadastrar fornecedor não se desfaz</span>
+  <p>Ao receber o primeiro título, o Omie cria sozinho uma conta contábil para o fornecedor novo, e a partir daí o cadastro não pode mais ser apagado pela integração. Confira razão social, CNPJ e e-mail antes de confirmar.</p>
 </div>
 
-<p class="note">Este é o único ponto em que a plataforma escreve no ERP. Todo o resto é leitura. Por ser uma escrita na contabilidade do cliente, o recurso é liberado ambiente a ambiente, de forma consciente.</p>
+<h3>Quando algo falha no meio</h3>
+<p>A provisão é feita em passos (fornecedor, título e, quando há, baixa), e cada passo guarda o número que o Omie devolveu antes de seguir. Se um passo falha, a linha mostra <span class="ui">Lançamento parado</span> com o passo, e <span class="ui">Retomar lançamento</span> continua dali, sem repetir o que já foi criado. Título criado e baixa recusada é um resultado possível, e o resumo diz isso com os números. Competência já fechada no Omie aparece na linha, com a mensagem do ERP.</p>
+
+<div class="callout warn">
+  <span class="label">Limites deliberados</span>
+  <p><strong>Estorno é bloqueado</strong>, nas duas formas. A representação de crédito na escrita ainda não foi liberada pela equipe, e lançar um estorno no palpite poderia registrá-lo como uma segunda despesa.</p>
+  <p><strong>Falha de comunicação nunca reenvia às cegas.</strong> No lançamento direto, se a resposta do ERP não chegar, a linha fica marcada para conferência manual em vez de ser lançada de novo. Na provisão, o envio é repetido com a mesma identificação, que o Omie reconhece e não duplica, até três vezes; depois disso, a linha também fica para conferência no Omie. Ao repetir, vale o que foi enviado da primeira vez: se a compra foi alterada nesse meio tempo, o Omie devolve o título já criado. O critério interno é explícito: um único lançamento duplicado em produção e o recurso é desligado inteiro.</p>
+</div>
+
+<p class="note">Este é o único ponto em que a plataforma escreve no ERP. Todo o resto é leitura. Por ser uma escrita na contabilidade do cliente, cada forma é liberada ambiente a ambiente, de forma consciente; quando uma delas está desligada, a gaveta diz isso na linha.</p>
 
 <h2 id="s67">6.7 Relatório em Excel e painel</h2>
 
@@ -532,12 +639,34 @@
 
 <h2 id="s73">7.3 O de-para</h2>
 
-<p>Aqui mora a decisão central do Hologram OS: para onde cada categoria de origem vai, em cada destino.</p>
+<p>Aqui mora a decisão central do Hologram OS: para onde cada categoria de origem vai, em cada destino. O bloco <span class="ui">Como funciona</span>, no topo da tela (recolhível), resume as quatro palavras que a tela usa:</p>
+
+<dl class="kv">
+  <dt>Destino</dt>
+  <dd>Para onde a classificação vai: demonstrativo contábil, fluxo de caixa, conta contábil e outros. A mesma categoria pode ir para lugares diferentes em cada destino.</dd>
+  <dt>Alvo</dt>
+  <dd>A linha do destino que recebe a categoria, com código e nome. Os alvos vêm do catálogo da organização; na conta contábil, vêm do plano contábil do próprio cliente (seção 5.5).</dd>
+  <dt>Decisão</dt>
+  <dd>Para qual alvo cada categoria do cliente vai naquele destino, ou “Não mapear”. Vale a partir de uma competência.</dd>
+  <dt>Herdada</dt>
+  <dd>A decisão proposta pela conta de demonstrativo que a categoria já traz no Omie (só no demonstrativo). Fica herdada até alguém confirmar ou alterar.</dd>
+</dl>
 
 <figure>
   <img src="img/de-para.png" alt="Tela do de-para com as decisões por destino">
-  <figcaption>As decisões de um destino. Os cinco indicadores mostram o universo de categorias e em que estado cada grupo está; clicar num deles filtra a lista.</figcaption>
+  <figcaption>As decisões de um destino, com o bloco <span class="ui">Como funciona</span> aberto. Os cinco indicadores mostram o universo de categorias e em que estado cada grupo está; clicar num deles filtra a lista.</figcaption>
 </figure>
+
+<h3>O catálogo de alvos da organização</h3>
+<p>Os alvos de cada destino (menos a conta contábil) formam um catálogo da organização, que vale para todos os clientes dela. Ele fica em <span class="ui">Configurações &gt; Destinos do de-para</span>, para o administrador da organização: a lista dos destinos com a quantidade de alvos e, por destino, os alvos, com <span class="ui">Adicionar alvos</span> (cola-se uma lista de “código;nome”, uma por linha, e entram todos de uma vez), editar o nome e inativar.</p>
+
+<figure>
+  <img src="img/destinos-de-para.png" alt="Tela Destinos do de-para com os destinos e os alvos do demonstrativo">
+  <figcaption>Os destinos da organização e os alvos do demonstrativo contábil. A conta contábil aparece sem catálogo: o alvo dela é o plano contábil de cada cliente.</figcaption>
+</figure>
+
+<p>Uma organização nova começa com os destinos e nenhum alvo. No de-para de um cliente, o aviso de catálogo vazio oferece ao administrador <span class="ui">Cadastrar alvos</span> e <span class="ui">Criar alvos a partir das contas de demonstrativo deste cliente</span>: a plataforma mostra as contas de demonstrativo que as categorias do Omie do cliente já declaram, com o nome que o Omie devolve, e só cria as que a pessoa confirmar. Nada entra no catálogo sozinho, porque ele vale para todos os clientes. Quem não administra o catálogo lê o aviso e sabe a quem pedir.</p>
+<p>Sem destino escolhido, a tela abre no demonstrativo; se o demonstrativo ainda não tem alvos e o cliente já tem plano contábil, ela abre na conta contábil, onde já dá para trabalhar.</p>
 
 <h3>Os estados de uma categoria</h3>
 <table>
@@ -601,7 +730,7 @@
 
 <figure>
   <img src="img/layouts.png" alt="Tela de layouts de exportação">
-  <figcaption>Os layouts da organização. Cada alteração vira uma versão nova, e um arquivo gerado no passado continua explicado pela versão que o gerou.</figcaption>
+  <figcaption>Os layouts da organização. Cada alteração vira uma versão nova, e um arquivo gerado no passado continua explicado pela versão que o gerou. <span class="ui">Excluir</span> só vale para layout que nunca gerou arquivo (capítulo 9).</figcaption>
 </figure>
 
 <!-- ============================ CAP 8 ============================ -->
@@ -656,8 +785,10 @@
 <dl class="kv">
   <dt>Categorias de cliente</dt>
   <dd>Os rótulos usados para organizar a lista de clientes. Cada organização tem os seus.</dd>
+  <dt>Destinos do de-para</dt>
+  <dd>Os alvos de cada destino do de-para, descritos na seção 7.3: criados em lote, editados e inativados pelo administrador da organização.</dd>
   <dt>Layouts de exportação</dt>
-  <dd>Os formatos de arquivo contábil, descritos na seção 7.5.</dd>
+  <dd>Os formatos de arquivo contábil, descritos na seção 7.5. Um layout que nunca gerou arquivo pode ser excluído (<span class="ui">Excluir</span>, na linha); um que já gerou fica, porque cada arquivo baixado de novo é refeito pela versão do layout que o gerou, e a recusa diz quantos arquivos dependem dele.</dd>
   <dt>Tipos de anomalia</dt>
   <dd>O catálogo de apontamentos que a análise pode gerar. É comum a todas as organizações do Hologram OS, e por isso mantido pela administração da plataforma; a organização consulta e usa.</dd>
 </dl>
@@ -729,6 +860,8 @@
   <tbody>
     <tr><td><strong>Estorno não é lançado no ERP</strong></td><td>A representação de crédito na API do ERP não foi validada contra a operação real. Lançar no palpite poderia registrar um estorno como segunda despesa.</td></tr>
     <tr><td><strong>O lançamento no ERP cobre fatura de cartão</strong></td><td>O fluxo foi construído e verificado para a conta de cartão. Outras contas continuam apenas em leitura.</td></tr>
+    <tr><td><strong>Lançamento parado sem resposta do ERP</strong></td><td>Depois de três envios sem confirmação no mesmo passo, a linha fica para conferência no Omie, e a tela ainda não oferece como dar a linha por resolvida. Reenviar no escuro arriscaria uma escrita a mais na contabilidade do cliente.</td></tr>
+    <tr><td><strong>Fornecedor cadastrado pela plataforma não se apaga</strong></td><td>O Omie cria uma conta contábil para o fornecedor no primeiro título e, a partir daí, recusa apagá-lo pela integração.</td></tr>
     <tr><td><strong>Um cliente tem um tipo de origem</strong></td><td>Permitir ERP e arquivo ao mesmo tempo abriria caminho para a mesma movimentação entrar duas vezes.</td></tr>
     <tr><td><strong>Tolerância de data fixa em 3 dias</strong></td><td>Tolerância configurável por cliente tornaria o resultado de uma conciliação incomparável com o de outra.</td></tr>
     <tr><td><strong>O arquivo contábil não é enviado sozinho</strong></td><td>A importação no sistema contábil é um ato deliberado do escritório, e assim permanece.</td></tr>
@@ -763,6 +896,15 @@
     <tr><td>Conta do banco pendente</td><td>Há linha com categoria decidida e sem conta contábil para o lado do banco.</td><td>Associar a conta de origem a uma conta contábil, na tela do plano contábil.</td></tr>
     <tr><td>Cobertura parcial na geração</td><td>Existem categorias sem decisão na competência.</td><td>Decidir as pendentes no de-para e materializar de novo.</td></tr>
     <tr><td>Texto não cabe no layout</td><td>Um histórico contém caractere que quebraria o arquivo, como o separador de colunas.</td><td>Ajustar o histórico padrão da decisão. Nada é truncado automaticamente.</td></tr>
+    <tr><td>Informe o vencimento da fatura</td><td>Conciliação de cartão de um cliente que lança no vencimento, sem a data de vencimento.</td><td>Informar o vencimento impresso na fatura, no bloco Fatura do cartão.</td></tr>
+    <tr><td>Formato de arquivo não suportado (.xls)</td><td>No plano contábil ou na origem por arquivo: o arquivo tem extensão .xls mas não é uma planilha do Excel (por exemplo, uma página salva como .xls). Na conciliação, o .xls não é aceito.</td><td>Abrir no Excel e salvar como .xlsx ou CSV.</td></tr>
+    <tr><td>Já existe conta com este código</td><td>O cliente já tem uma conta com o código reduzido informado, ativa ou inativa.</td><td>Editar a conta existente; se ela estiver inativa, reativá-la pela edição.</td></tr>
+    <tr><td>Conta em uso</td><td>Tentativa de tornar sintética ou inativa uma conta usada por decisões do de-para ou como conta do banco.</td><td>Trocar antes as decisões ou a conta do banco que apontam para ela, ou reimportar o plano.</td></tr>
+    <tr><td>Sem fornecedor (fornecedor pendente)</td><td>A compra não tem CNPJ cadastrado no Omie, nem dados para cadastrar, e o cliente não tem fornecedor padrão.</td><td>Buscar o CNPJ, informar razão social e e-mail, ou definir o fornecedor padrão no Editar Cliente.</td></tr>
+    <tr><td>Este cliente exige rateio por departamento</td><td>A compra foi provisionada sem departamentos num cliente que exige rateio.</td><td>Ratear a compra entre os departamentos, somando 100%.</td></tr>
+    <tr><td>Lançamento desativado neste ambiente</td><td>A forma escolhida (provisão ou lançamento direto) não está liberada no ambiente.</td><td>Usar a outra forma, se estiver liberada, ou falar com o suporte.</td></tr>
+    <tr><td>Competência fechada no Omie</td><td>O Omie recusou o título ou o lançamento porque o mês está fechado no ERP.</td><td>Conferir o fechamento com quem administra o Omie do cliente antes de lançar de novo.</td></tr>
+    <tr><td>Layout já gerou arquivos</td><td>Tentativa de excluir um layout que já produziu arquivo contábil.</td><td>Nada a fazer: o layout fica, porque o download refaz cada arquivo pela versão que o gerou.</td></tr>
     <tr><td>Cliente encerrado</td><td>Toda escrita em cliente encerrado é bloqueada.</td><td>Apenas leitura. Um cliente que retorna entra como cadastro novo.</td></tr>
   </tbody>
 </table>
@@ -775,11 +917,12 @@
 
 <h2>Uma vez, por cliente novo</h2>
 <ol class="steps">
-  <li>Cadastrar o cliente e definir o responsável.</li>
+  <li>Cadastrar o cliente e definir o responsável. Com Omie, declarar como as compras do cartão entram no ERP (na data da compra ou no vencimento da fatura) e, se o cliente provisiona no Contas a Pagar, se exige rateio por departamento e qual é o fornecedor padrão.</li>
   <li>Conectar a origem (ERP ou arquivo) e confirmar que ela ficou ativa.</li>
   <li>Sincronizar as contas bancárias.</li>
-  <li>Sincronizar o Plano de Contas da origem e observar quantas categorias já trazem destino declarado.</li>
-  <li>Importar o plano contábil do cliente e associar a conta contábil de cada conta de origem.</li>
+  <li>Sincronizar as Categorias do Omie (o plano da origem) e observar quantas categorias já trazem destino declarado.</li>
+  <li>Importar o plano contábil do cliente (o .xls do Domínio entra como sai) e associar a conta contábil de cada conta de origem.</li>
+  <li>Conferir se a organização já tem os alvos do de-para; numa organização nova, cadastrá-los em Destinos do de-para ou a partir das contas de demonstrativo do cliente.</li>
   <li>Registrar no glossário as regras que hoje só existem na cabeça de quem atende o cliente.</li>
   <li>Percorrer o de-para: confirmar as herdadas, decidir as pendentes e marcar o que fica fora do destino.</li>
   <li>Conceder acesso às pessoas do cliente, se for o caso.</li>
@@ -787,10 +930,10 @@
 
 <h2>Todo mês</h2>
 <ol class="steps">
-  <li>Criar a conciliação de cada conta do mês e conferir a prévia antes de confirmar.</li>
+  <li>Criar a conciliação de cada conta do mês e conferir a prévia antes de confirmar. No cartão lançado no vencimento, conferir o vencimento da fatura lido do arquivo.</li>
   <li>Aguardar a notificação e revisar: divergências primeiro, anomalias depois.</li>
   <li>Dar o veredito nas anomalias e registrar as observações que explicam o mês.</li>
-  <li>Lançar no ERP as compras de cartão que faltaram.</li>
+  <li>Lançar no ERP as compras de cartão que faltaram: provisionar no Contas a Pagar (com fornecedor, categoria e, se o cliente exige, rateio) ou, no processo da data da compra, lançar direto. Depois, reprocessar com o Omie para a conciliação encontrar o que foi lançado.</li>
   <li>Exportar o relatório em Excel e arquivar.</li>
   <li>Sincronizar a base de movimentos da competência.</li>
   <li>Conferir a prévia do de-para: cobertura e partida completa em 100%.</li>
@@ -808,6 +951,7 @@
 <table class="long">
   <thead><tr><th style="width:30%">Termo</th><th>Definição</th></tr></thead>
   <tbody>
+    <tr><td>Alvo</td><td>A linha de um destino que recebe a categoria, com código e nome.</td></tr>
     <tr><td>Anomalia</td><td>Apontamento gerado pela análise, com severidade e status, para uma situação que merece olhar humano.</td></tr>
     <tr><td>Base de movimentos</td><td>Os lançamentos do cliente em uma competência, independentemente de conta, usados pela ponte contábil.</td></tr>
     <tr><td>Carteira (de clientes)</td><td>O conjunto de clientes que um gerente alcança.</td></tr>
@@ -820,12 +964,14 @@
     <tr><td>Destino</td><td>O uso dado à classificação: conta contábil, demonstrativo, fluxo de caixa e outros.</td></tr>
     <tr><td>Divergência Omie</td><td>Lançamento que existe no ERP e não apareceu no extrato.</td></tr>
     <tr><td>Glossário</td><td>O vocabulário contábil de um cliente: categorias, fornecedores típicos e regras de auditoria.</td></tr>
+    <tr><td>Lote da fatura</td><td>O intervalo de 3 dias antes a 3 dias depois do vencimento da fatura, onde a conciliação procura as compras do cartão de quem lança no vencimento.</td></tr>
     <tr><td>Materialização</td><td>O fechamento de uma competência em um destino, em versão imutável.</td></tr>
     <tr><td>Organização</td><td>O escritório contábil ou BPO que usa o Hologram OS.</td></tr>
     <tr><td>Origem</td><td>De onde vêm as contas e os lançamentos do cliente.</td></tr>
     <tr><td>Partida</td><td>O par de contas, débito e crédito, de uma linha do arquivo contábil.</td></tr>
     <tr><td>Plano contábil</td><td>O plano de contas do sistema contábil de destino, importado por cliente.</td></tr>
-    <tr><td>Plano de Contas</td><td>A classificação que o ERP do cliente já usa.</td></tr>
+    <tr><td>Plano de Contas</td><td>A classificação que o ERP do cliente já usa. Na tela, Categorias do Omie.</td></tr>
+    <tr><td>Provisão</td><td>A compra lançada como título no Contas a Pagar do Omie, com fornecedor e vencimento.</td></tr>
     <tr><td>Sem Omie</td><td>Linha do extrato sem lançamento correspondente no ERP.</td></tr>
     <tr><td>Veredito</td><td>A resposta do revisor sobre se um apontamento procedia.</td></tr>
     <tr><td>Vigência</td><td>A competência a partir da qual uma decisão de de-para passa a valer.</td></tr>

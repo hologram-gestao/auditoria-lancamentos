@@ -37,7 +37,7 @@ Antes de declarar ou usar um campo, procure-o na fixture do endpoint:
 
 ```bash
 grep -c '"<campo>"' apps/api/tests/fixtures/omie/<endpoint>.response.json   # 0 = NÃO existe na resposta real
-cd apps/api && uv run --extra dev pytest tests/unit/test_omie_fixtures.py -q --no-cov   # esperado: 14 passed
+cd apps/api && uv run --extra dev pytest tests/unit/test_omie_fixtures.py -q --no-cov   # esperado: 39 passed
 ```
 
 Envelopes reais (chave do array): `listaMovimentos` (ListarExtrato),
@@ -86,12 +86,12 @@ invenção (defeito P11 da Sprint 1). Sem fixture, o teste skipa citando o scrip
 
 ## Passo 3 — Toda chamada passa pelo `OmieClient.call` (e o que ele já faz)
 
-`OmieClient` (`app/integrations/omie/client.py:146`) é o único lugar que fala com
+`OmieClient` (`app/integrations/omie/client.py:246`) é o único lugar que fala com
 `OMIE_BASE_URL`. Chamada nova = método tipado novo no client (padrão `listar_extrato`,
-`:628`) que faz `model_validate` num schema de `schemas.py`; nunca `httpx` solto num
+`:848`) que faz `model_validate` num schema de `schemas.py`; nunca `httpx` solto num
 service.
 
-O `call()` (`:184`) já trata o que a Omie tem de peculiar — não reimplemente:
+O `call()` (`:284`) já trata o que a Omie tem de peculiar — não reimplemente:
 
 - **Erro vem com HTTP 200.** Todo body é checado por `faultstring` (`:395-406`); auth →
   `OmieAuthError` (keywords `:71`, faultcodes `:86`), o resto → `OmieFaultError`.
@@ -225,7 +225,7 @@ grep -c '"razao_social"\|"nome_fornecedor"' apps/api/tests/fixtures/omie/listar_
 grep -n "DEFAULT_TTL_SECONDS\|UNRESOLVED_TTL_SECONDS" apps/api/app/integrations/omie/*_cache.py
 ```
 
-## Passo 8 — ESCRITA: existe UMA em produto, e qualquer outra é pergunta, não código
+## Passo 8 — ESCRITA: duas formas em produto, e qualquer outra é pergunta, não código
 
 O invariante "Omie read-only" acabou na Sprint 7 com **`IncluirLancCC`**
 (`financas/contacorrentelancamentos`) — lançamento de compras `sem_omie` da fatura de
@@ -247,13 +247,14 @@ O que protege essa escrita (CLAUDE.md §3.16; tudo em
   `OmiePostingDisabledError` só com as DUAS desligadas; uma só desligada bloqueia as
   linhas dela (`direto_desligado` / `provisao_desligada`). Ligar é por ambiente, via
   `--update-env-vars`.
-- **Só cartão**: `_require_credit_card` (`:269`) — `account_type == 'credit_card'` = `CR`.
+- **Só cartão**: `_require_credit_card` — `account_type == 'credit_card'` = `CR`.
 - **O `direto` só no processo "na data da compra"** (86e3n70p0): no modo
   `invoice_due_date` a linha `direto` volta `direto_indisponivel_no_modo_vencimento` (o
   `dDtLanc` seria a data da compra); a provisão funciona nesse processo e para no
   título, sem baixa.
-- **Estorno bloqueado**: valor positivo → `estorno_nao_verificado` (`_eligibility_block`,
-  `:717-740`). O contrato não tem `cNatureza`; o crédito segue sem captura.
+- **Estorno bloqueado** nas duas formas: valor positivo → `estorno_nao_verificado`
+  (`_eligibility_block`). A captura de 13/10/2026 mostrou como o crédito aterrissa (fim
+  deste passo); destravar é task própria, não código de passagem.
 - **Dedup é do ADL**: intenção em `reconciliation_omie_postings` ANTES do POST, chave
   derivada da IDENTIDADE da linha (`omie_posting/keys.py`: `ADL` lançamento, `HCP`
   título, `HBX` baixa, mesmo sufixo; `HFN` fornecedor, do CNPJ normalizado), nunca do
@@ -263,8 +264,8 @@ O que protege essa escrita (CLAUDE.md §3.16; tudo em
   retomada pula o que já tem id. Timeout de passo da provisão REENVIA com a mesma chave
   (até `MAX_STEP_SENDS = 3`); o `direto` não (abaixo).
 - **`faultstring` = falha definitiva**, nada marcado como lançado; a mensagem do
-  provedor é persistida e **nunca logada** (`:427-451`). **Timeout nunca reenvia às
-  cegas**: `_reconcile` (`:539-578`) é sempre inconclusivo porque o extrato NÃO devolve
+  provedor é persistida e **nunca logada**. **O `direto` nunca reenvia às cegas após
+  timeout**: `_reconcile` é sempre inconclusivo porque o extrato NÃO devolve
   `cCodIntLanc` (0 ocorrências nas fixtures).
 - **Contrato verificado em 21/08/2026**: `param` aninhado, `nValorLanc` NÚMERO JSON
   (serializer `schemas.py:514-525`; string deu `3102`), `cTipo='DIN'` obrigatório na
