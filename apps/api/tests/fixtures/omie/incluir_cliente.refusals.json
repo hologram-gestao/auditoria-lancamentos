@@ -1,0 +1,14 @@
+[
+  {
+    "call_name": "IncluirCliente",
+    "captured_at": "2026-10-13T10:58:25+00:00",
+    "param": {
+      "codigo_cliente_integracao": "HOSCAP1013-FORN",
+      "razao_social": "TESTE HOLOGRAM OS CAPTURA FORNECEDOR LTDA",
+      "nome_fantasia": "TESTE HOLOGRAM OS CAPTURA FORNECEDOR",
+      "cnpj_cpf": "99.999.001/0001-59"
+    },
+    "_adl_capture_exception_type": "OmieFaultError",
+    "_adl_capture_exception_message": "5xx permanente em IncluirCliente (geral/clientes): 1040 - É obrigatório o preenchimento do e-mail."
+  }
+]

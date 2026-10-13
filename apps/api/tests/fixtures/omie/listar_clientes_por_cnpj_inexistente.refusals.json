@@ -1,0 +1,15 @@
+[
+  {
+    "call_name": "ListarClientes",
+    "captured_at": "2026-10-13T10:58:13+00:00",
+    "param": {
+      "pagina": 1,
+      "registros_por_pagina": 50,
+      "clientesFiltro": {
+        "cnpj_cpf": "99.999.001/0001-59"
+      }
+    },
+    "_adl_capture_exception_type": "OmieFaultError",
+    "_adl_capture_exception_message": "5xx permanente em ListarClientes (geral/clientes): 5113 - Não existem registros para a página [1]!"
+  }
+]

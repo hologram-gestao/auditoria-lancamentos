@@ -1,0 +1,16 @@
+{
+  "call_name": "IncluirLancCC",
+  "param": {
+    "cCodIntLanc": "HOSCAP1013-LC-REC",
+    "cabecalho": {
+      "nCodCC": 2625046958,
+      "dDtLanc": "13/10/2026",
+      "nValorLanc": 0.01
+    },
+    "detalhes": {
+      "cCodCateg": "1.02.98",
+      "cObs": "TESTE HOLOGRAM OS CAPTURA credito via receita",
+      "cTipo": "DIN"
+    }
+  }
+}

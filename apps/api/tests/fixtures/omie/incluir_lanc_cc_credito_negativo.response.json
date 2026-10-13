@@ -1,0 +1,5 @@
+{
+  "_adl_capture_note": "IncluirLancCC recusado pela Omie. Texto preservado VERBATIM; o param recusado está em .refusals.json.",
+  "_adl_capture_exception_type": "OmieFaultError",
+  "_adl_capture_exception_message": "5xx permanente em IncluirLancCC (financas/contacorrentelancamentos): 106 - O preenchimento da tag [nValorLanc] deve ser maior ou igual que zero!"
+}

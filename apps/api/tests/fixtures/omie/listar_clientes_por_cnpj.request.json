@@ -1,0 +1,10 @@
+{
+  "call_name": "ListarClientes",
+  "param": {
+    "pagina": 1,
+    "registros_por_pagina": 50,
+    "clientesFiltro": {
+      "cnpj_cpf": "00.394.460/0001-00"
+    }
+  }
+}

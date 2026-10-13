@@ -1,0 +1,11 @@
+{
+  "call_name": "LancarPagamento",
+  "param": {
+    "codigo_lancamento": 3105843596,
+    "codigo_baixa_integracao": "HOSCAP1013-BX-A",
+    "codigo_conta_corrente": 2625046958,
+    "valor": 0.01,
+    "data": "13/10/2026",
+    "observacao": "TESTE HOLOGRAM OS CAPTURA baixa do titulo (a)"
+  }
+}

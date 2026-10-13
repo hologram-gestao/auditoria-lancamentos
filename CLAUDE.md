@@ -297,7 +297,22 @@ nValorLanc}` + `detalhes{cCodCateg, cTipo, cObs}`); `nValorLanc` é
     lança o cartão em lote no VENCIMENTO da fatura (§4.8, §5.8) não usa essa data. Sessão
     com `card_posting_date_mode = invoice_due_date` recusa o lote inteiro com 400
     (`_require_purchase_date_process`) e a tela não oferece a ação. Lançar no lote é
-    desenho em aberto, não "trocar a data".
+    desenho em aberto, não "trocar a data". - **O contrato do CONTAS A PAGAR foi
+    CAPTURADO em 13/10/2026 (86e3n70q0), mas NENHUM serviço o consome ainda** — é a
+    evidência do bloco B da 86e3b6n78, não código de produto. Fixtures anonimizadas e DTOs
+    mínimos (`OmieWriteParam`) por chamada, cada uma verificada contra a conta real da
+    Hologram em 13/10/2026: `ListarDepartamentos` (sem `nivel_totalizador` na resposta,
+    apesar da doc); busca de fornecedor por CNPJ é `ListarClientes` + `clientesFiltro`
+    (inexistente = fault `5113`); `IncluirCliente` exige `email` (`1040`) e é idempotente em
+    `codigo_cliente_integracao`; `IncluirContaPagar` aceita `categorias` com duas categorias
+    e `distribuicao` com valor e percentual, idempotente em `codigo_lancamento_integracao`;
+    a baixa é `LancarPagamento` (devolve `codigo_baixa`; repetir devolve a mesma) e no
+    extrato do cartão vira natureza `P` com `nCodLancamento` próprio e sem `cCodIntLanc`;
+    `CancelarPagamento`, `ExcluirContaPagar` e `ExcluirLancCC` funcionam por id;
+    `ExcluirCliente` de fornecedor que já teve título é recusado (`21`). **O CRÉDITO no
+    `IncluirLancCC` é categoria de RECEITA com valor absoluto (natureza `R` no extrato);
+    valor negativo é recusado (`106`)** — o `estorno_nao_verificado` continua bloqueado até
+    task própria usar essa evidência. Detalhe por chamada na skill `omie`.
 17. **O limite do login é por IDENTIDADE, não por IP (86e3anx10).** Atrás do BFF do Next
     a API vê o IP do PROXY para todo mundo (o uvicorn sobe sem `--forwarded-allow-ips`),
     então um limite por IP é um balde da plataforma inteira. O que distingue pessoas é
@@ -1627,6 +1642,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.93, 13/10/2026. **O contrato do Contas a Pagar da Omie foi capturado contra a conta real da Hologram (86e3n70q0, subtask 5 do épico 86e3n70nv; bloco A da 86e3b6n78), sem nenhum código de produto.** Mesma receita da S-1: `scripts/capture_omie_payables.py` (um passo por chamada, 2º envio de cada escrita, recusas em `.refusals.json`, limpeza pela API como passo próprio), DTOs mínimos em `schemas.py` sobre a base `OmieWriteParam` (a mesma `omie_param_aliases` do `IncluirLancCCRequest`, agora herdada) e 25 testes novos no gate de fixtures (39 no total, 49 arquivos de fixture novos, anonimizados). O que a Omie respondeu está na §3.16 e na skill `omie`: `ListarDepartamentos` sem `nivel_totalizador`; busca por CNPJ é `ListarClientes` + `clientesFiltro`, inexistente é fault `5113`; `IncluirCliente` exige `email` (`1040`, única recusa de payload do dia) e é idempotente; `IncluirContaPagar` aceitou de primeira as três formas (simples, duas `categorias`, `distribuicao` com valor e percentual) e é idempotente; a baixa é `LancarPagamento`, repetir devolve a mesma baixa, e no extrato ela é natureza `P` com id próprio; o CRÉDITO do `IncluirLancCC` é categoria de receita (natureza `R`), valor negativo é `106`; o extrato leva segundos para refletir o recém-criado. Tudo que a captura criou saiu pela API, exceto o fornecedor de teste (`ExcluirCliente` recusado com `21` por dependência): fica para apagar à mão. Sem rota nem permissão nova: endpoints sensíveis (**124**), matriz (**29**) e pares de AAD (**17**) não mudaram._
 
 _Versão 1.92, 10/10/2026. **Layout de exportação nunca usado passou a ter saída (86e3nuuub, pedido do Pedro: "criei esse layout apenas para testar, não seria interessante poder deletar?").** Nasceu `DELETE /api/v1/export-layouts/{layout_id}` (204, `manage_export_layouts`, alcance pelo mesmo `SELECT ... FOR UPDATE` restrito à organização das rotas irmãs; outra organização ou inexistente = 404; organização suspensa = 409). Só sai o layout sem nenhuma geração em `accounting_file_generations` apontando para qualquer versão: com geração é 409 `LAYOUT_EM_USO` (`ExportLayoutInUseError`) com a contagem e nada sai, porque o download regenera o arquivo pela versão. Versões e layout saem na mesma transação, num SAVEPOINT; a corrida (geração gravada entre a contagem e o DELETE) cai na FK RESTRICT `fk_accounting_file_generations_layout_version` e vira o MESMO 409, nunca 500. Nenhuma FK nem migration mudou. Na tela, "Excluir" na linha da lista só para quem tem a permissão, `AlertDialog` que diz a regra antes de confirmar, e o 409 aparece DENTRO do diálogo com a mensagem do servidor e só "Fechar" (sem toast). Lista canônica 123 → **124** (bateria dos três atacantes sem fixture nova); matriz (**29**) e pares de AAD seguem iguais. Arquivar layout usado ficou fora de escopo._
 
