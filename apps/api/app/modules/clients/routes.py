@@ -160,6 +160,8 @@ async def create_client(
         requested_organization_id=payload.organization_id,
         category_id=payload.category_id,
         card_posting_date_mode=payload.card_posting_date_mode,
+        omie_default_supplier_code=payload.omie_default_supplier_code,
+        omie_department_required=payload.omie_department_required,
     )
 
 
@@ -452,6 +454,10 @@ async def update_client(
         category_id=payload.category_id,
         category_set="category_id" in payload.model_fields_set,
         card_posting_date_mode=payload.card_posting_date_mode,
+        # 86e3n70q0: tri-estado do fornecedor padrão, como a categoria.
+        omie_default_supplier_code=payload.omie_default_supplier_code,
+        omie_default_supplier_set="omie_default_supplier_code" in payload.model_fields_set,
+        omie_department_required=payload.omie_department_required,
     )
 
 

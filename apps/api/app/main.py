@@ -36,6 +36,7 @@ from app.db.session import close_db, init_db
 from app.integrations.anthropic.model_limits import validate_parse_output_config
 from app.integrations.omie.categorias_cache import OmieCategoriasCache
 from app.integrations.omie.clientes_cache import OmieClientesCache
+from app.integrations.omie.departamentos_cache import OmieDepartamentosCache
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache
 from app.modules.accounting_files import routes as accounting_files_routes
 from app.modules.anomaly_types import routes as anomaly_types_routes
@@ -57,6 +58,7 @@ from app.modules.glossary import routes as glossary_routes
 from app.modules.leads import routes as leads_routes
 from app.modules.mapping_catalog import routes as mapping_catalog_routes
 from app.modules.notifications import routes as notifications_routes
+from app.modules.omie_data import client_routes as omie_data_client_routes
 from app.modules.omie_data import routes as omie_data_routes
 from app.modules.organizations import routes as organizations_routes
 from app.modules.reconciliations import routes as reconciliations_routes
@@ -346,6 +348,7 @@ def create_app() -> FastAPI:
     app.include_router(review_routes.router)
     app.include_router(export_routes.router)
     app.include_router(omie_data_routes.router)
+    app.include_router(omie_data_client_routes.router)
     app.include_router(anomaly_types_routes.router)
     app.include_router(client_categories_routes.router)
     app.include_router(notifications_routes.router)
@@ -362,6 +365,9 @@ def create_app() -> FastAPI:
     # tabela: o §4.5 do CLAUDE.md lista `categorias` entre o que nunca persiste
     # em claro — só cache com TTL.
     app.state.omie_categorias_cache = OmieCategoriasCache()
+    # Cache L1 de departamentos Omie (86e3n70q0) — o nome do departamento carrega
+    # nome de cliente final: só cache TTL, nunca tabela (§4.5).
+    app.state.omie_departamentos_cache = OmieDepartamentosCache()
     # Cache L1 de nomes de cliente/fornecedor (86e33bmkb) — resolve o
     # `supplier_code` das divergências de título via ConsultarCliente. Nome é
     # PII do cliente final: só cache TTL, nunca tabela (§4.5).

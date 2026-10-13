@@ -671,8 +671,21 @@ class ClienteOmie(BaseModel):
     codigo_cliente_omie: int = Field(description="ID do cliente/fornecedor no Omie.")
     razao_social: str | None = Field(default=None, description="Razão social.")
     nome_fantasia: str | None = Field(default=None, description="Nome fantasia.")
+    inativo: str | None = Field(
+        default=None,
+        description=(
+            "`S`/`N`. Presente no cadastro do `ListarClientes` (fixture "
+            "`listar_clientes_por_cnpj.response.json`, 13/10/2026): a busca por CNPJ "
+            "prefere o cadastro ativo."
+        ),
+    )
 
     model_config = ConfigDict(populate_by_name=True)
+
+    @property
+    def is_active(self) -> bool:
+        """Ausente conta como ativo: só `S` explícito inativa."""
+        return not _omie_flag(self.inativo)
 
     @property
     def display_name(self) -> str | None:
@@ -942,6 +955,11 @@ class DepartamentoOmie(BaseModel):
     )
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    @property
+    def is_active(self) -> bool:
+        """Ausente conta como ativo: só `S` explícito inativa (mesmo default do cadastro)."""
+        return not _omie_flag(self.inativo)
 
 
 class ClientesFiltro(BaseModel):

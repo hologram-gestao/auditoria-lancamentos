@@ -142,6 +142,7 @@ function client(over: Partial<Client> = {}): Client {
     // "tem origem", para os casos desta suíte não medirem o selo novo.
     origin_status: 'ativa',
     card_posting_date_mode: 'purchase_date',
+    omie_department_required: false,
     ...over,
   };
 }

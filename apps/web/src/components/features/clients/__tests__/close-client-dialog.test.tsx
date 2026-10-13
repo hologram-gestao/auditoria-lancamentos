@@ -43,6 +43,7 @@ const client: Client = {
   // S9: campo obrigatório do contrato; irrelevante para esta suíte.
   origin_status: 'ativa',
   card_posting_date_mode: 'purchase_date',
+  omie_department_required: false,
 };
 
 beforeEach(() => {

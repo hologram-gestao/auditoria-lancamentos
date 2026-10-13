@@ -29,7 +29,9 @@ from app.core.exceptions import (
 from app.core.logging import get_logger
 from app.db.models import (
     FileEntrySituation,
+    OmiePostingKind,
     OmiePostingStatus,
+    OmiePostingStep,
     ReconciliationFileEntry,
     ReconciliationOmiePosting,
 )
@@ -100,8 +102,13 @@ class OmiePostingRepository:
         client_id: UUID,
         session_id: UUID,
         file_entry_id: UUID,
+        kind: OmiePostingKind = OmiePostingKind.DIRETO,
     ) -> ReconciliationOmiePosting:
         """Registra a intenção de lançar a linha. **Idempotente.**
+
+        `kind` só vale na CRIAÇÃO: a 2ª chamada devolve a intenção existente como
+        ela está, inclusive no outro modo — quem decide se trocar de modo é seguro
+        é o serviço (`reset_kind`), nunca um INSERT que "corrige" a linha.
 
         A 2ª chamada para a mesma linha **não cria registro novo** — devolve o
         existente. A idempotência é do BANCO (`ON CONFLICT DO NOTHING` sobre
@@ -125,6 +132,10 @@ class OmiePostingRepository:
                 cod_int_lanc=cod_int_lanc,
                 status=OmiePostingStatus.PENDING.value,
                 attempts=0,
+                kind=kind.value,
+                step=(
+                    OmiePostingStep.FORNECEDOR.value if kind is OmiePostingKind.PROVISAO else None
+                ),
             )
             # SEM alvo de conflito: cobre as DUAS chaves da tabela.
             # Mirar só `uq_..._file_entry` deixava a colisão de `cod_int_lanc`
@@ -217,6 +228,78 @@ class OmiePostingRepository:
         await self._session.flush()
         return posting
 
+    async def reset_kind(
+        self,
+        *,
+        client_id: UUID,
+        file_entry_id: UUID,
+        kind: OmiePostingKind,
+    ) -> ReconciliationOmiePosting:
+        """Troca o modo de uma intenção que PROVADAMENTE não escreveu dinheiro.
+
+        Só o serviço sabe quando isso vale (`_kind_switch_allowed`): provisão
+        ainda no passo `fornecedor`, ou `direto` recusado de forma definitiva na
+        única tentativa. A intenção volta a `pending`, sem tentativas nem erro, no
+        primeiro passo do modo novo; a chave `cod_int_lanc` fica (é da LINHA).
+        """
+        posting = await self._require(client_id=client_id, file_entry_id=file_entry_id)
+        posting.kind = kind.value
+        posting.step = (
+            OmiePostingStep.FORNECEDOR.value if kind is OmiePostingKind.PROVISAO else None
+        )
+        posting.status = OmiePostingStatus.PENDING.value
+        posting.attempts = 0
+        posting.supplier_code = None
+        posting.payable_id = None
+        posting.payment_id = None
+        posting.error_code = None
+        posting.error_message = None
+        await self._session.flush()
+        return posting
+
+    async def record_provision_step(
+        self,
+        *,
+        client_id: UUID,
+        file_entry_id: UUID,
+        next_step: OmiePostingStep,
+        supplier_code: int | None = None,
+        payable_id: int | None = None,
+        payment_id: int | None = None,
+    ) -> ReconciliationOmiePosting:
+        """Grava o id que um passo da provisão devolveu e avança para o próximo.
+
+        Os ids ausentes não são tocados (o do passo anterior fica). `attempts`
+        zera — o contador é do passo corrente — e `concluido` é `confirmed`: o
+        CHECK `provisao_steps_coherent` recusa qualquer outra combinação.
+        Quem chama COMMITA logo depois: o id gravado é o que impede refazer o
+        passo na próxima execução.
+        """
+        posting = await self._require(client_id=client_id, file_entry_id=file_entry_id)
+        if supplier_code is not None:
+            posting.supplier_code = supplier_code
+        if payable_id is not None:
+            posting.payable_id = payable_id
+        if payment_id is not None:
+            posting.payment_id = payment_id
+        posting.step = next_step.value
+        posting.attempts = 0
+        posting.status = (
+            OmiePostingStatus.CONFIRMED.value
+            if next_step is OmiePostingStep.CONCLUIDO
+            else OmiePostingStatus.PENDING.value
+        )
+        posting.error_code = None
+        posting.error_message = None
+        await self._session.flush()
+        return posting
+
+    async def _require(self, *, client_id: UUID, file_entry_id: UUID) -> ReconciliationOmiePosting:
+        posting = await self.get_by_file_entry(client_id=client_id, file_entry_id=file_entry_id)
+        if posting is None:
+            raise ValueError("intenção não registrada — register_intent tem de vir antes")
+        return posting
+
     async def mark_failed(
         self,
         *,
@@ -224,6 +307,7 @@ class OmiePostingRepository:
         file_entry_id: UUID,
         error_code: str,
         error_message: str,
+        reset_attempts: bool = False,
     ) -> ReconciliationOmiePosting:
         """Marca a tentativa como falha. **Nada** é marcado como lançado.
 
@@ -240,6 +324,11 @@ class OmiePostingRepository:
         posting.status = OmiePostingStatus.FAILED.value
         posting.error_code = error_code
         posting.error_message = error_message
+        if reset_attempts:
+            # Provisão (86e3n70q0): `faultstring` é resposta DEFINITIVA de que o
+            # passo não criou nada, então a contagem de envios sem confirmação
+            # recomeça. O `direto` mantém o histórico de sempre (`False`).
+            posting.attempts = 0
         await self._session.flush()
         return posting
 

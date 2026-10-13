@@ -203,7 +203,10 @@ TTL:
 - categoria → `listar_categorias` (`client.py:602`) + `categorias_cache.py` (6 h, `:41`);
 - fornecedor → `consultar_cliente` (`client.py:530`) + `clientes_cache.py` (6 h +
   negativo 15 min para código que a Omie disse não conhecer, `:31-34`);
-- lançamento do extrato → `lancamento_cache.py` (2 h + negativo 15 min, `:47-55`).
+- lançamento do extrato → `lancamento_cache.py` (2 h + negativo 15 min, `:47-55`);
+- departamento → `listar_departamentos` + `departamentos_cache.py` (6 h, por tenant; o
+  nome carrega nome de cliente na Omie da Hologram). Só o código (`cCodDep`) vai no
+  título; nada persiste do departamento.
 
 Persistir nome, CNPJ ou descrição em claro é violação da §4.5 — código pode, nome não.
 
@@ -226,31 +229,39 @@ grep -n "DEFAULT_TTL_SECONDS\|UNRESOLVED_TTL_SECONDS" apps/api/app/integrations/
 
 O invariante "Omie read-only" acabou na Sprint 7 com **`IncluirLancCC`**
 (`financas/contacorrentelancamentos`) — lançamento de compras `sem_omie` da fatura de
-CARTÃO na própria conta do cartão. ⚠️ `IncluirContaPagar` e as chamadas irmãs do Contas
-a Pagar **têm contrato capturado desde 13/10/2026** (task 86e3n70q0, tabela abaixo) mas
-**ainda não são usadas por nenhum serviço**: o backend que as consome é o bloco B da
-86e3b6n78, com kill-switch próprio. Os 8 métodos que o ADL chama, e o único `Incluir*`:
+CARTÃO na própria conta do cartão. Desde a 86e3n70q0 (bloco B, 13/10/2026) há uma
+SEGUNDA forma, escolhida por linha (`modo`): a **provisão no Contas a Pagar**
+(`IncluirCliente` quando o CNPJ não tem cadastro, `IncluirContaPagar` e, só no processo
+"na data da compra", `LancarPagamento`), com kill-switch próprio
+(`OMIE_PAYABLE_POSTING_ENABLED`). Os 13 métodos que o ADL chama, quatro deles escritas:
 
 ```bash
-grep -rn 'call_name="' apps/api/app --include=*.py | grep -v "call_name=call_name"   # 8 linhas; só IncluirLancCC escreve
+grep -rn 'call_name="' apps/api/app --include=*.py | grep -v "call_name=call_name"   # 13 linhas; escrevem IncluirLancCC, IncluirCliente, IncluirContaPagar, LancarPagamento
 ```
 
 O que protege essa escrita (CLAUDE.md §3.16; tudo em
 `app/modules/reconciliations/omie_posting/`):
 
-- **Kill-switch `OMIE_POSTING_ENABLED`**, default `False` (`config.py:196`) —
-  `_require_enabled` (`service.py:263`) → 409 `OmiePostingDisabledError`. Ligar é por
-  ambiente, via `--update-env-vars`.
+- **Dois kill-switches**, default `False` nos dois: `OMIE_POSTING_ENABLED` (direto) e
+  `OMIE_PAYABLE_POSTING_ENABLED` (provisão). `_require_some_posting_enabled` dá 409
+  `OmiePostingDisabledError` só com as DUAS desligadas; uma só desligada bloqueia as
+  linhas dela (`direto_desligado` / `provisao_desligada`). Ligar é por ambiente, via
+  `--update-env-vars`.
 - **Só cartão**: `_require_credit_card` (`:269`) — `account_type == 'credit_card'` = `CR`.
-- **E só no processo "na data da compra"** (86e3n70p0): `_require_purchase_date_process`
-  recusa o lote de sessão no modo `invoice_due_date` com 400 — o `dDtLanc` seria a data
-  da compra num cliente que lança no vencimento da fatura. Desenho em aberto.
+- **O `direto` só no processo "na data da compra"** (86e3n70p0): no modo
+  `invoice_due_date` a linha `direto` volta `direto_indisponivel_no_modo_vencimento` (o
+  `dDtLanc` seria a data da compra); a provisão funciona nesse processo e para no
+  título, sem baixa.
 - **Estorno bloqueado**: valor positivo → `estorno_nao_verificado` (`_eligibility_block`,
   `:717-740`). O contrato não tem `cNatureza`; o crédito segue sem captura.
-- **Dedup é do ADL**: intenção em `reconciliation_omie_postings` ANTES do POST (`_send`,
-  `:391-415`), chave `cCodIntLanc` derivada da IDENTIDADE da linha (`keys.py:61`), nunca
-  do conteúdo. A Omie provou idempotência sobre a chave (2º POST devolve o mesmo
-  `nCodLanc`) — é defesa secundária.
+- **Dedup é do ADL**: intenção em `reconciliation_omie_postings` ANTES do POST, chave
+  derivada da IDENTIDADE da linha (`omie_posting/keys.py`: `ADL` lançamento, `HCP`
+  título, `HBX` baixa, mesmo sufixo; `HFN` fornecedor, do CNPJ normalizado), nunca do
+  conteúdo. A Omie provou idempotência nas quatro escritas (2º envio devolve o mesmo
+  id) — é defesa secundária. A provisão é máquina de estados (`kind`, `step` e ids na
+  intenção, CHECKs no banco): cada passo grava o id e commita antes do próximo, e a
+  retomada pula o que já tem id. Timeout de passo da provisão REENVIA com a mesma chave
+  (até `MAX_STEP_SENDS = 3`); o `direto` não (abaixo).
 - **`faultstring` = falha definitiva**, nada marcado como lançado; a mensagem do
   provedor é persistida e **nunca logada** (`:427-451`). **Timeout nunca reenvia às
   cegas**: `_reconcile` (`:539-578`) é sempre inconclusivo porque o extrato NÃO devolve
@@ -259,6 +270,11 @@ O que protege essa escrita (CLAUDE.md §3.16; tudo em
   (serializer `schemas.py:514-525`; string deu `3102`), `cTipo='DIN'` obrigatório na
   prática, formato plano recusado com `5001`. Gate: `TestIncluirLancCCRealFixture`
   (`test_omie_fixtures.py:183`).
+
+**Ler o código da Omie de um `OmieFaultError` é `omie_error_code(exc)`** (`client.py`):
+ele chega pelo header `OmieAPI-Error` ("5113 - …", HTTP 5xx) OU pelo `faultcode`
+(`SOAP-ENV:Client-5113`, HTTP 200), e comparar um formato só já deixou código morto.
+`5113` na busca por CNPJ é "não existe"; `757` no título é competência fechada.
 
 **Escrita nova (outro `Incluir*`, qualquer `Alterar*`/`Excluir*`, ou `IncluirLancCC`
 fora do fluxo de cartão) → PARE e pergunte ao usuário** (`AskUserQuestion`, CLAUDE.md

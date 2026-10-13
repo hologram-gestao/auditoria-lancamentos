@@ -33,19 +33,20 @@ export function originCanWrite(connections: readonly ClientConnection[]): boolea
 }
 
 /**
- * O processo do cartão desta conciliação permite lançar no Omie? (86e3n70p0)
+ * O processo do cartão desta conciliação permite o lançamento DIRETO? (86e3n70p0)
  *
- * Espelho de `_require_purchase_date_process` do servidor: o `IncluirLancCC`
- * grava a data da COMPRA, e o cliente que lança em lote no vencimento da fatura
- * não usa essa data. Decisão do Pedro (08/10/2026): bloquear o lote inteiro até
- * o lançamento no lote ser desenhado. Sessão antiga (sem o processo gravado)
- * é o processo de sempre.
+ * Espelho do motivo `direto_indisponivel_no_modo_vencimento` do servidor: o
+ * `IncluirLancCC` grava a data da COMPRA, e o cliente que lança em lote no
+ * vencimento da fatura não usa essa data. Esta gaveta só faz o lançamento
+ * direto; a PROVISÃO no Contas a Pagar (86e3n70q0), que funciona nesse
+ * processo, ganha tela no bloco C. Sessão antiga (sem o processo gravado) é o
+ * processo de sempre.
  */
 export function processAllowsPosting(session: { card_posting_date_mode?: string | null }): boolean {
   return session.card_posting_date_mode !== 'invoice_due_date';
 }
 
-/** Mensagem VERBATIM do servidor (`INVOICE_DUE_DATE_POSTING_BLOCK_MESSAGE`). */
+/** Aviso da gaveta no processo do vencimento (o servidor bloqueia o direto por linha). */
 export const INVOICE_DUE_DATE_POSTING_BLOCK_MESSAGE =
   'Esta conciliação cruza as compras pelo vencimento da fatura. O lançamento no Omie ainda não é feito neste processo: lance as compras diretamente no Omie.';
 
