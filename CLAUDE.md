@@ -2,7 +2,7 @@
 
 > **Para futuras conversas com Claude:** este arquivo é o _primer_ obrigatório. Leia-o antes de qualquer ação. Ele é atualizado continuamente conforme decisões são tomadas.
 >
-> **Status do projeto:** 🚀 **S0–S19 + Sprints 0–5 do agents-hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
+> **Status do projeto:** 🚀 **S0–S19, as sprints do agents-hub (tabela da §8) e os épicos de fora do hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
 > ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **126/126** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
@@ -27,7 +27,7 @@
 > contra a API real, e o critério de rollback é **um único lançamento duplicado em
 > produção**.
 >
-> **Roadmap (PRD 15/06/2026 → FASE 0–5):** plano em [Docs/PLANO_PROXIMOS_PASSOS.md](Docs/PLANO_PROXIMOS_PASSOS.md). **FASE 0 ✅** (Redis/ARQ removido, `BackgroundTasks`). **FASE 1 ✅ na `main`** — tolerância de data fixa (`DATE_DIVERGENCE_RANGE = 3` em `processing/matcher.py`) e cartão. **FASE 2** lançamento de fatura no Omie (Sprint 7). **FASE 3** glossário por cliente (**Sprint 6 — a próxima**). **FASE 4** Open Finance (Pluggy). **FASE 5** rotinas automáticas de auditoria.
+> **Roadmap (PRD 15/06/2026 → FASE 0–5):** plano em [Docs/PLANO_PROXIMOS_PASSOS.md](Docs/PLANO_PROXIMOS_PASSOS.md). **FASE 0 ✅** (Redis/ARQ removido, `BackgroundTasks`). **FASE 1 ✅ na `main`** — tolerância de data fixa (`DATE_DIVERGENCE_RANGE = 3` em `processing/matcher.py`) e cartão. **FASE 2 ✅** lançamento de fatura no Omie (Sprint 7 e, desde 86e3n70q0, o Contas a Pagar). **FASE 3 ✅** glossário por cliente (Sprint 6). **FASE 4** Open Finance (Pluggy). **FASE 5** rotinas automáticas de auditoria.
 
 ---
 
@@ -1300,7 +1300,7 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
 | **S18** | E2E + deploy + docs                | — (finalização)               |
 | **S19** | Qualificação (`qualification`)     | BACK 12.1 · FRONT 12.2        |
 
-> **S20+ (pivot — auditoria contínua sobre o Omie):** eixo S20–S27, em planejamento. Não está na tabela acima; ver [Docs/PLANO_S20_AUDITORIA_CONTINUA.md](Docs/PLANO_S20_AUDITORIA_CONTINUA.md).
+> **S20+:** não está na tabela acima; o plano vigente é [Docs/PLANO_PROXIMOS_PASSOS.md](Docs/PLANO_PROXIMOS_PASSOS.md) (o antigo [Docs/PLANO_S20_AUDITORIA_CONTINUA.md](Docs/PLANO_S20_AUDITORIA_CONTINUA.md) foi absorvido na FASE 5, §1).
 
 ### Sprints do agents-hub (numeração própria, todas na `main`)
 
@@ -1509,9 +1509,7 @@ carteira inteira, **inadimplência real** (sem contexto ou `perda_provavel`) e
 **vencido com contexto**, classificando pelo contexto mais recente. O contexto
 **nunca altera o título**. Números deste primer: endpoints sensíveis 74 → **77**,
 matriz 18 → **20** (`view_title_context`, `manage_title_context`), pares de AAD
-12 → **13**. ⚠️ Rodou pela Sprint 15 do hub, mas as Sprints 12, 13 e 14 continuam
-FORA da `main`: a 12 (de-para) é a próxima do caminho crítico, a 14 depende dela e
-a 13 está bloqueada pelo layout do arquivo contábil.
+12 → **13**. Rodou antes das Sprints 12, 13 e 14, que entraram depois (tabela acima).
 
 ✅ **A Sprint 11 passou pela validação humana em 24/09/2026** (PR #200 da sprint,
 correções da validação em `fix/S11-validation-findings`); depois do merge na `main`
@@ -1636,10 +1634,10 @@ Quando o usuário não tiver decidido, **pergunte** antes de presumir:
 
 **Novos (do PRD FASE 0–5 — detalhe em [Docs/PLANO_PROXIMOS_PASSOS.md](Docs/PLANO_PROXIMOS_PASSOS.md)):**
 
-- [x] ~~**Tolerância de data zero** também para conta corrente~~ → **SIM, aprovado + implementado** (FASE 1 / BACK 1.6): exato → `conciliado`; 1–3 dias → `conciliado_data_divergente` + `wrong_date`; > 3 → `sem_omie`. Vale p/ CC e cartão (`DATE_DIVERGENCE_RANGE=3` fixo). Na branch de integração; muda o comportamento da CC em prod quando a FASE 1 for mergeada. Ver §5.2.
+- [x] ~~**Tolerância de data zero** também para conta corrente~~ → **SIM, aprovado + implementado** (FASE 1 / BACK 1.6): exato → `conciliado`; 1–3 dias → `conciliado_data_divergente` + `wrong_date`; > 3 → `sem_omie`. Vale p/ CC e cartão (`DATE_DIVERGENCE_RANGE=3` fixo), na `main`. Ver §5.2.
 - [x] ~~**Quebra do invariante "Omie read-only"**~~ → **implementado na Sprint 7**, com
-      **`IncluirLancCC`** (lançamento na própria conta do cartão) e **não**
-      `IncluirContaPagar`. ✅ **A captura S-1 foi feita em 21/08/2026** (conta Hologram,
+      **`IncluirLancCC`** (lançamento na própria conta do cartão); desde a 86e3n70q0
+      também o **Contas a Pagar** (`IncluirContaPagar`, a provisão, §3.16). ✅ **A captura S-1 foi feita em 21/08/2026** (conta Hologram,
       cartão Inter): contrato aninhado verificado, idempotência de `cCodIntLanc`
       confirmada (2º POST devolve o mesmo `nCodLanc`), fixtures anonimizadas no repo e
       gate rodando verde. Ver **§3.16**. ⚠️ **O que ficou em aberto:**
@@ -1649,12 +1647,15 @@ Quando o usuário não tiver decidido, **pergunte** antes de presumir:
       (b) **reenvio pós-timeout do `direto`** — o `ListarExtrato` não devolve
       `cCodIntLanc`, então a reconciliação atual é sempre inconclusiva; a idempotência
       provada permitiria reenviar com segurança — decidir com o Pedro (a PROVISÃO já
-      reenvia, até 3 envios por passo, 86e3n70q0); (c) ligar `OMIE_POSTING_ENABLED` em
-      dev **só depois** deste código deployado; (d) **título com várias `categorias` E
+      reenvia, até 3 envios por passo, 86e3n70q0); (c) ~~ligar as flags em dev~~ → `OMIE_POSTING_ENABLED` e
+      `OMIE_PAYABLE_POSTING_ENABLED` **ligadas em dev em 13/10/2026**, depois do deploy do
+      #331; (d) **título com várias `categorias` E
       `distribuicao` ao mesmo tempo** não foi exercitado pela captura (cada forma foi
       aceita sozinha): conferir no primeiro uso real antes de ligar
-      `OMIE_PAYABLE_POSTING_ENABLED` para cliente que divide categorias e exige rateio.
-      _FASE 2 / S24_
+      `OMIE_PAYABLE_POSTING_ENABLED` para cliente que divide categorias e exige rateio;
+      (e) **a linha da provisão parada em `envio_anterior_sem_confirmacao`** (3 envios
+      sem confirmação no mesmo passo) não tem saída pela tela: confere-se no Omie pela
+      chave, e a ação de destravar espera decisão do Pedro. _FASE 2 / S24_
 - [ ] **Cloud Run `--no-cpu-throttling` + `min-instances ≥ 1`** na API após remover Redis (senão BackgroundTasks congela). Custo aceitável? _FASE 0 / S20_
 - [ ] **Pluggy interna vs Cubos** (proposta Arthur Souza, 16/06) + cobertura de Sicredi/BNB/Cora + primeiro endpoint público (webhook). _FASE 4_
 - [ ] **Campo de departamento/rateio** na response Omie (bloqueia check `sem_departamento`); Slack (app vs webhook) e provedor de email; persona supervisor (role nova vs reuso). _FASE 5_
@@ -1713,6 +1714,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.96, 13/10/2026. **A varredura de fim do épico 86e3n70nv (86e3ndj0p) tirou do primer o que ele ainda dizia ao contrário do código: o status do topo e o roadmap (Sprints 0–5, FASE 2 e 3 em aberto), as Sprints 12 a 14 "fora da `main`" no parágrafo da S15, o ponteiro da §8 para o plano superado, a FASE 1 "na branch de integração" e o "não `IncluirContaPagar`" da §10, que também registra as duas flags de escrita ligadas em dev em 13/10 e a linha parada em `envio_anterior_sem_confirmacao` como decisão aberta; números conferidos por comando (126 endpoints, `PENDING_ENDPOINTS` vazio, 16 fora da lista, 29 permissões, 17 pares de AAD) e a doc gerada de endpoints sem divergência.**_
 
 _Versão 1.95, 13/10/2026. **A gaveta "Lançar no Omie" ganhou a provisão no Contas a Pagar, e o selo da linha passou a vir do servidor (86e3n70q0, bloco C; fecha a subtask 86e3nb818, compra dividida em IOF + gasto).** Backend pequeno, sem rota nova (lista canônica segue **126**): `ListedFileEntry` e o `related_file_entry` das anomalias ganharam `omie_posting` (`review/omie_posting_state.py`, uma query por página com `client_id` no `WHERE`; também no PATCH da linha e nas respostas de criar e resolver anomalia), e `GET /clients/{id}/omie/fornecedores` aceita `?codigo=` (exatamente um entre `cnpj` e `codigo`, senão 400), resolvido pelo MESMO `resolve_supplier_names` + `OmieClientesCache` das divergências: o cache negativo separa "a Omie disse que não existe" (404 `FORNECEDOR_NAO_ENCONTRADO`) de "a Omie não respondeu" (502); a bateria dos três atacantes cobre a variante. O mock responde o fornecedor cadastrado pelo nome dele e tem um código sentinela de cadastro excluído (`MOCK_FORNECEDOR_EXCLUIDO_CODIGO`). Na tela: forma por linha e no lote (padrão provisionar; no processo do vencimento só a provisão, com a frase do servidor), categoria única ou dividida em valor (2 a 10 partes, soma em 0,01, "Falta/Sobra" ao vivo), fornecedor pela busca por CNPJ (encontrado, sem cadastro pedindo razão social e e-mail, erro com "Tentar de novo", CNPJ conferido por `lib/cnpj.ts` antes de sair) ou o padrão do cliente, rateio em percentual com o valor só para conferência (obrigatório quando o cliente exige), linha travada na forma gravada, e o resumo com título, baixa, onde entrou e o passo onde parou (título criado e baixa recusada é aviso, não "nada lançado"). A regra da linha e o pedido moram em `lib/validation/omie-posting.ts` (zod + builder); a busca de fornecedor é UM componente (`omie-suppliers/omie-supplier-lookup.tsx`) para a gaveta e o editar cliente. O editar cliente ganhou "Exigir rateio por departamento nos títulos" e "Fornecedor padrão no Omie" (nome pela busca por código, "Remover" manda `null`, intocado não vai no PATCH), com o mesmo gate do campo do cartão; o criar ganhou só o rateio, porque a busca pergunta ao Omie de um cliente que ainda não existe (decisão do Pedro, 13/10). `processAllowsPosting` e `INVOICE_DUE_DATE_POSTING_BLOCK_MESSAGE` saíram: no processo do vencimento a ação existe. A saída para a linha parada em `envio_anterior_sem_confirmacao` continua fora (decisão do Pedro pendente). Matriz (**29**) e pares de AAD (**17**) não mudaram._
 
