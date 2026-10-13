@@ -55,7 +55,11 @@ import {
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
-import { useOpenLancarDrawer, usePostedInSession } from '@/hooks/use-omie-postings';
+import {
+  pickPostingState,
+  useOpenLancarDrawer,
+  usePostedInSession,
+} from '@/hooks/use-omie-postings';
 import {
   useAllSessionAnomalies,
   useFileEntries,
@@ -68,12 +72,17 @@ import { formatBRDate, formatBRL } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 import { LancarLoteBar, LancarNoOmieButton, PostingCheckbox } from './lancar-no-omie-controls';
-import { LancarNoOmieDrawer } from './lancar-no-omie-drawer';
-import { getPostingBlock, type PostingBlockReason } from './omie-posting-eligibility';
+import { LancarNoOmieDrawer, type PostingClientContext } from './lancar-no-omie-drawer';
+import {
+  getPostingBlock,
+  isProvisionStalled,
+  postingBlockMessage,
+  type PostingBlockReason,
+} from './omie-posting-eligibility';
 import { QualificationCell, isQualificationAnomaly } from './qualification-cell';
 import { QualificationOverrideDialog } from './qualification-override-dialog';
 import { RegistrarAnomaliaModal } from './registrar-anomalia-modal';
-import { LancadaNoOmieBadge, SituationBadge } from './situation-badge';
+import { OmiePostingBadge, SituationBadge } from './situation-badge';
 import { TrocarLancamentoModal } from './trocar-lancamento-modal';
 
 interface MovementsTabProps {
@@ -91,6 +100,8 @@ interface MovementsTabProps {
    * resolvido em `originCanWrite` — a UI reflete, não decide.
    */
   canPostToOmie: boolean;
+  /** Cliente e processo da conciliação, para a gaveta (86e3n70q0, bloco C). */
+  postingContext: PostingClientContext;
 }
 
 type SituationFilter =
@@ -105,7 +116,12 @@ type TypeFilter = 'all' | 'credit' | 'debit';
 const DEFAULT_PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE_MS = 300;
 
-export function MovementsTab({ sessionId, isCard, canPostToOmie }: MovementsTabProps) {
+export function MovementsTab({
+  sessionId,
+  isCard,
+  canPostToOmie,
+  postingContext,
+}: MovementsTabProps) {
   /**
    * S9 (R6): lançar exige a capacidade `escrever` da origem ATIVA — o servidor
    * responde `CAPACIDADE_AUSENTE` (409) ao lote se ela faltar. `isCard` sozinho
@@ -235,26 +251,40 @@ export function MovementsTab({ sessionId, isCard, canPostToOmie }: MovementsTabP
   // Sprint 7 / FRONT 07.6 — seleção e lançamento no Omie
   // ---------------------------------------------------------------------
 
+  /**
+   * Linhas concluídas nesta visita (id → estado). O selo persistente vem do
+   * SERVIDOR (`omie_posting` da linha); este cache só pinta o selo entre o envio
+   * e o refetch, nesta aba e na de Anomalias (`pickPostingState`).
+   */
+  const postedById = usePostedInSession(sessionId);
+  /** As linhas da página com o estado da intenção já resolvido (servidor + visita). */
+  const postableItems = useMemo(
+    () =>
+      items.map((entry) => {
+        const posting = pickPostingState(entry.omie_posting, postedById[entry.id]);
+        return posting === (entry.omie_posting ?? null)
+          ? entry
+          : { ...entry, omie_posting: posting };
+      }),
+    [items, postedById],
+  );
+
   /** Compras da página que o servidor aceitaria lançar (mesma regra dele). */
   const eligibleIds = useMemo(
     () =>
-      items.filter((e) => getPostingBlock(e, { isCard: showPosting }) === null).map((e) => e.id),
-    [items, showPosting],
+      postableItems
+        .filter((e) => getPostingBlock(e, { isCard: showPosting }) === null)
+        .map((e) => e.id),
+    [postableItems, showPosting],
   );
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  /**
-   * Resumo dos lotes desta visita, por linha (id → nº do lançamento). Mora no
-   * cache da sessão (`usePostedInSession`), não aqui: é o que pinta "Lançado no
-   * Omie · nº X" DEPOIS que a gaveta fecha, nesta aba e na de Anomalias — e some
-   * no recarregamento da tela, que é o alcance honesto do dado (ver o badge).
-   */
-  const postedById = usePostedInSession(sessionId);
   const [launchTargets, setLaunchTargets] = useState<FileEntryItem[] | null>(null);
   // 86e3n70qj — o botão clicado fica em "carregando" até as categorias chegarem.
   const { open: openLaunch, openingTargets } = useOpenLancarDrawer<FileEntryItem>(
     sessionId,
     setLaunchTargets,
+    postingContext.clientId,
   );
   const openingIds = new Set((openingTargets ?? []).map((e) => e.id));
 
@@ -270,8 +300,8 @@ export function MovementsTab({ sessionId, isCard, canPostToOmie }: MovementsTabP
   }, [eligibleIds]);
 
   const selectedEntries = useMemo(
-    () => items.filter((e) => selectedIds.includes(e.id)),
-    [items, selectedIds],
+    () => postableItems.filter((e) => selectedIds.includes(e.id)),
+    [postableItems, selectedIds],
   );
   const allEligibleSelected = eligibleIds.length > 0 && selectedIds.length === eligibleIds.length;
 
@@ -407,7 +437,7 @@ export function MovementsTab({ sessionId, isCard, canPostToOmie }: MovementsTabP
             )}
 
             {!isLoading &&
-              items.map((entry) => {
+              postableItems.map((entry) => {
                 const isEditingNote = noteEditingId === entry.id;
                 const omieData =
                   entry.omie_lancamento_id !== null ? omieById.get(entry.omie_lancamento_id) : null;
@@ -427,8 +457,6 @@ export function MovementsTab({ sessionId, isCard, canPostToOmie }: MovementsTabP
                     columnCount={columnCount}
                     isCard={showPosting}
                     postingBlock={getPostingBlock(entry, { isCard: showPosting })}
-                    posted={Object.prototype.hasOwnProperty.call(postedById, entry.id)}
-                    postedOmieId={postedById[entry.id] ?? null}
                     opening={openingIds.has(entry.id)}
                     selected={selectedIds.includes(entry.id)}
                     onSelectedChange={(checked) => toggleEntry(entry.id, checked)}
@@ -485,14 +513,15 @@ export function MovementsTab({ sessionId, isCard, canPostToOmie }: MovementsTabP
       {launchTargets !== null && (
         <LancarNoOmieDrawer
           sessionId={sessionId}
+          context={postingContext}
           entries={launchTargets}
           open
           onOpenChange={(open) => {
             if (!open) setLaunchTargets(null);
           }}
           onPosted={(results) => {
-            // O par (linha → lançamento) que pinta o badge já foi para o cache da
-            // sessão no sucesso do envio; aqui só sai da seleção o que foi lançado.
+            // O estado que pinta o selo já foi para o cache da sessão no sucesso
+            // do envio; aqui só sai da seleção o que foi concluído.
             setSelectedIds((prev) => prev.filter((id) => !(id in results)));
           }}
         />
@@ -552,9 +581,6 @@ interface RowFragmentProps {
   isCard: boolean;
   /** `null` = pode lançar. Caso contrário é o motivo lido pelo leitor de tela. */
   postingBlock: PostingBlockReason | null;
-  /** Lançada no lote desta visita (fato observado, não inferido da listagem). */
-  posted: boolean;
-  postedOmieId: number | null;
   /** A gaveta desta linha está abrindo (categorias a caminho): botão em carregando. */
   opening: boolean;
   selected: boolean;
@@ -586,8 +612,6 @@ function RowFragment({
   columnCount,
   isCard,
   postingBlock,
-  posted,
-  postedOmieId,
   opening,
   selected,
   onSelectedChange,
@@ -657,7 +681,7 @@ function RowFragment({
         <TableCell>
           <div className="flex flex-col items-start gap-1">
             <SituationBadge situation={entry.situation} title={divergenceTitle} />
-            {posted && <LancadaNoOmieBadge omieLancamentoId={postedOmieId} />}
+            <OmiePostingBadge posting={entry.omie_posting} />
           </div>
         </TableCell>
         <TableCell className="text-center">
@@ -670,7 +694,17 @@ function RowFragment({
                 dentro de um menu. Em linha inelegível ela continua no lugar,
                 inerte e com o motivo, em vez de sumir sem explicação. */}
             {isCard && (
-              <LancarNoOmieButton block={postingBlock} pending={opening} onClick={onLancar} />
+              <LancarNoOmieButton
+                block={postingBlock}
+                blockMessage={
+                  postingBlock === null
+                    ? undefined
+                    : postingBlockMessage(postingBlock, entry.omie_posting)
+                }
+                resume={isProvisionStalled(entry.omie_posting)}
+                pending={opening}
+                onClick={onLancar}
+              />
             )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

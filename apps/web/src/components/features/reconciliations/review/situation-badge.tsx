@@ -6,6 +6,7 @@ import { Check, MinusCircle, AlertTriangle, Upload } from 'lucide-react';
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { PRODUCT_SHORT_NAME } from '@/lib/brand';
+import type { OmiePostingState } from '@/lib/contracts';
 import { cn } from '@/lib/utils';
 
 interface SituationBadgeProps {
@@ -117,42 +118,95 @@ export function SituationBadge({ situation, title }: SituationBadgeProps) {
   );
 }
 
+/** Nome do passo da provisão na frase do selo. */
+const STEP_LABEL: Record<string, string> = {
+  fornecedor: 'fornecedor',
+  titulo: 'título',
+  baixa: 'baixa',
+  concluido: 'concluído',
+};
+
 /**
- * "Lançado no Omie · nº X" (Sprint 7 / FRONT 07.6; número visível desde a
- * 86e3n70qj) — o desfecho do lançamento na própria linha, ao lado da situação.
+ * O que o sistema escreveu (ou tentou escrever) no Omie por esta linha, na
+ * própria linha, ao lado da situação (Sprint 7; número visível desde a
+ * 86e3n70qj; provisão desde a 86e3n70q0, bloco C).
  *
- * **Pinta por TOKEN semântico** (`bg-success-muted`/`text-success`, o par que o
- * `theme-contrast.test.ts` cobre nos dois temas), e não pela paleta crua que os
- * badges acima ainda usam: nada novo nasce fora dos tokens.
+ * **Verdade do banco.** O estado vem do servidor (`omie_posting` na listagem,
+ * lido de `reconciliation_omie_postings`), não de uma observação da tela: o selo
+ * sobrevive ao recarregamento e é o mesmo para quem abre a conciliação depois.
+ * Uma linha conciliada pelo CRUZAMENTO não tem intenção, e por isso nunca leva o
+ * selo — dizer que o sistema escreveu no ERP quando não escreveu seria pior que
+ * não dizer nada. O cache da visita (`usePostedInSession`) só pinta o selo entre
+ * o envio e o refetch.
  *
- * ⚠️ **Alcance declarado.** O contrato da linha (`ListedFileEntry`) NÃO tem
- * campo de "lançada pelo ADL": depois do envio ela vira `conciliado` com
- * `omie_lancamento_id`, indistinguível de uma linha que o matcher conciliou.
- * Por isso este badge é alimentado pelo RESUMO do lote (fato observado nesta
- * visita, `usePostedInSession`), nunca inferido da listagem — inferir marcaria de "lançada" uma linha
- * conciliada pelo cruzamento, que é dizer ao operador que o ADL escreveu no ERP
- * quando não escreveu. O sinal PERSISTENTE do vínculo continua sendo a ação
- * indisponível com o motivo "já está vinculada a um lançamento do Omie".
- * Fechar isso de vez pede um campo no backend (ver HANDOFF).
+ * - direto confirmado: "Lançado no Omie · nº X";
+ * - provisão confirmada: "Provisionado · título nº X";
+ * - provisão começada e não terminada: "Lançamento parado · passo Y", em aviso,
+ *   com a mensagem do servidor na dica;
+ * - direto enviado sem confirmação: "Lançamento sem confirmação", em aviso.
+ *
+ * Pinta por TOKEN semântico (o par `-muted` + sólido do `theme-contrast.test.ts`).
  */
-export function LancadaNoOmieBadge({ omieLancamentoId }: { omieLancamentoId: number | null }) {
-  // `whitespace-nowrap`: "nº" e o número não podem se separar numa coluna estreita.
-  const classes =
+export function OmiePostingBadge({ posting }: { posting: OmiePostingState | null | undefined }) {
+  if (posting === null || posting === undefined) return null;
+  const success =
     'bg-success-muted text-success inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium';
-  // 86e3n70qj — o número fica VISÍVEL no selo, não só na dica: depois de lançar,
-  // a pessoa foi ao Omie conferir porque a linha não dizia qual lançamento era.
-  const rotulo =
-    omieLancamentoId === null ? 'Lançado no Omie' : `Lançado no Omie · nº ${omieLancamentoId}`;
-  const conteudo = (
-    <>
-      <Upload className="h-3 w-3" aria-hidden="true" />
-      {rotulo}
-    </>
-  );
-  const dica = `Criado pelo ${PRODUCT_SHORT_NAME} nesta visita, na conta do cartão no Omie, na data da compra.`;
-  return (
-    <BadgeComDica dica={dica} ariaLabel={`${rotulo}. ${dica}`} className={classes}>
-      {conteudo}
-    </BadgeComDica>
-  );
+  const warning =
+    'bg-warning-muted text-warning inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium';
+
+  if (posting.status === 'confirmed' && posting.kind === 'provisao') {
+    const rotulo =
+      posting.payable_id === null
+        ? 'Provisionado'
+        : `Provisionado · título nº ${posting.payable_id}`;
+    const dica =
+      posting.payment_id === null
+        ? `Título criado pelo ${PRODUCT_SHORT_NAME} no Contas a Pagar do Omie, a vencer e sem baixa: a baixa é feita quando a fatura for paga.`
+        : `Título criado pelo ${PRODUCT_SHORT_NAME} no Contas a Pagar do Omie e baixado na conta do cartão (baixa nº ${posting.payment_id}).`;
+    return (
+      <BadgeComDica dica={dica} ariaLabel={`${rotulo}. ${dica}`} className={success}>
+        <Upload className="h-3 w-3" aria-hidden="true" />
+        {rotulo}
+      </BadgeComDica>
+    );
+  }
+  if (posting.status === 'confirmed') {
+    // `whitespace-nowrap`: "nº" e o número não podem se separar numa coluna estreita.
+    const rotulo =
+      posting.omie_lancamento_id === null
+        ? 'Lançado no Omie'
+        : `Lançado no Omie · nº ${posting.omie_lancamento_id}`;
+    const dica = `Lançado pelo ${PRODUCT_SHORT_NAME} na conta do cartão no Omie, na data da compra.`;
+    return (
+      <BadgeComDica dica={dica} ariaLabel={`${rotulo}. ${dica}`} className={success}>
+        <Upload className="h-3 w-3" aria-hidden="true" />
+        {rotulo}
+      </BadgeComDica>
+    );
+  }
+  if (posting.kind === 'provisao') {
+    const step = posting.step ?? '';
+    const rotulo = `Lançamento parado · passo ${STEP_LABEL[step] ?? step}`;
+    const dica =
+      posting.error_message ??
+      'Houve envio ao Omie sem confirmação neste passo. Confira no Omie antes de retomar.';
+    return (
+      <BadgeComDica dica={dica} ariaLabel={`${rotulo}. ${dica}`} className={warning}>
+        <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+        {rotulo}
+      </BadgeComDica>
+    );
+  }
+  if (posting.status === 'pending' && posting.attempts > 0) {
+    const rotulo = 'Lançamento sem confirmação';
+    const dica =
+      'Houve envio direto ao Omie sem confirmação. Confira no Omie antes de tentar de novo.';
+    return (
+      <BadgeComDica dica={dica} ariaLabel={`${rotulo}. ${dica}`} className={warning}>
+        <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+        {rotulo}
+      </BadgeComDica>
+    );
+  }
+  return null;
 }

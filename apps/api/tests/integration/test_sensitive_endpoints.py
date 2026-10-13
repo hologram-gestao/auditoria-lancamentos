@@ -646,6 +646,33 @@ async def test_cross_tenant_por_endpoint(
     assert resp.status_code in {403, 404}, f"{endpoint.key} -> {resp.status_code}: {resp.text}"
 
 
+@pytest.mark.parametrize("attacker", sorted(ATTACKERS))
+async def test_busca_de_fornecedor_por_codigo_nega_os_tres_atacantes(
+    attacker: str,
+    client_with_db: AsyncClient,
+    tenants: dict[str, Any],
+) -> None:
+    """A variante `?codigo=` da busca de fornecedor (86e3n70q0, bloco C).
+
+    A bateria acima dispara a rota com `?cnpj=`; esta cobre a OUTRA variante,
+    que passa pelo cache de nomes de fornecedor antes da Omie. A negação tem de
+    vir do `client_id`, antes de qualquer resolução.
+    """
+    login = await client_with_db.post(
+        "/api/v1/auth/login",
+        json={"email": ATTACKERS[attacker], "password": PLAIN_PASSWORD},
+    )
+    assert login.status_code == 200, login.text
+
+    resp = await client_with_db.get(
+        f"/api/v1/clients/{tenants['cli_b'].id}/omie/fornecedores",
+        params={"codigo": "700000001"},
+    )
+    assert SECRET_NAME_B not in resp.text
+    assert "PAPELARIA DEMO" not in resp.text
+    assert resp.status_code in {403, 404}, resp.text
+
+
 async def test_notificacoes_do_outro_tenant_nao_aparecem(
     client_with_db: AsyncClient, tenants: dict[str, Any]
 ) -> None:

@@ -64,6 +64,8 @@ export function makeCreateClientSchema({ requireOrganization = false } = {}) {
       category_id: z.string().optional(),
       // 86e3n70p0 — processo do cartão no Omie, declarado (nunca inferido).
       card_posting_date_mode: cardPostingDateModeField,
+      // 86e3n70q0 (bloco C) — título no Contas a Pagar só com rateio.
+      omie_department_required: z.boolean().default(false),
       organization_id: organizationTargetField(requireOrganization),
     })
     .superRefine((vals, ctx) => {
@@ -105,6 +107,10 @@ export const updateClientSchema = z.object({
   // 86e34jd8m — id do catálogo ou a sentinela 'none'.
   category_id: z.string().optional(),
   card_posting_date_mode: cardPostingDateModeField,
+  // 86e3n70q0 (bloco C). O fornecedor padrão é o CÓDIGO do cadastro no Omie,
+  // escolhido pela busca por CNPJ; `null` = sem padrão.
+  omie_department_required: z.boolean().default(false),
+  omie_default_supplier_code: z.number().int().positive().nullable(),
 });
 
 export type UpdateClientFormValues = z.infer<typeof updateClientSchema>;

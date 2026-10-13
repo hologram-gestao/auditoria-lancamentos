@@ -271,8 +271,14 @@
       ambiente**, via `--update-env-vars` no Cloud Run, sem deploy. Uma forma desligada
       bloqueia só as linhas dela (`direto_desligado`, `provisao_desligada`); as duas
       desligadas recusam o lote com 409. O pedido de cada linha traz `modo`, e o padrão
-      do SERVIDOR é `provisionar` (a gaveta atual manda `direto` explícito até a tela do
-      bloco C).
+      é `provisionar` no servidor E na gaveta (86e3n70q0, bloco C): o `direto` é escolha
+      explícita, por linha ou no "aplicar a todas", e só aparece no processo "na data da
+      compra". A linha que já teve envio abre TRAVADA na forma gravada
+      (`lockedPostingMode`, espelho de `_kind_switch_allowed` em
+      `omie-posting-eligibility.ts`), e o pedido deriva da forma: linha `direto` sai SÓ
+      com `file_entry_id`, `cod_categoria` e `modo` (campo da provisão num `direto` é 400
+      para o lote inteiro). A compra dividida em categorias (subtask 86e3nb818, IOF +
+      gasto) existe só na provisão, em VALOR; o rateio é em PERCENTUAL.
     - **Contratos VERIFICADOS contra a API real** (fixtures anonimizadas em
       `apps/api/tests/fixtures/omie/`, gate `tests/unit/test_omie_fixtures.py`, que FALHA
       se o DTO divergir). `IncluirLancCC` (21/08/2026): `param` **ANINHADO**
@@ -1081,6 +1087,15 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   a tela explica o que é o recurso, por que ele não está disponível ali e quem pode
   liberar. Quem some do menu é o que a MATRIZ nega, nunca o que o dado do cliente ainda
   não tem.
+- **O que o sistema escreveu no Omie se lê do SERVIDOR, nunca de uma observação da tela**
+  (86e3n70q0, bloco C). A linha da revisão traz `omie_posting` (a intenção de
+  `reconciliation_omie_postings`, uma query por página com `client_id` no `WHERE`, o
+  MESMO helper para Movimentações e o `related_file_entry` de Anomalias), e é ele que
+  pinta o selo (`OmiePostingBadge`: "Lançado no Omie · nº X", "Provisionado · título nº
+  X", "Lançamento parado · passo Y" com "Retomar lançamento") e bloqueia a ação. O cache
+  da visita (`usePostedInSession`) só pinta entre o envio e o refetch
+  (`pickPostingState`); linha conciliada pelo cruzamento não tem intenção e nunca leva
+  selo de "lançado".
 - **Ação oferecida numa tela TEM de existir na tela de destino, e quem decide é a MESMA
   chamada dos dois lados** (86e3g9uku · 86e3g9u3w). O painel do cliente oferecia "Criar
   conciliação" apontando para a lista, onde a criação já estava escondida para cliente
@@ -1698,6 +1713,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.95, 13/10/2026. **A gaveta "Lançar no Omie" ganhou a provisão no Contas a Pagar, e o selo da linha passou a vir do servidor (86e3n70q0, bloco C; fecha a subtask 86e3nb818, compra dividida em IOF + gasto).** Backend pequeno, sem rota nova (lista canônica segue **126**): `ListedFileEntry` e o `related_file_entry` das anomalias ganharam `omie_posting` (`review/omie_posting_state.py`, uma query por página com `client_id` no `WHERE`; também no PATCH da linha e nas respostas de criar e resolver anomalia), e `GET /clients/{id}/omie/fornecedores` aceita `?codigo=` (exatamente um entre `cnpj` e `codigo`, senão 400), resolvido pelo MESMO `resolve_supplier_names` + `OmieClientesCache` das divergências: o cache negativo separa "a Omie disse que não existe" (404 `FORNECEDOR_NAO_ENCONTRADO`) de "a Omie não respondeu" (502); a bateria dos três atacantes cobre a variante. O mock responde o fornecedor cadastrado pelo nome dele e tem um código sentinela de cadastro excluído (`MOCK_FORNECEDOR_EXCLUIDO_CODIGO`). Na tela: forma por linha e no lote (padrão provisionar; no processo do vencimento só a provisão, com a frase do servidor), categoria única ou dividida em valor (2 a 10 partes, soma em 0,01, "Falta/Sobra" ao vivo), fornecedor pela busca por CNPJ (encontrado, sem cadastro pedindo razão social e e-mail, erro com "Tentar de novo", CNPJ conferido por `lib/cnpj.ts` antes de sair) ou o padrão do cliente, rateio em percentual com o valor só para conferência (obrigatório quando o cliente exige), linha travada na forma gravada, e o resumo com título, baixa, onde entrou e o passo onde parou (título criado e baixa recusada é aviso, não "nada lançado"). A regra da linha e o pedido moram em `lib/validation/omie-posting.ts` (zod + builder); a busca de fornecedor é UM componente (`omie-suppliers/omie-supplier-lookup.tsx`) para a gaveta e o editar cliente. O editar cliente ganhou "Exigir rateio por departamento nos títulos" e "Fornecedor padrão no Omie" (nome pela busca por código, "Remover" manda `null`, intocado não vai no PATCH), com o mesmo gate do campo do cartão; o criar ganhou só o rateio, porque a busca pergunta ao Omie de um cliente que ainda não existe (decisão do Pedro, 13/10). `processAllowsPosting` e `INVOICE_DUE_DATE_POSTING_BLOCK_MESSAGE` saíram: no processo do vencimento a ação existe. A saída para a linha parada em `envio_anterior_sem_confirmacao` continua fora (decisão do Pedro pendente). Matriz (**29**) e pares de AAD (**17**) não mudaram._
 
 _Versão 1.94, 13/10/2026. **As compras do cartão passaram a poder ir ao Omie como Contas a Pagar, escolhido por linha (86e3n70q0, bloco B: o backend; a tela é o bloco C).** Cinco métodos novos no `OmieClient` sobre os DTOs da captura (`listar_departamentos` paginando, `listar_clientes_por_cnpj` com o `5113` virando "não encontrado", `incluir_cliente`, `incluir_conta_pagar`, `lancar_pagamento`), `omie_error_code` para ler o código da Omie nos dois formatos em que ele chega (header `OmieAPI-Error` e `faultcode` SOAP), o mock coerente e `core/cnpj.py` (normalizar, dígito verificador, a máscara da captura). Duas leituras para a tela: `GET /clients/{id}/omie/departamentos` (cache em memória por cliente, 6 h, só ativos) e `GET /clients/{id}/omie/fornecedores?cnpj=` (404 `FORNECEDOR_NAO_ENCONTRADO`, nunca grava), as duas `AccessibleClientDep`, só-arquivo 409 `CAPACIDADE_AUSENTE`; lista canônica 124 → **126**. Cliente ganhou `omie_default_supplier_code` e `omie_department_required` (§4.8, migration `c4e8a1f7b3d2`). A intenção virou máquina de estados (§4.11, migration `d9f3b6a2e815`, downgrade que aborta com provisão gravada) e as chaves por passo (`HCP`, `HBX`, `HFN`) nasceram em `keys.py`. O pedido por linha ganhou `modo` (padrão `provisionar`), fornecedor, categorias e departamentos; a provisão tem flag própria (`OMIE_PAYABLE_POSTING_ENABLED`, default `False`); no processo "vencimento da fatura" ela para no título e o `direto` é bloqueado por linha, então o lote não é mais recusado inteiro. Timeout de passo reenvia com a mesma chave até 3 vezes; `757` é `competencia_fechada`; evento `lancamento_omie_provisao`. A gaveta atual manda `modo: 'direto'` explícito, então nada muda na tela até o bloco C. §3.16 reescrita como lei atual (também desfez os marcadores colapsados numa linha). Matriz (**29**) e pares de AAD (**17**) não mudaram: nenhum campo cifrado nasceu, porque CNPJ, razão social e e-mail do fornecedor não persistem._
 

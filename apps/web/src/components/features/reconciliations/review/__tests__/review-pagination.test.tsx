@@ -93,6 +93,7 @@ import { AnomaliesTab } from '@/components/features/reconciliations/review/anoma
 import { MovementsTab } from '@/components/features/reconciliations/review/movements-tab';
 import { OmieDivergencesTab } from '@/components/features/reconciliations/review/omie-divergences-tab';
 import type { AuthenticatedUser } from '@/lib/contracts';
+import { TEST_POSTING_CONTEXT } from '@/test/posting-context';
 
 const SESSION_ID = 's1';
 
@@ -100,7 +101,15 @@ const ABAS = [
   {
     nome: 'Movimentações',
     rotuloBarra: 'Paginação de movimentações',
-    render: () => render(<MovementsTab sessionId={SESSION_ID} isCard={false} canPostToOmie />),
+    render: () =>
+      render(
+        <MovementsTab
+          sessionId={SESSION_ID}
+          isCard={false}
+          canPostToOmie
+          postingContext={TEST_POSTING_CONTEXT}
+        />,
+      ),
     params: () => fileEntriesParams,
   },
   {
@@ -112,7 +121,15 @@ const ABAS = [
   {
     nome: 'Anomalias',
     rotuloBarra: 'Paginação de anomalias',
-    render: () => render(<AnomaliesTab sessionId={SESSION_ID} isCard={false} canPostToOmie />),
+    render: () =>
+      render(
+        <AnomaliesTab
+          sessionId={SESSION_ID}
+          isCard={false}
+          canPostToOmie
+          postingContext={TEST_POSTING_CONTEXT}
+        />,
+      ),
     params: () => anomaliesParams,
   },
 ] as const;
