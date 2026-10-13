@@ -114,7 +114,14 @@ export function LancarNoOmieDrawer({
           (pair): pair is { entry: FileEntryItem; codigo: string } =>
             pair.codigo !== undefined && pair.codigo.trim() !== '',
         )
-        .map(({ entry, codigo }) => ({ file_entry_id: entry.id, cod_categoria: codigo })),
+        // `modo: 'direto'` EXPLÍCITO: esta gaveta é o `IncluirLancCC` da Sprint 7.
+        // Desde a 86e3n70q0 o padrão do servidor é provisionar no Contas a
+        // Pagar; a escolha por linha e a tela da provisão são do bloco C.
+        .map(({ entry, codigo }) => ({
+          file_entry_id: entry.id,
+          cod_categoria: codigo,
+          modo: 'direto' as const,
+        })),
     [entries, categoriaByEntry, resultByEntry],
   );
 

@@ -122,6 +122,9 @@ class ErrorCode(StrEnum):
     #: 86e3nuuub: excluir layout que já gerou arquivo contábil. A geração aponta para a
     #: VERSÃO com RESTRICT e o download regenera por ela: o layout usado fica.
     LAYOUT_EM_USO = "LAYOUT_EM_USO"
+    #: 86e3n70q0 (bloco B): o CNPJ consultado não tem cadastro no Omie do cliente
+    #: (a Omie responde `5113`). A tela oferece cadastrar com razão social e e-mail.
+    FORNECEDOR_NAO_ENCONTRADO = "FORNECEDOR_NAO_ENCONTRADO"
     # Sprint 13 (BACK 13.3) — recusas da GERAÇÃO do arquivo contábil. Todas 409 (estado
     # da materialização/configuração, não forma do pedido), levantadas ANTES de montar
     # qualquer byte, e `details` só com CÓDIGOS (categoria de origem, parcelas em
@@ -503,6 +506,20 @@ class OmiePostingDisabledError(ConflictError):
 
     default_user_message = (
         "O lançamento no Omie está desativado neste ambiente. Fale com o suporte."
+    )
+
+
+class SupplierNotFoundError(NotFoundError):
+    """404 — nenhum fornecedor com este CNPJ no Omie do cliente (86e3n70q0).
+
+    A Omie responde `5113` ("Não existem registros"); a busca NUNCA grava nada. A
+    mensagem não ecoa o CNPJ consultado: quem consultou já o tem na tela.
+    """
+
+    code = ErrorCode.FORNECEDOR_NAO_ENCONTRADO
+    default_user_message = (
+        "Nenhum fornecedor com este CNPJ no Omie do cliente. Informe razão social e "
+        "e-mail para cadastrá-lo no lançamento."
     )
 
 

@@ -85,7 +85,9 @@ describe('usePostOmieLancamentos + usePostedInSession', () => {
     expect(result.current.posted).toEqual({});
 
     await act(async () => {
-      await result.current.post.mutateAsync([{ file_entry_id: 'e1', cod_categoria: '2.01.03' }]);
+      await result.current.post.mutateAsync([
+        { file_entry_id: 'e1', cod_categoria: '2.01.03', modo: 'direto' },
+      ]);
     });
 
     await waitFor(() => expect(result.current.posted).toEqual({ e1: 5001, e2: 4999 }));
@@ -107,7 +109,9 @@ describe('usePostOmieLancamentos + usePostedInSession', () => {
       { wrapper: wrapperWith(client) },
     );
     await act(async () => {
-      await result.current.post.mutateAsync([{ file_entry_id: 'e1', cod_categoria: '2.01.03' }]);
+      await result.current.post.mutateAsync([
+        { file_entry_id: 'e1', cod_categoria: '2.01.03', modo: 'direto' },
+      ]);
     });
     expect(result.current.other).toEqual({});
   });

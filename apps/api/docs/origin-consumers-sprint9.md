@@ -33,6 +33,7 @@ origem faria o glossário de um cliente sem Omie parar de funcionar.
 | `app/modules/clients/repository.py` | fallback / conversão do R2 | `resolve_origin_connections` | projeta o predicado do cliente legado em `WHERE` (`legacy_origin_available`) para derivar `origin_status` sem N+1 — a MESMA decisão de `resolve_origin_connections`, em SQL. Não constrói client de provedor nem lê credencial |
 | `app/modules/clients/service.py` | origem — convertido para o contrato | `resolve_origin_connections` | detalhe (200 sempre) e sync manual (409 acionável); crypto-shredding do encerramento |
 | `app/modules/glossary/service.py` | cifra de dado do tenant — declarado, sem conversão | `load_client_cipher` · `provision_client_cipher` | cifra ENTRADAS DO GLOSSÁRIO do tenant — nada a ver com origem. Verificado em 22/09: nenhuma chamada ao provedor. NÃO converter |
+| `app/modules/omie_data/client_routes.py` | origem — convertido para o contrato | `build_capable_client` | departamentos e fornecedor por CNPJ (86e3n70q0): resolve conexão capaz de `listar_lancamentos`; só-arquivo é 409 `CAPACIDADE_AUSENTE` |
 | `app/modules/omie_data/routes.py` | origem — convertido para o contrato | `build_capable_client` | categorias e lançamentos: resolve conexão capaz de `listar_lancamentos` |
 | `app/modules/reconciliations/export/routes.py` | origem — convertido para o contrato | `build_capable_client` | enriquecimento de nomes em runtime: resolve conexão capaz |
 | `app/modules/reconciliations/export/service.py` | cifra de dado do tenant — declarado, sem conversão | `load_client_cipher` | decifra descrição/nota para a planilha — dado do tenant |
@@ -44,7 +45,7 @@ origem faria o glossário de um cliente sem Omie parar de funcionar.
 
 ## Contagens
 
-- **origem — convertido para o contrato**: 14
+- **origem — convertido para o contrato**: 15
 - **cifra de dado do tenant — declarado, sem conversão**: 7
 - **definição**: 3
 - **fallback / conversão do R2**: 2

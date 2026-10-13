@@ -18,3 +18,8 @@ apps/web/src/lib/contracts/schema.ts
 # Doc GERADA por `apps/api/scripts/gen_sensitive_endpoints_doc.py`, pelo mesmo motivo
 # do contrato: o hook reescrevia o arquivo inteiro e a linha nova sumia no diff.
 apps/api/docs/endpoints-sensiveis-sprint5.md
+
+# Doc GERADA por `apps/api/scripts/gen_origin_consumers_inventory.py`, comparada byte a
+# byte pelo `test_origin_consumers_inventory.py`: o hook realinhava a tabela e o teste
+# passava a reprovar na develop (achado da revisão do PR #327).
+apps/api/docs/origin-consumers-sprint9.md

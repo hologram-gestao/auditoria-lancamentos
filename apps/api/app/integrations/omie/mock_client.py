@@ -24,15 +24,24 @@ from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
+from app.core.cnpj import normalize_cnpj
+from app.core.exceptions import OmieFaultError
 from app.core.logging import get_logger
 from app.integrations.omie.client import OmieClient, OmieCredentials
 from app.integrations.omie.schemas import (
     CategoriaOmie,
     ClienteOmie,
+    ClienteStatusResponse,
     ContaCorrente,
+    ContaPagarStatusResponse,
+    DepartamentoOmie,
+    IncluirClienteRequest,
+    IncluirContaPagarRequest,
     IncluirLancCCRequest,
     IncluirLancCCResponse,
     LancamentoExtrato,
+    LancarPagamentoRequest,
+    LancarPagamentoResponse,
     OmieTituloStatus,
     TituloAPagarReceber,
 )
@@ -303,6 +312,73 @@ _MOCK_CATEGORIAS: list[CategoriaOmie] = [
 ]
 
 
+# Contas a Pagar (86e3n70q0, bloco B) — departamentos e fornecedores fictícios
+# da Padaria. Um departamento sintético e um inativo de propósito: a tela de
+# escolha tem de mostrar o primeiro (só o cliente sabe o que é sintético, a Omie
+# não diz) e esconder o segundo.
+_MOCK_DEPARTAMENTOS: list[DepartamentoOmie] = [
+    DepartamentoOmie.model_validate(
+        {
+            "codigo": "800000001",
+            "descricao": "z[Sintético] Operação",
+            "estrutura": "001",
+            "inativo": "N",
+        }
+    ),
+    DepartamentoOmie.model_validate(
+        {"codigo": "800000002", "descricao": "Produção", "estrutura": "001.001", "inativo": "N"}
+    ),
+    DepartamentoOmie.model_validate(
+        {"codigo": "800000003", "descricao": "Loja", "estrutura": "001.002", "inativo": "N"}
+    ),
+    DepartamentoOmie.model_validate(
+        {"codigo": "800000004", "descricao": "Administrativo", "estrutura": "002", "inativo": "N"}
+    ),
+    DepartamentoOmie.model_validate(
+        {
+            "codigo": "800000009",
+            "descricao": "Filial desativada",
+            "estrutura": "003",
+            "inativo": "S",
+        }
+    ),
+]
+
+#: Fornecedores já cadastrados no Omie fictício, por CNPJ normalizado. O
+#: `incluir_cliente` acrescenta aqui (estado do PROCESSO, como o Omie real teria
+#: no servidor): a busca seguinte pelo mesmo CNPJ acha o que foi criado, e o
+#: fluxo de provisão roda de ponta a ponta no demo. Testes limpam com
+#: `reset_mock_payables_state()`.
+_MOCK_FORNECEDORES_SEED: dict[str, ClienteOmie] = {
+    "12345678000195": ClienteOmie(
+        codigo_cliente_omie=700_000_001,
+        razao_social="PAPELARIA DEMO LTDA",
+        nome_fantasia="Papelaria Demo",
+        inativo="N",
+    ),
+    "98765432000198": ClienteOmie(
+        codigo_cliente_omie=700_000_002,
+        razao_social="POSTO DEMO COMBUSTIVEIS LTDA",
+        nome_fantasia="Posto Demo",
+        inativo="N",
+    ),
+}
+_MOCK_FORNECEDORES: dict[str, ClienteOmie] = dict(_MOCK_FORNECEDORES_SEED)
+
+
+def reset_mock_payables_state() -> None:
+    """Volta o cadastro de fornecedores do mock ao seed (isolamento de teste)."""
+    _MOCK_FORNECEDORES.clear()
+    _MOCK_FORNECEDORES.update(_MOCK_FORNECEDORES_SEED)
+
+
+def _stable_id(prefix: int, key: str) -> int:
+    """ID fictício DETERMINÍSTICO por chave de integração: a mesma chave devolve
+    sempre o mesmo id, como a Omie real fez na captura (idempotência)."""
+    digest = hashlib.blake2s(key.encode(), digest_size=4).digest()
+    return prefix + int.from_bytes(digest, "big") % 1_000_000
+
+
 def _within(
     titulos: list[TituloAPagarReceber], data_de: date | None, data_ate: date | None
 ) -> list[TituloAPagarReceber]:
@@ -412,6 +488,85 @@ class MockOmieClient(OmieClient):
                 "cCodStatus": "0",
                 "cDesStatus": "Lancamento incluido com sucesso (MOCK)",
             }
+        )
+
+    async def listar_departamentos(self) -> list[DepartamentoOmie]:
+        """Departamentos fictícios (ativos e inativos — quem filtra é o serviço)."""
+        await asyncio.sleep(_DELAY_LISTAR_CONTAS_SECONDS)
+        log.info("omie_mock_call", call="listar_departamentos", count=len(_MOCK_DEPARTAMENTOS))
+        return list(_MOCK_DEPARTAMENTOS)
+
+    async def listar_clientes_por_cnpj(self, *, cnpj_cpf: str) -> list[ClienteOmie]:
+        """Acha pelo CNPJ normalizado; sem cadastro é `[]` (o `5113` do real)."""
+        log.info("omie_mock_call", call="listar_clientes_por_cnpj")
+        try:
+            digits = normalize_cnpj(cnpj_cpf)
+        except ValueError:
+            return []
+        found = _MOCK_FORNECEDORES.get(digits)
+        return [found] if found is not None else []
+
+    async def incluir_cliente(self, request: IncluirClienteRequest) -> ClienteStatusResponse:
+        """Cadastra (ou devolve o mesmo, pela chave) e passa a achar pelo CNPJ.
+
+        Como no real: `email` vazio é recusado e a chave é idempotente.
+        """
+        if not request.email.strip():
+            raise OmieFaultError(
+                "Fault em IncluirCliente (MOCK): e-mail obrigatório",
+                user_message=(
+                    "Ocorreu um erro ao acessar o Omie: 1040 - É obrigatório o "
+                    "preenchimento do e-mail."
+                ),
+                metadata={"fault_code": "SOAP-ENV:Client-1040"},
+            )
+        codigo = _stable_id(710_000_000, request.codigo_cliente_integracao)
+        try:
+            digits = normalize_cnpj(request.cnpj_cpf)
+        except ValueError:
+            digits = None
+        if digits is not None and digits not in _MOCK_FORNECEDORES:
+            _MOCK_FORNECEDORES[digits] = ClienteOmie(
+                codigo_cliente_omie=codigo,
+                razao_social=request.razao_social,
+                nome_fantasia=request.nome_fantasia,
+                inativo="N",
+            )
+        log.info("omie_mock_call", call="incluir_cliente", codigo=codigo)
+        return ClienteStatusResponse(
+            codigo_cliente_omie=codigo,
+            codigo_cliente_integracao=request.codigo_cliente_integracao,
+            codigo_status="0",
+            descricao_status="Cliente cadastrado com sucesso! (MOCK)",
+        )
+
+    async def incluir_conta_pagar(
+        self, request: IncluirContaPagarRequest
+    ) -> ContaPagarStatusResponse:
+        """Título com id estável por `codigo_lancamento_integracao` (idempotente)."""
+        await asyncio.sleep(_DELAY_LISTAR_CONTAS_SECONDS)
+        codigo = _stable_id(720_000_000, request.codigo_lancamento_integracao)
+        log.info("omie_mock_call", call="incluir_conta_pagar", codigo=codigo)
+        return ContaPagarStatusResponse(
+            codigo_lancamento_omie=codigo,
+            codigo_lancamento_integracao=request.codigo_lancamento_integracao,
+            codigo_status="0",
+            descricao_status="Lançamento cadastrado com sucesso! (MOCK)",
+        )
+
+    async def lancar_pagamento(self, request: LancarPagamentoRequest) -> LancarPagamentoResponse:
+        """Baixa com id estável por `codigo_baixa_integracao`: repetir devolve a MESMA."""
+        await asyncio.sleep(_DELAY_LISTAR_CONTAS_SECONDS)
+        codigo = _stable_id(730_000_000, request.codigo_baixa_integracao or "")
+        log.info("omie_mock_call", call="lancar_pagamento", codigo=codigo)
+        return LancarPagamentoResponse(
+            codigo_lancamento=request.codigo_lancamento,
+            codigo_baixa=codigo,
+            codigo_baixa_integracao=request.codigo_baixa_integracao,
+            liquidado="S",
+            valor_baixado=request.valor,
+            codigo_status="0",
+            descricao_status="Baixa executada com sucesso! (MOCK)",
         )
 
     async def listar_categorias(self) -> list[CategoriaOmie]:

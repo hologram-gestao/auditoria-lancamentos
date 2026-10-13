@@ -198,6 +198,12 @@ CLASSIFICATION: tuple[Entry, ...] = (
         "categorias e lançamentos: resolve conexão capaz de `listar_lancamentos`",
     ),
     Entry(
+        "app/modules/omie_data/client_routes.py",
+        Family.ORIGEM,
+        "departamentos e fornecedor por CNPJ (86e3n70q0): resolve conexão capaz de "
+        "`listar_lancamentos`; só-arquivo é 409 `CAPACIDADE_AUSENTE`",
+    ),
+    Entry(
         "app/modules/reconciliations/routes.py",
         Family.ORIGEM,
         "criação exige `listar_lancamentos` ANTES de gravar; lançamento exige `escrever`. "

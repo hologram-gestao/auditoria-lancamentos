@@ -2611,3 +2611,189 @@ def _backfill_sql() -> str:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return str(module._BACKFILL)
+
+
+# ----------------------------------------------------------------------
+# 86e3n70q0 (bloco B) — configuração do lançamento como Contas a Pagar.
+# ----------------------------------------------------------------------
+
+CLIENT_PAYABLES_CONFIG_REV = "c4e8a1f7b3d2"
+
+
+class TestConfiguracaoDoContasAPagarRoundTrip:
+    """As duas colunas do cliente sobem com o CHECK, descem e sobem; o cliente fica."""
+
+    def test_sobe_desce_e_sobe_sem_perder_o_cliente(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, CLIENT_PAYABLES_CONFIG_REV)
+        client_id = _seed_client_row(url)
+        assert (
+            _columns(url, "clients", "omie_default_supplier_code", "omie_department_required") == 2
+        )
+        # Cliente existente nasce como antes: sem padrão, rateio opcional.
+        assert (
+            _scalar(
+                url,
+                "SELECT omie_department_required FROM clients WHERE id = :cid",
+                cid=client_id,
+            )
+            is False
+        )
+        assert (
+            _scalar(
+                url,
+                "SELECT count(*) FROM pg_constraint "
+                "WHERE conname = 'ck_clients_omie_default_supplier_code_positive'",
+            )
+            == 1
+        )
+
+        command.downgrade(alembic_cfg, CHART_SORT_KEY_REV)
+        assert (
+            _columns(url, "clients", "omie_default_supplier_code", "omie_department_required") == 0
+        )
+        assert _scalar(url, "SELECT count(*) FROM clients WHERE id = :cid", cid=client_id) == 1
+
+        for _ in range(2):
+            command.upgrade(alembic_cfg, CLIENT_PAYABLES_CONFIG_REV)
+            command.downgrade(alembic_cfg, CHART_SORT_KEY_REV)
+        command.upgrade(alembic_cfg, "head")
+        assert CLIENT_PAYABLES_CONFIG_REV in _revisions_in_chain(alembic_cfg)
+
+
+POSTING_STATE_MACHINE_REV = "d9f3b6a2e815"
+
+
+def _seed_posting_row(url: str, *, kind: str | None = None) -> str:
+    """Cliente, sessão, linha e UMA intenção de lançamento, em SQL cru.
+
+    `kind=None` grava a linha na forma ANTERIOR à máquina de estados (sem as
+    colunas novas): é assim que as intenções da Sprint 7 estão no banco real.
+    """
+    client_id = _seed_client_row(url)
+    creator = _scalar(url, "SELECT created_by FROM clients WHERE id = :cid", cid=client_id)
+    session_id, entry_id, posting_id = str(uuid4()), str(uuid4()), str(uuid4())
+    _execute(
+        url,
+        "INSERT INTO reconciliation_sessions (id, client_id, created_by, omie_conta_id, "
+        "reference_month, date_tolerance_days, status, total_file_entries, conciliated_count, "
+        "sem_omie_count, omie_sem_arquivo_count, anomaly_count) VALUES (:sid, :cid, :uid, 1, "
+        "'2026-04-01', 0, 'reviewing', 1, 0, 1, 0, 0)",
+        sid=session_id,
+        cid=client_id,
+        uid=creator,
+    )
+    _execute(
+        url,
+        "INSERT INTO reconciliation_file_entries (id, session_id, transaction_date, "
+        "description_encrypted, description_iv, amount, situation) VALUES (:eid, :sid, "
+        "'2026-04-10', 'ct', '0123456789abcdef01234567', -12.00, 'sem_omie')",
+        eid=entry_id,
+        sid=session_id,
+    )
+    if kind is None:
+        _execute(
+            url,
+            "INSERT INTO reconciliation_omie_postings (id, session_id, client_id, "
+            "file_entry_id, cod_int_lanc, status, attempts, created_at, updated_at) "
+            "VALUES (:pid, :sid, :cid, :eid, 'ADLAAAAAAAAAAAAAAAAA', 'confirmed', 1, now(), now())",
+            pid=posting_id,
+            sid=session_id,
+            cid=client_id,
+            eid=entry_id,
+        )
+    else:
+        _execute(
+            url,
+            "INSERT INTO reconciliation_omie_postings (id, session_id, client_id, "
+            "file_entry_id, cod_int_lanc, status, attempts, kind, step, supplier_code, "
+            "payable_id, created_at, updated_at) VALUES (:pid, :sid, :cid, :eid, "
+            "'ADLBBBBBBBBBBBBBBBBB', 'failed', 0, :kind, 'baixa', 10, 20, now(), now())",
+            pid=posting_id,
+            sid=session_id,
+            cid=client_id,
+            eid=entry_id,
+            kind=kind,
+        )
+    return posting_id
+
+
+class TestMaquinaDeEstadosDoLancamentoRoundTrip:
+    """A intenção de lançamento ganha `kind`/`step`/ids e os três CHECKs."""
+
+    def test_linha_da_sprint_7_vira_direto_e_o_ciclo_converge(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, CLIENT_PAYABLES_CONFIG_REV)
+        posting_id = _seed_posting_row(url)
+
+        command.upgrade(alembic_cfg, POSTING_STATE_MACHINE_REV)
+        assert (
+            _scalar(
+                url,
+                "SELECT kind FROM reconciliation_omie_postings WHERE id = :pid",
+                pid=posting_id,
+            )
+            == "direto"
+        )
+        assert (
+            _scalar(
+                url,
+                "SELECT count(*) FROM pg_constraint WHERE conname IN ("
+                "'ck_reconciliation_omie_postings_status_known', "
+                "'ck_reconciliation_omie_postings_kind_shape', "
+                "'ck_reconciliation_omie_postings_provisao_steps_coherent')",
+            )
+            == 3
+        )
+
+        command.downgrade(alembic_cfg, CLIENT_PAYABLES_CONFIG_REV)
+        assert _columns(url, "reconciliation_omie_postings", "kind", "step", "payable_id") == 0
+        # A intenção da Sprint 7 continua lá: o downgrade sem provisão não perde nada.
+        assert (
+            _scalar(
+                url,
+                "SELECT count(*) FROM reconciliation_omie_postings WHERE id = :pid",
+                pid=posting_id,
+            )
+            == 1
+        )
+        for _ in range(2):
+            command.upgrade(alembic_cfg, POSTING_STATE_MACHINE_REV)
+            command.downgrade(alembic_cfg, CLIENT_PAYABLES_CONFIG_REV)
+        command.upgrade(alembic_cfg, "head")
+        assert POSTING_STATE_MACHINE_REV in _revisions_in_chain(alembic_cfg)
+
+    def test_downgrade_aborta_com_provisao_gravada(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        """Derrubar `payable_id` com título já criado no Omie seria perder a memória dele."""
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, POSTING_STATE_MACHINE_REV)
+        _seed_posting_row(url, kind="provisao")
+        with pytest.raises(Exception, match="Downgrade bloqueado"):
+            command.downgrade(alembic_cfg, CLIENT_PAYABLES_CONFIG_REV)
+        assert _columns(url, "reconciliation_omie_postings", "payable_id") == 1
+
+    def test_o_banco_recusa_provisao_que_pula_passo(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, POSTING_STATE_MACHINE_REV)
+        posting_id = _seed_posting_row(url, kind="provisao")
+        with pytest.raises(Exception, match="provisao_steps_coherent"):
+            # `concluido` exige `confirmed`: o status `failed` da linha recusa.
+            _execute(
+                url,
+                "UPDATE reconciliation_omie_postings SET step = 'concluido' WHERE id = :pid",
+                pid=posting_id,
+            )
+        with pytest.raises(Exception, match="kind_shape"):
+            _execute(
+                url,
+                "UPDATE reconciliation_omie_postings SET kind = 'direto' WHERE id = :pid",
+                pid=posting_id,
+            )

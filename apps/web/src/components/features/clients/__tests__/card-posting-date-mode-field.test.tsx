@@ -87,6 +87,7 @@ const CLIENT: Client = {
   category: null,
   origin_status: 'ativa',
   card_posting_date_mode: 'invoice_due_date',
+  omie_department_required: false,
 };
 
 const FIELD = 'Compras do cartão no Omie';

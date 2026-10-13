@@ -68,6 +68,11 @@ class UsageEventName(StrEnum):
     # (`linhas`) da métrica da sprint.
     OMIE_LANCAMENTO_ENVIADO = "omie_lancamento_enviado"
     OMIE_LANCAMENTO_REJEITADO = "omie_lancamento_rejeitado"
+    #: 86e3n70q0 (bloco B) — um lote teve linhas pedidas como PROVISÃO no Contas
+    #: a Pagar. De BACKEND, uma linha por lote, sem dedup (a mesma sessão manda
+    #: vários lotes). Só contagens por passo e o processo do cartão; nunca
+    #: fornecedor, CNPJ, categoria nem descrição.
+    LANCAMENTO_OMIE_PROVISAO = "lancamento_omie_provisao"
     # 86e34jd1d — exclusão definitiva de cliente. De BACKEND (o fato é do
     # servidor); sem `session_id`, fora da dedup por construção: cada exclusão
     # é uma linha.
@@ -836,6 +841,28 @@ class OmieLancamentoEnviadoProps(_StrictProps):
     linhas: int = Field(ge=0)
     sucesso: int = Field(ge=0)
     falha: int = Field(ge=0)
+    duracao_ms: int = Field(ge=0)
+
+
+class LancamentoOmieProvisaoProps(_StrictProps):
+    """`lancamento_omie_provisao` — o que as linhas de provisão de um lote fizeram.
+
+    `processo` é o do cartão da sessão (`purchase_date` provisiona e dá baixa;
+    `invoice_due_date` só provisiona). `parciais` são as linhas que pararam
+    depois de criar o título (sucesso parcial). Os `*_criados` contam ESCRITAS
+    feitas neste lote — a retomada de uma linha pela metade não recria o que já
+    existia, então eles não somam as linhas.
+    """
+
+    processo: Literal["purchase_date", "invoice_due_date"]
+    linhas: int = Field(ge=0)
+    concluidas: int = Field(ge=0)
+    parciais: int = Field(ge=0)
+    bloqueadas: int = Field(ge=0)
+    com_erro: int = Field(ge=0)
+    fornecedores_criados: int = Field(ge=0)
+    titulos_criados: int = Field(ge=0)
+    baixas_criadas: int = Field(ge=0)
     duracao_ms: int = Field(ge=0)
 
 

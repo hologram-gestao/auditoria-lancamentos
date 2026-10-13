@@ -1543,7 +1543,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Lança no Omie, em lote, as compras `sem_omie` de uma conciliação de CARTÃO. Body = lista de {file_entry_id, cod_categoria}. Devolve o resumo por linha (lançada / bloqueada / erro + motivo) e os agregados. Idempotente por linha: reenviar não duplica. Desligável por `OMIE_POSTING_ENABLED` sem deploy.
+         * Lança no Omie, em lote, as compras `sem_omie` de uma conciliação de CARTÃO. Cada linha escolhe `modo`: `provisionar` (padrão; título no Contas a Pagar com fornecedor, categorias e rateio, e baixa na data da compra só no processo 'na data da compra') ou `direto` (IncluirLancCC, só no processo 'na data da compra'). Devolve o resumo por linha (lançada / bloqueada / erro + motivo, e na provisão o passo onde parou com os ids) e os agregados. Idempotente por linha: reenviar não duplica e retoma a provisão do passo gravado. Desligável por `OMIE_POSTING_ENABLED` (direto) e `OMIE_PAYABLE_POSTING_ENABLED` (provisão), sem deploy.
          * @description Lançamento em lote no Omie (Sprint 7 / BACK 07.4).
          *
          *     ⚠️ **É a única escrita do ADL no ERP do cliente** — o invariante "Omie
@@ -1735,6 +1735,40 @@ export interface paths {
         };
         /** Resolve dados Omie para uma lista de IDs via cache hierárquico (L1 in-memory 2h + L2 Redis 2h, com re-fetch via ListarExtrato quando necessário). Requer `session_id` para resolver o período. Máximo 100 IDs por request. */
         get: operations["get_omie_lancamentos_api_v1_omie_lancamentos_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/omie/departamentos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Departamentos ATIVOS do Omie do cliente (código, nome e posição na árvore), para o rateio do título a pagar. Lista completa, sem paginação, de um cache em memória por cliente (6 h); `refresh=true` ignora o cache. Cliente só-arquivo: 409 CAPACIDADE_AUSENTE. */
+        get: operations["get_client_omie_departamentos_api_v1_clients__client_id__omie_departamentos_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/omie/fornecedores": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Busca no Omie do cliente o fornecedor de um CNPJ (14 dígitos, com ou sem máscara). Devolve código, razão social e nome fantasia, ou 404 FORNECEDOR_NAO_ENCONTRADO. Nunca grava nada. CNPJ inválido: 400. Cliente só-arquivo: 409 CAPACIDADE_AUSENTE. */
+        get: operations["get_client_omie_fornecedor_api_v1_clients__client_id__omie_fornecedores_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2885,6 +2919,20 @@ export interface components {
             totalAmount: string;
         };
         /**
+         * CategoriaRateio
+         * @description Uma parcela da compra numa categoria (subtask 10 nascendo aqui).
+         *
+         *     `valor` positivo, em reais, com no máximo 2 casas. A soma das parcelas é
+         *     conferida contra o valor da compra no SERVIÇO (tolerância 0,01), porque é lá
+         *     que a linha é conhecida.
+         */
+        CategoriaRateio: {
+            /** Codigo */
+            codigo: string;
+            /** Valor */
+            valor: number | string;
+        };
+        /**
          * CategoryMode
          * @description De onde sai a categoria de origem — fonte ÚNICA do CHECK `category_mode`.
          *
@@ -3326,6 +3374,13 @@ export interface components {
             manager_count: number;
             /** @default purchase_date */
             card_posting_date_mode: components["schemas"]["CardPostingDateMode"];
+            /** Omie Default Supplier Code */
+            omie_default_supplier_code?: number | null;
+            /**
+             * Omie Department Required
+             * @default false
+             */
+            omie_department_required: boolean;
             /**
              * @description `sem_origem` = nenhuma conexão; `ativa` = há conexão ativa; `erro` = há conexão, nenhuma ativa.
              * @default sem_origem
@@ -3438,6 +3493,13 @@ export interface components {
             manager_count: number;
             /** @default purchase_date */
             card_posting_date_mode: components["schemas"]["CardPostingDateMode"];
+            /** Omie Default Supplier Code */
+            omie_default_supplier_code?: number | null;
+            /**
+             * Omie Department Required
+             * @default false
+             */
+            omie_department_required: boolean;
             /**
              * @description `sem_origem` = nenhuma conexão; `ativa` = há conexão ativa; `erro` = há conexão, nenhuma ativa.
              * @default sem_origem
@@ -3762,6 +3824,17 @@ export interface components {
              * @default purchase_date
              */
             card_posting_date_mode: components["schemas"]["CardPostingDateMode"];
+            /**
+             * Omie Default Supplier Code
+             * @description `codigo_cliente_omie` do fornecedor padrão do título quando a linha da fatura não traz CNPJ. Ausente ou null = sem padrão (a linha bloqueia).
+             */
+            omie_default_supplier_code?: number | null;
+            /**
+             * Omie Department Required
+             * @description O título a pagar só sai com rateio por departamento.
+             * @default false
+             */
+            omie_department_required: boolean;
             /**
              * Organization Id
              * @description Organização dona do cliente. Obrigatória para a plataforma; para o staff de organização, omitir (usa a própria) ou repetir a própria.
@@ -4129,6 +4202,16 @@ export interface components {
              * @description Idênticas à decisão confirmada vigente.
              */
             unchanged: number;
+        };
+        /**
+         * DepartamentoRateio
+         * @description Uma parcela do rateio por departamento, em percentual (2 casas).
+         */
+        DepartamentoRateio: {
+            /** Codigo */
+            codigo: string;
+            /** Percentual */
+            percentual: number | string;
         };
         /**
          * DuplicateCheckPayload
@@ -5763,6 +5846,34 @@ export interface components {
             total: number;
         };
         /**
+         * OmieDepartamentoItem
+         * @description Item de GET /api/v1/clients/{id}/omie/departamentos (86e3n70q0, bloco B).
+         *
+         *     `codigo` é o que vai em `distribuicao.cCodDep` do título; `descricao` é o que
+         *     a pessoa lê, e vem de um cache em memória (nunca do banco, §4.5: o nome do
+         *     departamento carrega nome de cliente). `estrutura` é a posição na árvore do
+         *     Omie (`001.007.001`), para a tela indentar.
+         */
+        OmieDepartamentoItem: {
+            /** Codigo */
+            codigo: string;
+            /** Descricao */
+            descricao: string;
+            /** Estrutura */
+            estrutura?: string | null;
+        };
+        /**
+         * OmieDepartamentoListResponse
+         * @description Lista COMPLETA dos departamentos ativos — sem paginação, como as categorias:
+         *     o consumidor é uma escolha com busca local sobre algumas centenas de itens.
+         */
+        OmieDepartamentoListResponse: {
+            /** Data */
+            data: components["schemas"]["OmieDepartamentoItem"][];
+            /** Total */
+            total: number;
+        };
+        /**
          * OmieEntryItem
          * @description Item de GET /api/v1/reconciliations/{id}/omie-entries.
          *
@@ -5801,6 +5912,25 @@ export interface components {
             /** Data */
             data: components["schemas"]["OmieEntryItem"][];
             pagination: components["schemas"]["PaginationMeta"];
+        };
+        /**
+         * OmieFornecedorItem
+         * @description O cadastro do fornecedor de um CNPJ no Omie do cliente (86e3n70q0, bloco B).
+         *
+         *     `codigo` é o `codigo_cliente_omie` que o título recebe em
+         *     `codigo_cliente_fornecedor`. Os nomes vêm da Omie na hora e não persistem.
+         */
+        OmieFornecedorItem: {
+            /** Codigo */
+            codigo: number;
+            /** Razao Social */
+            razao_social?: string | null;
+            /** Nome Fantasia */
+            nome_fantasia?: string | null;
+        };
+        /** OmieFornecedorResponse */
+        OmieFornecedorResponse: {
+            data: components["schemas"]["OmieFornecedorItem"];
         };
         /**
          * OmieLancamentoItem
@@ -5872,7 +6002,14 @@ export interface components {
         };
         /**
          * OmiePostingLineRequest
-         * @description Uma linha da fatura a lançar, com a categoria escolhida pelo operador.
+         * @description Uma linha da fatura a lançar, com a forma e a classificação escolhidas.
+         *
+         *     86e3n70q0 (bloco B): a pessoa escolhe POR LINHA entre `provisionar` (título no
+         *     Contas a Pagar; o padrão) e `direto` (`IncluirLancCC`, o lançamento da Sprint
+         *     7). Os campos do fornecedor, do rateio e das categorias só existem na
+         *     provisão: mandá-los num `direto` é 400, para nenhum dado ser ignorado em
+         *     silêncio. CNPJ, razão social e e-mail trafegam em memória até o Omie e não
+         *     persistem (§4.5).
          */
         OmiePostingLineRequest: {
             /**
@@ -5881,10 +6018,42 @@ export interface components {
              */
             file_entry_id: string;
             /**
-             * Cod Categoria
-             * @description `cCodCateg` do Omie. Sem ele o lançamento não existe (R2).
+             * Modo
+             * @description `provisionar` (Contas a Pagar, padrão) ou `direto` (IncluirLancCC).
+             * @default provisionar
+             * @enum {string}
              */
-            cod_categoria: string;
+            modo: "provisionar" | "direto";
+            /**
+             * Cod Categoria
+             * @description `cCodCateg` do Omie. Obrigatório no `direto`; na provisão, obrigatório quando `categorias` não vier.
+             */
+            cod_categoria?: string | null;
+            /**
+             * Categorias
+             * @description Só na provisão: a compra dividida entre categorias (`{codigo, valor}`). A soma fecha com o valor da compra (0,01). Exclui `cod_categoria`.
+             */
+            categorias?: components["schemas"]["CategoriaRateio"][] | null;
+            /**
+             * Cnpj Fornecedor
+             * @description Só na provisão: CNPJ do fornecedor (14 dígitos, com ou sem máscara).
+             */
+            cnpj_fornecedor?: string | null;
+            /**
+             * Razao Social
+             * @description Só na provisão, junto com `email`: cadastra o fornecedor quando o CNPJ não tem cadastro no Omie.
+             */
+            razao_social?: string | null;
+            /**
+             * Email
+             * @description Só na provisão, junto com `razao_social` (a Omie exige e-mail).
+             */
+            email?: string | null;
+            /**
+             * Departamentos
+             * @description Só na provisão: rateio por departamento (`{codigo, percentual}`), percentuais somando 100. Obrigatório se o cliente exige departamento.
+             */
+            departamentos?: components["schemas"]["DepartamentoRateio"][] | null;
         };
         /**
          * OmiePostingLineResult
@@ -5902,11 +6071,21 @@ export interface components {
              */
             status: "lancada" | "bloqueada" | "erro";
             /** Reason */
-            reason?: ("linha_inexistente" | "nao_e_sem_omie" | "linha_ignorada" | "ja_lancada" | "envio_anterior_sem_confirmacao" | "chave_em_conflito" | "lancamento_ja_vinculado" | "estorno_nao_verificado" | "erro_omie" | "omie_indisponivel" | "reconciliada") | null;
+            reason?: ("linha_inexistente" | "nao_e_sem_omie" | "linha_ignorada" | "ja_lancada" | "envio_anterior_sem_confirmacao" | "chave_em_conflito" | "lancamento_ja_vinculado" | "estorno_nao_verificado" | "direto_desligado" | "provisao_desligada" | "direto_indisponivel_no_modo_vencimento" | "fornecedor_pendente" | "departamento_pendente" | "categorias_nao_fecham" | "modo_divergente" | "erro_omie" | "omie_indisponivel" | "competencia_fechada" | "reconciliada") | null;
             /** Message */
             message?: string | null;
             /** Omie Lancamento Id */
             omie_lancamento_id?: number | null;
+            /** Kind */
+            kind?: ("direto" | "provisao") | null;
+            /** Step */
+            step?: ("fornecedor" | "titulo" | "baixa" | "concluido") | null;
+            /** Supplier Code */
+            supplier_code?: number | null;
+            /** Payable Id */
+            payable_id?: number | null;
+            /** Payment Id */
+            payment_id?: number | null;
         };
         /**
          * OrganizationCreate
@@ -7195,6 +7374,16 @@ export interface components {
             category_id?: string | null;
             /** @description Omitir mantém. Vale para as conciliações de cartão criadas DEPOIS. */
             card_posting_date_mode?: components["schemas"]["CardPostingDateMode"] | null;
+            /**
+             * Omie Default Supplier Code
+             * @description Omitir mantém o fornecedor padrão; `null` remove; código troca.
+             */
+            omie_default_supplier_code?: number | null;
+            /**
+             * Omie Department Required
+             * @description Omitir mantém. Liga ou desliga o rateio obrigatório por departamento.
+             */
+            omie_department_required?: boolean | null;
         };
         /**
          * UpdateClientUserRequest
@@ -11766,6 +11955,78 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OmieLancamentoListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_client_omie_departamentos_api_v1_clients__client_id__omie_departamentos_get: {
+        parameters: {
+            query?: {
+                /** @description Ignora o cache e rebusca do Omie. */
+                refresh?: boolean;
+            };
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OmieDepartamentoListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_client_omie_fornecedor_api_v1_clients__client_id__omie_fornecedores_get: {
+        parameters: {
+            query: {
+                /** @description CNPJ do fornecedor. */
+                cnpj: string;
+            };
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OmieFornecedorResponse"];
                 };
             };
             /** @description Validation Error */

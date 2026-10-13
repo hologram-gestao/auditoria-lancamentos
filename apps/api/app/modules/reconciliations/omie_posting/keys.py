@@ -58,6 +58,60 @@ _DIGEST_BYTES = 11
 _DIGEST_PERSON = b"adl-lanc"
 
 
+# ----------------------------------------------------------------------
+# Lançamento como Contas a Pagar (86e3n70q0, bloco B): uma chave POR PASSO
+# ----------------------------------------------------------------------
+#
+# A provisão faz até três escritas no Omie, e cada uma tem a sua chave de
+# integração — é sobre ela que a Omie é idempotente (captura de 13/10/2026: o 2º
+# envio de cada uma devolveu o MESMO id). Título e baixa usam o MESMO sufixo da
+# linha que o `cCodIntLanc`, com prefixo próprio: as chaves de uma linha diferem
+# entre si (são namespaces diferentes no Omie de qualquer jeito) e a pessoa que
+# procura no Omie acha o título e a baixa de uma compra pelo mesmo final. O
+# fornecedor é a exceção, de propósito: a chave dele vem do CNPJ, porque um
+# fornecedor é um por CNPJ no Omie do cliente, não um por linha.
+
+#: Título a pagar (`codigo_lancamento_integracao`, `string60`).
+PAYABLE_KEY_PREFIX = "HCP"
+#: Baixa do título (`codigo_baixa_integracao`, `string20` — o teto mais apertado).
+PAYMENT_KEY_PREFIX = "HBX"
+#: Fornecedor cadastrado pela plataforma (`codigo_cliente_integracao`, `string60`).
+SUPPLIER_KEY_PREFIX = "HFN"
+
+#: Domínio do digest do CNPJ — outro `person`, para que o sufixo do fornecedor
+#: nunca coincida com o de uma linha.
+_SUPPLIER_DIGEST_PERSON = b"hos-forn"
+
+
+def _suffix(material: bytes, person: bytes) -> str:
+    """17 chars de base32 de um blake2s de 88 bits (ver o cabeçalho do módulo)."""
+    digest = hashlib.blake2s(material, digest_size=_DIGEST_BYTES, person=person).digest()
+    return base64.b32encode(digest).decode("ascii").rstrip("=")[:_SUFFIX_LENGTH]
+
+
+def derive_payable_key(file_entry_id: UUID) -> str:
+    """`codigo_lancamento_integracao` do título a pagar desta linha."""
+    return f"{PAYABLE_KEY_PREFIX}{_suffix(file_entry_id.bytes, _DIGEST_PERSON)}"
+
+
+def derive_payment_key(file_entry_id: UUID) -> str:
+    """`codigo_baixa_integracao` da baixa do título desta linha."""
+    return f"{PAYMENT_KEY_PREFIX}{_suffix(file_entry_id.bytes, _DIGEST_PERSON)}"
+
+
+def derive_supplier_key(cnpj_digits: str) -> str:
+    """`codigo_cliente_integracao` do fornecedor que a plataforma cadastra.
+
+    Derivada do CNPJ NORMALIZADO (14 dígitos, `core/cnpj.normalize_cnpj`): o mesmo
+    fornecedor em duas linhas, ou em duas conciliações, é a MESMA chave — e a
+    Omie devolve o mesmo cadastro em vez de criar outro. A chave não persiste
+    aqui (o CNPJ também não, §4.5); ela só vai à Omie do próprio cliente.
+    """
+    if len(cnpj_digits) != 14 or not cnpj_digits.isdigit():
+        raise ValueError("derive_supplier_key espera o CNPJ normalizado (14 dígitos)")
+    return f"{SUPPLIER_KEY_PREFIX}{_suffix(cnpj_digits.encode('ascii'), _SUPPLIER_DIGEST_PERSON)}"
+
+
 def derive_cod_int_lanc(file_entry_id: UUID) -> str:
     """Chave `cCodIntLanc` determinística para uma linha da fatura.
 
@@ -73,10 +127,4 @@ def derive_cod_int_lanc(file_entry_id: UUID) -> str:
     Returns:
         Chave de até 20 caracteres, `[A-Z2-7]` após o prefixo `ADL`.
     """
-    digest = hashlib.blake2s(
-        file_entry_id.bytes,
-        digest_size=_DIGEST_BYTES,
-        person=_DIGEST_PERSON,
-    ).digest()
-    suffix = base64.b32encode(digest).decode("ascii").rstrip("=")[:_SUFFIX_LENGTH]
-    return f"{COD_INT_LANC_PREFIX}{suffix}"
+    return f"{COD_INT_LANC_PREFIX}{_suffix(file_entry_id.bytes, _DIGEST_PERSON)}"

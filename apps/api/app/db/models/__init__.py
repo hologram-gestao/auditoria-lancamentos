@@ -208,7 +208,9 @@ from app.db.models.reconciliation_omie_entry import (
 )
 from app.db.models.reconciliation_omie_posting import (
     COD_INT_LANC_MAX_LENGTH,
+    OmiePostingKind,
     OmiePostingStatus,
+    OmiePostingStep,
     ReconciliationOmiePosting,
 )
 from app.db.models.reconciliation_session import (
@@ -393,7 +395,9 @@ __all__ = [
     "OmieAccountType",
     "OmieEntryStatus",
     "OmieEntryUserAction",
+    "OmiePostingKind",
     "OmiePostingStatus",
+    "OmiePostingStep",
     "Organization",
     "ProviderType",
     "ReconciliationAnomaly",

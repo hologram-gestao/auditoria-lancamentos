@@ -30,6 +30,24 @@ quebraria a conexão.
 **Nada de PII em log.** `cObs` carrega a descrição da compra (§4.5) e a
 mensagem de erro do provedor é texto livre (ADR-023-BE): nenhuma das duas entra
 em log — só IDs, códigos e contadores.
+
+**Duas formas de lançar (86e3n70q0, bloco B), escolhidas POR LINHA.**
+
+- `direto` — o `IncluirLancCC` acima, sem mudança. Só no processo "na data da
+  compra" (ele grava a data da compra) e só com `OMIE_POSTING_ENABLED`.
+- `provisionar` (o padrão) — título no Contas a Pagar, com kill-switch próprio
+  (`OMIE_PAYABLE_POSTING_ENABLED`). Até três escritas: fornecedor (só se o CNPJ
+  não tem cadastro), título e, SÓ no processo "na data da compra", a baixa na
+  data da compra. No processo "vencimento da fatura" a provisão para no título:
+  a baixa depende do pagamento efetivo da fatura (bloco 0, 11/10/2026).
+
+A provisão é uma máquina de estados com RETOMADA (`step` + ids na intenção):
+cada passo lê o estado gravado, pula o que já tem id e grava o id que recebeu
+COMMITANDO antes de seguir. As três escritas são idempotentes sobre a chave de
+integração (captura de 13/10/2026), então, ao contrário do `direto`, um envio
+sem confirmação (timeout) PODE ser repetido com a mesma chave — até
+`MAX_STEP_SENDS` envios por passo; depois disso a linha pede conferência no
+Omie, como hoje. Sucesso parcial é estado legítimo e a resposta diz o passo.
 """
 
 from __future__ import annotations
@@ -44,12 +62,14 @@ from uuid import UUID
 from sqlalchemy import select
 
 from app.core.branding import PRODUCT_NAME
+from app.core.cnpj import format_cnpj
 from app.core.crypto_service import (
     AAD_ANOMALY_RESOLUTION_NOTE,
     AAD_FILE_ENTRY_DESCRIPTION,
     field_locator,
 )
 from app.core.exceptions import (
+    ErrorCode,
     OmieAuthError,
     OmieFaultError,
     OmieLancamentoAlreadyLinkedError,
@@ -65,23 +85,39 @@ from app.db.models import (
     AnomalyType,
     CardPostingDateMode,
     FileEntrySituation,
+    OmiePostingKind,
     OmiePostingStatus,
+    OmiePostingStep,
     ReconciliationAnomaly,
     ReconciliationFileEntry,
     ReconciliationOmiePosting,
     SessionAccountType,
 )
+from app.integrations.omie.client import omie_error_code
 from app.integrations.omie.schemas import (
+    ContaPagarCategoria,
+    ContaPagarDistribuicao,
+    IncluirClienteRequest,
+    IncluirContaPagarRequest,
     IncluirLancCCRequest,
+    LancarPagamentoRequest,
     LancCCCabecalho,
     LancCCDetalhes,
 )
+from app.modules.omie_data.payables_service import pick_supplier
+from app.modules.reconciliations.omie_posting.keys import (
+    derive_payable_key,
+    derive_payment_key,
+    derive_supplier_key,
+)
 from app.modules.reconciliations.omie_posting.repository import OmiePostingRepository
 from app.modules.reconciliations.omie_posting.schemas import (
+    SOMA_TOLERANCIA,
     OmiePostingBatchPayload,
     OmiePostingLineRequest,
     OmiePostingLineResult,
     PostingLineReason,
+    PostingLineStatus,
 )
 from app.modules.reconciliations.processing.anomalies import ANOMALY_CODE_MISSING_IN_OMIE
 from app.modules.reconciliations.totals import refresh_session_counters
@@ -95,7 +131,7 @@ if TYPE_CHECKING:
 
     from app.core.config import Settings
     from app.core.crypto import ClientCipher
-    from app.db.models import ReconciliationSession
+    from app.db.models import Client, ReconciliationSession
     from app.integrations.omie.client import OmieClient
 
 log = get_logger(__name__)
@@ -120,6 +156,35 @@ _C_TIPO_DOCUMENTO = "DIN"
 #: Nota gravada na anomalia resolvida. Sem PII: só o ID do lançamento Omie.
 #: O mínimo de 10 chars da revisão (Doc §17.3) é respeitado com folga.
 _RESOLUTION_NOTE = f"Lancado no Omie pelo {PRODUCT_NAME} - lancamento {{omie_lancamento_id}}."
+#: Nota da provisão concluída: só os ids do título e (quando houver) da baixa.
+_PROVISION_NOTE = f"Provisionado no Omie pelo {PRODUCT_NAME} - titulo {{payable_id}}."
+_PROVISION_PAID_NOTE = (
+    f"Provisionado no Omie pelo {PRODUCT_NAME} - titulo {{payable_id}}, baixa {{payment_id}}."
+)
+
+#: Envios de UM passo da provisão sem resposta conclusiva (timeout/5xx) antes de
+#: a linha parar e pedir conferência no Omie: o 1º envio e até 2 reenvios. Os
+#: reenvios são seguros porque as três escritas são idempotentes sobre a chave
+#: (captura de 13/10/2026); o teto existe para uma Omie instável não virar uma
+#: linha reenviada a cada clique para sempre.
+MAX_STEP_SENDS = 3
+
+#: Erro da Omie para data em competência FECHADA no Painel do Contador (bloco 0,
+#: item g): mostrado linha a linha, sem consulta prévia.
+OMIE_CODE_CLOSED_COMPETENCE = "757"
+
+#: Data no formato da Omie.
+_OMIE_DATE = "%d/%m/%Y"
+
+
+class _DependencyFailureError(Exception):
+    """A Omie caiu NO MEIO de uma provisão: carrega o resultado da linha (com o
+    passo e os ids já gravados) e a causa, para o lote parar como no `direto`."""
+
+    def __init__(self, result: OmiePostingLineResult, cause: Exception) -> None:
+        super().__init__(str(cause))
+        self.result = result
+        self.cause = cause
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,12 +232,17 @@ class OmiePostingService:
         self,
         *,
         session: ReconciliationSession,
+        client: Client,
         lines: list[OmiePostingLineRequest],
     ) -> OmiePostingBatchPayload:
         """Lança o lote e devolve o resumo por linha + agregados.
 
+        Cada linha vai na forma que pediu (`modo`): `direto` pelo `IncluirLancCC`
+        de sempre, `provisionar` pelo Contas a Pagar. Uma forma desligada no
+        ambiente bloqueia só as linhas dela; as duas desligadas recusam o lote.
+
         Raises:
-            OmiePostingDisabledError: kill-switch desligado (409).
+            OmiePostingDisabledError: as DUAS escritas desligadas (409).
             OmiePostingNotEligibleError: sessão não é de cartão (400).
             ValidationAppError: lote acima do teto do servidor (400).
             OmieAuthError / OmieTimeoutError / OmieServerError: falha de
@@ -180,9 +250,8 @@ class OmiePostingService:
                 para que o alerting enxergue a indisponibilidade em vez de um
                 200 com "deu ruim em todas".
         """
-        self._require_enabled()
+        self._require_some_posting_enabled()
         self._require_credit_card(session)
-        self._require_purchase_date_process(session)
         self._require_batch_within_cap(lines)
 
         started = time.monotonic()
@@ -194,6 +263,7 @@ class OmiePostingService:
 
         results: list[OmiePostingLineResult] = []
         dependency_failure: Exception | None = None
+        provision = _ProvisionTally()
 
         for line in lines:
             if dependency_failure is not None:
@@ -205,32 +275,36 @@ class OmiePostingService:
                 )
                 continue
             try:
-                results.append(
-                    await self._post_one(
-                        session=session, line=line, entries=entries, postings=postings
-                    )
+                result = await self._post_one(
+                    session=session,
+                    client=client,
+                    line=line,
+                    entries=entries,
+                    postings=postings,
+                    tally=provision,
                 )
+            except _DependencyFailureError as exc:
+                dependency_failure = exc.cause
+                await self._emit_unavailable(session.id, exc.cause)
+                result = exc.result
             except (OmieTimeoutError, OmieServerError, OmieAuthError) as exc:
                 dependency_failure = exc
-                await self._events.emit_omie_lancamento_rejeitado(
-                    session_id=session.id,
-                    codigo=(
-                        "OMIE_AUTH_ERROR" if isinstance(exc, OmieAuthError) else "OMIE_TIMEOUT"
-                    ),
-                    fault_message=exc.user_message,
-                )
-                results.append(
-                    _line_error(line.file_entry_id, "omie_indisponivel", exc.user_message)
-                )
+                await self._emit_unavailable(session.id, exc)
+                result = _line_error(line.file_entry_id, "omie_indisponivel", exc.user_message)
+            results.append(result)
+            if line.modo == "provisionar":
+                provision.count(result)
 
         posted = [r for r in results if r.status == "lancada"]
         if posted:
             # Fonte ÚNICA dos totalizadores (CLAUDE.md §7 / totals.py) — nunca
             # somar/subtrair contador na mão aqui.
             await refresh_session_counters(self._db, session.id)
-        elif dependency_failure is not None:
+        elif dependency_failure is not None and not provision.wrote_anything:
             # Nenhuma linha entrou E a Omie caiu: isto é indisponibilidade, não
             # resultado de negócio. 4xx/200 aqui seria invisível ao alerting.
+            # Com um título ou fornecedor já gravado no meio do caminho, o 200
+            # com o passo de cada linha é a resposta honesta.
             raise dependency_failure
 
         payload = OmiePostingBatchPayload(
@@ -239,6 +313,7 @@ class OmiePostingService:
             bloqueadas=sum(1 for r in results if r.status == "bloqueada"),
             com_erro=sum(1 for r in results if r.status == "erro"),
         )
+        duration_ms = round((time.monotonic() - started) * 1000)
         # `duracao_ms` INTEIRO (§3.4) e medido sobre o lote inteiro — é o que
         # sustenta o guardrail "o tempo de conciliação não pode subir".
         await self._events.emit_omie_lancamento_enviado(
@@ -246,27 +321,57 @@ class OmiePostingService:
             linhas=len(lines),
             sucesso=payload.lancadas,
             falha=payload.com_erro,
-            duracao_ms=round((time.monotonic() - started) * 1000),
+            duracao_ms=duration_ms,
         )
+        if provision.linhas:
+            await self._events.emit_lancamento_omie_provisao(
+                session_id=session.id,
+                processo=_process_of(session),
+                linhas=provision.linhas,
+                concluidas=provision.concluidas,
+                parciais=provision.parciais,
+                bloqueadas=provision.bloqueadas,
+                com_erro=provision.com_erro,
+                fornecedores_criados=provision.fornecedores_criados,
+                titulos_criados=provision.titulos_criados,
+                baixas_criadas=provision.baixas_criadas,
+                duracao_ms=duration_ms,
+            )
         log.info(
             "omie_posting_batch_done",
             session_id=str(session.id),
             client_id=str(session.client_id),
             requested=len(lines),
+            provisao=provision.linhas,
             lancadas=payload.lancadas,
             bloqueadas=payload.bloqueadas,
             com_erro=payload.com_erro,
         )
         return payload
 
+    async def _emit_unavailable(self, session_id: UUID, exc: Exception) -> None:
+        user_message = getattr(exc, "user_message", "")
+        await self._events.emit_omie_lancamento_rejeitado(
+            session_id=session_id,
+            codigo="OMIE_AUTH_ERROR" if isinstance(exc, OmieAuthError) else "OMIE_TIMEOUT",
+            fault_message=user_message,
+        )
+
     # ------------------------------------------------------------------
     # Guardas do lote inteiro
     # ------------------------------------------------------------------
 
-    def _require_enabled(self) -> None:
-        if not self._settings.OMIE_POSTING_ENABLED:
+    def _require_some_posting_enabled(self) -> None:
+        """Ao menos UMA das duas escritas ligada; senão o lote é 409 inteiro.
+
+        Com só uma ligada, quem decide é a linha: a forma desligada volta
+        bloqueada com motivo (`direto_desligado` / `provisao_desligada`).
+        """
+        if not (self._settings.OMIE_POSTING_ENABLED or self._settings.OMIE_PAYABLE_POSTING_ENABLED):
             log.warning("omie_posting_disabled_attempt")
-            raise OmiePostingDisabledError("OMIE_POSTING_ENABLED=false")
+            raise OmiePostingDisabledError(
+                "OMIE_POSTING_ENABLED=false e OMIE_PAYABLE_POSTING_ENABLED=false"
+            )
 
     @staticmethod
     def _require_credit_card(session: ReconciliationSession) -> None:
@@ -275,22 +380,6 @@ class OmiePostingService:
         if session.account_type != SessionAccountType.CREDIT_CARD.value:
             raise OmiePostingNotEligibleError(
                 f"Sessão {session.id} é '{session.account_type}', não 'credit_card'.",
-            )
-
-    @staticmethod
-    def _require_purchase_date_process(session: ReconciliationSession) -> None:
-        """Só o processo "na data da compra" (86e3n70p0, decisão do Pedro 08/10/2026).
-
-        O `IncluirLancCC` grava `dDtLanc` = data da COMPRA. Num cliente que lança
-        as compras do cartão em LOTE no vencimento da fatura, isso escreveria na
-        contabilidade dele uma data que o processo dele não usa. Até a forma de
-        lançar no lote ser decidida (subtask própria), o lote inteiro é recusado
-        com motivo — e a tela nem oferece a ação.
-        """
-        if session.card_posting_date_mode == CardPostingDateMode.INVOICE_DUE_DATE.value:
-            raise OmiePostingNotEligibleError(
-                f"Sessão {session.id} cruza no modo invoice_due_date; lançamento bloqueado.",
-                user_message=INVOICE_DUE_DATE_POSTING_BLOCK_MESSAGE,
             )
 
     def _require_batch_within_cap(self, lines: list[OmiePostingLineRequest]) -> None:
@@ -312,9 +401,11 @@ class OmiePostingService:
         self,
         *,
         session: ReconciliationSession,
+        client: Client,
         line: OmiePostingLineRequest,
         entries: dict[UUID, ReconciliationFileEntry],
         postings: dict[UUID, ReconciliationOmiePosting],
+        tally: _ProvisionTally,
     ) -> OmiePostingLineResult:
         entry = entries.get(line.file_entry_id)
         if entry is None:
@@ -328,10 +419,56 @@ class OmiePostingService:
             return blocked
 
         existing = postings.get(line.file_entry_id)
+        if line.modo == "direto":
+            result = await self._post_direct(
+                session=session, line=line, entry=entry, existing=existing
+            )
+            # A `ja_lancada` de uma provisão já vem com `kind`; o resto é `direto`.
+            if result.kind is None:
+                result = result.model_copy(update={"kind": "direto"})
+            return result
+        return await self._provision(
+            session=session, client=client, line=line, entry=entry, existing=existing, tally=tally
+        )
+
+    # ------------------------------------------------------------------
+    # Lançamento DIRETO (Sprint 7) — sem mudança de comportamento
+    # ------------------------------------------------------------------
+
+    async def _post_direct(
+        self,
+        *,
+        session: ReconciliationSession,
+        line: OmiePostingLineRequest,
+        entry: ReconciliationFileEntry,
+        existing: ReconciliationOmiePosting | None,
+    ) -> OmiePostingLineResult:
+        """O `IncluirLancCC` da Sprint 7, agora atrás de duas perguntas da linha."""
+        if not self._settings.OMIE_POSTING_ENABLED:
+            return _line_blocked(entry.id, "direto_desligado", _DIRECT_DISABLED_MSG)
+        if _process_of(session) == CardPostingDateMode.INVOICE_DUE_DATE.value:
+            # O `IncluirLancCC` grava `dDtLanc` = data da COMPRA; o cliente que
+            # lança a fatura no vencimento não usa essa data (86e3n70p0). A
+            # provisão, que põe o vencimento no título, é o caminho dele.
+            return _line_blocked(
+                entry.id,
+                "direto_indisponivel_no_modo_vencimento",
+                DIRECT_IN_DUE_DATE_PROCESS_MESSAGE,
+            )
+        if existing is not None and existing.kind == OmiePostingKind.PROVISAO.value:
+            if existing.status == OmiePostingStatus.CONFIRMED.value:
+                return _provision_already_done(existing)
+            if not _kind_switch_allowed(existing):
+                return _line_blocked(entry.id, "modo_divergente", _MODE_LOCKED_MSG)
+            existing = await self._repo.reset_kind(
+                client_id=session.client_id,
+                file_entry_id=entry.id,
+                kind=OmiePostingKind.DIRETO,
+            )
+            await self._db.commit()
         decided = await self._decide_from_own_state(session=session, line=line, existing=existing)
         if decided is not None:
             return decided
-
         return await self._send(session=session, line=line, entry=entry)
 
     async def _decide_from_own_state(
@@ -433,6 +570,8 @@ class OmiePostingService:
         # "eu tentei" um fato antes de haver efeito externo.
         await self._db.commit()
 
+        if line.cod_categoria is None:  # pragma: no cover  -- o schema exige no `direto`
+            raise ValueError("lançamento direto sem cod_categoria")
         request = self._build_request(
             session=session,
             entry=entry,
@@ -496,6 +635,428 @@ class OmiePostingService:
             status="lancada",
             omie_lancamento_id=response.n_cod_lanc,
         )
+
+    # ------------------------------------------------------------------
+    # PROVISÃO no Contas a Pagar (86e3n70q0, bloco B)
+    # ------------------------------------------------------------------
+
+    async def _provision(
+        self,
+        *,
+        session: ReconciliationSession,
+        client: Client,
+        line: OmiePostingLineRequest,
+        entry: ReconciliationFileEntry,
+        existing: ReconciliationOmiePosting | None,
+        tally: _ProvisionTally,
+    ) -> OmiePostingLineResult:
+        """Fornecedor → título → baixa (só no processo "na data da compra").
+
+        Tudo o que pode recusar a linha SEM escrever no Omie vem antes de
+        qualquer chamada: flag, categorias que não fecham, rateio obrigatório
+        ausente, linha já lançada, modo travado e o teto de reenvios.
+        """
+        if not self._settings.OMIE_PAYABLE_POSTING_ENABLED:
+            return _line_blocked(entry.id, "provisao_desligada", _PROVISION_DISABLED_MSG)
+        total = abs(Decimal(entry.amount)).quantize(_CENT, rounding=ROUND_HALF_UP)
+        categorias = _category_split(line, total)
+        if categorias is None:
+            return _line_blocked(entry.id, "categorias_nao_fecham", _CATEGORIES_MISMATCH_MSG)
+        if client.omie_department_required and not line.departamentos:
+            return _line_blocked(entry.id, "departamento_pendente", _DEPARTMENT_REQUIRED_MSG)
+
+        if existing is not None:
+            if existing.status == OmiePostingStatus.CONFIRMED.value:
+                return _provision_already_done(existing)
+            if existing.kind == OmiePostingKind.DIRETO.value:
+                if not _kind_switch_allowed(existing):
+                    return _line_blocked(entry.id, "modo_divergente", _MODE_LOCKED_MSG)
+                existing = await self._repo.reset_kind(
+                    client_id=session.client_id,
+                    file_entry_id=entry.id,
+                    kind=OmiePostingKind.PROVISAO,
+                )
+                await self._db.commit()
+            elif (
+                existing.status == OmiePostingStatus.PENDING.value
+                and existing.attempts >= MAX_STEP_SENDS
+            ):
+                return _provision_result(
+                    existing,
+                    status="bloqueada",
+                    reason="envio_anterior_sem_confirmacao",
+                    message=_stuck_message(existing, entry.id),
+                )
+            posting = existing
+        else:
+            try:
+                posting = await self._repo.register_intent(
+                    client_id=session.client_id,
+                    session_id=session.id,
+                    file_entry_id=entry.id,
+                    kind=OmiePostingKind.PROVISAO,
+                )
+            except OmiePostingKeyCollisionError as exc:
+                return _line_blocked(entry.id, "chave_em_conflito", exc.user_message)
+            await self._db.commit()
+
+        omie_client = await self._factory()
+        try:
+            while posting.step != OmiePostingStep.CONCLUIDO.value:
+                outcome = await self._run_step(
+                    session=session,
+                    client=client,
+                    line=line,
+                    entry=entry,
+                    posting=posting,
+                    omie=omie_client,
+                    total=total,
+                    categorias=categorias,
+                    tally=tally,
+                )
+                if outcome is not None:
+                    return outcome
+        finally:
+            await omie_client.aclose()
+
+        await self._conclude_provision(session=session, entry=entry, posting=posting)
+        return _provision_result(posting, status="lancada")
+
+    async def _run_step(
+        self,
+        *,
+        session: ReconciliationSession,
+        client: Client,
+        line: OmiePostingLineRequest,
+        entry: ReconciliationFileEntry,
+        posting: ReconciliationOmiePosting,
+        omie: OmieClient,
+        total: Decimal,
+        categorias: list[tuple[str, Decimal]],
+        tally: _ProvisionTally,
+    ) -> OmiePostingLineResult | None:
+        """Executa o passo CORRENTE e avança. `None` = seguiu; resultado = parou."""
+        step = posting.step
+        if step == OmiePostingStep.FORNECEDOR.value:
+            return await self._step_supplier(
+                session=session,
+                client=client,
+                line=line,
+                entry=entry,
+                posting=posting,
+                omie=omie,
+                tally=tally,
+            )
+        if step == OmiePostingStep.TITULO.value:
+            return await self._step_payable(
+                session=session,
+                line=line,
+                entry=entry,
+                posting=posting,
+                omie=omie,
+                total=total,
+                categorias=categorias,
+                tally=tally,
+            )
+        if step == OmiePostingStep.BAIXA.value:
+            return await self._step_payment(
+                session=session,
+                entry=entry,
+                posting=posting,
+                omie=omie,
+                total=total,
+                tally=tally,
+            )
+        raise ValueError(f"passo desconhecido na intenção {posting.id}: {step!r}")
+
+    async def _step_supplier(
+        self,
+        *,
+        session: ReconciliationSession,
+        client: Client,
+        line: OmiePostingLineRequest,
+        entry: ReconciliationFileEntry,
+        posting: ReconciliationOmiePosting,
+        omie: OmieClient,
+        tally: _ProvisionTally,
+    ) -> OmiePostingLineResult | None:
+        """Quem recebe o título: o cadastro do CNPJ, um cadastro novo, ou o padrão.
+
+        Nessa ordem (bloco 0, item e): CNPJ com cadastro → ele; sem cadastro e com
+        razão social e e-mail na linha → cadastra pela chave do CNPJ (idempotente:
+        o mesmo fornecedor em duas linhas é o MESMO cadastro); senão o fornecedor
+        padrão do cliente; senão a linha bloqueia. Nenhum nome, CNPJ ou e-mail é
+        gravado aqui — só o código que a Omie devolve.
+        """
+        code: int | None = None
+        cnpj = line.cnpj_fornecedor
+        if cnpj is not None:
+            try:
+                cadastros = await omie.listar_clientes_por_cnpj(cnpj_cpf=format_cnpj(cnpj))
+            except OmieFaultError as exc:
+                return await self._step_fault(
+                    session=session, entry=entry, posting=posting, exc=exc
+                )
+            except (OmieTimeoutError, OmieServerError, OmieAuthError) as exc:
+                raise _DependencyFailureError(
+                    _provision_result(
+                        posting, status="erro", reason="omie_indisponivel", message=exc.user_message
+                    ),
+                    exc,
+                ) from exc
+            chosen = pick_supplier(cadastros)
+            if chosen is not None:
+                code = chosen.codigo_cliente_omie
+            elif line.razao_social is not None and line.email is not None:
+                request = IncluirClienteRequest(
+                    codigo_cliente_integracao=derive_supplier_key(cnpj),
+                    razao_social=line.razao_social,
+                    # Mesma forma do request ACEITO na captura (com nome fantasia).
+                    nome_fantasia=line.razao_social,
+                    cnpj_cpf=format_cnpj(cnpj),
+                    email=line.email,
+                )
+                response = await self._send_step(
+                    session=session,
+                    entry=entry,
+                    posting=posting,
+                    call=lambda: omie.incluir_cliente(request),
+                )
+                if isinstance(response, OmiePostingLineResult):
+                    return response
+                code = response.codigo_cliente_omie
+                tally.fornecedores_criados += 1
+        if code is None:
+            code = client.omie_default_supplier_code
+        if code is None:
+            return _provision_result(
+                posting,
+                status="bloqueada",
+                reason="fornecedor_pendente",
+                message=_SUPPLIER_PENDING_MSG,
+            )
+        await self._repo.record_provision_step(
+            client_id=session.client_id,
+            file_entry_id=entry.id,
+            next_step=OmiePostingStep.TITULO,
+            supplier_code=code,
+        )
+        await self._db.commit()
+        return None
+
+    async def _step_payable(
+        self,
+        *,
+        session: ReconciliationSession,
+        line: OmiePostingLineRequest,
+        entry: ReconciliationFileEntry,
+        posting: ReconciliationOmiePosting,
+        omie: OmieClient,
+        total: Decimal,
+        categorias: list[tuple[str, Decimal]],
+        tally: _ProvisionTally,
+    ) -> OmiePostingLineResult | None:
+        """O título a pagar. Emissão = data da compra; vencimento = o da fatura.
+
+        Sem vencimento gravado na sessão (processo "na data da compra" com fatura
+        que não o trouxe), o vencimento é a própria data da compra — a baixa sai
+        no mesmo dia, então o título nunca fica "a vencer" num dia inventado.
+        """
+        if posting.supplier_code is None:  # pragma: no cover  -- CHECK do banco
+            raise ValueError(f"intenção {posting.id} no título sem fornecedor")
+        due = session.invoice_due_date or entry.transaction_date
+        single = categorias[0][0] if len(categorias) == 1 else None
+        request = IncluirContaPagarRequest(
+            codigo_lancamento_integracao=derive_payable_key(entry.id),
+            codigo_cliente_fornecedor=posting.supplier_code,
+            data_emissao=entry.transaction_date.strftime(_OMIE_DATE),
+            data_vencimento=due.strftime(_OMIE_DATE),
+            data_previsao=due.strftime(_OMIE_DATE),
+            valor_documento=total,
+            codigo_categoria=single,
+            categorias=(
+                None
+                if single is not None
+                else [
+                    ContaPagarCategoria(
+                        codigo_categoria=codigo,
+                        valor=valor,
+                        percentual=percentual,
+                    )
+                    for (codigo, valor), percentual in zip(
+                        categorias, _percentuals([v for _, v in categorias], total), strict=True
+                    )
+                ]
+            ),
+            id_conta_corrente=session.omie_conta_id,
+            observacao=self._describe(entry),
+            distribuicao=_department_split(line, total),
+        )
+        response = await self._send_step(
+            session=session,
+            entry=entry,
+            posting=posting,
+            call=lambda: omie.incluir_conta_pagar(request),
+        )
+        if isinstance(response, OmiePostingLineResult):
+            return response
+        tally.titulos_criados += 1
+        next_step = (
+            OmiePostingStep.CONCLUIDO
+            if _process_of(session) == CardPostingDateMode.INVOICE_DUE_DATE.value
+            else OmiePostingStep.BAIXA
+        )
+        await self._repo.record_provision_step(
+            client_id=session.client_id,
+            file_entry_id=entry.id,
+            next_step=next_step,
+            payable_id=response.codigo_lancamento_omie,
+        )
+        await self._db.commit()
+        return None
+
+    async def _step_payment(
+        self,
+        *,
+        session: ReconciliationSession,
+        entry: ReconciliationFileEntry,
+        posting: ReconciliationOmiePosting,
+        omie: OmieClient,
+        total: Decimal,
+        tally: _ProvisionTally,
+    ) -> OmiePostingLineResult | None:
+        """A baixa na conta do cartão, valor total, na data da compra.
+
+        Só existe no processo "na data da compra": `_step_payable` leva o
+        processo "vencimento da fatura" direto a `concluido`.
+        """
+        if posting.payable_id is None:  # pragma: no cover  -- CHECK do banco
+            raise ValueError(f"intenção {posting.id} na baixa sem título")
+        request = LancarPagamentoRequest(
+            codigo_lancamento=posting.payable_id,
+            codigo_baixa_integracao=derive_payment_key(entry.id),
+            codigo_conta_corrente=session.omie_conta_id,
+            valor=total,
+            data=entry.transaction_date.strftime(_OMIE_DATE),
+        )
+        response = await self._send_step(
+            session=session,
+            entry=entry,
+            posting=posting,
+            call=lambda: omie.lancar_pagamento(request),
+        )
+        if isinstance(response, OmiePostingLineResult):
+            return response
+        tally.baixas_criadas += 1
+        await self._repo.record_provision_step(
+            client_id=session.client_id,
+            file_entry_id=entry.id,
+            next_step=OmiePostingStep.CONCLUIDO,
+            payment_id=response.codigo_baixa,
+        )
+        await self._db.commit()
+        return None
+
+    async def _send_step[R](
+        self,
+        *,
+        session: ReconciliationSession,
+        entry: ReconciliationFileEntry,
+        posting: ReconciliationOmiePosting,
+        call: Callable[[], Awaitable[R]],
+    ) -> R | OmiePostingLineResult:
+        """Um envio de ESCRITA de um passo: conta antes, e trata o desfecho.
+
+        A tentativa é contada e COMMITADA antes do POST, como no `direto`: se a
+        resposta nunca chegar, a próxima execução sabe que houve envio e quantos.
+        Timeout/5xx sobem como falha de dependência (o lote para), com o passo e
+        os ids no resultado; o reenvio na próxima execução é seguro pela chave.
+        """
+        await self._repo.increment_attempts(client_id=session.client_id, file_entry_id=entry.id)
+        await self._db.commit()
+        try:
+            return await call()
+        except OmieFaultError as exc:
+            return await self._step_fault(session=session, entry=entry, posting=posting, exc=exc)
+        except (OmieTimeoutError, OmieServerError, OmieAuthError) as exc:
+            log.info(
+                "omie_provision_step_unconfirmed",
+                session_id=str(session.id),
+                file_entry_id=str(entry.id),
+                step=posting.step,
+                attempts=posting.attempts,
+            )
+            raise _DependencyFailureError(
+                _provision_result(
+                    posting, status="erro", reason="omie_indisponivel", message=exc.user_message
+                ),
+                exc,
+            ) from exc
+
+    async def _step_fault(
+        self,
+        *,
+        session: ReconciliationSession,
+        entry: ReconciliationFileEntry,
+        posting: ReconciliationOmiePosting,
+        exc: OmieFaultError,
+    ) -> OmiePostingLineResult:
+        """`faultstring`: o passo NÃO criou nada. Guarda a mensagem, nunca a loga."""
+        await self._repo.mark_failed(
+            client_id=session.client_id,
+            file_entry_id=entry.id,
+            error_code=exc.code.value,
+            error_message=exc.user_message,
+            reset_attempts=True,
+        )
+        await self._db.commit()
+        omie_code = omie_error_code(exc)
+        log.info(
+            "omie_provision_step_failed",
+            session_id=str(session.id),
+            file_entry_id=str(entry.id),
+            step=posting.step,
+            omie_code=omie_code,
+        )
+        await self._events.emit_omie_lancamento_rejeitado(
+            session_id=session.id,
+            codigo="OMIE_FAULT",
+            fault_message=exc.user_message,
+        )
+        reason: PostingLineReason = (
+            "competencia_fechada" if omie_code == OMIE_CODE_CLOSED_COMPETENCE else "erro_omie"
+        )
+        return _provision_result(posting, status="erro", reason=reason, message=exc.user_message)
+
+    async def _conclude_provision(
+        self,
+        *,
+        session: ReconciliationSession,
+        entry: ReconciliationFileEntry,
+        posting: ReconciliationOmiePosting,
+    ) -> None:
+        """Fecha a anomalia `missing_in_omie` com os ids do título e da baixa.
+
+        A LINHA da conciliação não muda de situação: ela continua `sem_omie` e sem
+        `omie_lancamento_id`, porque o lançamento que a casaria no extrato (a
+        baixa, ou nada, no processo do vencimento) tem um id que a Omie não
+        devolve e só aparece no extrato depois (a captura levou 20 s). Inventar o
+        vínculo seria afirmar um casamento que ninguém viu; reprocessar a
+        conciliação encontra o par de verdade. Quem diz "já lançada" é a intenção
+        `confirmed`, que bloqueia o segundo envio.
+        """
+        note = (
+            _PROVISION_PAID_NOTE.format(
+                payable_id=posting.payable_id, payment_id=posting.payment_id
+            )
+            if posting.payment_id is not None
+            else _PROVISION_NOTE.format(payable_id=posting.payable_id)
+        )
+        await self._resolve_missing_in_omie(
+            session_id=session.id, file_entry_id=entry.id, note=note
+        )
+        # Barreira de durabilidade, como no `_confirm` do direto.
+        await self._db.commit()
 
     # ------------------------------------------------------------------
     # Montagem do request
@@ -624,7 +1185,7 @@ class OmiePostingService:
         await self._resolve_missing_in_omie(
             session_id=session.id,
             file_entry_id=file_entry_id,
-            omie_lancamento_id=omie_lancamento_id,
+            note=_RESOLUTION_NOTE.format(omie_lancamento_id=omie_lancamento_id),
         )
         # **Barreira de durabilidade** (ADR-028-BE). O lançamento JÁ existe no
         # Omie e não há como desfazê-lo (`ExcluirLancCC` está fora de escopo).
@@ -639,7 +1200,7 @@ class OmiePostingService:
         *,
         session_id: UUID,
         file_entry_id: UUID,
-        omie_lancamento_id: int,
+        note: str,
     ) -> None:
         """Fecha a anomalia `missing_in_omie` da linha, referenciando o lançamento.
 
@@ -665,7 +1226,6 @@ class OmiePostingService:
         ).scalar_one_or_none()
         if anomaly is None:
             return
-        note = _RESOLUTION_NOTE.format(omie_lancamento_id=omie_lancamento_id)
         try:
             ct, iv = self._cipher.encrypt(
                 note, field_locator(AAD_ANOMALY_RESOLUTION_NOTE, anomaly.id)
@@ -683,7 +1243,6 @@ class OmiePostingService:
             log.warning(
                 "omie_posting_resolution_note_encrypt_failed",
                 anomaly_id=str(anomaly.id),
-                omie_lancamento_id=omie_lancamento_id,
             )
             anomaly.resolved = True
             await self._db.flush()
@@ -727,12 +1286,37 @@ class OmiePostingService:
 # Helpers de resultado
 # ----------------------------------------------------------------------
 
-#: Mensagem do bloqueio do modo vencimento — VERBATIM no front
-#: (`omie-posting-eligibility.ts`), para o operador ler o mesmo motivo nos dois.
-INVOICE_DUE_DATE_POSTING_BLOCK_MESSAGE = (
-    "Esta conciliação cruza as compras pelo vencimento da fatura. O lançamento no Omie "
-    "ainda não é feito neste processo: lance as compras diretamente no Omie."
+#: Lançamento DIRETO num processo "vencimento da fatura" (86e3n70q0, bloco B). A
+#: provisão, que põe o vencimento da fatura no título, é o caminho desse processo.
+DIRECT_IN_DUE_DATE_PROCESS_MESSAGE = (
+    "Esta conciliação cruza as compras pelo vencimento da fatura: o lançamento direto "
+    "gravaria a data da compra. Provisione a compra no Contas a Pagar."
 )
+
+_DIRECT_DISABLED_MSG = (
+    "O lançamento direto no Omie está desativado neste ambiente. Provisione a compra "
+    "no Contas a Pagar."
+)
+_PROVISION_DISABLED_MSG = (
+    "O lançamento como Contas a Pagar está desativado neste ambiente. Fale com o suporte."
+)
+_CATEGORIES_MISMATCH_MSG = (
+    "A soma das categorias não fecha com o valor da compra. Ajuste os valores e repita."
+)
+_DEPARTMENT_REQUIRED_MSG = (
+    "Este cliente exige rateio por departamento. Escolha os departamentos da compra."
+)
+_SUPPLIER_PENDING_MSG = (
+    "Fornecedor não definido: informe o CNPJ (e, se ele não tiver cadastro no Omie, "
+    "razão social e e-mail) ou configure um fornecedor padrão no cliente."
+)
+_MODE_LOCKED_MSG = (
+    "Esta compra já teve um envio ao Omie na outra forma de lançamento. Continue por ela, "
+    "ou confira no Omie antes: trocar agora poderia lançar a mesma compra duas vezes."
+)
+
+_CENT = Decimal("0.01")
+_HUNDRED = Decimal(100)
 
 _UNAVAILABLE_MSG = (
     "O Omie não respondeu. Nenhum lançamento foi confirmado para esta linha — "
@@ -792,3 +1376,160 @@ def _line_error(
         reason=reason,
         message=message,
     )
+
+
+# ----------------------------------------------------------------------
+# Provisão: helpers puros (86e3n70q0, bloco B)
+# ----------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class _ProvisionTally:
+    """Contagens do lote para o evento `lancamento_omie_provisao` (só números)."""
+
+    linhas: int = 0
+    concluidas: int = 0
+    parciais: int = 0
+    bloqueadas: int = 0
+    com_erro: int = 0
+    fornecedores_criados: int = 0
+    titulos_criados: int = 0
+    baixas_criadas: int = 0
+
+    @property
+    def wrote_anything(self) -> bool:
+        """Algum passo ESCREVEU no Omie neste lote (fornecedor, título ou baixa)."""
+        return bool(self.fornecedores_criados or self.titulos_criados or self.baixas_criadas)
+
+    def count(self, result: OmiePostingLineResult) -> None:
+        self.linhas += 1
+        if result.status == "lancada":
+            self.concluidas += 1
+        elif result.status == "bloqueada":
+            self.bloqueadas += 1
+        else:
+            self.com_erro += 1
+        if result.status != "lancada" and result.payable_id is not None:
+            # Título criado e a linha parou depois dele: sucesso PARCIAL.
+            self.parciais += 1
+
+
+def _process_of(session: ReconciliationSession) -> str:
+    """O processo do cartão da sessão. Sessão antiga (NULL) é o de sempre."""
+    return session.card_posting_date_mode or CardPostingDateMode.PURCHASE_DATE.value
+
+
+def _kind_switch_allowed(existing: ReconciliationOmiePosting) -> bool:
+    """Trocar de forma só quando NENHUM dinheiro pode ter sido escrito.
+
+    - provisão ainda no passo `fornecedor`: no máximo um cadastro de fornecedor
+      existiu, nunca título nem baixa;
+    - direto recusado por `faultstring` na ÚNICA tentativa: a Omie disse "não"
+      ao único envio. (`failed` por vínculo em conflito NÃO serve: ali o
+      lançamento entrou no Omie.)
+    """
+    if existing.status == OmiePostingStatus.CONFIRMED.value:
+        return False
+    if existing.kind == OmiePostingKind.PROVISAO.value:
+        return existing.step == OmiePostingStep.FORNECEDOR.value
+    return (
+        existing.status == OmiePostingStatus.FAILED.value
+        and existing.attempts == 1
+        and existing.error_code == ErrorCode.OMIE_FAULT.value
+        and existing.omie_lancamento_id is None
+    )
+
+
+def _provision_result(
+    posting: ReconciliationOmiePosting,
+    *,
+    status: PostingLineStatus,
+    reason: PostingLineReason | None = None,
+    message: str | None = None,
+) -> OmiePostingLineResult:
+    """Resultado de uma linha de provisão: o passo onde está e os ids gravados."""
+    return OmiePostingLineResult(
+        file_entry_id=posting.file_entry_id,
+        status=status,
+        reason=reason,
+        message=message,
+        kind="provisao",
+        step=OmiePostingStep(posting.step).value if posting.step else None,
+        supplier_code=posting.supplier_code,
+        payable_id=posting.payable_id,
+        payment_id=posting.payment_id,
+    )
+
+
+def _provision_already_done(existing: ReconciliationOmiePosting) -> OmiePostingLineResult:
+    return _provision_result(
+        existing,
+        status="bloqueada",
+        reason="ja_lancada",
+        message=f"Esta compra já foi provisionada no Omie (título nº {existing.payable_id}).",
+    )
+
+
+def _stuck_message(existing: ReconciliationOmiePosting, file_entry_id: UUID) -> str:
+    """O passo parado e a chave para achar no Omie. Sem nome, só a chave."""
+    key = {
+        OmiePostingStep.TITULO.value: f" (título {derive_payable_key(file_entry_id)})",
+        OmiePostingStep.BAIXA.value: f" (baixa {derive_payment_key(file_entry_id)})",
+    }.get(existing.step or "", "")
+    return (
+        f"Houve {existing.attempts} envios sem confirmação do Omie no passo "
+        f"{existing.step}{key}. Confira no Omie antes de tentar de novo."
+    )
+
+
+def _category_split(
+    line: OmiePostingLineRequest, total: Decimal
+) -> list[tuple[str, Decimal]] | None:
+    """As categorias do título com valores que somam EXATAMENTE o da compra.
+
+    Uma categoria só (`cod_categoria`) leva o valor inteiro. Com `categorias`, a
+    soma tem de fechar com a compra dentro de 0,01; o centavo de diferença vai
+    para a última categoria, para o título nunca ter valor diferente da compra.
+    `None` = não fecha.
+    """
+    if line.categorias is None:
+        if line.cod_categoria is None:  # pragma: no cover  -- o schema exige um dos dois
+            return None
+        return [(line.cod_categoria, total)]
+    values = [c.valor for c in line.categorias]
+    diff = total - sum(values, Decimal(0))
+    if abs(diff) > SOMA_TOLERANCIA:
+        return None
+    values[-1] += diff
+    if values[-1] <= 0:
+        return None
+    return [(c.codigo, v) for c, v in zip(line.categorias, values, strict=True)]
+
+
+def _percentuals(values: list[Decimal], total: Decimal) -> list[Decimal]:
+    """O percentual de cada parcela (2 casas), somando exatamente 100."""
+    if total == 0:
+        return [Decimal(0) for _ in values]
+    parts = [(v / total * _HUNDRED).quantize(_CENT, rounding=ROUND_HALF_UP) for v in values]
+    parts[-1] = _HUNDRED - sum(parts[:-1], Decimal(0))
+    return parts
+
+
+def _department_split(
+    line: OmiePostingLineRequest, total: Decimal
+) -> list[ContaPagarDistribuicao] | None:
+    """O rateio com valor E percentual (a forma aceita na captura), fechando o total.
+
+    O percentual da última parcela fecha 100 e o valor dela fecha o total: um
+    rateio que não soma o título seria recusado ou, pior, aceito torto.
+    """
+    if not line.departamentos:
+        return None
+    pcts = [d.percentual for d in line.departamentos]
+    pcts[-1] = _HUNDRED - sum(pcts[:-1], Decimal(0))
+    values = [(total * p / _HUNDRED).quantize(_CENT, rounding=ROUND_HALF_UP) for p in pcts]
+    values[-1] = total - sum(values[:-1], Decimal(0))
+    return [
+        ContaPagarDistribuicao(c_cod_dep=d.codigo, n_val_dep=v, n_per_dep=p)
+        for d, v, p in zip(line.departamentos, values, pcts, strict=True)
+    ]

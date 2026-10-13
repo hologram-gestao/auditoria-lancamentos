@@ -292,7 +292,15 @@ class TestReprocessReviewedSession:
         await _login(client_with_db, admin.email)
         posted = await client_with_db.post(
             POSTING_URL.format(session_id=sess.id),
-            json={"lines": [{"file_entry_id": str(posted_line.id), "cod_categoria": "2.01.03"}]},
+            json={
+                "lines": [
+                    {
+                        "file_entry_id": str(posted_line.id),
+                        "cod_categoria": "2.01.03",
+                        "modo": "direto",
+                    }
+                ]
+            },
         )
         assert posted.status_code == 200, posted.text
         assert posted.json()["data"]["lancadas"] == 1
@@ -371,7 +379,15 @@ class TestReprocessReviewedSession:
         )
         again = await client_with_db.post(
             POSTING_URL.format(session_id=sess.id),
-            json={"lines": [{"file_entry_id": str(posted_line.id), "cod_categoria": "2.01.03"}]},
+            json={
+                "lines": [
+                    {
+                        "file_entry_id": str(posted_line.id),
+                        "cod_categoria": "2.01.03",
+                        "modo": "direto",
+                    }
+                ]
+            },
         )
         assert again.status_code == 200, again.text
         line = again.json()["data"]["lines"][0]

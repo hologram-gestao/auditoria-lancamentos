@@ -22,7 +22,13 @@ import pytest
 from app.db.models import COD_INT_LANC_MAX_LENGTH
 from app.modules.reconciliations.omie_posting.keys import (
     COD_INT_LANC_PREFIX,
+    PAYABLE_KEY_PREFIX,
+    PAYMENT_KEY_PREFIX,
+    SUPPLIER_KEY_PREFIX,
     derive_cod_int_lanc,
+    derive_payable_key,
+    derive_payment_key,
+    derive_supplier_key,
 )
 
 #: base32 (RFC 4648) — o que a chave pode conter depois do prefixo.
@@ -89,3 +95,62 @@ class TestKeyIsPerLineNotPerContent:
         """
         keys = {derive_cod_int_lanc(uuid4()) for _ in range(50_000)}
         assert len(keys) == 50_000
+
+
+@pytest.mark.unit
+class TestChavesDaProvisao:
+    """86e3n70q0 (bloco B): uma chave por passo da provisão, todas derivadas."""
+
+    def test_as_quatro_chaves_de_uma_linha_sao_distintas_e_estaveis(self) -> None:
+        entry = UUID("12345678-1234-5678-1234-567812345678")
+        cnpj = "12345678000195"
+        keys = [
+            derive_cod_int_lanc(entry),
+            derive_payable_key(entry),
+            derive_payment_key(entry),
+            derive_supplier_key(cnpj),
+        ]
+        assert len(set(keys)) == 4
+        assert keys == [
+            derive_cod_int_lanc(entry),
+            derive_payable_key(entry),
+            derive_payment_key(entry),
+            derive_supplier_key(cnpj),
+        ]
+        prefixes = {k[:3] for k in keys}
+        assert prefixes == {
+            COD_INT_LANC_PREFIX,
+            PAYABLE_KEY_PREFIX,
+            PAYMENT_KEY_PREFIX,
+            SUPPLIER_KEY_PREFIX,
+        }
+
+    def test_cabem_no_teto_mais_apertado_da_omie(self) -> None:
+        """`codigo_baixa_integracao` é `string20`: todas cabem nos 20."""
+        for _ in range(500):
+            entry = uuid4()
+            for key in (derive_payable_key(entry), derive_payment_key(entry)):
+                assert len(key) == COD_INT_LANC_MAX_LENGTH
+                assert set(key[3:]) <= _BASE32_ALPHABET
+        assert len(derive_supplier_key("12345678000195")) == COD_INT_LANC_MAX_LENGTH
+
+    def test_titulo_e_baixa_compartilham_o_sufixo_da_linha(self) -> None:
+        """A pessoa acha título e baixa de uma compra no Omie pelo mesmo final."""
+        entry = uuid4()
+        assert derive_payable_key(entry)[3:] == derive_payment_key(entry)[3:]
+        assert derive_payable_key(entry)[3:] == derive_cod_int_lanc(entry)[3:]
+
+    def test_linhas_distintas_dao_chaves_distintas(self) -> None:
+        keys = {derive_payable_key(uuid4()) for _ in range(2000)}
+        assert len(keys) == 2000
+
+    def test_fornecedor_e_um_por_cnpj_nao_por_linha(self) -> None:
+        assert derive_supplier_key("12345678000195") == derive_supplier_key("12345678000195")
+        assert derive_supplier_key("12345678000195") != derive_supplier_key("98765432000198")
+        # O sufixo do fornecedor não coincide com o de nenhuma linha por construção
+        # (outro `person`), então não há como confundir as duas famílias.
+
+    @pytest.mark.parametrize("raw", ["12.345.678/0001-95", "123", "1234567800019X"])
+    def test_fornecedor_exige_o_cnpj_normalizado(self, raw: str) -> None:
+        with pytest.raises(ValueError, match="normalizado"):
+            derive_supplier_key(raw)
