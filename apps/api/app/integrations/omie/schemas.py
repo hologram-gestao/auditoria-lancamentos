@@ -19,9 +19,16 @@ from collections.abc import Iterator
 from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import get_args
+from typing import Annotated, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    field_serializer,
+    field_validator,
+)
 
 
 def unescape_omie_text(value: str) -> str:
@@ -679,6 +686,54 @@ class ClienteOmie(BaseModel):
 
 
 # ----------------------------------------------------------------------
+# Base dos `param` de ESCRITA (gate de fixture) e número no fio
+# ----------------------------------------------------------------------
+
+
+def _submodel_of(annotation: object) -> type[BaseModel] | None:
+    """Acha o `BaseModel` dentro de uma anotação (`X`, `X | None`, `list[X] | None`)."""
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return annotation
+    for arg in get_args(annotation):
+        found = _submodel_of(arg)
+        if found is not None:
+            return found
+    return None
+
+
+class OmieWriteParam(BaseModel):
+    """Base dos `param` de ESCRITA: expõe as chaves que o DTO pode enviar à Omie.
+
+    `omie_param_aliases()` devolve caminhos pontilhados (`cabecalho.nCodCC`,
+    `categorias.codigo_categoria`, ...) para o gate de fixture comparar o
+    request capturado com o DTO chave a chave: campo renomeado ou acrescentado
+    sem recaptura de uma chamada real acusa divergência. Lista entra pelo tipo
+    do item (sem índice), porque o gate achata o `param` do mesmo jeito.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def omie_param_aliases(cls) -> frozenset[str]:
+        def walk(model: type[BaseModel], prefix: str) -> Iterator[str]:
+            for name, field in model.model_fields.items():
+                alias = field.alias or name
+                path = f"{prefix}{alias}"
+                yield path
+                sub = _submodel_of(field.annotation)
+                if sub is not None:
+                    yield from walk(sub, f"{path}.")
+
+        return frozenset(walk(cls, ""))
+
+
+# `decimal` da doc vai no fio como NÚMERO JSON, nunca string: `nValorLanc` como
+# string deu `3102` em 21/08/2026 (`LancCCCabecalho._valor_como_numero`). O
+# float existe só nesta borda de serialização; internamente é `Decimal` (§3.4).
+OmieNumber = Annotated[Decimal, PlainSerializer(float, return_type=float, when_used="json")]
+
+
+# ----------------------------------------------------------------------
 # IncluirLancCC (ESCRITA — Sprint 7 / BACK 07.1)
 # ----------------------------------------------------------------------
 #
@@ -767,7 +822,7 @@ class LancCCDetalhes(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
-class IncluirLancCCRequest(BaseModel):
+class IncluirLancCCRequest(OmieWriteParam):
     """Parâmetro do `IncluirLancCC` (`financas/contacorrentelancamentos/`).
 
     Forma ANINHADA conforme a doc oficial, **corroborada pela recusa real do
@@ -809,33 +864,6 @@ class IncluirLancCCRequest(BaseModel):
     cabecalho: LancCCCabecalho
     detalhes: LancCCDetalhes
 
-    model_config = ConfigDict(populate_by_name=True)
-
-    @classmethod
-    def omie_param_aliases(cls) -> frozenset[str]:
-        """Chaves que este DTO pode enviar à Omie, como caminhos pontilhados.
-
-        Ex.: `{"cCodIntLanc", "cabecalho", "cabecalho.nCodCC", ...}`. Usado
-        pelo gate de fixture: se alguém renomear/adicionar campo sem recapturar
-        uma chamada real, o teste acusa a divergência. O gate achata o `param`
-        capturado no mesmo formato antes de comparar.
-        """
-
-        def walk(model: type[BaseModel], prefix: str) -> Iterator[str]:
-            for name, field in model.model_fields.items():
-                alias = field.alias or name
-                path = f"{prefix}{alias}"
-                yield path
-                candidates = (field.annotation, *get_args(field.annotation))
-                sub = next(
-                    (c for c in candidates if isinstance(c, type) and issubclass(c, BaseModel)),
-                    None,
-                )
-                if sub is not None:
-                    yield from walk(sub, f"{path}.")
-
-        return frozenset(walk(cls, ""))
-
 
 class IncluirLancCCResponse(BaseModel):
     """Resposta do `IncluirLancCC`.
@@ -871,6 +899,231 @@ class IncluirLancCCResponse(BaseModel):
         alias="cDesStatus",
         description="Descrição do status da inclusão. ⚠️ NÃO-VERIFICADO.",
     )
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+# ----------------------------------------------------------------------
+# Contas a Pagar — ESCRITA e leituras de apoio (captura 86e3n70q0, 11/10/2026)
+# ----------------------------------------------------------------------
+#
+# DTOs MÍNIMOS para o gate de fixtures: só os campos que a captura envia ou lê,
+# com os nomes VERBATIM da doc oficial (`geral/departamentos`, `geral/clientes`,
+# `financas/contapagar`, `financas/contacorrentelancamentos`) — e, a partir da
+# captura, verbatim da RESPOSTA REAL (`tests/fixtures/omie/*.json`). Nenhum
+# serviço de produto consome estes DTOs ainda: o bloco B (backend) nasce em
+# cima deles depois que a fixture arbitrar o contrato. Declarar campo que a
+# captura não exercita aumentaria a superfície de divergência sem evidência
+# (mesmo racional do `CategoriaOmie` e do `LancCCDetalhes`).
+
+
+class DepartamentoOmie(BaseModel):
+    """Item de `departamentos` em `ListarDepartamentos` (`geral/departamentos`).
+
+    Insumo do rateio (`distribuicao.cCodDep`) do título a pagar. Só código,
+    nome e as duas flags que decidem se o departamento recebe rateio.
+    """
+
+    codigo: str = Field(description="Código do departamento (`string40`); vai em `cCodDep`.")
+    descricao: str = Field(description="Nome do departamento (`string50`).")
+    estrutura: str | None = Field(
+        default=None,
+        description="Posição na árvore (`001.007.001`), presente na resposta real de 13/10/2026.",
+    )
+    inativo: str | None = Field(default=None, description="`S`/`N`.")
+    nivel_totalizador: str | None = Field(
+        default=None,
+        description=(
+            "`S` = nível totalizador, SEGUNDO A DOC. ⚠️ A resposta real de 13/10/2026 NÃO "
+            "traz este campo (179 departamentos, nenhum com a chave): sintético e "
+            "analítico só se distinguem pela convenção de nome do cliente, então o "
+            "departamento do rateio é sempre ESCOLHIDO, nunca inferido."
+        ),
+    )
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class ClientesFiltro(BaseModel):
+    """`clientesFiltro` de `ListarClientes` — a captura filtra só por CNPJ."""
+
+    cnpj_cpf: str = Field(description="CNPJ ou CPF (`string20`), com ou sem máscara.")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class ListarClientesPorCnpjRequest(OmieWriteParam):
+    """`clientes_list_request` com `clientesFiltro.cnpj_cpf` (busca de fornecedor).
+
+    `ConsultarCliente` só aceita `codigo_cliente_omie`/`codigo_cliente_integracao`
+    (doc oficial): a busca por CNPJ é o `ListarClientes` filtrado.
+    """
+
+    pagina: int = 1
+    registros_por_pagina: int = 50
+    clientes_filtro: ClientesFiltro = Field(alias="clientesFiltro")
+
+
+class IncluirClienteRequest(OmieWriteParam):
+    """`clientes_cadastro` mínimo do `IncluirCliente` (fornecedor novo).
+
+    `codigo_cliente_integracao` é a chave de idempotência candidata; a
+    captura envia o mesmo código duas vezes para arbitrar.
+    """
+
+    codigo_cliente_integracao: str = Field(description="Chave de integração (`string60`).")
+    razao_social: str = Field(description="`string60`.")
+    nome_fantasia: str | None = Field(default=None, description="`string100`.")
+    cnpj_cpf: str = Field(description="`string20`.")
+    email: str = Field(
+        description=(
+            "`string500`. OBRIGATÓRIO na prática: sem ele a Omie recusa com "
+            "`1040 - É obrigatório o preenchimento do e-mail.` (captura de 13/10/2026)."
+        )
+    )
+
+
+class ClienteStatusResponse(BaseModel):
+    """`clientes_status` — resposta de `IncluirCliente` e `ExcluirCliente`."""
+
+    codigo_cliente_omie: int = Field(description="ID do fornecedor no Omie.")
+    codigo_cliente_integracao: str | None = Field(default=None)
+    codigo_status: str | None = Field(default=None)
+    descricao_status: str | None = Field(default=None)
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class ClienteChaveRequest(OmieWriteParam):
+    """`clientes_cadastro_chave` — alvo de `ExcluirCliente`/`ConsultarCliente`."""
+
+    codigo_cliente_omie: int | None = Field(default=None)
+    codigo_cliente_integracao: str | None = Field(default=None)
+
+
+class ContaPagarCategoria(BaseModel):
+    """Item de `categorias` do título: rateio do valor entre categorias."""
+
+    codigo_categoria: str = Field(description="`string20`.")
+    valor: OmieNumber | None = Field(default=None, description="Parcela do valor.")
+    percentual: OmieNumber | None = Field(default=None, description="Parcela em %.")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class ContaPagarDistribuicao(BaseModel):
+    """Item de `distribuicao` do título: rateio por departamento.
+
+    `cDesDep` só volta na leitura (`ListarContasPagar`); a escrita manda código
+    e valor e/ou percentual — a captura arbitra qual dos dois a Omie exige.
+    """
+
+    c_cod_dep: str = Field(alias="cCodDep", description="Código do departamento.")
+    n_val_dep: OmieNumber | None = Field(default=None, alias="nValDep")
+    n_per_dep: OmieNumber | None = Field(default=None, alias="nPerDep")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class IncluirContaPagarRequest(OmieWriteParam):
+    """`conta_pagar_cadastro` mínimo do `IncluirContaPagar` (`financas/contapagar`).
+
+    Datas no formato Omie `dd/mm/aaaa`. `codigo_categoria` OU `categorias`
+    (lista): a captura envia um título com uma categoria e outro com duas.
+    """
+
+    codigo_lancamento_integracao: str = Field(description="Chave de integração (`string60`).")
+    codigo_cliente_fornecedor: int = Field(description="`codigo_cliente_omie` do fornecedor.")
+    data_vencimento: str
+    valor_documento: OmieNumber
+    codigo_categoria: str | None = Field(default=None)
+    categorias: list[ContaPagarCategoria] | None = Field(default=None)
+    data_previsao: str | None = Field(default=None)
+    id_conta_corrente: int = Field(description="`nCodCC` da conta (o cartão).")
+    data_emissao: str | None = Field(default=None)
+    observacao: str | None = Field(default=None, description="Texto livre. Nunca logado (§4.5).")
+    distribuicao: list[ContaPagarDistribuicao] | None = Field(default=None)
+
+
+class ContaPagarStatusResponse(BaseModel):
+    """`conta_pagar_cadastro_response` — `IncluirContaPagar` e `ExcluirContaPagar`."""
+
+    codigo_lancamento_omie: int = Field(description="ID do título no Omie.")
+    codigo_lancamento_integracao: str | None = Field(default=None)
+    codigo_status: str | None = Field(default=None)
+    descricao_status: str | None = Field(default=None)
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class ContaPagarChaveRequest(OmieWriteParam):
+    """`conta_pagar_cadastro_chave` — alvo de `ConsultarContaPagar`/`ExcluirContaPagar`."""
+
+    codigo_lancamento_omie: int | None = Field(default=None)
+    codigo_lancamento_integracao: str | None = Field(default=None)
+
+
+class LancarPagamentoRequest(OmieWriteParam):
+    """`conta_pagar_lancar_pagamento` — a BAIXA do título (`LancarPagamento`)."""
+
+    codigo_lancamento: int | None = Field(default=None, description="ID do título no Omie.")
+    codigo_lancamento_integracao: str | None = Field(default=None)
+    codigo_baixa_integracao: str | None = Field(
+        default=None, description="Chave de integração da baixa (`string20`)."
+    )
+    codigo_conta_corrente: int = Field(description="`nCodCC` da conta que paga.")
+    valor: OmieNumber
+    data: str = Field(description="Data da baixa, `dd/mm/aaaa`.")
+    observacao: str | None = Field(default=None)
+
+
+class LancarPagamentoResponse(BaseModel):
+    """`conta_pagar_lancar_pagamento_resposta`."""
+
+    codigo_lancamento: int | None = Field(default=None)
+    codigo_lancamento_integracao: str | None = Field(default=None)
+    codigo_baixa: int = Field(description="ID da baixa — o alvo de `CancelarPagamento`.")
+    codigo_baixa_integracao: str | None = Field(default=None)
+    liquidado: str | None = Field(default=None, description="`S`/`N`.")
+    valor_baixado: Decimal | None = Field(default=None)
+    codigo_status: str | None = Field(default=None)
+    descricao_status: str | None = Field(default=None)
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class CancelarPagamentoRequest(OmieWriteParam):
+    """`conta_pagar_cancelar_pagamento` — desfaz a baixa."""
+
+    codigo_baixa: int | None = Field(default=None)
+    codigo_baixa_integracao: str | None = Field(default=None)
+
+
+class CancelarPagamentoResponse(BaseModel):
+    """`conta_pagar_cancelar_pagamento_resposta`."""
+
+    codigo_baixa: int | None = Field(default=None)
+    codigo_baixa_integracao: str | None = Field(default=None)
+    codigo_status: str | None = Field(default=None)
+    descricao_status: str | None = Field(default=None)
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class ExcluirLancCCRequest(OmieWriteParam):
+    """`lanccExcluirRequest` — exclui lançamento direto em conta corrente."""
+
+    n_cod_lanc: int | None = Field(default=None, alias="nCodLanc")
+    c_cod_int_lanc: str | None = Field(default=None, alias="cCodIntLanc")
+
+
+class ExcluirLancCCResponse(BaseModel):
+    """`lanccExcluirResponse` (mesmo eco de `IncluirLancCCResponse`)."""
+
+    n_cod_lanc: int | None = Field(default=None, alias="nCodLanc")
+    c_cod_int_lanc: str | None = Field(default=None, alias="cCodIntLanc")
+    c_cod_status: str | None = Field(default=None, alias="cCodStatus")
+    c_des_status: str | None = Field(default=None, alias="cDesStatus")
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 

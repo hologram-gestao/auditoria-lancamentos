@@ -38,6 +38,15 @@ Uso — leitura + ESCRITA (opt-in; cria lançamento real):
     export OMIE_CAPTURE_C_TIPO=DIN                  # opcional; default DIN (doc oficial)
     uv run python -m scripts.capture_omie_fixtures
 
+As chamadas do CONTAS A PAGAR (`ListarDepartamentos`, busca de fornecedor por
+CNPJ, `IncluirCliente`, `IncluirContaPagar` em três formas, `LancarPagamento`,
+releituras, exclusões e o crédito opcional do `IncluirLancCC`) vivem no script
+irmão `scripts/capture_omie_payables.py` (task 86e3n70q0, 11/10/2026), que
+reusa daqui o diretório, o `_write_json`, o `_require_env` e o MESMO opt-in de
+escrita (`OMIE_CAPTURE_ALLOW_WRITE`) — um passo por chamada e a limpeza como
+passo próprio (`--step cleanup`). As variáveis `OMIE_CAPTURE_*` novas estão
+documentadas no docstring dele e no README das fixtures.
+
 Grava `<endpoint>.request.json` (SEM credenciais) e `<endpoint>.response.json`
 em `tests/fixtures/omie/`. **Sanitize a PII dos VALORES antes de commitar**,
 mantendo os NOMES DE CAMPO verbatim (o README explica).
