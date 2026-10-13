@@ -51,3 +51,41 @@ class OmieCategoriaListResponse(BaseModel):
 
     data: list[OmieCategoriaItem]
     total: int
+
+
+class OmieDepartamentoItem(BaseModel):
+    """Item de GET /api/v1/clients/{id}/omie/departamentos (86e3n70q0, bloco B).
+
+    `codigo` é o que vai em `distribuicao.cCodDep` do título; `descricao` é o que
+    a pessoa lê, e vem de um cache em memória (nunca do banco, §4.5: o nome do
+    departamento carrega nome de cliente). `estrutura` é a posição na árvore do
+    Omie (`001.007.001`), para a tela indentar.
+    """
+
+    codigo: str
+    descricao: str
+    estrutura: str | None = None
+
+
+class OmieDepartamentoListResponse(BaseModel):
+    """Lista COMPLETA dos departamentos ativos — sem paginação, como as categorias:
+    o consumidor é uma escolha com busca local sobre algumas centenas de itens."""
+
+    data: list[OmieDepartamentoItem]
+    total: int
+
+
+class OmieFornecedorItem(BaseModel):
+    """O cadastro do fornecedor de um CNPJ no Omie do cliente (86e3n70q0, bloco B).
+
+    `codigo` é o `codigo_cliente_omie` que o título recebe em
+    `codigo_cliente_fornecedor`. Os nomes vêm da Omie na hora e não persistem.
+    """
+
+    codigo: int
+    razao_social: str | None = None
+    nome_fantasia: str | None = None
+
+
+class OmieFornecedorResponse(BaseModel):
+    data: OmieFornecedorItem

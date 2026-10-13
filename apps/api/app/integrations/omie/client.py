@@ -47,10 +47,19 @@ from app.core.logging import get_logger
 from app.integrations.omie.schemas import (
     CategoriaOmie,
     ClienteOmie,
+    ClientesFiltro,
+    ClienteStatusResponse,
     ContaCorrente,
+    ContaPagarStatusResponse,
+    DepartamentoOmie,
+    IncluirClienteRequest,
+    IncluirContaPagarRequest,
     IncluirLancCCRequest,
     IncluirLancCCResponse,
     LancamentoExtrato,
+    LancarPagamentoRequest,
+    LancarPagamentoResponse,
+    ListarClientesPorCnpjRequest,
     OmieFaultPayload,
     OmieTituloStatus,
     TituloAPagarReceber,
@@ -112,6 +121,42 @@ def is_extrato_summary_row(raw: Mapping[str, Any]) -> bool:
         return Decimal(str(raw.get("nValorDocumento"))) == 0
     except InvalidOperation:
         return False
+
+
+#: Código numérico no INÍCIO do `OmieAPI-Error` ("5113 - Não existem registros…").
+_LEADING_CODE = re.compile(r"^\s*(\d+)\b")
+#: Código numérico no FIM do `faultcode` SOAP ("SOAP-ENV:Client-5113").
+_TRAILING_CODE = re.compile(r"(\d+)\s*$")
+
+#: `ListarClientes` filtrado por um CNPJ sem cadastro NÃO devolve lista vazia:
+#: devolve este código (captura real de 13/10/2026,
+#: `listar_clientes_por_cnpj_inexistente.response.json`).
+OMIE_CODE_NO_RECORDS = "5113"
+
+
+def omie_error_code(exc: OmieFaultError) -> str | None:
+    """O código numérico da Omie por trás de um `OmieFaultError`, ou `None`.
+
+    A Omie entrega o MESMO código por dois caminhos, e comparar por igualdade
+    num só já deixou um ramo de fallback inteiro morto (Sprint 11):
+
+    - HTTP 5xx com o header `OmieAPI-Error` = `"5113 - Não existem registros…"`
+      (é como o `5113` da busca por CNPJ chegou na captura de 13/10/2026);
+    - HTTP 200 com `faultcode` = `"SOAP-ENV:Client-5113"`.
+
+    Só o código sai daqui; o texto do fornecedor nunca é devolvido nem logado.
+    """
+    api_error = exc.metadata.get("omie_api_error")
+    if isinstance(api_error, str):
+        match = _LEADING_CODE.match(api_error)
+        if match is not None:
+            return match.group(1)
+    fault_code = exc.metadata.get("fault_code")
+    if isinstance(fault_code, str):
+        match = _TRAILING_CODE.search(fault_code)
+        if match is not None:
+            return match.group(1)
+    return None
 
 
 # Substrings (case-insensitive) em `faultstring` que indicam erro de
@@ -673,6 +718,106 @@ class OmieClient:
             param=request.model_dump(by_alias=True, exclude_none=True, mode="json"),
         )
         return IncluirLancCCResponse.model_validate(raw)
+
+    # ------------------------------------------------------------------
+    # Contas a Pagar (86e3n70q0, bloco B) — contrato capturado em 13/10/2026
+    # ------------------------------------------------------------------
+    #
+    # Os `param` saem dos DTOs que o gate `TestContasAPagarRealFixtures` roda
+    # contra as fixtures reais. As TRÊS escritas abaixo são idempotentes sobre a
+    # chave de integração (provado na captura: o 2º envio devolveu o MESMO id),
+    # e é isso que permite ao serviço reenviar depois de um timeout. O retry do
+    # `call()` em 5xx/timeout continua valendo pelo mesmo motivo.
+
+    async def listar_departamentos(self) -> list[DepartamentoOmie]:
+        """TODOS os departamentos do cliente, paginando (`geral/departamentos`).
+
+        A resposta real é paginada (`total_de_paginas`, 179 itens em 4 páginas na
+        captura) e NÃO traz `nivel_totalizador`: quem filtra o que é escolhível é
+        quem chama, por `inativo`. Nada daqui é logado além da contagem — o nome
+        do departamento carrega nome de cliente final (§4.5).
+        """
+        items: list[DepartamentoOmie] = []
+        async for raw in self._paginate(
+            module="geral",
+            endpoint="departamentos",
+            call_name="ListarDepartamentos",
+            list_key="departamentos",
+            page_size=50,
+        ):
+            items.append(DepartamentoOmie.model_validate(raw))
+        log.info("omie_departamentos_size", item_count=len(items))
+        return items
+
+    async def listar_clientes_por_cnpj(self, *, cnpj_cpf: str) -> list[ClienteOmie]:
+        """Cadastros com este CNPJ (`ListarClientes` + `clientesFiltro.cnpj_cpf`).
+
+        `ConsultarCliente` só aceita código (doc oficial), então a busca por CNPJ
+        é a listagem filtrada. **CNPJ sem cadastro é fault `5113`**, não lista
+        vazia (captura de 13/10/2026): aqui ele vira `[]`. Qualquer outro fault
+        sobe — "não achei" e "não consegui perguntar" são coisas diferentes, e só
+        a primeira autoriza cadastrar um fornecedor novo.
+        """
+        request = ListarClientesPorCnpjRequest(clientes_filtro=ClientesFiltro(cnpj_cpf=cnpj_cpf))
+        try:
+            raw = await self.call(
+                module="geral",
+                endpoint="clientes",
+                call_name="ListarClientes",
+                param=request.model_dump(by_alias=True, exclude_none=True, mode="json"),
+            )
+        except OmieFaultError as exc:
+            if omie_error_code(exc) == OMIE_CODE_NO_RECORDS:
+                return []
+            raise
+        cadastros: list[dict[str, Any]] = raw.get("clientes_cadastro") or []
+        return [ClienteOmie.model_validate(item) for item in cadastros]
+
+    async def incluir_cliente(self, request: IncluirClienteRequest) -> ClienteStatusResponse:
+        """Cadastra um fornecedor (`IncluirCliente`). ESCRITA.
+
+        Idempotente sobre `codigo_cliente_integracao` (2º POST da captura devolveu
+        o MESMO `codigo_cliente_omie`). `email` é obrigatório na prática (`1040`).
+        Nada do `param` é logado: razão social, CNPJ e e-mail são do cliente final.
+        """
+        raw = await self.call(
+            module="geral",
+            endpoint="clientes",
+            call_name="IncluirCliente",
+            param=request.model_dump(by_alias=True, exclude_none=True, mode="json"),
+        )
+        return ClienteStatusResponse.model_validate(raw)
+
+    async def incluir_conta_pagar(
+        self, request: IncluirContaPagarRequest
+    ) -> ContaPagarStatusResponse:
+        """Cria o título a pagar (`IncluirContaPagar`). ESCRITA — dinheiro.
+
+        Idempotente sobre `codigo_lancamento_integracao` (captura de 13/10/2026).
+        A `observacao` carrega a descrição da compra: nunca logada (§4.5).
+        """
+        raw = await self.call(
+            module="financas",
+            endpoint="contapagar",
+            call_name="IncluirContaPagar",
+            param=request.model_dump(by_alias=True, exclude_none=True, mode="json"),
+        )
+        return ContaPagarStatusResponse.model_validate(raw)
+
+    async def lancar_pagamento(self, request: LancarPagamentoRequest) -> LancarPagamentoResponse:
+        """Dá baixa no título (`LancarPagamento`). ESCRITA — dinheiro.
+
+        Repetir com o mesmo `codigo_baixa_integracao` devolveu a MESMA baixa na
+        captura, sem duplicar nem recusar. No extrato do cartão a baixa aparece
+        como natureza `P` com `nCodLancamento` PRÓPRIO (≠ título, ≠ baixa).
+        """
+        raw = await self.call(
+            module="financas",
+            endpoint="contapagar",
+            call_name="LancarPagamento",
+            param=request.model_dump(by_alias=True, exclude_none=True, mode="json"),
+        )
+        return LancarPagamentoResponse.model_validate(raw)
 
     async def listar_categorias(self) -> list[CategoriaOmie]:
         """Lista TODAS as categorias do cliente, com paginação automática.

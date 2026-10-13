@@ -459,6 +459,23 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         "app/modules/omie_data/routes.py",
         f"{_VIA_SESSION}; o client_id do cache vem da sessão, nunca da query",
     ),
+    # 86e3n70q0 (bloco B) — leituras do lançamento como Contas a Pagar. Sem
+    # permissão própria (como as categorias): quem alcança o cliente lê.
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/omie/departamentos",
+        ScopeKind.COLLECTION,
+        "app/modules/omie_data/client_routes.py",
+        f"{_VIA_CLIENT_PATH}; o cache em memória é chaveado pelo client_id já "
+        "autorizado e o nome do departamento nunca persiste",
+    ),
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/omie/fornecedores",
+        ScopeKind.COLLECTION,
+        "app/modules/omie_data/client_routes.py",
+        f"{_VIA_CLIENT_PATH}; a busca vai à origem do cliente autorizado e nunca grava",
+    ),
     # ---------------------------------------------------------------- notificações
     SensitiveEndpoint(
         "GET",

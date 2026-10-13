@@ -334,6 +334,7 @@ _QUERIES: dict[str, dict[str, str]] = {
     },
     "GET /api/v1/omie/lancamentos": {"ids": "1,2", "session_id": "{session_b}"},
     "GET /api/v1/omie/categorias": {"session_id": "{session_b}"},
+    "GET /api/v1/clients/{client_id}/omie/fornecedores": {"cnpj": "12.345.678/0001-95"},
     "GET /api/v1/clients/{client_id}/movements/sync-state": {"competence": "2026-06"},
     "GET /api/v1/clients/{client_id}/mapping/{destination_type}/decisions/history": {
         "categoryCode": "2.04.94"

@@ -15,10 +15,10 @@
 
 | | |
 | --- | --- |
-| Endpoints sensíveis (denominador) | **124** |
-| Com caso negativo cross-tenant verde | **124** |
+| Endpoints sensíveis (denominador) | **126** |
+| Com caso negativo cross-tenant verde | **126** |
 | Pendentes (implementação em outra task) | **0** |
-| Cobertura | **124/124 = 100%** |
+| Cobertura | **126/126 = 100%** |
 
 ## Lista canônica
 
@@ -75,6 +75,8 @@ Legenda de `tipo`: **coleção** = vaza forjando `client_id` na URL/payload · *
 | `POST` | `/api/v1/reconciliations/{session_id}/omie-postings` | detalhe (PK) | `app/modules/reconciliations/routes.py` | require_session_access: SELECT da sessão já com AND client_id = <tenant da linha> (scoped_by_tenant) + resolve_client_access; 404 uniforme; o Client sai do client_id da sessão já autorizada e as linhas são carregadas com AND session_id — nada vem do body | ✅ verde |
 | `GET` | `/api/v1/omie/lancamentos` | coleção | `app/modules/omie_data/routes.py` | require_session_access: SELECT da sessão já com AND client_id = <tenant da linha> (scoped_by_tenant) + resolve_client_access; 404 uniforme | ✅ verde |
 | `GET` | `/api/v1/omie/categorias` | coleção | `app/modules/omie_data/routes.py` | require_session_access: SELECT da sessão já com AND client_id = <tenant da linha> (scoped_by_tenant) + resolve_client_access; 404 uniforme; o client_id do cache vem da sessão, nunca da query | ✅ verde |
+| `GET` | `/api/v1/clients/{client_id}/omie/departamentos` | coleção | `app/modules/omie_data/client_routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); o cache em memória é chaveado pelo client_id já autorizado e o nome do departamento nunca persiste | ✅ verde |
+| `GET` | `/api/v1/clients/{client_id}/omie/fornecedores` | coleção | `app/modules/omie_data/client_routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha); a busca vai à origem do cliente autorizado e nunca grava | ✅ verde |
 | `GET` | `/api/v1/notifications` | coleção | `app/modules/notifications/repository.py` | _visibility_filter: user_id = eu AND client_id = <tenant da linha> | ✅ verde |
 | `GET` | `/api/v1/notifications/unread-count` | coleção | `app/modules/notifications/repository.py` | _visibility_filter: user_id = eu AND client_id = <tenant da linha> | ✅ verde |
 | `POST` | `/api/v1/notifications/read-all` | coleção | `app/modules/notifications/repository.py` | mark_all_read com o mesmo _visibility_filter no UPDATE | ✅ verde |
