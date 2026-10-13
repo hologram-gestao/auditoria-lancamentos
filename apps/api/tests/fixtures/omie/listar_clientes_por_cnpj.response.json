@@ -1,0 +1,69 @@
+{
+  "pagina": 1,
+  "total_de_paginas": 1,
+  "registros": 1,
+  "total_de_registros": 1,
+  "clientes_cadastro": [
+    {
+      "bairro": "CENTRO",
+      "bloquear_faturamento": "N",
+      "cep": "01000000",
+      "cidade": "SAO PAULO (SP)",
+      "cidade_ibge": "3550308",
+      "cnae": "0000000",
+      "cnpj_cpf": "00.394.460/0001-00",
+      "codigo_cliente_integracao": "",
+      "codigo_cliente_omie": 3052086626,
+      "codigo_pais": "1058",
+      "complemento": "",
+      "dadosBancarios": {
+        "agencia": "",
+        "cChavePix": "",
+        "codigo_banco": "",
+        "conta_corrente": "",
+        "doc_titular": "",
+        "nome_titular": "",
+        "transf_padrao": ""
+      },
+      "email": "fornecedor001@example.com",
+      "endereco": "RUA FICTICIA",
+      "enderecoEntrega": {},
+      "endereco_numero": "1",
+      "enviar_anexos": "N",
+      "estado": "SP",
+      "exterior": "N",
+      "inativo": "N",
+      "info": {
+        "cImpAPI": "N",
+        "dAlt": "31/12/2025",
+        "dInc": "31/12/2025",
+        "hAlt": "15:30:39",
+        "hInc": "15:30:31",
+        "uAlt": "USUARIO",
+        "uInc": "USUARIO"
+      },
+      "inscricao_estadual": "",
+      "inscricao_municipal": "",
+      "nome_fantasia": "FORNECEDOR FICTICIO 001",
+      "optante_simples_nacional": "S",
+      "pessoa_fisica": "N",
+      "razao_social": "FORNECEDOR FICTICIO 001 LTDA",
+      "recomendacoes": {
+        "gerar_boletos": "N",
+        "tipo_assinante": "6"
+      },
+      "tags": [
+        {
+          "tag": "TAG FICTICIA 1"
+        },
+        {
+          "tag": "TAG FICTICIA 2"
+        }
+      ],
+      "telefone1_ddd": "11",
+      "telefone1_numero": "900000000",
+      "tipo_atividade": "2"
+    }
+  ],
+  "cDesStatus": " Elapsed time: 0.05"
+}

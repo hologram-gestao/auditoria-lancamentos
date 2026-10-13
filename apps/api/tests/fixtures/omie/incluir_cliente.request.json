@@ -1,0 +1,10 @@
+{
+  "call_name": "IncluirCliente",
+  "param": {
+    "codigo_cliente_integracao": "HOSCAP1013-FORN",
+    "razao_social": "TESTE HOLOGRAM OS CAPTURA FORNECEDOR LTDA",
+    "nome_fantasia": "TESTE HOLOGRAM OS CAPTURA FORNECEDOR",
+    "cnpj_cpf": "99.999.001/0001-59",
+    "email": "captura.teste@example.com"
+  }
+}

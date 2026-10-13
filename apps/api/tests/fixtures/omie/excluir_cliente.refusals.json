@@ -1,0 +1,11 @@
+[
+  {
+    "call_name": "ExcluirCliente",
+    "captured_at": "2026-10-13T11:03:25+00:00",
+    "param": {
+      "codigo_cliente_omie": 3105843586
+    },
+    "_adl_capture_exception_type": "OmieFaultError",
+    "_adl_capture_exception_message": "5xx permanente em ExcluirCliente (geral/clientes): 21 - Não é possível fazer esta exclusão porque existem outras informações que dependem deste registro.Plano de Contas Contábeis (1)"
+  }
+]

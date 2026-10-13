@@ -1,0 +1,6 @@
+{
+  "call_name": "CancelarPagamento",
+  "param": {
+    "codigo_baixa": 3105843608
+  }
+}

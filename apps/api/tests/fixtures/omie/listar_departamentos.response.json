@@ -1,0 +1,308 @@
+{
+  "pagina": 1,
+  "total_de_paginas": 4,
+  "registros": 50,
+  "total_de_registros": 179,
+  "departamentos": [
+    {
+      "codigo": "2617722758",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 001",
+      "estrutura": "001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787838270",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 002",
+      "estrutura": "001.007",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787839543",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 003",
+      "estrutura": "001.007.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787839623",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 004",
+      "estrutura": "001.007.001.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787840664",
+      "descricao": "DEPARTAMENTO FICTICIO 005",
+      "estrutura": "001.007.001.001.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787841396",
+      "descricao": "DEPARTAMENTO FICTICIO 006",
+      "estrutura": "001.007.001.001.003",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787841444",
+      "descricao": "DEPARTAMENTO FICTICIO 007",
+      "estrutura": "001.007.001.001.004",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787842044",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 008",
+      "estrutura": "001.007.001.002",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787842217",
+      "descricao": "DEPARTAMENTO FICTICIO 009",
+      "estrutura": "001.007.001.002.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787842783",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 010",
+      "estrutura": "001.007.001.003",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787843220",
+      "descricao": "DEPARTAMENTO FICTICIO 011",
+      "estrutura": "001.007.001.003.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787844822",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 012",
+      "estrutura": "001.007.002",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787844985",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 013",
+      "estrutura": "001.007.002.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787845224",
+      "descricao": "DEPARTAMENTO FICTICIO 014",
+      "estrutura": "001.007.002.001.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787845449",
+      "descricao": "DEPARTAMENTO FICTICIO 015",
+      "estrutura": "001.007.002.001.002",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787845560",
+      "descricao": "DEPARTAMENTO FICTICIO 016",
+      "estrutura": "001.007.002.001.003",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787846244",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 017",
+      "estrutura": "001.007.002.002",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787846363",
+      "descricao": "DEPARTAMENTO FICTICIO 018",
+      "estrutura": "001.007.002.002.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787846471",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 019",
+      "estrutura": "001.007.002.003",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787847450",
+      "descricao": "DEPARTAMENTO FICTICIO 020",
+      "estrutura": "001.007.002.003.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787848139",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 021",
+      "estrutura": "001.007.003",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787848288",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 022",
+      "estrutura": "001.007.003.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787848581",
+      "descricao": "DEPARTAMENTO FICTICIO 023",
+      "estrutura": "001.007.003.001.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787849108",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 024",
+      "estrutura": "001.007.003.002",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787850599",
+      "descricao": "DEPARTAMENTO FICTICIO 025",
+      "estrutura": "001.007.003.002.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787850868",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 026",
+      "estrutura": "001.007.003.003",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787851154",
+      "descricao": "DEPARTAMENTO FICTICIO 027",
+      "estrutura": "001.007.003.003.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787851542",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 028",
+      "estrutura": "001.008",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787851838",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 029",
+      "estrutura": "001.008.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787854621",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 030",
+      "estrutura": "001.008.001.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787854963",
+      "descricao": "DEPARTAMENTO FICTICIO 031",
+      "estrutura": "001.008.001.001.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787855470",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 032",
+      "estrutura": "001.008.001.002",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787856008",
+      "descricao": "DEPARTAMENTO FICTICIO 033",
+      "estrutura": "001.008.001.002.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787856485",
+      "descricao": "DEPARTAMENTO FICTICIO 034",
+      "estrutura": "001.008.001.002.002",
+      "inativo": "S"
+    },
+    {
+      "codigo": "2787857965",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 035",
+      "estrutura": "001.008.001.003",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787858088",
+      "descricao": "DEPARTAMENTO FICTICIO 036",
+      "estrutura": "001.008.001.003.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787858389",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 037",
+      "estrutura": "001.008.001.004",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787858554",
+      "descricao": "DEPARTAMENTO FICTICIO 038",
+      "estrutura": "001.008.001.004.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787889875",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 039",
+      "estrutura": "001.009",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787889987",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 040",
+      "estrutura": "001.009.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787890172",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 041",
+      "estrutura": "001.009.001.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787890459",
+      "descricao": "DEPARTAMENTO FICTICIO 042",
+      "estrutura": "001.009.001.001.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787890641",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 043",
+      "estrutura": "001.009.001.002",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787890853",
+      "descricao": "DEPARTAMENTO FICTICIO 044",
+      "estrutura": "001.009.001.002.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787891007",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 045",
+      "estrutura": "001.009.001.003",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787891137",
+      "descricao": "DEPARTAMENTO FICTICIO 046",
+      "estrutura": "001.009.001.003.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787891974",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 047",
+      "estrutura": "001.010",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787895252",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 048",
+      "estrutura": "001.010.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787895369",
+      "descricao": "z[Sintético] DEPARTAMENTO FICTICIO 049",
+      "estrutura": "001.010.001.001",
+      "inativo": "N"
+    },
+    {
+      "codigo": "2787895612",
+      "descricao": "DEPARTAMENTO FICTICIO 050",
+      "estrutura": "001.010.001.001.001",
+      "inativo": "N"
+    }
+  ]
+}

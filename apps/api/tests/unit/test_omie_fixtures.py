@@ -396,3 +396,362 @@ class TestIncluirLancCCRealFixture:
             f"{entry.c_natureza!r}. Se for 'D' com valor absoluto, "
             "`signed_amount` continua correto; registre a nova evidência aqui."
         )
+
+
+# ----------------------------------------------------------------------
+# Contas a Pagar — captura real de 13/10/2026 (task 86e3n70q0)
+# ----------------------------------------------------------------------
+#
+# Diferente das classes acima, estes testes FALHAM se a fixture sumir: ela já foi
+# capturada e commitada (conta da Hologram, cartão Inter, R$ 0,01), então ausência
+# é regressão do repositório, não "captura ainda pendente".
+
+from app.integrations.omie.schemas import (  # noqa: E402 - bloco próprio da captura
+    CancelarPagamentoRequest,
+    CancelarPagamentoResponse,
+    ClienteChaveRequest,
+    ClienteOmie,
+    ClienteStatusResponse,
+    ContaPagarChaveRequest,
+    ContaPagarStatusResponse,
+    DepartamentoOmie,
+    ExcluirLancCCRequest,
+    ExcluirLancCCResponse,
+    IncluirClienteRequest,
+    IncluirContaPagarRequest,
+    LancarPagamentoRequest,
+    LancarPagamentoResponse,
+    ListarClientesPorCnpjRequest,
+    OmieWriteParam,
+)
+
+_PAYABLES_CAPTURE = "captura real de 13/10/2026 (scripts/capture_omie_payables.py)"
+
+
+def _require(name: str) -> dict[str, Any]:
+    loaded = _load_json(name)
+    assert loaded is not None, f"fixture {name}.json ausente — era da {_PAYABLES_CAPTURE}"
+    return loaded
+
+
+def _require_list(name: str) -> list[dict[str, Any]]:
+    path = _FIXTURES_DIR / f"{name}.json"
+    assert path.exists(), f"fixture {name}.json ausente — era da {_PAYABLES_CAPTURE}"
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    assert isinstance(loaded, list)
+    return loaded
+
+
+def _refusal_message(resp: dict[str, Any]) -> str:
+    message = resp.get("_adl_capture_exception_message")
+    assert isinstance(message, str), "fixture esperada como RECUSA não tem a faultstring"
+    return message
+
+
+def _assert_request_matches_dto(name: str, call_name: str, dto: type[OmieWriteParam]) -> dict:
+    req = _require(f"{name}.request")
+    assert req.get("call_name") == call_name
+    param = req["param"]
+    assert isinstance(param, dict)
+    unknown = set(_flatten_param_keys(param)) - dto.omie_param_aliases()
+    assert not unknown, (
+        f"{name}: a chamada ACEITA enviou chaves que {dto.__name__} não declara "
+        f"({sorted(unknown)}) — DTO e chamada real divergiram."
+    )
+    return param
+
+
+def _extrato_lancamentos(name: str) -> list[LancamentoExtrato]:
+    resp = _require(f"{name}.response")
+    return [
+        LancamentoExtrato.model_validate(raw)
+        for raw in resp["listaMovimentos"]
+        if not is_extrato_summary_row(raw)
+    ]
+
+
+@pytest.mark.unit
+class TestContasAPagarRealFixtures:
+    """Gate anti-invenção das chamadas do Contas a Pagar, contra as respostas REAIS."""
+
+    # --- 1. departamentos -------------------------------------------------
+
+    def test_listar_departamentos_matches_schema(self) -> None:
+        req = _require("listar_departamentos.request")
+        assert req["call_name"] == "ListarDepartamentos"
+        resp = _require("listar_departamentos.response")
+        itens = resp["departamentos"]
+        assert isinstance(itens, list)
+        assert len(itens) == 50
+        assert {"pagina", "total_de_paginas", "registros", "total_de_registros"} <= set(resp)
+        for raw in itens:
+            DepartamentoOmie.model_validate(raw)
+
+    def test_listar_departamentos_nao_traz_nivel_totalizador(self) -> None:
+        """A doc promete `nivel_totalizador`; a resposta real não o traz em nenhum dos 50.
+
+        Sem ele, sintético e analítico só se distinguem pela convenção de nome do
+        cliente — por isso o departamento do rateio é sempre escolhido, nunca inferido.
+        """
+        itens = _require("listar_departamentos.response")["departamentos"]
+        assert all("nivel_totalizador" not in raw for raw in itens)
+        assert all("estrutura" in raw for raw in itens)
+
+    # --- 2. fornecedor por CNPJ --------------------------------------------
+
+    def test_listar_clientes_por_cnpj_existente(self) -> None:
+        param = _assert_request_matches_dto(
+            "listar_clientes_por_cnpj", "ListarClientes", ListarClientesPorCnpjRequest
+        )
+        resp = _require("listar_clientes_por_cnpj.response")
+        cadastros = resp["clientes_cadastro"]
+        assert resp["total_de_registros"] == 1
+        assert len(cadastros) == 1
+        cliente = ClienteOmie.model_validate(cadastros[0])
+        assert cliente.display_name
+        assert cadastros[0]["cnpj_cpf"] == param["clientesFiltro"]["cnpj_cpf"]
+
+    def test_listar_clientes_por_cnpj_inexistente_e_fault_5113(self) -> None:
+        """CNPJ sem cadastro NÃO é lista vazia: é fault `5113 - Não existem registros`."""
+        _assert_request_matches_dto(
+            "listar_clientes_por_cnpj_inexistente", "ListarClientes", ListarClientesPorCnpjRequest
+        )
+        message = _refusal_message(_require("listar_clientes_por_cnpj_inexistente.response"))
+        assert "5113" in message
+        assert "Não existem registros" in message
+        history = _require_list("listar_clientes_por_cnpj_inexistente.refusals")
+        assert len(history) == 1
+
+    # --- 3. fornecedor de teste --------------------------------------------
+
+    def test_incluir_cliente_matches_schema_and_needs_email(self) -> None:
+        param = _assert_request_matches_dto(
+            "incluir_cliente", "IncluirCliente", IncluirClienteRequest
+        )
+        assert param["email"], "o e-mail é obrigatório na prática (1040)"
+        resp = ClienteStatusResponse.model_validate(_require("incluir_cliente.response"))
+        assert resp.codigo_status == "0"
+        assert resp.codigo_cliente_integracao == param["codigo_cliente_integracao"]
+        # 1ª tentativa, SEM e-mail, foi recusada: a recusa é evidência e fica no histórico.
+        history = _require_list("incluir_cliente.refusals")
+        assert len(history) == 1
+        assert "email" not in history[0]["param"]
+        assert "1040" in history[0]["_adl_capture_exception_message"]
+
+    def test_incluir_cliente_is_idempotent_on_codigo_cliente_integracao(self) -> None:
+        first = ClienteStatusResponse.model_validate(_require("incluir_cliente.response"))
+        repeat = _require("incluir_cliente_repeat.response")
+        assert "_adl_capture_exception_type" not in repeat, "o 2º POST não foi recusado"
+        second = ClienteStatusResponse.model_validate(repeat)
+        assert second.codigo_cliente_omie == first.codigo_cliente_omie
+        assert second.codigo_status == "0"
+
+    # --- 4. títulos ------------------------------------------------------------
+
+    def test_incluir_conta_pagar_matches_schema(self) -> None:
+        param = _assert_request_matches_dto(
+            "incluir_conta_pagar", "IncluirContaPagar", IncluirContaPagarRequest
+        )
+        assert param["valor_documento"] == 0.01
+        resp = ContaPagarStatusResponse.model_validate(_require("incluir_conta_pagar.response"))
+        assert resp.codigo_status == "0"
+        assert resp.codigo_lancamento_integracao == param["codigo_lancamento_integracao"]
+
+    def test_incluir_conta_pagar_is_idempotent_on_codigo_lancamento_integracao(self) -> None:
+        first = ContaPagarStatusResponse.model_validate(_require("incluir_conta_pagar.response"))
+        repeat = _require("incluir_conta_pagar_repeat.response")
+        assert "_adl_capture_exception_type" not in repeat
+        second = ContaPagarStatusResponse.model_validate(repeat)
+        assert second.codigo_lancamento_omie == first.codigo_lancamento_omie
+
+    def test_incluir_conta_pagar_duas_categorias_aceita_lista(self) -> None:
+        """Subtask 10: um título com DUAS categorias (R$ 0,02 = 0,01 + 0,01) é aceito."""
+        param = _assert_request_matches_dto(
+            "incluir_conta_pagar_duas_categorias", "IncluirContaPagar", IncluirContaPagarRequest
+        )
+        assert "codigo_categoria" not in param
+        assert len(param["categorias"]) == 2
+        assert all(
+            {"codigo_categoria", "valor", "percentual"} <= set(c) for c in param["categorias"]
+        )
+        resp = ContaPagarStatusResponse.model_validate(
+            _require("incluir_conta_pagar_duas_categorias.response")
+        )
+        assert resp.codigo_status == "0"
+
+    def test_incluir_conta_pagar_distribuicao_aceita_valor_e_percentual(self) -> None:
+        """Rateio por departamento: `distribuicao[{cCodDep, nValDep, nPerDep}]` aceito."""
+        param = _assert_request_matches_dto(
+            "incluir_conta_pagar_distribuicao", "IncluirContaPagar", IncluirContaPagarRequest
+        )
+        assert len(param["distribuicao"]) == 2
+        assert all({"cCodDep", "nValDep", "nPerDep"} <= set(d) for d in param["distribuicao"])
+        resp = ContaPagarStatusResponse.model_validate(
+            _require("incluir_conta_pagar_distribuicao.response")
+        )
+        assert resp.codigo_status == "0"
+
+    # --- 5. baixa e releituras --------------------------------------------------
+
+    def test_lancar_pagamento_matches_schema(self) -> None:
+        param = _assert_request_matches_dto(
+            "lancar_pagamento", "LancarPagamento", LancarPagamentoRequest
+        )
+        resp = LancarPagamentoResponse.model_validate(_require("lancar_pagamento.response"))
+        assert resp.codigo_status == "0"
+        assert resp.liquidado == "S"
+        assert resp.valor_baixado == Decimal(str(param["valor"]))
+        assert resp.codigo_lancamento == param["codigo_lancamento"]
+        assert resp.codigo_baixa_integracao == param["codigo_baixa_integracao"]
+
+    def test_lancar_pagamento_repeat_devolve_a_mesma_baixa(self) -> None:
+        first = LancarPagamentoResponse.model_validate(_require("lancar_pagamento.response"))
+        repeat = _require("lancar_pagamento_repeat.response")
+        assert "_adl_capture_exception_type" not in repeat
+        second = LancarPagamentoResponse.model_validate(repeat)
+        assert second.codigo_baixa == first.codigo_baixa, "o 2º envio criou OUTRA baixa"
+
+    def test_consultar_conta_pagar_apos_baixa(self) -> None:
+        _assert_request_matches_dto(
+            "consultar_conta_pagar", "ConsultarContaPagar", ContaPagarChaveRequest
+        )
+        raw = _require("consultar_conta_pagar.response")
+        titulo = TituloAPagarReceber.model_validate(raw)
+        assert titulo.status_titulo == "PAGO"
+        # Enviamos só `codigo_categoria`; a Omie devolve também a lista com 100%.
+        assert raw["categorias"] == [
+            {"codigo_categoria": raw["codigo_categoria"], "percentual": 100, "valor": 0.01}
+        ]
+        assert raw["codigo_lancamento_integracao"] == "HOSCAP1013-CP-A"
+
+    def test_listar_contas_pagar_apos_baixa_mostra_os_tres_titulos(self) -> None:
+        req = _require("listar_contas_pagar_apos_baixa.request")
+        assert req["call_name"] == "ListarContasPagar"
+        assert "filtrar_cliente" in req["param"]
+        resp = _require("listar_contas_pagar_apos_baixa.response")
+        titulos = resp["conta_pagar_cadastro"]
+        assert resp["total_de_registros"] == 3
+        assert len(titulos) == 3
+        for raw in titulos:
+            TituloAPagarReceber.model_validate(raw)
+        por_chave = {raw["codigo_lancamento_integracao"]: raw for raw in titulos}
+        assert por_chave["HOSCAP1013-CP-A"]["status_titulo"] == "PAGO"
+        assert por_chave["HOSCAP1013-CP-B"]["status_titulo"] == "A VENCER"
+        assert len(por_chave["HOSCAP1013-CP-B"]["categorias"]) == 2
+        dist = por_chave["HOSCAP1013-CP-C"]["distribuicao"]
+        assert len(dist) == 2
+        assert all({"cCodDep", "cDesDep", "nPerDep", "nValDep"} <= set(d) for d in dist)
+
+    def test_listar_extrato_baixa_mostra_a_baixa_como_pagamento(self) -> None:
+        """A baixa vira linha do extrato do cartão: natureza `P`, valor já negativo,
+        `cOrigem='Conta Paga'`, com ID PRÓPRIO (nem o do título, nem o da baixa) e
+        sem `cCodIntLanc`."""
+        baixa = LancarPagamentoResponse.model_validate(_require("lancar_pagamento.response"))
+        lancamentos = _extrato_lancamentos("listar_extrato_baixa")
+        assert len(lancamentos) == 1
+        linha = lancamentos[0]
+        assert linha.c_natureza == "P"
+        assert linha.signed_amount == Decimal("-0.01")
+        assert linha.n_cod_lancamento not in {baixa.codigo_lancamento, baixa.codigo_baixa}
+        assert linha.n_cod_lanc_relac == linha.n_cod_lancamento
+        assert linha.c_cod_int_lanc is None
+        raw = _require("listar_extrato_baixa.response")["listaMovimentos"]
+        assert any(m.get("cOrigem") == "Conta Paga" for m in raw)
+
+    # --- 7. crédito no IncluirLancCC (épico 86e2xweaf, item 2) -----------------
+
+    def test_incluir_lanc_cc_credito_via_categoria_de_receita_e_aceito(self) -> None:
+        param = _assert_request_matches_dto(
+            "incluir_lanc_cc_credito_receita", "IncluirLancCC", IncluirLancCCRequest
+        )
+        assert param["cabecalho"]["nValorLanc"] == 0.01
+        resp = IncluirLancCCResponse.model_validate(
+            _require("incluir_lanc_cc_credito_receita.response")
+        )
+        assert resp.c_cod_status == "0"
+
+    def test_incluir_lanc_cc_valor_negativo_e_recusado_106(self) -> None:
+        """`nValorLanc` negativo NÃO representa crédito: fault `106 - ... maior ou igual que zero`."""
+        req = _require("incluir_lanc_cc_credito_negativo.request")
+        assert req["param"]["cabecalho"]["nValorLanc"] == -0.01
+        message = _refusal_message(_require("incluir_lanc_cc_credito_negativo.response"))
+        assert "106" in message
+        assert "nValorLanc" in message
+        history = _require_list("incluir_lanc_cc_credito_negativo.refusals")
+        assert len(history) == 1
+
+    def test_listar_extrato_credito_mostra_natureza_r(self) -> None:
+        """Categoria de RECEITA + valor absoluto aterrissa como CRÉDITO (`R`, positivo)."""
+        criado = IncluirLancCCResponse.model_validate(
+            _require("incluir_lanc_cc_credito_receita.response")
+        )
+        lancamentos = {
+            e.n_cod_lancamento: e for e in _extrato_lancamentos("listar_extrato_credito")
+        }
+        credito = lancamentos[criado.n_cod_lanc]
+        assert credito.c_natureza == "R"
+        assert credito.signed_amount == Decimal("0.01")
+        raw = _require("listar_extrato_credito.response")["listaMovimentos"]
+        origem = next(m["cOrigem"] for m in raw if m.get("nCodLancamento") == criado.n_cod_lanc)
+        assert origem == "Crédito em Conta Corrente"
+
+    # --- 6. limpeza ----------------------------------------------------------------
+
+    def test_cancelar_pagamento_matches_schema(self) -> None:
+        param = _assert_request_matches_dto(
+            "cancelar_pagamento", "CancelarPagamento", CancelarPagamentoRequest
+        )
+        baixa = LancarPagamentoResponse.model_validate(_require("lancar_pagamento.response"))
+        assert param["codigo_baixa"] == baixa.codigo_baixa
+        resp = CancelarPagamentoResponse.model_validate(_require("cancelar_pagamento.response"))
+        assert resp.codigo_status == "0"
+        assert resp.codigo_baixa == baixa.codigo_baixa
+        # A Omie ecoa o `codigo_baixa_integracao` PREENCHIDO com espaços (string20).
+        assert resp.codigo_baixa_integracao is not None
+        assert resp.codigo_baixa_integracao != resp.codigo_baixa_integracao.strip()
+        assert resp.codigo_baixa_integracao.strip() == baixa.codigo_baixa_integracao
+
+    @pytest.mark.parametrize(
+        ("criado", "excluido"),
+        [
+            ("incluir_conta_pagar", "excluir_conta_pagar"),
+            ("incluir_conta_pagar_duas_categorias", "excluir_conta_pagar_duas_categorias"),
+            ("incluir_conta_pagar_distribuicao", "excluir_conta_pagar_distribuicao"),
+        ],
+    )
+    def test_excluir_conta_pagar_matches_schema(self, criado: str, excluido: str) -> None:
+        titulo = ContaPagarStatusResponse.model_validate(_require(f"{criado}.response"))
+        param = _assert_request_matches_dto(excluido, "ExcluirContaPagar", ContaPagarChaveRequest)
+        assert param["codigo_lancamento_omie"] == titulo.codigo_lancamento_omie
+        resp = ContaPagarStatusResponse.model_validate(_require(f"{excluido}.response"))
+        assert resp.codigo_status == "0"
+        assert resp.codigo_lancamento_omie == titulo.codigo_lancamento_omie
+
+    def test_excluir_lanc_cc_matches_schema(self) -> None:
+        criado = IncluirLancCCResponse.model_validate(
+            _require("incluir_lanc_cc_credito_receita.response")
+        )
+        param = _assert_request_matches_dto(
+            "excluir_lanc_cc_credito_receita", "ExcluirLancCC", ExcluirLancCCRequest
+        )
+        assert param["nCodLanc"] == criado.n_cod_lanc
+        resp = ExcluirLancCCResponse.model_validate(
+            _require("excluir_lanc_cc_credito_receita.response")
+        )
+        assert resp.c_cod_status == "0"
+        assert resp.n_cod_lanc == criado.n_cod_lanc
+
+    def test_excluir_cliente_recusado_por_dependencia_21(self) -> None:
+        """Fornecedor que já teve título NÃO sai pela API: `21 - ... existem outras
+        informações que dependem deste registro` — ficou para apagar à mão."""
+        _assert_request_matches_dto("excluir_cliente", "ExcluirCliente", ClienteChaveRequest)
+        message = _refusal_message(_require("excluir_cliente.response"))
+        assert message.startswith("5xx permanente em ExcluirCliente")
+        assert "21 - " in message
+        history = _require_list("excluir_cliente.refusals")
+        assert len(history) == 1
+
+    def test_listar_extrato_apos_limpeza_so_tem_linhas_de_saldo(self) -> None:
+        resp = _require("listar_extrato_apos_limpeza.response")
+        assert all(is_extrato_summary_row(raw) for raw in resp["listaMovimentos"])
+        assert _extrato_lancamentos("listar_extrato_apos_limpeza") == []

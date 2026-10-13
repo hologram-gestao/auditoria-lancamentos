@@ -1,0 +1,10 @@
+{
+  "codigo_lancamento": 3105843596,
+  "codigo_lancamento_integracao": "HOSCAP1013-CP-A",
+  "codigo_baixa": 3105843608,
+  "codigo_baixa_integracao": "HOSCAP1013-BX-A",
+  "liquidado": "S",
+  "valor_baixado": 0.01,
+  "codigo_status": "0",
+  "descricao_status": "Baixa executada com sucesso!"
+}

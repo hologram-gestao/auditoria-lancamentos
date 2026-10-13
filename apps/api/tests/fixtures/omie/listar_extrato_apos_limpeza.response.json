@@ -1,0 +1,40 @@
+{
+  "nCodCC": 2625046958,
+  "cCodIntCC": "",
+  "nCodAgencia": "",
+  "nCodBanco": "986",
+  "nNumConta": "",
+  "cDescricao": "Banco Inter - Cartão de Crédito",
+  "cCodTipo": "CR",
+  "cDesTipo": "Cartão de Crédito",
+  "cFluxoCaixa": "S",
+  "cResumoExecutivo": "S",
+  "dPeriodoInicial": "13/10/2026",
+  "dPeriodoFinal": "13/10/2026",
+  "nSaldoAnterior": -3953.53,
+  "nSaldoAnteriorPrevisto": -5890.46,
+  "nSaldoAtual": -3953.53,
+  "nSaldoAtualPrevisto": -5890.46,
+  "nSaldoConciliado": 20117.69,
+  "nSaldoProvisorio": -3953.53,
+  "nLimiteCreditoTotal": 0,
+  "nSaldoDisponivel": -3953.53,
+  "listaMovimentos": [
+    {
+      "cDesCliente": "SALDO ANTERIOR",
+      "dDataLancamento": "12/10/2026",
+      "nCodLancamento": 1,
+      "nSaldo": -3953.53,
+      "nSaldoPrev": -5890.46,
+      "nValorDocumento": 0
+    },
+    {
+      "cDesCliente": "SALDO",
+      "dDataLancamento": "13/10/2026",
+      "nCodLancamento": 2,
+      "nSaldo": -3953.53,
+      "nSaldoPrev": -5890.46,
+      "nValorDocumento": 0
+    }
+  ]
+}
