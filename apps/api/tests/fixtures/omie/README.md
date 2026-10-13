@@ -169,6 +169,77 @@ extrato relido — por isso ele faz parte da captura.
    criado um segundo lançamento, exclua **os dois**. O ADL não implementa
    `ExcluirLancCC` (fora do escopo da Sprint 7) — a limpeza é manual.
 
+---
+
+# Captura do CONTAS A PAGAR (task 86e3n70q0, 13/10/2026)
+
+Mesma receita da S-1, agora para o processo "provisão + baixa" do lançamento de
+compra de cartão (86e3b6n78): `scripts/capture_omie_payables.py`, um passo por
+chamada, contra a conta REAL da Hologram (cartão Inter, `nCodCC` 2625046958,
+R$ 0,01 e R$ 0,02, textos `TESTE HOLOGRAM OS CAPTURA`). Toda recusa fica em
+`<nome>.response.json` (envelope `_adl_capture_*`) e acumula em
+`<nome>.refusals.json` com o `param` recusado: é ela que escolheu o payload
+seguinte, nunca a doc. O gate é `TestContasAPagarRealFixtures` em
+`tests/unit/test_omie_fixtures.py` (um teste por fixture; **falha** se a fixture
+sumir, porque ela já foi capturada).
+
+| Fixture                                                   | O que prova                                                                                                                                     |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `listar_departamentos.*`                                  | envelope `departamentos` paginado; a resposta real NÃO traz `nivel_totalizador` (só `codigo`, `descricao`, `estrutura`, `inativo`)             |
+| `listar_clientes_por_cnpj.*`                              | `ListarClientes` + `clientesFiltro.cnpj_cpf` devolve o cadastro completo em `clientes_cadastro` (`ConsultarCliente` não busca por CNPJ)         |
+| `listar_clientes_por_cnpj_inexistente.*` + `.refusals`    | CNPJ sem cadastro é fault `5113 - Não existem registros para a página [1]!`, não lista vazia                                                    |
+| `incluir_cliente.*`, `_repeat`, `.refusals`               | sem `email` → `1040`; aceito com `codigo_cliente_integracao` + `razao_social` + `cnpj_cpf` + `email`; 2º POST devolve o MESMO `codigo_cliente_omie` |
+| `incluir_conta_pagar.*`, `_repeat`                        | título simples aceito de primeira; 2º POST do mesmo `codigo_lancamento_integracao` devolve o MESMO `codigo_lancamento_omie`                      |
+| `incluir_conta_pagar_duas_categorias.*`                   | `categorias[{codigo_categoria, valor, percentual}]` com DUAS categorias aceito (subtask 10), sem `codigo_categoria` no topo                     |
+| `incluir_conta_pagar_distribuicao.*`                      | `distribuicao[{cCodDep, nValDep, nPerDep}]` em dois departamentos aceito, valor E percentual juntos                                             |
+| `lancar_pagamento.*`, `_repeat`                           | a baixa é `LancarPagamento`; resposta traz `codigo_baixa`, `liquidado='S'`, `valor_baixado`; 2º envio devolve a MESMA baixa                      |
+| `consultar_conta_pagar.*`                                 | título relido: `status_titulo='PAGO'`, `categorias` preenchida com 100% mesmo quando só `codigo_categoria` foi enviado                          |
+| `listar_contas_pagar_apos_baixa.*`                        | `filtrar_cliente` recorta os 3 títulos; `A VENCER` (com espaço) nos abertos; `distribuicao` volta com `cDesDep`                                 |
+| `listar_extrato_baixa.*`                                  | a baixa vira linha do extrato do cartão: natureza `P`, `-0.01`, `cOrigem='Conta Paga'`, `nCodLancamento` PRÓPRIO, sem `cCodIntLanc`              |
+| `incluir_lanc_cc_credito_receita.*`                       | CRÉDITO no `IncluirLancCC` = categoria de RECEITA com valor absoluto (aceito)                                                                    |
+| `incluir_lanc_cc_credito_negativo.*` + `.refusals`        | `nValorLanc` negativo é recusado: `106 - O preenchimento da tag [nValorLanc] deve ser maior ou igual que zero!`                                  |
+| `listar_extrato_credito.*`                                | o crédito aparece como natureza `R`, `+0.01`, `cOrigem='Crédito em Conta Corrente'` (o extrato levou ~20 s para refletir)                       |
+| `cancelar_pagamento.*`                                    | `CancelarPagamento` por `codigo_baixa`; o eco de `codigo_baixa_integracao` vem preenchido com espaços até 20                                     |
+| `excluir_conta_pagar*.*`, `excluir_lanc_cc_credito_receita.*` | exclusões por id, status `0`                                                                                                                 |
+| `excluir_cliente.*` + `.refusals`                         | fornecedor que já teve título NÃO sai pela API: `21 - ... existem outras informações que dependem deste registro` (apagar à mão)                 |
+| `listar_extrato_apos_limpeza.*`                           | depois da limpeza o extrato do dia só tem as linhas de saldo                                                                                    |
+
+## Como capturar (operador com credencial autorizada)
+
+```bash
+cd apps/api
+export OMIE_CAPTURE_APP_KEY=... OMIE_CAPTURE_APP_SECRET=...
+export OMIE_CAPTURE_CONTA_ID=2625046958          # cartão: título, baixa e crédito
+export OMIE_CAPTURE_COD_CATEG=2.01.90 OMIE_CAPTURE_COD_CATEG_2=2.01.01
+export OMIE_CAPTURE_COD_CATEG_RECEITA=1.02.98    # só o passo `estorno`
+export OMIE_CAPTURE_DEP_1=... OMIE_CAPTURE_DEP_2=...   # ANALÍTICOS (a API não distingue)
+export OMIE_CAPTURE_CNPJ_EXISTENTE=...            # opcional; default: 1º de ListarClientes
+export OMIE_CAPTURE_CNPJ_TESTE=99.999.001/0001-59 # fictício, dígitos válidos
+export OMIE_CAPTURE_KEY_PREFIX=HOSCAP1013         # prefixo das chaves de integração
+uv run python -m scripts.capture_omie_payables --step listar_departamentos --step buscar_fornecedor_por_cnpj
+OMIE_CAPTURE_ALLOW_WRITE=1 uv run python -m scripts.capture_omie_payables --step incluir_cliente   # e assim por diante
+OMIE_CAPTURE_ALLOW_WRITE=1 OMIE_CAPTURE_ESTORNO=1 uv run python -m scripts.capture_omie_payables --step estorno --step readback_credito
+OMIE_CAPTURE_ALLOW_WRITE=1 uv run python -m scripts.capture_omie_payables --step cleanup --step readback_limpeza
+```
+
+Ordem: `listar_departamentos` → `buscar_fornecedor_por_cnpj` → `incluir_cliente` →
+`incluir_conta_pagar` → `incluir_conta_pagar_duas_categorias` →
+`incluir_conta_pagar_distribuicao` → `lancar_pagamento` → `readback` → `estorno` →
+`readback_credito` → `cleanup` → `readback_limpeza`. A limpeza lê os ids das próprias
+fixtures; **não a rode duas vezes** (a segunda recusa sobrescreveria as respostas de
+sucesso). Antes de reler o extrato o script espera 25 s: o lançamento recém-criado
+não aparece na hora.
+
+## Antes de commitar — sanitização (Contas a Pagar)
+
+Mesma regra: VALORES de PII trocados, NOMES DE CAMPO e estrutura intactos. Na captura
+de 13/10/2026 foram anonimizados o cadastro do fornecedor real devolvido pela busca por
+CNPJ (nome, CNPJ, e-mail, telefone, endereço, dados bancários, tags), o CNPJ do
+request correspondente, as descrições dos departamentos (carregam nome de cliente) e
+o `cDesDep` ecoado na listagem de títulos. Ids (`codigo_cliente_omie`,
+`codigo_lancamento_omie`, `codigo_baixa`, `nCodLancamento`) e saldos ficam, como nas
+fixtures anteriores. O fornecedor de TESTE já nasce fictício.
+
 ## Nunca
 
 - **Não fabrique fixture.** Um JSON escrito à mão com os nomes que assumimos

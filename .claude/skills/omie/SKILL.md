@@ -23,9 +23,10 @@ grep não bater, o código andou: releia o arquivo, não confie na linha.
 ## Passo 1 — Fonte da verdade é a resposta REAL, não a doc
 
 Todo nome de endpoint, envelope e campo que entra no código vem de uma fixture
-capturada da API real em `apps/api/tests/fixtures/omie/` (17 arquivos: 6 leituras com
-`request`+`response`, 4 da escrita, README). O gate `tests/unit/test_omie_fixtures.py`
-roda os DTOs contra elas e FALHA na divergência — 14 testes, e hoje nenhum skipa.
+capturada da API real em `apps/api/tests/fixtures/omie/` (66 arquivos: as 6 leituras e a
+escrita da S-1 mais as 20 chamadas do Contas a Pagar de 13/10/2026, com `request`,
+`response`, `_repeat` e `.refusals`; README). O gate `tests/unit/test_omie_fixtures.py`
+roda os DTOs contra elas e FALHA na divergência — 39 testes, e hoje nenhum skipa.
 
 A doc interna (`Docs/documentation/6. Integração com API do Omie-20260424133624.md`) e
 a doc oficial (`https://app.omie.com.br/api/v1/<module>/<endpoint>/`) servem para achar
@@ -44,11 +45,12 @@ Envelopes reais (chave do array): `listaMovimentos` (ListarExtrato),
 `categoria_cadastro`. Os paginados trazem `pagina`/`total_de_paginas`/`registros`/
 `total_de_registros`; o extrato NÃO traz nenhum desses.
 
-**O que ainda NÃO tem fixture:** `ConsultarCliente` (`ClienteOmie`, `schemas.py:436` —
-campos da doc oficial, consumo fail-soft) e o request de títulos COM filtros: a captura
-de `ListarContasPagar/Receber` foi sem `filtrar_por_status`/`filtrar_conta_corrente`
-(só `PAGO`/`RECEBIDO` na fixture) — os nomes dos filtros foram verificados por incidente
-de produção, não por fixture. Campo sem fixture → passo 2, nunca "por analogia": a Omie
+**O que ainda NÃO tem fixture:** `ConsultarCliente` por código (`ClienteOmie` —
+campos da doc oficial, consumo fail-soft; a fixture `listar_clientes_por_cnpj` prova o
+MESMO shape de cadastro pela listagem) e o request de títulos COM
+`filtrar_por_status`/`filtrar_conta_corrente` (só `PAGO`/`RECEBIDO` na fixture; os nomes
+dos filtros foram verificados por incidente de produção, não por fixture;
+`filtrar_cliente` tem fixture desde 13/10/2026). Campo sem fixture → passo 2, nunca "por analogia": a Omie
 chama o mesmo dado de `cCodCateg` na escrita, `codigo_categoria` nos títulos e `codigo`
 nas categorias.
 
@@ -220,13 +222,14 @@ grep -c '"razao_social"\|"nome_fornecedor"' apps/api/tests/fixtures/omie/listar_
 grep -n "DEFAULT_TTL_SECONDS\|UNRESOLVED_TTL_SECONDS" apps/api/app/integrations/omie/*_cache.py
 ```
 
-## Passo 8 — ESCRITA: existe UMA, e qualquer outra é pergunta, não código
+## Passo 8 — ESCRITA: existe UMA em produto, e qualquer outra é pergunta, não código
 
 O invariante "Omie read-only" acabou na Sprint 7 com **`IncluirLancCC`**
 (`financas/contacorrentelancamentos`) — lançamento de compras `sem_omie` da fatura de
-CARTÃO na própria conta do cartão. ⚠️ A spec desta skill (14/08) falava em
-`IncluirContaPagar`: não é usado e não está aprovado. Os 8 métodos que o ADL chama, e o
-único `Incluir*`:
+CARTÃO na própria conta do cartão. ⚠️ `IncluirContaPagar` e as chamadas irmãs do Contas
+a Pagar **têm contrato capturado desde 13/10/2026** (task 86e3n70q0, tabela abaixo) mas
+**ainda não são usadas por nenhum serviço**: o backend que as consome é o bloco B da
+86e3b6n78, com kill-switch próprio. Os 8 métodos que o ADL chama, e o único `Incluir*`:
 
 ```bash
 grep -rn 'call_name="' apps/api/app --include=*.py | grep -v "call_name=call_name"   # 8 linhas; só IncluirLancCC escreve
@@ -270,6 +273,43 @@ grep -n "OMIE_POSTING_ENABLED" apps/api/app/core/config.py apps/api/app/modules/
 grep -n "estorno_nao_verificado\|_require_credit_card\|inconclusive" apps/api/app/modules/reconciliations/omie_posting/service.py
 ```
 
+### O que a captura de 13/10/2026 verificou (Contas a Pagar, conta real da Hologram)
+
+Fixtures em `apps/api/tests/fixtures/omie/` (README, seção "Captura do CONTAS A PAGAR");
+DTOs mínimos em `schemas.py` (seção "Contas a Pagar"), base `OmieWriteParam`; script
+`scripts/capture_omie_payables.py`. Uma linha por chamada:
+
+- `ListarDepartamentos` (`geral/departamentos`): paginado, envelope `departamentos`
+  {`codigo`, `descricao`, `estrutura`, `inativo`}; **sem `nivel_totalizador`** (a doc
+  mente) — departamento do rateio é ESCOLHIDO, nunca inferido.
+- Busca de fornecedor por CNPJ = `ListarClientes` + `clientesFiltro.cnpj_cpf`
+  (`ConsultarCliente` só aceita código); inexistente é **fault `5113`**, não lista vazia.
+- `IncluirCliente`: `email` obrigatório na prática (`1040`); aceito com
+  `codigo_cliente_integracao`/`razao_social`/`nome_fantasia`/`cnpj_cpf`/`email`;
+  **idempotente** sobre `codigo_cliente_integracao` (2º POST = mesmo `codigo_cliente_omie`).
+- `IncluirContaPagar`: aceito de primeira com `codigo_lancamento_integracao`,
+  `codigo_cliente_fornecedor`, `data_emissao`/`data_vencimento`/`data_previsao`,
+  `valor_documento` (número), `codigo_categoria` OU `categorias[{codigo_categoria, valor,
+  percentual}]` (duas categorias aceitas — subtask 10), `id_conta_corrente`, `observacao`,
+  `distribuicao[{cCodDep, nValDep, nPerDep}]` (valor E percentual juntos aceitos);
+  **idempotente** sobre `codigo_lancamento_integracao`. Relido: `status_titulo` `PAGO` /
+  `A VENCER` (com espaço), `categorias` sempre preenchida, `distribuicao` com `cDesDep`.
+- Baixa = `LancarPagamento` {`codigo_lancamento`, `codigo_baixa_integracao`,
+  `codigo_conta_corrente`, `valor`, `data`, `observacao`} → `codigo_baixa`, `liquidado='S'`,
+  `valor_baixado`; 2º envio devolve a **mesma** baixa. No extrato do cartão ela é natureza
+  `P`, valor negativo, `cOrigem='Conta Paga'`, com `nCodLancamento` PRÓPRIO (≠ título, ≠
+  baixa) e sem `cCodIntLanc`. Desfazer = `CancelarPagamento` {`codigo_baixa`} (eco de
+  `codigo_baixa_integracao` com espaços até 20).
+- `ExcluirContaPagar` {`codigo_lancamento_omie`} e `ExcluirLancCC` {`nCodLanc`} saem com
+  status `0`; **`ExcluirCliente` de fornecedor que já teve título é recusado (`21`)**: o
+  fornecedor fica para apagar à mão.
+- **CRÉDITO no `IncluirLancCC`** (item 2 do épico 86e2xweaf): categoria de RECEITA + valor
+  absoluto aterrissa como natureza `R`, `cOrigem='Crédito em Conta Corrente'`;
+  `nValorLanc` negativo é recusado (`106`). O `estorno_nao_verificado` passa a ter a
+  evidência para ser destravado — decisão e código são de task própria.
+- O extrato **não reflete na hora** o lançamento recém-criado (1,5 s não bastou, 20 s
+  bastaram): readback de evidência espera antes de ler.
+
 ## Passo 9 — Como testar sem a Omie
 
 - **Unit do client:** `respx` sobre a URL canônica — `tests/unit/test_omie_client.py`
@@ -283,7 +323,7 @@ grep -n "estorno_nao_verificado\|_require_credit_card\|inconclusive" apps/api/ap
   assume NÃO conta.
 
 ```bash
-cd apps/api && uv run --extra dev pytest tests/unit/test_omie_client.py tests/unit/test_omie_fixtures.py -q --no-cov   # 54 passed em 28/09/2026
+cd apps/api && uv run --extra dev pytest tests/unit/test_omie_client.py tests/unit/test_omie_fixtures.py -q --no-cov   # 79 passed em 13/10/2026
 ```
 
 ## Pontos em aberto — não redescubra, feche com captura
