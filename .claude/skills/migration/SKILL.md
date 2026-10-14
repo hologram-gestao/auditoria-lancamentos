@@ -68,6 +68,11 @@ Verificado no código-fonte do Alembic 1.18.4 instalado (`.venv/.../alembic/`):
   `app/db/models/user.py:38,56`). Valor novo no enum não gera DDL — só precisa de
   migration se a largura ou um CHECK mudar. Tipos da casa: `sa.UUID`, `Numeric(14, 2)`,
   `DateTime(timezone=True)`, `String(n)`.
+- **Coluna que ORDENA texto declara a collation** (`COLLATE "C"` em
+  `client_accounting_accounts.sort_key`, `b2f7c9e41d06`): a collation do sistema
+  (`en_US.utf8` da glibc, a do Postgres em Debian) ignora pontuação e ordena `1.10` antes
+  de `1.1.2`; o Postgres alpine do CI compara por byte e NÃO mostra o defeito. Teste de
+  migration confere a collation da coluna, não só a ordem.
 - **Renomear coluna sai como DROP + ADD** (perda de dado). Escreva `op.alter_column(...,
 new_column_name=...)` à mão.
 
@@ -97,11 +102,13 @@ rename), não carona numa task alheia.
 
 ## Passo 3 — Downgrade de verdade, e o ciclo local ANTES do commit
 
-`downgrade()` com `pass` é proibido (hoje: 0 de 24). Quando o dado NÃO cabe na forma
+`downgrade()` com `pass` é proibido (hoje: 0 de 48). Quando o dado NÃO cabe na forma
 antiga, o downgrade ABORTA com a consulta que resolve, em vez de apagar:
 `_ABORT_IF_DUPLICATES` (`a1d7f36c9b52:60-80`, `RAISE EXCEPTION 'Downgrade bloqueado: …'`),
 travado por `test_downgrade_aborta_com_mensagem_acionavel_se_houver_duplicata`
-(`tests/integration/test_migrations.py:307`). Encolher largura de coluna deixa o aviso
+(`tests/integration/test_migrations.py:307`). O mesmo vale para memória de escrita
+externa: `d9f3b6a2e815` aborta enquanto houver intenção `provisao` gravada, porque
+derrubar `payable_id` faria o código anterior lançar a mesma compra de novo. Encolher largura de coluna deixa o aviso
 no próprio downgrade (`f4d1a7c93e20_fase1_situation_divergente_wrong_date.py:73-75`).
 
 O ciclo roda num Postgres DESCARTÁVEL — nunca no banco de dev: `downgrade` derruba

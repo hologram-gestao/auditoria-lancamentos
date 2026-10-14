@@ -100,6 +100,9 @@
  * ────────────────────────────────────────────────────────────────────────────
  */
 
+import { statSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import AxeBuilder from '@axe-core/playwright';
 import {
   expect,
@@ -10711,7 +10714,13 @@ test.describe('Landing pública (86e3fr9vz)', () => {
       .locator('#seguranca')
       .getByRole('link', { name: 'Baixar o manual (PDF)', exact: true });
     await expect(link).toHaveAttribute('download', '');
-    await expect(link).toHaveAccessibleDescription('PDF, 4 MB');
+    // O rótulo vem do TAMANHO do arquivo servido, pela MESMA conta do
+    // `content.test.ts`: um texto fixo aqui ficou para trás quando o manual
+    // 1.3 passou de 4 para 5 MB e derrubou o gate (PR #332).
+    const megabytes = Math.round(
+      statSync(resolve(__dirname, '../public/manual-hologram-os.pdf')).size / 1_000_000,
+    );
+    await expect(link).toHaveAccessibleDescription(`PDF, ${megabytes} MB`);
     const href = await link.getAttribute('href');
     expect(href).toBe('/manual-hologram-os.pdf');
     // Nova aba só com `rel=noopener`; hoje o link nem abre aba (baixa na mesma).
