@@ -56,10 +56,16 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { ApiError } from '@/lib/api/client';
-import { isCreditCardAccount, listReconciliations, type BankAccount } from '@/lib/api/clients';
+import {
+  isCreditCardAccount,
+  listReconciliations,
+  resolveSessionAccountType,
+  type BankAccount,
+  type SessionAccountType,
+} from '@/lib/api/clients';
 import { attachSessionFiles, createReconciliation } from '@/lib/api/reconciliations';
 import type { CardPostingDateMode } from '@/lib/contracts';
-import { formatBRDate, formatReferenceMonth } from '@/lib/format';
+import { formatBRDate, formatOmieAccountType, formatReferenceMonth } from '@/lib/format';
 import { isOriginError } from '@/lib/origin-state';
 import { cn } from '@/lib/utils';
 import {
@@ -153,7 +159,23 @@ function DrawerContent({
   const selectedAccount = sortedAccounts.find(
     (a) => a.omie_conta_id === Number(meta.omie_conta_id),
   );
-  const isCard = selectedAccount !== undefined && isCreditCardAccount(selectedAccount.account_type);
+  // O tipo da conciliação é a MESMA decisão do servidor (86e3qyu04): conta de
+  // código que a plataforma entende decide sozinha; código desconhecido (`AC`
+  // Administradora de Cartões, onde um cartão pode estar cadastrado) deixa o
+  // tipo que o parser identificou no arquivo decidir — quando as partes
+  // concordam entre si.
+  const parsedStatementTypes = new Set<SessionAccountType>(
+    pipeline.items.flatMap((it) =>
+      it.status === 'parsed' && it.result ? [it.result.statement.account_type] : [],
+    ),
+  );
+  const statementAccountType =
+    parsedStatementTypes.size === 1 ? [...parsedStatementTypes][0] : undefined;
+  const isCard =
+    selectedAccount !== undefined &&
+    resolveSessionAccountType(selectedAccount.account_type, statementAccountType) === 'credit_card';
+  const cardDecidedByFile =
+    isCard && selectedAccount !== undefined && !isCreditCardAccount(selectedAccount.account_type);
   // O vencimento que o parser leu (primeira parte que trouxe) vira a PROPOSTA do
   // campo, uma vez: depois que a pessoa mexeu nele, a extração não sobrescreve.
   const extractedDueDate = pipeline.items.find(
@@ -487,6 +509,22 @@ function DrawerContent({
                 <span>
                   Inclua somente arquivos da fatura do cartão. O pagamento da fatura aparece no
                   extrato da conta corrente — não inclua aqui.
+                </span>
+              </p>
+            )}
+
+            {cardDecidedByFile && selectedAccount !== undefined && (
+              <p
+                role="note"
+                data-testid="card-decided-by-file"
+                className="text-muted-foreground flex items-start gap-2 text-xs"
+              >
+                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span>
+                  No Omie esta conta está cadastrada como{' '}
+                  {formatOmieAccountType(selectedAccount.account_type)}, não como Cartão de Crédito.
+                  Como o arquivo é uma fatura de cartão, a conciliação é tratada como cartão: o
+                  cruzamento e o lançamento no Omie valem como em qualquer cartão.
                 </span>
               </p>
             )}
