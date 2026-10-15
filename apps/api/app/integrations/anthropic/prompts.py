@@ -71,7 +71,13 @@ fatura anterior" e afins (o crédito que quita o saldo anterior do cartão) \
 devem ser extraídas normalmente — não as omita (regra 4) — e marcadas com \
 `is_payment: true`. Elas são excluídas do checksum de saldos, que precisa \
 fechar no total da fatura. Para compras, encargos, juros e estornos, e para \
-QUALQUER linha de conta corrente ou aplicação, use `false` ou omita o campo.
+QUALQUER linha de conta corrente ou aplicação, use `false` ou omita o campo. \
+**O pagamento sai SOMENTE da lista de transações**, com a data que o \
+documento dá a ele (na própria linha ou no agrupamento por dia acima dela). O \
+"Pagamento recebido" / "Pagamentos" do bloco de RESUMO da fatura (ao lado de \
+"Fatura anterior", "Total de compras", "Total a pagar") é um totalizador \
+(regra 4), não uma transação: não o extraia. A data de emissão, fechamento ou \
+vencimento da fatura nunca é data de pagamento.
 
 Particularidades de CONTA DE APLICAÇÃO / INVESTIMENTO (quando `account_type` = `investment`):
 
@@ -114,6 +120,12 @@ inventado, nada filtrado.\
 # 86e3ff8xd); sem esta nota o modelo poderia tentar "completar" o período
 # declarado no preâmbulo com linhas que estão em outros blocos. A última frase
 # é a D4: um bloco pode não ter movimentação, e inventar é pior que vazio.
+# ⚠️ Esta nota NÃO fala do resumo da fatura de propósito (86e3qyu04): a versão
+# que dizia "o pagamento só sai da lista de transações, que pode estar em outro
+# bloco" fez o modelo devolver ZERO linhas em TODOS os blocos da fatura Nubank,
+# inclusive no bloco que tem a lista. A regra do resumo mora só na regra 12 do
+# system prompt, e sem exigir "data impressa ao lado da linha": no Nubank a data
+# é o cabeçalho do dia acima do grupo, e essa exigência também esvaziava blocos.
 PART_NOTE_TEMPLATE = """ \
 Este é o bloco {index} de {total} do MESMO documento, dividido só para \
 processamento: o cabeçalho se repete em todos os blocos ou aparece só no \
