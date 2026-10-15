@@ -225,6 +225,40 @@ export function isCreditCardAccount(accountType: string): boolean {
   return accountType.trim().toUpperCase() === 'CR';
 }
 
+/** Tipo de conta da SESSÃO de conciliação (o mesmo `Literal` do servidor). */
+export type SessionAccountType = 'checking' | 'credit_card' | 'investment';
+
+/**
+ * Códigos do Omie que a plataforma ENTENDE: para eles o tipo da sessão vem do
+ * Omie e o arquivo não opina. Espelho de `_MAPPED_OMIE_ACCOUNT_TYPES` em
+ * `reconciliations/service.py`.
+ */
+const MAPPED_OMIE_ACCOUNT_TYPES: Readonly<Record<string, SessionAccountType>> = {
+  CR: 'credit_card',
+  CA: 'investment',
+  CC: 'checking',
+};
+
+/**
+ * Tipo da sessão que o servidor vai gravar para a conta selecionada e o arquivo
+ * extraído. Espelho de `session_account_type_from_omie_tipo` (backend): código
+ * conhecido (`CR`, `CA`, `CC`) decide sozinho; código desconhecido (`AC`
+ * Administradora de Cartões e os outros da doc da Omie, ou conta fora do cache)
+ * deixa o tipo identificado no ARQUIVO decidir; sem arquivo, `checking`.
+ *
+ * 86e3qyu04: o cartão Nubank cadastrado no Omie como `AC` recebia a fatura e a
+ * gaveta não mostrava o bloco "Fatura do cartão" — a mesma decisão do servidor
+ * tem de valer na tela, senão a gaveta e a revisão discordam sobre a conciliação.
+ */
+export function resolveSessionAccountType(
+  omieAccountType: string | undefined,
+  statementAccountType: SessionAccountType | undefined,
+): SessionAccountType {
+  const mapped = MAPPED_OMIE_ACCOUNT_TYPES[(omieAccountType ?? '').trim().toUpperCase()];
+  if (mapped !== undefined) return mapped;
+  return statementAccountType ?? 'checking';
+}
+
 /**
  * Detalhe do cliente + contas do cache L1 (contrato: `ClientDetailResponse`).
  *

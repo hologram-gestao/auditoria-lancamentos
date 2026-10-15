@@ -51,3 +51,24 @@ def test_invoice_due_date_esta_na_tool_no_prompt_e_no_schema() -> None:
     assert "`invoice_due_date`" in SYSTEM_PROMPT
     assert "Nunca invente" in SYSTEM_PROMPT
     assert ExtractedStatement.model_fields["invoice_due_date"].is_required() is False
+
+
+def test_pagamento_do_resumo_da_fatura_nao_e_transacao_no_prompt_na_nota_e_na_tool() -> None:
+    """86e3qyu04 — a fatura Nubank da DM Construções (15/10/2026) saiu com o
+    pagamento DUAS vezes: a linha da lista de transações e o "Pagamento recebido"
+    do bloco RESUMO (em outro bloco de páginas, com a data de emissão inventada).
+    O checksum do cartão exclui `is_payment`, então nada acusou. A regra 12 e a
+    descrição da tool passam a dizer que o pagamento só sai da lista de
+    transações, com a data impressa nele. A NOTA DE BLOCO fica de fora de
+    propósito: a versão que a mencionava fez o modelo devolver zero linhas em
+    todos os blocos (5 de 6 rodadas reais), e este teste trava a ausência."""
+    from app.integrations.anthropic.prompts import PART_NOTE_TEMPLATE
+
+    assert "SOMENTE da lista de transações" in SYSTEM_PROMPT
+    assert "RESUMO da fatura" in SYSTEM_PROMPT
+    assert "nunca é data de pagamento" in SYSTEM_PROMPT
+    assert "resumo" not in PART_NOTE_TEMPLATE.lower()
+    assert "outro bloco" not in PART_NOTE_TEMPLATE
+    schema = EXTRACT_MOVEMENTS_TOOL["input_schema"]
+    prop = schema["properties"]["transactions"]["items"]["properties"]["is_payment"]
+    assert "RESUMO da fatura" in prop["description"]

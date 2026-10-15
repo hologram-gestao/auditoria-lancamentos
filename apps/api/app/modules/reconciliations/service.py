@@ -7,6 +7,7 @@ descrições) e leitura do status para o polling.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -52,6 +53,7 @@ from app.modules.reconciliations.repository import ReconciliationRepository
 from app.modules.reconciliations.schemas import (
     CreateReconciliationRequest,
     ReconciliationFileInput,
+    ReconciliationStatementInput,
     SessionAuthor,
     SessionDetailPayload,
     SessionFileItem,
@@ -67,7 +69,23 @@ _DUPLICATE_FILE_USER_MSG = (
 )
 
 
-def session_account_type_from_omie_tipo(omie_tipo: str | None) -> str:
+#: Códigos de `tipo_conta_corrente` que a plataforma ENTENDE: para eles o tipo
+#: da sessão vem do Omie e o arquivo não opina. A doc da Omie declara 13
+#: códigos; os outros 10 (`AC` Administradora de Cartões, `AD`, `CE`, `CG`,
+#: `CN`, `CP`, `CV`, `CX`, `MT`, `PG`) não têm regra própria aqui.
+_MAPPED_OMIE_ACCOUNT_TYPES: frozenset[str] = frozenset(
+    {
+        OmieAccountType.CREDIT_CARD.value,  # "CR"
+        OmieAccountType.INVESTMENT.value,  # "CA"
+        OmieAccountType.CHECKING.value,  # "CC"
+    }
+)
+
+
+def session_account_type_from_omie_tipo(
+    omie_tipo: str | None,
+    statement_account_type: str | None = None,
+) -> str:
     """Mapeia o `tipo` Omie da conta selecionada → `account_type` da sessão.
 
     Regra:
@@ -77,7 +95,16 @@ def session_account_type_from_omie_tipo(omie_tipo: str | None) -> str:
           27/06): a aplicação inverte entrada/saída vs conta corrente e o
           resgate precisa do valor líquido — a qualificação e a extração
           ramificam nisso.
-        - Qualquer outro tipo — incluindo `None` (conta não cacheada) → `checking`.
+        - `CC` (Conta Corrente) → `checking`.
+        - Qualquer outro código, incluindo `None` (conta não cacheada): o tipo
+          que o parser identificou no ARQUIVO (`statement_account_type`), e
+          `checking` quando não há arquivo que diga. É o caso 86e3qyu04 (DM
+          Construções, 15/10/2026): o cartão Nubank cadastrado no Omie como
+          `AC` (Administradora de Cartões) recebia a fatura, a sessão nascia
+          `checking` em silêncio e "Lançar no Omie" sumia da revisão. Para um
+          código que a plataforma não entende, o Omie não traz informação; a
+          fatura identificada pelo parser (com o checksum fechado no total)
+          traz.
 
     ⚠️ NUNCA mapear `CA` para cartão: era exatamente o bug M-1 (auditoria
     20/05/2026) — `CA` é investimento, não cartão.
@@ -86,7 +113,22 @@ def session_account_type_from_omie_tipo(omie_tipo: str | None) -> str:
         return SessionAccountType.CREDIT_CARD.value
     if omie_tipo == OmieAccountType.INVESTMENT.value:  # "CA"
         return SessionAccountType.INVESTMENT.value
+    if omie_tipo == OmieAccountType.CHECKING.value:  # "CC"
+        return SessionAccountType.CHECKING.value
+    if statement_account_type in {member.value for member in SessionAccountType}:
+        return str(statement_account_type)
     return SessionAccountType.CHECKING.value
+
+
+def statement_account_type_of(statements: Sequence[ReconciliationStatementInput]) -> str | None:
+    """O tipo de conta que o parser identificou nas partes, quando é UM só.
+
+    Partes que discordam entre si (uma fatura e um extrato na mesma conciliação)
+    não elegem tipo nenhum: devolve `None`, e o mapeamento cai no `checking`
+    de sempre para conta de código desconhecido.
+    """
+    types = {s.account_type for s in statements}
+    return next(iter(types)) if len(types) == 1 else None
 
 
 #: Prefixo do rótulo que o usuário DO CLIENTE vê quando o autor é da equipe que
@@ -353,14 +395,24 @@ class ReconciliationService:
         period_start = min(s.period_start for s in statements)
         period_end = max(s.period_end for s in statements)
 
-        # account_type vem do `tipo` Omie da conta SELECIONADA (cache L1),
-        # não do palpite da IA no statement (CLAUDE.md §3.8 — não confiar no
-        # client). Conta não cacheada → None → default 'checking'.
+        # account_type vem do `tipo` Omie da conta SELECIONADA (cache L1) quando
+        # é um código que a plataforma entende (CR/CA/CC). Código desconhecido
+        # (ou conta não cacheada) deixa o tipo identificado no ARQUIVO decidir
+        # (86e3qyu04): o cliente não escolhe o tipo, o parser identificou.
         omie_tipo = await self._repo.get_cached_account_type(
             client_id=request.client_id,
             omie_conta_id=request.omie_conta_id,
         )
-        account_type = session_account_type_from_omie_tipo(omie_tipo)
+        statement_account_type = statement_account_type_of(statements)
+        account_type = session_account_type_from_omie_tipo(omie_tipo, statement_account_type)
+        if omie_tipo not in _MAPPED_OMIE_ACCOUNT_TYPES:
+            logger.info(
+                "reconciliation_session_type_from_statement",
+                client_id=str(request.client_id),
+                omie_tipo=omie_tipo,
+                statement_account_type=statement_account_type,
+                account_type=account_type,
+            )
         # 86e3n70p0 — antes de qualquer escrita: o 422 do vencimento não deixa
         # sessão nem arquivo para trás.
         card_posting_date_mode, invoice_due_date = resolve_card_posting(

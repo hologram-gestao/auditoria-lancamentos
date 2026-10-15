@@ -55,6 +55,9 @@ describe('formatOmieAccountType', () => {
   it('devolve o código cru em tipo desconhecido (não quebra a UI)', () => {
     expect(formatOmieAccountType('ZZ')).toBe('ZZ');
   });
+  it('rotula AC como Administradora de Cartões (86e3qyu04)', () => {
+    expect(formatOmieAccountType('AC')).toBe('Administradora de Cartões');
+  });
 });
 
 describe('formatSyncedAt', () => {
