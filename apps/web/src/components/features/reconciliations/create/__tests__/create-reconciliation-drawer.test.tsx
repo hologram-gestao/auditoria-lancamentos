@@ -527,6 +527,56 @@ describe('Gaveta — fatura do cartão (86e3n70p0)', () => {
     expect(payload).not.toHaveProperty('invoice_due_date');
   });
 
+  it('conta de código desconhecido (AC) com FATURA: bloco da fatura, aviso e modo no payload (86e3qyu04)', async () => {
+    const user = userEvent.setup();
+    renderDrawer({
+      clientMode: 'purchase_date',
+      accounts: [{ ...ACCOUNTS[0]!, name: 'Cartão de Crédito - Nubank', account_type: 'AC' }],
+    });
+    await user.click(screen.getByRole('combobox', { name: 'Conta bancária' }));
+    await user.click(screen.getByRole('option', { name: /Nubank/ }));
+    await user.type(screen.getByLabelText('Mês de referência'), '2026-09');
+    await user.click(screen.getByRole('button', { name: /Avançar/ }));
+    // Antes do arquivo a gaveta não sabe que é cartão: nada de fatura.
+    expect(screen.queryByText('Fatura do cartão')).toBeNull();
+    await addFile(user, pdf('fatura-nubank.pdf'));
+
+    expect(await screen.findByText('Fatura do cartão')).toBeVisible();
+    expect(screen.getByTestId('card-decided-by-file')).toHaveTextContent(
+      /cadastrada como Administradora de Cartões, não como Cartão de Crédito/,
+    );
+    await user.click(screen.getByRole('button', { name: 'Confirmar (1)' }));
+    await waitFor(() => expect(createReconciliationMock).toHaveBeenCalledTimes(1));
+    const payload = createReconciliationMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(payload.card_posting_date_mode).toBe('purchase_date');
+    await assertNoA11yViolations(screen.getByRole('dialog'));
+  });
+
+  it('conta de código desconhecido (AC) com EXTRATO: segue conta corrente', async () => {
+    const user = userEvent.setup();
+    parseStatementMock.mockResolvedValue({
+      statement: { ...statement(), account_type: 'checking' },
+      checksum: checksum(),
+      fileHash: 'server-hash',
+    });
+    renderDrawer({
+      clientMode: 'purchase_date',
+      accounts: [{ ...ACCOUNTS[0]!, name: 'Maquininha', account_type: 'AC' }],
+    });
+    await user.click(screen.getByRole('combobox', { name: 'Conta bancária' }));
+    await user.click(screen.getByRole('option', { name: /Maquininha/ }));
+    await user.type(screen.getByLabelText('Mês de referência'), '2026-09');
+    await user.click(screen.getByRole('button', { name: /Avançar/ }));
+    await addFile(user, pdf('extrato.pdf'));
+
+    await user.click(await screen.findByRole('button', { name: 'Confirmar (1)' }));
+    await waitFor(() => expect(createReconciliationMock).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('Fatura do cartão')).toBeNull();
+    expect(screen.queryByTestId('card-decided-by-file')).toBeNull();
+    const payload = createReconciliationMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty('card_posting_date_mode');
+  });
+
   it('não tem violações critical/serious com o bloco da fatura', async () => {
     const user = userEvent.setup();
     withDueDate('2026-07-10');

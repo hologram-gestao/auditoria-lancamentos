@@ -176,7 +176,12 @@ grep -n "_TITULO_STATUS_TO_CANONICAL" -A 3 apps/api/app/modules/reconciliations/
   (`omie_fetch.py:194-195`), receber = positivo.
 - **Tipo de conta** (`tipo_conta_corrente`): `CC` conta corrente, `CR` cartão, **`CA` =
   Conta Aplicação, NÃO cartão** (`OmieAccountType`, `schemas.py:58-60`; o PRD erra
-  isso).
+  isso). A doc declara 13 códigos; os outros 10 (`AC` Administradora de Cartões, `AD`,
+  `CE`, `CG`, `CN`, `CP`, `CV`, `CX`, `MT`, `PG`) a plataforma não entende, e aí o tipo
+  da SESSÃO vem do arquivo que o parser identificou (`session_account_type_from_omie_tipo`,
+  86e3qyu04: cliente cadastra cartão como `AC` e espera que a fatura seja tratada como
+  cartão). Nunca mapeie `AC` para cartão na mão: é conta de administradora, não de
+  cartão.
 - **Linhas de saldo:** `listaMovimentos` mistura linhas-resumo de saldo ("SALDO
   ANTERIOR", "SALDO"), uma por dia, em DUAS formas reais: no cartão vêm SEM
   `nCodLancamento` (32 das 112 linhas); na conta corrente vêm COM `nCodLancamento` — um

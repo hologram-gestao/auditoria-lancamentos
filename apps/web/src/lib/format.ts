@@ -117,7 +117,7 @@ export function toMonthInputValue(referenceMonth: string): string {
  * conta consomem daqui. ⚠️ `CA` = Conta Aplicação (investimento), NÃO cartão
  * (bug M-1, auditoria 20/05/2026); cartão é `CR`.
  *
- * A doc da Omie declara mais 11 tipos (`AC, AD, CE, CG, CN, CV, MT, PG`, …):
+ * A doc da Omie declara mais tipos (`AD, CE, CG, CN, CV, MT, PG`, …):
  * os menos comuns caem no default e aparecem com o código cru, para um tipo
  * novo do Omie não quebrar a UI.
  */
@@ -129,6 +129,8 @@ export function formatOmieAccountType(type: string): string {
       return 'Cartão de Crédito';
     case 'CA':
       return 'Conta Aplicação';
+    case 'AC':
+      return 'Administradora de Cartões';
     case 'CP':
       return 'Conta Poupança';
     case 'CX':

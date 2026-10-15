@@ -336,9 +336,19 @@
       A captura de 13/10/2026 mostrou que o CRÉDITO no `IncluirLancCC` é categoria de
       RECEITA com valor absoluto (natureza `R`; valor negativo dá `106`); destravar é
       task própria (item 2 do épico 86e2xweaf).
-    - **Só cartão.** Elegibilidade é `session.account_type == 'credit_card'` (o `CR` do
-      Omie). ⚠️ O PRD chama a conta de cartão de `CA` e **está errado**: `CA` é Conta
-      Aplicação. Filtrar por `CA` lança na conta errada.
+    - **Só cartão.** Elegibilidade é `session.account_type == 'credit_card'`. ⚠️ O PRD
+      chama a conta de cartão de `CA` e **está errado**: `CA` é Conta Aplicação. Filtrar
+      por `CA` lança na conta errada. **O tipo da sessão é UMA decisão,
+      `session_account_type_from_omie_tipo` (servidor) espelhada em
+      `resolveSessionAccountType` (`lib/api/clients.ts`), com as duas tabelas de teste
+      iguais** (86e3qyu04): código do Omie que a plataforma entende decide sozinho (`CR`
+      cartão, `CA` aplicação, `CC` corrente; o arquivo não opina); código que ela NÃO
+      entende (os outros 10 da doc, `AC` Administradora de Cartões inclusive, ou conta
+      fora do cache) deixa o tipo que o parser identificou no ARQUIVO decidir, e sem
+      arquivo é `checking`. Foi o caso da DM Construções (15/10/2026): o cartão Nubank
+      cadastrado no Omie como `AC` recebia a fatura, a sessão nascia `checking` em
+      silêncio e "Lançar no Omie" sumia da revisão. A gaveta mostra o bloco "Fatura do
+      cartão" pela mesma decisão, com um aviso quando foi o arquivo que decidiu.
     - **O `direto` só no processo "na data da compra"** (86e3n70p0): o `IncluirLancCC`
       grava `dDtLanc` = data da COMPRA, que o cliente do lote no vencimento não usa.
       Nesse processo o `direto` volta `direto_indisponivel_no_modo_vencimento` por linha
@@ -1714,6 +1724,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.97, 15/10/2026. **O tipo da conciliação deixou de ignorar o arquivo quando o Omie cadastra a conta num tipo que a plataforma não entende (86e3qyu04, bugfix do relato do Gabriel, DM Construções).** O cartão Nubank estava cadastrado no Omie como `AC` (Administradora de Cartões); o mapeamento só conhecia `CR` e `CA` e mandava o resto para `checking` em silêncio, então a fatura (identificada como `credit_card` pelo parser, checksum fechado em 351,50) virou uma conciliação de conta corrente, sem o bloco "Fatura do cartão" na gaveta e sem "Lançar no Omie" na revisão (`isCard` é `account_type === 'credit_card'`). Provado no banco de dev pelo cache de contas (`tipo_conta_corrente = "AC"`) e nas duas sessões do dia (`account_type=checking`, 7 linhas `sem_omie`). Regra nova na §3.16: código conhecido (`CR`, `CA`, `CC`) decide sozinho; desconhecido ou fora do cache deixa o arquivo decidir; `CC` com fatura continua `checking` (sem regressão). Sem rota, permissão nem campo cifrado novo: endpoints sensíveis (**126**), matriz (**29**) e pares de AAD (**17**) iguais. **Achado paralelo, fora deste fix:** o parser extraiu o pagamento da fatura DUAS vezes (a linha "Pagamento em 04 AGO" da página 5 e o "Pagamento recebido" do bloco RESUMO da página 4, este com a data da emissão inventada); passou porque o checksum do cartão exclui `is_payment`. É uma linha `sem_omie` a mais, sem dinheiro em risco (pagamento não é elegível ao lançamento); fica para task própria, porque mexer no prompt pede validação contra a API real._
 
 _Versão 1.96, 13/10/2026. **A varredura de fim do épico 86e3n70nv (86e3ndj0p) tirou do primer o que ele ainda dizia ao contrário do código: o status do topo e o roadmap (Sprints 0–5, FASE 2 e 3 em aberto), as Sprints 12 a 14 "fora da `main`" no parágrafo da S15, o ponteiro da §8 para o plano superado, a FASE 1 "na branch de integração" e o "não `IncluirContaPagar`" da §10, que também registra as duas flags de escrita ligadas em dev em 13/10 e a linha parada em `envio_anterior_sem_confirmacao` como decisão aberta; números conferidos por comando (126 endpoints, `PENDING_ENDPOINTS` vazio, 16 fora da lista, 29 permissões, 17 pares de AAD) e a doc gerada de endpoints sem divergência.**_
 

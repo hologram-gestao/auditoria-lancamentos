@@ -161,7 +161,11 @@ async def _login(client: AsyncClient, email: str) -> None:
     assert resp.status_code == 200, resp.text
 
 
-def _statement(transactions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def _statement(
+    transactions: list[dict[str, Any]] | None = None,
+    *,
+    account_type: str = "checking",
+) -> dict[str, Any]:
     """Builder padrão de payload (ParsedStatement)."""
     if transactions is None:
         transactions = [
@@ -180,7 +184,7 @@ def _statement(transactions: list[dict[str, Any]] | None = None) -> dict[str, An
         ]
     return {
         "bank_name": "Sicredi",
-        "account_type": "checking",
+        "account_type": account_type,
         "period_start": "2026-04-01",
         "period_end": "2026-04-30",
         "opening_balance": "1000.00",
@@ -196,6 +200,7 @@ def _create_payload(
     file_hash: str | None = None,
     reference_month: str = "2026-04-01",
     transactions: list[dict[str, Any]] | None = None,
+    statement_account_type: str = "checking",
 ) -> dict[str, Any]:
     return {
         "client_id": str(client_id),
@@ -203,7 +208,7 @@ def _create_payload(
         "reference_month": reference_month,
         "date_tolerance_days": 3,
         "file_hash": file_hash or _hex64("default"),
-        "statement": _statement(transactions),
+        "statement": _statement(transactions, account_type=statement_account_type),
     }
 
 
@@ -485,11 +490,13 @@ class TestCreateReconciliationPersistence:
 @pytest.mark.integration
 class TestCreateReconciliationAccountType:
     """A sessão grava `account_type` a partir do `tipo` Omie da conta
-    SELECIONADA (cache L1), não do palpite da IA no statement.
+    SELECIONADA (cache L1) quando é um código que a plataforma entende.
 
-    Risco #1 da FASE 1: só `CR` (Cartão de Crédito) → 'credit_card'; `CA`
-    (Conta Aplicação) e qualquer outro → 'checking'. Mapear `CA` p/ cartão
-    reintroduziria o bug M-1.
+    Risco #1 da FASE 1: `CR` (Cartão de Crédito) → 'credit_card'; `CA` (Conta
+    Aplicação) → 'investment' (nunca cartão: bug M-1); `CC` → 'checking'.
+    Código que a plataforma NÃO entende (86e3qyu04: `AC`, Administradora de
+    Cartões, onde a DM Construções cadastrou o cartão Nubank) deixa o tipo
+    identificado no ARQUIVO decidir; sem arquivo que diga, 'checking'.
     """
 
     async def _create_and_load(
@@ -500,6 +507,7 @@ class TestCreateReconciliationAccountType:
         cliente: Client,
         omie_conta_id: int,
         file_hash: str,
+        statement_account_type: str = "checking",
     ) -> ReconciliationSession:
         resp = await client_with_db.post(
             "/api/v1/reconciliations",
@@ -507,6 +515,7 @@ class TestCreateReconciliationAccountType:
                 client_id=cliente.id,
                 omie_conta_id=omie_conta_id,
                 file_hash=file_hash,
+                statement_account_type=statement_account_type,
             ),
         )
         assert resp.status_code == 201, resp.text
@@ -588,6 +597,98 @@ class TestCreateReconciliationAccountType:
             file_hash=_hex64("uncached"),
         )
         assert sess.account_type == "checking"
+
+    async def test_unmapped_account_with_card_invoice_becomes_credit_card(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        """86e3qyu04 — cartão Nubank cadastrado no Omie como `AC` (Administradora
+        de Cartões) recebe uma FATURA: a sessão nasce `credit_card`, com o
+        snapshot do processo do cartão, e não `checking` em silêncio."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="DM", creator=admin)
+        await _seed_account(db_session, client=cliente, omie_conta_id=2140601736, tipo="AC")
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        sess = await self._create_and_load(
+            client_with_db,
+            db_session,
+            cliente=cliente,
+            omie_conta_id=2140601736,
+            file_hash=_hex64("ac-card"),
+            statement_account_type="credit_card",
+        )
+        assert sess.account_type == "credit_card"
+        assert sess.card_posting_date_mode == "purchase_date"
+
+    async def test_unmapped_account_with_bank_statement_stays_checking(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        """Código desconhecido com EXTRATO: continua conta corrente (sem regressão)."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="X", creator=admin)
+        await _seed_account(db_session, client=cliente, omie_conta_id=55, tipo="AC")
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        sess = await self._create_and_load(
+            client_with_db,
+            db_session,
+            cliente=cliente,
+            omie_conta_id=55,
+            file_hash=_hex64("ac-checking"),
+            statement_account_type="checking",
+        )
+        assert sess.account_type == "checking"
+        assert sess.card_posting_date_mode is None
+
+    async def test_checking_account_with_card_invoice_stays_checking(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        """`CC` é código que a plataforma entende: o Omie vence, o arquivo não
+        opina — a fatura numa conta corrente continua `checking` como sempre."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="X", creator=admin)
+        await _seed_account(db_session, client=cliente, omie_conta_id=42, tipo="CC")
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        sess = await self._create_and_load(
+            client_with_db,
+            db_session,
+            cliente=cliente,
+            omie_conta_id=42,
+            file_hash=_hex64("cc-card"),
+            statement_account_type="credit_card",
+        )
+        assert sess.account_type == "checking"
+
+    async def test_uncached_account_with_card_invoice_becomes_credit_card(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        stub_enqueue: list[UUID],
+    ) -> None:
+        """Conta fora do cache (None) com fatura: o arquivo decide, como no `AC`."""
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        cliente = await _seed_client(db_session, name="X", creator=admin)
+        await _login(client_with_db, ADMIN_EMAIL)
+
+        sess = await self._create_and_load(
+            client_with_db,
+            db_session,
+            cliente=cliente,
+            omie_conta_id=1234,
+            file_hash=_hex64("uncached-card"),
+            statement_account_type="credit_card",
+        )
+        assert sess.account_type == "credit_card"
 
 
 # ----------------------------------------------------------------------
