@@ -780,17 +780,23 @@ class OmiePostingService:
         omie: OmieClient,
         tally: _ProvisionTally,
     ) -> OmiePostingLineResult | None:
-        """Quem recebe o título: o cadastro do CNPJ, um cadastro novo, ou o padrão.
+        """Quem recebe o título: o cadastro escolhido, o do CNPJ, um novo, ou o padrão.
 
-        Nessa ordem (bloco 0, item e): CNPJ com cadastro → ele; sem cadastro e com
+        86e3qhhrd: o `codigo_fornecedor` da linha é o cadastro que a pessoa escolheu
+        na tela (busca pelo nome, sugestão ou CNPJ) e vence tudo, sem nova ida à
+        Omie: o título vai para quem ela viu, inclusive fornecedor do exterior sem
+        CNPJ. Como o fornecedor padrão, o código não é reconferido aqui; um código
+        que sumiu falha no título com a mensagem da Omie.
+
+        Depois, nessa ordem (bloco 0, item e): CNPJ com cadastro → ele; sem cadastro e com
         razão social e e-mail na linha → cadastra pela chave do CNPJ (idempotente:
         o mesmo fornecedor em duas linhas é o MESMO cadastro); senão o fornecedor
         padrão do cliente; senão a linha bloqueia. Nenhum nome, CNPJ ou e-mail é
         gravado aqui — só o código que a Omie devolve.
         """
-        code: int | None = None
+        code: int | None = line.codigo_fornecedor
         cnpj = line.cnpj_fornecedor
-        if cnpj is not None:
+        if code is None and cnpj is not None:
             try:
                 cadastros = await omie.listar_clientes_por_cnpj(cnpj_cpf=format_cnpj(cnpj))
             except OmieFaultError as exc:

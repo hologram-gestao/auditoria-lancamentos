@@ -1564,6 +1564,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reconciliations/{session_id}/omie-postings/fornecedores-sugeridos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Para cada linha pedida (`file_entry_id`, repetível, até 200) da conciliação, até 3 cadastros ATIVOS do Omie do cliente com mais tokens em comum com a descrição da compra (a mesma afinidade de nome do cruzamento). A descrição é decifrada no servidor e não sai dele. Linha de outra conciliação não volta. Só sugere: o fornecedor do título é o que a pessoa confirmar. Nunca grava. Cliente encerrado: 409; só-arquivo: 409 CAPACIDADE_AUSENTE.
+         * @description Sugestão de fornecedor por linha (86e3qhhrd).
+         *
+         *     **Autorização e tenant**: os MESMOS do lançamento (`ReviewExportDep` +
+         *     `require_session_access`): quem pode lançar a linha pode ver a sugestão para
+         *     ela. O `Client` sai do `client_id` da sessão autorizada, e as linhas, do
+         *     `SELECT` com o `session_id` dela.
+         */
+        get: operations["get_omie_supplier_suggestions_api_v1_reconciliations__session_id__omie_postings_fornecedores_sugeridos_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reconciliations/{session_id}/file-entries": {
         parameters: {
             query?: never;
@@ -1769,6 +1794,23 @@ export interface paths {
         };
         /** Busca no Omie do cliente o fornecedor de um CNPJ (14 dígitos, com ou sem máscara) OU de um código (`codigo_cliente_omie`): exatamente um dos dois. Por CNPJ devolve código, razão social e nome fantasia; por código, o nome de exibição do cadastro em `razao_social`. Sem cadastro: 404 FORNECEDOR_NAO_ENCONTRADO. Nunca grava nada. CNPJ inválido, os dois ou nenhum: 400. Cliente só-arquivo: 409 CAPACIDADE_AUSENTE. */
         get: operations["get_client_omie_fornecedor_api_v1_clients__client_id__omie_fornecedores_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/omie/fornecedores/busca": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Cadastros ATIVOS do Omie do cliente que contêm o texto digitado (razão social, nome fantasia ou dígitos do CNPJ/CPF), no máximo 20, quem começa pelo texto primeiro. Sai de um diretório em memória por cliente (6 h), lido da Omie uma vez: buscar ao digitar não chama a Omie por tecla. `refresh=true` relê o diretório. Nunca grava. Texto com menos de 3 caracteres úteis: 400. Cliente só-arquivo: 409 CAPACIDADE_AUSENTE. */
+        get: operations["search_client_omie_fornecedores_api_v1_clients__client_id__omie_fornecedores_busca_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5929,10 +5971,54 @@ export interface components {
             razao_social?: string | null;
             /** Nome Fantasia */
             nome_fantasia?: string | null;
+            /**
+             * Cnpj Cpf
+             * @description CNPJ ou CPF do cadastro como a Omie grava (com máscara); nulo em fornecedor do exterior e na busca por código. Só para a pessoa conferir: o lançamento recebe o `codigo`.
+             */
+            cnpj_cpf?: string | null;
         };
         /** OmieFornecedorResponse */
         OmieFornecedorResponse: {
             data: components["schemas"]["OmieFornecedorItem"];
+        };
+        /**
+         * OmieFornecedorSearchResponse
+         * @description Cadastros ATIVOS parecidos com o texto digitado (86e3qhhrd).
+         *
+         *     `total` é quantos casaram; `data` traz no máximo o teto da busca, os mais
+         *     prováveis primeiro. `truncated` diz à tela que vale refinar o texto.
+         */
+        OmieFornecedorSearchResponse: {
+            /** Data */
+            data: components["schemas"]["OmieFornecedorItem"][];
+            /** Total */
+            total: number;
+            /** Truncated */
+            truncated: boolean;
+        };
+        /**
+         * OmieFornecedorSuggestion
+         * @description Os cadastros sugeridos para UMA linha da fatura, pela descrição da compra.
+         */
+        OmieFornecedorSuggestion: {
+            /**
+             * File Entry Id
+             * Format: uuid
+             */
+            file_entry_id: string;
+            /** Sugestoes */
+            sugestoes: components["schemas"]["OmieFornecedorItem"][];
+        };
+        /**
+         * OmieFornecedorSuggestionResponse
+         * @description Uma entrada por linha pedida que existe na conciliação, na ordem do pedido.
+         *
+         *     Linha sem nenhum cadastro com afinidade vem com `sugestoes` vazia: "não sei",
+         *     nunca "não existe" (a pessoa busca pelo nome ou pelo CNPJ).
+         */
+        OmieFornecedorSuggestionResponse: {
+            /** Data */
+            data: components["schemas"]["OmieFornecedorSuggestion"][];
         };
         /**
          * OmieLancamentoItem
@@ -6041,6 +6127,11 @@ export interface components {
              * @description Só na provisão: CNPJ do fornecedor (14 dígitos, com ou sem máscara).
              */
             cnpj_fornecedor?: string | null;
+            /**
+             * Codigo Fornecedor
+             * @description Só na provisão: o `codigo_cliente_omie` do cadastro que a pessoa escolheu (busca pelo nome, sugestão ou busca por CNPJ). O título vai para ESTE cadastro, sem nova busca, inclusive fornecedor do exterior sem CNPJ. Exclui `cnpj_fornecedor`, `razao_social` e `email`.
+             */
+            codigo_fornecedor?: number | null;
             /**
              * Razao Social
              * @description Só na provisão, junto com `email`: cadastra o fornecedor quando o CNPJ não tem cadastro no Omie.
@@ -11601,6 +11692,42 @@ export interface operations {
             };
         };
     };
+    get_omie_supplier_suggestions_api_v1_reconciliations__session_id__omie_postings_fornecedores_sugeridos_get: {
+        parameters: {
+            query: {
+                /** @description Linhas da conciliação para sugerir fornecedor. */
+                file_entry_id: string[];
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OmieFornecedorSuggestionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_file_entries_api_v1_reconciliations__session_id__file_entries_get: {
         parameters: {
             query?: {
@@ -12067,6 +12194,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OmieFornecedorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_client_omie_fornecedores_api_v1_clients__client_id__omie_fornecedores_busca_get: {
+        parameters: {
+            query: {
+                /** @description Texto da busca (nome ou parte do nome do fornecedor). */
+                nome: string;
+                /** @description Relê o diretório da Omie. */
+                refresh?: boolean;
+            };
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OmieFornecedorSearchResponse"];
                 };
             };
             /** @description Validation Error */

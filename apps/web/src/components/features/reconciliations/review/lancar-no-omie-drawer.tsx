@@ -52,10 +52,12 @@ import {
   isPostingResultConcluded,
   useOmieCategorias,
   useOmieDepartamentos,
+  useOmieSupplierSuggestions,
   usePostOmieLancamentos,
 } from '@/hooks/use-omie-postings';
 import { ApiError, NetworkError } from '@/lib/api/client';
 import type {
+  OmieFornecedorItem,
   OmiePostingBatchPayload,
   OmiePostingLineRequest,
   OmiePostingLineResult,
@@ -123,6 +125,9 @@ interface BatchDraft {
   departments: DepartmentPart[];
 }
 
+/** Teto de linhas por pedido de sugestão de fornecedor (o mesmo do servidor). */
+const SUPPLIER_SUGGESTION_MAX_ENTRIES = 200;
+
 export function LancarNoOmieDrawer({
   sessionId,
   context,
@@ -136,6 +141,29 @@ export function LancarNoOmieDrawer({
   // ninguém paga essa ida por abrir a tela de revisão.
   const categoriasQuery = useOmieCategorias(sessionId, { enabled: open });
   const departamentosQuery = useOmieDepartamentos(context.clientId, { enabled: open });
+  // 86e3qhhrd — sugestão de fornecedor pela descrição da compra, numa ida só para
+  // as linhas que ainda vão escolher fornecedor (nem travadas no direto, nem com o
+  // fornecedor já gravado numa provisão retomada). O teto é o do servidor.
+  const suggestionEntryIds = useMemo(
+    () =>
+      entries
+        .filter((e) => {
+          const posting = e.omie_posting ?? null;
+          if (posting?.kind === 'provisao' && posting.supplier_code !== null) return false;
+          return lockedPostingMode(posting) !== 'direto';
+        })
+        .map((e) => e.id)
+        .slice(0, SUPPLIER_SUGGESTION_MAX_ENTRIES),
+    [entries],
+  );
+  const suggestionsQuery = useOmieSupplierSuggestions(sessionId, suggestionEntryIds, {
+    enabled: open,
+  });
+  const suggestionsByEntry = useMemo(() => {
+    const map = new Map<string, readonly OmieFornecedorItem[]>();
+    suggestionsQuery.data?.forEach((s) => map.set(s.file_entry_id, s.sugestoes));
+    return map;
+  }, [suggestionsQuery.data]);
   const allowDirect = processAllowsDirectPosting({
     card_posting_date_mode: context.cardPostingDateMode,
   });
@@ -395,6 +423,7 @@ export function LancarNoOmieDrawer({
                           purchaseLabel={purchaseLabel}
                           posting={postingFor(entry)}
                           lockedMode={lockedFor(entry)}
+                          supplierSuggestions={suggestionsByEntry.get(entry.id)}
                           context={editorContext}
                         />
                         {ev.issue !== null && (
@@ -470,8 +499,8 @@ export function LancarNoOmieDrawer({
 function issueMessage(issue: LineIssue, context: PostingClientContext): string {
   if (issue === 'fornecedor_pendente') {
     return context.defaultSupplierCode !== null
-      ? 'Escolha o fornecedor: busque o CNPJ ou marque o fornecedor padrão do cliente. Sem ele esta compra fica de fora (fornecedor pendente).'
-      : 'Sem fornecedor: busque o CNPJ (compra sem CNPJ pede um fornecedor padrão, configurado no cliente). Sem ele esta compra fica de fora (fornecedor pendente).';
+      ? 'Escolha o fornecedor: busque pelo nome ou pelo CNPJ, ou marque o fornecedor padrão do cliente. Sem ele esta compra fica de fora (fornecedor pendente).'
+      : 'Sem fornecedor: busque pelo nome ou pelo CNPJ. Sem ele esta compra fica de fora (fornecedor pendente).';
   }
   return LINE_ISSUE_MESSAGE[issue];
 }
@@ -579,7 +608,7 @@ function BatchSupplier({
           value={batch.supplier}
           onChange={(supplier) => onChange({ ...batch, supplier })}
           allowRegister
-          label="CNPJ do fornecedor para todas as compras"
+          label="Fornecedor para todas as compras"
           disabled={context.disabled}
         />
       )}

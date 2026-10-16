@@ -62,13 +62,16 @@ export interface DepartmentPart {
  *
  * - `none`: nada escolhido (sem padrão no cliente, a linha fica de fora);
  * - `default`: o fornecedor padrão do cliente (o servidor o usa sozinho);
- * - `found`: o CNPJ tem cadastro no Omie; vai o CNPJ e o servidor acha o mesmo;
+ * - `found`: um cadastro do Omie que a pessoa escolheu (pelo nome, pela
+ *   sugestão ou pelo CNPJ); vai o CÓDIGO dele (`codigo_fornecedor`, 86e3qhhrd) e o
+ *   título sai para exatamente esse cadastro, inclusive fornecedor do exterior
+ *   sem CNPJ, sem o servidor buscar de novo;
  * - `new`: o CNPJ não tem cadastro; vão razão social e e-mail para cadastrar.
  */
 export type SupplierValue =
   | { kind: 'none' }
   | { kind: 'default' }
-  | { kind: 'found'; cnpj: string; supplier: OmieFornecedorItem }
+  | { kind: 'found'; supplier: OmieFornecedorItem }
   | { kind: 'new'; cnpj: string; razaoSocial: string; email: string };
 
 export interface LineDraft {
@@ -284,7 +287,7 @@ export const LINE_ISSUE_MESSAGE: Record<LineIssue, string> = {
   departamento_pendente:
     'Este cliente exige rateio por departamento: escolha os departamentos. Sem eles esta compra fica de fora (departamento pendente).',
   fornecedor_pendente:
-    'Sem fornecedor: busque o CNPJ ou use o fornecedor padrão. Sem ele esta compra fica de fora (fornecedor pendente).',
+    'Sem fornecedor: busque pelo nome ou pelo CNPJ, ou use o fornecedor padrão. Sem ele esta compra fica de fora (fornecedor pendente).',
   fornecedor_incompleto:
     'CNPJ sem cadastro no Omie: informe razão social e e-mail para cadastrar o fornecedor.',
 };
@@ -333,7 +336,7 @@ export function buildPostingLine(
   if (!context.supplierSettled) {
     const supplier = draft.supplier;
     if (supplier.kind === 'found') {
-      line.cnpj_fornecedor = cnpjDigits(supplier.cnpj);
+      line.codigo_fornecedor = supplier.supplier.codigo;
     } else if (supplier.kind === 'new') {
       line.cnpj_fornecedor = cnpjDigits(supplier.cnpj);
       line.razao_social = supplier.razaoSocial.trim();

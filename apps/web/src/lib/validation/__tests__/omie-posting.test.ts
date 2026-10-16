@@ -25,13 +25,18 @@ const CTX: LineContext = {
   hasDefaultSupplier: false,
   supplierSettled: false,
 };
-const FOUND = { codigo: 7, razao_social: 'X', nome_fantasia: null };
+const FOUND = {
+  codigo: 7,
+  razao_social: 'X',
+  nome_fantasia: null,
+  cnpj_cpf: '12.345.678/0001-95',
+};
 
 function draft(over: Partial<LineDraft> = {}): LineDraft {
   return {
     ...emptyDraft('provisionar'),
     categoria: '2.02.02',
-    supplier: { kind: 'found', cnpj: '12345678000195', supplier: FOUND },
+    supplier: { kind: 'found', supplier: FOUND },
     ...over,
   };
 }
@@ -177,6 +182,27 @@ describe('buildPostingLine', () => {
         { codigo: 'd1', percentual: '33.33' },
         { codigo: 'd2', percentual: '66.67' },
       ],
+    });
+  });
+
+  it('o cadastro escolhido vai pelo CÓDIGO, nunca pelo CNPJ (86e3qhhrd)', () => {
+    expect(buildPostingLine('e1', draft(), { supplierSettled: false })).toEqual({
+      file_entry_id: 'e1',
+      modo: 'provisionar',
+      cod_categoria: '2.02.02',
+      codigo_fornecedor: 7,
+    });
+    // Fornecedor do exterior, escolhido pelo nome: sem CNPJ, e o pedido é o mesmo.
+    const exterior = { codigo: 9, razao_social: 'SOFTWARE GMBH', cnpj_cpf: null };
+    expect(
+      buildPostingLine('e1', draft({ supplier: { kind: 'found', supplier: exterior } }), {
+        supplierSettled: false,
+      }),
+    ).toEqual({
+      file_entry_id: 'e1',
+      modo: 'provisionar',
+      cod_categoria: '2.02.02',
+      codigo_fornecedor: 9,
     });
   });
 

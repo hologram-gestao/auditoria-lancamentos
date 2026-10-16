@@ -354,21 +354,49 @@ _MOCK_FORNECEDORES_SEED: dict[str, ClienteOmie] = {
         codigo_cliente_omie=700_000_001,
         razao_social="PAPELARIA DEMO LTDA",
         nome_fantasia="Papelaria Demo",
+        cnpj_cpf="12.345.678/0001-95",
         inativo="N",
     ),
     "98765432000198": ClienteOmie(
         codigo_cliente_omie=700_000_002,
         razao_social="POSTO DEMO COMBUSTIVEIS LTDA",
         nome_fantasia="Posto Demo",
+        cnpj_cpf="98.765.432/0001-98",
         inativo="N",
+    ),
+    "44556677000186": ClienteOmie(
+        codigo_cliente_omie=700_000_004,
+        razao_social="PAPELARIA ANTIGA DEMO LTDA",
+        nome_fantasia="Papelaria Antiga",
+        cnpj_cpf="44.556.677/0001-86",
+        inativo="S",
     ),
 }
 _MOCK_FORNECEDORES: dict[str, ClienteOmie] = dict(_MOCK_FORNECEDORES_SEED)
+
+#: Cadastros SEM CNPJ (86e3qhhrd): fornecedor do exterior, como o da assinatura de
+#: software que aparece na fatura de cartão. Só a busca pelo NOME os acha, e é por
+#: isso que o lançamento passou a aceitar o código do cadastro escolhido.
+_MOCK_FORNECEDORES_SEM_CNPJ: tuple[ClienteOmie, ...] = (
+    ClienteOmie(
+        codigo_cliente_omie=700_000_003,
+        razao_social="SOFTWARE DEMO GMBH",
+        nome_fantasia="Software Demo",
+        cnpj_cpf="",
+        inativo="N",
+    ),
+)
 
 #: Código que o `consultar_cliente` do mock responde com `faultstring`, como a Omie
 #: real faz para cadastro excluído (86e3n70q0, bloco C): é o 404 da busca de
 #: fornecedor por código, para a tela e o teste exercitarem o padrão que sumiu.
 MOCK_FORNECEDOR_EXCLUIDO_CODIGO = 799_999_999
+
+
+def _mock_cadastros() -> list[ClienteOmie]:
+    """Todos os cadastros do Omie fictício: os com CNPJ (inclusive os criados pelo
+    lançamento) e os do exterior."""
+    return [*_MOCK_FORNECEDORES.values(), *_MOCK_FORNECEDORES_SEM_CNPJ]
 
 
 def reset_mock_payables_state() -> None:
@@ -465,11 +493,7 @@ class MockOmieClient(OmieClient):
         # nome dele: a busca por código (fornecedor padrão do cliente, bloco C)
         # mostra o mesmo cadastro que a busca por CNPJ achou.
         known = next(
-            (
-                c
-                for c in _MOCK_FORNECEDORES.values()
-                if c.codigo_cliente_omie == codigo_cliente_omie
-            ),
+            (c for c in _mock_cadastros() if c.codigo_cliente_omie == codigo_cliente_omie),
             None,
         )
         if known is not None:
@@ -529,6 +553,13 @@ class MockOmieClient(OmieClient):
         found = _MOCK_FORNECEDORES.get(digits)
         return [found] if found is not None else []
 
+    async def listar_clientes(self) -> list[ClienteOmie]:
+        """O diretório inteiro do Omie fictício (86e3qhhrd): com CNPJ, sem CNPJ e
+        inativo, para a busca pelo nome rodar de ponta a ponta no demo."""
+        cadastros = _mock_cadastros()
+        log.info("omie_mock_call", call="listar_clientes", count=len(cadastros))
+        return cadastros
+
     async def incluir_cliente(self, request: IncluirClienteRequest) -> ClienteStatusResponse:
         """Cadastra (ou devolve o mesmo, pela chave) e passa a achar pelo CNPJ.
 
@@ -553,6 +584,7 @@ class MockOmieClient(OmieClient):
                 codigo_cliente_omie=codigo,
                 razao_social=request.razao_social,
                 nome_fantasia=request.nome_fantasia,
+                cnpj_cpf=request.cnpj_cpf,
                 inativo="N",
             )
         log.info("omie_mock_call", call="incluir_cliente", codigo=codigo)

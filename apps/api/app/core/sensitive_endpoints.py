@@ -476,6 +476,25 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         "app/modules/omie_data/client_routes.py",
         f"{_VIA_CLIENT_PATH}; a busca vai à origem do cliente autorizado e nunca grava",
     ),
+    # 86e3qhhrd — fornecedor pelo NOME (busca ao digitar) e sugestão por linha.
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/omie/fornecedores/busca",
+        ScopeKind.COLLECTION,
+        "app/modules/omie_data/client_routes.py",
+        f"{_VIA_CLIENT_PATH}; o diretório em memória é chaveado pelo client_id já "
+        "autorizado e razão social e CNPJ nunca persistem",
+    ),
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/reconciliations/{session_id}/omie-postings/fornecedores-sugeridos",
+        ScopeKind.DETAIL_PK,
+        "app/modules/reconciliations/routes.py",
+        (
+            f"{_VIA_SESSION}; o Client sai do client_id da sessão já autorizada e "
+            "as linhas são carregadas com AND session_id — id de linha alheio não volta"
+        ),
+    ),
     # ---------------------------------------------------------------- notificações
     SensitiveEndpoint(
         "GET",

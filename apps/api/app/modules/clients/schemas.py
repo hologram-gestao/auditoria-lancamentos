@@ -22,6 +22,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.models import CardPostingDateMode, ReconciliationStatus
+from app.integrations.omie.schemas import OMIE_CODE_MAX
 from app.modules.client_connections.schemas import ClientConnectionResponse
 from app.modules.reconciliations.schemas import SessionAuthor
 from app.modules.users.schemas import PaginationMeta
@@ -73,6 +74,7 @@ class CreateClientRequest(BaseModel):
     omie_default_supplier_code: int | None = Field(
         None,
         gt=0,
+        le=OMIE_CODE_MAX,
         description=(
             "`codigo_cliente_omie` do fornecedor padrão do título quando a linha da "
             "fatura não traz CNPJ. Ausente ou null = sem padrão (a linha bloqueia)."
@@ -135,6 +137,7 @@ class UpdateClientRequest(BaseModel):
     omie_default_supplier_code: int | None = Field(
         None,
         gt=0,
+        le=OMIE_CODE_MAX,
         description="Omitir mantém o fornecedor padrão; `null` remove; código troca.",
     )
     # Omitido mantém. `null` não é estado (a coluna é NOT NULL).

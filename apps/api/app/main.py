@@ -37,6 +37,7 @@ from app.integrations.anthropic.model_limits import validate_parse_output_config
 from app.integrations.omie.categorias_cache import OmieCategoriasCache
 from app.integrations.omie.clientes_cache import OmieClientesCache
 from app.integrations.omie.departamentos_cache import OmieDepartamentosCache
+from app.integrations.omie.fornecedores_directory_cache import OmieFornecedoresDirectoryCache
 from app.integrations.omie.lancamento_cache import OmieLancamentoCache
 from app.modules.accounting_files import routes as accounting_files_routes
 from app.modules.anomaly_types import routes as anomaly_types_routes
@@ -372,6 +373,10 @@ def create_app() -> FastAPI:
     # `supplier_code` das divergências de título via ConsultarCliente. Nome é
     # PII do cliente final: só cache TTL, nunca tabela (§4.5).
     app.state.omie_clientes_cache = OmieClientesCache()
+    # Diretório de cadastros Omie por cliente (86e3qhhrd) — a busca de fornecedor
+    # pelo NOME roda sobre ele, sem uma chamada à Omie por tecla. Razão social e
+    # CNPJ são PII do cliente final: só cache TTL, nunca tabela (§4.5).
+    app.state.omie_fornecedores_directory_cache = OmieFornecedoresDirectoryCache()
 
     @app.get("/health", tags=["system"])
     async def health() -> dict[str, str]:

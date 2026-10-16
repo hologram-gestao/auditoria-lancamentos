@@ -2132,7 +2132,27 @@ const OMIE_FORNECEDOR = {
   codigo: 700000001,
   razao_social: 'PAPELARIA DEMO LTDA',
   nome_fantasia: 'Papelaria Demo',
+  cnpj_cpf: '12.345.678/0001-95',
 };
+
+/**
+ * 86e3qhhrd — o diretório de cadastros do Omie fictício, para a busca pelo nome:
+ * o da papelaria (com CNPJ), um posto e um fornecedor do exterior SEM CNPJ, que
+ * só a busca pelo nome acha. A sugestão pela compra devolve o posto.
+ */
+const OMIE_FORNECEDOR_POSTO = {
+  codigo: 700000002,
+  razao_social: 'POSTO DEMO COMBUSTIVEIS LTDA',
+  nome_fantasia: 'Posto Demo',
+  cnpj_cpf: '98.765.432/0001-98',
+};
+const OMIE_FORNECEDOR_EXTERIOR = {
+  codigo: 700000003,
+  razao_social: 'SOFTWARE DEMO GMBH',
+  nome_fantasia: 'Software Demo',
+  cnpj_cpf: null,
+};
+const OMIE_DIRETORIO = [OMIE_FORNECEDOR, OMIE_FORNECEDOR_POSTO, OMIE_FORNECEDOR_EXTERIOR];
 
 /**
  * Uma anomalia da Camada 1 (o único tipo que aceita veredito) e uma
@@ -3244,6 +3264,27 @@ async function fulfillApi(route: Route): Promise<void> {
       body: JSON.stringify({ data: OMIE_DEPARTAMENTOS, total: OMIE_DEPARTAMENTOS.length }),
     });
   }
+  // 86e3qhhrd — busca pelo nome: `{data, total, truncated}` (três chaves, o front
+  // não desempacota), "contém" sem caixa sobre razão social e nome fantasia.
+  if (path === `/api/v1/clients/${CLIENT_ID}/omie/fornecedores/busca`) {
+    const nome = (url.searchParams.get('nome') ?? '').trim().toLowerCase();
+    const found = OMIE_DIRETORIO.filter((f) =>
+      [f.razao_social, f.nome_fantasia].some((n) => n.toLowerCase().includes(nome)),
+    );
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ data: found, total: found.length, truncated: false }),
+    });
+  }
+  // 86e3qhhrd — sugestão por linha: o posto para cada linha pedida.
+  if (path === `/api/v1/reconciliations/${SESSION_ID}/omie-postings/fornecedores-sugeridos`) {
+    return json(
+      url.searchParams
+        .getAll('file_entry_id')
+        .map((id) => ({ file_entry_id: id, sugestoes: [OMIE_FORNECEDOR_POSTO] })),
+    );
+  }
   // Por CNPJ (o do mock acha; outro é 404) ou por código (o padrão gravado).
   if (path === `/api/v1/clients/${CLIENT_ID}/omie/fornecedores`) {
     const cnpj = (url.searchParams.get('cnpj') ?? '').replace(/\D/g, '');
@@ -3253,6 +3294,7 @@ async function fulfillApi(route: Route): Promise<void> {
         codigo: Number(codigo),
         razao_social: OMIE_FORNECEDOR.razao_social,
         nome_fantasia: null,
+        cnpj_cpf: null,
       });
     }
     if (cnpj === '12345678000195') return json(OMIE_FORNECEDOR);
@@ -4076,7 +4118,7 @@ for (const vp of VIEWPORTS) {
       await expect(
         gaveta.getByText(/o lançamento direto gravaria a data da compra\. Provisione a compra/),
       ).toBeVisible();
-      await expect(gaveta.getByLabel(/CNPJ do fornecedor/)).toBeVisible();
+      await expect(gaveta.getByLabel(/Buscar fornecedor no Omie/)).toBeVisible();
       await shot(page, `pr-revisao-cartao-vencimento-${vp.label.replace(/\s+/g, '-')}`);
       await analyze(page, `gaveta no processo do vencimento, só provisão (${vp.label})`);
     });
@@ -5772,7 +5814,7 @@ for (const vp of VIEWPORTS) {
       await page.getByRole('option', { name: /Administrativo/ }).click();
       await expect(gaveta.getByText('Soma 100%.')).toBeVisible();
 
-      await gaveta.getByLabel(/CNPJ do fornecedor/).pressSequentially('12345678000195');
+      await gaveta.getByLabel(/Buscar fornecedor no Omie/).pressSequentially('12345678000195');
       await gaveta.getByRole('button', { name: 'Buscar no Omie' }).click();
       await expect(gaveta.getByText('PAPELARIA DEMO LTDA')).toBeVisible();
       await expect(gaveta.getByRole('button', { name: /Confirmar e lançar 1 de 1/ })).toBeEnabled();
@@ -5804,6 +5846,52 @@ for (const vp of VIEWPORTS) {
       await analyze(page, `gaveta com provisão completa (${vp.label})`);
     });
 
+    /**
+     * 86e3qhhrd — fornecedor pelo NOME: a sugestão pela compra aparece antes de
+     * digitar, a lista de parecidos aparece ao parar de digitar (com o fornecedor
+     * do exterior "sem CNPJ"), e escolher troca o campo pelo resumo. Mede-se o axe
+     * com a lista ABERTA e a borda direita dela em 390px.
+     */
+    test('gaveta: fornecedor pelo nome e sugestão pela compra (86e3qhhrd)', async ({ page }) => {
+      sessionAccountType = 'credit_card';
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}`);
+      const linha = page.getByRole('row', { name: /Posto Shell 1234/ });
+      await linha.getByRole('button', { name: /Lançar no Omie/ }).click();
+      const gaveta = page.getByRole('dialog', { name: 'Lançar no Omie' });
+      await aguardarAnimacao(gaveta);
+      await gaveta.getByRole('button', { name: /Categoria da compra de/ }).click();
+      await page.getByRole('option', { name: /Combustível/ }).click();
+
+      await expect(gaveta.getByText('Sugestão pelo nome da compra:')).toBeVisible();
+      await expect(
+        gaveta.getByRole('button', { name: /POSTO DEMO COMBUSTIVEIS LTDA/ }),
+      ).toBeVisible();
+      // A sugestão não vale sozinha: sem o clique, a linha segue sem fornecedor.
+      await expect(
+        gaveta.getByRole('button', { name: /Confirmar e lançar 0 de 1/ }),
+      ).toBeDisabled();
+
+      await gaveta.getByLabel(/Buscar fornecedor no Omie/).pressSequentially('softw');
+      const opcao = gaveta.getByRole('button', { name: /SOFTWARE DEMO GMBH/ });
+      await expect(opcao).toBeVisible();
+      await expect(opcao).toContainText('sem CNPJ');
+      await expect(gaveta.getByText('1 fornecedor encontrado.')).toBeVisible();
+      const lista = gaveta.getByRole('list', { name: /Fornecedores encontrados/ });
+      const caixa = await lista.boundingBox();
+      expect(
+        (caixa?.x ?? 0) + (caixa?.width ?? 0),
+        'lista de fornecedores passando da borda direita',
+      ).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0);
+      await shot(page, `pr-gaveta-fornecedor-por-nome-${slugP}`);
+      await analyze(page, `gaveta com a busca de fornecedor pelo nome aberta (${vp.label})`);
+
+      await opcao.click();
+      await expect(gaveta.getByRole('button', { name: /Trocar fornecedor/ })).toBeVisible();
+      await expect(gaveta.getByRole('button', { name: /Confirmar e lançar 1 de 1/ })).toBeEnabled();
+      await shot(page, `pr-gaveta-fornecedor-escolhido-${slugP}`);
+      await analyze(page, `gaveta com o fornecedor escolhido pelo nome (${vp.label})`);
+    });
+
     test('gaveta: provisão que parou na baixa mostra o passo e os ids (86e3n70q0)', async ({
       page,
     }) => {
@@ -5816,7 +5904,7 @@ for (const vp of VIEWPORTS) {
       await aguardarAnimacao(gaveta);
       await gaveta.getByRole('button', { name: /Categoria da compra de/ }).click();
       await page.getByRole('option', { name: /Combustível/ }).click();
-      await gaveta.getByLabel(/CNPJ do fornecedor/).pressSequentially('11222333000181');
+      await gaveta.getByLabel(/Buscar fornecedor no Omie/).pressSequentially('11222333000181');
       await gaveta.getByRole('button', { name: 'Buscar no Omie' }).click();
       await gaveta.getByLabel('Razão social').fill('Loja Nova Ltda');
       await gaveta.getByLabel('E-mail').fill('financeiro@lojanova.com.br');
@@ -5827,7 +5915,7 @@ for (const vp of VIEWPORTS) {
       await expect(gaveta.getByRole('button', { name: /Tentar novamente 1 de 1/ })).toBeVisible();
       // A linha passa a estar travada na provisão, sem pedir o fornecedor de novo.
       await expect(gaveta.getByRole('radio')).toHaveCount(0);
-      await expect(gaveta.getByLabel(/CNPJ do fornecedor/)).toHaveCount(0);
+      await expect(gaveta.getByLabel(/Buscar fornecedor no Omie/)).toHaveCount(0);
       await aguardarToastEstavel(page);
       await shot(page, `pr-gaveta-provisao-parcial-${slugP}`);
       await analyze(page, `resumo da provisão parada na baixa (${vp.label})`);
@@ -7985,7 +8073,7 @@ for (const vp of VIEWPORTS) {
       await expect(rateio).toHaveAttribute('aria-checked', 'true');
       await expect(dialog.getByText('PAPELARIA DEMO LTDA')).toBeVisible();
       await dialog.getByRole('button', { name: 'Trocar' }).click();
-      const cnpj = dialog.getByLabel('CNPJ do fornecedor padrão');
+      const cnpj = dialog.getByLabel('Buscar o fornecedor padrão no Omie');
       await expect(cnpj).toBeVisible();
       const buscar = dialog.getByRole('button', { name: 'Buscar no Omie' });
       await buscar.scrollIntoViewIfNeeded();
