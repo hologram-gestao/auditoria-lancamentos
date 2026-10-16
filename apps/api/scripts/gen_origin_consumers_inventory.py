@@ -206,7 +206,8 @@ CLASSIFICATION: tuple[Entry, ...] = (
     Entry(
         "app/modules/reconciliations/routes.py",
         Family.ORIGEM,
-        "criação exige `listar_lancamentos` ANTES de gravar; lançamento exige `escrever`. "
+        "criação exige `listar_lancamentos` ANTES de gravar; lançamento exige `escrever`; "
+        "a sugestão de fornecedor (86e3qhhrd) lê o diretório pela `listar_lancamentos`. "
         "Os demais usos do cipher aqui cifram descrição de linha (cifra de dado)",
     ),
     Entry(
