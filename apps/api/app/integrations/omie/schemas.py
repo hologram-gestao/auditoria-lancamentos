@@ -648,6 +648,13 @@ class CategoriaOmie(BaseModel):
 # ----------------------------------------------------------------------
 
 
+#: Teto de um código numérico da Omie que o sistema GRAVA (`codigo_cliente_omie`
+#: no fornecedor padrão do cliente e na intenção de lançamento): a coluna é
+#: BIGINT. Sem o teto, um inteiro maior chegava ao banco e virava 500 (§7: falha
+#: esperada nunca é 500).
+OMIE_CODE_MAX = 2**63 - 1
+
+
 class ClienteOmie(BaseModel):
     """Cadastro de cliente/fornecedor retornado por `ConsultarCliente`.
 
@@ -671,6 +678,15 @@ class ClienteOmie(BaseModel):
     codigo_cliente_omie: int = Field(description="ID do cliente/fornecedor no Omie.")
     razao_social: str | None = Field(default=None, description="Razão social.")
     nome_fantasia: str | None = Field(default=None, description="Nome fantasia.")
+    cnpj_cpf: str | None = Field(
+        default=None,
+        description=(
+            "CNPJ ou CPF como a Omie grava (com máscara). Presente no cadastro do "
+            "`ListarClientes` (fixture `listar_clientes_por_cnpj.response.json`, "
+            "13/10/2026); vazio em fornecedor do exterior. Trafega em memória até a "
+            "tela e não persiste (§4.5)."
+        ),
+    )
     inativo: str | None = Field(
         default=None,
         description=(

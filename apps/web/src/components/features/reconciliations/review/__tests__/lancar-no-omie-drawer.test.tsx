@@ -36,6 +36,22 @@ const categoriasState = {
   isFetching: false,
   refetch: vi.fn(),
 };
+type SearchData = {
+  data: {
+    codigo: number;
+    razao_social: string;
+    nome_fantasia: string | null;
+    cnpj_cpf: string | null;
+  }[];
+  total: number;
+  truncated: boolean;
+};
+/** 86e3qhhrd — o que a busca pelo nome devolve para cada texto pedido. */
+const searchByText = vi.fn<(nome: string) => SearchData | undefined>(() => undefined);
+const searchCalls: string[] = [];
+const suggestionsState = {
+  data: undefined as { file_entry_id: string; sugestoes: SearchData['data'] }[] | undefined,
+};
 const departamentosState = {
   data: {
     data: [
@@ -56,6 +72,17 @@ vi.mock('@/hooks/use-omie-postings', async (importOriginal) => ({
   useOmieCategorias: () => categoriasState,
   useOmieDepartamentos: () => departamentosState,
   useFindOmieFornecedor: () => findState,
+  useSearchOmieFornecedores: (_clientId: string, nome: string) => {
+    if (nome.trim() !== '') searchCalls.push(nome.trim());
+    return {
+      data: nome.trim() === '' ? undefined : searchByText(nome.trim()),
+      isError: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    };
+  },
+  useRefreshOmieFornecedores: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+  useOmieSupplierSuggestions: () => suggestionsState,
   useOmieFornecedorByCode: () => ({
     data: { codigo: 700000001, razao_social: 'PAPELARIA DEMO LTDA', nome_fantasia: null },
     isLoading: false,
@@ -97,6 +124,14 @@ const FOUND = {
   codigo: 700000001,
   razao_social: 'PAPELARIA DEMO LTDA',
   nome_fantasia: 'Papelaria',
+  cnpj_cpf: CNPJ_FOUND,
+};
+/** Fornecedor do exterior: só a busca pelo nome o acha (sem CNPJ). */
+const EXTERIOR = {
+  codigo: 700000003,
+  razao_social: 'SOFTWARE DEMO GMBH',
+  nome_fantasia: 'Software Demo',
+  cnpj_cpf: null,
 };
 
 function entry(over: Partial<FileEntryItem> = {}): FileEntryItem {
@@ -198,6 +233,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   postState.isPending = false;
   findState.isPending = false;
+  searchByText.mockImplementation(() => undefined);
+  searchCalls.length = 0;
+  suggestionsState.data = undefined;
   categoriasState.isLoading = false;
   categoriasState.isError = false;
   categoriasState.isFetching = false;
@@ -224,7 +262,7 @@ describe('Forma do lançamento', () => {
 
     await escolher(ui, /Categoria da compra de 10\/06\/2026/, /Combustível/);
 
-    expect(screen.getByText(/Sem fornecedor: busque o CNPJ/)).toBeInTheDocument();
+    expect(screen.getByText(/Sem fornecedor: busque pelo nome ou pelo CNPJ/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Confirmar e lançar 0 de 1/ })).toBeDisabled();
     expect(screen.getByText(/1 compra fica de fora/)).toHaveTextContent('(sem fornecedor)');
   });
@@ -273,7 +311,7 @@ describe('Forma do lançamento', () => {
     expect(screen.getByText(/parou no passo baixa/)).toBeInTheDocument();
     expect(screen.getByText(/não pode ser trocada/)).toBeInTheDocument();
     expect(screen.getByText(/O título nº 8800001 já existe no Omie/)).toBeInTheDocument();
-    expect(screen.queryByLabelText(/CNPJ do fornecedor/)).toBeNull();
+    expect(screen.queryByLabelText(/Buscar fornecedor no Omie/)).toBeNull();
 
     await escolher(ui, /Categoria da compra de 10\/06\/2026/, /Combustível/);
     postMock.mockResolvedValue(payload([line('e1', 'lancada', { kind: 'provisao' })]));
@@ -317,18 +355,18 @@ describe('Forma do lançamento', () => {
     ]);
     expect(screen.queryByRole('radio')).toBeNull();
     expect(screen.getByText('Lançar direto na conta do cartão')).toBeInTheDocument();
-    expect(screen.queryByLabelText(/CNPJ do fornecedor/)).toBeNull();
+    expect(screen.queryByLabelText(/Buscar fornecedor no Omie/)).toBeNull();
   });
 });
 
 describe('Fornecedor', () => {
-  it('encontrado: mostra o cadastro e o pedido leva o CNPJ', async () => {
+  it('encontrado pelo CNPJ: mostra o cadastro e o pedido leva o CÓDIGO dele', async () => {
     const ui = userEvent.setup();
     findMock.mockResolvedValue(FOUND);
     renderDrawer([entry()]);
 
     await escolher(ui, /Categoria da compra de 10\/06\/2026/, /Combustível/);
-    await buscarFornecedor(ui, /CNPJ do fornecedor — 10\/06\/2026/, CNPJ_FOUND);
+    await buscarFornecedor(ui, /Buscar fornecedor no Omie — 10\/06\/2026/, CNPJ_FOUND);
 
     expect(findMock).toHaveBeenCalledWith({ cnpj: '12345678000195' });
     expect(await screen.findByText('PAPELARIA DEMO LTDA')).toBeInTheDocument();
@@ -340,9 +378,89 @@ describe('Fornecedor', () => {
         file_entry_id: 'e1',
         modo: 'provisionar',
         cod_categoria: '1.01.01',
-        cnpj_fornecedor: '12345678000195',
+        codigo_fornecedor: 700000001,
       },
     ]);
+  });
+
+  it('pelo nome: a lista aparece ao parar de digitar e o pedido leva o código (86e3qhhrd)', async () => {
+    const ui = userEvent.setup();
+    searchByText.mockImplementation((nome) =>
+      nome.toLowerCase().startsWith('soft')
+        ? { data: [EXTERIOR], total: 1, truncated: false }
+        : { data: [], total: 0, truncated: false },
+    );
+    renderDrawer([entry()]);
+
+    await escolher(ui, /Categoria da compra de 10\/06\/2026/, /Combustível/);
+    const input = screen.getByLabelText(/Buscar fornecedor no Omie — 10\/06\/2026/);
+    await ui.type(input, 'softw');
+    // Com letra é nome: o botão da busca por CNPJ some.
+    expect(screen.queryByRole('button', { name: 'Buscar no Omie' })).toBeNull();
+    const option = await screen.findByRole('button', { name: /SOFTWARE DEMO GMBH/ });
+    expect(option).toHaveTextContent('sem CNPJ');
+    expect(screen.getByText('1 fornecedor encontrado.')).toBeInTheDocument();
+    // Só o texto já parado vai à busca, e nunca o que a pessoa digitou no meio.
+    expect(searchCalls.at(-1)).toBe('softw');
+    expect(findMock).not.toHaveBeenCalled();
+
+    await ui.click(option);
+    expect(screen.getByRole('button', { name: /Trocar fornecedor/ })).toBeInTheDocument();
+    postMock.mockResolvedValue(payload([line('e1', 'lancada', { kind: 'provisao' })]));
+    await ui.click(screen.getByRole('button', { name: /Confirmar e lançar 1 de 1/ }));
+
+    expect(postMock).toHaveBeenCalledWith([
+      {
+        file_entry_id: 'e1',
+        modo: 'provisionar',
+        cod_categoria: '1.01.01',
+        codigo_fornecedor: 700000003,
+      },
+    ]);
+  });
+
+  it('nome sem resultado: diz o que fazer, sem lista', async () => {
+    const ui = userEvent.setup();
+    searchByText.mockImplementation(() => ({ data: [], total: 0, truncated: false }));
+    renderDrawer([entry()]);
+
+    await ui.type(screen.getByLabelText(/Buscar fornecedor no Omie — 10\/06\/2026/), 'zzzz');
+
+    expect(
+      await screen.findByText(/Nenhum fornecedor ativo com esse nome no Omie do cliente/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Atualizar lista/ })).toBeInTheDocument();
+  });
+
+  it('sugestão pela compra: aparece antes de digitar e só vale com o clique', async () => {
+    const ui = userEvent.setup();
+    suggestionsState.data = [{ file_entry_id: 'e1', sugestoes: [EXTERIOR] }];
+    renderDrawer([entry({ description: 'SOFTWARE DEMO*ASSINATURA' })]);
+
+    await escolher(ui, /Categoria da compra de 10\/06\/2026/, /Combustível/);
+    expect(screen.getByText('Sugestão pelo nome da compra:')).toBeInTheDocument();
+    // Nada aplicado sozinho: sem o clique, a linha segue sem fornecedor.
+    expect(screen.getByRole('button', { name: /Confirmar e lançar 0 de 1/ })).toBeDisabled();
+
+    await ui.click(screen.getByRole('button', { name: /SOFTWARE DEMO GMBH/ }));
+    postMock.mockResolvedValue(payload([line('e1', 'lancada', { kind: 'provisao' })]));
+    await ui.click(screen.getByRole('button', { name: /Confirmar e lançar 1 de 1/ }));
+    expect(postMock).toHaveBeenCalledWith([
+      expect.objectContaining({ file_entry_id: 'e1', codigo_fornecedor: 700000003 }),
+    ]);
+  });
+
+  it('"Trocar fornecedor" volta ao campo vazio e a linha fica sem fornecedor', async () => {
+    const ui = userEvent.setup();
+    suggestionsState.data = [{ file_entry_id: 'e1', sugestoes: [EXTERIOR] }];
+    renderDrawer([entry()]);
+
+    await escolher(ui, /Categoria da compra de 10\/06\/2026/, /Combustível/);
+    await ui.click(screen.getByRole('button', { name: /SOFTWARE DEMO GMBH/ }));
+    await ui.click(screen.getByRole('button', { name: /Trocar fornecedor/ }));
+
+    expect(screen.getByLabelText(/Buscar fornecedor no Omie — 10\/06\/2026/)).toHaveValue('');
+    expect(screen.getByRole('button', { name: /Confirmar e lançar 0 de 1/ })).toBeDisabled();
   });
 
   it('sem cadastro: pede razão social e e-mail, e só então lança', async () => {
@@ -357,7 +475,7 @@ describe('Fornecedor', () => {
     renderDrawer([entry()]);
 
     await escolher(ui, /Categoria da compra de 10\/06\/2026/, /Combustível/);
-    await buscarFornecedor(ui, /CNPJ do fornecedor — 10\/06\/2026/, CNPJ_NEW);
+    await buscarFornecedor(ui, /Buscar fornecedor no Omie — 10\/06\/2026/, CNPJ_NEW);
 
     expect(await screen.findByText(/não tem cadastro no Omie do cliente/)).toBeInTheDocument();
     expect(screen.getByText(/não se desfaz pela API/)).toBeInTheDocument();
@@ -391,7 +509,7 @@ describe('Fornecedor', () => {
     );
     renderDrawer([entry()]);
 
-    await buscarFornecedor(ui, /CNPJ do fornecedor — 10\/06\/2026/, CNPJ_FOUND);
+    await buscarFornecedor(ui, /Buscar fornecedor no Omie — 10\/06\/2026/, CNPJ_FOUND);
 
     expect(await screen.findByText(/não respondeu no tempo esperado/)).toBeInTheDocument();
     findMock.mockResolvedValue(FOUND);
@@ -403,7 +521,7 @@ describe('Fornecedor', () => {
     const ui = userEvent.setup();
     renderDrawer([entry()]);
 
-    await buscarFornecedor(ui, /CNPJ do fornecedor — 10\/06\/2026/, '12.345.678/0001-96');
+    await buscarFornecedor(ui, /Buscar fornecedor no Omie — 10\/06\/2026/, '12.345.678/0001-96');
 
     expect(screen.getByText('CNPJ inválido. Confira os 14 dígitos.')).toBeInTheDocument();
     expect(findMock).not.toHaveBeenCalled();
@@ -417,7 +535,7 @@ describe('Fornecedor', () => {
     const padrao = screen.getByRole('checkbox', { name: /Usar o fornecedor padrão do cliente/ });
     expect(padrao).toHaveAccessibleName(/PAPELARIA DEMO LTDA/);
     await ui.click(padrao);
-    expect(screen.queryByLabelText(/CNPJ do fornecedor/)).toBeNull();
+    expect(screen.queryByLabelText(/Buscar fornecedor no Omie/)).toBeNull();
 
     postMock.mockResolvedValue(payload([line('e1', 'lancada', { kind: 'provisao' })]));
     await ui.click(screen.getByRole('button', { name: /Confirmar e lançar 1 de 1/ }));
@@ -444,7 +562,7 @@ describe('Compra dividida em categorias (86e3nb818)', () => {
     await digitarValor(ui, /Valor da parte 2/, '380');
     expect(screen.getByText('Fecha com o valor da compra.')).toBeInTheDocument();
 
-    await buscarFornecedor(ui, /CNPJ do fornecedor — 10\/06\/2026/, CNPJ_FOUND);
+    await buscarFornecedor(ui, /Buscar fornecedor no Omie — 10\/06\/2026/, CNPJ_FOUND);
     await screen.findByText('PAPELARIA DEMO LTDA');
     postMock.mockResolvedValue(payload([line('e1', 'lancada', { kind: 'provisao' })]));
     await ui.click(screen.getByRole('button', { name: /Confirmar e lançar 1 de 1/ }));
@@ -457,7 +575,7 @@ describe('Compra dividida em categorias (86e3nb818)', () => {
           { codigo: '2.02.02', valor: '100.00' },
           { codigo: '2.09.09', valor: '3.80' },
         ],
-        cnpj_fornecedor: '12345678000195',
+        codigo_fornecedor: 700000001,
       },
     ]);
   });
@@ -744,7 +862,7 @@ describe('Acessibilidade', () => {
 
     await ui.click(screen.getByRole('switch', { name: /Dividir em categorias/ }));
     await ui.click(screen.getByRole('switch', { name: /Ratear por departamento/ }));
-    await buscarFornecedor(ui, /CNPJ do fornecedor — 10\/06\/2026/, CNPJ_NEW);
+    await buscarFornecedor(ui, /Buscar fornecedor no Omie — 10\/06\/2026/, CNPJ_NEW);
     await screen.findByLabelText('Razão social');
 
     await assertNoA11yViolations(document.body);

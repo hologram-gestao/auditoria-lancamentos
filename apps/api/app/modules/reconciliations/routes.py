@@ -62,17 +62,27 @@ from app.core.rate_limit import limiter, user_id_key_func
 from app.db.models import Client, ReconciliationStatus
 from app.integrations.anthropic.client import AnthropicClient
 from app.integrations.omie.client import OmieClient
+from app.integrations.omie.fornecedores_directory_cache import OmieFornecedoresDirectoryCache
 from app.integrations.providers.base import Capability
 from app.modules.client_connections.origin import (
     assert_offers_origin_client,
+    build_capable_client,
     build_origin_client,
     resolve_capable_connection,
 )
+from app.modules.omie_data.payables_service import (
+    SUPPLIER_SUGGESTION_MAX_ENTRIES,
+    OmieFornecedorDirectoryService,
+)
+from app.modules.omie_data.schemas import OmieFornecedorSuggestionResponse
 from app.modules.reconciliations.omie_posting.schemas import (
     OmiePostingBatchRequest,
     OmiePostingBatchResponse,
 )
 from app.modules.reconciliations.omie_posting.service import OmiePostingService
+from app.modules.reconciliations.omie_posting.supplier_suggestions import (
+    suggest_suppliers_for_entries,
+)
 from app.modules.reconciliations.parse_service import ParseService
 from app.modules.reconciliations.processing.checksum import compute_checksum
 from app.modules.reconciliations.processing.job import run_reconciliation_processing
@@ -884,3 +894,67 @@ async def post_omie_lancamentos(
     )
     payload = await service.post_batch(session=session_obj, client=client, lines=body.lines)
     return OmiePostingBatchResponse(data=payload)
+
+
+@router.get(
+    "/{session_id}/omie-postings/fornecedores-sugeridos",
+    summary=(
+        "Para cada linha pedida (`file_entry_id`, repetível, até 200) da conciliação, "
+        "até 3 cadastros ATIVOS do Omie do cliente com mais tokens em comum com a "
+        "descrição da compra (a mesma afinidade de nome do cruzamento). A descrição é "
+        "decifrada no servidor e não sai dele. Linha de outra conciliação não volta. "
+        "Só sugere: o fornecedor do título é o que a pessoa confirmar. Nunca grava. "
+        "Cliente encerrado: 409; só-arquivo: 409 CAPACIDADE_AUSENTE."
+    ),
+)
+async def get_omie_supplier_suggestions(
+    user: ReviewExportDep,
+    db: DbSessionDep,
+    request: Request,
+    settings: Annotated[Settings, Depends(get_settings)],
+    session_id: UUID,
+    file_entry_id: Annotated[
+        list[UUID],
+        Query(
+            min_length=1,
+            max_length=SUPPLIER_SUGGESTION_MAX_ENTRIES,
+            description="Linhas da conciliação para sugerir fornecedor.",
+        ),
+    ],
+) -> OmieFornecedorSuggestionResponse:
+    """Sugestão de fornecedor por linha (86e3qhhrd).
+
+    **Autorização e tenant**: os MESMOS do lançamento (`ReviewExportDep` +
+    `require_session_access`): quem pode lançar a linha pode ver a sugestão para
+    ela. O `Client` sai do `client_id` da sessão autorizada, e as linhas, do
+    `SELECT` com o `session_id` dela.
+    """
+    session_obj = await require_session_access(db, user, session_id)
+    client = (
+        await db.execute(select(Client).where(Client.id == session_obj.client_id))
+    ).scalar_one_or_none()
+    if client is None:  # pragma: no cover  -- FK garante a existência
+        raise NotFoundError("Conciliação não encontrada.")
+    if client.closed_at is not None:
+        raise ClientClosedError(
+            f"Cliente {client.id} está encerrado; sugestão de fornecedor recusada."
+        )
+    cipher = await load_client_cipher(client, settings=settings)
+    cache: OmieFornecedoresDirectoryCache = request.app.state.omie_fornecedores_directory_cache
+
+    async def build_client() -> OmieClient:
+        return await build_capable_client(
+            db, client, Capability.LISTAR_LANCAMENTOS, settings=settings
+        )
+
+    cadastros = await OmieFornecedorDirectoryService(cache).directory(
+        client_id=client.id, omie_client_factory=build_client
+    )
+    suggestions = await suggest_suppliers_for_entries(
+        db,
+        session_id=session_obj.id,
+        file_entry_ids=file_entry_id,
+        cipher=cipher,
+        cadastros=cadastros,
+    )
+    return OmieFornecedorSuggestionResponse(data=suggestions)

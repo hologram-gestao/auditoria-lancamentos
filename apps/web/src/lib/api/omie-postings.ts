@@ -22,6 +22,8 @@ import type {
   OmieCategoriaListResponse,
   OmieDepartamentoListResponse,
   OmieFornecedorItem,
+  OmieFornecedorSearchResponse,
+  OmieFornecedorSuggestion,
   OmiePostingBatchPayload,
   OmiePostingLineRequest,
 } from '@/lib/contracts';
@@ -36,6 +38,8 @@ export type {
   OmieDepartamentoItem,
   OmieDepartamentoListResponse,
   OmieFornecedorItem,
+  OmieFornecedorSearchResponse,
+  OmieFornecedorSuggestion,
   OmiePostingMode,
   OmiePostingState,
   OmiePostingBatchPayload,
@@ -103,6 +107,42 @@ export async function listOmieDepartamentos(
   clientId: string,
 ): Promise<OmieDepartamentoListResponse> {
   return apiGet<OmieDepartamentoListResponse>(`/api/v1/clients/${clientId}/omie/departamentos`);
+}
+
+/**
+ * Cadastros ATIVOS do Omie do cliente que contêm o texto (86e3qhhrd): a busca ao
+ * digitar. O servidor procura num diretório em memória (6 h), então cada busca é
+ * uma ida à NOSSA API, nunca à Omie. `refresh` relê o diretório da Omie
+ * ("Atualizar lista"). Nunca grava.
+ */
+export async function searchOmieFornecedores(
+  clientId: string,
+  nome: string,
+  options: { refresh?: boolean; signal?: AbortSignal } = {},
+): Promise<OmieFornecedorSearchResponse> {
+  const sp = new URLSearchParams({ nome });
+  if (options.refresh) sp.set('refresh', 'true');
+  return apiGet<OmieFornecedorSearchResponse>(
+    `/api/v1/clients/${clientId}/omie/fornecedores/busca?${sp.toString()}`,
+    { signal: options.signal },
+  );
+}
+
+/**
+ * Sugestão de fornecedor por linha da fatura, pela descrição da compra (86e3qhhrd).
+ *
+ * Os ids das linhas vão na URL; a DESCRIÇÃO nunca: ela é cifrada e o servidor a
+ * decifra para comparar. `{ data: [...] }` com chave única: o `apiGet` desembrulha.
+ */
+export async function fetchOmieSupplierSuggestions(
+  sessionId: string,
+  fileEntryIds: readonly string[],
+): Promise<OmieFornecedorSuggestion[]> {
+  const sp = new URLSearchParams();
+  fileEntryIds.forEach((id) => sp.append('file_entry_id', id));
+  return apiGet<OmieFornecedorSuggestion[]>(
+    `/api/v1/reconciliations/${sessionId}/omie-postings/fornecedores-sugeridos?${sp.toString()}`,
+  );
 }
 
 /** CNPJ (com ou sem máscara) OU código do cadastro — exatamente um dos dois. */

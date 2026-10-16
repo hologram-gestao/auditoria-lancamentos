@@ -133,6 +133,16 @@ _TRAILING_CODE = re.compile(r"(\d+)\s*$")
 #: `listar_clientes_por_cnpj_inexistente.response.json`).
 OMIE_CODE_NO_RECORDS = "5113"
 
+#: Página do `ListarClientes` sem filtro: o mesmo `registros_por_pagina` da busca
+#: por CNPJ capturada (13/10/2026), o único valor provado contra a API real.
+LISTAR_CLIENTES_PAGE_SIZE = 50
+
+#: Teto de páginas do diretório de cadastros (86e3qhhrd): 100 x 50 = 5.000
+#: cadastros. Acima disso o `_paginate` para e loga `omie_paginate_max_pages_reached`
+#: (a busca seguiria sobre os 5.000 primeiros), sinal para trocar a estratégia pelo
+#: filtro da própria Omie.
+LISTAR_CLIENTES_MAX_PAGES = 100
+
 
 def omie_error_code(exc: OmieFaultError) -> str | None:
     """O código numérico da Omie por trás de um `OmieFaultError`, ou `None`.
@@ -772,6 +782,41 @@ class OmieClient:
             raise
         cadastros: list[dict[str, Any]] = raw.get("clientes_cadastro") or []
         return [ClienteOmie.model_validate(item) for item in cadastros]
+
+    async def listar_clientes(self) -> list[ClienteOmie]:
+        """TODOS os cadastros de cliente e fornecedor (`ListarClientes` sem filtro).
+
+        86e3qhhrd: a busca de fornecedor pelo NOME. A pessoa digita e a lista de
+        parecidos sai de um cache em memória por cliente
+        (`OmieFornecedoresDirectoryCache`), alimentado por esta leitura uma vez por
+        TTL: nunca uma chamada à Omie por tecla, porque chamada em rajada cai no
+        `425` e a Omie processa uma requisição por método por app_key.
+
+        Mesmo método, mesmo envelope (`clientes_cadastro`, `total_de_paginas`) e
+        mesmo tamanho de página (50) da busca por CNPJ capturada em 13/10/2026; só
+        sai o `clientesFiltro`. Sem nenhum cadastro, a Omie responde `5113` em vez
+        de lista vazia (como na busca por CNPJ): aqui ele vira `[]`.
+
+        Nada daqui é logado além da contagem: razão social e CNPJ são do cliente
+        final (§4.5).
+        """
+        items: list[ClienteOmie] = []
+        try:
+            async for raw in self._paginate(
+                module="geral",
+                endpoint="clientes",
+                call_name="ListarClientes",
+                list_key="clientes_cadastro",
+                page_size=LISTAR_CLIENTES_PAGE_SIZE,
+                max_pages=LISTAR_CLIENTES_MAX_PAGES,
+            ):
+                items.append(ClienteOmie.model_validate(raw))
+        except OmieFaultError as exc:
+            if omie_error_code(exc) == OMIE_CODE_NO_RECORDS and not items:
+                return []
+            raise
+        log.info("omie_clientes_directory_size", item_count=len(items))
+        return items
 
     async def incluir_cliente(self, request: IncluirClienteRequest) -> ClienteStatusResponse:
         """Cadastra um fornecedor (`IncluirCliente`). ESCRITA.

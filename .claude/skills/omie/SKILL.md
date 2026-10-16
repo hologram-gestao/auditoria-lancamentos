@@ -306,6 +306,14 @@ DTOs mínimos em `schemas.py` (seção "Contas a Pagar"), base `OmieWriteParam`;
   mente) — departamento do rateio é ESCOLHIDO, nunca inferido.
 - Busca de fornecedor por CNPJ = `ListarClientes` + `clientesFiltro.cnpj_cpf`
   (`ConsultarCliente` só aceita código); inexistente é **fault `5113`**, não lista vazia.
+- Busca pelo NOME (86e3qhhrd) NÃO usa filtro da Omie: `OmieClient.listar_clientes` é o
+  MESMO `ListarClientes` capturado, sem o `clientesFiltro`, paginado de 50 em 50 (teto
+  de 100 páginas), para um diretório em memória por cliente com trava no miss; o
+  "contém" roda no servidor. O cadastro traz `cnpj_cpf` com máscara e VAZIO em
+  fornecedor do exterior. Diretório sem nenhum cadastro foi tratado como `5113` por
+  analogia com a busca por CNPJ: não foi capturado. Se um cliente passar de 5.000
+  cadastros, o `_paginate` loga `omie_paginate_max_pages_reached` e é a hora de
+  capturar o filtro `razao_social` da própria Omie.
 - `IncluirCliente`: `email` obrigatório na prática (`1040`); aceito com
   `codigo_cliente_integracao`/`razao_social`/`nome_fantasia`/`cnpj_cpf`/`email`;
   **idempotente** sobre `codigo_cliente_integracao` (2º POST = mesmo `codigo_cliente_omie`).

@@ -7,6 +7,9 @@
   `?codigo=` (bloco C) devolve o nome do cadastro de um código, para a tela de
   edição do cliente mostrar o fornecedor padrão gravado; a resolução é a das
   divergências (`resolve_supplier_names` + `OmieClientesCache`).
+- `GET /api/v1/clients/{client_id}/omie/fornecedores/busca?nome=` (86e3qhhrd) — os
+  cadastros ATIVOS que contêm o texto digitado, de um diretório em memória por
+  cliente (6 h; `refresh=true` relê): nenhuma chamada à Omie por tecla.
 
 **Tenant.** `AccessibleClientDep` (a decisão única `resolve_client_access`): o
 `client_id` do path só serve para endereçar, quem decide se ele é alcançável é a
@@ -31,15 +34,23 @@ from app.core.exceptions import ValidationAppError
 from app.integrations.omie.client import OmieClient
 from app.integrations.omie.clientes_cache import OmieClientesCache
 from app.integrations.omie.departamentos_cache import OmieDepartamentosCache
+from app.integrations.omie.fornecedores_directory_cache import OmieFornecedoresDirectoryCache
+from app.integrations.omie.schemas import OMIE_CODE_MAX
 from app.integrations.providers.base import Capability
 from app.modules.client_connections.origin import build_capable_client
 from app.modules.omie_data.payables_service import (
+    SUPPLIER_SEARCH_MAX_CHARS,
+    SUPPLIER_SEARCH_MIN_CHARS,
     OmieDepartamentosService,
+    OmieFornecedorDirectoryService,
     OmieFornecedorLookupService,
+    normalize_search_text,
+    search_directory,
 )
 from app.modules.omie_data.schemas import (
     OmieDepartamentoListResponse,
     OmieFornecedorResponse,
+    OmieFornecedorSearchResponse,
 )
 
 router = APIRouter(prefix="/api/v1/clients/{client_id}/omie", tags=["omie"])
@@ -99,7 +110,11 @@ async def get_client_omie_fornecedor(
     ] = None,
     codigo: Annotated[
         int | None,
-        Query(ge=1, description="Código do cadastro no Omie (`codigo_cliente_omie`)."),
+        Query(
+            ge=1,
+            le=OMIE_CODE_MAX,
+            description="Código do cadastro no Omie (`codigo_cliente_omie`).",
+        ),
     ] = None,
 ) -> OmieFornecedorResponse:
     if cnpj is not None and codigo is not None:
@@ -138,3 +153,51 @@ async def get_client_omie_fornecedor(
         omie_client_factory=build_client,
     )
     return OmieFornecedorResponse(data=item)
+
+
+@router.get(
+    "/fornecedores/busca",
+    summary=(
+        "Cadastros ATIVOS do Omie do cliente que contêm o texto digitado (razão "
+        "social, nome fantasia ou dígitos do CNPJ/CPF), no máximo 20, quem começa "
+        "pelo texto primeiro. Sai de um diretório em memória por cliente (6 h), lido "
+        "da Omie uma vez: buscar ao digitar não chama a Omie por tecla. "
+        "`refresh=true` relê o diretório. Nunca grava. Texto com menos de 3 "
+        "caracteres úteis: 400. Cliente só-arquivo: 409 CAPACIDADE_AUSENTE."
+    ),
+)
+async def search_client_omie_fornecedores(
+    client: AccessibleClientDep,
+    db: DbSessionDep,
+    request: Request,
+    settings: Annotated[Settings, Depends(get_settings)],
+    nome: Annotated[
+        str,
+        Query(
+            min_length=SUPPLIER_SEARCH_MIN_CHARS,
+            max_length=SUPPLIER_SEARCH_MAX_CHARS,
+            description="Texto da busca (nome ou parte do nome do fornecedor).",
+        ),
+    ],
+    refresh: Annotated[bool, Query(description="Relê o diretório da Omie.")] = False,
+) -> OmieFornecedorSearchResponse:
+    # `min_length` conta pontuação e espaço: "a-b" passaria e casaria metade do
+    # cadastro. O mínimo vale sobre o texto NORMALIZADO, sem ecoar o que veio.
+    if len(normalize_search_text(nome).replace(" ", "")) < SUPPLIER_SEARCH_MIN_CHARS:
+        raise ValidationAppError(
+            "Busca de fornecedor com menos de 3 caracteres úteis.",
+            user_message="Digite pelo menos 3 letras ou números do nome do fornecedor.",
+        )
+    cache: OmieFornecedoresDirectoryCache = request.app.state.omie_fornecedores_directory_cache
+
+    async def build_client() -> OmieClient:
+        # Só no MISS: o hit do cache não paga o unwrap da DEK nem o 409 de origem.
+        return await build_capable_client(
+            db, client, Capability.LISTAR_LANCAMENTOS, settings=settings
+        )
+
+    cadastros = await OmieFornecedorDirectoryService(cache).directory(
+        client_id=client.id, omie_client_factory=build_client, refresh=refresh
+    )
+    items, total = search_directory(cadastros, nome)
+    return OmieFornecedorSearchResponse(data=items, total=total, truncated=total > len(items))

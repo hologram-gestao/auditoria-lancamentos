@@ -675,6 +675,9 @@ export type OmieDepartamentoItem = Schemas['OmieDepartamentoItem'];
 export type OmieDepartamentoListResponse = Schemas['OmieDepartamentoListResponse'];
 /** O cadastro de um fornecedor no Omie do cliente (busca por CNPJ ou por código). */
 export type OmieFornecedorItem = Schemas['OmieFornecedorItem'];
+export type OmieFornecedorSearchResponse = Schemas['OmieFornecedorSearchResponse'];
+export type OmieFornecedorSuggestion = Schemas['OmieFornecedorSuggestion'];
+export type OmieFornecedorSuggestionResponse = Schemas['OmieFornecedorSuggestionResponse'];
 
 /** Query real de `GET /omie/categorias` (`session_id` obrigatório, `refresh`). */
 export type ListOmieCategoriasQuery = NonNullable<
