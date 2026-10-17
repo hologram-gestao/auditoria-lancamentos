@@ -105,6 +105,8 @@ def card_posting_date_mode_check(*, nullable: bool = False) -> str:
 #: compara as duas fontes.
 OMIE_DEFAULT_SUPPLIER_CK_LABEL = "omie_default_supplier_code_positive"
 OMIE_DEFAULT_SUPPLIER_CK = "omie_default_supplier_code IS NULL OR omie_default_supplier_code > 0"
+#: Tamanho da impressão digital dos relatórios de terceiros (86e3qhhrn): HMAC-SHA256 em hex.
+PARTY_REPORTS_FINGERPRINT_HEX_LENGTH = 64
 
 
 class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -279,6 +281,15 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # (decisão de 11/10/2026); desligado por padrão, que é o processo de sempre.
     omie_department_required: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
+    )
+
+    # 86e3qhhrn: a IMPRESSÃO DIGITAL (HMAC-SHA256 com a `SEARCH_BLIND_INDEX_KEY`, 64
+    # hex) do CNPJ da empresa que aparece no cabeçalho dos relatórios de clientes e
+    # fornecedores do Domínio já importados para este cliente. Serve só para
+    # comparar: relatório de OUTRA empresa é recusado antes de gravar vínculo. O CNPJ
+    # em si nunca persiste (§4.5); o encerramento zera a coluna (é identidade).
+    party_reports_company_fingerprint: Mapped[str | None] = mapped_column(
+        String(PARTY_REPORTS_FINGERPRINT_HEX_LENGTH), nullable=True
     )
 
     # Relationships

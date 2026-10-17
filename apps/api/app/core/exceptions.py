@@ -102,6 +102,9 @@ class ErrorCode(StrEnum):
     CONTA_CONTABIL_INVALIDA = "CONTA_CONTABIL_INVALIDA"
     CONTA_CONTABIL_EM_USO = "CONTA_CONTABIL_EM_USO"
     PLANO_CONTABIL_INDECIFRAVEL = "PLANO_CONTABIL_INDECIFRAVEL"
+    #: 86e3qhhrn: a relação de clientes/fornecedores do Domínio enviada é de OUTRA
+    #: empresa (o CNPJ do cabeçalho não bate com o dos relatórios já importados).
+    RELATORIO_DE_OUTRA_EMPRESA = "RELATORIO_DE_OUTRA_EMPRESA"
     # Sprint 16 (BACK 16.2) — o de-para no destino `conta_contabil` aponta para o
     # plano do CLIENTE, e só ele: catálogo da org nesse destino, conta do plano em
     # outro destino e a importação da planilha nesse destino são recusas tipadas.
@@ -1057,6 +1060,23 @@ class AccountingChartUndecipherableError(AppError):
     default_user_message = (
         "Não foi possível exportar o plano contábil: o nome de algumas contas não pôde "
         "ser lido. Fale com o suporte."
+    )
+
+
+class PartiesReportCompanyMismatchError(AppError):
+    """422 — a relação de clientes/fornecedores é de OUTRA empresa (86e3qhhrn).
+
+    O CNPJ do cabeçalho do relatório não bate com a impressão digital gravada nos
+    relatórios já importados para este cliente. Nada é gravado, e a resposta não
+    traz CNPJ nenhum (nem o do arquivo, nem o do cliente): só o motivo.
+    """
+
+    code = ErrorCode.RELATORIO_DE_OUTRA_EMPRESA
+    status_code = 422
+    default_user_message = (
+        "Este relatório é de outra empresa: o CNPJ do cabeçalho não é o mesmo dos "
+        "relatórios já importados para este cliente. Confira se exportou a relação da "
+        "empresa certa no Domínio."
     )
 
 

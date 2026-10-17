@@ -70,6 +70,19 @@ let planTotal = 0;
 /** A sonda ainda não respondeu (a lista pode ter chegado antes). */
 let probeLoading = false;
 const importState = { mutateAsync: vi.fn(), isPending: false };
+const partiesListState = {
+  data: {
+    data: [],
+    pagination: { page: 1, pageSize: 50, total: 0, totalPages: 0 },
+    summary: { contasVinculadas: 0, clientes: 0, fornecedores: 0 },
+  },
+  isLoading: false,
+  isFetching: false,
+  isError: false,
+  error: null,
+  refetch: vi.fn(),
+};
+const partiesImportState = { mutateAsync: vi.fn(), isPending: false };
 const previewState = { mutateAsync: vi.fn(), isPending: false };
 const exportState = { mutateAsync: vi.fn(), isPending: false };
 const sourceState = {
@@ -104,6 +117,9 @@ vi.mock('@/hooks/use-client-accounting-chart', () => ({
   useSetSourceAccountBinding: () => bindingState,
   useCreateAccountingAccount: () => createAccountState,
   useUpdateAccountingAccount: () => updateAccountState,
+  // 86e3qhhrn — a aba "Clientes e fornecedores" (testada em accounting-parties-tab.test.tsx).
+  useAccountingPartiesList: () => partiesListState,
+  useImportAccountingParties: () => partiesImportState,
 }));
 
 const clientDetailState = {
@@ -367,6 +383,52 @@ describe('gating por capacidade (manage_client_accounting_chart)', () => {
       expect(within(section).queryByText(/Peça a/)).not.toBeInTheDocument();
     },
   );
+});
+
+describe('abas (86e3qhhrn)', () => {
+  it('quem gere o plano vê as duas abas e a de vínculos abre pela URL', () => {
+    authState.user = manager;
+    withPlan([account()]);
+    currentSearch = 'aba=clientes-fornecedores';
+    render(<AccountingChartScreen clientId="c1" />);
+
+    const tabs = screen.getByRole('tablist', { name: 'Seções do plano contábil' });
+    expect(within(tabs).getByRole('tab', { name: 'Contas' })).toHaveAttribute(
+      'aria-selected',
+      'false',
+    );
+    expect(within(tabs).getByRole('tab', { name: 'Clientes e fornecedores' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(screen.getByTestId('accounting-parties-tab')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Importar relação' })).toBeInTheDocument();
+    // A aba "Contas" inativa não está na árvore (o Radix não monta o painel inativo).
+    expect(screen.queryByText('Banco conta movimento')).not.toBeInTheDocument();
+  });
+
+  it('sem o parâmetro na URL, a tela abre em "Contas" com a faixa de abas', () => {
+    authState.user = admin;
+    withPlan([account()]);
+    render(<AccountingChartScreen clientId="c1" />);
+    const tabs = screen.getByRole('tablist', { name: 'Seções do plano contábil' });
+    expect(within(tabs).getByRole('tab', { name: 'Contas' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: /Reimportar planilha/ })).toBeVisible();
+  });
+
+  it('usuário do cliente não vê a faixa de abas, e o deep link cai em "Contas"', () => {
+    authState.user = clientManager;
+    withPlan([account()]);
+    currentSearch = 'aba=clientes-fornecedores';
+    render(<AccountingChartScreen clientId="c1" />);
+
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('accounting-parties-tab')).not.toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'Banco conta movimento' })).toBeInTheDocument();
+  });
 });
 
 describe('lista', () => {
