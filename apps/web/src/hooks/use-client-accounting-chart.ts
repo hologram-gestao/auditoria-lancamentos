@@ -13,7 +13,9 @@
  *   - incluir ou editar UMA conta (86e3nb816) invalida o mesmo que importar: a
  *     lista, as contas de origem (nome da conta do banco) e o de-para;
  *   - associar a conta do banco atualiza as contas de origem e o de-para (a
- *     prévia lista as contas de origem pendentes).
+ *     prévia lista as contas de origem pendentes);
+ *   - importar uma relação de clientes/fornecedores (86e3qhhrn) invalida a árvore
+ *     do plano (os vínculos são colunas da conta); listar vínculos é leitura.
  */
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -22,12 +24,15 @@ import {
   createAccountingAccount,
   exportAccountingChart,
   importAccountingChart,
+  importAccountingParties,
   listAccountingChart,
+  listAccountingParties,
   listSourceAccounts,
   previewAccountingChartImport,
   setSourceAccountBinding,
   updateAccountingAccount,
   type ListAccountingChartParams,
+  type ListAccountingPartiesParams,
 } from '@/lib/api/client-accounting-chart';
 import type {
   AccountingAccount,
@@ -36,6 +41,8 @@ import type {
   AccountingChartImportPreview,
   AccountingChartImportResult,
   AccountingChartListResponse,
+  AccountingPartiesImportResult,
+  AccountingPartyLinksListResponse,
   SourceAccountBindingPayload,
   SourceAccountBindingRequest,
   SourceAccountEntry,
@@ -48,6 +55,8 @@ export const accountingChartKeys = {
   list: (clientId: string, params: ListAccountingChartParams) =>
     ['accounting-chart', clientId, 'list', params] as const,
   sourceAccounts: (clientId: string) => ['accounting-chart', clientId, 'source-accounts'] as const,
+  parties: (clientId: string, params: ListAccountingPartiesParams) =>
+    ['accounting-chart', clientId, 'parties', params] as const,
 };
 
 export function useAccountingChartList(
@@ -130,6 +139,31 @@ export function useSetSourceAccountBinding(clientId: string) {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: accountingChartKeys.sourceAccounts(clientId) });
       void qc.invalidateQueries({ queryKey: clientMappingKeys.all(clientId) });
+    },
+  });
+}
+
+/** As contas com vínculo a cliente/fornecedor (86e3qhhrn). Só para quem gere o plano. */
+export function useAccountingPartiesList(
+  clientId: string,
+  params: ListAccountingPartiesParams,
+  options: { enabled?: boolean } = {},
+) {
+  return useQuery<AccountingPartyLinksListResponse>({
+    queryKey: accountingChartKeys.parties(clientId, params),
+    queryFn: () => listAccountingParties(clientId, params),
+    placeholderData: keepPreviousData,
+    enabled: clientId.length > 0 && (options.enabled ?? true),
+  });
+}
+
+/** Importa uma relação do Domínio (86e3qhhrn): o vínculo mora na conta, então a árvore inteira invalida. */
+export function useImportAccountingParties(clientId: string) {
+  const qc = useQueryClient();
+  return useMutation<AccountingPartiesImportResult, Error, File>({
+    mutationFn: (file) => importAccountingParties(clientId, file),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: accountingChartKeys.all(clientId) });
     },
   });
 }

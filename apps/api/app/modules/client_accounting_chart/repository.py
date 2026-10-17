@@ -24,6 +24,7 @@ from uuid import UUID
 
 from sqlalchemy import Table, bindparam, func, insert, select, text, update
 
+from app.db.models.client import Client
 from app.db.models.client_accounting_account import ClientAccountingAccount
 from app.db.models.client_mapping import ClientMappingDecision
 from app.db.models.client_source_account_binding import ClientSourceAccountBinding
@@ -307,3 +308,87 @@ class AccountingChartRepository:
                 if account_id is not None
             )
         return used
+
+    # ------------------------------------------- vínculo conta ↔ pessoa (86e3qhhrn)
+
+    async def company_fingerprint_for_update(self, client_id: UUID) -> str | None:
+        """A impressão digital da empresa dos relatórios já importados, travada.
+
+        `FOR UPDATE` na linha do cliente: duas importações simultâneas do primeiro
+        relatório não gravam impressões diferentes (a segunda espera a primeira e lê
+        o que ela gravou). Roda sob `lock_client_chart`, que já serializa o plano.
+        """
+        stmt = (
+            select(Client.party_reports_company_fingerprint)
+            .where(Client.id == client_id)
+            .with_for_update()
+        )
+        return (await self._session.execute(stmt)).scalar_one()
+
+    async def set_company_fingerprint(self, client_id: UUID, fingerprint: str) -> None:
+        """Grava a impressão digital da empresa. Quem decide se pode (nula, ou diferente
+        sem nenhum vínculo gravado) é o serviço, sob o `FOR UPDATE` de
+        `company_fingerprint_for_update`."""
+        table = cast(Table, Client.__table__)
+        stmt = (
+            update(table)
+            .where(table.c.id == client_id)
+            .values(party_reports_company_fingerprint=fingerprint)
+        )
+        await self._session.execute(stmt)
+
+    async def update_party_links(self, updates: Sequence[dict[str, Any]]) -> None:
+        """Grava o vínculo (documento cifrado, IV e tipo) por pk, em lote (Core).
+
+        Cada item: `{"b_client", "b_id", "b_ct", "b_iv", "b_type", "b_author"}`.
+        `client_id` no WHERE junto da pk (§3.15); `updated_at` pelo `clock_timestamp()`.
+        Nada mais da conta muda: nome, tipo, classificação e situação são do plano.
+        """
+        if not updates:
+            return
+        table = _table()
+        stmt = (
+            update(table)
+            .where(table.c.client_id == bindparam("b_client"), table.c.id == bindparam("b_id"))
+            .values(
+                party_document_encrypted=bindparam("b_ct"),
+                party_document_iv=bindparam("b_iv"),
+                party_type=bindparam("b_type"),
+                updated_by=bindparam("b_author"),
+                updated_at=func.clock_timestamp(),
+            )
+        )
+        await self._session.execute(stmt, list(updates))
+
+    async def list_linked_page(
+        self,
+        client_id: UUID,
+        *,
+        party_type: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ClientAccountingAccount], int]:
+        """As contas COM vínculo, paginadas, na ordem do plano; `party_type` recorta."""
+        stmt = self._base_query(client_id).where(
+            ClientAccountingAccount.party_document_encrypted.is_not(None)
+        )
+        if party_type is not None:
+            stmt = stmt.where(ClientAccountingAccount.party_type == party_type)
+        total_stmt = select(func.count()).select_from(stmt.order_by(None).subquery())
+        total = int((await self._session.execute(total_stmt)).scalar_one())
+        page_stmt = stmt.order_by(*_chart_order()).limit(limit).offset(offset)
+        rows = list((await self._session.execute(page_stmt)).scalars().all())
+        return rows, total
+
+    async def count_links_by_type(self, client_id: UUID) -> dict[str, int]:
+        """Quantas contas vinculadas por tipo (`cliente`/`fornecedor`), do cliente."""
+        stmt = (
+            select(ClientAccountingAccount.party_type, func.count())
+            .where(
+                ClientAccountingAccount.client_id == client_id,
+                ClientAccountingAccount.party_document_encrypted.is_not(None),
+            )
+            .group_by(ClientAccountingAccount.party_type)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return {str(party_type): int(count) for party_type, count in rows if party_type}

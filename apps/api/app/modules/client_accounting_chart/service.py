@@ -33,6 +33,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.crypto_service import (
     AAD_ACCOUNTING_ACCOUNT_NAME,
+    AAD_ACCOUNTING_ACCOUNT_PARTY_DOCUMENT,
     field_locator,
     load_client_cipher,
     provision_client_cipher,
@@ -45,15 +46,23 @@ from app.core.exceptions import (
     AccountingAccountNotPostableError,
     AccountingChartUndecipherableError,
     ClientClosedError,
+    PartiesReportCompanyMismatchError,
 )
 from app.core.logging import get_logger
+from app.core.search_index import compute_fingerprint
 from app.db.models import Client
 from app.db.models.client_accounting_account import (
     AccountingAccountType,
+    AccountingPartyType,
     ClientAccountingAccount,
 )
 from app.modules.client_accounting_chart.diff import ChartDiff, diff_chart
 from app.modules.client_accounting_chart.export import build_chart_csv
+from app.modules.client_accounting_chart.parties import (
+    PartyLineProblem,
+    parse_parties_report,
+    raise_party_lines,
+)
 from app.modules.client_accounting_chart.repository import (
     AccountingChartFilters,
     AccountingChartRepository,
@@ -165,6 +174,45 @@ class DecryptedNames:
 
     names: dict[UUID, str]
     failed: frozenset[UUID]
+
+
+@dataclass(frozen=True, slots=True)
+class PartyImportResult:
+    """As contagens da importação de uma relação (86e3qhhrn), a resposta e o evento.
+
+    `lines` = pessoas no relatório; `new` + `updated` + `unchanged` = contas vinculadas
+    por esta importação; `skipped` = as linhas que ficaram sem vínculo, com o motivo
+    fechado e o código da conta (nunca o documento).
+    """
+
+    party_type: AccountingPartyType
+    lines: int
+    new: int
+    updated: int
+    unchanged: int
+    skipped: list[PartyLineProblem]
+
+    @property
+    def linked(self) -> int:
+        return self.new + self.updated + self.unchanged
+
+
+@dataclass(frozen=True, slots=True)
+class PartyDocuments:
+    """`id → documento MASCARADO` e os ids que NÃO decifraram (saem sem documento)."""
+
+    masked: dict[UUID, str]
+    kinds: dict[UUID, Literal["cnpj", "cpf"]]
+    failed: frozenset[UUID]
+
+
+@dataclass(frozen=True, slots=True)
+class PartyLinksSummary:
+    """Quantas contas do plano têm vínculo, por tipo."""
+
+    linked: int
+    clientes: int
+    fornecedores: int
 
 
 def not_postable_reason(account: ClientAccountingAccount) -> NotPostableReason | None:
@@ -563,6 +611,197 @@ class AccountingChartService:
         )
         return account, names
 
+    # ------------------------------------------- vínculo conta ↔ pessoa (86e3qhhrn)
+
+    async def import_parties(
+        self, client: Client, *, actor: CurrentUser, content: bytes
+    ) -> PartyImportResult:
+        """Importa a RELAÇÃO DE CLIENTES ou a DE FORNECEDORES do Domínio — por arquivo,
+        tudo ou nada.
+
+        Ordem: cliente encerrado (409) → relatório inteiro lido em memória (422 tipado,
+        nada gravado) → trava por cliente → EMPRESA do relatório contra a impressão
+        digital dos relatórios anteriores (422 `RELATORIO_DE_OUTRA_EMPRESA`) → cada conta
+        contra o plano do cliente (inexistente ou sintética recusa o arquivo inteiro,
+        `LINHAS_INVALIDAS`) → DEK → documento cifrado por conta, numa transação →
+        commit → métrica.
+
+        Reimportar é idempotente: a conta cujo documento e tipo não mudaram não é
+        regravada. A conta vinculada que não vem no relatório FICA como está (como a
+        reimportação do plano nunca inativa). O documento nunca entra em log.
+        """
+        _require_open(client)
+        report = await run_in_threadpool(parse_parties_report, content)
+
+        await self._repo.lock_client_chart(client.id)
+        fingerprint = compute_fingerprint(
+            report.company_document, self._settings.SEARCH_BLIND_INDEX_KEY.get_secret_value()
+        )
+        current_fingerprint = await self._repo.company_fingerprint_for_update(client.id)
+        if current_fingerprint is not None and current_fingerprint != fingerprint:
+            # A empresa só muda enquanto NENHUMA conta tem vínculo: é a saída para o
+            # relatório da empresa errada importado por engano antes de qualquer
+            # vínculo; com vínculo gravado, a troca seria misturar duas empresas.
+            if sum((await self._repo.count_links_by_type(client.id)).values()) > 0:
+                raise PartiesReportCompanyMismatchError(
+                    f"relatório de terceiros de outra empresa para o cliente {client.id}"
+                )
+            current_fingerprint = None
+
+        codes = {line.account_code for line in report.lines}
+        accounts = {a.code: a for a in await self._repo.get_by_codes(client.id, codes)}
+        problems: list[PartyLineProblem] = []
+        for line in report.lines:
+            account = accounts.get(line.account_code)
+            if account is None:
+                problems.append(
+                    PartyLineProblem(line.line, "conta_nao_encontrada", line.account_code)
+                )
+            elif account.account_type != AccountingAccountType.ANALITICA.value:
+                problems.append(PartyLineProblem(line.line, "conta_sintetica", line.account_code))
+        if problems:
+            raise_party_lines(problems)
+
+        if not report.lines:
+            # Nada a vincular (só pulos): não provisiona DEK nem grava a empresa.
+            result = PartyImportResult(
+                party_type=report.party_type,
+                lines=report.persons,
+                new=0,
+                updated=0,
+                unchanged=0,
+                skipped=report.skipped,
+            )
+            log.info(
+                "accounting_parties_imported",
+                client_id=str(client.id),
+                relatorio=result.party_type.value,
+                lines=result.lines,
+                new=0,
+                updated=0,
+                unchanged=0,
+                skipped=len(result.skipped),
+            )
+            await self._emit_parties_imported(client, result)
+            return result
+
+        cipher = await self._write_cipher(client)
+        linked_accounts = [accounts[line.account_code] for line in report.lines]
+        current = _decrypt_party_documents(client.id, cipher, linked_accounts)
+        author_id = UUID(actor.id)
+        updates: list[dict[str, object]] = []
+        new = updated = unchanged = 0
+        for line in report.lines:
+            account = accounts[line.account_code]
+            if account.party_document_encrypted is None:
+                new += 1
+            elif (
+                account.id not in current.failed
+                and current.plain.get(account.id) == line.document
+                and account.party_type == report.party_type.value
+            ):
+                unchanged += 1
+                continue
+            else:
+                updated += 1
+            envelope, iv = cipher.encrypt(
+                line.document, field_locator(AAD_ACCOUNTING_ACCOUNT_PARTY_DOCUMENT, account.id)
+            )
+            updates.append(
+                {
+                    "b_client": client.id,
+                    "b_id": account.id,
+                    "b_ct": envelope,
+                    "b_iv": iv,
+                    "b_type": report.party_type.value,
+                    "b_author": author_id,
+                }
+            )
+        await self._repo.update_party_links(updates)
+        if current_fingerprint is None:
+            await self._repo.set_company_fingerprint(client.id, fingerprint)
+        await self._db.commit()
+
+        result = PartyImportResult(
+            party_type=report.party_type,
+            lines=report.persons,
+            new=new,
+            updated=updated,
+            unchanged=unchanged,
+            skipped=report.skipped,
+        )
+        log.info(
+            "accounting_parties_imported",
+            client_id=str(client.id),
+            relatorio=result.party_type.value,
+            lines=result.lines,
+            new=result.new,
+            updated=result.updated,
+            unchanged=result.unchanged,
+            skipped=len(result.skipped),
+        )
+        await self._emit_parties_imported(client, result)
+        return result
+
+    async def list_parties(
+        self, client: Client, *, party_type: AccountingPartyType | None, limit: int, offset: int
+    ) -> tuple[
+        list[ClientAccountingAccount], int, DecryptedNames, PartyDocuments, PartyLinksSummary
+    ]:
+        """As contas COM vínculo, paginadas, com o nome decifrado e o documento MASCARADO.
+
+        O documento inteiro nunca sai em lista: `load_client_cipher` (só leitura) abre o
+        envelope e `mask_document` guarda só o fim (filial e dígitos do CNPJ, os quatro
+        últimos do CPF). Falha de decifragem sai sem documento, nunca 500.
+        """
+        rows, total = await self._repo.list_linked_page(
+            client.id,
+            party_type=party_type.value if party_type is not None else None,
+            limit=limit,
+            offset=offset,
+        )
+        by_type = await self._repo.count_links_by_type(client.id)
+        summary = PartyLinksSummary(
+            linked=sum(by_type.values()),
+            clientes=by_type.get(AccountingPartyType.CLIENTE.value, 0),
+            fornecedores=by_type.get(AccountingPartyType.FORNECEDOR.value, 0),
+        )
+        if not rows:
+            return (
+                rows,
+                total,
+                DecryptedNames(names={}, failed=frozenset()),
+                PartyDocuments(masked={}, kinds={}, failed=frozenset()),
+                summary,
+            )
+        cipher = await load_client_cipher(client, settings=self._settings)
+        names = _decrypt_all(client.id, cipher, rows)
+        plain = _decrypt_party_documents(client.id, cipher, rows)
+        documents = PartyDocuments(
+            masked={account_id: mask_document(doc) for account_id, doc in plain.plain.items()},
+            kinds={
+                account_id: ("cnpj" if len(doc) == 14 else "cpf")
+                for account_id, doc in plain.plain.items()
+            },
+            failed=plain.failed,
+        )
+        return rows, total, names, documents, summary
+
+    async def _emit_parties_imported(self, client: Client, result: PartyImportResult) -> None:
+        """`plano_contabil_vinculos_importados` DEPOIS do commit — nunca derruba a escrita."""
+        try:
+            await self._usage_events.emit_plano_contabil_vinculos_importados(
+                client_id=client.id,
+                relatorio=result.party_type.value,
+                linhas=result.lines,
+                vinculos_novos=result.new,
+                vinculos_atualizados=result.updated,
+                vinculos_sem_mudanca=result.unchanged,
+                nao_vinculadas=len(result.skipped),
+            )
+        except Exception:
+            log.warning("plano_contabil_vinculos_importados_emit_failed", client_id=str(client.id))
+
     async def _refuse_if_in_use(
         self,
         client_id: UUID,
@@ -813,3 +1052,52 @@ def _decrypt_all(
             names[account.id] = ACCOUNTING_ACCOUNT_UNDECIPHERABLE
             failed.add(account.id)
     return DecryptedNames(names=names, failed=frozenset(failed))
+
+
+@dataclass(frozen=True, slots=True)
+class _PlainDocuments:
+    """`id → documento em claro` (só em memória) e os ids que não decifraram."""
+
+    plain: dict[UUID, str]
+    failed: frozenset[UUID]
+
+
+def _decrypt_party_documents(
+    client_id: UUID, cipher: ClientCipher, accounts: Iterable[ClientAccountingAccount]
+) -> _PlainDocuments:
+    """Abre o documento das contas VINCULADAS; conta sem vínculo não entra em nenhum mapa."""
+    plain: dict[UUID, str] = {}
+    failed: set[UUID] = set()
+    for account in accounts:
+        if account.party_document_encrypted is None or account.party_document_iv is None:
+            continue
+        try:
+            plain[account.id] = cipher.decrypt(
+                account.party_document_encrypted,
+                account.party_document_iv,
+                field_locator(AAD_ACCOUNTING_ACCOUNT_PARTY_DOCUMENT, account.id),
+            )
+        except Exception:
+            # Só IDs (§4.1): nunca plaintext, ciphertext nem IV.
+            log.warning(
+                "accounting_party_document_decrypt_failed",
+                client_id=str(client_id),
+                account_id=str(account.id),
+            )
+            failed.add(account.id)
+    return _PlainDocuments(plain=plain, failed=frozenset(failed))
+
+
+def mask_document(digits: str) -> str:
+    """O documento como a tela o mostra: só o fim, nunca o inteiro.
+
+    CNPJ (14 dígitos): `**.***.***/0001-91` (a raiz escondida, filial e verificadores à
+    vista: é o que distingue filiais e confirma a pessoa sem identificá-la). CPF (11):
+    `***.***.*89-00` (os quatro últimos). Outro tamanho é defeito de gravação: sai
+    inteiramente mascarado.
+    """
+    if len(digits) == 14:
+        return f"**.***.***/{digits[8:12]}-{digits[12:]}"
+    if len(digits) == 11:
+        return f"***.***.*{digits[7:9]}-{digits[9:]}"
+    return "*" * len(digits)

@@ -1990,6 +1990,11 @@ class TestPlanoContabilRoundTrip:
             "sort_key",
             # 86e3qhhrm (`a94a539e1d34`): o selo "não veio na última importação", só data.
             "absent_since",
+            # 86e3qhhrn (`7c3e9a1d5f28`): o vínculo conta ↔ cliente/fornecedor — o documento
+            # CIFRADO (par ciphertext/IV) e o tipo em claro (vocabulário fechado).
+            "party_document_encrypted",
+            "party_document_iv",
+            "party_type",
         )
         assert _columns(url, "client_accounting_accounts", *columns) == len(columns)
         assert _scalar(
@@ -2838,3 +2843,90 @@ class TestSeloDeAusenteRoundTrip:
 
         assert _columns(url, "client_accounting_accounts", "absent_since") == 1
         assert "a94a539e1d34" in _revisions_in_chain(alembic_cfg)
+
+
+class TestVinculoDeTerceirosRoundTrip:
+    """86e3qhhrn — o vínculo conta ↔ pessoa sobe com os CHECKs, desce de verdade e sobe."""
+
+    def test_upgrade_cria_colunas_checks_e_a_impressao_digital(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        assert (
+            _columns(
+                url,
+                "client_accounting_accounts",
+                "party_document_encrypted",
+                "party_document_iv",
+                "party_type",
+            )
+            == 3
+        )
+        assert _columns(url, "clients", "party_reports_company_fingerprint") == 1
+        assert (
+            _scalar(
+                url,
+                "SELECT character_maximum_length FROM information_schema.columns "
+                "WHERE table_name = 'client_accounting_accounts' "
+                "AND column_name = 'party_document_iv'",
+            )
+            == 24
+        )
+        for name in (
+            "ck_client_accounting_accounts_party_pair",
+            "ck_client_accounting_accounts_party_type",
+        ):
+            assert _scalar(url, _CONSTRAINT_COUNT, name=name) == 1, name
+
+    def test_documento_iv_e_tipo_vivem_e_morrem_juntos(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        _insert_accounting_account(url, client_id)
+        link = (
+            "UPDATE client_accounting_accounts SET party_document_encrypted = :ct, "
+            "party_document_iv = :iv, party_type = :kind WHERE client_id = :cid"
+        )
+        # Vinculada: os três preenchidos, tipo do vocabulário.
+        _execute(url, link, ct="v1:k1:00", iv="0" * 24, kind="fornecedor", cid=client_id)
+        assert _scalar(url, "SELECT party_type FROM client_accounting_accounts") == "fornecedor"
+        # Documento sem tipo, tipo sem documento e tipo fora do vocabulário: o CHECK recusa.
+        for ct, iv, kind in (
+            ("v1:k1:00", "0" * 24, None),
+            (None, None, "cliente"),
+            ("v1:k1:00", None, "cliente"),
+            ("v1:k1:00", "0" * 24, "socio"),
+        ):
+            with pytest.raises(sa.exc.IntegrityError):
+                _execute(url, link, ct=ct, iv=iv, kind=kind, cid=client_id)
+        # Sem vínculo: os três nulos.
+        _execute(url, link, ct=None, iv=None, kind=None, cid=client_id)
+        assert _scalar(url, "SELECT party_type FROM client_accounting_accounts") is None
+
+    def test_downgrade_e_real_e_o_ciclo_converge(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        client_id = _seed_client_row(url)
+        _insert_accounting_account(url, client_id)
+        _execute(
+            url,
+            "UPDATE clients SET party_reports_company_fingerprint = :fp WHERE id = :cid",
+            fp="f" * 64,
+            cid=client_id,
+        )
+
+        for _ in range(2):
+            command.downgrade(alembic_cfg, "a94a539e1d34")
+            assert _columns(url, "client_accounting_accounts", "party_type") == 0
+            assert _columns(url, "clients", "party_reports_company_fingerprint") == 0
+            # A conta FICA: o vínculo é derivado de um relatório que se reimporta.
+            assert _scalar(url, "SELECT count(*) FROM client_accounting_accounts") == 1
+            command.upgrade(alembic_cfg, "head")
+
+        assert _columns(url, "clients", "party_reports_company_fingerprint") == 1
+        assert "7c3e9a1d5f28" in _revisions_in_chain(alembic_cfg)

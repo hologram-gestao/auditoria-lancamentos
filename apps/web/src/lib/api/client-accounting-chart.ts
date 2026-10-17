@@ -19,6 +19,10 @@
  *   - `GET  /clients/{id}/accounting-chart/export` → CSV no modelo (86e3qhhrm)
  *   - `POST  /clients/{id}/accounting-chart/accounts`       → `{ data: conta }` (86e3nb816)
  *   - `PATCH /clients/{id}/accounting-chart/accounts/{id}`  → `{ data: conta }` (86e3nb816)
+ *   - `POST /clients/{id}/accounting-chart/parties/import` → multipart `file`; `{ data:
+ *                                                     contagens + naoVinculadas }` (86e3qhhrn)
+ *   - `GET  /clients/{id}/accounting-chart/parties`  → `{ data: [...], pagination, summary }`
+ *                                                     — TRÊS chaves: o envelope chega inteiro
  *   - `GET  /clients/{id}/source-accounts`         → `{ data: [...] }` — chave única: o array
  *   - `PUT  /clients/{id}/source-accounts`         → `{ data: { entry, created } }`
  *
@@ -34,7 +38,10 @@ import type {
   AccountingChartImportPreview,
   AccountingChartImportResult,
   AccountingChartListResponse,
+  AccountingPartiesImportResult,
+  AccountingPartyLinksListResponse,
   ListAccountingChartQuery,
+  ListAccountingPartiesQuery,
   SourceAccountBindingPayload,
   SourceAccountBindingRequest,
   SourceAccountEntry,
@@ -57,10 +64,13 @@ type ImportBody =
   components['schemas']['Body_import_accounting_chart_api_v1_clients__client_id__accounting_chart_import_post'];
 type PreviewBody =
   components['schemas']['Body_preview_accounting_chart_import_api_v1_clients__client_id__accounting_chart_import_preview_post'];
+type PartiesBody =
+  components['schemas']['Body_import_accounting_parties_api_v1_clients__client_id__accounting_chart_parties_import_post'];
 
-/** Nome do campo do multipart — travado no contrato pelo `satisfies` (as duas rotas). */
+/** Nome do campo do multipart — travado no contrato pelo `satisfies` (as três rotas). */
 const IMPORT_FIELD = { file: 'file' } as const satisfies Record<keyof ImportBody, string> &
-  Record<keyof PreviewBody, string>;
+  Record<keyof PreviewBody, string> &
+  Record<keyof PartiesBody, string>;
 
 /** Teto do `pageSize` no servidor (`le=100`); acima dele a rota responde 422. */
 export const ACCOUNTING_CHART_MAX_PAGE_SIZE = 100;
@@ -177,5 +187,42 @@ export async function setSourceAccountBinding(
   return apiPutJson<SourceAccountBindingPayload>(
     `${clientBase(clientId)}/source-accounts`,
     payload,
+  );
+}
+
+export type ListAccountingPartiesParams = ListAccountingPartiesQuery;
+
+/**
+ * Importa a RELAÇÃO DE CLIENTES ou a DE FORNECEDORES do Domínio (86e3qhhrn): por arquivo,
+ * tudo ou nada. Requer `manage_client_accounting_chart`; cliente encerrado 409; recusas
+ * 422 tipadas (`LINHAS_INVALIDAS`, `RELATORIO_DE_OUTRA_EMPRESA`, `CABECALHO_DIVERGENTE`,
+ * `ARQUIVO_INVALIDO`, `FORMATO_NAO_SUPORTADO`).
+ */
+export async function importAccountingParties(
+  clientId: string,
+  file: File,
+): Promise<AccountingPartiesImportResult> {
+  const form = new FormData();
+  form.append(IMPORT_FIELD.file, file);
+  return apiPostMultipart<AccountingPartiesImportResult>(
+    `${clientBase(clientId)}/accounting-chart/parties/import`,
+    form,
+  );
+}
+
+/**
+ * As contas COM vínculo, com o documento mascarado e o resumo. `page`/`pageSize` vão
+ * sempre; `type` só quando há filtro.
+ */
+export async function listAccountingParties(
+  clientId: string,
+  params: ListAccountingPartiesParams = {},
+): Promise<AccountingPartyLinksListResponse> {
+  const sp = new URLSearchParams();
+  sp.set('page', String(params.page ?? 1));
+  sp.set('pageSize', String(params.pageSize ?? 50));
+  if (params.type) sp.set('type', params.type);
+  return apiGet<AccountingPartyLinksListResponse>(
+    `${clientBase(clientId)}/accounting-chart/parties?${sp.toString()}`,
   );
 }

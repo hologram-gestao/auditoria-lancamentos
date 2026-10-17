@@ -39,6 +39,13 @@
  * ganha o selo "não veio na última importação" na coluna Situação, e a gaveta de
  * importação mostra a prévia antes de gravar. "Baixar planilha" (todo papel que lê)
  * exporta o plano no MESMO modelo da importação.
+ *
+ * **Duas abas** (86e3qhhrn): "Contas" (tudo o que a tela sempre teve, inclusive a
+ * conta do banco) e "Clientes e fornecedores", onde as relações do Domínio vinculam
+ * conta ↔ CNPJ/CPF. A segunda aba só existe para quem tem
+ * `manage_client_accounting_chart` — ler os vínculos pede a permissão no servidor, e
+ * ação que o servidor nega não aparece (§4.9). A aba vive na URL (`aba`); deep link
+ * para a aba sem permissão cai em "Contas" em silêncio.
  */
 
 import { CheckCircle2, Download, Loader2, Pencil, Plus, Search, Upload, X } from 'lucide-react';
@@ -59,6 +66,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   useAccountingChartList,
   useExportAccountingChart,
@@ -83,8 +91,10 @@ import { AbsentFromImportBadge } from './absent-from-import';
 import { AccountingAccountFormSheet } from './accounting-account-form-sheet';
 import { AccountingChartImportSheet, importSuccessMessage } from './accounting-chart-import-sheet';
 import { AccountingChartModel } from './accounting-chart-model';
+import { AccountingPartiesTab } from './accounting-parties-tab';
 import { BankAccountsSection } from './bank-accounts-section';
 import { classificationDepth, indentClassFor } from './chart-hierarchy';
+import { FilterGroup } from './filter-group';
 
 const PARAM = {
   page: 'page',
@@ -92,7 +102,12 @@ const PARAM = {
   code: 'code',
   type: 'type',
   status: 'status',
+  tab: 'aba',
 } as const;
+
+/** As abas da tela (86e3qhhrn); o valor é o da URL. */
+export const CHART_TABS = ['contas', 'clientes-fornecedores'] as const;
+export type ChartTab = (typeof CHART_TABS)[number];
 
 export const DEFAULT_PAGE_SIZE = 50;
 /** Teto do termo, igual ao `max_length` do código reduzido no servidor. */
@@ -127,6 +142,7 @@ export function AccountingChartScreen({ clientId }: { clientId: string }) {
   const codeParam = get(PARAM.code) ?? '';
   const type = readEnum(get(PARAM.type), TYPE_FILTERS);
   const status = readEnum(get(PARAM.status), STATUS_FILTERS);
+  const tabParam = readEnum(get(PARAM.tab), CHART_TABS);
 
   const [codeInput, setCodeInput] = useState(codeParam);
   const debouncedCode = useDebouncedValue(codeInput, 300);
@@ -171,6 +187,9 @@ export function AccountingChartScreen({ clientId }: { clientId: string }) {
   const isClosed = clientDetail.data?.closed_at != null;
   const canManage = hasPermission(currentUser, 'manage_client_accounting_chart');
   const showImport = canManage && !isClosed;
+  // A aba de vínculos pede a permissão no servidor: sem ela, o deep link cai em "Contas".
+  const tab: ChartTab =
+    tabParam === 'clientes-fornecedores' && canManage ? 'clientes-fornecedores' : 'contas';
 
   const hasFilters = codeParam !== '' || type !== undefined || status !== undefined;
   // A lista e a sonda são queries independentes: se a lista chega vazia antes
@@ -303,151 +322,171 @@ export function AccountingChartScreen({ clientId }: { clientId: string }) {
         </div>
       )}
 
-      {/* Barra de filtros: só aparece com plano — sem plano, não há o que filtrar. */}
-      {!noPlan && (
-        <div className="flex flex-col gap-3 xl:flex-row xl:flex-wrap xl:items-center">
-          <div className="xl:w-72">
-            <Label htmlFor="accounting-code-search" className="sr-only">
-              Buscar por código
-            </Label>
-            <div className="relative">
-              <Search
-                className="text-muted-foreground absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
-                aria-hidden="true"
+      <Tabs
+        value={tab}
+        onValueChange={(next) => setMany({ [PARAM.tab]: next === 'contas' ? null : next })}
+        className="flex flex-col gap-4"
+      >
+        {/* Com um item só, a faixa de abas não aparece: a tela é a de sempre. */}
+        {canManage && (
+          <TabsList className="self-start" aria-label="Seções do plano contábil">
+            <TabsTrigger value="contas">Contas</TabsTrigger>
+            <TabsTrigger value="clientes-fornecedores">Clientes e fornecedores</TabsTrigger>
+          </TabsList>
+        )}
+        <TabsContent value="contas" className="mt-0 flex flex-col gap-4">
+          {/* Barra de filtros: só aparece com plano — sem plano, não há o que filtrar. */}
+          {!noPlan && (
+            <div className="flex flex-col gap-3 xl:flex-row xl:flex-wrap xl:items-center">
+              <div className="xl:w-72">
+                <Label htmlFor="accounting-code-search" className="sr-only">
+                  Buscar por código
+                </Label>
+                <div className="relative">
+                  <Search
+                    className="text-muted-foreground absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
+                    aria-hidden="true"
+                  />
+                  <Input
+                    id="accounting-code-search"
+                    value={codeInput}
+                    maxLength={MAX_CODE_CHARS}
+                    onChange={(e) => setCodeInput(e.target.value)}
+                    placeholder="Buscar por código"
+                    aria-describedby="accounting-code-search-hint"
+                    className="pl-9 pr-28"
+                  />
+                  {/* O nome é cifrado: não existe busca por nome, e a tela diz isso. */}
+                  <span
+                    id="accounting-code-search-hint"
+                    className="text-muted-foreground pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs"
+                  >
+                    início do código
+                  </span>
+                </div>
+              </div>
+
+              <FilterGroup
+                label="Tipo"
+                value={type ?? null}
+                options={TYPE_FILTERS.map((value) => ({ value, label: TYPE_FILTER_LABELS[value] }))}
+                onChange={(value) => setMany({ [PARAM.type]: value, [PARAM.page]: null })}
               />
-              <Input
-                id="accounting-code-search"
-                value={codeInput}
-                maxLength={MAX_CODE_CHARS}
-                onChange={(e) => setCodeInput(e.target.value)}
-                placeholder="Buscar por código"
-                aria-describedby="accounting-code-search-hint"
-                className="pl-9 pr-28"
+              <FilterGroup
+                label="Situação"
+                value={status ?? null}
+                options={STATUS_FILTERS.map((value) => ({
+                  value,
+                  label: STATUS_FILTER_LABELS[value],
+                }))}
+                onChange={(value) => setMany({ [PARAM.status]: value, [PARAM.page]: null })}
               />
-              {/* O nome é cifrado: não existe busca por nome, e a tela diz isso. */}
-              <span
-                id="accounting-code-search-hint"
-                className="text-muted-foreground pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs"
-              >
-                início do código
-              </span>
+
+              {hasFilters && (
+                <Button type="button" variant="outline" size="sm" onClick={clearFilters}>
+                  Limpar filtros
+                </Button>
+              )}
             </div>
+          )}
+
+          <div aria-busy={listQuery.isFetching}>
+            {listQuery.isError ? (
+              <ErrorState
+                message={
+                  listQuery.error instanceof ApiError
+                    ? listQuery.error.userMessage
+                    : 'Não foi possível carregar o plano contábil.'
+                }
+                onRetry={() => void listQuery.refetch()}
+              />
+            ) : (
+              <TableCard pageScroll>
+                <Table
+                  stickyHeader="page"
+                  scrollRegionLabel="Contas do plano contábil (rolável)"
+                  className="[&_td]:py-2 [&_th]:h-10"
+                >
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="whitespace-nowrap">Código</TableHead>
+                      <TableHead className="whitespace-nowrap">Classificação</TableHead>
+                      <TableHead>Nome</TableHead>
+                      <TableHead>Tipo</TableHead>
+                      <TableHead>Situação</TableHead>
+                      {showImport && (
+                        <TableHead className="w-12">
+                          <span className="sr-only">Ações</span>
+                        </TableHead>
+                      )}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {listQuery.isLoading ? (
+                      <TableSkeletonRows columns={COLUMN_COUNT + (showImport ? 1 : 0)} />
+                    ) : (
+                      rows.map((account) => (
+                        <AccountRow
+                          key={account.id}
+                          account={account}
+                          onEdit={showImport ? () => openAccountForm(account) : null}
+                        />
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+                {!listQuery.isLoading && rows.length === 0 && (
+                  <TableEmpty>
+                    {hasFilters && !noPlan ? (
+                      <div className="flex flex-col items-center gap-3 text-center">
+                        <p className="text-muted-foreground text-sm">
+                          Nenhuma conta encontrada para este recorte.
+                        </p>
+                        <Button type="button" variant="outline" size="sm" onClick={clearFilters}>
+                          Limpar filtros
+                        </Button>
+                      </div>
+                    ) : (
+                      <NoPlanState
+                        action={showImport ? importButton : null}
+                        canManage={canManage}
+                        isClosed={isClosed}
+                      />
+                    )}
+                  </TableEmpty>
+                )}
+              </TableCard>
+            )}
           </div>
 
-          <FilterGroup
-            label="Tipo"
-            value={type ?? null}
-            options={TYPE_FILTERS.map((value) => ({ value, label: TYPE_FILTER_LABELS[value] }))}
-            onChange={(value) => setMany({ [PARAM.type]: value, [PARAM.page]: null })}
-          />
-          <FilterGroup
-            label="Situação"
-            value={status ?? null}
-            options={STATUS_FILTERS.map((value) => ({
-              value,
-              label: STATUS_FILTER_LABELS[value],
-            }))}
-            onChange={(value) => setMany({ [PARAM.status]: value, [PARAM.page]: null })}
-          />
-
-          {hasFilters && (
-            <Button type="button" variant="outline" size="sm" onClick={clearFilters}>
-              Limpar filtros
-            </Button>
+          {!listQuery.isError && !noPlan && (
+            <PaginationBar
+              page={pagination?.page ?? page}
+              pageSize={pagination?.pageSize ?? pageSize}
+              total={pagination?.total ?? 0}
+              totalPages={pagination?.totalPages ?? 0}
+              onPageChange={(next) => setMany({ [PARAM.page]: String(next) })}
+              onPageSizeChange={(next) =>
+                setMany({ [PARAM.pageSize]: String(next), [PARAM.page]: null })
+              }
+              disabled={listQuery.isLoading}
+              itemLabel="contas"
+            />
           )}
-        </div>
-      )}
 
-      <div aria-busy={listQuery.isFetching}>
-        {listQuery.isError ? (
-          <ErrorState
-            message={
-              listQuery.error instanceof ApiError
-                ? listQuery.error.userMessage
-                : 'Não foi possível carregar o plano contábil.'
-            }
-            onRetry={() => void listQuery.refetch()}
+          <BankAccountsSection
+            clientId={clientId}
+            canManage={canManage}
+            isClosed={isClosed}
+            hasPlan={hasPlan}
           />
-        ) : (
-          <TableCard pageScroll>
-            <Table
-              stickyHeader="page"
-              scrollRegionLabel="Contas do plano contábil (rolável)"
-              className="[&_td]:py-2 [&_th]:h-10"
-            >
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="whitespace-nowrap">Código</TableHead>
-                  <TableHead className="whitespace-nowrap">Classificação</TableHead>
-                  <TableHead>Nome</TableHead>
-                  <TableHead>Tipo</TableHead>
-                  <TableHead>Situação</TableHead>
-                  {showImport && (
-                    <TableHead className="w-12">
-                      <span className="sr-only">Ações</span>
-                    </TableHead>
-                  )}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {listQuery.isLoading ? (
-                  <TableSkeletonRows columns={COLUMN_COUNT + (showImport ? 1 : 0)} />
-                ) : (
-                  rows.map((account) => (
-                    <AccountRow
-                      key={account.id}
-                      account={account}
-                      onEdit={showImport ? () => openAccountForm(account) : null}
-                    />
-                  ))
-                )}
-              </TableBody>
-            </Table>
-            {!listQuery.isLoading && rows.length === 0 && (
-              <TableEmpty>
-                {hasFilters && !noPlan ? (
-                  <div className="flex flex-col items-center gap-3 text-center">
-                    <p className="text-muted-foreground text-sm">
-                      Nenhuma conta encontrada para este recorte.
-                    </p>
-                    <Button type="button" variant="outline" size="sm" onClick={clearFilters}>
-                      Limpar filtros
-                    </Button>
-                  </div>
-                ) : (
-                  <NoPlanState
-                    action={showImport ? importButton : null}
-                    canManage={canManage}
-                    isClosed={isClosed}
-                  />
-                )}
-              </TableEmpty>
-            )}
-          </TableCard>
+        </TabsContent>
+        {canManage && (
+          <TabsContent value="clientes-fornecedores" className="mt-0">
+            <AccountingPartiesTab clientId={clientId} isClosed={isClosed} hasPlan={hasPlan} />
+          </TabsContent>
         )}
-      </div>
-
-      {!listQuery.isError && !noPlan && (
-        <PaginationBar
-          page={pagination?.page ?? page}
-          pageSize={pagination?.pageSize ?? pageSize}
-          total={pagination?.total ?? 0}
-          totalPages={pagination?.totalPages ?? 0}
-          onPageChange={(next) => setMany({ [PARAM.page]: String(next) })}
-          onPageSizeChange={(next) =>
-            setMany({ [PARAM.pageSize]: String(next), [PARAM.page]: null })
-          }
-          disabled={listQuery.isLoading}
-          itemLabel="contas"
-        />
-      )}
-
-      <BankAccountsSection
-        clientId={clientId}
-        canManage={canManage}
-        isClosed={isClosed}
-        hasPlan={hasPlan}
-      />
+      </Tabs>
 
       {showImport && accountForm !== undefined && (
         <AccountingAccountFormSheet
@@ -481,44 +520,6 @@ export function AccountingChartScreen({ clientId }: { clientId: string }) {
         />
       )}
     </section>
-  );
-}
-
-function FilterGroup<T extends string>({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: T | null;
-  options: { value: T; label: string }[];
-  onChange: (value: T | null) => void;
-}) {
-  const all: { value: T | null; label: string }[] = [{ value: null, label: 'Todas' }, ...options];
-  return (
-    <div
-      role="group"
-      aria-label={label}
-      className="bg-background inline-flex flex-wrap self-start rounded-md border p-0.5 xl:self-auto"
-    >
-      {all.map((option) => {
-        const pressed = value === option.value;
-        return (
-          <Button
-            key={option.label}
-            type="button"
-            variant="ghost"
-            size="sm"
-            aria-pressed={pressed}
-            className={cn('h-8', pressed && 'bg-accent text-accent-foreground')}
-            onClick={() => onChange(option.value)}
-          >
-            {option.label}
-          </Button>
-        );
-      })}
-    </div>
   );
 }
 

@@ -17,7 +17,9 @@ from app.db.models.client_accounting_account import (
     MAX_ACCOUNTING_ACCOUNT_CODE_CHARS,
     MAX_ACCOUNTING_ACCOUNT_NAME_CHARS,
     AccountingAccountType,
+    AccountingPartyType,
 )
+from app.modules.client_accounting_chart.parties import PartyLineProblem
 from app.modules.client_accounting_chart.service import (
     ACCOUNTING_ACCOUNT_UNDECIPHERABLE,
     AccountPatch,
@@ -31,6 +33,9 @@ if TYPE_CHECKING:
         ChartImportResult,
         ChartPreview,
         DecryptedNames,
+        PartyDocuments,
+        PartyImportResult,
+        PartyLinksSummary,
     )
 
 #: Situações do filtro `?status=`. `Literal` para valor fora do vocabulário virar
@@ -383,3 +388,162 @@ class AccountingAccountUpdateRequest(BaseModel):
             classification_set="classification" in self.model_fields_set,
             active=self.active,
         )
+
+
+# ------------------------------------------------ vínculo conta ↔ pessoa (86e3qhhrn)
+
+#: Teto da lista de linhas NÃO vinculadas na resposta da importação (as contagens
+#: são sempre as reais). Mesmo teto das linhas inválidas do leitor.
+PARTIES_SKIPPED_LIST_LIMIT = 50
+
+PartyDocumentKind = Literal["cnpj", "cpf"]
+
+
+class PartySkippedLine(BaseModel):
+    """Uma linha do relatório que ficou SEM vínculo: linha, motivo fechado e o código da
+    conta (nunca o documento, o nome nem a razão social)."""
+
+    line: int
+    reason: str = Field(
+        description=(
+            "`sem_conta` (conta 0 no Domínio), `documento_ausente`, `documento_invalido` "
+            "(dígito verificador errado no Domínio) ou `conta_compartilhada` (a mesma conta "
+            "em mais de uma pessoa: vínculo um-para-um impossível)."
+        )
+    )
+    account_code: str | None = Field(default=None, alias="accountCode")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def from_problem(cls, problem: PartyLineProblem) -> PartySkippedLine:
+        return cls(line=problem.line, reason=problem.reason, account_code=problem.account_code)
+
+
+class PartiesImportPayload(BaseModel):
+    """As contagens da importação de uma relação — só números, o tipo e as linhas puladas."""
+
+    relatorio: AccountingPartyType = Field(
+        description="`cliente` (RELAÇÃO DE CLIENTES) ou `fornecedor` (RELAÇÃO DE FORNECEDORES)."
+    )
+    linhas: int = Field(ge=0, description="Pessoas no relatório.")
+    contas_vinculadas: int = Field(
+        ge=0,
+        alias="contasVinculadas",
+        description="Contas do plano com vínculo depois desta importação (novas + atualizadas + sem mudança).",
+    )
+    vinculos_novos: int = Field(ge=0, alias="vinculosNovos")
+    vinculos_atualizados: int = Field(
+        ge=0,
+        alias="vinculosAtualizados",
+        description="Contas já vinculadas cujo documento ou tipo mudou.",
+    )
+    vinculos_sem_mudanca: int = Field(ge=0, alias="vinculosSemMudanca")
+    nao_vinculadas: list[PartySkippedLine] = Field(
+        alias="naoVinculadas",
+        description=f"Até {PARTIES_SKIPPED_LIST_LIMIT} linhas que ficaram sem vínculo, na ordem do relatório.",
+    )
+    nao_vinculadas_total: int = Field(ge=0, alias="naoVinculadasTotal")
+    list_limit: int = Field(alias="listLimit")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def from_result(cls, result: PartyImportResult) -> PartiesImportPayload:
+        return cls(
+            relatorio=result.party_type,
+            linhas=result.lines,
+            contas_vinculadas=result.linked,
+            vinculos_novos=result.new,
+            vinculos_atualizados=result.updated,
+            vinculos_sem_mudanca=result.unchanged,
+            nao_vinculadas=[
+                PartySkippedLine.from_problem(p)
+                for p in result.skipped[:PARTIES_SKIPPED_LIST_LIMIT]
+            ],
+            nao_vinculadas_total=len(result.skipped),
+            list_limit=PARTIES_SKIPPED_LIST_LIMIT,
+        )
+
+
+class PartiesImportEnvelope(BaseModel):
+    """Body de `POST /clients/{client_id}/accounting-chart/parties/import`."""
+
+    data: PartiesImportPayload
+
+
+class PartyLinkResponse(BaseModel):
+    """Uma conta do plano COM vínculo: a conta, o tipo e o documento MASCARADO."""
+
+    account_id: UUID = Field(alias="accountId")
+    code: str
+    name: str = Field(
+        description="Nome da conta, decifrado na leitura (`[indecifrável]` se não abrir)."
+    )
+    name_resolved: bool = Field(alias="nameResolved")
+    active: bool
+    party_type: AccountingPartyType = Field(alias="partyType")
+    document_kind: PartyDocumentKind | None = Field(
+        default=None,
+        alias="documentKind",
+        description="`cnpj` ou `cpf`; `null` quando o documento não decifrou.",
+    )
+    document_masked: str | None = Field(
+        default=None,
+        alias="documentMasked",
+        description=(
+            "O documento com a raiz escondida (`**.***.***/0001-91`, `***.***.*89-00`). O "
+            "documento inteiro nunca sai da API."
+        ),
+    )
+    document_resolved: bool = Field(
+        alias="documentResolved",
+        description="`false` = o documento não decifrou (cliente encerrado) e sai sem máscara nenhuma.",
+    )
+    updated_at: datetime = Field(alias="updatedAt")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def from_row(
+        cls, row: ClientAccountingAccount, *, names: DecryptedNames, documents: PartyDocuments
+    ) -> PartyLinkResponse:
+        resolved = row.id in documents.masked and row.id not in documents.failed
+        return cls(
+            account_id=row.id,
+            code=row.code,
+            name=names.names.get(row.id, ACCOUNTING_ACCOUNT_UNDECIPHERABLE),
+            name_resolved=row.id in names.names and row.id not in names.failed,
+            active=row.active,
+            party_type=AccountingPartyType(row.party_type or AccountingPartyType.CLIENTE.value),
+            document_kind=documents.kinds.get(row.id) if resolved else None,
+            document_masked=documents.masked.get(row.id) if resolved else None,
+            document_resolved=resolved,
+            updated_at=row.updated_at,
+        )
+
+
+class PartyLinksSummaryPayload(BaseModel):
+    """Quantas contas do plano têm vínculo, por tipo — só contagens."""
+
+    contas_vinculadas: int = Field(ge=0, alias="contasVinculadas")
+    clientes: int = Field(ge=0)
+    fornecedores: int = Field(ge=0)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def from_summary(cls, summary: PartyLinksSummary) -> PartyLinksSummaryPayload:
+        return cls(
+            contas_vinculadas=summary.linked,
+            clientes=summary.clientes,
+            fornecedores=summary.fornecedores,
+        )
+
+
+class PartyLinksListResponse(BaseModel):
+    """Body de `GET /clients/{client_id}/accounting-chart/parties`."""
+
+    data: list[PartyLinkResponse]
+    pagination: PaginationMeta
+    summary: PartyLinksSummaryPayload

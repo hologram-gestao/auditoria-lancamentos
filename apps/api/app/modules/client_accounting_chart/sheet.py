@@ -226,11 +226,15 @@ def _cell_text(value: Any) -> str | None:
     return text or None
 
 
-def _fold(text: str) -> str:
+def fold_text(text: str) -> str:
     """Minúsculas e sem acento — para casar o `tipo` (`Analítica` → `analitica`) e o
-    nome de coluna (`Classificação` → `classificacao`)."""
+    nome de coluna (`Classificação` → `classificacao`). Pública: o leitor das relações
+    de clientes e fornecedores (`parties.py`) usa a MESMA dobra, nunca uma cópia."""
     decomposed = unicodedata.normalize("NFKD", text.strip().lower())
     return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+
+
+_fold = fold_text
 
 
 #: As grafias aceitas do `tipo`, já normalizadas por `_fold`: o nome do enum, a forma

@@ -60,6 +60,13 @@ AAD_MOVEMENT_DESCRIPTION = ("client_movements", "description_encrypted")
 # de conta carrega inquilino, pessoa física e fornecedor (§4.5). O código reduzido
 # fica em claro — é o que vai no arquivo. 16º par.
 AAD_ACCOUNTING_ACCOUNT_NAME = ("client_accounting_accounts", "name_encrypted")
+#: 86e3qhhrn — o CNPJ ou CPF do cliente/fornecedor vinculado à conta do plano
+#: contábil (relatórios "RELAÇÃO DE CLIENTES/FORNECEDORES" do Domínio). Documento é
+#: dado do cliente final (§4.5): nasce cifrado com a DEK do cliente, pk da conta no AAD.
+AAD_ACCOUNTING_ACCOUNT_PARTY_DOCUMENT = (
+    "client_accounting_accounts",
+    "party_document_encrypted",
+)
 # Sprint 16 (BACK 16.2) — o HISTÓRICO PADRÃO da decisão do de-para no destino
 # `conta_contabil` (o texto que vai na linha do arquivo contábil), no molde de
 # `title_contexts.text_encrypted`: texto livre do escritório que carrega inquilino,
